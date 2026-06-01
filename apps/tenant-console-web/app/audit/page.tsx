@@ -281,7 +281,6 @@ type EmptyStateSpec = {
 type ExportState = {
   download: ControlledDownloadRecord | null;
   error: string | null;
-  rowCount: number;
 };
 
 function getSingleParam(searchParams: SearchParamsInput, key: string): string {
@@ -612,7 +611,7 @@ function toViewModel(
   };
 }
 
-function describeErrorReason(error: unknown): EmptyReason {
+function describeTransportFailureReason(error: unknown): EmptyReason {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
 
@@ -943,22 +942,20 @@ async function loadAuditExport(filters: FilterState): Promise<ExportState> {
     const download = (await client.exportTenantAudit(
       buildExportCommand(filters),
     )) as ControlledDownloadRecord;
-    return { download, error: null, rowCount: 0 };
+    return { download, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { download: null, error: message, rowCount: 0 };
+    return { download: null, error: message };
   }
 }
 
 function buildExportState(
-  rowCount: number,
   download: ControlledDownloadRecord | null,
   error: string | null,
 ): ExportState {
   return {
     download,
     error,
-    rowCount,
   };
 }
 
@@ -966,6 +963,28 @@ function shortenManifestHash(value: string | null | undefined) {
   if (!value) return "—";
   if (value.length <= 24) return value;
   return `${value.slice(0, 16)}…${value.slice(-8)}`;
+}
+
+function describeExportState(state: ExportState) {
+  if (state.download) {
+    return {
+      label: "下載簽章匯出",
+      summary: `Artifact ready · ${formatArtifactAt(state.download.expiresAt)} 到期`,
+    };
+  }
+
+  if (state.error) {
+    return {
+      label: "重新申請簽章匯出",
+      summary:
+        "Artifact issuance failed; retry after refreshing the current snapshot.",
+    };
+  }
+
+  return {
+    label: "產生簽章匯出",
+    summary: "匯出會產生 immutable signed subset。",
+  };
 }
 
 export default async function AuditPage({
@@ -981,7 +1000,7 @@ export default async function AuditPage({
   try {
     auditView = await loadAuditLogs(filters);
   } catch (error) {
-    errorReason = describeErrorReason(error);
+    errorReason = describeTransportFailureReason(error);
     errorMessage = error instanceof Error ? error.message : String(error);
   }
 
@@ -1024,8 +1043,8 @@ export default async function AuditPage({
   const requestLinkedCount = records.filter((record) =>
     Boolean(record.requestId),
   ).length;
-  const exportCount = rows.length;
   const availableActions = auditView?.availableActions ?? [];
+  const filterAction = findAvailableAction(availableActions, "filter");
   const refreshAction = findAvailableAction(availableActions, "refresh");
   const exportAction = findAvailableAction(availableActions, "export");
   const emptyReason = auditView?.emptyState?.reason ?? errorReason;
@@ -1048,11 +1067,11 @@ export default async function AuditPage({
       ? await loadAuditExport(filters)
       : null;
   const exportState = buildExportState(
-    exportCount,
     exportLoadState?.download ?? null,
     exportLoadState?.error ?? null,
   );
   const exportReady = Boolean(exportState.download?.downloadUrl);
+  const exportPresentation = describeExportState(exportState);
   const snapshotGeneratedAt = auditView?.refreshMetadata?.generatedAt
     ? formatAuditAt(auditView.refreshMetadata.generatedAt)
     : "—";
@@ -1071,7 +1090,9 @@ export default async function AuditPage({
                   exportReady
                     ? (exportState.download?.downloadUrl ?? "#")
                     : buildActionHref(exportAction, filters),
-                  exportReady ? "下載簽章匯出" : actionLabel(exportAction),
+                  exportReady
+                    ? exportPresentation.label
+                    : actionLabel(exportAction),
                 )
               : null}
           </>
@@ -1175,14 +1196,19 @@ export default async function AuditPage({
             <div style={controlRowStyle}>
               <button
                 type="submit"
+                disabled={filterAction ? !filterAction.enabled : false}
+                title={filterAction?.disabledReasonCode}
                 style={{
                   ...linkButtonBaseStyle,
                   background: th.accent,
                   borderColor: th.accent,
                   color: "#fff",
+                  ...(filterAction && !filterAction.enabled
+                    ? { opacity: 0.45, cursor: "not-allowed" }
+                    : null),
                 }}
               >
-                套用篩選
+                {filterAction ? actionLabel(filterAction) : "套用篩選"}
               </button>
               <a
                 href="/audit"
@@ -1247,9 +1273,7 @@ export default async function AuditPage({
                   {shortenManifestHash(exportState.download?.manifestHash)}
                 </span>
                 <span style={summarySubStyle}>
-                  {exportReady
-                    ? `Artifact ready · ${formatArtifactAt(exportState.download?.expiresAt)} 到期`
-                    : "匯出會產生 immutable signed subset。"}
+                  {exportPresentation.summary}
                 </span>
               </div>
             </div>
