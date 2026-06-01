@@ -66,9 +66,11 @@ type SwitchboardListPayload<T> = {
 };
 
 type SwitchboardTab = "versions" | "placards" | "history";
+type PlacardScopeOption = "fleet" | "vehicle" | "brand_template";
 type PlacardFormState = {
   versionCode: string;
   publicInfoVersionId: string;
+  scope: PlacardScopeOption;
   templateName: string;
   artifactFileId: string;
 };
@@ -92,11 +94,17 @@ const EMPTY_PUBLIC_INFO_FORM = {
 const EMPTY_PLACARD_FORM: PlacardFormState = {
   versionCode: "",
   publicInfoVersionId: "",
+  scope: "brand_template",
   templateName: "seatback-default",
   artifactFileId: "",
 };
 
 const REFRESH_TIER_FALLBACK: RefreshTier = "medium_slow";
+const PLACARD_SCOPE_TEMPLATES: Record<PlacardScopeOption, string[]> = {
+  fleet: ["fleet-window-default", "fleet-window-premium"],
+  vehicle: ["vehicle-seatback-default", "vehicle-door-default"],
+  brand_template: ["seatback-default", "brand-lobby-default"],
+};
 
 function cleanNullable(value: string) {
   const normalized = value.trim();
@@ -298,6 +306,71 @@ function inferPlacardScope(templateName: string) {
   return "brand_template";
 }
 
+function getDefaultTemplateForScope(scope: PlacardScopeOption) {
+  return PLACARD_SCOPE_TEMPLATES[scope][0] ?? "seatback-default";
+}
+
+function normalizePlacardScope(templateName: string): PlacardScopeOption {
+  return inferPlacardScope(templateName) as PlacardScopeOption;
+}
+
+function compareIsoDateDesc(
+  left: string | null | undefined,
+  right: string | null | undefined,
+) {
+  if (left && right) {
+    return right.localeCompare(left);
+  }
+  if (left) {
+    return -1;
+  }
+  if (right) {
+    return 1;
+  }
+  return 0;
+}
+
+function sortPublicInfoVersions(
+  versions: PublicInfoWithRuntime[],
+): PublicInfoWithRuntime[] {
+  return [...versions].sort((left, right) => {
+    const statusWeight = (status: PublicInfoVersionRecord["status"]) =>
+      status === "published" ? 0 : status === "draft" ? 1 : 2;
+    const weightDifference =
+      statusWeight(left.status) - statusWeight(right.status);
+    if (weightDifference !== 0) {
+      return weightDifference;
+    }
+    const effectiveDifference = compareIsoDateDesc(
+      left.effectiveFrom ??
+        left.publishedAt ??
+        left.updatedAt ??
+        left.createdAt,
+      right.effectiveFrom ??
+        right.publishedAt ??
+        right.updatedAt ??
+        right.createdAt,
+    );
+    if (effectiveDifference !== 0) {
+      return effectiveDifference;
+    }
+    return compareIsoDateDesc(left.createdAt, right.createdAt);
+  });
+}
+
+function sortPlacards(placards: PlacardWithRuntime[]): PlacardWithRuntime[] {
+  return [...placards].sort((left, right) => {
+    const publishedDifference = compareIsoDateDesc(
+      left.publishedAt ?? left.updatedAt ?? left.createdAt,
+      right.publishedAt ?? right.updatedAt ?? right.createdAt,
+    );
+    if (publishedDifference !== 0) {
+      return publishedDifference;
+    }
+    return compareIsoDateDesc(left.createdAt, right.createdAt);
+  });
+}
+
 function actionLabel(action: string, locale: string, fallback: string) {
   const labels: Record<string, { zh: string; en: string }> = {
     create: { zh: "建立", en: "Create" },
@@ -442,6 +515,15 @@ function SectionEmptyState({
         };
 
   const config = copy[emptyState.reason];
+  const symbolByReason: Record<EmptyReason, string> = {
+    no_data: "00",
+    not_provisioned: "01",
+    fetch_failed: "02",
+    permission_denied: "03",
+    external_unavailable: "04",
+    driver_not_eligible: "05",
+    filtered_empty: "06",
+  };
 
   return (
     <div
@@ -449,44 +531,64 @@ function SectionEmptyState({
         textAlign: "left",
         borderStyle: "solid",
         borderColor: `${config.tone}22`,
-        background: `${config.tone}08`,
+        background: `linear-gradient(135deg, ${config.tone}10 0%, rgba(255,255,255,0.98) 72%)`,
         display: "grid",
-        gap: 10,
+        gap: 16,
+        gridTemplateColumns: "88px minmax(0, 1fr)",
+        alignItems: "center",
       })}
     >
-      <div>
+      <div
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 24,
+          display: "grid",
+          placeItems: "center",
+          background: `${config.tone}14`,
+          color: config.tone,
+          fontSize: 24,
+          fontWeight: 800,
+          letterSpacing: "0.12em",
+          boxShadow: `inset 0 0 0 1px ${config.tone}18`,
+        }}
+      >
+        {symbolByReason[emptyState.reason]}
+      </div>
+      <div style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 700, color: config.tone }}>
           {config.title}
         </div>
         <div style={{ color: "#475569", fontSize: 13, lineHeight: 1.6 }}>
           {config.body}
         </div>
+        {emptyState.nextAction && (
+          <div>
+            <button
+              type="button"
+              style={mergeStyles(
+                actionButtonStyle({
+                  tone:
+                    emptyState.nextAction.riskLevel === "high"
+                      ? "primary"
+                      : "secondary",
+                }),
+                disabledActionStyle(!emptyState.nextAction.enabled),
+              )}
+              disabled={!emptyState.nextAction.enabled}
+              title={emptyState.nextAction.disabledReasonCode}
+              onClick={() => onAction(emptyState.nextAction!)}
+            >
+              {actionLabel(
+                emptyState.nextAction.action,
+                locale,
+                locale === "en" ? "Continue" : "繼續",
+              )}
+            </button>
+          </div>
+        )}
+        <div style={emptyStateCodeStyle}>{emptyState.messageCode}</div>
       </div>
-      {emptyState.nextAction && (
-        <div>
-          <button
-            type="button"
-            style={mergeStyles(
-              actionButtonStyle({
-                tone:
-                  emptyState.nextAction.riskLevel === "high"
-                    ? "primary"
-                    : "secondary",
-              }),
-              disabledActionStyle(!emptyState.nextAction.enabled),
-            )}
-            disabled={!emptyState.nextAction.enabled}
-            title={emptyState.nextAction.disabledReasonCode}
-            onClick={() => onAction(emptyState.nextAction!)}
-          >
-            {actionLabel(
-              emptyState.nextAction.action,
-              locale,
-              locale === "en" ? "Continue" : "繼續",
-            )}
-          </button>
-        </div>
-      )}
     </div>
   );
 }
@@ -517,6 +619,7 @@ export default function SwitchboardPage() {
         },
         topActions: {
           createVersion: "Create draft",
+          publishVersion: "Publish version",
           generatePlacard: "Generate placard",
           refresh: "Refresh now",
         },
@@ -528,6 +631,8 @@ export default function SwitchboardPage() {
           links: "Cross-app and audit links",
           timeline: "Publication timeline",
           contacts: "Public contact disclosure",
+          actionDeck: "Action deck",
+          decisionPoints: "Decision points",
         },
         forms: {
           createVersion: "Create public-info draft",
@@ -576,6 +681,15 @@ export default function SwitchboardPage() {
           sourceState: "Source state",
           downloadState: "Download validity",
           opensNewTab: "Opens in new tab",
+          scopeSelector: "Placard scope",
+          templatePreset: "Template preset",
+          versionLineage: "Version lineage",
+          olderPublishedSignal: "Older published version still active",
+          chooseScope:
+            "Choose placard scope before selecting a template preset.",
+          generationWizard: "Placard generation wizard",
+          fallbackActionReason:
+            "This action is visible through switchboard governance but currently unavailable for this dataset.",
         },
         quickLinks: {
           ops: "Open ops-console distribution board",
@@ -604,6 +718,7 @@ export default function SwitchboardPage() {
         },
         topActions: {
           createVersion: "建立草稿",
+          publishVersion: "發布版本",
           generatePlacard: "產生牌貼",
           refresh: "立即刷新",
         },
@@ -615,6 +730,8 @@ export default function SwitchboardPage() {
           links: "跨 app / 稽核連結",
           timeline: "發布時間線",
           contacts: "對外揭露聯絡資訊",
+          actionDeck: "治理動作",
+          decisionPoints: "決策提醒",
         },
         forms: {
           createVersion: "建立公開資訊草稿",
@@ -662,6 +779,14 @@ export default function SwitchboardPage() {
           sourceState: "來源狀態",
           downloadState: "下載有效期",
           opensNewTab: "新分頁開啟",
+          scopeSelector: "牌貼範圍",
+          templatePreset: "範本預設",
+          versionLineage: "版本沿革",
+          olderPublishedSignal: "舊 published 版本仍在生效",
+          chooseScope: "先選擇牌貼 scope，再決定對應的 template preset。",
+          generationWizard: "牌貼產生精靈",
+          fallbackActionReason:
+            "此動作在 switchboard 治理流程中可見，但目前資料集尚不可執行。",
         },
         quickLinks: {
           ops: "開啟 ops-console 發放看板",
@@ -794,8 +919,14 @@ export default function SwitchboardPage() {
     return () => window.clearInterval(intervalId);
   }, [loadData, refreshTier]);
 
-  const publicInfo = publicInfoPayload.items;
-  const placards = placardPayload.items;
+  const publicInfo = useMemo(
+    () => sortPublicInfoVersions(publicInfoPayload.items),
+    [publicInfoPayload.items],
+  );
+  const placards = useMemo(
+    () => sortPlacards(placardPayload.items),
+    [placardPayload.items],
+  );
 
   const publicInfoById = useMemo(
     () =>
@@ -822,6 +953,12 @@ export default function SwitchboardPage() {
     placards.find((placard) => placard.publishedAt != null) ??
     placards[0] ??
     null;
+  const placardsInFlight = useMemo(
+    () => placards.filter((placard) => !placard.artifactDownloadUrl).length,
+    [placards],
+  );
+  const hasOlderPublishedSignal =
+    publishedVersions.length > 1 && retiredVersions.length === 0;
   const selectedPublicInfoVersion =
     publicInfoById[placardForm.publicInfoVersionId] ?? null;
   const versionCodePrecheckMessage = useMemo(
@@ -836,6 +973,7 @@ export default function SwitchboardPage() {
   const placardSourceBlocked = isPlacardSourceSelectionBlocked(
     selectedPublicInfoVersion,
   );
+  const scopeTemplateOptions = PLACARD_SCOPE_TEMPLATES[placardForm.scope];
 
   useEffect(() => {
     const preferredVersion = getPreferredPlacardSourceVersion(publicInfo);
@@ -845,6 +983,7 @@ export default function SwitchboardPage() {
     setPlacardForm((current) => ({
       ...current,
       publicInfoVersionId: preferredVersion.versionId,
+      scope: normalizePlacardScope(current.templateName),
     }));
   }, [placardForm.publicInfoVersionId, publicInfo]);
 
@@ -905,6 +1044,29 @@ export default function SwitchboardPage() {
           descriptor.action === "generate_placard" ||
           descriptor.action === "generate_placard_version",
       ) ?? null,
+    [pageActions],
+  );
+  const createVersionAction = useMemo(
+    () =>
+      pageActions.find(
+        (descriptor) =>
+          descriptor.action === "create" ||
+          descriptor.action === "create_version",
+      ) ?? null,
+    [pageActions],
+  );
+  const publishVersionAction = useMemo(
+    () =>
+      pageActions.find(
+        (descriptor) =>
+          descriptor.action === "publish" ||
+          descriptor.action === "publish_public_info",
+      ) ?? null,
+    [pageActions],
+  );
+  const refreshAction = useMemo(
+    () =>
+      pageActions.find((descriptor) => descriptor.action === "refresh") ?? null,
     [pageActions],
   );
 
@@ -1196,7 +1358,9 @@ export default function SwitchboardPage() {
       const command: GeneratePlacardVersionCommand = {
         versionCode: placardForm.versionCode.trim(),
         publicInfoVersionId: placardForm.publicInfoVersionId,
-        templateName: placardForm.templateName.trim(),
+        templateName:
+          placardForm.templateName.trim() ||
+          getDefaultTemplateForScope(placardForm.scope),
         artifactFileId: cleanNullable(placardForm.artifactFileId),
       };
       await client.generatePlacardVersion(command);
@@ -1375,100 +1539,192 @@ export default function SwitchboardPage() {
         </div>
       )}
 
-      <div style={kpiGridStyle}>
-        <MetricCard
-          label={copy.labels.draftCount}
-          value={draftVersions.length}
-          note={isEnglish ? "Awaiting compliance publish" : "等待發布"}
-        />
-        <MetricCard
-          label={copy.labels.publishedCount}
-          value={publishedVersions.length}
-          note={isEnglish ? "Immutable legal disclosures" : "不可變法定揭露"}
-        />
-        <MetricCard
-          label={copy.labels.placardCount}
-          value={placards.length}
-          note={isEnglish ? "Artifact lineage tracked" : "成品沿革可追溯"}
-        />
-        <MetricCard
-          label={copy.labels.tiedCount}
-          value={
-            placards.filter((placard) => {
-              const source = publicInfoById[placard.publicInfoVersionId];
-              return source?.status === "published";
-            }).length
-          }
-          note={isEnglish ? "Ready for distribution" : "可進入發放"}
-        />
-      </div>
+      <div style={heroGridStyle}>
+        <section style={mergeStyles(surfaceCardStyle, controlPanelStyle)}>
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={sectionEyebrowStyle}>{copy.workflowTitle}</div>
+            <div style={sectionTitleStyle}>Switchboard control plane</div>
+            <div style={supportCopyStyle}>{copy.workflowNote}</div>
+          </div>
 
-      <div style={mergeStyles(surfaceCardStyle, spotlightGridStyle)}>
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={sectionEyebrowStyle}>{copy.workflowTitle}</div>
-          <div style={supportCopyStyle}>{copy.workflowNote}</div>
-        </div>
-        <div style={spotlightStatStyle}>
-          <div style={sectionEyebrowStyle}>{copy.liveVersion}</div>
-          <strong style={{ fontSize: 18, color: "#0f172a" }}>
-            {livePublicInfoVersion?.title ?? copy.labels.noLiveVersion}
-          </strong>
-          <div style={supportCopyStyle}>
-            {livePublicInfoVersion
-              ? `${livePublicInfoVersion.versionId} · ${formatDateTime(
-                  livePublicInfoVersion.publishedAt ?? "",
-                )}`
-              : copy.labels.retention}
+          <div style={controlFactsStyle}>
+            <DataColumn
+              label={copy.labels.sitemapPath}
+              value="/switchboard"
+              mono
+            />
+            <DataColumn
+              label={copy.labels.sitemapEntry}
+              value={isEnglish ? "Sidebar navigation" : "側邊欄導覽"}
+            />
+            <DataColumn
+              label={copy.labels.sitemapExit}
+              value={
+                isEnglish
+                  ? "Placard PDF artifact download"
+                  : "牌貼 PDF 成品下載"
+              }
+            />
+            <DataColumn
+              label={copy.refreshLabel}
+              value={`${refreshTier} · ${getRefreshTierCadenceLabel(refreshTier)}`}
+            />
           </div>
-        </div>
-        <div style={spotlightStatStyle}>
-          <div style={sectionEyebrowStyle}>{copy.livePlacard}</div>
-          <strong style={{ fontSize: 18, color: "#0f172a" }}>
-            {livePlacardVersion?.versionCode ?? copy.labels.noLivePlacard}
-          </strong>
-          <div style={supportCopyStyle}>
-            {livePlacardVersion
-              ? `${livePlacardVersion.templateName} · ${formatDateTime(
-                  livePlacardVersion.publishedAt ??
-                    livePlacardVersion.createdAt,
-                )}`
-              : copy.labels.pendingArtifact}
-          </div>
-        </div>
-        <div style={spotlightStatStyle}>
-          <div style={sectionEyebrowStyle}>{copy.historySignal}</div>
-          <div style={supportCopyStyle}>{copy.historyNote}</div>
-        </div>
-      </div>
 
-      <div style={mergeStyles(surfaceCardStyle, sitemapGridStyle)}>
-        <div style={{ display: "grid", gap: 8 }}>
-          <div style={sectionTitleStyle}>{copy.sections.sitemap}</div>
-          <div style={supportCopyStyle}>
-            {isEnglish
-              ? "Platform & Commerce / Public Info & Placards"
-              : "平台與商務 / Public Info & Placards"}
+          <div style={controlBandStyle}>
+            <div style={sectionEyebrowStyle}>
+              {copy.sections.decisionPoints}
+            </div>
+            <div style={supportCopyStyle}>
+              {hasOlderPublishedSignal
+                ? copy.labels.olderPublishedSignal
+                : isEnglish
+                  ? "Publishing a newer legal disclosure should also trigger review of any older unretired published version."
+                  : "當新的法定揭露上線時，仍須同步檢查是否有舊 published 版本尚未退場。"}
+            </div>
+            <div style={supportCopyStyle}>
+              {isEnglish
+                ? `Placard generation in flight: ${placardsInFlight}`
+                : `牌貼產生中：${placardsInFlight}`}
+            </div>
           </div>
-        </div>
-        <DetailItem label={copy.labels.sitemapPath} value="/switchboard" mono />
-        <DetailItem
-          label={copy.labels.sitemapEntry}
-          value={isEnglish ? "Sidebar navigation" : "側邊欄導覽"}
-        />
-        <DetailItem
-          label={copy.labels.sitemapExit}
-          value={
-            isEnglish ? "Placard PDF artifact download" : "牌貼 PDF 成品下載"
-          }
-        />
-        <DetailItem
-          label={copy.labels.sitemapTask}
-          value={
-            isEnglish
-              ? "Maintain disclosure versions and publish placards per scope."
-              : "維護法定揭露版本，並依 scope 產生與發布牌貼。"
-          }
-        />
+
+          <div style={controlBandStyle}>
+            <div style={sectionEyebrowStyle}>{copy.sections.links}</div>
+            <ResourceLinkList links={deepLinks} />
+          </div>
+
+          <div style={resourceActionsStyle}>
+            {createVersionAction ? (
+              <button
+                type="button"
+                title={createVersionAction.disabledReasonCode}
+                disabled={!createVersionAction.enabled}
+                style={mergeStyles(
+                  actionButtonStyle(),
+                  disabledActionStyle(!createVersionAction.enabled),
+                )}
+                onClick={() => void handleActionDescriptor(createVersionAction)}
+              >
+                {copy.topActions.createVersion}
+              </button>
+            ) : null}
+            {publishVersionAction ? (
+              <button
+                type="button"
+                title={publishVersionAction.disabledReasonCode}
+                disabled={!publishVersionAction.enabled}
+                style={mergeStyles(
+                  actionButtonStyle({ tone: "primary" }),
+                  disabledActionStyle(!publishVersionAction.enabled),
+                )}
+                onClick={() =>
+                  void handleActionDescriptor(publishVersionAction)
+                }
+              >
+                {copy.topActions.publishVersion}
+              </button>
+            ) : null}
+            {refreshAction ? (
+              <button
+                type="button"
+                title={refreshAction.disabledReasonCode}
+                disabled={!refreshAction.enabled}
+                style={mergeStyles(
+                  actionButtonStyle(),
+                  disabledActionStyle(!refreshAction.enabled),
+                )}
+                onClick={() => void handleActionDescriptor(refreshAction)}
+              >
+                {copy.topActions.refresh}
+              </button>
+            ) : null}
+          </div>
+        </section>
+
+        <section style={surfaceCardStyle}>
+          <div style={sectionTitleStyle}>{copy.sections.livePreview}</div>
+          <div style={placardPreviewStyle}>
+            <div style={placardBrandStyle}>
+              {livePublicInfoVersion?.title ??
+                (isEnglish ? "No live disclosure" : "尚無 live 揭露")}
+            </div>
+            <div style={placardCalloutStyle}>
+              {isEnglish ? "Call" : "叫車"}{" "}
+              {livePublicInfoVersion?.callPhone ?? "—"} ·{" "}
+              {isEnglish ? "Complaint" : "客訴"}{" "}
+              {livePublicInfoVersion?.complaintPhone ?? "—"}
+            </div>
+            <div style={placardBodyStyle}>
+              <div>
+                {isEnglish ? "Placard" : "牌貼"} ·{" "}
+                {livePlacardVersion?.versionCode ?? "—"}
+              </div>
+              <div>{livePublicInfoVersion?.fareText ?? "—"}</div>
+              <div>{livePublicInfoVersion?.paymentMethodText ?? "—"}</div>
+              <div>
+                {isEnglish ? "Template" : "範本"} ·{" "}
+                {livePlacardVersion?.templateName ??
+                  copy.labels.pendingArtifact}
+              </div>
+              <div style={{ color: "#6b7280" }}>
+                {livePublicInfoVersion
+                  ? `${livePublicInfoVersion.effectiveFrom ?? "—"} → ${livePublicInfoVersion.effectiveTo ?? "—"}`
+                  : copy.labels.noLiveVersion}
+              </div>
+            </div>
+          </div>
+          <div style={detailGridStyle}>
+            <DetailItem
+              label={copy.liveVersion}
+              value={livePublicInfoVersion?.versionId ?? "—"}
+              mono
+            />
+            <DetailItem
+              label={copy.livePlacard}
+              value={livePlacardVersion?.versionCode ?? "—"}
+              mono
+            />
+            <DetailItem
+              label={copy.labels.placardCount}
+              value={String(placards.length)}
+            />
+            <DetailItem
+              label={copy.labels.publishedCount}
+              value={String(publishedVersions.length)}
+            />
+          </div>
+          <div style={resourceActionsStyle}>
+            {livePlacardVersion?.artifactDownloadUrl ? (
+              <a
+                href={livePlacardVersion.artifactDownloadUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={mergeStyles(actionButtonStyle(), {
+                  textDecoration: "none",
+                })}
+              >
+                {copy.labels.download}
+              </a>
+            ) : null}
+            {generatePlacardAction ? (
+              <button
+                type="button"
+                title={generatePlacardAction.disabledReasonCode}
+                disabled={!generatePlacardAction.enabled}
+                style={mergeStyles(
+                  actionButtonStyle({ tone: "primary" }),
+                  disabledActionStyle(!generatePlacardAction.enabled),
+                )}
+                onClick={() =>
+                  void handleActionDescriptor(generatePlacardAction)
+                }
+              >
+                {copy.topActions.generatePlacard}
+              </button>
+            ) : null}
+          </div>
+        </section>
       </div>
 
       <div style={toolbarRowStyle}>
@@ -1491,39 +1747,7 @@ export default function SwitchboardPage() {
             ),
           )}
         </div>
-
-        <div style={toolbarActionsStyle}>
-          {pageActions.map((descriptor) => {
-            const isPrimary =
-              descriptor.action === "publish" ||
-              descriptor.action === "generate_placard_version";
-            return (
-              <button
-                key={`${descriptor.action}-${descriptor.riskLevel}`}
-                type="button"
-                title={descriptor.disabledReasonCode}
-                disabled={!descriptor.enabled}
-                style={mergeStyles(
-                  actionButtonStyle({
-                    tone: isPrimary ? "primary" : "secondary",
-                  }),
-                  disabledActionStyle(!descriptor.enabled),
-                )}
-                onClick={() => void handleActionDescriptor(descriptor)}
-              >
-                {actionLabel(
-                  descriptor.action,
-                  locale,
-                  descriptor.action === "generate_placard_version"
-                    ? copy.topActions.generatePlacard
-                    : descriptor.action === "refresh"
-                      ? copy.topActions.refresh
-                      : copy.topActions.createVersion,
-                )}
-              </button>
-            );
-          })}
-        </div>
+        <div style={supportCopyStyle}>{copy.labels.availableActions}</div>
       </div>
 
       {showPublicInfoForm && (
@@ -1705,6 +1929,33 @@ export default function SwitchboardPage() {
                 </select>
               </label>
               <label style={labelStyle}>
+                {copy.labels.scopeSelector}
+                <select
+                  value={placardForm.scope}
+                  onChange={(event) => {
+                    const scope = event.target.value as PlacardScopeOption;
+                    setPlacardForm((current) => ({
+                      ...current,
+                      scope,
+                      templateName: getDefaultTemplateForScope(scope),
+                    }));
+                  }}
+                  style={inputStyle}
+                >
+                  {(
+                    [
+                      "brand_template",
+                      "fleet",
+                      "vehicle",
+                    ] as PlacardScopeOption[]
+                  ).map((scope) => (
+                    <option key={scope} value={scope}>
+                      {formatPlatformCodeLabel(locale, scope)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={labelStyle}>
                 Version code
                 <input
                   value={placardForm.versionCode}
@@ -1719,8 +1970,8 @@ export default function SwitchboardPage() {
                 />
               </label>
               <label style={labelStyle}>
-                {copy.labels.template}
-                <input
+                {copy.labels.templatePreset}
+                <select
                   value={placardForm.templateName}
                   onChange={(event) =>
                     setPlacardForm((current) => ({
@@ -1729,8 +1980,13 @@ export default function SwitchboardPage() {
                     }))
                   }
                   style={inputStyle}
-                  placeholder="seatback-default"
-                />
+                >
+                  {scopeTemplateOptions.map((template) => (
+                    <option key={template} value={template}>
+                      {template}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label style={labelStyle}>
                 Artifact file ID
@@ -1752,6 +2008,7 @@ export default function SwitchboardPage() {
               </label>
             </div>
             <div style={supportCopyStyle}>{copy.labels.sourceHint}</div>
+            <div style={supportCopyStyle}>{copy.labels.chooseScope}</div>
             <div style={supportCopyStyle}>
               {getPlacardSourceSelectionHint(selectedPublicInfoVersion, locale)}
             </div>
@@ -1796,9 +2053,26 @@ export default function SwitchboardPage() {
 
       {activeTab === "versions" && (
         <div style={contentGridStyle}>
-          <div style={{ display: "grid", gap: 16 }}>
-            <section style={surfaceCardStyle}>
+          <section style={mergeStyles(surfaceCardStyle, tablePanelStyle)}>
+            <div style={{ padding: "0 18px" }}>
               <div style={sectionTitleStyle}>{copy.sections.versions}</div>
+              <div style={supportCopyStyle}>
+                {isEnglish
+                  ? "Draft / published / retired legal disclosure versions with effective window and phone disclosures."
+                  : "依草稿 / published / retired 管理法定揭露版本，保留生效區間與對外電話資訊。"}
+              </div>
+            </div>
+            <div style={tableHeaderRowStyle}>
+              <div style={sectionEyebrowStyle}>Version</div>
+              <div style={sectionEyebrowStyle}>Effective from</div>
+              <div style={sectionEyebrowStyle}>Effective to</div>
+              <div style={sectionEyebrowStyle}>
+                {isEnglish ? "Call / complaint" : "叫車 / 客訴"}
+              </div>
+              <div style={sectionEyebrowStyle}>Status</div>
+              <div style={sectionEyebrowStyle}>Updated</div>
+            </div>
+            <div style={tableBodyStackStyle}>
               {publicInfo.length === 0 && publicInfoPayload.emptyState ? (
                 <SectionEmptyState
                   locale={locale}
@@ -1806,15 +2080,29 @@ export default function SwitchboardPage() {
                   onAction={(action) => void handleActionDescriptor(action)}
                 />
               ) : (
-                <div style={stackListStyle}>
+                <>
                   {publicInfo.map((version) => (
-                    <div key={version.versionId} style={resourceCardStyle}>
-                      <div style={resourceCardHeaderStyle}>
-                        <div>
+                    <div key={version.versionId} style={versionTableRowStyle}>
+                      <div style={tableSummaryRowStyle}>
+                        <div style={{ display: "grid", gap: 4 }}>
                           <div style={resourceTitleStyle}>{version.title}</div>
                           <div style={resourceMetaStyle}>
                             {version.versionId}
                           </div>
+                        </div>
+                        <div
+                          style={mergeStyles(detailValueStyle, monoTextStyle)}
+                        >
+                          {version.effectiveFrom ?? "—"}
+                        </div>
+                        <div
+                          style={mergeStyles(detailValueStyle, monoTextStyle)}
+                        >
+                          {version.effectiveTo ?? "—"}
+                        </div>
+                        <div style={detailValueStyle}>
+                          {version.callPhone ?? "—"} ·{" "}
+                          {version.complaintPhone ?? "—"}
                         </div>
                         <span
                           style={statusBadgeStyle(
@@ -1823,13 +2111,14 @@ export default function SwitchboardPage() {
                         >
                           {formatPlatformCodeLabel(locale, version.status)}
                         </span>
+                        <div
+                          style={mergeStyles(detailValueStyle, monoTextStyle)}
+                        >
+                          {formatDateTime(version.updatedAt)}
+                        </div>
                       </div>
 
                       <div style={detailGridStyle}>
-                        <DetailItem
-                          label={copy.labels.effectiveWindow}
-                          value={`${version.effectiveFrom ?? "—"} → ${version.effectiveTo ?? "—"}`}
-                        />
                         <DetailItem
                           label={copy.labels.publishedBy}
                           value={version.publishedBy ?? "—"}
@@ -1839,13 +2128,21 @@ export default function SwitchboardPage() {
                           value={`${version.callPhone ?? "—"} · ${version.complaintPhone ?? "—"}`}
                         />
                         <DetailItem
-                          label={isEnglish ? "Fare / payment" : "計價 / 付款"}
-                          value={`${version.callRateText ?? "—"} · ${version.paymentMethodText ?? "—"}`}
+                          label={isEnglish ? "Call rate text" : "計價說明"}
+                          value={version.callRateText ?? "—"}
                         />
-                      </div>
-
-                      <div style={supportCopyStyle}>
-                        {version.fareText ?? copy.labels.retention}
+                        <DetailItem
+                          label={isEnglish ? "Fare disclosure" : "票價說明"}
+                          value={version.fareText ?? "—"}
+                        />
+                        <DetailItem
+                          label={isEnglish ? "Payment methods" : "付款方式"}
+                          value={version.paymentMethodText ?? "—"}
+                        />
+                        <DetailItem
+                          label={copy.labels.versionLineage}
+                          value={`${formatDateTime(version.createdAt)} → ${formatDateTime(version.updatedAt)}`}
+                        />
                       </div>
 
                       <AvailableActionsList
@@ -1916,67 +2213,50 @@ export default function SwitchboardPage() {
                       <ResourceLinkList links={getVersionLinks(version)} />
                     </div>
                   ))}
-                </div>
+                </>
               )}
-            </section>
-          </div>
+            </div>
+          </section>
 
-          <div style={{ display: "grid", gap: 16 }}>
+          <div style={compactRailStyle}>
             <section style={surfaceCardStyle}>
-              <div style={sectionTitleStyle}>{copy.sections.livePreview}</div>
-              <div style={placardPreviewStyle}>
-                <div style={placardBrandStyle}>
-                  {livePublicInfoVersion?.title ??
-                    (isEnglish ? "No live disclosure" : "尚無 live 揭露")}
-                </div>
-                <div style={placardCalloutStyle}>
-                  {isEnglish ? "Call" : "叫車"}{" "}
-                  {livePublicInfoVersion?.callPhone ?? "—"} ·{" "}
-                  {isEnglish ? "Complaint" : "客訴"}{" "}
-                  {livePublicInfoVersion?.complaintPhone ?? "—"}
-                </div>
-                <div style={placardBodyStyle}>
-                  <div>{livePlacardVersion?.versionCode ?? "—"}</div>
-                  <div>{livePublicInfoVersion?.fareText ?? "—"}</div>
-                  <div>{livePublicInfoVersion?.paymentMethodText ?? "—"}</div>
-                  <div style={{ color: "#6b7280" }}>
-                    {livePublicInfoVersion
-                      ? `${livePublicInfoVersion.effectiveFrom ?? "—"} → ${livePublicInfoVersion.effectiveTo ?? "—"}`
-                      : copy.labels.noLiveVersion}
-                  </div>
-                </div>
-              </div>
-              <div style={resourceActionsStyle}>
-                {livePlacardVersion?.artifactDownloadUrl ? (
-                  <a
-                    href={livePlacardVersion.artifactDownloadUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={mergeStyles(actionButtonStyle(), {
-                      textDecoration: "none",
-                    })}
-                  >
-                    {copy.labels.download}
-                  </a>
-                ) : null}
-                {generatePlacardAction ? (
-                  <button
-                    type="button"
-                    title={generatePlacardAction.disabledReasonCode}
-                    disabled={!generatePlacardAction.enabled}
-                    style={mergeStyles(
-                      actionButtonStyle({ tone: "primary" }),
-                      disabledActionStyle(!generatePlacardAction.enabled),
-                    )}
-                    onClick={() =>
-                      void handleActionDescriptor(generatePlacardAction)
-                    }
-                  >
-                    {copy.topActions.generatePlacard}
-                  </button>
-                ) : null}
+              <div style={sectionTitleStyle}>{copy.sections.sitemap}</div>
+              <div style={detailGridStyle}>
+                <DetailItem
+                  label={copy.labels.sitemapTask}
+                  value={
+                    isEnglish
+                      ? "Maintain disclosure versions and publish placards per scope."
+                      : "維護法定揭露版本，並依 scope 產生與發布牌貼。"
+                  }
+                />
+                <DetailItem
+                  label={copy.labels.tiedCount}
+                  value={String(
+                    placards.filter((placard) => {
+                      const source =
+                        publicInfoById[placard.publicInfoVersionId];
+                      return source?.status === "published";
+                    }).length,
+                  )}
+                />
               </div>
             </section>
+
+            {hasOlderPublishedSignal && (
+              <section
+                style={mergeStyles(surfaceCardStyle, warningSignalCardStyle)}
+              >
+                <div style={sectionTitleStyle}>
+                  {copy.sections.decisionPoints}
+                </div>
+                <div style={supportCopyStyle}>
+                  {isEnglish
+                    ? "A newer disclosure is already live while older published versions remain unretired. Packet §5 requires explicit review signalling on this state."
+                    : "較新的揭露已 live，但舊 published 版本仍未退場。依 packet §5，這種狀態必須被明確標示並安排後續治理。"}
+                </div>
+              </section>
+            )}
 
             <section style={surfaceCardStyle}>
               <div style={sectionTitleStyle}>{copy.sections.contacts}</div>
@@ -1997,6 +2277,39 @@ export default function SwitchboardPage() {
                   label={isEnglish ? "Payment methods" : "付款方式"}
                   value={livePublicInfoVersion?.paymentMethodText ?? "—"}
                 />
+              </div>
+            </section>
+
+            <section style={surfaceCardStyle}>
+              <div style={sectionTitleStyle}>{copy.sections.actionDeck}</div>
+              <div style={actionDeckGridStyle}>
+                {pageActions.map((descriptor) => (
+                  <button
+                    key={`deck-${descriptor.action}-${descriptor.riskLevel}`}
+                    type="button"
+                    title={
+                      descriptor.disabledReasonCode ??
+                      copy.labels.fallbackActionReason
+                    }
+                    disabled={!descriptor.enabled}
+                    style={mergeStyles(
+                      actionDeckButtonStyle,
+                      disabledActionStyle(!descriptor.enabled),
+                    )}
+                    onClick={() => void handleActionDescriptor(descriptor)}
+                  >
+                    <span style={sectionEyebrowStyle}>
+                      {descriptor.riskLevel}
+                    </span>
+                    <strong style={{ color: "#0f172a", fontSize: 14 }}>
+                      {actionLabel(
+                        descriptor.action,
+                        locale,
+                        descriptor.action,
+                      )}
+                    </strong>
+                  </button>
+                ))}
               </div>
             </section>
 
@@ -2308,24 +2621,6 @@ export default function SwitchboardPage() {
   );
 }
 
-function MetricCard({
-  label,
-  value,
-  note,
-}: {
-  label: string;
-  value: number;
-  note: string;
-}) {
-  return (
-    <div style={mergeStyles(surfaceCardStyle, { display: "grid", gap: 6 })}>
-      <div style={sectionEyebrowStyle}>{label}</div>
-      <strong style={{ fontSize: 28, color: "#0f172a" }}>{value}</strong>
-      <div style={supportCopyStyle}>{note}</div>
-    </div>
-  );
-}
-
 function DetailItem({
   label,
   value,
@@ -2385,6 +2680,8 @@ function AvailableActionsList({
 }
 
 function ResourceLinkList({ links }: { links: CrossAppResourceLink[] }) {
+  const { locale } = useTranslation();
+  const isEnglish = locale === "en";
   return (
     <div style={stackListStyle}>
       {links.map((link) => (
@@ -2402,6 +2699,9 @@ function ResourceLinkList({ links }: { links: CrossAppResourceLink[] }) {
           </a>
           <span style={resourceLinkMetaStyle}>
             {link.targetApp} · {link.resourceType}
+            {link.openMode === "new_tab"
+              ? ` · ${isEnglish ? "new tab" : "新分頁"}`
+              : ""}
           </span>
         </div>
       ))}
@@ -2409,34 +2709,74 @@ function ResourceLinkList({ links }: { links: CrossAppResourceLink[] }) {
   );
 }
 
-const kpiGridStyle: CSSProperties = {
+function DataColumn({
+  label,
+  value,
+  width,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  width?: string;
+  mono?: boolean;
+}) {
+  return (
+    <div style={{ display: "grid", gap: 4, minWidth: 0, width }}>
+      <div style={sectionEyebrowStyle}>{label}</div>
+      <div
+        style={
+          mono
+            ? mergeStyles(detailValueStyle, monoTextStyle, {
+                overflowWrap: "anywhere",
+              })
+            : mergeStyles(detailValueStyle, { overflowWrap: "anywhere" })
+        }
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+const heroGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 14,
+  gridTemplateColumns: "minmax(0, 1.6fr) minmax(320px, 1fr)",
+  gap: 16,
+  alignItems: "start",
 };
 
-const spotlightGridStyle: CSSProperties = {
+const tablePanelStyle: CSSProperties = {
   display: "grid",
   gap: 14,
-  gridTemplateColumns: "1.25fr repeat(3, minmax(0, 1fr))",
-  alignItems: "stretch",
-  background:
-    "linear-gradient(135deg, rgba(15,23,42,0.02) 0%, rgba(29,78,216,0.06) 100%)",
+  overflow: "hidden",
 };
 
-const spotlightStatStyle: CSSProperties = {
+const tableHeaderRowStyle: CSSProperties = {
   display: "grid",
-  gap: 8,
-  padding: 16,
-  borderRadius: 16,
-  background: "#ffffff",
-  border: "1px solid rgba(148,163,184,0.16)",
+  gridTemplateColumns:
+    "minmax(140px, 1.1fr) minmax(112px, 0.8fr) minmax(112px, 0.8fr) minmax(150px, 1fr) minmax(92px, 0.7fr) minmax(124px, 0.8fr)",
+  gap: 12,
+  padding: "0 18px 12px",
+  borderBottom: "1px solid rgba(148,163,184,0.16)",
 };
 
-const sitemapGridStyle: CSSProperties = {
+const tableBodyStackStyle: CSSProperties = {
   display: "grid",
-  gap: 14,
-  gridTemplateColumns: "1.1fr repeat(4, minmax(0, 1fr))",
+  gap: 0,
+};
+
+const versionTableRowStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+  padding: "16px 18px",
+  borderBottom: "1px solid rgba(148,163,184,0.14)",
+};
+
+const tableSummaryRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns:
+    "minmax(140px, 1.1fr) minmax(112px, 0.8fr) minmax(112px, 0.8fr) minmax(150px, 1fr) minmax(92px, 0.7fr) minmax(124px, 0.8fr)",
+  gap: 12,
   alignItems: "start",
 };
 
@@ -2449,12 +2789,6 @@ const toolbarRowStyle: CSSProperties = {
 };
 
 const pillTabsStyle: CSSProperties = {
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-};
-
-const toolbarActionsStyle: CSSProperties = {
   display: "flex",
   gap: 8,
   flexWrap: "wrap",
@@ -2487,6 +2821,11 @@ const contentGridStyle: CSSProperties = {
   alignItems: "start",
 };
 
+const compactRailStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+};
+
 const sectionTitleStyle: CSSProperties = {
   margin: "0 0 14px",
   fontSize: 17,
@@ -2506,6 +2845,12 @@ const supportCopyStyle: CSSProperties = {
   color: "#64748b",
   fontSize: 13,
   lineHeight: 1.6,
+};
+
+const emptyStateCodeStyle: CSSProperties = {
+  ...monoTextStyle,
+  color: "#94a3b8",
+  fontSize: 11,
 };
 
 const actionChipRowStyle: CSSProperties = {
@@ -2605,6 +2950,51 @@ const resourceLinkMetaStyle: CSSProperties = {
   ...monoTextStyle,
   color: "#94a3b8",
   fontSize: 11,
+};
+
+const actionDeckGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+  gap: 10,
+};
+
+const actionDeckButtonStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+  textAlign: "left",
+  padding: 14,
+  borderRadius: 16,
+  border: "1px solid rgba(148,163,184,0.18)",
+  background:
+    "linear-gradient(180deg, rgba(248,250,252,0.94) 0%, #ffffff 100%)",
+};
+
+const controlPanelStyle: CSSProperties = {
+  display: "grid",
+  gap: 14,
+  background:
+    "linear-gradient(135deg, rgba(15,23,42,0.04) 0%, rgba(29,78,216,0.07) 100%)",
+};
+
+const controlFactsStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 12,
+};
+
+const controlBandStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+  padding: 14,
+  borderRadius: 14,
+  border: "1px solid rgba(148,163,184,0.18)",
+  background: "rgba(255,255,255,0.82)",
+};
+
+const warningSignalCardStyle: CSSProperties = {
+  borderColor: "rgba(245, 158, 11, 0.22)",
+  background:
+    "linear-gradient(180deg, rgba(245, 158, 11, 0.08) 0%, rgba(255,255,255,0.98) 100%)",
 };
 
 const placardPreviewStyle: CSSProperties = {
