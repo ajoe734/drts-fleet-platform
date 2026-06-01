@@ -188,7 +188,7 @@ export function SecretRevealCard({
               checked={stored}
               onChange={(event) => setStored(event.target.checked)}
             />
-            I stored this key in a secure location
+            I stored this secret in a secure location
           </label>
           <form action={clearReceiptAction}>
             <input type="hidden" name="webhookId" value={webhookId} />

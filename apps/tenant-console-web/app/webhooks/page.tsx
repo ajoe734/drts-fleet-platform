@@ -717,7 +717,52 @@ function getActionTone(action: string): CanvasTone | undefined {
   }
 }
 
-function getActionHref(
+function getPageActionHref(action: string) {
+  switch (action) {
+    case "createWebhookEndpoint":
+      return "/webhooks?mode=create";
+    default:
+      return undefined;
+  }
+}
+
+function getEndpointActionHref(
+  action: string,
+  options?: {
+    webhookId?: string;
+    status?: string;
+  },
+) {
+  const webhookId = options?.webhookId;
+  const status =
+    options?.status && options.status !== "all"
+      ? `&status=${encodeURIComponent(options.status)}`
+      : "";
+
+  switch (action) {
+    case "updateWebhookEndpoint":
+    case "disableWebhookEndpoint":
+      return webhookId
+        ? `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}${status}`
+        : undefined;
+    case "deleteWebhookEndpoint":
+      return webhookId
+        ? `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}${status}#high-risk`
+        : undefined;
+    case "rotateWebhookSecret":
+      return webhookId
+        ? `/webhooks?mode=rotate&webhookId=${encodeURIComponent(webhookId)}${status}`
+        : undefined;
+    case "viewDeliveryLog":
+      return webhookId
+        ? `/webhooks?webhookId=${encodeURIComponent(webhookId)}${status}`
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function getDeliveryActionHref(
   action: string,
   options?: {
     webhookId?: string;
@@ -733,23 +778,6 @@ function getActionHref(
       : "";
 
   switch (action) {
-    case "payload_schema":
-      return "/settings";
-    case "createWebhookEndpoint":
-      return "/webhooks?mode=create";
-    case "updateWebhookEndpoint":
-    case "disableWebhookEndpoint":
-      return webhookId
-        ? `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}${status}`
-        : undefined;
-    case "deleteWebhookEndpoint":
-      return webhookId
-        ? `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}${status}#high-risk`
-        : undefined;
-    case "rotateWebhookSecret":
-      return webhookId
-        ? `/webhooks?mode=rotate&webhookId=${encodeURIComponent(webhookId)}${status}`
-        : undefined;
     case "viewDeliveryLog":
       if (!webhookId) {
         return undefined;
@@ -762,7 +790,69 @@ function getActionHref(
   }
 }
 
-function decorateActions(
+function decoratePageActions(
+  descriptors: ResourceActionDescriptor[],
+): ActionDescriptor[] {
+  return descriptors.flatMap((descriptor) => {
+    const href = getPageActionHref(descriptor.action);
+    if (!href) {
+      return [];
+    }
+    const tone = getActionTone(descriptor.action);
+
+    return [
+      {
+        action: descriptor.action,
+        label: getActionLabel(descriptor.action),
+        riskLevel: descriptor.riskLevel,
+        enabled: descriptor.enabled,
+        ...(descriptor.requiresReason !== undefined
+          ? { requiresReason: descriptor.requiresReason }
+          : {}),
+        ...(descriptor.disabledReasonCode
+          ? { disabledReasonCode: descriptor.disabledReasonCode }
+          : {}),
+        ...(tone ? { tone } : {}),
+        href,
+      },
+    ];
+  });
+}
+
+function decorateEndpointActions(
+  descriptors: ResourceActionDescriptor[],
+  options?: {
+    webhookId?: string;
+    status?: string;
+  },
+): ActionDescriptor[] {
+  return descriptors.flatMap((descriptor) => {
+    const tone = getActionTone(descriptor.action);
+    const href = getEndpointActionHref(descriptor.action, options);
+    if (!href && descriptor.action !== "deleteWebhookEndpoint") {
+      return [];
+    }
+
+    return [
+      {
+        action: descriptor.action,
+        label: getActionLabel(descriptor.action),
+        riskLevel: descriptor.riskLevel,
+        enabled: descriptor.enabled,
+        ...(descriptor.requiresReason !== undefined
+          ? { requiresReason: descriptor.requiresReason }
+          : {}),
+        ...(descriptor.disabledReasonCode
+          ? { disabledReasonCode: descriptor.disabledReasonCode }
+          : {}),
+        ...(tone ? { tone } : {}),
+        ...(href ? { href } : {}),
+      },
+    ];
+  });
+}
+
+function decorateDeliveryActions(
   descriptors: ResourceActionDescriptor[],
   options?: {
     webhookId?: string;
@@ -770,31 +860,36 @@ function decorateActions(
     status?: string;
   },
 ): ActionDescriptor[] {
-  return descriptors.map((descriptor) => {
+  return descriptors.flatMap((descriptor) => {
     const tone = getActionTone(descriptor.action);
-    const href = getActionHref(descriptor.action, options);
+    const href = getDeliveryActionHref(descriptor.action, options);
+    if (!href) {
+      return [];
+    }
 
-    return {
-      action: descriptor.action,
-      label: getActionLabel(descriptor.action),
-      riskLevel: descriptor.riskLevel,
-      enabled: descriptor.enabled,
-      ...(descriptor.requiresReason !== undefined
-        ? { requiresReason: descriptor.requiresReason }
-        : {}),
-      ...(descriptor.disabledReasonCode
-        ? { disabledReasonCode: descriptor.disabledReasonCode }
-        : {}),
-      ...(tone ? { tone } : {}),
-      ...(href ? { href } : {}),
-    };
+    return [
+      {
+        action: descriptor.action,
+        label: getActionLabel(descriptor.action),
+        riskLevel: descriptor.riskLevel,
+        enabled: descriptor.enabled,
+        ...(descriptor.requiresReason !== undefined
+          ? { requiresReason: descriptor.requiresReason }
+          : {}),
+        ...(descriptor.disabledReasonCode
+          ? { disabledReasonCode: descriptor.disabledReasonCode }
+          : {}),
+        ...(tone ? { tone } : {}),
+        href,
+      },
+    ];
   });
 }
 
 function getPageActions(
   governanceActions: ResourceActionDescriptor[] | undefined,
 ): ActionDescriptor[] {
-  return decorateActions(governanceActions ?? []);
+  return decoratePageActions(governanceActions ?? []);
 }
 
 function deriveActiveTab(options: {
@@ -812,7 +907,7 @@ function getEndpointActions(
   endpoint: TenantWebhookEndpoint,
   statusFilter = "all",
 ): ActionDescriptor[] {
-  return decorateActions(endpoint.availableActions ?? [], {
+  return decorateEndpointActions(endpoint.availableActions ?? [], {
     webhookId: endpoint.webhookId,
     status: statusFilter,
   }).map((action) =>
@@ -826,7 +921,7 @@ function getDeliveryActions(
   delivery: WebhookDeliveryRecord,
   statusFilter = "all",
 ): ActionDescriptor[] {
-  return decorateActions(delivery.availableActions ?? [], {
+  return decorateDeliveryActions(delivery.availableActions ?? [], {
     webhookId: delivery.webhookId,
     deliveryId: delivery.deliveryId,
     status: statusFilter,
@@ -1088,6 +1183,14 @@ async function updateWebhookAction(formData: FormData) {
       throw new Error("缺少 webhookId。");
     }
 
+    const currentEndpoints = await client.listWebhooks();
+    const currentEndpoint = currentEndpoints.find(
+      (endpoint) => endpoint.webhookId === webhookId,
+    );
+    if (!currentEndpoint) {
+      throw new Error("找不到目前的 webhook endpoint。");
+    }
+
     const command: UpdateTenantWebhookEndpointCommand = {
       url: String(formData.get("url") ?? "").trim(),
       events,
@@ -1098,6 +1201,18 @@ async function updateWebhookAction(formData: FormData) {
 
     if (!command.url || !command.status || events.length === 0) {
       throw new Error("URL、status 與至少一個 event 為必填。");
+    }
+    const disableAction = currentEndpoint.availableActions?.find(
+      (action) => action.action === "disableWebhookEndpoint",
+    );
+    if (
+      command.status === "disabled" &&
+      currentEndpoint.status !== "disabled" &&
+      !disableAction?.enabled
+    ) {
+      throw new Error(
+        "此 endpoint 目前沒有 disableWebhookEndpoint action，不能透過 update flow 停用。",
+      );
     }
     if (command.status === "disabled" && !disableReason) {
       throw new Error("停用 endpoint 時必須填寫 reason。");
@@ -1246,6 +1361,8 @@ function EndpointForm({
   const rotateAction = findAction(endpointActions ?? [], "rotateWebhookSecret");
   const canShowDisabledOption =
     webhook?.status === "disabled" || Boolean(disableAction?.enabled);
+  const disableUnavailableReason =
+    disableAction?.disabledReasonCode ?? "disableWebhookEndpoint_not_published";
 
   return (
     <CanvasCard
@@ -1342,6 +1459,18 @@ function EndpointForm({
               disabled={!disableAction.enabled}
             />
           </CanvasField>
+        ) : !isCreate ? (
+          <CanvasField
+            theme={th}
+            label="DISABLE"
+            hint={`High-risk disable 目前未由 endpoint.availableActions[] 發布。Reason gate 保持關閉。${webhook?.status === "disabled" ? " 此 endpoint 已是 disabled，只能先回到 active/test_pending 後再等待 backend 重新發布 disable action。" : ` Disabled reason: ${disableUnavailableReason}.`}`}
+          >
+            <input
+              readOnly
+              value="Disable action unavailable on this endpoint"
+              style={controlStyle}
+            />
+          </CanvasField>
         ) : null}
         <div style={buttonWrapStyle}>
           <button
@@ -1366,7 +1495,8 @@ function EndpointForm({
             </div>
             <p style={mutedStyle}>
               Delete 與 disable 依 packet 屬 high action；delete 送出前必須填
-              reason， disable 則透過上方欄位 gate 住提交。
+              reason，disable 只有在 `disableWebhookEndpoint`
+              已發布時才可透過上方欄位提交。
             </p>
             <div style={buttonWrapStyle}>
               {deleteAction ? (
@@ -1668,7 +1798,9 @@ export default async function WebhooksPage({
                 )
               : endpoint.availableActions === undefined
                 ? renderContractGap("No published endpoint actions.")
-                : renderContractGap("Read-only for current actor.")}
+                : renderContractGap(
+                    "No supported endpoint actions published for this surface.",
+                  )}
           </div>
         );
       },
@@ -1719,7 +1851,9 @@ export default async function WebhooksPage({
                 )
               : delivery.availableActions === undefined
                 ? renderContractGap("No published delivery actions.")
-                : renderContractGap("Read-only for current actor.")}
+                : renderContractGap(
+                    "No supported delivery actions published for this surface.",
+                  )}
           </div>
         );
       },
