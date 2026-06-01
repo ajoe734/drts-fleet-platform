@@ -909,22 +909,86 @@ function buildRows({
     });
 }
 
-function availableActionsForRow(row: FeatureFlagRow, selectedTenantId: string) {
-  if (selectedTenantId) {
-    if (row.selectedTenantSnapshot?.availableActions) {
-      return row.selectedTenantSnapshot.availableActions;
-    }
-    if (row.selectedTenantOverride?.availableActions) {
-      return row.selectedTenantOverride.availableActions;
-    }
-    if (row.selectedTenantSnapshot || row.selectedTenantOverride) {
-      return [];
+function contextualizeDescriptor({
+  row,
+  descriptor,
+  selectedTenantId,
+}: {
+  row: FeatureFlagRow;
+  descriptor: ResourceActionDescriptor;
+  selectedTenantId: string;
+}): ResourceActionDescriptor {
+  switch (descriptor.action) {
+    case "add_tenant_override":
+      return selectedTenantId
+        ? descriptor
+        : {
+            ...descriptor,
+            enabled: false,
+            disabledReasonCode:
+              descriptor.disabledReasonCode ?? "select_tenant_scope_first",
+          };
+    case "remove_tenant_override":
+      if (!selectedTenantId) {
+        return {
+          ...descriptor,
+          enabled: false,
+          disabledReasonCode:
+            descriptor.disabledReasonCode ?? "select_tenant_scope_first",
+        };
+      }
+      if (!row.selectedTenantOverride) {
+        return {
+          ...descriptor,
+          enabled: false,
+          disabledReasonCode:
+            descriptor.disabledReasonCode ?? "no_override_for_selected_scope",
+        };
+      }
+      return descriptor;
+    case "toggle_global":
+      return row.global
+        ? descriptor
+        : {
+            ...descriptor,
+            enabled: false,
+            disabledReasonCode:
+              descriptor.disabledReasonCode ?? "global_default_missing",
+          };
+    default:
+      return descriptor;
+  }
+}
+
+function availableActionsForRow(
+  row: FeatureFlagRow,
+  selectedTenantId: string,
+): ResourceActionDescriptor[] {
+  const descriptorsByAction = new Map<string, ResourceActionDescriptor>();
+  const descriptorSources = selectedTenantId
+    ? [
+        row.selectedTenantSnapshot?.availableActions ?? [],
+        row.selectedTenantOverride?.availableActions ?? [],
+        row.global?.availableActions ?? [],
+      ]
+    : [row.global?.availableActions ?? []];
+
+  for (const descriptors of descriptorSources) {
+    for (const descriptor of descriptors) {
+      if (!descriptorsByAction.has(descriptor.action)) {
+        descriptorsByAction.set(
+          descriptor.action,
+          contextualizeDescriptor({
+            row,
+            descriptor,
+            selectedTenantId,
+          }),
+        );
+      }
     }
   }
 
-  return (
-    (row.global as RuntimeFeatureFlagRecord | null)?.availableActions ?? []
-  );
+  return [...descriptorsByAction.values()];
 }
 
 function filterRows(
