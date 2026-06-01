@@ -294,7 +294,6 @@ type ActionLink = {
   href?: string;
   link?: CrossAppResourceLink;
   note?: string;
-  groups?: string[];
 };
 
 type SettingsSitemapEntry = {
@@ -525,111 +524,84 @@ type ActionLinkOverride = {
   href?: string;
   link?: CrossAppResourceLink;
   note?: string;
-  groups?: string[];
 };
 
-type ActionRegistryEntry = ActionLinkOverride & {
-  groups: string[];
-};
-
-const ACTION_GROUPS = {
-  general: "general",
-  notifications: "notifications",
-  integrations: "integrations",
-  people: "people",
-  page: "page",
-} as const;
+type ActionRegistryEntry = ActionLinkOverride;
 
 const SETTINGS_ACTION_REGISTRY: Record<string, ActionRegistryEntry> = {
   view_tenant_audit_evidence: {
     label: "租戶稽核",
     note: "same-tab",
-    groups: [ACTION_GROUPS.general, ACTION_GROUPS.people, ACTION_GROUPS.page],
   },
   update_tenant_billing_profile: {
     label: "計費資料",
     href: "/billing",
     note: "module-owned",
-    groups: [ACTION_GROUPS.general, ACTION_GROUPS.page],
   },
   update_notification_subscription: {
     label: "通知偏好",
     href: "/notifications",
-    groups: [ACTION_GROUPS.notifications, ACTION_GROUPS.page],
   },
   update_notification_preferences: {
     label: "通知偏好",
     href: "/notifications",
-    groups: [ACTION_GROUPS.notifications, ACTION_GROUPS.page],
   },
   update_sla_profile: {
     label: "SLA 設定",
     href: "/sla",
-    groups: [ACTION_GROUPS.notifications, ACTION_GROUPS.page],
   },
   issue_api_key: {
     label: "API 金鑰",
     href: "/api-keys",
     note: "module-owned",
-    groups: [ACTION_GROUPS.integrations, ACTION_GROUPS.page],
   },
   rotate_api_key: {
     label: "API 金鑰",
     href: "/api-keys",
     note: "module-owned",
-    groups: [ACTION_GROUPS.integrations, ACTION_GROUPS.page],
   },
   revoke_api_key: {
     label: "API 金鑰",
     href: "/api-keys",
     note: "module-owned",
-    groups: [ACTION_GROUPS.integrations, ACTION_GROUPS.page],
   },
   create_webhook_endpoint: {
     label: "Webhook",
     href: "/webhooks",
     note: "module-owned",
-    groups: [ACTION_GROUPS.integrations, ACTION_GROUPS.page],
   },
   update_webhook_endpoint: {
     label: "Webhook",
     href: "/webhooks",
     note: "module-owned",
-    groups: [ACTION_GROUPS.integrations, ACTION_GROUPS.page],
   },
   rotate_webhook_secret: {
     label: "Webhook",
     href: "/webhooks",
     note: "module-owned",
-    groups: [ACTION_GROUPS.integrations, ACTION_GROUPS.page],
   },
   disable_webhook_endpoint: {
     label: "Webhook",
     href: "/webhooks",
     note: "module-owned",
-    groups: [ACTION_GROUPS.integrations, ACTION_GROUPS.page],
   },
   activate_webhook_endpoint: {
     label: "Webhook",
     href: "/webhooks",
     note: "module-owned",
-    groups: [ACTION_GROUPS.integrations, ACTION_GROUPS.page],
   },
   send_test_webhook: {
     label: "Webhook",
     href: "/webhooks",
     note: "module-owned",
-    groups: [ACTION_GROUPS.integrations, ACTION_GROUPS.page],
   },
   create_tenant_user: {
     label: "人員與角色",
     href: "/users",
-    groups: [ACTION_GROUPS.people, ACTION_GROUPS.page],
   },
   update_tenant_role: {
     label: "人員與角色",
     href: "/users",
-    groups: [ACTION_GROUPS.people, ACTION_GROUPS.page],
   },
 };
 
@@ -666,11 +638,6 @@ function buildActionLink(
   if (note) {
     actionLink.note = note;
   }
-  const groups = overrides?.groups ?? resolved?.groups;
-  if (groups !== undefined) {
-    actionLink.groups = groups;
-  }
-
   return actionLink;
 }
 
@@ -699,10 +666,6 @@ function dedupeActionLinks(actions: ActionLink[]) {
     seen.add(key);
     return true;
   });
-}
-
-function filterActionLinksByGroup(actions: ActionLink[], group: string) {
-  return actions.filter((action) => action.groups?.includes(group));
 }
 
 function resolveActionHref(action: ActionLink) {
@@ -1118,50 +1081,33 @@ export default async function SettingsPage() {
     },
   ];
 
-  const mappedAvailableActions = dedupeActionLinks(
-    mapActionLinks(data.availableActions, tenantCode),
-  );
-
   const generalActions = dedupeActionLinks([
-    ...filterActionLinksByGroup(mappedAvailableActions, ACTION_GROUPS.general),
+    ...mapActionLinks(data.billingProfile?.availableActions, tenantCode),
     ...mapActionLinks(data.auditLogs?.availableActions, tenantCode, {
       view_tenant_audit_evidence: {
         label: "檢視稽核",
         href: `/audit?module=settings&resourceId=${tenantCode}`,
         note: "same-tab",
-        groups: [ACTION_GROUPS.general],
       },
     }),
   ]);
-  const notificationActions = filterActionLinksByGroup(
-    mappedAvailableActions,
-    ACTION_GROUPS.notifications,
-  );
-  const integrationActions = filterActionLinksByGroup(
-    mappedAvailableActions,
-    ACTION_GROUPS.integrations,
-  );
-  const peopleActions = dedupeActionLinks([
-    ...filterActionLinksByGroup(mappedAvailableActions, ACTION_GROUPS.people),
-    ...mapActionLinks(data.auditLogs?.availableActions, tenantCode, {
-      view_tenant_audit_evidence: {
-        label: "平台 trace",
-        link: {
-          targetApp: "platform-admin",
-          route: `/audit?resourceType=tenant&resourceId=${tenantCode}`,
-          resourceType: "tenant",
-          resourceId: tenantCode,
-          openMode: "new_tab",
-          label: "平台 trace",
-        },
-        groups: [ACTION_GROUPS.people],
-      },
-    }),
+  const notificationActions = dedupeActionLinks([
+    ...mapActionLinks(data.preferences?.availableActions, tenantCode),
+    ...mapActionLinks(data.sla?.availableActions, tenantCode),
   ]);
-  const pageActions = filterActionLinksByGroup(
-    mappedAvailableActions,
-    ACTION_GROUPS.page,
+  const integrationActions = dedupeActionLinks([
+    ...mapActionLinks(data.apiKeys?.availableActions, tenantCode),
+    ...mapActionLinks(data.webhooks?.availableActions, tenantCode),
+  ]);
+  const peopleActions = dedupeActionLinks(
+    mapActionLinks(data.users?.availableActions, tenantCode),
   );
+  const pageActions = dedupeActionLinks([
+    ...generalActions,
+    ...notificationActions,
+    ...integrationActions,
+    ...peopleActions,
+  ]);
   const runtimeChips: RuntimeChip[] = [
     {
       label: "refresh tier",
