@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { ResourceActionDescriptor } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -958,6 +959,15 @@ export interface TenantPassengerRecord {
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Per-resource CTAs the current actor may invoke on this passenger (Q-X13 /
+   * packet §3.5). Backend-sourced so the directory UI never hard-codes
+   * action availability by role; the page falls back to an activeFlag-derived
+   * default set only when the backend omits this field. Field added with its
+   * sole consumer (tenant-console `/passengers`) per the ui-runtime contract
+   * note.
+   */
+  availableActions?: ResourceActionDescriptor[];
 }
 
 export interface UpsertTenantPassengerCommand {
