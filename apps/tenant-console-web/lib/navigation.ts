@@ -18,6 +18,7 @@ type TenantNavIcon =
   | "flags"
   | "reports"
   | "apiKeys"
+  | "sla"
   | "webhooks"
   | "audit"
   | "users";
@@ -100,6 +101,12 @@ export const tenantNavEntries: TenantNavEntry[] = [
     href: "/api-keys",
     icon: "apiKeys",
     label: "API 金鑰",
+  },
+  {
+    key: "sla",
+    href: "/sla",
+    icon: "sla",
+    label: "SLA",
   },
   {
     key: "webhooks",

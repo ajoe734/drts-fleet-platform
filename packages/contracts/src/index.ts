@@ -921,6 +921,11 @@ export interface UpdateTenantSlaProfileCommand {
   waitThresholdMin?: number;
   arrivalThresholdMin?: number;
   completionThresholdMin?: number;
+  reason?: string;
+}
+
+export interface RecalculateTenantSlaBookingsCommand {
+  reason: string;
 }
 
 export interface TenantSlaProfile {

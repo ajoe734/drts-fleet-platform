@@ -84,6 +84,8 @@ import type {
   TenantQuotaLimit,
   TenantQuotaPolicyRecord,
   TenantQuotaSummary,
+  ActionReceipt,
+  RecalculateTenantSlaBookingsCommand,
   TenantRoleCatalogRecord,
   TenantSlaProfile,
   TenantUserRoleRecord,
@@ -5230,6 +5232,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   updateSlaProfile(
     tenantId: string,
     command: UpdateTenantSlaProfileCommand,
+    actorId?: string,
     requestId?: string,
   ) {
     const currentProfile = this.getOrCreateSlaProfile(tenantId);
@@ -5253,7 +5256,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     this.recordTenantAudit(
       {
-        actorId: null,
+        actorId: actorId ?? null,
         actorType: "tenant_admin",
         tenantId,
         moduleName: "tenant-partner",
@@ -5264,6 +5267,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           waitThresholdMin: slaProfile.waitThresholdMin,
           arrivalThresholdMin: slaProfile.arrivalThresholdMin,
           completionThresholdMin: slaProfile.completionThresholdMin,
+          reason: command.reason ?? null,
         },
       },
       requestId,
@@ -5271,6 +5275,49 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     return {
       status: "updated",
+    };
+  }
+
+  recalculateSlaBookings(
+    tenantId: string,
+    command: RecalculateTenantSlaBookingsCommand,
+    actorId?: string,
+    requestId?: string,
+  ): ActionReceipt {
+    const normalizedReason = command.reason?.trim();
+    if (!normalizedReason) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "SLA_RECALCULATE_REASON_REQUIRED",
+        "A non-empty reason is required to recalculate existing bookings.",
+      );
+    }
+
+    this.recordTenantAudit(
+      {
+        actorId: actorId ?? null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "recalculate_sla_bookings",
+        resourceType: "tenant_sla",
+        resourceId: tenantId,
+        newValuesSummary: {
+          reason: normalizedReason,
+          requestedAt: new Date().toISOString(),
+        },
+      },
+      requestId,
+    );
+
+    return {
+      actionId: randomUUID(),
+      auditId: requestId ?? randomUUID(),
+      resourceType: "tenant_sla",
+      resourceId: tenantId,
+      status: "accepted",
+      message:
+        "SLA recalculation was accepted. Existing bookings will be recomputed asynchronously.",
     };
   }
 

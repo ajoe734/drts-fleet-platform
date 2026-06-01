@@ -38,6 +38,7 @@ import type {
   PartnerEligibilityReviewQueueItem,
   PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
+  RecalculateTenantSlaBookingsCommand,
   ResolvePartnerEligibilityReviewCommand,
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
@@ -1235,12 +1236,32 @@ export class TenantPartnerController {
   updateSlaProfile(
     @Body() command: UpdateTenantSlaProfileCommand,
     @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-actor-id") actorId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.updateSlaProfile(
         this.requireTenantId(tenantId),
         command,
+        actorId,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/sla/recalculate")
+  recalculateSlaBookings(
+    @Body() command: RecalculateTenantSlaBookingsCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-actor-id") actorId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.recalculateSlaBookings(
+        this.requireTenantId(tenantId),
+        command,
+        actorId,
         requestId,
       ),
       requestId,

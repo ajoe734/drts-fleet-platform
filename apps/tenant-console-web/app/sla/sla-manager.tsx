@@ -1,0 +1,562 @@
+"use client";
+
+import type { CSSProperties } from "react";
+import { useState, useTransition } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { EmptyReason, ResourceActionDescriptor } from "@drts/contracts";
+import {
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasDL,
+  CanvasField,
+  CanvasPageHeader,
+  CanvasPill,
+  buildCanvasTheme,
+} from "@drts/ui-web";
+import {
+  recalculateTenantSlaBookingsAction,
+  updateTenantSlaProfileAction,
+} from "./actions";
+
+type SlaSnapshot = {
+  waitThresholdMin: number;
+  arrivalThresholdMin: number;
+  completionThresholdMin: number;
+  updatedAt: string;
+};
+
+type LinkItem = {
+  href: string;
+  label: string;
+};
+
+type EmptyStateConfig = {
+  reason: EmptyReason;
+  title: string;
+  body: string;
+  tone: "neutral" | "warn" | "danger" | "info";
+};
+
+type SlaManagerProps = {
+  profile: SlaSnapshot | null;
+  updatedBy: string;
+  governanceStatus: string;
+  lastRecalculationAt: string | null;
+  availableActions: ResourceActionDescriptor[];
+  emptyReason: EmptyReason | null;
+  links: LinkItem[];
+};
+
+const th = buildCanvasTheme({
+  surface: "tenant",
+  dark: true,
+  density: "compact",
+});
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const gridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.45fr) minmax(280px, 1fr)",
+  gap: 16,
+};
+
+const kpiGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 12,
+};
+
+const nativeInputStyle: CSSProperties = {
+  width: "100%",
+  background: th.bgRaised,
+  border: `1px solid ${th.border}`,
+  borderRadius: 7,
+  padding: "8px 10px",
+  fontSize: 12.5,
+  color: th.text,
+  outline: "none",
+  fontFamily: th.monoFamily,
+  boxSizing: "border-box",
+};
+
+const nativeTextAreaStyle: CSSProperties = {
+  ...nativeInputStyle,
+  minHeight: 86,
+  resize: "vertical",
+  fontFamily: th.fontFamily,
+  lineHeight: 1.45,
+};
+
+const footerStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  flexWrap: "wrap",
+  marginTop: 14,
+};
+
+const actionRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const noteStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: th.textMuted,
+  lineHeight: 1.5,
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: "36px 28px",
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+  alignItems: "flex-start",
+};
+
+const linkRowStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+};
+
+const linkStyle: CSSProperties = {
+  color: th.accent,
+  fontSize: 12.5,
+  textDecoration: "none",
+};
+
+const summaryListStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+};
+
+const summaryLabelStyle: CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 600,
+  letterSpacing: 0.4,
+  textTransform: "uppercase",
+  color: th.textMuted,
+};
+
+const summaryValueStyle: CSSProperties = {
+  fontFamily: th.monoFamily,
+  fontSize: 12.5,
+  color: th.text,
+};
+
+const EMPTY_STATE_CONFIG: Record<
+  Exclude<EmptyReason, "driver_not_eligible">,
+  EmptyStateConfig
+> = {
+  no_data: {
+    reason: "no_data",
+    title: "尚無 SLA 資料",
+    body: "租戶尚未寫入任何 SLA threshold。先建立初始 wait / arrival / completion 分鐘門檻。",
+    tone: "neutral",
+  },
+  not_provisioned: {
+    reason: "not_provisioned",
+    title: "SLA profile 尚未 provision",
+    body: "此租戶還沒有 SLA profile。完成初始設定後，整合治理頁才會把 SLA 標為 ready。",
+    tone: "warn",
+  },
+  fetch_failed: {
+    reason: "fetch_failed",
+    title: "SLA profile 讀取失敗",
+    body: "目前無法取得 SLA profile。重新整理後若仍失敗，請查看 audit / integration governance 追查 request。",
+    tone: "danger",
+  },
+  permission_denied: {
+    reason: "permission_denied",
+    title: "沒有權限變更 SLA",
+    body: "只有 tenant admin 可維護 SLA profile。若你是只讀角色，請聯絡租戶管理員代為更新。",
+    tone: "warn",
+  },
+  external_unavailable: {
+    reason: "external_unavailable",
+    title: "SLA 依賴服務暫時不可用",
+    body: "SLA profile 目前受外部計算或同步服務影響而不可用。請稍後重試並留意平台公告。",
+    tone: "danger",
+  },
+  filtered_empty: {
+    reason: "filtered_empty",
+    title: "目前篩選條件下沒有結果",
+    body: "目前套用的 preview state 不會顯示 SLA profile。本頁保留 distinct empty-state render 以符合 Q-X15。",
+    tone: "info",
+  },
+};
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return new Intl.DateTimeFormat("sv-SE", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+    .format(parsed)
+    .replace(",", "");
+}
+
+function getAction(
+  actions: ResourceActionDescriptor[],
+  matcher: string[],
+  fallback: ResourceActionDescriptor,
+) {
+  const matched = actions.find((action) => matcher.includes(action.action));
+  return matched ?? fallback;
+}
+
+function disabledReasonLabel(reason: string | undefined) {
+  if (!reason) return "Unavailable";
+  return reason.replaceAll("_", " ");
+}
+
+export function SlaManager({
+  profile,
+  updatedBy,
+  governanceStatus,
+  lastRecalculationAt,
+  availableActions,
+  emptyReason,
+  links,
+}: SlaManagerProps) {
+  const router = useRouter();
+  const [waitThresholdMin, setWaitThresholdMin] = useState(
+    profile?.waitThresholdMin ? String(profile.waitThresholdMin) : "",
+  );
+  const [arrivalThresholdMin, setArrivalThresholdMin] = useState(
+    profile?.arrivalThresholdMin ? String(profile.arrivalThresholdMin) : "",
+  );
+  const [completionThresholdMin, setCompletionThresholdMin] = useState(
+    profile?.completionThresholdMin
+      ? String(profile.completionThresholdMin)
+      : "",
+  );
+  const [reason, setReason] = useState("");
+  const [feedback, setFeedback] = useState<{
+    tone: "success" | "danger" | "warn" | "info";
+    message: string;
+  } | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const updateAction = getAction(
+    availableActions,
+    ["update_sla_profile", "save"],
+    {
+      action: "update_sla_profile",
+      enabled: true,
+      riskLevel: "high",
+      requiresReason: true,
+    },
+  );
+  const recalcAction = getAction(
+    availableActions,
+    ["recalculate_sla_bookings", "recalculate"],
+    {
+      action: "recalculate_sla_bookings",
+      enabled: true,
+      riskLevel: "high",
+      requiresReason: true,
+    },
+  );
+
+  const activeEmptyState =
+    emptyReason && emptyReason !== "driver_not_eligible"
+      ? EMPTY_STATE_CONFIG[emptyReason]
+      : null;
+
+  const handleUpdate = () => {
+    startTransition(async () => {
+      try {
+        const result = await updateTenantSlaProfileAction({
+          waitThresholdMin: Number(waitThresholdMin),
+          arrivalThresholdMin: Number(arrivalThresholdMin),
+          completionThresholdMin: Number(completionThresholdMin),
+          reason,
+        });
+        setFeedback({ tone: "success", message: result.message });
+        setReason("");
+        router.refresh();
+      } catch (error) {
+        setFeedback({
+          tone: "danger",
+          message:
+            error instanceof Error ? error.message : "SLA update failed.",
+        });
+      }
+    });
+  };
+
+  const handleRecalculate = () => {
+    startTransition(async () => {
+      try {
+        const result = await recalculateTenantSlaBookingsAction(reason);
+        setFeedback({ tone: "info", message: result.message });
+        setReason("");
+        router.refresh();
+      } catch (error) {
+        setFeedback({
+          tone: "danger",
+          message:
+            error instanceof Error
+              ? error.message
+              : "SLA recalculation request failed.",
+        });
+      }
+    });
+  };
+
+  return (
+    <div>
+      <CanvasPageHeader
+        theme={th}
+        title="SLA Profile"
+        subtitle="wait · arrival · completion 三個門檻 · 單位 = 分鐘"
+        actions={
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <CanvasPill theme={th} tone="accent">
+              refresh tier · T5
+            </CanvasPill>
+            <CanvasPill theme={th} tone="neutral">
+              governance · {governanceStatus}
+            </CanvasPill>
+          </div>
+        }
+      />
+
+      <div style={pageBodyStyle}>
+        {feedback ? (
+          <CanvasBanner
+            theme={th}
+            tone={feedback.tone}
+            title={
+              feedback.tone === "success"
+                ? "SLA 已更新"
+                : feedback.tone === "info"
+                  ? "重算已送出"
+                  : "操作失敗"
+            }
+            body={feedback.message}
+          />
+        ) : null}
+
+        {lastRecalculationAt ? (
+          <CanvasBanner
+            theme={th}
+            tone="info"
+            title="既有訂單重算進行中"
+            body={`最近一次重算請求於 ${formatDateTime(lastRecalculationAt)} 送出。既有訂單會保留建立時 snapshot，直到重算完成。`}
+          />
+        ) : null}
+
+        {activeEmptyState ? (
+          <CanvasCard theme={th}>
+            <div style={emptyStateStyle}>
+              <CanvasPill theme={th} tone={activeEmptyState.tone}>
+                {activeEmptyState.reason}
+              </CanvasPill>
+              <div style={{ fontSize: 18, fontWeight: 600 }}>
+                {activeEmptyState.title}
+              </div>
+              <div style={{ ...noteStyle, maxWidth: 560 }}>
+                {activeEmptyState.body}
+              </div>
+              <div style={linkRowStyle}>
+                {links.map((link) => (
+                  <Link key={link.href} href={link.href} style={linkStyle}>
+                    {link.label} →
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </CanvasCard>
+        ) : (
+          <div style={gridStyle}>
+            <CanvasCard
+              theme={th}
+              title="當前門檻 · waitThresholdMin / arrivalThresholdMin / completionThresholdMin"
+            >
+              <CanvasBanner
+                theme={th}
+                tone="info"
+                title="變更影響範圍 · Q-TEN07"
+                body="Threshold changes affect new bookings and newly computed SLA events. Existing bookings keep SLA profile snapshot at creation unless explicitly recalculated by admin command."
+              />
+
+              <div style={{ height: 14 }} />
+
+              <div style={kpiGridStyle}>
+                <CanvasField
+                  theme={th}
+                  label="waitThresholdMin · 等候門檻"
+                  hint="超過此分鐘數標記為 wait 違規"
+                >
+                  <input
+                    value={waitThresholdMin}
+                    onChange={(event) =>
+                      setWaitThresholdMin(event.target.value)
+                    }
+                    inputMode="numeric"
+                    style={nativeInputStyle}
+                    aria-label="waitThresholdMin"
+                    disabled={isPending || !updateAction.enabled}
+                  />
+                </CanvasField>
+                <CanvasField
+                  theme={th}
+                  label="arrivalThresholdMin · 抵達門檻"
+                  hint="ETA 與實際抵達差異上限"
+                >
+                  <input
+                    value={arrivalThresholdMin}
+                    onChange={(event) =>
+                      setArrivalThresholdMin(event.target.value)
+                    }
+                    inputMode="numeric"
+                    style={nativeInputStyle}
+                    aria-label="arrivalThresholdMin"
+                    disabled={isPending || !updateAction.enabled}
+                  />
+                </CanvasField>
+                <CanvasField
+                  theme={th}
+                  label="completionThresholdMin · 完成門檻"
+                  hint="預估 vs 實際行車時間差異上限"
+                >
+                  <input
+                    value={completionThresholdMin}
+                    onChange={(event) =>
+                      setCompletionThresholdMin(event.target.value)
+                    }
+                    inputMode="numeric"
+                    style={nativeInputStyle}
+                    aria-label="completionThresholdMin"
+                    disabled={isPending || !updateAction.enabled}
+                  />
+                </CanvasField>
+              </div>
+
+              <div style={{ marginTop: 14 }}>
+                <CanvasField
+                  theme={th}
+                  label="變更原因"
+                  hint="High-risk actions require a non-empty reason for audit."
+                >
+                  <textarea
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    style={nativeTextAreaStyle}
+                    disabled={isPending}
+                    aria-label="reason"
+                  />
+                </CanvasField>
+              </div>
+
+              <div style={footerStyle}>
+                <div style={noteStyle}>
+                  {updateAction.enabled
+                    ? "availableActions 決定 CTA 顯示；高風險變更需要 reason，送出後會刷新本頁與 settings。"
+                    : `目前不可更新：${disabledReasonLabel(updateAction.disabledReasonCode)}`}
+                </div>
+                <div style={actionRowStyle}>
+                  <CanvasBtn
+                    theme={th}
+                    onClick={handleRecalculate}
+                    disabled={isPending || !recalcAction.enabled}
+                  >
+                    重算既有訂單
+                  </CanvasBtn>
+                  <CanvasBtn
+                    theme={th}
+                    variant="primary"
+                    onClick={handleUpdate}
+                    disabled={isPending || !updateAction.enabled}
+                  >
+                    儲存設定
+                  </CanvasBtn>
+                </div>
+              </div>
+            </CanvasCard>
+
+            <CanvasCard theme={th} title="治理摘要 · 更新人 / 深連結 / 進度">
+              <div style={summaryListStyle}>
+                <div>
+                  <div style={summaryLabelStyle}>updatedAt</div>
+                  <div style={summaryValueStyle}>
+                    {formatDateTime(profile?.updatedAt)}
+                  </div>
+                </div>
+                <div>
+                  <div style={summaryLabelStyle}>updated by</div>
+                  <div style={summaryValueStyle}>{updatedBy}</div>
+                </div>
+                <div>
+                  <div style={summaryLabelStyle}>recalculation</div>
+                  <div style={summaryValueStyle}>
+                    {lastRecalculationAt
+                      ? `pending since ${formatDateTime(lastRecalculationAt)}`
+                      : "idle"}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ height: 16 }} />
+
+              <CanvasDL
+                theme={th}
+                cols={1}
+                items={[
+                  {
+                    k: "waitThresholdMin",
+                    v: profile ? `${profile.waitThresholdMin} min` : "—",
+                    mono: true,
+                  },
+                  {
+                    k: "arrivalThresholdMin",
+                    v: profile ? `${profile.arrivalThresholdMin} min` : "—",
+                    mono: true,
+                  },
+                  {
+                    k: "completionThresholdMin",
+                    v: profile ? `${profile.completionThresholdMin} min` : "—",
+                    mono: true,
+                  },
+                ]}
+              />
+
+              <div style={{ height: 16 }} />
+
+              <div style={linkRowStyle}>
+                {links.map((link) => (
+                  <Link key={link.href} href={link.href} style={linkStyle}>
+                    {link.label} →
+                  </Link>
+                ))}
+              </div>
+            </CanvasCard>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

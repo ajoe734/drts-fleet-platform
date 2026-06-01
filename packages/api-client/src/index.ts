@@ -211,6 +211,7 @@ import type {
   UpdatePlatformTenantSettingsCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
+  RecalculateTenantSlaBookingsCommand,
   UpdateTenantSlaProfileCommand,
   UpdateTenantWebhookEndpointCommand,
   UpdateVehicleComplianceCommand,
@@ -1713,6 +1714,10 @@ export class ApiClient {
 
   async updateSlaProfile(command: UpdateTenantSlaProfileCommand) {
     return this.post("/api/tenant/sla", { body: command });
+  }
+
+  async recalculateSlaBookings(command: RecalculateTenantSlaBookingsCommand) {
+    return this.post("/api/tenant/sla/recalculate", { body: command });
   }
 
   async listTenantUsers(): Promise<TenantUserRoleRecord[]> {
