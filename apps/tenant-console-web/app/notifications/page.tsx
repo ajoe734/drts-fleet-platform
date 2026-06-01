@@ -384,13 +384,22 @@ function buildMatrixRows(
     });
 }
 
+const UPDATE_SUBSCRIPTION_ACTION = "update_subscription";
+
+/**
+ * Resolve the save CTA descriptor strictly from the backend-provided
+ * `availableActions` (Q-X13 / packet §5.8). The UI must never synthesize an
+ * enabled write affordance from role or data presence — when the backend does
+ * not grant `update_subscription`, the CTA stays disabled with a reason code so
+ * the screen cannot expose an unauthorized write path.
+ */
 function deriveUpdateAction(
   preferences: TenantNotificationPreferences | null,
   hasError: boolean,
 ): ResourceActionDescriptor {
   if (hasError) {
     return {
-      action: "update_subscription",
+      action: UPDATE_SUBSCRIPTION_ACTION,
       enabled: false,
       disabledReasonCode: "fetch_failed",
       riskLevel: "medium",
@@ -398,16 +407,28 @@ function deriveUpdateAction(
   }
   if (preferences === null) {
     return {
-      action: "update_subscription",
+      action: UPDATE_SUBSCRIPTION_ACTION,
       enabled: false,
       disabledReasonCode: "not_provisioned",
       riskLevel: "medium",
     };
   }
+  const granted = preferences.availableActions?.find(
+    (descriptor) => descriptor.action === UPDATE_SUBSCRIPTION_ACTION,
+  );
+  if (!granted) {
+    // No descriptor → actor is not authorized to write. Show the affordance
+    // disabled rather than hidden, per Q-X13 disabled-with-reason guidance.
+    return {
+      action: UPDATE_SUBSCRIPTION_ACTION,
+      enabled: false,
+      disabledReasonCode: "permission_denied",
+      riskLevel: "medium",
+    };
+  }
   return {
-    action: "update_subscription",
-    enabled: true,
-    riskLevel: "medium",
+    ...granted,
+    riskLevel: granted.riskLevel ?? "medium",
   };
 }
 

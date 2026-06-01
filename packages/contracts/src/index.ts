@@ -1,5 +1,6 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type { ResourceActionDescriptor } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -819,6 +820,15 @@ export interface TenantNotificationPreferences {
   tenantId: string;
   subscriptions: TenantNotificationSubscription[];
   updatedAt: string;
+  /**
+   * Per-resource action affordances (Q-X13). The UI must drive the
+   * `update_subscription` save CTA from this list rather than inferring
+   * write access from role or data presence. Optional for backward
+   * compatibility: when the backend omits it, the UI treats the resource
+   * as read-only (no enabled write CTA) instead of falling back to
+   * enabled. A 0-length list likewise means read-only for the actor.
+   */
+  availableActions?: ResourceActionDescriptor[];
 }
 
 export interface WebhookRetryPolicyRecord {
