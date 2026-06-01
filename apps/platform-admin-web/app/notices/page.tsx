@@ -1,11 +1,18 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+} from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type { Locale } from "@/lib/translations";
 import type {
+  EmptyReason,
   EmptyStateEnvelope,
   PlatformNoticeActionReceipt,
   PlatformNoticeAudience,
@@ -16,6 +23,26 @@ import type {
   RefreshTier,
   ResourceActionDescriptor,
 } from "@drts/contracts";
+import {
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasField,
+  CanvasKPI,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasShell,
+  CanvasTable,
+  buildCanvasTheme,
+  type CanvasShellNavItem,
+  type CanvasTableColumn,
+  type CanvasTheme,
+} from "@drts/ui-web";
+
+const theme = buildCanvasTheme({
+  surface: "platform",
+  density: "compact",
+});
 
 const SEVERITY_OPTIONS: PlatformNoticeSeverity[] = [
   "info",
@@ -48,7 +75,197 @@ const TIER_META: Record<
   manual: { label: "T6 Manual", cadence: "manual", pollMs: null },
 };
 
+const shellStyle = {
+  margin: "-32px",
+  minHeight: "calc(100vh - 64px)",
+} satisfies CSSProperties;
+
+const bodyStyle = {
+  display: "grid",
+  gap: 16,
+  padding: 24,
+} satisfies CSSProperties;
+
+const tabsStyle = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const contentGridStyle = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "minmax(0, 1.4fr) minmax(280px, 0.8fr)",
+} satisfies CSSProperties;
+
+const splitGridStyle = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+} satisfies CSSProperties;
+
+const maintenanceGridStyle = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "minmax(0, 1.35fr) minmax(280px, 0.9fr)",
+} satisfies CSSProperties;
+
+const fieldGridStyle = {
+  display: "grid",
+  gap: 14,
+  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+} satisfies CSSProperties;
+
+const actionRowStyle = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  alignItems: "center",
+} satisfies CSSProperties;
+
+const mutedTextStyle = {
+  color: theme.textMuted,
+  fontSize: 12,
+  lineHeight: 1.5,
+} satisfies CSSProperties;
+
+const subtleMonoStyle = {
+  color: theme.textDim,
+  fontFamily: theme.monoFamily,
+  fontSize: 11,
+  lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const codeStyle = {
+  display: "inline-flex",
+  padding: "2px 7px",
+  borderRadius: 999,
+  background: theme.surfaceLo,
+  border: `1px solid ${theme.border}`,
+  color: theme.textDim,
+  fontFamily: theme.monoFamily,
+  fontSize: 11,
+} satisfies CSSProperties;
+
+const inputStyle = (th: CanvasTheme): CSSProperties => ({
+  width: "100%",
+  boxSizing: "border-box",
+  borderRadius: 8,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  color: th.text,
+  fontFamily: th.fontFamily,
+  fontSize: 12.5,
+  padding: "9px 10px",
+  outline: "none",
+});
+
+const textAreaStyle = (th: CanvasTheme): CSSProperties => ({
+  ...inputStyle(th),
+  resize: "vertical",
+  minHeight: 104,
+});
+
+const tabButtonStyle = (th: CanvasTheme, active: boolean): CSSProperties => ({
+  display: "inline-flex",
+  gap: 8,
+  alignItems: "center",
+  padding: "10px 12px",
+  borderRadius: 999,
+  border: `1px solid ${active ? th.accent : th.border}`,
+  background: active ? th.surfaceLo : th.bg,
+  color: active ? th.accent : th.text,
+  fontSize: 12.5,
+  fontWeight: 600,
+  cursor: "pointer",
+});
+
+const alertStripStyle = (highRisk: boolean): CSSProperties => ({
+  display: "grid",
+  gap: 4,
+  padding: "10px 12px",
+  borderRadius: 12,
+  border: `1px solid ${
+    highRisk ? "rgba(220, 38, 38, 0.2)" : "rgba(37, 99, 235, 0.18)"
+  }`,
+  background: highRisk
+    ? "linear-gradient(135deg, rgba(255,241,242,0.96), rgba(255,255,255,0.98))"
+    : "linear-gradient(135deg, rgba(239,246,255,0.96), rgba(255,255,255,0.98))",
+  color: highRisk ? "#7f1d1d" : "#1d4ed8",
+  fontSize: 12,
+  lineHeight: 1.45,
+});
+
+const previewBannerStyle = {
+  display: "grid",
+  gap: 8,
+  padding: 14,
+  borderRadius: 12,
+  border: "1px solid rgba(220, 38, 38, 0.18)",
+  background: "linear-gradient(135deg, rgba(255,241,242,0.96), #ffffff)",
+} satisfies CSSProperties;
+
+const linkStackStyle = {
+  display: "grid",
+  gap: 8,
+} satisfies CSSProperties;
+
+const linkRowStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  textDecoration: "none",
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  color: theme.text,
+} satisfies CSSProperties;
+
+const blockedListStyle = {
+  display: "grid",
+  gap: 8,
+} satisfies CSSProperties;
+
+const blockedItemStyle = {
+  display: "grid",
+  gap: 6,
+  padding: 10,
+  borderRadius: 10,
+  border: `1px dashed ${theme.border}`,
+  background: theme.surfaceLo,
+} satisfies CSSProperties;
+
+const emptyCardBodyStyle = {
+  display: "grid",
+  gap: 8,
+  justifyItems: "start",
+} satisfies CSSProperties;
+
+const modalScrimStyle = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 50,
+  display: "grid",
+  placeItems: "center",
+  padding: 24,
+  background: "rgba(15, 23, 42, 0.46)",
+} satisfies CSSProperties;
+
+const modalCardStyle = {
+  width: "min(560px, 100%)",
+  display: "grid",
+  gap: 16,
+  padding: 20,
+  borderRadius: 18,
+  background: "#ffffff",
+  border: `1px solid ${theme.border}`,
+  boxShadow: "0 24px 60px rgba(15, 23, 42, 0.2)",
+} satisfies CSSProperties;
+
 type TabId = "notices" | "maintenance" | "history";
+
 type ActionTarget =
   | { kind: "create"; descriptor: ResourceActionDescriptor }
   | {
@@ -66,6 +283,116 @@ type MaintenanceActionMap = {
   setAction: ResourceActionDescriptor | null;
   clearAction: ResourceActionDescriptor | null;
 };
+
+type NoticeTableRow = PlatformNoticeWorkspaceRecord & Record<string, unknown>;
+type HistoryTableRow = PlatformNoticeHistoryRecord & Record<string, unknown>;
+
+const TAB_DEFS: Array<{ id: TabId; label: string }> = [
+  { id: "notices", label: "Notices" },
+  { id: "maintenance", label: "Maintenance Mode" },
+  { id: "history", label: "Broadcast History" },
+];
+
+function buildPlatformNav(locale: string): CanvasShellNavItem[] {
+  const labels =
+    locale === "en"
+      ? {
+          workspace: "Workspace",
+          home: "Governance Home",
+          health: "Platform Health",
+          tenantGroup: "Tenant Governance",
+          tenants: "Tenants",
+          partners: "Partner entry",
+          users: "Platform staff",
+          fleetGroup: "Fleet & Compliance",
+          fleet: "Fleet & compliance",
+          switchboard: "Public info & placards",
+          pricingGroup: "Pricing & Settlement",
+          pricing: "Pricing",
+          payments: "Settlement governance",
+          platformGroup: "Platform Layer",
+          notices: "Notices & maintenance",
+          audit: "Audit & evidence",
+          flags: "Feature flags",
+          adapters: "Adapter registry",
+        }
+      : {
+          workspace: "工作面",
+          home: "工作首頁",
+          health: "平台健康",
+          tenantGroup: "租戶治理",
+          tenants: "租戶",
+          partners: "合作夥伴 entry",
+          users: "平台成員",
+          fleetGroup: "車隊與合規",
+          fleet: "車隊與合規",
+          switchboard: "外部資訊與標牌",
+          pricingGroup: "定價與結算",
+          pricing: "定價治理",
+          payments: "結算治理",
+          platformGroup: "平台層",
+          notices: "公告與維護",
+          audit: "稽核與證據",
+          flags: "功能旗標",
+          adapters: "Adapter registry",
+        };
+
+  return [
+    { divider: labels.workspace },
+    { key: "home", label: labels.home, href: "/", icon: "dashboard" },
+    { key: "health", label: labels.health, href: "/health", icon: "health" },
+    { divider: labels.tenantGroup },
+    {
+      key: "tenants",
+      label: labels.tenants,
+      href: "/tenants",
+      icon: "tenants",
+    },
+    {
+      key: "partners",
+      label: labels.partners,
+      href: "/partners",
+      icon: "partners",
+    },
+    { key: "users", label: labels.users, href: "/users", icon: "users" },
+    { divider: labels.fleetGroup },
+    { key: "fleet", label: labels.fleet, href: "/fleet", icon: "fleet" },
+    {
+      key: "switchboard",
+      label: labels.switchboard,
+      href: "/switchboard",
+      icon: "switchboard",
+    },
+    { divider: labels.pricingGroup },
+    {
+      key: "pricing",
+      label: labels.pricing,
+      href: "/pricing",
+      icon: "pricing",
+    },
+    {
+      key: "payments",
+      label: labels.payments,
+      href: "/payments",
+      icon: "payments",
+    },
+    { divider: labels.platformGroup },
+    { key: "notices", label: labels.notices, href: "/notices", icon: "notice" },
+    { key: "audit", label: labels.audit, href: "/audit", icon: "audit" },
+    {
+      key: "flags",
+      label: labels.flags,
+      href: "/feature-flags",
+      icon: "flags",
+    },
+    {
+      key: "adapters",
+      label: labels.adapters,
+      href: "/adapter-registry",
+      icon: "settings",
+    },
+  ];
+}
 
 export default function NoticesPage() {
   const { t, locale } = useTranslation();
@@ -101,35 +428,40 @@ export default function NoticesPage() {
     [workspace?.refreshTier],
   );
 
-  async function loadWorkspace(mode: "initial" | "refresh" = "initial") {
-    if (mode === "initial") {
-      setLoading(true);
-    } else {
-      setRefreshing(true);
-    }
-    setError(null);
-    try {
-      const next = await client.getPlatformNoticesWorkspace();
-      setWorkspace(next);
-      setMaintEnabled(next.maintenance.currentState.enabled);
-      setMaintReason(next.maintenance.currentState.reason ?? "");
-      setMaintScheduledStart(
-        next.maintenance.currentState.scheduledStart?.slice(0, 16) ?? "",
-      );
-      setMaintScheduledEnd(
-        next.maintenance.currentState.scheduledEnd?.slice(0, 16) ?? "",
-      );
-    } catch (nextError: any) {
-      setError(nextError?.message || String(nextError));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
+  const loadWorkspace = useCallback(
+    async (mode: "initial" | "refresh" = "initial") => {
+      if (mode === "initial") {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+      setError(null);
+      try {
+        const next = await client.getPlatformNoticesWorkspace();
+        setWorkspace(next);
+        setMaintEnabled(next.maintenance.currentState.enabled);
+        setMaintReason(next.maintenance.currentState.reason ?? "");
+        setMaintScheduledStart(
+          next.maintenance.currentState.scheduledStart?.slice(0, 16) ?? "",
+        );
+        setMaintScheduledEnd(
+          next.maintenance.currentState.scheduledEnd?.slice(0, 16) ?? "",
+        );
+      } catch (nextError: unknown) {
+        setError(
+          nextError instanceof Error ? nextError.message : String(nextError),
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [client],
+  );
 
   useEffect(() => {
     void loadWorkspace();
-  }, []);
+  }, [loadWorkspace]);
 
   useEffect(() => {
     if (!workspace || tierMeta.pollMs === null) return;
@@ -137,7 +469,7 @@ export default function NoticesPage() {
       void loadWorkspace("refresh");
     }, tierMeta.pollMs);
     return () => window.clearInterval(timer);
-  }, [tierMeta.pollMs, workspace]);
+  }, [loadWorkspace, tierMeta.pollMs, workspace]);
 
   function openAction(target: ActionTarget) {
     setReasonDraft("");
@@ -154,8 +486,9 @@ export default function NoticesPage() {
     if (
       actionRequiresReason(pendingAction, noticeSeverity) &&
       !reasonDraft.trim()
-    )
+    ) {
       return;
+    }
 
     setSubmitting(true);
     try {
@@ -191,17 +524,34 @@ export default function NoticesPage() {
       setReceipt(nextReceipt);
       closePendingAction();
       await loadWorkspace("refresh");
-    } catch (nextError: any) {
-      setError(nextError?.message || String(nextError));
+    } catch (nextError: unknown) {
+      setError(
+        nextError instanceof Error ? nextError.message : String(nextError),
+      );
     } finally {
       setSubmitting(false);
     }
   }
 
-  const maintenance = workspace?.maintenance.currentState;
   const notices = workspace?.notices.items ?? [];
   const history = workspace?.history.items ?? [];
-  const activeCount = notices.filter((item) => item.status === "active").length;
+  const maintenance = workspace?.maintenance.currentState;
+  const maintenanceActions = getMaintenanceActions(
+    workspace?.maintenance.availableActions,
+  );
+  const maintenanceIntentAction = getMaintenanceIntentAction(
+    maintenanceActions,
+    maintEnabled,
+  );
+  const createNoticeAction = workspace?.notices.availableActions.find(
+    (descriptor) => descriptor.action === "create_notice",
+  );
+  const primaryHeaderAction =
+    activeTab === "notices"
+      ? (createNoticeAction ?? null)
+      : activeTab === "maintenance"
+        ? maintenanceIntentAction
+        : null;
   const scheduledCount = notices.filter(
     (item) => item.status === "scheduled",
   ).length;
@@ -211,542 +561,274 @@ export default function NoticesPage() {
   const deliveredHistoryCount = history.filter(
     (item) => item.deliveryStatus === "delivered",
   ).length;
-  const createNoticeAction = workspace?.notices.availableActions.find(
-    (descriptor) => descriptor.action === "create_notice",
-  );
-  const maintenanceActions = getMaintenanceActions(
-    workspace?.maintenance.availableActions,
-  );
-  const maintenanceIntentAction = getMaintenanceIntentAction(
-    maintenanceActions,
-    maintEnabled,
-  );
-  const canToggleMaintenance = Boolean(
-    maintenanceActions.setAction || maintenanceActions.clearAction,
-  );
-  const tabActions = getTabActions(workspace, activeTab, maintEnabled);
   const dataFreshness = workspace?.refresh.dataFreshness ?? "unknown";
-
-  if (loading && !workspace) {
-    return <div className="admin-empty">{t("notices.loading")}</div>;
-  }
+  const noticeColumns = useMemo(
+    () => buildNoticeColumns(locale, openAction),
+    [locale],
+  );
+  const historyColumns = useMemo(() => buildHistoryColumns(locale), [locale]);
+  const searchPlaceholder =
+    locale === "en"
+      ? "Search notice ids, audience, or audit traces…"
+      : "搜尋公告編號、受眾或稽核軌跡…";
 
   return (
-    <div style={pageStyle}>
-      <div style={heroStyle}>
-        <div style={heroHeaderRowStyle}>
-          <div style={{ display: "grid", gap: 10 }}>
-            <div style={eyebrowStyle}>Platform ops / risk governance</div>
-            <h1 style={heroTitleStyle}>Notices &amp; Maintenance</h1>
-            <p style={heroSubtitleStyle}>
-              Critical and maintenance notices propagate cross-app banners to
-              ops, tenant, and driver surfaces. Refresh tier is {tierMeta.label}{" "}
-              ({tierMeta.cadence}).
-            </p>
-          </div>
-          <div style={heroBadgeClusterStyle}>
-            <MetricChip
-              label="Active notices"
-              value={String(activeCount)}
-              tone="neutral"
-            />
-            <MetricChip
-              label="Propagating"
-              value={String(propagatingCount)}
-              tone={propagatingCount ? "warning" : "success"}
-            />
-            <MetricChip
-              label="Maintenance"
-              value={maintenance?.enabled ? "ON" : "OFF"}
-              tone={maintenance?.enabled ? "danger" : "success"}
-            />
-          </div>
-        </div>
-
-        <div style={heroGridStyle}>
-          <SummaryCard
-            title="Live workspace"
-            value={`${notices.length} notices`}
-            note={`${scheduledCount} scheduled · ${history.length} history items`}
-          />
-          <SummaryCard
-            title="Delivery state"
-            value={formatPlatformCodeLabel(locale, dataFreshness)}
-            note={`source ${workspace?.refresh.source ?? "live"} · stale after ${workspace?.refresh.staleAfterMs ?? 0} ms`}
-          />
-          <SummaryCard
-            title="Broadcast history"
-            value={`${deliveredHistoryCount}/${history.length || 0}`}
-            note="Delivered snapshots across downstream surfaces"
-          />
-          <SummaryCard
-            title="Scheduled windows"
-            value={String(scheduledCount)}
-            note={
-              maintenance?.scheduledStart
-                ? `maintenance starts ${formatDateTime(maintenance.scheduledStart)}`
-                : "no maintenance window scheduled"
-            }
-          />
-        </div>
-      </div>
-
-      {receipt && (
-        <section style={receiptCardStyle}>
-          <div style={receiptCardHeaderStyle}>
-            <div>
-              <div style={receiptTitleStyle}>{receipt.message}</div>
-              <div style={receiptMetaStyle}>
-                audit {receipt.auditId} · action {receipt.actionId} ·{" "}
-                {receipt.status}
-              </div>
-            </div>
-            <a
-              href={`/audit?auditId=${receipt.auditId}`}
-              style={primaryLinkStyle}
+    <CanvasShell
+      theme={theme}
+      nav={buildPlatformNav(locale)}
+      active="notices"
+      currentPath="/notices"
+      breadcrumb={[
+        locale === "en" ? "Platform ops / risk" : "平台維運 / 風險治理",
+        locale === "en" ? "Notices & maintenance" : "公告與維護",
+      ]}
+      brandLabel={t("app.name")}
+      brandSubLabel={t("app.sub")}
+      searchPlaceholder={searchPlaceholder}
+      avatarLabel={locale === "en" ? "PA" : "平台"}
+      env="production"
+      versionLabel="canvas"
+      style={shellStyle}
+    >
+      <CanvasPageHeader
+        theme={theme}
+        title="Notices & Maintenance"
+        subtitle={`Critical and maintenance severity fan out cross-app banners to ops, tenant, and driver surfaces. Refresh tier ${tierMeta.label} (${tierMeta.cadence}).`}
+        actions={
+          <>
+            <CanvasBtn
+              theme={theme}
+              icon="arrow"
+              onClick={() => void loadWorkspace("refresh")}
             >
-              View audit
-            </a>
-          </div>
-        </section>
-      )}
+              {refreshing ? "Refreshing..." : t("common.refresh")}
+            </CanvasBtn>
+            {primaryHeaderAction ? (
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                icon={
+                  activeTab === "maintenance"
+                    ? maintEnabled
+                      ? "warn"
+                      : "plus"
+                    : "plus"
+                }
+                onClick={() =>
+                  handleHeaderAction(
+                    primaryHeaderAction,
+                    activeTab,
+                    maintEnabled,
+                    openAction,
+                  )
+                }
+              >
+                {actionLabel(primaryHeaderAction.action)}
+              </CanvasBtn>
+            ) : null}
+          </>
+        }
+      />
 
-      {error && (
-        <section style={errorCardStyle}>
-          <div style={sectionTitleStyle}>Request error</div>
-          <div style={mutedBodyStyle}>{error}</div>
-        </section>
-      )}
-
-      {maintenance?.enabled && (
-        <section style={maintenanceBannerStyle}>
-          <div style={maintenanceBannerTitleStyle}>
-            Maintenance mode is active
-          </div>
-          <div style={maintenanceBannerBodyStyle}>
-            {maintenance.reason || t("notices.maintActive")} · updated{" "}
-            {formatDateTime(maintenance.updatedAt)}
-          </div>
-        </section>
-      )}
-
-      <section style={toolbarCardStyle}>
-        <div style={tabRowStyle}>
+      <div style={bodyStyle}>
+        <div style={tabsStyle}>
           {TAB_DEFS.map((tab) => (
             <button
               key={tab.id}
               type="button"
+              style={tabButtonStyle(theme, activeTab === tab.id)}
               onClick={() => setActiveTab(tab.id)}
-              style={tabButtonStyle(activeTab === tab.id)}
             >
-              {tab.label}
-              <span style={tabCountStyle(activeTab === tab.id)}>
+              <span>{tab.label}</span>
+              <CanvasPill
+                theme={theme}
+                tone={activeTab === tab.id ? "accent" : "neutral"}
+              >
                 {tab.id === "notices"
-                  ? notices.length
+                  ? String(notices.length)
                   : tab.id === "maintenance"
                     ? maintenance?.enabled
                       ? "ON"
                       : "OFF"
-                    : history.length}
-              </span>
+                    : String(history.length)}
+              </CanvasPill>
             </button>
           ))}
         </div>
-        <div style={toolbarActionsStyle}>
-          <ActionGroup
-            actions={tabActions}
-            tone="secondary"
-            emptyLabel="No tab-level actions for this view"
-            onAction={(descriptor) =>
-              handleTabAction(
-                descriptor,
-                activeTab,
-                maintEnabled,
-                maintenanceActions,
-                openAction,
-              )
+
+        {receipt ? (
+          <CanvasBanner
+            theme={theme}
+            tone="info"
+            icon="audit"
+            title={receipt.message}
+            body={
+              <span>
+                audit <span style={codeStyle}>{receipt.auditId}</span> · action{" "}
+                <span style={codeStyle}>{receipt.actionId}</span> ·{" "}
+                {receipt.status}
+                {" · "}
+                <a
+                  href={`/audit?auditId=${receipt.auditId}`}
+                  style={{ color: theme.accent }}
+                >
+                  View audit
+                </a>
+              </span>
             }
           />
-          <button
-            type="button"
-            style={secondaryButtonStyle}
-            onClick={() => void loadWorkspace("refresh")}
-          >
-            {refreshing ? "Refreshing..." : t("common.refresh")}
-          </button>
-        </div>
-      </section>
+        ) : null}
 
-      <section style={snapshotCardStyle(dataFreshness)}>
-        <div style={snapshotLeftStyle}>
-          <div style={sectionEyebrowStyle}>Refresh contract</div>
-          <div style={snapshotTitleStyle}>
-            {tierMeta.label} · {tierMeta.cadence}
-          </div>
-          <div style={mutedBodyStyle}>
-            Generated {formatDateTime(workspace?.refresh.generatedAt ?? "")} ·{" "}
-            {formatPlatformCodeLabel(locale, dataFreshness)}
-          </div>
-        </div>
-        <div style={snapshotRightStyle}>
-          <SnapshotPill
-            label="source"
-            value={workspace?.refresh.source ?? "live"}
+        {error ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            title="Request error"
+            body={error}
           />
-          <SnapshotPill
-            label="stale after"
-            value={`${workspace?.refresh.staleAfterMs ?? 0} ms`}
-          />
-        </div>
-      </section>
+        ) : null}
 
-      {activeTab === "notices" && workspace && (
-        <section style={contentGridStyle}>
-          <div style={{ display: "grid", gap: 16 }}>
-            {createNoticeAction ? (
-              <NoticeComposer
-                t={t}
+        {maintenance?.enabled ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title="Maintenance mode is active"
+            body={`${maintenance.reason || t("notices.maintActive")} · updated ${formatDateTime(maintenance.updatedAt)}`}
+          />
+        ) : null}
+
+        {workspace ? (
+          <>
+            <div style={splitGridStyle}>
+              <CanvasKPI
+                theme={theme}
+                label="Live workspace"
+                value={`${notices.length}`}
+                hint={`${scheduledCount} scheduled · ${history.length} history rows`}
+              />
+              <CanvasKPI
+                theme={theme}
+                label="Delivery state"
+                value={formatPlatformCodeLabel(locale, dataFreshness)}
+                hint={`source ${workspace.refresh.source} · stale after ${workspace.refresh.staleAfterMs} ms`}
+              />
+              <CanvasKPI
+                theme={theme}
+                label="Critical in flight"
+                value={`${propagatingCount}`}
+                hint="Broadcasts still propagating to downstream apps"
+              />
+              <CanvasKPI
+                theme={theme}
+                label="Delivered history"
+                value={`${deliveredHistoryCount}/${history.length || 0}`}
+                hint="Completed broadcast receipts"
+              />
+            </div>
+
+            {activeTab === "notices" ? (
+              <NoticesTab
                 locale={locale}
-                title={noticeTitle}
-                body={noticeBody}
-                severity={noticeSeverity}
-                audience={noticeAudience}
-                scheduledAt={noticeScheduledAt}
+                t={t}
+                workspace={workspace}
+                notices={notices}
+                columns={noticeColumns}
                 createAction={createNoticeAction}
-                onOpenCreate={(descriptor) =>
-                  openAction({ kind: "create", descriptor })
-                }
+                noticeTitle={noticeTitle}
+                noticeBody={noticeBody}
+                noticeSeverity={noticeSeverity}
+                noticeAudience={noticeAudience}
+                noticeScheduledAt={noticeScheduledAt}
                 onTitleChange={setNoticeTitle}
                 onBodyChange={setNoticeBody}
                 onSeverityChange={setNoticeSeverity}
                 onAudienceChange={setNoticeAudience}
                 onScheduledAtChange={setNoticeScheduledAt}
-              />
-            ) : (
-              <SupportCard
-                title="Creation action unavailable"
-                body="Notice publishing is driven by availableActions. This role can review active broadcasts and downstream links, but cannot compose a new platform notice from this workspace snapshot."
-              />
-            )}
-            {workspace.notices.items.length ? (
-              <div style={tableCardStyle}>
-                <div style={tableCardHeaderStyle}>
-                  <div>
-                    <div style={sectionEyebrowStyle}>Notices</div>
-                    <div style={sectionTitleStyle}>
-                      Active and scheduled broadcasts
-                    </div>
-                  </div>
-                </div>
-                <div style={{ overflowX: "auto" }}>
-                  <table className="admin-table">
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Notice</th>
-                        <th>Severity</th>
-                        <th>Status</th>
-                        <th>Audience</th>
-                        <th>Delivery</th>
-                        <th>Deep links</th>
-                        <th>{t("common.actions")}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {workspace.notices.items.map((notice) => (
-                        <NoticeRow
-                          key={notice.noticeId}
-                          locale={locale}
-                          notice={notice}
-                          onAction={openAction}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              <EmptyStateCard
-                emptyState={workspace.notices.emptyState}
-                fallbackAction={workspace.notices.availableActions[0]}
-                onAction={(descriptor) =>
+                onOpenCreate={(descriptor) =>
                   openAction({ kind: "create", descriptor })
                 }
               />
-            )}
-          </div>
+            ) : null}
 
-          <aside style={{ display: "grid", gap: 16 }}>
-            <SupportCard
-              title="Broadcast policy"
-              body="Critical and maintenance severities require a reason and return an audit-linked receipt. Use maintenance severity when the downstream apps must show a persistent warning banner."
-            />
-            <LinkCard
-              title="Downstream banner targets"
-              links={collectNoticeLinks(notices)}
-            />
-          </aside>
-        </section>
-      )}
+            {activeTab === "maintenance" ? (
+              <MaintenanceTab
+                locale={locale}
+                maintenance={workspace.maintenance}
+                maintenanceIntentAction={maintenanceIntentAction}
+                maintEnabled={maintEnabled}
+                maintReason={maintReason}
+                maintScheduledStart={maintScheduledStart}
+                maintScheduledEnd={maintScheduledEnd}
+                onMaintEnabledChange={setMaintEnabled}
+                onMaintReasonChange={setMaintReason}
+                onMaintScheduledStartChange={setMaintScheduledStart}
+                onMaintScheduledEndChange={setMaintScheduledEnd}
+                onOpenAction={(descriptor) =>
+                  openAction({
+                    kind: "maintenance",
+                    descriptor,
+                    enabled: maintEnabled,
+                  })
+                }
+              />
+            ) : null}
 
-      {activeTab === "maintenance" && workspace && (
-        <section style={contentGridStyle}>
-          <div style={{ display: "grid", gap: 16 }}>
-            <section style={panelCardStyle}>
-              <div style={panelHeaderStyle}>
-                <div>
-                  <div style={sectionEyebrowStyle}>Maintenance mode</div>
-                  <div style={sectionTitleStyle}>
-                    Current state and schedule
-                  </div>
-                </div>
-                <span
-                  style={statusBadgeStyle(
-                    maintenance?.enabled ? "danger" : "success",
-                  )}
-                >
-                  {maintenance?.enabled ? "Enabled" : "Disabled"}
-                </span>
-              </div>
-              <div style={maintenanceStatusCardStyle}>
-                <div style={maintenanceStatusHeaderStyle}>
-                  <div>
-                    <div style={maintenanceStatusTitleStyle}>
-                      Platform-wide maintenance gate
-                    </div>
-                    <div style={mutedBodyStyle}>
-                      Stops dispatch, webhook delivery, partner ingress, and
-                      tenant sync for the scheduled window.
-                    </div>
-                  </div>
-                  <label className="admin-switch">
-                    <input
-                      type="checkbox"
-                      checked={maintEnabled}
-                      onChange={(event) =>
-                        setMaintEnabled(event.target.checked)
-                      }
-                      disabled={!canToggleMaintenance}
-                    />
-                    <span className="admin-switch-slider" />
-                  </label>
-                </div>
-                <div style={maintenanceMetaGridStyle}>
-                  <div style={snapshotPillStyle}>
-                    <span style={snapshotPillLabelStyle}>updated</span>
-                    <span style={snapshotPillValueStyle}>
-                      {formatDateTime(maintenance?.updatedAt ?? "")}
-                    </span>
-                  </div>
-                  <div style={snapshotPillStyle}>
-                    <span style={snapshotPillLabelStyle}>owner</span>
-                    <span style={snapshotPillValueStyle}>
-                      {maintenance?.updatedBy ?? "system"}
-                    </span>
-                  </div>
-                  <div style={snapshotPillStyle}>
-                    <span style={snapshotPillLabelStyle}>window</span>
-                    <span style={snapshotPillValueStyle}>
-                      {maintenance?.scheduledStart
-                        ? `${formatDateTime(maintenance.scheduledStart)} → ${formatDateTime(maintenance?.scheduledEnd ?? "")}`
-                        : "not scheduled"}
-                    </span>
-                  </div>
-                </div>
-              </div>
+            {activeTab === "history" ? (
+              <HistoryTab
+                locale={locale}
+                workspace={workspace}
+                history={history}
+                columns={historyColumns}
+              />
+            ) : null}
+          </>
+        ) : loading ? (
+          <CanvasCard
+            theme={theme}
+            title={t("notices.title")}
+            subtitle={t("notices.loading")}
+          >
+            <div style={mutedTextStyle}>{t("notices.loading")}</div>
+          </CanvasCard>
+        ) : null}
+      </div>
 
-              <div style={maintenanceFieldGridStyle}>
-                <Field
-                  label="Current reason"
-                  control={
-                    <textarea
-                      value={maintReason}
-                      onChange={(event) => setMaintReason(event.target.value)}
-                      rows={4}
-                      style={textAreaStyle}
-                    />
-                  }
-                />
-                <Field
-                  label="Scheduled start"
-                  control={
-                    <input
-                      type="datetime-local"
-                      value={maintScheduledStart}
-                      onChange={(event) =>
-                        setMaintScheduledStart(event.target.value)
-                      }
-                      style={inputFieldStyle}
-                    />
-                  }
-                />
-                <Field
-                  label="Scheduled end"
-                  control={
-                    <input
-                      type="datetime-local"
-                      value={maintScheduledEnd}
-                      onChange={(event) =>
-                        setMaintScheduledEnd(event.target.value)
-                      }
-                      style={inputFieldStyle}
-                    />
-                  }
-                />
-                <Field
-                  label="Affected services"
-                  control={
-                    <div style={badgeWrapStyle}>
-                      {workspace.maintenance.affectedServices.map((service) => (
-                        <span key={service} style={statusBadgeStyle("warning")}>
-                          {service}
-                        </span>
-                      ))}
-                    </div>
-                  }
-                />
-              </div>
-
-              <div style={toolbarActionsStyle}>
-                {maintenanceIntentAction ? (
-                  <ActionGroup
-                    actions={[maintenanceIntentAction]}
-                    tone="primary"
-                    emptyLabel="Maintenance state is read-only"
-                    onAction={(descriptor) =>
-                      openAction({
-                        kind: "maintenance",
-                        descriptor,
-                        enabled: maintEnabled,
-                      })
-                    }
-                  />
-                ) : (
-                  <div style={readOnlyNoteStyle}>
-                    Maintenance state is read-only
-                  </div>
-                )}
-              </div>
-              <div style={mutedBodyStyle}>
-                {maintEnabled
-                  ? "Saving applies the current reason and scheduled window, then propagates the maintenance banner across downstream apps."
-                  : "Clearing removes the active maintenance banner. Keep the toggle on if you intend to activate the next scheduled window."}
-              </div>
-            </section>
-          </div>
-
-          <aside style={{ display: "grid", gap: 16 }}>
-            <section style={panelCardStyle}>
-              <div style={sectionEyebrowStyle}>Preview</div>
-              <div style={sectionTitleStyle}>Current maintenance notice</div>
-              <div style={previewBannerStyle}>
-                <div style={previewBannerTitleStyle}>
-                  {workspace.maintenance.previewTitle}
-                </div>
-                <div style={previewBannerBodyStyle}>
-                  {workspace.maintenance.previewBody}
-                </div>
-              </div>
-              <div style={previewMetaStyle}>
-                <span>
-                  updated {formatDateTime(maintenance?.updatedAt ?? "")}
-                </span>
-                <span>owner {maintenance?.updatedBy ?? "system"}</span>
-              </div>
-            </section>
-
-            <LinkCard
-              title="Cross-app deep links"
-              links={workspace.maintenance.crossAppLinks}
-            />
-          </aside>
-        </section>
-      )}
-
-      {activeTab === "history" && workspace && (
-        <section style={contentGridStyle}>
-          <div style={{ display: "grid", gap: 16 }}>
-            {workspace.history.items.length ? (
-              <div style={tableCardStyle}>
-                <div style={tableCardHeaderStyle}>
-                  <div>
-                    <div style={sectionEyebrowStyle}>Broadcast history</div>
-                    <div style={sectionTitleStyle}>
-                      Read-only cross-app delivery receipts
-                    </div>
-                  </div>
-                </div>
-                <div style={{ overflowX: "auto" }}>
-                  <table className="admin-table">
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Title</th>
-                        <th>Severity</th>
-                        <th>Targets</th>
-                        <th>Delivery</th>
-                        <th>Broadcast at</th>
-                        <th>Deep links</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {workspace.history.items.map((record) => (
-                        <HistoryRow
-                          key={record.noticeId}
-                          locale={locale}
-                          record={record}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              <EmptyStateCard emptyState={workspace.history.emptyState} />
-            )}
-          </div>
-
-          <aside style={{ display: "grid", gap: 16 }}>
-            <SupportCard
-              title="Read-only history"
-              body="Broadcast History is intentionally read-only. Use the active Notices tab for current-state intervention, and use the audit receipt link after mutations for durable evidence."
-            />
-            <SupportCard
-              title="Delivery contract"
-              body="Queued rows have not started propagating. Propagating rows indicate downstream apps may still be showing intermediate banner state until the next refresh cycle completes."
-            />
-          </aside>
-        </section>
-      )}
-
-      {pendingAction && (
+      {pendingAction ? (
         <div style={modalScrimStyle}>
           <div style={modalCardStyle}>
             <div style={{ display: "grid", gap: 6 }}>
-              <div style={sectionEyebrowStyle}>
+              <CanvasPill
+                theme={theme}
+                tone={
+                  getPendingActionRiskLevel(pendingAction, noticeSeverity) ===
+                  "high"
+                    ? "danger"
+                    : "accent"
+                }
+              >
                 {formatPlatformCodeLabel(
                   locale,
                   getPendingActionRiskLevel(pendingAction, noticeSeverity),
                 )}{" "}
-                risk action
-              </div>
-              <h3 style={modalTitleStyle}>
+                risk
+              </CanvasPill>
+              <div style={{ fontSize: 18, fontWeight: 700, color: theme.text }}>
                 {actionLabel(pendingAction.descriptor.action)}
-              </h3>
-              <p style={modalBodyStyle}>{actionHelpText(pendingAction)}</p>
+              </div>
+              <div style={mutedTextStyle}>{actionHelpText(pendingAction)}</div>
             </div>
 
-            {pendingAction.kind === "create" && (
-              <div style={modalPreviewStyle}>
-                <div style={sectionEyebrowStyle}>Pending notice</div>
-                <div style={modalPreviewTitleStyle}>
+            {pendingAction.kind === "create" ? (
+              <div style={previewBannerStyle}>
+                <div style={{ fontWeight: 700, color: "#7f1d1d" }}>
                   {noticeTitle.trim() || "Untitled notice"}
                 </div>
-                <div style={mutedBodyStyle}>
+                <div style={{ color: theme.text, lineHeight: 1.5 }}>
                   {noticeBody.trim() || "Add notice body before publishing."}
                 </div>
               </div>
-            )}
+            ) : null}
 
             <textarea
               value={reasonDraft}
@@ -757,20 +839,20 @@ export default function NoticesPage() {
                   ? "Required reason"
                   : "Optional audit note"
               }
-              style={textAreaStyle}
+              style={textAreaStyle(theme)}
             />
 
-            <div style={modalActionsStyle}>
-              <button
-                type="button"
-                style={secondaryButtonStyle}
+            <div style={actionRowStyle}>
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
                 onClick={closePendingAction}
               >
                 {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                style={primaryButtonStyle}
+              </CanvasBtn>
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
                 onClick={() => void submitPendingAction()}
                 disabled={
                   submitting ||
@@ -786,268 +868,392 @@ export default function NoticesPage() {
                 {submitting
                   ? t("notices.updating")
                   : actionLabel(pendingAction.descriptor.action)}
-              </button>
+              </CanvasBtn>
             </div>
           </div>
         </div>
-      )}
-    </div>
+      ) : null}
+    </CanvasShell>
   );
 }
 
-const TAB_DEFS: Array<{ id: TabId; label: string }> = [
-  { id: "notices", label: "Notices" },
-  { id: "maintenance", label: "Maintenance Mode" },
-  { id: "history", label: "Broadcast History" },
-];
-
-function NoticeComposer(props: {
-  t: (key: string, values?: Record<string, string | number>) => string;
+function NoticesTab(props: {
   locale: Locale;
-  title: string;
-  body: string;
-  severity: PlatformNoticeSeverity;
-  audience: PlatformNoticeAudience;
-  scheduledAt: string;
-  createAction: ResourceActionDescriptor | undefined;
-  onOpenCreate: (descriptor: ResourceActionDescriptor) => void;
+  t: (key: string, values?: Record<string, string | number>) => string;
+  workspace: PlatformNoticesWorkspaceResponse;
+  notices: PlatformNoticeWorkspaceRecord[];
+  columns: CanvasTableColumn<NoticeTableRow>[];
+  createAction?: ResourceActionDescriptor | undefined;
+  noticeTitle: string;
+  noticeBody: string;
+  noticeSeverity: PlatformNoticeSeverity;
+  noticeAudience: PlatformNoticeAudience;
+  noticeScheduledAt: string;
   onTitleChange: (value: string) => void;
   onBodyChange: (value: string) => void;
   onSeverityChange: (value: PlatformNoticeSeverity) => void;
   onAudienceChange: (value: PlatformNoticeAudience) => void;
   onScheduledAtChange: (value: string) => void;
+  onOpenCreate: (descriptor: ResourceActionDescriptor) => void;
 }) {
+  const hasRows = props.workspace.notices.items.length > 0;
+
   return (
-    <section style={panelCardStyle}>
-      <div style={panelHeaderStyle}>
-        <div>
-          <div style={sectionEyebrowStyle}>Compose</div>
-          <div style={sectionTitleStyle}>Create platform notice</div>
-        </div>
-        {props.createAction && (
-          <ActionGroup
-            actions={[props.createAction]}
-            tone="primary"
-            emptyLabel="Creation unavailable"
+    <section style={contentGridStyle}>
+      <div style={{ display: "grid", gap: 16 }}>
+        <CanvasCard
+          theme={theme}
+          title="Create platform notice"
+          subtitle="critical / maintenance severity requires reason and returns an audit-linked receipt"
+          actions={
+            props.createAction ? (
+              <DescriptorButton
+                descriptor={props.createAction}
+                tone="primary"
+                onClick={props.onOpenCreate}
+              />
+            ) : null
+          }
+        >
+          <div style={{ display: "grid", gap: 14 }}>
+            <div
+              style={alertStripStyle(
+                createNoticeRequiresReason(props.noticeSeverity),
+              )}
+            >
+              <strong>
+                {createNoticeRequiresReason(props.noticeSeverity)
+                  ? "High-risk publish path"
+                  : "Standard publish path"}
+              </strong>
+              <span>
+                {createNoticeRequiresReason(props.noticeSeverity)
+                  ? "The confirmation modal will require a reason and fan out cross-app banner state."
+                  : "Info and warning notices can publish without a mandatory reason."}
+              </span>
+            </div>
+
+            <div style={fieldGridStyle}>
+              <CanvasField theme={theme} label={props.t("notices.form.title")}>
+                <input
+                  value={props.noticeTitle}
+                  onChange={(event) => props.onTitleChange(event.target.value)}
+                  style={inputStyle(theme)}
+                />
+              </CanvasField>
+              <CanvasField
+                theme={theme}
+                label={props.t("notices.form.severity")}
+              >
+                <select
+                  value={props.noticeSeverity}
+                  onChange={(event) =>
+                    props.onSeverityChange(
+                      event.target.value as PlatformNoticeSeverity,
+                    )
+                  }
+                  style={inputStyle(theme)}
+                >
+                  {SEVERITY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {formatPlatformCodeLabel(props.locale, option)}
+                    </option>
+                  ))}
+                </select>
+              </CanvasField>
+              <CanvasField
+                theme={theme}
+                label={props.t("notices.form.audience")}
+              >
+                <select
+                  value={props.noticeAudience}
+                  onChange={(event) =>
+                    props.onAudienceChange(
+                      event.target.value as PlatformNoticeAudience,
+                    )
+                  }
+                  style={inputStyle(theme)}
+                >
+                  {AUDIENCE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {formatPlatformCodeLabel(props.locale, option)}
+                    </option>
+                  ))}
+                </select>
+              </CanvasField>
+              <CanvasField theme={theme} label="Scheduled start">
+                <input
+                  type="datetime-local"
+                  value={props.noticeScheduledAt}
+                  onChange={(event) =>
+                    props.onScheduledAtChange(event.target.value)
+                  }
+                  style={inputStyle(theme)}
+                />
+              </CanvasField>
+            </div>
+
+            <CanvasField theme={theme} label={props.t("notices.form.body")}>
+              <textarea
+                value={props.noticeBody}
+                onChange={(event) => props.onBodyChange(event.target.value)}
+                rows={5}
+                style={textAreaStyle(theme)}
+              />
+            </CanvasField>
+          </div>
+        </CanvasCard>
+
+        {hasRows ? (
+          <CanvasCard
+            theme={theme}
+            title="Active and scheduled broadcasts"
+            subtitle="title, body, severity, audience, status, delivery state, and cross-app links"
+          >
+            <CanvasTable
+              columns={props.columns}
+              rows={props.notices.map((notice) => ({ ...notice }))}
+            />
+          </CanvasCard>
+        ) : (
+          <EmptyStateCard
+            emptyState={props.workspace.notices.emptyState}
+            fallbackAction={props.workspace.notices.availableActions[0]}
             onAction={props.onOpenCreate}
           />
         )}
       </div>
-      <div style={mutedBodyStyle}>
-        Critical and maintenance severities require a reason at publish time and
-        fan out to downstream banner surfaces.
-      </div>
-      <div
-        style={composerAlertStyle(createNoticeRequiresReason(props.severity))}
-      >
-        <strong>
-          {createNoticeRequiresReason(props.severity)
-            ? "High-risk publish path"
-            : "Standard publish path"}
-        </strong>
-        <span>
-          {createNoticeRequiresReason(props.severity)
-            ? "The confirmation modal will require a reason and produce an audit-linked receipt."
-            : "Info and warning notices can be published without a mandatory reason."}
-        </span>
-      </div>
 
-      <div style={noticeComposerGridStyle}>
-        <Field
-          label={props.t("notices.form.title")}
-          control={
-            <input
-              value={props.title}
-              onChange={(event) => props.onTitleChange(event.target.value)}
-              style={inputFieldStyle}
-            />
-          }
-        />
-        <Field
-          label={props.t("notices.form.severity")}
-          control={
-            <select
-              value={props.severity}
-              onChange={(event) =>
-                props.onSeverityChange(
-                  event.target.value as PlatformNoticeSeverity,
-                )
-              }
-              style={inputFieldStyle}
-            >
-              {SEVERITY_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {formatPlatformCodeLabel(props.locale, option)}
-                </option>
-              ))}
-            </select>
-          }
-        />
-        <Field
-          label={props.t("notices.form.audience")}
-          control={
-            <select
-              value={props.audience}
-              onChange={(event) =>
-                props.onAudienceChange(
-                  event.target.value as PlatformNoticeAudience,
-                )
-              }
-              style={inputFieldStyle}
-            >
-              {AUDIENCE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {formatPlatformCodeLabel(props.locale, option)}
-                </option>
-              ))}
-            </select>
-          }
-        />
-        <Field
-          label="Scheduled start"
-          control={
-            <input
-              type="datetime-local"
-              value={props.scheduledAt}
-              onChange={(event) =>
-                props.onScheduledAtChange(event.target.value)
-              }
-              style={inputFieldStyle}
-            />
-          }
+      <div style={{ display: "grid", gap: 16 }}>
+        <CanvasCard
+          theme={theme}
+          title="Broadcast policy"
+          subtitle="Available actions remain backend-driven"
+        >
+          <div style={mutedTextStyle}>
+            A row with zero enabled actions is read-only. Critical and
+            maintenance severities produce cross-app banner propagation to ops,
+            tenant, and driver surfaces.
+          </div>
+        </CanvasCard>
+        <LinkCard
+          title="Downstream banner targets"
+          links={collectNoticeLinks(props.notices)}
         />
       </div>
-
-      <Field
-        label={props.t("notices.form.body")}
-        control={
-          <textarea
-            value={props.body}
-            onChange={(event) => props.onBodyChange(event.target.value)}
-            rows={5}
-            style={textAreaStyle}
-          />
-        }
-      />
     </section>
   );
 }
 
-function NoticeRow(props: {
+function MaintenanceTab(props: {
   locale: Locale;
-  notice: PlatformNoticeWorkspaceRecord;
-  onAction: (target: ActionTarget) => void;
+  maintenance: PlatformNoticesWorkspaceResponse["maintenance"];
+  maintenanceIntentAction: ResourceActionDescriptor | null;
+  maintEnabled: boolean;
+  maintReason: string;
+  maintScheduledStart: string;
+  maintScheduledEnd: string;
+  onMaintEnabledChange: (value: boolean) => void;
+  onMaintReasonChange: (value: string) => void;
+  onMaintScheduledStartChange: (value: string) => void;
+  onMaintScheduledEndChange: (value: string) => void;
+  onOpenAction: (descriptor: ResourceActionDescriptor) => void;
 }) {
+  const maintenance = props.maintenance.currentState;
+
   return (
-    <tr>
-      <td style={monoCellStyle}>{props.notice.noticeId}</td>
-      <td>
-        <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontWeight: 700, color: "#111827" }}>
-            {props.notice.title}
+    <section style={maintenanceGridStyle}>
+      <CanvasCard
+        theme={theme}
+        title="Maintenance mode · current state"
+        subtitle={
+          maintenance.enabled
+            ? "Platform-wide gate currently enabled"
+            : "Platform-wide gate currently disabled"
+        }
+        actions={
+          props.maintenanceIntentAction ? (
+            <DescriptorButton
+              descriptor={props.maintenanceIntentAction}
+              tone="primary"
+              onClick={props.onOpenAction}
+            />
+          ) : null
+        }
+      >
+        <div style={{ display: "grid", gap: 14 }}>
+          <div style={previewBannerStyle}>
+            <div style={actionRowStyle}>
+              <strong style={{ color: theme.text }}>
+                Platform maintenance gate
+              </strong>
+              <CanvasPill
+                theme={theme}
+                tone={maintenance.enabled ? "danger" : "success"}
+              >
+                {maintenance.enabled ? "Enabled" : "Disabled"}
+              </CanvasPill>
+            </div>
+            <div style={mutedTextStyle}>
+              Stops dispatch, webhook delivery, partner ingress, and tenant sync
+              during the maintenance window.
+            </div>
+            <label style={{ ...actionRowStyle, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={props.maintEnabled}
+                onChange={(event) =>
+                  props.onMaintEnabledChange(event.target.checked)
+                }
+              />
+              <span style={mutedTextStyle}>
+                Keep the toggle aligned to the intent you want the action
+                receipt to apply.
+              </span>
+            </label>
           </div>
-          <div style={tableBodyTextStyle}>{props.notice.body}</div>
-          <div style={subtleMonoStyle}>
-            created {formatDateTime(props.notice.createdAt)} ·{" "}
-            {props.notice.createdBy ?? "system"}
+
+          <div style={fieldGridStyle}>
+            <CanvasField theme={theme} label="Current reason">
+              <textarea
+                value={props.maintReason}
+                onChange={(event) =>
+                  props.onMaintReasonChange(event.target.value)
+                }
+                rows={4}
+                style={textAreaStyle(theme)}
+              />
+            </CanvasField>
+            <CanvasField theme={theme} label="Scheduled start">
+              <input
+                type="datetime-local"
+                value={props.maintScheduledStart}
+                onChange={(event) =>
+                  props.onMaintScheduledStartChange(event.target.value)
+                }
+                style={inputStyle(theme)}
+              />
+            </CanvasField>
+            <CanvasField theme={theme} label="Scheduled end">
+              <input
+                type="datetime-local"
+                value={props.maintScheduledEnd}
+                onChange={(event) =>
+                  props.onMaintScheduledEndChange(event.target.value)
+                }
+                style={inputStyle(theme)}
+              />
+            </CanvasField>
           </div>
-        </div>
-      </td>
-      <td>
-        <span style={statusBadgeStyle(severityTone(props.notice.severity))}>
-          {formatPlatformCodeLabel(props.locale, props.notice.severity)}
-        </span>
-      </td>
-      <td>
-        <span style={statusBadgeStyle(statusTone(props.notice.status))}>
-          {formatPlatformCodeLabel(props.locale, props.notice.status)}
-        </span>
-      </td>
-      <td>
-        <span style={statusBadgeStyle("info")}>
-          {formatPlatformCodeLabel(props.locale, props.notice.targetAudience)}
-        </span>
-      </td>
-      <td>
-        <div style={{ display: "grid", gap: 4 }}>
-          <span style={tableBodyTextStyle}>{props.notice.deliverySummary}</span>
-          <span style={subtleMonoStyle}>
-            {props.notice.broadcastStatus} ·{" "}
-            {formatDateTime(props.notice.updatedAt)}
-          </span>
-          {props.notice.scheduledAt && (
-            <span style={subtleMonoStyle}>
-              scheduled {formatDateTime(props.notice.scheduledAt)}
+
+          <div style={actionRowStyle}>
+            <span style={codeStyle}>
+              updated {formatDateTime(maintenance.updatedAt)}
             </span>
-          )}
+            <span style={codeStyle}>
+              owner {maintenance.updatedBy ?? "system"}
+            </span>
+            <span style={codeStyle}>
+              window{" "}
+              {maintenance.scheduledStart
+                ? `${formatDateTime(maintenance.scheduledStart)} → ${formatDateTime(maintenance.scheduledEnd ?? "")}`
+                : "not scheduled"}
+            </span>
+          </div>
         </div>
-      </td>
-      <td>
-        <LinkStack links={props.notice.crossAppLinks} compact />
-      </td>
-      <td>
-        <ActionGroup
-          actions={props.notice.availableActions}
-          size="sm"
-          tone="secondary"
-          emptyLabel="Read-only notice"
-          onAction={(descriptor) =>
-            props.onAction({
-              kind: "resolve",
-              descriptor,
-              notice: props.notice,
-            })
-          }
+      </CanvasCard>
+
+      <div style={{ display: "grid", gap: 16 }}>
+        <CanvasCard
+          theme={theme}
+          title="Current maintenance notice (preview)"
+          subtitle="Cross-app banner copy"
+        >
+          <div style={previewBannerStyle}>
+            <div style={{ fontWeight: 700, color: "#7f1d1d" }}>
+              {props.maintenance.previewTitle}
+            </div>
+            <div style={{ color: theme.text, lineHeight: 1.5 }}>
+              {props.maintenance.previewBody}
+            </div>
+          </div>
+        </CanvasCard>
+
+        <CanvasCard
+          theme={theme}
+          title="Affected services"
+          subtitle="Operational surfaces gated by maintenance mode"
+        >
+          <div style={actionRowStyle}>
+            {props.maintenance.affectedServices.map((service) => (
+              <CanvasPill key={service} theme={theme} tone="warn">
+                {service}
+              </CanvasPill>
+            ))}
+          </div>
+        </CanvasCard>
+
+        <LinkCard
+          title="Cross-app deep links"
+          links={props.maintenance.crossAppLinks}
         />
-      </td>
-    </tr>
+      </div>
+    </section>
   );
 }
 
-function HistoryRow(props: {
+function HistoryTab(props: {
   locale: Locale;
-  record: PlatformNoticeHistoryRecord;
+  workspace: PlatformNoticesWorkspaceResponse;
+  history: PlatformNoticeHistoryRecord[];
+  columns: CanvasTableColumn<HistoryTableRow>[];
 }) {
+  const hasRows = props.workspace.history.items.length > 0;
+
   return (
-    <tr>
-      <td style={monoCellStyle}>{props.record.noticeId}</td>
-      <td>
-        <div style={{ display: "grid", gap: 4 }}>
-          <div style={{ fontWeight: 700, color: "#111827" }}>
-            {props.record.title}
-          </div>
-          <div style={subtleMonoStyle}>
-            {formatPlatformCodeLabel(props.locale, props.record.targetAudience)}
-          </div>
-        </div>
-      </td>
-      <td>
-        <span style={statusBadgeStyle(severityTone(props.record.severity))}>
-          {formatPlatformCodeLabel(props.locale, props.record.severity)}
-        </span>
-      </td>
-      <td style={tableBodyTextStyle}>
-        {props.record.deliveredAudienceLabels.join(" / ")}
-      </td>
-      <td>
-        <div style={{ display: "grid", gap: 4 }}>
-          <span
-            style={statusBadgeStyle(broadcastTone(props.record.deliveryStatus))}
+    <section style={contentGridStyle}>
+      <div style={{ display: "grid", gap: 16 }}>
+        {hasRows ? (
+          <CanvasCard
+            theme={theme}
+            title="Broadcast history · cross-app delivery results"
+            subtitle="Read-only past notices with delivered audiences and receipt state"
           >
-            {props.record.deliveryDetail}
-          </span>
-          <span style={subtleMonoStyle}>
-            {props.record.deliveredCount}/{props.record.targetCount} targets
-          </span>
-        </div>
-      </td>
-      <td style={subtleMonoStyle}>
-        {formatDateTime(props.record.broadcastAt)}
-      </td>
-      <td>
-        <LinkStack links={props.record.crossAppLinks} compact />
-      </td>
-    </tr>
+            <CanvasTable
+              columns={props.columns}
+              rows={props.history.map((record) => ({ ...record }))}
+            />
+          </CanvasCard>
+        ) : (
+          <EmptyStateCard emptyState={props.workspace.history.emptyState} />
+        )}
+      </div>
+
+      <div style={{ display: "grid", gap: 16 }}>
+        <CanvasCard
+          theme={theme}
+          title="Read-only history"
+          subtitle="Current-state intervention stays on the Notices tab"
+        >
+          <div style={mutedTextStyle}>
+            Broadcast History intentionally does not expose mutation CTAs. Use
+            the active notices list for current-state intervention, then follow
+            the audit receipt for durable evidence.
+          </div>
+        </CanvasCard>
+        <CanvasCard
+          theme={theme}
+          title="Delivery contract"
+          subtitle="Queued and propagating rows remain visible"
+        >
+          <div style={mutedTextStyle}>
+            Queued rows have not started propagating. Propagating rows indicate
+            downstream apps may still be converging until the next refresh tier
+            poll completes.
+          </div>
+        </CanvasCard>
+      </div>
+    </section>
   );
 }
 
@@ -1056,135 +1262,35 @@ function EmptyStateCard(props: {
   fallbackAction?: ResourceActionDescriptor | undefined;
   onAction?: ((descriptor: ResourceActionDescriptor) => void) | undefined;
 }) {
-  const reason = props.emptyState?.reason ?? "no_data";
-  const meta = emptyStateMeta(reason);
+  const meta = emptyStateMeta(normalizeEmptyReason(props.emptyState?.reason));
   const nextAction = props.emptyState?.nextAction ?? props.fallbackAction;
 
   return (
-    <section
-      style={{
-        ...panelCardStyle,
-        border: `1px dashed ${meta.border}`,
-        background: meta.background,
-      }}
-    >
-      <div style={emptyStateIconStyle}>{meta.icon}</div>
-      <div style={sectionEyebrowStyle}>{meta.kicker}</div>
-      <div style={sectionTitleStyle}>{meta.title}</div>
-      <div style={mutedBodyStyle}>{meta.body}</div>
-      {props.emptyState?.messageCode && (
-        <div style={emptyReasonCodeStyle}>{props.emptyState.messageCode}</div>
-      )}
-      <div style={emptyStateHintStyle}>{meta.hint}</div>
-      {nextAction && props.onAction && (
-        <div style={{ marginTop: 4 }}>
-          <ActionGroup
-            actions={[nextAction]}
-            onAction={props.onAction}
+    <CanvasCard
+      theme={theme}
+      title={meta.title}
+      subtitle={meta.kicker}
+      actions={
+        nextAction && props.onAction ? (
+          <DescriptorButton
+            descriptor={nextAction}
             tone="secondary"
+            onClick={props.onAction}
           />
-        </div>
-      )}
-    </section>
-  );
-}
-
-function ActionDescriptorButton(props: {
-  descriptor: ResourceActionDescriptor;
-  onClick: () => void;
-  tone?: "primary" | "secondary" | undefined;
-  size?: "md" | "sm" | undefined;
-}) {
-  const buttonStyle =
-    props.tone === "primary"
-      ? props.size === "sm"
-        ? primaryButtonSmallStyle
-        : primaryButtonStyle
-      : props.size === "sm"
-        ? secondaryButtonSmallStyle
-        : secondaryButtonStyle;
-
-  return (
-    <button
-      type="button"
-      style={{
-        ...buttonStyle,
-        ...(props.descriptor.enabled ? null : disabledButtonStyle),
-      }}
-      onClick={props.onClick}
-      disabled={!props.descriptor.enabled}
-      title={props.descriptor.disabledReasonCode}
+        ) : null
+      }
     >
-      {actionLabel(props.descriptor.action)}
-    </button>
-  );
-}
-
-function ActionGroup(props: {
-  actions: ResourceActionDescriptor[];
-  onAction: (descriptor: ResourceActionDescriptor) => void;
-  tone?: "primary" | "secondary" | undefined;
-  size?: "md" | "sm" | undefined;
-  emptyLabel?: string | undefined;
-}) {
-  const enabledActions = props.actions.filter(
-    (descriptor) => descriptor.enabled,
-  );
-  const blockedActions = props.actions.filter(
-    (descriptor) => !descriptor.enabled,
-  );
-
-  if (props.actions.length === 0) {
-    return (
-      <div style={readOnlyNoteStyle}>{props.emptyLabel ?? "Read-only"}</div>
-    );
-  }
-
-  return (
-    <div style={{ display: "grid", gap: 10 }}>
-      {enabledActions.length > 0 && (
-        <div style={toolbarActionsStyle}>
-          {enabledActions.map((descriptor) => (
-            <ActionDescriptorButton
-              key={descriptor.action}
-              descriptor={descriptor}
-              {...(props.tone ? { tone: props.tone } : {})}
-              {...(props.size ? { size: props.size } : {})}
-              onClick={() => props.onAction(descriptor)}
-            />
-          ))}
-        </div>
-      )}
-      {blockedActions.length > 0 && (
-        <div style={blockedActionListStyle}>
-          {blockedActions.map((descriptor) => (
-            <div key={descriptor.action} style={blockedActionCardStyle}>
-              <ActionDescriptorButton
-                descriptor={descriptor}
-                tone="secondary"
-                {...(props.size ? { size: props.size } : {})}
-                onClick={() => props.onAction(descriptor)}
-              />
-              <span style={blockedActionReasonStyle}>
-                {descriptor.disabledReasonCode
-                  ? formatPlatformCodeLabel("en", descriptor.disabledReasonCode)
-                  : "Action currently unavailable"}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SupportCard(props: { title: string; body: string }) {
-  return (
-    <section style={panelCardStyle}>
-      <div style={sectionEyebrowStyle}>Guidance</div>
-      <div style={sectionTitleStyle}>{props.title}</div>
-      <div style={mutedBodyStyle}>{props.body}</div>
-    </section>
+      <div style={emptyCardBodyStyle}>
+        <CanvasPill theme={theme} tone={meta.tone}>
+          {meta.icon}
+        </CanvasPill>
+        <div style={mutedTextStyle}>{meta.body}</div>
+        <div style={subtleMonoStyle}>{meta.hint}</div>
+        {props.emptyState?.messageCode ? (
+          <span style={codeStyle}>{props.emptyState.messageCode}</span>
+        ) : null}
+      </div>
+    </CanvasCard>
   );
 }
 
@@ -1193,116 +1299,286 @@ function LinkCard(props: {
   links: PlatformNoticeWorkspaceRecord["crossAppLinks"];
 }) {
   return (
-    <section style={panelCardStyle}>
-      <div style={sectionEyebrowStyle}>Deep links</div>
-      <div style={sectionTitleStyle}>{props.title}</div>
+    <CanvasCard
+      theme={theme}
+      title={props.title}
+      subtitle="Operational handoff links open per contract"
+    >
       {props.links.length ? (
-        <LinkStack links={props.links} />
+        <div style={linkStackStyle}>
+          {props.links.map((link) => (
+            <a
+              key={`${link.targetApp}-${link.route}-${link.resourceId}`}
+              href={link.route}
+              target={link.openMode === "new_tab" ? "_blank" : undefined}
+              rel="noreferrer"
+              style={linkRowStyle}
+            >
+              <span style={{ fontWeight: 600 }}>{link.label}</span>
+              <span style={subtleMonoStyle}>{link.targetApp}</span>
+            </a>
+          ))}
+        </div>
       ) : (
-        <div style={mutedBodyStyle}>No downstream links available.</div>
+        <div style={mutedTextStyle}>No downstream links available.</div>
       )}
-    </section>
+    </CanvasCard>
   );
 }
 
-function LinkStack(props: {
-  links: PlatformNoticeWorkspaceRecord["crossAppLinks"];
-  compact?: boolean;
+function DescriptorButton(props: {
+  descriptor: ResourceActionDescriptor;
+  tone: "primary" | "secondary";
+  onClick: (descriptor: ResourceActionDescriptor) => void;
 }) {
   return (
-    <div style={{ display: "grid", gap: props.compact ? 6 : 10 }}>
+    <CanvasBtn
+      theme={theme}
+      variant={props.tone}
+      onClick={() => props.onClick(props.descriptor)}
+      disabled={!props.descriptor.enabled}
+    >
+      {actionLabel(props.descriptor.action)}
+    </CanvasBtn>
+  );
+}
+
+function buildNoticeColumns(
+  locale: Locale,
+  openAction: (target: ActionTarget) => void,
+): CanvasTableColumn<NoticeTableRow>[] {
+  return [
+    { h: "ID", k: "noticeId", w: 108, mono: true },
+    {
+      h: "Notice",
+      r: (notice) => (
+        <div style={{ display: "grid", gap: 4, whiteSpace: "normal" }}>
+          <div style={{ fontWeight: 700 }}>{notice.title}</div>
+          <div style={mutedTextStyle}>{notice.body}</div>
+          <div style={subtleMonoStyle}>
+            created {formatDateTime(notice.createdAt)} ·{" "}
+            {notice.createdBy ?? "system"}
+          </div>
+        </div>
+      ),
+    },
+    {
+      h: "SEV",
+      w: 112,
+      r: (notice) => (
+        <CanvasPill theme={theme} tone={severityTone(notice.severity)}>
+          {formatPlatformCodeLabel(locale, notice.severity)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: "Audience",
+      w: 110,
+      r: (notice) => (
+        <CanvasPill theme={theme} tone="info">
+          {formatPlatformCodeLabel(locale, notice.targetAudience)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: "Status",
+      w: 118,
+      r: (notice) => (
+        <CanvasPill theme={theme} tone={statusTone(notice.status)}>
+          {formatPlatformCodeLabel(locale, notice.status)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: "Delivery",
+      w: 220,
+      r: (notice) => (
+        <div style={{ display: "grid", gap: 4, whiteSpace: "normal" }}>
+          <div>{notice.deliverySummary}</div>
+          <div style={subtleMonoStyle}>
+            {notice.broadcastStatus} · {formatDateTime(notice.updatedAt)}
+          </div>
+          {notice.scheduledAt ? (
+            <div style={subtleMonoStyle}>
+              scheduled {formatDateTime(notice.scheduledAt)}
+            </div>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      h: "Deep links",
+      w: 220,
+      r: (notice) => <CompactLinks links={notice.crossAppLinks} />,
+    },
+    {
+      h: "Actions",
+      w: 220,
+      r: (notice) => (
+        <DescriptorActionGroup
+          actions={notice.availableActions}
+          onAction={(descriptor) =>
+            openAction({
+              kind: "resolve",
+              descriptor,
+              notice,
+            })
+          }
+          emptyLabel="Read-only notice"
+        />
+      ),
+    },
+  ];
+}
+
+function buildHistoryColumns(
+  locale: Locale,
+): CanvasTableColumn<HistoryTableRow>[] {
+  return [
+    { h: "Notice", k: "noticeId", w: 104, mono: true },
+    {
+      h: "Title",
+      r: (record) => (
+        <div style={{ display: "grid", gap: 4, whiteSpace: "normal" }}>
+          <div style={{ fontWeight: 700 }}>{record.title}</div>
+          <div style={subtleMonoStyle}>
+            {formatPlatformCodeLabel(locale, record.targetAudience)}
+          </div>
+        </div>
+      ),
+    },
+    {
+      h: "SEV",
+      w: 108,
+      r: (record) => (
+        <CanvasPill theme={theme} tone={severityTone(record.severity)}>
+          {formatPlatformCodeLabel(locale, record.severity)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: "Targets",
+      w: 190,
+      r: (record) => (
+        <div style={{ whiteSpace: "normal" }}>
+          {record.deliveredAudienceLabels.join(" / ")}
+        </div>
+      ),
+    },
+    {
+      h: "Delivery",
+      w: 180,
+      r: (record) => (
+        <div style={{ display: "grid", gap: 4, whiteSpace: "normal" }}>
+          <CanvasPill theme={theme} tone={broadcastTone(record.deliveryStatus)}>
+            {record.deliveryDetail}
+          </CanvasPill>
+          <div style={subtleMonoStyle}>
+            {record.deliveredCount}/{record.targetCount} targets
+          </div>
+        </div>
+      ),
+    },
+    {
+      h: "Broadcast at",
+      w: 150,
+      mono: true,
+      r: (record) => formatDateTime(record.broadcastAt),
+    },
+    {
+      h: "Deep links",
+      w: 220,
+      r: (record) => <CompactLinks links={record.crossAppLinks} />,
+    },
+  ];
+}
+
+function CompactLinks(props: {
+  links: PlatformNoticeWorkspaceRecord["crossAppLinks"];
+}) {
+  if (!props.links.length) {
+    return <span style={subtleMonoStyle}>No links</span>;
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 6, whiteSpace: "normal" }}>
       {props.links.map((link) => (
         <a
           key={`${link.targetApp}-${link.route}-${link.resourceId}`}
           href={link.route}
           target={link.openMode === "new_tab" ? "_blank" : undefined}
           rel="noreferrer"
-          style={linkRowStyle}
+          style={{ color: theme.accent, textDecoration: "none" }}
         >
-          <span style={{ fontWeight: 600 }}>{link.label}</span>
-          <span style={subtleMonoStyle}>{link.targetApp}</span>
+          {link.label}
         </a>
       ))}
     </div>
   );
 }
 
-function Field(props: { label: string; control: React.ReactNode }) {
-  return (
-    <div style={{ display: "grid", gap: 6 }}>
-      <label style={fieldLabelStyle}>{props.label}</label>
-      {props.control}
-    </div>
-  );
-}
-
-function SummaryCard(props: { title: string; value: string; note: string }) {
-  return (
-    <div style={summaryCardStyle}>
-      <div style={sectionEyebrowStyle}>{props.title}</div>
-      <div style={summaryValueStyle}>{props.value}</div>
-      <div style={summaryNoteStyle}>{props.note}</div>
-    </div>
-  );
-}
-
-function MetricChip(props: {
-  label: string;
-  value: string;
-  tone: "success" | "warning" | "neutral" | "danger";
+function DescriptorActionGroup(props: {
+  actions: ResourceActionDescriptor[];
+  onAction: (descriptor: ResourceActionDescriptor) => void;
+  emptyLabel: string;
 }) {
-  return (
-    <div style={metricChipStyle(props.tone)}>
-      <span style={{ opacity: 0.78 }}>{props.label}</span>
-      <strong>{props.value}</strong>
-    </div>
-  );
-}
+  const enabledActions = props.actions.filter((action) => action.enabled);
+  const blockedActions = props.actions.filter((action) => !action.enabled);
 
-function SnapshotPill(props: { label: string; value: string }) {
-  return (
-    <div style={snapshotPillStyle}>
-      <span style={snapshotPillLabelStyle}>{props.label}</span>
-      <span style={snapshotPillValueStyle}>{props.value}</span>
-    </div>
-  );
-}
-
-function getTabActions(
-  workspace: PlatformNoticesWorkspaceResponse | null,
-  activeTab: TabId,
-  maintEnabled: boolean,
-) {
-  if (!workspace) return [];
-  if (activeTab === "notices") return workspace.notices.availableActions;
-  if (activeTab === "maintenance") {
-    const nextAction = getMaintenanceIntentAction(
-      getMaintenanceActions(workspace.maintenance.availableActions),
-      maintEnabled,
-    );
-    return nextAction ? [nextAction] : [];
+  if (!props.actions.length) {
+    return <span style={subtleMonoStyle}>{props.emptyLabel}</span>;
   }
-  return [];
+
+  return (
+    <div style={blockedListStyle}>
+      {enabledActions.length ? (
+        <div style={actionRowStyle}>
+          {enabledActions.map((descriptor) => (
+            <DescriptorButton
+              key={descriptor.action}
+              descriptor={descriptor}
+              tone="secondary"
+              onClick={props.onAction}
+            />
+          ))}
+        </div>
+      ) : (
+        <span style={subtleMonoStyle}>{props.emptyLabel}</span>
+      )}
+
+      {blockedActions.map((descriptor) => (
+        <div key={descriptor.action} style={blockedItemStyle}>
+          <DescriptorButton
+            descriptor={descriptor}
+            tone="secondary"
+            onClick={props.onAction}
+          />
+          <span style={subtleMonoStyle}>
+            {descriptor.disabledReasonCode
+              ? formatPlatformCodeLabel("en", descriptor.disabledReasonCode)
+              : "Action currently unavailable"}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
-function handleTabAction(
+function handleHeaderAction(
   descriptor: ResourceActionDescriptor,
   activeTab: TabId,
   maintEnabled: boolean,
-  maintenanceActions: MaintenanceActionMap,
   openAction: (target: ActionTarget) => void,
 ) {
   if (activeTab === "notices") {
     openAction({ kind: "create", descriptor });
     return;
   }
+
   if (activeTab === "maintenance") {
-    const nextDescriptor =
-      getMaintenanceIntentAction(maintenanceActions, maintEnabled) ??
-      descriptor;
     openAction({
       kind: "maintenance",
-      descriptor: nextDescriptor,
+      descriptor,
       enabled: maintEnabled,
     });
   }
@@ -1327,9 +1603,7 @@ function getMaintenanceIntentAction(
   actions: MaintenanceActionMap,
   maintEnabled: boolean,
 ) {
-  return maintEnabled
-    ? (actions.clearAction ?? null)
-    : (actions.setAction ?? null);
+  return maintEnabled ? actions.clearAction : actions.setAction;
 }
 
 function canSubmitAction(
@@ -1345,9 +1619,11 @@ function canSubmitAction(
   ) {
     return false;
   }
+
   if (pendingAction.kind === "create") {
     return Boolean(noticeTitle.trim() && noticeBody.trim());
   }
+
   return true;
 }
 
@@ -1384,7 +1660,7 @@ function getPendingActionRiskLevel(
 function actionLabel(action: string) {
   switch (action) {
     case "create_notice":
-      return "Publish notice";
+      return "Create notice";
     case "resolve_notice":
       return "Resolve notice";
     case "set_maintenance_mode":
@@ -1403,8 +1679,8 @@ function actionHelpText(target: ActionTarget | null) {
   }
   if (target.kind === "maintenance") {
     return target.enabled
-      ? "Maintenance mode is a high-risk action. Save the current toggle and schedule with a required reason before the platform banner propagates."
-      : "Clearing maintenance mode is a high-risk action. Provide the audit reason before the platform banner is removed across downstream apps.";
+      ? "Setting maintenance mode is high-risk. Save the current toggle and schedule with a required reason before the platform banner propagates."
+      : "Clearing maintenance mode is high-risk. Provide the audit reason before the platform banner is removed across downstream apps.";
   }
   return "Resolving a notice removes it from the active stream and records the action in audit history.";
 }
@@ -1417,815 +1693,114 @@ function collectNoticeLinks(notices: PlatformNoticeWorkspaceRecord[]) {
   notices.forEach((notice) => {
     notice.crossAppLinks.forEach((link) => {
       const key = `${link.targetApp}-${link.route}-${link.resourceId}`;
-      if (!deduped.has(key)) deduped.set(key, link);
+      if (!deduped.has(key)) {
+        deduped.set(key, link);
+      }
     });
   });
   return [...deduped.values()];
 }
 
-function emptyStateMeta(reason: EmptyStateEnvelope["reason"]) {
+function normalizeEmptyReason(
+  reason: EmptyStateEnvelope["reason"] | undefined,
+): Exclude<EmptyReason, "driver_not_eligible"> {
+  if (!reason || reason === "no_data") return "no_data";
+  if (reason === "driver_not_eligible") return "fetch_failed";
+  return reason;
+}
+
+function emptyStateMeta(reason: Exclude<EmptyReason, "driver_not_eligible">) {
   switch (reason) {
     case "permission_denied":
       return {
-        icon: "Lock",
+        icon: "permission",
         kicker: "Permission boundary",
-        title: "You can see the workspace, but not this dataset",
-        body: "The route loaded, but the current actor is not authorized to read this tab's records.",
-        hint: "Switch to a broader role or use a cross-app audit link with the correct authority.",
-        border: "rgba(37, 99, 235, 0.35)",
-        background: "linear-gradient(135deg, #eff6ff, #ffffff)",
+        title: "You can load the route, but not this dataset",
+        body: "The workspace snapshot succeeded, but the current actor cannot read this tab's records.",
+        hint: "Switch to a broader role or follow a deep link with the correct authority.",
+        tone: "info" as const,
       };
     case "fetch_failed":
       return {
-        icon: "Retry",
+        icon: "fetch_failed",
         kicker: "Fetch failed",
-        title: "The data request did not complete",
-        body: "The workspace call failed before the list could be hydrated.",
-        hint: "Refresh the page. If the next fetch fails again, inspect the upstream API and audit trail.",
-        border: "rgba(220, 38, 38, 0.35)",
-        background: "linear-gradient(135deg, #fef2f2, #ffffff)",
+        title: "The workspace request did not complete",
+        body: "The API call failed before this dataset could hydrate.",
+        hint: "Refresh the page. If the next fetch fails again, inspect upstream API health and audit traces.",
+        tone: "danger" as const,
       };
     case "external_unavailable":
       return {
-        icon: "Bridge",
+        icon: "dependency",
         kicker: "External dependency",
-        title: "A downstream system is unavailable",
-        body: "The platform admin workspace is up, but at least one downstream notice target is not responding.",
-        hint: "Use the deep links to confirm downstream banner state once the dependency recovers.",
-        border: "rgba(217, 119, 6, 0.35)",
-        background: "linear-gradient(135deg, #fff7ed, #ffffff)",
+        title: "A downstream target is unavailable",
+        body: "Platform admin is up, but at least one banner target is not responding.",
+        hint: "Use the deep links to verify downstream banner state once the dependency recovers.",
+        tone: "warn" as const,
       };
     case "not_provisioned":
       return {
-        icon: "Setup",
+        icon: "provision",
         kicker: "Not provisioned",
         title: "This workspace has not been provisioned yet",
-        body: "No notices data exists for this environment or tenant slice yet.",
+        body: "No notice data exists for this environment slice yet.",
         hint: "Use the next action to provision the resource or publish the first notice.",
-        border: "rgba(5, 150, 105, 0.35)",
-        background: "linear-gradient(135deg, #ecfdf5, #ffffff)",
+        tone: "success" as const,
       };
     case "filtered_empty":
       return {
-        icon: "Filter",
+        icon: "filter",
         kicker: "Filtered result",
         title: "No records match the current slice",
-        body: "The query completed successfully, but the current list filters narrowed the result to zero rows.",
+        body: "The query completed successfully, but the applied slice narrowed the result to zero rows.",
         hint: "Clear filters or switch tabs to inspect a broader notice timeline.",
-        border: "rgba(71, 85, 105, 0.35)",
-        background: "linear-gradient(135deg, #f8fafc, #ffffff)",
-      };
-    case "driver_not_eligible":
-      return {
-        icon: "Ineligible",
-        kicker: "Contract mismatch",
-        title: "Received a driver-only empty reason on an admin page",
-        body: "This empty-state reason belongs to driver-facing flows and should not normally appear in platform admin.",
-        hint: "Treat this as a contract mismatch and verify the API payload before shipping.",
-        border: "rgba(124, 58, 237, 0.35)",
-        background: "linear-gradient(135deg, #f5f3ff, #ffffff)",
+        tone: "neutral" as const,
       };
     case "no_data":
     default:
       return {
-        icon: "Zero",
+        icon: "zero",
         kicker: "No data",
         title: "Nothing has been published here yet",
         body: "The request succeeded and this workspace currently has zero notices or history rows.",
-        hint: "Publish the first notice or wait for a future maintenance event to populate the stream.",
-        border: "rgba(148, 163, 184, 0.35)",
-        background: "linear-gradient(135deg, #f8fafc, #ffffff)",
+        hint: "Publish the first notice or wait for the next maintenance event to populate the stream.",
+        tone: "neutral" as const,
       };
   }
 }
 
-function severityTone(severity: PlatformNoticeSeverity) {
+function severityTone(
+  severity: PlatformNoticeSeverity,
+): "danger" | "warn" | "neutral" {
   switch (severity) {
     case "critical":
     case "maintenance":
       return "danger";
     case "warning":
-      return "warning";
+      return "warn";
     default:
-      return "info";
+      return "neutral";
   }
 }
 
-function statusTone(status: string) {
+function statusTone(status: string): "success" | "warn" | "neutral" {
   switch (status) {
     case "active":
       return "success";
     case "scheduled":
-      return "warning";
-    case "resolved":
-      return "neutral";
+      return "warn";
     default:
       return "neutral";
   }
 }
 
-function broadcastTone(status: string) {
+function broadcastTone(status: string): "success" | "warn" | "neutral" {
   switch (status) {
     case "propagating":
-      return "warning";
+      return "warn";
     case "queued":
       return "neutral";
     default:
       return "success";
   }
-}
-
-function statusBadgeStyle(
-  tone: "success" | "warning" | "info" | "neutral" | "danger",
-): React.CSSProperties {
-  const tones = {
-    success: {
-      background: "rgba(22, 163, 74, 0.12)",
-      color: "#166534",
-    },
-    warning: {
-      background: "rgba(217, 119, 6, 0.14)",
-      color: "#9a3412",
-    },
-    info: {
-      background: "rgba(37, 99, 235, 0.12)",
-      color: "#1d4ed8",
-    },
-    neutral: {
-      background: "rgba(100, 116, 139, 0.12)",
-      color: "#475569",
-    },
-    danger: {
-      background: "rgba(220, 38, 38, 0.12)",
-      color: "#991b1b",
-    },
-  }[tone];
-
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    padding: "4px 9px",
-    borderRadius: 999,
-    fontSize: 12,
-    fontWeight: 700,
-    whiteSpace: "nowrap",
-    ...tones,
-  };
-}
-
-function snapshotCardStyle(
-  freshness: PlatformNoticesWorkspaceResponse["refresh"]["dataFreshness"],
-): React.CSSProperties {
-  return {
-    ...panelCardStyle,
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 16,
-    flexWrap: "wrap",
-    background:
-      freshness === "fresh"
-        ? "rgba(255,255,255,0.92)"
-        : "linear-gradient(135deg, #fff7ed, rgba(255,255,255,0.96))",
-    borderColor:
-      freshness === "fresh" ? "rgba(30,41,59,0.08)" : "rgba(217,119,6,0.22)",
-  };
-}
-
-const pageStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 18,
-  paddingBottom: 40,
-};
-
-const heroStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 20,
-  padding: 28,
-  borderRadius: 32,
-  background:
-    "radial-gradient(circle at top left, rgba(245, 158, 11, 0.18), transparent 28%), radial-gradient(circle at top right, rgba(30, 64, 175, 0.16), transparent 24%), linear-gradient(135deg, rgba(255,251,235,0.96), rgba(255,255,255,0.94) 52%, rgba(239,246,255,0.96))",
-  border: "1px solid rgba(15,23,42,0.08)",
-  boxShadow: "0 30px 60px rgba(15, 23, 42, 0.08)",
-};
-
-const heroHeaderRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 16,
-  alignItems: "flex-start",
-  flexWrap: "wrap",
-};
-
-const eyebrowStyle: React.CSSProperties = {
-  fontSize: 11,
-  letterSpacing: "0.18em",
-  textTransform: "uppercase",
-  color: "#92400e",
-  fontWeight: 700,
-};
-
-const heroTitleStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: 32,
-  lineHeight: 1.05,
-  color: "#0f172a",
-};
-
-const heroSubtitleStyle: React.CSSProperties = {
-  margin: 0,
-  maxWidth: 760,
-  color: "#475569",
-  lineHeight: 1.65,
-  fontSize: 14,
-};
-
-const heroBadgeClusterStyle: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 10,
-  alignItems: "flex-start",
-  justifyContent: "flex-end",
-};
-
-const heroGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-};
-
-const summaryCardStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 8,
-  padding: 16,
-  borderRadius: 20,
-  background: "rgba(255,255,255,0.8)",
-  border: "1px solid rgba(15,23,42,0.08)",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.6)",
-};
-
-const summaryValueStyle: React.CSSProperties = {
-  fontSize: 24,
-  fontWeight: 800,
-  color: "#0f172a",
-};
-
-const summaryNoteStyle: React.CSSProperties = {
-  color: "#64748b",
-  fontSize: 12.5,
-  lineHeight: 1.5,
-};
-
-const panelCardStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 14,
-  padding: 20,
-  borderRadius: 24,
-  background: "rgba(255,255,255,0.92)",
-  border: "1px solid rgba(15,23,42,0.08)",
-  boxShadow: "0 16px 34px rgba(15, 23, 42, 0.05)",
-};
-
-const receiptCardStyle: React.CSSProperties = {
-  ...panelCardStyle,
-  background: "linear-gradient(135deg, #eff6ff, #ffffff)",
-  borderColor: "rgba(37,99,235,0.16)",
-};
-
-const receiptCardHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: 12,
-  flexWrap: "wrap",
-};
-
-const receiptTitleStyle: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 700,
-  color: "#1d4ed8",
-};
-
-const receiptMetaStyle: React.CSSProperties = {
-  color: "#475569",
-  fontSize: 12,
-};
-
-const errorCardStyle: React.CSSProperties = {
-  ...panelCardStyle,
-  background: "linear-gradient(135deg, #fef2f2, #ffffff)",
-  borderColor: "rgba(220,38,38,0.18)",
-};
-
-const maintenanceBannerStyle: React.CSSProperties = {
-  ...panelCardStyle,
-  gap: 6,
-  background: "linear-gradient(135deg, #fff1f2, #ffffff)",
-  borderColor: "rgba(220,38,38,0.22)",
-};
-
-const maintenanceBannerTitleStyle: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 800,
-  color: "#991b1b",
-};
-
-const maintenanceBannerBodyStyle: React.CSSProperties = {
-  color: "#7f1d1d",
-  lineHeight: 1.55,
-  fontSize: 13,
-};
-
-const toolbarCardStyle: React.CSSProperties = {
-  ...panelCardStyle,
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 16,
-  flexWrap: "wrap",
-  alignItems: "center",
-  background:
-    "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,250,252,0.96))",
-};
-
-const tabRowStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 10,
-  flexWrap: "wrap",
-};
-
-const toolbarActionsStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-  alignItems: "center",
-};
-
-const contentGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.45fr) minmax(290px, 0.85fr)",
-  gap: 16,
-};
-
-const noticeComposerGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: 12,
-};
-
-const maintenanceFieldGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: 12,
-};
-
-const panelHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 12,
-  alignItems: "flex-start",
-  flexWrap: "wrap",
-};
-
-const tableCardStyle: React.CSSProperties = {
-  ...panelCardStyle,
-  padding: 0,
-};
-
-const tableCardHeaderStyle: React.CSSProperties = {
-  padding: "20px 20px 0",
-};
-
-const sectionEyebrowStyle: React.CSSProperties = {
-  fontSize: 11,
-  letterSpacing: "0.16em",
-  textTransform: "uppercase",
-  color: "#94a3b8",
-  fontWeight: 700,
-};
-
-const sectionTitleStyle: React.CSSProperties = {
-  fontSize: 20,
-  lineHeight: 1.15,
-  fontWeight: 800,
-  color: "#0f172a",
-};
-
-const mutedBodyStyle: React.CSSProperties = {
-  color: "#64748b",
-  lineHeight: 1.6,
-  fontSize: 13.5,
-};
-
-const maintenanceStatusCardStyle: React.CSSProperties = {
-  padding: 16,
-  borderRadius: 18,
-  background: "#f8fafc",
-  border: "1px solid rgba(148,163,184,0.18)",
-};
-
-const maintenanceStatusHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 12,
-};
-
-const maintenanceMetaGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-  gap: 10,
-  marginTop: 14,
-};
-
-const maintenanceStatusTitleStyle: React.CSSProperties = {
-  fontWeight: 700,
-  fontSize: 15,
-  color: "#0f172a",
-  marginBottom: 4,
-};
-
-const previewBannerStyle: React.CSSProperties = {
-  padding: 16,
-  borderRadius: 18,
-  border: "1px solid rgba(220,38,38,0.2)",
-  background: "linear-gradient(135deg, #fff1f2, #ffffff)",
-};
-
-const previewBannerTitleStyle: React.CSSProperties = {
-  fontWeight: 800,
-  color: "#991b1b",
-  marginBottom: 8,
-  fontSize: 14,
-};
-
-const previewBannerBodyStyle: React.CSSProperties = {
-  color: "#7f1d1d",
-  lineHeight: 1.55,
-  fontSize: 13,
-};
-
-const previewMetaStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 12,
-  flexWrap: "wrap",
-  marginTop: 10,
-  color: "#7f1d1d",
-  fontSize: 12,
-  fontWeight: 600,
-};
-
-const snapshotLeftStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 6,
-};
-
-const snapshotRightStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-};
-
-const snapshotTitleStyle: React.CSSProperties = {
-  fontWeight: 800,
-  fontSize: 18,
-  color: "#0f172a",
-};
-
-const snapshotPillStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 4,
-  minWidth: 120,
-  padding: "10px 12px",
-  borderRadius: 14,
-  background: "#f8fafc",
-  border: "1px solid rgba(148,163,184,0.16)",
-};
-
-const snapshotPillLabelStyle: React.CSSProperties = {
-  textTransform: "uppercase",
-  letterSpacing: "0.12em",
-  fontSize: 10,
-  color: "#94a3b8",
-  fontWeight: 700,
-};
-
-const snapshotPillValueStyle: React.CSSProperties = {
-  fontSize: 12.5,
-  fontWeight: 700,
-  color: "#0f172a",
-};
-
-const primaryButtonStyle: React.CSSProperties = {
-  appearance: "none",
-  border: "1px solid #1d4ed8",
-  background: "#1d4ed8",
-  color: "#ffffff",
-  borderRadius: 12,
-  padding: "9px 14px",
-  fontSize: 13,
-  fontWeight: 700,
-  cursor: "pointer",
-  boxShadow: "0 10px 22px rgba(29, 78, 216, 0.18)",
-};
-
-const primaryButtonSmallStyle: React.CSSProperties = {
-  ...primaryButtonStyle,
-  padding: "6px 10px",
-  borderRadius: 10,
-  fontSize: 12,
-  boxShadow: "none",
-};
-
-const secondaryButtonStyle: React.CSSProperties = {
-  appearance: "none",
-  border: "1px solid rgba(148,163,184,0.28)",
-  background: "#ffffff",
-  color: "#0f172a",
-  borderRadius: 12,
-  padding: "9px 14px",
-  fontSize: 13,
-  fontWeight: 700,
-  cursor: "pointer",
-};
-
-const secondaryButtonSmallStyle: React.CSSProperties = {
-  ...secondaryButtonStyle,
-  padding: "6px 10px",
-  borderRadius: 10,
-  fontSize: 12,
-};
-
-const disabledButtonStyle: React.CSSProperties = {
-  cursor: "not-allowed",
-  opacity: 0.46,
-  boxShadow: "none",
-};
-
-const primaryLinkStyle: React.CSSProperties = {
-  ...primaryButtonStyle,
-  textDecoration: "none",
-  display: "inline-flex",
-  alignItems: "center",
-};
-
-const fieldLabelStyle: React.CSSProperties = {
-  color: "#475569",
-  fontSize: 12,
-  fontWeight: 700,
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
-};
-
-const inputFieldStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "10px 12px",
-  borderRadius: 12,
-  border: "1px solid #cbd5e1",
-  background: "#ffffff",
-  color: "#0f172a",
-  fontSize: 14,
-};
-
-const textAreaStyle: React.CSSProperties = {
-  ...inputFieldStyle,
-  resize: "vertical",
-  minHeight: 110,
-  fontFamily: "inherit",
-  lineHeight: 1.5,
-};
-
-const subtleMonoStyle: React.CSSProperties = {
-  fontFamily:
-    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-  fontSize: 11.5,
-  color: "#64748b",
-};
-
-const monoCellStyle: React.CSSProperties = {
-  ...subtleMonoStyle,
-  color: "#0f172a",
-};
-
-const tableBodyTextStyle: React.CSSProperties = {
-  color: "#334155",
-  fontSize: 12.5,
-  lineHeight: 1.5,
-};
-
-const badgeWrapStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 6,
-  flexWrap: "wrap",
-};
-
-const linkRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 8,
-  alignItems: "center",
-  textDecoration: "none",
-  color: "#0f172a",
-  padding: "10px 12px",
-  borderRadius: 14,
-  background:
-    "linear-gradient(135deg, rgba(239,246,255,0.88), rgba(248,250,252,0.94))",
-  border: "1px solid rgba(148,163,184,0.18)",
-};
-
-const readOnlyNoteStyle: React.CSSProperties = {
-  color: "#64748b",
-  fontSize: 12,
-  fontWeight: 700,
-};
-
-const blockedActionListStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 8,
-};
-
-const blockedActionCardStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 4,
-  justifyItems: "start",
-};
-
-const blockedActionReasonStyle: React.CSSProperties = {
-  color: "#64748b",
-  fontSize: 11.5,
-  lineHeight: 1.45,
-};
-
-const modalScrimStyle: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  display: "grid",
-  placeItems: "center",
-  padding: 20,
-  background: "rgba(15, 23, 42, 0.42)",
-  zIndex: 30,
-};
-
-const modalCardStyle: React.CSSProperties = {
-  ...panelCardStyle,
-  width: "min(560px, 100%)",
-  background: "#ffffff",
-};
-
-const modalTitleStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: 22,
-  color: "#0f172a",
-};
-
-const modalBodyStyle: React.CSSProperties = {
-  margin: 0,
-  color: "#475569",
-  lineHeight: 1.55,
-  fontSize: 14,
-};
-
-const modalPreviewStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 6,
-  padding: 14,
-  borderRadius: 16,
-  background: "#f8fafc",
-  border: "1px solid rgba(148,163,184,0.16)",
-};
-
-const modalPreviewTitleStyle: React.CSSProperties = {
-  fontWeight: 700,
-  color: "#0f172a",
-};
-
-const modalActionsStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: 8,
-  flexWrap: "wrap",
-};
-
-const emptyStateIconStyle: React.CSSProperties = {
-  display: "inline-flex",
-  justifySelf: "start",
-  padding: "7px 10px",
-  borderRadius: 999,
-  background: "rgba(255,255,255,0.72)",
-  border: "1px solid rgba(148,163,184,0.18)",
-  fontSize: 12,
-  fontWeight: 800,
-  letterSpacing: "0.14em",
-  textTransform: "uppercase",
-  color: "#334155",
-};
-
-function composerAlertStyle(active: boolean): React.CSSProperties {
-  return {
-    display: "grid",
-    gap: 4,
-    padding: "12px 14px",
-    borderRadius: 16,
-    border: active
-      ? "1px solid rgba(220,38,38,0.2)"
-      : "1px solid rgba(59,130,246,0.18)",
-    background: active
-      ? "linear-gradient(135deg, rgba(255,241,242,0.96), rgba(255,255,255,0.96))"
-      : "linear-gradient(135deg, rgba(239,246,255,0.96), rgba(255,255,255,0.96))",
-    color: active ? "#7f1d1d" : "#1e3a8a",
-    fontSize: 12.5,
-    lineHeight: 1.5,
-  };
-}
-
-const emptyReasonCodeStyle: React.CSSProperties = {
-  ...subtleMonoStyle,
-  display: "inline-flex",
-  justifySelf: "start",
-  padding: "6px 9px",
-  borderRadius: 999,
-  background: "rgba(255,255,255,0.62)",
-  border: "1px solid rgba(148,163,184,0.2)",
-};
-
-const emptyStateHintStyle: React.CSSProperties = {
-  color: "#475569",
-  fontSize: 12.5,
-  lineHeight: 1.55,
-  fontWeight: 600,
-};
-
-function tabButtonStyle(active: boolean): React.CSSProperties {
-  return {
-    appearance: "none",
-    border: active ? "1px solid #0f172a" : "1px solid rgba(148,163,184,0.26)",
-    background: active
-      ? "linear-gradient(135deg, #0f172a, #1e293b)"
-      : "rgba(255,255,255,0.92)",
-    color: active ? "#ffffff" : "#0f172a",
-    borderRadius: 999,
-    padding: "9px 15px",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
-    fontWeight: 700,
-    fontSize: 13,
-    cursor: "pointer",
-    boxShadow: active ? "0 10px 24px rgba(15, 23, 42, 0.16)" : "none",
-  };
-}
-
-function tabCountStyle(active: boolean): React.CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 28,
-    height: 22,
-    padding: "0 8px",
-    borderRadius: 999,
-    background: active ? "rgba(255,255,255,0.14)" : "#eef2ff",
-    color: active ? "#ffffff" : "#1d4ed8",
-    fontSize: 12,
-    fontWeight: 800,
-  };
-}
-
-function metricChipStyle(
-  tone: "success" | "warning" | "neutral" | "danger",
-): React.CSSProperties {
-  const palette = {
-    success: {
-      background: "rgba(240,253,244,0.92)",
-      color: "#166534",
-      border: "rgba(22,163,74,0.18)",
-    },
-    warning: {
-      background: "rgba(255,247,237,0.92)",
-      color: "#9a3412",
-      border: "rgba(217,119,6,0.18)",
-    },
-    neutral: {
-      background: "rgba(248,250,252,0.94)",
-      color: "#334155",
-      border: "rgba(100,116,139,0.16)",
-    },
-    danger: {
-      background: "rgba(255,241,242,0.94)",
-      color: "#991b1b",
-      border: "rgba(220,38,38,0.18)",
-    },
-  }[tone];
-
-  return {
-    display: "grid",
-    gap: 4,
-    minWidth: 110,
-    padding: "10px 12px",
-    borderRadius: 16,
-    fontSize: 12,
-    fontWeight: 700,
-    border: `1px solid ${palette.border}`,
-    background: palette.background,
-    color: palette.color,
-  };
 }
