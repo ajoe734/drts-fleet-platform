@@ -60,11 +60,8 @@ function renderProgressBar(status) {
     (id) => !liveIds.has(id),
   ).length;
   const total = tasks.length + archivedDone;
-  const done =
-    tasks.filter((t) => t.status === "done").length + archivedDone;
-  const approved = tasks.filter(
-    (t) => t.status === "review_approved",
-  ).length;
+  const done = tasks.filter((t) => t.status === "done").length + archivedDone;
+  const approved = tasks.filter((t) => t.status === "review_approved").length;
   const open = tasks.filter((t) =>
     ["backlog", "todo", "in_progress", "review", "blocked"].includes(
       String(t.status || "").toLowerCase(),
