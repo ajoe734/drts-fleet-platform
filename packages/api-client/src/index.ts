@@ -76,6 +76,7 @@ import type {
   DriverStartTaskCommand,
   DriverStatementRecord,
   DriverTaskRecord,
+  EmptyStateEnvelope,
   UnifiedDriverTaskView,
   ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
@@ -133,6 +134,7 @@ import type {
   PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
   QuoteCallEtaCommand,
+  RefreshTier,
   RefreshDriverDeviceSessionCommand,
   RejectExclusivityCommand,
   ReimbursementBatchRecord,
@@ -250,8 +252,10 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
-interface ListEnvelope<T> {
+export interface ListEnvelope<T> {
   items: T[];
+  emptyState?: EmptyStateEnvelope;
+  refreshTier?: RefreshTier;
 }
 
 function snakeToCamelCase(key: string): string {
@@ -349,8 +353,16 @@ export class ApiClient {
     path: string,
     options?: RequestOptions,
   ): Promise<T[]> {
+    const result = await this.getListEnvelope<T>(path, options);
+    return result.items ?? [];
+  }
+
+  private async getListEnvelope<T>(
+    path: string,
+    options?: RequestOptions,
+  ): Promise<ListEnvelope<T>> {
     const result = await this.get<T[] | ListEnvelope<T>>(path, options);
-    return Array.isArray(result) ? result : (result.items ?? []);
+    return Array.isArray(result) ? { items: result } : result;
   }
 
   private async request<T>(
@@ -1066,6 +1078,15 @@ export class ApiClient {
     return this.getList<DriverStatementRecord>(url);
   }
 
+  async listDriverStatementsEnvelope(
+    period?: string,
+  ): Promise<ListEnvelope<DriverStatementRecord>> {
+    const url = period
+      ? `/api/driver-statements?period=${encodeURIComponent(period)}`
+      : "/api/driver-statements";
+    return this.getListEnvelope<DriverStatementRecord>(url);
+  }
+
   async getDriverStatement(
     statementId: string,
   ): Promise<DriverStatementRecord> {
@@ -1136,6 +1157,22 @@ export class ApiClient {
       ? `/api/settlement/reconciliation-issues?${query}`
       : "/api/settlement/reconciliation-issues";
     return this.getList<ReconciliationIssueRecord>(url);
+  }
+
+  async listReconciliationIssuesEnvelope(filters?: {
+    status?: ReconciliationIssueRecord["status"];
+    issueType?: ReconciliationIssueRecord["issueType"];
+    channelKey?: string;
+  }): Promise<ListEnvelope<ReconciliationIssueRecord>> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.issueType) params.set("issueType", filters.issueType);
+    if (filters?.channelKey) params.set("channelKey", filters.channelKey);
+    const query = params.toString();
+    const url = query
+      ? `/api/settlement/reconciliation-issues?${query}`
+      : "/api/settlement/reconciliation-issues";
+    return this.getListEnvelope<ReconciliationIssueRecord>(url);
   }
 
   async createReconciliationIssue(
@@ -2103,8 +2140,24 @@ export class ApiClient {
     return this.getList<TenantInvoiceRecord>("/api/settlement/invoices");
   }
 
+  async listPlatformInvoicesEnvelope(): Promise<
+    ListEnvelope<TenantInvoiceRecord>
+  > {
+    return this.getListEnvelope<TenantInvoiceRecord>(
+      "/api/settlement/invoices",
+    );
+  }
+
   async listSettlementMatrix(): Promise<SettlementMatrixRecord[]> {
     return this.getList<SettlementMatrixRecord>("/api/settlement/matrix");
+  }
+
+  async listSettlementMatrixEnvelope(): Promise<
+    ListEnvelope<SettlementMatrixRecord>
+  > {
+    return this.getListEnvelope<SettlementMatrixRecord>(
+      "/api/settlement/matrix",
+    );
   }
 
   async suspendTenant(tenantId: string): Promise<unknown> {

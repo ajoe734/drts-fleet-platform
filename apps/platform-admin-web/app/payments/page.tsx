@@ -20,6 +20,7 @@ import {
 import type {
   CrossAppResourceLink,
   DriverStatementRecord,
+  EmptyStateEnvelope,
   EmptyReason,
   RefreshTier,
   ReconciliationIssueRecord,
@@ -660,7 +661,10 @@ export default function PaymentsPage() {
   const searchParams = useSearchParams();
   const defaults = getPreviousMonthDefaults();
   const theme = PLATFORM_THEME;
-  const refreshIntervalMs = refreshIntervalForTier(PAYMENTS_REFRESH_TIER);
+  const [refreshTier, setRefreshTier] = useState<RefreshTier>(
+    PAYMENTS_REFRESH_TIER,
+  );
+  const refreshIntervalMs = refreshIntervalForTier(refreshTier);
   const focusedIssueId = searchParams.get("issueId");
   const focusedBatchId = searchParams.get("batchId");
   const sourceApp = searchParams.get("fromApp");
@@ -681,6 +685,14 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [invoiceEmptyState, setInvoiceEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [statementEmptyState, setStatementEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [issueEmptyState, setIssueEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
+  const [matrixEmptyState, setMatrixEmptyState] =
+    useState<EmptyStateEnvelope | null>(null);
   const [invoiceFilter, setInvoiceFilter] = useState<
     "all" | "paid" | "draft" | "issued"
   >("all");
@@ -743,23 +755,34 @@ export default function PaymentsPage() {
     setError(null);
     try {
       const [
-        invoiceRecords,
-        statementRecords,
+        invoiceResponse,
+        statementResponse,
         reimbursementRecords,
-        issueRecords,
-        settlementMatrixRecords,
+        issueResponse,
+        settlementMatrixResponse,
       ] = await Promise.all([
-        client.listPlatformInvoices(),
-        client.listDriverStatements(),
+        client.listPlatformInvoicesEnvelope(),
+        client.listDriverStatementsEnvelope(),
         client.listReimbursementBatches(),
-        client.listReconciliationIssues(),
-        client.listSettlementMatrix(),
+        client.listReconciliationIssuesEnvelope(),
+        client.listSettlementMatrixEnvelope(),
       ]);
-      setInvoices(invoiceRecords ?? []);
-      setStatements(statementRecords ?? []);
+      setInvoices(invoiceResponse.items ?? []);
+      setStatements(statementResponse.items ?? []);
       setReimbursements(reimbursementRecords ?? []);
-      setReconciliationIssues(issueRecords ?? []);
-      setSettlementMatrix(settlementMatrixRecords ?? []);
+      setReconciliationIssues(issueResponse.items ?? []);
+      setSettlementMatrix(settlementMatrixResponse.items ?? []);
+      setInvoiceEmptyState(invoiceResponse.emptyState ?? null);
+      setStatementEmptyState(statementResponse.emptyState ?? null);
+      setIssueEmptyState(issueResponse.emptyState ?? null);
+      setMatrixEmptyState(settlementMatrixResponse.emptyState ?? null);
+      setRefreshTier(
+        invoiceResponse.refreshTier ??
+          statementResponse.refreshTier ??
+          issueResponse.refreshTier ??
+          settlementMatrixResponse.refreshTier ??
+          PAYMENTS_REFRESH_TIER,
+      );
       setLastRefreshedAt(new Date().toISOString());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1311,69 +1334,97 @@ export default function PaymentsPage() {
   };
 
   const rootEmptyReason = detectEmptyReason(error);
+  const issueEmptyNextAction =
+    rootEmptyReason === "fetch_failed"
+      ? listAction("retry_refresh", "low")
+      : (issueEmptyState?.nextAction ?? createIssueAction);
+  const invoiceEmptyNextAction =
+    filteredInvoices.length === 0 && invoices.length > 0
+      ? listAction("clear_invoice_filter", "low")
+      : (invoiceEmptyState?.nextAction ?? generateInvoicesAction);
+  const statementEmptyNextAction =
+    statementEmptyState?.nextAction ?? generateStatementsAction ?? undefined;
+  const resolveEnvelopeMessage = useCallback(
+    (
+      emptyState: EmptyStateEnvelope | null,
+      reason: PaymentsEmptyReason,
+      fallback: string,
+    ) => {
+      if (!emptyState) {
+        return defaultEmptyMessage(locale, reason, fallback);
+      }
+      const translated = t(emptyState.messageCode);
+      return translated !== emptyState.messageCode
+        ? translated
+        : defaultEmptyMessage(locale, reason, fallback);
+    },
+    [locale, t],
+  );
   const issueEmptyConfig: EmptyStateConfig = {
-    reason: rootEmptyReason ?? "no_data",
-    message: defaultEmptyMessage(
-      locale,
-      rootEmptyReason ?? "no_data",
+    reason:
+      rootEmptyReason ??
+      (issueEmptyState?.reason as PaymentsEmptyReason | undefined) ??
+      "no_data",
+    message: resolveEnvelopeMessage(
+      issueEmptyState,
+      rootEmptyReason ??
+        (issueEmptyState?.reason as PaymentsEmptyReason | undefined) ??
+        "no_data",
       t("payments.reconciliation.empty"),
     ),
-    ...((
-      rootEmptyReason === "fetch_failed"
-        ? listAction("retry_refresh", "low")
-        : createIssueAction
-    )
-      ? {
-          nextAction:
-            rootEmptyReason === "fetch_failed"
-              ? listAction("retry_refresh", "low")
-              : createIssueAction!,
-        }
-      : {}),
+    ...(issueEmptyNextAction ? { nextAction: issueEmptyNextAction } : {}),
   };
   const matrixEmptyConfig: EmptyStateConfig = {
-    reason: rootEmptyReason ?? "no_data",
-    message: defaultEmptyMessage(
-      locale,
-      rootEmptyReason ?? "no_data",
+    reason:
+      rootEmptyReason ??
+      (matrixEmptyState?.reason as PaymentsEmptyReason | undefined) ??
+      "no_data",
+    message: resolveEnvelopeMessage(
+      matrixEmptyState,
+      rootEmptyReason ??
+        (matrixEmptyState?.reason as PaymentsEmptyReason | undefined) ??
+        "no_data",
       t("payments.matrix.empty"),
     ),
+    ...(matrixEmptyState?.nextAction
+      ? { nextAction: matrixEmptyState.nextAction }
+      : {}),
   };
   const invoiceEmptyConfig: EmptyStateConfig = {
     reason:
       filteredInvoices.length === 0 && invoices.length > 0
         ? "filtered_empty"
-        : (rootEmptyReason ?? "no_data"),
-    message: defaultEmptyMessage(
-      locale,
+        : (rootEmptyReason ??
+          (invoiceEmptyState?.reason as PaymentsEmptyReason | undefined) ??
+          "no_data"),
+    message: resolveEnvelopeMessage(
+      filteredInvoices.length === 0 && invoices.length > 0
+        ? null
+        : invoiceEmptyState,
       filteredInvoices.length === 0 && invoices.length > 0
         ? "filtered_empty"
-        : (rootEmptyReason ?? "no_data"),
+        : (rootEmptyReason ??
+            (invoiceEmptyState?.reason as PaymentsEmptyReason | undefined) ??
+            "no_data"),
       t("payments.noInvoices"),
     ),
-    ...((
-      filteredInvoices.length === 0 && invoices.length > 0
-        ? listAction("clear_invoice_filter", "low")
-        : generateInvoicesAction
-    )
-      ? {
-          nextAction:
-            filteredInvoices.length === 0 && invoices.length > 0
-              ? listAction("clear_invoice_filter", "low")
-              : generateInvoicesAction!,
-        }
-      : {}),
+    ...(invoiceEmptyNextAction ? { nextAction: invoiceEmptyNextAction } : {}),
   };
   const statementEmptyConfig: EmptyStateConfig = {
-    reason: rootEmptyReason ?? "no_data",
-    message: defaultEmptyMessage(
-      locale,
-      rootEmptyReason ?? "no_data",
+    reason:
+      rootEmptyReason ??
+      (statementEmptyState?.reason as PaymentsEmptyReason | undefined) ??
+      "no_data",
+    message: resolveEnvelopeMessage(
+      statementEmptyState,
+      rootEmptyReason ??
+        (statementEmptyState?.reason as PaymentsEmptyReason | undefined) ??
+        "no_data",
       t("payments.noStatements"),
     ),
-    ...(generateStatementsAction
+    ...(statementEmptyNextAction
       ? {
-          nextAction: generateStatementsAction,
+          nextAction: statementEmptyNextAction,
         }
       : {}),
   };
@@ -1515,11 +1566,11 @@ export default function PaymentsPage() {
         };
   const freshnessLabel = lastRefreshedAt
     ? locale === "en"
-      ? `T4 · ${PAYMENTS_REFRESH_TIER} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)}s` : "manual"} · ${formatDateTime(lastRefreshedAt)}`
-      : `T4 · ${PAYMENTS_REFRESH_TIER} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)} 秒` : "手動"} · ${formatDateTime(lastRefreshedAt)}`
+      ? `T4 · ${refreshTier} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)}s` : "manual"} · ${formatDateTime(lastRefreshedAt)}`
+      : `T4 · ${refreshTier} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)} 秒` : "手動"} · ${formatDateTime(lastRefreshedAt)}`
     : locale === "en"
-      ? `T4 · ${PAYMENTS_REFRESH_TIER} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)}s` : "manual"}`
-      : `T4 · ${PAYMENTS_REFRESH_TIER} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)} 秒` : "手動"}`;
+      ? `T4 · ${refreshTier} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)}s` : "manual"}`
+      : `T4 · ${refreshTier} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)} 秒` : "手動"}`;
   const reimbursementQueueHref = focusedBatchId
     ? `/payments/reimbursements?batchId=${encodeURIComponent(focusedBatchId)}`
     : "/payments/reimbursements";
