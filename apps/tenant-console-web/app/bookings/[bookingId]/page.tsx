@@ -9,11 +9,7 @@ import type {
 } from "@drts/contracts";
 import { BookingCommandPanel } from "@/components/booking-command-panel";
 import { RefreshButton } from "@/components/refresh-button";
-import {
-  CalloutPanel,
-  PageHero,
-  SurfaceCard,
-} from "@/components/page-primitives";
+import { CalloutPanel, SurfaceCard } from "@/components/page-primitives";
 import { getTenantClient } from "@/lib/api-client";
 import { formatDateTime, formatMoney, isFutureIso } from "@/lib/formatters";
 import {
@@ -318,8 +314,8 @@ function buildRefreshSummary(booking: BookingDetailRecord): RefreshSummary {
 
   return {
     tierLabel: "T5",
-    tierCode: "medium_slow",
-    cadenceLabel: "slow / 30s cadence",
+    tierCode: "tenant_slow",
+    cadenceLabel: "tenant slow / 30s cadence",
     freshness: refreshMetadata.dataFreshness,
     generatedAt: refreshMetadata.generatedAt,
     source: refreshMetadata.source,
@@ -615,6 +611,17 @@ function getActivityToneClassName(realm: BookingActivityRow["realm"]) {
   }
 }
 
+function getActionAvailabilitySummary(
+  availableActions: ResourceActionDescriptor[],
+): string {
+  const enabled = availableActions.filter((action) => action.enabled);
+  if (enabled.length === 0) {
+    return "No tenant-safe actions are currently enabled in this snapshot.";
+  }
+
+  return enabled.map((action) => action.action).join(", ");
+}
+
 export default async function BookingDetailPage({
   params,
 }: {
@@ -683,49 +690,67 @@ export default async function BookingDetailPage({
         <span>{booking.bookingId}</span>
       </div>
 
-      <PageHero
-        eyebrow="Booking detail"
-        title={`${booking.bookingId} · ${booking.businessDispatchSubtype}`}
-        description={`${booking.pickup.address} -> ${booking.dropoff.address} · ${formatDateTime(booking.reservationWindowStart)} to ${formatDateTime(booking.reservationWindowEnd)}`}
-      />
-
       <section className="booking-detail-hero">
+        <span className="eyebrow">Booking detail</span>
+        <div className="booking-detail-canvas-header">
+          <div className="booking-detail-canvas-copy">
+            <div className="booking-detail-canvas-title">
+              <h1>
+                {booking.bookingId} · {booking.businessDispatchSubtype}
+              </h1>
+              <span className="status-badge">{booking.orderStatus}</span>
+              <span
+                className={`booking-state-pill booking-state-pill-${getCommandStateTone(commandState)}`}
+              >
+                {getCommandStateLabel(commandState)}
+              </span>
+            </div>
+            <p>
+              {booking.pickup.address} → {booking.dropoff.address} ·{" "}
+              {formatDateTime(booking.reservationWindowStart)} to{" "}
+              {formatDateTime(booking.reservationWindowEnd)}
+            </p>
+          </div>
+          <div className="booking-detail-canvas-actions">
+            <RefreshButton label="Refresh snapshot" />
+            <Link
+              className="action-button action-button-secondary"
+              href="#commands"
+            >
+              Review actions
+            </Link>
+            <Link
+              className="action-button action-button-secondary"
+              href={`/bookings/new?clone=${encodeURIComponent(booking.bookingId)}`}
+            >
+              Clone booking
+            </Link>
+          </div>
+        </div>
         <div className="booking-state-banner">
           <div className="booking-state-copy">
-            <span
-              className={`booking-state-pill booking-state-pill-${getCommandStateTone(commandState)}`}
-            >
-              {getCommandStateLabel(commandState)}
-            </span>
             <strong>{commandStateDescription}</strong>
             <p>
-              Action descriptors are{" "}
+              Backend descriptors remain the source of truth for tenant CTAs.
               {actionSource === "published"
-                ? "published by the backend for this booking."
-                : "temporarily derived in the UI until the backend descriptor upgrade lands."}
+                ? " This booking already publishes `availableActions`."
+                : " The API has not published `availableActions` yet, so the UI is showing a temporary fallback."}
             </p>
           </div>
           <div className="booking-state-actions">
-            <div className="booking-refresh-stack">
-              <span className="metric-label">Refresh tier</span>
-              <span
-                className={`booking-refresh-pill booking-refresh-pill-${refreshTone}`}
-              >
-                {refreshSummary.tierCode} · {refreshSummary.cadenceLabel} ·{" "}
-                {refreshSummary.freshness} · {refreshSummary.source}
-              </span>
-            </div>
-            <RefreshButton label="Refresh snapshot" />
+            <span className="metric-label">Refresh tier</span>
+            <span
+              className={`booking-refresh-pill booking-refresh-pill-${refreshTone}`}
+            >
+              {refreshSummary.tierCode} · {refreshSummary.cadenceLabel}
+            </span>
+            <span className="booking-deadline-chip">
+              Editable window · {editableCountdownLabel}
+            </span>
           </div>
         </div>
-        <div className="booking-detail-title-row">
+        <div className="booking-detail-meta-row">
           <div className="chip-row">
-            <span className="status-badge">{booking.orderStatus}</span>
-            <span
-              className={`status-chip${commandState !== "editable" ? " is-warning" : ""}`}
-            >
-              {getCommandStateLabel(commandState)}
-            </span>
             <span className="status-chip">{approvalState}</span>
             <span className="status-chip">
               Actions {actionSource === "published" ? "published" : "derived"}
@@ -734,31 +759,13 @@ export default async function BookingDetailPage({
               {source.badge}
             </span>
           </div>
-          <div className="booking-detail-meta-row">
-            <span className="metric-label">
-              Refresh {refreshSummary.tierLabel}
-            </span>
-            <span
-              className={`booking-refresh-pill booking-refresh-pill-${refreshTone}`}
-            >
-              {refreshSummary.tierCode} · {refreshSummary.cadenceLabel} ·{" "}
-              {refreshSummary.freshness} · {refreshSummary.source}
-            </span>
-            <span className="booking-deadline-chip">
-              Editable window · {editableCountdownLabel}
-            </span>
-          </div>
         </div>
-        <div className="booking-detail-highlights">
+        <div className="booking-detail-highlights booking-detail-highlights-compact">
           <div className="booking-highlight-card">
-            <span className="booking-highlight-label">Available actions</span>
-            <strong>{availableActions.length}</strong>
+            <span className="booking-highlight-label">Action availability</span>
+            <strong>{getActionAvailabilitySummary(availableActions)}</strong>
             <p>
-              {availableActions.length > 0
-                ? availableActions
-                    .map((action: ResourceActionDescriptor) => action.action)
-                    .join(", ")
-                : "No tenant-safe command descriptors published"}
+              {availableActions.length} descriptors published on this record.
             </p>
           </div>
           <div className="booking-highlight-card">
@@ -769,6 +776,21 @@ export default async function BookingDetailPage({
             <p>{editableCountdownLabel}</p>
           </div>
           <div className="booking-highlight-card">
+            <span className="booking-highlight-label">Driver summary</span>
+            <strong>
+              {assignment?.driverName
+                ? `${assignment.driverName}${assignment.vehicleLabel ? ` · ${assignment.vehicleLabel}` : ""}`
+                : "Assignment not published"}
+            </strong>
+            <p>
+              {assignment?.etaMinutes != null
+                ? `ETA ${formatDurationMinutes(assignment.etaMinutes)}`
+                : commandState === "accepted_pending"
+                  ? "Waiting for external confirmation"
+                  : "Tenant-safe assignment lane is blank"}
+            </p>
+          </div>
+          <div className="booking-highlight-card">
             <span className="booking-highlight-label">Approval state</span>
             <strong>{approvalState}</strong>
             <p>
@@ -777,28 +799,6 @@ export default async function BookingDetailPage({
                 : "No request identifiers published"}
             </p>
           </div>
-          <div className="booking-highlight-card">
-            <span className="booking-highlight-label">Empty reasons</span>
-            <strong>{activeEmptyReasons.length} active</strong>
-            <p>
-              {activeEmptyReasons.length > 0
-                ? activeEmptyReasons.map((reason) => reason.reason).join(", ")
-                : "No degraded or empty support lanes in this snapshot"}
-            </p>
-          </div>
-        </div>
-        <div className="booking-detail-link-row">
-          {detailRouteLinks.map((link) => (
-            <Link
-              className="booking-link-chip"
-              href={link.href}
-              key={`${link.app}-${link.label}`}
-              target={link.external ? "_blank" : undefined}
-            >
-              <span>{link.app}</span>
-              {link.label}
-            </Link>
-          ))}
         </div>
       </section>
 
@@ -847,9 +847,9 @@ export default async function BookingDetailPage({
       <section className="booking-detail-layout">
         <div className="booking-detail-main">
           <SurfaceCard
-            kicker="Booking facts"
-            title="Full booking context and editability"
-            description="Q-TEN05 keeps this page availability-first: CTAs come from backend descriptors and the published cutoff window, never from status text alone."
+            kicker="Trip snapshot"
+            title="Booking facts and editability"
+            description="Canvas IA keeps the reservation facts, editable window, and linked tenant entities together so operators can decide quickly whether this booking still needs intervention."
           >
             <dl className="definition-grid booking-detail-grid">
               <div>
@@ -947,9 +947,9 @@ export default async function BookingDetailPage({
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Lifecycle"
+            kicker="State machine"
             title="Current state and timeline"
-            description="The tenant surface shows published milestones, approval state, and recent booking updates without leaking dispatch-only traces."
+            description="This tenant-safe timeline mirrors the booking lifecycle and published edit cutoff without pretending tenant status changes are instant."
           >
             <ol className="timeline-list">
               {timeline.map((item) => (
@@ -993,29 +993,9 @@ export default async function BookingDetailPage({
 
         <div className="booking-detail-side">
           <SurfaceCard
-            kicker="Commands"
-            title="Available actions"
-            description="CTAs stay backend-driven. Disabled actions remain visible with a reason instead of disappearing by role."
-          >
-            {actionSource === "derived" ? (
-              <div className="empty-panel booking-inline-empty">
-                Backend `availableActions[]` have not been published for this
-                booking yet. The UI is rendering a temporary fallback so the
-                detail screen stays usable until the dependency lands.
-              </div>
-            ) : null}
-            <BookingCommandPanel
-              availableActions={availableActions}
-              booking={booking}
-              editableUntil={editableUntil}
-              readOnlyReasonCode={readOnlyReasonCode}
-            />
-          </SurfaceCard>
-
-          <SurfaceCard
-            kicker="Assignment"
-            title="Driver and service execution"
-            description="Driver and vehicle details remain tenant-safe summaries only when the read model publishes them."
+            kicker="Execution"
+            title="Driver and vehicle"
+            description="Assignment details stay concise here: enough to follow the ride, but still within the tenant-safe boundary."
           >
             <dl className="definition-grid">
               <div>
@@ -1054,9 +1034,9 @@ export default async function BookingDetailPage({
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Finance"
+            kicker="Billing"
             title="Fare, invoice, and governance"
-            description="Quoted fare authority and invoice linkage stay adjacent so a tenant user can reconcile the booking without leaving the detail flow."
+            description="The canvas keeps the commercial context in the side rail so finance follow-up stays adjacent to ride status."
           >
             <dl className="definition-grid">
               <div>
@@ -1095,94 +1075,123 @@ export default async function BookingDetailPage({
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Routing"
-            title="Refresh and cross-app deep links"
-            description="Q-X01 freshness metadata and Q-X03 deep links keep this tenant detail honest about both data age and the lane that owns the next action."
+            kicker="Commands"
+            title="Available actions"
+            description="CTAs stay backend-driven. Disabled actions remain visible with a reason instead of disappearing by role."
           >
-            <dl className="definition-grid">
-              <div>
-                <dt>Generated at</dt>
-                <dd>{formatDateTime(refreshSummary.generatedAt)}</dd>
+            <div id="commands" />
+            {actionSource === "derived" ? (
+              <div className="empty-panel booking-inline-empty">
+                Backend `availableActions[]` have not been published for this
+                booking yet. The UI is rendering a temporary fallback so the
+                detail screen stays usable until the dependency lands.
               </div>
-              <div>
-                <dt>Stale after</dt>
-                <dd>
-                  {formatDurationMinutes(
-                    Math.max(
-                      1,
-                      Math.floor(refreshSummary.staleAfterMs / 60_000),
-                    ),
-                  )}
-                </dd>
-              </div>
-              <div>
-                <dt>Freshness</dt>
-                <dd>{refreshSummary.freshness}</dd>
-              </div>
-              <div>
-                <dt>Source</dt>
-                <dd>{refreshSummary.source}</dd>
-              </div>
-            </dl>
-            <div className="booking-route-link-list">
-              <div className="booking-route-link-card">
-                <div className="booking-route-link-header">
-                  <span className="metric-label">tenant-console</span>
-                </div>
-                <strong>Refresh current detail</strong>
-                <p>
-                  Manual refresh remains available even on the T5 cadence when
-                  dispatch action is expected upstream.
-                </p>
-                <RefreshButton label="Refresh now" />
-              </div>
-              {detailRouteLinks.map((link) => (
-                <div className="booking-route-link-card" key={link.label}>
-                  <div className="booking-route-link-header">
-                    <span className="metric-label">{link.app}</span>
-                    {link.external ? (
-                      <span className="status-chip">new tab</span>
-                    ) : null}
-                  </div>
-                  <strong>{link.label}</strong>
-                  <p>{link.note}</p>
-                  <Link
-                    className="text-link"
-                    href={link.href}
-                    target={link.external ? "_blank" : undefined}
-                  >
-                    Open route
-                  </Link>
-                </div>
-              ))}
-            </div>
-          </SurfaceCard>
-
-          <SurfaceCard
-            kicker="Empty states"
-            title="Tenant empty-reason handling"
-            description="Q-X15 requires tenant detail to distinguish why a support lane is blank or degraded. Active reasons are highlighted; the rest stay documented for this route."
-          >
-            <div className="booking-empty-reason-grid">
-              {emptyReasonCards.map((card) => (
-                <div
-                  className={`booking-empty-reason-card booking-empty-reason-card-${getEmptyReasonTone(card.reason)}${card.active ? " is-active" : ""}`}
-                  key={card.reason}
-                >
-                  <div className="booking-empty-reason-header">
-                    <span className="metric-label">{card.reason}</span>
-                    <span className="status-chip">{card.lane}</span>
-                  </div>
-                  <strong>{card.title}</strong>
-                  <p>{card.description}</p>
-                </div>
-              ))}
-            </div>
+            ) : null}
+            <BookingCommandPanel
+              availableActions={availableActions}
+              booking={booking}
+              editableUntil={editableUntil}
+              readOnlyReasonCode={readOnlyReasonCode}
+            />
           </SurfaceCard>
         </div>
       </section>
 
       <section className="surface-grid surface-grid-wide">
+        <SurfaceCard
+          kicker="Routing"
+          title="Refresh and cross-app deep links"
+          description="Q-X01 freshness metadata and Q-X03 new-tab deep links make the tenant detail explicit about data age and which console owns the next action."
+        >
+          <dl className="definition-grid">
+            <div>
+              <dt>Generated at</dt>
+              <dd>{formatDateTime(refreshSummary.generatedAt)}</dd>
+            </div>
+            <div>
+              <dt>Stale after</dt>
+              <dd>
+                {formatDurationMinutes(
+                  Math.max(1, Math.floor(refreshSummary.staleAfterMs / 60_000)),
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Freshness</dt>
+              <dd>{refreshSummary.freshness}</dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd>{refreshSummary.source}</dd>
+            </div>
+          </dl>
+          <div className="booking-route-link-list">
+            <div className="booking-route-link-card">
+              <div className="booking-route-link-header">
+                <span className="metric-label">tenant-console</span>
+              </div>
+              <strong>Refresh current detail</strong>
+              <p>
+                Manual refresh remains available even on the T5 cadence when
+                dispatch action is expected upstream.
+              </p>
+              <RefreshButton label="Refresh now" />
+            </div>
+            {detailRouteLinks.map((link) => (
+              <div className="booking-route-link-card" key={link.label}>
+                <div className="booking-route-link-header">
+                  <span className="metric-label">{link.app}</span>
+                  {link.external ? (
+                    <span className="status-chip">new tab</span>
+                  ) : null}
+                </div>
+                <strong>{link.label}</strong>
+                <p>{link.note}</p>
+                <Link
+                  className="text-link"
+                  href={link.href}
+                  rel={link.external ? "noreferrer" : undefined}
+                  target={link.external ? "_blank" : undefined}
+                >
+                  Open route
+                </Link>
+              </div>
+            ))}
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard
+          kicker="Empty states"
+          title="Tenant empty-reason handling"
+          description="All six `EmptyReason` states remain visually distinct here so support lanes do not collapse into a generic blank panel."
+        >
+          <div className="booking-empty-reason-grid">
+            {emptyReasonCards.map((card) => (
+              <div
+                className={`booking-empty-reason-card booking-empty-reason-card-${getEmptyReasonTone(card.reason)}${card.active ? " is-active" : ""}`}
+                key={card.reason}
+              >
+                <div className="booking-empty-reason-header">
+                  <span className="metric-label">{card.reason}</span>
+                  <span className="status-chip">{card.lane}</span>
+                </div>
+                <strong>{card.title}</strong>
+                <p>{card.description}</p>
+              </div>
+            ))}
+          </div>
+          {activeEmptyReasons.length > 0 ? (
+            <p className="muted-copy">
+              Active on this snapshot:{" "}
+              {activeEmptyReasons.map((reason) => reason.reason).join(", ")}.
+            </p>
+          ) : (
+            <p className="muted-copy">
+              No degraded support lanes are active on this snapshot.
+            </p>
+          )}
+        </SurfaceCard>
+
         <SurfaceCard
           kicker="Business fields"
           title="Additional reservation context"
