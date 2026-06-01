@@ -117,7 +117,7 @@ export function parseJsonLines(text) {
     .filter(Boolean);
 }
 
-export function parseRecentJsonLines(text, limit = 24) {
+export function parseRecentJsonLines(text, limit = 24, excludeTypes = null) {
   const parsed = [];
   const lines = text.split("\n");
 
@@ -125,7 +125,11 @@ export function parseRecentJsonLines(text, limit = 24) {
     const line = lines[index].trim();
     if (!line || !line.startsWith("{")) continue;
     try {
-      parsed.unshift(JSON.parse(line));
+      const entry = JSON.parse(line);
+      // Skip pure-noise event types (e.g. permission_hook) so a flood of them
+      // can't push every high-signal event out of the recent window.
+      if (excludeTypes && excludeTypes.has(entry.type)) continue;
+      parsed.unshift(entry);
       if (parsed.length >= limit) break;
     } catch {
       // Ignore malformed log lines in the preview path.

@@ -67,5 +67,74 @@ class RuntimeStateMigrationTests(unittest.TestCase):
         self.assertEqual(state["dispatch_pauses"], [])
 
 
+
+class PruneExpiredReassignmentGuardsTests(unittest.TestCase):
+    def test_drops_expired_keeps_future_and_unparseable(self) -> None:
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        past = (now - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+        future = (now + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+        state = {
+            "chair_reassignment_guards": {
+                "T1:reviewer": {"task_id": "T1", "expires_at": past},
+                "T2:owner": {"task_id": "T2", "expires_at": future},
+                "T3:owner": {"task_id": "T3", "expires_at": "not-a-date"},
+                "T4:owner": {"task_id": "T4"},  # missing expires_at
+            }
+        }
+        runtime_state.prune_expired_reassignment_guards(state)
+        self.assertEqual(set(state["chair_reassignment_guards"]), {"T2:owner", "T3:owner", "T4:owner"})
+
+    def test_safe_on_missing_or_empty(self) -> None:
+        empty: dict = {}
+        runtime_state.prune_expired_reassignment_guards(empty)  # must not raise
+        self.assertNotIn("chair_reassignment_guards", empty)
+        state = {"chair_reassignment_guards": {}}
+        runtime_state.prune_expired_reassignment_guards(state)
+        self.assertEqual(state["chair_reassignment_guards"], {})
+
+
+
+class StateDigestTests(unittest.TestCase):
+    def test_digest_slims_workers_and_omits_bulk(self) -> None:
+        state = {
+            "version": 3,
+            "last_scan_at": "2026-05-31T00:00:00Z",
+            "seen_event_keys": {f"k{i}": "t" * 400 for i in range(500)},
+            "tasks": {f"T{i}": {"summary_zh": "x" * 500} for i in range(200)},
+            "provider_pauses": {"claude2": {"kind": "auth"}},
+            "failure_streaks": {"X:owner": {"count": 2}},
+            "dispatch_pauses": [{"task_id": "Y"}],
+            "chair_reassignment_guards": {"Z:owner": {"expires_at": "2030-01-01T00:00:00Z"}},
+            "chair_review": {"rotation_index": 1},
+            "supervisor": {"lifecycle": "running"},
+            "workers": {
+                "r1": {
+                    "status": "running", "task_id": "T1", "provider": "claude",
+                    "request_snapshot": {"reason": "owned_ready_dispatch", "message": "m" * 9000},
+                    "command": "c" * 8000, "metadata": {"big": "d" * 8000},
+                },
+            },
+        }
+        digest = runtime_state.build_state_digest(state)
+        # bulk omitted
+        self.assertNotIn("seen_event_keys", digest)
+        self.assertNotIn("tasks", digest)
+        # chair-relevant kept
+        self.assertEqual(digest["provider_pauses"], {"claude2": {"kind": "auth"}})
+        self.assertIn("failure_streaks", digest)
+        self.assertIn("chair_reassignment_guards", digest)
+        # worker slimmed: reason preserved, fat fields dropped
+        w = digest["workers"]["r1"]
+        self.assertEqual(w["reason"], "owned_ready_dispatch")
+        self.assertEqual(w["status"], "running")
+        self.assertNotIn("request_snapshot", w)
+        self.assertNotIn("command", w)
+        self.assertNotIn("metadata", w)
+        # whole digest stays tiny despite fat input
+        import json as _json
+        self.assertLess(len(_json.dumps(digest)), 4096)
+
+
 if __name__ == "__main__":
     unittest.main()
