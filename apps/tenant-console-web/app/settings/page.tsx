@@ -323,6 +323,16 @@ type ActionLink = {
   note?: string;
 };
 
+type ActionTarget = {
+  href?: string;
+  link?: CrossAppResourceLink;
+  note?: string;
+};
+
+type ActionSurface = ActionTarget & {
+  label: string;
+};
+
 type SettingsSitemapEntry = {
   title: string;
   route: string;
@@ -355,8 +365,8 @@ type RuntimeChip =
     };
 
 type ActionSource = {
-  label: string;
-  availableActions?: ResourceActionDescriptor[];
+  surface: ActionSurface;
+  descriptors: ResourceActionDescriptor[];
 };
 
 function formatDate(value: string | null | undefined) {
@@ -599,66 +609,29 @@ function parseListSurface<T>(payload: unknown): RuntimeListSurface<T> {
   };
 }
 
-type ActionLinkOverride = {
-  kind?: ActionLinkKind;
-  surfaceLabel?: string;
-  href?: string;
-  link?: CrossAppResourceLink;
-  note?: string;
-};
-
 function formatActionLabel(action: string) {
   return action.replaceAll("_", " ");
 }
 
-function resolveSettingsActionOverride(
-  action: string,
-): ActionLinkOverride | undefined {
-  switch (action) {
-    case "refresh_snapshot":
-      return { kind: "refresh", note: "refresh-runtime" };
-    case "create_tenant_user":
-    case "update_tenant_role":
-      return { href: "/users" };
-    case "issue_api_key":
-    case "rotate_api_key":
-    case "revoke_api_key":
-      return { href: "/api-keys" };
-    case "create_webhook_endpoint":
-    case "update_webhook_endpoint":
-    case "delete_webhook_endpoint":
-    case "rotate_webhook_secret":
-    case "send_test_webhook":
-      return { href: "/webhooks" };
-    case "view_audit":
-    case "export_audit":
-    case "list_audit":
-      return { href: "/audit", note: "same-tab" };
-    case "update_tenant_billing_profile":
-    case "update_notification_preferences":
-    case "update_notification_subscription":
-    case "update_sla_profile":
-      return { note: "module-route-pending" };
-    default:
-      return undefined;
-  }
-}
-
 function buildActionLink(
   descriptor: ResourceActionDescriptor,
-  overrides?: ActionLinkOverride,
+  surface: ActionSurface,
 ): ActionLink {
-  const resolved = resolveSettingsActionOverride(descriptor.action);
-  const merged = { ...resolved, ...overrides };
-  const href = sanitizeLocalHref(merged.href);
-  const link = merged.link;
-  const kind =
-    merged.kind ?? (href || link ? ("link" as const) : ("unresolved" as const));
+  const href = sanitizeLocalHref(surface.href);
+  const link = surface.link;
   const note =
-    merged.note ??
-    (!href && merged.href && isTenantConsoleLocalRoute(merged.href)
-      ? "route-pending"
-      : undefined);
+    descriptor.action === "refresh_snapshot"
+      ? "refresh-runtime"
+      : (surface.note ??
+        (!href && surface.href && isTenantConsoleLocalRoute(surface.href)
+          ? "route-pending"
+          : undefined));
+  const kind =
+    descriptor.action === "refresh_snapshot"
+      ? "refresh"
+      : href || link
+        ? "link"
+        : "unresolved";
 
   const actionLink: ActionLink = {
     descriptor,
@@ -666,10 +639,7 @@ function buildActionLink(
     kind,
   };
 
-  const surfaceLabel = merged.surfaceLabel;
-  if (surfaceLabel) {
-    actionLink.surfaceLabel = surfaceLabel;
-  }
+  actionLink.surfaceLabel = surface.label;
 
   if (href) {
     actionLink.href = href;
@@ -681,21 +651,6 @@ function buildActionLink(
     actionLink.note = note;
   }
   return actionLink;
-}
-
-function mapActionLinks(
-  actions: ResourceActionDescriptor[] | undefined,
-  defaultOverride?: ActionLinkOverride,
-  overrides: Partial<Record<string, ActionLinkOverride>> = {},
-) {
-  if (!actions || actions.length === 0) return [];
-
-  return actions.flatMap((descriptor) => [
-    buildActionLink(
-      descriptor,
-      overrides[descriptor.action] ?? defaultOverride,
-    ),
-  ]);
 }
 
 function dedupeActionLinks(actions: ActionLink[]) {
@@ -713,15 +668,9 @@ function flattenActionLinks(
 ) {
   return dedupeActionLinks(
     sources.flatMap((source) => {
-      const defaultOverride: ActionLinkOverride = {
-        ...(source?.label ? { surfaceLabel: source.label } : {}),
-      };
-
-      return mapActionLinks(source?.availableActions, defaultOverride).map(
-        (action) => {
-          const surfaceLabel = action.surfaceLabel ?? source?.label;
-          return surfaceLabel ? { ...action, surfaceLabel } : action;
-        },
+      if (!source || source.descriptors.length === 0) return [];
+      return source.descriptors.map((descriptor) =>
+        buildActionLink(descriptor, source.surface),
       );
     }),
   );
@@ -888,6 +837,21 @@ function formatActionTooltip(action: ActionLink) {
   return action.note ?? null;
 }
 
+const TENANT_SETTINGS_EMPTY_REASONS = new Set<EmptyReason>([
+  "no_data",
+  "not_provisioned",
+  "fetch_failed",
+  "permission_denied",
+  "external_unavailable",
+  "filtered_empty",
+]);
+
+function isTenantSettingsEmptyReason(
+  reason: EmptyReason,
+): reason is Exclude<EmptyReason, "driver_not_eligible"> {
+  return TENANT_SETTINGS_EMPTY_REASONS.has(reason);
+}
+
 function getEmptyReasonTone(reason: EmptyReason): CanvasTone {
   if (reason === "fetch_failed") return "danger";
   if (
@@ -949,7 +913,10 @@ function getEmptyReasonCardStyle(reason: EmptyReason): CSSProperties {
   }
 }
 
-function getEmptyReasonCopy(reason: EmptyReason) {
+function getEmptyReasonCopy(reason: EmptyReason): {
+  title: string;
+  body: string;
+} {
   switch (reason) {
     case "no_data":
       return {
@@ -976,15 +943,15 @@ function getEmptyReasonCopy(reason: EmptyReason) {
         title: "外部依賴降級",
         body: "上游身分、通知或第三方 delivery 供應商異常時，要保留降級說明與 trace 入口。",
       };
-    case "driver_not_eligible":
-      return {
-        title: "不適用於租戶頁",
-        body: "這是 driver app 專用空狀態；若後端誤送到 tenant surface，仍保留顯式標記。",
-      };
     case "filtered_empty":
       return {
         title: "篩選後無結果",
         body: "目前篩選條件過窄，因此結果為空；這與真正沒有資料不同。",
+      };
+    default:
+      return {
+        title: "不支援的空狀態",
+        body: "tenant settings 僅支援 packet 定義的 6 種 EmptyReason；其餘值視為 contract mismatch。",
       };
   }
 }
@@ -992,7 +959,37 @@ function getEmptyReasonCopy(reason: EmptyReason) {
 function hasEmptyStateEnvelope(
   surface: EmptyStateSurfaceCandidate,
 ): surface is EmptyStateSurface {
-  return surface.envelope !== null;
+  return (
+    surface.envelope !== null &&
+    isTenantSettingsEmptyReason(surface.envelope.reason)
+  );
+}
+
+function getSurfaceActionDescriptors(surface: {
+  availableActions: ResourceActionDescriptor[];
+  emptyState: EmptyStateEnvelope | null;
+}) {
+  const descriptors = [
+    ...(surface.emptyState?.nextAction ? [surface.emptyState.nextAction] : []),
+    ...surface.availableActions,
+  ];
+  const seen = new Set<string>();
+
+  return descriptors.filter((descriptor) => {
+    const key = [
+      descriptor.action,
+      descriptor.enabled ? "enabled" : "disabled",
+      descriptor.riskLevel,
+      descriptor.disabledReasonCode ?? "",
+      descriptor.requiresReason ? "reason" : "noreason",
+    ].join(":");
+
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function renderEmptyStateSurface(surface: EmptyStateSurface) {
@@ -1283,34 +1280,111 @@ export default async function SettingsPage() {
 
   const generalActions = flattenActionLinks(
     {
-      label: "計費資料",
-      availableActions: data.billingProfile.availableActions,
+      surface: {
+        label: "計費資料",
+        note: "module-route-pending",
+      },
+      descriptors: getSurfaceActionDescriptors(data.billingProfile),
     },
-    { label: "租戶稽核", availableActions: data.auditLogs.availableActions },
+    {
+      surface: {
+        label: "租戶稽核",
+        href: "/audit",
+        note: "same-tab",
+      },
+      descriptors: getSurfaceActionDescriptors(data.auditLogs),
+    },
   );
   const notificationActions = flattenActionLinks(
-    { label: "通知偏好", availableActions: data.preferences.availableActions },
-    { label: "SLA 設定", availableActions: data.sla.availableActions },
+    {
+      surface: {
+        label: "通知偏好",
+        note: "module-route-pending",
+      },
+      descriptors: getSurfaceActionDescriptors(data.preferences),
+    },
+    {
+      surface: {
+        label: "SLA 設定",
+        note: "module-route-pending",
+      },
+      descriptors: getSurfaceActionDescriptors(data.sla),
+    },
   );
   const integrationActions = flattenActionLinks(
-    { label: "API 金鑰", availableActions: data.apiKeys.availableActions },
-    { label: "Webhook", availableActions: data.webhooks.availableActions },
+    {
+      surface: {
+        label: "API 金鑰",
+        href: "/api-keys",
+      },
+      descriptors: getSurfaceActionDescriptors(data.apiKeys),
+    },
+    {
+      surface: {
+        label: "Webhook",
+        href: "/webhooks",
+      },
+      descriptors: getSurfaceActionDescriptors(data.webhooks),
+    },
   );
   const peopleActions = flattenActionLinks({
-    label: "人員與角色",
-    availableActions: data.users.availableActions,
+    surface: {
+      label: "人員與角色",
+      href: "/users",
+    },
+    descriptors: getSurfaceActionDescriptors(data.users),
   });
   const headerActions = flattenActionLinks(
     {
-      label: "計費資料",
-      availableActions: data.billingProfile.availableActions,
+      surface: {
+        label: "計費資料",
+        note: "module-route-pending",
+      },
+      descriptors: getSurfaceActionDescriptors(data.billingProfile),
     },
-    { label: "通知偏好", availableActions: data.preferences.availableActions },
-    { label: "SLA 設定", availableActions: data.sla.availableActions },
-    { label: "人員與角色", availableActions: data.users.availableActions },
-    { label: "API 金鑰", availableActions: data.apiKeys.availableActions },
-    { label: "Webhook", availableActions: data.webhooks.availableActions },
-    { label: "租戶稽核", availableActions: data.auditLogs.availableActions },
+    {
+      surface: {
+        label: "通知偏好",
+        note: "module-route-pending",
+      },
+      descriptors: getSurfaceActionDescriptors(data.preferences),
+    },
+    {
+      surface: {
+        label: "SLA 設定",
+        note: "module-route-pending",
+      },
+      descriptors: getSurfaceActionDescriptors(data.sla),
+    },
+    {
+      surface: {
+        label: "人員與角色",
+        href: "/users",
+      },
+      descriptors: getSurfaceActionDescriptors(data.users),
+    },
+    {
+      surface: {
+        label: "API 金鑰",
+        href: "/api-keys",
+      },
+      descriptors: getSurfaceActionDescriptors(data.apiKeys),
+    },
+    {
+      surface: {
+        label: "Webhook",
+        href: "/webhooks",
+      },
+      descriptors: getSurfaceActionDescriptors(data.webhooks),
+    },
+    {
+      surface: {
+        label: "租戶稽核",
+        href: "/audit",
+        note: "same-tab",
+      },
+      descriptors: getSurfaceActionDescriptors(data.auditLogs),
+    },
   );
   const runtimeSurfaces = [
     {
@@ -1478,80 +1552,66 @@ export default async function SettingsPage() {
       title: "通知訂閱",
       route: "/notifications",
       envelope: data.preferences.emptyState,
-      actions: dedupeActionLinks(
-        mapActionLinks(
-          data.preferences.emptyState?.nextAction
-            ? [data.preferences.emptyState.nextAction]
-            : data.preferences.availableActions,
-          {
-            surfaceLabel: "通知偏好",
-          },
-        ),
-      ),
+      actions: flattenActionLinks({
+        surface: {
+          label: "通知偏好",
+          note: "module-route-pending",
+        },
+        descriptors: getSurfaceActionDescriptors(data.preferences),
+      }),
     },
     {
       key: "users",
       title: "人員與角色",
       route: "/users",
       envelope: data.users.emptyState,
-      actions: dedupeActionLinks(
-        mapActionLinks(
-          data.users.emptyState?.nextAction
-            ? [data.users.emptyState.nextAction]
-            : data.users.availableActions,
-          {
-            surfaceLabel: "人員與角色",
-          },
-        ),
-      ),
+      actions: flattenActionLinks({
+        surface: {
+          label: "人員與角色",
+          href: "/users",
+        },
+        descriptors: getSurfaceActionDescriptors(data.users),
+      }),
     },
     {
       key: "api-keys",
       title: "API 金鑰",
       route: "/api-keys",
       envelope: data.apiKeys.emptyState,
-      actions: dedupeActionLinks(
-        mapActionLinks(
-          data.apiKeys.emptyState?.nextAction
-            ? [data.apiKeys.emptyState.nextAction]
-            : data.apiKeys.availableActions,
-          {
-            surfaceLabel: "API 金鑰",
-          },
-        ),
-      ),
+      actions: flattenActionLinks({
+        surface: {
+          label: "API 金鑰",
+          href: "/api-keys",
+        },
+        descriptors: getSurfaceActionDescriptors(data.apiKeys),
+      }),
     },
     {
       key: "webhooks",
       title: "Webhook",
       route: "/webhooks",
       envelope: data.webhooks.emptyState,
-      actions: dedupeActionLinks(
-        mapActionLinks(
-          data.webhooks.emptyState?.nextAction
-            ? [data.webhooks.emptyState.nextAction]
-            : data.webhooks.availableActions,
-          {
-            surfaceLabel: "Webhook",
-          },
-        ),
-      ),
+      actions: flattenActionLinks({
+        surface: {
+          label: "Webhook",
+          href: "/webhooks",
+        },
+        descriptors: getSurfaceActionDescriptors(data.webhooks),
+      }),
     },
     {
       key: "audit",
       title: "租戶稽核",
       route: "/audit",
       envelope: data.auditLogs.emptyState,
-      actions: dedupeActionLinks(
-        mapActionLinks(
-          data.auditLogs.emptyState?.nextAction
-            ? [data.auditLogs.emptyState.nextAction]
-            : data.auditLogs.availableActions,
-          {
-            surfaceLabel: "租戶稽核",
-          },
-        ),
-      ),
+      actions: flattenActionLinks({
+        surface: {
+          label: "租戶稽核",
+          href: "/audit",
+          note: "same-tab",
+        },
+        descriptors: getSurfaceActionDescriptors(data.auditLogs),
+      }),
     },
   ];
   const notificationEmptyStateSurface =
