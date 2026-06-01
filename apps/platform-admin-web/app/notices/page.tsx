@@ -151,7 +151,11 @@ export default function NoticesPage() {
 
   async function submitPendingAction() {
     if (!pendingAction) return;
-    if (pendingAction.descriptor.requiresReason && !reasonDraft.trim()) return;
+    if (
+      actionRequiresReason(pendingAction, noticeSeverity) &&
+      !reasonDraft.trim()
+    )
+      return;
 
     setSubmitting(true);
     try {
@@ -722,7 +726,7 @@ export default function NoticesPage() {
               <div style={sectionEyebrowStyle}>
                 {formatPlatformCodeLabel(
                   locale,
-                  pendingAction.descriptor.riskLevel,
+                  getPendingActionRiskLevel(pendingAction, noticeSeverity),
                 )}{" "}
                 risk action
               </div>
@@ -749,7 +753,7 @@ export default function NoticesPage() {
               onChange={(event) => setReasonDraft(event.target.value)}
               rows={4}
               placeholder={
-                pendingAction.descriptor.requiresReason
+                actionRequiresReason(pendingAction, noticeSeverity)
                   ? "Required reason"
                   : "Optional audit note"
               }
@@ -775,6 +779,7 @@ export default function NoticesPage() {
                     reasonDraft,
                     noticeTitle,
                     noticeBody,
+                    noticeSeverity,
                   )
                 }
               >
@@ -831,6 +836,20 @@ function NoticeComposer(props: {
       <div style={mutedBodyStyle}>
         Critical and maintenance severities require a reason at publish time and
         fan out to downstream banner surfaces.
+      </div>
+      <div
+        style={composerAlertStyle(createNoticeRequiresReason(props.severity))}
+      >
+        <strong>
+          {createNoticeRequiresReason(props.severity)
+            ? "High-risk publish path"
+            : "Standard publish path"}
+        </strong>
+        <span>
+          {createNoticeRequiresReason(props.severity)
+            ? "The confirmation modal will require a reason and produce an audit-linked receipt."
+            : "Info and warning notices can be published without a mandatory reason."}
+        </span>
       </div>
 
       <div style={noticeComposerGridStyle}>
@@ -1309,8 +1328,8 @@ function getMaintenanceIntentAction(
   maintEnabled: boolean,
 ) {
   return maintEnabled
-    ? (actions.setAction ?? null)
-    : (actions.clearAction ?? null);
+    ? (actions.clearAction ?? null)
+    : (actions.setAction ?? null);
 }
 
 function canSubmitAction(
@@ -1318,19 +1337,54 @@ function canSubmitAction(
   reasonDraft: string,
   noticeTitle: string,
   noticeBody: string,
+  noticeSeverity: PlatformNoticeSeverity,
 ) {
-  if (pendingAction.descriptor.requiresReason && !reasonDraft.trim())
+  if (
+    actionRequiresReason(pendingAction, noticeSeverity) &&
+    !reasonDraft.trim()
+  ) {
     return false;
+  }
   if (pendingAction.kind === "create") {
     return Boolean(noticeTitle.trim() && noticeBody.trim());
   }
   return true;
 }
 
+function createNoticeRequiresReason(severity: PlatformNoticeSeverity) {
+  return severity === "critical" || severity === "maintenance";
+}
+
+function actionRequiresReason(
+  pendingAction: ActionTarget,
+  noticeSeverity: PlatformNoticeSeverity,
+) {
+  if (pendingAction.kind === "create") {
+    return (
+      pendingAction.descriptor.requiresReason ||
+      createNoticeRequiresReason(noticeSeverity)
+    );
+  }
+  return pendingAction.descriptor.requiresReason;
+}
+
+function getPendingActionRiskLevel(
+  pendingAction: ActionTarget,
+  noticeSeverity: PlatformNoticeSeverity,
+): ResourceActionDescriptor["riskLevel"] {
+  if (
+    pendingAction.kind === "create" &&
+    createNoticeRequiresReason(noticeSeverity)
+  ) {
+    return "high";
+  }
+  return pendingAction.descriptor.riskLevel;
+}
+
 function actionLabel(action: string) {
   switch (action) {
     case "create_notice":
-      return "Create notice";
+      return "Publish notice";
     case "resolve_notice":
       return "Resolve notice";
     case "set_maintenance_mode":
@@ -1345,7 +1399,7 @@ function actionLabel(action: string) {
 function actionHelpText(target: ActionTarget | null) {
   if (!target) return "";
   if (target.kind === "create") {
-    return "Publishing a critical or maintenance notice requires a reason and returns an audit receipt for cross-app propagation.";
+    return "Publishing critical or maintenance severity requires a reason and returns an audit receipt for cross-app propagation across ops, tenant, and driver surfaces.";
   }
   if (target.kind === "maintenance") {
     return target.enabled
@@ -1540,19 +1594,19 @@ function snapshotCardStyle(
 
 const pageStyle: React.CSSProperties = {
   display: "grid",
-  gap: 16,
-  paddingBottom: 32,
+  gap: 18,
+  paddingBottom: 40,
 };
 
 const heroStyle: React.CSSProperties = {
   display: "grid",
-  gap: 18,
-  padding: 24,
-  borderRadius: 28,
+  gap: 20,
+  padding: 28,
+  borderRadius: 32,
   background:
-    "linear-gradient(135deg, rgba(255,251,235,0.95), rgba(255,255,255,0.92) 48%, rgba(238,242,255,0.94))",
-  border: "1px solid rgba(30,41,59,0.08)",
-  boxShadow: "0 24px 50px rgba(15, 23, 42, 0.06)",
+    "radial-gradient(circle at top left, rgba(245, 158, 11, 0.18), transparent 28%), radial-gradient(circle at top right, rgba(30, 64, 175, 0.16), transparent 24%), linear-gradient(135deg, rgba(255,251,235,0.96), rgba(255,255,255,0.94) 52%, rgba(239,246,255,0.96))",
+  border: "1px solid rgba(15,23,42,0.08)",
+  boxShadow: "0 30px 60px rgba(15, 23, 42, 0.08)",
 };
 
 const heroHeaderRowStyle: React.CSSProperties = {
@@ -1604,9 +1658,10 @@ const summaryCardStyle: React.CSSProperties = {
   display: "grid",
   gap: 8,
   padding: 16,
-  borderRadius: 18,
-  background: "rgba(255,255,255,0.78)",
-  border: "1px solid rgba(30,41,59,0.08)",
+  borderRadius: 20,
+  background: "rgba(255,255,255,0.8)",
+  border: "1px solid rgba(15,23,42,0.08)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.6)",
 };
 
 const summaryValueStyle: React.CSSProperties = {
@@ -1625,10 +1680,10 @@ const panelCardStyle: React.CSSProperties = {
   display: "grid",
   gap: 14,
   padding: 20,
-  borderRadius: 22,
+  borderRadius: 24,
   background: "rgba(255,255,255,0.92)",
-  border: "1px solid rgba(30,41,59,0.08)",
-  boxShadow: "0 12px 30px rgba(15, 23, 42, 0.04)",
+  border: "1px solid rgba(15,23,42,0.08)",
+  boxShadow: "0 16px 34px rgba(15, 23, 42, 0.05)",
 };
 
 const receiptCardStyle: React.CSSProperties = {
@@ -1688,6 +1743,8 @@ const toolbarCardStyle: React.CSSProperties = {
   gap: 16,
   flexWrap: "wrap",
   alignItems: "center",
+  background:
+    "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,250,252,0.96))",
 };
 
 const tabRowStyle: React.CSSProperties = {
@@ -1967,11 +2024,12 @@ const linkRowStyle: React.CSSProperties = {
   gap: 8,
   alignItems: "center",
   textDecoration: "none",
-  color: "#1d4ed8",
+  color: "#0f172a",
   padding: "10px 12px",
   borderRadius: 14,
-  background: "#f8fafc",
-  border: "1px solid rgba(148,163,184,0.16)",
+  background:
+    "linear-gradient(135deg, rgba(239,246,255,0.88), rgba(248,250,252,0.94))",
+  border: "1px solid rgba(148,163,184,0.18)",
 };
 
 const readOnlyNoteStyle: React.CSSProperties = {
@@ -2048,12 +2106,36 @@ const modalActionsStyle: React.CSSProperties = {
 };
 
 const emptyStateIconStyle: React.CSSProperties = {
+  display: "inline-flex",
+  justifySelf: "start",
+  padding: "7px 10px",
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.72)",
+  border: "1px solid rgba(148,163,184,0.18)",
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: "0.14em",
   textTransform: "uppercase",
   color: "#334155",
 };
+
+function composerAlertStyle(active: boolean): React.CSSProperties {
+  return {
+    display: "grid",
+    gap: 4,
+    padding: "12px 14px",
+    borderRadius: 16,
+    border: active
+      ? "1px solid rgba(220,38,38,0.2)"
+      : "1px solid rgba(59,130,246,0.18)",
+    background: active
+      ? "linear-gradient(135deg, rgba(255,241,242,0.96), rgba(255,255,255,0.96))"
+      : "linear-gradient(135deg, rgba(239,246,255,0.96), rgba(255,255,255,0.96))",
+    color: active ? "#7f1d1d" : "#1e3a8a",
+    fontSize: 12.5,
+    lineHeight: 1.5,
+  };
+}
 
 const emptyReasonCodeStyle: React.CSSProperties = {
   ...subtleMonoStyle,
@@ -2075,17 +2157,20 @@ const emptyStateHintStyle: React.CSSProperties = {
 function tabButtonStyle(active: boolean): React.CSSProperties {
   return {
     appearance: "none",
-    border: active ? "1px solid #1e3a8a" : "1px solid rgba(148,163,184,0.26)",
-    background: active ? "#0f172a" : "#ffffff",
+    border: active ? "1px solid #0f172a" : "1px solid rgba(148,163,184,0.26)",
+    background: active
+      ? "linear-gradient(135deg, #0f172a, #1e293b)"
+      : "rgba(255,255,255,0.92)",
     color: active ? "#ffffff" : "#0f172a",
     borderRadius: 999,
-    padding: "8px 14px",
+    padding: "9px 15px",
     display: "inline-flex",
     alignItems: "center",
     gap: 8,
     fontWeight: 700,
     fontSize: 13,
     cursor: "pointer",
+    boxShadow: active ? "0 10px 24px rgba(15, 23, 42, 0.16)" : "none",
   };
 }
 
