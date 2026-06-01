@@ -1328,7 +1328,10 @@ export default function TripScreen() {
     ? getActionDisabledReasonLabel(relayAcceptDescriptor?.disabledReasonCode)
     : null;
   // EmptyReason (Q-X15) — distinct not-ready treatment when there is no task.
-  const tripEmptyReason = classifyTripEmptyReason(error, getDriverIdentityIssue());
+  const tripEmptyReason = classifyTripEmptyReason(
+    error,
+    getDriverIdentityIssue(),
+  );
   const tripEmptyStateModel = getTripEmptyStateModel(tripEmptyReason, error);
   const headerSubtitle = taskDetail
     ? taskDetail.orderId
@@ -1393,25 +1396,26 @@ export default function TripScreen() {
           ? relayAcceptDisabledReason
           : completionSubmitBlocker === "proof_requirements_unavailable"
             ? "完單前需先載入訂單佐證需求，請重新整理後再送出。"
-      : completionSubmitBlocker === "expense_amount_invalid"
-        ? "費用金額格式無效，請輸入有效的正數後再完成行程。"
-        : completionSubmitBlocker === "tracking_unavailable"
-          ? (locationTrackingMessage ??
-            "請先恢復定位追蹤，再完成行程並寫入距離與時長。")
-          : proofRequirements.minPhotoCount > 0 && missingRequiredPhotos > 0
-            ? `完單前仍需補上 ${missingRequiredPhotos} 張佐證照片。`
-            : signoffRequirementMissing
-              ? "此行程仍缺少簽收識別資料。"
-              : expenseRequirementMissing
-                ? "此行程仍缺少完整費用佐證。"
-                : forwardedOutcomeSummary
-                  ? (forwardedActionResult?.driverMessage ??
-                    forwardedOutcomeSummary.title)
-                  : tripExperienceState === "forwarded_offered"
-                    ? tripAuthorityBanner.description
-                    : primaryTripAction
-                      ? primaryTripAction.helperText
-                      : tripStatusPresentation.detail;
+            : completionSubmitBlocker === "expense_amount_invalid"
+              ? "費用金額格式無效，請輸入有效的正數後再完成行程。"
+              : completionSubmitBlocker === "tracking_unavailable"
+                ? (locationTrackingMessage ??
+                  "請先恢復定位追蹤，再完成行程並寫入距離與時長。")
+                : proofRequirements.minPhotoCount > 0 &&
+                    missingRequiredPhotos > 0
+                  ? `完單前仍需補上 ${missingRequiredPhotos} 張佐證照片。`
+                  : signoffRequirementMissing
+                    ? "此行程仍缺少簽收識別資料。"
+                    : expenseRequirementMissing
+                      ? "此行程仍缺少完整費用佐證。"
+                      : forwardedOutcomeSummary
+                        ? (forwardedActionResult?.driverMessage ??
+                          forwardedOutcomeSummary.title)
+                        : tripExperienceState === "forwarded_offered"
+                          ? tripAuthorityBanner.description
+                          : primaryTripAction
+                            ? primaryTripAction.helperText
+                            : tripStatusPresentation.detail;
   const completeActionDisabled =
     primaryTripAction?.action === "complete"
       ? shouldDisableCompleteTripAction({
@@ -1995,7 +1999,7 @@ export default function TripScreen() {
         taskDetail ? (
           <View style={styles.footerBar}>
             <Text style={styles.footerNotice}>
-              {bottomPrimaryAction || bottomSecondaryAction
+              {bottomPrimaryAction || bottomSecondaryAction || isAcceptPending
                 ? footerNotice
                 : getIdleBottomActionLabel(tripExperienceState)}
             </Text>
@@ -2073,7 +2077,9 @@ export default function TripScreen() {
         </Pill>
         <Text style={styles.refreshTierMeta}>
           {`資料 ${getRefreshFreshnessLabel(tripRefreshMetadata)}${
-            lastLoadedAtMs ? ` · 更新於 ${formatShortTime(new Date(lastLoadedAtMs).toISOString())}` : ""
+            lastLoadedAtMs
+              ? ` · 更新於 ${formatShortTime(new Date(lastLoadedAtMs).toISOString())}`
+              : ""
           }`}
         </Text>
       </View>
