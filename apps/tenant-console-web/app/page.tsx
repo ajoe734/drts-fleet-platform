@@ -37,6 +37,21 @@ export const dynamic = "force-dynamic";
 
 const HOME_REFRESH_TIER: RefreshTier = "slow";
 const HOME_REFRESH_MS = 30_000;
+const EXISTING_APP_ROUTES = new Set([
+  "/",
+  "/api-keys",
+  "/audit",
+  "/bookings",
+  "/bookings/new",
+  "/cost-centers",
+  "/invoices",
+  "/partner",
+  "/passengers",
+  "/rules",
+  "/settings",
+  "/users",
+  "/webhooks",
+]);
 
 const th = buildCanvasTheme({
   surface: "tenant",
@@ -543,6 +558,13 @@ function buildCrossAppHref(link: CrossAppResourceLink) {
         : (process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ??
           "http://localhost:3002");
   return `${base}${link.route}`;
+}
+
+function hasExistingAppRoute(href: string) {
+  if (/^https?:\/\//.test(href)) return true;
+  if (EXISTING_APP_ROUTES.has(href)) return true;
+  if (/^\/bookings\/[^/]+$/.test(href)) return true;
+  return false;
 }
 
 function buildWorkspaceAvailableActions(
@@ -1159,6 +1181,7 @@ function ActionLink({
   disabled?: boolean;
   variant?: "primary" | "secondary" | "ghost";
 }) {
+  const routeAvailable = external || hasExistingAppRoute(href);
   const styles =
     variant === "primary"
       ? {
@@ -1194,7 +1217,7 @@ function ActionLink({
     textDecoration: "none",
   };
 
-  if (disabled) {
+  if (disabled || !routeAvailable) {
     return (
       <span aria-disabled="true" style={commonStyle}>
         {label}
@@ -1668,8 +1691,16 @@ export default async function HomePage() {
                       </strong>
                       <div style={smallMetaStyle}>{section.description}</div>
                     </div>
-                    {section.routes.map((route) =>
-                      route.enabled ? (
+                    {section.routes.map((route) => {
+                      const routeAvailable = hasExistingAppRoute(route.href);
+                      const canNavigate = route.enabled && routeAvailable;
+                      const statusLabel = !route.enabled
+                        ? "hidden"
+                        : routeAvailable
+                          ? "visible"
+                          : "spec-only";
+
+                      return canNavigate ? (
                         <Link
                           key={route.key}
                           href={route.href}
@@ -1682,7 +1713,7 @@ export default async function HomePage() {
                             </div>
                           </div>
                           <CanvasPill theme={th} tone={route.tone}>
-                            visible
+                            {statusLabel}
                           </CanvasPill>
                         </Link>
                       ) : (
@@ -1698,11 +1729,11 @@ export default async function HomePage() {
                             </div>
                           </div>
                           <CanvasPill theme={th} tone={route.tone}>
-                            hidden
+                            {statusLabel}
                           </CanvasPill>
                         </div>
-                      ),
-                    )}
+                      );
+                    })}
                   </div>
                 ))}
               </div>
