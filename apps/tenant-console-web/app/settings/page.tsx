@@ -28,6 +28,7 @@ import {
   CanvasPageHeader,
   CanvasPill,
   CanvasSelect,
+  type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
@@ -61,7 +62,7 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const topRowStyle: CSSProperties = {
+const topCanvasGridStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 16,
@@ -80,12 +81,10 @@ const generalGridStyle: CSSProperties = {
 };
 
 const generalCardStyle: CSSProperties = {
-  flex: "1.4 1 460px",
   minWidth: 0,
 };
 
 const statusCardStyle: CSSProperties = {
-  flex: "1 1 320px",
   minWidth: 0,
 };
 
@@ -126,6 +125,52 @@ const chipRowStyle: CSSProperties = {
 const mutedFootnoteStyle: CSSProperties = {
   fontSize: 11,
   color: th.textDim,
+};
+
+const runtimeStripStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+};
+
+const runtimeChipStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  minHeight: 32,
+  padding: "6px 10px",
+  borderRadius: 999,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceLo,
+  fontSize: 11.5,
+  color: th.textMuted,
+};
+
+const runtimeLabelStyle: CSSProperties = {
+  fontFamily: th.monoFamily,
+  fontSize: 10.5,
+  letterSpacing: 0.3,
+  textTransform: "uppercase",
+  color: th.textDim,
+};
+
+const summaryGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  gap: 16,
+};
+
+const summaryStackStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+};
+
+const actionPanelStyle: CSSProperties = {
+  padding: "12px 14px",
+  borderRadius: 10,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceLo,
 };
 
 const checklistStyle: CSSProperties = {
@@ -265,6 +310,18 @@ type EmptyReasonCard = {
   body: string;
   nextAction?: ActionLink;
 };
+
+type RuntimeChip =
+  | {
+      label: string;
+      value: string;
+      mono?: true;
+    }
+  | {
+      label: string;
+      value: string;
+      tone: CanvasTone;
+    };
 
 type ActionSource = {
   availableActions?: ResourceActionDescriptor[];
@@ -750,14 +807,14 @@ function renderActionLink(action: ActionLink, key: string) {
   );
 }
 
-function getFreshnessTone(refresh: UiRefreshMetadata) {
+function getFreshnessTone(refresh: UiRefreshMetadata): CanvasTone {
   if (refresh.dataFreshness === "fresh") return "success";
   if (refresh.dataFreshness === "stale") return "warn";
   if (refresh.dataFreshness === "degraded") return "warn";
   return "neutral";
 }
 
-function getEmptyReasonTone(reason: EmptyReason) {
+function getEmptyReasonTone(reason: EmptyReason): CanvasTone {
   if (reason === "fetch_failed") return "danger";
   if (
     reason === "permission_denied" ||
@@ -767,6 +824,55 @@ function getEmptyReasonTone(reason: EmptyReason) {
     return "warn";
   }
   return "neutral";
+}
+
+function getEmptyReasonCardStyle(reason: EmptyReason): CSSProperties {
+  const shared = {
+    padding: "12px 12px 14px",
+    borderRadius: 10,
+    background: th.surfaceLo,
+  } satisfies CSSProperties;
+
+  switch (reason) {
+    case "fetch_failed":
+      return {
+        ...shared,
+        border: `1px solid ${th.danger}`,
+        boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.04)",
+      };
+    case "permission_denied":
+      return {
+        ...shared,
+        border: `1px solid ${th.warn}`,
+        background:
+          "linear-gradient(180deg, rgba(245, 158, 11, 0.08), rgba(6, 11, 19, 0.6))",
+      };
+    case "external_unavailable":
+      return {
+        ...shared,
+        border: `1px dashed ${th.warn}`,
+        background:
+          "linear-gradient(180deg, rgba(234, 179, 8, 0.08), rgba(6, 11, 19, 0.6))",
+      };
+    case "not_provisioned":
+      return {
+        ...shared,
+        border: `1px dashed ${th.accent}`,
+      };
+    case "filtered_empty":
+      return {
+        ...shared,
+        border: `1px solid ${th.border}`,
+        background:
+          "linear-gradient(180deg, rgba(15, 118, 110, 0.09), rgba(6, 11, 19, 0.62))",
+      };
+    case "no_data":
+    default:
+      return {
+        ...shared,
+        border: `1px solid ${th.border}`,
+      };
+  }
 }
 
 async function loadSettingsData(): Promise<SettingsData> {
@@ -1056,6 +1162,28 @@ export default async function SettingsPage() {
     mappedAvailableActions,
     ACTION_GROUPS.page,
   );
+  const runtimeChips: RuntimeChip[] = [
+    {
+      label: "refresh tier",
+      value: SETTINGS_REFRESH.label,
+      mono: true,
+    },
+    {
+      label: "freshness",
+      value: data.refresh.dataFreshness,
+      tone: getFreshnessTone(data.refresh),
+    },
+    {
+      label: "generated",
+      value: formatUpdated(data.refresh.generatedAt),
+      mono: true,
+    },
+    {
+      label: "source",
+      value: data.refresh.source,
+      mono: true,
+    },
+  ];
 
   const sitemapEntries: SettingsSitemapEntry[] = [
     {
@@ -1258,7 +1386,30 @@ export default async function SettingsPage() {
           />
         ) : null}
 
-        <div style={topRowStyle}>
+        <div style={runtimeStripStyle}>
+          {runtimeChips.map((chip) => (
+            <div key={chip.label} style={runtimeChipStyle}>
+              <span style={runtimeLabelStyle}>{chip.label}</span>
+              {"tone" in chip ? (
+                <CanvasPill theme={th} tone={chip.tone} dot>
+                  {chip.value}
+                </CanvasPill>
+              ) : (
+                <span
+                  style={
+                    chip.mono
+                      ? { fontFamily: th.monoFamily, color: th.text }
+                      : { color: th.text }
+                  }
+                >
+                  {chip.value}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div style={topCanvasGridStyle}>
           <CanvasCard theme={th} title="一般" style={generalCardStyle}>
             <div style={generalGridStyle}>
               <CanvasField theme={th} label="租戶代碼 · tenant_code">
@@ -1289,25 +1440,9 @@ export default async function SettingsPage() {
               items={[
                 { k: "STAGE", v: currentStageValue, mono: true },
                 {
-                  k: "refresh tier",
-                  v: SETTINGS_REFRESH.label,
-                  mono: true,
-                },
-                {
-                  k: "freshness",
-                  v: (
-                    <CanvasPill
-                      theme={th}
-                      tone={getFreshnessTone(data.refresh)}
-                      dot
-                    >
-                      {data.refresh.dataFreshness}
-                    </CanvasPill>
-                  ),
-                },
-                {
                   k: "啟用模組",
                   v: `${localModuleCount} / ${moduleCatalogCount}`,
+                  mono: true,
                 },
                 {
                   k: "配額",
@@ -1330,7 +1465,7 @@ export default async function SettingsPage() {
           </CanvasCard>
         </div>
 
-        <div style={splitGridStyle}>
+        <div style={summaryGridStyle}>
           <CanvasCard
             theme={th}
             title="設定 sitemap"
@@ -1382,32 +1517,53 @@ export default async function SettingsPage() {
 
           <CanvasCard
             theme={th}
-            title="一般 posture"
-            subtitle="不新增未發布欄位；只展示 contracts 已提供的 tenant identity 與 billing snapshot。"
+            title="可用動作與 posture"
+            subtitle="header CTA 與下列模組捷徑全部取自 runtime `availableActions`。"
           >
-            <CanvasDL
-              theme={th}
-              cols={2}
-              items={[
-                { k: "realm", v: data.identity?.realm ?? "tenant", mono: true },
-                { k: "auth mode", v: authMode, mono: true },
-                { k: "角色摘要", v: roleSummary, mono: true },
-                {
-                  k: "billing email",
-                  v: data.billingProfile?.email ?? "—",
-                  mono: true,
-                },
-                {
-                  k: "billing address",
-                  v: billingAddress,
-                },
-                {
-                  k: "last snapshot",
-                  v: formatUpdated(data.refresh.generatedAt),
-                  mono: true,
-                },
-              ]}
-            />
+            <div style={summaryStackStyle}>
+              <div style={actionPanelStyle}>
+                <div style={sectionLabelStyle}>availableActions</div>
+                {pageActions.length > 0 ? (
+                  <div style={actionRowStyle}>
+                    {pageActions.map((action, index) =>
+                      renderActionLink(action, `page-action-${index}`),
+                    )}
+                  </div>
+                ) : (
+                  <div style={emptyStateStyle}>
+                    目前 actor 沒有 backend 可用動作
+                  </div>
+                )}
+              </div>
+
+              <CanvasDL
+                theme={th}
+                cols={2}
+                items={[
+                  {
+                    k: "realm",
+                    v: data.identity?.realm ?? "tenant",
+                    mono: true,
+                  },
+                  { k: "auth mode", v: authMode, mono: true },
+                  { k: "角色摘要", v: roleSummary, mono: true },
+                  {
+                    k: "billing email",
+                    v: data.billingProfile?.email ?? "—",
+                    mono: true,
+                  },
+                  {
+                    k: "billing address",
+                    v: billingAddress,
+                  },
+                  {
+                    k: "last snapshot",
+                    v: formatUpdated(data.refresh.generatedAt),
+                    mono: true,
+                  },
+                ]}
+              />
+            </div>
           </CanvasCard>
         </div>
 
@@ -1658,12 +1814,7 @@ export default async function SettingsPage() {
                 {emptyReasonCards.map((card) => (
                   <div
                     key={card.reason}
-                    style={{
-                      padding: "12px 12px 14px",
-                      borderRadius: 10,
-                      border: `1px dashed ${th.border}`,
-                      background: th.surfaceLo,
-                    }}
+                    style={getEmptyReasonCardStyle(card.reason)}
                   >
                     <div
                       style={{ display: "flex", alignItems: "center", gap: 8 }}
