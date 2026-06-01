@@ -20,6 +20,7 @@ ROOT = Path(
 ).resolve()
 STATUS_FILE = ROOT / "ai-status.json"
 LOG_FILE = ROOT / "ai-activity-log.jsonl"
+TASK_ARCHIVE_FILE = ROOT / "ai-task-archive.jsonl"
 CURRENT_WORK_FILE = ROOT / "current-work.md"
 DOCS_SITE_DIR = ROOT / "docs-site"
 
@@ -589,7 +590,113 @@ def atomic_write_text(path: Path, content: str) -> None:
     tmp_path.replace(path)
 
 
+def _retention_keeps() -> dict[str, int]:
+    """Resolve status-file retention keep counts from orchestrator config.
+
+    ai_status.py is the dominant writer of ai-status.json (the worker
+    ``ai-status.sh`` CLI runs it on every status mutation), so the same prune
+    that ``supervisor.write_status_with_prune`` applies MUST also live here —
+    otherwise handoffs/tasks regrow unbounded (17.8k handoffs / 8.7 MB by the
+    2026-05-31 incident) and the file blows past the 256 KB cap the
+    chair/coordination worker Read tool enforces, re-breaking machine-truth
+    reads. Keeps are read from the orchestrator config (config.local.json
+    overrides config.json), matching the supervisor. See
+    feedback_ai_status_handoff_bloat.
+    """
+    supervisor_cfg: dict[str, Any] = {}
+    for name in ("config.json", "config.local.json"):
+        path = ROOT / ".orchestrator" / name
+        try:
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                section = data.get("supervisor") if isinstance(data, dict) else None
+                if isinstance(section, dict):
+                    supervisor_cfg.update(section)
+        except (OSError, ValueError):
+            continue
+    return {
+        "handoffs": int(supervisor_cfg.get("handoff_keep_count", 200)),
+        "tasks": int(supervisor_cfg.get("task_keep_count", 150)),
+        "blockers": int(supervisor_cfg.get("blocker_keep_count", 100)),
+    }
+
+
+def archive_task_bodies(dropped: list[dict[str, Any]]) -> None:
+    """Append the full bodies of pruned done-tasks to ``ai-task-archive.jsonl``
+    so completed-task detail (summary/owner/review notes/artifacts) stays
+    auditable after the live status file drops them — ``archived_task_ids`` only
+    keeps the id. Append-only JSONL + O_APPEND is used deliberately: ai_status.py
+    is the dominant, highly concurrent writer (~153k invocations), so a
+    read-modify-write of a single JSON object would race and lose records. A task
+    is dropped from ``state["tasks"]`` exactly once, so no de-dup is needed here.
+    Best-effort: archival must never block or fail a status write."""
+    if not dropped:
+        return
+    stamp = iso_now()
+    try:
+        with TASK_ARCHIVE_FILE.open("a", encoding="utf-8") as handle:
+            for task in dropped:
+                if not task.get("id"):
+                    continue
+                record = dict(task)
+                record["_archived_at"] = stamp
+                record["_archived_by"] = "ai_status.py"
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def prune_state_for_size(state: dict[str, Any]) -> None:
+    """Bound the unbounded audit tails (done handoffs, done tasks, resolved
+    blockers) in place. Mirrors supervisor.{prune_done_handoffs,prune_done_tasks,
+    prune_blockers}; pending handoffs and open blockers are never trimmed, and
+    dropped done-task ids are recorded in ``archived_task_ids`` (dependency-safe
+    because ``dependencies_satisfied`` treats a missing dep as archived/done).
+    Dropped done-task bodies are appended to ``ai-task-archive.jsonl`` first so
+    their detail stays auditable (see ``archive_task_bodies``)."""
+    keeps = _retention_keeps()
+
+    handoffs = state.get("handoffs")
+    if isinstance(handoffs, list):
+        keep = keeps["handoffs"]
+        done = [x for x in handoffs if str(x.get("status") or "").lower() == "done"]
+        if len(done) > keep:
+            pending = [x for x in handoffs if str(x.get("status") or "").lower() != "done"]
+            state["handoffs"] = pending + done[-keep:]
+
+    tasks = state.get("tasks")
+    if isinstance(tasks, list):
+        keep = keeps["tasks"]
+        done = [t for t in tasks if str(t.get("status") or "").lower() == "done"]
+        if len(done) > keep:
+            dropped = done[:-keep] if keep > 0 else done
+            dropped_ids = {t.get("id") for t in dropped if t.get("id")}
+            if dropped_ids:
+                archive_task_bodies(dropped)
+                state["tasks"] = [
+                    t
+                    for t in tasks
+                    if str(t.get("status") or "").lower() != "done" or t.get("id") not in dropped_ids
+                ]
+                archived = state.setdefault("archived_task_ids", [])
+                if isinstance(archived, list):
+                    already = set(archived)
+                    for tid in (t.get("id") for t in dropped):
+                        if tid and tid not in already:
+                            archived.append(tid)
+                            already.add(tid)
+
+    blockers = state.get("blockers")
+    if isinstance(blockers, list):
+        keep = keeps["blockers"]
+        resolved = [b for b in blockers if str(b.get("status") or "").lower() == "resolved"]
+        if len(resolved) > keep:
+            dropped = {id(b) for b in (resolved[:-keep] if keep > 0 else resolved)}
+            state["blockers"] = [b for b in blockers if id(b) not in dropped]
+
+
 def save_state(state: dict[str, Any]) -> None:
+    prune_state_for_size(state)
     atomic_write_text(STATUS_FILE, json.dumps(state, indent=2, ensure_ascii=False) + "\n")
 
 

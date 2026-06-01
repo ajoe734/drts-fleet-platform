@@ -50,13 +50,19 @@ function basename(value) {
 
 // ── Progress bar ──────────────────────────────────────────────────────────────
 
-function renderProgressBar(tasks) {
-  const total = (tasks || []).length;
-  const done = (tasks || []).filter((t) => t.status === "done").length;
-  const approved = (tasks || []).filter(
-    (t) => t.status === "review_approved",
+function renderProgressBar(status) {
+  const tasks = status?.tasks || [];
+  const liveIds = new Set(tasks.map((t) => t.id));
+  // Archived task ids are completed tasks pruned from the live set to keep
+  // ai-status.json under the worker read cap. Count them as done so progress
+  // reflects cumulative completion, not just the post-prune live window.
+  const archivedDone = (status?.archived_task_ids || []).filter(
+    (id) => !liveIds.has(id),
   ).length;
-  const open = (tasks || []).filter((t) =>
+  const total = tasks.length + archivedDone;
+  const done = tasks.filter((t) => t.status === "done").length + archivedDone;
+  const approved = tasks.filter((t) => t.status === "review_approved").length;
+  const open = tasks.filter((t) =>
     ["backlog", "todo", "in_progress", "review", "blocked"].includes(
       String(t.status || "").toLowerCase(),
     ),
@@ -76,8 +82,13 @@ function renderOverviewMetrics(status, orchState, approvalQueue) {
   if (!container) return;
 
   const tasks = status.tasks || [];
-  const total = tasks.length;
-  const done = tasks.filter((t) => t.status === "done").length;
+  const liveIds = new Set(tasks.map((t) => t.id));
+  // Pruned-but-completed tasks (see renderProgressBar) count toward cumulative done.
+  const archivedDone = (status.archived_task_ids || []).filter(
+    (id) => !liveIds.has(id),
+  ).length;
+  const total = tasks.length + archivedDone;
+  const done = tasks.filter((t) => t.status === "done").length + archivedDone;
   const approvedTasks = tasks.filter((t) => t.status === "review_approved");
   const backlogTasks = tasks.filter((t) =>
     ["backlog", "todo", "in_progress", "review", "blocked"].includes(
@@ -508,6 +519,12 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
 
 // ── Activity log ──────────────────────────────────────────────────────────────
 
+// Event types that are pure permission/audit noise — emitted by every
+// interactive session's permission hook, not real orchestrator activity.
+// Excluded from the recent-activity window so they can't crowd out the
+// high-signal events the feed is meant to surface.
+const LOW_SIGNAL_ACTIVITY_TYPES = new Set(["permission_hook"]);
+
 function renderActivity(entries, options = {}) {
   const container = qs("#activity-list");
   if (!container) return;
@@ -870,7 +887,11 @@ async function loadActivityFeed(status, orchState, approvalQueue, version) {
   activityLoadPromise = fetchText(DATA_FILES.activity, { timeoutMs: 2500 })
     .then((activityText) => {
       if (version !== renderVersion) return;
-      const logs = parseRecentJsonLines(activityText, 32);
+      const logs = parseRecentJsonLines(
+        activityText,
+        150,
+        LOW_SIGNAL_ACTIVITY_TYPES,
+      );
       if (logs.length) renderActivity(logs);
       activityLoadedVersion = version;
     })
@@ -960,7 +981,7 @@ async function render({ syncFirst = false } = {}) {
     const agentStates = deriveAgentState(status, orchState);
     latestCoreState = { status, orchState, approvalQueue, snapshot };
 
-    renderProgressBar(status.tasks);
+    renderProgressBar(status);
     renderOverviewMetrics(status, orchState, approvalQueue);
     renderSystemStatus(status, orchState, approvalQueue, agentStates);
     renderWorkload(status);
