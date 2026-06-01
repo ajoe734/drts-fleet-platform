@@ -1,5 +1,10 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4669,6 +4674,17 @@ export interface PlatformAdminUserRecord {
   status: PlatformAdminUserStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PlatformAdminUserListItem extends PlatformAdminUserRecord {
+  availableActions: ResourceActionDescriptor[];
+}
+
+export interface PlatformAdminUsersListResponse {
+  items: PlatformAdminUserListItem[];
+  emptyState?: EmptyStateEnvelope;
+  refresh: UiRefreshMetadata;
+  availableActions: ResourceActionDescriptor[];
 }
 
 export interface CreatePlatformAdminUserCommand {

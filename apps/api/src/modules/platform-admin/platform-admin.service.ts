@@ -8,8 +8,11 @@ import type {
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
+  EmptyStateEnvelope,
   GeneratePlacardVersionCommand,
   PlacardVersionRecord,
+  PlatformAdminUserListItem,
+  PlatformAdminUsersListResponse,
   PlatformAdminUserRecord,
   PlatformMaintenanceModeRecord,
   PlatformNoticeRecord,
@@ -18,8 +21,10 @@ import type {
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
+  ResourceActionDescriptor,
   SetPlatformMaintenanceModeCommand,
   TenantInvoiceRecord,
+  UiRefreshMetadata,
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
@@ -77,22 +82,67 @@ const PLACARD_SEED: PlacardVersionRecord[] = [
 
 const PLATFORM_ADMIN_USERS_SEED: PlatformAdminUserRecord[] = [
   {
-    userId: "pa-admin-001",
-    email: "admin@platform.drts",
-    displayName: "Platform Superadmin",
+    userId: "pa-user-001",
+    email: "yc.lin@drts.io",
+    displayName: "林宜君",
     roleCode: "superadmin",
     status: "active",
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-04-01T00:00:00.000Z",
+    createdAt: "2026-01-10T00:00:00.000Z",
+    updatedAt: "2026-05-25T08:40:00.000Z",
   },
   {
-    userId: "pa-operator-001",
-    email: "ops@platform.drts",
-    displayName: "Ops Operator",
+    userId: "pa-user-002",
+    email: "fang.wang@drts.io",
+    displayName: "王芳",
+    roleCode: "admin",
+    status: "active",
+    createdAt: "2026-01-14T00:00:00.000Z",
+    updatedAt: "2026-05-25T08:42:00.000Z",
+  },
+  {
+    userId: "pa-user-003",
+    email: "wei.chang@drts.io",
+    displayName: "張薇",
+    roleCode: "admin",
+    status: "active",
+    createdAt: "2026-02-02T00:00:00.000Z",
+    updatedAt: "2026-05-25T08:44:00.000Z",
+  },
+  {
+    userId: "pa-user-004",
+    email: "jun.li@drts.io",
+    displayName: "李俊",
     roleCode: "operator",
     status: "active",
-    createdAt: "2026-02-01T00:00:00.000Z",
-    updatedAt: "2026-04-01T00:00:00.000Z",
+    createdAt: "2026-02-18T00:00:00.000Z",
+    updatedAt: "2026-05-24T11:15:00.000Z",
+  },
+  {
+    userId: "pa-user-005",
+    email: "wei.chen@drts.io",
+    displayName: "陳維",
+    roleCode: "operator",
+    status: "active",
+    createdAt: "2026-03-03T00:00:00.000Z",
+    updatedAt: "2026-05-21T09:10:00.000Z",
+  },
+  {
+    userId: "pa-user-006",
+    email: "ken.liao@drts.io",
+    displayName: "Ken Liao",
+    roleCode: "viewer",
+    status: "invited",
+    createdAt: "2026-03-18T00:00:00.000Z",
+    updatedAt: "2026-05-19T06:30:00.000Z",
+  },
+  {
+    userId: "pa-user-007",
+    email: "cs.huang@drts.io",
+    displayName: "黃啟賢",
+    roleCode: "viewer",
+    status: "suspended",
+    createdAt: "2026-01-22T00:00:00.000Z",
+    updatedAt: "2026-04-21T05:55:00.000Z",
   },
 ];
 
@@ -575,8 +625,28 @@ export class PlatformAdminService implements OnModuleInit {
 
   // ── Platform Admin Users ──────────────────────────────────────────────────
 
-  listPlatformAdminUsers(): PlatformAdminUserRecord[] {
-    return this.platformAdminUsers.map((u) => ({ ...u }));
+  listPlatformAdminUsers(): PlatformAdminUsersListResponse {
+    const availableActions = this.buildPlatformAdminUsersPageActions();
+    const items = this.platformAdminUsers.map((user) =>
+      this.buildPlatformAdminUserListItem(user),
+    );
+
+    return {
+      items,
+      refresh: this.buildPlatformAdminUsersRefreshMetadata(),
+      availableActions,
+      ...(items.length === 0
+        ? {
+            emptyState: {
+              reason: "no_data",
+              messageCode: "platform_users_no_data",
+              nextAction: availableActions.find(
+                (action) => action.action === "create_staff_user",
+              ),
+            } satisfies EmptyStateEnvelope,
+          }
+        : {}),
+    };
   }
 
   createPlatformAdminUser(
@@ -1035,6 +1105,74 @@ export class PlatformAdminService implements OnModuleInit {
       artifactDownloadUrl: downloadMetadata.downloadUrl,
       artifactExpiresAt: downloadMetadata.expiresAt,
       downloadMetadata,
+    };
+  }
+
+  private buildPlatformAdminUsersPageActions(): ResourceActionDescriptor[] {
+    return [
+      {
+        action: "refresh",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "create_staff_user",
+        enabled: true,
+        riskLevel: "medium",
+      },
+    ];
+  }
+
+  private buildPlatformAdminUsersRefreshMetadata(): UiRefreshMetadata {
+    return {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: 30_000,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+  }
+
+  private buildPlatformAdminUserListItem(
+    user: PlatformAdminUserRecord,
+  ): PlatformAdminUserListItem {
+    const isLastSuperadmin =
+      user.roleCode === "superadmin" &&
+      this.platformAdminUsers.filter(
+        (candidate) =>
+          candidate.roleCode === "superadmin" &&
+          candidate.status !== "suspended",
+      ).length <= 1;
+
+    const availableActions: ResourceActionDescriptor[] = [
+      {
+        action: "update_role",
+        enabled: !isLastSuperadmin,
+        ...(isLastSuperadmin ? { disabledReasonCode: "last_superadmin" } : {}),
+        riskLevel: "medium",
+      },
+      user.status === "suspended"
+        ? {
+            action: "reactivate",
+            enabled: true,
+            riskLevel: "high",
+            requiresReason: true,
+          }
+        : {
+            action: "suspend",
+            enabled: user.status === "active" && !isLastSuperadmin,
+            ...(user.status === "invited"
+              ? { disabledReasonCode: "invite_pending" }
+              : isLastSuperadmin
+                ? { disabledReasonCode: "last_superadmin" }
+                : {}),
+            riskLevel: "high",
+            requiresReason: true,
+          },
+    ];
+
+    return {
+      ...user,
+      availableActions,
     };
   }
 

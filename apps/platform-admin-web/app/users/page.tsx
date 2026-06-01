@@ -17,6 +17,8 @@ import type {
   CrossAppResourceLink,
   EmptyReason,
   EmptyStateEnvelope,
+  PlatformAdminUserListItem,
+  PlatformAdminUsersListResponse,
   PlatformAdminUserRecord,
   PlatformAdminUserRole,
   PlatformAdminUserStatus,
@@ -39,16 +41,8 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
-type UsersApiPayload = {
-  items?: PlatformAdminUserRecord[];
-  emptyState?: EmptyStateEnvelope;
-  refresh?: Partial<UiRefreshMetadata>;
-  availableActions?: ResourceActionDescriptor[];
-};
-
-type UserRow = PlatformAdminUserRecord &
+type UserRow = PlatformAdminUserListItem &
   Record<string, unknown> & {
-    availableActions: ResourceActionDescriptor[];
     auditLink: CrossAppResourceLink;
   };
 
@@ -999,18 +993,13 @@ export default function UsersPage() {
     setError(null);
 
     try {
-      const payload = await client.get<UsersApiPayload>(
-        "/api/platform-admin/users",
-      );
+      const payload: PlatformAdminUsersListResponse =
+        await client.listPlatformAdminUsers();
       const items = payload.items ?? [];
       setUsers(
         items.map((user) => {
-          const record = user as PlatformAdminUserRecord & {
-            availableActions?: ResourceActionDescriptor[];
-          };
           return {
             ...user,
-            availableActions: record.availableActions ?? [],
             auditLink: buildAuditLink(user),
             _selected: user.status === "suspended",
           };

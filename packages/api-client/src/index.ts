@@ -116,6 +116,7 @@ import type {
   PartnerIngressCredentialRecord,
   PlacardVersionRecord,
   PlatformAdminTenantRecord,
+  PlatformAdminUsersListResponse,
   PlatformAdminUserRecord,
   PlatformEarningsByPlatformResponse,
   PlatformEarningsSummary,
@@ -2015,8 +2016,10 @@ export class ApiClient {
     );
   }
 
-  async listPlatformAdminUsers(): Promise<PlatformAdminUserRecord[]> {
-    return this.getList<PlatformAdminUserRecord>("/api/platform-admin/users");
+  async listPlatformAdminUsers(): Promise<PlatformAdminUsersListResponse> {
+    return this.get<PlatformAdminUsersListResponse>(
+      "/api/platform-admin/users",
+    );
   }
 
   async createPlatformAdminUser(
