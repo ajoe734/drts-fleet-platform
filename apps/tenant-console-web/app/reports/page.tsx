@@ -6,6 +6,7 @@ import type {
   ReportJobRecord,
   ReportJobStatus,
   ResourceActionDescriptor,
+  TenantReportJobListData,
   UiRefreshMetadata,
 } from "@drts/contracts";
 import {
@@ -52,9 +53,19 @@ const REPORTS_STALE_AFTER_MS = 15 * 60 * 1000;
 // never hard-coded by role. There is no single page-resource record to carry
 // these, so the route publishes the descriptors the backend authorizes for
 // `/reports`; per-job authority instead rides on `job.availableActions`.
-const ROUTE_ACTIONS: ResourceActionDescriptor[] = [
-  { action: "create_report_job", enabled: true, riskLevel: "medium" },
-  { action: "refresh_report_jobs", enabled: true, riskLevel: "low" },
+const FALLBACK_ROUTE_ACTIONS: ResourceActionDescriptor[] = [
+  {
+    action: "create_report_job",
+    enabled: false,
+    riskLevel: "medium",
+    disabledReasonCode: "reports_unavailable",
+  },
+  {
+    action: "refresh_report_jobs",
+    enabled: false,
+    riskLevel: "low",
+    disabledReasonCode: "reports_unavailable",
+  },
 ];
 
 const EMPTY_REASONS: EmptyReason[] = [
@@ -256,6 +267,7 @@ type ReportRow = {
   jobType: string;
   scope: string;
   period: string;
+  failureReason: string | null;
   status: ReportJobStatus;
   statusTone: CanvasTone;
   format: string;
@@ -341,16 +353,18 @@ async function loadReportsData(): Promise<ReportsData> {
   const client = getTenantClient();
 
   try {
+    const payload: TenantReportJobListData =
+      await client.listTenantReportJobsData();
     return {
-      jobs: (await client.listTenantReportJobs()) as ReportJobRecord[],
+      jobs: payload.items as ReportJobRecord[],
       errors: [],
-      availableActions: ROUTE_ACTIONS,
+      availableActions: payload.availableActions ?? FALLBACK_ROUTE_ACTIONS,
     };
   } catch (error) {
     return {
       jobs: [],
       errors: [toErrorMessage(error)],
-      availableActions: ROUTE_ACTIONS,
+      availableActions: FALLBACK_ROUTE_ACTIONS,
     };
   }
 }
@@ -732,6 +746,11 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
         <div>
           <div>{row.scope}</div>
           <div style={mutedTextStyle}>{row.period}</div>
+          {row.failureReason ? (
+            <div style={{ ...mutedTextStyle, color: "#f3a6ad" }}>
+              err: {row.failureReason}
+            </div>
+          ) : null}
         </div>
       ),
     },
@@ -810,6 +829,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
       jobType: formatJobType(job.jobType),
       scope: getScopeLabel(job),
       period: getPeriodLabel(job),
+      failureReason: job.lastError ?? null,
       status: job.status,
       statusTone: formatStatusTone(job.status),
       format: job.format,

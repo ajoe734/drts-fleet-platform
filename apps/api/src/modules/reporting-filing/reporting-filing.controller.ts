@@ -88,7 +88,14 @@ export class ReportingFilingController {
       identity,
       this.requireTenantId(tenantId),
     );
-    return toApiSuccessEnvelope(toApiListData(items), requestId);
+    return toApiSuccessEnvelope(
+      {
+        ...toApiListData(items),
+        availableActions:
+          this.reportingFilingService.buildTenantReportRouteActions(identity),
+      },
+      requestId,
+    );
   }
 
   @Get("reports/:jobId")

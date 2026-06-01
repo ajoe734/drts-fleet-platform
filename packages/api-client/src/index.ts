@@ -144,6 +144,7 @@ import type {
   ReportJobAccepted,
   ReportJobDetailRecord,
   ReportJobRecord,
+  TenantReportJobListData,
   ResolveReconciliationIssueCommand,
   ResolveComplaintCaseCommand,
   ResolveEvidenceDeletionExceptionCommand,
@@ -1343,6 +1344,10 @@ export class ApiClient {
 
   async listTenantReportJobs(): Promise<ReportJobRecord[]> {
     return this.getList<ReportJobRecord>("/api/tenant/reports/jobs");
+  }
+
+  async listTenantReportJobsData(): Promise<TenantReportJobListData> {
+    return this.get<TenantReportJobListData>("/api/tenant/reports/jobs");
   }
 
   async getTenantReportJob(jobId: string): Promise<ReportJobDetailRecord> {

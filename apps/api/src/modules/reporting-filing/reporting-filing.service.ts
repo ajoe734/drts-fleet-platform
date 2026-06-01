@@ -16,6 +16,7 @@ import type {
   ReportArtifactRecord,
   ReportJobAccepted,
   ReportJobRecord,
+  ResourceActionDescriptor,
   SettlementMatrixRecord,
 } from "@drts/contracts";
 
@@ -27,6 +28,7 @@ import {
 } from "../../common/evidence-governance";
 import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
 import {
   ReportingFilingRepository,
   type PersistReportingFilingChanges,
@@ -212,6 +214,7 @@ export class ReportingFilingService implements OnModuleInit {
       status: "queued",
       filters: normalizedFilters,
       artifact: null,
+      lastError: null,
       rows: [],
       partnerRevenueRows: [],
       settlementMatrix: [],
@@ -287,6 +290,31 @@ export class ReportingFilingService implements OnModuleInit {
     );
 
     return items;
+  }
+
+  buildTenantReportRouteActions(
+    identity: BootstrapRequestIdentity | null,
+  ): ResourceActionDescriptor[] {
+    const canManageReports =
+      this.hasAnyRole(identity, ["tc_admin", "tc_finance"]) ||
+      identity?.realm === "platform" ||
+      identity?.realm === "ops";
+
+    return [
+      {
+        action: "create_report_job",
+        enabled: canManageReports,
+        riskLevel: "medium",
+        ...(canManageReports
+          ? {}
+          : { disabledReasonCode: "report_write_role_required" }),
+      },
+      {
+        action: "refresh_report_jobs",
+        enabled: true,
+        riskLevel: "low",
+      },
+    ];
   }
 
   getReportJob(
@@ -607,8 +635,11 @@ export class ReportingFilingService implements OnModuleInit {
     error: unknown,
     requestId?: string,
   ) {
+    const errorMessage =
+      error instanceof Error ? error.message : "unknown reporting error";
     job.status = "failed";
     job.updatedAt = new Date().toISOString();
+    job.lastError = errorMessage;
     this.persistChanges(
       {
         reportJobs: [this.cloneStoredReportJob(job)],
@@ -627,8 +658,7 @@ export class ReportingFilingService implements OnModuleInit {
         newValuesSummary: {
           jobType: job.jobType,
           status: job.status,
-          error:
-            error instanceof Error ? error.message : "unknown reporting error",
+          error: errorMessage,
         },
       },
       requestId,
@@ -901,6 +931,7 @@ export class ReportingFilingService implements OnModuleInit {
     return {
       ...job,
       filters: { ...job.filters },
+      availableActions: this.buildJobAvailableActions(job),
       artifact: job.artifact
         ? {
             ...job.artifact,
@@ -941,6 +972,55 @@ export class ReportingFilingService implements OnModuleInit {
         reportingArtifacts: [...row.reportingArtifacts],
       })),
     };
+  }
+
+  private buildJobAvailableActions(
+    job: StoredReportJob,
+  ): ResourceActionDescriptor[] {
+    const downloadable =
+      Boolean(job.artifact?.downloadUrl) &&
+      (!job.artifact?.expiresAt ||
+        new Date(job.artifact.expiresAt).getTime() > Date.now());
+    const rerunnable = job.status === "failed" || job.status === "expired";
+
+    return [
+      {
+        action: "download_artifact",
+        enabled: downloadable,
+        riskLevel: "low",
+        ...(downloadable
+          ? {}
+          : {
+              disabledReasonCode: job.artifact
+                ? "artifact_expired"
+                : "artifact_pending",
+            }),
+      },
+      {
+        action: "rerun_failed_job",
+        enabled: rerunnable,
+        riskLevel: "medium",
+        ...(rerunnable
+          ? {}
+          : {
+              disabledReasonCode:
+                job.status === "queued" || job.status === "running"
+                  ? "job_in_progress"
+                  : "rerun_not_required",
+            }),
+      },
+    ];
+  }
+
+  private hasAnyRole(
+    identity: BootstrapRequestIdentity | null,
+    roles: string[],
+  ) {
+    if (!identity) {
+      return false;
+    }
+
+    return roles.some((role) => identity.roles.includes(role));
   }
 
   private cloneFilingPackage(
