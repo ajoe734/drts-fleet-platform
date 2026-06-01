@@ -238,7 +238,7 @@ type PassengerActionLink = {
   label: string;
   href: string | undefined;
   disabled: boolean | undefined;
-  disabledReasonCode?: string;
+  disabledReasonCode?: string | undefined;
   variant: "primary" | "secondary" | "ghost" | undefined;
   danger: boolean | undefined;
   target?: "_blank";
@@ -314,6 +314,13 @@ type PassengerPageData = {
 type PassengerTabDefinition = {
   key: PassengerTabKey;
   label: string;
+};
+
+const FALLBACK_REFRESH: UiRefreshMetadata = {
+  generatedAt: "",
+  staleAfterMs: T5_REFRESH_MS,
+  dataFreshness: "unknown",
+  source: "live",
 };
 
 const PASSENGER_TABS: PassengerTabDefinition[] = [
@@ -452,14 +459,12 @@ async function fetchPassengersEnvelope(): Promise<PassengerPageData> {
     >;
     const payload = envelope.data;
     const passengers = [...(payload.items ?? [])].sort(comparePassengers);
-    const refresh =
+    const refresh: UiRefreshMetadata =
       "refresh" in payload && payload.refresh
         ? payload.refresh
         : {
+            ...FALLBACK_REFRESH,
             generatedAt: envelope.meta.timestamp,
-            staleAfterMs: T5_REFRESH_MS,
-            dataFreshness: "unknown",
-            source: "live",
           };
 
     const duplicateWarnings =
