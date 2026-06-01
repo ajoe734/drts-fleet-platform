@@ -678,6 +678,32 @@ function collectCrossAppLinks(
   return Array.from(deduped.values());
 }
 
+function collectUniqueActions(
+  ...sources: (ResourceActionDescriptor[] | undefined)[]
+) {
+  const deduped = new Map<string, ResourceActionDescriptor>();
+  sources.flat().forEach((action) => {
+    if (!action) {
+      return;
+    }
+    const key = getNoticeActionIntent(action.action);
+    if (!deduped.has(key)) {
+      deduped.set(key, action);
+    }
+  });
+  return Array.from(deduped.values());
+}
+
+function findActionByIntent(
+  actions: ResourceActionDescriptor[],
+  intent: NoticeActionIntent,
+) {
+  return (
+    actions.find((action) => getNoticeActionIntent(action.action) === intent) ??
+    null
+  );
+}
+
 function MetricCard({
   label,
   value,
@@ -993,13 +1019,36 @@ export default function NoticesPage() {
   const historyLinks = collectCrossAppLinks(
     ...historyRows.map((notice) => notice.crossAppLinks),
   );
+  const noticesTabActions = collectUniqueActions(
+    ...notices.map((notice) => notice.availableActions),
+    noticesEmptyState?.nextAction ? [noticesEmptyState.nextAction] : undefined,
+  );
+  const historyTabActions = collectUniqueActions(
+    ...historyRows.map((notice) => notice.availableActions),
+    noticesEmptyState?.nextAction ? [noticesEmptyState.nextAction] : undefined,
+  );
+  const createNoticeAction = findActionByIntent(
+    noticesTabActions,
+    "create_notice",
+  );
+  const currentTabActions =
+    activeTab === "notices"
+      ? noticesTabActions
+      : activeTab === "maint"
+        ? maintenanceAction
+          ? [maintenanceAction]
+          : []
+        : historyTabActions;
 
   const updateTab = useCallback(
     (nextTab: NoticeTab) => {
       setActiveTab(nextTab);
       const params = new URLSearchParams(searchParams.toString());
       params.set("tab", nextTab);
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      const nextQuery = params.toString();
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
+        scroll: false,
+      });
     },
     [pathname, router, searchParams],
   );
@@ -1108,6 +1157,16 @@ export default function NoticesPage() {
     } finally {
       setSavingMaintenance(false);
     }
+  }
+
+  function getTabBadge(tab: NoticeTab) {
+    if (tab === "notices") {
+      return String(notices.length);
+    }
+    if (tab === "maint") {
+      return maintenance?.enabled ? copy.enabled : copy.disabled;
+    }
+    return String(historyRows.length);
   }
 
   function renderLinkSet(links?: CrossAppResourceLink[]) {
@@ -2006,6 +2065,15 @@ export default function NoticesPage() {
             {TAB_PARAM_VALUES.map((tab, index) => (
               <div
                 key={tab}
+                role="button"
+                tabIndex={0}
+                onClick={() => updateTab(tab)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    updateTab(tab);
+                  }
+                }}
                 style={{
                   borderRadius: 16,
                   border: "1px solid rgba(148,163,184,0.22)",
@@ -2014,9 +2082,22 @@ export default function NoticesPage() {
                     activeTab === tab
                       ? "linear-gradient(180deg, rgba(15,23,42,0.06), rgba(255,255,255,0.96))"
                       : "rgba(255,255,255,0.82)",
+                  cursor: "pointer",
                 }}
               >
-                <div style={metaLabelStyle}>{`0${index + 1}`}</div>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    alignItems: "center",
+                  }}
+                >
+                  <div style={metaLabelStyle}>{`0${index + 1}`}</div>
+                  <span className="admin-badge admin-badge--neutral">
+                    {getTabBadge(tab)}
+                  </span>
+                </div>
                 <div style={{ marginTop: 8, fontWeight: 800 }}>
                   {copy.tabs[tab]}
                 </div>
@@ -2098,13 +2179,32 @@ export default function NoticesPage() {
           ))}
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {activeTab === "notices" ? (
+          {activeTab === "notices" && createNoticeAction ? (
             <button
               type="button"
               className="admin-btn admin-btn--primary"
+              disabled={!createNoticeAction.enabled}
+              title={
+                createNoticeAction.disabledReasonCode ?? copy.actionUnavailable
+              }
               onClick={() => setShowCreate((current) => !current)}
             >
               {showCreate ? copy.closeComposer : copy.createNotice}
+            </button>
+          ) : null}
+          {activeTab === "maint" && maintenanceAction ? (
+            <button
+              type="button"
+              className="admin-btn admin-btn--primary"
+              disabled={savingMaintenance || !maintenanceAction.enabled}
+              title={maintenanceAction.disabledReasonCode ?? undefined}
+              onClick={() => void handleSaveMaintenance()}
+            >
+              {savingMaintenance
+                ? copy.savingMaintenance
+                : maintenanceAction.action === "clear_maintenance_mode"
+                  ? copy.clearAction
+                  : copy.saveMaintenance}
             </button>
           ) : null}
           <button
@@ -2117,7 +2217,31 @@ export default function NoticesPage() {
         </div>
       </div>
 
-      {activeTab === "notices" && showCreate ? (
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {currentTabActions.length > 0 ? (
+          currentTabActions.map((action) => (
+            <ActionMeta
+              key={`${activeTab}-${action.action}`}
+              locale={locale}
+              action={action}
+              {...(activeTab === "maint"
+                ? {
+                    label:
+                      action.action === "clear_maintenance_mode"
+                        ? copy.clearAction
+                        : copy.setAction,
+                  }
+                : {})}
+            />
+          ))
+        ) : (
+          <span className="admin-badge admin-badge--neutral">
+            {copy.readOnly}
+          </span>
+        )}
+      </div>
+
+      {activeTab === "notices" && showCreate && createNoticeAction ? (
         <div
           className="admin-card"
           style={{
