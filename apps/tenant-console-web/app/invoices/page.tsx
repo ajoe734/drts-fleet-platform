@@ -36,7 +36,13 @@ const th = buildCanvasTheme({
   density: "compact",
 });
 
-const REFRESH_TIER: RefreshTier = "slow";
+const INVOICES_REFRESH_POLICY: {
+  packetTier: string;
+  runtimeTier: RefreshTier;
+} = {
+  packetTier: "T5",
+  runtimeTier: "slow",
+};
 const STATUS_FILTERS = ["all", "draft", "issued", "paid", "overdue"] as const;
 const pageStyle: CSSProperties = {
   padding: 24,
@@ -577,6 +583,16 @@ function formatRefreshWindow(staleAfterMs: number | null | undefined) {
   return `${totalMinutes}m`;
 }
 
+function formatRefreshTierBadge(
+  policy: typeof INVOICES_REFRESH_POLICY,
+  refreshWindow: string | null,
+) {
+  const refreshTier = getRefreshTierDescriptor(policy.runtimeTier);
+  return `${policy.packetTier} · ${policy.runtimeTier} · ${refreshTier.cadenceLabel}${
+    refreshWindow ? ` · staleAfter ${refreshWindow}` : ""
+  }`;
+}
+
 function buildInvoiceDetailHref(
   invoiceId: string,
   filters?: Pick<InvoiceFilters, "query" | "period" | "status">,
@@ -629,8 +645,6 @@ function resolveEmptyStateActionHref(action: ResourceActionDescriptor) {
     case "clear_filters":
     case "refresh_snapshot":
       return "/invoices";
-    case "review_access":
-      return "/users";
     case "open_billing":
     case "open_billing_setup":
       return "/billing";
@@ -658,6 +672,44 @@ function getEmptyStateActionLabel(action: ResourceActionDescriptor) {
     default:
       return formatActionLabel(action);
   }
+}
+
+function describeEmptyStateAction(action: ResourceActionDescriptor) {
+  if (action.enabled) {
+    return getEmptyStateActionLabel(action);
+  }
+
+  if (action.disabledReasonCode) {
+    return `${getEmptyStateActionLabel(action)} (${action.disabledReasonCode})`;
+  }
+
+  return `${getEmptyStateActionLabel(action)} 已停用`;
+}
+
+function renderEmptyStateAction(action: ResourceActionDescriptor) {
+  const href = resolveEmptyStateActionHref(action);
+  const label = describeEmptyStateAction(action);
+
+  if (action.enabled && href) {
+    return (
+      <Link
+        href={href}
+        style={{
+          ...actionChipStyle,
+          color: th.accent,
+          background: th.surface,
+        }}
+      >
+        {label}
+      </Link>
+    );
+  }
+
+  return (
+    <span style={{ ...actionChipStyle, opacity: 0.52, cursor: "not-allowed" }}>
+      {label}
+    </span>
+  );
 }
 
 function describeAction(action: InvoiceActionView) {
@@ -803,8 +855,11 @@ export default async function InvoicesPage({
   const emptyDescription = computedEmptyReason
     ? describeEmptyState(computedEmptyReason)
     : null;
-  const refreshTier = getRefreshTierDescriptor(REFRESH_TIER);
   const refreshWindow = formatRefreshWindow(data.refresh?.staleAfterMs);
+  const refreshTierBadge = formatRefreshTierBadge(
+    INVOICES_REFRESH_POLICY,
+    refreshWindow,
+  );
 
   const selectedInvoice =
     filteredInvoices.find(
@@ -830,13 +885,6 @@ export default async function InvoicesPage({
   const selectedInvoiceDetailHref = selectedInvoice
     ? buildInvoiceDetailHref(selectedInvoice.invoiceId, filters)
     : null;
-  const emptyStateActionHref = emptyState?.nextAction
-    ? resolveEmptyStateActionHref(emptyState.nextAction)
-    : null;
-  const emptyStateActionLabel =
-    emptyState?.nextAction && emptyState.nextAction.enabled
-      ? getEmptyStateActionLabel(emptyState.nextAction)
-      : null;
   const rows: InvoiceRow[] = filteredInvoices.map((invoice) => ({
     ...invoice,
   }));
@@ -915,10 +963,9 @@ export default async function InvoicesPage({
         subtitle="invoice history · status / period / id filters · availableActions-driven CTAs"
         actions={
           <>
-            <CanvasPill
-              theme={th}
-              tone="info"
-            >{`T5 · ${REFRESH_TIER} · ${refreshTier.cadenceLabel}${refreshWindow ? ` · staleAfter ${refreshWindow}` : ""}`}</CanvasPill>
+            <CanvasPill theme={th} tone="info">
+              {refreshTierBadge}
+            </CanvasPill>
             {data.refresh ? (
               <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
                 {data.refresh.dataFreshness}
@@ -952,10 +999,9 @@ export default async function InvoicesPage({
             links，不從 client 推導角色權限。
           </div>
           <div style={pageLeadMetaStyle}>
-            <CanvasPill
-              theme={th}
-              tone="info"
-            >{`T5 · ${REFRESH_TIER} · ${refreshTier.cadenceLabel}`}</CanvasPill>
+            <CanvasPill theme={th} tone="info">
+              {formatRefreshTierBadge(INVOICES_REFRESH_POLICY, null)}
+            </CanvasPill>
             {data.refresh ? (
               <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
                 {data.refresh.dataFreshness}
@@ -991,7 +1037,9 @@ export default async function InvoicesPage({
             title="Snapshot freshness warning"
             body={`目前內容產生於 ${formatDateInput(
               data.refresh.generatedAt,
-            )}，refresh tier 為 T5 / ${REFRESH_TIER}${
+            )}，refresh tier 為 ${INVOICES_REFRESH_POLICY.packetTier} / ${
+              INVOICES_REFRESH_POLICY.runtimeTier
+            }${
               refreshWindow ? `，staleAfter ${refreshWindow}` : ""
             }。資料不是 fresh 時，頁面必須明確提示而不是假裝即時。`}
           />
@@ -1102,20 +1150,9 @@ export default async function InvoicesPage({
                       ? ` · nextAction: ${formatActionLabel(emptyState.nextAction)}`
                       : ""}
                   </div>
-                  {emptyState.nextAction?.enabled &&
-                  emptyStateActionHref &&
-                  emptyStateActionLabel ? (
-                    <Link
-                      href={emptyStateActionHref}
-                      style={{
-                        ...actionChipStyle,
-                        color: th.accent,
-                        background: th.surface,
-                      }}
-                    >
-                      {emptyStateActionLabel}
-                    </Link>
-                  ) : null}
+                  {emptyState.nextAction
+                    ? renderEmptyStateAction(emptyState.nextAction)
+                    : null}
                 </div>
               ) : (
                 <CanvasTable<InvoiceRow>
