@@ -1,4 +1,4 @@
-import type { EmptyStateEnvelope, TenantSlaProfileView } from "@drts/contracts";
+import type { TenantSlaProfileView } from "@drts/contracts";
 import { CanvasBanner, buildCanvasTheme } from "@drts/ui-web";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
 import { SlaManager } from "./sla-manager";
@@ -16,7 +16,7 @@ const pageBodyStyle = {
 };
 
 async function loadSlaPageData(): Promise<{
-  view: TenantSlaProfileView;
+  view: TenantSlaProfileView | null;
   errorMessage: string | null;
 }> {
   const client = getTenantClient();
@@ -25,26 +25,8 @@ async function loadSlaPageData(): Promise<{
     const view = await client.getSlaProfileView();
     return { view, errorMessage: null };
   } catch (error) {
-    const fallbackEmptyState: EmptyStateEnvelope = {
-      reason: "fetch_failed",
-      messageCode: "tenant.sla.fetch_failed",
-    };
-
     return {
-      view: {
-        profile: null,
-        emptyState: fallbackEmptyState,
-        availableActions: [],
-        refreshTier: "manual",
-        refreshMetadata: {
-          generatedAt: "",
-          staleAfterMs: 0,
-          dataFreshness: "unknown",
-          source: "cache",
-        },
-        updatedBy: null,
-        lastRecalculationAt: null,
-      },
+      view: null,
       errorMessage: error instanceof Error ? error.message : "Unknown error",
     };
   }
@@ -67,13 +49,21 @@ export default async function SlaPage() {
       ) : null}
 
       <SlaManager
-        profile={data.view.profile}
-        updatedBy={data.view.updatedBy ?? "—"}
-        lastRecalculationAt={data.view.lastRecalculationAt}
-        availableActions={data.view.availableActions}
-        emptyState={data.view.emptyState}
-        refreshTier={data.view.refreshTier}
-        refreshMetadata={data.view.refreshMetadata}
+        profile={data.view?.profile ?? null}
+        updatedBy={data.view?.updatedBy ?? "—"}
+        lastRecalculationAt={data.view?.lastRecalculationAt ?? null}
+        availableActions={data.view?.availableActions ?? []}
+        emptyState={data.view?.emptyState ?? null}
+        refreshTier={data.view?.refreshTier ?? "manual"}
+        refreshMetadata={
+          data.view?.refreshMetadata ?? {
+            generatedAt: "",
+            staleAfterMs: 0,
+            dataFreshness: "unknown",
+            source: "cache",
+          }
+        }
+        loadErrorMessage={data.errorMessage}
         links={[
           { href: "/integration-governance", label: "查看整合就緒度" },
           { href: "/audit", label: "查看 SLA 稽核紀錄" },

@@ -64,6 +64,7 @@ type SlaManagerProps = {
   emptyState: EmptyStateEnvelope | null;
   refreshTier: RefreshTier;
   refreshMetadata: UiRefreshMetadata;
+  loadErrorMessage: string | null;
   links: LinkItem[];
   crossAppLinks: CrossAppLinkItem[];
 };
@@ -322,6 +323,7 @@ export function SlaManager({
   emptyState,
   refreshTier,
   refreshMetadata,
+  loadErrorMessage,
   links,
   crossAppLinks,
 }: SlaManagerProps) {
@@ -354,13 +356,16 @@ export function SlaManager({
     "recalculate_sla_bookings",
     "recalculate",
   ]);
-  const effectiveEmptyReason = toRenderableEmptyReason(emptyState?.reason);
+  const effectiveEmptyReason = toRenderableEmptyReason(
+    emptyState?.reason ?? (loadErrorMessage ? "fetch_failed" : null),
+  );
   const activeEmptyState = effectiveEmptyReason
     ? EMPTY_STATE_CONFIG[effectiveEmptyReason]
     : null;
-  const allowInlineProvisioning =
-    activeEmptyState?.reason === "no_data" ||
-    activeEmptyState?.reason === "not_provisioned";
+  const showEditor = Boolean(profile) || Boolean(updateAction);
+  const reasonRequired = Boolean(
+    updateAction?.requiresReason || recalcAction?.requiresReason,
+  );
   const refreshMetadataAvailable = Boolean(refreshMetadata.generatedAt);
 
   const handleUpdate = () => {
@@ -509,7 +514,7 @@ export function SlaManager({
           />
         ) : null}
 
-        {activeEmptyState && !allowInlineProvisioning ? (
+        {activeEmptyState && !showEditor ? (
           <CanvasCard theme={th}>
             <div style={emptyStateStyle}>
               <CanvasPill theme={th} tone={activeEmptyState.tone}>
@@ -522,7 +527,9 @@ export function SlaManager({
                 {activeEmptyState.body}
               </div>
               <div style={noteStyle}>
-                messageCode · {emptyState?.messageCode ?? "—"}
+                messageCode ·{" "}
+                {emptyState?.messageCode ??
+                  (loadErrorMessage ? "tenant.sla.fetch_failed" : "—")}
               </div>
               {emptyState?.nextAction ? (
                 <div style={emptyActionStyle}>
@@ -566,7 +573,7 @@ export function SlaManager({
                   theme={th}
                   tone={activeEmptyState.tone}
                   title={activeEmptyState.title}
-                  body={`${activeEmptyState.body}${emptyState?.nextAction ? ` 建議動作：${actionLabel(emptyState.nextAction.action)}。` : ""}`}
+                  body={`${activeEmptyState.body}${emptyState?.nextAction ? ` 建議動作：${actionLabel(emptyState.nextAction.action)}。` : ""}${loadErrorMessage ? ` 錯誤訊息：${loadErrorMessage}` : ""}`}
                 />
               ) : null}
 
@@ -645,6 +652,11 @@ export function SlaManager({
                     style={nativeTextAreaStyle}
                     disabled={isPending || (!updateAction && !recalcAction)}
                     aria-label="reason"
+                    placeholder={
+                      reasonRequired
+                        ? "請填寫操作原因，會寫入 audit trail"
+                        : undefined
+                    }
                   />
                 </CanvasField>
               </div>
@@ -652,7 +664,7 @@ export function SlaManager({
               <div style={footerStyle}>
                 <div style={noteStyle}>
                   {updateAction || recalcAction
-                    ? "availableActions 決定 CTA 顯示；高風險變更需要 reason，送出後會刷新本頁與相關 deep links。"
+                    ? `availableActions 決定 CTA 顯示；${reasonRequired ? "目前可執行動作需要 reason，送出後會刷新本頁與相關 deep links。" : "送出後會刷新本頁與相關 deep links。"}`
                     : "目前 API 沒有回傳可操作的 SLA 動作。"}
                   {emptyState?.nextAction ? (
                     <div style={actionHintStyle}>
