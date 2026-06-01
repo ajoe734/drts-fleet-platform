@@ -16,7 +16,9 @@ import type {
   EmptyReason,
   PlatformPricingRuleRecord,
   ProductRuleCatalog,
+  RefreshTier,
   ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -71,6 +73,7 @@ type ResourceListEnvelope<T> = {
   items?: T[];
   emptyState?: ListEmptyState | null;
   availableActions?: ResourceActionDescriptor[];
+  refreshMetadata?: UiRefreshMetadata | null;
 };
 
 type ActionableResource = {
@@ -84,6 +87,7 @@ type PricingListState<T> = {
   items: T[];
   emptyState: ListEmptyState | null;
   availableActions: ResourceActionDescriptor[];
+  refreshMetadata: UiRefreshMetadata | null;
 };
 
 type PricingRuleRow = Record<string, unknown> &
@@ -110,6 +114,21 @@ type HistoryRow = Record<string, unknown> & {
   auditHref: string;
 };
 
+type SubsidyRow = Record<string, unknown> & {
+  rowId: string;
+  sourceRuleId: string;
+  version: string;
+  name: string;
+  triggerLabel: string;
+  amountLabel: string;
+  scope: string;
+  effectiveLabel: string;
+  linkageLabel: string;
+  status: PlatformPricingRuleRecord["status"];
+  displayStatus: string;
+  notes: string | null;
+};
+
 const PRICING_TABS: PricingTab[] = [
   "passenger",
   "driver",
@@ -132,6 +151,7 @@ const HISTORY_PERIOD_MS: Record<Exclude<HistoryPeriodFilter, "all">, number> = {
   "90d": 90 * 24 * 60 * 60 * 1000,
 };
 
+const PRICING_REFRESH_TIER: RefreshTier = "medium_slow";
 const PRICING_REFRESH_MS = 30_000;
 
 const EMPTY_PRICING_FORM: PricingFormState = {
@@ -534,6 +554,7 @@ function normalizeListResponse<T>(
       items: response,
       emptyState: null,
       availableActions: [],
+      refreshMetadata: null,
     };
   }
 
@@ -541,7 +562,62 @@ function normalizeListResponse<T>(
     items: response.items ?? [],
     emptyState: response.emptyState ?? null,
     availableActions: response.availableActions ?? [],
+    refreshMetadata: response.refreshMetadata ?? null,
   };
+}
+
+function fallbackRefreshMetadata(): UiRefreshMetadata {
+  return {
+    generatedAt: new Date().toISOString(),
+    staleAfterMs: PRICING_REFRESH_MS,
+    dataFreshness: "fresh",
+    source: "live",
+  };
+}
+
+function refreshTone(
+  freshness: UiRefreshMetadata["dataFreshness"],
+): CanvasTone {
+  if (freshness === "degraded") {
+    return "warn";
+  }
+  if (freshness === "stale") {
+    return "danger";
+  }
+  if (freshness === "unknown") {
+    return "neutral";
+  }
+  return "accent";
+}
+
+function refreshLabel(
+  locale: string,
+  refreshMetadata: UiRefreshMetadata | null,
+  lastRefreshedAt: string | null,
+) {
+  const metadata = refreshMetadata;
+  const generatedAt = metadata?.generatedAt ?? lastRefreshedAt;
+  if (!generatedAt) {
+    return locale === "en" ? "freshness unknown" : "freshness 未知";
+  }
+
+  const freshness = metadata?.dataFreshness ?? "fresh";
+  const source = metadata?.source ?? "live";
+  if (locale === "en") {
+    return `${freshness} · ${source} · ${formatDateTime(generatedAt)}`;
+  }
+  return `${freshness} · ${source} · ${formatDateTime(generatedAt)}`;
+}
+
+function formatEffectiveWindow(
+  locale: string,
+  effectiveFrom?: string | null,
+  effectiveTo?: string | null,
+) {
+  const openEnded = locale === "en" ? "open-ended" : "未設定截止";
+  return `${formatDateTime(effectiveFrom ?? "")} → ${
+    effectiveTo ? formatDateTime(effectiveTo) : openEnded
+  }`;
 }
 
 function actionMatches(
@@ -836,6 +912,13 @@ function firstEnabledAction(
   );
 }
 
+function firstMatchingAction(
+  actions: ResourceActionDescriptor[],
+  matcher: readonly string[],
+) {
+  return actions.find((descriptor) => actionMatches(descriptor, matcher));
+}
+
 function visibleActionList(
   runtimeActions: ResourceActionDescriptor[],
   fallbackActions: ResourceActionDescriptor[],
@@ -872,9 +955,11 @@ export default function PricingPage() {
             history: "Published Versions",
           },
           refreshTier: "T4 refresh tier · every 30s",
+          refreshTierCode: "medium_slow",
           refreshLabel: "Refresh",
           autoRefresh:
             "Auto-refresh keeps this workspace aligned with the T4 30-second admin cadence.",
+          freshnessLabel: "Freshness",
           routeMapTitle: "Pricing sitemap",
           routeMapSubtitle:
             "The page follows the packet's 4-tab structure and keeps audit / reimbursements exits close.",
@@ -933,6 +1018,15 @@ export default function PricingPage() {
           subsidyInsightsTitle: "Reimbursement linkage",
           subsidyInsightsSubtitle:
             "Derived from the current pricing rules and fee plans until a dedicated subsidy-rule feed lands.",
+          subsidyTableTitle: "Subsidy / reimbursement rules",
+          subsidyTableCopy:
+            "Dedicated subsidy-rule contracts are not provisioned yet; this table derives governance rows from the current pricing rule set.",
+          subsidyDetailTitle: "Selected subsidy governance row",
+          noSubsidySelection:
+            "Select a reimbursement governance row to inspect trigger, scope, and downstream actions.",
+          serviceBucketsTitle: "Service bucket fee breakdown",
+          serviceBucketsSubtitle:
+            "Canvas-aligned bucket summary from the canonical product rule catalog.",
           versionHistoryEmpty:
             "No published versions match the active filters.",
           noHistoryYet:
@@ -977,6 +1071,7 @@ export default function PricingPage() {
             scope: "SCOPE",
             fee: "SERVICE FEE",
             reimburse: "REIMBURSEMENT",
+            effective: "EFFECTIVE",
             status: "STATUS",
             actions: "ACTIONS",
           },
@@ -985,8 +1080,19 @@ export default function PricingPage() {
             version: "VERSION",
             scope: "SCOPE",
             linkage: "SUBSIDY LINKAGE",
+            effective: "EFFECTIVE",
             status: "STATUS",
             published: "PUBLISHED",
+            actions: "ACTIONS",
+          },
+          subsidyColumns: {
+            version: "VERSION",
+            name: "Rule",
+            trigger: "TRIGGER",
+            amount: "AMOUNT",
+            scope: "SCOPE",
+            effective: "EFFECTIVE",
+            status: "STATUS",
             actions: "ACTIONS",
           },
           historyColumns: {
@@ -1032,8 +1138,10 @@ export default function PricingPage() {
             history: "已發布版本",
           },
           refreshTier: "T4 refresh tier · 每 30 秒",
+          refreshTierCode: "medium_slow",
           refreshLabel: "重新整理",
           autoRefresh: "這個工作台會依照 T4 的 30 秒節奏自動刷新。",
+          freshnessLabel: "Freshness",
           routeMapTitle: "Pricing sitemap",
           routeMapSubtitle:
             "頁面依 packet 的 4-tab 結構實作，並把 audit / reimbursements 出口放在近處。",
@@ -1089,6 +1197,15 @@ export default function PricingPage() {
           subsidyInsightsTitle: "報銷 linkage",
           subsidyInsightsSubtitle:
             "在 dedicated subsidy-rule feed 落地前，先依現有 pricing rule 與 fee plan 推導治理摘要。",
+          subsidyTableTitle: "補貼 / 報銷規則",
+          subsidyTableCopy:
+            "專用 subsidy-rule contract 尚未佈建；此表先依現有 pricing rule 推導治理列。",
+          subsidyDetailTitle: "選取的補貼治理列",
+          noSubsidySelection:
+            "請先選一列報銷治理資料，再檢查 trigger、scope 與下游動作。",
+          serviceBucketsTitle: "服務 bucket fee 拆解",
+          serviceBucketsSubtitle:
+            "依 canonical product rule catalog 顯示，對齊 canvas 的 bucket 摘要。",
           versionHistoryEmpty: "目前篩選條件下沒有符合的已發布版本。",
           noHistoryYet: "目前還沒有已發布的 pricing / fee-plan 版本。",
           openEnded: "未設定截止",
@@ -1131,6 +1248,7 @@ export default function PricingPage() {
             scope: "SCOPE",
             fee: "SERVICE FEE",
             reimburse: "報銷",
+            effective: "生效區間",
             status: "狀態",
             actions: "操作",
           },
@@ -1139,8 +1257,19 @@ export default function PricingPage() {
             version: "版本",
             scope: "SCOPE",
             linkage: "補貼 linkage",
+            effective: "生效區間",
             status: "狀態",
             published: "發布時間",
+            actions: "操作",
+          },
+          subsidyColumns: {
+            version: "版本",
+            name: "規則",
+            trigger: "TRIGGER",
+            amount: "AMOUNT",
+            scope: "SCOPE",
+            effective: "生效區間",
+            status: "狀態",
             actions: "操作",
           },
           historyColumns: {
@@ -1183,6 +1312,7 @@ export default function PricingPage() {
     items: [],
     emptyState: null,
     availableActions: [],
+    refreshMetadata: null,
   });
   const [feePlansState, setFeePlansState] = useState<
     PricingListState<DriverFeePlanResource>
@@ -1190,6 +1320,7 @@ export default function PricingPage() {
     items: [],
     emptyState: null,
     availableActions: [],
+    refreshMetadata: null,
   });
   const [productRuleCatalog, setProductRuleCatalog] =
     useState<ProductRuleCatalog | null>(null);
@@ -1206,6 +1337,9 @@ export default function PricingPage() {
     useState<HistoryPeriodFilter>("30d");
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [selectedSubsidyId, setSelectedSubsidyId] = useState<string | null>(
+    null,
+  );
   const [showCreateRuleForm, setShowCreateRuleForm] = useState(false);
   const [showFeePlanForm, setShowFeePlanForm] = useState(false);
   const [creatingRule, setCreatingRule] = useState(false);
@@ -1251,8 +1385,19 @@ export default function PricingPage() {
             client.getProductRuleCatalog(),
           ]);
 
-        setPricingRulesState(normalizeListResponse(pricingRulesResponse));
-        setFeePlansState(normalizeListResponse(feePlansResponse));
+        const nextPricingRulesState =
+          normalizeListResponse(pricingRulesResponse);
+        const nextFeePlansState = normalizeListResponse(feePlansResponse);
+        setPricingRulesState({
+          ...nextPricingRulesState,
+          refreshMetadata:
+            nextPricingRulesState.refreshMetadata ?? fallbackRefreshMetadata(),
+        });
+        setFeePlansState({
+          ...nextFeePlansState,
+          refreshMetadata:
+            nextFeePlansState.refreshMetadata ?? fallbackRefreshMetadata(),
+        });
         setProductRuleCatalog(catalog);
         setLastRefreshedAt(new Date().toISOString());
         setLastRefreshSource(source);
@@ -1327,6 +1472,58 @@ export default function PricingPage() {
     }
   }, [feePlans, selectedPlan]);
 
+  const subsidyRows: SubsidyRow[] = pricingRules.map((rule) => ({
+    rowId: `subsidy-${rule.ruleId}`,
+    sourceRuleId: rule.ruleId,
+    version: rule.version,
+    name: rule.ruleName,
+    triggerLabel:
+      rule.reimbursementMode === "mixed"
+        ? locale === "en"
+          ? "manual reimbursement review"
+          : "人工報銷審核"
+        : locale === "en"
+          ? "platform-funded subsidy lane"
+          : "平台資助補貼路徑",
+    amountLabel:
+      rule.reimbursementMode === "mixed"
+        ? locale === "en"
+          ? `${formatPercent(rule.serviceFeeBps)} variable reimbursement`
+          : `${formatPercent(rule.serviceFeeBps)} 浮動報銷`
+        : locale === "en"
+          ? `${formatPercent(rule.serviceFeeBps)} platform-funded`
+          : `${formatPercent(rule.serviceFeeBps)} 平台資助`,
+    scope: scopeLabel(locale, rule.applicableTo),
+    effectiveLabel: formatEffectiveWindow(
+      locale,
+      rule.effectiveFrom,
+      rule.effectiveTo,
+    ),
+    linkageLabel:
+      rule.reimbursementMode === "mixed"
+        ? copy.linkageMixed
+        : copy.linkagePlatform,
+    status: rule.status,
+    displayStatus: pricingStatusLabel(locale, rule.status),
+    notes: rule.notes,
+  }));
+
+  const selectedSubsidyRow =
+    subsidyRows.find((row) => row.rowId === selectedSubsidyId) ??
+    subsidyRows[0] ??
+    null;
+  const selectedSubsidyRule =
+    pricingRules.find(
+      (rule) => rule.ruleId === selectedSubsidyRow?.sourceRuleId,
+    ) ?? null;
+
+  useEffect(() => {
+    const firstSubsidy = subsidyRows[0];
+    if (!selectedSubsidyRow && firstSubsidy) {
+      setSelectedSubsidyId(firstSubsidy.rowId);
+    }
+  }, [selectedSubsidyRow, subsidyRows]);
+
   const ruleCounts = {
     drafts: pricingRules.filter((rule) => rule.status === "draft").length,
     published: pricingRules.filter((rule) => rule.status === "active").length,
@@ -1349,11 +1546,11 @@ export default function PricingPage() {
     selectedPlan?.availableActions ?? [],
     selectedPlan ? fallbackFeePlanActions() : [],
   );
-
-  const createRuleAction = firstEnabledAction(
-    pageRuleActions,
-    ACTION_GROUPS.createRule,
+  const selectedSubsidyActions = visibleActionList(
+    selectedSubsidyRule?.availableActions ?? [],
+    selectedSubsidyRule ? fallbackRuleActions(selectedSubsidyRule) : [],
   );
+
   const publishRuleAction = firstEnabledAction(
     selectedRuleActions,
     ACTION_GROUPS.publishRule,
@@ -1362,6 +1559,22 @@ export default function PricingPage() {
     pageFeePlanActions,
     ACTION_GROUPS.publishPlan,
   );
+  const headerCreateRuleAction = firstMatchingAction(
+    pageRuleActions,
+    ACTION_GROUPS.createRule,
+  );
+  const headerPublishRuleAction = firstMatchingAction(
+    selectedRuleActions,
+    ACTION_GROUPS.publishRule,
+  );
+  const headerPublishPlanAction = firstMatchingAction(
+    pageFeePlanActions,
+    ACTION_GROUPS.publishPlan,
+  );
+  const activeRefreshMetadata =
+    activeTab === "driver"
+      ? feePlansState.refreshMetadata
+      : pricingRulesState.refreshMetadata;
 
   useEffect(() => {
     if (selectedRule?.status !== "draft") {
@@ -1723,6 +1936,38 @@ export default function PricingPage() {
     },
   ];
 
+  const subsidyDeepLinks: CrossAppResourceLink[] = [
+    {
+      targetApp: "platform-admin",
+      route: "/payments/reimbursements",
+      resourceType: "reimbursement_batch",
+      resourceId: selectedSubsidyRule?.ruleId ?? "pricing-subsidy",
+      openMode: "same_tab",
+      label: copy.reimbursementLabel,
+    },
+    {
+      targetApp: "ops-console",
+      route: "/dispatch",
+      resourceType: "dispatch_override_board",
+      resourceId: selectedSubsidyRule?.ruleId ?? "pricing-subsidy",
+      openMode: "new_tab",
+      label: copy.opsDispatchLabel,
+    },
+    {
+      targetApp: "platform-admin",
+      route:
+        actionAuditHref ??
+        buildAuditHref(
+          "platform_pricing_rule",
+          selectedSubsidyRule?.ruleId ?? "pricing-subsidy",
+        ),
+      resourceType: "audit_log",
+      resourceId: selectedSubsidyRule?.ruleId ?? "pricing-subsidy",
+      openMode: "same_tab",
+      label: copy.auditPrompt,
+    },
+  ];
+
   const subsidyInsights = [
     {
       label: locale === "en" ? "Platform-funded lanes" : "平台資助路徑",
@@ -1818,6 +2063,13 @@ export default function PricingPage() {
       r: (rule) => reimbursementModeLabel(copy, rule.reimbursementMode),
     },
     {
+      h: copy.ruleColumns.effective,
+      w: 220,
+      mono: true,
+      r: (rule) =>
+        formatEffectiveWindow(locale, rule.effectiveFrom, rule.effectiveTo),
+    },
+    {
       h: copy.ruleColumns.status,
       w: 118,
       r: (rule) => (
@@ -1892,6 +2144,12 @@ export default function PricingPage() {
       r: (plan) => plan.linkageLabel,
     },
     {
+      h: copy.planColumns.effective,
+      w: 220,
+      mono: true,
+      r: (plan) => formatEffectiveWindow(locale, plan.publishedAt, null),
+    },
+    {
       h: copy.planColumns.status,
       w: 112,
       r: (plan) => (
@@ -1938,6 +2196,98 @@ export default function PricingPage() {
                 {actionLabel(locale, descriptor)}
               </CanvasBtn>
             ))}
+          </div>
+        );
+      },
+    },
+  ];
+
+  const subsidyColumns: CanvasTableColumn<SubsidyRow>[] = [
+    {
+      h: copy.subsidyColumns.version,
+      w: 126,
+      mono: true,
+      k: "version",
+    },
+    {
+      h: copy.subsidyColumns.name,
+      w: 220,
+      r: (row) => (
+        <div style={stackedCellStyle}>
+          <span style={{ color: theme.text, fontWeight: 600 }}>{row.name}</span>
+          <span style={helperMonoStyle}>{row.linkageLabel}</span>
+        </div>
+      ),
+    },
+    {
+      h: copy.subsidyColumns.trigger,
+      w: 190,
+      r: (row) => row.triggerLabel,
+    },
+    {
+      h: copy.subsidyColumns.amount,
+      w: 170,
+      mono: true,
+      r: (row) => row.amountLabel,
+    },
+    {
+      h: copy.subsidyColumns.scope,
+      w: 150,
+      mono: true,
+      r: (row) => row.scope,
+    },
+    {
+      h: copy.subsidyColumns.effective,
+      w: 220,
+      mono: true,
+      r: (row) => row.effectiveLabel,
+    },
+    {
+      h: copy.subsidyColumns.status,
+      w: 112,
+      r: (row) => (
+        <CanvasPill theme={theme} tone={pricingStatusTone(row.status)} dot>
+          {row.displayStatus}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: copy.subsidyColumns.actions,
+      w: 190,
+      r: (row) => {
+        const rowRule = pricingRules.find(
+          (rule) => rule.ruleId === row.sourceRuleId,
+        );
+        const rowActions = visibleActionList(
+          rowRule?.availableActions ?? [],
+          rowRule ? fallbackRuleActions(rowRule) : [],
+        );
+        const rowPrimaryAction = rowActions[0];
+        return (
+          <div style={actionRowStyle}>
+            <CanvasBtn
+              theme={theme}
+              size="xs"
+              variant={
+                selectedSubsidyId === row.rowId ? "primary" : "secondary"
+              }
+              onClick={() => setSelectedSubsidyId(row.rowId)}
+            >
+              {copy.buttons.select}
+            </CanvasBtn>
+            {rowRule && rowPrimaryAction ? (
+              <CanvasBtn
+                theme={theme}
+                size="xs"
+                variant="secondary"
+                disabled={!rowPrimaryAction.enabled}
+                onClick={() =>
+                  handleAction(rowPrimaryAction, { rule: rowRule })
+                }
+              >
+                {actionLabel(locale, rowPrimaryAction)}
+              </CanvasBtn>
+            ) : null}
           </div>
         );
       },
@@ -2186,20 +2536,38 @@ export default function PricingPage() {
             >
               {copy.refreshLabel}
             </CanvasBtn>
-            {activeTab === "passenger" && createRuleAction ? (
+            {activeTab === "passenger" && headerCreateRuleAction ? (
               <CanvasBtn
                 theme={theme}
                 variant={showCreateRuleForm ? "secondary" : "primary"}
-                onClick={() => setShowCreateRuleForm((current) => !current)}
+                disabled={!headerCreateRuleAction.enabled}
+                onClick={() => handleAction(headerCreateRuleAction)}
               >
-                {actionLabel(locale, createRuleAction)}
+                {actionLabel(locale, headerCreateRuleAction)}
               </CanvasBtn>
             ) : null}
-            {activeTab === "driver" && publishPlanAction ? (
+            {activeTab === "passenger" && headerPublishRuleAction ? (
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                disabled={!headerPublishRuleAction.enabled}
+                onClick={() =>
+                  selectedRule
+                    ? handleAction(headerPublishRuleAction, {
+                        rule: selectedRule,
+                      })
+                    : undefined
+                }
+              >
+                {actionLabel(locale, headerPublishRuleAction)}
+              </CanvasBtn>
+            ) : null}
+            {activeTab === "driver" && headerPublishPlanAction ? (
               <CanvasBtn
                 theme={theme}
                 variant={showFeePlanForm ? "secondary" : "primary"}
-                onClick={() => setShowFeePlanForm((current) => !current)}
+                disabled={!headerPublishPlanAction.enabled}
+                onClick={() => handleAction(headerPublishPlanAction)}
               >
                 {showFeePlanForm
                   ? copy.buttons.hideComposer
@@ -2241,7 +2609,16 @@ export default function PricingPage() {
 
         <div style={summaryRowStyle}>
           <CanvasPill theme={theme} tone="accent">
-            {copy.refreshTier}
+            {copy.refreshTier} · {PRICING_REFRESH_TIER}
+          </CanvasPill>
+          <CanvasPill
+            theme={theme}
+            tone={refreshTone(
+              activeRefreshMetadata?.dataFreshness ?? "unknown",
+            )}
+          >
+            {copy.freshnessLabel}:{" "}
+            {activeRefreshMetadata?.dataFreshness ?? "unknown"}
           </CanvasPill>
           <CanvasPill theme={theme} tone="warn">
             {copy.counts.drafts} {ruleCounts.drafts}
@@ -2261,6 +2638,8 @@ export default function PricingPage() {
                 formatDateTime(lastRefreshedAt),
                 lastRefreshSource,
               )}
+              {" · "}
+              {refreshLabel(locale, activeRefreshMetadata, lastRefreshedAt)}
             </span>
           ) : null}
         </div>
@@ -2784,18 +3163,24 @@ export default function PricingPage() {
                 <CanvasBanner
                   theme={theme}
                   tone="info"
-                  title={copy.subsidyInsightsTitle}
-                  body={copy.subsidyInsightsSubtitle}
+                  title={copy.subsidyTableTitle}
+                  body={copy.subsidyTableCopy}
                 />
 
                 <div style={{ height: 16 }} />
 
-                {subsidyEmptyState
-                  ? renderEmptyState(
-                      subsidyEmptyState.reason,
-                      subsidyEmptyState.nextAction,
-                    )
-                  : null}
+                {subsidyRows.length > 0 ? (
+                  <CanvasTable
+                    theme={theme}
+                    columns={subsidyColumns}
+                    rows={subsidyRows}
+                  />
+                ) : subsidyEmptyState ? (
+                  renderEmptyState(
+                    subsidyEmptyState.reason,
+                    subsidyEmptyState.nextAction,
+                  )
+                ) : null}
               </CanvasCard>
             ) : null}
 
@@ -2900,6 +3285,37 @@ export default function PricingPage() {
               <div style={{ height: 12 }} />
               <CanvasDL theme={theme} cols={1} items={authorityItems} />
             </CanvasCard>
+
+            {activeTab === "passenger" ? (
+              <CanvasCard
+                theme={theme}
+                title={copy.serviceBucketsTitle}
+                subtitle={copy.serviceBucketsSubtitle}
+              >
+                <div style={splitStatsStyle}>
+                  {(productRuleCatalog?.phase1ServiceBuckets ?? [])
+                    .slice(0, 4)
+                    .map((bucket) => (
+                      <div key={bucket} style={statBlockStyle}>
+                        <span style={detailLabelStyle}>{bucket}</span>
+                        <strong style={{ fontSize: 16 }}>
+                          {selectedRule
+                            ? `${formatBps(locale, selectedRule.serviceFeeBps)} bps`
+                            : "—"}
+                        </strong>
+                        <p style={mutedTextStyle}>
+                          {selectedRule
+                            ? reimbursementModeLabel(
+                                copy,
+                                selectedRule.reimbursementMode,
+                              )
+                            : copy.authorityFallback}
+                        </p>
+                      </div>
+                    ))}
+                </div>
+              </CanvasCard>
+            ) : null}
 
             {activeTab === "passenger" ? (
               <CanvasCard
@@ -3012,6 +3428,76 @@ export default function PricingPage() {
               </CanvasCard>
             ) : null}
 
+            {activeTab === "subsidy" ? (
+              <CanvasCard
+                theme={theme}
+                title={copy.subsidyDetailTitle}
+                subtitle={
+                  selectedSubsidyRow
+                    ? selectedSubsidyRow.name
+                    : copy.noSubsidySelection
+                }
+              >
+                {selectedSubsidyRow ? (
+                  <div style={detailListStyle}>
+                    <div style={detailRowStyle}>
+                      <span style={detailLabelStyle}>{copy.forms.version}</span>
+                      <span style={detailValueStyle}>
+                        {selectedSubsidyRow.version}
+                      </span>
+                    </div>
+                    <div style={detailRowStyle}>
+                      <span style={detailLabelStyle}>
+                        {copy.subsidyColumns.trigger}
+                      </span>
+                      <span style={detailValueStyle}>
+                        {selectedSubsidyRow.triggerLabel}
+                      </span>
+                    </div>
+                    <div style={detailRowStyle}>
+                      <span style={detailLabelStyle}>
+                        {copy.subsidyColumns.amount}
+                      </span>
+                      <span style={detailValueStyle}>
+                        {selectedSubsidyRow.amountLabel}
+                      </span>
+                    </div>
+                    <div style={detailRowStyle}>
+                      <span style={detailLabelStyle}>
+                        {copy.forms.applicableTo}
+                      </span>
+                      <span style={detailValueStyle}>
+                        {selectedSubsidyRow.scope}
+                      </span>
+                    </div>
+                    <div style={detailRowStyle}>
+                      <span style={detailLabelStyle}>
+                        {copy.ruleColumns.effective}
+                      </span>
+                      <span style={detailValueStyle}>
+                        {selectedSubsidyRow.effectiveLabel}
+                      </span>
+                    </div>
+                    <div style={detailRowStyle}>
+                      <span style={detailLabelStyle}>{copy.reasonLabel}</span>
+                      <span style={detailValueStyle}>
+                        {selectedSubsidyRow.notes ||
+                          (locale === "en" ? "No notes" : "無備註")}
+                      </span>
+                    </div>
+                    <div style={lineStyle} />
+                    {selectedSubsidyRule
+                      ? renderActionDescriptors(selectedSubsidyActions, {
+                          rule: selectedSubsidyRule,
+                        })
+                      : renderActionDescriptors(selectedSubsidyActions)}
+                  </div>
+                ) : (
+                  <p style={mutedTextStyle}>{copy.noSubsidySelection}</p>
+                )}
+              </CanvasCard>
+            ) : null}
+
             {activeTab === "passenger" ||
             activeTab === "driver" ||
             activeTab === "subsidy" ? (
@@ -3023,7 +3509,9 @@ export default function PricingPage() {
                 {renderCrossAppLinks(
                   activeTab === "passenger"
                     ? passengerDeepLinks
-                    : reimbursementDeepLinks,
+                    : activeTab === "subsidy"
+                      ? subsidyDeepLinks
+                      : reimbursementDeepLinks,
                 )}
               </CanvasCard>
             ) : null}
