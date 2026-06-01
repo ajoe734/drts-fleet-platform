@@ -1232,6 +1232,19 @@ export class TenantPartnerController {
     );
   }
 
+  @Get("tenant/sla/view")
+  getSlaProfileView(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getSlaProfileView(
+        this.requireTenantId(tenantId),
+      ),
+      requestId,
+    );
+  }
+
   @Post("tenant/sla")
   updateSlaProfile(
     @Body() command: UpdateTenantSlaProfileCommand,

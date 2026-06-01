@@ -192,6 +192,7 @@ import type {
   TenantQuotaPolicyRecord,
   TenantQuotaSummary,
   TenantRoleCatalogRecord,
+  TenantSlaProfileView,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
   TransferCallToComplaintCommand,
@@ -1710,6 +1711,10 @@ export class ApiClient {
 
   async getSlaProfile() {
     return this.get("/api/tenant/sla");
+  }
+
+  async getSlaProfileView(): Promise<TenantSlaProfileView> {
+    return this.get("/api/tenant/sla/view");
   }
 
   async updateSlaProfile(command: UpdateTenantSlaProfileCommand) {

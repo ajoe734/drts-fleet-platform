@@ -4,7 +4,12 @@ import type { CSSProperties } from "react";
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { EmptyReason, ResourceActionDescriptor } from "@drts/contracts";
+import type {
+  EmptyStateEnvelope,
+  RefreshTier,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -32,8 +37,13 @@ type LinkItem = {
   label: string;
 };
 
+type CrossAppLinkItem = {
+  href: string;
+  label: string;
+};
+
 type EmptyStateConfig = {
-  reason: EmptyReason;
+  reason: Exclude<EmptyStateEnvelope["reason"], "driver_not_eligible">;
   title: string;
   body: string;
   tone: "neutral" | "warn" | "danger" | "info";
@@ -42,11 +52,13 @@ type EmptyStateConfig = {
 type SlaManagerProps = {
   profile: SlaSnapshot | null;
   updatedBy: string;
-  governanceStatus: string;
   lastRecalculationAt: string | null;
   availableActions: ResourceActionDescriptor[];
-  emptyReason: EmptyReason | null;
+  emptyState: EmptyStateEnvelope | null;
+  refreshTier: RefreshTier;
+  refreshMetadata: UiRefreshMetadata;
   links: LinkItem[];
+  crossAppLinks: CrossAppLinkItem[];
 };
 
 const th = buildCanvasTheme({
@@ -159,7 +171,7 @@ const summaryValueStyle: CSSProperties = {
 };
 
 const EMPTY_STATE_CONFIG: Record<
-  Exclude<EmptyReason, "driver_not_eligible">,
+  Exclude<EmptyStateEnvelope["reason"], "driver_not_eligible">,
   EmptyStateConfig
 > = {
   no_data: {
@@ -231,14 +243,35 @@ function disabledReasonLabel(reason: string | undefined) {
   return reason.replaceAll("_", " ");
 }
 
+const REFRESH_TIER_LABEL: Record<RefreshTier, string> = {
+  urgent: "即時推播 · 5s 後援輪詢",
+  fast: "3s 自動更新",
+  dispatch: "5s 自動更新",
+  medium: "15s 自動更新",
+  medium_slow: "30s 自動更新",
+  slow: "30s 自動更新",
+  manual: "手動更新",
+};
+
+function describeGovernance(profile: SlaSnapshot | null) {
+  if (!profile) return "not_provisioned";
+  return profile.waitThresholdMin > 0 &&
+    profile.arrivalThresholdMin > 0 &&
+    profile.completionThresholdMin > 0
+    ? "ready"
+    : "partial";
+}
+
 export function SlaManager({
   profile,
   updatedBy,
-  governanceStatus,
   lastRecalculationAt,
   availableActions,
-  emptyReason,
+  emptyState,
+  refreshTier,
+  refreshMetadata,
   links,
+  crossAppLinks,
 }: SlaManagerProps) {
   const router = useRouter();
   const [waitThresholdMin, setWaitThresholdMin] = useState(
@@ -281,9 +314,10 @@ export function SlaManager({
   );
 
   const activeEmptyState =
-    emptyReason && emptyReason !== "driver_not_eligible"
-      ? EMPTY_STATE_CONFIG[emptyReason]
+    emptyState && emptyState.reason !== "driver_not_eligible"
+      ? EMPTY_STATE_CONFIG[emptyState.reason]
       : null;
+  const governanceStatus = describeGovernance(profile);
 
   const handleUpdate = () => {
     startTransition(async () => {
@@ -335,10 +369,18 @@ export function SlaManager({
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <CanvasPill theme={th} tone="accent">
-              refresh tier · T5
+              refresh tier · T5 / {refreshTier}
             </CanvasPill>
             <CanvasPill theme={th} tone="neutral">
               governance · {governanceStatus}
+            </CanvasPill>
+            <CanvasPill
+              theme={th}
+              tone={
+                refreshMetadata.dataFreshness === "fresh" ? "success" : "warn"
+              }
+            >
+              freshness · {refreshMetadata.dataFreshness}
             </CanvasPill>
           </div>
         }
@@ -369,6 +411,15 @@ export function SlaManager({
           />
         ) : null}
 
+        <CanvasBanner
+          theme={th}
+          tone="info"
+          title={`Refresh cadence · ${REFRESH_TIER_LABEL[refreshTier]}`}
+          body={`metadata source=${refreshMetadata.source} · generatedAt=${formatDateTime(
+            refreshMetadata.generatedAt,
+          )} · staleAfterMs=${refreshMetadata.staleAfterMs}`}
+        />
+
         {activeEmptyState ? (
           <CanvasCard theme={th}>
             <div style={emptyStateStyle}>
@@ -381,11 +432,25 @@ export function SlaManager({
               <div style={{ ...noteStyle, maxWidth: 560 }}>
                 {activeEmptyState.body}
               </div>
+              <div style={noteStyle}>
+                messageCode · {emptyState?.messageCode ?? "—"}
+              </div>
               <div style={linkRowStyle}>
                 {links.map((link) => (
                   <Link key={link.href} href={link.href} style={linkStyle}>
                     {link.label} →
                   </Link>
+                ))}
+                {crossAppLinks.map((link) => (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    style={linkStyle}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {link.label} ↗
+                  </a>
                 ))}
               </div>
             </div>
@@ -551,6 +616,17 @@ export function SlaManager({
                   <Link key={link.href} href={link.href} style={linkStyle}>
                     {link.label} →
                   </Link>
+                ))}
+                {crossAppLinks.map((link) => (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    style={linkStyle}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {link.label} ↗
+                  </a>
                 ))}
               </div>
             </CanvasCard>

@@ -88,6 +88,7 @@ import type {
   RecalculateTenantSlaBookingsCommand,
   TenantRoleCatalogRecord,
   TenantSlaProfile,
+  TenantSlaProfileView,
   TenantUserRoleRecord,
   TenantWebhookDisableReason,
   TenantWebhookEndpoint,
@@ -109,6 +110,9 @@ import type {
   WebhookEventPayload,
   WebhookDeliveryRecord,
   WebhookRetryPolicyRecord,
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -5229,6 +5233,42 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return { ...this.getOrCreateSlaProfile(tenantId) };
   }
 
+  getSlaProfileView(tenantId: string): TenantSlaProfileView {
+    const profile = this.slaProfiles.get(tenantId);
+    const availableActions = this.buildTenantSlaAvailableActions(profile);
+    const refreshMetadata: UiRefreshMetadata = {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: 30_000,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+    const tenantAuditLogs = this.auditNotificationService
+      .listAuditLogs()
+      .filter((auditLog) => auditLog.tenantId === tenantId);
+
+    return {
+      profile: profile ? this.cloneSlaProfile(profile) : null,
+      emptyState: profile
+        ? null
+        : availableActions[0]
+          ? ({
+              reason: "not_provisioned",
+              messageCode: "tenant.sla.not_provisioned",
+              nextAction: availableActions[0],
+            } satisfies EmptyStateEnvelope)
+          : ({
+              reason: "not_provisioned",
+              messageCode: "tenant.sla.not_provisioned",
+            } satisfies EmptyStateEnvelope),
+      availableActions,
+      refreshTier: "slow",
+      refreshMetadata,
+      updatedBy: this.pickTenantSlaUpdatedBy(tenantAuditLogs),
+      lastRecalculationAt:
+        this.pickTenantSlaLastRecalculationAt(tenantAuditLogs),
+    };
+  }
+
   updateSlaProfile(
     tenantId: string,
     command: UpdateTenantSlaProfileCommand,
@@ -5677,6 +5717,52 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private cloneSlaProfile(profile: TenantSlaProfile): TenantSlaProfile {
     return { ...profile };
+  }
+
+  private buildTenantSlaAvailableActions(
+    profile: TenantSlaProfile | undefined,
+  ): ResourceActionDescriptor[] {
+    return [
+      {
+        action: "update_sla_profile",
+        enabled: true,
+        riskLevel: "high",
+        requiresReason: true,
+      },
+      {
+        action: "recalculate_sla_bookings",
+        enabled: Boolean(profile),
+        riskLevel: "high",
+        requiresReason: true,
+        ...(profile ? {} : { disabledReasonCode: "sla_not_provisioned" }),
+      },
+    ];
+  }
+
+  private pickTenantSlaUpdatedBy(
+    auditLogs: readonly AuditLogRecord[],
+  ): string | null {
+    const auditLog = [...auditLogs]
+      .filter((entry) => entry.actionName === "update_sla_profile")
+      .sort(
+        (left, right) =>
+          Date.parse(right.createdAt) - Date.parse(left.createdAt),
+      )[0];
+
+    return auditLog?.actorId ?? auditLog?.actorType ?? null;
+  }
+
+  private pickTenantSlaLastRecalculationAt(
+    auditLogs: readonly AuditLogRecord[],
+  ): string | null {
+    const auditLog = [...auditLogs]
+      .filter((entry) => entry.actionName === "recalculate_sla_bookings")
+      .sort(
+        (left, right) =>
+          Date.parse(right.createdAt) - Date.parse(left.createdAt),
+      )[0];
+
+    return auditLog?.createdAt ?? null;
   }
 
   private clonePassenger(

@@ -2,7 +2,10 @@ import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type {
   DriverMatchingSuppression,
+  EmptyStateEnvelope,
+  RefreshTier,
   ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
@@ -934,6 +937,16 @@ export interface TenantSlaProfile {
   arrivalThresholdMin: number;
   completionThresholdMin: number;
   updatedAt: string;
+}
+
+export interface TenantSlaProfileView {
+  profile: TenantSlaProfile | null;
+  emptyState: EmptyStateEnvelope | null;
+  availableActions: ResourceActionDescriptor[];
+  refreshTier: RefreshTier;
+  refreshMetadata: UiRefreshMetadata;
+  updatedBy: string | null;
+  lastRecalculationAt: string | null;
 }
 
 export const TENANT_PASSENGER_MASTER_ROLES = [
