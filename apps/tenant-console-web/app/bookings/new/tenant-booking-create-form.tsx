@@ -223,6 +223,15 @@ function describeImpactLabel(scope: "tenant" | "cost_center", code: string | nul
   return "租戶";
 }
 
+// Resolve a CTA from the route's availableActions[] (Q-X13). Mirrors the shipped
+// /rules route: the client renders only the actions the route published.
+function findAction(
+  actions: ResourceActionDescriptor[],
+  action: string,
+): ResourceActionDescriptor | null {
+  return actions.find((item) => item.action === action) ?? null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
@@ -231,6 +240,7 @@ export function TenantBookingCreateForm({
   passengers,
   addresses,
   costCenters,
+  availableActions,
   initialPassengerId,
   initialPickupAddressId,
   initialDropoffAddressId,
@@ -238,6 +248,7 @@ export function TenantBookingCreateForm({
   passengers: TenantPassengerRecord[];
   addresses: TenantAddressRecord[];
   costCenters: TenantCostCenterRecord[];
+  availableActions: ResourceActionDescriptor[];
   initialPassengerId?: string | null;
   initialPickupAddressId?: string | null;
   initialDropoffAddressId?: string | null;
@@ -542,12 +553,27 @@ export function TenantBookingCreateForm({
   const submitDisabled =
     submitInProgress || policyRefreshing || blocked || missingRequiredFields;
 
-  // availableActions descriptors (Q-X13) drive the action row.
+  // CTAs are resolved from the route's availableActions[] (Q-X13) via findAction,
+  // then live runtime state is overlaid onto the base descriptor. The form never
+  // hard-codes a CTA the route did not publish.
+  const submitBase = findAction(availableActions, "submit_command");
+  const cancelBase = findAction(availableActions, "cancel_form");
+  const draftBase = findAction(availableActions, "save_draft");
+
   const submitDescriptor: ResourceActionDescriptor = useMemo(
     () => ({
-      action: decision === "require_approval" ? "submit_for_approval" : "submit_command",
-      enabled: !submitDisabled,
-      riskLevel: "medium",
+      ...(submitBase ?? {
+        action: "submit_command",
+        enabled: true,
+        riskLevel: "medium" as const,
+      }),
+      // A require_approval decision relabels the same published affordance
+      // (Q-TEN04) — it does not introduce a new route action.
+      action:
+        decision === "require_approval"
+          ? "submit_for_approval"
+          : (submitBase?.action ?? "submit_command"),
+      enabled: (submitBase?.enabled ?? true) && !submitDisabled,
       ...(blocked
         ? { disabledReasonCode: "blocked_by_policy" }
         : missingRequiredFields
@@ -556,15 +582,20 @@ export function TenantBookingCreateForm({
             ? { disabledReasonCode: "submitting" }
             : {}),
     }),
-    [blocked, decision, missingRequiredFields, submitDisabled, submitInProgress],
+    [blocked, decision, missingRequiredFields, submitBase, submitDisabled, submitInProgress],
   );
+  // cancel_form: published descriptor, disabled only while a submit is in flight.
   const cancelDescriptor: ResourceActionDescriptor = {
-    action: "cancel_form",
-    enabled: !submitInProgress,
-    riskLevel: "low",
+    ...(cancelBase ?? {
+      action: "cancel_form",
+      enabled: true,
+      riskLevel: "low" as const,
+    }),
+    enabled: (cancelBase?.enabled ?? true) && !submitInProgress,
   };
-  // Drafts are not a published tenant command (Q-TEN04 synchronous command only).
-  const draftDescriptor: ResourceActionDescriptor = {
+  // save_draft: rendered straight from the route descriptor — disabled with the
+  // drafts_not_supported reason (Q-TEN04 synchronous-command-only), never hidden.
+  const draftDescriptor: ResourceActionDescriptor = draftBase ?? {
     action: "save_draft",
     enabled: false,
     disabledReasonCode: "drafts_not_supported",

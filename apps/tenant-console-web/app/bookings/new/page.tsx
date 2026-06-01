@@ -224,15 +224,34 @@ function BookingEmptyState({ reason }: { reason: EmptyReason }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Page-level availableActions (Q-X13): CTAs are descriptor-driven, never
-// hard-coded by role. The list/export affordances stay disabled-aware.
+// Route availableActions (Q-X13): the backend would normally return these per
+// resource so the UI renders CTAs without hard-coding role→action. The create
+// form owns its own command surface, so the route declares the descriptor set
+// and the client resolves each CTA via findAction (mirrors the shipped /rules
+// route). The form overlays live runtime state (submitting / policy-blocked /
+// missing fields) onto these base descriptors — it never invents new ones.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const VIEW_LIST_ACTION: ResourceActionDescriptor = {
-  action: "view_list",
-  enabled: true,
-  riskLevel: "low",
-};
+const BOOKING_CREATE_ACTIONS: readonly ResourceActionDescriptor[] = [
+  { action: "view_list", enabled: true, riskLevel: "low" },
+  { action: "submit_command", enabled: true, riskLevel: "medium" },
+  // Drafts are not a published tenant command (Q-TEN04 synchronous command
+  // only) — surface the affordance disabled with a reason, never hidden.
+  {
+    action: "save_draft",
+    enabled: false,
+    disabledReasonCode: "drafts_not_supported",
+    riskLevel: "low",
+  },
+  { action: "cancel_form", enabled: true, riskLevel: "low" },
+] as const;
+
+function findAction(
+  actions: readonly ResourceActionDescriptor[],
+  action: string,
+): ResourceActionDescriptor | null {
+  return actions.find((item) => item.action === action) ?? null;
+}
 
 const EMPTY_REASONS: readonly EmptyReason[] = [
   "no_data",
@@ -281,6 +300,9 @@ export default async function NewBookingPage({
     addresses.length === 0 &&
     costCenters.length === 0;
 
+  // CTAs are resolved from the route availableActions, not hard-coded.
+  const viewListAction = findAction(BOOKING_CREATE_ACTIONS, "view_list");
+
   // Override (preview) > hard passenger-directory failure > healthy-but-empty.
   // Only override + a hard failure block the form; an empty directory still
   // supports manual booking, so it degrades to a soft banner above the form.
@@ -300,7 +322,7 @@ export default async function NewBookingPage({
               size="sm"
               variant="secondary"
               icon="ext"
-              disabled={!VIEW_LIST_ACTION.enabled}
+              disabled={!viewListAction?.enabled}
             >
               訂單列表
             </CanvasBtn>
@@ -343,6 +365,7 @@ export default async function NewBookingPage({
               passengers={passengers}
               addresses={addresses}
               costCenters={costCenters}
+              availableActions={[...BOOKING_CREATE_ACTIONS]}
               initialPassengerId={initialPassengerId}
               initialPickupAddressId={initialPickupAddressId}
               initialDropoffAddressId={initialDropoffAddressId}
