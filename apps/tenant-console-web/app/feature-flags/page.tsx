@@ -317,6 +317,11 @@ function compareFlags(a: TenantFeatureFlagRecord, b: TenantFeatureFlagRecord) {
   return a.key.localeCompare(b.key, "en");
 }
 
+// Live data only — there is NO fixture/synthetic fallback. An empty or failed
+// backend response is preserved verbatim so the empty state renders the real
+// EmptyReason (not_provisioned / no_data / filtered_empty / classified fetch
+// error) instead of masking it with placeholder rows. `emptyReasonOverride` is
+// a QA-only `?emptyReason=` deep link for previewing each of the six states.
 async function loadFeatureFlagsData(
   query: string,
   scope: "all" | TenantFeatureFlagScope,
