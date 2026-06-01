@@ -265,18 +265,6 @@ type EmptyReasonCard = {
   nextAction?: ActionLink;
 };
 
-type ActionIntent = {
-  action: string;
-  label: string;
-  href?: string;
-  link?: CrossAppResourceLink;
-  note?: string;
-};
-
-type ActionCatalogEntry = ActionIntent & {
-  section: "page" | "general" | "notifications" | "integrations" | "people";
-};
-
 type ActionSource = {
   availableActions?: ResourceActionDescriptor[];
 };
@@ -474,151 +462,114 @@ function flattenAvailableActions(
   return sources.flatMap((source) => source?.availableActions ?? []);
 }
 
+type ActionLinkOverride = {
+  label?: string;
+  href?: string;
+  link?: CrossAppResourceLink;
+  note?: string;
+};
+
 function buildActionLink(
   descriptor: ResourceActionDescriptor,
-  intent: ActionIntent,
-): ActionLink {
-  return {
+  tenantCode: string,
+  overrides?: ActionLinkOverride,
+): ActionLink | null {
+  const resolved: ActionLinkOverride | null = (() => {
+    switch (descriptor.action) {
+      case "view_tenant_audit_evidence":
+        return {
+          label: "租戶稽核",
+          href: `/audit?resourceType=tenant&resourceId=${tenantCode}`,
+          note: "same-tab",
+        };
+      case "update_tenant_billing_profile":
+        return {
+          label: "計費資料",
+          href: "/billing",
+          note: "module-owned",
+        };
+      case "update_notification_subscription":
+      case "update_notification_preferences":
+        return {
+          label: "通知偏好",
+          href: "/notifications",
+        };
+      case "update_sla_profile":
+        return {
+          label: "SLA 設定",
+          href: "/sla",
+        };
+      case "issue_api_key":
+      case "rotate_api_key":
+      case "revoke_api_key":
+        return {
+          label: "API 金鑰",
+          href: "/api-keys",
+          note: "module-owned",
+        };
+      case "create_webhook_endpoint":
+      case "update_webhook_endpoint":
+      case "rotate_webhook_secret":
+      case "disable_webhook_endpoint":
+      case "activate_webhook_endpoint":
+      case "send_test_webhook":
+        return {
+          label: "Webhook",
+          href: "/webhooks",
+          note: "module-owned",
+        };
+      case "create_tenant_user":
+      case "update_tenant_role":
+        return {
+          label: "人員與角色",
+          href: "/users",
+        };
+      default:
+        return null;
+    }
+  })();
+
+  if (!resolved && !overrides) {
+    return null;
+  }
+
+  const href = overrides?.href ?? resolved?.href;
+  const link = overrides?.link ?? resolved?.link;
+  const note = overrides?.note ?? resolved?.note;
+
+  const actionLink: ActionLink = {
     descriptor,
-    label: intent.label,
-    ...(intent.href ? { href: intent.href } : {}),
-    ...(intent.link ? { link: intent.link } : {}),
-    ...(intent.note ? { note: intent.note } : {}),
+    label: overrides?.label ?? resolved?.label ?? descriptor.action,
   };
+
+  if (href) {
+    actionLink.href = href;
+  }
+  if (link) {
+    actionLink.link = link;
+  }
+  if (note) {
+    actionLink.note = note;
+  }
+
+  return actionLink;
 }
 
 function mapActionLinks(
   actions: ResourceActionDescriptor[] | undefined,
-  intents: ReadonlyArray<ActionIntent>,
+  tenantCode: string,
+  overrides: Partial<Record<string, ActionLinkOverride>> = {},
 ) {
   if (!actions || actions.length === 0) return [];
 
-  const intentByAction = intents.reduce<Record<string, ActionIntent>>(
-    (acc, intent) => {
-      acc[intent.action] = intent;
-      return acc;
-    },
-    {},
-  );
-
   return actions.flatMap((descriptor) => {
-    const intent = intentByAction[descriptor.action];
-    return intent ? [buildActionLink(descriptor, intent)] : [];
+    const actionLink = buildActionLink(
+      descriptor,
+      tenantCode,
+      overrides[descriptor.action],
+    );
+    return actionLink ? [actionLink] : [];
   });
-}
-
-const SETTINGS_ACTION_CATALOG: ReadonlyArray<ActionCatalogEntry> = [
-  {
-    action: "view_tenant_audit_evidence",
-    label: "租戶稽核",
-    href: "/audit",
-    note: "same-tab",
-    section: "page",
-  },
-  {
-    action: "update_tenant_billing_profile",
-    label: "計費資料",
-    href: "/billing",
-    note: "module-owned",
-    section: "general",
-  },
-  {
-    action: "update_notification_subscription",
-    label: "通知偏好",
-    href: "/notifications",
-    section: "notifications",
-  },
-  {
-    action: "update_notification_preferences",
-    label: "通知偏好",
-    href: "/notifications",
-    section: "notifications",
-  },
-  {
-    action: "update_sla_profile",
-    label: "SLA 設定",
-    href: "/sla",
-    section: "notifications",
-  },
-  {
-    action: "issue_api_key",
-    label: "API 金鑰",
-    href: "/api-keys",
-    note: "module-owned",
-    section: "page",
-  },
-  {
-    action: "rotate_api_key",
-    label: "API 金鑰",
-    href: "/api-keys",
-    note: "module-owned",
-    section: "integrations",
-  },
-  {
-    action: "revoke_api_key",
-    label: "API 金鑰",
-    href: "/api-keys",
-    note: "module-owned",
-    section: "integrations",
-  },
-  {
-    action: "create_webhook_endpoint",
-    label: "Webhook",
-    href: "/webhooks",
-    note: "module-owned",
-    section: "page",
-  },
-  {
-    action: "update_webhook_endpoint",
-    label: "Webhook",
-    href: "/webhooks",
-    note: "module-owned",
-    section: "integrations",
-  },
-  {
-    action: "rotate_webhook_secret",
-    label: "Webhook",
-    href: "/webhooks",
-    note: "module-owned",
-    section: "integrations",
-  },
-  {
-    action: "disable_webhook_endpoint",
-    label: "Webhook",
-    href: "/webhooks",
-    note: "module-owned",
-    section: "integrations",
-  },
-  {
-    action: "activate_webhook_endpoint",
-    label: "Webhook",
-    href: "/webhooks",
-    note: "module-owned",
-    section: "integrations",
-  },
-  {
-    action: "send_test_webhook",
-    label: "Webhook",
-    href: "/webhooks",
-    note: "module-owned",
-    section: "integrations",
-  },
-  {
-    action: "create_tenant_user",
-    label: "人員與角色",
-    href: "/users",
-    section: "people",
-  },
-  {
-    action: "update_tenant_role",
-    label: "人員與角色",
-    href: "/users",
-    section: "people",
-  },
-];
-
-function getActionCatalogBySection(section: ActionCatalogEntry["section"]) {
-  return SETTINGS_ACTION_CATALOG.filter((entry) => entry.section === section);
 }
 
 function dedupeActionLinks(actions: ActionLink[]) {
@@ -844,9 +795,24 @@ async function loadSettingsData(): Promise<SettingsData> {
     webhooksValue,
     auditLogsValue,
   );
-  const supportedActions = new Set(
-    SETTINGS_ACTION_CATALOG.map((entry) => entry.action),
-  );
+  const supportedActions = new Set([
+    "view_tenant_audit_evidence",
+    "update_tenant_billing_profile",
+    "update_notification_subscription",
+    "update_notification_preferences",
+    "update_sla_profile",
+    "issue_api_key",
+    "rotate_api_key",
+    "revoke_api_key",
+    "create_webhook_endpoint",
+    "update_webhook_endpoint",
+    "rotate_webhook_secret",
+    "disable_webhook_endpoint",
+    "activate_webhook_endpoint",
+    "send_test_webhook",
+    "create_tenant_user",
+    "update_tenant_role",
+  ]);
   const unsupportedActions = availableActions.filter(
     (descriptor) => !supportedActions.has(descriptor.action),
   );
@@ -997,21 +963,10 @@ export default async function SettingsPage() {
     },
   ];
 
-  const pageActionIntents = getActionCatalogBySection("page").map((entry) =>
-    entry.action === "view_tenant_audit_evidence"
-      ? {
-          ...entry,
-          href: `/audit?resourceType=tenant&resourceId=${tenantCode}`,
-        }
-      : entry,
-  );
-  const generalActionIntents = getActionCatalogBySection("general");
-  const notificationActionIntents = getActionCatalogBySection("notifications");
-  const integrationActionIntents = getActionCatalogBySection("integrations");
-  const peopleActionIntents = getActionCatalogBySection("people");
-
   const pageActions = dedupeActionLinks([
-    ...mapActionLinks(data.availableActions, pageActionIntents),
+    ...mapActionLinks(data.auditLogs?.availableActions, tenantCode),
+    ...mapActionLinks(data.apiKeys?.availableActions, tenantCode),
+    ...mapActionLinks(data.webhooks?.availableActions, tenantCode),
   ]);
 
   const sitemapEntries: SettingsSitemapEntry[] = [
@@ -1019,35 +974,38 @@ export default async function SettingsPage() {
       title: "一般資料",
       route: "/settings",
       detail: "租戶代碼、計費資料、身分與預設 posture 留在此頁總覽。",
-      actions: dedupeActionLinks(
-        mapActionLinks(data.availableActions, [
-          ...generalActionIntents,
-          {
-            action: "view_tenant_audit_evidence",
+      actions: dedupeActionLinks([
+        ...mapActionLinks(data.billingProfile?.availableActions, tenantCode),
+        ...mapActionLinks(data.identity?.availableActions, tenantCode),
+        ...mapActionLinks(data.auditLogs?.availableActions, tenantCode, {
+          view_tenant_audit_evidence: {
             label: "檢視稽核",
             href: `/audit?module=settings&resourceId=${tenantCode}`,
             note: "same-tab",
           },
-        ]),
-      ),
+        }),
+      ]),
     },
     {
       title: "通知與 SLA",
       route: "/notifications · /sla",
       detail:
         "通知事件矩陣與 SLA 門檻屬獨立 module route；此頁只顯示 posture。",
-      actions: dedupeActionLinks(
-        mapActionLinks(data.availableActions, notificationActionIntents),
-      ),
+      actions: dedupeActionLinks([
+        ...mapActionLinks(data.preferences?.availableActions, tenantCode),
+        ...mapActionLinks(data.sla?.availableActions, tenantCode),
+      ]),
     },
     {
       title: "整合預設",
       route: "/api-keys · /webhooks · platform-admin /audit",
       detail:
         "API key / webhook 治理留在 tenant app；feature rollout 與 platform-owned 變更從 cross-app trace 解釋。",
-      actions: dedupeActionLinks(
-        mapActionLinks(data.availableActions, integrationActionIntents),
-      ),
+      actions: dedupeActionLinks([
+        ...mapActionLinks(data.governance?.availableActions, tenantCode),
+        ...mapActionLinks(data.apiKeys?.availableActions, tenantCode),
+        ...mapActionLinks(data.webhooks?.availableActions, tenantCode),
+      ]),
     },
     {
       title: "人員、隱私、跨 app",
@@ -1055,10 +1013,9 @@ export default async function SettingsPage() {
       detail:
         "權限、隱私同意與 platform-owned 設定變更用 cross-app audit trace 串起來。",
       actions: dedupeActionLinks([
-        ...mapActionLinks(data.availableActions, peopleActionIntents),
-        ...mapActionLinks(data.availableActions, [
-          {
-            action: "view_tenant_audit_evidence",
+        ...mapActionLinks(data.users?.availableActions, tenantCode),
+        ...mapActionLinks(data.auditLogs?.availableActions, tenantCode, {
+          view_tenant_audit_evidence: {
             label: "平台 trace",
             link: {
               targetApp: "platform-admin",
@@ -1069,7 +1026,7 @@ export default async function SettingsPage() {
               label: "平台 trace",
             },
           },
-        ]),
+        }),
       ]),
     },
   ];
@@ -1124,13 +1081,13 @@ export default async function SettingsPage() {
     data.webhooks?.emptyState?.nextAction
       ? [data.webhooks.emptyState.nextAction]
       : (data.webhooks?.availableActions ?? data.availableActions),
-    [
-      {
-        action: "create_webhook_endpoint",
+    tenantCode,
+    {
+      create_webhook_endpoint: {
         label: "檢查 Webhook",
         href: "/webhooks",
       },
-    ],
+    },
   )[0];
 
   const emptyReasonCards: EmptyReasonCard[] = [
