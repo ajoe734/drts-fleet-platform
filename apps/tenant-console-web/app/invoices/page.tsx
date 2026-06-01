@@ -582,13 +582,32 @@ function formatRefreshWindow(staleAfterMs: number | null | undefined) {
   return `${totalMinutes}m`;
 }
 
+function buildInvoiceDetailHref(
+  invoiceId: string,
+  filters?: Pick<InvoiceFilters, "query" | "period" | "status">,
+) {
+  const params = new URLSearchParams();
+  params.set("invoiceId", invoiceId);
+
+  if (filters) {
+    if (filters.status !== "all") params.set("status", filters.status);
+    if (filters.period) params.set("period", filters.period);
+    if (filters.query) params.set("q", filters.query);
+  }
+
+  return `/invoices?${params.toString()}`;
+}
+
 function resolveInvoiceActionHref(
   invoice: InvoiceViewRecord,
   action: InvoiceActionView,
+  filters?: Pick<InvoiceFilters, "query" | "period" | "status">,
 ) {
   switch (action.action) {
     case "download_artifact":
       return action.enabled ? invoice.artifactUrl : null;
+    case "view_detail":
+      return buildInvoiceDetailHref(invoice.invoiceId, filters);
     case "open_billing":
       return (
         invoice.deepLinks.find(
@@ -610,6 +629,23 @@ function resolveInvoiceActionHref(
   }
 }
 
+function resolveEmptyStateActionHref(action: ResourceActionDescriptor) {
+  switch (action.action) {
+    case "clear_filters":
+    case "refresh_snapshot":
+      return "/invoices";
+    case "review_access":
+      return "/users";
+    case "open_billing":
+    case "open_billing_setup":
+      return "/billing";
+    case "open_platform_audit":
+      return "/audit?resourceType=tenant_invoice";
+    default:
+      return null;
+  }
+}
+
 function describeAction(action: InvoiceActionView) {
   if (action.enabled) return action.label;
   if (action.disabledReasonCode === "artifact_missing") {
@@ -624,8 +660,9 @@ function describeAction(action: InvoiceActionView) {
 function renderActionLink(
   action: InvoiceActionView,
   invoice: InvoiceViewRecord,
+  filters?: Pick<InvoiceFilters, "query" | "period" | "status">,
 ) {
-  const href = resolveInvoiceActionHref(invoice, action);
+  const href = resolveInvoiceActionHref(invoice, action, filters);
   const deepLinkMatch = href
     ? invoice.deepLinks.find((link) => link.route === href)
     : null;
@@ -769,14 +806,17 @@ export default async function InvoicesPage({
     ) ?? null;
   const selectedArtifactHref =
     selectedInvoice && selectedArtifactAction
-      ? resolveInvoiceActionHref(selectedInvoice, selectedArtifactAction)
+      ? resolveInvoiceActionHref(
+          selectedInvoice,
+          selectedArtifactAction,
+          filters,
+        )
       : null;
   const selectedInvoiceDetailHref = selectedInvoice
-    ? `/invoices?invoiceId=${encodeURIComponent(selectedInvoice.invoiceId)}&status=${
-        filters.status
-      }&period=${encodeURIComponent(filters.period)}&q=${encodeURIComponent(
-        filters.query,
-      )}`
+    ? buildInvoiceDetailHref(selectedInvoice.invoiceId, filters)
+    : null;
+  const emptyStateActionHref = emptyState?.nextAction
+    ? resolveEmptyStateActionHref(emptyState.nextAction)
     : null;
   const rows: InvoiceRow[] = filteredInvoices.map((invoice) => ({
     ...invoice,
@@ -840,7 +880,9 @@ export default async function InvoicesPage({
       w: 210,
       r: (row) => (
         <div style={actionRowStyle}>
-          {row.availableActions.map((action) => renderActionLink(action, row))}
+          {row.availableActions.map((action) =>
+            renderActionLink(action, row, filters),
+          )}
         </div>
       ),
     },
@@ -1041,8 +1083,15 @@ export default async function InvoicesPage({
                       ? ` · nextAction: ${formatActionLabel(emptyState.nextAction)}`
                       : ""}
                   </div>
-                  {computedEmptyReason === "filtered_empty" ? (
-                    <Link href="/invoices" style={inlineLinkStyle}>
+                  {emptyState.nextAction?.enabled && emptyStateActionHref ? (
+                    <Link
+                      href={emptyStateActionHref}
+                      style={{
+                        ...actionChipStyle,
+                        color: th.accent,
+                        background: th.surface,
+                      }}
+                    >
                       {emptyDescription.ctaLabel}
                     </Link>
                   ) : null}
@@ -1161,7 +1210,7 @@ export default async function InvoicesPage({
                       <div style={fieldLabelStyle}>Available actions</div>
                       <div style={actionRowStyle}>
                         {selectedInvoice.availableActions.map((action) =>
-                          renderActionLink(action, selectedInvoice),
+                          renderActionLink(action, selectedInvoice, filters),
                         )}
                       </div>
                     </div>
@@ -1187,11 +1236,10 @@ export default async function InvoicesPage({
                           return (
                             <Link
                               key={invoice.invoiceId}
-                              href={`/invoices?invoiceId=${encodeURIComponent(
+                              href={buildInvoiceDetailHref(
                                 invoice.invoiceId,
-                              )}&status=${filters.status}&period=${encodeURIComponent(
-                                filters.period,
-                              )}&q=${encodeURIComponent(filters.query)}`}
+                                filters,
+                              )}
                               style={
                                 selected
                                   ? selectedInvoiceLinkStyle
