@@ -6,7 +6,6 @@ import type {
   EmptyReason,
   EmptyStateEnvelope,
   MoneyAmount,
-  RefreshTier,
   ResourceActionDescriptor,
   TenantBillingProfile,
   TenantInvoiceListData,
@@ -26,6 +25,7 @@ import {
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { formatDateInput } from "@/lib/formatters";
+import { TENANT_PAGE_REFRESH_POLICIES } from "@/lib/page-refresh-policy";
 import { getRefreshTierDescriptor } from "@/lib/refresh-tier";
 
 export const dynamic = "force-dynamic";
@@ -36,13 +36,7 @@ const th = buildCanvasTheme({
   density: "compact",
 });
 
-const INVOICES_REFRESH_POLICY: {
-  packetTier: string;
-  runtimeTier: RefreshTier;
-} = {
-  packetTier: "T5",
-  runtimeTier: "slow",
-};
+const INVOICES_REFRESH_POLICY = TENANT_PAGE_REFRESH_POLICIES.invoices;
 const STATUS_FILTERS = ["all", "draft", "issued", "paid", "overdue"] as const;
 const pageStyle: CSSProperties = {
   padding: 24,
