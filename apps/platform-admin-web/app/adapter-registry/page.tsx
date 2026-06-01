@@ -34,10 +34,8 @@ import {
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
-  CanvasTable,
   buildCanvasTheme,
   type CanvasShellNavItem,
-  type CanvasTableColumn,
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -130,6 +128,12 @@ const toolbarGridStyle = {
   gridTemplateColumns: "minmax(0, 1.6fr) repeat(3, minmax(160px, 1fr))",
 } satisfies CSSProperties;
 
+const adapterGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+} satisfies CSSProperties;
+
 const kpiGridStyle = {
   display: "grid",
   gap: 12,
@@ -160,6 +164,16 @@ const actionRowStyle = {
   alignItems: "center",
 } satisfies CSSProperties;
 
+const cardActionRowStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+  alignItems: "center",
+  marginTop: 12,
+  paddingTop: 12,
+  borderTop: `1px solid ${theme.border}`,
+} satisfies CSSProperties;
+
 const inlineMetaStyle = {
   display: "flex",
   flexWrap: "wrap",
@@ -184,6 +198,13 @@ const titleCellStyle = {
   display: "grid",
   gap: 5,
   minWidth: 0,
+} satisfies CSSProperties;
+
+const cardTitleStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: 8,
 } satisfies CSSProperties;
 
 const secondaryTextStyle = {
@@ -231,6 +252,11 @@ const externalLinkStyle = {
   background: theme.surfaceLo,
   color: theme.text,
   textDecoration: "none",
+} satisfies CSSProperties;
+
+const selectedCardStyle = {
+  borderColor: theme.accent,
+  boxShadow: "0 0 0 1px rgba(79, 70, 229, 0.18)",
 } satisfies CSSProperties;
 
 const modalBackdropStyle = {
@@ -786,9 +812,10 @@ export default function AdapterRegistryPage() {
     locale === "en"
       ? {
           pageTitle: "Adapter Registry",
+          pageTitleLong: "External Platform Adapter Registry",
           pageSubtitle:
             "Split-authority registry for external platform adapters, credentials, and operational traffic controls.",
-          breadcrumbParent: "Platform Layer",
+          breadcrumbParent: "Platform & Commerce",
           refresh: "Refresh",
           refreshing: "Refreshing…",
           staleBannerTitle: "Refresh tier T4 wired",
@@ -811,7 +838,7 @@ export default function AdapterRegistryPage() {
           pausedAdapters: "Ops paused",
           listTitle: "Registry inventory",
           listSubtitle:
-            "List, health, credential posture, supported actions, and availableActions-derived CTAs.",
+            "Canvas inventory of adapter health, credential posture, split authority, and availableActions-derived CTAs.",
           detailTitle: "Adapter workspace",
           detailSubtitle:
             "Per-adapter metadata, capability flags, split-authority controls, and cross-app exits.",
@@ -868,9 +895,10 @@ export default function AdapterRegistryPage() {
         }
       : {
           pageTitle: "Adapter Registry",
+          pageTitleLong: "External Platform Adapter Registry",
           pageSubtitle:
             "外部平台 adapter 的 split-authority registry，集中管理 credentials 與 operational traffic control。",
-          breadcrumbParent: "平台層",
+          breadcrumbParent: "平台與商務",
           refresh: "重新整理",
           refreshing: "重新整理中…",
           staleBannerTitle: "已接上 refresh tier T4",
@@ -893,7 +921,7 @@ export default function AdapterRegistryPage() {
           pausedAdapters: "Ops 暫停中",
           listTitle: "Registry 清單",
           listSubtitle:
-            "列表、health、credential posture、supported actions，以及由 availableActions 驅動的 CTA。",
+            "以 canvas card inventory 呈現 adapter health、credential posture、split authority 與 availableActions 驅動 CTA。",
           detailTitle: "Adapter 工作區",
           detailSubtitle:
             "單筆 adapter metadata、capability flags、split-authority controls 與 cross-app exits。",
@@ -1250,177 +1278,6 @@ export default function AdapterRegistryPage() {
     pendingAction,
   ]);
 
-  const columns = useMemo<CanvasTableColumn<AdapterRegistryRecord>[]>(
-    () => [
-      {
-        h: locale === "en" ? "Adapter" : "Adapter",
-        w: 260,
-        r: (row) => (
-          <div style={titleCellStyle}>
-            <button
-              type="button"
-              onClick={() => setSelectedAdapterId(row.id)}
-              style={{
-                background: "transparent",
-                border: 0,
-                padding: 0,
-                textAlign: "left",
-                color: row.id === selectedAdapterId ? theme.accent : theme.text,
-                fontWeight: 650,
-                cursor: "pointer",
-              }}
-            >
-              {row.name}
-            </button>
-            <div style={inlineMetaStyle}>
-              <span style={codeStyle}>
-                {formatPlatformCodeLabel(locale, row.platformCode)}
-              </span>
-              <CanvasPill
-                theme={theme}
-                tone={row.config.isEnabled ? "success" : "neutral"}
-              >
-                {row.config.isEnabled
-                  ? locale === "en"
-                    ? "enabled"
-                    : "啟用中"
-                  : locale === "en"
-                    ? "disabled"
-                    : "停用"}
-              </CanvasPill>
-              {row.operationalPause?.ttlUntil ? (
-                <CanvasPill theme={theme} tone="warn">
-                  {locale === "en" ? "ops paused" : "ops 已暫停"}
-                </CanvasPill>
-              ) : null}
-            </div>
-            <div style={secondaryTextStyle}>{row.description}</div>
-          </div>
-        ),
-      },
-      {
-        h: locale === "en" ? "Environment" : "Environment",
-        w: 120,
-        r: (row) => (
-          <div style={titleCellStyle}>
-            <span>{toEnvironmentLabel(locale, row.environment)}</span>
-            <span style={metricNoteStyle}>
-              {toEnvironmentLabel(locale, row.rolloutStage)}
-            </span>
-          </div>
-        ),
-      },
-      {
-        h: locale === "en" ? "Health" : "Health",
-        w: 140,
-        r: (row) => (
-          <div style={titleCellStyle}>
-            <CanvasPill
-              theme={theme}
-              tone={statusToneForHealth(row.healthStatus.status)}
-              dot
-            >
-              {row.healthStatus.status}
-            </CanvasPill>
-            <span style={metricNoteStyle}>
-              {row.healthStatus.lastCheckTimestamp
-                ? formatDateTime(row.healthStatus.lastCheckTimestamp)
-                : "—"}
-            </span>
-          </div>
-        ),
-      },
-      {
-        h: locale === "en" ? "Credentials" : "Credentials",
-        w: 160,
-        r: (row) => (
-          <div style={titleCellStyle}>
-            <CanvasPill
-              theme={theme}
-              tone={toneForCredential(row.credentialStatus)}
-            >
-              {row.credentialStatus}
-            </CanvasPill>
-            <span style={metricNoteStyle}>
-              {row.credentialMeta?.rotatedAt
-                ? formatDateTime(row.credentialMeta.rotatedAt)
-                : row.updatedAt
-                  ? formatDateTime(row.updatedAt)
-                  : "—"}
-            </span>
-          </div>
-        ),
-      },
-      {
-        h: locale === "en" ? "Webhook" : "Webhook",
-        w: 190,
-        r: (row) => (
-          <div style={titleCellStyle}>
-            <span style={{ ...metricNoteStyle, color: theme.text }}>
-              {row.webhookStatus?.url ?? "—"}
-            </span>
-            <div style={inlineMetaStyle}>
-              <CanvasPill
-                theme={theme}
-                tone={row.webhookStatus?.isEnabled ? "success" : "neutral"}
-              >
-                {row.webhookStatus?.isEnabled ? "enabled" : "disabled"}
-              </CanvasPill>
-              {row.webhookStatus?.lastStatus ? (
-                <CanvasPill
-                  theme={theme}
-                  tone={
-                    row.webhookStatus.lastStatus === "FAILURE"
-                      ? "danger"
-                      : "info"
-                  }
-                >
-                  {row.webhookStatus.lastStatus}
-                </CanvasPill>
-              ) : null}
-            </div>
-          </div>
-        ),
-      },
-      {
-        h: locale === "en" ? "Authority split" : "Authority split",
-        w: 170,
-        r: (row) => {
-          const actions = row.availableActions ?? [];
-          const platformCount = actions.filter(
-            (item: ResourceActionDescriptor) =>
-              authorityGroup(item.action) === "platform",
-          ).length;
-          const opsCount = actions.filter(
-            (item: ResourceActionDescriptor) =>
-              authorityGroup(item.action) === "ops",
-          ).length;
-          return (
-            <div style={titleCellStyle}>
-              <div style={inlineMetaStyle}>
-                <CanvasPill theme={theme} tone="accent">
-                  PA {platformCount}
-                </CanvasPill>
-                <CanvasPill theme={theme} tone="info">
-                  Ops {opsCount}
-                </CanvasPill>
-              </div>
-              <span style={metricNoteStyle}>
-                {row.supportedActions
-                  .map(
-                    (item: AdapterRegistryRecord["supportedActions"][number]) =>
-                      item.name,
-                  )
-                  .join(", ") || "—"}
-              </span>
-            </div>
-          );
-        },
-      },
-    ],
-    [locale, selectedAdapterId],
-  );
-
   const emptyState = activeEmptyReason
     ? emptyStateCopy(locale, activeEmptyReason, pageLevelActions[0] ?? null)
     : null;
@@ -1513,7 +1370,7 @@ export default function AdapterRegistryPage() {
       >
         <CanvasPageHeader
           theme={theme}
-          title={copy.pageTitle}
+          title={copy.pageTitleLong}
           subtitle={copy.pageSubtitle}
           actions={
             <>
@@ -1836,11 +1693,186 @@ export default function AdapterRegistryPage() {
                 ) : null}
               </div>
             ) : (
-              <CanvasTable<AdapterRegistryRecord>
-                theme={theme}
-                columns={columns}
-                rows={filteredAdapters as readonly AdapterRegistryRecord[]}
-              />
+              <div style={adapterGridStyle}>
+                {filteredAdapters.map((adapter) => {
+                  const adapterActions = adapter.availableActions ?? [];
+                  const enabledAdapterActions = adapterActions.filter(
+                    (descriptor: ResourceActionDescriptor) =>
+                      descriptor.enabled,
+                  );
+                  const cardActions = enabledAdapterActions.slice(0, 4);
+                  const platformCount = adapterActions.filter(
+                    (descriptor: ResourceActionDescriptor) =>
+                      authorityGroup(descriptor.action) === "platform",
+                  ).length;
+                  const opsCount = adapterActions.filter(
+                    (descriptor: ResourceActionDescriptor) =>
+                      authorityGroup(descriptor.action) === "ops",
+                  ).length;
+
+                  return (
+                    <CanvasCard
+                      key={adapter.id}
+                      theme={theme}
+                      title={
+                        <span style={cardTitleStyle}>
+                          {adapter.name}
+                          <CanvasPill
+                            theme={theme}
+                            tone={
+                              adapter.isForwarded
+                                ? "info"
+                                : adapter.adapterType === "INTERNAL"
+                                  ? "accent"
+                                  : "neutral"
+                            }
+                          >
+                            {adapter.adapterType}
+                          </CanvasPill>
+                        </span>
+                      }
+                      subtitle={adapter.id}
+                      actions={
+                        <CanvasPill
+                          theme={theme}
+                          tone={statusToneForHealth(
+                            adapter.healthStatus.status,
+                          )}
+                          dot
+                        >
+                          {adapter.healthStatus.status}
+                        </CanvasPill>
+                      }
+                      {...(adapter.id === selectedAdapterId
+                        ? { style: selectedCardStyle }
+                        : {})}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAdapterId(adapter.id)}
+                        style={{
+                          appearance: "none",
+                          border: 0,
+                          background: "transparent",
+                          padding: 0,
+                          width: "100%",
+                          textAlign: "left",
+                          cursor: "pointer",
+                          color: theme.text,
+                        }}
+                      >
+                        <div style={inlineMetaStyle}>
+                          <span style={codeStyle}>
+                            {formatPlatformCodeLabel(
+                              locale,
+                              adapter.platformCode,
+                            )}
+                          </span>
+                          <CanvasPill
+                            theme={theme}
+                            tone={
+                              adapter.config.isEnabled ? "success" : "neutral"
+                            }
+                          >
+                            {adapter.config.isEnabled
+                              ? locale === "en"
+                                ? "enabled"
+                                : "啟用中"
+                              : locale === "en"
+                                ? "disabled"
+                                : "停用"}
+                          </CanvasPill>
+                          {adapter.operationalPause?.ttlUntil ? (
+                            <CanvasPill theme={theme} tone="warn">
+                              {locale === "en" ? "ops paused" : "ops 已暫停"}
+                            </CanvasPill>
+                          ) : null}
+                        </div>
+
+                        <div
+                          style={{
+                            ...secondaryTextStyle,
+                            marginTop: 8,
+                            marginBottom: 12,
+                          }}
+                        >
+                          {adapter.description}
+                        </div>
+
+                        <CanvasDL
+                          theme={theme}
+                          cols={3}
+                          items={[
+                            {
+                              label:
+                                locale === "en" ? "Environment" : "Environment",
+                              value: toEnvironmentLabel(
+                                locale,
+                                adapter.environment,
+                              ),
+                            },
+                            {
+                              label:
+                                locale === "en" ? "Credential" : "Credential",
+                              value: (
+                                <CanvasPill
+                                  theme={theme}
+                                  tone={toneForCredential(
+                                    adapter.credentialStatus,
+                                  )}
+                                >
+                                  {adapter.credentialStatus}
+                                </CanvasPill>
+                              ),
+                            },
+                            {
+                              label:
+                                locale === "en" ? "Last health" : "最後 health",
+                              value: adapter.healthStatus.lastCheckTimestamp
+                                ? formatDateTime(
+                                    adapter.healthStatus.lastCheckTimestamp,
+                                  )
+                                : "—",
+                            },
+                            {
+                              label: locale === "en" ? "Webhook" : "Webhook",
+                              value: adapter.webhookStatus?.lastStatus ?? "—",
+                            },
+                            {
+                              label:
+                                locale === "en" ? "PA authority" : "PA 權限",
+                              value: `PA ${platformCount}`,
+                            },
+                            {
+                              label:
+                                locale === "en" ? "Ops authority" : "Ops 權限",
+                              value: `Ops ${opsCount}`,
+                            },
+                          ]}
+                        />
+                      </button>
+
+                      <div style={cardActionRowStyle}>
+                        {cardActions.map(
+                          (descriptor: ResourceActionDescriptor) => (
+                            <CanvasBtn
+                              key={`${adapter.id}-${descriptor.action}`}
+                              theme={theme}
+                              variant="secondary"
+                              danger={descriptor.action === "disable_adapter"}
+                              onClick={() =>
+                                handleActionIntent(descriptor, adapter.id)
+                              }
+                            >
+                              {toActionLabel(locale, descriptor.action)}
+                            </CanvasBtn>
+                          ),
+                        )}
+                      </div>
+                    </CanvasCard>
+                  );
+                })}
+              </div>
             )}
           </CanvasCard>
 
