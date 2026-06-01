@@ -530,11 +530,11 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
     if (log.resourceType === "report_job") {
       return {
         targetApp: "tenant-console",
-        route: `/audit?auditId=${encodeURIComponent(log.auditId)}`,
+        route: "/reports",
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看報表工作稽核",
+        label: "查看報表工作",
       };
     }
     return {
