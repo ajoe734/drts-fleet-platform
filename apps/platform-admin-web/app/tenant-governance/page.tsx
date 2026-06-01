@@ -138,16 +138,16 @@ const kpiGridStyle = {
   gap: 12,
 } satisfies CSSProperties;
 
-const contentGridStyle = {
+const panelGridStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.6fr) minmax(320px, 0.9fr)",
   gap: 16,
 } satisfies CSSProperties;
 
-const sidebarStackStyle = {
+const supportGridStyle = {
   display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
   gap: 16,
-  alignContent: "start",
+  alignItems: "start",
 } satisfies CSSProperties;
 
 const actionRowStyle = {
@@ -182,6 +182,14 @@ const listRowStyle = {
   gap: 6,
   paddingBottom: 10,
   borderBottom: `1px solid ${theme.border}`,
+} satisfies CSSProperties;
+
+const sectionLabelStyle = {
+  fontSize: 10.5,
+  letterSpacing: "0.12em",
+  textTransform: "uppercase",
+  color: theme.textDim,
+  fontFamily: theme.monoFamily,
 } satisfies CSSProperties;
 
 const secondaryTextStyle = {
@@ -755,10 +763,10 @@ export default function TenantGovernancePage() {
           openRules: "Tenant Console · Rules",
           openOps: "Ops Console · Dispatch",
           heatmapTitle: "Quota usage heat map",
-          heatmapSubtitle: "Top governance pressure across tenants this month.",
+          heatmapSubtitle: "Top 8 tenants by governance pressure this month.",
           selectedTitle: "Tenant governance rail",
           selectedSubtitle:
-            "Same-app and cross-app drill targets stay explicit.",
+            "Drill targets stay explicit across platform-admin, tenant-console, and ops-console.",
           filtersTitle: "Governance focus lanes",
           filtersSubtitle:
             "Filters, row actions, and drill CTAs are rendered from action descriptors.",
@@ -825,10 +833,10 @@ export default function TenantGovernancePage() {
           openRules: "Tenant Console · Rules",
           openOps: "Ops Console · Dispatch",
           heatmapTitle: "Quota 使用熱圖",
-          heatmapSubtitle: "本月最需要治理注意的 tenant。",
+          heatmapSubtitle: "依治理壓力排序的 top 8 tenant。",
           selectedTitle: "租戶治理側欄",
           selectedSubtitle:
-            "保留同 app 與 cross-app drill target 的完整上下文。",
+            "保留 platform-admin、tenant-console、ops-console 的完整 drill context。",
           filtersTitle: "治理聚焦路徑",
           filtersSubtitle:
             "Filter、列動作與 drill CTA 都由 action descriptor 渲染。",
@@ -1413,7 +1421,7 @@ export default function TenantGovernancePage() {
       },
       {
         h: copy.table.status,
-        w: 140,
+        w: 170,
         r: (row) => (
           <div style={{ display: "grid", gap: 6 }}>
             <CanvasPill theme={theme} tone={row.quotaTone} dot>
@@ -1428,6 +1436,14 @@ export default function TenantGovernancePage() {
                 dot
               >
                 {row.riskLabels[0]}
+              </CanvasPill>
+            ) : null}
+            {row.highestGateStatus ? (
+              <CanvasPill
+                theme={theme}
+                tone={toCanvasTone(tenantStageTone(row.highestGateStatus))}
+              >
+                {formatPlatformCodeLabel(language, row.highestGateStatus)}
               </CanvasPill>
             ) : null}
           </div>
@@ -1447,26 +1463,8 @@ export default function TenantGovernancePage() {
           </div>
         ),
       },
-      {
-        h: copy.table.actions,
-        w: 220,
-        r: (row) => (
-          <div style={actionRowStyle}>
-            {row.actions.map((action) => (
-              <div key={action.descriptor.action}>
-                {renderAction(language, origins, action, {
-                  compact: true,
-                  active:
-                    action.descriptor.action === "focus_row" &&
-                    selectedTenantId === row.tenantId,
-                })}
-              </div>
-            ))}
-          </div>
-        ),
-      },
     ],
-    [copy.table, language, origins, selectedTenantId],
+    [copy.table, language],
   );
 
   if (loading && !snapshot) {
@@ -1643,10 +1641,12 @@ export default function TenantGovernancePage() {
             </div>
           </CanvasCard>
         ) : (
-          <div style={contentGridStyle}>
+          <div style={panelGridStyle}>
             <CanvasCard
               theme={theme}
-              title={copy.heatmapTitle}
+              title={`${copy.heatmapTitle} · top 8 tenant · ${
+                language === "en" ? "this month" : "本月"
+              }`}
               subtitle={copy.heatmapSubtitle}
               actions={
                 <CanvasPill theme={theme} tone="neutral">
@@ -1654,44 +1654,10 @@ export default function TenantGovernancePage() {
                 </CanvasPill>
               }
             >
-              <CanvasTable
-                theme={theme}
-                columns={tableColumns}
-                rows={pagedRows}
-              />
-              <div style={{ ...toolbarStyle, marginTop: 14 }}>
-                <span style={secondaryTextStyle}>
-                  {copy.pageSummary(page, totalPages, pagedRows.length)}
-                </span>
-                <span style={{ flex: 1 }} />
-                <CanvasBtn
-                  theme={theme}
-                  variant="secondary"
-                  disabled={page <= 1}
-                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+              <div style={{ display: "grid", gap: 16 }}>
+                <div
+                  style={{ ...toolbarStyle, justifyContent: "space-between" }}
                 >
-                  {copy.previous}
-                </CanvasBtn>
-                <CanvasBtn
-                  theme={theme}
-                  variant="secondary"
-                  disabled={page >= totalPages}
-                  onClick={() =>
-                    setPage((current) => Math.min(totalPages, current + 1))
-                  }
-                >
-                  {copy.next}
-                </CanvasBtn>
-              </div>
-            </CanvasCard>
-
-            <div style={sidebarStackStyle}>
-              <CanvasCard
-                theme={theme}
-                title={copy.filtersTitle}
-                subtitle={copy.filtersSubtitle}
-              >
-                <div style={{ display: "grid", gap: 12 }}>
                   <div style={actionRowStyle}>
                     {(
                       Object.keys(filterActions.actions) as GovernanceFilter[]
@@ -1703,12 +1669,16 @@ export default function TenantGovernancePage() {
                           filterActions.actions[key],
                           {
                             active: filter === key,
+                            compact: true,
                           },
                         )}
                       </div>
                     ))}
                   </div>
                   <div style={actionRowStyle}>
+                    <CanvasPill theme={theme} tone="neutral">
+                      {copy.resultSummary(rows.length, filteredRows.length)}
+                    </CanvasPill>
                     {(
                       Object.keys(filterActions.counts) as GovernanceFilter[]
                     ).map((key) => (
@@ -1724,6 +1694,200 @@ export default function TenantGovernancePage() {
                     ))}
                   </div>
                 </div>
+
+                <CanvasTable
+                  theme={theme}
+                  columns={tableColumns}
+                  rows={pagedRows}
+                />
+
+                <div style={{ ...toolbarStyle, marginTop: -2 }}>
+                  <span style={secondaryTextStyle}>
+                    {language === "en"
+                      ? "Select a tenant name to update the governance rail."
+                      : "點選 tenant 名稱即可切換治理側欄。"}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <CanvasBtn
+                    theme={theme}
+                    variant="secondary"
+                    disabled={page <= 1}
+                    onClick={() =>
+                      setPage((current) => Math.max(1, current - 1))
+                    }
+                  >
+                    {copy.previous}
+                  </CanvasBtn>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="secondary"
+                    disabled={page >= totalPages}
+                    onClick={() =>
+                      setPage((current) => Math.min(totalPages, current + 1))
+                    }
+                  >
+                    {copy.next}
+                  </CanvasBtn>
+                </div>
+              </div>
+            </CanvasCard>
+
+            <div style={supportGridStyle}>
+              <CanvasCard
+                theme={theme}
+                title={
+                  selectedTenant
+                    ? `${copy.selectedTitle} · ${selectedTenant.tenantName}`
+                    : copy.selectedTitle
+                }
+                subtitle={copy.selectedSubtitle}
+              >
+                {selectedTenant ? (
+                  <div style={{ display: "grid", gap: 16 }}>
+                    <div style={metricGridStyle}>
+                      <div style={metricCardStyle}>
+                        <div style={sectionLabelStyle}>Rollout</div>
+                        <div style={actionRowStyle}>
+                          <CanvasPill
+                            theme={theme}
+                            tone={toCanvasTone(
+                              tenantStageTone(
+                                selectedTenant.tenantRolloutStage,
+                              ),
+                            )}
+                            dot
+                          >
+                            {formatPlatformCodeLabel(
+                              language,
+                              selectedTenant.tenantRolloutStage,
+                            )}
+                          </CanvasPill>
+                          <CanvasPill
+                            theme={theme}
+                            tone={toCanvasTone(
+                              tenantStatusTone(selectedTenant.tenantStatus),
+                            )}
+                            dot
+                          >
+                            {formatPlatformCodeLabel(
+                              language,
+                              selectedTenant.tenantStatus,
+                            )}
+                          </CanvasPill>
+                          {selectedTenant.highestGateStatus ? (
+                            <CanvasPill
+                              theme={theme}
+                              tone={toCanvasTone(
+                                tenantStageTone(
+                                  selectedTenant.highestGateStatus,
+                                ),
+                              )}
+                            >
+                              {formatPlatformCodeLabel(
+                                language,
+                                selectedTenant.highestGateStatus,
+                              )}
+                            </CanvasPill>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div style={metricCardStyle}>
+                        <div style={sectionLabelStyle}>Cost-center health</div>
+                        <CanvasPill
+                          theme={theme}
+                          tone={selectedTenant.costCenterTone}
+                          dot
+                        >
+                          {selectedTenant.costCenterLabel}
+                        </CanvasPill>
+                        <div style={secondaryTextStyle}>
+                          {formatNumber(
+                            language,
+                            selectedTenant.costCenterCount,
+                          )}{" "}
+                          cost center ·{" "}
+                          {formatNumber(
+                            language,
+                            selectedTenant.activeRuleCount,
+                          )}{" "}
+                          active rule
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={metricGridStyle}>
+                      <div style={metricCardStyle}>
+                        <div style={sectionLabelStyle}>Quota burn</div>
+                        <div style={{ fontWeight: 700, fontSize: 18 }}>
+                          {formatPercent(
+                            language,
+                            selectedTenant.monthlyQuotaPercentUsed,
+                          )}
+                        </div>
+                        {quotaMeter(
+                          language,
+                          selectedTenant.monthlyQuotaPercentUsed,
+                        )}
+                      </div>
+                      <div style={metricCardStyle}>
+                        <div style={sectionLabelStyle}>Approval backlog</div>
+                        <div style={{ fontWeight: 700, fontSize: 18 }}>
+                          {formatNumber(
+                            language,
+                            selectedTenant.pendingApprovalCount,
+                          )}
+                        </div>
+                        <div style={secondaryTextStyle}>
+                          {formatAge(
+                            language,
+                            selectedTenant.oldestPendingApprovalAgeHours,
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={metricCardStyle}>
+                      <div style={sectionLabelStyle}>Signals</div>
+                      <div style={actionRowStyle}>
+                        {selectedTenant.riskLabels.length > 0 ? (
+                          selectedTenant.riskLabels.map((label, index) => (
+                            <CanvasPill
+                              key={`${label}-${index}`}
+                              theme={theme}
+                              tone={index === 0 ? "danger" : "warn"}
+                              dot
+                            >
+                              {label}
+                            </CanvasPill>
+                          ))
+                        ) : (
+                          <CanvasPill theme={theme} tone="success" dot>
+                            {language === "en" ? "All clear" : "全部正常"}
+                          </CanvasPill>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <div style={sectionLabelStyle}>Drill targets</div>
+                      <div style={actionRowStyle}>
+                        {selectedTenant.detailActions.map((action) => (
+                          <div key={action.descriptor.action}>
+                            {renderAction(language, origins, action, {
+                              showReason: true,
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={secondaryTextStyle}>
+                    {language === "en"
+                      ? "Select a tenant row to inspect detail context."
+                      : "先選一列 tenant，再看 detail rail。"}
+                  </div>
+                )}
               </CanvasCard>
 
               <CanvasCard
@@ -1739,7 +1903,7 @@ export default function TenantGovernancePage() {
                       value: formatNumber(language, aggregates.approvalBacklog),
                       note:
                         language === "en"
-                          ? "Cross-tenant approval requests visible now."
+                          ? "Cross-tenant approval requests visible in the current read."
                           : "目前 read model 可見的跨租戶待審量。",
                     },
                     {
@@ -1819,8 +1983,8 @@ export default function TenantGovernancePage() {
                       value: "Gap",
                       note:
                         language === "en"
-                          ? "Explicitly rendered as not provisioned."
-                          : "刻意以 not provisioned 顯示。",
+                          ? "Rendered as not provisioned until the feed is delivered."
+                          : "在 feed 交付前，這裡明確顯示為 not provisioned。",
                     },
                     {
                       label:
@@ -1854,163 +2018,6 @@ export default function TenantGovernancePage() {
                     </div>
                   ))}
                 </div>
-              </CanvasCard>
-
-              <CanvasCard
-                theme={theme}
-                title={
-                  selectedTenant
-                    ? `${copy.selectedTitle} · ${selectedTenant.tenantName}`
-                    : copy.selectedTitle
-                }
-                subtitle={copy.selectedSubtitle}
-              >
-                {selectedTenant ? (
-                  <div style={{ display: "grid", gap: 16 }}>
-                    <div style={metricGridStyle}>
-                      <div style={metricCardStyle}>
-                        <div style={monoTextStyle}>Rollout</div>
-                        <div style={actionRowStyle}>
-                          <CanvasPill
-                            theme={theme}
-                            tone={toCanvasTone(
-                              tenantStageTone(
-                                selectedTenant.tenantRolloutStage,
-                              ),
-                            )}
-                            dot
-                          >
-                            {formatPlatformCodeLabel(
-                              language,
-                              selectedTenant.tenantRolloutStage,
-                            )}
-                          </CanvasPill>
-                          <CanvasPill
-                            theme={theme}
-                            tone={toCanvasTone(
-                              tenantStatusTone(selectedTenant.tenantStatus),
-                            )}
-                            dot
-                          >
-                            {formatPlatformCodeLabel(
-                              language,
-                              selectedTenant.tenantStatus,
-                            )}
-                          </CanvasPill>
-                          {selectedTenant.highestGateStatus ? (
-                            <CanvasPill
-                              theme={theme}
-                              tone={toCanvasTone(
-                                tenantStageTone(
-                                  selectedTenant.highestGateStatus,
-                                ),
-                              )}
-                            >
-                              {formatPlatformCodeLabel(
-                                language,
-                                selectedTenant.highestGateStatus,
-                              )}
-                            </CanvasPill>
-                          ) : null}
-                        </div>
-                      </div>
-                      <div style={metricCardStyle}>
-                        <div style={monoTextStyle}>Cost-center health</div>
-                        <CanvasPill
-                          theme={theme}
-                          tone={selectedTenant.costCenterTone}
-                          dot
-                        >
-                          {selectedTenant.costCenterLabel}
-                        </CanvasPill>
-                        <div style={secondaryTextStyle}>
-                          {formatNumber(
-                            language,
-                            selectedTenant.costCenterCount,
-                          )}{" "}
-                          cost center ·{" "}
-                          {formatNumber(
-                            language,
-                            selectedTenant.activeRuleCount,
-                          )}{" "}
-                          active rule
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={metricGridStyle}>
-                      <div style={metricCardStyle}>
-                        <div style={monoTextStyle}>Quota burn</div>
-                        <div style={{ fontWeight: 700, fontSize: 18 }}>
-                          {formatPercent(
-                            language,
-                            selectedTenant.monthlyQuotaPercentUsed,
-                          )}
-                        </div>
-                        {quotaMeter(
-                          language,
-                          selectedTenant.monthlyQuotaPercentUsed,
-                        )}
-                      </div>
-                      <div style={metricCardStyle}>
-                        <div style={monoTextStyle}>Approval backlog</div>
-                        <div style={{ fontWeight: 700, fontSize: 18 }}>
-                          {formatNumber(
-                            language,
-                            selectedTenant.pendingApprovalCount,
-                          )}
-                        </div>
-                        <div style={secondaryTextStyle}>
-                          {formatAge(
-                            language,
-                            selectedTenant.oldestPendingApprovalAgeHours,
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={metricCardStyle}>
-                      <div style={monoTextStyle}>Signals</div>
-                      <div style={actionRowStyle}>
-                        {selectedTenant.riskLabels.length > 0 ? (
-                          selectedTenant.riskLabels.map((label, index) => (
-                            <CanvasPill
-                              key={`${label}-${index}`}
-                              theme={theme}
-                              tone={index === 0 ? "danger" : "warn"}
-                              dot
-                            >
-                              {label}
-                            </CanvasPill>
-                          ))
-                        ) : (
-                          <CanvasPill theme={theme} tone="success" dot>
-                            {language === "en" ? "All clear" : "全部正常"}
-                          </CanvasPill>
-                        )}
-                      </div>
-                    </div>
-
-                    <div style={{ display: "grid", gap: 8 }}>
-                      <div style={monoTextStyle}>Drill targets</div>
-                      <div style={actionRowStyle}>
-                        {selectedTenant.detailActions.map((action) => (
-                          <div key={action.descriptor.action}>
-                            {renderAction(language, origins, action, {
-                              showReason: true,
-                            })}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={secondaryTextStyle}>
-                    {language === "en"
-                      ? "Select a tenant row to inspect detail context."
-                      : "先選一列 tenant，再看 detail rail。"}
-                  </div>
-                )}
               </CanvasCard>
             </div>
           </div>
