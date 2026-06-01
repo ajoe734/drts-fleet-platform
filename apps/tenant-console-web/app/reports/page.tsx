@@ -479,22 +479,29 @@ function findAction(actions: ResourceActionDescriptor[], actionName: string) {
   return actions.find((action) => action.action === actionName);
 }
 
-// Renders the backend snapshot's freshness rather than fabricating staleness
-// from the wall clock. `generatedAt` is the newest backend write timestamp in
-// the response; freshness reflects real fetch signals (upstream error →
-// degraded; no backend timestamp → unknown). Manual tier (T6) never
-// auto-stales on a client timer.
+// The tenant reports list endpoint returns only `ReportJobRecord[]` — it does
+// not yet carry a backend `UiRefreshMetadata` envelope — so the page synthesizes
+// freshness from the jobs' own backend write timestamps. `generatedAt` is the
+// newest such timestamp; when the snapshot carries no backend timestamp at all
+// we must NOT fabricate one from the client wall clock, so it stays `null` and
+// freshness is reported `unknown` (the banner then renders "—"). This widens the
+// contract's non-null `generatedAt` to nullable locally rather than inventing a
+// fake "just now". Manual tier (T6) never auto-stales on a client timer.
+type ReportsRefreshMetadata = Omit<UiRefreshMetadata, "generatedAt"> & {
+  generatedAt: string | null;
+};
+
 function buildRefreshMetadata(
   jobs: ReportJobRecord[],
   degraded: boolean,
-): UiRefreshMetadata {
+): ReportsRefreshMetadata {
   const latestUpdatedAt = jobs.reduce<string | null>((latest, job) => {
     if (!job.updatedAt) return latest;
     return !latest || job.updatedAt > latest ? job.updatedAt : latest;
   }, null);
 
   return {
-    generatedAt: latestUpdatedAt ?? new Date().toISOString(),
+    generatedAt: latestUpdatedAt,
     staleAfterMs: REPORTS_STALE_AFTER_MS,
     source: "live",
     dataFreshness: degraded
@@ -638,8 +645,13 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   const flashJobId = getSearchParam(resolvedSearchParams, "flashJobId");
 
   // CTAs are descriptor-driven from the loaded data (packet §3.5), not gated by
-  // role or by the `?emptyReason` scenario param.
+  // role or by the `?emptyReason` scenario param. The header affordances read
+  // the same `availableActions` envelope as the per-job rows — they are never
+  // hard-coded — so a backend that withholds `refresh_report_jobs` or
+  // `create_report_job` (or marks it disabled) renders a disabled affordance.
   const pageActions = data.availableActions;
+  const refreshAction = findAction(pageActions, "refresh_report_jobs");
+  const createAction = findAction(pageActions, "create_report_job");
 
   const sortedJobs = [...data.jobs].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt),
@@ -859,15 +871,43 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
         subtitle="T6 manual · report jobs · artifact downloads · rerun failed exports"
         actions={
           <div style={actionRowStyle}>
-            <form action={refreshReportsAction}>
-              <input name="returnTo" type="hidden" value={returnTo} />
-              <button style={secondaryButtonStyle} type="submit">
+            {refreshAction?.enabled ? (
+              <form action={refreshReportsAction}>
+                <input name="returnTo" type="hidden" value={returnTo} />
+                <button style={secondaryButtonStyle} type="submit">
+                  手動 refresh
+                </button>
+              </form>
+            ) : (
+              <button
+                disabled
+                style={{
+                  ...secondaryButtonStyle,
+                  opacity: 0.45,
+                  cursor: "not-allowed",
+                }}
+                title={getActionDisabledTitle(refreshAction)}
+                type="button"
+              >
                 手動 refresh
               </button>
-            </form>
-            <a href="#create-report-job" style={ghostLinkStyle}>
-              建立工作
-            </a>
+            )}
+            {createAction?.enabled ? (
+              <a href="#create-report-job" style={ghostLinkStyle}>
+                建立工作
+              </a>
+            ) : (
+              <span
+                style={{
+                  ...ghostLinkStyle,
+                  opacity: 0.45,
+                  cursor: "not-allowed",
+                }}
+                title={getActionDisabledTitle(createAction)}
+              >
+                建立工作
+              </span>
+            )}
           </div>
         }
       />
