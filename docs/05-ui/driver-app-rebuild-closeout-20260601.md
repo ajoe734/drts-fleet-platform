@@ -1,6 +1,6 @@
 # Driver App Rebuild — Umbrella Closeout (2026-06-01)
 
-Owner: `Claude2` · Reviewer: `Codex2`
+Owner: `Claude2` · Reviewer: `Claude`
 Task: `UI-FE-DRV-UMBRELLA`
 Phase: `phase1-ui-implementation-wave-202605`
 Design authority (visual): [`docs/05-ui/drts-design-canvas/Driver App.html`](./drts-design-canvas/Driver%20App.html) v0.6
@@ -24,12 +24,17 @@ This document binds:
 1. each of the 9 implementation sub-tasks to its shipped `commit_hash` and the
    reviewer that approved it (§1),
 2. the **SOS press-and-hold 2-second** binding contract (Q-DRV11) to verified
-   in-code evidence — including a contract defect found during this closeout and
-   the corrective change made here (§2),
+   in-code evidence — already satisfied by the shipped SOS screen, no corrective
+   change needed (§2),
 3. the **two device-class** targets (412×892 large, 360×780 narrow) to the
    canvas device frames and the app's own device-frame shell + responsive
    layout (§3),
 4. the executable gate evidence rerun on this branch (§4).
+
+This branch carries **zero code delta vs `origin/dev`**: its net diff is this
+closeout document only (`git diff --stat origin/dev HEAD` → this file, +170).
+The driver-app source — including `incident.tsx` — is byte-identical to the
+shipped `origin/dev` tree.
 
 ## 1. Sub-task completion ledger
 
@@ -53,7 +58,27 @@ All 10 canvas routes (`/onboarding`, `/index`, `/jobs`, `/trip`,
 `/platform-presence`, `/earnings`, `/shift`, `/incident`, `/settings`, plus the
 `_layout` tab shell) are present under `apps/driver-app/app/`.
 
-## 2. SOS press-and-hold 2s contract — verification + corrective change
+### Integration / merge-state (honest call-out)
+
+These sub-tasks are all `done` + reviewer-approved in canonical machine truth,
+but they are **not all integrated into `dev` yet**. As of this closeout
+(`origin/dev` = `64638c94`):
+
+- **Merged into `dev` (3 of 9):** `UI-FE-DRV-IDX` (`043fe12c`),
+  `UI-FE-DRV-PP` (`760af192`), `UI-FE-DRV-SOS` (`e2427577`) — each verified an
+  ancestor of `origin/dev` (`git merge-base --is-ancestor … origin/dev`).
+- **Finalized on per-owner lane branches, not yet merged to `dev` (6 of 9):**
+  `UI-FE-DRV-ONB`, `UI-FE-DRV-JOB`, `UI-FE-DRV-TRP`, `UI-FE-DRV-EAR`,
+  `UI-FE-DRV-SHF`, `UI-FE-DRV-SET` (see the `Branch` column). Their commit
+  objects resolve in this checkout but their per-lane branches still need their
+  own merge/PR into `dev`.
+
+This is acceptable for an umbrella **status** document — it records and binds
+the finalized commits — but it is **not** a claim that all 9 screens are live on
+`dev`. The remaining 6 lane branches must still be integrated through the normal
+per-branch merge flow.
+
+## 2. SOS press-and-hold 2s contract — verified (already shipped)
 
 ### Binding contract
 
@@ -70,31 +95,41 @@ contract, not a visual choice:
 The canvas encodes the gesture as a visual state (`incident-tap` progress=0,
 `incident-hold` press-and-hold 55%).
 
-### Defect found during closeout
+### Verification — already satisfied by the shipped SOS screen
 
-The shipped `UI-FE-DRV-SOS` screen (`apps/driver-app/app/incident.tsx`,
-commit `e2427577e02e`) implemented the long-press threshold at **800 ms (0.8s)**,
-not the binding 2 seconds. The gesture itself (two-step: long-press → explicit
-confirm dialog) was correct, but the duration violated the Q-DRV11 contract. It
-appeared in four places: the `delayLongPress` constant and three Traditional
-Chinese copy strings ("約 0.8 秒" / "需長按 0.8 秒").
+The shipped `UI-FE-DRV-SOS` screen (`apps/driver-app/app/incident.tsx`, commit
+`e2427577e02e`, on `dev`) **already implements the binding 2-second hold**. No
+defect existed and **no corrective change is made by this closeout**. The
+shipped code, byte-identical on `origin/dev` and on this branch, encodes the 2 s
+contract directly:
 
-### Corrective change (made in this closeout)
+```tsx
+const SOS_HOLD_DURATION_MS = 2_000;                       // incident.tsx:70
+// …hold-progress fill driven by elapsed time against the 2 s threshold:
+const elapsedMs = Date.now() - holdStartedAtRef.current;
+const nextProgress = Math.min(1, elapsedMs / SOS_HOLD_DURATION_MS); // :618–619
+// …native long-press threshold bound to the same 2 s constant:
+delayLongPress={SOS_HOLD_DURATION_MS}                     // :929
+```
 
-Brought `incident.tsx` into contract compliance on this branch:
+The gesture is a full press-and-hold with a progress fill that completes at
+`SOS_HOLD_DURATION_MS = 2_000` ms, plus the two-step protection (a single tap
+never submits; the 2 s hold only opens the explicit danger-confirm dialog;
+submit requires the confirm `onConfirm`). This is enforced by the driver-app
+incident tests (§4).
 
-- `SOS_LONG_PRESS_DELAY_MS` `800` → `2000`
-- review-section body copy: "長按底部按鈕約 0.8 秒" → "約 2 秒"
-- bottom-bar hint: "請長按右側按鈕約 0.8 秒…" → "約 2 秒…"
-- CTA eyebrow: "需長按 0.8 秒" → "需長按 2 秒"
+> **Correction note (reopen):** An earlier revision of this closeout
+> (commit `edd1e21b`) claimed the shipped screen held at **0.8 s** and bundled a
+> code edit to "fix" it. That was wrong. It was authored against a **stale base**
+> (`0e3de49b`, 58 commits behind `dev`), where `incident.tsx` was the
+> *pre-rewrite* draft using a since-removed `SOS_LONG_PRESS_DELAY_MS = 800`
+> constant. The shipped `UI-FE-DRV-SOS` rewrite (`e2427577`) replaced that draft
+> entirely with the `SOS_HOLD_DURATION_MS = 2_000` hold-progress model above.
+> The bundled `incident.tsx` edit has been **dropped** (this branch is rebased
+> onto `origin/dev` and carries zero code delta); the `0.8 s` value never existed
+> on `dev`.
 
-The two-step protection (single tap never submits; long-press only opens the
-confirm dialog; submit requires the danger-confirm `onConfirm`) is unchanged and
-remains enforced by `tests/unit/incident-screen.test.ts`. The `delayLongPress`
-prop now enforces the 2-second hold before `onLongPress` fires, satisfying the
-binding contract.
-
-**Post-change SOS contract status: VERIFIED (2 s).**
+**SOS press-and-hold 2 s (Q-DRV11) contract status: VERIFIED as already shipped.**
 
 ## 3. Device-class verification (412×892 + 360×780)
 
@@ -138,33 +173,36 @@ browser can confirm pixel rendering by opening the canvas frames and the
 
 ## 4. Executable gate evidence (rerun on this branch)
 
-Reran the driver-app gates after building workspace deps
+This branch is rebased onto `origin/dev` (`64638c94`) and carries **zero code
+delta** vs `dev` (net diff = this doc only), so the driver-app gate state here is
+exactly `dev`'s. Reran the gates on the merged tree after building workspace deps
 (`pnpm turbo run build --filter=@drts/driver-app^...` so `@drts/contracts` /
 `@drts/ui-tokens` resolve):
 
 - `pnpm --filter @drts/driver-app typecheck` (`tsc --noEmit`) → **exit 0**
-- `pnpm --filter @drts/driver-app exec vitest run` → **11 files, 39 tests passed**
-  (includes `tests/unit/incident-screen.test.ts` covering the SOS two-step gate)
+- `pnpm --filter @drts/driver-app exec vitest run` → **12 files, 44 tests passed**
+  (includes the driver-app incident tests covering the SOS hold + two-step gate)
 
 ## 5. Acceptance mapping
 
 | Acceptance criterion | Status | Evidence |
 | --- | --- | --- |
-| All 9 sub-tasks done | ✅ | §1 ledger — all `done`, commits resolve |
+| All 9 sub-tasks done | ✅ | §1 ledger — all `done` + approved; 3 merged to `dev`, 6 on per-owner lane branches (see §1 merge-state call-out) |
 | Closeout doc | ✅ | this document |
 | Two device-class verification (412×892 + 360×780) | ✅ (canvas + code bound; no live screenshots — see §3 scope note) | §3 |
-| SOS press-and-hold 2s contract verified | ✅ | §2 — defect found at 0.8s, corrected to 2s, typecheck + tests green |
+| SOS press-and-hold 2s contract verified | ✅ | §2 — already shipped in `e2427577` via `SOS_HOLD_DURATION_MS = 2_000` (no defect, no corrective change); typecheck + tests green (§4) |
 
-## 6. Reviewer guidance (Codex2)
+## 6. Reviewer guidance (Claude)
 
 1. Confirm against the canonical machine-truth root (`AI_STATUS_ROOT` /
    `ORCH_STATUS_ROOT`) that each §1 `commit_hash` is the finalized `done` commit
-   for its sub-task.
-2. Review the §2 SOS corrective diff in `apps/driver-app/app/incident.tsx` (the
-   `0.8s → 2s` change). This modifies a file previously finalized under
-   `UI-FE-DRV-SOS`; it is intentionally reopened here because the binding Q-DRV11
-   2s contract — which this umbrella exists to verify — was not met by the
-   shipped 0.8s value.
+   for its sub-task, and note the §1 merge-state call-out (only IDX/PP/SOS are on
+   `dev`; the other 6 are on per-owner lane branches).
+2. Confirm this branch carries **zero code delta vs `origin/dev`**
+   (`git diff --stat origin/dev HEAD` → this doc only) — the prior reopen's two
+   blockers are resolved: the stale `incident.tsx` clobber is dropped, and §2 now
+   states the SOS 2 s contract is verified as **already shipped** in `e2427577`
+   (`SOS_HOLD_DURATION_MS = 2_000`), with no defect and no corrective change.
 3. Confirm the §3 device-class binding and the honest screenshot-scope note are
    acceptable for closeout, or request live captures if a simulator is available
    in your lane.
