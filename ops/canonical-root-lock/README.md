@@ -9,7 +9,7 @@ their assigned isolated worktree.
 
 The orchestrator's contract: supervisor dispatches each worker into an
 isolated worktree under `.artifacts/worktrees/auto/<lane>-<task>`. The
-worker is supposed to switch branches and commit *there*, never on the
+worker is supposed to switch branches and commit _there_, never on the
 canonical root. The canonical root is the single source of truth for
 machine-readable state (`ai-status.json`, `state.json`, dashboards),
 and its branch determines which tasks the supervisor can see.
@@ -27,12 +27,13 @@ sibling ops branch on the canonical root.
 
 Runs after every branch checkout. If the checkout happened in the
 canonical root (not in any worktree), records:
+
 - timestamp
 - previous and new branch + sha
 - caller process chain (PID + command) up the parent tree
 
 Output: `.orchestrator/logs/canonical-root-checkouts.jsonl` + a stderr
-WARN that the operator sees in their terminal *and* that any worker
+WARN that the operator sees in their terminal _and_ that any worker
 process responsible for the switch sees in its captured output.
 
 This layer cannot block the switch — git has no pre-checkout hook —
@@ -49,7 +50,7 @@ watchdog:
    `~/.config/drts/canonical-root.env`).
 3. If drifted, logs to `.orchestrator/logs/canonical-root-watchdog.jsonl`
    and exits non-zero — `systemctl --user status
-   drts-canonical-root-watch` then surfaces the drift to the operator.
+drts-canonical-root-watch` then surfaces the drift to the operator.
 
 ### Optional Layer 3 — enforce
 
@@ -74,12 +75,12 @@ sprint-branch checkout. The husky hook activates automatically on next
 ## Maintaining the allow list
 
 When you intentionally park the canonical root on a non-default branch
-(e.g., during a wave dispatch like `claude/ui-impl-wave-dispatch-202605`),
+(e.g., during a wave dispatch like `claude/ui-impl-wave-dispatch-202605-rebased-root`),
 edit the env file:
 
 ```
 $EDITOR ~/.config/drts/canonical-root.env
-# ORCH_CANONICAL_BRANCH=claude/ui-impl-wave-dispatch-202605
+# ORCH_CANONICAL_BRANCH=claude/ui-impl-wave-dispatch-202605-rebased-root
 systemctl --user restart drts-canonical-root-watch.timer
 ```
 

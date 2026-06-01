@@ -12,21 +12,21 @@ This UAT codifies the human-runnable acceptance scenarios for governance-aware b
 
 The directive §H acceptance body for `WF-FIN-GOV-001` is the exact 13-field set declared in the spec §3.8. Review must be able to point to one primary happy-path assertion for each field, plus the negative-path guard that prevents silent drift.
 
-| Field | Primary UAT coverage | Negative / integrity coverage |
-| --- | --- | --- |
-| `costCenterCode` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-006` | `UAT-FIN-GOV-011` |
-| `costCenterName` | `UAT-FIN-GOV-001` | `UAT-FIN-GOV-011` |
-| `ownerUserId` | `UAT-FIN-GOV-001` | `UAT-FIN-GOV-011` |
-| `legacy_unmapped` | `UAT-FIN-GOV-001` (`false` on current mappings) | `UAT-FIN-GOV-011` |
-| `approvalRequestId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003` | `UAT-FIN-GOV-008` |
-| `approvalState` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003` | `UAT-FIN-GOV-008` |
-| `quotaPeriodKey` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-006` | `UAT-FIN-GOV-007` |
-| `quotaUsageDelta` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004` | `UAT-FIN-GOV-007`, `UAT-FIN-GOV-012` |
-| `partnerProgramCode` | `UAT-FIN-GOV-005` | `UAT-FIN-GOV-013` |
-| `eligibilityVerificationId` | `UAT-FIN-GOV-005` | `UAT-FIN-GOV-013` |
-| `platformEarningsRef` | `UAT-FIN-GOV-006` | `UAT-FIN-GOV-010` |
-| `auditId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003` | `UAT-FIN-GOV-009`, `UAT-FIN-GOV-010`, `UAT-FIN-GOV-012` |
-| `reportArtifactId` | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-005`, `UAT-FIN-GOV-006` | `UAT-FIN-GOV-009`, `UAT-FIN-GOV-010` |
+| Field                       | Primary UAT coverage                                                       | Negative / integrity coverage                           |
+| --------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `costCenterCode`            | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-006`                    | `UAT-FIN-GOV-011`                                       |
+| `costCenterName`            | `UAT-FIN-GOV-001`                                                          | `UAT-FIN-GOV-011`                                       |
+| `ownerUserId`               | `UAT-FIN-GOV-001`                                                          | `UAT-FIN-GOV-011`                                       |
+| `legacy_unmapped`           | `UAT-FIN-GOV-001` (`false` on current mappings)                            | `UAT-FIN-GOV-011`                                       |
+| `approvalRequestId`         | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003`                    | `UAT-FIN-GOV-008`                                       |
+| `approvalState`             | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003`                    | `UAT-FIN-GOV-008`                                       |
+| `quotaPeriodKey`            | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-006`                    | `UAT-FIN-GOV-007`                                       |
+| `quotaUsageDelta`           | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`                                       | `UAT-FIN-GOV-007`, `UAT-FIN-GOV-012`                    |
+| `partnerProgramCode`        | `UAT-FIN-GOV-005`                                                          | `UAT-FIN-GOV-013`                                       |
+| `eligibilityVerificationId` | `UAT-FIN-GOV-005`                                                          | `UAT-FIN-GOV-013`                                       |
+| `platformEarningsRef`       | `UAT-FIN-GOV-006`                                                          | `UAT-FIN-GOV-010`                                       |
+| `auditId`                   | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-002`, `UAT-FIN-GOV-003`                    | `UAT-FIN-GOV-009`, `UAT-FIN-GOV-010`, `UAT-FIN-GOV-012` |
+| `reportArtifactId`          | `UAT-FIN-GOV-001`, `UAT-FIN-GOV-004`, `UAT-FIN-GOV-005`, `UAT-FIN-GOV-006` | `UAT-FIN-GOV-009`, `UAT-FIN-GOV-010`                    |
 
 Expected review posture:
 
@@ -60,7 +60,7 @@ If any pre-condition is missing, the UAT halts and reports the missing precondit
 4. Generate the invoice for the billing window.
 5. Generate the report export for the billing window.
 
-**Assert**: the billing record carries the full 13-field verification body for the non-partner owned flow: `costCenterCode = CC-A`, `costCenterName` resolved to the registry snapshot, `ownerUserId` populated, `legacy_unmapped = false`, `approvalRequestId` set, `approvalState = auto_approved`, `quotaPeriodKey` set, `quotaUsageDelta > 0`, `auditId` set, and `reportArtifactId` becomes non-null after export. `partnerProgramCode`, `eligibilityVerificationId`, and `platformEarningsRef` remain null on this owned non-partner path. The report export contains the same governance fields for the same booking row.
+**Assert**: the billing record carries `costCenterCode = CC-A`, `costCenterName` resolved to the registry snapshot, `ownerUserId` populated, `approvalRequestId` set, `approvalState = auto_approved`, `quotaPeriodKey` set, `quotaUsageDelta > 0`, `auditId` set, `reportArtifactId` non-null after export. `partnerProgramCode` and `platformEarningsRef` null. `legacy_unmapped = false`. `ownerName` and `approvalEvaluationId` are set as enrichment. The report export contains the same booking row with the same field values.
 
 ### `UAT-FIN-GOV-002` — Approval-required threshold, manual approval
 
