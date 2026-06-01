@@ -261,9 +261,13 @@ export default function NoticesPage() {
             note="Delivered snapshots across downstream surfaces"
           />
           <SummaryCard
-            title="Last generated"
-            value={formatDateTime(workspace?.refresh.generatedAt ?? "")}
-            note="Workspace snapshot timestamp"
+            title="Scheduled windows"
+            value={String(scheduledCount)}
+            note={
+              maintenance?.scheduledStart
+                ? `maintenance starts ${formatDateTime(maintenance.scheduledStart)}`
+                : "no maintenance window scheduled"
+            }
           />
         </div>
       </div>
@@ -330,14 +334,14 @@ export default function NoticesPage() {
           ))}
         </div>
         <div style={toolbarActionsStyle}>
-          {tabActions.map((descriptor) => (
-            <ActionDescriptorButton
-              key={`${activeTab}-${descriptor.action}`}
-              descriptor={descriptor}
-              tone={descriptor.riskLevel === "high" ? "primary" : "secondary"}
-              onClick={() => handleTabAction(descriptor, activeTab, openAction)}
-            />
-          ))}
+          <ActionGroup
+            actions={tabActions}
+            tone="secondary"
+            emptyLabel="No tab-level actions for this view"
+            onAction={(descriptor) =>
+              handleTabAction(descriptor, activeTab, openAction)
+            }
+          />
           <button
             type="button"
             style={secondaryButtonStyle}
@@ -501,6 +505,28 @@ export default function NoticesPage() {
                     <span className="admin-switch-slider" />
                   </label>
                 </div>
+                <div style={maintenanceMetaGridStyle}>
+                  <div style={snapshotPillStyle}>
+                    <span style={snapshotPillLabelStyle}>updated</span>
+                    <span style={snapshotPillValueStyle}>
+                      {formatDateTime(maintenance?.updatedAt ?? "")}
+                    </span>
+                  </div>
+                  <div style={snapshotPillStyle}>
+                    <span style={snapshotPillLabelStyle}>owner</span>
+                    <span style={snapshotPillValueStyle}>
+                      {maintenance?.updatedBy ?? "system"}
+                    </span>
+                  </div>
+                  <div style={snapshotPillStyle}>
+                    <span style={snapshotPillLabelStyle}>window</span>
+                    <span style={snapshotPillValueStyle}>
+                      {maintenance?.scheduledStart
+                        ? `${formatDateTime(maintenance.scheduledStart)} → ${formatDateTime(maintenance?.scheduledEnd ?? "")}`
+                        : "not scheduled"}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               <div style={maintenanceFieldGridStyle}>
@@ -556,20 +582,18 @@ export default function NoticesPage() {
               </div>
 
               <div style={toolbarActionsStyle}>
-                {workspace.maintenance.availableActions.map((descriptor) => (
-                  <ActionDescriptorButton
-                    key={descriptor.action}
-                    descriptor={descriptor}
-                    tone="primary"
-                    onClick={() =>
-                      openAction({
-                        kind: "maintenance",
-                        descriptor,
-                        enabled: descriptor.action !== "clear_maintenance_mode",
-                      })
-                    }
-                  />
-                ))}
+                <ActionGroup
+                  actions={workspace.maintenance.availableActions}
+                  tone="primary"
+                  emptyLabel="Maintenance state is read-only"
+                  onAction={(descriptor) =>
+                    openAction({
+                      kind: "maintenance",
+                      descriptor,
+                      enabled: descriptor.action !== "clear_maintenance_mode",
+                    })
+                  }
+                />
               </div>
             </section>
           </div>
@@ -585,6 +609,12 @@ export default function NoticesPage() {
                 <div style={previewBannerBodyStyle}>
                   {workspace.maintenance.previewBody}
                 </div>
+              </div>
+              <div style={previewMetaStyle}>
+                <span>
+                  updated {formatDateTime(maintenance?.updatedAt ?? "")}
+                </span>
+                <span>owner {maintenance?.updatedBy ?? "system"}</span>
               </div>
             </section>
 
@@ -643,6 +673,10 @@ export default function NoticesPage() {
             <SupportCard
               title="Read-only history"
               body="Broadcast History is intentionally read-only. Use the active Notices tab for current-state intervention, and use the audit receipt link after mutations for durable evidence."
+            />
+            <SupportCard
+              title="Delivery contract"
+              body="Queued rows have not started propagating. Propagating rows indicate downstream apps may still be showing intermediate banner state until the next refresh cycle completes."
             />
           </aside>
         </section>
@@ -753,10 +787,11 @@ function NoticeComposer(props: {
           <div style={sectionTitleStyle}>Create platform notice</div>
         </div>
         {props.createAction && (
-          <ActionDescriptorButton
-            descriptor={props.createAction}
+          <ActionGroup
+            actions={[props.createAction]}
             tone="primary"
-            onClick={() => props.onOpenCreate(props.createAction!)}
+            emptyLabel="Creation unavailable"
+            onAction={props.onOpenCreate}
           />
         )}
       </div>
@@ -860,6 +895,10 @@ function NoticeRow(props: {
             {props.notice.title}
           </div>
           <div style={tableBodyTextStyle}>{props.notice.body}</div>
+          <div style={subtleMonoStyle}>
+            created {formatDateTime(props.notice.createdAt)} ·{" "}
+            {props.notice.createdBy ?? "system"}
+          </div>
         </div>
       </td>
       <td>
@@ -884,29 +923,30 @@ function NoticeRow(props: {
             {props.notice.broadcastStatus} ·{" "}
             {formatDateTime(props.notice.updatedAt)}
           </span>
+          {props.notice.scheduledAt && (
+            <span style={subtleMonoStyle}>
+              scheduled {formatDateTime(props.notice.scheduledAt)}
+            </span>
+          )}
         </div>
       </td>
       <td>
         <LinkStack links={props.notice.crossAppLinks} compact />
       </td>
       <td>
-        <div style={{ display: "grid", gap: 8, justifyItems: "start" }}>
-          {props.notice.availableActions.map((descriptor) => (
-            <ActionDescriptorButton
-              key={`${props.notice.noticeId}-${descriptor.action}`}
-              descriptor={descriptor}
-              size="sm"
-              tone="secondary"
-              onClick={() =>
-                props.onAction({
-                  kind: "resolve",
-                  descriptor,
-                  notice: props.notice,
-                })
-              }
-            />
-          ))}
-        </div>
+        <ActionGroup
+          actions={props.notice.availableActions}
+          size="sm"
+          tone="secondary"
+          emptyLabel="Read-only notice"
+          onAction={(descriptor) =>
+            props.onAction({
+              kind: "resolve",
+              descriptor,
+              notice: props.notice,
+            })
+          }
+        />
       </td>
     </tr>
   );
@@ -920,8 +960,13 @@ function HistoryRow(props: {
     <tr>
       <td style={monoCellStyle}>{props.record.noticeId}</td>
       <td>
-        <div style={{ fontWeight: 700, color: "#111827" }}>
-          {props.record.title}
+        <div style={{ display: "grid", gap: 4 }}>
+          <div style={{ fontWeight: 700, color: "#111827" }}>
+            {props.record.title}
+          </div>
+          <div style={subtleMonoStyle}>
+            {formatPlatformCodeLabel(props.locale, props.record.targetAudience)}
+          </div>
         </div>
       </td>
       <td>
@@ -974,16 +1019,17 @@ function EmptyStateCard(props: {
       <div style={emptyStateIconStyle}>{meta.icon}</div>
       <div style={sectionEyebrowStyle}>{meta.kicker}</div>
       <div style={sectionTitleStyle}>{meta.title}</div>
-      <div style={mutedBodyStyle}>
-        {props.emptyState?.messageCode ??
-          "No records returned for this workspace."}
-      </div>
-      {nextAction && (
-        <div style={toolbarActionsStyle}>
-          <ActionDescriptorButton
-            descriptor={nextAction}
+      <div style={mutedBodyStyle}>{meta.body}</div>
+      {props.emptyState?.messageCode && (
+        <div style={emptyReasonCodeStyle}>{props.emptyState.messageCode}</div>
+      )}
+      <div style={emptyStateHintStyle}>{meta.hint}</div>
+      {nextAction && props.onAction && (
+        <div style={{ marginTop: 4 }}>
+          <ActionGroup
+            actions={[nextAction]}
+            onAction={props.onAction}
             tone="secondary"
-            onClick={() => props.onAction?.(nextAction)}
           />
         </div>
       )}
@@ -994,8 +1040,8 @@ function EmptyStateCard(props: {
 function ActionDescriptorButton(props: {
   descriptor: ResourceActionDescriptor;
   onClick: () => void;
-  tone?: "primary" | "secondary";
-  size?: "md" | "sm";
+  tone?: "primary" | "secondary" | undefined;
+  size?: "md" | "sm" | undefined;
 }) {
   const buttonStyle =
     props.tone === "primary"
@@ -1019,6 +1065,64 @@ function ActionDescriptorButton(props: {
     >
       {actionLabel(props.descriptor.action)}
     </button>
+  );
+}
+
+function ActionGroup(props: {
+  actions: ResourceActionDescriptor[];
+  onAction: (descriptor: ResourceActionDescriptor) => void;
+  tone?: "primary" | "secondary" | undefined;
+  size?: "md" | "sm" | undefined;
+  emptyLabel?: string | undefined;
+}) {
+  const enabledActions = props.actions.filter(
+    (descriptor) => descriptor.enabled,
+  );
+  const blockedActions = props.actions.filter(
+    (descriptor) => !descriptor.enabled,
+  );
+
+  if (props.actions.length === 0) {
+    return (
+      <div style={readOnlyNoteStyle}>{props.emptyLabel ?? "Read-only"}</div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {enabledActions.length > 0 && (
+        <div style={toolbarActionsStyle}>
+          {enabledActions.map((descriptor) => (
+            <ActionDescriptorButton
+              key={descriptor.action}
+              descriptor={descriptor}
+              {...(props.tone ? { tone: props.tone } : {})}
+              {...(props.size ? { size: props.size } : {})}
+              onClick={() => props.onAction(descriptor)}
+            />
+          ))}
+        </div>
+      )}
+      {blockedActions.length > 0 && (
+        <div style={blockedActionListStyle}>
+          {blockedActions.map((descriptor) => (
+            <div key={descriptor.action} style={blockedActionCardStyle}>
+              <ActionDescriptorButton
+                descriptor={descriptor}
+                tone="secondary"
+                {...(props.size ? { size: props.size } : {})}
+                onClick={() => props.onAction(descriptor)}
+              />
+              <span style={blockedActionReasonStyle}>
+                {descriptor.disabledReasonCode
+                  ? formatPlatformCodeLabel("en", descriptor.disabledReasonCode)
+                  : "Action currently unavailable"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1204,6 +1308,8 @@ function emptyStateMeta(reason: EmptyStateEnvelope["reason"]) {
         icon: "Lock",
         kicker: "Permission boundary",
         title: "You can see the workspace, but not this dataset",
+        body: "The route loaded, but the current actor is not authorized to read this tab's records.",
+        hint: "Switch to a broader role or use a cross-app audit link with the correct authority.",
         border: "rgba(37, 99, 235, 0.35)",
         background: "linear-gradient(135deg, #eff6ff, #ffffff)",
       };
@@ -1212,6 +1318,8 @@ function emptyStateMeta(reason: EmptyStateEnvelope["reason"]) {
         icon: "Retry",
         kicker: "Fetch failed",
         title: "The data request did not complete",
+        body: "The workspace call failed before the list could be hydrated.",
+        hint: "Refresh the page. If the next fetch fails again, inspect the upstream API and audit trail.",
         border: "rgba(220, 38, 38, 0.35)",
         background: "linear-gradient(135deg, #fef2f2, #ffffff)",
       };
@@ -1220,6 +1328,8 @@ function emptyStateMeta(reason: EmptyStateEnvelope["reason"]) {
         icon: "Bridge",
         kicker: "External dependency",
         title: "A downstream system is unavailable",
+        body: "The platform admin workspace is up, but at least one downstream notice target is not responding.",
+        hint: "Use the deep links to confirm downstream banner state once the dependency recovers.",
         border: "rgba(217, 119, 6, 0.35)",
         background: "linear-gradient(135deg, #fff7ed, #ffffff)",
       };
@@ -1228,6 +1338,8 @@ function emptyStateMeta(reason: EmptyStateEnvelope["reason"]) {
         icon: "Setup",
         kicker: "Not provisioned",
         title: "This workspace has not been provisioned yet",
+        body: "No notices data exists for this environment or tenant slice yet.",
+        hint: "Use the next action to provision the resource or publish the first notice.",
         border: "rgba(5, 150, 105, 0.35)",
         background: "linear-gradient(135deg, #ecfdf5, #ffffff)",
       };
@@ -1236,6 +1348,8 @@ function emptyStateMeta(reason: EmptyStateEnvelope["reason"]) {
         icon: "Filter",
         kicker: "Filtered result",
         title: "No records match the current slice",
+        body: "The query completed successfully, but the current list filters narrowed the result to zero rows.",
+        hint: "Clear filters or switch tabs to inspect a broader notice timeline.",
         border: "rgba(71, 85, 105, 0.35)",
         background: "linear-gradient(135deg, #f8fafc, #ffffff)",
       };
@@ -1244,6 +1358,8 @@ function emptyStateMeta(reason: EmptyStateEnvelope["reason"]) {
         icon: "Ineligible",
         kicker: "Contract mismatch",
         title: "Received a driver-only empty reason on an admin page",
+        body: "This empty-state reason belongs to driver-facing flows and should not normally appear in platform admin.",
+        hint: "Treat this as a contract mismatch and verify the API payload before shipping.",
         border: "rgba(124, 58, 237, 0.35)",
         background: "linear-gradient(135deg, #f5f3ff, #ffffff)",
       };
@@ -1253,6 +1369,8 @@ function emptyStateMeta(reason: EmptyStateEnvelope["reason"]) {
         icon: "Zero",
         kicker: "No data",
         title: "Nothing has been published here yet",
+        body: "The request succeeded and this workspace currently has zero notices or history rows.",
+        hint: "Publish the first notice or wait for a future maintenance event to populate the stream.",
         border: "rgba(148, 163, 184, 0.35)",
         background: "linear-gradient(135deg, #f8fafc, #ffffff)",
       };
@@ -1587,6 +1705,13 @@ const maintenanceStatusHeaderStyle: React.CSSProperties = {
   gap: 12,
 };
 
+const maintenanceMetaGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: 10,
+  marginTop: 14,
+};
+
 const maintenanceStatusTitleStyle: React.CSSProperties = {
   fontWeight: 700,
   fontSize: 15,
@@ -1612,6 +1737,16 @@ const previewBannerBodyStyle: React.CSSProperties = {
   color: "#7f1d1d",
   lineHeight: 1.55,
   fontSize: 13,
+};
+
+const previewMetaStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 12,
+  flexWrap: "wrap",
+  marginTop: 10,
+  color: "#7f1d1d",
+  fontSize: 12,
+  fontWeight: 600,
 };
 
 const snapshotLeftStyle: React.CSSProperties = {
@@ -1771,6 +1906,29 @@ const linkRowStyle: React.CSSProperties = {
   border: "1px solid rgba(148,163,184,0.16)",
 };
 
+const readOnlyNoteStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 12,
+  fontWeight: 700,
+};
+
+const blockedActionListStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const blockedActionCardStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  justifyItems: "start",
+};
+
+const blockedActionReasonStyle: React.CSSProperties = {
+  color: "#64748b",
+  fontSize: 11.5,
+  lineHeight: 1.45,
+};
+
 const modalScrimStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
@@ -1827,6 +1985,23 @@ const emptyStateIconStyle: React.CSSProperties = {
   letterSpacing: "0.14em",
   textTransform: "uppercase",
   color: "#334155",
+};
+
+const emptyReasonCodeStyle: React.CSSProperties = {
+  ...subtleMonoStyle,
+  display: "inline-flex",
+  justifySelf: "start",
+  padding: "6px 9px",
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.62)",
+  border: "1px solid rgba(148,163,184,0.2)",
+};
+
+const emptyStateHintStyle: React.CSSProperties = {
+  color: "#475569",
+  fontSize: 12.5,
+  lineHeight: 1.55,
+  fontWeight: 600,
 };
 
 function tabButtonStyle(active: boolean): React.CSSProperties {
