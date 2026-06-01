@@ -443,6 +443,22 @@ function getActionDescriptor(
   return actions.find((descriptor) => descriptor.action === action) ?? null;
 }
 
+function actionDescriptorTooltip(
+  descriptor: ResourceActionDescriptor | null,
+  locale: string,
+) {
+  if (!descriptor) {
+    return undefined;
+  }
+  if (!descriptor.enabled) {
+    return descriptor.disabledReasonCode ?? descriptor.action;
+  }
+  if (descriptor.requiresReason) {
+    return locale === "en" ? "Reason required" : "需填原因";
+  }
+  return undefined;
+}
+
 function resolveResourceActions(
   record: RuntimeActionedResource | null | undefined,
 ) {
@@ -1169,6 +1185,16 @@ export default function PaymentsPage() {
   });
   const issueLinksFor = (issue: RuntimeIssueRecord) =>
     resolveCrossAppLinks(issue, [issueOpsLinkFor(issue)]);
+  const settlementContextIssues = sortedIssues.filter(
+    (issue) =>
+      issue.tenantId ||
+      issue.partnerId ||
+      issue.partnerProgramId ||
+      issue.sponsorReference ||
+      issue.mirrorOrderId ||
+      issue.externalOrderId ||
+      issue.linkedReconciliationJobId,
+  );
 
   const rootEmptyReason = detectEmptyReason(error);
   const issueEmptyConfig: EmptyStateConfig = {
@@ -1320,6 +1346,10 @@ export default function PaymentsPage() {
           reimbursementQueueCta: "Open reimbursement queue",
           reimbursementQueueFocused: (batchId: string) =>
             `Received batch deep link ${batchId}. Continue the approval or paid flow from the reimbursement queue route.`,
+          matrixContextTitle: "Preserved settlement identifiers",
+          matrixContextSubtitle:
+            "Keep tenant, partner, sponsor, mirrored order, and reconciliation job references visible beside the settlement matrix.",
+          matrixContextIssueLabel: "Queue anchor",
           actorLabel: "Finance actor ID",
           loading: t("payments.loading"),
         }
@@ -1362,6 +1392,10 @@ export default function PaymentsPage() {
           reimbursementQueueCta: "前往 reimbursement queue",
           reimbursementQueueFocused: (batchId: string) =>
             `收到批次 deep link ${batchId}，請改到 reimbursement queue 繼續處理。`,
+          matrixContextTitle: "保留的結算識別欄位",
+          matrixContextSubtitle:
+            "把 tenant、partner、sponsor、鏡像訂單與 reconciliation job 識別資訊保留在 settlement matrix 旁邊。",
+          matrixContextIssueLabel: "Queue 錨點",
           actorLabel: "財務操作人 ID",
           loading: t("payments.loading"),
         };
@@ -2714,11 +2748,21 @@ export default function PaymentsPage() {
 
                       <button
                         type="submit"
-                        disabled={issueDraftPending || !newIssue.summary.trim()}
+                        title={actionDescriptorTooltip(
+                          createIssueAction,
+                          locale,
+                        )}
+                        disabled={
+                          issueDraftPending ||
+                          !newIssue.summary.trim() ||
+                          createIssueAction?.enabled === false
+                        }
                         style={nativeSubmitStyle(theme, {
                           primary: true,
                           disabled:
-                            issueDraftPending || !newIssue.summary.trim(),
+                            issueDraftPending ||
+                            !newIssue.summary.trim() ||
+                            createIssueAction?.enabled === false,
                         })}
                       >
                         {issueDraftPending
@@ -2775,15 +2819,10 @@ export default function PaymentsPage() {
                     </CanvasField>
                     <button
                       type="submit"
-                      title={
-                        !generateInvoicesAction?.enabled
-                          ? generateInvoicesAction?.disabledReasonCode
-                          : generateInvoicesAction?.requiresReason
-                            ? locale === "en"
-                              ? "Reason required"
-                              : "需填原因"
-                            : undefined
-                      }
+                      title={actionDescriptorTooltip(
+                        generateInvoicesAction,
+                        locale,
+                      )}
                       disabled={
                         invoicePending ||
                         generateInvoicesAction?.enabled === false
@@ -2825,15 +2864,10 @@ export default function PaymentsPage() {
                     </CanvasField>
                     <button
                       type="submit"
-                      title={
-                        !generateStatementsAction?.enabled
-                          ? generateStatementsAction?.disabledReasonCode
-                          : generateStatementsAction?.requiresReason
-                            ? locale === "en"
-                              ? "Reason required"
-                              : "需填原因"
-                            : undefined
-                      }
+                      title={actionDescriptorTooltip(
+                        generateStatementsAction,
+                        locale,
+                      )}
                       disabled={
                         statementPending ||
                         generateStatementsAction?.enabled === false
@@ -2877,11 +2911,177 @@ export default function PaymentsPage() {
                 padding={0}
               >
                 {sortedMatrix.length > 0 ? (
-                  <CanvasTable
-                    theme={theme}
-                    columns={settlementColumns}
-                    rows={sortedMatrix as MatrixTableRow[]}
-                  />
+                  <>
+                    <CanvasTable
+                      theme={theme}
+                      columns={settlementColumns}
+                      rows={sortedMatrix as MatrixTableRow[]}
+                    />
+                    {settlementContextIssues.length > 0 ? (
+                      <div
+                        style={{
+                          borderTop: `1px solid ${theme.border}`,
+                          padding: 16,
+                          display: "grid",
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <div style={{ fontWeight: 600 }}>
+                            {copy.matrixContextTitle}
+                          </div>
+                          <div
+                            style={{
+                              color: theme.textMuted,
+                              fontSize: 12.5,
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            {copy.matrixContextSubtitle}
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns:
+                              "repeat(auto-fit, minmax(240px, 1fr))",
+                            gap: 12,
+                          }}
+                        >
+                          {settlementContextIssues.slice(0, 6).map((issue) => (
+                            <div
+                              key={`settlement-context-${issue.issueId}`}
+                              style={{
+                                border: `1px solid ${theme.border}`,
+                                background: theme.bgRaised,
+                                borderRadius: 10,
+                                padding: 12,
+                                display: "grid",
+                                gap: 10,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: 8,
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                <CanvasPill
+                                  theme={theme}
+                                  tone={issueStatusTone(issue.status)}
+                                  dot
+                                >
+                                  {issue.issueId}
+                                </CanvasPill>
+                                <CanvasPill theme={theme} tone="neutral">
+                                  {describeMatrixChannel(issue.channelKey)}
+                                </CanvasPill>
+                              </div>
+
+                              <CanvasDL
+                                theme={theme}
+                                cols={1}
+                                items={[
+                                  {
+                                    k: t("payments.form.tenantId"),
+                                    v: issue.tenantId ?? "—",
+                                    mono: true,
+                                  },
+                                  {
+                                    k: t("payments.reconciliation.partnerId"),
+                                    v: issue.partnerId ?? "—",
+                                    mono: true,
+                                  },
+                                  {
+                                    k: t(
+                                      "payments.reconciliation.partnerProgramId",
+                                    ),
+                                    v: issue.partnerProgramId ?? "—",
+                                    mono: true,
+                                  },
+                                  {
+                                    k: t(
+                                      "payments.reconciliation.sponsorReference",
+                                    ),
+                                    v: issue.sponsorReference ?? "—",
+                                    mono: true,
+                                  },
+                                  {
+                                    k: t(
+                                      "payments.reconciliation.mirrorOrderId",
+                                    ),
+                                    v:
+                                      issue.mirrorOrderId ??
+                                      issue.orderId ??
+                                      "—",
+                                    mono: true,
+                                  },
+                                  {
+                                    k: t(
+                                      "payments.reconciliation.externalOrderId",
+                                    ),
+                                    v: issue.externalOrderId ?? "—",
+                                    mono: true,
+                                  },
+                                  {
+                                    k: t("payments.reconciliation.linkedJobId"),
+                                    v: issue.linkedReconciliationJobId ?? "—",
+                                    mono: true,
+                                  },
+                                ]}
+                              />
+
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: 10,
+                                  flexWrap: "wrap",
+                                  fontSize: 12,
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <a
+                                  href="#payments-reconciliation-queue"
+                                  style={{
+                                    color: theme.accent,
+                                    textDecoration: "none",
+                                  }}
+                                >
+                                  {copy.matrixContextIssueLabel}
+                                </a>
+                                {issueLinksFor(issue).map((link) => (
+                                  <a
+                                    key={`${issue.issueId}-${link.targetApp}-${link.route}-matrix`}
+                                    href={link.route}
+                                    target={
+                                      link.openMode === "new_tab"
+                                        ? "_blank"
+                                        : undefined
+                                    }
+                                    rel={
+                                      link.openMode === "new_tab"
+                                        ? "noreferrer"
+                                        : undefined
+                                    }
+                                    style={{
+                                      color: theme.accent,
+                                      textDecoration: "none",
+                                    }}
+                                  >
+                                    {link.label}
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
                 ) : (
                   renderEmptyState(matrixEmptyConfig)
                 )}
