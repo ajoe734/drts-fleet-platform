@@ -58,7 +58,7 @@ type SlaManagerProps = {
 
 const th = buildCanvasTheme({
   surface: "tenant",
-  dark: true,
+  dark: false,
   density: "compact",
 });
 
@@ -67,6 +67,8 @@ const pageBodyStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 16,
+  maxWidth: 1180,
+  margin: "0 auto",
 };
 
 const gridStyle: CSSProperties = {
@@ -77,7 +79,7 @@ const gridStyle: CSSProperties = {
 
 const kpiGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: 12,
 };
 
@@ -126,11 +128,30 @@ const noteStyle: CSSProperties = {
 };
 
 const emptyStateStyle: CSSProperties = {
-  padding: "36px 28px",
+  padding: "32px 28px",
   display: "flex",
   flexDirection: "column",
   gap: 12,
   alignItems: "flex-start",
+};
+
+const emptyStateHeroStyle: CSSProperties = {
+  width: "100%",
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 132px) minmax(0, 1fr)",
+  gap: 20,
+  alignItems: "center",
+};
+
+const emptyStateBadgeStyle: CSSProperties = {
+  minHeight: 132,
+  borderRadius: 24,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: 34,
+  fontWeight: 700,
+  letterSpacing: 1.6,
 };
 
 const linkRowStyle: CSSProperties = {
@@ -183,6 +204,53 @@ const actionHintStyle: CSSProperties = {
   marginTop: 12,
 };
 
+const summaryCardStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 18,
+};
+
+const statListStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const statRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  justifyContent: "space-between",
+  gap: 12,
+  paddingBottom: 10,
+  borderBottom: `1px solid ${th.border}`,
+};
+
+const statKeyStyle: CSSProperties = {
+  fontSize: 12,
+  color: th.textMuted,
+};
+
+const statValueStyle: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  color: th.text,
+  fontFamily: th.monoFamily,
+  textAlign: "right",
+};
+
+const inputShellStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+};
+
+const inputMetaStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 11,
+  color: th.textMuted,
+};
+
 const EMPTY_STATE_CONFIG: Record<TenantSlaEmptyReason, EmptyStateConfig> = {
   no_data: {
     reason: "no_data",
@@ -220,6 +288,15 @@ const EMPTY_STATE_CONFIG: Record<TenantSlaEmptyReason, EmptyStateConfig> = {
     body: "目前套用的 preview state 不會顯示 SLA profile。本頁保留 distinct empty-state render 以符合 Q-X15。",
     tone: "info",
   },
+};
+
+const EMPTY_STATE_MONOGRAM: Record<TenantSlaEmptyReason, string> = {
+  no_data: "ND",
+  not_provisioned: "NP",
+  fetch_failed: "FF",
+  permission_denied: "PD",
+  external_unavailable: "EU",
+  filtered_empty: "FE",
 };
 
 function formatDateTime(value: string | null | undefined) {
@@ -350,6 +427,30 @@ function getReceiptTone(receipt: ActionReceipt) {
   }
 }
 
+function parseThresholdValue(
+  value: string,
+  fieldLabel: string,
+): { ok: true; value: number } | { ok: false; message: string } {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { ok: false, message: `${fieldLabel} 不能留白。` };
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+    return {
+      ok: false,
+      message: `${fieldLabel} 必須是大於等於 0 的整數分鐘。`,
+    };
+  }
+
+  return { ok: true, value: parsed };
+}
+
+function requiresReasonForAction(action: ResourceActionDescriptor | null) {
+  return Boolean(action?.enabled && action.requiresReason);
+}
+
 export function SlaManager({
   view,
   loadErrorMessage,
@@ -394,6 +495,32 @@ export function SlaManager({
     refreshTier && refreshMetadata?.generatedAt,
   );
   const refreshDeadline = getRefreshDeadline(refreshMetadata);
+  const metricRows = [
+    {
+      label: "profile state",
+      value: profile ? "configured" : (emptyState?.reason ?? "unknown"),
+    },
+    {
+      label: "update action",
+      value: updateAction
+        ? updateAction.enabled
+          ? "enabled"
+          : `disabled · ${disabledReasonLabel(updateAction.disabledReasonCode)}`
+        : "not returned",
+    },
+    {
+      label: "recalculate",
+      value: recalcAction
+        ? recalcAction.enabled
+          ? "enabled"
+          : `disabled · ${disabledReasonLabel(recalcAction.disabledReasonCode)}`
+        : "not returned",
+    },
+    {
+      label: "last recalc",
+      value: lastRecalculationAt ? formatDateTime(lastRecalculationAt) : "idle",
+    },
+  ];
 
   useEffect(() => {
     setWaitThresholdMin(formatThresholdInput(profile?.waitThresholdMin));
@@ -433,15 +560,48 @@ export function SlaManager({
   }, [refreshDeadline, router]);
 
   const handleUpdate = () => {
+    const waitValue = parseThresholdValue(waitThresholdMin, "waitThresholdMin");
+    if (!waitValue.ok) {
+      setActionError(waitValue.message);
+      setReceipt(null);
+      return;
+    }
+
+    const arrivalValue = parseThresholdValue(
+      arrivalThresholdMin,
+      "arrivalThresholdMin",
+    );
+    if (!arrivalValue.ok) {
+      setActionError(arrivalValue.message);
+      setReceipt(null);
+      return;
+    }
+
+    const completionValue = parseThresholdValue(
+      completionThresholdMin,
+      "completionThresholdMin",
+    );
+    if (!completionValue.ok) {
+      setActionError(completionValue.message);
+      setReceipt(null);
+      return;
+    }
+
+    if (requiresReasonForAction(updateAction) && !reason.trim()) {
+      setActionError("更新 SLA profile 前必須填寫變更原因。");
+      setReceipt(null);
+      return;
+    }
+
     startTransition(async () => {
       setActionError(null);
       setReceipt(null);
       try {
         const nextReceipt = await updateTenantSlaProfileAction({
-          waitThresholdMin: Number(waitThresholdMin),
-          arrivalThresholdMin: Number(arrivalThresholdMin),
-          completionThresholdMin: Number(completionThresholdMin),
-          reason,
+          waitThresholdMin: waitValue.value,
+          arrivalThresholdMin: arrivalValue.value,
+          completionThresholdMin: completionValue.value,
+          reason: reason.trim(),
         });
         setReceipt(nextReceipt);
         setReason("");
@@ -455,11 +615,19 @@ export function SlaManager({
   };
 
   const handleRecalculate = () => {
+    if (requiresReasonForAction(recalcAction) && !reason.trim()) {
+      setActionError("重算既有訂單前必須填寫操作原因。");
+      setReceipt(null);
+      return;
+    }
+
     startTransition(async () => {
       setActionError(null);
       setReceipt(null);
       try {
-        const nextReceipt = await recalculateTenantSlaBookingsAction(reason);
+        const nextReceipt = await recalculateTenantSlaBookingsAction(
+          reason.trim(),
+        );
         setReceipt(nextReceipt);
         setReason("");
         router.refresh();
@@ -574,11 +742,37 @@ export function SlaManager({
               <CanvasPill theme={th} tone={activeEmptyState.tone}>
                 {activeEmptyState.reason}
               </CanvasPill>
-              <div style={{ fontSize: 18, fontWeight: 600 }}>
-                {activeEmptyState.title}
-              </div>
-              <div style={{ ...noteStyle, maxWidth: 560 }}>
-                {activeEmptyState.body}
+              <div style={emptyStateHeroStyle}>
+                <div
+                  style={{
+                    ...emptyStateBadgeStyle,
+                    background:
+                      activeEmptyState.tone === "danger"
+                        ? "#ffe4e6"
+                        : activeEmptyState.tone === "warn"
+                          ? "#fef3c7"
+                          : "#ccfbf1",
+                    color:
+                      activeEmptyState.tone === "danger"
+                        ? "#be123c"
+                        : activeEmptyState.tone === "warn"
+                          ? "#b45309"
+                          : "#0f766e",
+                  }}
+                >
+                  {EMPTY_STATE_MONOGRAM[activeEmptyState.reason]}
+                </div>
+                <div style={{ display: "grid", gap: 10 }}>
+                  <div style={{ fontSize: 22, fontWeight: 700 }}>
+                    {activeEmptyState.title}
+                  </div>
+                  <div style={{ ...noteStyle, maxWidth: 560 }}>
+                    {activeEmptyState.body}
+                  </div>
+                  {loadErrorMessage ? (
+                    <div style={noteStyle}>error · {loadErrorMessage}</div>
+                  ) : null}
+                </div>
               </div>
               <div style={noteStyle}>
                 messageCode · {emptyState?.messageCode ?? "—"}
@@ -642,51 +836,69 @@ export function SlaManager({
                   label="waitThresholdMin · 等候門檻"
                   hint="超過此分鐘數標記為 wait 違規"
                 >
-                  <input
-                    value={waitThresholdMin}
-                    onChange={(event) =>
-                      setWaitThresholdMin(event.target.value)
-                    }
-                    inputMode="numeric"
-                    style={nativeInputStyle}
-                    aria-label="waitThresholdMin"
-                    disabled={isPending || !updateAction?.enabled}
-                    placeholder="分鐘"
-                  />
+                  <div style={inputShellStyle}>
+                    <input
+                      value={waitThresholdMin}
+                      onChange={(event) =>
+                        setWaitThresholdMin(event.target.value)
+                      }
+                      inputMode="numeric"
+                      style={nativeInputStyle}
+                      aria-label="waitThresholdMin"
+                      disabled={isPending || !updateAction?.enabled}
+                      placeholder="分鐘"
+                    />
+                    <div style={inputMetaStyle}>
+                      <span>unit</span>
+                      <span>min</span>
+                    </div>
+                  </div>
                 </CanvasField>
                 <CanvasField
                   theme={th}
                   label="arrivalThresholdMin · 抵達門檻"
                   hint="ETA 與實際抵達差異上限"
                 >
-                  <input
-                    value={arrivalThresholdMin}
-                    onChange={(event) =>
-                      setArrivalThresholdMin(event.target.value)
-                    }
-                    inputMode="numeric"
-                    style={nativeInputStyle}
-                    aria-label="arrivalThresholdMin"
-                    disabled={isPending || !updateAction?.enabled}
-                    placeholder="分鐘"
-                  />
+                  <div style={inputShellStyle}>
+                    <input
+                      value={arrivalThresholdMin}
+                      onChange={(event) =>
+                        setArrivalThresholdMin(event.target.value)
+                      }
+                      inputMode="numeric"
+                      style={nativeInputStyle}
+                      aria-label="arrivalThresholdMin"
+                      disabled={isPending || !updateAction?.enabled}
+                      placeholder="分鐘"
+                    />
+                    <div style={inputMetaStyle}>
+                      <span>unit</span>
+                      <span>min</span>
+                    </div>
+                  </div>
                 </CanvasField>
                 <CanvasField
                   theme={th}
                   label="completionThresholdMin · 完成門檻"
                   hint="預估 vs 實際行車時間差異上限"
                 >
-                  <input
-                    value={completionThresholdMin}
-                    onChange={(event) =>
-                      setCompletionThresholdMin(event.target.value)
-                    }
-                    inputMode="numeric"
-                    style={nativeInputStyle}
-                    aria-label="completionThresholdMin"
-                    disabled={isPending || !updateAction?.enabled}
-                    placeholder="分鐘"
-                  />
+                  <div style={inputShellStyle}>
+                    <input
+                      value={completionThresholdMin}
+                      onChange={(event) =>
+                        setCompletionThresholdMin(event.target.value)
+                      }
+                      inputMode="numeric"
+                      style={nativeInputStyle}
+                      aria-label="completionThresholdMin"
+                      disabled={isPending || !updateAction?.enabled}
+                      placeholder="分鐘"
+                    />
+                    <div style={inputMetaStyle}>
+                      <span>unit</span>
+                      <span>min</span>
+                    </div>
+                  </div>
                 </CanvasField>
               </div>
 
@@ -766,71 +978,80 @@ export function SlaManager({
               </div>
             </CanvasCard>
 
-            <CanvasCard theme={th} title="治理摘要 · 更新人 / 深連結 / 進度">
-              <div style={summaryListStyle}>
-                <div>
-                  <div style={summaryLabelStyle}>updatedAt</div>
-                  <div style={summaryValueStyle}>
-                    {formatDateTime(profile?.updatedAt)}
+            <CanvasCard theme={th} title="效益 · SLA 檔案狀態">
+              <div style={summaryCardStyle}>
+                <div style={statListStyle}>
+                  {metricRows.map((row) => (
+                    <div key={row.label} style={statRowStyle}>
+                      <div style={statKeyStyle}>{row.label}</div>
+                      <div style={statValueStyle}>{row.value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={summaryListStyle}>
+                  <div>
+                    <div style={summaryLabelStyle}>updatedAt</div>
+                    <div style={summaryValueStyle}>
+                      {formatDateTime(profile?.updatedAt)}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={summaryLabelStyle}>updated by</div>
+                    <div style={summaryValueStyle}>{updatedBy ?? "—"}</div>
+                  </div>
+                  <div>
+                    <div style={summaryLabelStyle}>recalculation</div>
+                    <div style={summaryValueStyle}>
+                      {lastRecalculationAt
+                        ? `pending since ${formatDateTime(lastRecalculationAt)}`
+                        : "idle"}
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <div style={summaryLabelStyle}>updated by</div>
-                  <div style={summaryValueStyle}>{updatedBy ?? "—"}</div>
+
+                <CanvasDL
+                  theme={th}
+                  cols={1}
+                  items={[
+                    {
+                      k: "waitThresholdMin",
+                      v: profile ? `${profile.waitThresholdMin} min` : "—",
+                      mono: true,
+                    },
+                    {
+                      k: "arrivalThresholdMin",
+                      v: profile ? `${profile.arrivalThresholdMin} min` : "—",
+                      mono: true,
+                    },
+                    {
+                      k: "completionThresholdMin",
+                      v: profile
+                        ? `${profile.completionThresholdMin} min`
+                        : "—",
+                      mono: true,
+                    },
+                  ]}
+                />
+
+                <div style={linkRowStyle}>
+                  {links.map((link) => (
+                    <Link key={link.href} href={link.href} style={linkStyle}>
+                      {link.label} →
+                    </Link>
+                  ))}
+                  {crossAppLinks.map((link) => (
+                    <a
+                      key={link.href}
+                      href={link.href}
+                      style={linkStyle}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {link.label} ↗
+                    </a>
+                  ))}
                 </div>
-                <div>
-                  <div style={summaryLabelStyle}>recalculation</div>
-                  <div style={summaryValueStyle}>
-                    {lastRecalculationAt
-                      ? `pending since ${formatDateTime(lastRecalculationAt)}`
-                      : "idle"}
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ height: 16 }} />
-
-              <CanvasDL
-                theme={th}
-                cols={1}
-                items={[
-                  {
-                    k: "waitThresholdMin",
-                    v: profile ? `${profile.waitThresholdMin} min` : "—",
-                    mono: true,
-                  },
-                  {
-                    k: "arrivalThresholdMin",
-                    v: profile ? `${profile.arrivalThresholdMin} min` : "—",
-                    mono: true,
-                  },
-                  {
-                    k: "completionThresholdMin",
-                    v: profile ? `${profile.completionThresholdMin} min` : "—",
-                    mono: true,
-                  },
-                ]}
-              />
-
-              <div style={{ height: 16 }} />
-
-              <div style={linkRowStyle}>
-                {links.map((link) => (
-                  <Link key={link.href} href={link.href} style={linkStyle}>
-                    {link.label} →
-                  </Link>
-                ))}
-                {crossAppLinks.map((link) => (
-                  <a
-                    key={link.href}
-                    href={link.href}
-                    style={linkStyle}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {link.label} ↗
-                  </a>
-                ))}
               </div>
             </CanvasCard>
           </div>
