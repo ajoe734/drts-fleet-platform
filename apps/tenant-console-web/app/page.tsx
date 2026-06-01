@@ -1134,6 +1134,69 @@ function renderNavChip(label: ReactNode, href: string) {
   );
 }
 
+function renderModuleTile(module: WorkspaceModule) {
+  const content = (
+    <>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <p style={sectionTitleStyle}>{module.title}</p>
+        <CanvasPill theme={th} tone={getStatusTone(module.status)}>
+          {module.status}
+        </CanvasPill>
+      </div>
+      <p style={sectionBodyStyle}>{module.body}</p>
+      <div style={actionMetaStyle}>
+        <span style={statusCopyStyle}>{module.meta}</span>
+        {!EXISTING_APP_ROUTES.has(module.href) ? (
+          <CanvasPill theme={th} tone="warn">
+            spec route
+          </CanvasPill>
+        ) : null}
+      </div>
+    </>
+  );
+
+  if (!EXISTING_APP_ROUTES.has(module.href)) {
+    return (
+      <div key={module.key} style={moduleTileStyle}>
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <Link href={module.href} key={module.key} style={moduleTileStyle}>
+      {content}
+    </Link>
+  );
+}
+
+function renderReadinessAction(action: ResourceActionDescriptor | undefined) {
+  if (!action) {
+    return null;
+  }
+
+  const href = getActionRoute(action.action);
+  if (!EXISTING_APP_ROUTES.has(href)) {
+    return (
+      <span style={secondaryActionStyle}>
+        {getActionLabel(action.action)} · spec route
+      </span>
+    );
+  }
+
+  return (
+    <Link href={href} style={secondaryActionStyle}>
+      {getActionLabel(action.action)}
+    </Link>
+  );
+}
+
 export default async function HomePage() {
   const data = await loadDashboardData();
   const refresh = buildRefreshMetadata(data);
@@ -1470,31 +1533,7 @@ export default async function HomePage() {
             >
               {modules.length > 0 ? (
                 <div style={moduleSummaryStyle}>
-                  {modules.map((module) => (
-                    <Link
-                      href={module.href}
-                      key={module.key}
-                      style={moduleTileStyle}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          gap: 8,
-                        }}
-                      >
-                        <p style={sectionTitleStyle}>{module.title}</p>
-                        <CanvasPill
-                          theme={th}
-                          tone={getStatusTone(module.status)}
-                        >
-                          {module.status}
-                        </CanvasPill>
-                      </div>
-                      <p style={sectionBodyStyle}>{module.body}</p>
-                      <span style={statusCopyStyle}>{module.meta}</span>
-                    </Link>
-                  ))}
+                  {modules.map(renderModuleTile)}
                 </div>
               ) : (
                 <div style={emptyPanelStyle}>
@@ -1539,14 +1578,7 @@ export default async function HomePage() {
                         <span style={statusCopyStyle}>
                           {item.nextAction?.action ?? "no nextAction"}
                         </span>
-                        {item.nextAction ? (
-                          <Link
-                            href={getActionRoute(item.nextAction.action)}
-                            style={secondaryActionStyle}
-                          >
-                            {getActionLabel(item.nextAction.action)}
-                          </Link>
-                        ) : null}
+                        {renderReadinessAction(item.nextAction)}
                       </div>
                     </div>
                   ))
