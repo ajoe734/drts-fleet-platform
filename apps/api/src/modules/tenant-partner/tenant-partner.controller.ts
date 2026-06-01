@@ -35,6 +35,7 @@ import type {
   PartnerIngressCredentialIssued,
   PartnerIngressCredentialRecord,
   PartnerChannelEntryRecord,
+  PlatformAdminPartnerEntryRecord,
   PartnerEligibilityReviewQueueItem,
   PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
@@ -155,8 +156,19 @@ export class TenantPartnerController {
   @Get("platform-admin/partner-entries")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listPlatformPartnerEntries(@Headers("x-request-id") requestId?: string) {
+    const items: PlatformAdminPartnerEntryRecord[] =
+      this.tenantPartnerService.listPlatformPartnerEntries();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("platform-admin/partner-entries/:entrySlug")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getPlatformPartnerEntry(
+    @Param("entrySlug") entrySlug: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
     return toApiSuccessEnvelope(
-      toApiListData(this.tenantPartnerService.listPlatformPartnerEntries()),
+      this.tenantPartnerService.getPlatformPartnerEntry(entrySlug),
       requestId,
     );
   }

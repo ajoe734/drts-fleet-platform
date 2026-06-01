@@ -21,6 +21,7 @@ import type {
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
+  CrossAppResourceLink,
   PartnerEntryBrandingMetadata,
   CreateTenantUserCommand,
   EscalateTenantBookingApprovalRequestCommand,
@@ -30,6 +31,7 @@ import type {
   IssuePartnerIngressCredentialCommand,
   PartnerEligibilityAdapterAttemptRecord,
   PartnerChannelEntryRecord,
+  PlatformAdminPartnerEntryRecord,
   PartnerEntryStatus,
   PartnerEligibilityDecisionSource,
   PartnerEligibilityIntegrationContractRecord,
@@ -68,6 +70,7 @@ import type {
   TenantApiKeyIssued,
   OwnedOrderRecord,
   ReorderTenantApprovalRulesCommand,
+  ResourceActionDescriptor,
   TenantBookingQuotaImpactPreview,
   TenantBookingQuotaImpactQuery,
   TenantBookingQuotaImpactResult,
@@ -2805,7 +2808,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   listPlatformPartnerEntries() {
-    return this.partnerEntries.map((entry) => this.clonePartnerEntry(entry));
+    return this.partnerEntries.map((entry) =>
+      this.buildPlatformAdminPartnerEntryRecord(entry),
+    );
   }
 
   listPlatformPartnerIngressCredentials(entrySlug: string) {
@@ -2894,6 +2899,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   getPartnerEntry(entrySlug: string) {
     return this.clonePartnerEntry(this.requirePublicPartnerEntry(entrySlug));
+  }
+
+  getPlatformPartnerEntry(entrySlug: string): PlatformAdminPartnerEntryRecord {
+    return this.buildPlatformAdminPartnerEntryRecord(
+      this.requirePlatformPartnerEntry(entrySlug),
+    );
   }
 
   createPlatformPartnerEntry(
@@ -5675,6 +5686,181 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         : null,
       auditMetadata: { ...entry.auditMetadata },
     };
+  }
+
+  private buildPlatformAdminPartnerEntryRecord(
+    entry: PartnerChannelEntryRecord,
+  ): PlatformAdminPartnerEntryRecord {
+    const clonedEntry = this.clonePartnerEntry(entry);
+    const activeCredentialCount = this.partnerIngressCredentials.filter(
+      (credential) =>
+        credential.entrySlug === entry.entrySlug &&
+        credential.revokedAt === null,
+    ).length;
+
+    return {
+      ...clonedEntry,
+      availableActions: this.buildPlatformPartnerEntryActions(
+        clonedEntry,
+        activeCredentialCount,
+      ),
+      crossAppLinks: this.buildPlatformPartnerCrossAppLinks(clonedEntry),
+      adapterLink: this.buildPlatformPartnerAdapterLink(clonedEntry),
+      tenantLink: this.buildPlatformPartnerTenantLink(clonedEntry),
+      webhookLink: this.buildPlatformPartnerWebhookLink(clonedEntry),
+      refreshTier: "medium_slow",
+    };
+  }
+
+  private buildPlatformPartnerEntryActions(
+    entry: PartnerChannelEntryRecord,
+    activeCredentialCount: number,
+  ): ResourceActionDescriptor[] {
+    const actions: ResourceActionDescriptor[] = [
+      {
+        action: "edit",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      {
+        action: "activate",
+        enabled: entry.status === "inactive" && entry.status !== "revoked",
+        disabledReasonCode:
+          entry.status === "revoked"
+            ? "entry_revoked"
+            : entry.status === "active"
+              ? "entry_not_inactive"
+              : undefined,
+        riskLevel: "medium",
+      },
+      {
+        action: "deactivate",
+        enabled: entry.status === "active",
+        disabledReasonCode:
+          entry.status === "inactive"
+            ? "entry_not_active"
+            : entry.status === "revoked"
+              ? "entry_revoked"
+              : undefined,
+        riskLevel: "medium",
+      },
+      {
+        action: "issue_credential",
+        enabled:
+          entry.authMode === "partner_api_key" && entry.status !== "revoked",
+        disabledReasonCode:
+          entry.status === "revoked"
+            ? "entry_revoked"
+            : entry.authMode !== "partner_api_key"
+              ? "auth_mode_does_not_use_partner_credentials"
+              : undefined,
+        riskLevel: "high",
+      },
+      {
+        action: "rotate_credential",
+        enabled:
+          entry.authMode === "partner_api_key" &&
+          entry.status !== "revoked" &&
+          activeCredentialCount > 0,
+        disabledReasonCode:
+          entry.status === "revoked"
+            ? "entry_revoked"
+            : entry.authMode !== "partner_api_key"
+              ? "auth_mode_does_not_use_partner_credentials"
+              : activeCredentialCount === 0
+                ? "no_active_credential"
+                : undefined,
+        riskLevel: "high",
+      },
+      {
+        action: "revoke_credential",
+        enabled:
+          entry.authMode === "partner_api_key" &&
+          entry.status !== "revoked" &&
+          activeCredentialCount > 0,
+        disabledReasonCode:
+          entry.status === "revoked"
+            ? "entry_revoked"
+            : entry.authMode !== "partner_api_key"
+              ? "auth_mode_does_not_use_partner_credentials"
+              : activeCredentialCount === 0
+                ? "no_active_credential"
+                : undefined,
+        requiresReason: true,
+        riskLevel: "high",
+      },
+      {
+        action: "view_readiness_gaps",
+        enabled: true,
+        riskLevel: "low",
+      },
+    ];
+
+    return actions;
+  }
+
+  private buildPlatformPartnerTenantLink(
+    entry: PartnerChannelEntryRecord,
+  ): CrossAppResourceLink {
+    return {
+      targetApp: "platform-admin",
+      route: `/tenants/${encodeURIComponent(entry.tenantId)}`,
+      resourceType: "tenant",
+      resourceId: entry.tenantId,
+      openMode: "same_tab",
+      label: `Tenant ${entry.tenantId}`,
+    };
+  }
+
+  private buildPlatformPartnerAdapterLink(
+    entry: PartnerChannelEntryRecord,
+  ): CrossAppResourceLink {
+    return {
+      targetApp: "platform-admin",
+      route: `/adapter-registry?entrySlug=${encodeURIComponent(entry.entrySlug)}`,
+      resourceType: "adapter_registry",
+      resourceId: entry.entrySlug,
+      openMode: "same_tab",
+      label: "Adapter registry",
+    };
+  }
+
+  private buildPlatformPartnerWebhookLink(
+    entry: PartnerChannelEntryRecord,
+  ): CrossAppResourceLink {
+    return {
+      targetApp: "platform-admin",
+      route: `/tenants/${encodeURIComponent(entry.tenantId)}#webhooks`,
+      resourceType: "tenant_webhooks",
+      resourceId: entry.tenantId,
+      openMode: "same_tab",
+      label: "Webhook baseline",
+    };
+  }
+
+  private buildPlatformPartnerCrossAppLinks(
+    entry: PartnerChannelEntryRecord,
+  ): CrossAppResourceLink[] {
+    const links: CrossAppResourceLink[] = [
+      {
+        targetApp: "ops-console",
+        route: `/tenants/${encodeURIComponent(entry.tenantId)}`,
+        resourceType: "tenant_ops_view",
+        resourceId: entry.tenantId,
+        openMode: "new_tab",
+        label: "Ops tenant view",
+      },
+      {
+        targetApp: "platform-admin",
+        route: `/audit?resourceType=partner_entry&resourceId=${encodeURIComponent(entry.entrySlug)}`,
+        resourceType: "audit",
+        resourceId: entry.entrySlug,
+        openMode: "same_tab",
+        label: "Audit trail",
+      },
+    ];
+
+    return links;
   }
 
   private cloneStoredPartnerIngressCredential(

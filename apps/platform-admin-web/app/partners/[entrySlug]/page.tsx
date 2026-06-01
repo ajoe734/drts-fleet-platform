@@ -27,12 +27,12 @@ import {
   type BusinessDispatchSubtype,
   type CrossAppResourceLink,
   type EmptyReason,
-  type PartnerChannelEntryRecord,
   type PartnerEntryAuthMode,
   type PartnerEntryStatus,
   type PartnerEligibilityMode,
   type PartnerIngressCredentialIssued,
   type PartnerIngressCredentialRecord,
+  type PlatformAdminPartnerEntryRecord,
   type RefreshTier,
   type ResourceActionDescriptor,
 } from "@drts/contracts";
@@ -53,14 +53,7 @@ import {
   type CanvasTableColumn,
 } from "@drts/ui-web";
 
-type PartnerDetailRecord = PartnerChannelEntryRecord & {
-  availableActions?: ResourceActionDescriptor[];
-  crossAppLinks?: CrossAppResourceLink[];
-  adapterLink?: CrossAppResourceLink | null;
-  tenantLink?: CrossAppResourceLink | null;
-  webhookLink?: CrossAppResourceLink | null;
-  refreshTier?: RefreshTier;
-};
+type PartnerDetailRecord = PlatformAdminPartnerEntryRecord;
 
 type CredentialRow = Record<string, unknown> & {
   keyId: string;
@@ -768,6 +761,8 @@ function disabledReasonLabel(code: string | undefined, locale: string): string {
           auth_mode_does_not_use_partner_credentials:
             "This auth mode does not rely on partner-managed ingress credentials.",
           entry_revoked: "Revoked entries cannot issue or rotate credentials.",
+          no_active_credential:
+            "Issue a credential before attempting rotation or revoke.",
         }
       : {
           entry_not_inactive: "僅 inactive entry 可執行啟用。",
@@ -775,6 +770,7 @@ function disabledReasonLabel(code: string | undefined, locale: string): string {
           auth_mode_does_not_use_partner_credentials:
             "此 auth mode 不使用 partner-managed ingress credential。",
           entry_revoked: "已撤銷的 entry 不可再核發或輪替 credential。",
+          no_active_credential: "請先核發有效 credential，再執行輪替或撤銷。",
         };
 
   return dict[code as keyof typeof dict] ?? code;
@@ -1237,11 +1233,7 @@ export default function PartnerDetailPage() {
       setActionError(null);
 
       try {
-        const entries =
-          (await client.listPlatformPartnerEntries()) as PartnerDetailRecord[];
-        const selected =
-          entries.find((candidate) => candidate.entrySlug === entrySlug) ??
-          null;
+        const selected = await client.getPlatformPartnerEntry(entrySlug);
         setEntry(selected);
         setEditForm(selected ? toPartnerFormState(selected) : EMPTY_ENTRY_FORM);
 
@@ -1250,20 +1242,16 @@ export default function PartnerDetailPage() {
         }
 
         setCredentialError(null);
-        if (selected) {
-          try {
-            const nextCredentials =
-              await client.listPlatformPartnerIngressCredentials(
-                selected.entrySlug,
-              );
-            setCredentials(nextCredentials ?? []);
-          } catch (cause: unknown) {
-            setCredentialError(
-              cause instanceof Error ? cause.message : String(cause),
+        try {
+          const nextCredentials =
+            await client.listPlatformPartnerIngressCredentials(
+              selected.entrySlug,
             );
-            setCredentials([]);
-          }
-        } else {
+          setCredentials(nextCredentials ?? []);
+        } catch (cause: unknown) {
+          setCredentialError(
+            cause instanceof Error ? cause.message : String(cause),
+          );
           setCredentials([]);
         }
         setLastLoadedAt(new Date().toISOString());

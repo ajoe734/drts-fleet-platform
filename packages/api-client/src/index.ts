@@ -109,6 +109,7 @@ import type {
   OperationalObservabilitySnapshot,
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
+  PlatformAdminPartnerEntryRecord,
   PartnerBootstrapSession,
   PartnerEligibilityReviewQueueItem,
   PartnerEligibilityReviewResolution,
@@ -1881,9 +1882,19 @@ export class ApiClient {
     );
   }
 
-  async listPlatformPartnerEntries(): Promise<PartnerChannelEntryRecord[]> {
-    return this.getList<PartnerChannelEntryRecord>(
+  async listPlatformPartnerEntries(): Promise<
+    PlatformAdminPartnerEntryRecord[]
+  > {
+    return this.getList<PlatformAdminPartnerEntryRecord>(
       "/api/platform-admin/partner-entries",
+    );
+  }
+
+  async getPlatformPartnerEntry(
+    entrySlug: string,
+  ): Promise<PlatformAdminPartnerEntryRecord> {
+    return this.get<PlatformAdminPartnerEntryRecord>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}`,
     );
   }
 

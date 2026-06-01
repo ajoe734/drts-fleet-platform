@@ -1,3 +1,8 @@
+import type {
+  CrossAppResourceLink,
+  RefreshTier,
+  ResourceActionDescriptor,
+} from "./ui-runtime";
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 
@@ -426,6 +431,15 @@ export interface PartnerChannelEntryRecord {
   createdAt: string;
   updatedAt: string;
   auditMetadata: PartnerRecordAuditMetadata;
+}
+
+export interface PlatformAdminPartnerEntryRecord extends PartnerChannelEntryRecord {
+  availableActions: ResourceActionDescriptor[];
+  crossAppLinks: CrossAppResourceLink[];
+  adapterLink: CrossAppResourceLink | null;
+  tenantLink: CrossAppResourceLink | null;
+  webhookLink: CrossAppResourceLink | null;
+  refreshTier: RefreshTier;
 }
 
 export interface CreatePartnerChannelEntryCommand {
