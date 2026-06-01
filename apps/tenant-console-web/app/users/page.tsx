@@ -78,13 +78,28 @@ const stripCardStyle: CSSProperties = {
 
 const summaryGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.3fr) minmax(300px, 0.9fr)",
+  gridTemplateColumns: "minmax(0, 1.45fr) minmax(320px, 0.85fr)",
   gap: 16,
 };
 
 const stackStyle: CSSProperties = {
   display: "grid",
   gap: 12,
+};
+
+const metricGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+  gap: 10,
+};
+
+const metricCardStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceLo,
 };
 
 const pillRowStyle: CSSProperties = {
@@ -223,6 +238,13 @@ const roleListDescriptionStyle: CSSProperties = {
   lineHeight: 1.45,
 };
 
+const compactMetaStyle: CSSProperties = {
+  color: th.textDim,
+  fontSize: 11,
+  lineHeight: 1.45,
+  fontFamily: th.monoFamily,
+};
+
 const linkCardStyle: CSSProperties = {
   display: "grid",
   gap: 6,
@@ -354,12 +376,16 @@ function getRoleLabel(roleCode: string) {
   return ROLE_CANVAS_LABEL[roleCode] ?? roleCode;
 }
 
+function isTenantAdminRole(roleCode: string) {
+  return roleCode === "tc_admin" || roleCode === "tenant_admin";
+}
+
 function getRoleTone(roleCode: string): CanvasTone {
-  return roleCode === "tenant_admin" ? "accent" : "info";
+  return isTenantAdminRole(roleCode) ? "accent" : "info";
 }
 
 function getRoleCatalogTone(role: TenantRoleCatalogRecord): CanvasTone {
-  if (role.roleCode === "tenant_admin") return "accent";
+  if (isTenantAdminRole(role.roleCode)) return "accent";
   return role.assignable ? "info" : "neutral";
 }
 
@@ -497,6 +523,48 @@ function buildUserRows(
     roleDisplayName:
       roleLookup.get(user.roleCode)?.displayName ?? getRoleLabel(user.roleCode),
   }));
+}
+
+function pickAction(
+  actions: ResourceActionDescriptor[],
+  candidates: string[],
+): ResourceActionDescriptor | undefined {
+  return sortAvailableActions(actions).find((descriptor) =>
+    candidates.includes(descriptor.action),
+  );
+}
+
+function deriveEmptyReason({
+  filteredUsersCount,
+  usersCount,
+  rolesCount,
+  failures,
+  emptyState,
+}: {
+  filteredUsersCount: number;
+  usersCount: number;
+  rolesCount: number;
+  failures: LoadFailure[];
+  emptyState: EmptyStateEnvelope | null;
+}): EmptyReason | null {
+  if (filteredUsersCount === 0 && usersCount > 0) {
+    return "filtered_empty";
+  }
+  if (emptyState?.reason) {
+    return emptyState.reason;
+  }
+  if (filteredUsersCount > 0) {
+    return null;
+  }
+
+  const userFailure = failures.find((failure) => failure.source === "users");
+  if (userFailure) {
+    return userFailure.reason;
+  }
+  if (rolesCount === 0) {
+    return "not_provisioned";
+  }
+  return "no_data";
 }
 
 function getEmptyStateConfig(
@@ -844,8 +912,8 @@ function EmptyStateBlock({
 }
 
 function getActorChip(identity: IdentityContext | null, tenantId: string) {
-  if (!identity) return `tenant / production / ${tenantId}`;
-  return `${identity.realm} / production / ${identity.tenantId ?? tenantId}`;
+  if (!identity) return `unknown / tenant / ${tenantId} / production`;
+  return `${identity.actorId ?? identity.actorType} / ${identity.realm} / ${identity.tenantId ?? tenantId} / production`;
 }
 
 function getActorSummary(identity: IdentityContext | null) {
@@ -877,6 +945,12 @@ export default async function UsersPage({
   const assignableRoles = roles.filter((role) => role.assignable);
   const roleFilter = normalizeRoleFilter(resolvedSearchParams.role, roles);
   const statusFilter = normalizeStatusFilter(resolvedSearchParams.status);
+  const inviteAction = pickAction(availableActions, [
+    "invite",
+    "create_user",
+    "create_tenant_user",
+  ]);
+  const refreshAction = pickAction(availableActions, ["refresh"]);
 
   const filteredUsers = users.filter((user) => {
     if (roleFilter !== "all" && user.roleCode !== roleFilter) return false;
@@ -885,12 +959,23 @@ export default async function UsersPage({
   });
 
   const userRows = buildUserRows(filteredUsers, roles);
-  const emptyReason =
-    filteredUsers.length === 0 && users.length > 0
-      ? ("filtered_empty" as const)
-      : (emptyState?.reason ?? null);
+  const emptyReason = deriveEmptyReason({
+    filteredUsersCount: filteredUsers.length,
+    usersCount: users.length,
+    rolesCount: roles.length,
+    failures,
+    emptyState,
+  });
   const emptyConfig = emptyReason
-    ? getEmptyStateConfig(emptyReason, emptyState?.nextAction, refreshHref)
+    ? getEmptyStateConfig(
+        emptyReason,
+        emptyState?.nextAction ??
+          (emptyReason === "fetch_failed" ||
+          emptyReason === "external_unavailable"
+            ? refreshAction
+            : inviteAction),
+        refreshHref,
+      )
     : null;
 
   const activeUsers = users.filter((user) => user.status === "active").length;
@@ -1047,7 +1132,7 @@ export default async function UsersPage({
 
         <div style={stripGridStyle}>
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>Identity Chip</div>
+            <div style={stripLabelStyle}>Header Chip</div>
             <div style={stripValueStyle}>
               {getActorChip(identity, tenantId)}
             </div>
@@ -1077,11 +1162,13 @@ export default async function UsersPage({
           </div>
 
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>Cross-App Exits</div>
-            <div style={stripValueStyle}>Audit drill-outs stay explicit</div>
+            <div style={stripLabelStyle}>Cross-App Audit</div>
+            <div style={stripValueStyle}>
+              Tenant same-tab · ops/platform new-tab
+            </div>
             <div style={hintCopyStyle}>
-              Tenant audit same-tab；ops/platform deep links new-tab per packet
-              §3.10。
+              Cross-app access traces stay explicit so tenant admins can follow
+              platform-owned changes without losing their current roster view.
             </div>
           </div>
         </div>
@@ -1159,26 +1246,22 @@ export default async function UsersPage({
           <CanvasCard
             theme={th}
             title="Authority / Refresh"
-            subtitle="spec-required context without leaving the users surface"
+            subtitle="tc_admin guardrail + T5 snapshot freshness"
           >
             <div style={stackStyle}>
-              <div style={stripGridStyle}>
-                <div>
+              <div style={metricGridStyle}>
+                <div style={metricCardStyle}>
                   <div style={metricValueStyle}>
                     {formatCount(filteredUsers.length)}
                   </div>
-                  <div style={metricLabelStyle}>
-                    visible roster rows after role/status filter
-                  </div>
+                  <div style={metricLabelStyle}>visible rows</div>
                 </div>
-                <div>
+                <div style={metricCardStyle}>
                   <div style={metricValueStyle}>
                     {formatCount(assignableRoles.length)} /{" "}
                     {formatCount(roles.length)}
                   </div>
-                  <div style={metricLabelStyle}>
-                    assignable roles from role catalog
-                  </div>
+                  <div style={metricLabelStyle}>assignable roles</div>
                 </div>
               </div>
 
@@ -1189,6 +1272,14 @@ export default async function UsersPage({
                   {
                     k: "Primary persona",
                     v: "tc_admin only",
+                    mono: true,
+                  },
+                  {
+                    k: "Must-support actions",
+                    v:
+                      sortAvailableActions(availableActions)
+                        .map((descriptor) => descriptor.action)
+                        .join(" / ") || "runtime_unavailable",
                     mono: true,
                   },
                   {
@@ -1269,6 +1360,9 @@ export default async function UsersPage({
                     <div style={roleListDescriptionStyle}>
                       {role.description}
                     </div>
+                    <div style={compactMetaStyle}>
+                      {role.assignable ? "assignable" : "system-managed only"}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1316,7 +1410,8 @@ export default async function UsersPage({
                   >
                     <span style={linkTitleStyle}>{link.label}</span>
                     <span style={linkMetaStyle}>
-                      {link.targetApp} · {link.route}
+                      {link.targetApp} · {link.route} · {link.resourceType}:
+                      {link.resourceId}
                     </span>
                   </a>
                 ))}
