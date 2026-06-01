@@ -16,6 +16,7 @@ type ApiKeyPageData = {
   identity: IdentityContext | null;
   availableActions: ResourceActionDescriptor[];
   initialEmptyReason: EmptyReason | null;
+  loadedAt: string;
   errors: string[];
 };
 
@@ -41,9 +42,10 @@ function canViewApiKeys(identity: IdentityContext | null) {
 function buildAvailableActions(
   identity: IdentityContext | null,
   governance: TenantIntegrationGovernancePackage | null,
+  apiKeys: TenantApiKeyRecord[],
 ): ResourceActionDescriptor[] {
   const canManage = canManageApiKeys(identity);
-  const disabledReasonCode = !identity
+  const issueDisabledReasonCode = !identity
     ? "identity_unavailable"
     : !canManage
       ? "permission_denied"
@@ -52,24 +54,32 @@ function buildAvailableActions(
         : governance.apiKeyPolicy.allowedScopes.length === 0
           ? "not_provisioned"
           : undefined;
+  const hasExistingKeys = apiKeys.length > 0;
+  const rotateDisabledReasonCode =
+    issueDisabledReasonCode ?? (!hasExistingKeys ? "no_data" : undefined);
+  const revokeDisabledReasonCode = !canManage
+    ? "permission_denied"
+    : !hasExistingKeys
+      ? "no_data"
+      : undefined;
 
   return [
     {
       action: "issue",
-      enabled: !disabledReasonCode,
-      disabledReasonCode,
+      enabled: !issueDisabledReasonCode,
+      disabledReasonCode: issueDisabledReasonCode,
       riskLevel: "high",
     },
     {
       action: "rotate",
-      enabled: !disabledReasonCode,
-      disabledReasonCode,
+      enabled: !rotateDisabledReasonCode,
+      disabledReasonCode: rotateDisabledReasonCode,
       riskLevel: "high",
     },
     {
       action: "revoke",
-      enabled: canManage,
-      disabledReasonCode: canManage ? undefined : "permission_denied",
+      enabled: !revokeDisabledReasonCode,
+      disabledReasonCode: revokeDisabledReasonCode,
       requiresReason: true,
       riskLevel: "high",
     },
@@ -162,7 +172,7 @@ async function loadApiKeyPageData(): Promise<ApiKeyPageData> {
     apiKeys,
     governance,
     identity,
-    availableActions: buildAvailableActions(identity, governance),
+    availableActions: buildAvailableActions(identity, governance, apiKeys),
     initialEmptyReason: deriveInitialEmptyReason({
       apiKeys,
       apiKeysFailed: apiKeysResult.status === "rejected",
@@ -170,6 +180,7 @@ async function loadApiKeyPageData(): Promise<ApiKeyPageData> {
       governanceFailed: governanceResult.status === "rejected",
       identity,
     }),
+    loadedAt: new Date().toISOString(),
     errors,
   };
 }

@@ -38,6 +38,7 @@ type ApiKeyManagerProps = {
   identity: IdentityContext | null;
   availableActions: ResourceActionDescriptor[];
   initialEmptyReason: EmptyReason | null;
+  loadedAt: string;
   errors: string[];
 };
 
@@ -48,9 +49,11 @@ type ApiKeyRow = TenantApiKeyRecord & Record<string, unknown>;
 
 const th = buildCanvasTheme({
   surface: "tenant",
-  dark: true,
+  dark: false,
   density: "compact",
 });
+
+const REFRESH_INTERVAL_MS = 30_000;
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -339,6 +342,13 @@ const deepLinkItemStyle: CSSProperties = {
   background: th.surface,
 };
 
+const deepLinkMetaStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  minWidth: 0,
+};
+
 const aliasListStyle: CSSProperties = {
   margin: 0,
   paddingLeft: 16,
@@ -350,6 +360,10 @@ const aliasListStyle: CSSProperties = {
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
   dateStyle: "short",
   timeStyle: "short",
+});
+
+const relativeTimeFormatter = new Intl.RelativeTimeFormat("zh-Hant", {
+  numeric: "auto",
 });
 
 function formatDateTime(value: string | null | undefined) {
@@ -461,6 +475,21 @@ function getActionByKind(
   return availableActions.find((entry) => entry.action === kind) ?? null;
 }
 
+function formatRelativeAge(fromIso: string, nowMs: number) {
+  const timestamp = new Date(fromIso).getTime();
+  if (Number.isNaN(timestamp)) return "時間未知";
+  const diffSeconds = Math.round((timestamp - nowMs) / 1000);
+  if (Math.abs(diffSeconds) < 60) {
+    return relativeTimeFormatter.format(diffSeconds, "second");
+  }
+  const diffMinutes = Math.round(diffSeconds / 60);
+  if (Math.abs(diffMinutes) < 60) {
+    return relativeTimeFormatter.format(diffMinutes, "minute");
+  }
+  const diffHours = Math.round(diffMinutes / 60);
+  return relativeTimeFormatter.format(diffHours, "hour");
+}
+
 function buildCreateFormData(
   keyName: string,
   expiresAt: string,
@@ -566,14 +595,16 @@ export function ApiKeyManager({
   identity,
   availableActions,
   initialEmptyReason,
+  loadedAt,
   errors,
 }: ApiKeyManagerProps) {
   const router = useRouter();
   const [flash, setFlash] = useState<ApiKeyFlashPayload | null>(null);
   const [pending, startTransition] = useTransition();
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [statusFilter, setStatusFilter] = useState<ApiKeyStatusFilter>("all");
   const [searchTerm, setSearchTerm] = useState("");
-  const [editorMode, setEditorMode] = useState<EditorMode | null>("issue");
+  const [editorMode, setEditorMode] = useState<EditorMode | null>(null);
   const [selectedKey, setSelectedKey] = useState<TenantApiKeyRecord | null>(
     null,
   );
@@ -638,6 +669,13 @@ export function ApiKeyManager({
   const issueAction = getActionByKind(availableActions, "issue");
   const rotateAction = getActionByKind(availableActions, "rotate");
   const revokeAction = getActionByKind(availableActions, "revoke");
+  const refreshAgeMs = Math.max(0, nowMs - new Date(loadedAt).getTime());
+  const refreshStateTone: CanvasTone =
+    refreshAgeMs >= REFRESH_INTERVAL_MS ? "warn" : "success";
+
+  useEffect(() => {
+    setEditorMode(issueAction?.enabled ? "issue" : null);
+  }, [issueAction?.enabled]);
 
   useEffect(() => {
     const nextScopes = selectedKey?.scopes?.length
@@ -658,6 +696,21 @@ export function ApiKeyManager({
       setCopyState("idle");
     }
   }, [flash]);
+
+  useEffect(() => {
+    setNowMs(Date.now());
+    const ageTicker = window.setInterval(() => setNowMs(Date.now()), 5_000);
+    const refreshTicker = window.setInterval(() => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      router.refresh();
+    }, REFRESH_INTERVAL_MS);
+    return () => {
+      window.clearInterval(ageTicker);
+      window.clearInterval(refreshTicker);
+    };
+  }, [router]);
 
   function toggleScope(scope: string) {
     setDraftScopes((current) =>
@@ -739,27 +792,35 @@ export function ApiKeyManager({
   }
 
   function renderActionCatalog() {
-    const supportedActions: ApiKeyActionKind[] = ["issue", "rotate", "revoke"];
+    const supportedActions = [...availableActions].sort((left, right) => {
+      const order: ApiKeyActionKind[] = ["issue", "rotate", "revoke"];
+      return (
+        order.indexOf(left.action as ApiKeyActionKind) -
+        order.indexOf(right.action as ApiKeyActionKind)
+      );
+    });
     return (
       <div style={actionCatalogStyle}>
-        {supportedActions.map((actionKind) => {
-          const action = getActionByKind(availableActions, actionKind);
+        {supportedActions.map((action) => {
+          const actionKind = action.action as ApiKeyActionKind;
           return (
             <div key={actionKind} style={actionDescriptorStyle}>
               <div style={descriptorTitleRowStyle}>
                 <strong>{getActionLabel(actionKind)}</strong>
                 <CanvasPill theme={th} tone={getActionTone(actionKind)}>
-                  {action ? getRiskLabel(action.riskLevel) : "Unavailable"}
+                  {getRiskLabel(action.riskLevel)}
                 </CanvasPill>
               </div>
               <div style={formNoteStyle}>
                 {getActionDescription(actionKind)}
               </div>
-              {action?.enabled === false ? (
+              {action.enabled === false ? (
                 <div style={formNoteStyle}>
                   停用原因: {action.disabledReasonCode ?? "action_disabled"}
                 </div>
-              ) : null}
+              ) : (
+                <div style={formNoteStyle}>目前可執行。</div>
+              )}
             </div>
           );
         })}
@@ -805,6 +866,16 @@ export function ApiKeyManager({
               >
                 {getActionLabel("issue")}
               </CanvasBtn>
+            ) : null}
+            {effectiveEmptyReason === "permission_denied" ? (
+              <Link href="/settings" style={textLinkStyle}>
+                檢查治理與角色
+              </Link>
+            ) : null}
+            {effectiveEmptyReason === "not_provisioned" ? (
+              <Link href="/webhooks" style={textLinkStyle}>
+                前往 /webhooks
+              </Link>
             ) : null}
             <Link href="/audit" style={textLinkStyle}>
               查看稽核紀錄
@@ -954,6 +1025,14 @@ export function ApiKeyManager({
           icon="warn"
           title="Q-TEN09: 完整明文只顯示一次"
           body="Issue 與 rotate 成功後都只會在 modal 內揭露一次完整 key。關閉後僅保留 key prefix 與 masked suffix，遺失請重新輪替。"
+        />
+
+        <CanvasBanner
+          theme={th}
+          tone={refreshStateTone}
+          icon="clock"
+          title={`T5 refresh tier · 每 30 秒輪詢一次${refreshAgeMs >= REFRESH_INTERVAL_MS ? " · 建議立即刷新" : ""}`}
+          body={`目前快照建立於 ${formatDateTime(loadedAt)}（${formatRelativeAge(loadedAt, nowMs)}）。頁面可見時會自動 refresh；你也可以手動刷新以取得最新狀態。`}
         />
 
         {flash && !flash.plaintextKey ? (
@@ -1163,7 +1242,7 @@ export function ApiKeyManager({
           <CanvasCard
             theme={th}
             title="可用操作"
-            subtitle="Risk tier 與 disabled reason 直接映射 availableActions。"
+            subtitle="Risk tier 與 disabled reason 直接映射 availableActions，空清單與無權限時不再假裝可操作。"
           >
             {renderActionCatalog()}
           </CanvasCard>
@@ -1282,6 +1361,19 @@ export function ApiKeyManager({
                     </ul>
                   </>
                 ) : null}
+
+                {governance.onboardingChecklist.length > 0 ? (
+                  <>
+                    <div style={{ ...sectionLabelStyle, marginTop: 14 }}>
+                      Onboarding checklist
+                    </div>
+                    <ul style={aliasListStyle}>
+                      {governance.onboardingChecklist.map((item: string) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
               </>
             ) : (
               <div style={formNoteStyle}>
@@ -1293,11 +1385,22 @@ export function ApiKeyManager({
           <CanvasCard
             theme={th}
             title="Deep links"
-            subtitle="從 API key inventory 直接跳往相依模組與稽核視角。"
+            subtitle="依 packet 導向整合相依模組；audit handoff 會在 receipt 可用時接續到 owning lane。"
           >
             <div style={deepLinkListStyle}>
               <div style={deepLinkItemStyle}>
-                <div>
+                <div style={deepLinkMetaStyle}>
+                  <strong>Integration governance</strong>
+                  <div style={formNoteStyle}>
+                    對照 readiness、published scope 與 onboarding checklist。
+                  </div>
+                </div>
+                <Link href="/settings" style={textLinkStyle}>
+                  /settings
+                </Link>
+              </div>
+              <div style={deepLinkItemStyle}>
+                <div style={deepLinkMetaStyle}>
                   <strong>Webhook 管理</strong>
                   <div style={formNoteStyle}>
                     檢查 key 對應的 webhook receiver 是否已就緒。
@@ -1308,10 +1411,10 @@ export function ApiKeyManager({
                 </Link>
               </div>
               <div style={deepLinkItemStyle}>
-                <div>
-                  <strong>租戶設定</strong>
+                <div style={deepLinkMetaStyle}>
+                  <strong>通知偏好</strong>
                   <div style={formNoteStyle}>
-                    對照通知、SLA 與 billing 等整體整合設定。
+                    確認 delivery failure 與 onboarding 通知是否已開通。
                   </div>
                 </div>
                 <Link href="/settings" style={textLinkStyle}>
@@ -1319,18 +1422,18 @@ export function ApiKeyManager({
                 </Link>
               </div>
               <div style={deepLinkItemStyle}>
-                <div>
-                  <strong>Partner entry</strong>
+                <div style={deepLinkMetaStyle}>
+                  <strong>SLA 設定</strong>
                   <div style={formNoteStyle}>
-                    驗證 partner bootstrap surface 對新 key 的操作說明。
+                    檢視整合異常的通知節點與租戶回應時限。
                   </div>
                 </div>
-                <Link href="/partner" style={textLinkStyle}>
-                  /partner
+                <Link href="/settings" style={textLinkStyle}>
+                  /settings
                 </Link>
               </div>
               <div style={deepLinkItemStyle}>
-                <div>
+                <div style={deepLinkMetaStyle}>
                   <strong>稽核紀錄</strong>
                   <div style={formNoteStyle}>
                     Issue / rotate / revoke 後可回到 audit lane 追蹤動作。
