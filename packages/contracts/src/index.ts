@@ -1,6 +1,7 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type {
+  CrossAppResourceLink,
   DriverMatchingSuppression,
   ResourceActionDescriptor,
 } from "./ui-runtime";

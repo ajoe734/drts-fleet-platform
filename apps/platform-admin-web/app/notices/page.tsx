@@ -38,6 +38,13 @@ type Audience = "all" | "tenants" | "ops" | "drivers";
 type NoticeFilter = "all" | "active" | "scheduled" | "resolved";
 type HistoryFilter = "all" | "delivered" | "delivering" | "pending";
 type SupportedEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
+type NoticeActionIntent =
+  | "create_notice"
+  | "resolve_notice"
+  | "view_broadcast_history"
+  | "set_maintenance_mode"
+  | "clear_maintenance_mode"
+  | "unknown";
 
 type NoticeRecord = PlatformNoticeRecord & {
   availableActions?: ResourceActionDescriptor[];
@@ -408,15 +415,44 @@ function getMaintenanceAction(
   maintenance: MaintenanceRecord | null,
   enabled: boolean,
 ): ResourceActionDescriptor | null {
-  const expectedAction = enabled
-    ? "clear_maintenance_mode"
-    : "set_maintenance_mode";
   const actions = normalizeMaintenanceActions(maintenance);
   return (
-    actions.find((action) => action.action === expectedAction) ??
+    actions.find((action) => {
+      const intent = getNoticeActionIntent(action.action);
+      return enabled
+        ? intent === "clear_maintenance_mode"
+        : intent === "set_maintenance_mode";
+    }) ??
     actions[0] ??
     null
   );
+}
+
+function getNoticeActionIntent(action: string): NoticeActionIntent {
+  const normalizedAction = action.toLowerCase();
+  if (normalizedAction === "create" || normalizedAction.includes("create")) {
+    return "create_notice";
+  }
+  if (
+    normalizedAction.includes("broadcast_history") ||
+    normalizedAction.includes("view_broadcast") ||
+    normalizedAction.includes("history")
+  ) {
+    return "view_broadcast_history";
+  }
+  if (normalizedAction.includes("clear_maintenance")) {
+    return "clear_maintenance_mode";
+  }
+  if (
+    normalizedAction.includes("set_maintenance") ||
+    normalizedAction.includes("enable_maintenance")
+  ) {
+    return "set_maintenance_mode";
+  }
+  if (normalizedAction.includes("resolve")) {
+    return "resolve_notice";
+  }
+  return "unknown";
 }
 
 function getSeverityTone(severity: PlatformNoticeSeverity) {
@@ -481,18 +517,51 @@ function getActionLabel(
   action: ResourceActionDescriptor["action"],
 ) {
   const labels: Record<string, { en: string; zh: string }> = {
+    create: { en: "Create notice", zh: "建立公告" },
     resolve_notice: { en: "Resolve notice", zh: "結束公告" },
+    resolve: { en: "Resolve notice", zh: "結束公告" },
     view_broadcast_history: {
       en: "View broadcast history",
       zh: "查看廣播歷史",
     },
+    set_maintenance: { en: "Set maintenance mode", zh: "啟用維護模式" },
     set_maintenance_mode: { en: "Set maintenance mode", zh: "啟用維護模式" },
     clear_maintenance_mode: {
       en: "Clear maintenance mode",
       zh: "解除維護模式",
     },
   };
-  return labels[action]?.[locale === "zh" ? "zh" : "en"] ?? action;
+  const direct = labels[action]?.[locale === "zh" ? "zh" : "en"];
+  if (direct) {
+    return direct;
+  }
+
+  const intentLabels: Record<
+    NoticeActionIntent,
+    { en: string; zh: string } | undefined
+  > = {
+    create_notice: { en: "Create notice", zh: "建立公告" },
+    resolve_notice: { en: "Resolve notice", zh: "結束公告" },
+    view_broadcast_history: {
+      en: "View broadcast history",
+      zh: "查看廣播歷史",
+    },
+    set_maintenance_mode: {
+      en: "Set maintenance mode",
+      zh: "啟用維護模式",
+    },
+    clear_maintenance_mode: {
+      en: "Clear maintenance mode",
+      zh: "解除維護模式",
+    },
+    unknown: undefined,
+  };
+
+  return (
+    intentLabels[getNoticeActionIntent(action)]?.[
+      locale === "zh" ? "zh" : "en"
+    ] ?? action
+  );
 }
 
 function getDeliveryLabel(
@@ -509,6 +578,22 @@ function getDeliveryLabel(
     return copy.deliveryPending;
   }
   return "—";
+}
+
+function collectCrossAppLinks(
+  ...sources: (CrossAppResourceLink[] | undefined)[]
+) {
+  const deduped = new Map<string, CrossAppResourceLink>();
+  sources.flat().forEach((link) => {
+    if (!link) {
+      return;
+    }
+    deduped.set(
+      `${link.targetApp}:${link.resourceType}:${link.resourceId}:${link.route}`,
+      link,
+    );
+  });
+  return Array.from(deduped.values());
 }
 
 function MetricCard({
@@ -571,11 +656,13 @@ function EmptyStateCard({
   reason,
   messageCode,
   nextAction,
+  onNextAction,
 }: {
   locale: Locale;
   reason: SupportedEmptyReason;
-  messageCode?: string;
-  nextAction?: ResourceActionDescriptor;
+  messageCode?: string | undefined;
+  nextAction?: ResourceActionDescriptor | undefined;
+  onNextAction?: (() => void) | null | undefined;
 }) {
   const copy = getCopy(locale);
   const emptyMap = copy.empty as unknown as Record<
@@ -682,7 +769,19 @@ function EmptyStateCard({
             </p>
           ) : null}
           {nextAction ? (
-            <ActionMeta locale={locale} action={nextAction} />
+            <div style={{ display: "grid", gap: 10 }}>
+              <ActionMeta locale={locale} action={nextAction} />
+              {onNextAction && nextAction.enabled ? (
+                <button
+                  type="button"
+                  className="admin-btn admin-btn--primary"
+                  onClick={onNextAction}
+                  style={{ width: "fit-content" }}
+                >
+                  {getActionLabel(locale, nextAction.action)}
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
@@ -803,6 +902,12 @@ export default function NoticesPage() {
     return state === "pending" || state === "delivering";
   }).length;
   const maintenanceAction = getMaintenanceAction(maintenance, maintEnabled);
+  const noticeLinks = collectCrossAppLinks(
+    ...notices.map((notice) => notice.crossAppLinks),
+  );
+  const historyLinks = collectCrossAppLinks(
+    ...historyRows.map((notice) => notice.crossAppLinks),
+  );
 
   const updateTab = useCallback(
     (nextTab: NoticeTab) => {
@@ -812,6 +917,30 @@ export default function NoticesPage() {
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     },
     [pathname, router, searchParams],
+  );
+
+  const handleEmptyStateAction = useCallback(
+    (action: ResourceActionDescriptor | undefined) => {
+      if (!action?.enabled) {
+        return;
+      }
+      switch (getNoticeActionIntent(action.action)) {
+        case "create_notice":
+          setShowCreate(true);
+          updateTab("notices");
+          return;
+        case "view_broadcast_history":
+          updateTab("history");
+          return;
+        case "set_maintenance_mode":
+        case "clear_maintenance_mode":
+          updateTab("maint");
+          return;
+        default:
+          return;
+      }
+    },
+    [updateTab],
   );
 
   async function handleCreateNotice(event: React.FormEvent) {
@@ -928,6 +1057,11 @@ export default function NoticesPage() {
         reason={reason}
         messageCode={emptyState?.messageCode}
         nextAction={emptyState?.nextAction}
+        onNextAction={
+          emptyState?.nextAction
+            ? () => handleEmptyStateAction(emptyState.nextAction)
+            : null
+        }
       />
     );
   }
@@ -950,7 +1084,8 @@ export default function NoticesPage() {
     return (
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {actions.map((action) => {
-          if (action.action === "resolve_notice" && action.enabled) {
+          const intent = getNoticeActionIntent(action.action);
+          if (intent === "resolve_notice" && action.enabled) {
             return (
               <button
                 key={action.action}
@@ -960,11 +1095,11 @@ export default function NoticesPage() {
                 title={action.disabledReasonCode ?? copy.actionUnavailable}
                 onClick={() => void handleResolveNotice(notice.noticeId)}
               >
-                {copy.resolve}
+                {getActionLabel(locale, action.action)}
               </button>
             );
           }
-          if (action.action === "view_broadcast_history" && action.enabled) {
+          if (intent === "view_broadcast_history" && action.enabled) {
             return (
               <button
                 key={action.action}
@@ -1794,15 +1929,11 @@ export default function NoticesPage() {
           <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
             <div style={fieldBoxStyle}>
               <div style={metaLabelStyle}>{copy.noticeSummary}</div>
-              <div style={{ marginTop: 8 }}>
-                {renderLinkSet(maintenance?.crossAppLinks)}
-              </div>
+              <div style={{ marginTop: 8 }}>{renderLinkSet(noticeLinks)}</div>
             </div>
             <div style={fieldBoxStyle}>
               <div style={metaLabelStyle}>{copy.historyTableTitle}</div>
-              <div style={{ marginTop: 8 }}>
-                {renderLinkSet(notices[0]?.crossAppLinks)}
-              </div>
+              <div style={{ marginTop: 8 }}>{renderLinkSet(historyLinks)}</div>
             </div>
           </div>
         </div>
