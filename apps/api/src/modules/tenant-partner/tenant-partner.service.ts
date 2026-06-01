@@ -46,6 +46,7 @@ import type {
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
+  SetPlatformPartnerEntryStatusCommand,
   DisableTenantCostCenterCommand,
   EvaluateTenantApprovalRuleCommand,
   ListOpsPendingApprovalRequestsQuery,
@@ -3118,15 +3119,68 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   setPlatformPartnerEntryStatus(
     entrySlug: string,
     status: "active" | "inactive",
+    command: SetPlatformPartnerEntryStatusCommand = {},
     requestId?: string,
   ) {
-    return this.updatePlatformPartnerEntry(
-      entrySlug,
+    const entry = this.requirePlatformPartnerEntry(entrySlug);
+    const before = this.clonePartnerEntry(entry);
+    const reason = this.normalizeNullableText(command.reason);
+
+    if (entry.status === "revoked" && status === "active") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PARTNER_ENTRY_REVOKED",
+        "Revoked partner entries cannot be reactivated or re-opened.",
+        {
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
+
+    entry.status = status;
+    entry.activeFlag = status === "active";
+    entry.revokedAt = null;
+    entry.revokedBy = null;
+    entry.revokeReason = null;
+    entry.updatedAt = new Date().toISOString();
+    entry.auditMetadata = {
+      ...entry.auditMetadata,
+      source: "platform_admin_console",
+      requestId: this.normalizeNullableText(requestId),
+      updatedBy: "platform_admin",
+    };
+
+    this.persistChanges(
       {
-        status,
+        partnerEntries: [this.clonePartnerEntry(entry)],
+      },
+      "update_platform_partner_entry",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: entry.tenantId,
+        moduleName: "tenant-partner",
+        actionName:
+          status === "active"
+            ? "activate_partner_entry"
+            : "deactivate_partner_entry",
+        resourceType: "partner_entry",
+        resourceId: entry.entrySlug,
+        oldValuesSummary: before as unknown as Record<string, unknown>,
+        newValuesSummary: {
+          ...(this.clonePartnerEntry(entry) as unknown as Record<
+            string,
+            unknown
+          >),
+          reason,
+        },
       },
       requestId,
     );
+
+    return this.clonePartnerEntry(entry);
   }
 
   revokePlatformPartnerEntry(entrySlug: string, requestId?: string) {

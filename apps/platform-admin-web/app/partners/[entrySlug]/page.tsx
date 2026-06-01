@@ -1843,10 +1843,14 @@ export default function PartnerDetailPage() {
       try {
         if (pendingAction.intent === "activate") {
           setChangingStatus("activate");
-          await client.activatePlatformPartnerEntry(entry.entrySlug);
+          await client.activatePlatformPartnerEntry(entry.entrySlug, {
+            reason: reason || null,
+          });
         } else if (pendingAction.intent === "deactivate") {
           setChangingStatus("deactivate");
-          await client.deactivatePlatformPartnerEntry(entry.entrySlug);
+          await client.deactivatePlatformPartnerEntry(entry.entrySlug, {
+            reason: reason || null,
+          });
         } else if (pendingAction.intent === "issue_credential") {
           setChangingStatus("issue_credential");
           const issued = await client.issuePlatformPartnerIngressCredential(

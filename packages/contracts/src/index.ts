@@ -390,6 +390,10 @@ export interface RevokePartnerIngressCredentialCommand {
   revokeReason?: string | null;
 }
 
+export interface SetPlatformPartnerEntryStatusCommand {
+  reason?: string | null;
+}
+
 export interface PartnerIngressCredentialIssued {
   credential: PartnerIngressCredentialRecord;
   plaintextKey: string;

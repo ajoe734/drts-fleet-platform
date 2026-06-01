@@ -100,6 +100,7 @@ import type {
   InitiateVehicleOffboardingCommand,
   InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
+  SetPlatformPartnerEntryStatusCommand,
   LinkCallOrderCommand,
   MaintenanceRecord,
   MarkReimbursementPaidCommand,
@@ -1911,19 +1912,25 @@ export class ApiClient {
 
   async activatePlatformPartnerEntry(
     entrySlug: string,
+    command: SetPlatformPartnerEntryStatusCommand = {},
   ): Promise<PartnerChannelEntryRecord> {
     return this.post<PartnerChannelEntryRecord>(
       `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/activate`,
-      {},
+      {
+        body: command,
+      },
     );
   }
 
   async deactivatePlatformPartnerEntry(
     entrySlug: string,
+    command: SetPlatformPartnerEntryStatusCommand = {},
   ): Promise<PartnerChannelEntryRecord> {
     return this.post<PartnerChannelEntryRecord>(
       `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/deactivate`,
-      {},
+      {
+        body: command,
+      },
     );
   }
 

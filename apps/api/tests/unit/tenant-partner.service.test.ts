@@ -516,6 +516,60 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
+  it("records activate/deactivate reasons in partner entry audit evidence", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
+
+    const deactivated = service.setPlatformPartnerEntryStatus(
+      "bank-demo-alpha-airport",
+      "inactive",
+      {
+        reason: "manual_hold_for_readiness_gap",
+      },
+      "req-partner-deactivate-001",
+    );
+    const reactivated = service.setPlatformPartnerEntryStatus(
+      "bank-demo-alpha-airport",
+      "active",
+      {
+        reason: "readiness_cleared",
+      },
+      "req-partner-activate-001",
+    );
+
+    expect(deactivated).toMatchObject({
+      status: "inactive",
+      activeFlag: false,
+    });
+    expect(reactivated).toMatchObject({
+      status: "active",
+      activeFlag: true,
+    });
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "deactivate_partner_entry",
+          resourceType: "partner_entry",
+          resourceId: "bank-demo-alpha-airport",
+          newValuesSummary: expect.objectContaining({
+            reason: "manual_hold_for_readiness_gap",
+            status: "inactive",
+          }),
+        }),
+        expect.objectContaining({
+          actionName: "activate_partner_entry",
+          resourceType: "partner_entry",
+          resourceId: "bank-demo-alpha-airport",
+          newValuesSummary: expect.objectContaining({
+            reason: "readiness_cleared",
+            status: "active",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("rotates and revokes partner ingress credentials with audit evidence", () => {
     process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
       "pk_test_alpha_ingress_secret";

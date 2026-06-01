@@ -42,6 +42,7 @@ import type {
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
+  SetPlatformPartnerEntryStatusCommand,
   TenantBookingApprovalRequestRecord,
   TenantAddressExportViewRecord,
   TenantCostCenterRecord,
@@ -190,12 +191,14 @@ export class TenantPartnerController {
   @Post("platform-admin/partner-entries/:entrySlug/activate")
   activatePlatformPartnerEntry(
     @Param("entrySlug") entrySlug: string,
+    @Body() command: SetPlatformPartnerEntryStatusCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.setPlatformPartnerEntryStatus(
         entrySlug,
         "active",
+        command,
         requestId,
       ),
       requestId,
@@ -205,12 +208,14 @@ export class TenantPartnerController {
   @Post("platform-admin/partner-entries/:entrySlug/deactivate")
   deactivatePlatformPartnerEntry(
     @Param("entrySlug") entrySlug: string,
+    @Body() command: SetPlatformPartnerEntryStatusCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.setPlatformPartnerEntryStatus(
         entrySlug,
         "inactive",
+        command,
         requestId,
       ),
       requestId,
