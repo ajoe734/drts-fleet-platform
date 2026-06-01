@@ -25,6 +25,7 @@ import {
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type {
+  ActionReceipt,
   CreatePlatformTenantCommand,
   EmptyReason,
   EmptyStateEnvelope,
@@ -77,6 +78,13 @@ type NormalizedTenantList = {
 type PendingTenantAction = {
   tenant: TenantListItem;
   action: ResourceActionDescriptor;
+};
+
+type ActionFeedback = {
+  tone: "success" | "danger";
+  title: string;
+  body: string;
+  auditHref?: string;
 };
 
 type OwnerAssignment = {
@@ -631,6 +639,47 @@ function getOpsHref(tenant: TenantListItem) {
   return url.toString();
 }
 
+function normalizeActionPathSegment(action: string) {
+  return action.replace(/_/g, "-");
+}
+
+function isActionReceipt(value: unknown): value is ActionReceipt {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<ActionReceipt>;
+  return (
+    typeof candidate.auditId === "string" &&
+    typeof candidate.message === "string" &&
+    typeof candidate.status === "string"
+  );
+}
+
+function buildActionFeedback(
+  locale: string,
+  action: ResourceActionDescriptor,
+  receipt?: ActionReceipt,
+): ActionFeedback {
+  const actionLabel = getActionLabel(locale, action.action);
+  const feedback: ActionFeedback = {
+    tone: receipt?.status === "failed" ? "danger" : "success",
+    title:
+      locale === "en" ? `${actionLabel} completed` : `已完成「${actionLabel}」`,
+    body:
+      receipt?.message ??
+      (locale === "en"
+        ? "The tenant roster has been refreshed with the latest governance state."
+        : "租戶清單已重新載入最新治理狀態。"),
+  };
+
+  if (receipt?.auditId) {
+    feedback.auditHref = `/audit?auditId=${encodeURIComponent(receipt.auditId)}`;
+  }
+
+  return feedback;
+}
+
 function getRefreshTierDisplay(refreshTier: RefreshTier) {
   return refreshTier === "medium_slow" ? "T4" : refreshTier;
 }
@@ -837,6 +886,9 @@ export default function TenantsPage() {
   const [pendingAction, setPendingAction] =
     useState<PendingTenantAction | null>(null);
   const [actionReason, setActionReason] = useState("");
+  const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(
+    null,
+  );
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
   const copy =
@@ -1054,6 +1106,69 @@ export default function TenantsPage() {
     [client],
   );
 
+  const executeTenantAction = useCallback(
+    async (
+      tenantId: string,
+      action: ResourceActionDescriptor,
+      lifecycleCommand?: PlatformTenantLifecycleActionCommand,
+    ) => {
+      const response = await client.post<unknown>(
+        `/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/${normalizeActionPathSegment(action.action)}`,
+        lifecycleCommand ? { body: lifecycleCommand } : undefined,
+      );
+      return isActionReceipt(response) ? response : undefined;
+    },
+    [client],
+  );
+
+  const handlePageAction = useCallback(
+    async (action: ResourceActionDescriptor) => {
+      if (!action.enabled) {
+        return;
+      }
+
+      setActionFeedback(null);
+
+      if (action.action === "create") {
+        setShowCreate(true);
+        return;
+      }
+
+      if (action.action === "refresh") {
+        await loadTenants("manual");
+        return;
+      }
+
+      if (action.action === "open_ops_view" && OPS_CONSOLE_ORIGIN) {
+        window.open(
+          new URL("/dispatch", OPS_CONSOLE_ORIGIN).toString(),
+          "_blank",
+          "noopener,noreferrer",
+        );
+        return;
+      }
+
+      const routeMap: Record<string, string> = {
+        open_audit: "/audit",
+        open_users: "/users",
+        open_partners: "/partners",
+        open_tenant_governance: "/tenant-governance",
+      };
+      const href = routeMap[action.action];
+      if (href) {
+        window.location.assign(href);
+        return;
+      }
+
+      setError(
+        locale === "en"
+          ? `Unsupported page action: ${action.action}`
+          : `目前不支援這個頁面動作：${action.action}`,
+      );
+    },
+    [loadTenants, locale],
+  );
+
   useEffect(() => {
     let active = true;
     const run = async (mode: "initial" | "manual" | "interval") => {
@@ -1091,17 +1206,11 @@ export default function TenantsPage() {
       if (action.riskLevel === "low") {
         setMutatingTenantId(tenant.id);
         setError(null);
+        setActionFeedback(null);
         try {
-          if (action.action === "activate") {
-            await client.activateTenant(tenant.id);
-          } else if (action.action === "suspend") {
-            await client.suspendTenant(tenant.id);
-          } else if (action.action === "rollback_hold") {
-            await client.rollbackHoldTenant(tenant.id);
-          } else {
-            return;
-          }
+          const receipt = await executeTenantAction(tenant.id, action);
           await loadTenants("manual");
+          setActionFeedback(buildActionFeedback(locale, action, receipt));
         } catch (actionError) {
           setError(
             actionError instanceof Error
@@ -1117,32 +1226,14 @@ export default function TenantsPage() {
       setActionReason("");
       setPendingAction({ tenant, action });
     },
-    [client, copy.actionFailed, loadTenants, locale],
+    [copy.actionFailed, executeTenantAction, loadTenants, locale],
   );
 
   const handleEmptyStateAction = useCallback(
     async (action: ResourceActionDescriptor) => {
-      if (!action.enabled) {
-        return;
-      }
-
-      if (action.action === "create") {
-        setShowCreate(true);
-        return;
-      }
-
-      if (action.action === "open_ops_view" && OPS_CONSOLE_ORIGIN) {
-        window.open(
-          new URL("/dispatch", OPS_CONSOLE_ORIGIN).toString(),
-          "_blank",
-          "noopener,noreferrer",
-        );
-        return;
-      }
-
-      await loadTenants("manual");
+      await handlePageAction(action);
     },
-    [loadTenants],
+    [handlePageAction],
   );
 
   const handleActionDialogClose = useCallback(() => {
@@ -1168,22 +1259,19 @@ export default function TenantsPage() {
 
     setMutatingTenantId(pendingAction.tenant.id);
     setError(null);
+    setActionFeedback(null);
     try {
-      if (pendingAction.action.action === "activate") {
-        await client.activateTenant(pendingAction.tenant.id, lifecycleCommand);
-      } else if (pendingAction.action.action === "suspend") {
-        await client.suspendTenant(pendingAction.tenant.id, lifecycleCommand);
-      } else if (pendingAction.action.action === "rollback_hold") {
-        await client.rollbackHoldTenant(
-          pendingAction.tenant.id,
-          lifecycleCommand,
-        );
-      } else {
-        return;
-      }
+      const receipt = await executeTenantAction(
+        pendingAction.tenant.id,
+        pendingAction.action,
+        lifecycleCommand,
+      );
       setPendingAction(null);
       setActionReason("");
       await loadTenants("manual");
+      setActionFeedback(
+        buildActionFeedback(locale, pendingAction.action, receipt),
+      );
     } catch (actionError) {
       setError(
         actionError instanceof Error
@@ -1193,7 +1281,14 @@ export default function TenantsPage() {
     } finally {
       setMutatingTenantId(null);
     }
-  }, [actionReason, client, copy.actionFailed, loadTenants, pendingAction]);
+  }, [
+    actionReason,
+    copy.actionFailed,
+    executeTenantAction,
+    loadTenants,
+    locale,
+    pendingAction,
+  ]);
 
   const handleCreate = useCallback(
     async (event: React.FormEvent) => {
@@ -1779,6 +1874,27 @@ export default function TenantsPage() {
             icon="warn"
             title={copy.loadErrorTitle}
             body={error}
+          />
+        ) : null}
+
+        {actionFeedback ? (
+          <CanvasBanner
+            theme={th}
+            tone={actionFeedback.tone}
+            icon={actionFeedback.tone === "danger" ? "warn" : "check"}
+            title={actionFeedback.title}
+            body={
+              actionFeedback.auditHref ? (
+                <span>
+                  {actionFeedback.body}{" "}
+                  <Link href={actionFeedback.auditHref}>
+                    {locale === "en" ? "View audit" : "查看稽核"}
+                  </Link>
+                </span>
+              ) : (
+                actionFeedback.body
+              )
+            }
           />
         ) : null}
 
