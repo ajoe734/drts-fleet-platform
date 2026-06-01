@@ -22,6 +22,7 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 import type {
+  ActionReceipt,
   CrossAppResourceLink,
   EmptyReason,
   ResourceActionDescriptor,
@@ -98,6 +99,13 @@ type EmptyStateDescriptor = {
   body: string;
   nextAction?: ResourceActionDescriptor;
   links?: CrossAppResourceLink[];
+};
+
+type PricingActionReceipt = ActionReceipt & {
+  actionLabel: string;
+  subject: string;
+  reason: string | null;
+  auditRoute: string;
 };
 
 const TAB_IDS: PricingTabId[] = ["passenger", "driver", "subsidy", "history"];
@@ -918,6 +926,8 @@ export default function PricingPage() {
   const [historyPeriodFilter, setHistoryPeriodFilter] = useState("all");
   const [showRetired, setShowRetired] = useState(true);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionReceipt, setActionReceipt] =
+    useState<PricingActionReceipt | null>(null);
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
 
   const activeTab = useMemo<PricingTabId>(() => {
@@ -1165,7 +1175,21 @@ export default function PricingPage() {
 
   const handleAction = (action: ResourceActionDescriptor, subject: string) => {
     if (!action.enabled) {
+      setActionReceipt(null);
       setActionMessage(action.disabledReasonCode ?? "Action unavailable.");
+      return;
+    }
+
+    if (
+      refreshMetadata.dataFreshness !== "fresh" &&
+      (action.action === "publish_draft" || action.action === "retire_version")
+    ) {
+      setActionReceipt(null);
+      setActionMessage(
+        locale === "en"
+          ? "Refresh is required before publishing or retiring a version."
+          : "發布或 retire 版本前必須先 refresh。",
+      );
       return;
     }
 
@@ -1177,12 +1201,14 @@ export default function PricingPage() {
     }
 
     if (action.requiresReason) {
-      const reason = window.prompt(
+      const reasonInput = window.prompt(
         locale === "en"
           ? "Reason is required for this high-risk action."
           : "此高風險操作必須輸入原因。",
       );
+      const reason = reasonInput?.trim() ?? "";
       if (!reason || !reason.trim()) {
+        setActionReceipt(null);
         setActionMessage(
           locale === "en" ? "Reason is required." : "必須填寫原因。",
         );
@@ -1194,15 +1220,20 @@ export default function PricingPage() {
         setPendingActionKey((current) =>
           current === pendingKey ? null : current,
         );
-        setActionMessage(
-          locale === "en"
-            ? `${formatActionLabel(action.action)} accepted for ${subject}. Audit reference issued.`
-            : `${subject} 已送出 ${formatActionLabel(action.action)}，並產生 audit reference。`,
-        );
+        const receipt = buildActionReceipt({
+          action,
+          subject,
+          tab: activeTab,
+          locale,
+          reason,
+        });
+        setActionReceipt(receipt);
+        setActionMessage(receipt.message);
       }, 900);
       return;
     }
 
+    setActionReceipt(null);
     setActionMessage(
       locale === "en"
         ? `${formatActionLabel(action.action)} completed for ${subject}.`
@@ -1335,6 +1366,44 @@ export default function PricingPage() {
       />
 
       <div style={pageStackStyle}>
+        {actionReceipt ? (
+          <CanvasCard
+            theme={theme}
+            title={locale === "en" ? "Action receipt" : "操作回執"}
+            subtitle={actionReceipt.message}
+            actions={
+              <a
+                href={actionReceipt.auditRoute}
+                target="_blank"
+                rel="noreferrer"
+                style={linkStyle(theme)}
+              >
+                {copy.auditLink}
+              </a>
+            }
+          >
+            <CanvasDL
+              theme={theme}
+              cols={2}
+              items={[
+                { label: copy.actionsLabel, value: actionReceipt.actionLabel },
+                { label: copy.tableStatus, value: actionReceipt.status },
+                { label: copy.tableName, value: actionReceipt.subject },
+                { label: "auditId", value: actionReceipt.auditId, mono: true },
+                {
+                  label: "actionId",
+                  value: actionReceipt.actionId,
+                  mono: true,
+                },
+                {
+                  label: locale === "en" ? "Reason" : "原因",
+                  value: actionReceipt.reason ?? "—",
+                },
+              ]}
+            />
+          </CanvasCard>
+        ) : null}
+
         {actionMessage ? (
           <CanvasBanner
             theme={theme}
@@ -1800,6 +1869,62 @@ function tabLabel(tab: PricingTabId, locale: string) {
           history: "已發布版本",
         };
   return labels[tab];
+}
+
+function buildActionReceipt({
+  action,
+  subject,
+  tab,
+  locale,
+  reason,
+}: {
+  action: ResourceActionDescriptor;
+  subject: string;
+  tab: PricingTabId;
+  locale: string;
+  reason: string;
+}): PricingActionReceipt {
+  const resourceId = toReceiptSlug(subject);
+  const actionLabel = formatActionLabel(action.action);
+  const auditId = `aud-prc-${resourceId}`;
+  return {
+    actionId: `act-prc-${resourceId}-${toReceiptSlug(action.action)}`,
+    auditId,
+    resourceType: resourceTypeForTab(tab),
+    resourceId,
+    status: "accepted",
+    message:
+      locale === "en"
+        ? `${actionLabel} accepted for ${subject}. Audit receipt ${auditId} issued.`
+        : `${subject} 已送出 ${actionLabel}，並產生稽核回執 ${auditId}。`,
+    actionLabel,
+    subject,
+    reason,
+    auditRoute: `/audit?auditId=${auditId}`,
+  };
+}
+
+function resourceTypeForTab(tab: PricingTabId) {
+  switch (tab) {
+    case "driver":
+      return "driver_fee_plan";
+    case "subsidy":
+      return "subsidy_rule";
+    case "history":
+      return "pricing_version";
+    case "passenger":
+    default:
+      return "platform_pricing_rule";
+  }
+}
+
+function toReceiptSlug(value: string) {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "pricing";
 }
 
 function actionButtonStyle(

@@ -112,6 +112,7 @@ describe("BillingSettlementService settlement matrix", () => {
       version: "2026-03",
       serviceFeeBps: 1000,
       reimbursementMode: "platform_funded",
+      reason: "Seed driver statements for March billing verification.",
     });
     const generated = await service.generateDriverStatements({
       periodMonth: "2026-03",

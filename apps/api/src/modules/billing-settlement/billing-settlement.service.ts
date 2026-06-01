@@ -571,6 +571,7 @@ export class BillingSettlementService implements OnModuleInit {
   ) {
     this.assertNonBlank(command.planName, "planName");
     this.assertNonBlank(command.version, "version");
+    this.assertNonBlank(command.reason, "reason");
 
     const duplicatePlan = this.driverFeePlans.find(
       (plan) =>
@@ -618,6 +619,7 @@ export class BillingSettlementService implements OnModuleInit {
           version: feePlan.version,
           serviceFeeBps: feePlan.serviceFeeBps,
           reimbursementMode: feePlan.reimbursementMode,
+          reason: command.reason,
         },
       },
       requestId,

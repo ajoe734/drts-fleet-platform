@@ -3427,6 +3427,7 @@ export interface PublishDriverFeePlanCommand {
   version: string;
   serviceFeeBps: number;
   reimbursementMode: "platform_funded" | "mixed";
+  reason: string;
 }
 
 export interface DriverFeePlanRecord {
@@ -4910,6 +4911,7 @@ export interface PublishPlatformPricingRuleCommand {
   effectiveFrom?: string | null;
   effectiveTo?: string | null;
   publishedBy?: string | null;
+  reason: string;
 }
 
 export interface SetTenantStatusCommand {

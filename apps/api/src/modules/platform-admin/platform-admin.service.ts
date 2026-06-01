@@ -853,6 +853,7 @@ export class PlatformAdminService implements OnModuleInit {
     command: PublishPlatformPricingRuleCommand,
     requestId?: string,
   ): PlatformPricingRuleRecord {
+    this.assertNonBlank(command.reason, "reason");
     const rule = this.requirePricingRule(ruleId);
     const previousActive = this.pricingRules.find(
       (candidate) =>
@@ -901,6 +902,7 @@ export class PlatformAdminService implements OnModuleInit {
           version: rule.version,
           publishedAt,
           applicableTo: rule.applicableTo,
+          reason: command.reason,
         },
       },
       requestId,
