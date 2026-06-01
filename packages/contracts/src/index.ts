@@ -1,5 +1,9 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  DriverMatchingSuppression,
+  ResourceActionDescriptor,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -1402,6 +1406,7 @@ export interface OpsPendingApprovalRequestRecord extends TenantBookingApprovalRe
   opsSlaAcknowledgedAt: string | null;
   opsSlaAcknowledgedByActorId: string | null;
   opsSlaAcknowledgedByActorType: IdentityContext["actorType"] | null;
+  availableActions: ResourceActionDescriptor[];
 }
 
 export interface ListTenantBookingApprovalRequestsQuery {
@@ -4255,6 +4260,12 @@ export interface UpdateIncidentCommand {
   severity?: IncidentSeverity;
 }
 
+export interface ExtendDriverMatchingSuppressionCommand {
+  reason: string;
+  expiresAt?: string;
+  extendByHours?: number;
+}
+
 export interface CreateIncidentFromDispatchExceptionCommand {
   orderId: string;
   exceptionReasonCode: string;
@@ -4305,6 +4316,8 @@ export interface IncidentRecord {
   location: string | null;
   resolutionNote: string | null;
   serviceRecoveryActions: ServiceRecoveryActionRecord[];
+  availableActions?: ResourceActionDescriptor[];
+  matchingSuppression?: DriverMatchingSuppression | null;
   createdAt: string;
   updatedAt: string;
 }

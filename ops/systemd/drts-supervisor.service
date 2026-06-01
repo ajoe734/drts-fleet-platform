@@ -1,0 +1,63 @@
+[Unit]
+Description=DRTS Fleet Platform supervisor (orchestrator)
+Documentation=file:%h/workspace/drts-fleet-platform/ops/systemd/README.md
+# Tied to user session bus so journald log labelling and resource accounting
+# stay scoped to the developer account that owns the workspace.
+After=default.target network-online.target
+Wants=network-online.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+
+# WorkingDirectory + ExecStart are placeholders templated by
+# scripts/install-supervisor-systemd.sh at install time. The installed unit
+# under ~/.config/systemd/user/ has the literal paths substituted; this
+# tracked copy keeps the variables for readability and so checks in CI can
+# diff against the canonical version.
+WorkingDirectory=%h/workspace/drts-fleet-platform
+ExecStart=/usr/bin/env bash %h/workspace/drts-fleet-platform/scripts/run-supervisor.sh --config %h/workspace/drts-fleet-platform/.orchestrator/config.json --verbose
+
+# Restart policy: any non-zero exit, SIGKILL, OOM kill, or watchdog timeout
+# triggers a restart after RestartSec. The cap (StartLimitBurst+IntervalSec)
+# prevents a thrashing supervisor from melting the host.
+Restart=on-failure
+RestartSec=10
+
+# Memory ceiling: supervisor RSS has historically grown to ~1.5 GB under
+# availability-first thrashing (see feedback_supervisor_oom_from_thrashing).
+# Killing at 4 GB gives plenty of headroom for healthy operation but stops
+# pathological growth from taking down the dev box.
+MemoryMax=4G
+MemoryHigh=3G
+
+# Watchdog: 1800s (30 min). supervisor.py now calls _sd_notify("WATCHDOG=1")
+# on every run_once tick (OPS-SUPERVISOR-SD-NOTIFY-001), so systemd correctly
+# detects a hung tick loop (no heartbeat for 30 min) and SIGKILL-restarts the
+# supervisor. Healthy supervisors heartbeat well under the deadline, so this
+# no longer kills happy processes (the OPS-SUPERVISOR-WATCHDOG-OFF-001 bug).
+# 30 min is generous to absorb a slow startup reconcile / cold cache without
+# false-positive kills; lower if you want faster hang detection.
+NotifyAccess=main
+WatchdogSec=1800
+
+# Journald is the canonical log; the .orchestrator/logs/supervisor-bg.log
+# trail is still written by supervisor itself for backward compatibility
+# with chair-review scripts that grep it.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=drts-supervisor
+
+# Run as the invoking user; do NOT escalate privileges.
+NoNewPrivileges=true
+
+# Keep child process group together so SIGTERM cleans up dispatched worker
+# CLIs (claude / codex / gemini) instead of orphaning them to PID 1.
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

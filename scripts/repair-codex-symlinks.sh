@@ -3,6 +3,11 @@
 #
 # Pre-flight repair for the codex / codex2 ChatGPT OAuth credential layout.
 #
+# Defaults preserve the historical worker homes (~/.codex for the primary lane,
+# ~/.codex2 for codex2), but every path here is overrideable so deployments can
+# adopt clearer worker-only names such as ~/.codex-worker and ~/.codex2-worker
+# while leaving the interactive chatbox extension on ~/.codex.
+#
 # Two modes, selected by CODEX_LANE_ISOLATION:
 #
 # === Legacy single-account mode (CODEX_LANE_ISOLATION unset / 0) ===
@@ -21,15 +26,15 @@
 #
 #   - The codex CLI resolves its config dir as "$CODEX_HOME" when CODEX_HOME
 #     is set, but as "$HOME/.codex" when only HOME is set.
-#   - The supervisor launches codex2 with CODEX_HOME=~/.codex2  -> reads
-#     ~/.codex2/auth.json
-#   - An operator doing `HOME=~/.codex2 codex login` writes to
-#     ~/.codex2/.codex/auth.json
+#   - The supervisor launches codex2 with CODEX_HOME=<worker home>  -> reads
+#     <worker home>/auth.json
+#   - An operator doing `HOME=<worker home> codex login` writes to
+#     <worker home>/.codex/auth.json
 #   - => login refreshes one file, supervisor reads the other => stale-token
 #     401 loop. (Observed 2026-05-27.)
 #
 # In isolation mode we reconcile those two paths for codex2: whichever of
-# {~/.codex2/auth.json, ~/.codex2/.codex/auth.json} is newer becomes the
+# {<worker home>/auth.json, <worker home>/.codex/auth.json} is newer becomes the
 # canonical regular file, and the other becomes a symlink to it. That way
 # both the CODEX_HOME view and the HOME view always see the freshest token.
 #
@@ -37,6 +42,14 @@
 # - Missing sources warn and exit 0 (supervisor surfaces real auth failures
 #   through its normal channels rather than crashing startup).
 # - Safe to run repeatedly. Intended to be invoked from run-supervisor.sh.
+#
+# Tunables (env vars):
+# - CODEX_MAIN_CREDS : primary lane auth file used for legacy shared mode
+#                      and cross-link warnings (default: ~/.codex/auth.json)
+# - CODEX2_HOME_DIR  : codex2 worker home to reconcile in either mode
+#                      (default: ~/.codex2)
+# - CODEX2_CREDS     : explicit CODEX_HOME-view auth path, if it differs from
+#                      "$CODEX2_HOME_DIR/auth.json"
 
 set -euo pipefail
 
