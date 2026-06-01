@@ -53,6 +53,22 @@ type RolloutState =
   | "deprecated"
   | "tenant_only";
 
+type FeatureFlagRecord = FeatureFlag & {
+  availableActions?: ResourceActionDescriptor[];
+  updatedBy?: string | null;
+  resourceLinks?: CrossAppResourceLink[];
+};
+
+type FeatureFlagSummaryEnvelope = FeatureFlagSummary & {
+  flags: FeatureFlagRecord[];
+  refreshTier?: RefreshTier;
+  generatedAt?: string;
+  emptyState?: {
+    reason: EmptyReason;
+    messageCode?: string;
+  };
+};
+
 type FeatureFlagOverrideRecord = {
   tenantId: string;
   tenantCode: string;
@@ -61,17 +77,20 @@ type FeatureFlagOverrideRecord = {
   description: string;
   updatedAt: string;
   crossLink: CrossAppResourceLink;
+  availableActions: ResourceActionDescriptor[];
+  updatedBy: string | null;
 };
 
 type FeatureFlagRow = {
   key: string;
   description: string;
-  global: FeatureFlag | null;
+  global: FeatureFlagRecord | null;
   overrides: FeatureFlagOverrideRecord[];
   selectedTenantOverride: FeatureFlagOverrideRecord | null;
   rolloutState: RolloutState;
   latestUpdatedAt: string;
   updatedBy: string;
+  sourceMode: "contract" | "legacy_fallback";
   availableActions: ResourceActionDescriptor[];
 };
 
@@ -132,7 +151,6 @@ type EmptyReasonMeta = {
 };
 
 const REFRESH_TIER: RefreshTier = "medium_slow";
-const REFRESH_TIER_CODE = REFRESH_TIER === "medium_slow" ? "T4" : REFRESH_TIER;
 const REFRESH_INTERVAL_MS = 30_000;
 const OPS_CONSOLE_BASE_URL =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003";
@@ -610,6 +628,44 @@ function auditHref(key: string) {
   return `/audit?${params.toString()}`;
 }
 
+function refreshTierCode(tier: RefreshTier | null | undefined) {
+  if (!tier) {
+    return "T4";
+  }
+
+  switch (tier) {
+    case "urgent":
+      return "T0";
+    case "fast":
+      return "T1";
+    case "dispatch":
+      return "T2";
+    case "medium":
+      return "T3";
+    case "medium_slow":
+      return "T4";
+    case "slow":
+      return "T5";
+    case "manual":
+      return "T6";
+    default:
+      return tier;
+  }
+}
+
+function isContractActionArray(
+  actions: ResourceActionDescriptor[] | undefined,
+): actions is ResourceActionDescriptor[] {
+  return Array.isArray(actions) && actions.length > 0;
+}
+
+function preferResourceLink(
+  links: CrossAppResourceLink[] | undefined,
+  fallback: CrossAppResourceLink,
+) {
+  return links?.[0] ?? fallback;
+}
+
 function classifyErrorReason(message: string | null): EmptyReason {
   if (!message) {
     return "fetch_failed";
@@ -649,12 +705,12 @@ function isDeprecatedFlag(key: string, description: string) {
   );
 }
 
-function buildAvailableActions({
+function buildLegacyAvailableActions({
   global,
   selectedTenantId,
   selectedTenantOverride,
 }: {
-  global: FeatureFlag | null;
+  global: FeatureFlagRecord | null;
   selectedTenantId: string;
   selectedTenantOverride: FeatureFlagOverrideRecord | null;
 }): ResourceActionDescriptor[] {
@@ -717,12 +773,12 @@ function buildRows({
   tenantSummaries,
   selectedTenantId,
 }: {
-  globalFlags: FeatureFlag[];
+  globalFlags: FeatureFlagRecord[];
   tenants: PlatformAdminTenantRecord[];
-  tenantSummaries: Record<string, FeatureFlagSummary>;
+  tenantSummaries: Record<string, FeatureFlagSummaryEnvelope>;
   selectedTenantId: string;
 }): FeatureFlagRow[] {
-  const globalByKey = new Map(
+  const globalByKey = new Map<string, FeatureFlagRecord>(
     sortFlags(globalFlags).map((flag) => [flag.key, flag]),
   );
   const overridesByKey = new Map<string, FeatureFlagOverrideRecord[]>();
@@ -740,6 +796,7 @@ function buildRows({
         continue;
       }
 
+      const fallbackLink = buildOpsDeepLink(tenant, flag.key);
       const existing = overridesByKey.get(flag.key) ?? [];
       existing.push({
         tenantId: tenant.id,
@@ -748,7 +805,9 @@ function buildRows({
         enabled: flag.enabled,
         description: flag.description,
         updatedAt: flag.updatedAt,
-        crossLink: buildOpsDeepLink(tenant, flag.key),
+        crossLink: preferResourceLink(flag.resourceLinks, fallbackLink),
+        availableActions: flag.availableActions ?? [],
+        updatedBy: flag.updatedBy ?? null,
       });
       overridesByKey.set(flag.key, existing);
     }
@@ -793,6 +852,16 @@ function buildRows({
       const latestUpdatedAt =
         timestamps.sort((left, right) => right.localeCompare(left))[0] ?? "";
 
+      const availableActions = isContractActionArray(global?.availableActions)
+        ? global.availableActions
+        : isContractActionArray(selectedTenantOverride?.availableActions)
+          ? selectedTenantOverride.availableActions
+          : buildLegacyAvailableActions({
+              global,
+              selectedTenantId,
+              selectedTenantOverride,
+            });
+
       return {
         key,
         description,
@@ -801,16 +870,20 @@ function buildRows({
         selectedTenantOverride,
         rolloutState,
         latestUpdatedAt,
-        updatedBy: selectedTenantOverride
-          ? `tenant:${selectedTenantOverride.tenantCode} · actor pending contract`
-          : overrides.length > 0
-            ? `${overrides.length} override scope(s) · actor pending contract`
-            : "platform default · actor pending contract",
-        availableActions: buildAvailableActions({
-          global,
-          selectedTenantId,
-          selectedTenantOverride,
-        }),
+        updatedBy:
+          selectedTenantOverride?.updatedBy ??
+          global?.updatedBy ??
+          (selectedTenantOverride
+            ? `tenant:${selectedTenantOverride.tenantCode} · actor pending contract`
+            : overrides.length > 0
+              ? `${overrides.length} override scope(s) · actor pending contract`
+              : "platform default · actor pending contract"),
+        sourceMode:
+          isContractActionArray(global?.availableActions) ||
+          isContractActionArray(selectedTenantOverride?.availableActions)
+            ? "contract"
+            : "legacy_fallback",
+        availableActions,
       };
     });
 }
@@ -900,29 +973,31 @@ function rolloutLabel(locale: string, state: RolloutState) {
 
 function refreshMeta(
   locale: string,
+  refreshTier: RefreshTier,
   freshness: "fresh" | "stale" | "degraded" | "unknown",
 ) {
+  const tierCode = refreshTierCode(refreshTier);
   if (locale === "en") {
     switch (freshness) {
       case "fresh":
         return {
-          label: `${REFRESH_TIER_CODE} · 30s · fresh`,
+          label: `${tierCode} · 30s · fresh`,
           tone: "success" as const,
         };
       case "stale":
         return {
-          label: `${REFRESH_TIER_CODE} · 30s · stale`,
+          label: `${tierCode} · 30s · stale`,
           tone: "warn" as const,
         };
       case "degraded":
         return {
-          label: `${REFRESH_TIER_CODE} · 30s · degraded`,
+          label: `${tierCode} · 30s · degraded`,
           tone: "danger" as const,
         };
       case "unknown":
       default:
         return {
-          label: `${REFRESH_TIER_CODE} · 30s · unknown`,
+          label: `${tierCode} · 30s · unknown`,
           tone: "neutral" as const,
         };
     }
@@ -931,23 +1006,23 @@ function refreshMeta(
   switch (freshness) {
     case "fresh":
       return {
-        label: `${REFRESH_TIER_CODE} · 30s · 即時`,
+        label: `${tierCode} · 30s · 即時`,
         tone: "success" as const,
       };
     case "stale":
       return {
-        label: `${REFRESH_TIER_CODE} · 30s · 過時`,
+        label: `${tierCode} · 30s · 過時`,
         tone: "warn" as const,
       };
     case "degraded":
       return {
-        label: `${REFRESH_TIER_CODE} · 30s · 降級`,
+        label: `${tierCode} · 30s · 降級`,
         tone: "danger" as const,
       };
     case "unknown":
     default:
       return {
-        label: `${REFRESH_TIER_CODE} · 30s · 未知`,
+        label: `${tierCode} · 30s · 未知`,
         tone: "neutral" as const,
       };
   }
@@ -1135,12 +1210,11 @@ function EmptyStateCard({
 export default function FeatureFlagsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
-  const [globalSummary, setGlobalSummary] = useState<FeatureFlagSummary | null>(
-    null,
-  );
+  const [globalSummary, setGlobalSummary] =
+    useState<FeatureFlagSummaryEnvelope | null>(null);
   const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
   const [tenantSummaries, setTenantSummaries] = useState<
-    Record<string, FeatureFlagSummary>
+    Record<string, FeatureFlagSummaryEnvelope>
   >({});
   const [snapshotIssues, setSnapshotIssues] = useState<SnapshotIssue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1158,6 +1232,7 @@ export default function FeatureFlagsPage() {
   const [receipt, setReceipt] = useState<ReceiptState | null>(null);
   const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null);
   const [clockNow, setClockNow] = useState(() => Date.now());
+  const [refreshTier, setRefreshTier] = useState<RefreshTier>(REFRESH_TIER);
 
   const copy =
     locale === "en"
@@ -1179,7 +1254,7 @@ export default function FeatureFlagsPage() {
             "Packet §5 requires scope filtering plus key search. Selected tenant focus also drives availableActions.",
           summaryTitle: "Governance scope",
           summarySubtitle:
-            "T4 refresh, reason-required writes, and cross-app ops context all live in this surface.",
+            "Refresh tier, reason-required writes, and cross-app ops context all live in this surface.",
           selectedTitle: "Selected flag",
           selectedSubtitle:
             "Use availableActions instead of role hard-coding. High-risk writes always require a reason.",
@@ -1197,6 +1272,10 @@ export default function FeatureFlagsPage() {
           guardrailTitle: "Write authority stays here.",
           guardrailBody:
             "Global default toggles and tenant overrides are governed on this page only. Other apps read filtered endpoints.",
+          legacyActionsTitle:
+            "Legacy action fallback is active for part of this page.",
+          legacyActionsBody:
+            "The backend has not embedded availableActions on every feature-flag record yet. This screen prefers contract-driven descriptors and only falls back where the payload is still legacy.",
           degradedTitle: "Some tenant scopes did not refresh cleanly.",
           degradedBody:
             "The page still shows the latest successful global snapshot, but at least one tenant override scope is degraded.",
@@ -1276,7 +1355,7 @@ export default function FeatureFlagsPage() {
             "依 packet §5，同時提供 scope 篩選與 key 搜尋；selected tenant 也會直接影響 availableActions。",
           summaryTitle: "治理範圍",
           summarySubtitle:
-            "這個頁面同時承接 T4 refresh、需原因的高風險寫入，以及 cross-app ops context。",
+            "這個頁面同時承接 refresh tier、需原因的高風險寫入，以及 cross-app ops context。",
           selectedTitle: "選取中的旗標",
           selectedSubtitle:
             "所有 CTA 由 availableActions 決定，不用角色硬編碼；高風險寫入一律需填原因。",
@@ -1294,6 +1373,9 @@ export default function FeatureFlagsPage() {
           guardrailTitle: "寫入權限只在這裡。",
           guardrailBody:
             "全域預設 toggle 與 tenant override 只在這個頁面治理；其他 app 僅讀取過濾後端點。",
+          legacyActionsTitle: "部分區塊仍在使用 legacy action fallback。",
+          legacyActionsBody:
+            "後端目前尚未在每筆 feature-flag record 都嵌入 availableActions。此頁會優先使用 contract 回傳，只有 legacy payload 才退回暫時性 fallback。",
           degradedTitle: "部分 tenant scope 重新整理失敗。",
           degradedBody:
             "頁面仍保留最近一次成功的 global snapshot，但至少有一個 tenant override scope 正在降級。",
@@ -1367,24 +1449,27 @@ export default function FeatureFlagsPage() {
       try {
         const [tenantList, nextGlobalSummary] = await Promise.all([
           client.listPlatformTenants(),
-          client.getFeatureFlags(),
+          client.getFeatureFlags() as Promise<FeatureFlagSummaryEnvelope>,
         ]);
 
         const settled = await Promise.allSettled(
           tenantList.map(async (tenant: PlatformAdminTenantRecord) => ({
             tenant,
-            summary: await client.getFeatureFlags({ tenantId: tenant.id }),
+            summary: (await client.getFeatureFlags({
+              tenantId: tenant.id,
+            })) as FeatureFlagSummaryEnvelope,
           })),
         );
 
-        const nextTenantSummaries: Record<string, FeatureFlagSummary> = {};
+        const nextTenantSummaries: Record<string, FeatureFlagSummaryEnvelope> =
+          {};
         const nextSnapshotIssues: SnapshotIssue[] = [];
 
         settled.forEach(
           (
             result: PromiseSettledResult<{
               tenant: PlatformAdminTenantRecord;
-              summary: FeatureFlagSummary;
+              summary: FeatureFlagSummaryEnvelope;
             }>,
             index: number,
           ) => {
@@ -1410,11 +1495,16 @@ export default function FeatureFlagsPage() {
         );
 
         setGlobalSummary(nextGlobalSummary);
+        setRefreshTier(nextGlobalSummary.refreshTier ?? REFRESH_TIER);
         setTenants(tenantList);
         setTenantSummaries(nextTenantSummaries);
         setSnapshotIssues(nextSnapshotIssues);
         setError(null);
-        setLastLoadedAt(Date.now());
+        setLastLoadedAt(
+          nextGlobalSummary.generatedAt
+            ? new Date(nextGlobalSummary.generatedAt).getTime()
+            : Date.now(),
+        );
       } catch (nextError: unknown) {
         setError(
           nextError instanceof Error ? nextError.message : String(nextError),
@@ -1516,11 +1606,24 @@ export default function FeatureFlagsPage() {
     return "fresh";
   }, [clockNow, error, lastLoadedAt, snapshotIssues.length]);
 
-  const refreshChip = refreshMeta(locale, dataFreshness);
+  const refreshChip = refreshMeta(locale, refreshTier, dataFreshness);
+
+  const isUsingLegacyActionFallback = rows.some(
+    (row) => row.sourceMode === "legacy_fallback",
+  );
 
   const activeEmptyReason = useMemo(() => {
     if (filteredRows.length > 0) {
       return null;
+    }
+    const selectedTenantSummary = selectedTenantId
+      ? tenantSummaries[selectedTenantId]
+      : null;
+    const emptyReasonFromPayload =
+      selectedTenantSummary?.emptyState?.reason ??
+      globalSummary?.emptyState?.reason;
+    if (emptyReasonFromPayload) {
+      return emptyReasonFromPayload;
     }
     if (error) {
       return classifyErrorReason(error);
@@ -1539,9 +1642,12 @@ export default function FeatureFlagsPage() {
     scopeFilter,
     search,
     selectedTenantId,
+    globalSummary,
+    tenantSummaries,
   ]);
 
   const selectedRowActions = selectedRow?.availableActions ?? [];
+  const refreshTierLabel = `${refreshTierCode(refreshTier)} · 30s`;
   const selectedAddOverride = getActionDescriptor(
     selectedRowActions,
     "add_tenant_override",
@@ -1678,7 +1784,9 @@ export default function FeatureFlagsPage() {
       r: (row) => (
         <div style={stackedCellStyle}>
           <span style={secondaryTextStyle}>{row.updatedBy}</span>
-          <span style={secondaryMonoStyle}>{copy.updatedByFallback}</span>
+          {row.sourceMode === "legacy_fallback" ? (
+            <span style={secondaryMonoStyle}>{copy.updatedByFallback}</span>
+          ) : null}
         </div>
       ),
     },
@@ -2022,6 +2130,15 @@ export default function FeatureFlagsPage() {
               title={copy.guardrailTitle}
               body={copy.guardrailBody}
             />
+            {isUsingLegacyActionFallback ? (
+              <CanvasBanner
+                theme={theme}
+                tone="warn"
+                icon="warn"
+                title={copy.legacyActionsTitle}
+                body={copy.legacyActionsBody}
+              />
+            ) : null}
 
             <div style={kpiGridStyle}>
               <CanvasKPI
@@ -2049,7 +2166,7 @@ export default function FeatureFlagsPage() {
               <CanvasKPI
                 theme={theme}
                 label={copy.refreshTier}
-                value="T4"
+                value={refreshTierCode(refreshTier)}
                 sub={
                   lastLoadedAt
                     ? formatDateTime(new Date(lastLoadedAt).toISOString())
@@ -2138,7 +2255,7 @@ export default function FeatureFlagsPage() {
                       },
                       {
                         label: copy.refreshTier,
-                        value: "T4 · 30s",
+                        value: refreshTierLabel,
                       },
                       {
                         label: copy.scopeLabel,
@@ -2498,7 +2615,7 @@ export default function FeatureFlagsPage() {
                   },
                   {
                     label: copy.refreshTier,
-                    value: "T4 · 30s",
+                    value: refreshTierLabel,
                   },
                   {
                     label: copy.selectedTenantScope,
