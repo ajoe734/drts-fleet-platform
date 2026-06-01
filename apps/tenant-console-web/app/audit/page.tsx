@@ -293,7 +293,6 @@ type EmptyStateSpec = {
   title: string;
   body: string;
   tone: CanvasTone;
-  actions: Array<{ href: string; label: string }>;
   messageCode?: string;
 };
 
@@ -691,9 +690,7 @@ function buildActionHref(
 
 function buildEmptyState(
   reason: EmptyReason,
-  filters: FilterState,
   refreshTier: TenantAuditListView["refreshTier"] | null | undefined,
-  nextAction?: ResourceActionDescriptor,
   messageCode?: string,
 ): EmptyStateSpec {
   const spec: Omit<EmptyStateSpec, "messageCode"> = (() => {
@@ -703,52 +700,36 @@ function buildEmptyState(
           title: "此租戶尚未完成稽核治理接線",
           body: "Audit trail route 已開通，但此 tenant 的 audit export / evidence governance 尚未 provisioning；這不是 no_data。",
           tone: "warn",
-          actions: [
-            { href: "/settings", label: "查看租戶設定" },
-            { href: "/integration-governance", label: "查看整合就緒度" },
-          ],
         };
       case "permission_denied":
         return {
           title: "目前角色無法讀取稽核資料",
           body: "此畫面僅對具 audit read 權限的租戶角色開放，請由 `tc_admin` 或 `tc_finance` 協助。",
           tone: "danger",
-          actions: [
-            { href: "/users", label: "查看角色配置" },
-            { href: "/audit", label: "返回稽核首頁" },
-          ],
         };
       case "external_unavailable":
         return {
           title: "上游稽核服務暫時不可用",
           body: `Tenant snapshot 無法自 ${API_URL} 取得最新資料。此頁 refresh tier 為 ${formatRefreshTier(refreshTier)}，只支援手動重新整理。`,
           tone: "warn",
-          actions: [
-            {
-              href: buildAuditHref({ ...filters, download: "" }),
-              label: "重新整理",
-            },
-            { href: "/reports", label: "改查報表" },
-          ],
         };
       case "fetch_failed":
         return {
           title: "稽核資料讀取失敗",
           body: "保留目前篩選條件後重試；若持續失敗，請帶著 request correlation 聯絡平台支援。",
           tone: "danger",
-          actions: [
-            {
-              href: buildAuditHref({ ...filters, download: "" }),
-              label: "重新整理",
-            },
-          ],
         };
       case "filtered_empty":
         return {
           title: "目前篩選條件沒有命中任何稽核列",
           body: "可放寬 actor、module、action 或時間範圍，或直接清除所有篩選後重新檢視。",
           tone: "info",
-          actions: [{ href: "/audit", label: "清除篩選" }],
+        };
+      case "driver_not_eligible":
+        return {
+          title: "目前身份不符合這個列表的查看條件",
+          body: "這是 contract 內保留的空狀態原因。Audit 畫面通常不會收到它，但若上游錯誤回傳，畫面仍需明確區分，避免誤判成 no_data。",
+          tone: "warn",
         };
       case "no_data":
       default:
@@ -756,36 +737,11 @@ function buildEmptyState(
           title: "目前沒有可顯示的稽核列",
           body: "此租戶尚未產生任何 state-changing action，或 audit snapshot 仍在初始化中。",
           tone: "neutral",
-          actions: [
-            { href: "/bookings/new", label: "建立第一筆叫車" },
-            { href: "/audit", label: "重新整理" },
-          ],
         };
     }
   })();
 
-  if (!nextAction) {
-    return messageCode ? { ...spec, messageCode } : spec;
-  }
-
-  return {
-    ...spec,
-    ...(messageCode ? { messageCode } : {}),
-    actions: [
-      ...spec.actions,
-      {
-        href: buildActionHref(nextAction, filters),
-        label:
-          nextAction.action === "refresh"
-            ? "依建議重新整理"
-            : nextAction.action === "export"
-              ? "依建議匯出"
-              : nextAction.action === "filter"
-                ? "調整篩選"
-                : `執行 ${nextAction.action}`,
-      },
-    ],
-  };
+  return messageCode ? { ...spec, messageCode } : spec;
 }
 
 function renderActionLink(
@@ -829,18 +785,52 @@ function renderActionLink(
   );
 }
 
-function resolveHeaderAction(
+function findAvailableAction(
   availableActions: ResourceActionDescriptor[],
   actionName: "filter" | "refresh" | "export",
-): ResourceActionDescriptor {
+) {
   return (
-    availableActions.find((action) => action.action === actionName) ?? {
-      action: actionName,
-      enabled: false,
-      disabledReasonCode: "action_unavailable",
-      riskLevel: "low",
-    }
+    availableActions.find((action) => action.action === actionName) ?? null
   );
+}
+
+function actionLabel(action: ResourceActionDescriptor, emptyState = false) {
+  switch (action.action) {
+    case "refresh":
+      return emptyState ? "重新整理快照" : "重新整理";
+    case "export":
+      return emptyState ? "匯出目前篩選" : "產生簽章匯出";
+    case "filter":
+      return emptyState ? "調整篩選" : "清除篩選";
+    default:
+      return emptyState ? `執行 ${action.action}` : action.action;
+  }
+}
+
+function buildEmptyStateActions(
+  reason: EmptyReason,
+  filters: FilterState,
+  availableActions: ResourceActionDescriptor[],
+  nextAction?: ResourceActionDescriptor,
+) {
+  const ordered = [
+    nextAction,
+    ...availableActions.filter((action) =>
+      reason === "filtered_empty"
+        ? action.action === "filter" || action.action === "refresh"
+        : action.action === "refresh" || action.action === "filter",
+    ),
+  ].filter((action): action is ResourceActionDescriptor => Boolean(action));
+
+  const seen = new Set<string>();
+
+  return ordered.filter((action) => {
+    if (seen.has(action.action)) {
+      return false;
+    }
+    seen.add(action.action);
+    return true;
+  });
 }
 
 function buildTableColumns(
@@ -1052,21 +1042,27 @@ export default async function AuditPage({
   ).length;
   const exportCount = rows.length;
   const availableActions = auditView?.availableActions ?? [];
-  const filterAction = resolveHeaderAction(availableActions, "filter");
-  const refreshAction = resolveHeaderAction(availableActions, "refresh");
-  const exportAction = resolveHeaderAction(availableActions, "export");
+  const filterAction = findAvailableAction(availableActions, "filter");
+  const refreshAction = findAvailableAction(availableActions, "refresh");
+  const exportAction = findAvailableAction(availableActions, "export");
   const emptyReason = auditView?.emptyState?.reason ?? errorReason;
   const emptyState = emptyReason
     ? buildEmptyState(
         emptyReason,
-        filters,
         auditView?.refreshTier,
-        auditView?.emptyState?.nextAction,
         auditView?.emptyState?.messageCode,
       )
     : null;
+  const emptyStateActions = emptyReason
+    ? buildEmptyStateActions(
+        emptyReason,
+        filters,
+        availableActions,
+        auditView?.emptyState?.nextAction,
+      )
+    : [];
   const exportLoadState =
-    exportAction.enabled && !emptyState && filters.download === "1"
+    exportAction?.enabled && !emptyState && filters.download === "1"
       ? await loadAuditExport(filters)
       : null;
   const exportState = buildExportState(
@@ -1074,20 +1070,6 @@ export default async function AuditPage({
     exportLoadState?.download ?? null,
     exportLoadState?.error ?? null,
   );
-  const exportDisabledReason =
-    "disabledReasonCode" in exportAction
-      ? exportAction.disabledReasonCode
-      : undefined;
-  const exportActionResolved = exportAction.enabled
-    ? exportAction
-    : {
-        ...exportAction,
-        enabled: false,
-        disabledReasonCode:
-          exportDisabledReason ??
-          exportState.error ??
-          "Signed export unavailable",
-      };
   const exportReady = Boolean(exportState.download?.downloadUrl);
 
   return (
@@ -1098,19 +1080,29 @@ export default async function AuditPage({
         subtitle={`不可變 · request correlation · cross-actor visibility · refresh tier ${formatRefreshTier(auditView?.refreshTier)}`}
         actions={
           <>
-            {renderActionLink(filterAction, "/audit", "清除篩選")}
-            {renderActionLink(
-              refreshAction,
-              buildAuditHref({ ...filters, download: "" }),
-              "重新整理",
-            )}
-            {renderActionLink(
-              exportActionResolved,
-              exportReady
-                ? (exportState.download?.downloadUrl ?? "#")
-                : buildAuditHref({ ...filters, download: "1" }),
-              exportReady ? "下載簽章匯出" : "產生簽章匯出",
-            )}
+            {filterAction
+              ? renderActionLink(
+                  filterAction,
+                  "/audit",
+                  actionLabel(filterAction),
+                )
+              : null}
+            {refreshAction
+              ? renderActionLink(
+                  refreshAction,
+                  buildActionHref(refreshAction, filters),
+                  actionLabel(refreshAction),
+                )
+              : null}
+            {exportAction
+              ? renderActionLink(
+                  exportAction,
+                  exportReady
+                    ? (exportState.download?.downloadUrl ?? "#")
+                    : buildActionHref(exportAction, filters),
+                  exportReady ? "下載簽章匯出" : actionLabel(exportAction),
+                )
+              : null}
           </>
         }
       />
@@ -1334,21 +1326,19 @@ export default async function AuditPage({
                       </div>
                     ) : null}
                   </div>
-                  <div style={controlRowStyle}>
-                    {emptyState.actions.map((action) => (
-                      <a
-                        key={`${action.href}-${action.label}`}
-                        href={action.href}
-                        style={{
-                          ...linkButtonBaseStyle,
-                          background: th.surface,
-                          color: th.text,
-                        }}
-                      >
-                        {action.label}
-                      </a>
-                    ))}
-                  </div>
+                  {emptyStateActions.length > 0 ? (
+                    <div style={controlRowStyle}>
+                      {emptyStateActions.map((action) => (
+                        <span key={`empty-${action.action}`}>
+                          {renderActionLink(
+                            action,
+                            buildActionHref(action, filters),
+                            actionLabel(action, true),
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <CanvasTable<AuditTableRow>
