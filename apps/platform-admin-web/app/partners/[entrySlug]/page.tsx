@@ -102,6 +102,15 @@ type PendingAction =
       label: string;
     };
 
+type ActionFeedback = {
+  status: "completed" | "accepted" | "failed";
+  title: string;
+  message: string;
+  auditHref?: string;
+  resourceHref?: string;
+  resourceLabel?: string;
+};
+
 const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
@@ -1100,13 +1109,17 @@ function PlaintextCredentialModal({
         <div style={overlayActionsStyle}>
           <div style={mutedTextStyle}>
             {locale === "en"
-              ? "Keep audit lineage and rotation notes in sync with any handoff outside this app."
-              : "若此 secret 需要交接到其他系統，請同步維護 audit lineage 與 rotation note。"}
+              ? copied || downloaded
+                ? "Secret transfer recorded locally. Keep audit lineage and rotation notes in sync with any handoff outside this app."
+                : "Copy the secret or download the .txt file before closing this modal."
+              : copied || downloaded
+                ? "已留下本地 transfer 動作。若此 secret 需要交接到其他系統，請同步維護 audit lineage 與 rotation note。"
+                : "關閉前必須先複製 secret 或下載 .txt 檔。"}
           </div>
           <Btn
             theme={theme}
             variant="primary"
-            disabled={!stored}
+            disabled={!stored || (!copied && !downloaded)}
             onClick={onClose}
           >
             {locale === "en" ? "I stored this key" : "我已保存此 key"}
@@ -1243,6 +1256,9 @@ export default function PartnerDetailPage() {
   const [revokingCredentialId, setRevokingCredentialId] = useState<
     string | null
   >(null);
+  const [actionFeedback, setActionFeedback] = useState<ActionFeedback | null>(
+    null,
+  );
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(
     null,
   );
@@ -1886,13 +1902,47 @@ export default function PartnerDetailPage() {
         return;
       }
 
+      const entryAuditHref = `/audit?resourceType=partner_entry&resourceId=${encodeURIComponent(
+        entry.entrySlug,
+      )}`;
+
       try {
         if (pendingAction.intent === "activate") {
           setChangingStatus("activate");
           await client.activatePlatformPartnerEntry(entry.entrySlug);
+          setActionFeedback({
+            status: "completed",
+            title:
+              locale === "en"
+                ? "Partner entry activated"
+                : "Partner entry 已啟用",
+            message:
+              locale === "en"
+                ? "Traffic can resume subject to readiness and downstream adapter posture."
+                : "此 entry 可在 readiness 與下游 adapter 條件符合時恢復流量。",
+            auditHref: entryAuditHref,
+            resourceHref: "#overview",
+            resourceLabel:
+              locale === "en" ? "Return to overview" : "返回 overview",
+          });
         } else if (pendingAction.intent === "deactivate") {
           setChangingStatus("deactivate");
           await client.deactivatePlatformPartnerEntry(entry.entrySlug);
+          setActionFeedback({
+            status: "completed",
+            title:
+              locale === "en"
+                ? "Partner entry deactivated"
+                : "Partner entry 已停用",
+            message:
+              locale === "en"
+                ? "Partner-facing traffic should remain blocked until a future activation decision."
+                : "Partner-facing 流量應維持封鎖，直到後續重新啟用決策。",
+            auditHref: entryAuditHref,
+            resourceHref: "#overview",
+            resourceLabel:
+              locale === "en" ? "Return to overview" : "返回 overview",
+          });
         } else if (pendingAction.intent === "issue_credential") {
           setChangingStatus("issue_credential");
           const issued = await client.issuePlatformPartnerIngressCredential(
@@ -1900,6 +1950,22 @@ export default function PartnerDetailPage() {
             { rotationReason: reason || null },
           );
           setIssuedCredential(issued);
+          setActionFeedback({
+            status: "completed",
+            title: locale === "en" ? "Credential issued" : "Credential 已核發",
+            message:
+              locale === "en"
+                ? "Plaintext material is now available once in the modal. Store it before dismissal."
+                : "明文 secret 已在 modal 中單次顯示；請在關閉前完成保存。",
+            auditHref: `/audit?resourceType=partner_ingress_credential&resourceId=${encodeURIComponent(
+              issued.credential.keyId,
+            )}`,
+            resourceHref: "#credentials",
+            resourceLabel:
+              locale === "en"
+                ? "Review credential lane"
+                : "查看 credential 區塊",
+          });
         } else if (pendingAction.intent === "rotate_credential") {
           setChangingStatus("rotate_credential");
           const issued = await client.issuePlatformPartnerIngressCredential(
@@ -1907,6 +1973,22 @@ export default function PartnerDetailPage() {
             { rotationReason: reason || null },
           );
           setIssuedCredential(issued);
+          setActionFeedback({
+            status: "completed",
+            title: locale === "en" ? "Credential rotated" : "Credential 已輪替",
+            message:
+              locale === "en"
+                ? "The previous key has been revoked and the replacement secret is shown once in the modal."
+                : "舊 key 已撤銷，替換 secret 會在 modal 中單次顯示。",
+            auditHref: `/audit?resourceType=partner_ingress_credential&resourceId=${encodeURIComponent(
+              issued.credential.keyId,
+            )}`,
+            resourceHref: "#credentials",
+            resourceLabel:
+              locale === "en"
+                ? "Review credential lane"
+                : "查看 credential 區塊",
+          });
         } else if (pendingAction.intent === "revoke_credential") {
           setRevokingCredentialId(pendingAction.keyId);
           await client.revokePlatformPartnerIngressCredential(
@@ -1914,18 +1996,43 @@ export default function PartnerDetailPage() {
             pendingAction.keyId,
             { revokeReason: reason || null },
           );
+          setActionFeedback({
+            status: "completed",
+            title: locale === "en" ? "Credential revoked" : "Credential 已撤銷",
+            message:
+              locale === "en"
+                ? `${pendingAction.label} is no longer valid for ingress traffic.`
+                : `${pendingAction.label} 已不再可用於 ingress 流量。`,
+            auditHref: `/audit?resourceType=partner_ingress_credential&resourceId=${encodeURIComponent(
+              pendingAction.keyId,
+            )}`,
+            resourceHref: "#credentials",
+            resourceLabel:
+              locale === "en"
+                ? "Review credential lane"
+                : "查看 credential 區塊",
+          });
         }
 
         setPendingAction(null);
         await loadEntry({ preserveIssuedCredential: true });
       } catch (cause: unknown) {
         setError(cause instanceof Error ? cause.message : String(cause));
+        setActionFeedback({
+          status: "failed",
+          title: locale === "en" ? "Partner action failed" : "Partner 動作失敗",
+          message: cause instanceof Error ? cause.message : String(cause),
+          auditHref: entryAuditHref,
+          resourceHref: "#audit",
+          resourceLabel:
+            locale === "en" ? "Inspect audit lineage" : "查看 audit lineage",
+        });
       } finally {
         setChangingStatus(null);
         setRevokingCredentialId(null);
       }
     },
-    [client, entry, loadEntry, pendingAction],
+    [client, entry, loadEntry, locale, pendingAction],
   );
 
   const saveEntry = useCallback(async () => {
@@ -1939,13 +2046,41 @@ export default function PartnerDetailPage() {
         entry.entrySlug,
         toPartnerUpdateCommand(editForm),
       );
+      setActionFeedback({
+        status: "completed",
+        title:
+          locale === "en"
+            ? "Partner entry changes saved"
+            : "Partner entry 變更已儲存",
+        message:
+          locale === "en"
+            ? "Branding, routing, and support metadata were updated for this entry."
+            : "此 entry 的 branding、routing 與 support metadata 已更新。",
+        auditHref: `/audit?resourceType=partner_entry&resourceId=${encodeURIComponent(
+          entry.entrySlug,
+        )}`,
+        resourceHref: "#branding",
+        resourceLabel:
+          locale === "en" ? "Review editable fields" : "查看可編輯欄位",
+      });
       await loadEntry();
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      setActionFeedback({
+        status: "failed",
+        title: locale === "en" ? "Unable to save changes" : "無法儲存變更",
+        message: cause instanceof Error ? cause.message : String(cause),
+        auditHref: `/audit?resourceType=partner_entry&resourceId=${encodeURIComponent(
+          entry.entrySlug,
+        )}`,
+        resourceHref: "#branding",
+        resourceLabel:
+          locale === "en" ? "Return to editable fields" : "返回可編輯欄位",
+      });
     } finally {
       setSaving(false);
     }
-  }, [client, editAction?.enabled, editForm, entry, loadEntry]);
+  }, [client, editAction?.enabled, editForm, entry, loadEntry, locale]);
 
   const handleSave = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -2140,6 +2275,76 @@ export default function PartnerDetailPage() {
                   : `目前畫面超過 ${refreshLabel} ${refreshCadence} 更新目標。請先重新整理，再做啟用或 credential 決策。`
               }
             />
+          ) : null}
+
+          {actionFeedback ? (
+            <Card
+              theme={theme}
+              title={actionFeedback.title}
+              subtitle={actionFeedback.message}
+              actions={
+                <div style={buttonRowStyle}>
+                  {actionFeedback.auditHref ? (
+                    <a
+                      href={actionFeedback.auditHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ textDecoration: "none" }}
+                    >
+                      <Btn theme={theme} variant="secondary" size="xs">
+                        {locale === "en" ? "View audit" : "查看 audit"}
+                      </Btn>
+                    </a>
+                  ) : null}
+                  {actionFeedback.resourceHref &&
+                  actionFeedback.resourceLabel ? (
+                    <a
+                      href={actionFeedback.resourceHref}
+                      style={{ textDecoration: "none" }}
+                      onClick={() => {
+                        const sectionMatch =
+                          actionFeedback.resourceHref?.match(/^#(.+)$/);
+                        if (sectionMatch?.[1]) {
+                          jumpToSection(sectionMatch[1] as DetailSectionId);
+                        }
+                      }}
+                    >
+                      <Btn theme={theme} variant="secondary" size="xs">
+                        {actionFeedback.resourceLabel}
+                      </Btn>
+                    </a>
+                  ) : null}
+                  <Btn
+                    theme={theme}
+                    variant="secondary"
+                    size="xs"
+                    onClick={() => setActionFeedback(null)}
+                  >
+                    {locale === "en" ? "Dismiss" : "關閉"}
+                  </Btn>
+                </div>
+              }
+            >
+              <div style={shellBadgeRowStyle}>
+                <Pill
+                  theme={theme}
+                  tone={
+                    actionFeedback.status === "failed"
+                      ? "danger"
+                      : actionFeedback.status === "accepted"
+                        ? "accent"
+                        : "success"
+                  }
+                >
+                  {actionFeedback.status}
+                </Pill>
+                <span style={mutedTextStyle}>
+                  {locale === "en"
+                    ? "Receipt stays in-page until backend ActionReceipt support lands for this route."
+                    : "在此路由後端正式提供 ActionReceipt 前，receipt 先以頁內方式呈現。"}
+                </span>
+              </div>
+            </Card>
           ) : null}
 
           <Card
