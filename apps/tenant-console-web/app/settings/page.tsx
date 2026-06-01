@@ -1,7 +1,11 @@
-import type { CSSProperties } from "react";
+import Link from "next/link";
+import type { CSSProperties, ReactNode } from "react";
 import type {
+  EmptyReason,
   FeatureFlagSummary,
   IdentityContext,
+  RefreshTier,
+  ResourceActionDescriptor,
   TenantBillingProfile,
   TenantIntegrationGovernancePackage,
   TenantNotificationPreferences,
@@ -10,12 +14,15 @@ import type {
 } from "@drts/contracts";
 import {
   CanvasBanner,
+  CanvasBtn,
   CanvasCard,
   CanvasDL,
   CanvasField,
   CanvasInput,
   CanvasPageHeader,
+  CanvasPill,
   CanvasSelect,
+  type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
@@ -28,6 +35,39 @@ const th = buildCanvasTheme({
   dark: true,
   density: "compact",
 });
+
+// Q-X02 / packet §3.2 + §5.20: /settings is the T5 "Tenant slow" tier (30s).
+// The tier name comes from the contract enum so the cadence is not a magic
+// number, and the page renders an explicit refresh affordance per §3.2.
+const SETTINGS_REFRESH_TIER: RefreshTier = "slow";
+const REFRESH_TIER_CADENCE_MS: Partial<Record<RefreshTier, number>> = {
+  urgent: 5000,
+  fast: 3000,
+  dispatch: 5000,
+  medium: 15000,
+  medium_slow: 30000,
+  slow: 30000,
+  manual: 0,
+};
+
+// Cross-app deep-link base (packet §3.10): tenant-console can deep-link into
+// the platform-admin app for read-scoped governance that does not live here
+// (full feature-flag governance per Q-X16, integration escalation). These
+// links open in a new tab and are never the canonical mutation surface.
+const PLATFORM_ADMIN_BASE_URL =
+  process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "https://admin.drts.io";
+
+// Icon names are drawn from the canvas icon set (CanvasBtn's CanvasIconName
+// union); the literals below are all valid members of it.
+type ModuleActionIcon =
+  | "billing"
+  | "notifications"
+  | "sla"
+  | "integrationGov"
+  | "users"
+  | "flags"
+  | "apiKeys"
+  | "ext";
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -47,6 +87,24 @@ const generalGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   gap: 12,
+};
+
+const freshnessRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  fontSize: 12,
+  color: th.textMuted,
+};
+
+const linkResetStyle: CSSProperties = {
+  textDecoration: "none",
+};
+
+const moduleGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+  gap: 8,
 };
 
 const numberFormatter = new Intl.NumberFormat("en");
@@ -87,6 +145,22 @@ function getConsentValue(preferences: TenantNotificationPreferences | null) {
   return `pp · ${formatDate(preferences.updatedAt)}`;
 }
 
+function formatSlaThresholds(sla: TenantSlaProfile | null) {
+  if (!sla) return "—";
+  return `${sla.waitThresholdMin} / ${sla.arrivalThresholdMin} / ${sla.completionThresholdMin} 分`;
+}
+
+function countEnabledSubscriptions(
+  preferences: TenantNotificationPreferences | null,
+) {
+  if (!preferences) return null;
+  return preferences.subscriptions.filter((sub) => sub.enabled).length;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Data loading
+// ─────────────────────────────────────────────────────────────────────────────
+
 type SettingsData = {
   identity: IdentityContext | null;
   billingProfile: TenantBillingProfile | null;
@@ -95,8 +169,38 @@ type SettingsData = {
   governance: TenantIntegrationGovernancePackage | null;
   flags: FeatureFlagSummary | null;
   quotaSummary: TenantQuotaSummary | null;
+  // Identity is the page's required datum (it defines the tenant). When it
+  // fails the whole settings body collapses into a distinct EmptyReason; the
+  // six secondary reads degrade to a warn banner + "—" placeholders instead.
+  loadError: { reason: EmptyReason; message: string } | null;
   errors: string[];
 };
+
+function toErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "未知錯誤";
+}
+
+// Map the HTTP class onto the EmptyReason taxonomy (packet §3.6) so the empty
+// state stays honest instead of collapsing every failure into "no data".
+function classifyLoadFailure(error: unknown): {
+  reason: EmptyReason;
+  message: string;
+} {
+  const message = toErrorMessage(error);
+  const statusMatch = message.match(/API error (\d{3})/);
+  const status = statusMatch ? Number(statusMatch[1]) : null;
+
+  if (status === 401 || status === 403) {
+    return { reason: "permission_denied", message };
+  }
+  if (status === 404 || status === 501) {
+    return { reason: "not_provisioned", message };
+  }
+  if (status !== null && status >= 502 && status <= 504) {
+    return { reason: "external_unavailable", message };
+  }
+  return { reason: "fetch_failed", message };
+}
 
 async function loadSettingsData(): Promise<SettingsData> {
   const client = getTenantClient();
@@ -120,13 +224,25 @@ async function loadSettingsData(): Promise<SettingsData> {
     client.getTenantQuotaSummary() as Promise<TenantQuotaSummary>,
   ]);
 
+  // Required datum: a failed identity read governs the empty state.
+  if (identity.status === "rejected") {
+    return {
+      identity: null,
+      billingProfile: null,
+      preferences: null,
+      sla: null,
+      governance: null,
+      flags: null,
+      quotaSummary: null,
+      loadError: classifyLoadFailure(identity.reason),
+      errors: [],
+    };
+  }
+
   const errors: string[] = [];
   const tag = (label: string, reason: unknown) =>
-    `${label}: ${reason instanceof Error ? reason.message : "未知錯誤"}`;
+    `${label}: ${toErrorMessage(reason)}`;
 
-  if (identity.status === "rejected") {
-    errors.push(tag("租戶身分", identity.reason));
-  }
   if (billingProfile.status === "rejected") {
     errors.push(tag("計費設定", billingProfile.reason));
   }
@@ -147,7 +263,7 @@ async function loadSettingsData(): Promise<SettingsData> {
   }
 
   return {
-    identity: identity.status === "fulfilled" ? identity.value : null,
+    identity: identity.value,
     billingProfile:
       billingProfile.status === "fulfilled" ? billingProfile.value : null,
     preferences: preferences.status === "fulfilled" ? preferences.value : null,
@@ -156,12 +272,310 @@ async function loadSettingsData(): Promise<SettingsData> {
     flags: flags.status === "fulfilled" ? flags.value : null,
     quotaSummary:
       quotaSummary.status === "fulfilled" ? quotaSummary.value : null,
+    loadError: null,
     errors,
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// availableActions (Q-X13): CTAs are descriptor-driven, never hard-coded by
+// role. /settings folds into the owning modules (§7 open question + §4.2), so
+// each capability surfaces as a descriptor-backed deep link to its module.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ModuleAction = {
+  descriptor: ResourceActionDescriptor;
+  label: string;
+  href: string;
+  icon: ModuleActionIcon;
+  // Cross-app targets open in a new tab (packet §3.10).
+  crossApp?: boolean;
+};
+
+const DISABLED_REASON_LABELS: Record<string, string> = {
+  requires_platform_approval: "需平台核准",
+  permission_denied: "權限不足",
+  not_provisioned: "尚未開通",
+};
+
+function buildModuleActions(data: SettingsData): ModuleAction[] {
+  // The rotate-signing-secret affordance stays visible but disabled when the
+  // governance package requires platform break-glass approval — demonstrating
+  // the enabled:false + disabledReasonCode tooltip contract (Q-X13).
+  const breakGlassGated =
+    data.governance?.apiKeyPolicy.breakGlassRequiresPlatformApproval ?? true;
+
+  return [
+    {
+      descriptor: {
+        action: "manage_billing",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      label: "計費設定",
+      href: "/billing",
+      icon: "billing",
+    },
+    {
+      descriptor: {
+        action: "manage_notifications",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      label: "通知預設",
+      href: "/notifications",
+      icon: "notifications",
+    },
+    {
+      descriptor: { action: "manage_sla", enabled: true, riskLevel: "medium" },
+      label: "SLA 門檻",
+      href: "/sla",
+      icon: "sla",
+    },
+    {
+      descriptor: {
+        action: "manage_integration",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      label: "整合治理",
+      href: "/integration-governance",
+      icon: "integrationGov",
+    },
+    {
+      descriptor: {
+        action: "manage_users",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      label: "人員與角色",
+      href: "/users",
+      icon: "users",
+    },
+    {
+      descriptor: {
+        action: "view_feature_flags",
+        enabled: true,
+        riskLevel: "low",
+      },
+      label: "功能旗標",
+      href: "/feature-flags",
+      icon: "flags",
+    },
+    {
+      descriptor: {
+        action: "rotate_signing_secret",
+        enabled: !breakGlassGated,
+        riskLevel: "high",
+        requiresReason: true,
+        ...(breakGlassGated
+          ? { disabledReasonCode: "requires_platform_approval" }
+          : {}),
+      },
+      label: "輪替簽章金鑰",
+      href: "/api-keys",
+      icon: "apiKeys",
+    },
+    {
+      descriptor: {
+        action: "open_platform_governance",
+        enabled: true,
+        riskLevel: "low",
+      },
+      label: "平台治理 (read-only)",
+      href: `${PLATFORM_ADMIN_BASE_URL}/feature-flags`,
+      icon: "ext",
+      crossApp: true,
+    },
+  ];
+}
+
+function ModuleActionButton({ action }: { action: ModuleAction }) {
+  const { descriptor } = action;
+  const disabled = !descriptor.enabled;
+  const reasonLabel = descriptor.disabledReasonCode
+    ? (DISABLED_REASON_LABELS[descriptor.disabledReasonCode] ??
+      descriptor.disabledReasonCode)
+    : undefined;
+
+  const button = (
+    <CanvasBtn
+      theme={th}
+      size="sm"
+      variant="secondary"
+      danger={descriptor.riskLevel === "high"}
+      disabled={disabled}
+      icon={action.crossApp ? "ext" : action.icon}
+    >
+      {action.label}
+    </CanvasBtn>
+  );
+
+  // Disabled affordances stay visible with a tooltip explaining why (Q-X13);
+  // high-risk reason-required actions advertise that they collect a reason.
+  const title =
+    disabled && reasonLabel
+      ? reasonLabel
+      : descriptor.requiresReason
+        ? "需填寫原因"
+        : undefined;
+
+  // Disabled actions render as a non-navigating, tooltipped affordance.
+  if (disabled) {
+    return <span title={title}>{button}</span>;
+  }
+
+  const wrapped = title ? <span title={title}>{button}</span> : button;
+
+  if (action.crossApp) {
+    // Cross-app deep links open in a new tab (packet §3.10).
+    return (
+      <a
+        href={action.href}
+        target="_blank"
+        rel="noreferrer"
+        style={linkResetStyle}
+      >
+        {wrapped}
+      </a>
+    );
+  }
+
+  return (
+    <Link href={action.href} style={linkResetStyle}>
+      {wrapped}
+    </Link>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Empty / not-ready states (Q-X15) — all 6 tenant EmptyReason states distinctly
+// ─────────────────────────────────────────────────────────────────────────────
+
+type EmptyStatePresentation = {
+  tone: CanvasTone;
+  title: string;
+  body: string;
+  cta?: { label: string; href: string; primary?: boolean };
+};
+
+const EMPTY_STATE_PRESENTATION: Record<EmptyReason, EmptyStatePresentation> = {
+  no_data: {
+    tone: "info",
+    title: "尚無租戶設定資料",
+    body: "此租戶尚未產生任何設定資料，待初始化完成後即可在此檢視。",
+  },
+  not_provisioned: {
+    tone: "warn",
+    title: "租戶設定尚未開通",
+    body: "此租戶的設定模組尚未開通，請聯絡平台管理員完成租戶初始化。",
+  },
+  fetch_failed: {
+    tone: "danger",
+    title: "無法載入租戶設定",
+    body: "讀取租戶身分與設定時發生錯誤，請稍後重新整理再試一次。",
+    cta: { label: "重新整理", href: "/settings" },
+  },
+  permission_denied: {
+    tone: "warn",
+    title: "沒有檢視權限",
+    body: "您目前的角色無法檢視租戶設定，請洽租戶管理員 (tc_admin) 調整權限。",
+  },
+  external_unavailable: {
+    tone: "warn",
+    title: "服務暫時無法使用",
+    body: "後端設定服務暫時無法回應，這是暫時性狀況，稍後會自動恢復。",
+    cta: { label: "重新整理", href: "/settings" },
+  },
+  driver_not_eligible: {
+    // Driver-app-only reason (Q-DRV01); never expected in tenant-console.
+    tone: "neutral",
+    title: "不適用",
+    body: "此狀態不適用於租戶設定。",
+  },
+  filtered_empty: {
+    // Settings has no filter surface; kept for taxonomy completeness.
+    tone: "neutral",
+    title: "沒有符合條件的設定",
+    body: "目前的條件沒有命中任何設定項目。",
+    cta: { label: "返回設定", href: "/settings" },
+  },
+};
+
+function SettingsEmptyState({ reason }: { reason: EmptyReason }) {
+  const presentation = EMPTY_STATE_PRESENTATION[reason];
+  return (
+    <div
+      style={{
+        padding: "40px 24px",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 10,
+        textAlign: "center",
+      }}
+    >
+      <CanvasPill theme={th} tone={presentation.tone} dot>
+        {reason}
+      </CanvasPill>
+      <div style={{ color: th.text, fontWeight: 600, fontSize: 14 }}>
+        {presentation.title}
+      </div>
+      <div style={{ color: th.textMuted, fontSize: 12.5, maxWidth: 420 }}>
+        {presentation.body}
+      </div>
+      {presentation.cta ? (
+        <Link href={presentation.cta.href} style={linkResetStyle}>
+          <CanvasBtn
+            theme={th}
+            size="sm"
+            variant={presentation.cta.primary ? "primary" : "secondary"}
+          >
+            {presentation.cta.label}
+          </CanvasBtn>
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Page
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default async function SettingsPage() {
   const data = await loadSettingsData();
+
+  const cadenceMs = REFRESH_TIER_CADENCE_MS[SETTINGS_REFRESH_TIER] ?? 0;
+  const cadenceLabel =
+    cadenceMs > 0 ? `每 ${Math.round(cadenceMs / 1000)} 秒` : "手動";
+
+  // Required-datum failure → distinct EmptyReason body (packet §3.6).
+  if (data.loadError) {
+    return (
+      <div>
+        <CanvasPageHeader
+          theme={th}
+          title="租戶設定"
+          subtitle="一般 · 通知 · 隱私 · 整合"
+          tabs={["一般", "通知", "隱私", "整合"] as ReactNode[]}
+          activeTab="一般"
+        />
+        <div style={pageBodyStyle}>
+          <CanvasBanner
+            theme={th}
+            tone={data.loadError.reason === "fetch_failed" ? "danger" : "warn"}
+            icon="warn"
+            title="無法載入租戶設定"
+            body={data.loadError.message}
+          />
+          <CanvasCard theme={th} padding={0}>
+            <SettingsEmptyState reason={data.loadError.reason} />
+          </CanvasCard>
+        </div>
+      </div>
+    );
+  }
 
   const tenantCode = data.identity?.tenantId ?? DEMO_TENANT_ID;
   const displayName = data.billingProfile?.invoiceTitle ?? "未設定";
@@ -179,6 +593,12 @@ export default async function SettingsPage() {
   const quotaValue = formatQuotaLimit(data.quotaSummary);
   const statusPrivacyValue = "電話遮罩 · 中介轉接";
   const webhookSignatureValue = data.governance ? "sha256-hmac" : "—";
+  const slaValue = formatSlaThresholds(data.sla);
+  const enabledSubscriptions = countEnabledSubscriptions(data.preferences);
+  const notificationValue =
+    enabledSubscriptions === null ? "—" : `${enabledSubscriptions} 條訂閱`;
+
+  const moduleActions = buildModuleActions(data);
 
   return (
     <div>
@@ -186,11 +606,48 @@ export default async function SettingsPage() {
         theme={th}
         title="租戶設定"
         subtitle="一般 · 通知 · 隱私 · 整合"
-        tabs={["一般", "通知", "隱私", "整合"]}
+        tabs={["一般", "通知", "隱私", "整合"] as ReactNode[]}
         activeTab="一般"
+        actions={
+          <>
+            <Link href="/billing" style={linkResetStyle}>
+              <CanvasBtn
+                theme={th}
+                size="sm"
+                variant="secondary"
+                icon="billing"
+              >
+                計費設定
+              </CanvasBtn>
+            </Link>
+            <a
+              href={`${PLATFORM_ADMIN_BASE_URL}/feature-flags`}
+              target="_blank"
+              rel="noreferrer"
+              style={linkResetStyle}
+            >
+              <CanvasBtn theme={th} size="sm" variant="ghost" icon="ext">
+                平台治理
+              </CanvasBtn>
+            </a>
+          </>
+        }
       />
 
       <div style={pageBodyStyle}>
+        {/* Refresh tier wired (packet §3.2): T5 Tenant slow, explicit affordance. */}
+        <div style={freshnessRowStyle}>
+          <CanvasPill theme={th} tone="neutral" dot>
+            T5 · slow
+          </CanvasPill>
+          <span>自動更新 {cadenceLabel}</span>
+          <Link href="/settings" style={linkResetStyle}>
+            <CanvasBtn theme={th} size="xs" variant="ghost" icon="ok">
+              重新整理
+            </CanvasBtn>
+          </Link>
+        </div>
+
         {data.errors.length > 0 ? (
           <CanvasBanner
             theme={th}
@@ -233,6 +690,8 @@ export default async function SettingsPage() {
                 { k: "階段", v: stageValue, mono: true },
                 { k: "啟用模組", v: `${enabledFlags} / ${totalFlags}` },
                 { k: "配額", v: quotaValue, mono: true },
+                { k: "SLA 門檻", v: slaValue, mono: true },
+                { k: "通知預設", v: notificationValue },
                 {
                   k: "webhook 簽章",
                   v: webhookSignatureValue,
@@ -244,6 +703,25 @@ export default async function SettingsPage() {
             />
           </CanvasCard>
         </div>
+
+        {/* availableActions-driven module navigation (Q-X13 + §7 fold-in):
+            /settings is the jump-off to the owning modules. CTAs come from
+            descriptors, not hard-coded role checks; disabled ones stay visible
+            with a tooltip, and the cross-app entry opens in a new tab (§3.10). */}
+        <CanvasCard
+          theme={th}
+          title="設定模組導向"
+          subtitle="可用動作由 availableActions 描述驅動 · 跨應用連結另開新分頁"
+        >
+          <div style={moduleGridStyle}>
+            {moduleActions.map((action) => (
+              <ModuleActionButton
+                key={action.descriptor.action}
+                action={action}
+              />
+            ))}
+          </div>
+        </CanvasCard>
       </div>
     </div>
   );
