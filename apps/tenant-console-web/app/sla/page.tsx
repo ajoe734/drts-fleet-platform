@@ -61,17 +61,11 @@ function applyEmptyReasonOverride(
     return view;
   }
 
-  const nextAction =
-    view?.availableActions.find(
-      (action) => action.action === "update_sla_profile",
-    ) ?? view?.availableActions[0];
-
   return {
     profile: null,
     emptyState: {
       reason: emptyReasonOverride,
       messageCode: `preview.${emptyReasonOverride}`,
-      ...(nextAction ? { nextAction } : {}),
     },
     availableActions: view?.availableActions ?? [],
     refreshTier: view?.refreshTier ?? "slow",
