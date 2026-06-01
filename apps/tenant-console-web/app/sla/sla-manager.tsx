@@ -1180,8 +1180,33 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                     </div>
                     <div>
                       <div style={summaryLabelStyle}>cross-app links</div>
-                      <div style={summaryValueStyle}>
-                        audit / ops-console / integration-governance
+                      <div style={{ ...summaryValueStyle, ...linkRowStyle }}>
+                        {resourceLinks.length > 0 ? (
+                          resourceLinks.map((link) =>
+                            link.openMode === "same_tab" &&
+                            link.targetApp === "tenant-console" ? (
+                              <Link
+                                key={`${link.targetApp}:${link.route}:summary`}
+                                href={resolveResourceHref(link)}
+                                style={linkStyle}
+                              >
+                                {link.label} →
+                              </Link>
+                            ) : (
+                              <a
+                                key={`${link.targetApp}:${link.route}:summary`}
+                                href={resolveResourceHref(link)}
+                                style={linkStyle}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {link.label} ↗
+                              </a>
+                            ),
+                          )
+                        ) : (
+                          <span>—</span>
+                        )}
                       </div>
                     </div>
                   </div>
