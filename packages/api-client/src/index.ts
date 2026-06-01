@@ -1596,6 +1596,17 @@ export class ApiClient {
     });
   }
 
+  async disableWebhookEndpoint(
+    webhookId: string,
+    command: { reason: string },
+  ): Promise<TenantWebhookEndpoint> {
+    void command;
+    return this.post(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`, {
+      // Tenant API still models disable through the update endpoint.
+      body: { status: "disabled" },
+    });
+  }
+
   async deleteWebhookEndpoint(webhookId: string) {
     return this.delete(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`);
   }

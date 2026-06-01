@@ -26,6 +26,7 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { WebhookSecretRotateForm } from "./webhook-secret-rotate-form";
 
 export const dynamic = "force-dynamic";
 
@@ -929,9 +930,7 @@ async function disableWebhook(formData: FormData) {
       throw new Error("停用 webhook 需要 reason。");
     }
 
-    await client.updateWebhookEndpoint(webhookId, {
-      status: "disabled",
-    });
+    await client.disableWebhookEndpoint(webhookId, { reason });
     revalidatePath("/webhooks");
     destination = `${destination}&success=${encodeURIComponent("Webhook endpoint 已停用。")}`;
   } catch (error) {
@@ -962,45 +961,6 @@ async function deleteWebhook(formData: FormData) {
     destination = `/webhooks?success=${encodeURIComponent("Webhook endpoint 已刪除。")}`;
   } catch (error) {
     destination = `/webhooks?error=${encodeURIComponent(toErrorMessage(error))}`;
-  }
-
-  redirect(destination);
-}
-
-async function rotateWebhookSecret(formData: FormData) {
-  "use server";
-
-  const client = getTenantClient();
-  const webhookId = String(formData.get("webhookId") ?? "").trim();
-  let destination = webhookId
-    ? `/webhooks?webhookId=${encodeURIComponent(webhookId)}`
-    : "/webhooks";
-
-  try {
-    if (!webhookId) {
-      throw new Error("缺少 webhookId。");
-    }
-
-    const secret = String(formData.get("secret") ?? "").trim();
-    const rotationReason = String(formData.get("rotationReason") ?? "").trim();
-
-    if (!secret || !rotationReason) {
-      throw new Error("Rotate secret 需要新 secret 與 reason。");
-    }
-
-    await client.post(
-      `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/rotate-secret`,
-      {
-        body: {
-          secret,
-          rotationReason,
-        },
-      },
-    );
-    revalidatePath("/webhooks");
-    destination = `${destination}&success=${encodeURIComponent("Webhook secret 已輪替，請立即同步 receiver 端。")}`;
-  } catch (error) {
-    destination = `${destination}&error=${encodeURIComponent(toErrorMessage(error))}`;
   }
 
   redirect(destination);
@@ -1933,56 +1893,18 @@ export default async function WebhooksPage({
                     <div style={dividerStyle} />
 
                     {rotateSecretAction ? (
-                      <form
-                        id="rotate-secret"
-                        action={rotateWebhookSecret}
-                        style={inlineStackStyle}
-                      >
-                        <input
-                          type="hidden"
-                          name="webhookId"
-                          value={selectedEndpoint.webhookId}
-                        />
+                      <div id="rotate-secret" style={inlineStackStyle}>
                         <div style={cardSectionLabelStyle}>Rotate secret</div>
-                        <div style={fieldGridStyle}>
-                          <CanvasField theme={th} label="New secret">
-                            <input
-                              name="secret"
-                              style={nativeInputStyle}
-                              disabled={!rotateSecretAction.enabled}
-                            />
-                          </CanvasField>
-                          <CanvasField theme={th} label="Rotation reason">
-                            <input
-                              name="rotationReason"
-                              defaultValue="consumer_key_rotation"
-                              style={nativeInputStyle}
-                              disabled={!rotateSecretAction.enabled}
-                            />
-                          </CanvasField>
-                        </div>
-                        <div style={dangerNoteStyle}>
-                          目前 API 只回傳 secret preview，不回傳 plaintext-once
-                          secret；輪替後請立即同步 receiver。
-                        </div>
-                        <div style={actionRowStyle}>
-                          {rotateSecretAction.enabled ? (
-                            <button type="submit" style={submitButtonStyle}>
-                              Rotate secret
-                            </button>
-                          ) : (
-                            <span
-                              style={disabledActionStyle}
-                              title={
-                                renderDescriptorHint(rotateSecretAction) ??
-                                "disabled"
-                              }
-                            >
-                              Rotate secret
-                            </span>
+                        <WebhookSecretRotateForm
+                          webhookId={selectedEndpoint.webhookId}
+                          theme={th}
+                          enabled={rotateSecretAction.enabled}
+                          disabledReason={renderDescriptorHint(
+                            rotateSecretAction,
                           )}
-                        </div>
-                      </form>
+                          defaultReason="consumer_key_rotation"
+                        />
+                      </div>
                     ) : null}
 
                     <div style={dividerStyle} />
