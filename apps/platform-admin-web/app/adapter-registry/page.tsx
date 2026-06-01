@@ -274,48 +274,51 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       ? {
           workspace: "Workspace",
           home: "Governance Home",
-          health: "Platform Health",
           tenantGroup: "Tenant Governance",
           tenants: "Tenants",
+          tenantGovernance: "Tenant governance",
+          partnerGroup: "Partner Governance",
           partners: "Partner entry",
+          peopleFleetGroup: "People & Fleet",
           users: "Platform staff",
-          fleetGroup: "Fleet & Compliance",
           fleet: "Fleet & compliance",
+          commerceGroup: "Platform & Commerce",
           switchboard: "Public info & placards",
-          pricingGroup: "Pricing & Settlement",
           pricing: "Pricing",
           payments: "Settlement governance",
-          platformGroup: "Platform Layer",
+          adapters: "Adapter registry",
+          opsRiskGroup: "Platform Ops & Risk",
+          health: "Platform Health",
           notices: "Notices & maintenance",
           audit: "Audit & evidence",
           flags: "Feature flags",
-          adapters: "Adapter registry",
         }
       : {
           workspace: "工作面",
           home: "工作首頁",
-          health: "平台健康",
           tenantGroup: "租戶治理",
           tenants: "租戶",
+          tenantGovernance: "跨租戶治理",
+          partnerGroup: "合作夥伴治理",
           partners: "合作夥伴 entry",
+          peopleFleetGroup: "人員與車隊",
           users: "平台人員",
-          fleetGroup: "車隊與法遵",
           fleet: "車隊與合規",
-          switchboard: "法定資訊與牌貼",
-          pricingGroup: "計價與結算",
+          commerceGroup: "平台與商務",
+          switchboard: "公開資訊 / 車牌貼",
           pricing: "計價",
           payments: "結算治理",
-          platformGroup: "平台層",
+          adapters: "平台 Adapter",
+          opsRiskGroup: "平台維運",
+          health: "平台健康",
           notices: "公告與維護",
           audit: "稽核與證據",
           flags: "功能旗標",
-          adapters: "介接登錄",
         };
 
   return [
     { divider: labels.workspace },
     { key: "home", href: "/", label: labels.home, icon: "dashboard" },
-    { key: "health", href: "/health", label: labels.health, icon: "health" },
     { divider: labels.tenantGroup },
     {
       key: "tenants",
@@ -324,21 +327,28 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       icon: "tenants",
     },
     {
+      key: "tenant-governance",
+      href: "/tenant-governance",
+      label: labels.tenantGovernance,
+      icon: "integrationGov",
+    },
+    { divider: labels.partnerGroup },
+    {
       key: "partners",
       href: "/partners",
       label: labels.partners,
       icon: "partners",
     },
+    { divider: labels.peopleFleetGroup },
     { key: "users", href: "/users", label: labels.users, icon: "users" },
-    { divider: labels.fleetGroup },
     { key: "fleet", href: "/fleet", label: labels.fleet, icon: "fleet" },
+    { divider: labels.commerceGroup },
     {
       key: "switchboard",
       href: "/switchboard",
       label: labels.switchboard,
       icon: "switchboard",
     },
-    { divider: labels.pricingGroup },
     {
       key: "pricing",
       href: "/pricing",
@@ -351,7 +361,16 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       label: labels.payments,
       icon: "payments",
     },
-    { divider: labels.platformGroup },
+    {
+      key: "adapters",
+      href: "/adapter-registry",
+      label: labels.adapters,
+      icon: "adapters",
+      badge: "T4",
+      badgeTone: "info",
+    },
+    { divider: labels.opsRiskGroup },
+    { key: "health", href: "/health", label: labels.health, icon: "health" },
     {
       key: "notices",
       href: "/notices",
@@ -364,14 +383,6 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
       href: "/feature-flags",
       label: labels.flags,
       icon: "flags",
-    },
-    {
-      key: "adapters",
-      href: "/adapter-registry",
-      label: labels.adapters,
-      icon: "adapters",
-      badge: "T4",
-      badgeTone: "info",
     },
   ];
 }
@@ -851,6 +862,9 @@ export default function AdapterRegistryPage() {
           refreshSource: "Refresh source",
           refreshWindow: "Refresh window",
           refreshCadence: "Refresh cadence",
+          credentialBannerTitle: "Credential urgency",
+          credentialBannerBody:
+            "This adapter is nearing credential expiry. Rotate or repair credentials before callback and dispatch relays fail.",
         }
       : {
           pageTitle: "Adapter Registry",
@@ -930,6 +944,9 @@ export default function AdapterRegistryPage() {
           refreshSource: "Refresh source",
           refreshWindow: "Refresh window",
           refreshCadence: "Refresh cadence",
+          credentialBannerTitle: "Credential 風險",
+          credentialBannerBody:
+            "這筆 adapter 的 credential 已接近或進入風險區間。請在 callback 或 dispatch relay 失效前先輪替或修復。",
         };
 
   const loadAdapters = useCallback(
@@ -1440,6 +1457,40 @@ export default function AdapterRegistryPage() {
     driver_not_eligible: "driver_not_eligible",
     filtered_empty: copy.filteredEmpty,
   };
+  const credentialAlertAdapter = useMemo(() => {
+    const urgencyRank: Record<
+      AdapterRegistryRecord["credentialStatus"],
+      number
+    > = {
+      EXPIRED: 0,
+      INVALID: 1,
+      PENDING: 2,
+      NOT_CONFIGURED: 3,
+      VALID: 4,
+    };
+
+    return [...adapters]
+      .filter(
+        (adapter) =>
+          adapter.credentialMeta?.expiring ||
+          adapter.credentialStatus === "EXPIRED" ||
+          adapter.credentialStatus === "INVALID",
+      )
+      .sort((left, right) => {
+        const rankDiff =
+          urgencyRank[left.credentialStatus] -
+          urgencyRank[right.credentialStatus];
+        if (rankDiff !== 0) {
+          return rankDiff;
+        }
+        return left.platformCode.localeCompare(right.platformCode);
+      })[0];
+  }, [adapters]);
+  const credentialAlertAction = credentialAlertAdapter
+    ? ((credentialAlertAdapter.availableActions ?? []).find((descriptor) =>
+        ["rotate_credentials", "edit_credentials"].includes(descriptor.action),
+      ) ?? null)
+    : null;
 
   return (
     <>
@@ -1493,6 +1544,41 @@ export default function AdapterRegistryPage() {
         />
 
         <div style={bodyStyle}>
+          {credentialAlertAdapter ? (
+            <CanvasBanner
+              theme={theme}
+              tone={
+                credentialAlertAdapter.credentialStatus === "EXPIRED" ||
+                credentialAlertAdapter.credentialStatus === "INVALID"
+                  ? "danger"
+                  : "warn"
+              }
+              icon="warn"
+              title={`${formatPlatformCodeLabel(locale, credentialAlertAdapter.platformCode)} · ${copy.credentialBannerTitle}`}
+              body={
+                locale === "en"
+                  ? `${copy.credentialBannerBody} Current status: ${credentialAlertAdapter.credentialStatus}.`
+                  : `${copy.credentialBannerBody} 目前狀態：${credentialAlertAdapter.credentialStatus}。`
+              }
+              actions={
+                credentialAlertAction?.enabled ? (
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    onClick={() =>
+                      handleActionIntent(
+                        credentialAlertAction,
+                        credentialAlertAdapter.id,
+                      )
+                    }
+                  >
+                    {toActionLabel(locale, credentialAlertAction.action)}
+                  </CanvasBtn>
+                ) : null
+              }
+            />
+          ) : null}
+
           <CanvasBanner
             theme={theme}
             tone={
