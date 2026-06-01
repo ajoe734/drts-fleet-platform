@@ -100,11 +100,14 @@ A parity-story task (Ops Console storybook stories — none currently exist) is 
 
 ## 6. Verification evidence
 
-_(filled at commit time — see task handoff note for commit hash / typecheck result)_
+Repair commit: `45e8ae97` on branch `claude/ui-fe-ops-umbrella-unblock-history-repair` (base `origin/dev@64cb4597`).
 
-- Restore: `apps/ops-console-web/app/approval-requests/page.tsx` re-added (236 lines), `git status` shows `A`.
-- Imported-symbol resolution against `origin/dev`: all present (table §4).
-- Typecheck/build: see §6 addendum recorded in the closeout handoff.
+- **Restore:** `apps/ops-console-web/app/approval-requests/page.tsx` re-added (236 lines) from blob `21ee942e^`.
+- **Imported-symbol resolution against `origin/dev`:** all present (table §4).
+- **`pnpm install --frozen-lockfile`:** exit 0.
+- **Workspace dep build** (`@drts/contracts`, `@drts/ui-tokens`, `@drts/ui-web`, `@drts/api-client`): exit 0.
+- **`pnpm --filter ops-console-web typecheck`** (`tsc --noEmit`): **exit 0** — clean.
+- **`pnpm --filter ops-console-web build`** (`next build`): **exit 0** — "Compiled successfully", TypeScript pass. Route table now lists **`ƒ /approval-requests`** alongside the other 20 routes, confirming the live 404 is cleared and the restored route compiles into the production tree.
 
 ---
 
