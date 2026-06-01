@@ -277,7 +277,6 @@ type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 type InvoiceActionView = ResourceActionDescriptor & {
   label: string;
-  href?: string;
 };
 
 type InvoiceViewRecord = Omit<
@@ -363,34 +362,27 @@ function deriveInvoiceStatus(invoice: TenantInvoiceRecord) {
 
 function normalizeRuntimeAction(
   action: ResourceActionDescriptor,
-  invoice: TenantInvoiceRecord,
 ): InvoiceActionView {
-  const invoiceId = encodeURIComponent(invoice.invoiceId);
-
   switch (action.action) {
     case "download_artifact":
       return {
         ...action,
         label: "下載簽名檔",
-        ...(invoice.artifactUrl ? { href: invoice.artifactUrl } : {}),
       };
     case "view_detail":
       return {
         ...action,
         label: "檢視詳情",
-        href: `/invoices?invoiceId=${invoiceId}`,
       };
     case "open_billing":
       return {
         ...action,
         label: "返回帳務概覽",
-        href: `/billing?invoiceId=${invoiceId}`,
       };
     case "open_platform_audit":
       return {
         ...action,
         label: "平台稽核",
-        href: `/audit?resourceType=tenant_invoice&resourceId=${invoiceId}`,
       };
     default:
       return {
@@ -405,7 +397,7 @@ function normalizeInvoice(
 ): InvoiceViewRecord {
   const expiresAt = parseArtifactExpiry(invoice.artifactUrl);
   const normalizedActions = invoice.availableActions.map((action) =>
-    normalizeRuntimeAction(action, invoice),
+    normalizeRuntimeAction(action),
   );
 
   return {
@@ -495,13 +487,10 @@ function getRefreshTone(refresh: UiRefreshMetadata): CanvasTone {
   return "info";
 }
 
-function buildFilteredEmptyState(filters: InvoiceFilters): EmptyStateEnvelope {
+function buildFilteredEmptyState(): EmptyStateEnvelope {
   return {
     reason: "filtered_empty",
-    messageCode:
-      filters.query || filters.period || filters.status !== "all"
-        ? "tenant_invoice_filtered_empty"
-        : "tenant_invoice_empty",
+    messageCode: "tenant_invoice_filtered_empty",
     nextAction: {
       action: "clear_filters",
       enabled: true,
@@ -518,7 +507,6 @@ function describeEmptyState(reason: EmptyReason) {
         body: "租戶 billing profile 尚未準備好，先補齊 invoice title、稅籍與月結設定，再回到發票頁。",
         tone: "warn" as const,
         ctaLabel: "前往 /billing",
-        ctaHref: "/billing",
       };
     case "fetch_failed":
       return {
@@ -526,7 +514,6 @@ function describeEmptyState(reason: EmptyReason) {
         body: "本次載入沒有取得可信的 invoice register，頁面保留語境並要求使用者重試，而不是誤導成沒有資料。",
         tone: "danger" as const,
         ctaLabel: "重試本頁",
-        ctaHref: "/invoices",
       };
     case "permission_denied":
       return {
@@ -534,7 +521,6 @@ function describeEmptyState(reason: EmptyReason) {
         body: "這不是 empty data。後端拒絕此角色查看 tenant invoice，需回到角色或權限設定處理。",
         tone: "neutral" as const,
         ctaLabel: "檢查 /users",
-        ctaHref: "/users",
       };
     case "external_unavailable":
       return {
@@ -542,7 +528,6 @@ function describeEmptyState(reason: EmptyReason) {
         body: "發票頁仍存在，但簽名下載或相關外部依賴無法提供完整結果，必須保留治理與稽核去向。",
         tone: "warn" as const,
         ctaLabel: "查看 Platform Admin 稽核",
-        ctaHref: "/audit?resourceType=tenant_invoice",
       };
     case "filtered_empty":
       return {
@@ -550,7 +535,6 @@ function describeEmptyState(reason: EmptyReason) {
         body: "保留 status、period 與 invoice id 的查詢語境，並提供清楚的回復路徑，避免把搜尋失敗誤解為 tenant 沒有任何 invoice。",
         tone: "info" as const,
         ctaLabel: "清除篩選",
-        ctaHref: "/invoices",
       };
     case "no_data":
     default:
@@ -559,7 +543,6 @@ function describeEmptyState(reason: EmptyReason) {
         body: "系統讀取正常，但目前 tenant scope 尚未產出任何 invoice record；使用者仍可回到帳務概覽或稽核確認月結狀態。",
         tone: "info" as const,
         ctaLabel: "回到 /billing",
-        ctaHref: "/billing",
       };
   }
 }
@@ -587,18 +570,41 @@ function formatActionLabel(action: ResourceActionDescriptor) {
   }
 }
 
-function getEmptyActionHref(action: ResourceActionDescriptor | undefined) {
-  switch (action?.action) {
-    case "open_billing_setup":
+function formatRefreshWindow(staleAfterMs: number | null | undefined) {
+  if (!staleAfterMs || staleAfterMs <= 0) return null;
+
+  const totalSeconds = Math.round(staleAfterMs / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
+  const totalMinutes = Math.round(totalSeconds / 60);
+  return `${totalMinutes}m`;
+}
+
+function resolveInvoiceActionHref(
+  invoice: InvoiceViewRecord,
+  action: InvoiceActionView,
+) {
+  switch (action.action) {
+    case "download_artifact":
+      return action.enabled ? invoice.artifactUrl : null;
     case "open_billing":
-      return "/billing";
-    case "refresh_snapshot":
-    case "clear_filters":
-      return "/invoices";
-    case "review_access":
-      return "/users";
+      return (
+        invoice.deepLinks.find(
+          (link) =>
+            link.targetApp === "tenant-console" &&
+            link.route.startsWith("/billing"),
+        )?.route ?? null
+      );
     case "open_platform_audit":
-      return "/audit?resourceType=tenant_invoice";
+      return (
+        invoice.deepLinks.find(
+          (link) =>
+            link.targetApp === "platform-admin" &&
+            link.route.startsWith("/audit"),
+        )?.route ?? null
+      );
     default:
       return null;
   }
@@ -615,13 +621,22 @@ function describeAction(action: InvoiceActionView) {
   return `${action.label}已停用`;
 }
 
-function renderActionLink(action: InvoiceActionView) {
-  if (action.enabled && action.href) {
-    const isExternal = action.href.startsWith("http");
+function renderActionLink(
+  action: InvoiceActionView,
+  invoice: InvoiceViewRecord,
+) {
+  const href = resolveInvoiceActionHref(invoice, action);
+  const deepLinkMatch = href
+    ? invoice.deepLinks.find((link) => link.route === href)
+    : null;
+
+  if (action.enabled && href) {
+    const isExternal =
+      href.startsWith("http") || deepLinkMatch?.openMode === "new_tab";
     return (
       <Link
-        key={`${action.action}:${action.href}`}
-        href={action.href}
+        key={`${action.action}:${href}`}
+        href={href}
         target={isExternal ? "_blank" : undefined}
         rel={isExternal ? "noreferrer" : undefined}
         style={{
@@ -732,12 +747,12 @@ export default async function InvoicesPage({
 
   const emptyState =
     computedEmptyReason === "filtered_empty"
-      ? buildFilteredEmptyState(filters)
+      ? buildFilteredEmptyState()
       : data.emptyState;
   const emptyDescription = computedEmptyReason
     ? describeEmptyState(computedEmptyReason)
     : null;
-  const emptyActionHref = getEmptyActionHref(emptyState?.nextAction);
+  const refreshWindow = formatRefreshWindow(data.refresh?.staleAfterMs);
 
   const selectedInvoice =
     filteredInvoices.find(
@@ -752,6 +767,17 @@ export default async function InvoicesPage({
     selectedInvoice?.availableActions.find(
       (action) => action.action === "download_artifact",
     ) ?? null;
+  const selectedArtifactHref =
+    selectedInvoice && selectedArtifactAction
+      ? resolveInvoiceActionHref(selectedInvoice, selectedArtifactAction)
+      : null;
+  const selectedInvoiceDetailHref = selectedInvoice
+    ? `/invoices?invoiceId=${encodeURIComponent(selectedInvoice.invoiceId)}&status=${
+        filters.status
+      }&period=${encodeURIComponent(filters.period)}&q=${encodeURIComponent(
+        filters.query,
+      )}`
+    : null;
   const rows: InvoiceRow[] = filteredInvoices.map((invoice) => ({
     ...invoice,
   }));
@@ -814,7 +840,7 @@ export default async function InvoicesPage({
       w: 210,
       r: (row) => (
         <div style={actionRowStyle}>
-          {row.availableActions.map(renderActionLink)}
+          {row.availableActions.map((action) => renderActionLink(action, row))}
         </div>
       ),
     },
@@ -831,15 +857,15 @@ export default async function InvoicesPage({
             <CanvasPill
               theme={th}
               tone="info"
-            >{`T5 · ${REFRESH_TIER} · 30s`}</CanvasPill>
+            >{`T5 · ${REFRESH_TIER}${refreshWindow ? ` · ${refreshWindow}` : ""}`}</CanvasPill>
             {data.refresh ? (
               <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
                 {data.refresh.dataFreshness}
               </CanvasPill>
             ) : null}
-            {selectedArtifactAction?.enabled && selectedArtifactAction.href ? (
+            {selectedArtifactAction?.enabled && selectedArtifactHref ? (
               <Link
-                href={selectedArtifactAction.href}
+                href={selectedArtifactHref}
                 target="_blank"
                 rel="noreferrer"
                 style={{
@@ -874,6 +900,12 @@ export default async function InvoicesPage({
                 {data.refresh.dataFreshness}
               </CanvasPill>
             ) : null}
+            {data.refresh ? (
+              <CanvasPill
+                theme={th}
+                tone="neutral"
+              >{`source · ${data.refresh.source}`}</CanvasPill>
+            ) : null}
             <CanvasPill theme={th} tone="neutral">
               {`${filteredInvoices.length} visible`}
             </CanvasPill>
@@ -898,7 +930,9 @@ export default async function InvoicesPage({
             title="Snapshot freshness warning"
             body={`目前內容產生於 ${formatDateInput(
               data.refresh.generatedAt,
-            )}，refresh tier 為 T5 / ${REFRESH_TIER}。資料不是 fresh 時，頁面必須明確提示而不是假裝即時。`}
+            )}，refresh tier 為 T5 / ${REFRESH_TIER}${
+              refreshWindow ? `，staleAfter ${refreshWindow}` : ""
+            }。資料不是 fresh 時，頁面必須明確提示而不是假裝即時。`}
           />
         ) : null}
 
@@ -1007,8 +1041,8 @@ export default async function InvoicesPage({
                       ? ` · nextAction: ${formatActionLabel(emptyState.nextAction)}`
                       : ""}
                   </div>
-                  {emptyActionHref ? (
-                    <Link href={emptyActionHref} style={inlineLinkStyle}>
+                  {computedEmptyReason === "filtered_empty" ? (
+                    <Link href="/invoices" style={inlineLinkStyle}>
                       {emptyDescription.ctaLabel}
                     </Link>
                   ) : null}
@@ -1126,13 +1160,27 @@ export default async function InvoicesPage({
                     <div>
                       <div style={fieldLabelStyle}>Available actions</div>
                       <div style={actionRowStyle}>
-                        {selectedInvoice.availableActions.map(renderActionLink)}
+                        {selectedInvoice.availableActions.map((action) =>
+                          renderActionLink(action, selectedInvoice),
+                        )}
                       </div>
                     </div>
 
                     <div>
                       <div style={fieldLabelStyle}>Invoice picker</div>
                       <div style={actionRowStyle}>
+                        {selectedInvoiceDetailHref &&
+                        selectedInvoice.availableActions.some(
+                          (action) =>
+                            action.action === "view_detail" && action.enabled,
+                        ) ? (
+                          <Link
+                            href={selectedInvoiceDetailHref}
+                            style={inlineLinkStyle}
+                          >
+                            檢視詳情
+                          </Link>
+                        ) : null}
                         {filteredInvoices.slice(0, 6).map((invoice) => {
                           const selected =
                             invoice.invoiceId === selectedInvoice.invoiceId;
