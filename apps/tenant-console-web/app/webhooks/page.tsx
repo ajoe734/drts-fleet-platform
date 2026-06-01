@@ -650,6 +650,18 @@ function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
         description:
           "本次請求無法取得 endpoint 或 delivery read model。請先手動 refresh，必要時檢查平台健康。",
         tone: "warning",
+        actions: [
+          {
+            action: "refresh_page",
+            enabled: true,
+            riskLevel: "low",
+          },
+          {
+            action: "open_platform_health",
+            enabled: true,
+            riskLevel: "low",
+          },
+        ],
       };
     case "permission_denied":
       return {
@@ -658,6 +670,13 @@ function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
         description:
           "當前 actor 沒有 webhook 可見性或寫入權限，因此只顯示受限資訊。",
         tone: "neutral",
+        actions: [
+          {
+            action: "open_integration_governance",
+            enabled: true,
+            riskLevel: "low",
+          },
+        ],
       };
     case "external_unavailable":
       return {
@@ -666,6 +685,18 @@ function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
         description:
           "Webhook engine 仍存在，但目前外部相依或平台 queue 降級，請改從 delivery log 與平台健康頁追查。",
         tone: "warning",
+        actions: [
+          {
+            action: "open_platform_health",
+            enabled: true,
+            riskLevel: "low",
+          },
+          {
+            action: "open_integration_governance",
+            enabled: true,
+            riskLevel: "low",
+          },
+        ],
       };
     case "filtered_empty":
       return {
@@ -674,6 +705,13 @@ function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
         description:
           "清除 endpoint 聚焦或切回全部 deliveries，即可查看其他 webhook activity。",
         tone: "tenant",
+        actions: [
+          {
+            action: "clear_endpoint_filter",
+            enabled: true,
+            riskLevel: "low",
+          },
+        ],
       };
     case "no_data":
     default:
@@ -1047,7 +1085,10 @@ function renderActionDescriptor(
   );
 }
 
-function renderEmptyStateActions(model: EmptyStateModel) {
+function renderEmptyStateActions(
+  model: EmptyStateModel,
+  platformFailureLink: CrossAppResourceLink,
+) {
   if (!model.actions || model.actions.length === 0) return null;
 
   return (
@@ -1067,6 +1108,44 @@ function renderEmptyStateActions(model: EmptyStateModel) {
             action,
             "/integration-governance",
             "前往整合就緒度",
+          );
+        }
+
+        if (action.action === "refresh_page") {
+          return renderActionDescriptor(action, "/webhooks", "重新整理");
+        }
+
+        if (action.action === "clear_endpoint_filter") {
+          return renderActionDescriptor(
+            action,
+            "/webhooks#delivery-log",
+            "顯示全部 deliveries",
+          );
+        }
+
+        if (action.action === "open_platform_health") {
+          if (!action.enabled) {
+            return (
+              <span
+                key={action.action}
+                style={disabledActionStyle}
+                title={action.disabledReasonCode ?? "disabled"}
+              >
+                Platform Admin health
+              </span>
+            );
+          }
+
+          return (
+            <Link
+              key={action.action}
+              href={platformFailureLink.route}
+              target="_blank"
+              rel="noreferrer"
+              style={actionLinkStyle}
+            >
+              Platform Admin health
+            </Link>
           );
         }
 
@@ -1349,8 +1428,8 @@ export default async function WebhooksPage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="Webhooks"
-        subtitle="端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — 後端 engine 狀態直接決定畫面"
+        title="Webhook"
+        subtitle="端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — 後端 engine 是否啟用直接決定畫面 (Q-TEN08)"
         tabs={["Endpoints", "Deliveries", "Replay"]}
         activeTab="Endpoints"
         actions={
@@ -1500,7 +1579,7 @@ export default async function WebhooksPage({
               description={emptyModel.description}
               tone={emptyModel.tone}
               density="compact"
-              actions={renderEmptyStateActions(emptyModel)}
+              actions={renderEmptyStateActions(emptyModel, platformFailureLink)}
             />
           </CanvasCard>
         ) : (
@@ -2070,29 +2149,6 @@ export default async function WebhooksPage({
                 檢查 readiness / next action
               </Link>
             </div>
-          </div>
-        </CanvasCard>
-
-        <CanvasCard
-          theme={th}
-          title="Empty reason reference"
-          subtitle="6 種 EmptyReason 都有獨立文案與處置方向；可用 `?emptyReason=` 驗證畫面"
-        >
-          <div style={pillWrapStyle}>
-            {emptyReasonWhitelist.map((reason) => (
-              <Link
-                key={reason}
-                href={`/webhooks?emptyReason=${encodeURIComponent(reason)}`}
-                style={actionLinkStyle}
-              >
-                {reason}
-              </Link>
-            ))}
-          </div>
-          <div style={helperTextStyle}>
-            支援
-            `no_data`、`not_provisioned`、`fetch_failed`、`permission_denied`、
-            `external_unavailable`、`filtered_empty` 六種 distinct state。
           </div>
         </CanvasCard>
       </div>
