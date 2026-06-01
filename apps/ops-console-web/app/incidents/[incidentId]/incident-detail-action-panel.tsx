@@ -5,9 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type {
   IncidentCategory,
   IncidentEscalationTarget,
-  IncidentMutationResult,
   IncidentSeverity,
-  IncidentServiceRecoveryActionResult,
   IncidentStatus,
   RecordServiceRecoveryActionCommand,
   ResourceActionDescriptor,
@@ -59,12 +57,11 @@ type IncidentDetailActionPanelProps = {
   initialEscalationTarget: IncidentEscalationTarget | null;
   initialResolutionNote: string | null;
   latestAuditHref: string | null;
-  platformAdminAuditBaseUrl: string | null;
 };
 
 type ReceiptState = {
-  actionId: string;
-  auditId: string;
+  actionId: string | null;
+  auditId: string | null;
   title: string;
   body: string;
   auditHref: string | null;
@@ -168,18 +165,6 @@ function withOptionalString<T extends object>(
   return trimmed ? apply(trimmed) : {};
 }
 
-function buildAuditHref(
-  auditId: string,
-  platformAdminAuditBaseUrl: string | null,
-) {
-  const route = `/audit?auditId=${encodeURIComponent(auditId)}`;
-  if (!platformAdminAuditBaseUrl) {
-    return route;
-  }
-
-  return new URL(route, platformAdminAuditBaseUrl).toString();
-}
-
 export function IncidentDetailActionPanel({
   incidentId,
   locale,
@@ -192,7 +177,6 @@ export function IncidentDetailActionPanel({
   initialEscalationTarget,
   initialResolutionNote,
   latestAuditHref,
-  platformAdminAuditBaseUrl,
 }: IncidentDetailActionPanelProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -318,25 +302,29 @@ export function IncidentDetailActionPanel({
           : "動作已送出，正在刷新 timeline 與 audit 摘要。";
       let nextReceipt: ReceiptState | null = null;
 
+      // NOTE: the current backend does not return a receipt envelope on
+      // incident writes — updateIncident yields a bare IncidentRecord and
+      // recordServiceRecoveryAction yields a bare ServiceRecoveryActionRecord
+      // (api-client unwraps envelope.data). Packet §3.4 intends actionId/auditId
+      // receipts, but until the backend lane (UI-BE-007-DSP) emits them we
+      // degrade gracefully: surface what the record gives us and link to the
+      // latest audit subset the server snapshot already exposes.
       if (currentIntent === "service_recovery") {
-        const created = (await client.recordServiceRecoveryAction(incidentId, {
+        const created = await client.recordServiceRecoveryAction(incidentId, {
           actionType: recoveryType,
           actor: recoveryActor.trim() || "ops-user-001",
           note: recoveryNote.trim(),
-        })) as IncidentServiceRecoveryActionResult;
+        });
         receiptBody =
           locale === "en"
-            ? `Recorded ${formatOpsCodeLabel(locale, created.action.actionType)} by ${created.action.actor}.`
-            : `已由 ${created.action.actor} 記錄 ${formatOpsCodeLabel(locale, created.action.actionType)}。`;
+            ? `Recorded ${formatOpsCodeLabel(locale, created.actionType)} by ${created.actor}.`
+            : `已由 ${created.actor} 記錄 ${formatOpsCodeLabel(locale, created.actionType)}。`;
         nextReceipt = {
-          actionId: created.receipt.actionId,
-          auditId: created.receipt.auditId,
+          actionId: created.actionId,
+          auditId: null,
           title: receiptTitle,
           body: receiptBody,
-          auditHref: buildAuditHref(
-            created.receipt.auditId,
-            platformAdminAuditBaseUrl,
-          ),
+          auditHref: latestAuditHref,
         };
       } else {
         const payload: UpdateIncidentCommand =
@@ -364,37 +352,39 @@ export function IncidentDetailActionPanel({
                     resolutionNote: reasonText.trim(),
                   }
                 : {
-                    assignmentAcknowledgedAt: new Date().toISOString(),
-                    ...withOptionalString(ackActor, (trimmed) => ({
-                      assignmentAcknowledgedBy: trimmed,
-                    })),
-                    resolutionNote:
-                      reasonText.trim() ||
-                      (locale === "en"
-                        ? "Escalation acknowledged in incident workspace."
-                        : "已在 incident 工作區確認升級。"),
+                    // No dedicated acknowledge endpoint on the current backend
+                    // (UI-BE-007-DSP does not expose one yet); record the
+                    // acknowledgment — including who acknowledged — into the
+                    // resolution note so it persists and lands on the timeline,
+                    // without silently reassigning ownership.
+                    resolutionNote: (() => {
+                      const actor = ackActor.trim() || "ops-user";
+                      const note = reasonText.trim();
+                      if (note) {
+                        return locale === "en"
+                          ? `Escalation acknowledged by ${actor}: ${note}`
+                          : `升級已由 ${actor} 確認：${note}`;
+                      }
+                      return locale === "en"
+                        ? `Escalation acknowledged by ${actor}.`
+                        : `升級已由 ${actor} 確認。`;
+                    })(),
                   };
 
-        const updated = (await client.updateIncident(
-          incidentId,
-          payload,
-        )) as IncidentMutationResult;
+        await client.updateIncident(incidentId, payload);
         nextReceipt = {
-          actionId: updated.receipt.actionId,
-          auditId: updated.receipt.auditId,
+          actionId: null,
+          auditId: null,
           title: receiptTitle,
           body: receiptBody,
-          auditHref: buildAuditHref(
-            updated.receipt.auditId,
-            platformAdminAuditBaseUrl,
-          ),
+          auditHref: latestAuditHref,
         };
       }
 
       setReceipt(
         nextReceipt ?? {
-          actionId: "act-unavailable",
-          auditId: "audit-unavailable",
+          actionId: null,
+          auditId: null,
           title: receiptTitle,
           body: receiptBody,
           auditHref: latestAuditHref,
@@ -443,9 +433,13 @@ export function IncidentDetailActionPanel({
           />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
-              {locale === "en"
-                ? `Action ${receipt.actionId} · Audit ${receipt.auditId}`
-                : `動作 ${receipt.actionId} · 審計 ${receipt.auditId}`}
+              {receipt.actionId
+                ? locale === "en"
+                  ? `Action ${receipt.actionId} recorded`
+                  : `已記錄動作 ${receipt.actionId}`
+                : locale === "en"
+                  ? "Action recorded · receipt id pending backend"
+                  : "動作已記錄 · 回執編號待後端提供"}
             </span>
             {receipt.auditHref ? (
               <a

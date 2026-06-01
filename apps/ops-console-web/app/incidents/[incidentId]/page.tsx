@@ -1064,10 +1064,6 @@ export default async function IncidentDetailPage({
           ? "info"
           : null;
   const initialIntent = firstParam(resolvedSearchParams.intent) ?? null;
-  const platformAdminAuditBaseUrl =
-    process.env.PLATFORM_ADMIN_BASE_URL ??
-    process.env.NEXT_PUBLIC_PLATFORM_ADMIN_BASE_URL ??
-    null;
   const latestAuditHref = incidentAuditLogs[0]
     ? buildAuditLink(incidentAuditLogs[0].auditId)
     : null;
@@ -1249,7 +1245,6 @@ export default async function IncidentDetailPage({
               initialEscalationTarget={incident.escalationTarget}
               initialResolutionNote={incident.resolutionNote}
               latestAuditHref={latestAuditHref}
-              platformAdminAuditBaseUrl={platformAdminAuditBaseUrl}
             />
 
             <Card
