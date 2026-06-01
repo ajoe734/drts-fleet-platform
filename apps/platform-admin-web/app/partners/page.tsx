@@ -75,32 +75,6 @@ const pageStackStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
-const kpiGridStyle = {
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-} satisfies CSSProperties;
-
-const kpiCardStyle = (tone: "platform" | "warn" | "danger"): CSSProperties => ({
-  borderRadius: 20,
-  border: `1px solid ${
-    tone === "danger"
-      ? theme.dangerBorder
-      : tone === "warn"
-        ? theme.warnBorder
-        : theme.border
-  }`,
-  background:
-    tone === "danger"
-      ? theme.dangerBg
-      : tone === "warn"
-        ? theme.warnBg
-        : theme.bgRaised,
-  padding: 18,
-  display: "grid",
-  gap: 8,
-});
-
 const headerActionsStyle = {
   display: "flex",
   gap: 8,
@@ -159,21 +133,6 @@ const toolbarClusterStyle = {
   gap: 8,
   flexWrap: "wrap",
   alignItems: "center",
-} satisfies CSSProperties;
-
-const watchlistGridStyle = {
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-} satisfies CSSProperties;
-
-const watchlistCardStyle = {
-  border: `1px solid ${theme.border}`,
-  borderRadius: 18,
-  background: theme.bgRaised,
-  padding: 16,
-  display: "grid",
-  gap: 10,
 } satisfies CSSProperties;
 
 const rosterHeaderStyle = {
@@ -240,13 +199,6 @@ const textButtonStyle = {
   fontSize: 11.5,
   fontWeight: 600,
   cursor: "pointer",
-} satisfies CSSProperties;
-
-const linkRailStyle = {
-  display: "flex",
-  gap: 6,
-  flexWrap: "wrap",
-  alignItems: "center",
 } satisfies CSSProperties;
 
 const chipButtonStyle = (disabled: boolean): CSSProperties => ({
@@ -907,29 +859,6 @@ export default function PartnersPage() {
     [entries],
   );
 
-  const watchlistEntries = useMemo(
-    () =>
-      entries
-        .filter((entry) => partnerNeedsAttention(entry))
-        .sort((left, right) => {
-          const leftScore =
-            (left.status === "revoked"
-              ? 3
-              : left.status === "inactive"
-                ? 2
-                : 0) + readinessSummary(left, t).gaps.length;
-          const rightScore =
-            (right.status === "revoked"
-              ? 3
-              : right.status === "inactive"
-                ? 2
-                : 0) + readinessSummary(right, t).gaps.length;
-          return rightScore - leftScore;
-        })
-        .slice(0, 6),
-    [entries, t],
-  );
-
   const tenantOptions = useMemo(
     () => ["all", ...new Set(entries.map((entry) => entry.tenantId))],
     [entries],
@@ -1206,176 +1135,6 @@ export default function PartnersPage() {
             }
           />
         ) : null}
-
-        <div style={kpiGridStyle}>
-          <div style={kpiCardStyle("platform")}>
-            <span style={{ color: theme.textMuted, fontSize: 12 }}>
-              {copy.kpiActiveLabel}
-            </span>
-            <strong style={{ fontSize: 32, lineHeight: 1 }}>
-              {counts.active}
-            </strong>
-            <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
-              {locale === "en"
-                ? `${counts.all} total entries with ${counts.inactive} inactive still visible for governance.`
-                : `${counts.all} 筆 entries 中，${counts.inactive} 筆停用仍保留在治理清單。`}
-            </span>
-          </div>
-          <div style={kpiCardStyle("warn")}>
-            <span style={{ color: theme.textMuted, fontSize: 12 }}>
-              {copy.kpiAttentionLabel}
-            </span>
-            <strong style={{ fontSize: 32, lineHeight: 1 }}>
-              {counts.attention}
-            </strong>
-            <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
-              {locale === "en"
-                ? "Readiness gaps, inactive posture, or missing partner runtime signals."
-                : "包含 readiness 缺口、停用狀態或 partner runtime 訊號不完整。"}
-            </span>
-          </div>
-          <div style={kpiCardStyle("danger")}>
-            <span style={{ color: theme.textMuted, fontSize: 12 }}>
-              {copy.kpiRevokedLabel}
-            </span>
-            <strong style={{ fontSize: 32, lineHeight: 1 }}>
-              {counts.revoked}
-            </strong>
-            <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
-              {locale === "en"
-                ? "Revoked entries remain visible for audit lineage and deep-link investigation."
-                : "已撤銷 entries 仍需保留，以支援 audit lineage 與 deep link 調查。"}
-            </span>
-          </div>
-        </div>
-
-        {counts.attention > 0 ? (
-          <CanvasBanner
-            theme={theme}
-            tone="warn"
-            title={copy.watchlistTitle}
-            body={
-              locale === "en"
-                ? `${counts.attention} entries still need readiness or lifecycle follow-up before activation decisions.`
-                : `${counts.attention} 筆 entries 在 activation 決策前仍需補 readiness 或 lifecycle 後續處理。`
-            }
-          />
-        ) : null}
-
-        <CanvasCard
-          theme={theme}
-          title={copy.watchlistTitle}
-          subtitle={copy.watchlistSubtitle}
-        >
-          {watchlistEntries.length > 0 ? (
-            <div style={watchlistGridStyle}>
-              {watchlistEntries.map((entry) => {
-                const readiness = readinessSummary(entry, t);
-                const crossLinks = (entry.resourceLinks ?? []).filter(
-                  (link) => link.targetApp !== "platform-admin",
-                );
-                return (
-                  <div key={entry.entrySlug} style={watchlistCardStyle}>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: 10,
-                        alignItems: "flex-start",
-                      }}
-                    >
-                      <div style={entryCellStyle}>
-                        <span
-                          style={entryAvatarStyle(
-                            entry.themeAccent?.trim() || theme.accent,
-                          )}
-                        >
-                          {entry.partnerCode.slice(0, 2).toUpperCase() || "PE"}
-                        </span>
-                        <div style={{ display: "grid", gap: 2 }}>
-                          <strong style={{ fontSize: 13.5 }}>
-                            {entry.displayName}
-                          </strong>
-                          <span style={monoTextStyle}>/{entry.entrySlug}</span>
-                          <span
-                            style={{ color: theme.textMuted, fontSize: 12 }}
-                          >
-                            {entry.tenantId} · {entry.programId}
-                          </span>
-                        </div>
-                      </div>
-                      <CanvasPill
-                        theme={theme}
-                        tone={statusTone(entry.status)}
-                        dot
-                      >
-                        {entry.status}
-                      </CanvasPill>
-                    </div>
-                    <div style={toolbarClusterStyle}>
-                      <CanvasPill
-                        theme={theme}
-                        tone={readiness.tone}
-                        dot={readiness.gaps.length > 0}
-                      >
-                        {readiness.label}
-                      </CanvasPill>
-                      <CanvasPill theme={theme} tone="neutral">
-                        {formatPlatformCodeLabel(locale, entry.authMode)}
-                      </CanvasPill>
-                      <CanvasPill theme={theme} tone="neutral">
-                        {formatPlatformCodeLabel(locale, entry.eligibilityMode)}
-                      </CanvasPill>
-                    </div>
-                    <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                      {readiness.gaps.length > 0
-                        ? readiness.gaps
-                            .slice(0, 2)
-                            .map((gap) => gap.label)
-                            .join(" · ")
-                        : locale === "en"
-                          ? "No readiness gaps detected."
-                          : "目前沒有 readiness 缺口。"}
-                    </span>
-                    <div style={linkRailStyle}>
-                      <Link
-                        href={`/partners/${entry.entrySlug}`}
-                        style={secondaryLinkStyle}
-                      >
-                        {copy.watchlistOpen}
-                      </Link>
-                      {crossLinks.map((link) => (
-                        <a
-                          key={`${entry.entrySlug}:${link.targetApp}:${link.route}`}
-                          href={link.route}
-                          target={
-                            link.openMode === "new_tab" ? "_blank" : undefined
-                          }
-                          rel={
-                            link.openMode === "new_tab"
-                              ? "noreferrer noopener"
-                              : undefined
-                          }
-                          style={secondaryLinkStyle}
-                        >
-                          {crossAppLinkLabel(
-                            link.route,
-                            link.targetApp,
-                            link.label,
-                            copy,
-                          )}{" "}
-                          {link.openMode === "new_tab" ? "↗" : ""}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div style={infoBarStyle}>{copy.watchlistEmpty}</div>
-          )}
-        </CanvasCard>
 
         <CanvasCard
           theme={theme}
@@ -1721,16 +1480,18 @@ export default function PartnersPage() {
                     ),
                   },
                   {
-                    h: "TENANT / PROGRAM",
-                    w: 190,
+                    h: "PROGRAM",
+                    w: 200,
                     r: (entry) => (
                       <div style={{ display: "grid", gap: 2 }}>
                         <span style={{ fontWeight: 600 }}>
-                          {entry.tenantId}
+                          {entry.programId}
                         </span>
-                        <span style={monoTextStyle}>{entry.programId}</span>
+                        <span style={monoTextStyle}>
+                          {entry.programCode || "—"}
+                        </span>
                         <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                          {[entry.programCode, entry.bankCode]
+                          {[entry.tenantId, entry.bankCode]
                             .filter(Boolean)
                             .join(" · ") || "—"}
                         </span>
@@ -1738,37 +1499,38 @@ export default function PartnersPage() {
                     ),
                   },
                   {
-                    h: "TYPE / SUBTYPE",
+                    h: "SUBTYPE",
                     w: 180,
                     r: (entry) => (
                       <div style={{ display: "grid", gap: 2 }}>
                         <span style={{ fontWeight: 600 }}>
-                          {entry.partnerType || "—"}
-                        </span>
-                        <span style={monoTextStyle}>
                           {formatPlatformCodeLabel(
                             locale,
                             entry.businessDispatchSubtype,
                           )}
                         </span>
+                        <span style={monoTextStyle}>
+                          {entry.partnerType || "—"}
+                        </span>
                       </div>
                     ),
                   },
                   {
-                    h: "AUTH / ELIGIBILITY",
-                    w: 160,
+                    h: "AUTH",
+                    w: 120,
                     r: (entry) => (
-                      <div style={{ display: "grid", gap: 2 }}>
-                        <span style={monoTextStyle}>
-                          {formatPlatformCodeLabel(locale, entry.authMode)}
-                        </span>
-                        <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                          {formatPlatformCodeLabel(
-                            locale,
-                            entry.eligibilityMode,
-                          )}
-                        </span>
-                      </div>
+                      <span style={monoTextStyle}>
+                        {formatPlatformCodeLabel(locale, entry.authMode)}
+                      </span>
+                    ),
+                  },
+                  {
+                    h: "ELIGIBILITY",
+                    w: 140,
+                    r: (entry) => (
+                      <span style={monoTextStyle}>
+                        {formatPlatformCodeLabel(locale, entry.eligibilityMode)}
+                      </span>
                     ),
                   },
                   {
@@ -1786,7 +1548,7 @@ export default function PartnersPage() {
                   },
                   {
                     h: "READINESS",
-                    w: 200,
+                    w: 220,
                     r: (entry) => {
                       const readiness = readinessSummary(entry, t);
                       return (
@@ -1826,7 +1588,7 @@ export default function PartnersPage() {
                     },
                   },
                   {
-                    h: "ACTIONS / LINKS",
+                    h: "",
                     w: 300,
                     r: (entry) => {
                       const rowActions = entry.availableActions ?? [];
@@ -1910,15 +1672,6 @@ export default function PartnersPage() {
                         </div>
                       );
                     },
-                  },
-                  {
-                    h: "UPDATED",
-                    w: 140,
-                    r: (entry) => (
-                      <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                        {formatDateTime(entry.updatedAt)}
-                      </span>
-                    ),
                   },
                 ]}
               />
