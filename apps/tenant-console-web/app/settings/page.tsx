@@ -313,6 +313,7 @@ type SettingsData = {
 type ActionLink = {
   descriptor: ResourceActionDescriptor;
   label: string;
+  surfaceLabel?: string;
   href?: string;
   link?: CrossAppResourceLink;
   note?: string;
@@ -350,6 +351,7 @@ type RuntimeChip =
     };
 
 type ActionSource = {
+  label: string;
   availableActions?: ResourceActionDescriptor[];
 };
 
@@ -593,14 +595,8 @@ function parseListSurface<T>(payload: unknown): RuntimeListSurface<T> {
   };
 }
 
-function flattenAvailableActions(
-  ...sources: Array<ActionSource | null | undefined>
-) {
-  return sources.flatMap((source) => source?.availableActions ?? []);
-}
-
 type ActionLinkOverride = {
-  label?: string;
+  surfaceLabel?: string;
   href?: string;
   link?: CrossAppResourceLink;
   note?: string;
@@ -610,97 +606,80 @@ type ActionRegistryEntry = ActionLinkOverride;
 
 const SETTINGS_ACTION_REGISTRY: Record<string, ActionRegistryEntry> = {
   view_tenant_audit_evidence: {
-    label: "租戶稽核",
+    surfaceLabel: "租戶稽核",
     note: "same-tab",
   },
   update_tenant_billing_profile: {
-    label: "計費資料",
-    href: "#general-overview",
-    note: "summary-only",
+    surfaceLabel: "計費資料",
   },
   update_notification_subscription: {
-    label: "通知偏好",
-    href: "#notification-subscriptions",
-    note: "summary-only",
+    surfaceLabel: "通知偏好",
   },
   update_notification_preferences: {
-    label: "通知偏好",
-    href: "#notification-subscriptions",
-    note: "summary-only",
+    surfaceLabel: "通知偏好",
   },
   update_sla_profile: {
-    label: "SLA 設定",
-    href: "#sla-governance-posture",
-    note: "summary-only",
+    surfaceLabel: "SLA 設定",
   },
   issue_api_key: {
-    label: "API 金鑰",
+    surfaceLabel: "API 金鑰",
     href: "/api-keys",
-    note: "module-owned",
   },
   rotate_api_key: {
-    label: "API 金鑰",
+    surfaceLabel: "API 金鑰",
     href: "/api-keys",
-    note: "module-owned",
   },
   revoke_api_key: {
-    label: "API 金鑰",
+    surfaceLabel: "API 金鑰",
     href: "/api-keys",
-    note: "module-owned",
   },
   create_webhook_endpoint: {
-    label: "Webhook",
+    surfaceLabel: "Webhook",
     href: "/webhooks",
-    note: "module-owned",
   },
   update_webhook_endpoint: {
-    label: "Webhook",
+    surfaceLabel: "Webhook",
     href: "/webhooks",
-    note: "module-owned",
   },
   rotate_webhook_secret: {
-    label: "Webhook",
+    surfaceLabel: "Webhook",
     href: "/webhooks",
-    note: "module-owned",
   },
   disable_webhook_endpoint: {
-    label: "Webhook",
+    surfaceLabel: "Webhook",
     href: "/webhooks",
-    note: "module-owned",
   },
   activate_webhook_endpoint: {
-    label: "Webhook",
+    surfaceLabel: "Webhook",
     href: "/webhooks",
-    note: "module-owned",
   },
   send_test_webhook: {
-    label: "Webhook",
+    surfaceLabel: "Webhook",
     href: "/webhooks",
-    note: "module-owned",
   },
   create_tenant_user: {
-    label: "人員與角色",
+    surfaceLabel: "人員與角色",
     href: "/users",
   },
   update_tenant_role: {
-    label: "人員與角色",
+    surfaceLabel: "人員與角色",
     href: "/users",
   },
 };
 
+function formatActionLabel(action: string) {
+  return action.replaceAll("_", " ");
+}
+
 function buildActionLink(
   descriptor: ResourceActionDescriptor,
   overrides?: ActionLinkOverride,
-): ActionLink | null {
+): ActionLink {
   const resolved = SETTINGS_ACTION_REGISTRY[descriptor.action];
   const resolvedHref =
     descriptor.action === "view_tenant_audit_evidence"
       ? "/audit"
       : resolved?.href;
-
-  if (!resolved && !overrides) {
-    return null;
-  }
 
   const href = sanitizeLocalHref(overrides?.href ?? resolvedHref);
   const link = overrides?.link ?? resolved?.link;
@@ -712,8 +691,13 @@ function buildActionLink(
 
   const actionLink: ActionLink = {
     descriptor,
-    label: overrides?.label ?? resolved?.label ?? descriptor.action,
+    label: formatActionLabel(descriptor.action),
   };
+
+  const surfaceLabel = overrides?.surfaceLabel ?? resolved?.surfaceLabel;
+  if (surfaceLabel) {
+    actionLink.surfaceLabel = surfaceLabel;
+  }
 
   if (href) {
     actionLink.href = href;
@@ -733,13 +717,9 @@ function mapActionLinks(
 ) {
   if (!actions || actions.length === 0) return [];
 
-  return actions.flatMap((descriptor) => {
-    const actionLink = buildActionLink(
-      descriptor,
-      overrides[descriptor.action],
-    );
-    return actionLink ? [actionLink] : [];
-  });
+  return actions.flatMap((descriptor) => [
+    buildActionLink(descriptor, overrides[descriptor.action]),
+  ]);
 }
 
 function dedupeActionLinks(actions: ActionLink[]) {
@@ -750,6 +730,28 @@ function dedupeActionLinks(actions: ActionLink[]) {
     seen.add(key);
     return true;
   });
+}
+
+function flattenActionLinks(
+  ...sources: Array<ActionSource | null | undefined>
+) {
+  return dedupeActionLinks(
+    sources.flatMap((source) =>
+      mapActionLinks(source?.availableActions, {
+        view_tenant_audit_evidence:
+          source?.label === "租戶稽核"
+            ? {
+                href: "/audit",
+                note: "same-tab",
+                surfaceLabel: source.label,
+              }
+            : {},
+      }).map((action) => {
+        const surfaceLabel = action.surfaceLabel ?? source?.label;
+        return surfaceLabel ? { ...action, surfaceLabel } : action;
+      }),
+    ),
+  );
 }
 
 function resolveActionHref(action: ActionLink) {
@@ -803,6 +805,11 @@ function renderActionLink(action: ActionLink, key: string) {
   const content = (
     <>
       <span>{action.label}</span>
+      {action.surfaceLabel ? (
+        <span style={{ fontFamily: th.monoFamily, fontSize: 10, opacity: 0.8 }}>
+          {action.surfaceLabel}
+        </span>
+      ) : null}
       {action.link?.openMode === "new_tab" ? (
         <span style={{ fontFamily: th.monoFamily, fontSize: 10 }}>↗</span>
       ) : null}
@@ -876,9 +883,6 @@ function formatRefreshChipValue(refresh: UiRefreshMetadata) {
 function formatActionTooltip(action: ActionLink) {
   if (!action.descriptor.enabled) {
     return action.descriptor.disabledReasonCode ?? "disabled";
-  }
-  if (action.note === "summary-only") {
-    return "此動作目前回到本頁摘要區塊，避免導向未落地 route。";
   }
   if (action.note === "route-pending") {
     return "此 module route 尚未落地；目前不提供站內跳轉。";
@@ -1279,42 +1283,37 @@ export default async function SettingsPage() {
     (chip): chip is { label: string; tone: "accent" | "info" } => chip !== null,
   );
 
-  const generalActions = dedupeActionLinks([
-    ...mapActionLinks(data.billingProfile.availableActions),
-    ...mapActionLinks(data.auditLogs.availableActions, {
-      view_tenant_audit_evidence: {
-        label: "檢視稽核",
-        href: "/audit",
-        note: "same-tab",
-      },
-    }),
-  ]);
-  const notificationActions = dedupeActionLinks([
-    ...mapActionLinks(data.preferences.availableActions),
-    ...mapActionLinks(data.sla.availableActions),
-  ]);
-  const integrationActions = dedupeActionLinks([
-    ...mapActionLinks(data.apiKeys.availableActions),
-    ...mapActionLinks(data.webhooks.availableActions),
-  ]);
-  const peopleActions = dedupeActionLinks(
-    mapActionLinks(data.users.availableActions),
+  const generalActions = flattenActionLinks(
+    {
+      label: "計費資料",
+      availableActions: data.billingProfile.availableActions,
+    },
+    { label: "租戶稽核", availableActions: data.auditLogs.availableActions },
   );
-  const headerActions = dedupeActionLinks([
-    ...generalActions,
-    ...notificationActions,
-    ...integrationActions,
-    ...peopleActions,
-  ]);
-  const unsupportedActions = flattenAvailableActions(
-    data.billingProfile,
-    data.preferences,
-    data.sla,
-    data.users,
-    data.apiKeys,
-    data.webhooks,
-    data.auditLogs,
-  ).filter((descriptor) => !SETTINGS_ACTION_REGISTRY[descriptor.action]);
+  const notificationActions = flattenActionLinks(
+    { label: "通知偏好", availableActions: data.preferences.availableActions },
+    { label: "SLA 設定", availableActions: data.sla.availableActions },
+  );
+  const integrationActions = flattenActionLinks(
+    { label: "API 金鑰", availableActions: data.apiKeys.availableActions },
+    { label: "Webhook", availableActions: data.webhooks.availableActions },
+  );
+  const peopleActions = flattenActionLinks({
+    label: "人員與角色",
+    availableActions: data.users.availableActions,
+  });
+  const headerActions = flattenActionLinks(
+    {
+      label: "計費資料",
+      availableActions: data.billingProfile.availableActions,
+    },
+    { label: "通知偏好", availableActions: data.preferences.availableActions },
+    { label: "SLA 設定", availableActions: data.sla.availableActions },
+    { label: "人員與角色", availableActions: data.users.availableActions },
+    { label: "API 金鑰", availableActions: data.apiKeys.availableActions },
+    { label: "Webhook", availableActions: data.webhooks.availableActions },
+    { label: "租戶稽核", availableActions: data.auditLogs.availableActions },
+  );
   const runtimeSurfaces = [
     {
       label: "identity",
@@ -1368,7 +1367,7 @@ export default async function SettingsPage() {
   );
   const runtimeChips: RuntimeChip[] = [
     {
-      label: "page tier",
+      label: "refresh tier",
       value: SETTINGS_PAGE_TIER.label,
       mono: true,
     },
@@ -1522,12 +1521,6 @@ export default async function SettingsPage() {
           data.webhooks.emptyState?.nextAction
             ? [data.webhooks.emptyState.nextAction]
             : data.webhooks.availableActions,
-          {
-            create_webhook_endpoint: {
-              label: "檢查 Webhook",
-              href: "/webhooks",
-            },
-          },
         ),
       ),
     },
@@ -1541,13 +1534,6 @@ export default async function SettingsPage() {
           data.auditLogs.emptyState?.nextAction
             ? [data.auditLogs.emptyState.nextAction]
             : data.auditLogs.availableActions,
-          {
-            view_tenant_audit_evidence: {
-              label: "檢視稽核",
-              href: "/audit",
-              note: "same-tab",
-            },
-          },
         ),
       ),
     },
@@ -1611,18 +1597,6 @@ export default async function SettingsPage() {
             icon="warn"
             title="部分 module 仍是 legacy payload"
             body={`缺少 UiRefreshMetadata / ui-runtime envelope：${legacyModules.map((surface) => surface.label).join(" · ")}`}
-          />
-        ) : null}
-
-        {unsupportedActions.length > 0 ? (
-          <CanvasBanner
-            theme={th}
-            tone="warn"
-            icon="warn"
-            title="部分 backend actions 尚未對應到 settings CTA"
-            body={unsupportedActions
-              .map((descriptor) => descriptor.action)
-              .join(" · ")}
           />
         ) : null}
 
