@@ -17,7 +17,11 @@ import {
   toggleTenantModule,
   type TenantFormState,
 } from "@/components/tenant-governance-shared";
-import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatDateTime,
+  truncate,
+  usePlatformAdminClient,
+} from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type {
@@ -42,7 +46,6 @@ import {
   CanvasCard,
   CanvasDL,
   CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -58,10 +61,6 @@ type TenantStageFilter =
   | "all"
   | PlatformAdminTenantRecord["rollout"]["stage"]
   | "rollback_hold";
-type = Extract<
-  UiRefreshMetadata["dataFreshness"],
-  "fresh" | "stale" | "degraded"
->;
 type TenantListItem = PlatformAdminTenantListItem;
 
 type TenantTableRow = TenantListItem & Record<string, unknown>;
@@ -91,16 +90,9 @@ const OPS_CONSOLE_ORIGIN =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN ??
   "";
 
-const pageRootStyle: CSSProperties = {
-  minHeight: "100%",
-  background: th.bg,
-  color: th.text,
-  borderRadius: 12,
-  overflow: "hidden",
-  border: `1px solid ${th.border}`,
-  boxShadow: "0 24px 60px rgba(2, 6, 23, 0.28)",
-  gridTemplateColumns: "0 minmax(0, 1fr)",
-  gridTemplateRows: "46px minmax(0, 1fr)",
+const shellStyle: CSSProperties = {
+  margin: "-32px",
+  minHeight: "calc(100vh - 64px)",
 };
 
 const pageBodyStyle: CSSProperties = {
@@ -113,6 +105,13 @@ const pageBodyStyle: CSSProperties = {
 const toolbarCardStyle: CSSProperties = {
   display: "grid",
   gap: 14,
+};
+
+const headerActionsStyle: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+  alignItems: "center",
 };
 
 const filterRowStyle: CSSProperties = {
@@ -260,6 +259,119 @@ const moduleGridStyle: CSSProperties = {
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 10,
 };
+
+function buildPlatformNav(locale: string): CanvasShellNavItem[] {
+  const labels =
+    locale === "en"
+      ? {
+          workspace: "Workspace",
+          home: "Governance Home",
+          health: "Platform Health",
+          tenantGov: "Tenant Governance",
+          tenants: "Tenants",
+          partners: "Partner entry",
+          users: "Platform staff",
+          fleetGov: "Fleet & Compliance",
+          fleet: "Fleet & compliance",
+          switchboard: "Public info & placards",
+          pricingGov: "Pricing & Settlement",
+          pricing: "Pricing",
+          payments: "Settlement governance",
+          platformLayer: "Platform Layer",
+          notices: "Notices & maintenance",
+          audit: "Audit & evidence",
+          flags: "Feature flags",
+          adapters: "Adapter registry",
+        }
+      : {
+          workspace: "工作面",
+          home: "工作首頁",
+          health: "平台健康",
+          tenantGov: "租戶治理",
+          tenants: "租戶",
+          partners: "合作夥伴 entry",
+          users: "平台人員",
+          fleetGov: "車隊與法遵",
+          fleet: "車隊與合規",
+          switchboard: "法定資訊與牌貼",
+          pricingGov: "計價與結算",
+          pricing: "計價",
+          payments: "結算治理",
+          platformLayer: "平台層",
+          notices: "公告與維護",
+          audit: "稽核與證據",
+          flags: "功能旗標",
+          adapters: "介接登錄",
+        };
+
+  return [
+    { divider: labels.workspace },
+    { key: "home", href: "/", icon: "home", label: labels.home },
+    {
+      key: "health",
+      href: "/health",
+      icon: "health",
+      label: labels.health,
+      badge: "T4",
+      badgeTone: "neutral",
+    },
+    { divider: labels.tenantGov },
+    {
+      key: "tenants",
+      href: "/tenants",
+      icon: "tenants",
+      label: labels.tenants,
+    },
+    {
+      key: "partners",
+      href: "/partners",
+      icon: "partners",
+      label: labels.partners,
+    },
+    { key: "users", href: "/users", icon: "users", label: labels.users },
+    { divider: labels.fleetGov },
+    { key: "fleet", href: "/fleet", icon: "fleet", label: labels.fleet },
+    {
+      key: "switchboard",
+      href: "/switchboard",
+      icon: "switchboard",
+      label: labels.switchboard,
+    },
+    { divider: labels.pricingGov },
+    {
+      key: "pricing",
+      href: "/pricing",
+      icon: "pricing",
+      label: labels.pricing,
+    },
+    {
+      key: "payments",
+      href: "/payments",
+      icon: "payments",
+      label: labels.payments,
+    },
+    { divider: labels.platformLayer },
+    {
+      key: "notices",
+      href: "/notices",
+      icon: "notices",
+      label: labels.notices,
+    },
+    { key: "audit", href: "/audit", icon: "audit", label: labels.audit },
+    {
+      key: "flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: labels.flags,
+    },
+    {
+      key: "adapters",
+      href: "/adapter-registry",
+      icon: "integrations",
+      label: labels.adapters,
+    },
+  ];
+}
 
 function normalizeTenantListResponse(
   payload:
@@ -427,50 +539,12 @@ function getReasonCommand(
   return trimmed ? { reason: trimmed } : undefined;
 }
 
-function getTenantStageValue(
-  tenant: PlatformAdminTenantRecord,
-): TenantStageValue {
-  return tenant.status === "rollback_hold"
-    ? "rollback_hold"
-    : tenant.rollout.stage;
-}
-
-function getStageTone(stage: TenantStageValue): CanvasTone {
-  if (stage === "rollback_hold") {
-    return "danger";
-  }
-  return toCanvasTone(tenantStageTone(stage));
-}
-
-function formatQuotaSummary(locale: string, tenant: PlatformAdminTenantRecord) {
-  return `${formatLocaleNumber(locale, tenant.quotas.monthlyBookings)}/mo`;
-}
-
-function getIntegrationSummary(tenant: PlatformAdminTenantRecord) {
-  switch (tenant.integrationPackage.mode) {
-    case "api_key":
-      return "api";
-    case "api_key_and_webhook":
-      return "api+webhook";
-    case "partner_managed":
-      return "partner";
-    case "none":
-    default:
-      return "none";
-  }
-}
-
-function formatShortDate(value: string) {
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return value.slice(0, 10);
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toISOString().slice(0, 10);
+function getIntegrationEndpoint(tenant: PlatformAdminTenantRecord) {
+  return (
+    tenant.integrationPackage.productionBaseUrl ??
+    tenant.integrationPackage.sandboxBaseUrl ??
+    "—"
+  );
 }
 
 function getOpsHref(tenant: TenantListItem) {
@@ -617,6 +691,7 @@ export default function TenantsPage() {
           filterBadge: "T4 admin medium-slow · 30s",
           searchLabel: "Search by tenant name or code",
           searchPlaceholder: "Search tenant or code",
+          breadcrumb: ["Platform Admin", "Tenants"],
           stageLabel: "Rollout stage",
           statusLabel: "Tenant status",
           freshnessFresh: "fresh",
@@ -660,6 +735,13 @@ export default function TenantsPage() {
           createSubmit: "Create tenant",
           createSubmitting: "Creating...",
           actionFailed: "Unable to complete tenant action",
+          bootstrap: {
+            status: "Bootstrap status",
+            integration: "Integration mode",
+            admin: "Bootstrap admin",
+            sandbox: "Sandbox URL",
+            empty: "Not provided",
+          },
         }
       : {
           title: "租戶",
@@ -671,6 +753,7 @@ export default function TenantsPage() {
           filterBadge: "T4 admin medium-slow · 30s",
           searchLabel: "依租戶名稱或代碼搜尋",
           searchPlaceholder: "搜尋 tenant 或 code",
+          breadcrumb: ["平台治理", "租戶"],
           stageLabel: "Rollout stage",
           statusLabel: "租戶狀態",
           freshnessFresh: "fresh",
@@ -714,8 +797,16 @@ export default function TenantsPage() {
           createSubmit: "建立租戶",
           createSubmitting: "建立中...",
           actionFailed: "無法完成租戶動作",
+          bootstrap: {
+            status: "Bootstrap 狀態",
+            integration: "介接模式",
+            admin: "Bootstrap admin",
+            sandbox: "Sandbox URL",
+            empty: "尚未提供",
+          },
         };
 
+  const navItems = useMemo(() => buildPlatformNav(locale), [locale]);
   const moduleLabels = useMemo(
     () =>
       Object.fromEntries(
@@ -1268,7 +1359,7 @@ export default function TenantsPage() {
               onClick={exportVisibleTenants}
               disabled={loading || visibleTenants.length === 0}
             >
-              {copy.exportAction}
+              {copy.export}
             </CanvasBtn>
             {primaryCreateAction ? (
               <CanvasBtn
@@ -1281,7 +1372,7 @@ export default function TenantsPage() {
                 {getActionLabel(locale, primaryCreateAction.action)}
               </CanvasBtn>
             ) : null}
-          </>
+          </div>
         }
       />
 
@@ -1615,9 +1706,6 @@ export default function TenantsPage() {
                     );
                   })}
                 </div>
-              </form>
-            </CanvasCard>
-
                 <div style={filterRowStyle}>
                   <CanvasBtn
                     theme={th}
@@ -1675,8 +1763,8 @@ export default function TenantsPage() {
                   ]}
                 />
               </div>
-            </CanvasCard>
-          </div>
+            </form>
+          </CanvasCard>
         ) : null}
 
         <CanvasCard theme={th} padding={0}>
