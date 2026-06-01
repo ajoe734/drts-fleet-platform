@@ -272,6 +272,7 @@ type LoadFailure = {
 type UserRow = Record<string, unknown> &
   TenantUserRoleRecord & {
     availableActions: ResourceActionDescriptor[];
+    lastLoginAt?: string | null;
     roleDisplayName: string;
   };
 
@@ -300,6 +301,7 @@ type EmptyStateConfig = {
 
 type RuntimeTenantUserRecord = TenantUserRoleRecord & {
   availableActions?: ResourceActionDescriptor[];
+  lastLoginAt?: string | null;
 };
 
 const ROLE_CANVAS_LABEL: Record<string, string> = {
@@ -337,6 +339,13 @@ function formatUpdated(value: string | null | undefined) {
   return dateTimeFormatter.format(parsed);
 }
 
+function formatDurationMs(value: number | null | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value) || value < 0) return "—";
+  if (value < 1_000) return `${value}ms`;
+  if (value % 1_000 === 0) return `${value / 1_000}s`;
+  return `${(value / 1_000).toFixed(1)}s`;
+}
+
 function formatCount(value: number) {
   return numberFormatter.format(value);
 }
@@ -364,6 +373,21 @@ function getStateLabel(status: TenantUserRoleRecord["status"]) {
   if (status === "active") return "active";
   if (status === "invited") return "pending_invite";
   return "suspended";
+}
+
+function getRefreshTone(
+  metadata: UiRefreshMetadata | null,
+): "info" | "success" | "warn" | "accent" {
+  if (!metadata) return "info";
+  if (metadata.dataFreshness === "degraded") return "warn";
+  if (metadata.dataFreshness === "stale") return "accent";
+  if (metadata.dataFreshness === "fresh") return "success";
+  return "info";
+}
+
+function getRefreshSummary(metadata: UiRefreshMetadata | null) {
+  if (!metadata) return "backend did not return refreshMetadata";
+  return `${metadata.dataFreshness} · ${metadata.source} · staleAfter ${formatDurationMs(metadata.staleAfterMs)}`;
 }
 
 function compareUsers(a: TenantUserRoleRecord, b: TenantUserRoleRecord) {
@@ -929,6 +953,18 @@ export default async function UsersPage({
       ),
     },
     {
+      h: "INVITED",
+      w: 150,
+      mono: true,
+      r: (row) => formatUpdated(row.invitedAt),
+    },
+    {
+      h: "LAST LOGIN",
+      w: 150,
+      mono: true,
+      r: (row) => formatUpdated(row.lastLoginAt as string | null | undefined),
+    },
+    {
       h: "UPDATED",
       w: 150,
       mono: true,
@@ -977,14 +1013,10 @@ export default async function UsersPage({
         {backendRefreshMetadata ? (
           <CanvasBanner
             theme={th}
-            tone={
-              backendRefreshMetadata.dataFreshness === "degraded"
-                ? "warn"
-                : "info"
-            }
+            tone={getRefreshTone(backendRefreshMetadata)}
             icon="refresh"
-            title={`Refresh tier T5 · ${TENANT_REFRESH_CADENCE_MS / 1000}s cadence · ${TENANT_REFRESH_TIER}`}
-            body={`目前顯示的是 ${backendRefreshMetadata.generatedAt} 產生的 snapshot · dataFreshness=${backendRefreshMetadata.dataFreshness} · source=${backendRefreshMetadata.source}`}
+            title={`Snapshot ${formatUpdated(backendRefreshMetadata.generatedAt)}`}
+            body={`Refresh tier T5 · ${TENANT_REFRESH_TIER} · cadence ${TENANT_REFRESH_CADENCE_MS / 1000}s · ${getRefreshSummary(backendRefreshMetadata)}`}
           />
         ) : null}
 
@@ -1165,6 +1197,27 @@ export default async function UsersPage({
                     mono: true,
                   },
                   {
+                    k: "Snapshot generated",
+                    v: backendRefreshMetadata
+                      ? formatUpdated(backendRefreshMetadata.generatedAt)
+                      : "runtime_unavailable",
+                    mono: true,
+                  },
+                  {
+                    k: "Freshness / source",
+                    v: backendRefreshMetadata
+                      ? `${backendRefreshMetadata.dataFreshness} / ${backendRefreshMetadata.source}`
+                      : "runtime_unavailable",
+                    mono: true,
+                  },
+                  {
+                    k: "Stale after",
+                    v: backendRefreshMetadata
+                      ? formatDurationMs(backendRefreshMetadata.staleAfterMs)
+                      : "runtime_unavailable",
+                    mono: true,
+                  },
+                  {
                     k: "Tenant audit",
                     v: "/audit?resourceType=tenant_user_role",
                     mono: true,
@@ -1178,7 +1231,7 @@ export default async function UsersPage({
         <CanvasCard
           theme={th}
           title="Tenant roster"
-          subtitle="user id · display name · email · role · status · updated at"
+          subtitle="user id · display name · email · role · status · invited at · last login"
           padding={0}
         >
           {emptyReason && emptyConfig ? (
