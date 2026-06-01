@@ -42,6 +42,13 @@ const kpiGridStyle: CSSProperties = {
   gap: 12,
 };
 
+const overviewGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.2fr) minmax(280px, 0.8fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
 const filterBarStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns:
@@ -82,6 +89,12 @@ const stackedLayoutStyle: CSSProperties = {
   alignItems: "start",
 };
 
+const sideStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+  alignItems: "start",
+};
+
 const cardStyle: CSSProperties = {
   overflow: "hidden",
 };
@@ -105,6 +118,14 @@ const helperTextStyle: CSSProperties = {
   color: th.textMuted,
   fontSize: 12,
   lineHeight: 1.5,
+};
+
+const sectionLabelStyle: CSSProperties = {
+  fontSize: 11.5,
+  fontWeight: 700,
+  letterSpacing: 0.24,
+  color: th.textMuted,
+  textTransform: "uppercase",
 };
 
 const tabLinkStyle: CSSProperties = {
@@ -164,6 +185,80 @@ const infoListStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 6,
+};
+
+const summaryPanelStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+};
+
+const summaryStatGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+  gap: 10,
+};
+
+const summaryStatStyle: CSSProperties = {
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  display: "grid",
+  gap: 5,
+};
+
+const summaryStatValueStyle: CSSProperties = {
+  fontSize: 18,
+  lineHeight: 1,
+  color: th.text,
+  fontWeight: 700,
+};
+
+const summaryStatLabelStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: th.textMuted,
+  textTransform: "uppercase",
+  letterSpacing: 0.2,
+};
+
+const directoryStateGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+  gap: 10,
+};
+
+const stateMetricStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: `1px solid ${th.border}`,
+  background: "rgba(255,255,255,0.02)",
+  display: "grid",
+  gap: 4,
+};
+
+const stateMetricValueStyle: CSSProperties = {
+  fontSize: 15,
+  fontWeight: 700,
+  color: th.text,
+};
+
+const railBlockStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const compactListStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const compactListItemStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: `1px solid ${th.border}`,
+  background: "rgba(255,255,255,0.02)",
 };
 
 const emptyStateWrapStyle: CSSProperties = {
@@ -821,6 +916,42 @@ function getActionLabel(action: string) {
   }
 }
 
+function getActionTone(action: ResourceActionDescriptor): CanvasTone {
+  if (!action.enabled) {
+    return action.riskLevel === "high" ? "danger" : "neutral";
+  }
+
+  switch (action.riskLevel) {
+    case "high":
+      return "danger";
+    case "medium":
+      return "accent";
+    case "low":
+    default:
+      return "info";
+  }
+}
+
+function getActionSummary(action: ResourceActionDescriptor) {
+  if (!action.enabled) {
+    return getDisabledReasonLabel(action.disabledReasonCode);
+  }
+
+  if (action.requiresReason) {
+    return "需要填寫理由";
+  }
+
+  switch (action.riskLevel) {
+    case "high":
+      return "高風險確認";
+    case "medium":
+      return "一般確認";
+    case "low":
+    default:
+      return "直接執行";
+  }
+}
+
 function renderEmptyState(
   reason: PassengerEmptyReason,
   primaryAction: ResourceActionDescriptor | null,
@@ -1047,6 +1178,18 @@ function getQualityIssueLabel(issue: TenantPassengerQualityIssue) {
   }
 }
 
+function getQualityIssueSummary(issue: TenantPassengerQualityIssue) {
+  switch (issue) {
+    case "duplicate_employee_no":
+      return "工號在名冊內重複，建立新單前需再次確認乘客身分。";
+    case "missing_contact":
+      return "缺少手機或 email，可能影響預訂聯絡與通知。";
+    case "missing_employee_no":
+    default:
+      return "缺少工號，建議補齊以避免同名混淆。";
+  }
+}
+
 export default async function PassengersPage({
   searchParams,
 }: {
@@ -1212,6 +1355,31 @@ export default async function PassengersPage({
   const selectedDeepLinks = selectedPassenger
     ? toPassengerDeepLinks(selectedPassenger, refreshHref)
     : [];
+  const selectedEnabledActions = selectedActions.filter(
+    (action) => action.enabled,
+  );
+  const selectedDisabledActions = selectedActions.filter(
+    (action) => !action.enabled,
+  );
+  const staleAfterSeconds = refreshMetadata
+    ? Math.round(refreshMetadata.staleAfterMs / 1000)
+    : 30;
+  const visibleEmployeeCount = rows.filter(
+    (passenger) => passenger.kindLabel === "員工",
+  ).length;
+  const visibleVisitorCount = rows.length - visibleEmployeeCount;
+  const visibleDuplicateCount = rows.filter(
+    (passenger) => passenger.duplicateName,
+  ).length;
+  const visibleQualityIssueCount = rows.filter(
+    (passenger) => (passenger.qualityIssues?.length ?? 0) > 0,
+  ).length;
+  const qualityBannerBody =
+    selectedQualityIssues.length > 0
+      ? selectedQualityIssues
+          .map((issue) => getQualityIssueSummary(issue))
+          .join(" ")
+      : "目前選取的 passenger record 沒有 backend quality issue。";
 
   return (
     <div>
@@ -1289,6 +1457,100 @@ export default async function PassengersPage({
             value={selectedPassenger ? "ready" : "none"}
             sub={selectedPassenger ? selectedPassenger.fullName : "pick a row"}
           />
+        </div>
+
+        <div style={overviewGridStyle}>
+          <CanvasCard
+            theme={th}
+            title="Directory posture"
+            subtitle="Passenger directory 是 `/bookings/new` 的預填主資料來源，停用採 soft deactivate。"
+          >
+            <div style={summaryPanelStyle}>
+              <div style={summaryStatGridStyle}>
+                <div style={summaryStatStyle}>
+                  <div style={summaryStatLabelStyle}>Visible roster</div>
+                  <div style={summaryStatValueStyle}>{rows.length}</div>
+                  <div style={subtleTextStyle}>
+                    {visibleEmployeeCount} 員工 / {visibleVisitorCount} 訪客
+                  </div>
+                </div>
+                <div style={summaryStatStyle}>
+                  <div style={summaryStatLabelStyle}>Duplicate name</div>
+                  <div style={summaryStatValueStyle}>
+                    {visibleDuplicateCount}
+                  </div>
+                  <div style={subtleTextStyle}>
+                    依 full name 偵測，需搭配工號或手機辨識
+                  </div>
+                </div>
+                <div style={summaryStatStyle}>
+                  <div style={summaryStatLabelStyle}>Quality issues</div>
+                  <div style={summaryStatValueStyle}>
+                    {visibleQualityIssueCount}
+                  </div>
+                  <div style={subtleTextStyle}>
+                    backend quality flags 直接保留在 roster 與 detail
+                  </div>
+                </div>
+              </div>
+
+              <div style={directoryStateGridStyle}>
+                <div style={stateMetricStyle}>
+                  <div style={summaryStatLabelStyle}>All</div>
+                  <div style={stateMetricValueStyle}>{counts.all}</div>
+                  <div style={subtleTextStyle}>完整名冊</div>
+                </div>
+                <div style={stateMetricStyle}>
+                  <div style={summaryStatLabelStyle}>Employee</div>
+                  <div style={stateMetricValueStyle}>{counts.employee}</div>
+                  <div style={subtleTextStyle}>主要預訂對象</div>
+                </div>
+                <div style={stateMetricStyle}>
+                  <div style={summaryStatLabelStyle}>Visitor</div>
+                  <div style={stateMetricValueStyle}>{counts.visitor}</div>
+                  <div style={subtleTextStyle}>臨時或外部訪客</div>
+                </div>
+                <div style={stateMetricStyle}>
+                  <div style={summaryStatLabelStyle}>Deactivated</div>
+                  <div style={stateMetricValueStyle}>{counts.disabled}</div>
+                  <div style={subtleTextStyle}>歷史可見、picker 隱藏</div>
+                </div>
+              </div>
+            </div>
+          </CanvasCard>
+
+          <CanvasCard
+            theme={th}
+            title="Refresh contract"
+            subtitle="Tenant Console `/passengers` 依 packet §3.2 採 T5 Tenant slow。"
+          >
+            <div style={railBlockStyle}>
+              <div style={infoListStyle}>
+                <CanvasPill theme={th} tone={refreshTone} dot>
+                  {refreshMetadata?.dataFreshness ?? "fallback"}
+                </CanvasPill>
+                <CanvasPill theme={th} tone="info">
+                  {refreshTierLabel}
+                </CanvasPill>
+              </div>
+              <CanvasDL
+                theme={th}
+                cols={1}
+                items={[
+                  { k: "cadence", v: `${staleAfterSeconds}s`, mono: true },
+                  { k: "snapshot", v: refreshSummary },
+                  {
+                    k: "manual refresh",
+                    v: "保留頁面 refresh CTA，讓使用者手動重新取樣",
+                  },
+                ]}
+              />
+              <div style={helperTextStyle}>
+                stale banner 與 CTA 會一起保留，避免把 tenant slow tier
+                假裝成即時資料。
+              </div>
+            </div>
+          </CanvasCard>
         </div>
 
         <CanvasCard
@@ -1376,8 +1638,32 @@ export default async function PassengersPage({
             padding={0}
             style={cardStyle}
             title="Passenger roster"
-            subtitle={`${rows.length} visible row(s) · state ${filters.activeState}`}
+            subtitle={`${rows.length} visible row(s) · state ${filters.activeState} · tab ${selectedTab}`}
           >
+            <div
+              style={{ padding: 16, borderBottom: `1px solid ${th.border}` }}
+            >
+              <div style={infoListStyle}>
+                <CanvasPill theme={th} tone="info">
+                  search {filters.q ? `"${filters.q}"` : "all"}
+                </CanvasPill>
+                <CanvasPill theme={th} tone="neutral">
+                  department {filters.department || "all"}
+                </CanvasPill>
+                <CanvasPill theme={th} tone={refreshTone}>
+                  {refreshMetadata?.dataFreshness ?? "fallback"} snapshot
+                </CanvasPill>
+                {emptyReason ? (
+                  <CanvasPill
+                    theme={th}
+                    tone={EMPTY_STATE_VIEWS[emptyReason].tone}
+                  >
+                    emptyReason {emptyReason}
+                  </CanvasPill>
+                ) : null}
+              </div>
+            </div>
+
             {emptyReason ? (
               renderEmptyState(emptyReason, primaryPageAction)
             ) : (
@@ -1389,159 +1675,238 @@ export default async function PassengersPage({
             )}
           </CanvasCard>
 
-          <CanvasCard
-            theme={th}
-            title="Passenger detail"
-            subtitle={
-              selectedPassenger
-                ? `${selectedPassenger.fullName} · ${selectedPassenger.activeFlag ? "active" : "deactivated"}`
-                : "Select a row to inspect actions, deep links, and quality warnings."
-            }
-            style={detailCardStyle}
-          >
-            {selectedPassenger ? (
-              <div style={{ display: "grid", gap: 14 }}>
-                <div style={infoListStyle}>
-                  <CanvasPill
-                    theme={th}
-                    tone={selectedPassenger.activeFlag ? "success" : "neutral"}
-                    dot
-                  >
-                    {selectedPassenger.activeFlag ? "active" : "deactivated"}
-                  </CanvasPill>
-                  <CanvasPill theme={th} tone="info">
-                    {getKindLabel(selectedPassenger)}
-                  </CanvasPill>
-                  {selectedPassengerDuplicate ? (
-                    <CanvasPill theme={th} tone="warn">
-                      duplicate name
+          <div style={{ ...sideStackStyle, ...detailCardStyle }}>
+            <CanvasCard
+              theme={th}
+              title="Passenger detail"
+              subtitle={
+                selectedPassenger
+                  ? `${selectedPassenger.fullName} · ${selectedPassenger.activeFlag ? "active" : "deactivated"}`
+                  : "Select a row to inspect actions, deep links, and quality warnings."
+              }
+            >
+              {selectedPassenger ? (
+                <div style={{ display: "grid", gap: 14 }}>
+                  <div style={infoListStyle}>
+                    <CanvasPill
+                      theme={th}
+                      tone={
+                        selectedPassenger.activeFlag ? "success" : "neutral"
+                      }
+                      dot
+                    >
+                      {selectedPassenger.activeFlag ? "active" : "deactivated"}
                     </CanvasPill>
-                  ) : null}
+                    <CanvasPill theme={th} tone="info">
+                      {getKindLabel(selectedPassenger)}
+                    </CanvasPill>
+                    {selectedPassengerDuplicate ? (
+                      <CanvasPill theme={th} tone="warn">
+                        duplicate name
+                      </CanvasPill>
+                    ) : null}
+                  </div>
+
+                  <CanvasDL
+                    theme={th}
+                    cols={1}
+                    items={[
+                      {
+                        k: "乘客 ID",
+                        v: selectedPassenger.passengerId,
+                        mono: true,
+                      },
+                      {
+                        k: "工號",
+                        v: selectedPassenger.employeeNo ?? "—",
+                        mono: true,
+                      },
+                      { k: "部門", v: selectedDepartment },
+                      {
+                        k: "手機",
+                        v: selectedPassenger.mobile ?? "—",
+                        mono: true,
+                      },
+                      {
+                        k: "Email",
+                        v: selectedPassenger.email ?? "—",
+                        mono: true,
+                      },
+                      {
+                        k: "editableUntil",
+                        v: formatUpdated(selectedEditableUntil),
+                        mono: true,
+                      },
+                      {
+                        k: "consentVersion",
+                        v: selectedConsentVersion ?? "—",
+                      },
+                      {
+                        k: "readOnlyReason",
+                        v: selectedReadOnlyReason ?? "—",
+                      },
+                      {
+                        k: "updatedAt",
+                        v: formatUpdated(selectedPassenger.updatedAt),
+                        mono: true,
+                      },
+                    ]}
+                  />
                 </div>
+              ) : (
+                <div style={subtleTextStyle}>
+                  目前沒有可用 passenger row。若是新租戶，這會對應 `no_data`；
+                  若是套了篩選，則會落在 `filtered_empty`。
+                </div>
+              )}
+            </CanvasCard>
 
-                <CanvasDL
-                  theme={th}
-                  cols={1}
-                  items={[
-                    {
-                      k: "乘客 ID",
-                      v: selectedPassenger.passengerId,
-                      mono: true,
-                    },
-                    {
-                      k: "工號",
-                      v: selectedPassenger.employeeNo ?? "—",
-                      mono: true,
-                    },
-                    { k: "部門", v: selectedDepartment },
-                    {
-                      k: "手機",
-                      v: selectedPassenger.mobile ?? "—",
-                      mono: true,
-                    },
-                    {
-                      k: "Email",
-                      v: selectedPassenger.email ?? "—",
-                      mono: true,
-                    },
-                    {
-                      k: "editableUntil",
-                      v: formatUpdated(selectedEditableUntil),
-                      mono: true,
-                    },
-                    {
-                      k: "consentVersion",
-                      v: selectedConsentVersion ?? "—",
-                    },
-                    {
-                      k: "readOnlyReason",
-                      v: selectedReadOnlyReason ?? "—",
-                    },
-                    {
-                      k: "updatedAt",
-                      v: formatUpdated(selectedPassenger.updatedAt),
-                      mono: true,
-                    },
-                  ]}
-                />
+            <CanvasCard
+              theme={th}
+              title="Action contract"
+              subtitle="所有 CTA 以 `availableActions[]` 為準，不從 role 或 activeFlag 推論。"
+            >
+              {selectedPassenger ? (
+                <div style={railBlockStyle}>
+                  <div>
+                    <div style={sectionLabelStyle}>Enabled actions</div>
+                    <div style={{ ...actionsWrapStyle, marginTop: 8 }}>
+                      {selectedEnabledActions.length > 0 ? (
+                        selectedEnabledActions.map((action) =>
+                          renderActionDescriptor(
+                            action,
+                            getActionLabel(action.action),
+                          ),
+                        )
+                      ) : (
+                        <CanvasPill theme={th} tone="neutral">
+                          no enabled action
+                        </CanvasPill>
+                      )}
+                    </div>
+                  </div>
 
-                <div style={{ display: "grid", gap: 8 }}>
-                  <div style={{ ...fieldLabelStyle, color: th.text }}>
-                    Available actions
+                  <div>
+                    <div style={sectionLabelStyle}>Disabled affordances</div>
+                    <div style={{ ...actionsWrapStyle, marginTop: 8 }}>
+                      {selectedDisabledActions.length > 0 ? (
+                        selectedDisabledActions.map((action) =>
+                          renderActionDescriptor(
+                            action,
+                            getActionLabel(action.action),
+                          ),
+                        )
+                      ) : (
+                        <CanvasPill theme={th} tone="success">
+                          all exposed actions enabled
+                        </CanvasPill>
+                      )}
+                    </div>
                   </div>
-                  <div style={actionsWrapStyle}>
-                    {selectedActions.map((action) =>
-                      renderActionDescriptor(
-                        action,
-                        getActionLabel(action.action),
-                      ),
-                    )}
+
+                  <div style={compactListStyle}>
+                    {selectedActions.map((action) => (
+                      <div
+                        key={`summary-${action.action}`}
+                        style={compactListItemStyle}
+                      >
+                        <div style={infoListStyle}>
+                          <CanvasPill theme={th} tone={getActionTone(action)}>
+                            {getActionLabel(action.action)}
+                          </CanvasPill>
+                          <CanvasPill
+                            theme={th}
+                            tone={
+                              action.riskLevel === "high"
+                                ? "danger"
+                                : action.riskLevel === "medium"
+                                  ? "accent"
+                                  : "info"
+                            }
+                          >
+                            {action.riskLevel}
+                          </CanvasPill>
+                        </div>
+                        <div style={helperTextStyle}>
+                          {getActionSummary(action)}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div style={subtleTextStyle}>
-                    CTAs are driven from `availableActions` when present; this
-                    page falls back to spec-safe disabled affordances until the
-                    mutation route lands.
-                  </div>
+
                   <div style={helperTextStyle}>
                     Q-TEN06: passenger deactivation is soft-only. Existing
                     bookings retain their snapshot; inactive records disappear
                     from pickers but stay visible in historical detail.
                   </div>
                 </div>
+              ) : (
+                <div style={subtleTextStyle}>
+                  選取 passenger 後會顯示該筆 resource 的 action contract。
+                </div>
+              )}
+            </CanvasCard>
 
-                <div style={{ display: "grid", gap: 8 }}>
-                  <div style={{ ...fieldLabelStyle, color: th.text }}>
-                    Deep links
+            <CanvasCard
+              theme={th}
+              title="Linked flows"
+              subtitle="Tenant Console 內連與 cross-app deep link 在這裡集中呈現。"
+            >
+              {selectedPassenger ? (
+                <div style={railBlockStyle}>
+                  <div>
+                    <div style={sectionLabelStyle}>Deep links</div>
+                    <div style={{ ...actionsWrapStyle, marginTop: 8 }}>
+                      {selectedDeepLinks.map((link) => (
+                        <Link
+                          key={`${link.href}:${link.label}`}
+                          href={link.href}
+                          style={linkButtonStyle}
+                          target={link.newTab ? "_blank" : undefined}
+                          rel={link.newTab ? "noreferrer" : undefined}
+                        >
+                          {link.label}
+                        </Link>
+                      ))}
+                    </div>
                   </div>
-                  <div style={actionsWrapStyle}>
-                    {selectedDeepLinks.map((link) => (
-                      <Link
-                        key={`${link.href}:${link.label}`}
-                        href={link.href}
-                        style={linkButtonStyle}
-                        target={link.newTab ? "_blank" : undefined}
-                        rel={link.newTab ? "noreferrer" : undefined}
-                      >
-                        {link.label}
-                      </Link>
-                    ))}
+
+                  <div>
+                    <div style={sectionLabelStyle}>Quality issues</div>
+                    {selectedQualityIssues.length > 0 ? (
+                      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                        <div style={infoListStyle}>
+                          {selectedQualityIssues.map((issue) => (
+                            <CanvasPill
+                              key={issue}
+                              theme={th}
+                              tone={getQualityIssueTone(issue)}
+                            >
+                              {getQualityIssueLabel(issue)}
+                            </CanvasPill>
+                          ))}
+                        </div>
+                        <div style={helperTextStyle}>{qualityBannerBody}</div>
+                      </div>
+                    ) : (
+                      <div style={{ ...subtleTextStyle, marginTop: 8 }}>
+                        No current data-quality warning.
+                      </div>
+                    )}
                   </div>
+
                   <div style={helperTextStyle}>
                     Cross-app deep links follow Q-X03 and open in a new tab when
                     the target lives in Ops Console or Platform Admin.
                   </div>
                 </div>
-
-                <div style={{ display: "grid", gap: 8 }}>
-                  <div style={{ ...fieldLabelStyle, color: th.text }}>
-                    Quality issues
-                  </div>
-                  {selectedQualityIssues.length > 0 ? (
-                    <div style={infoListStyle}>
-                      {selectedQualityIssues.map((issue) => (
-                        <CanvasPill
-                          key={issue}
-                          theme={th}
-                          tone={getQualityIssueTone(issue)}
-                        >
-                          {getQualityIssueLabel(issue)}
-                        </CanvasPill>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={subtleTextStyle}>
-                      No current data-quality warning.
-                    </div>
-                  )}
+              ) : (
+                <div style={subtleTextStyle}>
+                  沒有選取 passenger 時，僅保留 roster 與 empty state。
                 </div>
-              </div>
-            ) : (
-              <div style={subtleTextStyle}>
-                目前沒有可用 passenger row。若是新租戶，這會對應 `no_data`；
-                若是套了篩選，則會落在 `filtered_empty`。
-              </div>
-            )}
-          </CanvasCard>
+              )}
+            </CanvasCard>
+          </div>
         </div>
       </div>
     </div>
