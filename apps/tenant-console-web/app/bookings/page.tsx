@@ -7,6 +7,7 @@ import type {
   BookingRecord,
   CrossAppResourceLink,
   EmptyReason,
+  EmptyStateEnvelope,
   RefreshTier,
   ResourceActionDescriptor,
   UiRefreshMetadata,
@@ -56,24 +57,65 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const filterFormStyle: CSSProperties = {
-  display: "grid",
-  gap: 14,
-};
-
-const filterGridStyle: CSSProperties = {
+const heroStatsStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: 12,
 };
 
+const statCardStyle: CSSProperties = {
+  border: `1px solid ${theme.border}`,
+  borderRadius: 12,
+  background: theme.surface,
+  padding: "14px 16px",
+  display: "grid",
+  gap: 6,
+};
+
+const statLabelStyle: CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 700,
+  color: theme.textDim,
+  letterSpacing: 0.44,
+  textTransform: "uppercase",
+};
+
+const statValueStyle: CSSProperties = {
+  fontSize: 26,
+  lineHeight: 1,
+  fontWeight: 700,
+  color: theme.text,
+  letterSpacing: -0.6,
+};
+
+const statHintStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: theme.textMuted,
+  lineHeight: 1.45,
+};
+
+const toolbarShellStyle: CSSProperties = {
+  padding: 16,
+  borderBottom: `1px solid ${theme.border}`,
+  display: "grid",
+  gap: 14,
+  background:
+    "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0))",
+};
+
+const filterGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(220px, 1.5fr) repeat(4, minmax(140px, 1fr))",
+  gap: 10,
+};
+
 const fieldLabelStyle: CSSProperties = {
   display: "grid",
   gap: 6,
-  fontSize: 11.5,
+  fontSize: 10.5,
   fontWeight: 700,
-  color: theme.textMuted,
-  letterSpacing: 0.24,
+  color: theme.textDim,
+  letterSpacing: 0.3,
   textTransform: "uppercase",
 };
 
@@ -82,7 +124,7 @@ const inputStyle: CSSProperties = {
   height: 34,
   borderRadius: 8,
   border: `1px solid ${theme.border}`,
-  background: theme.surface,
+  background: theme.bg,
   color: theme.text,
   padding: "0 10px",
   fontSize: 12.5,
@@ -93,11 +135,19 @@ const actionRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
+  alignItems: "center",
 };
 
 const compactActionRowStyle: CSSProperties = {
   ...actionRowStyle,
   marginTop: 6,
+};
+
+const pillRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
 };
 
 const actionLinkStyle = (variant: "primary" | "secondary" = "secondary") =>
@@ -129,6 +179,17 @@ const disabledActionStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+const secondaryTextStyle: CSSProperties = {
+  color: theme.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.45,
+};
+
+const primaryTextStyle: CSSProperties = {
+  color: theme.text,
+  fontWeight: 600,
+};
+
 const headerChipStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -137,21 +198,35 @@ const headerChipStyle: CSSProperties = {
   color: theme.text,
 };
 
-const primaryTextStyle: CSSProperties = {
-  color: theme.text,
-  fontWeight: 600,
-};
-
-const secondaryTextStyle: CSSProperties = {
-  color: theme.textMuted,
-  fontSize: 11.5,
-  lineHeight: 1.45,
-};
-
 const inlineMetaStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 6,
+};
+
+const emptyStateStyle = (tone: "info" | "warn"): CSSProperties => ({
+  padding: "28px 18px",
+  display: "grid",
+  justifyItems: "center",
+  gap: 14,
+  textAlign: "center",
+  borderRadius: 12,
+  border: `1px dashed ${tone === "warn" ? theme.warnBorder : theme.border}`,
+  background: tone === "warn" ? theme.warnBg : theme.surface,
+});
+
+const emptyStateBadgeStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "5px 10px",
+  borderRadius: 999,
+  border: `1px solid ${theme.border}`,
+  color: theme.textMuted,
+  fontSize: 11,
+  fontWeight: 600,
+  fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+  letterSpacing: 0.18,
 };
 
 type SearchParamValue = string | string[] | undefined;
@@ -163,15 +238,35 @@ type BookingSlaStatus = {
   detail: string;
 };
 
+type BookingRuntimeRecord = BookingRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  editableUntil?: string | null;
+  readOnlyReasonCode?: string | null;
+  crossAppLinks?: CrossAppResourceLink[];
+  slaStatus?: BookingSlaStatus | null;
+};
+
 type BookingListRecord = BookingRecord & {
   availableActions: ResourceActionDescriptor[];
   editableUntil: string | null;
+  readOnlyReasonCode: string | null;
   crossAppLinks: CrossAppResourceLink[];
   slaStatus: BookingSlaStatus | null;
 };
 
+type BookingListResponseData =
+  | ApiListData<BookingRuntimeRecord>
+  | {
+      items: BookingRuntimeRecord[];
+      pageInfo: ApiListData<BookingRuntimeRecord>["pageInfo"];
+      refresh?: UiRefreshMetadata;
+      emptyState?: EmptyStateEnvelope | null;
+      deepLinks?: CrossAppResourceLink[];
+    };
+
 type BookingRow = Record<string, unknown> & {
   bookingCell: ReactNode;
+  orderCell: ReactNode;
   typeCell: ReactNode;
   routeCell: ReactNode;
   windowCell: ReactNode;
@@ -185,7 +280,9 @@ type BookingListPageData = {
   pageInfo: ApiListData<BookingRecord>["pageInfo"];
   refresh: UiRefreshMetadata;
   emptyReason: BookingEmptyReason | null;
+  emptyStateEnvelope: EmptyStateEnvelope | null;
   errorMessage: string | null;
+  pageDeepLinks: CrossAppResourceLink[];
 };
 
 function first(value: SearchParamValue) {
@@ -299,9 +396,10 @@ function isActionableStatus(status: BookingRecord["orderStatus"]) {
   return status !== "completed" && status !== "cancelled";
 }
 
-function getActionDisabledReason(reasonCode?: string) {
+function getActionDisabledReason(reasonCode?: string | null) {
   switch (reasonCode) {
     case "editable_window_passed":
+    case "past_editable_until":
       return "Edit window closed";
     case "cancel_window_passed":
       return "Cancellation window closed";
@@ -321,6 +419,7 @@ function getActionLabel(action: string) {
     case "cancel_booking":
       return "Cancel";
     case "create_booking":
+    case "create":
       return "New";
     case "open_ops_approval":
       return "Ops approval";
@@ -340,7 +439,7 @@ function buildCrossAppHref(link: CrossAppResourceLink) {
   return origin ? `${origin}${link.route}` : link.route;
 }
 
-function buildBookingCrossAppLinks(
+function buildFallbackCrossAppLinks(
   booking: BookingRecord,
 ): CrossAppResourceLink[] {
   const links: CrossAppResourceLink[] = [];
@@ -380,10 +479,11 @@ function buildBookingCrossAppLinks(
   return links;
 }
 
-function buildBookingActions(
+function buildFallbackBookingActions(
   booking: BookingRecord,
+  editableUntil: string | null,
 ): ResourceActionDescriptor[] {
-  const modifiableUntil = parseDate(booking.modifiableUntil);
+  const modifiableUntil = parseDate(editableUntil ?? booking.modifiableUntil);
   const cancelableUntil = parseDate(booking.cancelableUntil);
   const canEdit =
     isActionableStatus(booking.orderStatus) &&
@@ -406,7 +506,7 @@ function buildBookingActions(
       ...(canEdit
         ? {}
         : {
-            disabledReasonCode: booking.modifiableUntil
+            disabledReasonCode: editableUntil
               ? "editable_window_passed"
               : "workflow_locked",
           }),
@@ -439,7 +539,7 @@ function buildBookingActions(
   }
 
   if (
-    buildBookingCrossAppLinks(booking).some(
+    buildFallbackCrossAppLinks(booking).some(
       (link) => link.resourceType === "dispatch_queue_item",
     )
   ) {
@@ -453,7 +553,9 @@ function buildBookingActions(
   return actions;
 }
 
-function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
+function deriveFallbackSlaStatus(
+  booking: BookingRecord,
+): BookingSlaStatus | null {
   if (
     booking.orderStatus === "dispatch_failed" ||
     booking.orderStatus === "dispatch_timeout" ||
@@ -491,33 +593,29 @@ function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
   return null;
 }
 
-function toBookingListRecord(booking: BookingRecord): BookingListRecord {
+function normalizeBookingRecord(
+  booking: BookingRuntimeRecord,
+): BookingListRecord {
+  const editableUntil =
+    booking.editableUntil ?? booking.modifiableUntil ?? null;
+  const crossAppLinks =
+    booking.crossAppLinks && booking.crossAppLinks.length > 0
+      ? booking.crossAppLinks
+      : buildFallbackCrossAppLinks(booking);
+
+  const availableActions =
+    booking.availableActions && booking.availableActions.length > 0
+      ? booking.availableActions
+      : buildFallbackBookingActions(booking, editableUntil);
+
   return {
     ...booking,
-    availableActions: buildBookingActions(booking),
-    editableUntil: booking.modifiableUntil,
-    crossAppLinks: buildBookingCrossAppLinks(booking),
-    slaStatus: deriveSlaStatus(booking),
+    availableActions,
+    editableUntil,
+    readOnlyReasonCode: booking.readOnlyReasonCode ?? null,
+    crossAppLinks,
+    slaStatus: booking.slaStatus ?? deriveFallbackSlaStatus(booking),
   };
-}
-
-function getActionHref(action: string, booking: BookingListRecord) {
-  switch (action) {
-    case "open_detail":
-    case "update_booking":
-    case "cancel_booking":
-      return `/bookings/${booking.bookingId}`;
-    case "open_ops_approval":
-      return booking.crossAppLinks.find(
-        (link) => link.resourceType === "tenant_booking_approval_request",
-      );
-    case "open_ops_dispatch":
-      return booking.crossAppLinks.find(
-        (link) => link.resourceType === "dispatch_queue_item",
-      );
-    default:
-      return null;
-  }
 }
 
 function getSubtypeLabel(subtype: BookingRecord["businessDispatchSubtype"]) {
@@ -566,15 +664,19 @@ function mapErrorToEmptyReason(
 function getEmptyStateContent(
   reason: BookingEmptyReason,
   queryString: string,
+  envelope: EmptyStateEnvelope | null,
 ): {
   title: string;
   description: string;
   tone: "info" | "warn";
+  messageCode: string;
   nextAction?: {
     descriptor: ResourceActionDescriptor;
     href: string;
   };
 } {
+  const messageCode = envelope?.messageCode ?? `booking_list.${reason}`;
+
   switch (reason) {
     case "not_provisioned":
       return {
@@ -582,8 +684,9 @@ function getEmptyStateContent(
         description:
           "Bookings stay unavailable until tenant governance and downstream integrations finish setup for this workspace.",
         tone: "info",
+        messageCode,
         nextAction: {
-          descriptor: {
+          descriptor: envelope?.nextAction ?? {
             action: "open_integration_governance",
             enabled: true,
             riskLevel: "medium",
@@ -597,6 +700,7 @@ function getEmptyStateContent(
         description:
           "The current tenant actor can enter the shell, but booking ledger access is not granted for this role context.",
         tone: "warn",
+        messageCode,
       };
     case "external_unavailable":
       return {
@@ -604,6 +708,7 @@ function getEmptyStateContent(
         description:
           "An upstream dependency did not respond in time. Retry this page, then escalate through ops if the stale window persists.",
         tone: "warn",
+        messageCode,
       };
     case "fetch_failed":
       return {
@@ -611,6 +716,7 @@ function getEmptyStateContent(
         description:
           "The page could not retrieve a valid tenant booking snapshot. Retry the page and review service health if the failure repeats.",
         tone: "warn",
+        messageCode,
       };
     case "filtered_empty":
       return {
@@ -618,8 +724,9 @@ function getEmptyStateContent(
         description:
           "Try widening the reservation date range, clearing status chips, or moving back to all service buckets.",
         tone: "info",
+        messageCode,
         nextAction: {
-          descriptor: {
+          descriptor: envelope?.nextAction ?? {
             action: "reset_filters",
             enabled: true,
             riskLevel: "low",
@@ -634,8 +741,9 @@ function getEmptyStateContent(
         description:
           "This looks like a brand-new tenant workspace. Create the first booking or wait for upstream booking intake to populate this ledger.",
         tone: "info",
+        messageCode,
         nextAction: {
-          descriptor: {
+          descriptor: envelope?.nextAction ?? {
             action: "create_booking",
             enabled: true,
             riskLevel: "medium",
@@ -644,6 +752,30 @@ function getEmptyStateContent(
         },
       };
   }
+}
+
+function normalizeEnvelopeData(envelopeData: BookingListResponseData): {
+  bookings: BookingListRecord[];
+  pageInfo: ApiListData<BookingRecord>["pageInfo"];
+  refresh: UiRefreshMetadata | null;
+  emptyStateEnvelope: EmptyStateEnvelope | null;
+  pageDeepLinks: CrossAppResourceLink[];
+} {
+  const items = envelopeData.items ?? [];
+  const normalizedBookings = items.map(normalizeBookingRecord);
+  const deepLinks = "deepLinks" in envelopeData ? envelopeData.deepLinks : null;
+
+  return {
+    bookings: normalizedBookings,
+    pageInfo: envelopeData.pageInfo,
+    refresh: "refresh" in envelopeData ? (envelopeData.refresh ?? null) : null,
+    emptyStateEnvelope:
+      "emptyState" in envelopeData ? (envelopeData.emptyState ?? null) : null,
+    pageDeepLinks:
+      deepLinks && deepLinks.length > 0
+        ? deepLinks
+        : getPageDeepLinks(normalizedBookings),
+  };
 }
 
 async function loadBookingsPageData(): Promise<BookingListPageData> {
@@ -669,6 +801,10 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
       const errorEnvelope = (await response
         .json()
         .catch(() => null)) as ApiErrorEnvelope | null;
+      const emptyReason = mapErrorToEmptyReason(
+        response.status,
+        errorEnvelope?.error.code,
+      );
 
       return {
         bookings: [],
@@ -682,29 +818,34 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
           ...refresh,
           dataFreshness: "degraded",
         },
-        emptyReason: mapErrorToEmptyReason(
-          response.status,
-          errorEnvelope?.error.code,
-        ),
+        emptyReason,
+        emptyStateEnvelope: {
+          reason: emptyReason,
+          messageCode:
+            errorEnvelope?.error.code ?? `booking_list.${emptyReason}`,
+        },
         errorMessage: errorEnvelope?.error.message ?? "Unknown booking error.",
+        pageDeepLinks: [],
       };
     }
 
-    const envelope = (await response.json()) as ApiSuccessEnvelope<
-      ApiListData<BookingRecord>
-    >;
+    const envelope =
+      (await response.json()) as ApiSuccessEnvelope<BookingListResponseData>;
+    const normalized = normalizeEnvelopeData(envelope.data);
 
     return {
-      bookings: envelope.data.items.map(toBookingListRecord),
-      pageInfo: envelope.data.pageInfo,
-      refresh: {
+      bookings: normalized.bookings,
+      pageInfo: normalized.pageInfo,
+      refresh: normalized.refresh ?? {
         generatedAt: envelope.meta.timestamp,
         staleAfterMs: BOOKING_STALE_AFTER_MS,
         dataFreshness: "fresh",
         source: "live",
       },
       emptyReason: null,
+      emptyStateEnvelope: normalized.emptyStateEnvelope,
       errorMessage: null,
+      pageDeepLinks: normalized.pageDeepLinks,
     };
   } catch (error) {
     return {
@@ -720,8 +861,13 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
         dataFreshness: "degraded",
       },
       emptyReason: "fetch_failed",
+      emptyStateEnvelope: {
+        reason: "fetch_failed",
+        messageCode: "booking_list.fetch_failed",
+      },
       errorMessage:
         error instanceof Error ? error.message : "Unknown booking error.",
+      pageDeepLinks: [],
     };
   }
 }
@@ -749,6 +895,25 @@ function renderActionLink({
   );
 }
 
+function getActionHref(action: string, booking: BookingListRecord) {
+  switch (action) {
+    case "open_detail":
+    case "update_booking":
+    case "cancel_booking":
+      return `/bookings/${booking.bookingId}`;
+    case "open_ops_approval":
+      return booking.crossAppLinks.find(
+        (link) => link.resourceType === "tenant_booking_approval_request",
+      );
+    case "open_ops_dispatch":
+      return booking.crossAppLinks.find(
+        (link) => link.resourceType === "dispatch_queue_item",
+      );
+    default:
+      return null;
+  }
+}
+
 function renderBookingActionLinks(booking: BookingListRecord) {
   return (
     <div style={compactActionRowStyle}>
@@ -760,7 +925,9 @@ function renderBookingActionLinks(booking: BookingListRecord) {
             <span
               key={action.action}
               style={disabledActionStyle}
-              title={getActionDisabledReason(action.disabledReasonCode)}
+              title={getActionDisabledReason(
+                action.disabledReasonCode ?? booking.readOnlyReasonCode,
+              )}
             >
               {label}
             </span>
@@ -778,7 +945,7 @@ function renderBookingActionLinks(booking: BookingListRecord) {
               key={action.action}
               href={target}
               style={actionLinkStyle(
-                action.action === "open_detail" ? "primary" : "secondary",
+                action.riskLevel === "high" ? "secondary" : "secondary",
               )}
             >
               {label}
@@ -801,6 +968,14 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
     const editWindow = formatRemainingWindow(booking.editableUntil);
     const source = getBookingSourceVisibility(booking);
     const sourceToneClassName = getSourceToneClassName(source.tone);
+    const approvalHighlight =
+      booking.approvalState === "pending" ||
+      booking.approvalState === "blocked";
+    const deadlineSoon =
+      editWindow !== null &&
+      editWindow !== "Closed" &&
+      parseDate(booking.editableUntil) !== null &&
+      parseDate(booking.editableUntil)!.getTime() - Date.now() <= 3_600_000;
 
     return {
       bookingCell: (
@@ -808,8 +983,15 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
           <Link href={`/bookings/${booking.bookingId}`} style={headerChipStyle}>
             <span style={primaryTextStyle}>{booking.bookingId}</span>
           </Link>
-          <span style={secondaryTextStyle}>{booking.orderId}</span>
           {renderBookingActionLinks(booking)}
+        </div>
+      ),
+      orderCell: (
+        <div style={{ display: "grid", gap: 4 }}>
+          <span style={primaryTextStyle}>{booking.orderId}</span>
+          <span style={secondaryTextStyle}>
+            Age {formatRelativeDuration(booking.createdAt)}
+          </span>
         </div>
       ),
       typeCell: (
@@ -839,15 +1021,18 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
           </span>
           <div style={inlineMetaStyle}>
             <CanvasPill theme={theme} tone="neutral">
-              Age {formatRelativeDuration(booking.createdAt)}
-            </CanvasPill>
-            <CanvasPill theme={theme} tone="info">
               Updated {formatRelativeDuration(booking.updatedAt)}
             </CanvasPill>
             {editWindow ? (
               <CanvasPill
                 theme={theme}
-                tone={editWindow === "Closed" ? "neutral" : "warn"}
+                tone={
+                  editWindow === "Closed"
+                    ? "neutral"
+                    : deadlineSoon
+                      ? "warn"
+                      : "info"
+                }
               >
                 Editable {editWindow}
               </CanvasPill>
@@ -887,16 +1072,16 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
             ) : null}
           </div>
           <span style={secondaryTextStyle}>{booking.status}</span>
-          {booking.slaStatus ? (
-            <span style={secondaryTextStyle}>{booking.slaStatus.detail}</span>
-          ) : (
-            <span style={secondaryTextStyle}>No SLA warning is published.</span>
-          )}
+          <span style={secondaryTextStyle}>
+            {booking.slaStatus?.detail ??
+              (approvalHighlight
+                ? "Approval action is still pending for this booking."
+                : "No SLA warning is published.")}
+          </span>
         </div>
       ),
       _selected:
-        booking.approvalState === "pending" ||
-        booking.approvalState === "blocked" ||
+        approvalHighlight ||
         booking.orderStatus === "dispatch_failed" ||
         booking.orderStatus === "dispatch_timeout" ||
         booking.orderStatus === "exception_hold" ||
@@ -952,6 +1137,56 @@ function getHeaderTabs(bookings: BookingListRecord[]) {
   ));
 }
 
+function buildHeroStats(bookings: BookingListRecord[]) {
+  const active = bookings.filter((booking) =>
+    isActionableStatus(booking.orderStatus),
+  ).length;
+  const approvals = bookings.filter(
+    (booking) =>
+      booking.approvalState === "pending" ||
+      booking.approvalState === "blocked",
+  ).length;
+  const deadlineSoon = bookings.filter((booking) => {
+    const editableUntil = parseDate(booking.editableUntil);
+    if (!editableUntil) {
+      return false;
+    }
+
+    const remaining = editableUntil.getTime() - Date.now();
+    return remaining > 0 && remaining <= 3_600_000;
+  }).length;
+  const recovery = bookings.filter(
+    (booking) =>
+      booking.orderStatus === "dispatch_failed" ||
+      booking.orderStatus === "dispatch_timeout" ||
+      booking.orderStatus === "exception_hold" ||
+      booking.orderStatus === "redispatch_required",
+  ).length;
+
+  return [
+    {
+      label: "Active bookings",
+      value: String(active),
+      hint: "Current month reservations still in flight or editable.",
+    },
+    {
+      label: "Approval queue",
+      value: String(approvals),
+      hint: "Needs tenant attention or ops approval follow-up.",
+    },
+    {
+      label: "Edit window soon",
+      value: String(deadlineSoon),
+      hint: "Editable until approaching cutoff within the next hour.",
+    },
+    {
+      label: "Dispatch recovery",
+      value: String(recovery),
+      hint: "Cross-app deep links available for ops recovery surfaces.",
+    },
+  ];
+}
+
 export default async function BookingsPage({
   searchParams,
 }: {
@@ -964,9 +1199,13 @@ export default async function BookingsPage({
   );
   const data = await loadBookingsPageData();
   const result = applyBookingListQuery(data.bookings, query);
+  const envelopeEmptyReason = parseEmptyReason(
+    data.emptyStateEnvelope?.reason ?? "",
+  );
   const computedEmptyReason: BookingEmptyReason | null =
     forcedEmptyReason ??
     data.emptyReason ??
+    envelopeEmptyReason ??
     (result.items.length > 0
       ? null
       : hasActiveBookingFilters(query)
@@ -978,20 +1217,24 @@ export default async function BookingsPage({
     computedEmptyReason === null ? buildBookingRows(result.items) : [];
   const emptyState =
     computedEmptyReason !== null
-      ? getEmptyStateContent(computedEmptyReason, queryString)
+      ? getEmptyStateContent(
+          computedEmptyReason,
+          queryString,
+          data.emptyStateEnvelope,
+        )
       : null;
-  const pageDeepLinks =
-    computedEmptyReason === null ? getPageDeepLinks(result.items) : [];
+  const pageDeepLinks = computedEmptyReason === null ? data.pageDeepLinks : [];
   const headerTabs = getHeaderTabs(data.bookings);
   const activeHeaderTab = headerTabs[0];
-
+  const heroStats = buildHeroStats(data.bookings);
   const columns: CanvasTableColumn<BookingRow>[] = [
-    { h: "BK", k: "bookingCell", w: 180 },
-    { h: "TYPE", k: "typeCell", w: 150 },
+    { h: "BK", k: "bookingCell", w: 150 },
+    { h: "ORDER", k: "orderCell", w: 150 },
+    { h: "TYPE", k: "typeCell", w: 155 },
     { h: "PICKUP → DROP", k: "routeCell", w: 300 },
     { h: "WIN", k: "windowCell", w: 240 },
     { h: "PASS.", k: "passengerCell", w: 140 },
-    { h: "STATE", k: "stateCell", w: 220 },
+    { h: "STATE", k: "stateCell", w: 240 },
   ];
 
   return (
@@ -1004,18 +1247,15 @@ export default async function BookingsPage({
         activeTab={activeHeaderTab}
         actions={
           <div style={actionRowStyle}>
-            <Link href="#booking-filters" style={actionLinkStyle("secondary")}>
-              Filter
-            </Link>
             <span
               style={disabledActionStyle}
               title="Export is not available yet"
             >
-              Export
+              匯出
             </span>
             {renderActionLink({
               href: "/bookings/new",
-              label: "New",
+              label: "新增",
               variant: "primary",
             })}
             <RefreshTierControl
@@ -1037,121 +1277,27 @@ export default async function BookingsPage({
           />
         ) : null}
 
-        <CanvasCard
-          theme={theme}
-          title="Filters"
-          subtitle="Search by booking, order, or passenger, then narrow by status, service bucket, and reservation date range."
-        >
-          <form action="/bookings" id="booking-filters" style={filterFormStyle}>
-            <input name="dateField" type="hidden" value={query.dateField} />
+        {data.refresh.dataFreshness !== "fresh" ? (
+          <CanvasBanner
+            theme={theme}
+            tone={data.refresh.dataFreshness === "degraded" ? "warn" : "info"}
+            icon="info"
+            title="Booking state may lag behind dispatcher activity"
+            body={`Snapshot generated ${formatDateTime(
+              data.refresh.generatedAt,
+            )}. Tenant bookings refresh on T5 cadence, so upstream dispatch changes may appear on the next poll.`}
+          />
+        ) : null}
 
-            <div style={filterGridStyle}>
-              <label style={fieldLabelStyle}>
-                Search
-                <input
-                  defaultValue={query.q}
-                  name="q"
-                  placeholder="Booking, order, passenger"
-                  style={inputStyle}
-                />
-              </label>
-              <label style={fieldLabelStyle}>
-                Service bucket
-                <select
-                  defaultValue={query.serviceBucket}
-                  name="serviceBucket"
-                  style={inputStyle}
-                >
-                  <option value="all">All buckets</option>
-                  {PHASE1_SERVICE_BUCKETS.map((bucket) => (
-                    <option key={bucket} value={bucket}>
-                      {getServiceBucketLabel(bucket)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={fieldLabelStyle}>
-                From
-                <input
-                  defaultValue={query.dateFrom}
-                  name="dateFrom"
-                  type="date"
-                  style={inputStyle}
-                />
-              </label>
-              <label style={fieldLabelStyle}>
-                To
-                <input
-                  defaultValue={query.dateTo}
-                  name="dateTo"
-                  type="date"
-                  style={inputStyle}
-                />
-              </label>
-              <label style={fieldLabelStyle}>
-                Page size
-                <select
-                  defaultValue={String(query.pageSize)}
-                  name="pageSize"
-                  style={inputStyle}
-                >
-                  <option value="10">10</option>
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                </select>
-              </label>
+        <div style={heroStatsStyle}>
+          {heroStats.map((stat) => (
+            <div key={stat.label} style={statCardStyle}>
+              <span style={statLabelStyle}>{stat.label}</span>
+              <strong style={statValueStyle}>{stat.value}</strong>
+              <span style={statHintStyle}>{stat.hint}</span>
             </div>
-
-            <div style={{ display: "grid", gap: 10 }}>
-              <div style={inlineMetaStyle}>
-                {OWNED_ORDER_STATUSES.map((status) => {
-                  const nextStatuses = toggleStatus(query.statuses, status);
-                  const href = `/bookings?${buildBookingListQueryString(query, {
-                    statuses: nextStatuses,
-                    page: 1,
-                  })}`;
-                  const isActive = query.statuses.includes(status);
-
-                  return (
-                    <Link
-                      href={href}
-                      key={status}
-                      style={{ textDecoration: "none" }}
-                    >
-                      <CanvasPill
-                        theme={theme}
-                        tone={isActive ? "accent" : "neutral"}
-                      >
-                        {status}
-                      </CanvasPill>
-                    </Link>
-                  );
-                })}
-              </div>
-
-              {pageDeepLinks.length > 0 ? (
-                <div style={inlineMetaStyle}>
-                  {pageDeepLinks.map((link) =>
-                    renderActionLink({
-                      href: buildCrossAppHref(link),
-                      label: link.label,
-                      external: link.openMode === "new_tab",
-                    }),
-                  )}
-                </div>
-              ) : null}
-            </div>
-
-            <div style={actionRowStyle}>
-              <button type="submit" style={actionLinkStyle("primary")}>
-                Apply filters
-              </button>
-              <Link href="/bookings" style={actionLinkStyle("secondary")}>
-                Reset
-              </Link>
-            </div>
-          </form>
-        </CanvasCard>
+          ))}
+        </div>
 
         <CanvasCard
           theme={theme}
@@ -1161,6 +1307,125 @@ export default async function BookingsPage({
           )}`}
           padding={0}
         >
+          <div style={toolbarShellStyle}>
+            <form
+              action="/bookings"
+              id="booking-filters"
+              style={{ display: "grid", gap: 14 }}
+            >
+              <input name="dateField" type="hidden" value={query.dateField} />
+
+              <div style={filterGridStyle}>
+                <label style={fieldLabelStyle}>
+                  Search
+                  <input
+                    defaultValue={query.q}
+                    name="q"
+                    placeholder="Booking, order, passenger"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={fieldLabelStyle}>
+                  Service bucket
+                  <select
+                    defaultValue={query.serviceBucket}
+                    name="serviceBucket"
+                    style={inputStyle}
+                  >
+                    <option value="all">All buckets</option>
+                    {PHASE1_SERVICE_BUCKETS.map((bucket) => (
+                      <option key={bucket} value={bucket}>
+                        {getServiceBucketLabel(bucket)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label style={fieldLabelStyle}>
+                  From
+                  <input
+                    defaultValue={query.dateFrom}
+                    name="dateFrom"
+                    type="date"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={fieldLabelStyle}>
+                  To
+                  <input
+                    defaultValue={query.dateTo}
+                    name="dateTo"
+                    type="date"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={fieldLabelStyle}>
+                  Page size
+                  <select
+                    defaultValue={String(query.pageSize)}
+                    name="pageSize"
+                    style={inputStyle}
+                  >
+                    <option value="10">10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                  </select>
+                </label>
+              </div>
+
+              <div style={{ display: "grid", gap: 10 }}>
+                <div style={pillRowStyle}>
+                  {OWNED_ORDER_STATUSES.map((status) => {
+                    const nextStatuses = toggleStatus(query.statuses, status);
+                    const href = `/bookings?${buildBookingListQueryString(
+                      query,
+                      {
+                        statuses: nextStatuses,
+                        page: 1,
+                      },
+                    )}`;
+                    const isActive = query.statuses.includes(status);
+
+                    return (
+                      <Link
+                        href={href}
+                        key={status}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <CanvasPill
+                          theme={theme}
+                          tone={isActive ? "accent" : "neutral"}
+                        >
+                          {status}
+                        </CanvasPill>
+                      </Link>
+                    );
+                  })}
+                </div>
+
+                {pageDeepLinks.length > 0 ? (
+                  <div style={pillRowStyle}>
+                    {pageDeepLinks.map((link) =>
+                      renderActionLink({
+                        href: buildCrossAppHref(link),
+                        label: link.label,
+                        external: link.openMode === "new_tab",
+                      }),
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
+              <div style={actionRowStyle}>
+                <button type="submit" style={actionLinkStyle("primary")}>
+                  Apply filters
+                </button>
+                <Link href="/bookings" style={actionLinkStyle("secondary")}>
+                  Reset
+                </Link>
+              </div>
+            </form>
+          </div>
+
           {computedEmptyReason === null ? (
             <div style={{ display: "grid" }}>
               <CanvasTable<BookingRow>
@@ -1204,27 +1469,35 @@ export default async function BookingsPage({
               </div>
             </div>
           ) : (
-            <div style={{ padding: 18, display: "grid", gap: 14 }}>
-              <CanvasBanner
-                theme={theme}
-                tone={emptyState?.tone ?? "info"}
-                icon="warn"
-                title={emptyState?.title}
-                body={emptyState?.description}
-              />
-              {emptyState?.nextAction
-                ? renderActionLink({
-                    href: emptyState.nextAction.href,
-                    label: getActionLabel(
-                      emptyState.nextAction.descriptor.action,
-                    ),
-                    variant:
-                      emptyState.nextAction.descriptor.action ===
-                      "create_booking"
-                        ? "primary"
-                        : "secondary",
-                  })
-                : null}
+            <div style={{ padding: 18 }}>
+              <div style={emptyStateStyle(emptyState?.tone ?? "info")}>
+                <span style={emptyStateBadgeStyle}>
+                  emptyReason · {computedEmptyReason}
+                </span>
+                <div style={{ display: "grid", gap: 6 }}>
+                  <strong style={{ fontSize: 16, color: theme.text }}>
+                    {emptyState?.title}
+                  </strong>
+                  <span style={{ ...secondaryTextStyle, maxWidth: 480 }}>
+                    {emptyState?.description}
+                  </span>
+                  <span style={secondaryTextStyle}>
+                    messageCode · {emptyState?.messageCode}
+                  </span>
+                </div>
+                {emptyState?.nextAction
+                  ? renderActionLink({
+                      href: emptyState.nextAction.href,
+                      label: getActionLabel(
+                        emptyState.nextAction.descriptor.action,
+                      ),
+                      variant:
+                        emptyState.nextAction.descriptor.riskLevel === "medium"
+                          ? "primary"
+                          : "secondary",
+                    })
+                  : null}
+              </div>
             </div>
           )}
         </CanvasCard>
