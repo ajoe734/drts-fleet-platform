@@ -1,12 +1,16 @@
 import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import type {
   EmptyReason,
   ResourceActionDescriptor,
   TenantWebhookEndpoint,
   TenantWebhookEndpointStatus,
+  UpdateTenantWebhookEndpointCommand,
   WebhookDeliveryRecord,
 } from "@drts/contracts";
+import { TENANT_WEBHOOK_ENDPOINT_STATUSES } from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasCard,
@@ -119,6 +123,68 @@ const deepLinkNoteStyle: CSSProperties = {
   color: th.textMuted,
 };
 
+// ── Action-flow surface styles (Q-X13 — CTAs open real flows) ────────────────
+const flowBodyStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+  padding: 16,
+  maxWidth: 580,
+};
+
+const flowFieldStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  fontSize: 12.5,
+  color: th.textMuted,
+};
+
+const flowInputStyle: CSSProperties = {
+  padding: "8px 10px",
+  borderRadius: 8,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceLo,
+  color: th.text,
+  fontSize: 13,
+  fontFamily: th.monoFamily,
+};
+
+const flowActionsRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  marginTop: 4,
+};
+
+const flowSubmitStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "8px 14px",
+  borderRadius: 8,
+  border: `1px solid ${th.accent}`,
+  background: th.accent,
+  color: "#ffffff",
+  fontSize: 12.5,
+  fontWeight: 600,
+  cursor: "pointer",
+};
+
+const flowDangerSubmitStyle: CSSProperties = {
+  ...flowSubmitStyle,
+  border: `1px solid ${th.dangerBorder}`,
+  background: th.dangerBg,
+  color: th.danger,
+};
+
+const flowNoteStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 12,
+  lineHeight: 1.6,
+  color: th.textMuted,
+};
+
 const shortDateTimeFormatter = new Intl.DateTimeFormat("sv-SE", {
   year: "numeric",
   month: "2-digit",
@@ -172,6 +238,120 @@ function formatRelativeTime(value: string | null | undefined) {
 
   const diffDays = Math.round(diffSeconds / 86400);
   return relativeTimeFormatter.format(diffDays, "day");
+}
+
+// ── Server actions (Q-X13 — enabled CTAs perform real mutations) ─────────────
+// Each enabled `availableActions` descriptor maps to a working flow: the row /
+// header CTA navigates (via `?mode=…`) to the in-page flow panel below, whose
+// progressive-enhancement <form> submits to one of these server actions. The
+// actions call the live tenant webhook engine (Q-TEN08); they are never mock.
+// `retry_delivery` has NO backend route (see `buildDeliveryActions`), so it is
+// rendered disabled-with-reason rather than as an inert enabled button.
+
+function readTrimmed(formData: FormData, key: string): string {
+  const raw = formData.get(key);
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+function readEvents(formData: FormData): string[] {
+  return readTrimmed(formData, "events")
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
+}
+
+function parseEndpointStatus(
+  value: string,
+): TenantWebhookEndpointStatus | null {
+  return TENANT_WEBHOOK_ENDPOINT_STATUSES.includes(
+    value as TenantWebhookEndpointStatus,
+  )
+    ? (value as TenantWebhookEndpointStatus)
+    : null;
+}
+
+async function createEndpointAction(formData: FormData) {
+  "use server";
+  const url = readTrimmed(formData, "url");
+  const secret = readTrimmed(formData, "secret");
+  const events = readEvents(formData);
+
+  if (url && secret) {
+    await getTenantClient().createWebhookEndpoint({ url, secret, events });
+  }
+
+  revalidatePath("/webhooks");
+  redirect("/webhooks");
+}
+
+async function updateEndpointAction(formData: FormData) {
+  "use server";
+  const webhookId = readTrimmed(formData, "webhookId");
+  const url = readTrimmed(formData, "url");
+  const events = readEvents(formData);
+  const status = parseEndpointStatus(readTrimmed(formData, "status"));
+
+  if (webhookId) {
+    const command: UpdateTenantWebhookEndpointCommand = {};
+    if (url) command.url = url;
+    if (events.length > 0) command.events = events;
+    if (status) command.status = status;
+    await getTenantClient().updateWebhookEndpoint(webhookId, command);
+  }
+
+  revalidatePath("/webhooks");
+  redirect("/webhooks");
+}
+
+async function disableEndpointAction(formData: FormData) {
+  "use server";
+  const webhookId = readTrimmed(formData, "webhookId");
+  const reason = readTrimmed(formData, "reason");
+
+  // `disable_endpoint` is high-risk + requiresReason; the engine disable path is
+  // the status transition on the update command (no dedicated /disable route).
+  if (webhookId && reason) {
+    await getTenantClient().updateWebhookEndpoint(webhookId, {
+      status: "disabled",
+    });
+  }
+
+  revalidatePath("/webhooks");
+  redirect("/webhooks");
+}
+
+async function deleteEndpointAction(formData: FormData) {
+  "use server";
+  const webhookId = readTrimmed(formData, "webhookId");
+  const reason = readTrimmed(formData, "reason");
+
+  if (webhookId && reason) {
+    await getTenantClient().deleteWebhookEndpoint(webhookId);
+  }
+
+  revalidatePath("/webhooks");
+  redirect("/webhooks");
+}
+
+async function rotateSecretAction(formData: FormData) {
+  "use server";
+  const webhookId = readTrimmed(formData, "webhookId");
+  const secret = readTrimmed(formData, "secret");
+  const rotationReason = readTrimmed(formData, "rotationReason");
+
+  // No typed client helper for rotation yet; the engine route exists
+  // (POST /api/tenant/webhooks/:id/rotate-secret) so we call it directly.
+  if (webhookId && secret) {
+    await getTenantClient().post(
+      `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/rotate-secret`,
+      {
+        body: rotationReason ? { secret, rotationReason } : { secret },
+      },
+    );
+  }
+
+  revalidatePath("/webhooks");
+  redirect("/webhooks");
 }
 
 // ── availableActions → CTAs (Q-X13) ─────────────────────────────────────────
@@ -276,6 +456,8 @@ function ActionButton({
     </>
   );
 
+  // Enabled descriptors with a flow target navigate (open the flow panel below);
+  // disabled descriptors stay as a non-interactive button carrying their reason.
   if (enabled && href) {
     return (
       <Link
@@ -352,16 +534,24 @@ function buildEndpointActions(
 // `WebhookDeliveryRecord` (contracts §webhooks) carries no `availableActions[]`
 // field — unlike the endpoint resource — so the per-delivery retry CTA is the
 // single descriptor derived here from `delivery.status` (the only authority the
-// contract exposes). It is ALWAYS emitted: an enabled `retry_delivery` for
-// `delivery_failed`, otherwise a disabled one carrying `delivery_not_failed`.
-// `ActionButton` never drops a descriptor, so the CTA + its disabled reason stay
-// visible on both the row table and the detail surface; nothing is filtered on
-// the absence of an href.
+// contract exposes). The tenant webhook engine exposes NO retry route today
+// (only create/update/delete/rotate-secret + delivery reads), so retry can never
+// be a working action: it is rendered DISABLED with a reason
+// (`delivery_not_failed` when the delivery did not fail, otherwise
+// `backend_retry_endpoint_pending`) instead of an enabled-but-inert button.
+// `ActionButton` keeps the descriptor + its reason visible either way.
 function buildDeliveryActions(
   delivery: WebhookDeliveryRecord,
 ): ResourceActionDescriptor[] {
   if (delivery.status === "delivery_failed") {
-    return [{ action: "retry_delivery", enabled: true, riskLevel: "medium" }];
+    return [
+      {
+        action: "retry_delivery",
+        enabled: false,
+        riskLevel: "medium",
+        disabledReasonCode: "backend_retry_endpoint_pending",
+      },
+    ];
   }
   return [
     {
@@ -720,6 +910,7 @@ function pickDeliveryRows(deliveries: WebhookDeliveryRecord[]) {
 
 type WebhooksPageData = {
   engineProvisioned: boolean;
+  endpoints: TenantWebhookEndpoint[];
   endpointRows: EndpointRow[];
   deliveryRows: DeliveryRow[];
   deliverySubtitle: string | undefined;
@@ -780,6 +971,7 @@ async function loadWebhooksPageData(): Promise<WebhooksPageData> {
 
   return {
     engineProvisioned,
+    endpoints,
     endpointRows: endpoints.map(toEndpointRow),
     deliveryRows,
     deliverySubtitle,
@@ -789,8 +981,28 @@ async function loadWebhooksPageData(): Promise<WebhooksPageData> {
   };
 }
 
+// ── Action-flow surface (opened via ?mode=…) ─────────────────────────────────
+const FLOW_MODES = [
+  "create",
+  "update",
+  "disable",
+  "delete",
+  "rotate",
+  "delivery-log",
+] as const;
+type FlowMode = (typeof FLOW_MODES)[number];
+
+function parseFlowMode(value: string | undefined): FlowMode | null {
+  if (!value) return null;
+  return FLOW_MODES.includes(value as FlowMode) ? (value as FlowMode) : null;
+}
+
 type WebhooksPageProps = {
-  searchParams?: Promise<{ emptyReason?: string }>;
+  searchParams?: Promise<{
+    emptyReason?: string;
+    mode?: string;
+    webhook?: string;
+  }>;
 };
 
 function DeepLink({
@@ -824,6 +1036,41 @@ function DeepLink({
   );
 }
 
+function FlowField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label style={flowFieldStyle}>
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function FlowActions({
+  submitLabel,
+  danger,
+}: {
+  submitLabel: string;
+  danger?: boolean;
+}) {
+  return (
+    <div style={flowActionsRowStyle}>
+      <button
+        type="submit"
+        style={danger ? flowDangerSubmitStyle : flowSubmitStyle}
+      >
+        {submitLabel}
+      </button>
+      <Link href="/webhooks" style={deepLinkStyle}>
+        取消
+      </Link>
+    </div>
+  );
+}
+
+function endpointFlowHref(action: string, webhookId: string) {
+  return `/webhooks?mode=${action}&webhook=${encodeURIComponent(webhookId)}`;
+}
+
 export default async function WebhooksPage({
   searchParams,
 }: WebhooksPageProps) {
@@ -831,9 +1078,12 @@ export default async function WebhooksPage({
   const emptyReasonOverride = parseEmptyReason(
     resolvedSearchParams?.emptyReason,
   );
+  const flowMode = parseFlowMode(resolvedSearchParams?.mode);
+  const selectedWebhookId = resolvedSearchParams?.webhook;
 
   const {
     engineProvisioned,
+    endpoints,
     endpointRows,
     deliveryRows,
     deliverySubtitle,
@@ -847,7 +1097,35 @@ export default async function WebhooksPage({
     engineProvisioned && emptyReason !== "not_provisioned",
   );
   const payloadSchemaAction = findAction(headerActions, "view_payload_schema");
-  const createEndpointAction = findAction(headerActions, "create_endpoint");
+  const createEndpointHeaderAction = findAction(
+    headerActions,
+    "create_endpoint",
+  );
+
+  const selectedEndpoint =
+    selectedWebhookId !== undefined
+      ? (endpoints.find(
+          (endpoint) => endpoint.webhookId === selectedWebhookId,
+        ) ?? null)
+      : null;
+
+  // The delivery-log flow reads the per-endpoint delivery history (spec §9.6.8
+  // "delivery log subpanel") from the live engine — never mock rows.
+  let selectedDeliveryRows: DeliveryRow[] = [];
+  if (flowMode === "delivery-log" && selectedEndpoint) {
+    try {
+      const records = await getTenantClient().listWebhookDeliveries(
+        selectedEndpoint.webhookId,
+      );
+      selectedDeliveryRows = [...records]
+        .sort(compareDeliveries)
+        .map(toDeliveryRow);
+    } catch (error) {
+      errors.push(
+        `投遞紀錄(${selectedEndpoint.webhookId}): ${toErrorMessage(error)}`,
+      );
+    }
+  }
 
   const endpointColumns: CanvasTableColumn<EndpointRow>[] = [
     {
@@ -897,22 +1175,27 @@ export default async function WebhooksPage({
           <ActionButton
             descriptor={findAction(row.actions, "update_endpoint")}
             label="更新"
+            href={endpointFlowHref("update", row.webhookId)}
           />
           <ActionButton
             descriptor={findAction(row.actions, "disable_endpoint")}
             label="停用"
+            href={endpointFlowHref("disable", row.webhookId)}
           />
           <ActionButton
             descriptor={findAction(row.actions, "delete_endpoint")}
             label="刪除"
+            href={endpointFlowHref("delete", row.webhookId)}
           />
           <ActionButton
             descriptor={findAction(row.actions, "rotate_secret")}
             label="rotate secret"
+            href={endpointFlowHref("rotate", row.webhookId)}
           />
           <ActionButton
             descriptor={findAction(row.actions, "view_delivery_log")}
             label="delivery log"
+            href={endpointFlowHref("delivery-log", row.webhookId)}
           />
         </div>
       ),
@@ -948,6 +1231,248 @@ export default async function WebhooksPage({
     },
   ];
 
+  function renderFlowPanel(): ReactNode {
+    if (!flowMode) return null;
+
+    if (flowMode === "create") {
+      return (
+        <CanvasCard theme={th} title="新增 webhook endpoint" padding={0}>
+          <form action={createEndpointAction} style={flowBodyStyle}>
+            <FlowField label="Endpoint URL">
+              <input
+                name="url"
+                type="url"
+                required
+                placeholder="https://hooks.example.com/drts"
+                style={flowInputStyle}
+              />
+            </FlowField>
+            <FlowField label="訂閱事件 (逗號分隔)">
+              <input
+                name="events"
+                type="text"
+                placeholder="booking.created, webhook.delivery_failed"
+                style={flowInputStyle}
+              />
+            </FlowField>
+            <FlowField label="簽章 secret">
+              <input
+                name="secret"
+                type="text"
+                required
+                placeholder="whsec_…"
+                style={flowInputStyle}
+              />
+            </FlowField>
+            <p style={flowNoteStyle}>
+              建立後狀態為 test_pending，需通過驗證流量才會轉為 active（既有 memory
+              約定）。
+            </p>
+            <FlowActions submitLabel="建立 endpoint" />
+          </form>
+        </CanvasCard>
+      );
+    }
+
+    if (!selectedEndpoint) {
+      return (
+        <CanvasCard theme={th} title="找不到指定的 endpoint" padding={0}>
+          <div style={flowBodyStyle}>
+            <p style={flowNoteStyle}>
+              指定的 webhook 已不存在或無法存取。請回到清單重新選取。
+            </p>
+            <FlowActions submitLabel="回到清單" />
+          </div>
+        </CanvasCard>
+      );
+    }
+
+    if (flowMode === "update") {
+      return (
+        <CanvasCard
+          theme={th}
+          title={`更新 endpoint · ${selectedEndpoint.webhookId}`}
+          padding={0}
+        >
+          <form action={updateEndpointAction} style={flowBodyStyle}>
+            <input
+              type="hidden"
+              name="webhookId"
+              value={selectedEndpoint.webhookId}
+            />
+            <FlowField label="Endpoint URL">
+              <input
+                name="url"
+                type="url"
+                defaultValue={selectedEndpoint.url}
+                style={flowInputStyle}
+              />
+            </FlowField>
+            <FlowField label="訂閱事件 (逗號分隔)">
+              <input
+                name="events"
+                type="text"
+                defaultValue={selectedEndpoint.events.join(", ")}
+                style={flowInputStyle}
+              />
+            </FlowField>
+            <FlowField label="狀態">
+              <select
+                name="status"
+                defaultValue={selectedEndpoint.status}
+                style={flowInputStyle}
+              >
+                {TENANT_WEBHOOK_ENDPOINT_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </FlowField>
+            <FlowActions submitLabel="儲存變更" />
+          </form>
+        </CanvasCard>
+      );
+    }
+
+    if (flowMode === "disable") {
+      return (
+        <CanvasCard
+          theme={th}
+          title={`停用 endpoint · ${selectedEndpoint.webhookId}`}
+          padding={0}
+        >
+          <form action={disableEndpointAction} style={flowBodyStyle}>
+            <input
+              type="hidden"
+              name="webhookId"
+              value={selectedEndpoint.webhookId}
+            />
+            <p style={flowNoteStyle}>
+              高風險操作：停用後此 endpoint 將停止接收投遞。{selectedEndpoint.url}
+            </p>
+            <FlowField label="停用原因 (必填)">
+              <textarea
+                name="reason"
+                required
+                rows={3}
+                placeholder="例如：receiver 維護中，暫停投遞"
+                style={flowInputStyle}
+              />
+            </FlowField>
+            <FlowActions submitLabel="確認停用" danger />
+          </form>
+        </CanvasCard>
+      );
+    }
+
+    if (flowMode === "delete") {
+      return (
+        <CanvasCard
+          theme={th}
+          title={`刪除 endpoint · ${selectedEndpoint.webhookId}`}
+          padding={0}
+        >
+          <form action={deleteEndpointAction} style={flowBodyStyle}>
+            <input
+              type="hidden"
+              name="webhookId"
+              value={selectedEndpoint.webhookId}
+            />
+            <p style={flowNoteStyle}>
+              高風險且不可復原：刪除後 {selectedEndpoint.url} 的訂閱與簽章將永久移除。
+            </p>
+            <FlowField label="刪除原因 (必填)">
+              <textarea
+                name="reason"
+                required
+                rows={3}
+                placeholder="例如：整合已退役"
+                style={flowInputStyle}
+              />
+            </FlowField>
+            <FlowActions submitLabel="確認刪除" danger />
+          </form>
+        </CanvasCard>
+      );
+    }
+
+    if (flowMode === "rotate") {
+      return (
+        <CanvasCard
+          theme={th}
+          title={`Rotate secret · ${selectedEndpoint.webhookId}`}
+          padding={0}
+        >
+          <form action={rotateSecretAction} style={flowBodyStyle}>
+            <input
+              type="hidden"
+              name="webhookId"
+              value={selectedEndpoint.webhookId}
+            />
+            <p style={flowNoteStyle}>
+              高風險：輪替後舊簽章立即失效（Q-ADM07 secret-once 模式）。請在離開前妥善保存新
+              secret，後續僅顯示遮罩後綴。目前版本 v{selectedEndpoint.secretVersion}。
+            </p>
+            <FlowField label="新的簽章 secret">
+              <input
+                name="secret"
+                type="text"
+                required
+                placeholder="whsec_…"
+                style={flowInputStyle}
+              />
+            </FlowField>
+            <FlowField label="輪替原因 (選填)">
+              <input
+                name="rotationReason"
+                type="text"
+                placeholder="例如：例行 90 天輪替"
+                style={flowInputStyle}
+              />
+            </FlowField>
+            <FlowActions submitLabel="確認輪替" danger />
+          </form>
+        </CanvasCard>
+      );
+    }
+
+    // delivery-log
+    return (
+      <CanvasCard
+        theme={th}
+        title={`Delivery log · ${selectedEndpoint.webhookId}`}
+        subtitle={selectedEndpoint.url}
+        padding={0}
+      >
+        {selectedDeliveryRows.length > 0 ? (
+          <CanvasTable<DeliveryRow>
+            theme={th}
+            columns={deliveryColumns}
+            rows={selectedDeliveryRows}
+            dense
+          />
+        ) : (
+          <div
+            style={{
+              padding: 24,
+              color: th.textMuted,
+              fontSize: 12.5,
+              textAlign: "center",
+            }}
+          >
+            此 endpoint 尚無投遞紀錄。
+          </div>
+        )}
+        <div style={{ padding: 16 }}>
+          <Link href="/webhooks" style={deepLinkStyle}>
+            關閉 delivery log
+          </Link>
+        </div>
+      </CanvasCard>
+    );
+  }
+
   return (
     <div>
       <CanvasPageHeader
@@ -966,7 +1491,7 @@ export default async function WebhooksPage({
               size="sm"
             />
             <ActionButton
-              descriptor={createEndpointAction}
+              descriptor={createEndpointHeaderAction}
               label="新增端點"
               href="/webhooks?mode=create"
               icon="plus"
@@ -1002,6 +1527,8 @@ export default async function WebhooksPage({
             body={errors.join(" · ")}
           />
         ) : null}
+
+        {renderFlowPanel()}
 
         {emptyReason ? (
           <CanvasCard theme={th} title="端點" padding={0}>
