@@ -17,18 +17,16 @@ import {
 import type {
   DriverStatementLineRecord,
   DriverStatementRecord,
-  InvoiceLineRecord,
-  ReconciliationIssueRecord,
-  SettlementMatrixRecord,
-  TenantInvoiceRecord,
-} from "@drts/contracts";
-import type {
   CrossAppResourceLink,
   EmptyReason,
   EmptyStateEnvelope,
+  InvoiceLineRecord,
+  ReconciliationIssueRecord,
   ResourceActionDescriptor,
+  SettlementMatrixRecord,
+  TenantInvoiceRecord,
   UiRefreshMetadata,
-} from "@drts/contracts/ui-runtime";
+} from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -191,8 +189,8 @@ function withinDays(value: string, days: number) {
   return Date.now() - Date.parse(value) <= days * 24 * 3_600_000;
 }
 
-function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
-  const priority = new Map(
+function sortSettlementMatrix<T extends SettlementMatrixRecord>(rows: T[]) {
+  const priority = new Map<string, number>(
     MATRIX_CHANNEL_ORDER.map((channelKey, index) => [channelKey, index]),
   );
   return [...rows].sort(
@@ -202,7 +200,9 @@ function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
   );
 }
 
-function sortReconciliationIssues(rows: ReconciliationIssueRecord[]) {
+function sortReconciliationIssues<T extends ReconciliationIssueRecord>(
+  rows: T[],
+) {
   const priority: Record<ReconciliationIssueRecord["status"], number> = {
     reopened: 0,
     open: 1,
@@ -917,7 +917,7 @@ export default function PaymentsPage() {
       !selectedIssueId ||
       !sortedIssues.some((issue) => issue.issueId === selectedIssueId)
     ) {
-      setSelectedIssueId(sortedIssues[0].issueId);
+      setSelectedIssueId(sortedIssues[0]?.issueId ?? null);
     }
   }, [selectedIssueId, sortedIssues]);
 
