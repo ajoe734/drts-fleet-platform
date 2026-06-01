@@ -324,6 +324,17 @@ function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "未知錯誤";
 }
 
+function isPermissionDeniedMessage(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("403") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("permission") ||
+    normalized.includes("denied") ||
+    normalized.includes("unauthorized")
+  );
+}
+
 function parseDate(value: string | null | undefined) {
   if (!value) return null;
   const parsed = new Date(value);
@@ -594,6 +605,13 @@ function getPageActions(
     },
     fallbackCreateAction,
   ];
+}
+
+function getActionDescriptor(
+  actions: ResourceActionDescriptor[],
+  action: string,
+): ResourceActionDescriptor | null {
+  return actions.find((descriptor) => descriptor.action === action) ?? null;
 }
 
 function formatRetryPolicy(
@@ -1058,6 +1076,11 @@ function renderEmptyStateActions(model: EmptyStateModel) {
   );
 }
 
+function renderDescriptorHint(descriptor: ResourceActionDescriptor | null) {
+  if (!descriptor || descriptor.enabled) return null;
+  return descriptor.disabledReasonCode ?? "disabled";
+}
+
 function getRetryCapability(
   deliveries: ActionableDeliveryRecord[],
   endpointActions: ResourceActionDescriptor[],
@@ -1116,6 +1139,26 @@ export default async function WebhooksPage({
   const selectedEndpointActions = selectedEndpoint
     ? getEndpointActions(selectedEndpoint)
     : [];
+  const updateEndpointAction = getActionDescriptor(
+    selectedEndpointActions,
+    "update_endpoint",
+  );
+  const rotateSecretAction = getActionDescriptor(
+    selectedEndpointActions,
+    "rotate_secret",
+  );
+  const disableEndpointAction = getActionDescriptor(
+    selectedEndpointActions,
+    "disable_endpoint",
+  );
+  const deleteEndpointAction = getActionDescriptor(
+    selectedEndpointActions,
+    "delete_endpoint",
+  );
+  const viewDeliveryLogAction = getActionDescriptor(
+    selectedEndpointActions,
+    "view_delivery_log",
+  );
   const retryCapability = getRetryCapability(
     selectedDeliveries,
     selectedEndpointActions,
@@ -1139,6 +1182,11 @@ export default async function WebhooksPage({
     emptyReason = requestedEmptyReason as EmptyReason;
   } else if (webhookReadiness?.status === "not_provisioned") {
     emptyReason = "not_provisioned";
+  } else if (
+    data.errors.length > 0 &&
+    data.errors.every((error) => isPermissionDeniedMessage(error))
+  ) {
+    emptyReason = "permission_denied";
   } else if (
     webhookReadiness?.status === "blocked" &&
     endpointRows.length === 0
@@ -1303,7 +1351,7 @@ export default async function WebhooksPage({
         theme={th}
         title="Webhooks"
         subtitle="端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — 後端 engine 狀態直接決定畫面"
-        tabs={["Endpoints", "Deliveries"]}
+        tabs={["Endpoints", "Deliveries", "Replay"]}
         activeTab="Endpoints"
         actions={
           <>
@@ -1478,7 +1526,7 @@ export default async function WebhooksPage({
                 subtitle={
                   selectedEndpoint
                     ? selectedEndpoint.webhookId
-                    : "從左側選一個 endpoint 查看 delivery 與動作"
+                    : "從左側選一個 endpoint 查看 delivery、replay 與管理動作"
                 }
               >
                 {selectedEndpoint ? (
@@ -1629,14 +1677,25 @@ export default async function WebhooksPage({
                       })}
                     </div>
 
-                    <Link
-                      href={platformFailureLink.route}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={smallLinkStyle}
-                    >
-                      開新分頁到 Platform Admin 查看 queue / health
-                    </Link>
+                    <div style={inlineStackStyle}>
+                      <div style={cardSectionLabelStyle}>Cross-app links</div>
+                      <div style={actionRowStyle}>
+                        <Link
+                          href={platformFailureLink.route}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={actionLinkStyle}
+                        >
+                          開啟 Platform Admin queue / health
+                        </Link>
+                        <Link
+                          href="/integration-governance"
+                          style={actionLinkStyle}
+                        >
+                          回整合就緒度
+                        </Link>
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <WorkflowEmptyState
@@ -1650,132 +1709,184 @@ export default async function WebhooksPage({
 
               <CanvasCard
                 theme={th}
-                title={createMode ? "Create endpoint" : "Quick actions"}
+                title={createMode ? "Create endpoint" : "Endpoint actions"}
                 subtitle={
                   createMode
                     ? "新端點建立後會先進入 test_pending；需等待 receiver 驗證完成"
-                    : "用選取中的 endpoint 進行 update / rotate secret"
+                    : "用選取中的 endpoint 進行 update / rotate / disable / delete"
                 }
               >
                 {createMode ? (
-                  <form action={createWebhook} style={inlineStackStyle}>
-                    <div style={fieldGridStyle}>
-                      <CanvasField theme={th} label="Webhook URL">
-                        <input name="url" style={nativeInputStyle} />
-                      </CanvasField>
-                      <CanvasField theme={th} label="Events (comma-separated)">
-                        <input
-                          name="events"
-                          defaultValue={
-                            data.governance?.baselineWebhookEvents.join(", ") ??
-                            ""
-                          }
-                          style={nativeInputStyle}
-                        />
-                      </CanvasField>
-                    </div>
-                    <CanvasField theme={th} label="Secret">
-                      <input name="secret" style={nativeInputStyle} />
-                    </CanvasField>
-                    <div style={actionRowStyle}>
-                      <button type="submit" style={submitButtonStyle}>
-                        建立 endpoint
-                      </button>
-                      <Link href="/webhooks" style={actionLinkStyle}>
-                        取消
-                      </Link>
-                    </div>
-                    <div style={helperTextStyle}>
-                      create action 走真實 tenant webhook command
-                      surface；建立後狀態預期為 `test_pending`。
-                    </div>
-                  </form>
-                ) : selectedEndpoint ? (
-                  <div style={inlineStackStyle}>
-                    <form action={updateWebhook} style={inlineStackStyle}>
-                      <input
-                        type="hidden"
-                        name="webhookId"
-                        value={selectedEndpoint.webhookId}
-                      />
+                  createEndpointAction?.enabled ? (
+                    <form action={createWebhook} style={inlineStackStyle}>
                       <div style={fieldGridStyle}>
                         <CanvasField theme={th} label="Webhook URL">
+                          <input name="url" style={nativeInputStyle} />
+                        </CanvasField>
+                        <CanvasField
+                          theme={th}
+                          label="Events (comma-separated)"
+                        >
                           <input
-                            name="url"
-                            defaultValue={selectedEndpoint.url}
+                            name="events"
+                            defaultValue={
+                              data.governance?.baselineWebhookEvents.join(
+                                ", ",
+                              ) ?? ""
+                            }
                             style={nativeInputStyle}
                           />
                         </CanvasField>
-                        <CanvasField theme={th} label="Status">
-                          <select
-                            name="status"
-                            defaultValue={selectedEndpoint.status}
-                            style={nativeInputStyle}
-                          >
-                            <option value="active">active</option>
-                            <option value="test_pending">test_pending</option>
-                          </select>
-                        </CanvasField>
                       </div>
-                      <CanvasField theme={th} label="Events (comma-separated)">
-                        <input
-                          name="events"
-                          defaultValue={selectedEndpoint.events.join(", ")}
-                          style={nativeInputStyle}
-                        />
+                      <CanvasField theme={th} label="Secret">
+                        <input name="secret" style={nativeInputStyle} />
                       </CanvasField>
                       <div style={actionRowStyle}>
                         <button type="submit" style={submitButtonStyle}>
-                          更新 endpoint
+                          建立 endpoint
                         </button>
-                        <Link
-                          href={`/webhooks?create=true`}
-                          style={actionLinkStyle}
-                        >
-                          建立新端點
+                        <Link href="/webhooks" style={actionLinkStyle}>
+                          取消
                         </Link>
                       </div>
                       <div style={helperTextStyle}>
-                        `disabled` 不在一般 update flow 內；停用需走下方 danger
-                        zone，並提供 reason 以符合 high-risk 動作要求。
+                        create action 走真實 tenant webhook command
+                        surface；建立後狀態預期為 `test_pending`。
                       </div>
                     </form>
+                  ) : (
+                    <WorkflowEmptyState
+                      title="目前不可建立 endpoint"
+                      description={`create_endpoint 目前不可用：${renderDescriptorHint(createEndpointAction) ?? "disabled"}`}
+                      tone="warning"
+                      density="compact"
+                    />
+                  )
+                ) : selectedEndpoint ? (
+                  <div style={inlineStackStyle}>
+                    {updateEndpointAction ? (
+                      <form action={updateWebhook} style={inlineStackStyle}>
+                        <input
+                          type="hidden"
+                          name="webhookId"
+                          value={selectedEndpoint.webhookId}
+                        />
+                        <div style={fieldGridStyle}>
+                          <CanvasField theme={th} label="Webhook URL">
+                            <input
+                              name="url"
+                              defaultValue={selectedEndpoint.url}
+                              style={nativeInputStyle}
+                              disabled={!updateEndpointAction.enabled}
+                            />
+                          </CanvasField>
+                          <CanvasField theme={th} label="Status">
+                            <select
+                              name="status"
+                              defaultValue={selectedEndpoint.status}
+                              style={nativeInputStyle}
+                              disabled={!updateEndpointAction.enabled}
+                            >
+                              <option value="active">active</option>
+                              <option value="test_pending">test_pending</option>
+                            </select>
+                          </CanvasField>
+                        </div>
+                        <CanvasField
+                          theme={th}
+                          label="Events (comma-separated)"
+                        >
+                          <input
+                            name="events"
+                            defaultValue={selectedEndpoint.events.join(", ")}
+                            style={nativeInputStyle}
+                            disabled={!updateEndpointAction.enabled}
+                          />
+                        </CanvasField>
+                        <div style={actionRowStyle}>
+                          {updateEndpointAction.enabled ? (
+                            <button type="submit" style={submitButtonStyle}>
+                              更新 endpoint
+                            </button>
+                          ) : (
+                            <span
+                              style={disabledActionStyle}
+                              title={
+                                renderDescriptorHint(updateEndpointAction) ??
+                                "disabled"
+                              }
+                            >
+                              更新 endpoint
+                            </span>
+                          )}
+                          <Link
+                            href={`/webhooks?create=true`}
+                            style={actionLinkStyle}
+                          >
+                            建立新端點
+                          </Link>
+                        </div>
+                        <div style={helperTextStyle}>
+                          `disabled` 不在一般 update flow 內；停用需走下方
+                          danger zone，並提供 reason 以符合 high-risk 動作要求。
+                        </div>
+                      </form>
+                    ) : null}
 
                     <div style={dividerStyle} />
 
-                    <form
-                      id="rotate-secret"
-                      action={rotateWebhookSecret}
-                      style={inlineStackStyle}
-                    >
-                      <input
-                        type="hidden"
-                        name="webhookId"
-                        value={selectedEndpoint.webhookId}
-                      />
-                      <div style={cardSectionLabelStyle}>Rotate secret</div>
-                      <div style={fieldGridStyle}>
-                        <CanvasField theme={th} label="New secret">
-                          <input name="secret" style={nativeInputStyle} />
-                        </CanvasField>
-                        <CanvasField theme={th} label="Rotation reason">
-                          <input
-                            name="rotationReason"
-                            defaultValue="consumer_key_rotation"
-                            style={nativeInputStyle}
-                          />
-                        </CanvasField>
-                      </div>
-                      <div style={dangerNoteStyle}>
-                        目前 API 只回傳 secret preview，不回傳 plaintext-once
-                        secret；輪替後請立即同步 receiver。
-                      </div>
-                      <div style={actionRowStyle}>
-                        <button type="submit" style={submitButtonStyle}>
-                          Rotate secret
-                        </button>
-                      </div>
-                    </form>
+                    {rotateSecretAction ? (
+                      <form
+                        id="rotate-secret"
+                        action={rotateWebhookSecret}
+                        style={inlineStackStyle}
+                      >
+                        <input
+                          type="hidden"
+                          name="webhookId"
+                          value={selectedEndpoint.webhookId}
+                        />
+                        <div style={cardSectionLabelStyle}>Rotate secret</div>
+                        <div style={fieldGridStyle}>
+                          <CanvasField theme={th} label="New secret">
+                            <input
+                              name="secret"
+                              style={nativeInputStyle}
+                              disabled={!rotateSecretAction.enabled}
+                            />
+                          </CanvasField>
+                          <CanvasField theme={th} label="Rotation reason">
+                            <input
+                              name="rotationReason"
+                              defaultValue="consumer_key_rotation"
+                              style={nativeInputStyle}
+                              disabled={!rotateSecretAction.enabled}
+                            />
+                          </CanvasField>
+                        </div>
+                        <div style={dangerNoteStyle}>
+                          目前 API 只回傳 secret preview，不回傳 plaintext-once
+                          secret；輪替後請立即同步 receiver。
+                        </div>
+                        <div style={actionRowStyle}>
+                          {rotateSecretAction.enabled ? (
+                            <button type="submit" style={submitButtonStyle}>
+                              Rotate secret
+                            </button>
+                          ) : (
+                            <span
+                              style={disabledActionStyle}
+                              title={
+                                renderDescriptorHint(rotateSecretAction) ??
+                                "disabled"
+                              }
+                            >
+                              Rotate secret
+                            </span>
+                          )}
+                        </div>
+                      </form>
+                    ) : null}
 
                     <div style={dividerStyle} />
 
@@ -1785,45 +1896,90 @@ export default async function WebhooksPage({
                         停用與刪除都屬 high-risk 動作；依 spec 需填 reason
                         才能提交。
                       </div>
-                      <form action={disableWebhook} style={inlineStackStyle}>
-                        <input
-                          type="hidden"
-                          name="webhookId"
-                          value={selectedEndpoint.webhookId}
-                        />
-                        <CanvasField theme={th} label="Disable reason">
+                      {disableEndpointAction ? (
+                        <form action={disableWebhook} style={inlineStackStyle}>
                           <input
-                            name="reason"
-                            defaultValue="receiver_temporarily_unavailable"
-                            style={nativeInputStyle}
+                            type="hidden"
+                            name="webhookId"
+                            value={selectedEndpoint.webhookId}
                           />
-                        </CanvasField>
-                        <div style={actionRowStyle}>
-                          <button type="submit" style={dangerSubmitButtonStyle}>
-                            Disable endpoint
-                          </button>
-                        </div>
-                      </form>
+                          <CanvasField theme={th} label="Disable reason">
+                            <input
+                              name="reason"
+                              defaultValue="receiver_temporarily_unavailable"
+                              style={nativeInputStyle}
+                              disabled={!disableEndpointAction.enabled}
+                            />
+                          </CanvasField>
+                          <div style={actionRowStyle}>
+                            {disableEndpointAction.enabled ? (
+                              <button
+                                type="submit"
+                                style={dangerSubmitButtonStyle}
+                              >
+                                Disable endpoint
+                              </button>
+                            ) : (
+                              <span
+                                style={disabledActionStyle}
+                                title={
+                                  renderDescriptorHint(disableEndpointAction) ??
+                                  "disabled"
+                                }
+                              >
+                                Disable endpoint
+                              </span>
+                            )}
+                          </div>
+                        </form>
+                      ) : null}
 
-                      <form action={deleteWebhook} style={inlineStackStyle}>
-                        <input
-                          type="hidden"
-                          name="webhookId"
-                          value={selectedEndpoint.webhookId}
-                        />
-                        <CanvasField theme={th} label="Delete reason">
-                          <textarea
-                            name="reason"
-                            defaultValue="endpoint_decommissioned_after_receiver_cutover"
-                            style={nativeTextAreaStyle}
+                      {deleteEndpointAction ? (
+                        <form action={deleteWebhook} style={inlineStackStyle}>
+                          <input
+                            type="hidden"
+                            name="webhookId"
+                            value={selectedEndpoint.webhookId}
                           />
-                        </CanvasField>
-                        <div style={actionRowStyle}>
-                          <button type="submit" style={dangerSubmitButtonStyle}>
-                            Delete endpoint
-                          </button>
-                        </div>
-                      </form>
+                          <CanvasField theme={th} label="Delete reason">
+                            <textarea
+                              name="reason"
+                              defaultValue="endpoint_decommissioned_after_receiver_cutover"
+                              style={nativeTextAreaStyle}
+                              disabled={!deleteEndpointAction.enabled}
+                            />
+                          </CanvasField>
+                          <div style={actionRowStyle}>
+                            {deleteEndpointAction.enabled ? (
+                              <button
+                                type="submit"
+                                style={dangerSubmitButtonStyle}
+                              >
+                                Delete endpoint
+                              </button>
+                            ) : (
+                              <span
+                                style={disabledActionStyle}
+                                title={
+                                  renderDescriptorHint(deleteEndpointAction) ??
+                                  "disabled"
+                                }
+                              >
+                                Delete endpoint
+                              </span>
+                            )}
+                          </div>
+                        </form>
+                      ) : null}
+
+                      {viewDeliveryLogAction?.enabled ? (
+                        <Link
+                          href={`/webhooks?webhookId=${encodeURIComponent(selectedEndpoint.webhookId)}#delivery-log`}
+                          style={actionLinkStyle}
+                        >
+                          檢視此 endpoint delivery log
+                        </Link>
+                      ) : null}
                     </div>
                   </div>
                 ) : (
@@ -1889,6 +2045,33 @@ export default async function WebhooksPage({
             )}
           </CanvasCard>
         </div>
+
+        <CanvasCard
+          theme={th}
+          title="Replay / Retry"
+          subtitle="對照 canvas 的 Replay tab；tenant UI 只顯示 capability 與 deep link，不偽造 engine 控制"
+        >
+          <div style={inlineStackStyle}>
+            <div style={metaValueStyle}>
+              {retryCapability?.enabled
+                ? "後端標記該資源可重試，但 tenant console 目前仍以 delivery log 與平台 queue health 交叉追查為主。"
+                : `retry_failed_delivery: ${renderDescriptorHint(retryCapability) ?? "engine_auto_retry_only"}`}
+            </div>
+            <div style={actionRowStyle}>
+              <Link
+                href={platformFailureLink.route}
+                target="_blank"
+                rel="noreferrer"
+                style={actionLinkStyle}
+              >
+                到 Platform Admin 檢查 replay queue
+              </Link>
+              <Link href="/integration-governance" style={actionLinkStyle}>
+                檢查 readiness / next action
+              </Link>
+            </div>
+          </div>
+        </CanvasCard>
 
         <CanvasCard
           theme={th}
