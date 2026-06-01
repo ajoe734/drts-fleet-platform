@@ -100,12 +100,8 @@ type RuntimeActionedResource = {
 type RuntimeIssueRecord = ReconciliationIssueRecord & RuntimeActionedResource;
 type RuntimeInvoiceRecord = TenantInvoiceRecord & RuntimeActionedResource;
 type RuntimeStatementRecord = DriverStatementRecord & RuntimeActionedResource;
-type RuntimeReimbursementRecord = ReimbursementBatchRecord &
-  RuntimeActionedResource;
 type RuntimeSettlementMatrixRecord = SettlementMatrixRecord &
   RuntimeActionedResource;
-type ReimbursementTableRow = RuntimeReimbursementRecord &
-  Record<string, unknown>;
 type EmptyStateConfig = {
   reason: EmptyReason;
   message: string;
@@ -175,17 +171,6 @@ function formatMoney(
 
 function formatMinorMoney(amountMinor: number, currency: string) {
   return `${amountMinor.toLocaleString()} ${currency}`;
-}
-
-function reimbursementWorkflow(
-  batch: ReimbursementBatchRecord,
-  awaitingApproval: string,
-  paid: string,
-  approved: string,
-) {
-  if (batch.status === "paid") return paid;
-  if (batch.approvedAt) return approved;
-  return awaitingApproval;
 }
 
 function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
@@ -281,19 +266,6 @@ function invoiceStatusTone(status: TenantInvoiceRecord["status"]): CanvasTone {
     case "draft":
       return "neutral";
     case "issued":
-    default:
-      return "warn";
-  }
-}
-
-function reimbursementStatusTone(
-  status: ReimbursementBatchRecord["status"],
-): CanvasTone {
-  switch (status) {
-    case "paid":
-      return "success";
-    case "pending":
-      return "info";
     default:
       return "warn";
   }
@@ -632,7 +604,7 @@ export default function PaymentsPage() {
   const [invoices, setInvoices] = useState<RuntimeInvoiceRecord[]>([]);
   const [statements, setStatements] = useState<RuntimeStatementRecord[]>([]);
   const [reimbursements, setReimbursements] = useState<
-    RuntimeReimbursementRecord[]
+    ReimbursementBatchRecord[]
   >([]);
   const [reconciliationIssues, setReconciliationIssues] = useState<
     RuntimeIssueRecord[]
@@ -656,15 +628,8 @@ export default function PaymentsPage() {
   );
   const [invoicePending, setInvoicePending] = useState(false);
   const [statementPending, setStatementPending] = useState(false);
-  const [batchActionId, setBatchActionId] = useState<string | null>(null);
-  const [batchActionReasons, setBatchActionReasons] = useState<
-    Record<string, string>
-  >({});
   const [issueActionId, setIssueActionId] = useState<string | null>(null);
   const [issueDraftPending, setIssueDraftPending] = useState(false);
-  const [remittanceProofs, setRemittanceProofs] = useState<
-    Record<string, string>
-  >({});
   const [issueAssignments, setIssueAssignments] = useState<
     Record<string, string>
   >({});
@@ -783,11 +748,7 @@ export default function PaymentsPage() {
   }, [loadFinance, refreshIntervalMs]);
 
   useEffect(() => {
-    const targetId = focusedIssueId
-      ? "payments-reconciliation-queue"
-      : focusedBatchId
-        ? "payments-reimbursements"
-        : null;
+    const targetId = focusedIssueId ? "payments-reconciliation-queue" : null;
     if (!targetId) {
       return;
     }
@@ -795,7 +756,7 @@ export default function PaymentsPage() {
       behavior: "smooth",
       block: "start",
     });
-  }, [focusedBatchId, focusedIssueId]);
+  }, [focusedIssueId]);
 
   async function handleGenerateInvoice(event: React.FormEvent) {
     event.preventDefault();
@@ -1014,82 +975,6 @@ export default function PaymentsPage() {
     }
   }
 
-  async function handleApproveBatch(batch: ReimbursementBatchRecord) {
-    const descriptor = getActionDescriptor(
-      [
-        listAction("approve_batch", "high", {
-          enabled: !batch.approvedAt,
-          disabledReasonCode: "already_approved",
-          requiresReason: true,
-        }),
-      ],
-      "approve_batch",
-    );
-    const reason = batchActionReasons[batch.batchId]?.trim() ?? "";
-    if (descriptor?.requiresReason && !reason) {
-      setError(
-        locale === "en"
-          ? "Approval reason is required."
-          : "核准代墊批次前必須填寫原因。",
-      );
-      return;
-    }
-    setBatchActionId(batch.batchId);
-    setError(null);
-    try {
-      await client.approveReimbursementBatch(batch.batchId, {
-        statementId: batch.statementId,
-      });
-      await loadFinance();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBatchActionId(null);
-    }
-  }
-
-  async function handleMarkPaid(batch: ReimbursementBatchRecord) {
-    const descriptor = getActionDescriptor(
-      [
-        listAction("mark_paid", "high", {
-          enabled: batch.status !== "paid",
-          disabledReasonCode: "already_paid",
-          requiresReason: true,
-        }),
-      ],
-      "mark_paid",
-    );
-    const reason = batchActionReasons[batch.batchId]?.trim() ?? "";
-    if (descriptor?.requiresReason && !reason) {
-      setError(
-        locale === "en"
-          ? "Paid confirmation reason is required."
-          : "標記已付款前必須填寫確認原因。",
-      );
-      return;
-    }
-    setBatchActionId(batch.batchId);
-    setError(null);
-    try {
-      const proofId =
-        remittanceProofs[batch.batchId]?.trim() ||
-        `remit-${batch.batchId.slice(-8)}`;
-      await client.markReimbursementPaid(batch.batchId, {
-        remittanceProofId: proofId,
-        paidAt: new Date().toISOString(),
-      });
-      setRemittanceProofs((current) => ({
-        ...current,
-        [batch.batchId]: proofId,
-      }));
-      await loadFinance();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBatchActionId(null);
-    }
-  }
-
   const filteredInvoices =
     invoiceFilter === "all"
       ? invoices
@@ -1240,21 +1125,6 @@ export default function PaymentsPage() {
     }),
   ];
 
-  const reimbursementActionsFor = (
-    batch: ReimbursementBatchRecord,
-  ): ResourceActionDescriptor[] => [
-    listAction("approve_batch", "high", {
-      enabled: !batch.approvedAt,
-      disabledReasonCode: "already_approved",
-      requiresReason: true,
-    }),
-    listAction("mark_paid", "high", {
-      enabled: batch.status !== "paid",
-      disabledReasonCode: "already_paid",
-      requiresReason: true,
-    }),
-  ];
-
   const issueOpsLinkFor = (
     issue: ReconciliationIssueRecord,
   ): CrossAppResourceLink => ({
@@ -1342,15 +1212,6 @@ export default function PaymentsPage() {
         }
       : {}),
   };
-  const reimbursementEmptyConfig: EmptyStateConfig = {
-    reason: rootEmptyReason ?? "no_data",
-    message: defaultEmptyMessage(
-      locale,
-      rootEmptyReason ?? "no_data",
-      t("payments.noReimbursements"),
-    ),
-  };
-
   const navLabels =
     locale === "en"
       ? {
@@ -1398,7 +1259,7 @@ export default function PaymentsPage() {
           breadcrumbParent: "Pricing & Settlement",
           pageTitle: "Settlement governance",
           pageSubtitle:
-            "invoices · driver statements · reimbursement batches · settlement matrix · reconciliation issues",
+            "invoices · driver statements · settlement matrix · reconciliation issues",
           export: "Export",
           openIssue: "Open issue",
           searchPlaceholder: "Search orders, tenants, drivers...",
@@ -1428,6 +1289,12 @@ export default function PaymentsPage() {
           linkedExposure: "Linked exposure",
           shadowIssues: "Shadow issues",
           openMix: "Open mix",
+          reimbursementQueueTitle: "Reimbursement route",
+          reimbursementQueueSubtitle:
+            "Batch approval and paid-state mutation moved to the dedicated queue; this screen keeps the summary and route handoff.",
+          reimbursementQueueCta: "Open reimbursement queue",
+          reimbursementQueueFocused: (batchId: string) =>
+            `Received batch deep link ${batchId}. Continue the approval or paid flow from the reimbursement queue route.`,
           actorLabel: "Finance actor ID",
           loading: t("payments.loading"),
         }
@@ -1435,7 +1302,7 @@ export default function PaymentsPage() {
           breadcrumbParent: "計價與結算",
           pageTitle: "結算治理",
           pageSubtitle:
-            "invoices · driver statements · reimbursement batches · settlement matrix · reconciliation issues",
+            "invoices · driver statements · settlement matrix · reconciliation issues",
           export: "匯出",
           openIssue: "開立 issue",
           searchPlaceholder: "搜尋訂單、租戶、司機...",
@@ -1464,6 +1331,12 @@ export default function PaymentsPage() {
           linkedExposure: "關聯金額",
           shadowIssues: "Shadow issues",
           openMix: "Open mix",
+          reimbursementQueueTitle: "代墊批次路由",
+          reimbursementQueueSubtitle:
+            "批次核准與付款遷移到獨立 queue；本頁只保留 summary 與導流。",
+          reimbursementQueueCta: "前往 reimbursement queue",
+          reimbursementQueueFocused: (batchId: string) =>
+            `收到批次 deep link ${batchId}，請改到 reimbursement queue 繼續處理。`,
           actorLabel: "財務操作人 ID",
           loading: t("payments.loading"),
         };
@@ -1479,7 +1352,6 @@ export default function PaymentsPage() {
     t("payments.matrix.title"),
     t("payments.invoicesTitle"),
     t("payments.statementsTitle"),
-    t("payments.tab.reimbursements"),
     t("payments.reconciliation.title"),
   ];
   const generateInvoicesAction = getActionDescriptor(
@@ -1490,6 +1362,9 @@ export default function PaymentsPage() {
     paymentsPageActions,
     "generate_driver_statements",
   );
+  const reimbursementQueueHref = focusedBatchId
+    ? `/payments/reimbursements?batchId=${encodeURIComponent(focusedBatchId)}`
+    : "/payments/reimbursements";
 
   const shellNav: CanvasShellNavItem[] = [
     { key: "home", href: "/", label: navLabels.home, icon: "dashboard" },
@@ -1621,15 +1496,20 @@ export default function PaymentsPage() {
       r: (issue) => issue.tenantId ?? "—",
     },
     {
+      h: "Mirror order",
+      w: 164,
+      mono: true,
+      r: (issue) => issue.mirrorOrderId ?? issue.orderId ?? "—",
+    },
+    {
       h: "External order",
       w: 164,
       mono: true,
-      r: (issue) =>
-        issue.externalOrderId ?? issue.mirrorOrderId ?? issue.orderId ?? "—",
+      r: (issue) => issue.externalOrderId ?? "—",
     },
     {
       h: "Context",
-      w: 236,
+      w: 248,
       mono: true,
       r: (issue) => (
         <div style={cellStackStyle({ mono: true })}>
@@ -1647,12 +1527,17 @@ export default function PaymentsPage() {
     },
     {
       h: "Status",
-      w: 126,
+      w: 228,
       r: (issue) => (
         <div style={cellStackStyle()}>
           <CanvasPill theme={theme} tone={issueStatusTone(issue.status)} dot>
             {formatPlatformCodeLabel(locale, issue.status)}
           </CanvasPill>
+          {issue.evidenceArtifactIds.length > 0 ? (
+            <span style={{ color: theme.textMuted, fontSize: 11 }}>
+              {issue.evidenceArtifactIds.join(", ")}
+            </span>
+          ) : null}
           <span style={{ color: theme.textMuted, fontSize: 11 }}>
             {t("payments.reconciliation.evidenceCount", {
               count: String(issue.evidenceArtifactIds.length),
@@ -2160,160 +2045,6 @@ export default function PaymentsPage() {
     },
   ];
 
-  const reimbursementColumns: CanvasTableColumn<ReimbursementTableRow>[] = [
-    {
-      h: t("payments.col.batch"),
-      w: 152,
-      mono: true,
-      r: (batch) => (
-        <div style={cellStackStyle({ mono: true })}>
-          <span>{batch.batchId}</span>
-          <span style={{ color: theme.textMuted, fontSize: 11 }}>
-            {batch.periodMonth}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: t("payments.col.driver"),
-      w: 128,
-      mono: true,
-      r: (batch) => batch.driverId,
-    },
-    {
-      h: getPlatformLabel(locale, "statement"),
-      w: 160,
-      mono: true,
-      r: (batch) => batch.statementId,
-    },
-    {
-      h: getPlatformLabel(locale, "total"),
-      w: 128,
-      mono: true,
-      r: (batch) => formatMoney(batch.totalAmount),
-    },
-    {
-      h: getPlatformLabel(locale, "workflow"),
-      w: 168,
-      r: (batch) => (
-        <div style={cellStackStyle()}>
-          <CanvasPill
-            theme={theme}
-            tone={reimbursementStatusTone(batch.status)}
-            dot
-          >
-            {reimbursementWorkflow(
-              batch,
-              t("payments.awaitingApproval"),
-              formatPlatformCodeLabel(locale, "paid"),
-              t("payments.col.approved"),
-            )}
-          </CanvasPill>
-          <span style={{ color: theme.textMuted, fontSize: 11 }}>
-            {batch.approvedAt
-              ? formatDateTime(batch.approvedAt)
-              : t("payments.awaitingApproval")}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: getPlatformLabel(locale, "remittance"),
-      w: 220,
-      r: (batch) => (
-        <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
-          <input
-            value={
-              remittanceProofs[batch.batchId] ?? batch.remittanceProofId ?? ""
-            }
-            onChange={(event) =>
-              setRemittanceProofs((current) => ({
-                ...current,
-                [batch.batchId]: event.target.value,
-              }))
-            }
-            placeholder={getPlatformLabel(locale, "remittanceProofExample")}
-            style={nativeControlStyle(theme)}
-            disabled={batch.status === "paid"}
-          />
-          <input
-            value={batchActionReasons[batch.batchId] ?? ""}
-            onChange={(event) =>
-              setBatchActionReasons((current) => ({
-                ...current,
-                [batch.batchId]: event.target.value,
-              }))
-            }
-            placeholder={
-              locale === "en" ? "Reason for state change" : "狀態異動原因"
-            }
-            style={nativeControlStyle(theme)}
-          />
-        </div>
-      ),
-    },
-    {
-      h: getPlatformLabel(locale, "items"),
-      w: 220,
-      r: (batch) => (
-        <div style={{ ...cellStackStyle(), maxWidth: 220 }}>
-          {batch.items.map((item) => item.orderId).join(", ")}
-        </div>
-      ),
-    },
-    {
-      h: t("common.actions"),
-      w: 160,
-      r: (batch) => {
-        const batchActions = resourceActions(
-          batch as RuntimeReimbursementRecord,
-          reimbursementActionsFor(batch),
-        );
-        const approveAction = getActionDescriptor(
-          batchActions,
-          "approve_batch",
-        );
-        const markPaidAction = getActionDescriptor(batchActions, "mark_paid");
-        return (
-          <div style={{ display: "grid", gap: 8, minWidth: 140 }}>
-            {!batch.approvedAt
-              ? renderContractAction(approveAction, {
-                  label: t("payments.approve"),
-                  icon: "check",
-                  disabled: batchActionId === batch.batchId,
-                  onClick: () => void handleApproveBatch(batch),
-                })
-              : null}
-            {batch.status !== "paid"
-              ? renderContractAction(markPaidAction, {
-                  label:
-                    batchActionId === batch.batchId
-                      ? t("payments.saving")
-                      : t("payments.markPaid"),
-                  icon: "billing",
-                  primary: true,
-                  danger: true,
-                  disabled: batchActionId === batch.batchId,
-                  onClick: () => void handleMarkPaid(batch),
-                })
-              : null}
-            <a
-              href={`/payments?batchId=${encodeURIComponent(batch.batchId)}#payments-reimbursements`}
-              style={{
-                color: theme.accent,
-                textDecoration: "none",
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              {locale === "en" ? "Open batch queue" : "開啟批次佇列"}
-            </a>
-          </div>
-        );
-      },
-    },
-  ];
-
   function renderContractAction(
     descriptor: ResourceActionDescriptor | null,
     options: {
@@ -2437,7 +2168,7 @@ export default function PaymentsPage() {
           title={copy.pageTitle}
           subtitle={`${copy.pageSubtitle} · ${freshnessLabel}`}
           tabs={tabs}
-          activeTab={tabs[4]}
+          activeTab={tabs[3]}
           actions={
             <>
               <CanvasBtn theme={theme} icon="reports" disabled>
@@ -2499,6 +2230,27 @@ export default function PaymentsPage() {
                     locale === "en"
                       ? "This route owns reconciliation mutation. Review evidence and resolve or reopen from this control plane."
                       : "這個 route 擁有 reconciliation mutation 權限；請在這個 control plane 補證據、結案或重開。"
+                  }
+                />
+              ) : null}
+
+              {focusedBatchId ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="info"
+                  title={copy.reimbursementQueueFocused(focusedBatchId)}
+                  actions={
+                    <a
+                      href={reimbursementQueueHref}
+                      style={{
+                        color: theme.accent,
+                        textDecoration: "none",
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {copy.reimbursementQueueCta}
+                    </a>
                   }
                 />
               ) : null}
@@ -3165,12 +2917,11 @@ export default function PaymentsPage() {
 
               <CanvasCard
                 theme={theme}
-                title={t("payments.reimbursementsTitle")}
-                subtitle={`${pendingReimbursements.length} pending · ${paidReimbursementMinor.toLocaleString()} settled`}
-                padding={0}
+                title={copy.reimbursementQueueTitle}
+                subtitle={copy.reimbursementQueueSubtitle}
                 actions={
                   <a
-                    href="/payments#payments-reimbursements"
+                    href={reimbursementQueueHref}
                     style={{
                       color: theme.accent,
                       textDecoration: "none",
@@ -3178,23 +2929,45 @@ export default function PaymentsPage() {
                       fontWeight: 600,
                     }}
                   >
-                    {locale === "en"
-                      ? "Open reimbursement queue"
-                      : "開啟 reimbursement queue"}
+                    {copy.reimbursementQueueCta}
                   </a>
                 }
               >
-                <div id="payments-reimbursements">
-                  {reimbursements.length > 0 ? (
-                    <CanvasTable
-                      theme={theme}
-                      columns={reimbursementColumns}
-                      rows={reimbursements as ReimbursementTableRow[]}
-                    />
-                  ) : (
-                    renderEmptyState(reimbursementEmptyConfig)
-                  )}
-                </div>
+                <CanvasDL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    {
+                      k: locale === "en" ? "Pending batches" : "待處理批次",
+                      v: String(pendingReimbursements.length),
+                      mono: true,
+                    },
+                    {
+                      k: locale === "en" ? "Pending amount" : "待處理金額",
+                      v: formatMinorMoney(
+                        pendingReimbursementMinor,
+                        exposureCurrency,
+                      ),
+                      mono: true,
+                    },
+                    {
+                      k: locale === "en" ? "Paid amount" : "已付款金額",
+                      v: formatMinorMoney(
+                        paidReimbursementMinor,
+                        exposureCurrency,
+                      ),
+                      mono: true,
+                    },
+                    {
+                      k:
+                        locale === "en"
+                          ? "Deep link route"
+                          : "批次 deep link 路由",
+                      v: reimbursementQueueHref,
+                      mono: true,
+                    },
+                  ]}
+                />
               </CanvasCard>
 
               <div
