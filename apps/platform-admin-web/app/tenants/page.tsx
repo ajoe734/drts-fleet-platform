@@ -26,6 +26,7 @@ import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import type {
+  ActionReceipt,
   ApiSuccessEnvelope,
   CreatePlatformTenantCommand,
   CrossAppResourceLink,
@@ -95,6 +96,21 @@ type EmptyVisual = {
   hint?: string;
   tone: CanvasTone;
   icon: "tenants" | "search" | "warn" | "health";
+};
+
+type ConfirmIntent =
+  | {
+      kind: "create";
+      action: ResourceActionDescriptor;
+    }
+  | {
+      kind: "tenant_action";
+      action: ResourceActionDescriptor;
+      tenant: TenantListItem;
+    };
+
+type WriteReceiptState = ActionReceipt & {
+  requestId: string;
 };
 
 const REFRESH_TIER: RefreshTier = "medium_slow";
@@ -273,6 +289,53 @@ const emptyStateStyle = {
   padding: "32px 24px",
   textAlign: "center",
   color: theme.textMuted,
+} satisfies CSSProperties;
+
+const toastViewportStyle = {
+  position: "fixed",
+  top: 92,
+  right: 24,
+  zIndex: 30,
+  width: "min(420px, calc(100vw - 32px))",
+} satisfies CSSProperties;
+
+const toastCardStyle = {
+  display: "grid",
+  gap: 10,
+  padding: 16,
+  borderRadius: 14,
+  border: `1px solid ${theme.successBorder}`,
+  background: theme.surface,
+  boxShadow: "0 20px 40px rgba(15, 23, 42, 0.16)",
+} satisfies CSSProperties;
+
+const modalViewportStyle = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 40,
+  display: "grid",
+  placeItems: "center",
+  padding: 24,
+  background: "rgba(15, 23, 42, 0.56)",
+  backdropFilter: "blur(6px)",
+} satisfies CSSProperties;
+
+const modalCardStyle = {
+  width: "min(520px, 100%)",
+  display: "grid",
+  gap: 16,
+  padding: 20,
+  borderRadius: 18,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+  boxShadow: "0 32px 80px rgba(15, 23, 42, 0.28)",
+} satisfies CSSProperties;
+
+const modalFooterStyle = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 8,
+  flexWrap: "wrap",
 } satisfies CSSProperties;
 
 function buildPlatformNav(locale: string): CanvasShellNavItem[] {
@@ -657,6 +720,10 @@ function resolveOwnerName(
   return ownerMap.get(userId) ?? userId;
 }
 
+function resolveAuditHref(auditId: string) {
+  return `/audit?auditId=${encodeURIComponent(auditId)}`;
+}
+
 export default function TenantsPage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -672,6 +739,11 @@ export default function TenantsPage() {
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] =
     useState<TenantFormState>(EMPTY_TENANT_FORM);
+  const [confirmIntent, setConfirmIntent] = useState<ConfirmIntent | null>(
+    null,
+  );
+  const [confirmReason, setConfirmReason] = useState("");
+  const [receipt, setReceipt] = useState<WriteReceiptState | null>(null);
   const deferredSearchTerm = useDeferredValue(searchTerm);
 
   const copy =
@@ -788,7 +860,21 @@ export default function TenantsPage() {
             activate_tenant: "Restore this tenant to active state?",
             enter_rollback_hold:
               "Enter rollback hold for this tenant. A reason is required.",
+            create_tenant:
+              "Create this tenant and seed its lifecycle governance record?",
           },
+          confirmTitle: "Confirm action",
+          confirmReasonLabel: "Reason",
+          confirmReasonPlaceholder:
+            "Explain the governance reason that justifies this action.",
+          confirmCancel: "Cancel",
+          confirmSubmit: "Confirm",
+          receiptTitle: "Action recorded",
+          receiptOpenAudit: "View audit",
+          receiptDismiss: "Dismiss",
+          receiptBody: (message: string) => message,
+          receiptFallbackBody: (label: string) =>
+            `${label} completed. Audit receipt is still syncing.`,
           table: {
             tenant: "TENANT",
             stage: "STAGE",
@@ -918,7 +1004,19 @@ export default function TenantsPage() {
             activate_tenant: "要把這個租戶恢復成 active 狀態嗎？",
             enter_rollback_hold:
               "要把這個租戶切進 rollback hold。此動作需要理由。",
+            create_tenant: "要建立這個租戶並初始化其 lifecycle 治理資料嗎？",
           },
+          confirmTitle: "確認動作",
+          confirmReasonLabel: "理由",
+          confirmReasonPlaceholder: "請填寫這次治理動作的原因。",
+          confirmCancel: "取消",
+          confirmSubmit: "確認",
+          receiptTitle: "動作已記錄",
+          receiptOpenAudit: "查看稽核",
+          receiptDismiss: "關閉",
+          receiptBody: (message: string) => message,
+          receiptFallbackBody: (label: string) =>
+            `${label} 已完成，稽核收據仍在同步中。`,
           table: {
             tenant: "TENANT",
             stage: "STAGE",
@@ -942,6 +1040,18 @@ export default function TenantsPage() {
 
   const navItems = useMemo(() => buildPlatformNav(locale), [locale]);
   const moduleLabels = useMemo(() => createTenantModuleLabels(() => ""), []);
+
+  useEffect(() => {
+    if (!receipt) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setReceipt(null);
+    }, 6_000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [receipt]);
 
   const loadTenants = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -1025,6 +1135,10 @@ export default function TenantsPage() {
   const pageActions =
     loadState?.availableActions.filter((action) => !isRefreshAction(action)) ??
     [];
+  const createTenantAction = useMemo(
+    () => pageActions.find((action) => isCreateTenantAction(action)) ?? null,
+    [pageActions],
+  );
 
   const stageCounts = useMemo(
     () => ({
@@ -1188,80 +1302,134 @@ export default function TenantsPage() {
     [loadTenants],
   );
 
+  const lookupActionReceipt = useCallback(
+    async (
+      requestId: string,
+      fallback: {
+        actionLabel: string;
+        message: string;
+        resourceType: string;
+        resourceId: string;
+      },
+    ): Promise<WriteReceiptState> => {
+      try {
+        const logs = await client.listAuditLogs();
+        const matched = logs.find((entry) => entry.requestId === requestId);
+        if (matched?.auditId) {
+          return {
+            actionId: requestId,
+            auditId: matched.auditId,
+            resourceType: matched.resourceType,
+            resourceId: matched.resourceId ?? fallback.resourceId,
+            status: "completed",
+            message: fallback.message,
+            requestId,
+          };
+        }
+      } catch {
+        // Audit read scope is optional for some actors; keep the success toast.
+      }
+
+      return {
+        actionId: requestId,
+        auditId: "",
+        resourceType: fallback.resourceType,
+        resourceId: fallback.resourceId,
+        status: "completed",
+        message: copy.receiptFallbackBody(fallback.actionLabel),
+        requestId,
+      };
+    },
+    [client, copy],
+  );
+
+  const postTenantWrite = useCallback(
+    async <T,>(path: string, body?: unknown) => {
+      const requestId =
+        globalThis.crypto?.randomUUID?.() ??
+        `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const apiBaseUrl = getRuntimeApiBaseUrl().replace(/\/$/, "");
+      const response = await fetch(`${apiBaseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Request-Id": requestId,
+          "Idempotency-Key": requestId,
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(`API error ${response.status}: ${message}`);
+      }
+
+      return {
+        envelope: (await response.json()) as ApiSuccessEnvelope<T>,
+        requestId,
+      };
+    },
+    [],
+  );
+
   const executeTenantAction = useCallback(
     async (tenant: TenantListItem, action: ResourceActionDescriptor) => {
       if (!action.enabled) {
         return;
       }
 
-      if (action.riskLevel === "medium") {
-        const confirmed = window.confirm(
-          copy.actionMessages[
-            action.action as keyof typeof copy.actionMessages
-          ] ?? resolveActionLabel(action),
-        );
-        if (!confirmed) {
-          return;
-        }
-      }
-
-      let reason: string | null = null;
-      if (action.requiresReason || action.riskLevel === "high") {
-        reason = window.prompt(
-          copy.actionMessages[
-            action.action as keyof typeof copy.actionMessages
-          ] ?? resolveActionLabel(action),
-        );
-        if (!reason?.trim()) {
-          return;
-        }
-      }
-
-      try {
-        setRefreshing(true);
-        const command = toLifecycleActionCommand(reason);
-
-        if (actionMatches(action.action, "activate_tenant", "activateTenant")) {
-          await client.activateTenant(tenant.id, command);
-        } else if (
-          actionMatches(action.action, "suspend_tenant", "suspendTenant")
-        ) {
-          await client.suspendTenant(tenant.id, command);
-        } else if (
-          actionMatches(
-            action.action,
-            "enter_rollback_hold",
-            "rollback_hold_tenant",
-            "rollbackHoldTenant",
-          )
-        ) {
-          await client.rollbackHoldTenant(tenant.id, command);
-        } else {
-          setError(`Unsupported tenant action: ${action.action}`);
-          return;
-        }
-
-        await loadTenants({ silent: true });
-      } catch (caughtError: unknown) {
-        setError(
-          caughtError instanceof Error
-            ? caughtError.message
-            : String(caughtError),
-        );
-      } finally {
-        setRefreshing(false);
-      }
+      setConfirmReason("");
+      setConfirmIntent({
+        kind: "tenant_action",
+        action,
+        tenant,
+      });
     },
-    [client, copy.actionMessages, loadTenants, resolveActionLabel],
+    [],
   );
 
   const handleCreate = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
-      setCreating(true);
-      setError(null);
+      if (!createTenantAction?.enabled) {
+        return;
+      }
 
-      try {
+      setConfirmReason("");
+      setConfirmIntent({
+        kind: "create",
+        action: createTenantAction,
+      });
+    },
+    [createTenantAction],
+  );
+
+  const confirmBodyText =
+    confirmIntent &&
+    (copy.actionMessages[
+      confirmIntent.action.action as keyof typeof copy.actionMessages
+    ] ??
+      resolveActionLabel(confirmIntent.action));
+
+  const submitConfirmedIntent = useCallback(async () => {
+    if (!confirmIntent) {
+      return;
+    }
+
+    const action = confirmIntent.action;
+    const trimmedReason = confirmReason.trim();
+    if (
+      (action.requiresReason || action.riskLevel === "high") &&
+      !trimmedReason
+    ) {
+      return;
+    }
+
+    setError(null);
+
+    try {
+      if (confirmIntent.kind === "create") {
+        setCreating(true);
         const command: CreatePlatformTenantCommand = {
           name: createForm.name.trim(),
           code: createForm.code.trim(),
@@ -1281,22 +1449,89 @@ export default function TenantsPage() {
             : {}),
         };
 
-        await client.createPlatformTenant(command);
+        const { envelope, requestId } =
+          await postTenantWrite<PlatformAdminTenantRecord>(
+            "/api/platform-admin/tenants",
+            command,
+          );
+        const createdTenant = deepCamelCase(envelope.data);
+        const nextReceipt = await lookupActionReceipt(requestId, {
+          actionLabel: resolveActionLabel(action),
+          message: copy.receiptBody(
+            `${resolveActionLabel(action)} · ${createdTenant.name}`,
+          ),
+          resourceType: "platform_tenant",
+          resourceId: createdTenant.id,
+        });
+        setReceipt(nextReceipt);
         setCreateForm(EMPTY_TENANT_FORM);
         setShowCreate(false);
-        await loadTenants({ silent: true });
-      } catch (caughtError: unknown) {
-        setError(
-          caughtError instanceof Error
-            ? caughtError.message
-            : String(caughtError),
+      } else {
+        setRefreshing(true);
+        const command = toLifecycleActionCommand(trimmedReason);
+        const tenant = confirmIntent.tenant;
+        let path: string | null = null;
+
+        if (actionMatches(action.action, "activate_tenant", "activateTenant")) {
+          path = `/api/platform-admin/tenants/${encodeURIComponent(tenant.id)}/activate`;
+        } else if (
+          actionMatches(action.action, "suspend_tenant", "suspendTenant")
+        ) {
+          path = `/api/platform-admin/tenants/${encodeURIComponent(tenant.id)}/suspend`;
+        } else if (
+          actionMatches(
+            action.action,
+            "enter_rollback_hold",
+            "rollback_hold_tenant",
+            "rollbackHoldTenant",
+          )
+        ) {
+          path = `/api/platform-admin/tenants/${encodeURIComponent(tenant.id)}/rollback-hold`;
+        }
+
+        if (!path) {
+          setError(`Unsupported tenant action: ${action.action}`);
+          return;
+        }
+
+        const { requestId } = await postTenantWrite<PlatformAdminTenantRecord>(
+          path,
+          command,
         );
-      } finally {
-        setCreating(false);
+        const nextReceipt = await lookupActionReceipt(requestId, {
+          actionLabel: resolveActionLabel(action),
+          message: copy.receiptBody(
+            `${resolveActionLabel(action)} · ${tenant.name}`,
+          ),
+          resourceType: "platform_tenant",
+          resourceId: tenant.id,
+        });
+        setReceipt(nextReceipt);
       }
-    },
-    [client, createForm, loadTenants],
-  );
+
+      setConfirmIntent(null);
+      setConfirmReason("");
+      await loadTenants({ silent: true });
+    } catch (caughtError: unknown) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError),
+      );
+    } finally {
+      setRefreshing(false);
+      setCreating(false);
+    }
+  }, [
+    confirmIntent,
+    confirmReason,
+    copy,
+    createForm,
+    loadTenants,
+    lookupActionReceipt,
+    postTenantWrite,
+    resolveActionLabel,
+  ]);
 
   const exportVisibleRows = useCallback(() => {
     if (filteredTenants.length === 0) {
@@ -1694,6 +1929,65 @@ export default function TenantsPage() {
       />
 
       <div style={pageStackStyle}>
+        {receipt ? (
+          <div style={toastViewportStyle}>
+            <div style={toastCardStyle}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: "grid", gap: 4 }}>
+                  <span style={{ color: theme.success, fontWeight: 700 }}>
+                    {copy.receiptTitle}
+                  </span>
+                  <span style={{ color: theme.text }}>{receipt.message}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReceipt(null)}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: theme.textMuted,
+                    cursor: "pointer",
+                    fontFamily: theme.fontFamily,
+                    fontSize: 12,
+                  }}
+                >
+                  {copy.receiptDismiss}
+                </button>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                }}
+              >
+                {receipt.auditId ? (
+                  <Link
+                    href={resolveAuditHref(receipt.auditId)}
+                    style={{
+                      color: theme.accent,
+                      fontWeight: 600,
+                      textDecoration: "none",
+                    }}
+                  >
+                    {copy.receiptOpenAudit}
+                  </Link>
+                ) : null}
+                <span style={monoStyle}>
+                  {copy.requestId}: {truncate(receipt.requestId, 18)}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div style={utilityRowStyle}>
           <div style={utilityClusterStyle}>
             <CanvasPill theme={theme} tone="neutral">
@@ -2110,6 +2404,73 @@ export default function TenantsPage() {
           )}
         </CanvasCard>
       </div>
+      {confirmIntent ? (
+        <div style={modalViewportStyle}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tenant-action-confirm-title"
+            style={modalCardStyle}
+          >
+            <div style={{ display: "grid", gap: 6 }}>
+              <span
+                id="tenant-action-confirm-title"
+                style={{ color: theme.text, fontSize: 18, fontWeight: 700 }}
+              >
+                {copy.confirmTitle}
+              </span>
+              <span style={{ color: theme.textMuted, lineHeight: 1.5 }}>
+                {confirmBodyText}
+              </span>
+            </div>
+            {confirmIntent.action.requiresReason ||
+            confirmIntent.action.riskLevel === "high" ? (
+              <CanvasField
+                theme={theme}
+                label={copy.confirmReasonLabel}
+                required
+              >
+                <textarea
+                  value={confirmReason}
+                  onChange={(event) => setConfirmReason(event.target.value)}
+                  placeholder={copy.confirmReasonPlaceholder}
+                  style={{
+                    ...inputStyle(),
+                    minHeight: 92,
+                    resize: "vertical",
+                  }}
+                />
+              </CanvasField>
+            ) : null}
+            <div style={modalFooterStyle}>
+              <CanvasBtn
+                theme={theme}
+                variant="secondary"
+                onClick={() => {
+                  setConfirmIntent(null);
+                  setConfirmReason("");
+                }}
+              >
+                {copy.confirmCancel}
+              </CanvasBtn>
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                onClick={() => void submitConfirmedIntent()}
+                disabled={
+                  creating ||
+                  refreshing ||
+                  ((confirmIntent.action.requiresReason ||
+                    confirmIntent.action.riskLevel === "high") &&
+                    !confirmReason.trim())
+                }
+              >
+                {copy.confirmSubmit}
+              </CanvasBtn>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </CanvasShell>
   );
 }
