@@ -727,13 +727,6 @@ function isDeprecatedFlag(key: string, description: string) {
   );
 }
 
-function getActionDescriptor(
-  actions: ResourceActionDescriptor[],
-  action: string,
-) {
-  return actions.find((descriptor) => descriptor.action === action) ?? null;
-}
-
 function buildRows({
   globalFlags,
   tenants,
@@ -1018,6 +1011,10 @@ function describeDisabledReason(locale: string, code: string | undefined) {
     global_default_missing: {
       zh: "此 key 尚未建立平台預設值，因此不能切換全域預設。",
       en: "This key has no platform default yet, so the global toggle stays disabled.",
+    },
+    frontend_action_unmapped: {
+      zh: "目前前端版本尚未對應這個 action，但已按 descriptor 顯示其存在。",
+      en: "This frontend build does not map this action yet, but the descriptor is still surfaced.",
     },
   };
 
@@ -1706,28 +1703,115 @@ export default function FeatureFlagsPage() {
   ]);
 
   const selectedRowActions = selectedRow?.availableActions ?? [];
-  const selectedAddOverride = getActionDescriptor(
-    selectedRowActions,
-    "add_tenant_override",
-  );
-  const selectedHistory = getActionDescriptor(
-    selectedRowActions,
-    "view_change_history",
-  );
-  const selectedToggle = getActionDescriptor(
-    selectedRowActions,
-    "toggle_global",
-  );
-  const selectedRemoveOverride = getActionDescriptor(
-    selectedRowActions,
-    "remove_tenant_override",
-  );
   const selectedOpsLink =
     selectedRow && selectedTenant
       ? buildOpsDeepLink(selectedTenant, selectedRow.key)
       : (selectedRow?.selectedTenantOverride?.crossLink ??
         selectedRow?.overrides[0]?.crossLink ??
         null);
+
+  function buildDescriptorPresentation(
+    row: FeatureFlagRow,
+    descriptor: ResourceActionDescriptor,
+  ) {
+    switch (descriptor.action) {
+      case "toggle_global":
+        return {
+          descriptor,
+          onClick: () => {
+            setSelectedFlagKey(row.key);
+            setPendingAction({
+              kind: "toggle_global",
+              row,
+              descriptor,
+              nextEnabled: !(row.global?.enabled ?? false),
+            });
+            setActionReason("");
+          },
+        };
+      case "add_tenant_override":
+        return {
+          descriptor,
+          onClick: () => {
+            if (!selectedTenantId) {
+              return;
+            }
+            setSelectedFlagKey(row.key);
+            setPendingAction({
+              kind: "add_tenant_override",
+              row,
+              descriptor,
+              tenantId: selectedTenantId,
+              enabled:
+                row.selectedTenantSnapshot?.enabled ??
+                row.selectedTenantOverride?.enabled ??
+                !(row.global?.enabled ?? false),
+              description:
+                row.selectedTenantSnapshot?.description ??
+                row.selectedTenantOverride?.description ??
+                row.global?.description ??
+                "",
+            });
+            setActionReason("");
+          },
+        };
+      case "remove_tenant_override":
+        return {
+          descriptor,
+          onClick: () => {
+            if (!selectedTenantId || !row.selectedTenantOverride) {
+              return;
+            }
+            setSelectedFlagKey(row.key);
+            setPendingAction({
+              kind: "remove_tenant_override",
+              row,
+              descriptor,
+              tenantId: selectedTenantId,
+            });
+            setActionReason("");
+          },
+        };
+      case "view_change_history":
+        return {
+          descriptor,
+          onClick: () => {
+            setSelectedFlagKey(row.key);
+            window.open(auditHref(row.key), "_blank", "noopener,noreferrer");
+          },
+        };
+      default:
+        return {
+          descriptor: {
+            ...descriptor,
+            enabled: false,
+            disabledReasonCode:
+              descriptor.disabledReasonCode ?? "frontend_action_unmapped",
+          },
+          onClick: () => {},
+        };
+    }
+  }
+
+  function renderDescriptorButtons(
+    row: FeatureFlagRow,
+    descriptors: ResourceActionDescriptor[],
+    size: "xs" | "sm" | "md" = "sm",
+  ) {
+    return descriptors.map((descriptor) => {
+      const presentation = buildDescriptorPresentation(row, descriptor);
+      return (
+        <DescriptorButton
+          key={`${row.key}-${descriptor.action}`}
+          theme={theme}
+          locale={locale}
+          descriptor={presentation.descriptor}
+          size={size}
+          onClick={presentation.onClick}
+        />
+      );
+    });
+  }
 
   const tableRows = useMemo<FeatureFlagTableRow[]>(
     () =>
@@ -1895,99 +1979,7 @@ export default function FeatureFlagsPage() {
       w: 360,
       r: (row) => (
         <div style={actionRowStyle}>
-          <DescriptorButton
-            theme={theme}
-            locale={locale}
-            descriptor={getActionDescriptor(
-              row.availableActions,
-              "toggle_global",
-            )}
-            size="xs"
-            onClick={() => {
-              setSelectedFlagKey(row.key);
-              setPendingAction({
-                kind: "toggle_global",
-                row,
-                descriptor: getActionDescriptor(
-                  row.availableActions,
-                  "toggle_global",
-                )!,
-                nextEnabled: !(row.global?.enabled ?? false),
-              });
-              setActionReason("");
-            }}
-          />
-          <DescriptorButton
-            theme={theme}
-            locale={locale}
-            descriptor={getActionDescriptor(
-              row.availableActions,
-              "add_tenant_override",
-            )}
-            size="xs"
-            onClick={() => {
-              if (!selectedTenantId) {
-                return;
-              }
-              setSelectedFlagKey(row.key);
-              setPendingAction({
-                kind: "add_tenant_override",
-                row,
-                descriptor: getActionDescriptor(
-                  row.availableActions,
-                  "add_tenant_override",
-                )!,
-                tenantId: selectedTenantId,
-                enabled:
-                  row.selectedTenantSnapshot?.enabled ??
-                  row.selectedTenantOverride?.enabled ??
-                  !(row.global?.enabled ?? false),
-                description:
-                  row.selectedTenantSnapshot?.description ??
-                  row.selectedTenantOverride?.description ??
-                  row.global?.description ??
-                  "",
-              });
-              setActionReason("");
-            }}
-          />
-          <DescriptorButton
-            theme={theme}
-            locale={locale}
-            descriptor={getActionDescriptor(
-              row.availableActions,
-              "remove_tenant_override",
-            )}
-            size="xs"
-            onClick={() => {
-              if (!selectedTenantId || !row.selectedTenantOverride) {
-                return;
-              }
-              setSelectedFlagKey(row.key);
-              setPendingAction({
-                kind: "remove_tenant_override",
-                row,
-                descriptor: getActionDescriptor(
-                  row.availableActions,
-                  "remove_tenant_override",
-                )!,
-                tenantId: selectedTenantId,
-              });
-              setActionReason("");
-            }}
-          />
-          <DescriptorButton
-            theme={theme}
-            locale={locale}
-            descriptor={getActionDescriptor(
-              row.availableActions,
-              "view_change_history",
-            )}
-            size="xs"
-            onClick={() => {
-              window.open(auditHref(row.key), "_blank", "noopener,noreferrer");
-            }}
-          />
+          {renderDescriptorButtons(row, row.availableActions, "xs")}
         </div>
       ),
     },
@@ -2119,6 +2111,8 @@ export default function FeatureFlagsPage() {
     }
   }, [actionReason, client, loadData, locale, pendingAction, tenants]);
 
+  const reasonRequired = pendingAction?.descriptor.requiresReason ?? false;
+
   return (
     <CanvasShell
       theme={theme}
@@ -2150,33 +2144,9 @@ export default function FeatureFlagsPage() {
             <CanvasPill theme={theme} tone="accent" dot>
               writable · only here
             </CanvasPill>
-            <DescriptorButton
-              theme={theme}
-              locale={locale}
-              descriptor={selectedAddOverride}
-              size="md"
-              onClick={() => {
-                if (!selectedRow || !selectedAddOverride || !selectedTenantId) {
-                  return;
-                }
-                setPendingAction({
-                  kind: "add_tenant_override",
-                  row: selectedRow,
-                  descriptor: selectedAddOverride,
-                  tenantId: selectedTenantId,
-                  enabled:
-                    selectedRow.selectedTenantSnapshot?.enabled ??
-                    selectedRow.selectedTenantOverride?.enabled ??
-                    !(selectedRow.global?.enabled ?? false),
-                  description:
-                    selectedRow.selectedTenantSnapshot?.description ??
-                    selectedRow.selectedTenantOverride?.description ??
-                    selectedRow.global?.description ??
-                    "",
-                });
-                setActionReason("");
-              }}
-            />
+            {selectedRow
+              ? renderDescriptorButtons(selectedRow, selectedRowActions, "md")
+              : null}
             <button
               type="button"
               onClick={() => void loadData("manual")}
@@ -2450,64 +2420,11 @@ export default function FeatureFlagsPage() {
                 title={copy.selectedTitle}
                 subtitle={copy.selectedSubtitle}
                 actions={
-                  <div style={actionRowStyle}>
-                    <DescriptorButton
-                      theme={theme}
-                      locale={locale}
-                      descriptor={selectedToggle}
-                      onClick={() => {
-                        if (!selectedRow || !selectedToggle) {
-                          return;
-                        }
-                        setPendingAction({
-                          kind: "toggle_global",
-                          row: selectedRow,
-                          descriptor: selectedToggle,
-                          nextEnabled: !(selectedRow.global?.enabled ?? false),
-                        });
-                        setActionReason("");
-                      }}
-                    />
-                    <DescriptorButton
-                      theme={theme}
-                      locale={locale}
-                      descriptor={selectedRemoveOverride}
-                      onClick={() => {
-                        if (
-                          !selectedRow ||
-                          !selectedRemoveOverride ||
-                          !selectedTenantId ||
-                          !selectedRow.selectedTenantOverride
-                        ) {
-                          return;
-                        }
-                        setPendingAction({
-                          kind: "remove_tenant_override",
-                          row: selectedRow,
-                          descriptor: selectedRemoveOverride,
-                          tenantId: selectedTenantId,
-                        });
-                        setActionReason("");
-                      }}
-                    />
-                    {selectedHistory ? (
-                      <DescriptorButton
-                        theme={theme}
-                        locale={locale}
-                        descriptor={selectedHistory}
-                        onClick={() => {
-                          if (!selectedRow) {
-                            return;
-                          }
-                          window.open(
-                            auditHref(selectedRow.key),
-                            "_blank",
-                            "noopener,noreferrer",
-                          );
-                        }}
-                      />
-                    ) : null}
-                  </div>
+                  selectedRow ? (
+                    <div style={actionRowStyle}>
+                      {renderDescriptorButtons(selectedRow, selectedRowActions)}
+                    </div>
+                  ) : undefined
                 }
               >
                 {selectedRow ? (
@@ -2848,7 +2765,13 @@ export default function FeatureFlagsPage() {
               <CanvasField
                 theme={theme}
                 label={copy.reasonLabel}
-                hint={copy.reasonHint}
+                hint={
+                  reasonRequired
+                    ? copy.reasonHint
+                    : locale === "en"
+                      ? "Optional unless the backend descriptor marks this action as reason-required."
+                      : "除非後端 descriptor 指定需要原因，否則此欄位可留空。"
+                }
               >
                 <textarea
                   value={actionReason}
@@ -2876,12 +2799,17 @@ export default function FeatureFlagsPage() {
               </button>
               <button
                 type="button"
-                disabled={submitting || !actionReason.trim()}
+                disabled={
+                  submitting ||
+                  (reasonRequired && actionReason.trim().length === 0)
+                }
                 onClick={() => void submitPendingAction()}
                 style={buttonStyle(theme, {
                   action: "confirm",
-                  enabled: !submitting && Boolean(actionReason.trim()),
-                  riskLevel: "high",
+                  enabled:
+                    !submitting &&
+                    (!reasonRequired || actionReason.trim().length > 0),
+                  riskLevel: pendingAction.descriptor.riskLevel,
                 })}
               >
                 <CanvasIcon name="check" size={13} />
