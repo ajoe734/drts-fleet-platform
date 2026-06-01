@@ -5,6 +5,7 @@
 
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import React, { useState, useEffect, useCallback } from "react";
 import {
   usePlatformAdminClient,
@@ -28,6 +29,7 @@ type TFn = (key: string, params?: Record<string, string | number>) => string;
 export default function AuditPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
+  const searchParams = useSearchParams();
   const [records, setRecords] = useState<AuditLogRecord[]>([]);
   const [policies, setPolicies] = useState<EvidenceRetentionPolicyRecord[]>([]);
   const [legalHolds, setLegalHolds] = useState<EvidenceLegalHoldRecord[]>([]);
@@ -39,6 +41,8 @@ export default function AuditPage() {
   const [filterModule, setFilterModule] = useState<string>("");
   const [filterActorType, setFilterActorType] = useState<string>("");
   const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
+  const targetAuditId = searchParams.get("auditId")?.trim() || "";
+  const targetRequestId = searchParams.get("requestId")?.trim() || "";
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -82,10 +86,21 @@ export default function AuditPage() {
   }, [loadRecords]);
 
   const filtered = records.filter((r) => {
+    if (targetAuditId && r.auditId !== targetAuditId) return false;
+    if (targetRequestId && r.requestId !== targetRequestId) return false;
     if (filterModule && r.moduleName !== filterModule) return false;
     if (filterActorType && r.actorType !== filterActorType) return false;
     return true;
   });
+
+  useEffect(() => {
+    if (!targetAuditId) {
+      return;
+    }
+    if (records.some((record) => record.auditId === targetAuditId)) {
+      setExpandedAuditId(targetAuditId);
+    }
+  }, [records, targetAuditId]);
 
   const modules = [
     ...new Set(records.map((r) => r.moduleName).filter(Boolean)),

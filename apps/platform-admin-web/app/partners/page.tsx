@@ -25,6 +25,7 @@ import type {
   EmptyReason,
   EmptyStateEnvelope,
   PartnerChannelEntryRecord,
+  PartnerIngressCredentialRecord,
   RefreshTier,
   ResourceActionDescriptor,
 } from "@drts/contracts";
@@ -42,9 +43,24 @@ import {
 
 type PartnerFilter = "all" | "active" | "inactive" | "revoked" | "attention";
 type PartnerEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
-type PartnerRow = PartnerChannelEntryRecord & ActionableResourceRuntimeFields;
+type PartnerReadinessState = "ready" | "gap" | "unknown";
+type PartnerRowRuntimeFields = {
+  activeCredentialCount?: number;
+  credentialExpiring?: boolean;
+  webhookReady?: boolean | null;
+  webhookStatusLabel?: string | null;
+};
+type PartnerRow = PartnerChannelEntryRecord &
+  ActionableResourceRuntimeFields &
+  PartnerRowRuntimeFields;
 type PartnerTableRow = PartnerRow & Record<string, unknown>;
 type PartnerMutationKind = "create" | "activate" | "deactivate" | "revoke";
+type PartnerReadinessItem = {
+  label: string;
+  ready: boolean;
+  value: string;
+  state: PartnerReadinessState;
+};
 
 interface PendingPartnerAction {
   kind: PartnerMutationKind;
@@ -465,25 +481,131 @@ function emptyReasonEyebrow(reason: PartnerEmptyReason) {
   }
 }
 
-function partnerNeedsAttention(entry: PartnerChannelEntryRecord) {
+function resolveWebhookRuntime(entry: Record<string, unknown>) {
+  const rawLabel =
+    typeof entry.webhookStatusLabel === "string"
+      ? entry.webhookStatusLabel
+      : typeof entry.webhookStatus === "string"
+        ? entry.webhookStatus
+        : typeof entry.webhookReadiness === "string"
+          ? entry.webhookReadiness
+          : null;
+  const rawReady =
+    typeof entry.webhookReady === "boolean" ? entry.webhookReady : null;
+
+  if (rawReady !== null) {
+    return {
+      webhookReady: rawReady,
+      webhookStatusLabel: rawLabel ?? (rawReady ? "ready" : "missing"),
+    };
+  }
+
+  if (rawLabel) {
+    const normalized = rawLabel.trim().toLowerCase();
+    if (
+      ["healthy", "enabled", "ready", "configured", "active"].includes(
+        normalized,
+      )
+    ) {
+      return { webhookReady: true, webhookStatusLabel: rawLabel };
+    }
+    if (
+      [
+        "disabled",
+        "failing",
+        "missing",
+        "not_configured",
+        "not configured",
+        "error",
+      ].includes(normalized)
+    ) {
+      return { webhookReady: false, webhookStatusLabel: rawLabel };
+    }
+  }
+
+  return {
+    webhookReady: null,
+    webhookStatusLabel: rawLabel ?? "pending",
+  };
+}
+
+function extractPartnerRuntimeFields(
+  entry: PartnerChannelEntryRecord & ActionableResourceRuntimeFields,
+) {
+  const runtimeEntry = entry as PartnerRow & Record<string, unknown>;
+  const webhook = resolveWebhookRuntime(runtimeEntry);
+  const activeCredentialCount =
+    typeof runtimeEntry.activeCredentialCount === "number"
+      ? runtimeEntry.activeCredentialCount
+      : typeof runtimeEntry.activeCredentials === "number"
+        ? runtimeEntry.activeCredentials
+        : undefined;
+
+  return {
+    ...(activeCredentialCount !== undefined ? { activeCredentialCount } : {}),
+    credentialExpiring:
+      runtimeEntry.credentialExpiring === true ||
+      runtimeEntry.hasCredentialExpiring === true ||
+      String(runtimeEntry.credentialStatus ?? "")
+        .trim()
+        .toLowerCase() === "expiring",
+    webhookReady: webhook.webhookReady,
+    webhookStatusLabel: webhook.webhookStatusLabel,
+  } satisfies PartnerRowRuntimeFields;
+}
+
+function partnerNeedsAttention(entry: PartnerRow) {
+  const readiness = readinessSummary(entry, (key: string) => key);
   return (
     entry.status !== "active" ||
-    buildPartnerReadinessItems(entry, (key: string) => key).some(
-      (item) => !item.ready,
-    )
+    readiness.gaps.length > 0 ||
+    readiness.unknowns.length > 0 ||
+    readiness.credentialExpiring
   );
 }
 
-function readinessSummary(
-  entry: PartnerChannelEntryRecord,
-  t: (key: string) => string,
-) {
-  const items = buildPartnerReadinessItems(entry, t);
-  const gaps = items.filter((item) => !item.ready);
+function readinessSummary(entry: PartnerRow, t: (key: string) => string) {
+  const items: PartnerReadinessItem[] = [
+    ...buildPartnerReadinessItems(entry, t, {
+      ...(entry.activeCredentialCount !== undefined
+        ? { activeCredentialCount: entry.activeCredentialCount }
+        : {}),
+    }).map((item) => ({
+      ...item,
+      state: item.ready ? ("ready" as const) : ("gap" as const),
+    })),
+    {
+      label: "Webhook",
+      ready: entry.webhookReady === true,
+      value: entry.webhookStatusLabel ?? "pending",
+      state:
+        entry.webhookReady === true
+          ? "ready"
+          : entry.webhookReady === false
+            ? "gap"
+            : "unknown",
+    },
+  ];
+  const gaps = items.filter((item) => item.state === "gap");
+  const unknowns = items.filter((item) => item.state === "unknown");
+  const credentialExpiring = entry.credentialExpiring === true;
+
   return {
+    items,
     gaps,
-    tone: gaps.length === 0 ? ("success" as const) : ("warn" as const),
-    label: gaps.length === 0 ? "ready" : `${gaps.length} gaps`,
+    unknowns,
+    credentialExpiring,
+    tone:
+      credentialExpiring || gaps.length > 0 || unknowns.length > 0
+        ? ("warn" as const)
+        : ("success" as const),
+    label: credentialExpiring
+      ? "expiring"
+      : gaps.length === 0 && unknowns.length === 0
+        ? "ready"
+        : gaps.length > 0
+          ? `${gaps.length} gaps`
+          : `${unknowns.length} pending`,
   };
 }
 
@@ -537,10 +659,10 @@ function humanizeActionLabel(action: string) {
     .replace(/\b\w/g, (segment) => segment.toUpperCase());
 }
 
-function buildAuditHref(requestId?: string | null) {
+function buildAuditHref(auditId?: string | null) {
   const query = new URLSearchParams();
-  if (requestId?.trim()) {
-    query.set("requestId", requestId.trim());
+  if (auditId?.trim()) {
+    query.set("auditId", auditId.trim());
   }
   const suffix = query.toString();
   return suffix ? `/audit?${suffix}` : "/audit";
@@ -815,7 +937,42 @@ export default function PartnersPage() {
     setError(null);
     try {
       const result = await client.listPlatformPartnerEntries();
-      setEntries(result.items ?? []);
+      const rawItems = result.items ?? [];
+      const credentialSnapshots = new Map<
+        string,
+        { activeCredentialCount: number }
+      >();
+
+      await Promise.all(
+        rawItems.map(async (entry) => {
+          if (entry.authMode !== "partner_api_key") {
+            return;
+          }
+
+          try {
+            const credentials =
+              await client.listPlatformPartnerIngressCredentials(
+                entry.entrySlug,
+              );
+            credentialSnapshots.set(entry.entrySlug, {
+              activeCredentialCount: credentials.filter(
+                (credential: PartnerIngressCredentialRecord) =>
+                  !credential.revokedAt,
+              ).length,
+            });
+          } catch {
+            credentialSnapshots.delete(entry.entrySlug);
+          }
+        }),
+      );
+
+      setEntries(
+        rawItems.map((entry) => ({
+          ...entry,
+          ...extractPartnerRuntimeFields(entry),
+          ...credentialSnapshots.get(entry.entrySlug),
+        })),
+      );
       setListActions(result.availableActions ?? []);
       setEmptyState(result.emptyState ?? null);
       setRefreshTier(result.refreshTier ?? "medium_slow");
@@ -979,6 +1136,11 @@ export default function PartnersPage() {
         await loadEntries();
 
         const requestId = result?.auditMetadata.requestId?.trim() || null;
+        const auditId = requestId
+          ? ((await client.listAuditLogs()).find(
+              (record) => record.requestId === requestId,
+            )?.auditId ?? null)
+          : null;
         const subject =
           action.displayName || result?.displayName || action.entrySlug;
         const reasonSuffix = reason.trim()
@@ -991,10 +1153,12 @@ export default function PartnersPage() {
           tone: action.descriptor.riskLevel === "high" ? "warn" : "success",
           title: copy.receiptTitle,
           body:
-            requestId !== null
-              ? `${humanizeActionLabel(action.descriptor.action)} • ${subject ?? "partner entry"} • request ${requestId}.${reasonSuffix}`
-              : `${humanizeActionLabel(action.descriptor.action)} • ${subject ?? "partner entry"}. ${copy.receiptFallback}${reasonSuffix}`,
-          href: buildAuditHref(requestId),
+            auditId !== null
+              ? `${humanizeActionLabel(action.descriptor.action)} • ${subject ?? "partner entry"} • audit ${auditId}.${reasonSuffix}`
+              : requestId !== null
+                ? `${humanizeActionLabel(action.descriptor.action)} • ${subject ?? "partner entry"} • request ${requestId}.${reasonSuffix}`
+                : `${humanizeActionLabel(action.descriptor.action)} • ${subject ?? "partner entry"}. ${copy.receiptFallback}${reasonSuffix}`,
+          href: buildAuditHref(auditId),
           hrefLabel: copy.viewAudit,
         });
       } catch (cause: unknown) {
@@ -1557,13 +1721,22 @@ export default function PartnersPage() {
                             <CanvasPill
                               theme={theme}
                               tone={readiness.tone}
-                              dot={readiness.gaps.length > 0}
+                              dot={
+                                readiness.gaps.length > 0 ||
+                                readiness.unknowns.length > 0 ||
+                                readiness.credentialExpiring
+                              }
                             >
                               {readiness.label}
                             </CanvasPill>
                             {entry.status !== "active" ? (
                               <CanvasPill theme={theme} tone="warn">
                                 {copy.inactiveRisk}
+                              </CanvasPill>
+                            ) : null}
+                            {readiness.credentialExpiring ? (
+                              <CanvasPill theme={theme} tone="warn">
+                                Credential expiring
                               </CanvasPill>
                             ) : null}
                           </div>
@@ -1573,11 +1746,12 @@ export default function PartnersPage() {
                             {entry.entryHost || "—"}
                             {entry.entryPath || ""}
                           </span>
-                          {readiness.gaps.length > 0 ? (
+                          {readiness.gaps.length > 0 ||
+                          readiness.unknowns.length > 0 ? (
                             <span
                               style={{ color: theme.textDim, fontSize: 11.5 }}
                             >
-                              {readiness.gaps
+                              {[...readiness.gaps, ...readiness.unknowns]
                                 .slice(0, 2)
                                 .map((gap) => gap.label)
                                 .join(" · ")}
