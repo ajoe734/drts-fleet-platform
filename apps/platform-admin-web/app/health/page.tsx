@@ -12,6 +12,7 @@ import type {
   AdapterHealthRecord,
   CrossAppResourceLink,
   EmptyReason,
+  EmptyStateEnvelope,
   OperationalAlertRecord,
   OperationalObservabilitySnapshot,
   RefreshTier,
@@ -54,14 +55,35 @@ const REFRESH_INTERVAL_MS = REFRESH_CADENCE_MS[REFRESH_TIER];
 
 type HealthView = "alerts" | "adapters";
 type RouteFilter = "all" | "platform" | "ops";
-type AlertRow = OperationalAlertRecord & Record<string, unknown>;
-type AdapterRow = AdapterHealthRecord & Record<string, unknown>;
+type AlertRow = OperationalAlertRecord &
+  Record<string, unknown> & {
+    availableActions: ResourceActionDescriptor[];
+  };
+type AdapterRow = AdapterHealthRecord &
+  Record<string, unknown> & {
+    availableActions: ResourceActionDescriptor[];
+  };
 type MetricCard = {
   label: string;
   value: string;
   sub: string;
   delta?: string;
   deltaTone?: "up" | "down" | "neutral";
+  availableActions: ResourceActionDescriptor[];
+};
+type FocusCard = {
+  id: string;
+  title: string;
+  body: string;
+  tone: CanvasTone;
+  availableActions: ResourceActionDescriptor[];
+};
+type ActiveSurface = {
+  title: string;
+  subtitle: string;
+  rows: AlertRow[] | AdapterRow[];
+  emptyState: EmptyStateEnvelope | null;
+  availableActions: ResourceActionDescriptor[];
 };
 
 const theme = buildCanvasTheme({
@@ -76,6 +98,35 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
+const heroGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.65fr) minmax(280px, 0.95fr)",
+  gap: 16,
+  alignItems: "stretch",
+};
+
+const heroStatsStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 10,
+};
+
+const heroStatBoxStyle = (th: CanvasTheme): CSSProperties => ({
+  display: "grid",
+  gap: 4,
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceLo,
+});
+
+const heroMetaRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
 const kpiGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
@@ -84,7 +135,7 @@ const kpiGridStyle: CSSProperties = {
 
 const twoColumnStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.7fr) minmax(280px, 1fr)",
+  gridTemplateColumns: "minmax(0, 1.7fr) minmax(300px, 1fr)",
   gap: 16,
   alignItems: "start",
 };
@@ -103,29 +154,19 @@ const pillButtonStyle: CSSProperties = {
   cursor: "pointer",
 };
 
-const alertRowStyle = (th: CanvasTheme): CSSProperties => ({
-  display: "grid",
-  gridTemplateColumns: "auto minmax(0, 1fr) auto",
-  gap: 10,
+const actionClusterStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
   alignItems: "center",
-  padding: "10px 0",
-  borderBottom: `1px solid ${th.border}`,
-});
-
-const alertBodyStyle: CSSProperties = {
-  display: "grid",
-  gap: 4,
-  minWidth: 0,
 };
 
-const alertMetaStyle = (th: CanvasTheme): CSSProperties => ({
+const emptyActionRowStyle: CSSProperties = {
   display: "flex",
-  gap: 8,
   flexWrap: "wrap",
+  gap: 10,
   alignItems: "center",
-  fontSize: 11.5,
-  color: th.textMuted,
-});
+};
 
 const emptyStateStyle = (
   reason: EmptyReason,
@@ -133,18 +174,43 @@ const emptyStateStyle = (
 ): CSSProperties => {
   const palette = getEmptyStatePalette(reason, th);
   return {
-    padding: 24,
-    borderRadius: 12,
+    padding: 22,
+    borderRadius: 16,
     border: `1px dashed ${palette.border}`,
     background: palette.background,
     display: "grid",
-    gap: 10,
+    gap: 12,
+  };
+};
+
+const emptyHeaderStyle = (th: CanvasTheme): CSSProperties => ({
+  display: "grid",
+  gridTemplateColumns: "auto minmax(0, 1fr)",
+  gap: 14,
+  alignItems: "start",
+  color: th.text,
+});
+
+const emptyBadgeStyle = (
+  reason: EmptyReason,
+  th: CanvasTheme,
+): CSSProperties => {
+  const palette = getEmptyStatePalette(reason, th);
+  return {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    border: `1px solid ${palette.border}`,
+    display: "grid",
+    placeItems: "center",
+    background: th.surface,
+    fontSize: 22,
   };
 };
 
 const emptyBodyStyle: CSSProperties = {
   fontSize: 12.5,
-  lineHeight: 1.55,
+  lineHeight: 1.6,
   maxWidth: 720,
 };
 
@@ -171,6 +237,18 @@ const linkButtonStyle = (
   opacity: disabled ? 0.55 : 1,
   pointerEvents: disabled ? "none" : "auto",
 });
+
+const overviewListStyle = (th: CanvasTheme): CSSProperties => ({
+  display: "grid",
+  gap: 10,
+  paddingTop: 4,
+  borderTop: `1px solid ${th.border}`,
+});
+
+const railCardListStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
 
 function buildPlatformNav(
   locale: string,
@@ -380,6 +458,15 @@ function formatMetricValue(
 function formatDateTime(value: string, locale: "en" | "zh"): string {
   if (!value) return "—";
   return new Date(value).toLocaleString(locale === "en" ? "en-US" : "zh-TW");
+}
+
+function formatCountdown(ms: number, locale: "en" | "zh"): string {
+  if (ms <= 0) {
+    return locale === "en" ? "now" : "現在";
+  }
+
+  const seconds = Math.ceil(ms / 1000);
+  return locale === "en" ? `${seconds}s` : `${seconds} 秒`;
 }
 
 function toneForStatus(status: string): CanvasTone {
@@ -625,11 +712,7 @@ function buildEmptyState(
   totalAlerts: number,
   filteredAlerts: number,
   adapterCount: number,
-): {
-  reason: EmptyReason;
-  messageCode: string;
-  nextAction?: ResourceActionDescriptor;
-} | null {
+): EmptyStateEnvelope | null {
   if (errorReason) {
     return {
       reason: errorReason,
@@ -734,6 +817,24 @@ function getEmptyStatePalette(reason: EmptyReason, th: CanvasTheme) {
   }
 }
 
+function getEmptyStateSymbol(reason: EmptyReason): string {
+  switch (reason) {
+    case "no_data":
+      return "○";
+    case "not_provisioned":
+      return "⌁";
+    case "filtered_empty":
+      return "◌";
+    case "permission_denied":
+      return "⛔";
+    case "external_unavailable":
+      return "⇄";
+    case "fetch_failed":
+    default:
+      return "!";
+  }
+}
+
 function findAction(
   actions: ResourceActionDescriptor[],
   actionId: string,
@@ -766,6 +867,21 @@ function renderActionLink(
       {label}
     </Link>
   );
+}
+
+function getFocusToneLabel(tone: CanvasTone, locale: "en" | "zh"): string {
+  switch (tone) {
+    case "danger":
+      return locale === "en" ? "Critical" : "重大";
+    case "warn":
+      return locale === "en" ? "Watch" : "警示";
+    case "info":
+      return locale === "en" ? "Routed" : "已路由";
+    case "success":
+      return locale === "en" ? "Stable" : "穩定";
+    default:
+      return locale === "en" ? "Normal" : "正常";
+  }
 }
 
 export default function HealthPage() {
@@ -801,8 +917,10 @@ export default function HealthPage() {
 
         setAdapters(adapterData);
         setObservability(operationalData);
-      } catch (nextError: any) {
-        setError(nextError?.message || String(nextError));
+      } catch (nextError: unknown) {
+        setError(
+          nextError instanceof Error ? nextError.message : String(nextError),
+        );
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -823,7 +941,7 @@ export default function HealthPage() {
         : null;
     const freshnessTimer = window.setInterval(() => {
       setNow(Date.now());
-    }, 5_000);
+    }, 1_000);
 
     return () => {
       if (pollTimer !== null) {
@@ -842,46 +960,33 @@ export default function HealthPage() {
     () => buildHealthEnvelope(observability, adapters, errorReason),
     [adapters, errorReason, observability],
   );
+
   const sortedAlerts = useMemo(() => {
     const severityOrder = { critical: 0, warning: 1, healthy: 2 } as const;
     return [...observability.alerts].sort(
       (left, right) => severityOrder[left.state] - severityOrder[right.state],
     );
   }, [observability.alerts]);
-  const filteredAlerts = useMemo(() => {
+
+  const filteredAlertsBase = useMemo(() => {
     if (routeFilter === "all") {
       return sortedAlerts;
     }
     return sortedAlerts.filter((alert) => alert.routes.includes(routeFilter));
   }, [routeFilter, sortedAlerts]);
-  const emptyState = useMemo(
-    () =>
-      buildEmptyState(
-        view,
-        errorReason,
-        routeFilter,
-        sortedAlerts.length,
-        filteredAlerts.length,
-        adapters.length,
-      ),
-    [
-      adapters.length,
-      errorReason,
-      filteredAlerts.length,
-      routeFilter,
-      sortedAlerts.length,
-      view,
-    ],
-  );
 
-  const opsConsoleHref = resolveCrossAppHref({
-    targetApp: "ops-console",
-    route: "/dispatch",
-    resourceType: "dispatch_board",
-    resourceId: "dispatch",
-    openMode: "new_tab",
-    label: "Ops Console",
-  });
+  const opsConsoleHref = useMemo(
+    () =>
+      resolveCrossAppHref({
+        targetApp: "ops-console",
+        route: "/dispatch",
+        resourceType: "dispatch_board",
+        resourceId: "dispatch",
+        openMode: "new_tab",
+        label: "Ops Console",
+      }),
+    [],
+  );
 
   const attentionCount = useMemo(
     () =>
@@ -954,10 +1059,340 @@ export default function HealthPage() {
     [opsConsoleHref, refreshing, routeFilter, sortedAlerts, view],
   );
 
-  const emptyStateAction = emptyState?.nextAction
-    ? (findAction(healthAvailableActions, emptyState.nextAction.action) ??
-      emptyState.nextAction)
+  const alertRows = useMemo<AlertRow[]>(
+    () =>
+      filteredAlertsBase.map((alert) => {
+        const followUp = getAlertFollowUpLink(alert);
+        const href = followUp ? resolveCrossAppHref(followUp) : null;
+        const actionId =
+          followUp?.targetApp === "platform-admin"
+            ? "open:adapter-registry"
+            : "open:ops-console";
+
+        return {
+          ...alert,
+          availableActions:
+            followUp && href
+              ? [createAction(actionId, true, "low")]
+              : [
+                  createAction(
+                    "open:ops-console",
+                    false,
+                    "low",
+                    "no_follow_up",
+                  ),
+                ],
+        };
+      }),
+    [filteredAlertsBase, opsConsoleHref],
+  );
+
+  const adapterRows = useMemo<AdapterRow[]>(
+    () =>
+      adapters.map((adapter) => ({
+        ...adapter,
+        availableActions: [createAction("open:adapter-registry", true, "low")],
+      })),
+    [adapters],
+  );
+
+  const activeSurface = useMemo<ActiveSurface>(() => {
+    if (view === "alerts") {
+      return {
+        title: t("health.tab.alerts"),
+        subtitle:
+          locale === "en"
+            ? "Platform-routed alert list with route filters and cross-app follow-up."
+            : "平台路由警示清單，含 route filter 與跨 app 跟進入口。",
+        rows: alertRows,
+        emptyState: buildEmptyState(
+          "alerts",
+          errorReason,
+          routeFilter,
+          sortedAlerts.length,
+          alertRows.length,
+          adapterRows.length,
+        ),
+        availableActions: healthAvailableActions.filter(
+          (action) =>
+            action.action.startsWith("view:") ||
+            action.action.startsWith("filter:") ||
+            action.action === "refresh" ||
+            action.action === "open:ops-console" ||
+            action.action === "open:adapter-registry",
+        ),
+      };
+    }
+
+    return {
+      title: t("health.tab.adapters"),
+      subtitle:
+        locale === "en"
+          ? "Adapter counts and health status route directly into Adapter Registry follow-up."
+          : "Adapter 計數與健康狀態直接導向 Adapter Registry 跟進。",
+      rows: adapterRows,
+      emptyState: buildEmptyState(
+        "adapters",
+        errorReason,
+        routeFilter,
+        sortedAlerts.length,
+        alertRows.length,
+        adapterRows.length,
+      ),
+      availableActions: healthAvailableActions.filter(
+        (action) =>
+          action.action.startsWith("view:") ||
+          action.action === "refresh" ||
+          action.action === "open:adapter-registry",
+      ),
+    };
+  }, [
+    adapterRows.length,
+    adapterRows,
+    alertRows,
+    errorReason,
+    healthAvailableActions,
+    locale,
+    routeFilter,
+    sortedAlerts.length,
+    t,
+    view,
+  ]);
+
+  const emptyStateAction = activeSurface.emptyState?.nextAction
+    ? (findAction(
+        activeSurface.availableActions,
+        activeSurface.emptyState.nextAction.action,
+      ) ?? activeSurface.emptyState.nextAction)
     : null;
+
+  const metricCards: MetricCard[] = useMemo(
+    () => [
+      {
+        label: t("health.metric.dispatch.title"),
+        value: formatMetricValue(
+          observability.dispatch.oldestReadyOrderLagMinutes ?? 0,
+          "minutes",
+          locale,
+        ),
+        sub: t("health.metric.dispatch.note", {
+          count: observability.dispatch.laggedOrders,
+        }),
+        ...(observability.dispatch.laggedOrders > 0
+          ? {
+              delta: `${observability.dispatch.laggedOrders}`,
+              deltaTone: "down" as const,
+            }
+          : { deltaTone: "up" as const }),
+        availableActions: [
+          createAction(
+            "open:ops-console",
+            Boolean(opsConsoleHref),
+            "low",
+            opsConsoleHref ? undefined : "ops_console_unavailable",
+          ),
+        ],
+      },
+      {
+        label: t("health.metric.webhook.title"),
+        value: formatMetricValue(
+          observability.webhook.failedDeliveriesLastHour,
+          "count",
+          locale,
+        ),
+        sub: t("health.metric.webhook.note", {
+          count: observability.webhook.queuedDeliveries,
+        }),
+        ...(observability.webhook.failedDeliveriesLastHour > 0
+          ? {
+              delta: `${observability.webhook.failedDeliveriesLastHour}`,
+              deltaTone: "down" as const,
+            }
+          : { deltaTone: "up" as const }),
+        availableActions: [createAction("open:adapter-registry", true, "low")],
+      },
+      {
+        label: t("health.metric.eligibility.title"),
+        value: formatMetricValue(
+          observability.eligibility.totalReviewQueue,
+          "count",
+          locale,
+        ),
+        sub: t("health.metric.eligibility.note", {
+          count: observability.eligibility.manualReviewQueue,
+        }),
+        availableActions: [
+          createAction(
+            "open:ops-console",
+            Boolean(opsConsoleHref),
+            "low",
+            opsConsoleHref ? undefined : "ops_console_unavailable",
+          ),
+        ],
+      },
+      {
+        label: t("health.metric.reporting.title"),
+        value: formatMetricValue(
+          observability.reporting.failedJobs,
+          "count",
+          locale,
+        ),
+        sub: t("health.metric.reporting.note", {
+          count: observability.reporting.queuedJobs,
+        }),
+        ...(observability.reporting.failedJobs > 0
+          ? {
+              delta: `${observability.reporting.failedJobs}`,
+              deltaTone: "down" as const,
+            }
+          : { deltaTone: "up" as const }),
+        availableActions: [
+          createAction(
+            "open:ops-console",
+            Boolean(opsConsoleHref),
+            "low",
+            opsConsoleHref ? undefined : "ops_console_unavailable",
+          ),
+        ],
+      },
+      {
+        label: t("health.metric.adapters.title"),
+        value: formatMetricValue(
+          observability.adapters.degradedAdapters +
+            observability.adapters.downAdapters,
+          "count",
+          locale,
+        ),
+        sub: t("health.metric.adapters.note", {
+          count: observability.adapters.totalAdapters,
+        }),
+        availableActions: [createAction("open:adapter-registry", true, "low")],
+      },
+    ],
+    [locale, observability, opsConsoleHref, t],
+  );
+
+  const focusCards = useMemo<FocusCard[]>(
+    () => [
+      {
+        id: "dispatch",
+        title: locale === "en" ? "Dispatch lag cluster" : "派車延遲叢集",
+        body:
+          locale === "en"
+            ? `${observability.dispatch.laggedOrders} lagged order(s), ${observability.dispatch.exceptionHoldOrders} exception hold(s).`
+            : `${observability.dispatch.laggedOrders} 筆延遲訂單，${observability.dispatch.exceptionHoldOrders} 筆 exception hold。`,
+        tone: observability.dispatch.laggedOrders > 0 ? "warn" : "success",
+        availableActions: [
+          createAction(
+            "open:ops-console",
+            Boolean(opsConsoleHref),
+            "low",
+            opsConsoleHref ? undefined : "ops_console_unavailable",
+          ),
+        ],
+      },
+      {
+        id: "webhook",
+        title: locale === "en" ? "Webhook queue" : "Webhook 佇列",
+        body:
+          locale === "en"
+            ? `${observability.webhook.queuedDeliveries} queued delivery(ies), ${observability.webhook.failedDeliveriesLastHour} failed in the last hour.`
+            : `${observability.webhook.queuedDeliveries} 筆排隊中的傳遞，最近一小時 ${observability.webhook.failedDeliveriesLastHour} 筆失敗。`,
+        tone:
+          observability.webhook.failedDeliveriesLastHour > 0
+            ? "danger"
+            : "info",
+        availableActions: [createAction("open:adapter-registry", true, "low")],
+      },
+      {
+        id: "eligibility",
+        title: locale === "en" ? "Eligibility review queue" : "資格審查佇列",
+        body:
+          locale === "en"
+            ? `${observability.eligibility.totalReviewQueue} total review item(s), ${observability.eligibility.manualFallbackQueue} fallback queue.`
+            : `${observability.eligibility.totalReviewQueue} 筆審查項目，${observability.eligibility.manualFallbackQueue} 筆 fallback queue。`,
+        tone:
+          observability.eligibility.totalReviewQueue > 0 ? "warn" : "neutral",
+        availableActions: [
+          createAction(
+            "open:ops-console",
+            Boolean(opsConsoleHref),
+            "low",
+            opsConsoleHref ? undefined : "ops_console_unavailable",
+          ),
+        ],
+      },
+      {
+        id: "reporting",
+        title: locale === "en" ? "Reporting failures" : "報表失敗",
+        body:
+          locale === "en"
+            ? `${observability.reporting.failedJobs} failed job(s), ${observability.reporting.dispatchRecordingIndexQueuedJobs} dispatch recording index job(s) queued.`
+            : `${observability.reporting.failedJobs} 筆失敗工作，${observability.reporting.dispatchRecordingIndexQueuedJobs} 筆 dispatch recording index 工作排隊中。`,
+        tone: observability.reporting.failedJobs > 0 ? "danger" : "neutral",
+        availableActions: [
+          createAction(
+            "open:ops-console",
+            Boolean(opsConsoleHref),
+            "low",
+            opsConsoleHref ? undefined : "ops_console_unavailable",
+          ),
+        ],
+      },
+    ],
+    [locale, observability, opsConsoleHref],
+  );
+
+  const routeCoverage = useMemo(
+    () =>
+      observability.roleViews.length > 0
+        ? observability.roleViews
+        : [
+            {
+              route: "platform" as const,
+              alertKeys: ["adapter_degradation", "webhook_failure_burst"],
+              focusAreas: ["adapters", "webhook", "reporting"],
+            },
+            {
+              route: "ops" as const,
+              alertKeys: [
+                "dispatch_lag",
+                "recording_backlog",
+                "driver_state_lag",
+                "eligibility_review_backlog",
+              ],
+              focusAreas: [
+                "dispatch",
+                "recording",
+                "driver_state",
+                "eligibility",
+              ],
+            },
+          ],
+    [observability.roleViews],
+  );
+
+  const actionHrefMap = useMemo<Record<string, CrossAppResourceLink>>(
+    () => ({
+      "open:adapter-registry": {
+        targetApp: "platform-admin",
+        route: "/adapter-registry?filter=attention",
+        resourceType: "adapter_registry",
+        resourceId: "attention",
+        openMode: "same_tab",
+        label: t("health.openAdapterRegistry"),
+      },
+      "open:ops-console": {
+        targetApp: "ops-console",
+        route: "/dispatch",
+        resourceType: "dispatch_board",
+        resourceId: "dispatch",
+        openMode: "new_tab",
+        label: t("health.openOpsConsole"),
+      },
+    }),
+    [t],
+  );
 
   const handleAction = useCallback(
     (actionId: string) => {
@@ -987,82 +1422,16 @@ export default function HealthPage() {
     [loadData],
   );
 
-  const metricCards: MetricCard[] = [
-    {
-      label: t("health.metric.dispatch.title"),
-      value: formatMetricValue(
-        observability.dispatch.oldestReadyOrderLagMinutes ?? 0,
-        "minutes",
-        locale,
-      ),
-      sub: t("health.metric.dispatch.note", {
-        count: observability.dispatch.laggedOrders,
-      }),
-      ...(observability.dispatch.laggedOrders > 0
-        ? {
-            delta: `${observability.dispatch.laggedOrders}`,
-            deltaTone: "down" as const,
-          }
-        : { deltaTone: "up" as const }),
-    },
-    {
-      label: t("health.metric.webhook.title"),
-      value: formatMetricValue(
-        observability.webhook.failedDeliveriesLastHour,
-        "count",
-        locale,
-      ),
-      sub: t("health.metric.webhook.note", {
-        count: observability.webhook.queuedDeliveries,
-      }),
-      ...(observability.webhook.failedDeliveriesLastHour > 0
-        ? {
-            delta: `${observability.webhook.failedDeliveriesLastHour}`,
-            deltaTone: "down" as const,
-          }
-        : { deltaTone: "up" as const }),
-    },
-    {
-      label: t("health.metric.eligibility.title"),
-      value: formatMetricValue(
-        observability.eligibility.totalReviewQueue,
-        "count",
-        locale,
-      ),
-      sub: t("health.metric.eligibility.note", {
-        count: observability.eligibility.manualReviewQueue,
-      }),
-    },
-    {
-      label: t("health.metric.reporting.title"),
-      value: formatMetricValue(
-        observability.reporting.failedJobs,
-        "count",
-        locale,
-      ),
-      sub: t("health.metric.reporting.note", {
-        count: observability.reporting.queuedJobs,
-      }),
-      ...(observability.reporting.failedJobs > 0
-        ? {
-            delta: `${observability.reporting.failedJobs}`,
-            deltaTone: "down" as const,
-          }
-        : { deltaTone: "up" as const }),
-    },
-    {
-      label: t("health.metric.adapters.title"),
-      value: formatMetricValue(
-        observability.adapters.degradedAdapters +
-          observability.adapters.downAdapters,
-        "count",
-        locale,
-      ),
-      sub: t("health.metric.adapters.note", {
-        count: observability.adapters.totalAdapters,
-      }),
-    },
-  ];
+  const headerTabs = useMemo(
+    () => [t("health.tab.alerts"), t("health.tab.adapters")],
+    [t],
+  );
+
+  const nextRefreshInMs = Math.max(
+    REFRESH_INTERVAL_MS -
+      (now - new Date(refreshMetadata.generatedAt).getTime()),
+    0,
+  );
 
   const alertColumns = useMemo<CanvasTableColumn<AlertRow>[]>(
     () => [
@@ -1143,8 +1512,9 @@ export default function HealthPage() {
         r: (alert) => {
           const followUpLink = getAlertFollowUpLink(alert);
           const href = followUpLink ? resolveCrossAppHref(followUpLink) : null;
+          const action = alert.availableActions[0];
 
-          if (followUpLink && href) {
+          if (followUpLink && href && action?.enabled) {
             return renderActionLink(
               theme,
               href,
@@ -1210,7 +1580,17 @@ export default function HealthPage() {
         h: t("health.col.followUp"),
         w: 140,
         r: (adapter) => {
+          const action = adapter.availableActions[0];
           const followUp = getAdapterFollowUpLink(adapter.platformCode);
+
+          if (!action?.enabled) {
+            return (
+              <CanvasPill theme={theme} tone="neutral">
+                {t("health.readOnly")}
+              </CanvasPill>
+            );
+          }
+
           return renderActionLink(
             theme,
             followUp.route,
@@ -1222,11 +1602,6 @@ export default function HealthPage() {
       },
     ],
     [locale, t],
-  );
-
-  const headerTabs = useMemo(
-    () => [t("health.tab.alerts"), t("health.tab.adapters")],
-    [t],
   );
 
   const headerActions = (
@@ -1305,6 +1680,262 @@ export default function HealthPage() {
               />
             ) : null}
 
+            <div style={heroGridStyle}>
+              <CanvasCard
+                theme={theme}
+                title={locale === "en" ? "Operational focus" : "營運焦點"}
+                subtitle={
+                  locale === "en"
+                    ? "Platform health routes platform-wide issues to the next owning surface."
+                    : "平台健康頁把跨模組異常路由到下一個負責處理的工作面。"
+                }
+              >
+                <div style={{ display: "grid", gap: 14 }}>
+                  <div style={heroMetaRowStyle}>
+                    <CanvasPill
+                      theme={theme}
+                      tone={bannerToneForHealth(healthEnvelope.status)}
+                      dot
+                    >
+                      {t(`health.banner.${healthEnvelope.status}.title`)}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="accent">
+                      {t("health.refreshTier", { tier: REFRESH_TIER_LABEL })}
+                    </CanvasPill>
+                    <CanvasPill
+                      theme={theme}
+                      tone={toneForStatus(refreshMetadata.dataFreshness)}
+                      dot
+                    >
+                      {t(`health.freshness.${refreshMetadata.dataFreshness}`)}
+                    </CanvasPill>
+                  </div>
+
+                  <div style={heroStatsStyle}>
+                    <div style={heroStatBoxStyle(theme)}>
+                      <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+                        {t("health.hero.attention")}
+                      </span>
+                      <span
+                        style={{
+                          color: theme.text,
+                          fontSize: 26,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {attentionCount}
+                      </span>
+                      <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+                        {locale === "en"
+                          ? "alerts + degraded adapters"
+                          : "警示 + 降級 adapter"}
+                      </span>
+                    </div>
+                    <div style={heroStatBoxStyle(theme)}>
+                      <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+                        {t("health.hero.dispatch")}
+                      </span>
+                      <span
+                        style={{
+                          color: theme.text,
+                          fontSize: 26,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {observability.dispatch.laggedOrders}
+                      </span>
+                      <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+                        {locale === "en"
+                          ? "lagged dispatch orders"
+                          : "延遲派車訂單"}
+                      </span>
+                    </div>
+                    <div style={heroStatBoxStyle(theme)}>
+                      <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+                        {t("health.hero.adapters")}
+                      </span>
+                      <span
+                        style={{
+                          color: theme.text,
+                          fontSize: 26,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {observability.adapters.degradedAdapters +
+                          observability.adapters.downAdapters}
+                      </span>
+                      <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+                        {locale === "en"
+                          ? "registry follow-up rows"
+                          : "需進 Adapter Registry 跟進"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={overviewListStyle(theme)}>
+                    {focusCards.map((card) => {
+                      const action = card.availableActions[0];
+                      const deepLink = action
+                        ? actionHrefMap[action.action]
+                        : null;
+                      const href = deepLink
+                        ? resolveCrossAppHref(deepLink)
+                        : null;
+
+                      return (
+                        <div
+                          key={card.id}
+                          style={{
+                            display: "grid",
+                            gap: 8,
+                            padding: "10px 12px",
+                            borderRadius: 12,
+                            border: `1px solid ${theme.border}`,
+                            background: theme.surfaceLo,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 12,
+                            }}
+                          >
+                            <div style={{ display: "grid", gap: 4 }}>
+                              <div
+                                style={{
+                                  fontSize: 12.5,
+                                  fontWeight: 700,
+                                  color: theme.text,
+                                }}
+                              >
+                                {card.title}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  lineHeight: 1.55,
+                                  color: theme.textMuted,
+                                }}
+                              >
+                                {card.body}
+                              </div>
+                            </div>
+                            <CanvasPill theme={theme} tone={card.tone} dot>
+                              {getFocusToneLabel(card.tone, locale)}
+                            </CanvasPill>
+                          </div>
+
+                          {action?.enabled && deepLink && href ? (
+                            <div style={actionClusterStyle}>
+                              {renderActionLink(
+                                theme,
+                                href,
+                                deepLink.label,
+                                deepLink.openMode,
+                                "ghost",
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </CanvasCard>
+
+              <CanvasCard
+                theme={theme}
+                title={locale === "en" ? "Refresh & route map" : "刷新與路由圖"}
+                subtitle={
+                  locale === "en"
+                    ? "T4 cadence, route filters, and exit surfaces are explicit."
+                    : "T4 節奏、route filter 與離開目的地都要明確。"
+                }
+              >
+                <div style={{ display: "grid", gap: 14 }}>
+                  <CanvasDL
+                    theme={theme}
+                    cols={1}
+                    items={[
+                      {
+                        label: t("health.refreshTier", {
+                          tier: REFRESH_TIER_LABEL,
+                        }),
+                        value: refreshing
+                          ? t("health.refreshing")
+                          : t("health.refreshIdle"),
+                      },
+                      {
+                        label: t("health.generatedAt", {
+                          time: formatDateTime(
+                            refreshMetadata.generatedAt,
+                            locale,
+                          ),
+                        }),
+                        value: t("health.nextRefreshValue", {
+                          countdown: formatCountdown(nextRefreshInMs, locale),
+                        }),
+                      },
+                      {
+                        label: t("health.lastChecked", {
+                          time: formatDateTime(
+                            healthEnvelope.lastCheckedAt,
+                            locale,
+                          ),
+                        }),
+                        value: t(
+                          `health.sourceValue.${refreshMetadata.source}`,
+                        ),
+                      },
+                    ]}
+                  />
+
+                  <div style={railCardListStyle}>
+                    {routeCoverage.map((routeView) => (
+                      <div
+                        key={routeView.route}
+                        style={{
+                          display: "grid",
+                          gap: 8,
+                          padding: "10px 12px",
+                          borderRadius: 12,
+                          border: `1px solid ${theme.border}`,
+                          background: theme.surfaceLo,
+                        }}
+                      >
+                        <div style={pillsRowStyle}>
+                          <CanvasPill
+                            theme={theme}
+                            tone={
+                              routeView.route === "platform" ? "accent" : "warn"
+                            }
+                            dot
+                          >
+                            {t(`health.filter.${routeView.route}`)}
+                          </CanvasPill>
+                          <CanvasPill theme={theme} tone="neutral">
+                            {routeView.alertKeys.length}{" "}
+                            {t("health.routeAlerts")}
+                          </CanvasPill>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            lineHeight: 1.55,
+                            color: theme.textMuted,
+                          }}
+                        >
+                          {routeView.focusAreas.join(" / ")}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </CanvasCard>
+            </div>
+
             <div style={kpiGridStyle}>
               {metricCards.map((metric) => (
                 <CanvasKPI
@@ -1322,24 +1953,12 @@ export default function HealthPage() {
             <div style={twoColumnStyle}>
               <CanvasCard
                 theme={theme}
-                title={
-                  view === "alerts"
-                    ? t("health.tab.alerts")
-                    : t("health.tab.adapters")
-                }
-                subtitle={
-                  view === "alerts"
-                    ? locale === "en"
-                      ? "Platform-routed alert list with cross-app follow-up links."
-                      : "平台路由警示清單，含跨 app 跟進入口。"
-                    : locale === "en"
-                      ? "Adapter registry follow-up surfaces driven by current health data."
-                      : "依目前健康資料驅動的 adapter follow-up 視角。"
-                }
+                title={activeSurface.title}
+                subtitle={activeSurface.subtitle}
               >
                 <div style={{ display: "grid", gap: 14 }}>
                   <div style={pillsRowStyle}>
-                    {healthAvailableActions
+                    {activeSurface.availableActions
                       .filter((action) => action.action.startsWith("view:"))
                       .map((action) => {
                         const isActive =
@@ -1387,7 +2006,7 @@ export default function HealthPage() {
                             background: theme.border,
                           }}
                         />
-                        {healthAvailableActions
+                        {activeSurface.availableActions
                           .filter((action) =>
                             action.action.startsWith("filter:"),
                           )
@@ -1427,34 +2046,66 @@ export default function HealthPage() {
                     ) : null}
                   </div>
 
-                  {emptyState ? (
-                    <div style={emptyStateStyle(emptyState.reason, theme)}>
-                      <CanvasPill
-                        theme={theme}
-                        tone={
-                          getEmptyStatePalette(emptyState.reason, theme).tone
-                        }
-                        dot
-                      >
-                        {t(`health.emptyReason.${emptyState.reason}`)}
-                      </CanvasPill>
-                      <div
-                        style={{
-                          fontSize: 17,
-                          fontWeight: 700,
-                          color: theme.text,
-                        }}
-                      >
-                        {t(`${emptyState.messageCode}.title`)}
-                      </div>
-                      <div
-                        style={{ ...emptyBodyStyle, color: theme.textMuted }}
-                      >
-                        {t(`${emptyState.messageCode}.body`)}
+                  {activeSurface.emptyState ? (
+                    <div
+                      style={emptyStateStyle(
+                        activeSurface.emptyState.reason,
+                        theme,
+                      )}
+                    >
+                      <div style={emptyHeaderStyle(theme)}>
+                        <div
+                          style={emptyBadgeStyle(
+                            activeSurface.emptyState.reason,
+                            theme,
+                          )}
+                        >
+                          {getEmptyStateSymbol(activeSurface.emptyState.reason)}
+                        </div>
+                        <div style={{ display: "grid", gap: 8 }}>
+                          <div style={pillsRowStyle}>
+                            <CanvasPill
+                              theme={theme}
+                              tone={
+                                getEmptyStatePalette(
+                                  activeSurface.emptyState.reason,
+                                  theme,
+                                ).tone
+                              }
+                              dot
+                            >
+                              {t(
+                                `health.emptyReason.${activeSurface.emptyState.reason}`,
+                              )}
+                            </CanvasPill>
+                            <CanvasPill theme={theme} tone="neutral">
+                              {activeSurface.emptyState.messageCode
+                                .replace("health.empty.", "")
+                                .replaceAll("_", " ")}
+                            </CanvasPill>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 18,
+                              fontWeight: 700,
+                              color: theme.text,
+                            }}
+                          >
+                            {t(`${activeSurface.emptyState.messageCode}.title`)}
+                          </div>
+                          <div
+                            style={{
+                              ...emptyBodyStyle,
+                              color: theme.textMuted,
+                            }}
+                          >
+                            {t(`${activeSurface.emptyState.messageCode}.body`)}
+                          </div>
+                        </div>
                       </div>
 
-                      {emptyStateAction?.action === "refresh" ? (
-                        <div>
+                      <div style={emptyActionRowStyle}>
+                        {emptyStateAction?.action === "refresh" ? (
                           <CanvasBtn
                             theme={theme}
                             disabled={!emptyStateAction.enabled}
@@ -1464,11 +2115,9 @@ export default function HealthPage() {
                           >
                             {t("common.refresh")}
                           </CanvasBtn>
-                        </div>
-                      ) : null}
+                        ) : null}
 
-                      {emptyStateAction?.action === "filter:all" ? (
-                        <div>
+                        {emptyStateAction?.action === "filter:all" ? (
                           <CanvasBtn
                             theme={theme}
                             disabled={!emptyStateAction.enabled}
@@ -1478,192 +2127,232 @@ export default function HealthPage() {
                           >
                             {t("health.filter.all")}
                           </CanvasBtn>
-                        </div>
-                      ) : null}
+                        ) : null}
 
-                      {emptyStateAction?.action === "open:adapter-registry" ? (
-                        <div>
+                        {emptyStateAction?.action ===
+                        "open:adapter-registry" ? (
                           <Link
                             href="/adapter-registry?filter=attention"
                             style={linkButtonStyle(theme)}
                           >
                             {t("health.openAdapterRegistry")}
                           </Link>
-                        </div>
-                      ) : null}
+                        ) : null}
+                      </div>
                     </div>
                   ) : view === "alerts" ? (
-                    <CanvasCard
-                      theme={theme}
-                      title={
-                        locale === "en"
-                          ? `Active alerts · ${filteredAlerts.length}`
-                          : `現行警示 · ${filteredAlerts.length}`
-                      }
-                      subtitle={
-                        locale === "en"
-                          ? "Cross-module alert clusters for platform follow-up."
-                          : "跨模組平台跟進警示總覽。"
-                      }
-                    >
-                      <div style={{ display: "grid" }}>
-                        {filteredAlerts.map((alert, index) => {
-                          const followUpLink = getAlertFollowUpLink(alert);
-                          const followUpHref = followUpLink
-                            ? resolveCrossAppHref(followUpLink)
-                            : null;
+                    <>
+                      <CanvasCard
+                        theme={theme}
+                        title={
+                          locale === "en"
+                            ? `Active alerts · ${alertRows.length}`
+                            : `現行警示 · ${alertRows.length}`
+                        }
+                        subtitle={
+                          locale === "en"
+                            ? "Follow-up routing comes from each alert row."
+                            : "每一列警示的 follow-up 入口都由該列動作決定。"
+                        }
+                      >
+                        <div style={{ display: "grid", gap: 10 }}>
+                          {alertRows.map((alert) => {
+                            const followUpLink = getAlertFollowUpLink(alert);
+                            const followUpHref = followUpLink
+                              ? resolveCrossAppHref(followUpLink)
+                              : null;
 
-                          return (
-                            <div
-                              key={alert.key}
-                              style={{
-                                ...alertRowStyle(theme),
-                                borderBottom:
-                                  index === filteredAlerts.length - 1
-                                    ? "none"
-                                    : alertRowStyle(theme).borderBottom,
-                              }}
-                            >
-                              <CanvasPill
-                                theme={theme}
-                                tone={toneForStatus(alert.state)}
-                                dot
+                            return (
+                              <div
+                                key={alert.key}
+                                style={{
+                                  display: "grid",
+                                  gap: 10,
+                                  padding: "12px 14px",
+                                  borderRadius: 12,
+                                  border: `1px solid ${theme.border}`,
+                                  background: theme.surfaceLo,
+                                }}
                               >
-                                {t(
-                                  `health.filter.${alert.routes[0] ?? "platform"}`,
-                                )}
-                              </CanvasPill>
-
-                              <div style={alertBodyStyle}>
                                 <div
                                   style={{
-                                    fontSize: 12.5,
-                                    color: theme.text,
-                                    fontWeight: 600,
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "start",
+                                    gap: 12,
                                   }}
                                 >
-                                  {getAlertTitle(t, alert)}
+                                  <div style={{ display: "grid", gap: 6 }}>
+                                    <div
+                                      style={{
+                                        fontSize: 13,
+                                        fontWeight: 700,
+                                        color: theme.text,
+                                      }}
+                                    >
+                                      {getAlertTitle(t, alert)}
+                                    </div>
+                                    <div style={pillsRowStyle}>
+                                      <CanvasPill
+                                        theme={theme}
+                                        tone={toneForStatus(alert.state)}
+                                        dot
+                                      >
+                                        {formatPlatformCodeLabel(
+                                          locale,
+                                          alert.state,
+                                        )}
+                                      </CanvasPill>
+                                      {alert.routes.map((route) => (
+                                        <CanvasPill
+                                          key={`${alert.key}-route-${route}`}
+                                          theme={theme}
+                                          tone={
+                                            route === "platform"
+                                              ? "accent"
+                                              : "warn"
+                                          }
+                                          dot
+                                        >
+                                          {t(`health.filter.${route}`)}
+                                        </CanvasPill>
+                                      ))}
+                                    </div>
+                                  </div>
+
+                                  {followUpLink && followUpHref ? (
+                                    renderActionLink(
+                                      theme,
+                                      followUpHref,
+                                      followUpLink.targetApp ===
+                                        "platform-admin"
+                                        ? t("health.openAdapterRegistry")
+                                        : t("health.openOpsConsole"),
+                                      followUpLink.openMode,
+                                      "ghost",
+                                    )
+                                  ) : (
+                                    <CanvasPill theme={theme} tone="neutral">
+                                      {t("health.readOnly")}
+                                    </CanvasPill>
+                                  )}
                                 </div>
-                                <div style={alertMetaStyle(theme)}>
-                                  <span>{alert.key}</span>
-                                  <span>
-                                    {formatMetricValue(
-                                      alert.measuredValue,
-                                      alert.thresholds.unit,
-                                      locale,
-                                    )}
-                                  </span>
-                                  <span>
-                                    {t("health.thresholds", {
-                                      warning: formatMetricValue(
-                                        alert.thresholds.warning,
+
+                                <div
+                                  style={{
+                                    display: "grid",
+                                    gridTemplateColumns:
+                                      "repeat(auto-fit, minmax(160px, 1fr))",
+                                    gap: 10,
+                                  }}
+                                >
+                                  <div style={heroStatBoxStyle(theme)}>
+                                    <span
+                                      style={{
+                                        color: theme.textMuted,
+                                        fontSize: 11.5,
+                                      }}
+                                    >
+                                      {t("health.col.measured")}
+                                    </span>
+                                    <span
+                                      style={{
+                                        color: theme.text,
+                                        fontSize: 18,
+                                        fontWeight: 700,
+                                      }}
+                                    >
+                                      {formatMetricValue(
+                                        alert.measuredValue,
                                         alert.thresholds.unit,
                                         locale,
-                                      ),
-                                      critical: formatMetricValue(
-                                        alert.thresholds.critical,
-                                        alert.thresholds.unit,
-                                        locale,
-                                      ),
-                                    })}
-                                  </span>
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div style={heroStatBoxStyle(theme)}>
+                                    <span
+                                      style={{
+                                        color: theme.textMuted,
+                                        fontSize: 11.5,
+                                      }}
+                                    >
+                                      {t("health.col.threshold")}
+                                    </span>
+                                    <span
+                                      style={{
+                                        color: theme.text,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      {t("health.thresholds", {
+                                        warning: formatMetricValue(
+                                          alert.thresholds.warning,
+                                          alert.thresholds.unit,
+                                          locale,
+                                        ),
+                                        critical: formatMetricValue(
+                                          alert.thresholds.critical,
+                                          alert.thresholds.unit,
+                                          locale,
+                                        ),
+                                      })}
+                                    </span>
+                                  </div>
+                                  <div style={heroStatBoxStyle(theme)}>
+                                    <span
+                                      style={{
+                                        color: theme.textMuted,
+                                        fontSize: 11.5,
+                                      }}
+                                    >
+                                      {t("health.col.lastCheck")}
+                                    </span>
+                                    <span
+                                      style={{
+                                        color: theme.text,
+                                        fontSize: 13,
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      {formatDateTime(alert.observedAt, locale)}
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
+                            );
+                          })}
+                        </div>
+                      </CanvasCard>
 
-                              {followUpLink && followUpHref ? (
-                                renderActionLink(
-                                  theme,
-                                  followUpHref,
-                                  followUpLink.targetApp === "platform-admin"
-                                    ? t("health.openAdapterRegistry")
-                                    : t("health.openOpsConsole"),
-                                  followUpLink.openMode,
-                                  "ghost",
-                                )
-                              ) : alert.routes.includes("ops") ? (
-                                <CanvasPill theme={theme} tone="neutral">
-                                  {t("health.opsOwnedFollowUp")}
-                                </CanvasPill>
-                              ) : (
-                                <span style={{ color: theme.textDim }}>—</span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </CanvasCard>
+                      <CanvasCard theme={theme} padding={0}>
+                        <CanvasTable<AlertRow>
+                          theme={theme}
+                          columns={alertColumns}
+                          rows={alertRows}
+                        />
+                      </CanvasCard>
+                    </>
                   ) : (
                     <CanvasCard theme={theme} padding={0}>
                       <CanvasTable<AdapterRow>
                         theme={theme}
                         columns={adapterColumns}
-                        rows={adapters as AdapterRow[]}
+                        rows={adapterRows}
                       />
                     </CanvasCard>
                   )}
-
-                  {view === "alerts" && filteredAlerts.length > 0 ? (
-                    <CanvasCard theme={theme} padding={0}>
-                      <CanvasTable<AlertRow>
-                        theme={theme}
-                        columns={alertColumns}
-                        rows={filteredAlerts as AlertRow[]}
-                      />
-                    </CanvasCard>
-                  ) : null}
                 </div>
               </CanvasCard>
 
               <div style={{ display: "grid", gap: 16 }}>
                 <CanvasCard
                   theme={theme}
-                  title={locale === "en" ? "Refresh & source" : "刷新與來源"}
-                >
-                  <CanvasDL
-                    theme={theme}
-                    cols={1}
-                    items={[
-                      {
-                        label: t("health.refreshTier", {
-                          tier: REFRESH_TIER_LABEL,
-                        }),
-                        value: refreshing
-                          ? t("health.refreshing")
-                          : t("health.refreshIdle"),
-                      },
-                      {
-                        label: t("health.generatedAt", {
-                          time: formatDateTime(
-                            refreshMetadata.generatedAt,
-                            locale,
-                          ),
-                        }),
-                        value: t(
-                          `health.freshness.${refreshMetadata.dataFreshness}`,
-                        ),
-                      },
-                      {
-                        label: t("health.lastChecked", {
-                          time: formatDateTime(
-                            healthEnvelope.lastCheckedAt,
-                            locale,
-                          ),
-                        }),
-                        value: t(
-                          `health.sourceValue.${refreshMetadata.source}`,
-                        ),
-                      },
-                    ]}
-                  />
-                </CanvasCard>
-
-                <CanvasCard
-                  theme={theme}
                   title={t("health.affectedServices")}
                   subtitle={
                     locale === "en"
-                      ? "Page-critical dependencies emitted by the current UiHealthEnvelope."
-                      : "目前 UiHealthEnvelope 回傳的頁面關鍵依賴。"
+                      ? "UiHealthEnvelope summary shown to this page."
+                      : "此頁顯示的 UiHealthEnvelope 摘要。"
                   }
                 >
                   <div style={{ display: "grid", gap: 10 }}>
@@ -1677,9 +2366,9 @@ export default function HealthPage() {
                           key={service.service}
                           style={{
                             display: "grid",
-                            gap: 4,
+                            gap: 6,
                             padding: "10px 12px",
-                            borderRadius: 8,
+                            borderRadius: 10,
                             border: `1px solid ${theme.border}`,
                             background: theme.surfaceLo,
                           }}
@@ -1713,8 +2402,8 @@ export default function HealthPage() {
                   title={t("health.deepLinkLabel")}
                   subtitle={
                     locale === "en"
-                      ? "Cross-app links open in a new tab by default."
-                      : "跨 app deep link 預設以新分頁開啟。"
+                      ? "Exit surfaces are explicit so operators can jump from health to the owning tool."
+                      : "離開目的地要明確，讓操作員可以從健康頁直接跳到負責工具。"
                   }
                 >
                   <div style={{ display: "grid", gap: 10 }}>
@@ -1738,6 +2427,70 @@ export default function HealthPage() {
                         {t("health.opsConsoleUnavailableHint")}
                       </CanvasPill>
                     )}
+                  </div>
+                </CanvasCard>
+
+                <CanvasCard
+                  theme={theme}
+                  title={locale === "en" ? "Metric actions" : "指標動作"}
+                  subtitle={
+                    locale === "en"
+                      ? "Primary CTA exposure is driven from each surface action set."
+                      : "主要 CTA 由各 surface 的 action set 決定。"
+                  }
+                >
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {metricCards.map((metric) => {
+                      const action = metric.availableActions[0];
+                      const link = action ? actionHrefMap[action.action] : null;
+                      const href = link ? resolveCrossAppHref(link) : null;
+
+                      return (
+                        <div
+                          key={metric.label}
+                          style={{
+                            display: "grid",
+                            gap: 6,
+                            padding: "10px 12px",
+                            borderRadius: 10,
+                            border: `1px solid ${theme.border}`,
+                            background: theme.surfaceLo,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 12.5,
+                              fontWeight: 700,
+                              color: theme.text,
+                            }}
+                          >
+                            {metric.label}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 11.5,
+                              lineHeight: 1.55,
+                              color: theme.textMuted,
+                            }}
+                          >
+                            {metric.sub}
+                          </div>
+                          {action?.enabled && link && href ? (
+                            renderActionLink(
+                              theme,
+                              href,
+                              link.label,
+                              link.openMode,
+                              "ghost",
+                            )
+                          ) : (
+                            <CanvasPill theme={theme} tone="neutral">
+                              {t("health.readOnly")}
+                            </CanvasPill>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </CanvasCard>
               </div>
