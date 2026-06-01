@@ -6,6 +6,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   usePlatformAdminClient,
   formatDateTime,
@@ -28,6 +29,7 @@ type TFn = (key: string, params?: Record<string, string | number>) => string;
 export default function AuditPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
+  const searchParams = useSearchParams();
   const [records, setRecords] = useState<AuditLogRecord[]>([]);
   const [policies, setPolicies] = useState<EvidenceRetentionPolicyRecord[]>([]);
   const [legalHolds, setLegalHolds] = useState<EvidenceLegalHoldRecord[]>([]);
@@ -36,9 +38,17 @@ export default function AuditPage() {
   >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filterModule, setFilterModule] = useState<string>("");
-  const [filterActorType, setFilterActorType] = useState<string>("");
+  const [filterModule, setFilterModule] = useState<string>(
+    searchParams.get("module") ?? searchParams.get("moduleName") ?? "",
+  );
+  const [filterActorType, setFilterActorType] = useState<string>(
+    searchParams.get("actorType") ?? "",
+  );
   const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
+  const filterTenantId = searchParams.get("tenantId") ?? "";
+  const filterResourceType = searchParams.get("resourceType") ?? "";
+  const filterResourceId = searchParams.get("resourceId") ?? "";
+  const filterAuditId = searchParams.get("auditId") ?? "";
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -82,8 +92,13 @@ export default function AuditPage() {
   }, [loadRecords]);
 
   const filtered = records.filter((r) => {
+    if (filterTenantId && r.tenantId !== filterTenantId) return false;
     if (filterModule && r.moduleName !== filterModule) return false;
     if (filterActorType && r.actorType !== filterActorType) return false;
+    if (filterResourceType && r.resourceType !== filterResourceType)
+      return false;
+    if (filterResourceId && r.resourceId !== filterResourceId) return false;
+    if (filterAuditId && r.auditId !== filterAuditId) return false;
     return true;
   });
 
