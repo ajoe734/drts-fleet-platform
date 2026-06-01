@@ -4696,6 +4696,7 @@ export interface CreatePlatformAdminUserCommand {
 export interface UpdatePlatformAdminUserRoleCommand {
   roleCode: PlatformAdminUserRole;
   status?: PlatformAdminUserStatus;
+  reason?: string;
 }
 
 export type PlatformNoticeSeverity = "info" | "warning" | "critical";

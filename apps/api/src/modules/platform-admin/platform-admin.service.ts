@@ -630,6 +630,9 @@ export class PlatformAdminService implements OnModuleInit {
     const items = this.platformAdminUsers.map((user) =>
       this.buildPlatformAdminUserListItem(user),
     );
+    const createStaffAction = availableActions.find(
+      (action) => action.action === "create_staff_user",
+    );
 
     return {
       items,
@@ -640,9 +643,7 @@ export class PlatformAdminService implements OnModuleInit {
             emptyState: {
               reason: "no_data",
               messageCode: "platform_users_no_data",
-              nextAction: availableActions.find(
-                (action) => action.action === "create_staff_user",
-              ),
+              ...(createStaffAction ? { nextAction: createStaffAction } : {}),
             } satisfies EmptyStateEnvelope,
           }
         : {}),
@@ -707,11 +708,29 @@ export class PlatformAdminService implements OnModuleInit {
         { userId },
       );
     }
-    const oldRole = user.roleCode;
-    user.roleCode = command.roleCode;
-    if (command.status) {
-      user.status = command.status;
+
+    const availableAction = this.resolvePlatformAdminUserMutationAction(
+      user,
+      command,
+    );
+    const reason = this.normalizeNullableText(command.reason);
+
+    if (availableAction.requiresReason && !reason) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PLATFORM_ADMIN_USER_REASON_REQUIRED",
+        "A non-blank reason is required for this platform admin user action.",
+        {
+          userId,
+          action: availableAction.action,
+        },
+      );
     }
+
+    const oldRole = user.roleCode;
+    const oldStatus = user.status;
+    user.roleCode = command.roleCode;
+    user.status = command.status ?? user.status;
     user.updatedAt = new Date().toISOString();
     this.recordAudit(
       {
@@ -719,11 +738,20 @@ export class PlatformAdminService implements OnModuleInit {
         actorType: "platform_admin",
         tenantId: null,
         moduleName: "platform-admin",
-        actionName: "update_platform_admin_user_role",
+        actionName:
+          availableAction.action === "suspend"
+            ? "suspend_platform_admin_user"
+            : availableAction.action === "reactivate"
+              ? "reactivate_platform_admin_user"
+              : "update_platform_admin_user_role",
         resourceType: "platform_admin_user",
         resourceId: userId,
-        oldValuesSummary: { roleCode: oldRole },
-        newValuesSummary: { roleCode: command.roleCode },
+        oldValuesSummary: { roleCode: oldRole, status: oldStatus },
+        newValuesSummary: {
+          roleCode: command.roleCode,
+          status: user.status,
+          ...(reason ? { reason } : {}),
+        },
       },
       requestId,
     );
@@ -1174,6 +1202,38 @@ export class PlatformAdminService implements OnModuleInit {
       ...user,
       availableActions,
     };
+  }
+
+  private resolvePlatformAdminUserMutationAction(
+    user: PlatformAdminUserRecord,
+    command: UpdatePlatformAdminUserRoleCommand,
+  ): ResourceActionDescriptor {
+    const targetStatus = command.status ?? user.status;
+    const requestedAction =
+      targetStatus !== user.status
+        ? targetStatus === "suspended"
+          ? "suspend"
+          : "reactivate"
+        : "update_role";
+
+    const availableAction = this.buildPlatformAdminUserListItem(
+      user,
+    ).availableActions.find((action) => action.action === requestedAction);
+
+    if (!availableAction || !availableAction.enabled) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PLATFORM_ADMIN_USER_ACTION_NOT_ALLOWED",
+        "The requested platform admin user action is not currently allowed.",
+        {
+          userId: user.userId,
+          action: requestedAction,
+          disabledReasonCode: availableAction?.disabledReasonCode ?? null,
+        },
+      );
+    }
+
+    return availableAction;
   }
 
   private clonePricingRule(

@@ -1323,6 +1323,7 @@ export default function UsersPage() {
           {
             roleCode: formRoleCode,
             status: user.status,
+            ...(reason.trim() ? { reason: reason.trim() } : {}),
           },
         )) as Partial<ActionReceipt> & Partial<PlatformAdminUserRecord>;
         setLastReceipt(buildReceiptBanner(pendingAction, response));
@@ -1332,6 +1333,7 @@ export default function UsersPage() {
           {
             roleCode: user.roleCode,
             status: pendingAction.kind === "suspend" ? "suspended" : "active",
+            reason: reason.trim(),
           },
         )) as Partial<ActionReceipt> & Partial<PlatformAdminUserRecord>;
         setLastReceipt(buildReceiptBanner(pendingAction, response));
@@ -1356,6 +1358,7 @@ export default function UsersPage() {
     buildReceiptBanner,
     loadUsers,
     pendingAction,
+    reason,
   ]);
 
   const tableColumns = useMemo<CanvasTableColumn<UserRow>[]>(

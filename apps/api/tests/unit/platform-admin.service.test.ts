@@ -129,3 +129,70 @@ describe("PlatformAdminService.publishPlacardVersion", () => {
     );
   });
 });
+
+describe("PlatformAdminService.updatePlatformAdminUserRole", () => {
+  it("rejects mutating the last active superadmin via unavailable actions", () => {
+    const { service, platformAdminRepository, auditNotificationService } =
+      createService();
+
+    expect(() =>
+      service.updatePlatformAdminUserRole("pa-user-001", {
+        roleCode: "admin",
+        status: "active",
+      }),
+    ).toThrowError(ApiRequestError);
+
+    expect(platformAdminRepository.persistChanges).not.toHaveBeenCalled();
+    expect(auditNotificationService.recordAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("requires a non-blank reason for suspend and reactivate actions", () => {
+    const { service, platformAdminRepository, auditNotificationService } =
+      createService();
+
+    expect(() =>
+      service.updatePlatformAdminUserRole("pa-user-004", {
+        roleCode: "operator",
+        status: "suspended",
+      }),
+    ).toThrowError(ApiRequestError);
+
+    expect(() =>
+      service.updatePlatformAdminUserRole("pa-user-007", {
+        roleCode: "viewer",
+        status: "active",
+        reason: "   ",
+      }),
+    ).toThrowError(ApiRequestError);
+
+    expect(platformAdminRepository.persistChanges).not.toHaveBeenCalled();
+    expect(auditNotificationService.recordAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("records the reason when suspending a platform admin user", () => {
+    const { service, auditNotificationService } = createService();
+
+    const updated = service.updatePlatformAdminUserRole(
+      "pa-user-004",
+      {
+        roleCode: "operator",
+        status: "suspended",
+        reason: "Repeated RBAC violations during access review.",
+      },
+      "req-suspend-platform-user",
+    );
+
+    expect(updated.status).toBe("suspended");
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-suspend-platform-user",
+        actionName: "suspend_platform_admin_user",
+        resourceId: "pa-user-004",
+        newValuesSummary: expect.objectContaining({
+          status: "suspended",
+          reason: "Repeated RBAC violations during access review.",
+        }),
+      }),
+    );
+  });
+});
