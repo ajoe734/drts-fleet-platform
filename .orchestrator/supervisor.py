@@ -216,16 +216,118 @@ def prune_done_handoffs(status: dict[str, Any], keep: int = 500) -> None:
     status["handoffs"] = pending + done[-keep:]
 
 
-def write_status_with_prune(status_path, status: dict[str, Any], *, keep_handoffs: int = 500) -> None:
-    """Standard status-file write that also bounds the handoffs audit-log tail.
+def archive_task_bodies(archive_path: Path | None, dropped: list[dict[str, Any]]) -> None:
+    """Append full bodies of pruned done-tasks to ``ai-task-archive.jsonl`` so
+    their detail stays auditable after the live status file drops them (which
+    keeps only the id in ``archived_task_ids``). Append-only JSONL + O_APPEND is
+    deliberate — it is concurrency-safe, unlike a read-modify-write of one JSON
+    object. Mirrors ``ai_status.py.archive_task_bodies``. Best-effort: archival
+    must never block or fail a status write."""
+    if not archive_path or not dropped:
+        return
+    stamp = utc_now()
+    try:
+        with archive_path.open("a", encoding="utf-8") as handle:
+            for task in dropped:
+                if not task.get("id"):
+                    continue
+                record = dict(task)
+                record["_archived_at"] = stamp
+                record["_archived_by"] = "supervisor.py"
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def prune_done_tasks(
+    status: dict[str, Any], keep: int = 150, archive_path: Path | None = None
+) -> None:
+    """Trim ``status["tasks"]`` in place, keeping every non-done task plus the
+    most recent ``keep`` done tasks. Dropped done-task ids are recorded in
+    ``status["archived_task_ids"]``; their full bodies are appended to
+    ``archive_path`` (``ai-task-archive.jsonl``) when supplied.
+
+    ai-status.json's tasks array accumulates every completed task forever
+    (646 done / ~1.0 MB by the 2026-05-30 incident), pushing the file past the
+    256 KB cap the chair/coordination worker's Read tool enforces — so the only
+    healthy lanes could no longer read machine truth and the supervisor thrashed
+    re-queuing chair reviews. Dropping done tasks is dependency-safe:
+    ``dependencies_satisfied`` treats a dep missing from the task map as
+    archived/done (see its comment), so archived done tasks still satisfy
+    downstream deps. See feedback_ai_status_handoff_bloat for the write-up.
+    """
+    tasks = status.get("tasks") or []
+    if not isinstance(tasks, list):
+        return
+    done = [t for t in tasks if str(t.get("status") or "").lower() == "done"]
+    if len(done) <= keep:
+        return
+    dropped = done[:-keep] if keep > 0 else done
+    dropped_ids = {t.get("id") for t in dropped if t.get("id")}
+    if not dropped_ids:
+        return
+    archive_task_bodies(archive_path, dropped)
+    status["tasks"] = [
+        t
+        for t in tasks
+        if str(t.get("status") or "").lower() != "done" or t.get("id") not in dropped_ids
+    ]
+    archived = status.setdefault("archived_task_ids", [])
+    if isinstance(archived, list):
+        already = set(archived)
+        for tid in (t.get("id") for t in dropped):
+            if tid and tid not in already:
+                archived.append(tid)
+                already.add(tid)
+
+
+def prune_blockers(status: dict[str, Any], keep: int = 100) -> None:
+    """Trim ``status["blockers"]`` keeping every unresolved blocker plus the most
+    recent ``keep`` resolved ones. Resolved blockers accumulate forever and are
+    never re-read once closed; only open blockers drive chair decisions."""
+    blockers = status.get("blockers") or []
+    if not isinstance(blockers, list):
+        return
+    resolved = [b for b in blockers if str(b.get("status") or "").lower() == "resolved"]
+    if len(resolved) <= keep:
+        return
+    dropped = {id(b) for b in (resolved[:-keep] if keep > 0 else resolved)}
+    status["blockers"] = [b for b in blockers if id(b) not in dropped]
+
+
+def write_status_with_prune(
+    status_path,
+    status: dict[str, Any],
+    *,
+    config: dict[str, Any] | None = None,
+    keep_handoffs: int | None = None,
+    keep_done_tasks: int | None = None,
+    keep_blockers: int | None = None,
+) -> None:
+    """Standard status-file write that bounds the unbounded audit tails (done
+    handoffs, done tasks, resolved blockers) so ai-status.json stays under the
+    256 KB cap the chair/coordination workers' Read tool enforces.
 
     All supervisor paths that previously called ``write_json(status_path, status)``
-    now route through this wrapper so the prune cannot be forgotten in a new
-    code path. ``keep_handoffs`` is tunable via the
-    ``supervisor.handoff_keep_count`` config key for hosts that want longer
-    audit history.
+    now route through this wrapper so the prune cannot be forgotten in a new code
+    path. Keep counts are tunable via the ``supervisor.handoff_keep_count`` /
+    ``supervisor.task_keep_count`` / ``supervisor.blocker_keep_count`` config keys
+    for hosts that want a longer audit tail.
     """
+    supervisor_cfg = (config or {}).get("supervisor", {}) if isinstance(config, dict) else {}
+    if keep_handoffs is None:
+        keep_handoffs = int(supervisor_cfg.get("handoff_keep_count", 200))
+    if keep_done_tasks is None:
+        keep_done_tasks = int(supervisor_cfg.get("task_keep_count", 150))
+    if keep_blockers is None:
+        keep_blockers = int(supervisor_cfg.get("blocker_keep_count", 100))
     prune_done_handoffs(status, keep=keep_handoffs)
+    prune_done_tasks(
+        status,
+        keep=keep_done_tasks,
+        archive_path=Path(status_path).parent / "ai-task-archive.jsonl",
+    )
+    prune_blockers(status, keep=keep_blockers)
     write_json(status_path, status)
 
 
@@ -3185,7 +3287,7 @@ def persist_task_reassignment(
             }
         )
 
-    write_status_with_prune(status_path, status, keep_handoffs=int(config.get("supervisor", {}).get("handoff_keep_count", 500)))
+    write_status_with_prune(status_path, status, config=config)
     return sync_status_pipeline(config)
 
 
@@ -5828,6 +5930,17 @@ def build_chair_review_message(
             path = config_path(config, key)
         except KeyError:
             continue
+        if key == "state_file":
+            # Point the chair at the bounded chair-scoped digest, not the full
+            # state.json — the latter exceeds the 256 KB worker Read cap under
+            # concurrent dispatch (fat per-worker request_snapshot/command/metadata
+            # + seen_event_keys). See runtime_state.build_state_digest /
+            # feedback_ai_status_handoff_bloat.
+            path = path.parent / "state-digest.json"
+            machine_truth_lines.append(
+                f"- {label} (chair-scoped digest of state.json; tasks live in ai-status): `{path.resolve()}`"
+            )
+            continue
         machine_truth_lines.append(f"- {label}: `{path.resolve()}`")
     if not machine_truth_lines:
         machine_truth_lines.append("- configured machine-truth paths are unavailable in this test/config context")
@@ -6494,7 +6607,7 @@ def apply_chair_reassignment_action(
             "created_at": timestamp,
         }
     )
-    write_status_with_prune(status_path, status, keep_handoffs=int(config.get("supervisor", {}).get("handoff_keep_count", 500)))
+    write_status_with_prune(status_path, status, config=config)
     if not sync_status_pipeline(config):
         return False
     clear_failure_streak(state, task_id, role)
@@ -7085,7 +7198,7 @@ def apply_chair_parent_resume_action(
             blocker["status"] = "resolved"
             blocker["resolved_at"] = timestamp
 
-    write_status_with_prune(status_path, status, keep_handoffs=int(config.get("supervisor", {}).get("handoff_keep_count", 500)))
+    write_status_with_prune(status_path, status, config=config)
     if not sync_status_pipeline(config):
         return False
 
