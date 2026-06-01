@@ -1257,7 +1257,10 @@ export default async function WebhooksPage({
     emptyReason = "filtered_empty";
   }
 
-  const engineActive = emptyReason !== "not_provisioned";
+  const pageEmptyReason =
+    emptyReason && emptyReason !== "filtered_empty" ? emptyReason : null;
+
+  const engineActive = pageEmptyReason !== "not_provisioned";
   const allPageActions = getPageActions(
     engineActive,
     data.endpoints,
@@ -1271,7 +1274,9 @@ export default async function WebhooksPage({
     allPageActions.find(
       (descriptor) => descriptor.action === "create_endpoint",
     ) ?? null;
-  const emptyModel = emptyReason ? getEmptyStateModel(emptyReason) : null;
+  const emptyModel = pageEmptyReason
+    ? getEmptyStateModel(pageEmptyReason)
+    : null;
   const refreshAge = Math.max(
     0,
     Date.now() - (parseDate(data.refresh.generatedAt)?.getTime() ?? Date.now()),
@@ -1549,6 +1554,20 @@ export default async function WebhooksPage({
             </a>
           </div>
         </div>
+
+        {selectedWebhookId ? (
+          <CanvasBanner
+            theme={th}
+            tone={emptyReason === "filtered_empty" ? "accent" : "info"}
+            icon="link"
+            title={`目前聚焦 endpoint ${selectedWebhookId}`}
+            body={
+              emptyReason === "filtered_empty"
+                ? "此篩選目前沒有 delivery log；endpoint 管理動作仍可用，並可切回全部 deliveries。"
+                : "右側 detail、danger zone 與 replay 皆以此 endpoint 為主；可隨時切回全部 deliveries。"
+            }
+          />
+        ) : null}
 
         {emptyModel ? (
           <CanvasCard theme={th} title="Webhook 狀態" padding={20}>
@@ -2038,7 +2057,7 @@ export default async function WebhooksPage({
                 rows={deliveryRows.slice(0, 12)}
                 dense
               />
-            ) : emptyModel?.reason === "filtered_empty" ? (
+            ) : emptyReason === "filtered_empty" ? (
               <div style={{ padding: 20 }}>
                 <WorkflowEmptyState
                   title="此 endpoint 目前沒有 delivery log"
