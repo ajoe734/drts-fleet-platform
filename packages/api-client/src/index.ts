@@ -194,6 +194,10 @@ import type {
   TenantRoleCatalogRecord,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
+  EmptyStateEnvelope,
+  CrossAppResourceLink,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
   TransferCallToComplaintCommand,
   TransferCallToIncidentCommand,
   EscalateComplaintToIncidentCommand,
@@ -252,6 +256,13 @@ export interface RequestOptions {
 
 interface ListEnvelope<T> {
   items: T[];
+}
+
+export interface TenantUsersListEnvelope extends ListEnvelope<TenantUserRoleRecord> {
+  availableActions?: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope;
+  refreshMetadata?: UiRefreshMetadata;
+  crossAppLinks?: CrossAppResourceLink[];
 }
 
 function snakeToCamelCase(key: string): string {
@@ -1644,8 +1655,8 @@ export class ApiClient {
     return this.post("/api/tenant/sla", { body: command });
   }
 
-  async listTenantUsers(): Promise<TenantUserRoleRecord[]> {
-    return this.getList<TenantUserRoleRecord>("/api/tenant/users");
+  async listTenantUsers(): Promise<TenantUsersListEnvelope> {
+    return this.get<TenantUsersListEnvelope>("/api/tenant/users");
   }
 
   async listTenantRoles(): Promise<TenantRoleCatalogRecord[]> {

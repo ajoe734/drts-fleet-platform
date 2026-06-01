@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type {
   CrossAppResourceLink,
   EmptyReason,
+  EmptyStateEnvelope,
   IdentityContext,
   RefreshTier,
   ResourceActionDescriptor,
@@ -44,10 +45,6 @@ const REFRESH_TIER_CADENCE_MS: Record<RefreshTier, number | null> = {
 };
 const TENANT_REFRESH_CADENCE_MS =
   REFRESH_TIER_CADENCE_MS[TENANT_REFRESH_TIER] ?? 30_000;
-const OPS_CONSOLE_URL =
-  process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003";
-const PLATFORM_ADMIN_URL =
-  process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002";
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -246,21 +243,11 @@ const hintCopyStyle: CSSProperties = {
   lineHeight: 1.45,
 };
 
-const emptyReasonListStyle: CSSProperties = {
-  display: "grid",
-  gap: 10,
-};
-
 const numberFormatter = new Intl.NumberFormat("en");
 
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
   dateStyle: "short",
   timeStyle: "short",
-});
-
-const refreshDateFormatter = new Intl.DateTimeFormat("zh-Hant", {
-  dateStyle: "short",
-  timeStyle: "medium",
 });
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -279,7 +266,6 @@ type UserRow = Record<string, unknown> &
     availableActions: ResourceActionDescriptor[];
     lastLoginAt: string | null;
     roleDisplayName: string;
-    actionAuthority: "embedded" | "fallback";
   };
 
 type UsersPageData = {
@@ -288,6 +274,10 @@ type UsersPageData = {
   users: RuntimeTenantUserRecord[];
   roles: TenantRoleCatalogRecord[];
   failures: LoadFailure[];
+  availableActions: ResourceActionDescriptor[];
+  emptyState: EmptyStateEnvelope | null;
+  refreshMetadata: UiRefreshMetadata | null;
+  crossAppLinks: CrossAppResourceLink[];
 };
 
 type EmptyStateConfig = {
@@ -296,21 +286,15 @@ type EmptyStateConfig = {
   tone: CanvasTone;
   icon: ReactNode;
   nextAction?: ResourceActionDescriptor | undefined;
+  actionHref?: string;
+  actionLabel?: string;
+  actionIcon?: "plus" | "refresh" | "warn" | "ext";
 };
 
 type RuntimeTenantUserRecord = TenantUserRoleRecord & {
   availableActions?: ResourceActionDescriptor[];
   lastLoginAt?: string | null;
 };
-
-const EMPTY_REASON_ORDER: EmptyReason[] = [
-  "no_data",
-  "not_provisioned",
-  "fetch_failed",
-  "permission_denied",
-  "external_unavailable",
-  "filtered_empty",
-];
 
 const ROLE_CANVAS_LABEL: Record<string, string> = {
   tc_admin: "tenant_admin",
@@ -349,12 +333,6 @@ function formatUpdated(value: string | null | undefined) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
   return dateTimeFormatter.format(parsed);
-}
-
-function formatRefreshAt(value: string) {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return refreshDateFormatter.format(parsed);
 }
 
 function formatCount(value: number) {
@@ -423,15 +401,6 @@ function classifyFailureReason(message: string): EmptyReason {
   return "fetch_failed";
 }
 
-function deriveRefreshMetadata(failures: LoadFailure[]): UiRefreshMetadata {
-  return {
-    generatedAt: new Date().toISOString(),
-    staleAfterMs: TENANT_REFRESH_CADENCE_MS,
-    dataFreshness: failures.length > 0 ? "degraded" : "fresh",
-    source: "live",
-  };
-}
-
 function parseFilterValue(
   value: string | string[] | undefined,
   fallback: string,
@@ -465,23 +434,6 @@ function normalizeStatusFilter(
   return "all";
 }
 
-function normalizeEmptyReason(
-  value: string | string[] | undefined,
-): EmptyReason | null {
-  const normalized = parseFilterValue(value, "");
-  if (
-    normalized === "no_data" ||
-    normalized === "not_provisioned" ||
-    normalized === "fetch_failed" ||
-    normalized === "permission_denied" ||
-    normalized === "external_unavailable" ||
-    normalized === "filtered_empty"
-  ) {
-    return normalized;
-  }
-  return null;
-}
-
 function buildQueryString(
   base: SearchParams,
   updates: Record<string, string | null | undefined>,
@@ -505,77 +457,6 @@ function buildQueryString(
   return query.length > 0 ? `/users?${query}` : "/users";
 }
 
-function buildActionDescriptor(
-  action: string,
-  enabled: boolean,
-  riskLevel: ResourceActionDescriptor["riskLevel"],
-  disabledReasonCode?: string,
-  requiresReason?: boolean,
-): ResourceActionDescriptor {
-  return {
-    action,
-    enabled,
-    riskLevel,
-    ...(disabledReasonCode ? { disabledReasonCode } : {}),
-    ...(requiresReason ? { requiresReason: true } : {}),
-  };
-}
-
-function getPageInviteAction(
-  assignableRoles: TenantRoleCatalogRecord[],
-): ResourceActionDescriptor {
-  return buildActionDescriptor(
-    "invite",
-    assignableRoles.length > 0,
-    "medium",
-    assignableRoles.length > 0 ? undefined : "role_catalog_unavailable",
-  );
-}
-
-function getRefreshAction(): ResourceActionDescriptor {
-  return buildActionDescriptor("refresh", true, "low");
-}
-
-function buildFallbackUserActions(
-  user: TenantUserRoleRecord,
-): ResourceActionDescriptor[] {
-  const updateRole = buildActionDescriptor(
-    "role",
-    user.status === "active",
-    "medium",
-    user.status === "active" ? undefined : "not_active",
-  );
-  const suspend = buildActionDescriptor(
-    "suspend",
-    user.status === "active",
-    "high",
-    user.status === "suspended" ? "already_suspended" : "not_active",
-    true,
-  );
-  const resendInvite = buildActionDescriptor(
-    "resend_invitation",
-    user.status === "invited",
-    "medium",
-    user.status === "active" ? "already_active" : "not_pending_invite",
-  );
-
-  return [updateRole, suspend, resendInvite];
-}
-
-function resolveUserAvailableActions(user: RuntimeTenantUserRecord) {
-  if ("availableActions" in user && Array.isArray(user.availableActions)) {
-    return {
-      availableActions: user.availableActions,
-      actionAuthority: "embedded" as const,
-    };
-  }
-
-  return {
-    availableActions: buildFallbackUserActions(user),
-    actionAuthority: "fallback" as const,
-  };
-}
-
 function getAction(
   availableActions: ResourceActionDescriptor[],
   action: string,
@@ -589,51 +470,21 @@ function buildUserRows(
 ): UserRow[] {
   const roleLookup = new Map(roles.map((role) => [role.roleCode, role]));
 
-  return users.map((user) => {
-    const actionResolution = resolveUserAvailableActions(user);
-
-    return {
-      ...user,
-      availableActions: actionResolution.availableActions,
-      actionAuthority: actionResolution.actionAuthority,
-      lastLoginAt:
-        "lastLoginAt" in user
-          ? (user.lastLoginAt ?? null)
-          : user.status === "active"
-            ? user.updatedAt
-            : null,
-      roleDisplayName:
-        roleLookup.get(user.roleCode)?.displayName ??
-        getRoleLabel(user.roleCode),
-    };
-  });
-}
-
-function deriveEmptyReason(
-  allUsers: TenantUserRoleRecord[],
-  visibleUsers: TenantUserRoleRecord[],
-  roles: TenantRoleCatalogRecord[],
-  failures: LoadFailure[],
-  forcedReason: EmptyReason | null,
-): EmptyReason | null {
-  if (forcedReason) return forcedReason;
-
-  if (failures.some((failure) => failure.reason === "permission_denied")) {
-    return "permission_denied";
-  }
-  if (failures.some((failure) => failure.reason === "external_unavailable")) {
-    return "external_unavailable";
-  }
-  if (failures.length > 0) return "fetch_failed";
-  if (visibleUsers.length > 0) return null;
-  if (allUsers.length > 0) return "filtered_empty";
-  if (roles.length === 0) return "not_provisioned";
-  return "no_data";
+  return users.map((user) => ({
+    ...user,
+    availableActions: Array.isArray(user.availableActions)
+      ? user.availableActions
+      : [],
+    lastLoginAt: "lastLoginAt" in user ? (user.lastLoginAt ?? null) : null,
+    roleDisplayName:
+      roleLookup.get(user.roleCode)?.displayName ?? getRoleLabel(user.roleCode),
+  }));
 }
 
 function getEmptyStateConfig(
   reason: EmptyReason,
   nextAction: ResourceActionDescriptor | undefined,
+  refreshHref: string,
 ): EmptyStateConfig {
   switch (reason) {
     case "not_provisioned":
@@ -650,7 +501,9 @@ function getEmptyStateConfig(
         body: "後端快照沒有成功回來。請重新整理，若持續失敗再進 audit 或支援流程。",
         tone: "danger",
         icon: "warn",
-        nextAction: getRefreshAction(),
+        actionHref: refreshHref,
+        actionLabel: "重新整理",
+        actionIcon: "refresh",
       };
     case "permission_denied":
       return {
@@ -665,7 +518,9 @@ function getEmptyStateConfig(
         body: "租戶使用者清單可讀性受外部 identity / session 依賴影響。可先到 audit 查看近期 role 變更。",
         tone: "warn",
         icon: "warn",
-        nextAction: getRefreshAction(),
+        actionHref: refreshHref,
+        actionLabel: "重新整理",
+        actionIcon: "refresh",
       };
     case "filtered_empty":
       return {
@@ -686,45 +541,22 @@ function getEmptyStateConfig(
   }
 }
 
-function getCrossAppLinks(tenantId: string): CrossAppResourceLink[] {
-  return [
-    {
-      targetApp: "platform-admin",
-      route: `/audit?tenantId=${encodeURIComponent(tenantId)}&resourceType=tenant_user_role`,
-      resourceType: "tenant_user_role",
-      resourceId: tenantId,
-      openMode: "new_tab",
-      label: "Platform Admin audit",
-    },
-    {
-      targetApp: "ops-console",
-      route: `/audit?tenantId=${encodeURIComponent(tenantId)}&resourceType=tenant_user_role`,
-      resourceType: "tenant_user_role",
-      resourceId: tenantId,
-      openMode: "new_tab",
-      label: "Ops Console audit",
-    },
-  ];
-}
-
 function resolveCrossAppHref(link: CrossAppResourceLink) {
-  const origin =
-    link.targetApp === "platform-admin" ? PLATFORM_ADMIN_URL : OPS_CONSOLE_URL;
-  return `${origin}${link.route}`;
+  return link.route;
 }
 
 async function loadUsersData(): Promise<UsersPageData> {
   const client = getTenantClient();
   const [identityResult, usersResult, rolesResult] = await Promise.allSettled([
     client.getIdentityContext() as Promise<IdentityContext>,
-    client.listTenantUsers() as Promise<RuntimeTenantUserRecord[]>,
+    client.listTenantUsers(),
     client.listTenantRoles() as Promise<TenantRoleCatalogRecord[]>,
   ]);
 
   const failures: LoadFailure[] = [];
   const users =
     usersResult.status === "fulfilled"
-      ? [...usersResult.value].sort(compareUsers)
+      ? [...usersResult.value.items].sort(compareUsers)
       : [];
   const roles =
     rolesResult.status === "fulfilled"
@@ -758,7 +590,42 @@ async function loadUsersData(): Promise<UsersPageData> {
     users,
     roles,
     failures,
+    availableActions:
+      usersResult.status === "fulfilled" &&
+      Array.isArray(usersResult.value.availableActions)
+        ? usersResult.value.availableActions
+        : [],
+    emptyState:
+      usersResult.status === "fulfilled"
+        ? (usersResult.value.emptyState ?? null)
+        : null,
+    refreshMetadata:
+      usersResult.status === "fulfilled"
+        ? (usersResult.value.refreshMetadata ?? null)
+        : null,
+    crossAppLinks:
+      usersResult.status === "fulfilled" &&
+      Array.isArray(usersResult.value.crossAppLinks)
+        ? usersResult.value.crossAppLinks
+        : [],
   };
+}
+
+function getActionLabel(action: string) {
+  switch (action) {
+    case "invite":
+      return "邀請";
+    case "role":
+      return "更新角色";
+    case "suspend":
+      return "停用";
+    case "resend_invitation":
+      return "重送邀請";
+    case "refresh":
+      return "重新整理";
+    default:
+      return action;
+  }
 }
 
 function ActionDescriptorButton({
@@ -794,6 +661,24 @@ function ActionDescriptorButton({
         {label}
       </CanvasBtn>
     </span>
+  );
+}
+
+function EmptyStateActionLink({
+  href,
+  label,
+  icon,
+}: {
+  href: string;
+  label: string;
+  icon: "plus" | "refresh" | "warn" | "ext" | undefined;
+}) {
+  return (
+    <a href={href} style={{ textDecoration: "none" }}>
+      <CanvasBtn theme={th} size="sm" variant="secondary" icon={icon}>
+        {label}
+      </CanvasBtn>
+    </a>
   );
 }
 
@@ -843,10 +728,14 @@ function EmptyStateBlock({
       {config.nextAction ? (
         <ActionDescriptorButton
           descriptor={config.nextAction}
-          label={
-            config.nextAction.action === "refresh" ? "重新整理" : "邀請成員"
-          }
+          label={getActionLabel(config.nextAction.action)}
           icon={config.nextAction.action === "refresh" ? "refresh" : "plus"}
+        />
+      ) : config.actionHref && config.actionLabel ? (
+        <EmptyStateActionLink
+          href={config.actionHref}
+          label={config.actionLabel}
+          icon={config.actionIcon}
         />
       ) : null}
     </div>
@@ -869,17 +758,25 @@ export default async function UsersPage({
   searchParams?: Promise<SearchParams> | SearchParams;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
-  const { identity, identityError, users, roles, failures } =
-    await loadUsersData();
-  const refreshMetadata = deriveRefreshMetadata(failures);
+  const {
+    identity,
+    identityError,
+    users,
+    roles,
+    failures,
+    availableActions,
+    emptyState,
+    refreshMetadata: backendRefreshMetadata,
+    crossAppLinks: backendCrossAppLinks,
+  } = await loadUsersData();
+  const refreshHref = buildQueryString(resolvedSearchParams, {
+    refreshedAt: Date.now().toString(),
+  });
   const tenantId = identity?.tenantId ?? users[0]?.tenantId ?? DEMO_TENANT_ID;
   const assignableRoles = roles.filter((role) => role.assignable);
-  const pageInviteAction = getPageInviteAction(assignableRoles);
+  const pageInviteAction = getAction(availableActions, "invite");
   const roleFilter = normalizeRoleFilter(resolvedSearchParams.role, roles);
   const statusFilter = normalizeStatusFilter(resolvedSearchParams.status);
-  const forcedEmptyReason = normalizeEmptyReason(
-    resolvedSearchParams.emptyReason,
-  );
 
   const filteredUsers = users.filter((user) => {
     if (roleFilter !== "all" && user.roleCode !== roleFilter) return false;
@@ -888,15 +785,12 @@ export default async function UsersPage({
   });
 
   const userRows = buildUserRows(filteredUsers, roles);
-  const emptyReason = deriveEmptyReason(
-    users,
-    filteredUsers,
-    roles,
-    failures,
-    forcedEmptyReason,
-  );
+  const emptyReason =
+    filteredUsers.length === 0 && users.length > 0
+      ? ("filtered_empty" as const)
+      : (emptyState?.reason ?? null);
   const emptyConfig = emptyReason
-    ? getEmptyStateConfig(emptyReason, pageInviteAction)
+    ? getEmptyStateConfig(emptyReason, emptyState?.nextAction, refreshHref)
     : null;
 
   const activeUsers = users.filter((user) => user.status === "active").length;
@@ -910,25 +804,12 @@ export default async function UsersPage({
       ? user.updatedAt
       : latest;
   }, null);
-  const fallbackActionUsers = userRows.filter(
-    (row) => row.actionAuthority === "fallback",
-  ).length;
-
-  const crossAppLinks = getCrossAppLinks(tenantId);
-  const refreshHref = buildQueryString(resolvedSearchParams, {
-    refreshedAt: Date.now().toString(),
-    emptyReason: null,
-  });
+  const crossAppLinks = backendCrossAppLinks;
   const allRoleHref = buildQueryString(resolvedSearchParams, {
     role: null,
-    emptyReason: null,
   });
   const allStatusHref = buildQueryString(resolvedSearchParams, {
     status: null,
-    emptyReason: null,
-  });
-  const emptyReasonClearHref = buildQueryString(resolvedSearchParams, {
-    emptyReason: null,
   });
 
   const columns: CanvasTableColumn<UserRow>[] = [
@@ -993,6 +874,12 @@ export default async function UsersPage({
           row.availableActions,
           "resend_invitation",
         );
+        const extraActions = row.availableActions.filter(
+          (action) =>
+            action.action !== "role" &&
+            action.action !== "suspend" &&
+            action.action !== "resend_invitation",
+        );
 
         return (
           <div style={rowActionMetaStyle}>
@@ -1012,13 +899,25 @@ export default async function UsersPage({
                 label="重送邀請"
                 size="xs"
               />
+              {extraActions.map((action) => (
+                <ActionDescriptorButton
+                  key={action.action}
+                  descriptor={action}
+                  label={getActionLabel(action.action)}
+                  size="xs"
+                />
+              ))}
             </div>
-            <span style={userMetaStyle}>
-              availableActions[{row.actionAuthority}]:
-              {row.availableActions.map((action) =>
-                action.enabled ? ` ${action.action}` : ` ${action.action}[off]`,
-              )}
-            </span>
+            {row.availableActions.length > 0 ? (
+              <span style={userMetaStyle}>
+                availableActions:
+                {row.availableActions.map((action) =>
+                  action.enabled
+                    ? ` ${action.action}`
+                    : ` ${action.action}[off]`,
+                )}
+              </span>
+            ) : null}
           </div>
         );
       },
@@ -1053,13 +952,27 @@ export default async function UsersPage({
       />
 
       <div style={pageBodyStyle}>
-        <CanvasBanner
-          theme={th}
-          tone={refreshMetadata.dataFreshness === "degraded" ? "warn" : "info"}
-          icon="refresh"
-          title={`Refresh tier T5 · ${TENANT_REFRESH_CADENCE_MS / 1000}s cadence · ${TENANT_REFRESH_TIER}`}
-          body={`目前顯示的是 ${formatRefreshAt(refreshMetadata.generatedAt)} 產生的 snapshot · dataFreshness=${refreshMetadata.dataFreshness} · source=${refreshMetadata.source}`}
-        />
+        {backendRefreshMetadata ? (
+          <CanvasBanner
+            theme={th}
+            tone={
+              backendRefreshMetadata.dataFreshness === "degraded"
+                ? "warn"
+                : "info"
+            }
+            icon="refresh"
+            title={`Refresh tier T5 · ${TENANT_REFRESH_CADENCE_MS / 1000}s cadence · ${TENANT_REFRESH_TIER}`}
+            body={`目前顯示的是 ${backendRefreshMetadata.generatedAt} 產生的 snapshot · dataFreshness=${backendRefreshMetadata.dataFreshness} · source=${backendRefreshMetadata.source}`}
+          />
+        ) : (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="warn"
+            title={`Refresh tier T5 · ${TENANT_REFRESH_CADENCE_MS / 1000}s cadence · ${TENANT_REFRESH_TIER}`}
+            body="後端尚未提供 UiRefreshMetadata；此頁只顯示 spec tier 與手動重新整理入口，不再本地推導 freshness 狀態。"
+          />
+        )}
 
         {identityError ? (
           <CanvasBanner
@@ -1068,16 +981,6 @@ export default async function UsersPage({
             icon="warn"
             title="身份上下文讀取失敗"
             body={`IdentityContext 無法讀取，因此頁面改以 tenant users snapshot 推導 tenant 範圍。${identityError}`}
-          />
-        ) : null}
-
-        {fallbackActionUsers > 0 ? (
-          <CanvasBanner
-            theme={th}
-            tone="info"
-            icon="info"
-            title="availableActions authority fallback active"
-            body={`${formatCount(fallbackActionUsers)} 筆 roster row 尚未從後端收到 embedded availableActions；目前先用 legacy status-based fallback render disabled/enabled CTA，待 UI-BE-005 contract 補齊後可自動切回 backend authority。`}
           />
         ) : null}
 
@@ -1157,7 +1060,6 @@ export default async function UsersPage({
                       key={role.roleCode}
                       href={buildQueryString(resolvedSearchParams, {
                         role: role.roleCode,
-                        emptyReason: null,
                       })}
                       active={roleFilter === role.roleCode}
                       label={getRoleLabel(role.roleCode)}
@@ -1182,7 +1084,6 @@ export default async function UsersPage({
                   <FilterPillLink
                     href={buildQueryString(resolvedSearchParams, {
                       status: "active",
-                      emptyReason: null,
                     })}
                     active={statusFilter === "active"}
                     label="active"
@@ -1191,7 +1092,6 @@ export default async function UsersPage({
                   <FilterPillLink
                     href={buildQueryString(resolvedSearchParams, {
                       status: "invited",
-                      emptyReason: null,
                     })}
                     active={statusFilter === "invited"}
                     label="pending_invite"
@@ -1200,7 +1100,6 @@ export default async function UsersPage({
                   <FilterPillLink
                     href={buildQueryString(resolvedSearchParams, {
                       status: "suspended",
-                      emptyReason: null,
                     })}
                     active={statusFilter === "suspended"}
                     label="suspended"
@@ -1307,49 +1206,11 @@ export default async function UsersPage({
                 ))}
               </div>
             ) : (
-              <EmptyStateBlock
-                reason="not_provisioned"
-                config={getEmptyStateConfig(
-                  "not_provisioned",
-                  pageInviteAction,
-                )}
-              />
-            )}
-          </CanvasCard>
-
-          <CanvasCard
-            theme={th}
-            title="Empty reason variants"
-            subtitle="6 states from ui-runtime; use query links to verify distinct rendering"
-          >
-            <div style={emptyReasonListStyle}>
-              <div style={pillRowStyle}>
-                {EMPTY_REASON_ORDER.map((reason) => (
-                  <FilterPillLink
-                    key={reason}
-                    href={buildQueryString(resolvedSearchParams, {
-                      emptyReason: reason,
-                    })}
-                    active={forcedEmptyReason === reason}
-                    label={reason}
-                    tone={forcedEmptyReason === reason ? "warn" : "neutral"}
-                  />
-                ))}
-              </div>
-
               <div style={hintCopyStyle}>
-                目前 override: {forcedEmptyReason ?? "none"} · reviewers
-                可逐一切換確認 6 種 `EmptyReason` 在同一張 roster card
-                走不同文案與 CTA。
+                角色目錄目前沒有資料。此區等待後端 role catalog 契約補齊，
+                不再本地推導 empty reason。
               </div>
-
-              <a href={emptyReasonClearHref} style={linkCardStyle}>
-                <span style={linkTitleStyle}>Clear empty-state override</span>
-                <span style={linkMetaStyle}>
-                  回到實際後端回傳的使用者清單與 failures 推導結果
-                </span>
-              </a>
-            </div>
+            )}
           </CanvasCard>
 
           <CanvasCard
