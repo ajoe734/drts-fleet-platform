@@ -225,6 +225,14 @@ const roleListMetaStyle: CSSProperties = {
   gap: 8,
 };
 
+const routeCodeStyle: CSSProperties = {
+  color: th.text,
+  fontSize: 13,
+  fontWeight: 700,
+  lineHeight: 1.35,
+  fontFamily: th.monoFamily,
+};
+
 const roleListTitleStyle: CSSProperties = {
   color: th.text,
   fontWeight: 600,
@@ -291,11 +299,11 @@ type LoadFailure = {
   reason: EmptyReason;
 };
 
-type UserRow = Record<string, unknown> &
-  TenantUserRoleRecord & {
-    availableActions: ResourceActionDescriptor[];
-    roleDisplayName: string;
-  };
+interface UserRow extends RuntimeTenantUserRecord {
+  [key: string]: unknown;
+  availableActions: ResourceActionDescriptor[];
+  roleDisplayName: string;
+}
 
 type UsersPageData = {
   identity: IdentityContext | null;
@@ -322,6 +330,7 @@ type EmptyStateConfig = {
 
 type RuntimeTenantUserRecord = TenantUserRoleRecord & {
   availableActions?: ResourceActionDescriptor[];
+  lastLoginAt?: string | null;
 };
 
 const ROLE_CANVAS_LABEL: Record<string, string> = {
@@ -723,6 +732,7 @@ function getActionLabel(action: string) {
     case "resend_invitation":
     case "resend_invite":
       return "重送邀請";
+    case "update_role":
     case "role":
     case "update_tenant_role":
       return "更新角色";
@@ -741,6 +751,8 @@ function getActionIcon(action: string) {
     case "create_user":
     case "create_tenant_user":
       return "plus";
+    case "resend_invitation":
+    case "resend_invite":
     case "refresh":
       return "refresh";
     case "suspend":
@@ -759,12 +771,13 @@ function getActionSortOrder(action: string) {
     case "resend_invitation":
     case "resend_invite":
       return 1;
-    case "refresh":
-      return 2;
+    case "update_role":
     case "role":
     case "update_tenant_role":
-      return 3;
+      return 2;
     case "suspend":
+      return 3;
+    case "refresh":
       return 4;
     default:
       return 100;
@@ -981,6 +994,9 @@ export default async function UsersPage({
     "create_tenant_user",
   ]);
   const refreshAction = pickAction(availableActions, ["refresh"]);
+  const rowRoleActionNames = ["update_role", "role", "update_tenant_role"];
+  const rowSuspendActionNames = ["suspend"];
+  const rowResendActionNames = ["resend_invitation", "resend_invite"];
 
   const filteredUsers = users.filter((user) => {
     if (roleFilter !== "all" && user.roleCode !== roleFilter) return false;
@@ -1075,6 +1091,12 @@ export default async function UsersPage({
       r: (row) => formatUpdated(row.invitedAt),
     },
     {
+      h: "LAST LOGIN",
+      w: 150,
+      mono: true,
+      r: (row) => formatUpdated(row.lastLoginAt),
+    },
+    {
       h: "UPDATED",
       w: 150,
       mono: true,
@@ -1086,7 +1108,11 @@ export default async function UsersPage({
       r: (row) => (
         <div style={rowActionMetaStyle}>
           <div style={rowActionStyle}>
-            <ActionDescriptorList actions={row.availableActions} size="xs" />
+            <ActionDescriptorList
+              actions={row.availableActions}
+              size="xs"
+              excludeActions={["refresh"]}
+            />
           </div>
         </div>
       ),
@@ -1148,6 +1174,17 @@ export default async function UsersPage({
         ) : null}
 
         <div style={stripGridStyle}>
+          <div style={stripCardStyle}>
+            <div style={stripLabelStyle}>Sitemap / Entry</div>
+            <div style={routeCodeStyle}>/users</div>
+            <div style={stripValueStyle}>
+              Sidebar · tenant access management
+            </div>
+            <div style={hintCopyStyle}>
+              Entry from sidebar or action receipt deep link.
+            </div>
+          </div>
+
           <div style={stripCardStyle}>
             <div style={stripLabelStyle}>Header Chip</div>
             <div style={stripValueStyle}>
@@ -1292,6 +1329,11 @@ export default async function UsersPage({
                     mono: true,
                   },
                   {
+                    k: "Entry / exit",
+                    v: "sidebar → /users · audit deep links only",
+                    mono: true,
+                  },
+                  {
                     k: "Must-support actions",
                     v:
                       sortAvailableActions(availableActions)
@@ -1339,7 +1381,7 @@ export default async function UsersPage({
         <CanvasCard
           theme={th}
           title="Tenant roster"
-          subtitle="user id · display name · email · role · status · invited at · updated"
+          subtitle="user id · display name · email · role · status · invited at · last login · updated"
           padding={0}
         >
           {emptyReason && emptyConfig ? (
@@ -1425,7 +1467,10 @@ export default async function UsersPage({
                     }
                     style={linkCardStyle}
                   >
-                    <span style={linkTitleStyle}>{link.label}</span>
+                    <span style={linkTitleStyle}>
+                      {link.label}{" "}
+                      <span style={compactMetaStyle}>[{link.openMode}]</span>
+                    </span>
                     <span style={linkMetaStyle}>
                       {link.targetApp} · {link.route} · {link.resourceType}:
                       {link.resourceId}
@@ -1434,6 +1479,57 @@ export default async function UsersPage({
                 ))}
               </div>
             </div>
+          </CanvasCard>
+
+          <CanvasCard
+            theme={th}
+            title="Action contract"
+            subtitle="availableActions decides every CTA; UI does not infer permissions from role"
+          >
+            <CanvasDL
+              theme={th}
+              cols={1}
+              items={[
+                {
+                  k: "Invite user",
+                  v: inviteAction
+                    ? inviteAction.enabled
+                      ? "runtime-driven primary CTA"
+                      : `disabled · ${inviteAction.disabledReasonCode ?? "runtime"}`
+                    : "not returned in current snapshot",
+                },
+                {
+                  k: "Update role",
+                  v: userRows.some((row) =>
+                    row.availableActions.some((action) =>
+                      rowRoleActionNames.includes(action.action),
+                    ),
+                  )
+                    ? "row-level runtime action"
+                    : "not returned in current snapshot",
+                },
+                {
+                  k: "Suspend",
+                  v: userRows.some((row) =>
+                    row.availableActions.some((action) =>
+                      rowSuspendActionNames.includes(action.action),
+                    ),
+                  )
+                    ? "high risk row action"
+                    : "not returned in current snapshot",
+                },
+                {
+                  k: "Resend invitation",
+                  v: userRows.some((row) =>
+                    row.availableActions.some((action) =>
+                      rowResendActionNames.includes(action.action),
+                    ),
+                  )
+                    ? "invited rows expose resend affordance"
+                    : "not returned in current snapshot",
+                },
+              ]}
+            />
           </CanvasCard>
         </div>
       </div>
