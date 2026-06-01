@@ -544,14 +544,52 @@ function toPassengerRow(passenger: PassengerRowRecord): PassengerRow {
   };
 }
 
-function buildTabNodes(selectedTab: PassengerTabKey) {
+function renderTabLabel(label: string, count: number) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span>{label}</span>
+      <span
+        style={{
+          minWidth: 18,
+          height: 18,
+          padding: "0 6px",
+          borderRadius: 999,
+          background: th.bgRaised,
+          color: th.textMuted,
+          fontFamily: th.monoFamily,
+          fontSize: 11,
+          lineHeight: "18px",
+          textAlign: "center",
+        }}
+      >
+        {count}
+      </span>
+    </span>
+  );
+}
+
+function buildTabNodes(
+  selectedTab: PassengerTabKey,
+  passengers: PassengerRowRecord[],
+) {
+  const counts: Record<PassengerTabKey, number> = {
+    all: passengers.length,
+    employee: passengers.filter(
+      (passenger) => passenger.activeFlag && isEmployeePassenger(passenger),
+    ).length,
+    visitor: passengers.filter(
+      (passenger) => passenger.activeFlag && !isEmployeePassenger(passenger),
+    ).length,
+    disabled: passengers.filter((passenger) => !passenger.activeFlag).length,
+  };
+
   const tabs = PASSENGER_TABS.map((tab) => (
     <Link
       key={tab.key}
       href={tab.key === "all" ? "/passengers" : `/passengers?tab=${tab.key}`}
       style={tabLinkStyle}
     >
-      {tab.label}
+      {renderTabLabel(tab.label, counts[tab.key])}
     </Link>
   ));
 
@@ -625,7 +663,7 @@ function describeActionLabel(action: string) {
       return "編輯";
     case "soft_deactivate_passenger":
     case "deactivate_passenger":
-      return "停用";
+      return "軟停用";
     case "reactivate_passenger":
       return "重新啟用";
     case "create_booking":
@@ -639,8 +677,12 @@ function describeActionLabel(action: string) {
 
 function formatDisabledReason(code?: string) {
   switch (code) {
+    case "already_deactivated":
+      return "乘客目前已停用";
     case "passenger_deactivation_requires_reason":
       return "停用必須填寫原因";
+    case "permission_denied":
+      return "目前角色沒有這個動作權限";
     default:
       return code ? code.replaceAll("_", " ") : null;
   }
@@ -793,6 +835,16 @@ function resolveCrossAppHref(link: CrossAppResourceLink) {
   } catch {
     return link.route;
   }
+}
+
+function resolveSupportLinkTarget(link: CrossAppResourceLink) {
+  return link.targetApp === "tenant-console" && link.openMode !== "new_tab"
+    ? undefined
+    : "_blank";
+}
+
+function resolveSupportLinkRel(link: CrossAppResourceLink) {
+  return resolveSupportLinkTarget(link) ? "noreferrer noopener" : undefined;
 }
 
 function resolveEmptyState(params: {
@@ -1018,7 +1070,7 @@ export default async function PassengersPage({
     duplicateWarnings,
     errors,
   } = await fetchPassengersEnvelope();
-  const { tabs, activeTab } = buildTabNodes(selectedTab);
+  const { tabs, activeTab } = buildTabNodes(selectedTab, passengers);
 
   const departmentOptions = Array.from(
     new Set(
@@ -1418,18 +1470,15 @@ export default async function PassengersPage({
                     <Link
                       key={`${link.targetApp}-${link.resourceId}-${link.route}`}
                       href={resolveCrossAppHref(link)}
-                      target={
-                        link.openMode === "new_tab" ? "_blank" : undefined
-                      }
-                      rel={
-                        link.openMode === "new_tab"
-                          ? "noreferrer noopener"
-                          : undefined
-                      }
+                      target={resolveSupportLinkTarget(link)}
+                      rel={resolveSupportLinkRel(link)}
                       style={linkItemStyle}
                     >
                       <span>{link.label}</span>
-                      <span style={subtleMonoStyle}>{link.targetApp}</span>
+                      <span style={subtleMonoStyle}>
+                        {link.targetApp}
+                        {resolveSupportLinkTarget(link) ? " · new tab" : ""}
+                      </span>
                     </Link>
                   ))}
                 </div>
