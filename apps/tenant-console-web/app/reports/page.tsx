@@ -52,6 +52,32 @@ const EMPTY_REASONS: EmptyReason[] = [
 ];
 const REGULATORY_JOB_TYPE_SET = new Set<string>(REGULATORY_REPORT_JOB_TYPES);
 
+// Sibling tenant-console routes that actually exist on this app's base. Several
+// packet §4 routes (e.g. /integration-governance) are done-but-unmerged sibling
+// lane tasks, so an enabled deep link to them 404s. Keep the canonical href (so
+// the link auto-corrects when the sibling lane merges) but narrow any link whose
+// target is not built here to a disabled affordance — never widen availability.
+const EXISTING_TENANT_ROUTES = new Set<string>([
+  "/",
+  "/bookings",
+  "/bookings/new",
+  "/passengers",
+  "/cost-centers",
+  "/rules",
+  "/invoices",
+  "/reports",
+  "/api-keys",
+  "/webhooks",
+  "/audit",
+  "/users",
+  "/settings",
+]);
+
+function isRouteAvailable(href: string) {
+  const path = href.split("#")[0]?.split("?")[0] ?? href;
+  return EXISTING_TENANT_ROUTES.has(path);
+}
+
 const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "grid",
@@ -990,9 +1016,25 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                         建立報表工作
                       </button>
                     )}
-                    <Link href="/integration-governance" style={ghostLinkStyle}>
-                      整合就緒度
-                    </Link>
+                    {isRouteAvailable("/integration-governance") ? (
+                      <Link
+                        href="/integration-governance"
+                        style={ghostLinkStyle}
+                      >
+                        整合就緒度
+                      </Link>
+                    ) : (
+                      <span
+                        style={{
+                          ...ghostLinkStyle,
+                          opacity: 0.45,
+                          cursor: "not-allowed",
+                        }}
+                        title="route_not_available"
+                      >
+                        整合就緒度（待整合）
+                      </span>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -1174,15 +1216,29 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
               subtitle="依 packet §5.17 由 reports 連到治理與稽核面追查問題。"
             >
               <div style={stateGridStyle}>
-                {drillLinks.map((link) => (
-                  <Link
-                    href={link.href}
-                    key={link.label}
-                    style={ghostLinkStyle}
-                  >
-                    {link.label}
-                  </Link>
-                ))}
+                {drillLinks.map((link) =>
+                  isRouteAvailable(link.href) ? (
+                    <Link
+                      href={link.href}
+                      key={link.label}
+                      style={ghostLinkStyle}
+                    >
+                      {link.label}
+                    </Link>
+                  ) : (
+                    <span
+                      key={link.label}
+                      style={{
+                        ...ghostLinkStyle,
+                        opacity: 0.45,
+                        cursor: "not-allowed",
+                      }}
+                      title="route_not_available"
+                    >
+                      {link.label}（待整合）
+                    </span>
+                  ),
+                )}
               </div>
             </CanvasCard>
 
