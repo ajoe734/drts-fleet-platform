@@ -87,8 +87,7 @@ type FeatureFlagRow = {
   selectedTenantSnapshot: RuntimeFeatureFlagRecord | null;
   rolloutState: RolloutState;
   latestUpdatedAt: string;
-  updatedBy: string;
-  availableActions: ResourceActionDescriptor[];
+  updatedBy: string | null;
 };
 
 type FeatureFlagTableRow = FeatureFlagRow &
@@ -838,19 +837,24 @@ function buildRows({
         selectedTenantSnapshot,
         rolloutState,
         latestUpdatedAt,
-        updatedBy:
-          updatedBy ??
-          (selectedTenantOverride
-            ? `tenant:${selectedTenantOverride.tenantCode} · actor pending contract`
-            : overrides.length > 0
-              ? `${overrides.length} override scope(s) · actor pending contract`
-              : "platform default · actor pending contract"),
-        availableActions:
-          selectedTenantSnapshot?.availableActions ??
-          (global as RuntimeFeatureFlagRecord | null)?.availableActions ??
-          [],
+        updatedBy,
       };
     });
+}
+
+function availableActionsForRow(row: FeatureFlagRow, selectedTenantId: string) {
+  if (selectedTenantId) {
+    if (row.selectedTenantSnapshot?.availableActions) {
+      return row.selectedTenantSnapshot.availableActions;
+    }
+    if (row.selectedTenantOverride?.availableActions) {
+      return row.selectedTenantOverride.availableActions;
+    }
+  }
+
+  return (
+    (row.global as RuntimeFeatureFlagRecord | null)?.availableActions ?? []
+  );
 }
 
 function filterRows(
@@ -1357,7 +1361,6 @@ export default function FeatureFlagsPage() {
           globalDefault: "Platform default",
           overrideCount: "override(s)",
           selectedOverride: "selected scope",
-          updatedByFallback: "actor pending contract",
           tableTitle: "Feature flag registry",
           tableSubtitle:
             "KEY, scope, state, last changed by, last changed at, and availableActions.",
@@ -1461,7 +1464,6 @@ export default function FeatureFlagsPage() {
           globalDefault: "平台預設",
           overrideCount: "筆 override",
           selectedOverride: "目前 scope",
-          updatedByFallback: "actor contract 未提供",
           tableTitle: "Feature flag registry",
           tableSubtitle:
             "呈現 KEY、scope、state、最後變更者、最後變更時間，以及 availableActions。",
@@ -1702,7 +1704,9 @@ export default function FeatureFlagsPage() {
     selectedTenantId,
   ]);
 
-  const selectedRowActions = selectedRow?.availableActions ?? [];
+  const selectedRowActions = selectedRow
+    ? availableActionsForRow(selectedRow, selectedTenantId)
+    : [];
   const selectedOpsLink =
     selectedRow && selectedTenant
       ? buildOpsDeepLink(selectedTenant, selectedRow.key)
@@ -1963,8 +1967,7 @@ export default function FeatureFlagsPage() {
       w: 220,
       r: (row) => (
         <div style={stackedCellStyle}>
-          <span style={secondaryTextStyle}>{row.updatedBy}</span>
-          <span style={secondaryMonoStyle}>{copy.updatedByFallback}</span>
+          <span style={secondaryTextStyle}>{row.updatedBy ?? "—"}</span>
         </div>
       ),
     },
@@ -1979,7 +1982,11 @@ export default function FeatureFlagsPage() {
       w: 360,
       r: (row) => (
         <div style={actionRowStyle}>
-          {renderDescriptorButtons(row, row.availableActions, "xs")}
+          {renderDescriptorButtons(
+            row,
+            availableActionsForRow(row, selectedTenantId),
+            "xs",
+          )}
         </div>
       ),
     },
@@ -2373,8 +2380,8 @@ export default function FeatureFlagsPage() {
                     <div style={secondaryTextStyle}>
                       {selectedRow
                         ? locale === "en"
-                          ? `${selectedRow.availableActions.length} action descriptor(s) active for ${selectedRow.key}.`
-                          : `${selectedRow.key} 目前有 ${selectedRow.availableActions.length} 個 action descriptor。`
+                          ? `${selectedRowActions.length} action descriptor(s) active for ${selectedRow.key}.`
+                          : `${selectedRow.key} 目前有 ${selectedRowActions.length} 個 action descriptor。`
                         : copy.actionInventorySubtitle}
                     </div>
                     <div style={secondaryTextStyle}>
