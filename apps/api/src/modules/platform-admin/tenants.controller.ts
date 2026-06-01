@@ -11,8 +11,25 @@ import type {
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { toActionReceiptEnvelope } from "../../common/action-receipt";
 import { TenantsService } from "./tenants.service";
 import type { TenantSummary } from "./tenants.service";
+
+function tenantActionMessage(
+  action: "create" | "activate" | "suspend" | "rollback_hold",
+) {
+  switch (action) {
+    case "create":
+      return "Tenant created.";
+    case "activate":
+      return "Tenant activated.";
+    case "suspend":
+      return "Tenant suspended.";
+    case "rollback_hold":
+    default:
+      return "Tenant entered rollback hold.";
+  }
+}
 
 @Controller("platform-admin")
 export class TenantsController {
@@ -30,7 +47,13 @@ export class TenantsController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const created = this.tenants.create(body, requestId);
-    return toApiSuccessEnvelope(created, requestId);
+    return toActionReceiptEnvelope(
+      {
+        auditLog: created.auditLog,
+        message: tenantActionMessage("create"),
+      },
+      requestId,
+    );
   }
 
   @Post("tenants/:tenantId/settings")
@@ -98,7 +121,13 @@ export class TenantsController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const updated = this.tenants.setRollbackHold(tenantId, body, requestId);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toActionReceiptEnvelope(
+      {
+        auditLog: updated.auditLog,
+        message: tenantActionMessage("rollback_hold"),
+      },
+      requestId,
+    );
   }
 
   @Post("tenants/:tenantId/suspend")
@@ -108,7 +137,13 @@ export class TenantsController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const updated = this.tenants.setStatus(tenantId, "paused", body, requestId);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toActionReceiptEnvelope(
+      {
+        auditLog: updated.auditLog,
+        message: tenantActionMessage("suspend"),
+      },
+      requestId,
+    );
   }
 
   @Post("tenants/:tenantId/activate")
@@ -118,6 +153,12 @@ export class TenantsController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const updated = this.tenants.setStatus(tenantId, "active", body, requestId);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toActionReceiptEnvelope(
+      {
+        auditLog: updated.auditLog,
+        message: tenantActionMessage("activate"),
+      },
+      requestId,
+    );
   }
 }

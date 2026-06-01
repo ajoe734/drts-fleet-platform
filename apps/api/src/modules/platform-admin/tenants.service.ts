@@ -34,6 +34,7 @@ import {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { AuditedActionResult } from "../../common/action-receipt";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   PlatformAdminRepository,
@@ -163,7 +164,7 @@ export class TenantsService implements OnModuleInit {
   create(
     input: CreatePlatformTenantCommand,
     requestId?: string,
-  ): TenantSummary {
+  ): AuditedActionResult<TenantSummary> {
     const name = this.requireNonBlank(input.name, "name");
     const code = this.normalizeCode(input.code);
     this.assertCodeAvailable(code);
@@ -199,7 +200,7 @@ export class TenantsService implements OnModuleInit {
       },
       "create tenant",
     );
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "platform_admin",
@@ -219,7 +220,10 @@ export class TenantsService implements OnModuleInit {
       },
       requestId,
     );
-    return this.cloneTenant(created);
+    return {
+      data: this.cloneTenant(created),
+      auditLog,
+    };
   }
 
   updateSettings(
@@ -526,7 +530,7 @@ export class TenantsService implements OnModuleInit {
     tenantId: string,
     command?: PlatformTenantLifecycleActionCommand,
     requestId?: string,
-  ): TenantSummary {
+  ): AuditedActionResult<TenantSummary> {
     const tenant = this.requireTenant(tenantId);
     const oldStatus = tenant.status;
     const now = new Date().toISOString();
@@ -541,7 +545,7 @@ export class TenantsService implements OnModuleInit {
       { platformTenants: [this.cloneTenant(tenant)] },
       "set tenant rollback hold",
     );
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "platform_admin",
@@ -560,7 +564,10 @@ export class TenantsService implements OnModuleInit {
       requestId,
     );
 
-    return this.cloneTenant(tenant);
+    return {
+      data: this.cloneTenant(tenant),
+      auditLog,
+    };
   }
 
   setRolloutStage(
@@ -624,7 +631,7 @@ export class TenantsService implements OnModuleInit {
     newStatus: "active" | "paused" | "rollback_hold",
     command?: PlatformTenantLifecycleActionCommand,
     requestId?: string,
-  ): TenantSummary {
+  ): AuditedActionResult<TenantSummary> {
     const tenant = this.requireTenant(tenantId);
     const oldStatus = tenant.status;
     const reason = this.normalizeNullableText(command?.reason);
@@ -637,7 +644,7 @@ export class TenantsService implements OnModuleInit {
       },
       "set tenant status",
     );
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "platform_admin",
@@ -651,7 +658,10 @@ export class TenantsService implements OnModuleInit {
       },
       requestId,
     );
-    return this.cloneTenant(tenant);
+    return {
+      data: this.cloneTenant(tenant),
+      auditLog,
+    };
   }
 
   private enforcePromotionGates(
@@ -1067,7 +1077,7 @@ export class TenantsService implements OnModuleInit {
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
   ) {
-    this.auditNotificationService.recordAuditLog({
+    return this.auditNotificationService.recordAuditLog({
       ...input,
       ...(requestId ? { requestId } : {}),
     });

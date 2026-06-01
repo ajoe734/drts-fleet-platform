@@ -503,6 +503,18 @@ function isRefreshMetadata(value: unknown): value is UiRefreshMetadata {
   );
 }
 
+function isActionReceipt(value: unknown): value is ActionReceipt {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    typeof (value as ActionReceipt).actionId === "string" &&
+    typeof (value as ActionReceipt).resourceType === "string" &&
+    typeof (value as ActionReceipt).resourceId === "string" &&
+    typeof (value as ActionReceipt).status === "string" &&
+    typeof (value as ActionReceipt).message === "string",
+  );
+}
+
 function isEmptyEnvelope(value: unknown): value is EmptyStateEnvelope {
   return Boolean(
     value &&
@@ -722,6 +734,21 @@ function resolveOwnerName(
 
 function resolveAuditHref(auditId: string) {
   return `/audit?auditId=${encodeURIComponent(auditId)}`;
+}
+
+function normalizeActionReceipt(
+  payload: unknown,
+  requestId: string,
+): WriteReceiptState | null {
+  const data = deepCamelCase(payload);
+  if (!isActionReceipt(data)) {
+    return null;
+  }
+
+  return {
+    ...data,
+    requestId,
+  };
 }
 
 export default function TenantsPage() {
@@ -1270,9 +1297,6 @@ export default function TenantsPage() {
   const emptyVisual: EmptyVisual =
     copy.empty[emptyReason as keyof typeof copy.empty];
   const emptyNextAction = loadState?.empty?.nextAction ?? null;
-  const canCreateTenant = pageActions.some(
-    (action) => isCreateTenantAction(action) && action.enabled,
-  );
 
   const resolveActionLabel = useCallback(
     (action: ResourceActionDescriptor) =>
@@ -1302,47 +1326,6 @@ export default function TenantsPage() {
     [loadTenants],
   );
 
-  const lookupActionReceipt = useCallback(
-    async (
-      requestId: string,
-      fallback: {
-        actionLabel: string;
-        message: string;
-        resourceType: string;
-        resourceId: string;
-      },
-    ): Promise<WriteReceiptState> => {
-      try {
-        const logs = await client.listAuditLogs();
-        const matched = logs.find((entry) => entry.requestId === requestId);
-        if (matched?.auditId) {
-          return {
-            actionId: requestId,
-            auditId: matched.auditId,
-            resourceType: matched.resourceType,
-            resourceId: matched.resourceId ?? fallback.resourceId,
-            status: "completed",
-            message: fallback.message,
-            requestId,
-          };
-        }
-      } catch {
-        // Audit read scope is optional for some actors; keep the success toast.
-      }
-
-      return {
-        actionId: requestId,
-        auditId: "",
-        resourceType: fallback.resourceType,
-        resourceId: fallback.resourceId,
-        status: "completed",
-        message: copy.receiptFallbackBody(fallback.actionLabel),
-        requestId,
-      };
-    },
-    [client, copy],
-  );
-
   const postTenantWrite = useCallback(
     async <T,>(path: string, body?: unknown) => {
       const requestId =
@@ -1364,9 +1347,12 @@ export default function TenantsPage() {
         throw new Error(`API error ${response.status}: ${message}`);
       }
 
+      const envelope = (await response.json()) as ApiSuccessEnvelope<T>;
+
       return {
-        envelope: (await response.json()) as ApiSuccessEnvelope<T>,
+        envelope,
         requestId,
+        receipt: normalizeActionReceipt(envelope.data, requestId),
       };
     },
     [],
@@ -1449,21 +1435,22 @@ export default function TenantsPage() {
             : {}),
         };
 
-        const { envelope, requestId } =
+        const { requestId, receipt: nextReceipt } =
           await postTenantWrite<PlatformAdminTenantRecord>(
             "/api/platform-admin/tenants",
             command,
           );
-        const createdTenant = deepCamelCase(envelope.data);
-        const nextReceipt = await lookupActionReceipt(requestId, {
-          actionLabel: resolveActionLabel(action),
-          message: copy.receiptBody(
-            `${resolveActionLabel(action)} · ${createdTenant.name}`,
-          ),
-          resourceType: "platform_tenant",
-          resourceId: createdTenant.id,
-        });
-        setReceipt(nextReceipt);
+        setReceipt(
+          nextReceipt ?? {
+            actionId: requestId,
+            auditId: "",
+            resourceType: "platform_tenant",
+            resourceId: createForm.code.trim() || createForm.name.trim(),
+            status: "completed",
+            message: copy.receiptFallbackBody(resolveActionLabel(action)),
+            requestId,
+          },
+        );
         setCreateForm(EMPTY_TENANT_FORM);
         setShowCreate(false);
       } else {
@@ -1494,19 +1481,19 @@ export default function TenantsPage() {
           return;
         }
 
-        const { requestId } = await postTenantWrite<PlatformAdminTenantRecord>(
-          path,
-          command,
+        const { requestId, receipt: nextReceipt } =
+          await postTenantWrite<PlatformAdminTenantRecord>(path, command);
+        setReceipt(
+          nextReceipt ?? {
+            actionId: requestId,
+            auditId: "",
+            resourceType: "platform_tenant",
+            resourceId: tenant.id,
+            status: "completed",
+            message: copy.receiptFallbackBody(resolveActionLabel(action)),
+            requestId,
+          },
         );
-        const nextReceipt = await lookupActionReceipt(requestId, {
-          actionLabel: resolveActionLabel(action),
-          message: copy.receiptBody(
-            `${resolveActionLabel(action)} · ${tenant.name}`,
-          ),
-          resourceType: "platform_tenant",
-          resourceId: tenant.id,
-        });
-        setReceipt(nextReceipt);
       }
 
       setConfirmIntent(null);
@@ -1528,7 +1515,6 @@ export default function TenantsPage() {
     copy,
     createForm,
     loadTenants,
-    lookupActionReceipt,
     postTenantWrite,
     resolveActionLabel,
   ]);
@@ -2377,14 +2363,17 @@ export default function TenantsPage() {
                   {resolveActionLabel(emptyNextAction)}
                 </CanvasBtn>
               ) : null}
-              {canCreateTenant && emptyReason === "no_data" ? (
+              {!emptyNextAction &&
+              emptyReason === "no_data" &&
+              createTenantAction ? (
                 <CanvasBtn
                   theme={theme}
-                  variant="primary"
+                  variant={createTenantAction.enabled ? "primary" : "secondary"}
                   icon="plus"
-                  onClick={() => setShowCreate(true)}
+                  onClick={() => void handlePageAction(createTenantAction)}
+                  disabled={!createTenantAction.enabled}
                 >
-                  {copy.actionLabels.create_tenant}
+                  {resolveActionLabel(createTenantAction)}
                 </CanvasBtn>
               ) : null}
               {emptyReason === "filtered_empty" ? (

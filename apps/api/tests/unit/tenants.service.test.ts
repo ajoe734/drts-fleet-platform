@@ -18,7 +18,12 @@ function expectApiError(fn: () => unknown, errorCode: string) {
 
 function createService() {
   const auditNotificationService = {
-    recordAuditLog: vi.fn(),
+    recordAuditLog: vi.fn((input) => ({
+      auditId: "audit-test-id",
+      createdAt: "2026-06-01T00:00:00.000Z",
+      requestId: "request-test-id",
+      ...input,
+    })),
   };
   const platformAdminRepository = {
     loadState: vi.fn().mockResolvedValue({
@@ -52,7 +57,7 @@ describe("TenantsService", () => {
       integrationMode: "api_key_and_webhook",
       bootstrapAdminEmail: "admin@acme.example",
       sandboxBaseUrl: "https://sandbox.acme.example",
-    });
+    }).data;
 
     expect(created.bootstrapDefaults.billingBaseline).toMatchObject({
       invoiceTitle: "Acme Mobility",
@@ -88,7 +93,7 @@ describe("TenantsService", () => {
     const created = service.create({
       name: "Beta Dispatch",
       code: "beta_dispatch",
-    });
+    }).data;
 
     const updated = service.updateOnboarding(created.id, {
       billingBaseline: {
@@ -134,7 +139,7 @@ describe("TenantsService", () => {
     const created = service.create({
       name: "Gamma Fleet",
       code: "gamma_fleet",
-    });
+    }).data;
 
     // approve sandbox gate before promoting to pilot
     service.updateOnboarding(created.id, {
@@ -182,7 +187,10 @@ describe("TenantsService", () => {
 
   it("blocks promotion to pilot when sandbox is not approved", () => {
     const { service } = createService();
-    const created = service.create({ name: "Sandbox Fail", code: "sbx_fail" });
+    const created = service.create({
+      name: "Sandbox Fail",
+      code: "sbx_fail",
+    }).data;
 
     // sandbox starts in "ready" state, not "approved"
     expectApiError(
@@ -193,7 +201,10 @@ describe("TenantsService", () => {
 
   it("blocks promotion to production when required roles are not acknowledged", () => {
     const { service } = createService();
-    const created = service.create({ name: "Role Gate", code: "role_gate" });
+    const created = service.create({
+      name: "Role Gate",
+      code: "role_gate",
+    }).data;
 
     // prepare rollout prerequisites except role acknowledgment
     service.updateOnboarding(created.id, {
@@ -215,7 +226,10 @@ describe("TenantsService", () => {
 
   it("blocks promotion to production when rollback is not prepared", () => {
     const { service } = createService();
-    const created = service.create({ name: "Rollback Gate", code: "rb_gate" });
+    const created = service.create({
+      name: "Rollback Gate",
+      code: "rb_gate",
+    }).data;
 
     service.updateOnboarding(created.id, {
       rollout: {
@@ -243,7 +257,10 @@ describe("TenantsService", () => {
 
   it("blocks promotion when tenant is in rollback_hold", () => {
     const { service } = createService();
-    const created = service.create({ name: "Hold Test", code: "hold_test" });
+    const created = service.create({
+      name: "Hold Test",
+      code: "hold_test",
+    }).data;
 
     service.setRollbackHold(created.id);
 
@@ -258,7 +275,7 @@ describe("TenantsService", () => {
     const created = service.create({
       name: "Invite Test",
       code: "invite_test",
-    });
+    }).data;
 
     const updated = service.inviteRole(created.id, {
       roleCode: "tenant_admin",
@@ -277,7 +294,7 @@ describe("TenantsService", () => {
 
   it("rejects invite for unknown role code", () => {
     const { service } = createService();
-    const created = service.create({ name: "Bad Role", code: "bad_role" });
+    const created = service.create({ name: "Bad Role", code: "bad_role" }).data;
 
     expectApiError(
       () => service.inviteRole(created.id, { roleCode: "nonexistent_role" }),
@@ -287,7 +304,7 @@ describe("TenantsService", () => {
 
   it("acknowledges a previously invited role", () => {
     const { service, auditNotificationService } = createService();
-    const created = service.create({ name: "Ack Test", code: "ack_test" });
+    const created = service.create({ name: "Ack Test", code: "ack_test" }).data;
 
     service.inviteRole(created.id, { roleCode: "tenant_admin" });
     const updated = service.acknowledgeRole(created.id, {
@@ -305,7 +322,10 @@ describe("TenantsService", () => {
 
   it("rejects acknowledgment when role has not been invited", () => {
     const { service } = createService();
-    const created = service.create({ name: "No Invite", code: "no_invite" });
+    const created = service.create({
+      name: "No Invite",
+      code: "no_invite",
+    }).data;
 
     expectApiError(
       () => service.acknowledgeRole(created.id, { roleCode: "tenant_admin" }),
@@ -315,9 +335,12 @@ describe("TenantsService", () => {
 
   it("sets rollback hold and blocks production status", () => {
     const { service, auditNotificationService } = createService();
-    const created = service.create({ name: "Hold Corp", code: "hold_corp" });
+    const created = service.create({
+      name: "Hold Corp",
+      code: "hold_corp",
+    }).data;
 
-    const held = service.setRollbackHold(created.id);
+    const held = service.setRollbackHold(created.id).data;
 
     expect(held.status).toBe("rollback_hold");
     expect(held.rollout.productionStatus).toBe("blocked");
@@ -328,18 +351,21 @@ describe("TenantsService", () => {
 
   it("suspends and reactivates a tenant", () => {
     const { service } = createService();
-    const created = service.create({ name: "Toggle", code: "toggle_co" });
+    const created = service.create({ name: "Toggle", code: "toggle_co" }).data;
 
-    const paused = service.setStatus(created.id, "paused");
+    const paused = service.setStatus(created.id, "paused").data;
     expect(paused.status).toBe("paused");
 
-    const active = service.setStatus(created.id, "active");
+    const active = service.setStatus(created.id, "active").data;
     expect(active.status).toBe("active");
   });
 
   it("allows production promotion when all gates are satisfied", () => {
     const { service } = createService();
-    const created = service.create({ name: "Full Gate", code: "full_gate" });
+    const created = service.create({
+      name: "Full Gate",
+      code: "full_gate",
+    }).data;
 
     // invite and acknowledge all required roles
     for (const role of created.bootstrapDefaults.roleDefaults) {
