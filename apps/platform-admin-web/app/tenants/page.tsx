@@ -92,12 +92,6 @@ type OwnerAssignment = {
   user: PlatformAdminUserRecord | null;
 };
 
-const DEFAULT_CREATE_ACTION: ResourceActionDescriptor = {
-  action: "create",
-  enabled: true,
-  riskLevel: "medium",
-};
-
 const th = buildCanvasTheme({
   surface: "platform",
   density: "compact",
@@ -462,7 +456,7 @@ function normalizeTenantListResponse(
     };
     return {
       items: payload,
-      availableActions: [DEFAULT_CREATE_ACTION],
+      availableActions: [],
       ...(payload.length === 0
         ? {
             emptyState: {
@@ -485,10 +479,7 @@ function normalizeTenantListResponse(
           messageCode: "platformAdmin.tenants.empty.no_data",
         }
       : undefined);
-  const availableActions =
-    payload?.availableActions && payload.availableActions.length > 0
-      ? payload.availableActions
-      : [DEFAULT_CREATE_ACTION];
+  const availableActions = payload?.availableActions ?? [];
   if (emptyState) {
     return {
       items,
@@ -1087,9 +1078,7 @@ export default function TenantsPage() {
         } else {
           setTenantList({
             items: [],
-            availableActions: [
-              { action: "create", enabled: true, riskLevel: "medium" },
-            ],
+            availableActions: [],
             emptyState: {
               reason: "fetch_failed",
               messageCode: "platformAdmin.tenants.empty.fetch_failed",
@@ -1731,7 +1720,7 @@ export default function TenantsPage() {
                 variant="primary"
                 icon="plus"
                 disabled={!primaryCreateAction.enabled}
-                onClick={() => setShowCreate((current) => !current)}
+                onClick={() => void handlePageAction(primaryCreateAction)}
               >
                 {getActionLabel(locale, primaryCreateAction.action)}
               </CanvasBtn>
