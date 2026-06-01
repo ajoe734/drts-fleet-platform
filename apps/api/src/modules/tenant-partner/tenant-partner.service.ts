@@ -4436,6 +4436,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         lastSignaturePreview: null,
         disabledAt: null,
         disableReason: null,
+        disableReasonNote: null,
         retryPolicy: { ...DEFAULT_WEBHOOK_RETRY_POLICY },
         secretRotation: {
           currentVersion: 1,
@@ -4544,9 +4545,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     const now = new Date().toISOString();
     if (requestedStatus === "disabled") {
+      const disableReasonNote = command.disableReason?.trim();
+      if (!disableReasonNote) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "WEBHOOK_DISABLE_REASON_REQUIRED",
+          "disableReason is required when disabling a webhook endpoint.",
+          {
+            webhookId,
+          },
+        );
+      }
       endpoint.status = "disabled";
       endpoint.runtimeMetadata.disabledAt = now;
       endpoint.runtimeMetadata.disableReason = "manual_disable";
+      endpoint.runtimeMetadata.disableReasonNote = disableReasonNote;
       endpoint.updatedAt = now;
     } else if (requiresRevalidation || requestedStatus === "test_pending") {
       this.markWebhookValidationPending(endpoint, now);
@@ -4557,6 +4570,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         endpoint.status = "active";
         endpoint.runtimeMetadata.disabledAt = null;
         endpoint.runtimeMetadata.disableReason = null;
+        endpoint.runtimeMetadata.disableReasonNote = null;
         endpoint.updatedAt = now;
       }
     } else {
@@ -4848,6 +4862,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       lastSignaturePreview: result.signature.slice(0, 16),
       disabledAt: endpoint.runtimeMetadata.disabledAt,
       disableReason: endpoint.runtimeMetadata.disableReason,
+      disableReasonNote: endpoint.runtimeMetadata.disableReasonNote,
       secretRotation: {
         currentVersion: endpoint.secretVersion,
         rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
@@ -4898,6 +4913,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       endpoint.runtimeMetadata.lastValidatedAt = result.attemptedAt;
       endpoint.runtimeMetadata.disabledAt = null;
       endpoint.runtimeMetadata.disableReason = null;
+      endpoint.runtimeMetadata.disableReasonNote = null;
 
       this.recordTenantAudit({
         actorId: null,
@@ -4921,6 +4937,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       endpoint.updatedAt = result.attemptedAt;
       endpoint.runtimeMetadata.disabledAt = result.attemptedAt;
       endpoint.runtimeMetadata.disableReason = "delivery_failed";
+      endpoint.runtimeMetadata.disableReasonNote = null;
 
       this.auditNotificationService.recordNotification({
         tenantId: endpoint.tenantId,
@@ -4959,6 +4976,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     endpoint.updatedAt = updatedAt;
     endpoint.runtimeMetadata.disabledAt = null;
     endpoint.runtimeMetadata.disableReason = null;
+    endpoint.runtimeMetadata.disableReasonNote = null;
     endpoint.runtimeMetadata.nextAttemptAt = null;
   }
 

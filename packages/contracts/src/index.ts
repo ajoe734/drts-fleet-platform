@@ -854,6 +854,7 @@ export interface TenantWebhookRuntimeMetadata {
   lastSignaturePreview: string | null;
   disabledAt: string | null;
   disableReason: TenantWebhookDisableReason | null;
+  disableReasonNote?: string | null;
   retryPolicy: WebhookRetryPolicyRecord;
   secretRotation: {
     currentVersion: number;
@@ -897,6 +898,7 @@ export interface UpdateTenantWebhookEndpointCommand {
   url?: string;
   events?: string[];
   status?: TenantWebhookEndpointStatus;
+  disableReason?: string;
 }
 
 export interface SendTestWebhookCommand {

@@ -1602,13 +1602,12 @@ export class ApiClient {
       reason?: string;
     },
   ): Promise<TenantWebhookEndpoint> {
+    const body: UpdateTenantWebhookEndpointCommand = {
+      status: "disabled",
+      ...(command?.reason ? { disableReason: command.reason } : {}),
+    };
     return this.post(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`, {
-      body: {
-        status: "disabled",
-        ...(command?.reason ? { disableReason: command.reason } : {}),
-      } as UpdateTenantWebhookEndpointCommand & {
-        disableReason?: string;
-      },
+      body,
     });
   }
 

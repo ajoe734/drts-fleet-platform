@@ -1621,6 +1621,43 @@ describe("TenantPartnerService sensitive-data governance", () => {
       status: "test_pending",
       runtimeMetadata: expect.objectContaining({
         disableReason: null,
+        disableReasonNote: null,
+      }),
+    });
+  });
+
+  it("preserves manual disable reason notes on webhook endpoints", () => {
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      undefined,
+      new WebhookDispatchService(
+        vi.fn(async () => ({ ok: true, status: 202 })) as never,
+      ),
+      [],
+    );
+
+    const created = service.createWebhookEndpoint("tenant-demo-001", {
+      url: "https://tenant.example/webhooks/manual-disable",
+      secret: "whsec_manual_disable",
+      events: ["booking.created"],
+    });
+
+    const updated = service.updateWebhookEndpoint(
+      "tenant-demo-001",
+      created.webhookId,
+      {
+        status: "disabled",
+        disableReason: "Receiver maintenance window",
+      },
+      "req-webhook-disable-005",
+    );
+
+    expect(updated).toMatchObject({
+      webhookId: created.webhookId,
+      status: "disabled",
+      runtimeMetadata: expect.objectContaining({
+        disableReason: "manual_disable",
+        disableReasonNote: "Receiver maintenance window",
       }),
     });
   });
