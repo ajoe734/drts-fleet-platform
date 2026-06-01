@@ -102,8 +102,9 @@ type RuntimeInvoiceRecord = TenantInvoiceRecord & RuntimeActionedResource;
 type RuntimeStatementRecord = DriverStatementRecord & RuntimeActionedResource;
 type RuntimeSettlementMatrixRecord = SettlementMatrixRecord &
   RuntimeActionedResource;
+type PaymentsEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
 type EmptyStateConfig = {
-  reason: EmptyReason;
+  reason: PaymentsEmptyReason;
   message: string;
   nextAction?: ResourceActionDescriptor;
 };
@@ -451,7 +452,7 @@ function resourceActions(
     : fallbackActions;
 }
 
-function detectEmptyReason(error: string | null): EmptyReason | null {
+function detectEmptyReason(error: string | null): PaymentsEmptyReason | null {
   if (!error) {
     return null;
   }
@@ -474,7 +475,7 @@ function detectEmptyReason(error: string | null): EmptyReason | null {
     normalized.includes("eligible") ||
     normalized.includes("driver_not_eligible")
   ) {
-    return "driver_not_eligible";
+    return "permission_denied";
   }
   if (
     normalized.includes("external") ||
@@ -488,7 +489,7 @@ function detectEmptyReason(error: string | null): EmptyReason | null {
 
 function emptyStateTone(
   theme: CanvasTheme,
-  reason: EmptyReason,
+  reason: PaymentsEmptyReason,
 ): EmptyStateToneConfig {
   switch (reason) {
     case "not_provisioned":
@@ -526,13 +527,6 @@ function emptyStateTone(
         background: theme.surface,
         border: theme.border,
       };
-    case "driver_not_eligible":
-      return {
-        icon: "lock",
-        tone: "warn",
-        background: theme.warnBg,
-        border: theme.warnBorder,
-      };
     case "no_data":
     default:
       return {
@@ -544,9 +538,45 @@ function emptyStateTone(
   }
 }
 
+function emptyStateHeading(locale: string, reason: PaymentsEmptyReason) {
+  if (locale === "en") {
+    switch (reason) {
+      case "not_provisioned":
+        return "Provisioning required";
+      case "fetch_failed":
+        return "Data load failed";
+      case "permission_denied":
+        return "Permission required";
+      case "external_unavailable":
+        return "External dependency unavailable";
+      case "filtered_empty":
+        return "No rows match filters";
+      case "no_data":
+      default:
+        return "No records yet";
+    }
+  }
+
+  switch (reason) {
+    case "not_provisioned":
+      return "尚未完成 provision";
+    case "fetch_failed":
+      return "資料載入失敗";
+    case "permission_denied":
+      return "缺少權限";
+    case "external_unavailable":
+      return "外部相依暫時不可用";
+    case "filtered_empty":
+      return "目前篩選沒有資料";
+    case "no_data":
+    default:
+      return "目前沒有資料";
+  }
+}
+
 function defaultEmptyMessage(
   locale: string,
-  reason: EmptyReason,
+  reason: PaymentsEmptyReason,
   fallback: string,
 ): string {
   if (locale === "en") {
@@ -561,8 +591,6 @@ function defaultEmptyMessage(
         return "An upstream settlement dependency is unavailable. Retry after the external system recovers.";
       case "filtered_empty":
         return "No rows match the current filter slice. Adjust filters or broaden the period.";
-      case "driver_not_eligible":
-        return "This dataset is currently blocked by an eligibility or authority gate.";
       case "no_data":
       default:
         return fallback;
@@ -580,12 +608,17 @@ function defaultEmptyMessage(
       return "上游結算相依服務暫時不可用，需等外部系統恢復後再試。";
     case "filtered_empty":
       return "目前篩選條件沒有符合資料，請調整 filter 或放寬期間。";
-    case "driver_not_eligible":
-      return "目前資料受到 eligibility 或 authority gate 限制，暫時不可用。";
     case "no_data":
     default:
       return fallback;
   }
+}
+
+function resolveCrossAppLinks(
+  record: RuntimeActionedResource | null | undefined,
+  fallbackLinks: CrossAppResourceLink[] = [],
+) {
+  return record?.crossAppLinks?.length ? record.crossAppLinks : fallbackLinks;
 }
 
 export default function PaymentsPage() {
@@ -1135,6 +1168,8 @@ export default function PaymentsPage() {
     openMode: "new_tab",
     label: locale === "en" ? "Open ops mirror" : "開啟 ops mirror",
   });
+  const issueLinksFor = (issue: RuntimeIssueRecord) =>
+    resolveCrossAppLinks(issue, [issueOpsLinkFor(issue)]);
 
   const rootEmptyReason = detectEmptyReason(error);
   const issueEmptyConfig: EmptyStateConfig = {
@@ -1259,7 +1294,7 @@ export default function PaymentsPage() {
           breadcrumbParent: "Pricing & Settlement",
           pageTitle: "Settlement governance",
           pageSubtitle:
-            "invoices · driver statements · settlement matrix · reconciliation issues",
+            "invoice · driver statement · reimbursement · settlement matrix · reconciliation · ops mirror is read-only",
           export: "Export",
           openIssue: "Open issue",
           searchPlaceholder: "Search orders, tenants, drivers...",
@@ -1302,7 +1337,7 @@ export default function PaymentsPage() {
           breadcrumbParent: "計價與結算",
           pageTitle: "結算治理",
           pageSubtitle:
-            "invoices · driver statements · settlement matrix · reconciliation issues",
+            "invoice · driver statement · reimbursement · settlement matrix · reconciliation · 對應 ops 為 read-only mirror",
           export: "匯出",
           openIssue: "開立 issue",
           searchPlaceholder: "搜尋訂單、租戶、司機...",
@@ -1347,12 +1382,27 @@ export default function PaymentsPage() {
     : locale === "en"
       ? `T4 · ${PAYMENTS_REFRESH_TIER} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)}s` : "manual"}`
       : `T4 · ${PAYMENTS_REFRESH_TIER} · ${refreshIntervalMs ? `${Math.round(refreshIntervalMs / 1000)} 秒` : "手動"}`;
+  const reimbursementQueueHref = focusedBatchId
+    ? `/payments/reimbursements?batchId=${encodeURIComponent(focusedBatchId)}`
+    : "/payments/reimbursements";
 
   const tabs = [
     t("payments.matrix.title"),
     t("payments.invoicesTitle"),
     t("payments.statementsTitle"),
-    t("payments.reconciliation.title"),
+    <a
+      key="reimbursements-tab"
+      href={reimbursementQueueHref}
+      style={{ color: "inherit", textDecoration: "none" }}
+    >
+      {locale === "en"
+        ? `Reimbursements → ${pendingReimbursements.length}`
+        : `Reimbursements → ${pendingReimbursements.length}`}
+    </a>,
+    <>
+      {t("payments.reconciliation.title")}
+      {openReconciliationCount > 0 ? ` · ${openReconciliationCount}` : ""}
+    </>,
   ];
   const generateInvoicesAction = getActionDescriptor(
     paymentsPageActions,
@@ -1362,9 +1412,6 @@ export default function PaymentsPage() {
     paymentsPageActions,
     "generate_driver_statements",
   );
-  const reimbursementQueueHref = focusedBatchId
-    ? `/payments/reimbursements?batchId=${encodeURIComponent(focusedBatchId)}`
-    : "/payments/reimbursements";
 
   const shellNav: CanvasShellNavItem[] = [
     { key: "home", href: "/", label: navLabels.home, icon: "dashboard" },
@@ -1735,7 +1782,7 @@ export default function PaymentsPage() {
           "resolve_issue",
         );
         const reopenAction = getActionDescriptor(issueActions, "reopen_issue");
-        const opsLink = issueOpsLinkFor(issue);
+        const issueLinks = issueLinksFor(issue as RuntimeIssueRecord);
 
         return (
           <div style={{ display: "grid", gap: 8, minWidth: 180 }}>
@@ -1773,19 +1820,22 @@ export default function PaymentsPage() {
                   onClick: () => void handleReopenIssue(issue),
                 })
               : null}
-            <a
-              href={opsLink.route}
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                color: theme.accent,
-                textDecoration: "none",
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              {opsLink.label}
-            </a>
+            {issueLinks.map((link) => (
+              <a
+                key={`${issue.issueId}-${link.targetApp}-${link.route}`}
+                href={link.route}
+                target={link.openMode === "new_tab" ? "_blank" : undefined}
+                rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
+                style={{
+                  color: theme.accent,
+                  textDecoration: "none",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {link.label}
+              </a>
+            ))}
           </div>
         );
       },
@@ -2110,6 +2160,7 @@ export default function PaymentsPage() {
               fontWeight: 600,
             }}
           >
+            <span>{emptyStateHeading(locale, config.reason)}</span>
             <CanvasPill theme={theme} tone={tone.tone}>
               {config.reason}
             </CanvasPill>
@@ -2168,7 +2219,7 @@ export default function PaymentsPage() {
           title={copy.pageTitle}
           subtitle={`${copy.pageSubtitle} · ${freshnessLabel}`}
           tabs={tabs}
-          activeTab={tabs[3]}
+          activeTab={tabs[4]}
           actions={
             <>
               <CanvasBtn theme={theme} icon="reports" disabled>
