@@ -33,6 +33,7 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
+  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -89,6 +90,19 @@ const pageStackStyle = {
   display: "grid",
   gap: 24,
   padding: 24,
+} satisfies CSSProperties;
+
+const summaryGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+} satisfies CSSProperties;
+
+const workspaceSplitStyle = {
+  display: "grid",
+  gap: 16,
+  alignItems: "start",
+  gridTemplateColumns: "minmax(0, 1.7fr) minmax(300px, 0.9fr)",
 } satisfies CSSProperties;
 
 const headerActionsStyle = {
@@ -149,6 +163,11 @@ const toolbarClusterStyle = {
   gap: 8,
   flexWrap: "wrap",
   alignItems: "center",
+} satisfies CSSProperties;
+
+const sideStackStyle = {
+  display: "grid",
+  gap: 16,
 } satisfies CSSProperties;
 
 const rosterHeaderStyle = {
@@ -215,6 +234,20 @@ const textButtonStyle = {
   fontSize: 11.5,
   fontWeight: 600,
   cursor: "pointer",
+} satisfies CSSProperties;
+
+const watchlistStyle = {
+  display: "grid",
+  gap: 12,
+} satisfies CSSProperties;
+
+const watchlistItemStyle = {
+  border: `1px solid ${theme.border}`,
+  borderRadius: 16,
+  background: theme.surfaceLo,
+  padding: 14,
+  display: "grid",
+  gap: 10,
 } satisfies CSSProperties;
 
 const chipButtonStyle = (disabled: boolean): CSSProperties => ({
@@ -691,6 +724,19 @@ function crossAppLinkLabel(
   return fallbackLabel || copy.openExternal;
 }
 
+function resourceLinkPriority(targetApp: string) {
+  switch (targetApp) {
+    case "ops-console":
+      return 0;
+    case "tenant-console":
+      return 1;
+    case "platform-admin":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
 export default function PartnersPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -1016,6 +1062,30 @@ export default function PartnersPage() {
     [entries],
   );
 
+  const watchlistEntries = useMemo(
+    () =>
+      entries
+        .filter(partnerNeedsAttention)
+        .sort((left, right) => {
+          const leftReady = readinessSummary(left, t);
+          const rightReady = readinessSummary(right, t);
+          const leftScore =
+            (left.status !== "active" ? 3 : 0) +
+            (leftReady.credentialExpiring ? 3 : 0) +
+            leftReady.gaps.length * 2 +
+            leftReady.unknowns.length;
+          const rightScore =
+            (right.status !== "active" ? 3 : 0) +
+            (rightReady.credentialExpiring ? 3 : 0) +
+            rightReady.gaps.length * 2 +
+            rightReady.unknowns.length;
+
+          return rightScore - leftScore;
+        })
+        .slice(0, 5),
+    [entries, t],
+  );
+
   const tenantOptions = useMemo(
     () => ["all", ...new Set(entries.map((entry) => entry.tenantId))],
     [entries],
@@ -1300,558 +1370,753 @@ export default function PartnersPage() {
           />
         ) : null}
 
-        <CanvasCard
-          theme={theme}
-          title={copy.rosterTitle}
-          subtitle={copy.rosterSubtitle}
-          actions={
-            effectiveEmptyState?.reason === "filtered_empty" ? (
-              <CanvasBtn
-                theme={theme}
-                variant="secondary"
-                onClick={clearFilters}
-              >
-                {copy.clearFilters}
-              </CanvasBtn>
-            ) : undefined
-          }
-        >
-          <div style={{ display: "grid", gap: 14 }}>
-            <div style={rosterHeaderStyle}>
-              <div style={rosterHeaderTopStyle}>
-                <div style={toolbarClusterStyle}>
-                  <CanvasPill theme={theme} tone="neutral">
-                    {counts.all} total
-                  </CanvasPill>
-                  <CanvasPill theme={theme} tone="success" dot>
-                    {copy.filterLabels.active} {counts.active}
-                  </CanvasPill>
-                  <CanvasPill theme={theme} tone="warn" dot>
-                    {copy.filterLabels.inactive} {counts.inactive}
-                  </CanvasPill>
-                  <CanvasPill theme={theme} tone="warn" dot>
-                    {copy.filterLabels.attention} {counts.attention}
-                  </CanvasPill>
-                  <CanvasPill theme={theme} tone="danger" dot>
-                    {copy.filterLabels.revoked} {counts.revoked}
-                  </CanvasPill>
-                </div>
-                <div style={toolbarClusterStyle}>
-                  <CanvasPill theme={theme} tone="neutral">
-                    {copy.refreshTierLabel}:{" "}
-                    {formatRefreshTierLabel(refreshTier)}
-                  </CanvasPill>
-                  <CanvasPill theme={theme} tone="neutral">
-                    {copy.refreshedAtLabel}:{" "}
-                    {refreshedAt ? formatDateTime(refreshedAt) : "—"}
-                  </CanvasPill>
-                </div>
-              </div>
-              <div style={infoBarStyle}>
-                <span style={filterSummaryStyle}>{copy.rosterSummary}</span>
-                <span style={filterSummaryStyle}>
-                  {locale === "en"
-                    ? `Active filters: ${activeFilterCount}. T4 pages poll every 30s; T6 stays manual.`
-                    : `目前啟用 ${activeFilterCount} 個篩選。T4 頁面每 30 秒輪詢；T6 維持手動刷新。`}
-                </span>
-              </div>
-            </div>
+        <div style={summaryGridStyle}>
+          <CanvasKPI
+            theme={theme}
+            label={copy.totalCountLabel}
+            value={String(counts.all)}
+            sub={locale === "en" ? "partner entries" : "partner entries"}
+          />
+          <CanvasKPI
+            theme={theme}
+            label={copy.kpiActiveLabel}
+            value={String(counts.active)}
+            sub={locale === "en" ? "ready to serve" : "可對外服務"}
+          />
+          <CanvasKPI
+            theme={theme}
+            label={copy.kpiAttentionLabel}
+            value={String(counts.attention)}
+            sub={
+              locale === "en"
+                ? "readiness or status risk"
+                : "readiness 或狀態風險"
+            }
+          />
+          <CanvasKPI
+            theme={theme}
+            label={copy.kpiRevokedLabel}
+            value={String(counts.revoked)}
+            sub={locale === "en" ? "hard-stopped entries" : "已硬停條目"}
+          />
+        </div>
 
-            <div style={filtersCardStyle}>
-              <div style={filterCardHeaderStyle}>
-                <div style={{ display: "grid", gap: 4 }}>
-                  <strong style={{ fontSize: 13 }}>{copy.filtersTitle}</strong>
-                  <span style={filterSummaryStyle}>{copy.filtersSubtitle}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowFilters((current) => !current)}
-                  style={textButtonStyle}
-                >
-                  {showFilters
-                    ? locale === "en"
-                      ? "Hide filters"
-                      : "收合篩選"
-                    : copy.jumpToFilters}
-                </button>
-              </div>
-              {showFilters ? (
-                <div style={filtersGridStyle}>
-                  <label>
-                    <div
-                      style={{
-                        marginBottom: 6,
-                        fontSize: 11,
-                        color: theme.textMuted,
-                      }}
-                    >
-                      {copy.searchLabel}
-                    </div>
-                    <input
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder={copy.searchPlaceholder}
-                      style={inputStyle()}
-                    />
-                  </label>
-                  <label>
-                    <div
-                      style={{
-                        marginBottom: 6,
-                        fontSize: 11,
-                        color: theme.textMuted,
-                      }}
-                    >
-                      {copy.tenantLabel}
-                    </div>
-                    <select
-                      value={tenantFilter}
-                      onChange={(event) => setTenantFilter(event.target.value)}
-                      style={inputStyle(true)}
-                    >
-                      {tenantOptions.map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <div
-                      style={{
-                        marginBottom: 6,
-                        fontSize: 11,
-                        color: theme.textMuted,
-                      }}
-                    >
-                      {copy.typeLabel}
-                    </div>
-                    <select
-                      value={typeFilter}
-                      onChange={(event) => setTypeFilter(event.target.value)}
-                      style={inputStyle(true)}
-                    >
-                      {typeOptions.map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <div
-                      style={{
-                        marginBottom: 6,
-                        fontSize: 11,
-                        color: theme.textMuted,
-                      }}
-                    >
-                      {copy.statusLabel}
-                    </div>
-                    <select
-                      value={filter}
-                      onChange={(event) =>
-                        setFilter(event.target.value as PartnerFilter)
-                      }
-                      style={inputStyle(true)}
-                    >
-                      <option value="all">{copy.filterLabels.all}</option>
-                      <option value="active">{copy.filterLabels.active}</option>
-                      <option value="inactive">
-                        {copy.filterLabels.inactive}
-                      </option>
-                      <option value="attention">
-                        {copy.filterLabels.attention}
-                      </option>
-                      <option value="revoked">
-                        {copy.filterLabels.revoked}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-              ) : null}
-            </div>
-
-            <div style={toolbarClusterStyle}>
-              {(
-                [
-                  ["all", copy.filterLabels.all, counts.all, "neutral"],
-                  [
-                    "active",
-                    copy.filterLabels.active,
-                    counts.active,
-                    "success",
-                  ],
-                  [
-                    "inactive",
-                    copy.filterLabels.inactive,
-                    counts.inactive,
-                    "warn",
-                  ],
-                  [
-                    "attention",
-                    copy.filterLabels.attention,
-                    counts.attention,
-                    "warn",
-                  ],
-                  [
-                    "revoked",
-                    copy.filterLabels.revoked,
-                    counts.revoked,
-                    "danger",
-                  ],
-                ] as const
-              ).map(([value, label, count, tone]) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setFilter(value)}
-                  style={{ background: "transparent", border: 0, padding: 0 }}
-                >
-                  <CanvasPill
-                    theme={theme}
-                    tone={filter === value ? "accent" : tone}
-                    dot={value !== "all"}
-                  >
-                    {label} {count}
-                  </CanvasPill>
-                </button>
-              ))}
-              {createAction ? (
+        <div style={workspaceSplitStyle}>
+          <CanvasCard
+            theme={theme}
+            title={copy.rosterTitle}
+            subtitle={copy.rosterSubtitle}
+            actions={
+              effectiveEmptyState?.reason === "filtered_empty" ? (
                 <CanvasBtn
                   theme={theme}
-                  variant="primary"
-                  icon="plus"
-                  disabled={!createAction.enabled}
-                  onClick={() => setShowCreateModal(true)}
+                  variant="secondary"
+                  onClick={clearFilters}
                 >
-                  {copy.create}
+                  {copy.clearFilters}
                 </CanvasBtn>
-              ) : null}
-            </div>
-
-            {loading ? (
-              <div style={infoBarStyle}>{t("partners.loading")}</div>
-            ) : effectiveEmptyState ? (
-              <div style={emptyStateStyle(effectiveEmptyState.reason)}>
-                {displayEmptyReason ? (
-                  <span
-                    style={{
-                      color: theme.textMuted,
-                      fontSize: 11,
-                      fontWeight: 700,
-                      letterSpacing: "0.08em",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {emptyReasonEyebrow(displayEmptyReason)}
+              ) : undefined
+            }
+          >
+            <div style={{ display: "grid", gap: 14 }}>
+              <div style={rosterHeaderStyle}>
+                <div style={rosterHeaderTopStyle}>
+                  <div style={toolbarClusterStyle}>
+                    <CanvasPill theme={theme} tone="neutral">
+                      {counts.all} total
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="success" dot>
+                      {copy.filterLabels.active} {counts.active}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="warn" dot>
+                      {copy.filterLabels.inactive} {counts.inactive}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="warn" dot>
+                      {copy.filterLabels.attention} {counts.attention}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="danger" dot>
+                      {copy.filterLabels.revoked} {counts.revoked}
+                    </CanvasPill>
+                  </div>
+                  <div style={toolbarClusterStyle}>
+                    <CanvasPill theme={theme} tone="neutral">
+                      {copy.refreshTierLabel}:{" "}
+                      {formatRefreshTierLabel(refreshTier)}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="neutral">
+                      {copy.refreshedAtLabel}:{" "}
+                      {refreshedAt ? formatDateTime(refreshedAt) : "—"}
+                    </CanvasPill>
+                  </div>
+                </div>
+                <div style={infoBarStyle}>
+                  <span style={filterSummaryStyle}>{copy.rosterSummary}</span>
+                  <span style={filterSummaryStyle}>
+                    {locale === "en"
+                      ? `Active filters: ${activeFilterCount}. T4 pages poll every 30s; T6 stays manual.`
+                      : `目前啟用 ${activeFilterCount} 個篩選。T4 頁面每 30 秒輪詢；T6 維持手動刷新。`}
                   </span>
-                ) : null}
-                <CanvasPill
-                  theme={theme}
-                  tone={emptyTone(displayEmptyReason ?? "fetch_failed")}
-                >
-                  {displayEmptyReason ?? effectiveEmptyState.reason}
-                </CanvasPill>
-                <strong>
-                  {copy.emptyStates[displayEmptyReason ?? "fetch_failed"].title}
-                </strong>
-                <span style={{ color: theme.textMuted, maxWidth: 720 }}>
-                  {copy.emptyStates[displayEmptyReason ?? "fetch_failed"].body}
-                </span>
-                <span style={{ color: theme.textDim, fontSize: 12 }}>
-                  {error || effectiveEmptyState.messageCode}
-                </span>
-                <div style={toolbarClusterStyle}>
-                  {effectiveEmptyState.reason === "filtered_empty" ? (
-                    <CanvasBtn
-                      theme={theme}
-                      variant="secondary"
-                      onClick={clearFilters}
-                    >
-                      {copy.clearFilters}
-                    </CanvasBtn>
-                  ) : null}
-                  {refreshAction?.enabled ? (
-                    <CanvasBtn
-                      theme={theme}
-                      variant="secondary"
-                      onClick={() => void loadEntries()}
-                    >
-                      {copy.refresh}
-                    </CanvasBtn>
-                  ) : null}
-                  {effectiveEmptyState.nextAction ? (
-                    <button
-                      type="button"
-                      disabled={!effectiveEmptyState.nextAction.enabled}
-                      title={effectiveEmptyState.nextAction.disabledReasonCode}
-                      style={chipButtonStyle(
-                        !effectiveEmptyState.nextAction.enabled,
-                      )}
-                      onClick={() => {
-                        if (
-                          effectiveEmptyState.nextAction?.enabled &&
-                          actionMatches(effectiveEmptyState.nextAction, [
-                            "create",
-                            "new",
-                          ])
-                        ) {
-                          setShowCreateModal(true);
-                        }
-                      }}
-                    >
-                      {humanizeActionLabel(
-                        effectiveEmptyState.nextAction.action,
-                      )}
-                    </button>
-                  ) : null}
                 </div>
               </div>
-            ) : (
-              <CanvasTable<PartnerTableRow>
-                theme={theme}
-                rows={visibleEntries as PartnerTableRow[]}
-                columns={[
-                  {
-                    h: "ENTRY",
-                    w: 250,
-                    r: (entry) => (
-                      <div style={entryCellStyle}>
-                        <span
-                          style={entryAvatarStyle(
-                            entry.themeAccent?.trim() || theme.accent,
-                          )}
-                        >
-                          {entry.partnerCode.slice(0, 2).toUpperCase() || "PE"}
-                        </span>
+
+              <div style={filtersCardStyle}>
+                <div style={filterCardHeaderStyle}>
+                  <div style={{ display: "grid", gap: 4 }}>
+                    <strong style={{ fontSize: 13 }}>
+                      {copy.filtersTitle}
+                    </strong>
+                    <span style={filterSummaryStyle}>
+                      {copy.filtersSubtitle}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowFilters((current) => !current)}
+                    style={textButtonStyle}
+                  >
+                    {showFilters
+                      ? locale === "en"
+                        ? "Hide filters"
+                        : "收合篩選"
+                      : copy.jumpToFilters}
+                  </button>
+                </div>
+                {showFilters ? (
+                  <div style={filtersGridStyle}>
+                    <label>
+                      <div
+                        style={{
+                          marginBottom: 6,
+                          fontSize: 11,
+                          color: theme.textMuted,
+                        }}
+                      >
+                        {copy.searchLabel}
+                      </div>
+                      <input
+                        value={search}
+                        onChange={(event) => setSearch(event.target.value)}
+                        placeholder={copy.searchPlaceholder}
+                        style={inputStyle()}
+                      />
+                    </label>
+                    <label>
+                      <div
+                        style={{
+                          marginBottom: 6,
+                          fontSize: 11,
+                          color: theme.textMuted,
+                        }}
+                      >
+                        {copy.tenantLabel}
+                      </div>
+                      <select
+                        value={tenantFilter}
+                        onChange={(event) =>
+                          setTenantFilter(event.target.value)
+                        }
+                        style={inputStyle(true)}
+                      >
+                        {tenantOptions.map((value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <div
+                        style={{
+                          marginBottom: 6,
+                          fontSize: 11,
+                          color: theme.textMuted,
+                        }}
+                      >
+                        {copy.typeLabel}
+                      </div>
+                      <select
+                        value={typeFilter}
+                        onChange={(event) => setTypeFilter(event.target.value)}
+                        style={inputStyle(true)}
+                      >
+                        {typeOptions.map((value) => (
+                          <option key={value} value={value}>
+                            {value}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <div
+                        style={{
+                          marginBottom: 6,
+                          fontSize: 11,
+                          color: theme.textMuted,
+                        }}
+                      >
+                        {copy.statusLabel}
+                      </div>
+                      <select
+                        value={filter}
+                        onChange={(event) =>
+                          setFilter(event.target.value as PartnerFilter)
+                        }
+                        style={inputStyle(true)}
+                      >
+                        <option value="all">{copy.filterLabels.all}</option>
+                        <option value="active">
+                          {copy.filterLabels.active}
+                        </option>
+                        <option value="inactive">
+                          {copy.filterLabels.inactive}
+                        </option>
+                        <option value="attention">
+                          {copy.filterLabels.attention}
+                        </option>
+                        <option value="revoked">
+                          {copy.filterLabels.revoked}
+                        </option>
+                      </select>
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+
+              <div style={toolbarClusterStyle}>
+                {(
+                  [
+                    ["all", copy.filterLabels.all, counts.all, "neutral"],
+                    [
+                      "active",
+                      copy.filterLabels.active,
+                      counts.active,
+                      "success",
+                    ],
+                    [
+                      "inactive",
+                      copy.filterLabels.inactive,
+                      counts.inactive,
+                      "warn",
+                    ],
+                    [
+                      "attention",
+                      copy.filterLabels.attention,
+                      counts.attention,
+                      "warn",
+                    ],
+                    [
+                      "revoked",
+                      copy.filterLabels.revoked,
+                      counts.revoked,
+                      "danger",
+                    ],
+                  ] as const
+                ).map(([value, label, count, tone]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setFilter(value)}
+                    style={{
+                      background: "transparent",
+                      border: 0,
+                      padding: 0,
+                    }}
+                  >
+                    <CanvasPill
+                      theme={theme}
+                      tone={filter === value ? "accent" : tone}
+                      dot={value !== "all"}
+                    >
+                      {label} {count}
+                    </CanvasPill>
+                  </button>
+                ))}
+                {createAction ? (
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    icon="plus"
+                    disabled={!createAction.enabled}
+                    onClick={() => setShowCreateModal(true)}
+                  >
+                    {copy.create}
+                  </CanvasBtn>
+                ) : null}
+              </div>
+
+              {loading ? (
+                <div style={infoBarStyle}>{t("partners.loading")}</div>
+              ) : effectiveEmptyState ? (
+                <div style={emptyStateStyle(effectiveEmptyState.reason)}>
+                  {displayEmptyReason ? (
+                    <span
+                      style={{
+                        color: theme.textMuted,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {emptyReasonEyebrow(displayEmptyReason)}
+                    </span>
+                  ) : null}
+                  <CanvasPill
+                    theme={theme}
+                    tone={emptyTone(displayEmptyReason ?? "fetch_failed")}
+                  >
+                    {displayEmptyReason ?? effectiveEmptyState.reason}
+                  </CanvasPill>
+                  <strong>
+                    {
+                      copy.emptyStates[displayEmptyReason ?? "fetch_failed"]
+                        .title
+                    }
+                  </strong>
+                  <span style={{ color: theme.textMuted, maxWidth: 720 }}>
+                    {
+                      copy.emptyStates[displayEmptyReason ?? "fetch_failed"]
+                        .body
+                    }
+                  </span>
+                  <span style={{ color: theme.textDim, fontSize: 12 }}>
+                    {error || effectiveEmptyState.messageCode}
+                  </span>
+                  <div style={toolbarClusterStyle}>
+                    {effectiveEmptyState.reason === "filtered_empty" ? (
+                      <CanvasBtn
+                        theme={theme}
+                        variant="secondary"
+                        onClick={clearFilters}
+                      >
+                        {copy.clearFilters}
+                      </CanvasBtn>
+                    ) : null}
+                    {refreshAction?.enabled ? (
+                      <CanvasBtn
+                        theme={theme}
+                        variant="secondary"
+                        onClick={() => void loadEntries()}
+                      >
+                        {copy.refresh}
+                      </CanvasBtn>
+                    ) : null}
+                    {effectiveEmptyState.nextAction ? (
+                      <button
+                        type="button"
+                        disabled={!effectiveEmptyState.nextAction.enabled}
+                        title={
+                          effectiveEmptyState.nextAction.disabledReasonCode
+                        }
+                        style={chipButtonStyle(
+                          !effectiveEmptyState.nextAction.enabled,
+                        )}
+                        onClick={() => {
+                          if (
+                            effectiveEmptyState.nextAction?.enabled &&
+                            actionMatches(effectiveEmptyState.nextAction, [
+                              "create",
+                              "new",
+                            ])
+                          ) {
+                            setShowCreateModal(true);
+                          }
+                        }}
+                      >
+                        {humanizeActionLabel(
+                          effectiveEmptyState.nextAction.action,
+                        )}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <CanvasTable<PartnerTableRow>
+                  theme={theme}
+                  rows={visibleEntries as PartnerTableRow[]}
+                  columns={[
+                    {
+                      h: "ENTRY",
+                      w: 250,
+                      r: (entry) => (
+                        <div style={entryCellStyle}>
+                          <span
+                            style={entryAvatarStyle(
+                              entry.themeAccent?.trim() || theme.accent,
+                            )}
+                          >
+                            {entry.partnerCode.slice(0, 2).toUpperCase() ||
+                              "PE"}
+                          </span>
+                          <div style={{ display: "grid", gap: 2 }}>
+                            <Link
+                              href={`/partners/${entry.entrySlug}`}
+                              style={primaryLinkStyle}
+                            >
+                              {entry.displayName}
+                            </Link>
+                            <span style={monoTextStyle}>
+                              /{entry.entrySlug}
+                            </span>
+                            <span
+                              style={{ color: theme.textMuted, fontSize: 12 }}
+                            >
+                              {entry.tenantId} · {entry.partnerCode} ·{" "}
+                              {entry.partnerType}
+                            </span>
+                          </div>
+                        </div>
+                      ),
+                    },
+                    {
+                      h: "PROGRAM",
+                      w: 200,
+                      r: (entry) => (
                         <div style={{ display: "grid", gap: 2 }}>
+                          <span style={{ fontWeight: 600 }}>
+                            {entry.programId}
+                          </span>
+                          <span style={monoTextStyle}>
+                            {entry.programCode || "—"}
+                          </span>
+                          <span
+                            style={{ color: theme.textMuted, fontSize: 12 }}
+                          >
+                            {[entry.tenantId, entry.bankCode]
+                              .filter(Boolean)
+                              .join(" · ") || "—"}
+                          </span>
+                        </div>
+                      ),
+                    },
+                    {
+                      h: "SUBTYPE",
+                      w: 180,
+                      r: (entry) => (
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <span style={{ fontWeight: 600 }}>
+                            {formatPlatformCodeLabel(
+                              locale,
+                              entry.businessDispatchSubtype,
+                            )}
+                          </span>
+                          <span style={monoTextStyle}>
+                            {entry.partnerType || "—"}
+                          </span>
+                        </div>
+                      ),
+                    },
+                    {
+                      h: "AUTH",
+                      w: 120,
+                      r: (entry) => (
+                        <span style={monoTextStyle}>
+                          {formatPlatformCodeLabel(locale, entry.authMode)}
+                        </span>
+                      ),
+                    },
+                    {
+                      h: "ELIGIBILITY",
+                      w: 140,
+                      r: (entry) => (
+                        <span style={monoTextStyle}>
+                          {formatPlatformCodeLabel(
+                            locale,
+                            entry.eligibilityMode,
+                          )}
+                        </span>
+                      ),
+                    },
+                    {
+                      h: "STATUS",
+                      w: 110,
+                      r: (entry) => (
+                        <CanvasPill
+                          theme={theme}
+                          tone={statusTone(entry.status)}
+                          dot
+                        >
+                          {entry.status}
+                        </CanvasPill>
+                      ),
+                    },
+                    {
+                      h: "READINESS",
+                      w: 220,
+                      r: (entry) => {
+                        const readiness = readinessSummary(entry, t);
+                        return (
+                          <div style={{ display: "grid", gap: 6 }}>
+                            <div style={toolbarClusterStyle}>
+                              <CanvasPill
+                                theme={theme}
+                                tone={readiness.tone}
+                                dot={
+                                  readiness.gaps.length > 0 ||
+                                  readiness.unknowns.length > 0 ||
+                                  readiness.credentialExpiring
+                                }
+                              >
+                                {readiness.label}
+                              </CanvasPill>
+                              {entry.status !== "active" ? (
+                                <CanvasPill theme={theme} tone="warn">
+                                  {copy.inactiveRisk}
+                                </CanvasPill>
+                              ) : null}
+                              {readiness.credentialExpiring ? (
+                                <CanvasPill theme={theme} tone="warn">
+                                  Credential expiring
+                                </CanvasPill>
+                              ) : null}
+                            </div>
+                            <span
+                              style={{ color: theme.textMuted, fontSize: 11.5 }}
+                            >
+                              {entry.entryHost || "—"}
+                              {entry.entryPath || ""}
+                            </span>
+                            {readiness.gaps.length > 0 ||
+                            readiness.unknowns.length > 0 ? (
+                              <span
+                                style={{ color: theme.textDim, fontSize: 11.5 }}
+                              >
+                                {[...readiness.gaps, ...readiness.unknowns]
+                                  .slice(0, 2)
+                                  .map((gap) => gap.label)
+                                  .join(" · ")}
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      },
+                    },
+                    {
+                      h: "",
+                      w: 300,
+                      r: (entry) => {
+                        const rowActions = entry.availableActions ?? [];
+                        const links = entry.resourceLinks ?? [];
+                        return (
+                          <div style={{ display: "grid", gap: 8 }}>
+                            <div style={toolbarClusterStyle}>
+                              {rowActions.length > 0 ? (
+                                rowActions.map(
+                                  (action: ResourceActionDescriptor) => (
+                                    <button
+                                      key={action.action}
+                                      type="button"
+                                      disabled={
+                                        !action.enabled ||
+                                        pendingRowAction ===
+                                          `${entry.entrySlug}:${action.action}`
+                                      }
+                                      title={
+                                        action.disabledReasonCode ||
+                                        `${action.riskLevel}${action.requiresReason ? " · reason" : ""}`
+                                      }
+                                      style={chipButtonStyle(
+                                        !action.enabled ||
+                                          pendingRowAction ===
+                                            `${entry.entrySlug}:${action.action}`,
+                                      )}
+                                      onClick={() =>
+                                        stageRowAction(entry, action)
+                                      }
+                                    >
+                                      {pendingRowAction ===
+                                      `${entry.entrySlug}:${action.action}`
+                                        ? t("common.saving")
+                                        : humanizeActionLabel(action.action)}
+                                    </button>
+                                  ),
+                                )
+                              ) : (
+                                <span
+                                  style={chipButtonStyle(true)}
+                                  title={copy.noActionReason}
+                                >
+                                  {copy.readOnly}
+                                </span>
+                              )}
+                            </div>
+                            <div style={toolbarClusterStyle}>
+                              <Link
+                                href={`/partners/${entry.entrySlug}`}
+                                style={secondaryLinkStyle}
+                              >
+                                {copy.openDetail}
+                              </Link>
+                              {links.map((link) => (
+                                <a
+                                  key={`${link.targetApp}:${link.resourceType}:${link.resourceId}`}
+                                  href={link.route}
+                                  target={
+                                    link.openMode === "new_tab"
+                                      ? "_blank"
+                                      : undefined
+                                  }
+                                  rel={
+                                    link.openMode === "new_tab"
+                                      ? "noreferrer noopener"
+                                      : undefined
+                                  }
+                                  style={secondaryLinkStyle}
+                                >
+                                  {crossAppLinkLabel(
+                                    link.route,
+                                    link.targetApp,
+                                    link.label,
+                                    copy,
+                                  )}{" "}
+                                  {link.openMode === "new_tab" ? "↗" : ""}
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      },
+                    },
+                  ]}
+                />
+              )}
+            </div>
+          </CanvasCard>
+
+          <div style={sideStackStyle}>
+            <CanvasCard
+              theme={theme}
+              title={copy.watchlistTitle}
+              subtitle={copy.watchlistSubtitle}
+            >
+              <div style={watchlistStyle}>
+                {watchlistEntries.length === 0 ? (
+                  <span style={filterSummaryStyle}>{copy.watchlistEmpty}</span>
+                ) : (
+                  watchlistEntries.map((entry) => {
+                    const readiness = readinessSummary(entry, t);
+                    const preferredLinks = [...(entry.resourceLinks ?? [])]
+                      .sort(
+                        (left, right) =>
+                          resourceLinkPriority(left.targetApp) -
+                          resourceLinkPriority(right.targetApp),
+                      )
+                      .slice(0, 2);
+
+                    return (
+                      <div key={entry.entrySlug} style={watchlistItemStyle}>
+                        <div style={{ display: "grid", gap: 4 }}>
                           <Link
                             href={`/partners/${entry.entrySlug}`}
                             style={primaryLinkStyle}
                           >
                             {entry.displayName}
                           </Link>
-                          <span style={monoTextStyle}>/{entry.entrySlug}</span>
-                          <span
-                            style={{ color: theme.textMuted, fontSize: 12 }}
-                          >
-                            {entry.tenantId} · {entry.partnerCode} ·{" "}
-                            {entry.partnerType}
+                          <span style={monoTextStyle}>
+                            {entry.tenantId} · /{entry.entrySlug}
                           </span>
                         </div>
-                      </div>
-                    ),
-                  },
-                  {
-                    h: "PROGRAM",
-                    w: 200,
-                    r: (entry) => (
-                      <div style={{ display: "grid", gap: 2 }}>
-                        <span style={{ fontWeight: 600 }}>
-                          {entry.programId}
-                        </span>
-                        <span style={monoTextStyle}>
-                          {entry.programCode || "—"}
-                        </span>
-                        <span style={{ color: theme.textMuted, fontSize: 12 }}>
-                          {[entry.tenantId, entry.bankCode]
-                            .filter(Boolean)
-                            .join(" · ") || "—"}
-                        </span>
-                      </div>
-                    ),
-                  },
-                  {
-                    h: "SUBTYPE",
-                    w: 180,
-                    r: (entry) => (
-                      <div style={{ display: "grid", gap: 2 }}>
-                        <span style={{ fontWeight: 600 }}>
+                        <div style={toolbarClusterStyle}>
+                          <CanvasPill
+                            theme={theme}
+                            tone={statusTone(entry.status)}
+                            dot
+                          >
+                            {entry.status}
+                          </CanvasPill>
+                          <CanvasPill theme={theme} tone={readiness.tone} dot>
+                            {readiness.label}
+                          </CanvasPill>
+                          {readiness.credentialExpiring ? (
+                            <CanvasPill theme={theme} tone="warn">
+                              Credential expiring
+                            </CanvasPill>
+                          ) : null}
+                        </div>
+                        <span style={filterSummaryStyle}>
+                          {entry.partnerCode} · {entry.partnerType} ·{" "}
                           {formatPlatformCodeLabel(
                             locale,
                             entry.businessDispatchSubtype,
                           )}
                         </span>
-                        <span style={monoTextStyle}>
-                          {entry.partnerType || "—"}
+                        <span style={filterSummaryStyle}>
+                          {[...readiness.gaps, ...readiness.unknowns]
+                            .map((item) => item.label)
+                            .slice(0, 3)
+                            .join(" · ") ||
+                            (locale === "en"
+                              ? "Inactive status requires review."
+                              : "目前因狀態異常而需要治理檢查。")}
                         </span>
-                      </div>
-                    ),
-                  },
-                  {
-                    h: "AUTH",
-                    w: 120,
-                    r: (entry) => (
-                      <span style={monoTextStyle}>
-                        {formatPlatformCodeLabel(locale, entry.authMode)}
-                      </span>
-                    ),
-                  },
-                  {
-                    h: "ELIGIBILITY",
-                    w: 140,
-                    r: (entry) => (
-                      <span style={monoTextStyle}>
-                        {formatPlatformCodeLabel(locale, entry.eligibilityMode)}
-                      </span>
-                    ),
-                  },
-                  {
-                    h: "STATUS",
-                    w: 110,
-                    r: (entry) => (
-                      <CanvasPill
-                        theme={theme}
-                        tone={statusTone(entry.status)}
-                        dot
-                      >
-                        {entry.status}
-                      </CanvasPill>
-                    ),
-                  },
-                  {
-                    h: "READINESS",
-                    w: 220,
-                    r: (entry) => {
-                      const readiness = readinessSummary(entry, t);
-                      return (
-                        <div style={{ display: "grid", gap: 6 }}>
-                          <div style={toolbarClusterStyle}>
-                            <CanvasPill
-                              theme={theme}
-                              tone={readiness.tone}
-                              dot={
-                                readiness.gaps.length > 0 ||
-                                readiness.unknowns.length > 0 ||
-                                readiness.credentialExpiring
-                              }
-                            >
-                              {readiness.label}
-                            </CanvasPill>
-                            {entry.status !== "active" ? (
-                              <CanvasPill theme={theme} tone="warn">
-                                {copy.inactiveRisk}
-                              </CanvasPill>
-                            ) : null}
-                            {readiness.credentialExpiring ? (
-                              <CanvasPill theme={theme} tone="warn">
-                                Credential expiring
-                              </CanvasPill>
-                            ) : null}
-                          </div>
-                          <span
-                            style={{ color: theme.textMuted, fontSize: 11.5 }}
+                        <div style={toolbarClusterStyle}>
+                          <Link
+                            href={`/partners/${entry.entrySlug}`}
+                            style={secondaryLinkStyle}
                           >
-                            {entry.entryHost || "—"}
-                            {entry.entryPath || ""}
-                          </span>
-                          {readiness.gaps.length > 0 ||
-                          readiness.unknowns.length > 0 ? (
-                            <span
-                              style={{ color: theme.textDim, fontSize: 11.5 }}
-                            >
-                              {[...readiness.gaps, ...readiness.unknowns]
-                                .slice(0, 2)
-                                .map((gap) => gap.label)
-                                .join(" · ")}
-                            </span>
-                          ) : null}
-                        </div>
-                      );
-                    },
-                  },
-                  {
-                    h: "",
-                    w: 300,
-                    r: (entry) => {
-                      const rowActions = entry.availableActions ?? [];
-                      const links = entry.resourceLinks ?? [];
-                      return (
-                        <div style={{ display: "grid", gap: 8 }}>
-                          <div style={toolbarClusterStyle}>
-                            {rowActions.length > 0 ? (
-                              rowActions.map(
-                                (action: ResourceActionDescriptor) => (
-                                  <button
-                                    key={action.action}
-                                    type="button"
-                                    disabled={
-                                      !action.enabled ||
-                                      pendingRowAction ===
-                                        `${entry.entrySlug}:${action.action}`
-                                    }
-                                    title={
-                                      action.disabledReasonCode ||
-                                      `${action.riskLevel}${action.requiresReason ? " · reason" : ""}`
-                                    }
-                                    style={chipButtonStyle(
-                                      !action.enabled ||
-                                        pendingRowAction ===
-                                          `${entry.entrySlug}:${action.action}`,
-                                    )}
-                                    onClick={() =>
-                                      stageRowAction(entry, action)
-                                    }
-                                  >
-                                    {pendingRowAction ===
-                                    `${entry.entrySlug}:${action.action}`
-                                      ? t("common.saving")
-                                      : humanizeActionLabel(action.action)}
-                                  </button>
-                                ),
-                              )
-                            ) : (
-                              <span
-                                style={chipButtonStyle(true)}
-                                title={copy.noActionReason}
-                              >
-                                {copy.readOnly}
-                              </span>
-                            )}
-                          </div>
-                          <div style={toolbarClusterStyle}>
-                            <Link
-                              href={`/partners/${entry.entrySlug}`}
+                            {copy.watchlistOpen}
+                          </Link>
+                          {preferredLinks.map((link) => (
+                            <a
+                              key={`${entry.entrySlug}:${link.targetApp}:${link.resourceId}`}
+                              href={link.route}
+                              target={
+                                link.openMode === "new_tab"
+                                  ? "_blank"
+                                  : undefined
+                              }
+                              rel={
+                                link.openMode === "new_tab"
+                                  ? "noreferrer noopener"
+                                  : undefined
+                              }
                               style={secondaryLinkStyle}
                             >
-                              {copy.openDetail}
-                            </Link>
-                            {links.map((link) => (
-                              <a
-                                key={`${link.targetApp}:${link.resourceType}:${link.resourceId}`}
-                                href={link.route}
-                                target={
-                                  link.openMode === "new_tab"
-                                    ? "_blank"
-                                    : undefined
-                                }
-                                rel={
-                                  link.openMode === "new_tab"
-                                    ? "noreferrer noopener"
-                                    : undefined
-                                }
-                                style={secondaryLinkStyle}
-                              >
-                                {crossAppLinkLabel(
-                                  link.route,
-                                  link.targetApp,
-                                  link.label,
-                                  copy,
-                                )}{" "}
-                                {link.openMode === "new_tab" ? "↗" : ""}
-                              </a>
-                            ))}
-                          </div>
+                              {crossAppLinkLabel(
+                                link.route,
+                                link.targetApp,
+                                link.label,
+                                copy,
+                              )}{" "}
+                              {link.openMode === "new_tab" ? "↗" : ""}
+                            </a>
+                          ))}
                         </div>
-                      );
-                    },
-                  },
-                ]}
-              />
-            )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={theme}
+              title={copy.crossAppLabel}
+              subtitle={
+                locale === "en"
+                  ? "Cross-app links come from runtime contracts and should open in a new tab when specified."
+                  : "跨 app 連結來自 runtime contract，若標示 new_tab 則需以新分頁開啟。"
+              }
+            >
+              <div style={{ display: "grid", gap: 10 }}>
+                <span style={filterSummaryStyle}>
+                  {locale === "en"
+                    ? "Use ops-console or tenant-console deep links before mutating a partner whose readiness or traffic path is unclear."
+                    : "當 partner 的 readiness 或流量路徑不明確時，先透過 ops-console 或 tenant-console deep link 做交叉檢查。"}
+                </span>
+                <div style={toolbarClusterStyle}>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.refreshTierLabel}:{" "}
+                    {formatRefreshTierLabel(refreshTier)}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.activeFiltersLabel}: {activeFilterCount}
+                  </CanvasPill>
+                </div>
+              </div>
+            </CanvasCard>
           </div>
-        </CanvasCard>
+        </div>
       </div>
 
       {showCreateModal ? (
