@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { CSSProperties, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import type {
   EmptyReason,
   RefreshTier,
@@ -19,6 +19,7 @@ import {
   CanvasBanner,
   CanvasCard,
   CanvasField,
+  CanvasIcon,
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
@@ -280,6 +281,10 @@ type ReportRow = {
 type EmptyStateModel = {
   title: string;
   description: string;
+  tone: CanvasTone;
+  icon: ComponentProps<typeof CanvasIcon>["name"];
+  badge: string;
+  nextStep: string;
   nextAction?: ResourceActionDescriptor;
 };
 
@@ -557,6 +562,10 @@ function getEmptyStateModel(
         title: "報表服務尚未佈建",
         description:
           "目前租戶尚未完成報表工作流啟用，先回到整合就緒度確認 API 金鑰、Webhook 與 SLA 基線。",
+        tone: "warn",
+        icon: "integrationGov",
+        badge: "Provisioning required",
+        nextStep: "先補齊治理面設定，再回來建立第一筆報表工作。",
         ...(nextAction ? { nextAction } : {}),
       };
     case "fetch_failed":
@@ -564,6 +573,10 @@ function getEmptyStateModel(
         title: "工作佇列讀取失敗",
         description:
           "前端沒有假裝成空資料。請先手動 refresh；若仍失敗，再從稽核或整合治理追查上游問題。",
+        tone: "danger",
+        icon: "warn",
+        badge: "Fetch failed",
+        nextStep: "先重抓列表；若持續失敗，改從治理與稽核面確認上游狀態。",
         ...(nextAction ? { nextAction } : {}),
       };
     case "permission_denied":
@@ -571,6 +584,11 @@ function getEmptyStateModel(
         title: "目前角色只有唯讀或無報表權限",
         description:
           "依 packet §3.5，頁面不會自行推論角色。若後端不允許建立或重跑，就只保留可閱讀資訊。",
+        tone: "neutral",
+        icon: "apiKeys",
+        badge: "Read-only authority",
+        nextStep:
+          "等待後端授權開放 `create_report_job` 或 `rerun_failed_job` 後再操作。",
         ...(nextAction ? { nextAction } : {}),
       };
     case "external_unavailable":
@@ -578,6 +596,10 @@ function getEmptyStateModel(
         title: "外部產出管線暫時不可用",
         description:
           "工作可見，但 artifact 簽章或上游彙整服務不可達。請先檢查治理面板，再決定是否重跑。",
+        tone: "accent",
+        icon: "ext",
+        badge: "External dependency degraded",
+        nextStep: "先確認簽章與彙整依賴，再決定下載或重跑是否有意義。",
         ...(nextAction ? { nextAction } : {}),
       };
     case "filtered_empty":
@@ -585,6 +607,10 @@ function getEmptyStateModel(
         title: "目前篩選條件沒有命中任何工作",
         description:
           "調整 type、status、period 後再試一次，或直接建立新的報表工作。",
+        tone: "info",
+        icon: "filter",
+        badge: "Filter produced zero rows",
+        nextStep: "放寬 period 或 status，再回看完整工作佇列。",
         ...(nextAction ? { nextAction } : {}),
       };
     case "no_data":
@@ -593,6 +619,11 @@ function getEmptyStateModel(
         title: "租戶尚未建立任何報表工作",
         description:
           "這裡只呈現真實工作佇列。建立第一個月報、收入彙總或 dispatch trace 後，artifact 與到期資訊才會出現。",
+        tone: "info",
+        icon: "reports",
+        badge: "Queue is empty",
+        nextStep:
+          "用下方表單送出第一個 job，這裡才會開始出現 queue 與 artifact 狀態。",
         ...(nextAction ? { nextAction } : {}),
       };
   }
@@ -1065,11 +1096,60 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
               </form>
 
               {emptyState ? (
-                <div style={emptyStateStyle}>
+                <div
+                  style={{
+                    ...emptyStateStyle,
+                    borderColor:
+                      emptyState.tone === "danger"
+                        ? th.dangerBorder
+                        : emptyState.tone === "warn"
+                          ? th.warnBorder
+                          : emptyState.tone === "accent"
+                            ? th.accentBorder
+                            : emptyState.tone === "info"
+                              ? th.infoBorder
+                              : th.neutralBorder,
+                    background:
+                      emptyState.tone === "danger"
+                        ? th.dangerBg
+                        : emptyState.tone === "warn"
+                          ? th.warnBg
+                          : emptyState.tone === "accent"
+                            ? th.accentBg
+                            : emptyState.tone === "info"
+                              ? th.infoBg
+                              : th.neutralBg,
+                  }}
+                >
+                  <div style={actionRowStyle}>
+                    <CanvasPill theme={th} tone={emptyState.tone}>
+                      {emptyState.badge}
+                    </CanvasPill>
+                    <span
+                      style={{
+                        ...mutedTextStyle,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
+                    >
+                      <CanvasIcon name={emptyState.icon} size={14} />
+                      EmptyReason: {emptyReason}
+                    </span>
+                  </div>
                   <div>
                     <strong>{emptyState.title}</strong>
                     <p style={{ ...mutedTextStyle, marginTop: 6 }}>
                       {emptyState.description}
+                    </p>
+                    <p
+                      style={{
+                        ...mutedTextStyle,
+                        marginTop: 8,
+                        color: th.text,
+                      }}
+                    >
+                      Next step: {emptyState.nextStep}
                     </p>
                   </div>
 
@@ -1301,7 +1381,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                     建立工作
                   </button>
                   <span style={mutedTextStyle}>
-                    Medium risk · receipt 會透過 flash 與 audit link 回到本頁。
+                    Low risk · receipt 會透過 flash 與 audit link 回到本頁。
                   </span>
                 </div>
               </form>
