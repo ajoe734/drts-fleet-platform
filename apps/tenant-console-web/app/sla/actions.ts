@@ -1,5 +1,6 @@
 "use server";
 
+import type { ActionReceipt } from "@drts/contracts";
 import { revalidatePath } from "next/cache";
 import { getTenantClient } from "@/lib/api-client";
 
@@ -13,6 +14,7 @@ type UpdateSlaPayload = {
 type ActionResult = {
   ok: boolean;
   message: string;
+  receipt?: ActionReceipt;
 };
 
 function normalizePositiveInteger(value: number, field: string) {
@@ -35,7 +37,7 @@ export async function updateTenantSlaProfileAction(
 ): Promise<ActionResult> {
   const client = getTenantClient();
 
-  await client.updateSlaProfile({
+  const response = await client.updateSlaProfile({
     waitThresholdMin: normalizePositiveInteger(
       payload.waitThresholdMin,
       "waitThresholdMin",
@@ -56,7 +58,10 @@ export async function updateTenantSlaProfileAction(
 
   return {
     ok: true,
-    message: "SLA profile updated.",
+    message:
+      response && typeof response === "object" && "status" in response
+        ? `SLA profile ${String(response.status)}.`
+        : "SLA profile updated.",
   };
 }
 
@@ -65,15 +70,16 @@ export async function recalculateTenantSlaBookingsAction(
 ): Promise<ActionResult> {
   const client = getTenantClient();
 
-  await client.recalculateSlaBookings({
+  const receipt = (await client.recalculateSlaBookings({
     reason: normalizeReason(reason),
-  });
+  })) as ActionReceipt;
 
   revalidatePath("/sla");
   revalidatePath("/audit");
 
   return {
     ok: true,
-    message: "SLA recalculation accepted.",
+    message: receipt.message,
+    receipt,
   };
 }

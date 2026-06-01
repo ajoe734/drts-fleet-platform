@@ -1,8 +1,4 @@
-import type {
-  EmptyReason,
-  EmptyStateEnvelope,
-  TenantSlaProfileView,
-} from "@drts/contracts";
+import type { EmptyReason, TenantSlaProfileView } from "@drts/contracts";
 import { CanvasBanner, buildCanvasTheme } from "@drts/ui-web";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
 import { SlaManager } from "./sla-manager";
@@ -18,28 +14,6 @@ const th = buildCanvasTheme({
 const pageBodyStyle = {
   padding: 24,
 };
-
-type PageProps = {
-  searchParams?: Promise<{
-    empty?: string;
-  }>;
-};
-
-const EMPTY_REASON_SET = new Set<EmptyReason>([
-  "no_data",
-  "not_provisioned",
-  "fetch_failed",
-  "permission_denied",
-  "external_unavailable",
-  "filtered_empty",
-]);
-
-function parseEmptyReason(value: string | undefined): EmptyReason | null {
-  if (!value || !EMPTY_REASON_SET.has(value as EmptyReason)) {
-    return null;
-  }
-  return value as EmptyReason;
-}
 
 function classifyFetchFailure(error: unknown): EmptyReason {
   const message = error instanceof Error ? error.message : "Unknown error";
@@ -59,65 +33,46 @@ function classifyFetchFailure(error: unknown): EmptyReason {
   return "fetch_failed";
 }
 
-function buildPreviewEmptyState(
+function toRenderableEmptyReason(
   reason: EmptyReason,
-): EmptyStateEnvelope | null {
-  return {
-    reason,
-    messageCode: `tenant.sla.preview.${reason}`,
-  };
+): Exclude<EmptyReason, "driver_not_eligible"> {
+  return reason === "driver_not_eligible" ? "fetch_failed" : reason;
 }
 
-function buildFallbackView(reason: EmptyReason): TenantSlaProfileView {
-  return {
-    profile: null,
-    emptyState: buildPreviewEmptyState(reason),
-    // Fallback states must not invent write authority that the backend did
-    // not return.
-    availableActions: [],
-    refreshTier: "slow",
-    refreshMetadata: {
-      generatedAt: new Date().toISOString(),
-      staleAfterMs: 30_000,
-      dataFreshness: "unknown",
-      source: "live",
-    },
-    updatedBy: null,
-    lastRecalculationAt: null,
-  };
-}
-
-async function loadSlaPageData(
-  previewEmptyReason: EmptyReason | null,
-): Promise<{
+async function loadSlaPageData(): Promise<{
   view: TenantSlaProfileView;
   errors: string[];
+  fetchFailureReason: Exclude<EmptyReason, "driver_not_eligible"> | null;
 }> {
-  if (previewEmptyReason) {
-    return {
-      view: buildFallbackView(previewEmptyReason),
-      errors: [],
-    };
-  }
-
   const client = getTenantClient();
 
   try {
     const view = await client.getSlaProfileView();
-    return { view, errors: [] };
+    return { view, errors: [], fetchFailureReason: null };
   } catch (error) {
-    const reason = classifyFetchFailure(error);
     return {
-      view: buildFallbackView(reason),
+      view: {
+        profile: null,
+        emptyState: null,
+        availableActions: [],
+        refreshTier: "slow",
+        refreshMetadata: {
+          generatedAt: "",
+          staleAfterMs: 0,
+          dataFreshness: "unknown",
+          source: "live",
+        },
+        updatedBy: null,
+        lastRecalculationAt: null,
+      },
       errors: [error instanceof Error ? error.message : "Unknown error"],
+      fetchFailureReason: toRenderableEmptyReason(classifyFetchFailure(error)),
     };
   }
 }
 
-export default async function SlaPage({ searchParams }: PageProps) {
-  const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const previewEmptyReason = parseEmptyReason(resolvedSearchParams?.empty);
-  const data = await loadSlaPageData(previewEmptyReason);
+export default async function SlaPage() {
+  const data = await loadSlaPageData();
 
   return (
     <div>
@@ -140,6 +95,8 @@ export default async function SlaPage({ searchParams }: PageProps) {
         emptyState={data.view.emptyState}
         refreshTier={data.view.refreshTier}
         refreshMetadata={data.view.refreshMetadata}
+        loadFailureReason={data.fetchFailureReason}
+        loadErrors={data.errors}
         links={[
           { href: "/integration-governance", label: "查看整合就緒度" },
           { href: "/audit", label: "查看 SLA 稽核紀錄" },
