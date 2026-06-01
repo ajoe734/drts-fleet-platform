@@ -602,71 +602,6 @@ type ActionLinkOverride = {
   note?: string;
 };
 
-type ActionRegistryEntry = ActionLinkOverride;
-
-const SETTINGS_ACTION_REGISTRY: Record<string, ActionRegistryEntry> = {
-  view_tenant_audit_evidence: {
-    surfaceLabel: "租戶稽核",
-    note: "same-tab",
-  },
-  update_tenant_billing_profile: {
-    surfaceLabel: "計費資料",
-  },
-  update_notification_subscription: {
-    surfaceLabel: "通知偏好",
-  },
-  update_notification_preferences: {
-    surfaceLabel: "通知偏好",
-  },
-  update_sla_profile: {
-    surfaceLabel: "SLA 設定",
-  },
-  issue_api_key: {
-    surfaceLabel: "API 金鑰",
-    href: "/api-keys",
-  },
-  rotate_api_key: {
-    surfaceLabel: "API 金鑰",
-    href: "/api-keys",
-  },
-  revoke_api_key: {
-    surfaceLabel: "API 金鑰",
-    href: "/api-keys",
-  },
-  create_webhook_endpoint: {
-    surfaceLabel: "Webhook",
-    href: "/webhooks",
-  },
-  update_webhook_endpoint: {
-    surfaceLabel: "Webhook",
-    href: "/webhooks",
-  },
-  rotate_webhook_secret: {
-    surfaceLabel: "Webhook",
-    href: "/webhooks",
-  },
-  disable_webhook_endpoint: {
-    surfaceLabel: "Webhook",
-    href: "/webhooks",
-  },
-  activate_webhook_endpoint: {
-    surfaceLabel: "Webhook",
-    href: "/webhooks",
-  },
-  send_test_webhook: {
-    surfaceLabel: "Webhook",
-    href: "/webhooks",
-  },
-  create_tenant_user: {
-    surfaceLabel: "人員與角色",
-    href: "/users",
-  },
-  update_tenant_role: {
-    surfaceLabel: "人員與角色",
-    href: "/users",
-  },
-};
-
 function formatActionLabel(action: string) {
   return action.replaceAll("_", " ");
 }
@@ -675,26 +610,20 @@ function buildActionLink(
   descriptor: ResourceActionDescriptor,
   overrides?: ActionLinkOverride,
 ): ActionLink {
-  const resolved = SETTINGS_ACTION_REGISTRY[descriptor.action];
-  const resolvedHref =
-    descriptor.action === "view_tenant_audit_evidence"
-      ? "/audit"
-      : resolved?.href;
-
-  const href = sanitizeLocalHref(overrides?.href ?? resolvedHref);
-  const link = overrides?.link ?? resolved?.link;
+  const href = sanitizeLocalHref(overrides?.href);
+  const link = overrides?.link;
   const note =
     overrides?.note ??
-    (!href && resolvedHref && isTenantConsoleLocalRoute(resolvedHref)
+    (!href && overrides?.href && isTenantConsoleLocalRoute(overrides.href)
       ? "route-pending"
-      : resolved?.note);
+      : undefined);
 
   const actionLink: ActionLink = {
     descriptor,
     label: formatActionLabel(descriptor.action),
   };
 
-  const surfaceLabel = overrides?.surfaceLabel ?? resolved?.surfaceLabel;
+  const surfaceLabel = overrides?.surfaceLabel;
   if (surfaceLabel) {
     actionLink.surfaceLabel = surfaceLabel;
   }
@@ -713,12 +642,16 @@ function buildActionLink(
 
 function mapActionLinks(
   actions: ResourceActionDescriptor[] | undefined,
+  defaultOverride?: ActionLinkOverride,
   overrides: Partial<Record<string, ActionLinkOverride>> = {},
 ) {
   if (!actions || actions.length === 0) return [];
 
   return actions.flatMap((descriptor) => [
-    buildActionLink(descriptor, overrides[descriptor.action]),
+    buildActionLink(
+      descriptor,
+      overrides[descriptor.action] ?? defaultOverride,
+    ),
   ]);
 }
 
@@ -736,21 +669,36 @@ function flattenActionLinks(
   ...sources: Array<ActionSource | null | undefined>
 ) {
   return dedupeActionLinks(
-    sources.flatMap((source) =>
-      mapActionLinks(source?.availableActions, {
-        view_tenant_audit_evidence:
-          source?.label === "租戶稽核"
-            ? {
-                href: "/audit",
-                note: "same-tab",
-                surfaceLabel: source.label,
-              }
-            : {},
-      }).map((action) => {
-        const surfaceLabel = action.surfaceLabel ?? source?.label;
-        return surfaceLabel ? { ...action, surfaceLabel } : action;
-      }),
-    ),
+    sources.flatMap((source) => {
+      const defaultHref =
+        source?.label === "計費資料"
+          ? "/billing"
+          : source?.label === "通知偏好"
+            ? "/notifications"
+            : source?.label === "SLA 設定"
+              ? "/sla"
+              : source?.label === "人員與角色"
+                ? "/users"
+                : source?.label === "API 金鑰"
+                  ? "/api-keys"
+                  : source?.label === "Webhook"
+                    ? "/webhooks"
+                    : source?.label === "租戶稽核"
+                      ? "/audit"
+                      : undefined;
+      const defaultOverride: ActionLinkOverride = {
+        ...(source?.label ? { surfaceLabel: source.label } : {}),
+        ...(defaultHref ? { href: defaultHref } : {}),
+        ...(source?.label === "租戶稽核" ? { note: "same-tab" } : {}),
+      };
+
+      return mapActionLinks(source?.availableActions, defaultOverride).map(
+        (action) => {
+          const surfaceLabel = action.surfaceLabel ?? source?.label;
+          return surfaceLabel ? { ...action, surfaceLabel } : action;
+        },
+      );
+    }),
   );
 }
 
@@ -1482,6 +1430,10 @@ export default async function SettingsPage() {
           data.preferences.emptyState?.nextAction
             ? [data.preferences.emptyState.nextAction]
             : data.preferences.availableActions,
+          {
+            surfaceLabel: "通知偏好",
+            href: "/notifications",
+          },
         ),
       ),
     },
@@ -1495,6 +1447,10 @@ export default async function SettingsPage() {
           data.users.emptyState?.nextAction
             ? [data.users.emptyState.nextAction]
             : data.users.availableActions,
+          {
+            surfaceLabel: "人員與角色",
+            href: "/users",
+          },
         ),
       ),
     },
@@ -1508,6 +1464,10 @@ export default async function SettingsPage() {
           data.apiKeys.emptyState?.nextAction
             ? [data.apiKeys.emptyState.nextAction]
             : data.apiKeys.availableActions,
+          {
+            surfaceLabel: "API 金鑰",
+            href: "/api-keys",
+          },
         ),
       ),
     },
@@ -1521,6 +1481,10 @@ export default async function SettingsPage() {
           data.webhooks.emptyState?.nextAction
             ? [data.webhooks.emptyState.nextAction]
             : data.webhooks.availableActions,
+          {
+            surfaceLabel: "Webhook",
+            href: "/webhooks",
+          },
         ),
       ),
     },
@@ -1534,6 +1498,11 @@ export default async function SettingsPage() {
           data.auditLogs.emptyState?.nextAction
             ? [data.auditLogs.emptyState.nextAction]
             : data.auditLogs.availableActions,
+          {
+            surfaceLabel: "租戶稽核",
+            href: "/audit",
+            note: "same-tab",
+          },
         ),
       ),
     },
