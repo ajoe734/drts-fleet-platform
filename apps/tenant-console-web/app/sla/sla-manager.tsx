@@ -392,8 +392,15 @@ function formatActionCaption(action: ResourceActionDescriptor) {
 }
 
 function resolveResourceHref(link: CrossAppResourceLink) {
+  return resolveResourceHrefWithRoute(link, link.route);
+}
+
+function resolveResourceHrefWithRoute(
+  link: CrossAppResourceLink,
+  route: string,
+) {
   if (link.targetApp === "tenant-console") {
-    return link.route;
+    return route;
   }
 
   const appBaseUrl =
@@ -401,15 +408,16 @@ function resolveResourceHref(link: CrossAppResourceLink) {
       ? (process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3002")
       : (process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3003");
 
-  return `${appBaseUrl}${link.route}`;
+  return `${appBaseUrl}${route}`;
 }
 
 function withLinkSearchParams(
   link: CrossAppResourceLink,
   entries: Array<[string, string | null | undefined]>,
 ) {
-  const [pathname, rawSearch = ""] = link.route.split("?");
-  const params = new URLSearchParams(rawSearch);
+  const [rawPathname, rawSearch] = link.route.split("?");
+  const pathname = rawPathname || link.route;
+  const params = new URLSearchParams(rawSearch ?? "");
 
   for (const [key, value] of entries) {
     if (!value) {
@@ -419,7 +427,8 @@ function withLinkSearchParams(
   }
 
   const nextSearch = params.toString();
-  return nextSearch ? `${pathname}?${nextSearch}` : pathname;
+  const nextRoute: string = nextSearch ? `${pathname}?${nextSearch}` : pathname;
+  return resolveResourceHrefWithRoute(link, nextRoute);
 }
 
 function formatThresholdInput(value: number | null | undefined) {
@@ -520,11 +529,12 @@ function renderResourceLink(
   key: string,
   suffix?: ReactNode,
   hrefOverride?: string,
+  labelOverride?: string,
 ) {
   const href = hrefOverride ?? resolveResourceHref(link);
   const content = (
     <>
-      {link.label}
+      {labelOverride ?? link.label}
       {suffix ?? (isSameTabLink(link) ? " →" : " ↗")}
     </>
   );
@@ -1027,6 +1037,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                   {isSameTabLink(auditResourceLink) ? " →" : " ↗"}
                 </>,
                 receiptAuditHref ?? undefined,
+                "View audit",
               )
             ) : (
               <div style={noteStyle}>
