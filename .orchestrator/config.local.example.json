@@ -7,6 +7,22 @@
     "auto_refresh_provider_capabilities": true
   },
   "providers": {
+    "codex": {
+      "codex": {
+        // Keep the Codex worker lane off the interactive ChatGPT extension home.
+        // Leave chatbox / interactive usage on ~/.codex and give workers a clearly
+        // named CODEX_HOME instead.
+        "config_home": "~/.codex-worker"
+      }
+    },
+    "codex2": {
+      "codex": {
+        // Keep the second Codex worker lane on its own worker-named home.
+        // This can be the same OpenAI account as chatbox/codex if you only need
+        // token-file isolation, or a second account if you also want separate quota.
+        "config_home": "~/.codex2-worker"
+      }
+    },
     "claude2": {
       "runtime": {
         // Keep Claude2 on a separate account/quota from the primary Claude lane.

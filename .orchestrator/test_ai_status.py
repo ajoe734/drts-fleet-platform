@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import io
+import sys
 import unittest
+from contextlib import redirect_stdout
+from unittest import mock
+
 from pathlib import Path
 from unittest import mock
 
@@ -272,6 +277,82 @@ class GitMergeReconciliationTest(unittest.TestCase):
         self.assertIsNone(
             ai_status.CLOSEOUT_SUBJECT_RE.match("wip(PH1GC-E2E-010): in-flight anchor")
         )
+
+
+
+
+class CommandShowTests(unittest.TestCase):
+    """OPS-CONTEXT-BLOAT-SLIM-001: `show <task-id>` prints ONE task slice
+    so workers don't have to Read the 2MB ai-status.json wholesale (which
+    burns ~500K input tokens every read)."""
+
+    def test_show_prints_matching_task_json(self) -> None:
+        state = {"tasks": [
+            {"id": "T1", "status": "todo", "owner": "Codex2"},
+            {"id": "T2", "status": "done", "owner": "Claude"},
+        ]}
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ai_status.command_show(state, ["T2"])
+        out = buf.getvalue()
+        self.assertIn('"id": "T2"', out)
+        self.assertIn('"status": "done"', out)
+        self.assertNotIn('"id": "T1"', out, "must NOT leak other tasks")
+
+    def test_show_missing_task_exits_nonzero(self) -> None:
+        state = {"tasks": [{"id": "T1", "status": "todo"}]}
+        with self.assertRaises(SystemExit) as cm:
+            ai_status.command_show(state, ["DOES-NOT-EXIST"])
+        self.assertNotEqual(cm.exception.code, 0)
+
+    def test_show_no_args_exits_nonzero(self) -> None:
+        with self.assertRaises(SystemExit):
+            ai_status.command_show({"tasks": []}, [])
+
+
+class CommandListTests(unittest.TestCase):
+    """`list [--status X] [--owner Y] ...` is the compact alternative for
+    when a worker needs to enumerate tasks. One line per task vs 2 MB JSON.
+    """
+
+    def _state(self) -> dict:
+        return {"tasks": [
+            {"id": "A", "status": "todo", "owner": "Codex", "reviewer": "Codex2"},
+            {"id": "B", "status": "in_progress", "owner": "Codex2", "reviewer": "Codex"},
+            {"id": "C", "status": "todo", "owner": "Claude", "reviewer": "Claude2"},
+        ]}
+
+    def test_list_no_filter_prints_all(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ai_status.command_list(self._state(), [])
+        out = buf.getvalue()
+        ids = sorted(ln.split()[0] for ln in out.splitlines() if ln.strip() and not ln.startswith("("))
+        self.assertEqual(ids, ["A", "B", "C"])
+
+    def test_list_filter_by_status(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ai_status.command_list(self._state(), ["--status", "todo"])
+        out = buf.getvalue()
+        ids = sorted(ln.split()[0] for ln in out.splitlines() if ln.strip() and not ln.startswith("("))
+        self.assertEqual(ids, ["A", "C"])
+
+    def test_list_combine_filters(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ai_status.command_list(self._state(), ["--status", "todo", "--owner", "Codex"])
+        out = buf.getvalue()
+        # Match task-id at column start to avoid colliding with 'Codex'/'Claude2'.
+        ids_present = [ln.split()[0] for ln in out.splitlines() if ln.strip() and not ln.startswith("(")]
+        self.assertEqual(ids_present, ["A"], f'expected only A, got {ids_present}')
+
+    def test_list_no_matches_prints_placeholder(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ai_status.command_list(self._state(), ["--status", "nothing"])
+        out = buf.getvalue()
+        self.assertIn("(no matches)", out)
 
 
 if __name__ == "__main__":

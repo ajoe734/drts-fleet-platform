@@ -183,7 +183,7 @@ export const driverStrings = {
   },
   incident: {
     title: "安全求援",
-    subtitle: "兩階段 SOS 通報會同步通知派車台與安全主管",
+    subtitle: "開啟頁面後長按 2 秒送出，會同步通知派車台與安全主管",
     loadingTitle: "準備中",
     disabledTitle: "未啟用",
     urgentTitle: "高風險",
@@ -199,7 +199,7 @@ export const driverStrings = {
     orderContextOwned: "一般安全事件",
     primaryAction: "開啟 SOS 緊急通報",
     cancelAction: "取消",
-    confirmAction: "長按確認求援",
+    confirmAction: "長按 2 秒送出",
   },
   platformPresence: {
     title: "平台連線",
