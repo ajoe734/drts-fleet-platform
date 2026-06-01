@@ -308,7 +308,7 @@ const EMPTY_STATE_CONFIG: Record<TenantSlaEmptyReason, EmptyStateConfig> = {
   filtered_empty: {
     reason: "filtered_empty",
     title: "目前篩選條件下沒有結果",
-    body: "目前套用的 preview state 不會顯示 SLA profile。本頁保留 distinct empty-state render 以符合 Q-X15。",
+    body: "目前檢視條件下沒有可顯示的 SLA profile。請清除外部篩選條件，或從整合就緒度重新進入本頁。",
     tone: "info",
   },
 };
@@ -830,7 +830,7 @@ export function SlaManager({
       <CanvasPageHeader
         theme={th}
         title="SLA Profile"
-        subtitle="wait · arrival · completion 三個門檻 · 單位 = 分鐘"
+        subtitle="wait · arrival · completion 三個門檻 · 單位 = 分鐘 (Q-TEN07)"
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <CanvasBtn
@@ -895,8 +895,8 @@ export function SlaManager({
           <CanvasBanner
             theme={th}
             tone="info"
-            title="既有訂單重算進行中"
-            body={`最近一次重算請求於 ${formatDateTime(lastRecalculationAt)} 送出。既有訂單會保留建立時 snapshot，直到重算完成。`}
+            title="最近一次既有訂單重算請求"
+            body={`最近一次重算請求於 ${formatDateTime(lastRecalculationAt)} 送出。既有訂單會保留建立時 snapshot，直到該次重算將新的 SLA profile 套用完成。`}
           />
         ) : null}
 
@@ -1074,10 +1074,9 @@ export function SlaManager({
                 <div style={summaryCardStyle}>
                   <CanvasDL theme={th} cols={1} items={attainmentItems} />
                   <div style={noteStyle}>
-                    SLA attainment KPI card follows the design canvas. Current
-                    `TenantSlaProfileView` does not expose monthly attainment
-                    counters, so this panel keeps the artboard layout and shows
-                    live profile provenance until that read model lands.
+                    此卡片依照設計稿保留 SLA 達成率位置；目前 read model
+                    尚未回傳上月統計，因此先顯示 profile provenance
+                    與最近一次重算時間。
                   </div>
                   <div style={summaryListStyle}>
                     <div>
@@ -1101,8 +1100,8 @@ export function SlaManager({
             <CanvasCard theme={th} title="深連結與後續追蹤">
               <div style={summaryCardStyle}>
                 <div style={noteStyle}>
-                  In-app receipt links stay inside Tenant Console; cross-app
-                  targets open in a new tab per Q-X03.
+                  Tenant Console 內部追蹤維持同站導覽；跨 app 追蹤依 Q-X03
+                  以新分頁開啟。
                 </div>
                 <div style={inlineLinkRowStyle}>
                   {links.map((link) => (

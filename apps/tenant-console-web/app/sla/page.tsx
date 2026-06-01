@@ -83,7 +83,10 @@ export default async function SlaPage({ searchParams }: SlaPageProps) {
         previewEmptyReason={emptyReasonOverride}
         links={[
           { href: "/integration-governance", label: "查看整合就緒度" },
-          { href: "/audit", label: "查看 SLA 稽核紀錄" },
+          {
+            href: "/audit?resourceType=tenant_sla",
+            label: "查看 SLA 稽核軌跡",
+          },
           { href: "/settings", label: "返回租戶設定總覽" },
         ]}
         crossAppLinks={[
@@ -91,7 +94,7 @@ export default async function SlaPage({ searchParams }: SlaPageProps) {
             href: `${
               process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3002"
             }/complaints?tenantId=${encodeURIComponent(DEMO_TENANT_ID)}&slaBreached=true`,
-            label: "前往 Ops Console 檢視 SLA 違規",
+            label: "前往 Ops Console 檢視 SLA 違規客訴",
           },
         ]}
       />
