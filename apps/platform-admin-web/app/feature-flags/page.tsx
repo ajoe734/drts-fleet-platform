@@ -60,7 +60,23 @@ type FeatureFlagOverrideRecord = {
   enabled: boolean;
   description: string;
   updatedAt: string;
+  updatedBy?: string;
   crossLink: CrossAppResourceLink;
+  availableActions?: ResourceActionDescriptor[];
+};
+
+type RuntimeFeatureFlagRecord = FeatureFlag & {
+  availableActions?: ResourceActionDescriptor[];
+  updatedBy?: string;
+  lastChangedBy?: string;
+};
+
+type RuntimeFeatureFlagSummary = FeatureFlagSummary & {
+  flags: RuntimeFeatureFlagRecord[];
+  emptyState?: {
+    reason: EmptyReason;
+  } | null;
+  refreshTier?: RefreshTier;
 };
 
 type FeatureFlagRow = {
@@ -610,6 +626,14 @@ function auditHref(key: string) {
   return `/audit?${params.toString()}`;
 }
 
+function effectiveRefreshTier(summary: RuntimeFeatureFlagSummary | null) {
+  return summary?.refreshTier ?? REFRESH_TIER;
+}
+
+function refreshTierCode(tier: RefreshTier) {
+  return tier === "medium_slow" ? "T4" : tier;
+}
+
 function classifyErrorReason(message: string | null): EmptyReason {
   if (!message) {
     return "fetch_failed";
@@ -637,6 +661,17 @@ function classifyErrorReason(message: string | null): EmptyReason {
 
 function sortFlags(flags: FeatureFlag[]) {
   return [...flags].sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function runtimeUpdatedBy(flag: RuntimeFeatureFlagRecord | null | undefined) {
+  return flag?.lastChangedBy ?? flag?.updatedBy ?? null;
+}
+
+function normalizeAvailableActions(
+  actions: ResourceActionDescriptor[] | undefined,
+  fallback: ResourceActionDescriptor[],
+) {
+  return Array.isArray(actions) && actions.length > 0 ? actions : fallback;
 }
 
 function isDeprecatedFlag(key: string, description: string) {
@@ -717,9 +752,9 @@ function buildRows({
   tenantSummaries,
   selectedTenantId,
 }: {
-  globalFlags: FeatureFlag[];
+  globalFlags: RuntimeFeatureFlagRecord[];
   tenants: PlatformAdminTenantRecord[];
-  tenantSummaries: Record<string, FeatureFlagSummary>;
+  tenantSummaries: Record<string, RuntimeFeatureFlagSummary>;
   selectedTenantId: string;
 }): FeatureFlagRow[] {
   const globalByKey = new Map(
@@ -741,7 +776,7 @@ function buildRows({
       }
 
       const existing = overridesByKey.get(flag.key) ?? [];
-      existing.push({
+      const overrideRecord: FeatureFlagOverrideRecord = {
         tenantId: tenant.id,
         tenantCode: tenant.code,
         tenantName: tenant.name,
@@ -749,7 +784,15 @@ function buildRows({
         description: flag.description,
         updatedAt: flag.updatedAt,
         crossLink: buildOpsDeepLink(tenant, flag.key),
-      });
+      };
+      const updatedBy = runtimeUpdatedBy(flag);
+      if (updatedBy) {
+        overrideRecord.updatedBy = updatedBy;
+      }
+      if (flag.availableActions) {
+        overrideRecord.availableActions = flag.availableActions;
+      }
+      existing.push(overrideRecord);
       overridesByKey.set(flag.key, existing);
     }
   }
@@ -792,6 +835,20 @@ function buildRows({
       ].filter(Boolean);
       const latestUpdatedAt =
         timestamps.sort((left, right) => right.localeCompare(left))[0] ?? "";
+      const fallbackActions = buildAvailableActions({
+        global,
+        selectedTenantId,
+        selectedTenantOverride,
+      });
+      const runtimeActions =
+        selectedTenantOverride?.availableActions ??
+        overrides[0]?.availableActions ??
+        (global as RuntimeFeatureFlagRecord | null)?.availableActions;
+      const updatedBy =
+        selectedTenantOverride?.updatedBy ??
+        runtimeUpdatedBy(global as RuntimeFeatureFlagRecord | null) ??
+        overrides.find((override) => override.updatedBy)?.updatedBy ??
+        null;
 
       return {
         key,
@@ -801,16 +858,17 @@ function buildRows({
         selectedTenantOverride,
         rolloutState,
         latestUpdatedAt,
-        updatedBy: selectedTenantOverride
-          ? `tenant:${selectedTenantOverride.tenantCode} · actor pending contract`
-          : overrides.length > 0
-            ? `${overrides.length} override scope(s) · actor pending contract`
-            : "platform default · actor pending contract",
-        availableActions: buildAvailableActions({
-          global,
-          selectedTenantId,
-          selectedTenantOverride,
-        }),
+        updatedBy:
+          updatedBy ??
+          (selectedTenantOverride
+            ? `tenant:${selectedTenantOverride.tenantCode} · actor pending contract`
+            : overrides.length > 0
+              ? `${overrides.length} override scope(s) · actor pending contract`
+              : "platform default · actor pending contract"),
+        availableActions: normalizeAvailableActions(
+          runtimeActions,
+          fallbackActions,
+        ),
       };
     });
 }
@@ -1135,12 +1193,11 @@ function EmptyStateCard({
 export default function FeatureFlagsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
-  const [globalSummary, setGlobalSummary] = useState<FeatureFlagSummary | null>(
-    null,
-  );
+  const [globalSummary, setGlobalSummary] =
+    useState<RuntimeFeatureFlagSummary | null>(null);
   const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
   const [tenantSummaries, setTenantSummaries] = useState<
-    Record<string, FeatureFlagSummary>
+    Record<string, RuntimeFeatureFlagSummary>
   >({});
   const [snapshotIssues, setSnapshotIssues] = useState<SnapshotIssue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1377,14 +1434,15 @@ export default function FeatureFlagsPage() {
           })),
         );
 
-        const nextTenantSummaries: Record<string, FeatureFlagSummary> = {};
+        const nextTenantSummaries: Record<string, RuntimeFeatureFlagSummary> =
+          {};
         const nextSnapshotIssues: SnapshotIssue[] = [];
 
         settled.forEach(
           (
             result: PromiseSettledResult<{
               tenant: PlatformAdminTenantRecord;
-              summary: FeatureFlagSummary;
+              summary: RuntimeFeatureFlagSummary;
             }>,
             index: number,
           ) => {
@@ -1517,10 +1575,15 @@ export default function FeatureFlagsPage() {
   }, [clockNow, error, lastLoadedAt, snapshotIssues.length]);
 
   const refreshChip = refreshMeta(locale, dataFreshness);
+  const resolvedRefreshTier = effectiveRefreshTier(globalSummary);
+  const resolvedRefreshTierCode = refreshTierCode(resolvedRefreshTier);
 
   const activeEmptyReason = useMemo(() => {
     if (filteredRows.length > 0) {
       return null;
+    }
+    if (globalSummary?.emptyState?.reason && rows.length === 0) {
+      return globalSummary.emptyState.reason;
     }
     if (error) {
       return classifyErrorReason(error);
@@ -1536,6 +1599,7 @@ export default function FeatureFlagsPage() {
     error,
     filteredRows.length,
     rows.length,
+    globalSummary,
     scopeFilter,
     search,
     selectedTenantId,
@@ -1558,6 +1622,12 @@ export default function FeatureFlagsPage() {
     selectedRowActions,
     "remove_tenant_override",
   );
+  const selectedOpsLink =
+    selectedRow && selectedTenant
+      ? buildOpsDeepLink(selectedTenant, selectedRow.key)
+      : (selectedRow?.selectedTenantOverride?.crossLink ??
+        selectedRow?.overrides[0]?.crossLink ??
+        null);
 
   const tableRows = useMemo<FeatureFlagTableRow[]>(
     () =>
@@ -1805,6 +1875,7 @@ export default function FeatureFlagsPage() {
         await client.updateFeatureFlag(
           pendingAction.row.key,
           pendingAction.nextEnabled,
+          { reason: actionReason.trim() },
         );
         setReceipt({
           status: "completed",
@@ -1828,8 +1899,12 @@ export default function FeatureFlagsPage() {
             ? {
                 enabled: pendingAction.enabled,
                 description: pendingAction.description.trim(),
+                reason: actionReason.trim(),
               }
-            : { enabled: pendingAction.enabled };
+            : {
+                enabled: pendingAction.enabled,
+                reason: actionReason.trim(),
+              };
 
         await client.upsertFeatureFlagTenantOverride(
           pendingAction.row.key,
@@ -1862,6 +1937,7 @@ export default function FeatureFlagsPage() {
         await client.removeFeatureFlagTenantOverride(
           pendingAction.row.key,
           pendingAction.tenantId,
+          { reason: actionReason.trim() },
         );
 
         const targetTenant =
@@ -1935,6 +2011,9 @@ export default function FeatureFlagsPage() {
           <>
             <CanvasPill theme={theme} tone={refreshChip.tone} dot>
               {refreshChip.label}
+            </CanvasPill>
+            <CanvasPill theme={theme} tone="accent" dot>
+              writable · only here
             </CanvasPill>
             <button
               type="button"
@@ -2049,7 +2128,7 @@ export default function FeatureFlagsPage() {
               <CanvasKPI
                 theme={theme}
                 label={copy.refreshTier}
-                value="T4"
+                value={resolvedRefreshTierCode}
                 sub={
                   lastLoadedAt
                     ? formatDateTime(new Date(lastLoadedAt).toISOString())
@@ -2138,7 +2217,7 @@ export default function FeatureFlagsPage() {
                       },
                       {
                         label: copy.refreshTier,
-                        value: "T4 · 30s",
+                        value: `${resolvedRefreshTierCode} · 30s`,
                       },
                       {
                         label: copy.scopeLabel,
@@ -2291,11 +2370,9 @@ export default function FeatureFlagsPage() {
                         {copy.openAudit}
                         <CanvasIcon name="audit" size={12} />
                       </a>
-                      {selectedRow.selectedTenantOverride ? (
+                      {selectedOpsLink ? (
                         <a
-                          href={crossAppHref(
-                            selectedRow.selectedTenantOverride.crossLink,
-                          )}
+                          href={crossAppHref(selectedOpsLink)}
                           target="_blank"
                           rel="noreferrer"
                           style={deepLinkStyle}
@@ -2422,7 +2499,24 @@ export default function FeatureFlagsPage() {
                     reason={selectedTenantId ? "not_provisioned" : "no_data"}
                     compact
                     messageOverride={
-                      selectedTenantId ? copy.tenantRequired : copy.selectPrompt
+                      selectedTenantId
+                        ? locale === "en"
+                          ? "The selected tenant has no override for this flag yet. Review ops context or create one."
+                          : "所選 tenant 目前還沒有這支旗標的 override；可先看 ops context，或直接建立 override。"
+                        : copy.selectPrompt
+                    }
+                    actionNode={
+                      selectedOpsLink ? (
+                        <a
+                          href={crossAppHref(selectedOpsLink)}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={deepLinkStyle}
+                        >
+                          {copy.viewOps}
+                          <CanvasIcon name="ext" size={12} />
+                        </a>
+                      ) : undefined
                     }
                   />
                 )}
@@ -2498,7 +2592,7 @@ export default function FeatureFlagsPage() {
                   },
                   {
                     label: copy.refreshTier,
-                    value: "T4 · 30s",
+                    value: `${resolvedRefreshTierCode} · 30s`,
                   },
                   {
                     label: copy.selectedTenantScope,

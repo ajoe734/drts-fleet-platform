@@ -426,9 +426,13 @@ export class ApiClient {
     return this.get<FeatureFlag>(`/api/admin/flags/${key}`);
   }
 
-  async updateFeatureFlag(key: string, enabled: boolean): Promise<FeatureFlag> {
+  async updateFeatureFlag(
+    key: string,
+    enabled: boolean,
+    options?: { reason?: string },
+  ): Promise<FeatureFlag> {
     return this.patch<FeatureFlag>(`/api/admin/flags/${key}`, {
-      body: { enabled },
+      body: { enabled, ...(options?.reason ? { reason: options.reason } : {}) },
     });
   }
 
@@ -448,11 +452,15 @@ export class ApiClient {
   async removeFeatureFlagTenantOverride(
     key: string,
     tenantId: string,
+    options?: { reason?: string },
   ): Promise<FeatureFlag> {
     const searchParams = new URLSearchParams();
     searchParams.set("tenantId", tenantId);
     return this.delete<FeatureFlag>(
       `/api/admin/flags/${key}/tenant-overrides?${searchParams.toString()}`,
+      {
+        body: options?.reason ? { reason: options.reason } : undefined,
+      },
     );
   }
 

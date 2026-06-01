@@ -4188,6 +4188,7 @@ export interface FeatureFlagSummary {
 export interface FeatureFlagTenantOverrideCommand {
   enabled: boolean;
   description?: string;
+  reason?: string;
 }
 
 // ---------------------------------------------------------------------------
