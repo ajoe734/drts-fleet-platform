@@ -15,14 +15,16 @@ import {
   formatPlatformCodeLabel,
   getPlatformLabel,
 } from "@/lib/localized-labels";
-import { CredentialStatus } from "../../../../packages/contracts/src";
+import { CredentialStatus } from "../../../../packages/contracts/src/platform-adapter-registry";
+import type {
+  PlatformAdapter,
+  UpdatePlatformAdapterCommand,
+} from "../../../../packages/contracts/src/platform-adapter-registry";
 import type {
   EmptyReason,
-  PlatformAdapter,
   ResourceActionDescriptor,
   UiRefreshMetadata,
-  UpdatePlatformAdapterCommand,
-} from "../../../../packages/contracts/src";
+} from "../../../../packages/contracts/src/ui-runtime";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -84,6 +86,24 @@ type ReceiptState = {
   auditHref?: string | null;
 };
 
+type AdapterRegistryEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
+
+function normalizeEmptyReasonParam(
+  value: string | null,
+): AdapterRegistryEmptyReason | "live" {
+  switch (value) {
+    case "no_data":
+    case "not_provisioned":
+    case "fetch_failed":
+    case "permission_denied":
+    case "external_unavailable":
+    case "filtered_empty":
+      return value;
+    default:
+      return "live";
+  }
+}
+
 const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
@@ -95,7 +115,7 @@ const REFRESH_TIER = {
   intervalMs: 30_000,
 } as const;
 
-const EMPTY_REASON_OPTIONS: EmptyReason[] = [
+const EMPTY_REASON_OPTIONS: AdapterRegistryEmptyReason[] = [
   "no_data",
   "not_provisioned",
   "fetch_failed",
@@ -634,6 +654,36 @@ function deriveAvailableActions(
   return base;
 }
 
+function normalizeAdapterRecord(
+  adapter: AdapterRegistryRecord,
+): AdapterRegistryRecord {
+  return {
+    ...adapter,
+    availableActions:
+      adapter.availableActions?.length !== 0
+        ? (adapter.availableActions ?? deriveAvailableActions(adapter))
+        : [],
+    capabilityFlags: {
+      canRelayAccept:
+        adapter.capabilityFlags?.canRelayAccept ??
+        Boolean(
+          adapter.supportedActions.find(
+            (item: AdapterRegistryRecord["supportedActions"][number]) =>
+              /accept/i.test(item.name),
+          ),
+        ),
+      canRelayReject:
+        adapter.capabilityFlags?.canRelayReject ??
+        Boolean(
+          adapter.supportedActions.find(
+            (item: AdapterRegistryRecord["supportedActions"][number]) =>
+              /reject/i.test(item.name),
+          ),
+        ),
+    },
+  };
+}
+
 function authorityGroup(action: string) {
   switch (action as AdapterActionKey) {
     case "pause_operational_traffic":
@@ -653,7 +703,7 @@ function authorityGroup(action: string) {
 
 function emptyStateCopy(
   locale: string,
-  reason: EmptyReason,
+  reason: AdapterRegistryEmptyReason,
   defaultNextAction?: ResourceActionDescriptor | null,
 ) {
   const sharedNextAction =
@@ -666,7 +716,7 @@ function emptyStateCopy(
       : null;
 
   const copy: Record<
-    EmptyReason,
+    AdapterRegistryEmptyReason,
     { tone: "info" | "warn" | "danger"; title: string; body: string }
   > =
     locale === "en"
@@ -695,11 +745,6 @@ function emptyStateCopy(
             tone: "warn" as const,
             title: "External dependency unavailable",
             body: "The registry is reachable, but the external adapter dependency is not responding.",
-          },
-          driver_not_eligible: {
-            tone: "warn" as const,
-            title: "Actor not eligible",
-            body: "This empty state is reserved for driver-app eligibility gating and should not appear on this screen.",
           },
           filtered_empty: {
             tone: "info" as const,
@@ -732,11 +777,6 @@ function emptyStateCopy(
             tone: "warn" as const,
             title: "外部依賴不可用",
             body: "registry 可達，但外部 adapter dependency 目前沒有回應。",
-          },
-          driver_not_eligible: {
-            tone: "warn" as const,
-            title: "Actor 不符合資格",
-            body: "這個 empty state 保留給 driver-app eligibility gating；本頁正常情況不應出現。",
           },
           filtered_empty: {
             tone: "info" as const,
@@ -850,8 +890,8 @@ export default function AdapterRegistryPage() {
     useState(initialEnvironment);
   const [healthFilter, setHealthFilter] = useState(initialHealth);
   const [previewEmptyReason, setPreviewEmptyReason] = useState<
-    EmptyReason | "live"
-  >((searchParams.get("emptyReason") as EmptyReason | null) ?? "live");
+    AdapterRegistryEmptyReason | "live"
+  >(normalizeEmptyReasonParam(searchParams.get("emptyReason")));
   const [refreshMeta, setRefreshMeta] = useState<UiRefreshMetadata>({
     generatedAt: new Date().toISOString(),
     staleAfterMs: REFRESH_TIER.intervalMs,
@@ -1062,29 +1102,7 @@ export default function AdapterRegistryPage() {
       try {
         const raw =
           (await client.listPlatformAdapters()) as AdapterRegistryRecord[];
-        const normalized = raw.map((adapter) => ({
-          ...adapter,
-          availableActions:
-            adapter.availableActions ?? deriveAvailableActions(adapter),
-          capabilityFlags: {
-            canRelayAccept:
-              adapter.capabilityFlags?.canRelayAccept ??
-              Boolean(
-                adapter.supportedActions.find(
-                  (item: AdapterRegistryRecord["supportedActions"][number]) =>
-                    /accept/i.test(item.name),
-                ),
-              ),
-            canRelayReject:
-              adapter.capabilityFlags?.canRelayReject ??
-              Boolean(
-                adapter.supportedActions.find(
-                  (item: AdapterRegistryRecord["supportedActions"][number]) =>
-                    /reject/i.test(item.name),
-                ),
-              ),
-          },
-        }));
+        const normalized = raw.map(normalizeAdapterRecord);
         setAdapters(normalized);
         setRefreshMeta(deriveRefreshMetadata(normalized));
       } catch (caught: any) {
@@ -1237,11 +1255,18 @@ export default function AdapterRegistryPage() {
       adapterId: string,
       recipe: (adapter: AdapterRegistryRecord) => AdapterRegistryRecord,
     ) => {
-      setAdapters((current) =>
-        current.map((adapter) =>
-          adapter.id === adapterId ? recipe(adapter) : adapter,
-        ),
-      );
+      let nextAdapters: AdapterRegistryRecord[] = [];
+      setAdapters((current) => {
+        nextAdapters = current.map((adapter) =>
+          adapter.id === adapterId
+            ? normalizeAdapterRecord(recipe(adapter))
+            : adapter,
+        );
+        return nextAdapters;
+      });
+      if (nextAdapters.length > 0) {
+        setRefreshMeta(deriveRefreshMetadata(nextAdapters));
+      }
     },
     [],
   );
@@ -1286,8 +1311,6 @@ export default function AdapterRegistryPage() {
         applyAdapterMutation(adapter.id, (current) => ({
           ...current,
           ...updated,
-          availableActions:
-            updated.availableActions ?? deriveAvailableActions(updated),
         }));
       } else if (adapter && descriptor.action === "pause_operational_traffic") {
         applyAdapterMutation(adapter.id, (current) => ({
@@ -1368,7 +1391,11 @@ export default function AdapterRegistryPage() {
   ]);
 
   const emptyState = activeEmptyReason
-    ? emptyStateCopy(locale, activeEmptyReason, pageLevelActions[0] ?? null)
+    ? emptyStateCopy(
+        locale,
+        activeEmptyReason as AdapterRegistryEmptyReason,
+        pageLevelActions[0] ?? null,
+      )
     : null;
 
   const selectedAvailableActions = selectedAdapter?.availableActions ?? [];
@@ -1394,15 +1421,18 @@ export default function AdapterRegistryPage() {
     (descriptor: ResourceActionDescriptor) =>
       authorityGroup(descriptor.action) === "ops",
   );
-  const emptyReasonLabels: Record<EmptyReason, string> = {
+  const emptyReasonLabels: Record<AdapterRegistryEmptyReason, string> = {
     no_data: copy.noData,
     not_provisioned: copy.notProvisioned,
     fetch_failed: copy.fetchFailed,
     permission_denied: copy.permissionDenied,
     external_unavailable: copy.externalUnavailable,
-    driver_not_eligible: "driver_not_eligible",
     filtered_empty: copy.filteredEmpty,
   };
+  const pendingAdapter =
+    pendingAction?.adapterId != null
+      ? (adapters.find((item) => item.id === pendingAction.adapterId) ?? null)
+      : null;
   const credentialAlertAdapter = useMemo(() => {
     const urgencyRank: Record<
       AdapterRegistryRecord["credentialStatus"],
@@ -1691,7 +1721,7 @@ export default function AdapterRegistryPage() {
                     value={previewEmptyReason}
                     onChange={(event) =>
                       setPreviewEmptyReason(
-                        event.target.value as EmptyReason | "live",
+                        normalizeEmptyReasonParam(event.target.value),
                       )
                     }
                     style={inputStyle(theme)}
@@ -2313,6 +2343,10 @@ export default function AdapterRegistryPage() {
                         label: copy.refreshCadence,
                         value: `${Math.round(refreshMeta.staleAfterMs / 1000)}s`,
                       },
+                      {
+                        label: copy.refreshWindow,
+                        value: `${formatDateTime(refreshMeta.generatedAt)} + ${Math.round(refreshMeta.staleAfterMs / 1000)}s`,
+                      },
                     ]}
                   />
                 ) : (
@@ -2498,9 +2532,7 @@ export default function AdapterRegistryPage() {
               </div>
               <div style={secondaryTextStyle}>
                 {toActionLabel(locale, pendingAction.descriptor.action)}
-                {pendingAction.adapterId && selectedAdapter
-                  ? ` · ${selectedAdapter.name}`
-                  : ""}
+                {pendingAdapter ? ` · ${pendingAdapter.name}` : ""}
               </div>
             </div>
 
