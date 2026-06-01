@@ -720,6 +720,9 @@ function getActionLabel(action: string) {
     case "create_user":
     case "create_tenant_user":
       return "邀請";
+    case "resend_invitation":
+    case "resend_invite":
+      return "重送邀請";
     case "role":
     case "update_tenant_role":
       return "更新角色";
@@ -735,6 +738,8 @@ function getActionLabel(action: string) {
 function getActionIcon(action: string) {
   switch (action) {
     case "invite":
+    case "create_user":
+    case "create_tenant_user":
       return "plus";
     case "refresh":
       return "refresh";
@@ -751,13 +756,16 @@ function getActionSortOrder(action: string) {
     case "create_user":
     case "create_tenant_user":
       return 0;
-    case "refresh":
+    case "resend_invitation":
+    case "resend_invite":
       return 1;
+    case "refresh":
+      return 2;
     case "role":
     case "update_tenant_role":
-      return 2;
-    case "suspend":
       return 3;
+    case "suspend":
+      return 4;
     default:
       return 100;
   }
@@ -776,11 +784,13 @@ function ActionDescriptorButton({
   descriptor,
   label,
   icon,
+  href,
   size = "sm",
 }: {
   descriptor: ResourceActionDescriptor | undefined;
   label: string;
   icon?: "plus" | "refresh" | "warn" | "ext" | undefined;
+  href?: string | undefined;
   size?: "xs" | "sm" | "md";
 }) {
   if (!descriptor) return null;
@@ -792,7 +802,7 @@ function ActionDescriptorButton({
       ? `${descriptor.action} · requires_reason`
       : descriptor.action;
 
-  return (
+  const button = (
     <span title={title}>
       <CanvasBtn
         theme={th}
@@ -806,16 +816,28 @@ function ActionDescriptorButton({
       </CanvasBtn>
     </span>
   );
+
+  if (href && descriptor.enabled) {
+    return (
+      <a href={href} style={{ textDecoration: "none" }}>
+        {button}
+      </a>
+    );
+  }
+
+  return button;
 }
 
 function ActionDescriptorList({
   actions,
   size = "sm",
   excludeActions = [],
+  resolveHref,
 }: {
   actions: ResourceActionDescriptor[];
   size?: "xs" | "sm" | "md";
   excludeActions?: string[];
+  resolveHref?: (descriptor: ResourceActionDescriptor) => string | undefined;
 }) {
   const visibleActions = sortAvailableActions(actions).filter(
     (descriptor) => !excludeActions.includes(descriptor.action),
@@ -830,6 +852,7 @@ function ActionDescriptorList({
           descriptor={descriptor}
           label={getActionLabel(descriptor.action)}
           size={size}
+          href={resolveHref?.(descriptor)}
           {...(getActionIcon(descriptor.action)
             ? { icon: getActionIcon(descriptor.action) }
             : {})}
@@ -1078,19 +1101,11 @@ export default async function UsersPage({
         subtitle="只有 tc_admin 可操作 · tenant_admin / operator / finance / viewer"
         actions={
           <>
-            <a href={refreshHref} style={{ textDecoration: "none" }}>
-              <CanvasBtn
-                theme={th}
-                variant="secondary"
-                icon="refresh"
-                size="sm"
-              >
-                重新整理
-              </CanvasBtn>
-            </a>
             <ActionDescriptorList
               actions={availableActions}
-              excludeActions={["refresh"]}
+              resolveHref={(descriptor) =>
+                descriptor.action === "refresh" ? refreshHref : undefined
+              }
             />
           </>
         }
