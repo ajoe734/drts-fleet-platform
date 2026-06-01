@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import type { CSSProperties, ReactNode } from "react";
 import type {
   CreateTenantWebhookEndpointCommand,
@@ -31,6 +32,7 @@ import {
   DEMO_TENANT_ID,
   getTenantClient,
 } from "@/lib/api-client";
+import { SecretRevealCard } from "./secret-reveal-card";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +45,7 @@ const th = buildCanvasTheme({
 const REFRESH_TIER_LABEL = "T5 Tenant slow · 30s";
 const OPS_CONSOLE_URL = process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? null;
 const PLATFORM_ADMIN_URL = process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? null;
+const ROTATE_SECRET_RECEIPT_COOKIE = "tenant-webhook-rotate-receipt";
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -358,8 +361,32 @@ type WebhooksPageData = {
   loadedAt: string;
 };
 
+type RotateSecretReceipt = {
+  endpointUrl: string;
+  secret: string;
+  secretPreview: string;
+  secretVersion: number;
+  rotatedAt: string;
+  webhookId: string;
+};
+
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "未知錯誤";
+}
+
+function encodeRotateSecretReceipt(receipt: RotateSecretReceipt) {
+  return Buffer.from(JSON.stringify(receipt), "utf8").toString("base64url");
+}
+
+function decodeRotateSecretReceipt(value: string | undefined) {
+  if (!value) return null;
+  try {
+    return JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8"),
+    ) as RotateSecretReceipt;
+  } catch {
+    return null;
+  }
 }
 
 function parseDate(value: string | null | undefined) {
@@ -1225,6 +1252,7 @@ async function rotateWebhookSecretAction(formData: FormData) {
   "use server";
 
   const webhookId = String(formData.get("webhookId") ?? "");
+  const endpointUrl = String(formData.get("endpointUrl") ?? "").trim();
   const secret = String(formData.get("secret") ?? "").trim();
   const rotationReason = String(formData.get("rotationReason") ?? "").trim();
 
@@ -1233,14 +1261,33 @@ async function rotateWebhookSecretAction(formData: FormData) {
       throw new Error("webhookId 與新 secret 為必填。");
     }
 
-    await rotateWebhookSecretRequest(webhookId, {
+    const result = await rotateWebhookSecretRequest(webhookId, {
       secret,
       ...(rotationReason ? { rotationReason } : {}),
     });
+    const cookieStore = await cookies();
+    cookieStore.set(
+      ROTATE_SECRET_RECEIPT_COOKIE,
+      encodeRotateSecretReceipt({
+        endpointUrl,
+        secret,
+        secretPreview: result.data.secretPreview,
+        secretVersion: result.data.secretVersion,
+        rotatedAt: result.data.rotatedAt,
+        webhookId,
+      }),
+      {
+        httpOnly: false,
+        maxAge: 300,
+        path: "/webhooks",
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+      },
+    );
     revalidatePath("/webhooks");
     redirect(
-      `/webhooks?webhookId=${encodeURIComponent(webhookId)}&success=${encodeURIComponent(
-        "Secret 已旋轉。依治理規則，endpoint 會重新進入 test_pending。",
+      `/webhooks?webhookId=${encodeURIComponent(webhookId)}&revealSecret=1&success=${encodeURIComponent(
+        "Secret 已旋轉。依治理規則，endpoint 會重新進入 test_pending，完整值只在本次畫面顯示。",
       )}`,
     );
   } catch (error) {
@@ -1421,6 +1468,7 @@ function RotateSecretForm({ webhook }: { webhook: TenantWebhookEndpoint }) {
     >
       <form action={rotateWebhookSecretAction} style={formGridStyle}>
         <input type="hidden" name="webhookId" value={webhook.webhookId} />
+        <input type="hidden" name="endpointUrl" value={webhook.url} />
         <div style={fieldRowStyle}>
           <CanvasField theme={th} label="ENDPOINT">
             <input value={webhook.url} readOnly style={controlStyle} />
@@ -1484,6 +1532,14 @@ export default async function WebhooksPage({
   const selectedDeliveryId = getSearchParam(resolvedSearchParams.deliveryId);
   const success = getSearchParam(resolvedSearchParams.success);
   const error = getSearchParam(resolvedSearchParams.error);
+  const revealSecret =
+    getSearchParam(resolvedSearchParams.revealSecret) === "1";
+  const cookieStore = await cookies();
+  const rotateSecretReceipt = revealSecret
+    ? decodeRotateSecretReceipt(
+        cookieStore.get(ROTATE_SECRET_RECEIPT_COOKIE)?.value,
+      )
+    : null;
 
   const data = await loadWebhooksPageData();
   const canManage = deriveActorCanManage(data.identity);
@@ -1805,6 +1861,29 @@ export default async function WebhooksPage({
             title="Action failed"
             body={error}
           />
+        ) : null}
+
+        {rotateSecretReceipt ? (
+          <CanvasCard
+            theme={th}
+            title="Rotate secret receipt"
+            subtitle="Plaintext-once reveal for webhook secret rotation. The read model will revert to masked preview after this step."
+          >
+            <SecretRevealCard
+              theme={th}
+              title="完整 webhook secret 只在本次畫面顯示"
+              subtitle="PLAINTEXT-ONCE · webhook rotate secret"
+              body="請先複製或下載新的 secret，再完成後續 receiver 更新。離開後主列表只保留 masked preview。"
+              endpointUrl={rotateSecretReceipt.endpointUrl}
+              secret={rotateSecretReceipt.secret}
+              secretPreview={rotateSecretReceipt.secretPreview}
+              secretVersion={rotateSecretReceipt.secretVersion}
+              rotatedAt={formatDateTime(rotateSecretReceipt.rotatedAt)}
+              clearHref={`/webhooks?webhookId=${encodeURIComponent(
+                rotateSecretReceipt.webhookId,
+              )}`}
+            />
+          </CanvasCard>
         ) : null}
 
         {globalErrors.length > 0 ? (
