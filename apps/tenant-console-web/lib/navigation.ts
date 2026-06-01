@@ -19,6 +19,9 @@ type TenantNavIcon =
   | "reports"
   | "apiKeys"
   | "webhooks"
+  | "notifications"
+  | "sla"
+  | "integrationGov"
   | "audit"
   | "users";
 
@@ -39,92 +42,123 @@ export type TenantNavItem = {
 export type TenantNavEntry = TenantNavDivider | TenantNavItem;
 
 export const tenantNavEntries: TenantNavEntry[] = [
-  { divider: "工作面" },
-  { key: "home", href: "/", icon: "home", label: "首頁" },
+  { divider: "工作面 · Workspace" },
+  { key: "home", href: "/", icon: "home", label: "工作面 · Home" },
   {
     key: "bookings",
     href: "/bookings",
     icon: "bookings",
-    label: "叫車",
-    badge: "5",
-    badgeTone: "accent",
+    label: "訂單 · Bookings",
     matchPaths: ["/bookings"],
   },
   {
     key: "newbooking",
     href: "/bookings/new",
     icon: "plus",
-    label: "建立叫車",
+    label: "新增訂單 · New booking",
   },
-  { divider: "通訊錄" },
+  { divider: "資料維護 · Directory" },
   {
     key: "passengers",
     href: "/passengers",
     icon: "passengers",
-    label: "乘客",
+    label: "乘客 · Passengers",
   },
   {
     key: "addresses",
     href: "/addresses",
     icon: "addresses",
-    label: "地址簿",
+    label: "地址 · Addresses",
   },
   {
-    key: "costcenter",
+    key: "cost-centers",
     href: "/cost-centers",
     icon: "billing",
-    label: "成本中心",
+    label: "成本中心 · Cost centers",
   },
   {
     key: "rules",
     href: "/rules",
     icon: "flags",
-    label: "審批與配額",
+    label: "審批規則 · Rules",
   },
-  { divider: "帳務" },
+  { divider: "帳號與權限 · Access" },
   {
-    key: "invoices",
-    href: "/invoices",
-    icon: "billing",
-    label: "對帳單",
+    key: "users",
+    href: "/users",
+    icon: "users",
+    label: "使用者 · Users",
   },
+  { divider: "整合 · Integration" },
   {
-    key: "reports",
-    href: "/reports",
-    icon: "reports",
-    label: "報表",
-  },
-  { divider: "整合" },
-  {
-    key: "apikeys",
+    key: "api-keys",
     href: "/api-keys",
     icon: "apiKeys",
-    label: "API 金鑰",
+    label: "API 金鑰 · API keys",
   },
   {
     key: "webhooks",
     href: "/webhooks",
     icon: "webhooks",
-    label: "Webhook",
+    label: "Webhooks",
   },
+  {
+    key: "notifications",
+    href: "/notifications",
+    icon: "notifications",
+    label: "通知 · Notifications",
+  },
+  {
+    key: "integration-governance",
+    href: "/integration-governance",
+    icon: "integrationGov",
+    label: "整合就緒度 · Integration governance",
+  },
+  { divider: "服務水準 · SLA" },
+  {
+    key: "sla",
+    href: "/sla",
+    icon: "sla",
+    label: "SLA",
+  },
+  { divider: "財務 · Finance" },
+  {
+    key: "billing",
+    href: "/billing",
+    icon: "billing",
+    label: "帳務概覽 · Billing",
+  },
+  {
+    key: "invoices",
+    href: "/invoices",
+    icon: "billing",
+    label: "發票 · Invoices",
+  },
+  {
+    key: "reports",
+    href: "/reports",
+    icon: "reports",
+    label: "報表 · Reports",
+  },
+  { divider: "報表與稽核 · Reports & Audit" },
   {
     key: "audit",
     href: "/audit",
     icon: "audit",
-    label: "稽核",
+    label: "稽核 · Audit",
   },
-  { divider: "組織" },
+  { divider: "系統 · System" },
   {
-    key: "users",
-    href: "/users",
-    icon: "users",
-    label: "人員與角色",
+    key: "feature-flags",
+    href: "/feature-flags",
+    icon: "flags",
+    label: "功能旗標 · Feature flags",
   },
   {
     key: "settings",
     href: "/settings",
     icon: "flags",
-    label: "租戶設定",
+    label: "設定 · Settings",
   },
 ];
 

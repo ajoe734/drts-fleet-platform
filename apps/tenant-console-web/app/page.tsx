@@ -18,8 +18,10 @@ import type {
 } from "@drts/contracts";
 import {
   CanvasBanner,
+  CanvasBtn,
   CanvasCard,
   CanvasDL,
+  CanvasIcon,
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
@@ -40,7 +42,7 @@ export const dynamic = "force-dynamic";
 
 const th = buildCanvasTheme({
   surface: "tenant",
-  dark: true,
+  dark: false,
   density: "compact",
 });
 
@@ -59,12 +61,19 @@ const EXISTING_APP_ROUTES = new Set([
   "/",
   "/api-keys",
   "/audit",
+  "/billing",
   "/bookings",
+  "/bookings/new",
   "/cost-centers",
+  "/feature-flags",
   "/invoices",
+  "/integration-governance",
+  "/notifications",
   "/passengers",
+  "/reports",
   "/rules",
   "/settings",
+  "/sla",
   "/users",
   "/webhooks",
 ]);
@@ -73,23 +82,25 @@ const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "grid",
   gap: 16,
+  background: "#f6f2eb",
 };
 
 const heroGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1.2fr 0.8fr",
+  gridTemplateColumns: "1.35fr 1fr",
   gap: 16,
   alignItems: "start",
 };
 
 const heroPanelStyle: CSSProperties = {
   border: `1px solid ${th.border}`,
-  borderRadius: 24,
-  padding: 18,
+  borderRadius: 22,
+  padding: 20,
   background:
-    "linear-gradient(135deg, rgba(63, 217, 191, 0.16), rgba(11, 16, 21, 0.92) 62%)",
+    "linear-gradient(135deg, rgba(217, 245, 239, 0.98), rgba(246, 242, 235, 0.94) 58%, rgba(227, 238, 234, 0.95) 100%)",
   display: "grid",
-  gap: 14,
+  gap: 16,
+  boxShadow: "0 24px 56px rgba(15, 42, 40, 0.08)",
 };
 
 const heroChipRowStyle: CSSProperties = {
@@ -104,22 +115,22 @@ const heroEyebrowStyle: CSSProperties = {
   fontSize: 12,
   letterSpacing: 1.8,
   textTransform: "uppercase",
-  color: th.textMuted,
+  color: "#5f756e",
 };
 
 const heroTitleStyle: CSSProperties = {
   margin: 0,
-  fontSize: 28,
-  lineHeight: 1.12,
-  fontWeight: 700,
-  color: th.text,
+  fontSize: 30,
+  lineHeight: 1.08,
+  fontWeight: 800,
+  color: "#163330",
 };
 
 const heroBodyStyle: CSSProperties = {
   margin: 0,
-  fontSize: 13,
+  fontSize: 13.5,
   lineHeight: 1.6,
-  color: th.textMuted,
+  color: "#5f756e",
   maxWidth: 720,
 };
 
@@ -131,7 +142,7 @@ const actionGridStyle: CSSProperties = {
 
 const topGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1.45fr 1fr",
+  gridTemplateColumns: "1.4fr 1fr",
   gap: 16,
   alignItems: "start",
 };
@@ -164,7 +175,7 @@ const moduleTileStyle: CSSProperties = {
   border: `1px solid ${th.border}`,
   borderRadius: 16,
   padding: 12,
-  background: "rgba(255,255,255,0.02)",
+  background: "rgba(255,255,255,0.72)",
   display: "grid",
   gap: 8,
 };
@@ -179,16 +190,18 @@ const navChipStyle: CSSProperties = {
   border: `1px solid ${th.border}`,
   borderRadius: 999,
   padding: "6px 10px",
-  color: th.textMuted,
+  color: "#425853",
   fontSize: 11.5,
   lineHeight: 1.1,
+  textDecoration: "none",
+  background: "rgba(255,255,255,0.8)",
 };
 
 const emptyPanelStyle: CSSProperties = {
   border: `1px dashed ${th.border}`,
   borderRadius: 16,
   padding: 16,
-  background: "rgba(255,255,255,0.02)",
+  background: "rgba(255,255,255,0.7)",
   display: "grid",
   gap: 10,
 };
@@ -197,11 +210,12 @@ const actionTileBaseStyle: CSSProperties = {
   border: `1px solid ${th.border}`,
   borderRadius: 18,
   padding: 14,
-  background: "rgba(255,255,255,0.03)",
+  background: "rgba(255,255,255,0.88)",
   display: "grid",
   gap: 10,
   textDecoration: "none",
   color: th.text,
+  boxShadow: "0 16px 36px rgba(15, 42, 40, 0.06)",
 };
 
 const actionTileDisabledStyle: CSSProperties = {
@@ -232,7 +246,7 @@ const emptyActionStyle: CSSProperties = {
 
 const secondaryActionStyle: CSSProperties = {
   ...emptyActionStyle,
-  background: "rgba(255,255,255,0.08)",
+  background: "rgba(15, 118, 110, 0.08)",
   color: th.text,
 };
 
@@ -240,7 +254,7 @@ const externalLinkStyle: CSSProperties = {
   border: `1px solid ${th.border}`,
   borderRadius: 16,
   padding: 12,
-  background: "rgba(255,255,255,0.02)",
+  background: "rgba(255,255,255,0.82)",
   display: "grid",
   gap: 6,
   textDecoration: "none",
@@ -265,6 +279,23 @@ const sectionBodyStyle: CSSProperties = {
   fontSize: 12.5,
   color: th.textMuted,
   lineHeight: 1.5,
+};
+
+const reminderCardStyle: CSSProperties = {
+  ...moduleTileStyle,
+  gap: 10,
+};
+
+const headerActionRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+  justifyContent: "flex-end",
+  alignItems: "center",
+};
+
+const helperButtonStyle: CSSProperties = {
+  minWidth: 116,
 };
 
 type DashboardData = {
@@ -312,6 +343,17 @@ type EmptyPresentation = {
   title: string;
   body: string;
   nextAction?: AvailableAction;
+};
+
+type ReminderItem = {
+  key: string;
+  tone: CanvasTone;
+  icon: "warn" | "notifications" | "ok" | "clock";
+  title: string;
+  body: string;
+  meta?: string;
+  href?: string;
+  external?: boolean;
 };
 
 const EMPTY_REASON_ORDER: HomeEmptyReason[] = [
@@ -923,6 +965,108 @@ function buildRecentBookingRows(bookings: BookingRecord[]): RecentBookingRow[] {
     }));
 }
 
+function formatWorkspaceDate(iso: string) {
+  return new Intl.DateTimeFormat("zh-TW", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+    timeZone: "UTC",
+  }).format(new Date(iso));
+}
+
+function countCompletedOnRefreshDay(
+  bookings: BookingRecord[],
+  refreshIso: string,
+) {
+  const dayKey = refreshIso.slice(0, 10);
+
+  return bookings.filter(
+    (booking) =>
+      booking.orderStatus === "completed" &&
+      booking.updatedAt.startsWith(dayKey),
+  ).length;
+}
+
+function buildReminderItems(
+  data: DashboardData,
+  readinessItems: TenantIntegrationReadinessItem[],
+  externalLinks: CrossAppResourceLink[],
+): ReminderItem[] {
+  const reminders: ReminderItem[] = [];
+
+  const blockedReadiness = readinessItems.find(
+    (item) => item.status === "blocked",
+  );
+  if (blockedReadiness) {
+    reminders.push({
+      key: `blocked-${blockedReadiness.subSystem}`,
+      tone: "warn",
+      icon: "warn",
+      title: `${getSubSystemLabel(blockedReadiness.subSystem)} 仍待處理`,
+      body:
+        blockedReadiness.detail ?? "這個整合子系統目前仍未達到 healthy 狀態。",
+      href: getActionRoute(
+        blockedReadiness.nextAction?.action ?? "integration.open_governance",
+      ),
+    });
+  }
+
+  const unreadNotification = data.notifications.find(
+    (notification) => notification.status === "unread",
+  );
+  if (unreadNotification) {
+    reminders.push({
+      key: unreadNotification.notificationId,
+      tone: unreadNotification.channel === "ops_notice" ? "warn" : "info",
+      icon:
+        unreadNotification.channel === "ops_notice" ? "warn" : "notifications",
+      title: unreadNotification.title,
+      body: unreadNotification.message,
+      meta: formatDateTime(unreadNotification.createdAt),
+    });
+  }
+
+  const openInvoice = getLatestInvoice(
+    data.invoices.filter((invoice) => invoice.status !== "paid"),
+  );
+  if (openInvoice) {
+    reminders.push({
+      key: openInvoice.invoiceId,
+      tone: "neutral",
+      icon: "clock",
+      title: `當期帳單 ${openInvoice.invoiceId}`,
+      body: `${formatMoney(openInvoice.amount)} · ${openInvoice.status}`,
+      href: "/billing",
+    });
+  }
+
+  const crossAppLink = externalLinks[0];
+  if (crossAppLink) {
+    reminders.push({
+      key: `${crossAppLink.targetApp}-${crossAppLink.resourceId}`,
+      tone: "info",
+      icon: "notifications",
+      title: crossAppLink.label,
+      body: crossAppLink.route,
+      href: toExternalHref(crossAppLink),
+      external: crossAppLink.openMode === "new_tab",
+    });
+  }
+
+  if (reminders.length === 0) {
+    reminders.push({
+      key: "sla-good",
+      tone: "success",
+      icon: "ok",
+      title: "本月營運狀態穩定",
+      body: "目前沒有新的通知、blocked readiness 或跨 app 待處理連結。",
+    });
+  }
+
+  return reminders.slice(0, 3);
+}
+
 function getTenantLifecycleLabel(data: DashboardData) {
   if (getTenantSuspendedSignal(data)) {
     return "suspended";
@@ -1197,6 +1341,71 @@ function renderReadinessAction(action: ResourceActionDescriptor | undefined) {
   );
 }
 
+function renderReminderItem(item: ReminderItem) {
+  const content = (
+    <div style={reminderCardStyle}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+          alignItems: "flex-start",
+        }}
+      >
+        <div style={{ display: "grid", gap: 6 }}>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <CanvasIcon
+              name={item.icon}
+              size={15}
+              style={{ color: th.accent }}
+            />
+            <p style={sectionTitleStyle}>{item.title}</p>
+          </div>
+          <p style={sectionBodyStyle}>{item.body}</p>
+        </div>
+        <CanvasPill theme={th} tone={item.tone}>
+          reminder
+        </CanvasPill>
+      </div>
+      {item.meta ? <span style={statusCopyStyle}>{item.meta}</span> : null}
+    </div>
+  );
+
+  if (!item.href) {
+    return <div key={item.key}>{content}</div>;
+  }
+
+  if (item.external) {
+    return (
+      <a
+        href={item.href}
+        key={item.key}
+        rel="noreferrer"
+        style={{ textDecoration: "none", color: "inherit" }}
+        target="_blank"
+      >
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <Link
+      href={item.href}
+      key={item.key}
+      style={{ textDecoration: "none", color: "inherit" }}
+    >
+      {content}
+    </Link>
+  );
+}
+
 export default async function HomePage() {
   const data = await loadDashboardData();
   const refresh = buildRefreshMetadata(data);
@@ -1221,6 +1430,12 @@ export default async function HomePage() {
   const externalLinks = buildRuntimeCrossAppLinks(data);
   const readinessItems = data.readiness?.items ?? [];
   const tenantLifecycle = getTenantLifecycleLabel(data);
+  const reminderItems = buildReminderItems(data, readinessItems, externalLinks);
+  const completedToday = countCompletedOnRefreshDay(
+    data.bookings,
+    refresh.generatedAt,
+  );
+  const headerPrimaryAction = bookingCreateAction ?? quickActions[0];
 
   const recentBookingColumns: CanvasTableColumn<RecentBookingRow>[] = [
     {
@@ -1263,19 +1478,29 @@ export default async function HomePage() {
     <div>
       <CanvasPageHeader
         theme={th}
-        title={
-          data.identity?.tenantId
-            ? `${TENANT_CONSOLE_CONTEXT} 工作面`
-            : "租戶工作面"
-        }
-        subtitle="首頁集中呈現 tenant identity、模組能力、整合健康度、最近叫車與 quick actions。"
+        title={`您好，${data.identity?.actorId ?? "tenant team"}`}
+        subtitle={`${formatWorkspaceDate(refresh.generatedAt)} · ${formatQuotaSubline(data)}`}
         actions={
-          <CanvasPill
-            theme={th}
-            tone={refresh.dataFreshness === "degraded" ? "warn" : "info"}
-          >
-            {getRefreshLabel(refresh)}
-          </CanvasPill>
+          <div style={headerActionRowStyle}>
+            <CanvasPill
+              theme={th}
+              tone={refresh.dataFreshness === "degraded" ? "warn" : "info"}
+            >
+              {getRefreshLabel(refresh)}
+            </CanvasPill>
+            <CanvasBtn theme={th} icon="ext" style={helperButtonStyle}>
+              幫助中心
+            </CanvasBtn>
+            {headerPrimaryAction?.descriptor.enabled ? (
+              <Link href={headerPrimaryAction.href} style={emptyActionStyle}>
+                {headerPrimaryAction.label}
+              </Link>
+            ) : (
+              <span style={secondaryActionStyle}>
+                {headerPrimaryAction?.label ?? "暫無主要 CTA"}
+              </span>
+            )}
+          </div>
         }
       />
 
@@ -1302,15 +1527,29 @@ export default async function HomePage() {
               <h2 style={heroTitleStyle}>先看今日待處理，再決定下一步。</h2>
               <p style={heroBodyStyle}>
                 依 packet
-                §5.1，這裡同時回答三件事：租戶現在是否健康、今天是否有急件、以及後端目前允許你做哪些動作。
+                §5.1，首頁必須同時回答租戶現在是否健康、今日是否有急件，
+                以及後端 read model 目前允許你做哪些下一步。
               </p>
             </div>
+            {quickActions.length > 0 ? (
+              <div style={actionGridStyle}>
+                {quickActions.map(renderActionTile)}
+              </div>
+            ) : (
+              <div style={emptyPanelStyle}>
+                <strong style={sectionTitleStyle}>Quick CTAs</strong>
+                <p style={sectionBodyStyle}>
+                  這次 snapshot 沒有回傳 packet §5.1 指定的三個 quick
+                  actions，因此首頁不會前端自行合成。
+                </p>
+              </div>
+            )}
           </div>
 
           <CanvasCard
             theme={th}
-            title="租戶識別上下文"
-            subtitle="name / code / status / environment"
+            title="租戶識別與治理"
+            subtitle="tenant identity context · visible modules · refresh"
           >
             <CanvasDL
               theme={th}
@@ -1334,8 +1573,26 @@ export default async function HomePage() {
                   v: data.identity?.authMode ?? "unknown",
                   mono: true,
                 },
+                {
+                  k: "Refresh",
+                  v: `${REFRESH_TIER} · ${formatDateTime(refresh.generatedAt)}`,
+                  mono: true,
+                },
+                {
+                  k: "Visible",
+                  v: `${formatCount(visibleNavItems.length)} modules`,
+                  mono: true,
+                },
               ]}
             />
+            <div style={cardStackStyle}>
+              <p style={sectionTitleStyle}>可見模組導覽</p>
+              <div style={navChipWrapStyle}>
+                {visibleNavItems.map((item) =>
+                  renderNavChip(item.label, item.href),
+                )}
+              </div>
+            </div>
           </CanvasCard>
         </div>
 
@@ -1369,52 +1626,6 @@ export default async function HomePage() {
           />
         ) : null}
 
-        {availableActions.length > 0 ? (
-          <CanvasCard
-            theme={th}
-            title="後端授權的可執行動作"
-            subtitle="首頁只渲染 tenant read models 回傳的 authoritative availableActions。"
-          >
-            <div style={actionGridStyle}>
-              {availableActions.map(renderActionTile)}
-            </div>
-          </CanvasCard>
-        ) : (
-          <CanvasCard
-            theme={th}
-            title="後端授權的可執行動作"
-            subtitle="這次租戶快照沒有回傳可直接執行的 authoritative action descriptor。"
-          >
-            <div style={emptyPanelStyle}>
-              <strong style={sectionTitleStyle}>availableActions</strong>
-              <p style={sectionBodyStyle}>
-                這次 read model 沒有提供首頁可用
-                CTA，因此此區不會由前端自行補齊。
-              </p>
-            </div>
-          </CanvasCard>
-        )}
-
-        <CanvasCard
-          theme={th}
-          title="快捷入口"
-          subtitle="packet §5.1 的必備 quick CTAs 只從 backend-owned availableActions 取值與排序。"
-        >
-          {quickActions.length > 0 ? (
-            <div style={actionGridStyle}>
-              {quickActions.map(renderActionTile)}
-            </div>
-          ) : (
-            <div style={emptyPanelStyle}>
-              <strong style={sectionTitleStyle}>workspace quick CTAs</strong>
-              <p style={sectionBodyStyle}>
-                後端這次沒有回傳 `booking.create`、`booking.list_today` 或
-                `integration.open_governance`，因此首頁不會前端合成快捷 CTA。
-              </p>
-            </div>
-          )}
-        </CanvasCard>
-
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
@@ -1428,7 +1639,13 @@ export default async function HomePage() {
           />
           <CanvasKPI
             theme={th}
-            label="本月配額"
+            label="今日已完成"
+            value={formatCount(completedToday)}
+            sub={`${formatWorkspaceDate(refresh.generatedAt)} completed`}
+          />
+          <CanvasKPI
+            theme={th}
+            label="本月用量"
             value={formatQuotaValue(data)}
             sub={formatQuotaSubline(data)}
           />
@@ -1438,21 +1655,19 @@ export default async function HomePage() {
             value={
               latestInvoice?.amount ? formatMoney(latestInvoice.amount) : "—"
             }
-            sub={latestInvoice ? latestInvoice.invoiceId : "目前沒有可見發票"}
-          />
-          <CanvasKPI
-            theme={th}
-            label="可見模組"
-            value={formatCount(modules.length)}
-            sub={`${formatCount(visibleNavItems.length)} 個導覽入口通過 feature gating`}
+            sub={
+              latestInvoice
+                ? `${latestInvoice.invoiceId} · ${latestInvoice.status}`
+                : "目前沒有可見發票"
+            }
           />
         </div>
 
         <div style={topGridStyle}>
           <CanvasCard
             theme={th}
-            title="近期叫車與最新更新"
-            subtitle="首頁先回答今天是否有需要優先處理的 booking。"
+            title="進行中訂單"
+            subtitle="pending bookings count / recent updates"
           >
             {recentRows.length > 0 ? (
               <CanvasTable<RecentBookingRow>
@@ -1473,63 +1688,47 @@ export default async function HomePage() {
 
           <CanvasCard
             theme={th}
-            title="環境與可見模組"
-            subtitle="模組與導覽都遵守 feature flag gating。"
+            title="提醒"
+            subtitle="integrations healthy? urgent to handle today?"
           >
-            <CanvasDL
-              theme={th}
-              cols={2}
-              items={[
-                {
-                  k: "Tenant",
-                  v: data.identity?.tenantId ?? DEMO_TENANT_ID,
-                  mono: true,
-                },
-                {
-                  k: "Environment",
-                  v: TENANT_CONSOLE_ENV,
-                  mono: true,
-                },
-                {
-                  k: "Actor type",
-                  v: data.identity?.actorType ?? "unknown",
-                  mono: true,
-                },
-                {
-                  k: "Realm",
-                  v: data.identity?.realm ?? "unknown",
-                  mono: true,
-                },
-                {
-                  k: "Auth mode",
-                  v: data.identity?.authMode ?? "unknown",
-                  mono: true,
-                },
-                {
-                  k: "Refresh",
-                  v: `${REFRESH_TIER} · ${formatDateTime(refresh.generatedAt)}`,
-                  mono: true,
-                },
-              ]}
-            />
-
             <div style={cardStackStyle}>
-              <p style={sectionTitleStyle}>可見模組導覽</p>
-              <div style={navChipWrapStyle}>
-                {visibleNavItems.map((item) =>
-                  renderNavChip(item.label, item.href),
-                )}
-              </div>
+              {reminderItems.map(renderReminderItem)}
             </div>
           </CanvasCard>
         </div>
 
         <div style={bottomGridStyle}>
           <div style={cardStackStyle}>
+            {availableActions.length > 0 ? (
+              <CanvasCard
+                theme={th}
+                title="後端授權的可執行動作"
+                subtitle="首頁只渲染 authoritative availableActions，角色不在前端硬編碼。"
+              >
+                <div style={actionGridStyle}>
+                  {availableActions.map(renderActionTile)}
+                </div>
+              </CanvasCard>
+            ) : (
+              <CanvasCard
+                theme={th}
+                title="後端授權的可執行動作"
+                subtitle="沒有 action descriptor 時，首頁只誠實顯示 empty state。"
+              >
+                <div style={emptyPanelStyle}>
+                  <strong style={sectionTitleStyle}>availableActions</strong>
+                  <p style={sectionBodyStyle}>
+                    這次 read model 沒有提供首頁可用
+                    CTA，因此此區不會由前端自行補齊。
+                  </p>
+                </div>
+              </CanvasCard>
+            )}
+
             <CanvasCard
               theme={th}
               title="模組啟用摘要"
-              subtitle="依 spec 顯示首頁必備的 module enablement summary。"
+              subtitle="module enablement summary per spec §9.6.1"
             >
               {modules.length > 0 ? (
                 <div style={moduleSummaryStyle}>
@@ -1548,7 +1747,7 @@ export default async function HomePage() {
             <CanvasCard
               theme={th}
               title="整合健康度"
-              subtitle="aggregated readiness 與治理 checklist 依 packet §5.1 呈現。"
+              subtitle="aggregated readiness from /api/tenant/integration-governance/readiness"
             >
               <div style={cardStackStyle}>
                 {readinessItems.length > 0 ? (
@@ -1618,7 +1817,7 @@ export default async function HomePage() {
             <CanvasCard
               theme={th}
               title="Cross-app deep links"
-              subtitle="只渲染 runtime contract 回傳的 tenant-scoped CrossAppResourceLink。"
+              subtitle="只渲染 runtime contract 回傳的 tenant-scoped CrossAppResourceLink"
             >
               <div style={cardStackStyle}>
                 {externalLinks.length > 0 ? (
