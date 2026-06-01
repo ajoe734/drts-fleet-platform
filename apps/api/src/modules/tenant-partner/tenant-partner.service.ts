@@ -5263,6 +5263,40 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       availableActions,
       refreshTier: "slow",
       refreshMetadata,
+      resourceLinks: [
+        {
+          targetApp: "tenant-console",
+          route: "/integration-governance",
+          resourceType: "tenant_integration_governance",
+          resourceId: tenantId,
+          openMode: "same_tab",
+          label: "查看整合就緒度",
+        },
+        {
+          targetApp: "tenant-console",
+          route: "/audit?resourceType=tenant_sla",
+          resourceType: "tenant_sla_audit",
+          resourceId: tenantId,
+          openMode: "same_tab",
+          label: "查看 SLA 稽核軌跡",
+        },
+        {
+          targetApp: "tenant-console",
+          route: "/settings",
+          resourceType: "tenant_settings",
+          resourceId: tenantId,
+          openMode: "same_tab",
+          label: "返回租戶設定總覽",
+        },
+        {
+          targetApp: "ops-console",
+          route: `/complaints?tenantId=${encodeURIComponent(tenantId)}&slaBreached=true`,
+          resourceType: "complaint",
+          resourceId: tenantId,
+          openMode: "new_tab",
+          label: "前往 Ops Console 檢視 SLA 違規客訴",
+        },
+      ],
       updatedBy: this.pickTenantSlaUpdatedBy(tenantAuditLogs),
       lastRecalculationAt:
         this.pickTenantSlaLastRecalculationAt(tenantAuditLogs),
@@ -6875,14 +6909,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private async recordOpsApprovalDecision(input: {
     approvalRequestId: string;
     actorId: string;
-    actorType: Extract<AuditLogRecord["actorType"], "ops_user" | "platform_admin">;
+    actorType: Extract<
+      AuditLogRecord["actorType"],
+      "ops_user" | "platform_admin"
+    >;
     actorRoleCode: string | null;
     decision: "approve" | "reject";
     reasonCode: string | null;
     reasonNote: string | null;
     requestId?: string;
   }) {
-    const request = this.requirePendingApprovalRequestById(input.approvalRequestId);
+    const request = this.requirePendingApprovalRequestById(
+      input.approvalRequestId,
+    );
     const decidedAt = new Date().toISOString();
     const decision: TenantBookingApprovalDecisionRecord = {
       decisionId: `approval-decision-${randomUUID()}`,

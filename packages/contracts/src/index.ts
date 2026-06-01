@@ -1,6 +1,7 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type {
+  CrossAppResourceLink,
   DriverMatchingSuppression,
   EmptyStateEnvelope,
   RefreshTier,
@@ -945,6 +946,7 @@ export interface TenantSlaProfileView {
   availableActions: ResourceActionDescriptor[];
   refreshTier: RefreshTier;
   refreshMetadata: UiRefreshMetadata;
+  resourceLinks: CrossAppResourceLink[];
   updatedBy: string | null;
   lastRecalculationAt: string | null;
 }

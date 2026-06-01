@@ -1,6 +1,6 @@
 import type { TenantSlaProfileView } from "@drts/contracts";
 import { CanvasBanner, buildCanvasTheme } from "@drts/ui-web";
-import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
+import { getTenantClient } from "@/lib/api-client";
 import { SlaManager } from "./sla-manager";
 
 export const dynamic = "force-dynamic";
@@ -52,22 +52,6 @@ export default async function SlaPage() {
       <SlaManager
         view={data.view}
         transportErrorMessage={data.transportErrorMessage}
-        links={[
-          { href: "/integration-governance", label: "查看整合就緒度" },
-          {
-            href: "/audit?resourceType=tenant_sla",
-            label: "查看 SLA 稽核軌跡",
-          },
-          { href: "/settings", label: "返回租戶設定總覽" },
-        ]}
-        crossAppLinks={[
-          {
-            href: `${
-              process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3002"
-            }/complaints?tenantId=${encodeURIComponent(DEMO_TENANT_ID)}&slaBreached=true`,
-            label: "前往 Ops Console 檢視 SLA 違規客訴",
-          },
-        ]}
       />
     </div>
   );

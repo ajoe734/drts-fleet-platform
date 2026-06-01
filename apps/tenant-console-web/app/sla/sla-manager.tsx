@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
   ActionReceipt,
+  CrossAppResourceLink,
   EmptyReason,
   EmptyStateEnvelope,
   RefreshTier,
@@ -27,16 +28,6 @@ import {
   recalculateTenantSlaBookingsAction,
   updateTenantSlaProfileAction,
 } from "./actions";
-
-type LinkItem = {
-  href: string;
-  label: string;
-};
-
-type CrossAppLinkItem = {
-  href: string;
-  label: string;
-};
 
 type SlaActionKey = "update_sla_profile" | "recalculate_sla_bookings";
 
@@ -60,8 +51,6 @@ type TenantSlaEmptyReason = Exclude<
 type SlaManagerProps = {
   view: TenantSlaProfileView | null;
   transportErrorMessage: string | null;
-  links: LinkItem[];
-  crossAppLinks: CrossAppLinkItem[];
 };
 
 const th = buildCanvasTheme({
@@ -405,6 +394,19 @@ function buildAuditHref(receipt: ActionReceipt) {
   return `/audit?auditId=${encodeURIComponent(receipt.auditId)}`;
 }
 
+function resolveResourceHref(link: CrossAppResourceLink) {
+  if (link.targetApp === "tenant-console") {
+    return link.route;
+  }
+
+  const appBaseUrl =
+    link.targetApp === "ops-console"
+      ? (process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3002")
+      : (process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3003");
+
+  return `${appBaseUrl}${link.route}`;
+}
+
 function formatThresholdInput(value: number | null | undefined) {
   return typeof value === "number" ? String(value) : "";
 }
@@ -548,12 +550,7 @@ function buildActionPrompt(action: ResourceActionDescriptor | null) {
   }
 }
 
-export function SlaManager({
-  view,
-  transportErrorMessage,
-  links,
-  crossAppLinks,
-}: SlaManagerProps) {
+export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
   const router = useRouter();
   const profile = view?.profile ?? null;
   const updatedBy = view?.updatedBy ?? null;
@@ -562,6 +559,15 @@ export function SlaManager({
   const emptyState = view?.emptyState ?? null;
   const refreshTier = view?.refreshTier ?? null;
   const refreshMetadata = view?.refreshMetadata ?? null;
+  const resourceLinks = view?.resourceLinks ?? [];
+  const sameAppLinks = resourceLinks.filter(
+    (link) =>
+      link.targetApp === "tenant-console" && link.openMode === "same_tab",
+  );
+  const crossAppLinks = resourceLinks.filter(
+    (link) =>
+      !(link.targetApp === "tenant-console" && link.openMode === "same_tab"),
+  );
   const [waitThresholdMin, setWaitThresholdMin] = useState(
     formatThresholdInput(profile?.waitThresholdMin),
   );
@@ -816,15 +822,19 @@ export function SlaManager({
           </div>
         ) : null}
         <div style={linkRowStyle}>
-          {links.map((link) => (
-            <Link key={link.href} href={link.href} style={linkStyle}>
+          {sameAppLinks.map((link) => (
+            <Link
+              key={`${link.targetApp}:${link.route}`}
+              href={resolveResourceHref(link)}
+              style={linkStyle}
+            >
               {link.label} →
             </Link>
           ))}
           {crossAppLinks.map((link) => (
             <a
-              key={link.href}
-              href={link.href}
+              key={`${link.targetApp}:${link.route}`}
+              href={resolveResourceHref(link)}
               style={linkStyle}
               target="_blank"
               rel="noreferrer"
@@ -894,15 +904,19 @@ export function SlaManager({
                 <div style={noteStyle}>error · {transportErrorMessage}</div>
               </div>
               <div style={linkRowStyle}>
-                {links.map((link) => (
-                  <Link key={link.href} href={link.href} style={linkStyle}>
+                {sameAppLinks.map((link) => (
+                  <Link
+                    key={`${link.targetApp}:${link.route}`}
+                    href={resolveResourceHref(link)}
+                    style={linkStyle}
+                  >
                     {link.label} →
                   </Link>
                 ))}
                 {crossAppLinks.map((link) => (
                   <a
-                    key={link.href}
-                    href={link.href}
+                    key={`${link.targetApp}:${link.route}`}
+                    href={resolveResourceHref(link)}
                     style={linkStyle}
                     target="_blank"
                     rel="noreferrer"
@@ -1181,15 +1195,19 @@ export function SlaManager({
                   以新分頁開啟。
                 </div>
                 <div style={inlineLinkRowStyle}>
-                  {links.map((link) => (
-                    <Link key={link.href} href={link.href} style={linkStyle}>
+                  {sameAppLinks.map((link) => (
+                    <Link
+                      key={`${link.targetApp}:${link.route}`}
+                      href={resolveResourceHref(link)}
+                      style={linkStyle}
+                    >
                       {link.label} →
                     </Link>
                   ))}
                   {crossAppLinks.map((link) => (
                     <a
-                      key={link.href}
-                      href={link.href}
+                      key={`${link.targetApp}:${link.route}`}
+                      href={resolveResourceHref(link)}
                       style={linkStyle}
                       target="_blank"
                       rel="noreferrer"
