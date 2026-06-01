@@ -15,7 +15,8 @@ type SecretRevealCardProps = {
   secretPreview: string;
   secretVersion: number;
   rotatedAt: string;
-  clearHref: string;
+  webhookId: string;
+  clearReceiptAction: (formData: FormData) => void | Promise<void>;
 };
 
 const cardStyle = {
@@ -90,7 +91,8 @@ export function SecretRevealCard({
   secretPreview,
   secretVersion,
   rotatedAt,
-  clearHref,
+  webhookId,
+  clearReceiptAction,
 }: SecretRevealCardProps) {
   const [copied, setCopied] = useState(false);
   const [stored, setStored] = useState(false);
@@ -188,24 +190,36 @@ export function SecretRevealCard({
             />
             I stored this key in a secure location
           </label>
-          <a href={clearHref} aria-disabled={!stored}>
-            <CanvasBtn
-              theme={theme}
-              size="sm"
-              variant="secondary"
+          <form action={clearReceiptAction}>
+            <input type="hidden" name="webhookId" value={webhookId} />
+            <button
+              type="submit"
               disabled={!stored}
-              {...(stored
-                ? {
-                    style: {
-                      background: theme.success,
-                      borderColor: theme.success,
-                    },
-                  }
-                : {})}
+              style={{
+                cursor: stored ? "pointer" : "not-allowed",
+                border: 0,
+                background: "transparent",
+                padding: 0,
+              }}
             >
-              Done
-            </CanvasBtn>
-          </a>
+              <CanvasBtn
+                theme={theme}
+                size="sm"
+                variant="secondary"
+                disabled={!stored}
+                {...(stored
+                  ? {
+                      style: {
+                        background: theme.success,
+                        borderColor: theme.success,
+                      },
+                    }
+                  : {})}
+              >
+                Done
+              </CanvasBtn>
+            </button>
+          </form>
         </div>
       </div>
     </div>
