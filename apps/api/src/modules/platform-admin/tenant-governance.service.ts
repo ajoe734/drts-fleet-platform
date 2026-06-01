@@ -1,13 +1,16 @@
 import { Injectable } from "@nestjs/common";
 
 import type {
+  EmptyStateEnvelope,
   PlatformAdminTenantRecord,
   PlatformTenantGovernanceSummaryQuery,
   PlatformTenantGovernanceSummaryResponse,
   PlatformTenantGovernanceSummaryRow,
+  ResourceActionDescriptor,
   TenantApprovalRuleRecord,
   TenantCostCenterRecord,
   TenantUserRoleRecord,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
@@ -19,6 +22,7 @@ const MAX_PAGE_SIZE = 100;
 const QUOTA_ALERT_THRESHOLD_PERCENT = 95;
 const PENDING_APPROVAL_ALERT_THRESHOLD_HOURS = 48;
 const HOUR_IN_MS = 60 * 60 * 1000;
+const REFRESH_STALE_AFTER_MS = 30_000;
 
 @Injectable()
 export class PlatformTenantGovernanceService {
@@ -59,6 +63,15 @@ export class PlatformTenantGovernanceService {
     const start = (page - 1) * pageSize;
     const items = rows.slice(start, start + pageSize);
 
+    const emptyState =
+      items.length === 0
+        ? ({
+            reason: "no_data",
+            messageCode: "tenant_governance.empty.no_data",
+            nextAction: this.buildAction("open_tenant_list"),
+          } satisfies EmptyStateEnvelope)
+        : undefined;
+
     return {
       items,
       pageInfo: {
@@ -67,6 +80,9 @@ export class PlatformTenantGovernanceService {
         totalItems,
         totalPages,
       },
+      availableActions: this.buildSummaryActions(rows),
+      ...(emptyState ? { emptyState } : {}),
+      refresh: this.buildRefreshMetadata(),
     };
   }
 
@@ -132,7 +148,99 @@ export class PlatformTenantGovernanceService {
       pendingApprovalCount: pendingApprovalRequests.length,
       oldestPendingApprovalAgeHours,
       alertFlags,
+      availableActions: this.buildRowActions({
+        tenant,
+        pendingApprovalCount: pendingApprovalRequests.length,
+      }),
     };
+  }
+
+  private buildSummaryActions(rows: PlatformTenantGovernanceSummaryRow[]) {
+    return [
+      this.buildAction("filter_all"),
+      this.buildAction("filter_quota_pressure", {
+        enabled: rows.some((row) => row.monthlyQuotaPercentUsed >= 80),
+        disabledReasonCode: "no_matching_signals",
+      }),
+      this.buildAction("filter_approval_backlog", {
+        enabled: rows.some((row) => row.pendingApprovalCount > 0),
+        disabledReasonCode: "no_matching_signals",
+      }),
+      this.buildAction("filter_cost_center_attention", {
+        enabled: rows.some(
+          (row) => row.costCenterCount === 0 || row.activeRuleCount === 0,
+        ),
+        disabledReasonCode: "no_matching_signals",
+      }),
+      this.buildAction("filter_rollout_risk", {
+        enabled: rows.some(
+          (row) =>
+            row.tenantStatus === "rollback_hold" ||
+            row.tenantRolloutStage !== "sandbox",
+        ),
+        disabledReasonCode: "no_matching_signals",
+      }),
+      this.buildAction("filter_expiry_feeds", {
+        enabled: false,
+        disabledReasonCode: "feed_not_provisioned",
+      }),
+    ];
+  }
+
+  private buildRowActions({
+    tenant,
+    pendingApprovalCount,
+  }: {
+    tenant: PlatformAdminTenantRecord;
+    pendingApprovalCount: number;
+  }): ResourceActionDescriptor[] {
+    const actions = [
+      this.buildAction("focus_row"),
+      this.buildAction("open_tenant_detail"),
+      this.buildAction("open_payments_queue", {
+        enabled: pendingApprovalCount > 0,
+        disabledReasonCode: "no_pending_approvals",
+      }),
+      this.buildAction("open_audit"),
+      this.buildAction("open_tenant_cost_centers"),
+      this.buildAction("open_tenant_rules"),
+    ];
+
+    if (tenant.rollout.stage !== "sandbox") {
+      actions.push(this.buildAction("open_ops_dispatch"));
+    }
+
+    return actions;
+  }
+
+  private buildRefreshMetadata(): UiRefreshMetadata {
+    return {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: REFRESH_STALE_AFTER_MS,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+  }
+
+  private buildAction(
+    action: string,
+    overrides?: Partial<ResourceActionDescriptor>,
+  ): ResourceActionDescriptor {
+    const descriptor: ResourceActionDescriptor = {
+      action,
+      enabled: overrides?.enabled ?? true,
+      riskLevel: overrides?.riskLevel ?? "low",
+    };
+
+    if (overrides?.disabledReasonCode !== undefined) {
+      descriptor.disabledReasonCode = overrides.disabledReasonCode;
+    }
+
+    if (overrides?.requiresReason !== undefined) {
+      descriptor.requiresReason = overrides.requiresReason;
+    }
+
+    return descriptor;
   }
 
   private hasConfiguredApproverPool(

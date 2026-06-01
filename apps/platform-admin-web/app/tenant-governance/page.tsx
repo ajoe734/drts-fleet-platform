@@ -53,7 +53,6 @@ const CLIENT_PAGE_SIZE = 8;
 const SUMMARY_FETCH_SIZE = 500;
 const REFRESH_TIER: RefreshTier = "medium_slow";
 const REFRESH_INTERVAL_MS = 30_000;
-const STALE_AFTER_MS = 65_000;
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -74,7 +73,6 @@ type GovernanceFilter =
 type DashboardSnapshot = {
   summary: PlatformTenantGovernanceSummaryResponse;
   tenants: PlatformAdminTenantRecord[];
-  refresh: UiRefreshMetadata;
 };
 
 type GovernanceAction = {
@@ -370,6 +368,33 @@ function buildDescriptor(
   return disabledReasonCode
     ? { action, enabled, riskLevel, disabledReasonCode }
     : { action, enabled, riskLevel };
+}
+
+function mergeActionDescriptor(
+  descriptor: ResourceActionDescriptor | undefined,
+  overrides?: {
+    enabled?: boolean;
+    disabledReasonCode?: string;
+  },
+): ResourceActionDescriptor {
+  const merged: ResourceActionDescriptor = {
+    action: descriptor?.action ?? "unknown",
+    enabled: overrides?.enabled ?? descriptor?.enabled ?? false,
+    riskLevel: descriptor?.riskLevel ?? "low",
+  };
+
+  const requiresReason = descriptor?.requiresReason;
+  if (requiresReason !== undefined) {
+    merged.requiresReason = requiresReason;
+  }
+
+  const disabledReasonCode =
+    overrides?.disabledReasonCode ?? descriptor?.disabledReasonCode;
+  if (disabledReasonCode !== undefined) {
+    merged.disabledReasonCode = disabledReasonCode;
+  }
+
+  return merged;
 }
 
 function disabledReasonLabel(locale: LocalizedLocale, code?: string) {
@@ -909,12 +934,6 @@ export default function TenantGovernancePage() {
       setSnapshot({
         tenants,
         summary,
-        refresh: {
-          generatedAt: new Date().toISOString(),
-          staleAfterMs: STALE_AFTER_MS,
-          dataFreshness: "fresh",
-          source: "live",
-        },
       });
       setError(null);
     } catch (cause) {
@@ -945,16 +964,16 @@ export default function TenantGovernancePage() {
       return null;
     }
     const age =
-      freshnessTick - new Date(snapshot.refresh.generatedAt).getTime();
+      freshnessTick - new Date(snapshot.summary.refresh.generatedAt).getTime();
     const computedFreshness: SupportedFreshness =
       error && snapshot.summary.items.length > 0
         ? "degraded"
-        : age > snapshot.refresh.staleAfterMs
+        : age > snapshot.summary.refresh.staleAfterMs
           ? "stale"
-          : snapshot.refresh.dataFreshness;
+          : snapshot.summary.refresh.dataFreshness;
 
     return {
-      ...snapshot.refresh,
+      ...snapshot.summary.refresh,
       dataFreshness: previewFreshness ?? computedFreshness,
     };
   }, [error, freshnessTick, previewFreshness, snapshot]);
@@ -973,6 +992,9 @@ export default function TenantGovernancePage() {
     return snapshot.summary.items
       .map((item) => {
         const tenantRecord = tenantMap.get(item.tenantId) ?? null;
+        const actionMap = new Map<string, ResourceActionDescriptor>(
+          item.availableActions.map((action) => [action.action, action]),
+        );
         const highestGate = highestGateStatus(tenantRecord);
         const blockedGateCount = tenantRecord
           ? [
@@ -1041,33 +1063,33 @@ export default function TenantGovernancePage() {
         ].filter(Boolean) as string[];
         const detailActions: GovernanceAction[] = [
           {
-            descriptor: buildDescriptor("open_tenant_detail", true, "low"),
+            descriptor: mergeActionDescriptor(
+              actionMap.get("open_tenant_detail"),
+            ),
             label: copy.openTenant,
             href: `/tenants/${item.tenantId}`,
           },
           {
-            descriptor: buildDescriptor(
-              "open_payments_queue",
-              item.pendingApprovalCount > 0,
-              "low",
-              item.pendingApprovalCount > 0
-                ? undefined
-                : "no_pending_approvals",
+            descriptor: mergeActionDescriptor(
+              actionMap.get("open_payments_queue"),
             ),
             label: copy.openPayments,
             href: `/payments?tenantId=${encodeURIComponent(item.tenantId)}`,
           },
           {
-            descriptor: buildDescriptor("open_audit", true, "low"),
+            descriptor: mergeActionDescriptor(actionMap.get("open_audit")),
             label: copy.openAudit,
             href: `/audit?resourceType=tenant&resourceId=${encodeURIComponent(item.tenantId)}`,
           },
           {
-            descriptor: buildDescriptor(
-              "open_tenant_cost_centers",
-              !tenantConsoleMissing,
-              "low",
-              tenantConsoleMissing ? "cross_app_origin_missing" : undefined,
+            descriptor: mergeActionDescriptor(
+              actionMap.get("open_tenant_cost_centers"),
+              tenantConsoleMissing
+                ? {
+                    enabled: false,
+                    disabledReasonCode: "cross_app_origin_missing",
+                  }
+                : undefined,
             ),
             label: copy.openCostCenters,
             crossApp: {
@@ -1080,11 +1102,14 @@ export default function TenantGovernancePage() {
             },
           },
           {
-            descriptor: buildDescriptor(
-              "open_tenant_rules",
-              !tenantConsoleMissing,
-              "low",
-              tenantConsoleMissing ? "cross_app_origin_missing" : undefined,
+            descriptor: mergeActionDescriptor(
+              actionMap.get("open_tenant_rules"),
+              tenantConsoleMissing
+                ? {
+                    enabled: false,
+                    disabledReasonCode: "cross_app_origin_missing",
+                  }
+                : undefined,
             ),
             label: copy.openRules,
             crossApp: {
@@ -1098,13 +1123,16 @@ export default function TenantGovernancePage() {
           },
         ];
 
-        if (tenantRecord && tenantRecord.rollout.stage !== "sandbox") {
+        if (actionMap.has("open_ops_dispatch")) {
           detailActions.push({
-            descriptor: buildDescriptor(
-              "open_ops_dispatch",
-              !opsMissing,
-              "low",
-              opsMissing ? "cross_app_origin_missing" : undefined,
+            descriptor: mergeActionDescriptor(
+              actionMap.get("open_ops_dispatch"),
+              opsMissing
+                ? {
+                    enabled: false,
+                    disabledReasonCode: "cross_app_origin_missing",
+                  }
+                : undefined,
             ),
             label: copy.openOps,
             crossApp: {
@@ -1141,7 +1169,7 @@ export default function TenantGovernancePage() {
             item.alertFlags.length,
           actions: [
             {
-              descriptor: buildDescriptor("focus_row", true, "low"),
+              descriptor: mergeActionDescriptor(actionMap.get("focus_row")),
               label: copy.focus,
               onClick: () => setSelectedTenantId(item.tenantId),
             },
@@ -1175,53 +1203,31 @@ export default function TenantGovernancePage() {
       expiry_feeds: 0,
     } satisfies Record<GovernanceFilter, number>;
 
-    const buildFilterAction = (
-      key: GovernanceFilter,
-      enabled: boolean,
-      disabledReasonCode?: string,
-    ): GovernanceAction => ({
-      descriptor: buildDescriptor(
-        `filter_${key}`,
-        enabled,
-        "low",
-        disabledReasonCode,
-      ),
+    const summaryActionMap = new Map<string, ResourceActionDescriptor>(
+      (snapshot?.summary.availableActions ?? []).map((action) => [
+        action.action,
+        action,
+      ]),
+    );
+
+    const buildFilterAction = (key: GovernanceFilter): GovernanceAction => ({
+      descriptor: mergeActionDescriptor(summaryActionMap.get(`filter_${key}`)),
       label: copy.filters[key],
-      onClick: enabled ? () => setFilter(key) : undefined,
+      onClick: () => setFilter(key),
     });
 
     return {
       counts,
       actions: {
-        all: buildFilterAction("all", true),
-        quota_pressure: buildFilterAction(
-          "quota_pressure",
-          counts.quota_pressure > 0,
-          "no_matching_signals",
-        ),
-        approval_backlog: buildFilterAction(
-          "approval_backlog",
-          counts.approval_backlog > 0,
-          "no_matching_signals",
-        ),
-        cost_center_attention: buildFilterAction(
-          "cost_center_attention",
-          counts.cost_center_attention > 0,
-          "no_matching_signals",
-        ),
-        rollout_risk: buildFilterAction(
-          "rollout_risk",
-          counts.rollout_risk > 0,
-          "no_matching_signals",
-        ),
-        expiry_feeds: buildFilterAction(
-          "expiry_feeds",
-          false,
-          "feed_not_provisioned",
-        ),
+        all: buildFilterAction("all"),
+        quota_pressure: buildFilterAction("quota_pressure"),
+        approval_backlog: buildFilterAction("approval_backlog"),
+        cost_center_attention: buildFilterAction("cost_center_attention"),
+        rollout_risk: buildFilterAction("rollout_risk"),
+        expiry_feeds: buildFilterAction("expiry_feeds"),
       } satisfies Record<GovernanceFilter, GovernanceAction>,
     };
-  }, [copy.filters, rows]);
+  }, [copy.filters, rows, snapshot]);
 
   const filteredRows = useMemo(() => {
     switch (filter) {
@@ -1319,6 +1325,9 @@ export default function TenantGovernancePage() {
     if (previewEmptyReason) {
       return previewEmptyReason;
     }
+    if (snapshot?.summary.emptyState && rows.length === 0) {
+      return snapshot.summary.emptyState.reason;
+    }
     if (error && rows.length === 0) {
       return classifyErrorReason(error);
     }
@@ -1329,9 +1338,27 @@ export default function TenantGovernancePage() {
       return filter === "expiry_feeds" ? "not_provisioned" : "filtered_empty";
     }
     return null;
-  }, [error, filter, filteredRows.length, previewEmptyReason, rows.length]);
+  }, [
+    error,
+    filter,
+    filteredRows.length,
+    previewEmptyReason,
+    rows.length,
+    snapshot,
+  ]);
 
   const emptyAction = useMemo<GovernanceAction | null>(() => {
+    const backendEmptyAction =
+      filter === "all" ? snapshot?.summary.emptyState?.nextAction : undefined;
+
+    if (backendEmptyAction?.action === "open_tenant_list") {
+      return {
+        descriptor: backendEmptyAction,
+        label: copy.openTenant,
+        href: "/tenants",
+      };
+    }
+
     switch (resolvedEmptyReason) {
       case "fetch_failed":
       case "external_unavailable":
@@ -1356,7 +1383,14 @@ export default function TenantGovernancePage() {
       default:
         return null;
     }
-  }, [copy.clearFilter, copy.openTenant, copy.refresh, resolvedEmptyReason]);
+  }, [
+    copy.clearFilter,
+    copy.openTenant,
+    copy.refresh,
+    filter,
+    resolvedEmptyReason,
+    snapshot,
+  ]);
 
   const tableColumns = useMemo<CanvasTableColumn<GovernanceRow>[]>(
     () => [

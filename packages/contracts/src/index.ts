@@ -1,5 +1,10 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4609,10 +4614,14 @@ export interface PlatformTenantGovernanceSummaryRow {
   pendingApprovalCount: number;
   oldestPendingApprovalAgeHours: number | null;
   alertFlags: PlatformTenantGovernanceAlertFlag[];
+  availableActions: ResourceActionDescriptor[];
 }
 
-export type PlatformTenantGovernanceSummaryResponse =
-  ApiListData<PlatformTenantGovernanceSummaryRow>;
+export interface PlatformTenantGovernanceSummaryResponse extends ApiListData<PlatformTenantGovernanceSummaryRow> {
+  availableActions: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope;
+  refresh: UiRefreshMetadata;
+}
 
 export interface CreatePlatformTenantCommand {
   name: string;
