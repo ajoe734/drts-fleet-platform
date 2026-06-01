@@ -9,11 +9,16 @@ import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import type {
   AuditLogRecord,
+  CrossAppResourceLink,
+  EmptyReason,
   OperationalObservabilitySnapshot,
   PartnerChannelEntryRecord,
   PlatformAdminTenantRecord,
   PlatformAdminUserRecord,
+  RefreshTier,
   ReconciliationIssueRecord,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -23,21 +28,58 @@ import {
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
+  CanvasShell,
   buildCanvasTheme,
+  type CanvasShellNavItem,
   type CanvasTableColumn,
+  CanvasTable,
 } from "@drts/ui-web";
 
-type HomeSnapshot = {
-  tenants: PlatformAdminTenantRecord[];
-  partners: PartnerChannelEntryRecord[];
-  users: PlatformAdminUserRecord[];
-  issues: ReconciliationIssueRecord[];
-  audit: AuditLogRecord[];
-  observability: OperationalObservabilitySnapshot | null;
+type ListSource<T> = {
+  data: T[];
+  error: string | null;
+};
+
+type ValueSource<T> = {
+  data: T | null;
+  error: string | null;
+};
+
+type HomeSources = {
+  tenants: ListSource<PlatformAdminTenantRecord>;
+  partners: ListSource<PartnerChannelEntryRecord>;
+  users: ListSource<PlatformAdminUserRecord>;
+  issues: ListSource<ReconciliationIssueRecord>;
+  audit: ListSource<AuditLogRecord>;
+  observability: ValueSource<OperationalObservabilitySnapshot>;
 };
 
 type HomeBannerTone = "info" | "warn" | "danger";
+
+type HomeAction = ResourceActionDescriptor & {
+  label: string;
+  href?: string;
+  resourceLink?: CrossAppResourceLink;
+};
+
+type ModuleCard = {
+  key: string;
+  section: string;
+  href: string;
+  label: string;
+  note: string;
+  icon: ComponentProps<typeof CanvasIcon>["name"];
+  metric?: string;
+  detail?: string;
+  availableActions: HomeAction[];
+  emptyState?:
+    | {
+        reason: EmptyReason;
+        message: string;
+        nextAction?: HomeAction | undefined;
+      }
+    | undefined;
+};
 
 type GovernanceQueueItem = {
   id: string;
@@ -45,128 +87,466 @@ type GovernanceQueueItem = {
   title: string;
   description: string;
   href: string;
+  resourceLink?: CrossAppResourceLink;
+  actions: HomeAction[];
 };
 
-type AuditTableRow = AuditLogRecord & Record<string, unknown>;
-
-type ShortcutRoute = {
-  href: string;
-  label: string;
-  note: string;
-  icon: ComponentProps<typeof CanvasIcon>["name"];
+type AuditTableRow = {
+  [key: string]: unknown;
+  auditId: string;
+  createdAt: string;
+  module: string;
+  action: string;
+  actorId: string | null;
+  actorType: AuditLogRecord["actorType"];
+  tenantId: string | null;
+  requestId: string;
+};
+type EmptyStatePresentation = {
+  title: string;
+  summary: string;
+  hint: string;
+  tone: HomeBannerTone;
 };
 
-const th = buildCanvasTheme({
+const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
 });
 
-const pageBodyStyle: CSSProperties = {
-  padding: 24,
-  display: "flex",
-  flexDirection: "column",
-  gap: 16,
+const HOME_REFRESH_TIER: RefreshTier = "medium_slow";
+const HOME_REFRESH_INTERVAL_MS = 30_000;
+const HOME_ROUTE_COUNT = 18;
+const HOME_SECTION_COUNT = 6;
+
+const initialSources: HomeSources = {
+  tenants: { data: [], error: null },
+  partners: { data: [], error: null },
+  users: { data: [], error: null },
+  issues: { data: [], error: null },
+  audit: { data: [], error: null },
+  observability: { data: null, error: null },
 };
 
-const kpiGridStyle: CSSProperties = {
+const shellStyle = {
+  margin: "-32px",
+  minHeight: "calc(100vh - 64px)",
+} satisfies CSSProperties;
+
+const pageBodyStyle = {
+  display: "grid",
+  gap: 16,
+  padding: 24,
+} satisfies CSSProperties;
+
+const kpiGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: 12,
-};
+} satisfies CSSProperties;
 
-const sectionSplitStyle: CSSProperties = {
+const splitGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.55fr) minmax(320px, 1fr)",
+  gap: 16,
+} satisfies CSSProperties;
+
+const moduleToolbarStyle = {
   display: "flex",
   flexWrap: "wrap",
-  gap: 16,
-  alignItems: "start",
-};
-
-const sectionMainStyle: CSSProperties = {
-  flex: "1.6 1 520px",
-  minWidth: 0,
-};
-
-const sectionSideStyle: CSSProperties = {
-  flex: "1 1 320px",
-  minWidth: 280,
-};
-
-const bannerStackStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
   gap: 10,
-};
-
-const quickLinkGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 8,
-};
-
-const quickLinkStyle: CSSProperties = {
-  display: "flex",
   alignItems: "center",
-  gap: 10,
-  padding: "10px 12px",
-  borderRadius: 8,
-  border: `1px solid ${th.border}`,
-  background: th.surface,
-  color: th.text,
-  textDecoration: "none",
-  minWidth: 0,
-};
+  justifyContent: "space-between",
+} satisfies CSSProperties;
 
-const quickLinkIconStyle: CSSProperties = {
-  width: 28,
-  height: 28,
-  borderRadius: 7,
-  background: th.accentBg,
-  color: th.accent,
-  border: `1px solid ${th.accentBorder}`,
+const inputStyle = {
+  width: "100%",
+  maxWidth: 320,
+  boxSizing: "border-box",
+  borderRadius: 8,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  color: theme.text,
+  fontFamily: theme.fontFamily,
+  fontSize: 12.5,
+  padding: "8px 10px",
+  outline: "none",
+} satisfies CSSProperties;
+
+const moduleSectionStyle = {
+  display: "grid",
+  gap: 12,
+} satisfies CSSProperties;
+
+const moduleCardGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+  gap: 12,
+} satisfies CSSProperties;
+
+const moduleHeaderStyle = {
+  display: "flex",
+  gap: 10,
+  alignItems: "flex-start",
+} satisfies CSSProperties;
+
+const moduleIconStyle = {
+  width: 34,
+  height: 34,
+  borderRadius: 10,
+  background: theme.accentBg,
+  color: theme.accent,
+  border: `1px solid ${theme.accentBorder}`,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   flexShrink: 0,
-};
+} satisfies CSSProperties;
 
-const quickLinkTextStyle: CSSProperties = {
+const moduleMetaStyle = {
   display: "grid",
-  gap: 2,
+  gap: 3,
   minWidth: 0,
-  flex: 1,
-};
+} satisfies CSSProperties;
 
-const sectionTitleStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
+const moduleMetricStyle = {
+  color: theme.text,
+  fontFamily: theme.monoFamily,
+  fontWeight: 700,
+  fontSize: 22,
+  lineHeight: 1,
+} satisfies CSSProperties;
+
+const moduleDetailStyle = {
+  color: theme.textMuted,
+  fontSize: 12,
+  lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const actionRowStyle = {
+  display: "flex",
   gap: 8,
-};
+  flexWrap: "wrap",
+  alignItems: "center",
+} satisfies CSSProperties;
 
-const emptyStateStyle: CSSProperties = {
-  padding: 24,
-  color: th.textMuted,
+const actionStackStyle = {
+  display: "grid",
+  gap: 8,
+} satisfies CSSProperties;
+
+const actionItemStyle = {
+  display: "grid",
+  gap: 4,
+} satisfies CSSProperties;
+
+const actionMetaStyle = {
+  color: theme.textMuted,
+  fontSize: 11,
+  lineHeight: 1.4,
+} satisfies CSSProperties;
+
+const inlineEmptyStateStyle = {
+  display: "grid",
+  gap: 10,
+  padding: "14px 16px",
+  borderRadius: 12,
+  border: `1px dashed ${theme.border}`,
+  background: theme.bgRaised,
+} satisfies CSSProperties;
+
+const inlineEmptyStateHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 10,
+  alignItems: "center",
+} satisfies CSSProperties;
+
+const inlineEmptyStateTitleStyle = {
+  color: theme.text,
+  fontWeight: 700,
+  fontSize: 13,
+  lineHeight: 1.35,
+} satisfies CSSProperties;
+
+const inlineEmptyStateHintStyle = {
+  color: theme.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const queueStackStyle = {
+  display: "grid",
+  gap: 10,
+} satisfies CSSProperties;
+
+const statusGridStyle = {
+  display: "grid",
+  gap: 10,
+} satisfies CSSProperties;
+
+const workspaceLinkStackStyle = {
+  display: "grid",
+  gap: 8,
+} satisfies CSSProperties;
+
+const workspaceLinkStyle = {
+  display: "grid",
+  gap: 4,
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+} satisfies CSSProperties;
+
+const statusRowStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "center",
   fontSize: 12.5,
-  textAlign: "center",
-};
+} satisfies CSSProperties;
 
-const actorCellStyle: CSSProperties = {
+const actorCellStyle = {
   display: "grid",
   gap: 2,
   minWidth: 0,
-};
+} satisfies CSSProperties;
 
-const actorPrimaryStyle: CSSProperties = {
-  color: th.text,
+const actorPrimaryStyle = {
+  color: theme.text,
   fontWeight: 600,
-  fontFamily: th.monoFamily,
+  fontFamily: theme.monoFamily,
   fontSize: 11.5,
-};
+} satisfies CSSProperties;
 
-const actorMetaStyle: CSSProperties = {
-  color: th.textMuted,
+const actorMetaStyle = {
+  color: theme.textMuted,
   fontSize: 11.5,
   lineHeight: 1.35,
-};
+} satisfies CSSProperties;
+
+function buildPlatformNav(locale: string): CanvasShellNavItem[] {
+  const labels =
+    locale === "en"
+      ? {
+          workspace: "Workspace",
+          home: "Governance Home",
+          tenantGov: "Tenant Governance",
+          tenants: "Tenants",
+          crossTenant: "Cross-tenant governance",
+          partnerGov: "Partner Governance",
+          partners: "Partner entry",
+          peopleFleet: "People & Fleet",
+          users: "Platform staff",
+          fleet: "Fleet & compliance",
+          commerce: "Platform & Commerce",
+          switchboard: "Public info & placards",
+          pricing: "Pricing",
+          payments: "Settlement governance",
+          adapters: "Adapter registry",
+          opsRisk: "Platform Ops & Risk",
+          health: "Platform health",
+          notices: "Notices & maintenance",
+          audit: "Audit & evidence",
+          flags: "Feature flags",
+        }
+      : {
+          workspace: "工作面",
+          home: "工作首頁",
+          tenantGov: "租戶治理",
+          tenants: "租戶",
+          crossTenant: "跨租戶治理",
+          partnerGov: "合作夥伴治理",
+          partners: "合作夥伴 entry",
+          peopleFleet: "人員與車隊",
+          users: "平台人員",
+          fleet: "車隊與法遵",
+          commerce: "平台與商務",
+          switchboard: "公開資訊與牌貼",
+          pricing: "費率治理",
+          payments: "結算與帳務",
+          adapters: "平台 Adapter",
+          opsRisk: "平台維運",
+          health: "平台健康",
+          notices: "公告與維護",
+          audit: "稽核與證據",
+          flags: "功能旗標",
+        };
+
+  return [
+    { divider: labels.workspace },
+    { key: "home", href: "/", icon: "home", label: labels.home },
+    { divider: labels.tenantGov },
+    {
+      key: "tenants",
+      href: "/tenants",
+      icon: "tenants",
+      label: labels.tenants,
+    },
+    {
+      key: "tenant-governance",
+      href: "/tenant-governance",
+      icon: "governance",
+      label: labels.crossTenant,
+    },
+    { divider: labels.partnerGov },
+    {
+      key: "partners",
+      href: "/partners",
+      icon: "partners",
+      label: labels.partners,
+    },
+    { divider: labels.peopleFleet },
+    { key: "users", href: "/users", icon: "users", label: labels.users },
+    { key: "fleet", href: "/fleet", icon: "fleet", label: labels.fleet },
+    { divider: labels.commerce },
+    {
+      key: "switchboard",
+      href: "/switchboard",
+      icon: "switchboard",
+      label: labels.switchboard,
+    },
+    {
+      key: "pricing",
+      href: "/pricing",
+      icon: "pricing",
+      label: labels.pricing,
+    },
+    {
+      key: "payments",
+      href: "/payments",
+      icon: "payments",
+      label: labels.payments,
+    },
+    {
+      key: "adapter-registry",
+      href: "/adapter-registry",
+      icon: "adapters",
+      label: labels.adapters,
+    },
+    { divider: labels.opsRisk },
+    { key: "health", href: "/health", icon: "health", label: labels.health },
+    {
+      key: "notices",
+      href: "/notices",
+      icon: "notices",
+      label: labels.notices,
+    },
+    { key: "audit", href: "/audit", icon: "audit", label: labels.audit },
+    {
+      key: "flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: labels.flags,
+    },
+  ];
+}
+
+function createRefreshMetadata(
+  lastLoadedAt: string | null,
+  errorCount: number,
+): UiRefreshMetadata {
+  const generatedAt = lastLoadedAt ?? new Date(0).toISOString();
+
+  if (!lastLoadedAt) {
+    return {
+      generatedAt,
+      staleAfterMs: HOME_REFRESH_INTERVAL_MS,
+      dataFreshness: "unknown",
+      source: "live",
+    };
+  }
+
+  const ageMs = Date.now() - new Date(lastLoadedAt).getTime();
+
+  return {
+    generatedAt: lastLoadedAt,
+    staleAfterMs: HOME_REFRESH_INTERVAL_MS,
+    dataFreshness:
+      errorCount > 0
+        ? "degraded"
+        : ageMs > HOME_REFRESH_INTERVAL_MS
+          ? "stale"
+          : "fresh",
+    source: "live",
+  };
+}
+
+function extractErrorMessage(
+  result: PromiseSettledResult<unknown>,
+): string | null {
+  if (result.status === "fulfilled") {
+    return null;
+  }
+
+  const reason = result.reason;
+  return reason instanceof Error ? reason.message : String(reason);
+}
+
+function isPermissionError(message: string | null): boolean {
+  if (!message) {
+    return false;
+  }
+
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("403") ||
+    normalized.includes("401") ||
+    normalized.includes("permission")
+  );
+}
+
+function toneForEmptyReason(reason: EmptyReason): HomeBannerTone {
+  switch (reason) {
+    case "fetch_failed":
+    case "permission_denied":
+      return "danger";
+    case "external_unavailable":
+      return "warn";
+    case "filtered_empty":
+      return "info";
+    case "no_data":
+    case "not_provisioned":
+    default:
+      return "info";
+  }
+}
+
+function buildCrossAppHref(link: CrossAppResourceLink): string {
+  if (link.targetApp === "platform-admin") {
+    return link.route;
+  }
+
+  const origin =
+    link.targetApp === "ops-console"
+      ? (process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003")
+      : (process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3004");
+
+  return `${origin}${link.route}`;
+}
+
+function openAction(router: ReturnType<typeof useRouter>, action: HomeAction) {
+  const targetHref =
+    action.href ??
+    (action.resourceLink ? buildCrossAppHref(action.resourceLink) : null);
+
+  if (!targetHref || !action.enabled) {
+    return;
+  }
+
+  if (action.resourceLink?.openMode === "new_tab") {
+    window.open(targetHref, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  if (targetHref.startsWith("http://") || targetHref.startsWith("https://")) {
+    window.open(targetHref, "_blank", "noopener,noreferrer");
+    return;
+  }
+
+  router.push(targetHref);
+}
 
 function needsPartnerAttention(entry: PartnerChannelEntryRecord) {
   return entry.status !== "active" || partnerHasReadinessGaps(entry);
@@ -188,23 +568,316 @@ function alertTone(
   }
 }
 
-function queueTone(items: GovernanceQueueItem[]): HomeBannerTone {
-  if (items.some((item) => item.tone === "danger")) {
-    return "danger";
+function formatHealthStatus(locale: string, refresh: UiRefreshMetadata) {
+  if (refresh.dataFreshness === "degraded") {
+    return locale === "en" ? "degraded snapshot" : "快照降級";
   }
-  if (items.some((item) => item.tone === "warn")) {
-    return "warn";
+  if (refresh.dataFreshness === "stale") {
+    return locale === "en" ? "stale snapshot" : "快照偏舊";
   }
-  return "info";
+  if (refresh.dataFreshness === "unknown") {
+    return locale === "en" ? "waiting for first snapshot" : "等待首筆快照";
+  }
+  return locale === "en" ? "live snapshot" : "即時快照";
+}
+
+function formatRefreshTier(locale: string, refreshTier: RefreshTier) {
+  if (refreshTier === "manual") {
+    return locale === "en" ? "T6 · manual" : "T6 · 手動";
+  }
+
+  return locale === "en"
+    ? "T4 · medium_slow · 30s"
+    : "T4 · medium_slow · 30 秒";
+}
+
+function describeEmptyState(
+  locale: string,
+  reason: EmptyReason,
+): EmptyStatePresentation {
+  const copy: Record<EmptyReason, EmptyStatePresentation> =
+    locale === "en"
+      ? {
+          no_data: {
+            title: "Nothing has landed here yet",
+            summary:
+              "The module is available, but there are no records to review.",
+            hint: "Use the next action when this queue should be initialized by Platform Admin.",
+            tone: "info",
+          },
+          not_provisioned: {
+            title: "Setup is still incomplete",
+            summary:
+              "This surface depends on upstream provisioning that has not been completed.",
+            hint: "Provision the missing package before expecting live production traffic.",
+            tone: "info",
+          },
+          fetch_failed: {
+            title: "Snapshot fetch failed",
+            summary:
+              "The request did not return a usable response for this module.",
+            hint: "Refresh first; if it repeats, inspect audit and health before taking action.",
+            tone: "danger",
+          },
+          permission_denied: {
+            title: "Read scope is restricted",
+            summary:
+              "You can reach this module, but this dataset is outside your authority boundary.",
+            hint: "Use another module or ask a higher-scope admin if you need this dataset.",
+            tone: "danger",
+          },
+          external_unavailable: {
+            title: "External dependency is unavailable",
+            summary:
+              "A downstream observability or integration source is not returning live data.",
+            hint: "Treat this area as degraded and pivot through the linked cross-app board if needed.",
+            tone: "warn",
+          },
+          driver_not_eligible: {
+            title: "Not eligible for this workflow",
+            summary:
+              "This state is reserved for a driver-specific queue and should not block platform governance.",
+            hint: "If this appears here, verify the surface contract.",
+            tone: "warn",
+          },
+          filtered_empty: {
+            title: "Filter removed every module",
+            summary:
+              "The current query does not match any home-board module or route.",
+            hint: "Clear the filter to restore the full sitemap.",
+            tone: "info",
+          },
+        }
+      : {
+          no_data: {
+            title: "目前尚未進入任何資料",
+            summary: "模組已可進入，但暫時沒有待審視的紀錄。",
+            hint: "若此佇列本應由 Platform Admin 初始化，請使用下一步 CTA。",
+            tone: "info",
+          },
+          not_provisioned: {
+            title: "建置流程尚未完成",
+            summary: "此工作面依賴的上游 provisioning 還沒完成。",
+            hint: "補齊 package / 設定後，才會開始承接正式流量。",
+            tone: "info",
+          },
+          fetch_failed: {
+            title: "快照讀取失敗",
+            summary: "本模組請求沒有回傳可用資料。",
+            hint: "先重新整理；若持續失敗，請先檢查 audit 與 health 再操作。",
+            tone: "danger",
+          },
+          permission_denied: {
+            title: "讀取權限受限",
+            summary:
+              "你能抵達這個模組，但這份資料超出目前 authority boundary。",
+            hint: "請改走其他模組，或由更高權限管理者處理。",
+            tone: "danger",
+          },
+          external_unavailable: {
+            title: "外部依賴暫時不可用",
+            summary:
+              "下游 observability / integration 來源目前沒有回傳 live data。",
+            hint: "此區塊應視為 degraded；必要時改走對應的 cross-app board。",
+            tone: "warn",
+          },
+          driver_not_eligible: {
+            title: "不符合此工作流條件",
+            summary: "這是 driver 專屬隊列狀態，不應阻塞平台治理首頁。",
+            hint: "若首頁出現此狀態，請回查 surface contract。",
+            tone: "warn",
+          },
+          filtered_empty: {
+            title: "篩選條件排除了所有模組",
+            summary: "目前查詢沒有命中任何首頁模組或 route。",
+            hint: "清除篩選即可回到完整 sitemap。",
+            tone: "info",
+          },
+        };
+
+  return copy[reason];
+}
+
+function formatActionMeta(locale: string, action: HomeAction) {
+  const parts: string[] = [];
+
+  parts.push(`risk:${action.riskLevel}`);
+
+  if (!action.enabled && action.disabledReasonCode) {
+    parts.push(
+      locale === "en"
+        ? `disabled:${action.disabledReasonCode}`
+        : `停用原因:${action.disabledReasonCode}`,
+    );
+  }
+
+  if (action.resourceLink?.openMode === "new_tab") {
+    parts.push(locale === "en" ? "opens in new tab" : "新分頁開啟");
+  }
+
+  if (action.requiresReason) {
+    parts.push(locale === "en" ? "reason required" : "需填原因");
+  }
+
+  return parts.join(" · ");
+}
+
+function renderActionButtons(
+  locale: string,
+  actions: HomeAction[],
+  router: ReturnType<typeof useRouter>,
+) {
+  return (
+    <div style={actionStackStyle}>
+      <div style={actionRowStyle}>
+        {actions.map((action, index) => (
+          <div key={action.action} style={actionItemStyle}>
+            <CanvasBtn
+              theme={theme}
+              variant={index === 0 ? "primary" : "secondary"}
+              disabled={!action.enabled}
+              onClick={() => openAction(router, action)}
+            >
+              {action.label}
+            </CanvasBtn>
+            <span style={actionMetaStyle}>
+              {formatActionMeta(locale, action)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function renderEmptyState(
+  locale: string,
+  emptyState: ModuleCard["emptyState"],
+  onAction: (action: HomeAction) => void,
+  onClearFilter?: (() => void) | undefined,
+) {
+  if (!emptyState) {
+    return null;
+  }
+
+  const presentation = describeEmptyState(locale, emptyState.reason);
+
+  return (
+    <div style={inlineEmptyStateStyle}>
+      <div style={inlineEmptyStateHeaderStyle}>
+        <div style={{ display: "grid", gap: 4 }}>
+          <div style={inlineEmptyStateTitleStyle}>{presentation.title}</div>
+          <div style={inlineEmptyStateHintStyle}>{presentation.summary}</div>
+        </div>
+        <CanvasPill theme={theme} tone={presentation.tone} dot>
+          {emptyState.reason}
+        </CanvasPill>
+      </div>
+      <div style={moduleDetailStyle}>{emptyState.message}</div>
+      <div style={inlineEmptyStateHintStyle}>{presentation.hint}</div>
+      {emptyState.nextAction ? (
+        <div style={actionStackStyle}>
+          <div style={actionRowStyle}>
+            <CanvasBtn
+              theme={theme}
+              variant="secondary"
+              disabled={!emptyState.nextAction.enabled}
+              onClick={() => onAction(emptyState.nextAction!)}
+            >
+              {emptyState.nextAction.label}
+            </CanvasBtn>
+          </div>
+          <span style={actionMetaStyle}>
+            {formatActionMeta(locale, emptyState.nextAction)}
+          </span>
+        </div>
+      ) : emptyState.reason === "filtered_empty" && onClearFilter ? (
+        <div style={actionRowStyle}>
+          <CanvasBtn theme={theme} variant="secondary" onClick={onClearFilter}>
+            {locale === "en" ? "Clear filter" : "清除篩選"}
+          </CanvasBtn>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export default function HomePage() {
   const { locale } = useTranslation();
   const router = useRouter();
   const client = usePlatformAdminClient();
-  const [snapshot, setSnapshot] = useState<HomeSnapshot | null>(null);
+  const [sources, setSources] = useState<HomeSources>(initialSources);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
+  const [moduleQuery, setModuleQuery] = useState("");
+
+  const loadSnapshot = useCallback(
+    async (reason: "initial" | "manual" | "poll" = "manual") => {
+      if (reason === "initial") {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+
+      const results = await Promise.allSettled([
+        client.listPlatformTenants(),
+        client.listPlatformPartnerEntries(),
+        client.listPlatformAdminUsers(),
+        client.listReconciliationIssues(),
+        client.listAuditLogs() as Promise<AuditLogRecord[]>,
+        client.getOperationalObservability(),
+      ]);
+
+      setSources({
+        tenants: {
+          data:
+            results[0].status === "fulfilled" ? (results[0].value ?? []) : [],
+          error: extractErrorMessage(results[0]),
+        },
+        partners: {
+          data:
+            results[1].status === "fulfilled" ? (results[1].value ?? []) : [],
+          error: extractErrorMessage(results[1]),
+        },
+        users: {
+          data:
+            results[2].status === "fulfilled" ? (results[2].value ?? []) : [],
+          error: extractErrorMessage(results[2]),
+        },
+        issues: {
+          data:
+            results[3].status === "fulfilled" ? (results[3].value ?? []) : [],
+          error: extractErrorMessage(results[3]),
+        },
+        audit: {
+          data:
+            results[4].status === "fulfilled" ? (results[4].value ?? []) : [],
+          error: extractErrorMessage(results[4]),
+        },
+        observability: {
+          data: results[5].status === "fulfilled" ? results[5].value : null,
+          error: extractErrorMessage(results[5]),
+        },
+      });
+      setLastLoadedAt(new Date().toISOString());
+      setLoading(false);
+      setRefreshing(false);
+    },
+    [client],
+  );
+
+  useEffect(() => {
+    void loadSnapshot("initial");
+  }, [loadSnapshot]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadSnapshot("poll");
+    }, HOME_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(timer);
+  }, [loadSnapshot]);
 
   const copy =
     locale === "en"
@@ -214,69 +887,46 @@ export default function HomePage() {
             `DRTS control plane. ${count} governance item(s) need review today.`,
           refresh: "Refresh",
           refreshing: "Refreshing...",
-          openAll: "Open all",
-          viewRoute: "Open",
-          openAudit: "Go to audit",
-          loading: "Loading governance snapshot...",
-          noSnapshot: "No governance snapshot available yet.",
-          loadErrorTitle: "Unable to load governance snapshot",
-          quickLinksTitle: "Module shortcuts",
-          quickLinksSubtitle: "Jump directly into the governance surfaces.",
-          todayTitle: "Today's governance queue",
-          todaySubtitle:
-            "Cross-module items where a platform operator or governance owner should intervene.",
-          recentTitle: "Recent sensitive operations",
-          recentSubtitle: "Platform-layer audit trail · last 24 hours.",
+          queueTitle: "Today's governance queue",
+          queueSubtitle: "Cross-module items that need platform intervention.",
+          workspaceTitle: "Workspace status",
+          workspaceSubtitle: "Refresh tier, route map, and cross-app posture.",
+          workspaceLinksTitle: "Cross-app deep links",
+          searchPlaceholder: "Filter modules or routes…",
+          routesTitle: "Module sitemap",
+          routesSubtitle: "Landing board aligned to the Platform Admin canvas.",
+          auditTitle: "Recent sensitive operations",
+          auditSubtitle: "Platform-layer audit trail · last 24 hours.",
+          auditAction: "Go to audit",
+          noQueue: "No platform-routed governance blockers at the moment.",
+          queueAll: "Open all",
+          filteredEmpty: "No modules matched the current filter.",
+          auditTime: "Time",
+          auditModule: "Module",
+          auditActionLabel: "Action",
+          auditActor: "Actor",
+          auditRequest: "Request",
           kpiTenants: "Active tenants",
           kpiPartners: "Partner entries",
           kpiDrivers: "Active drivers",
           kpiRecon: "Pending reconciliation",
-          noAudit: "No audit records found.",
-          noTodos: "No platform-routed governance blockers at the moment.",
-          auditTime: "Time",
-          auditModule: "Module",
-          auditAction: "Action",
-          auditActor: "Actor",
-          auditRequest: "Request",
-          queueCount: (count: number) => `${count} items`,
-          routes: [
-            {
-              href: "/tenants",
-              label: "Tenants",
-              note: "Lifecycle + rollout",
-              icon: "tenants",
-            },
-            {
-              href: "/partners",
-              label: "Partner entry",
-              note: "Readiness + credentials",
-              icon: "partners",
-            },
-            {
-              href: "/pricing",
-              label: "Pricing",
-              note: "Rate cards + publish",
-              icon: "pricing",
-            },
-            {
-              href: "/payments",
-              label: "Settlement governance",
-              note: "Reconciliation + finance",
-              icon: "payments",
-            },
-            {
-              href: "/fleet",
-              label: "Fleet & compliance",
-              note: "Driver + vehicle governance",
-              icon: "fleet",
-            },
-            {
-              href: "/audit",
-              label: "Audit & evidence",
-              note: "Sensitive ops + logs",
-              icon: "audit",
-            },
-          ] satisfies ShortcutRoute[],
+          refreshTier: "Refresh tier",
+          healthState: "Freshness",
+          routeCoverage: "Route coverage",
+          routeCoverageValue: `${HOME_ROUTE_COUNT} routes / ${HOME_SECTION_COUNT} sections`,
+          crossApp: "Cross-app links",
+          crossAppValue: "ops-console + tenant-console",
+          lastGenerated: "Generated",
+          loading: "Loading platform home snapshot...",
+          showNewTab: "Opens in new tab",
+          sections: {
+            workspace: "Workspace",
+            tenant: "Tenant Governance",
+            partner: "Partner Governance",
+            peopleFleet: "People & Fleet",
+            commerce: "Platform & Commerce",
+            opsRisk: "Platform Ops & Risk",
+          },
         }
       : {
           title: "平台治理工作首頁",
@@ -284,231 +934,858 @@ export default function HomePage() {
             `DRTS 平台控制平面，今日有 ${count} 件治理事項需要審視。`,
           refresh: "重新整理",
           refreshing: "重新整理中...",
-          openAll: "展開所有",
-          viewRoute: "查看",
-          openAudit: "前往稽核",
-          loading: "載入治理快照中...",
-          noSnapshot: "目前沒有可用的治理快照。",
-          loadErrorTitle: "無法載入治理快照",
-          quickLinksTitle: "模組捷徑",
-          quickLinksSubtitle: "跳轉至各治理工作面。",
-          todayTitle: "今日治理待辦",
-          todaySubtitle: "跨模組需要平台治理人介入的事項。",
-          recentTitle: "近期高敏感操作",
-          recentSubtitle: "平台層審計足跡 · 最近 24 小時。",
+          queueTitle: "今日治理待辦",
+          queueSubtitle: "跨模組需要平台治理人介入的事項。",
+          workspaceTitle: "工作面狀態",
+          workspaceSubtitle: "refresh tier、route map 與 cross-app posture。",
+          workspaceLinksTitle: "跨 app deep links",
+          searchPlaceholder: "篩選模組或 route…",
+          routesTitle: "模組 sitemap",
+          routesSubtitle: "依 Platform Admin canvas 重建的 landing board。",
+          auditTitle: "近期高敏感操作",
+          auditSubtitle: "平台層審計足跡 · 最近 24 小時。",
+          auditAction: "前往稽核",
+          noQueue: "目前沒有路由到平台端的治理阻塞。",
+          queueAll: "展開所有",
+          filteredEmpty: "目前沒有符合篩選條件的模組。",
+          auditTime: "時間",
+          auditModule: "模組",
+          auditActionLabel: "動作",
+          auditActor: "操作者",
+          auditRequest: "Request",
           kpiTenants: "活躍租戶",
           kpiPartners: "合作夥伴 entry",
           kpiDrivers: "活躍司機",
           kpiRecon: "待結算對帳",
-          noAudit: "目前沒有稽核紀錄。",
-          noTodos: "目前沒有路由到平台端的治理阻塞。",
-          auditTime: "時間",
-          auditModule: "模組",
-          auditAction: "動作",
-          auditActor: "操作者",
-          auditRequest: "Request",
-          queueCount: (count: number) => `${count} 件`,
-          routes: [
-            {
-              href: "/tenants",
-              label: "租戶",
-              note: "生命週期與 rollout",
-              icon: "tenants",
-            },
-            {
-              href: "/partners",
-              label: "合作夥伴 entry",
-              note: "readiness 與憑證",
-              icon: "partners",
-            },
-            {
-              href: "/pricing",
-              label: "計價",
-              note: "費率與發佈",
-              icon: "pricing",
-            },
-            {
-              href: "/payments",
-              label: "結算治理",
-              note: "對帳與財務",
-              icon: "payments",
-            },
-            {
-              href: "/fleet",
-              label: "車隊與合規",
-              note: "司機與車輛治理",
-              icon: "fleet",
-            },
-            {
-              href: "/audit",
-              label: "稽核與證據",
-              note: "高敏感操作與紀錄",
-              icon: "audit",
-            },
-          ] satisfies ShortcutRoute[],
+          refreshTier: "Refresh tier",
+          healthState: "資料鮮度",
+          routeCoverage: "Route coverage",
+          routeCoverageValue: `${HOME_ROUTE_COUNT} routes / ${HOME_SECTION_COUNT} sections`,
+          crossApp: "Cross-app links",
+          crossAppValue: "ops-console + tenant-console",
+          lastGenerated: "快照時間",
+          loading: "載入平台首頁快照中...",
+          showNewTab: "以新分頁開啟",
+          sections: {
+            workspace: "工作面",
+            tenant: "租戶治理",
+            partner: "合作夥伴治理",
+            peopleFleet: "人員與車隊",
+            commerce: "平台與商務",
+            opsRisk: "平台維運",
+          },
         };
 
-  const loadSnapshot = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [tenants, partners, users, issues, audit, observability] =
-        await Promise.all([
-          client.listPlatformTenants(),
-          client.listPlatformPartnerEntries(),
-          client.listPlatformAdminUsers(),
-          client.listReconciliationIssues(),
-          client.listAuditLogs() as Promise<AuditLogRecord[]>,
-          client.getOperationalObservability(),
-        ]);
+  const errorCount = [
+    sources.tenants.error,
+    sources.partners.error,
+    sources.users.error,
+    sources.issues.error,
+    sources.audit.error,
+    sources.observability.error,
+  ].filter(Boolean).length;
 
-      setSnapshot({
-        tenants: tenants ?? [],
-        partners: partners ?? [],
-        users: users ?? [],
-        issues: issues ?? [],
-        audit: audit ?? [],
-        observability,
-      });
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [client]);
-
-  useEffect(() => {
-    void loadSnapshot();
-  }, [loadSnapshot]);
+  const refresh = useMemo(
+    () => createRefreshMetadata(lastLoadedAt, errorCount),
+    [errorCount, lastLoadedAt],
+  );
 
   const metrics = useMemo(() => {
-    const tenants = snapshot?.tenants ?? [];
-    const partners = snapshot?.partners ?? [];
-    const issues = snapshot?.issues ?? [];
-    const observability = snapshot?.observability;
+    const alerts: NonNullable<OperationalObservabilitySnapshot["alerts"]> =
+      sources.observability.data?.alerts ?? [];
+    let criticalAlerts = 0;
 
-    return {
-      activeTenants: tenants.filter((tenant) => tenant.status === "active")
-        .length,
-      sandboxTenants: tenants.filter(
-        (tenant) => tenant.rollout.stage === "sandbox",
-      ).length,
-      pilotTenants: tenants.filter((tenant) => tenant.rollout.stage === "pilot")
-        .length,
-      rollbackTenants: tenants.filter(
-        (tenant) => tenant.status === "rollback_hold",
-      ).length,
-      partnerEntries: partners.length,
-      partnerAttention: partners.filter(needsPartnerAttention).length,
-      openIssues: issues.filter((issue) => issue.status !== "resolved").length,
-      driverEligible: observability?.driverState.dispatchEligibleDrivers ?? 0,
-      staleDrivers: observability?.driverState.staleLocationDrivers ?? 0,
-      criticalAlerts:
-        observability?.alerts.filter(
-          (
-            alert: NonNullable<
-              OperationalObservabilitySnapshot["alerts"]
-            >[number],
-          ) => alert.routes.includes("platform") && alert.state === "critical",
-        ).length ?? 0,
-    };
-  }, [snapshot]);
-
-  const governanceQueue = useMemo(() => {
-    if (!snapshot) {
-      return [];
+    for (const alert of alerts) {
+      if (alert.routes.includes("platform") && alert.state === "critical") {
+        criticalAlerts += 1;
+      }
     }
 
-    const alerts = snapshot.observability?.alerts.filter(
-      (
-        alert: NonNullable<OperationalObservabilitySnapshot["alerts"]>[number],
-      ) => alert.routes.includes("platform"),
-    );
-    const rollbackTenant = snapshot.tenants.find(
+    return {
+      activeTenants: sources.tenants.data.filter(
+        (tenant) => tenant.status === "active",
+      ).length,
+      partnerEntries: sources.partners.data.length,
+      activeDrivers:
+        sources.observability.data?.driverState.dispatchEligibleDrivers ?? 0,
+      pendingReconciliation: sources.issues.data.filter(
+        (issue) => issue.status !== "resolved",
+      ).length,
+      sandboxTenants: sources.tenants.data.filter(
+        (tenant) => tenant.rollout.stage === "sandbox",
+      ).length,
+      pilotTenants: sources.tenants.data.filter(
+        (tenant) => tenant.rollout.stage === "pilot",
+      ).length,
+      rollbackTenants: sources.tenants.data.filter(
+        (tenant) => tenant.status === "rollback_hold",
+      ).length,
+      partnerAttention: sources.partners.data.filter(needsPartnerAttention)
+        .length,
+      staleDrivers:
+        sources.observability.data?.driverState.staleLocationDrivers ?? 0,
+      criticalAlerts,
+    };
+  }, [sources]);
+
+  const governanceQueue = useMemo(() => {
+    const alerts: NonNullable<OperationalObservabilitySnapshot["alerts"]> = [];
+
+    for (const alert of sources.observability.data?.alerts ?? []) {
+      if (alert.routes.includes("platform")) {
+        alerts.push(alert);
+      }
+    }
+
+    const rollbackTenant = sources.tenants.data.find(
       (tenant) => tenant.status === "rollback_hold",
     );
-    const partnerEntry = snapshot.partners.find(needsPartnerAttention);
-    const openIssue = snapshot.issues.find(
+    const partnerEntry = sources.partners.data.find(needsPartnerAttention);
+    const openIssue = sources.issues.data.find(
       (issue) => issue.status !== "resolved",
     );
 
-    return [
-      alerts?.[0]
-        ? {
-            id: `alert-${alerts[0].key}`,
-            tone: alertTone(alerts[0].state),
-            title:
-              locale === "en"
-                ? `Operational alert: ${alerts[0].key}`
-                : `營運告警：${alerts[0].key}`,
-            description:
-              locale === "en"
-                ? `Measured ${alerts[0].measuredValue} at ${formatDateTime(
-                    alerts[0].observedAt,
-                  )}. Review platform-routed observability before it spills into ops-only handling.`
-                : `${formatDateTime(alerts[0].observedAt)} 量測值 ${alerts[0].measuredValue}。請先在平台端完成判讀，再決定是否交給 ops 處理。`,
-            href: "/health",
-          }
-        : null,
-      rollbackTenant
-        ? {
-            id: `tenant-${rollbackTenant.id}`,
-            tone: "warn" as const,
-            title:
-              locale === "en"
-                ? `${rollbackTenant.name} is in rollback hold`
-                : `${rollbackTenant.name} 處於 rollback hold`,
-            description:
-              locale === "en"
-                ? `Rollout stage ${rollbackTenant.rollout.stage}. Verify cutover owner, rollback owner, and onboarding notes before any new promotion.`
-                : `目前 rollout 階段為 ${rollbackTenant.rollout.stage}。推進前請先確認 cutover / rollback owner 與 onboarding 備註。`,
-            href: `/tenants/${rollbackTenant.id}`,
-          }
-        : null,
-      partnerEntry
-        ? {
-            id: `partner-${partnerEntry.entrySlug}`,
-            tone: "info" as const,
-            title:
-              locale === "en"
-                ? `${partnerEntry.displayName} still has readiness gaps`
-                : `${partnerEntry.displayName} 仍有 readiness 缺口`,
-            description:
-              locale === "en"
-                ? "Branding, routing, or support metadata is incomplete. Finish the entry package before enabling production traffic."
-                : "品牌、路由或支援資訊尚未補齊。正式導流前請先完成 entry package。",
-            href: `/partners/${partnerEntry.entrySlug}`,
-          }
-        : null,
-      openIssue
-        ? {
-            id: `issue-${openIssue.issueId}`,
-            tone: "danger" as const,
-            title:
-              locale === "en"
-                ? `${openIssue.issueId} remains open in settlement governance`
-                : `${openIssue.issueId} 仍在結算治理佇列中`,
-            description:
-              locale === "en"
-                ? `Channel ${openIssue.channelKey}. Review owner, evidence, and resolution notes before the next finance close.`
-                : `渠道 ${openIssue.channelKey}。請在下一次財務 close 前確認 owner、證據與 resolution note。`,
-            href: `/payments/reconciliation/${openIssue.issueId}`,
-          }
-        : null,
-    ].filter(Boolean) as GovernanceQueueItem[];
-  }, [locale, snapshot]);
+    const items: GovernanceQueueItem[] = [];
 
-  const recentAudit = snapshot?.audit.slice(0, 5) ?? [];
-  const unresolvedIssueHint =
-    snapshot?.issues
-      .filter((issue) => issue.status !== "resolved")
-      .slice(0, 3)
-      .map((issue) => issue.issueId)
-      .join(", ") || undefined;
+    if (alerts[0]) {
+      items.push({
+        id: `alert-${alerts[0].key}`,
+        tone: alertTone(alerts[0].state),
+        title:
+          locale === "en"
+            ? `Operational alert: ${alerts[0].key}`
+            : `營運告警：${alerts[0].key}`,
+        description:
+          locale === "en"
+            ? `Measured ${alerts[0].measuredValue} at ${formatDateTime(alerts[0].observedAt)}. Review the platform-routed health board before it spills into ops-only handling.`
+            : `${formatDateTime(alerts[0].observedAt)} 量測值 ${alerts[0].measuredValue}。請先在平台端完成判讀，再決定是否交給 ops-only handling。`,
+        href: "/health",
+        resourceLink: {
+          targetApp: "ops-console",
+          route: "/dispatch",
+          resourceType: "dispatch_board",
+          resourceId: "platform",
+          openMode: "new_tab",
+          label:
+            locale === "en"
+              ? "Open ops dispatch board"
+              : "開啟 ops dispatch board",
+        },
+        actions: [
+          {
+            action: "open_health",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open health" : "查看健康頁",
+            href: "/health",
+          },
+          {
+            action: "open_ops_dispatch",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Ops dispatch" : "Ops dispatch",
+            resourceLink: {
+              targetApp: "ops-console",
+              route: "/dispatch",
+              resourceType: "dispatch_board",
+              resourceId: "platform",
+              openMode: "new_tab",
+              label:
+                locale === "en"
+                  ? "Open ops dispatch board"
+                  : "開啟 ops dispatch board",
+            },
+          },
+        ],
+      });
+    }
+
+    if (rollbackTenant) {
+      items.push({
+        id: `tenant-${rollbackTenant.id}`,
+        tone: "warn",
+        title:
+          locale === "en"
+            ? `${rollbackTenant.name} is in rollback hold`
+            : `${rollbackTenant.name} 處於 rollback hold`,
+        description:
+          locale === "en"
+            ? `Rollout stage ${rollbackTenant.rollout.stage}. Verify cutover owner, rollback owner, and onboarding notes before any new promotion.`
+            : `目前 rollout 階段為 ${rollbackTenant.rollout.stage}。推進前請先確認 cutover / rollback owner 與 onboarding 備註。`,
+        href: `/tenants/${rollbackTenant.id}`,
+        resourceLink: {
+          targetApp: "ops-console",
+          route: `/dispatch?tenantId=${encodeURIComponent(rollbackTenant.id)}`,
+          resourceType: "tenant_dispatch_context",
+          resourceId: rollbackTenant.id,
+          openMode: "new_tab",
+          label:
+            locale === "en" ? "Open ops tenant view" : "在 ops 開啟租戶視角",
+        },
+        actions: [
+          {
+            action: "open_tenant",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open tenant" : "查看租戶",
+            href: `/tenants/${rollbackTenant.id}`,
+          },
+          {
+            action: "open_ops_tenant",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Ops tenant view" : "Ops 租戶視角",
+            resourceLink: {
+              targetApp: "ops-console",
+              route: `/dispatch?tenantId=${encodeURIComponent(rollbackTenant.id)}`,
+              resourceType: "tenant_dispatch_context",
+              resourceId: rollbackTenant.id,
+              openMode: "new_tab",
+              label:
+                locale === "en"
+                  ? "Open ops tenant view"
+                  : "在 ops 開啟租戶視角",
+            },
+          },
+        ],
+      });
+    }
+
+    if (partnerEntry) {
+      items.push({
+        id: `partner-${partnerEntry.entrySlug}`,
+        tone: "info",
+        title:
+          locale === "en"
+            ? `${partnerEntry.displayName} still has readiness gaps`
+            : `${partnerEntry.displayName} 仍有 readiness 缺口`,
+        description:
+          locale === "en"
+            ? "Branding, routing, or support metadata is incomplete. Finish the entry package before enabling production traffic."
+            : "品牌、路由或支援資訊尚未補齊。正式導流前請先完成 entry package。",
+        href: `/partners/${partnerEntry.entrySlug}`,
+        actions: [
+          {
+            action: "open_partner",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open partner" : "查看夥伴",
+            href: `/partners/${partnerEntry.entrySlug}`,
+          },
+        ],
+      });
+    }
+
+    if (openIssue) {
+      items.push({
+        id: `issue-${openIssue.issueId}`,
+        tone: "danger",
+        title:
+          locale === "en"
+            ? `${openIssue.issueId} remains open in settlement governance`
+            : `${openIssue.issueId} 仍在結算治理佇列中`,
+        description:
+          locale === "en"
+            ? `Channel ${openIssue.channelKey}. Review owner, evidence, and resolution notes before the next finance close.`
+            : `渠道 ${openIssue.channelKey}。請在下一次財務 close 前確認 owner、evidence 與 resolution note。`,
+        href: "/payments",
+        resourceLink: {
+          targetApp: "ops-console",
+          route: `/revenue?issueId=${encodeURIComponent(openIssue.issueId)}`,
+          resourceType: "reconciliation_issue",
+          resourceId: openIssue.issueId,
+          openMode: "new_tab",
+          label:
+            locale === "en"
+              ? "Open ops revenue mirror"
+              : "開啟 ops revenue mirror",
+        },
+        actions: [
+          {
+            action: "open_payments",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open payments" : "查看結算",
+            href: "/payments",
+          },
+          {
+            action: "open_ops_revenue",
+            enabled: true,
+            riskLevel: "low",
+            label:
+              locale === "en" ? "Ops revenue mirror" : "Ops revenue mirror",
+            resourceLink: {
+              targetApp: "ops-console",
+              route: `/revenue?issueId=${encodeURIComponent(openIssue.issueId)}`,
+              resourceType: "reconciliation_issue",
+              resourceId: openIssue.issueId,
+              openMode: "new_tab",
+              label:
+                locale === "en"
+                  ? "Open ops revenue mirror"
+                  : "開啟 ops revenue mirror",
+            },
+          },
+        ],
+      });
+    }
+
+    return items;
+  }, [locale, sources]);
+
+  const moduleCards = useMemo<ModuleCard[]>(() => {
+    const tenantErrorReason: EmptyReason | null = isPermissionError(
+      sources.tenants.error,
+    )
+      ? "permission_denied"
+      : sources.tenants.error
+        ? "fetch_failed"
+        : sources.tenants.data.length === 0
+          ? "no_data"
+          : null;
+    const partnerErrorReason: EmptyReason | null = isPermissionError(
+      sources.partners.error,
+    )
+      ? "permission_denied"
+      : sources.partners.error
+        ? "fetch_failed"
+        : sources.partners.data.length === 0
+          ? "not_provisioned"
+          : null;
+    const usersErrorReason: EmptyReason | null = isPermissionError(
+      sources.users.error,
+    )
+      ? "permission_denied"
+      : sources.users.error
+        ? "fetch_failed"
+        : sources.users.data.length === 0
+          ? "no_data"
+          : null;
+    const issuesErrorReason: EmptyReason | null = isPermissionError(
+      sources.issues.error,
+    )
+      ? "permission_denied"
+      : sources.issues.error
+        ? "fetch_failed"
+        : sources.issues.data.length === 0
+          ? "no_data"
+          : null;
+    const auditErrorReason: EmptyReason | null = isPermissionError(
+      sources.audit.error,
+    )
+      ? "permission_denied"
+      : sources.audit.error
+        ? "fetch_failed"
+        : sources.audit.data.length === 0
+          ? "no_data"
+          : null;
+    const healthReason: EmptyReason | null = sources.observability.error
+      ? "external_unavailable"
+      : null;
+
+    return [
+      {
+        key: "tenants",
+        section: copy.sections.tenant,
+        href: "/tenants",
+        label: locale === "en" ? "Tenants" : "租戶",
+        note:
+          locale === "en"
+            ? "Lifecycle, modules, rollout, onboarding."
+            : "生命週期、模組、rollout 與 onboarding。",
+        icon: "tenants",
+        metric: String(sources.tenants.data.length),
+        detail:
+          locale === "en"
+            ? `${metrics.pilotTenants} pilot · ${metrics.sandboxTenants} sandbox`
+            : `${metrics.pilotTenants} pilot · ${metrics.sandboxTenants} sandbox`,
+        availableActions: [
+          {
+            action: "open_tenants",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/tenants",
+          },
+          {
+            action: "create_tenant",
+            enabled: true,
+            riskLevel: "medium",
+            label: locale === "en" ? "Create tenant" : "建立租戶",
+            href: "/tenants",
+          },
+        ],
+        emptyState: tenantErrorReason
+          ? {
+              reason: tenantErrorReason,
+              message:
+                sources.tenants.error ??
+                (locale === "en"
+                  ? "No tenant records yet."
+                  : "目前尚無租戶資料。"),
+            }
+          : undefined,
+      },
+      {
+        key: "tenant-governance",
+        section: copy.sections.tenant,
+        href: "/tenant-governance",
+        label: locale === "en" ? "Cross-tenant governance" : "跨租戶治理",
+        note:
+          locale === "en"
+            ? "Quota posture, approvals, cost-center health, governance risk."
+            : "配額態勢、核准流、成本中心健康與治理風險。",
+        icon: "governance",
+        metric: `${metrics.rollbackTenants}`,
+        detail:
+          locale === "en" ? "rollback hold tenants" : "rollback hold 租戶",
+        availableActions: [
+          {
+            action: "open_tenant_governance",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/tenant-governance",
+          },
+        ],
+      },
+      {
+        key: "partners",
+        section: copy.sections.partner,
+        href: "/partners",
+        label: locale === "en" ? "Partner entries" : "合作夥伴",
+        note:
+          locale === "en"
+            ? "Partner entry, credential issuance, readiness, branding."
+            : "合作夥伴 entry、憑證核發、readiness 與 branding。",
+        icon: "partners",
+        metric: String(sources.partners.data.length),
+        detail:
+          locale === "en"
+            ? `${metrics.partnerAttention} need attention`
+            : `${metrics.partnerAttention} 件需關注`,
+        availableActions: [
+          {
+            action: "open_partners",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/partners",
+          },
+          {
+            action: "create_partner",
+            enabled: true,
+            riskLevel: "medium",
+            label: locale === "en" ? "Create entry" : "建立 entry",
+            href: "/partners",
+          },
+        ],
+        emptyState: partnerErrorReason
+          ? {
+              reason: partnerErrorReason,
+              message:
+                sources.partners.error ??
+                (locale === "en"
+                  ? "Provision the first partner entry package before enabling production traffic."
+                  : "正式導流前，先建立第一筆 partner entry package。"),
+              nextAction: {
+                action: "create_partner_entry",
+                enabled: true,
+                riskLevel: "medium",
+                label: locale === "en" ? "Create entry" : "建立 entry",
+                href: "/partners",
+              },
+            }
+          : undefined,
+      },
+      {
+        key: "users",
+        section: copy.sections.peopleFleet,
+        href: "/users",
+        label: locale === "en" ? "Platform staff" : "平台人員",
+        note:
+          locale === "en"
+            ? "Identity governance, role coverage, invite lifecycle."
+            : "身分治理、角色覆蓋與邀請生命週期。",
+        icon: "users",
+        metric: String(sources.users.data.length),
+        detail:
+          locale === "en"
+            ? `${sources.users.data.filter((user) => user.status === "active").length} active`
+            : `${sources.users.data.filter((user) => user.status === "active").length} 啟用中`,
+        availableActions: [
+          {
+            action: "open_users",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/users",
+          },
+        ],
+        emptyState: usersErrorReason
+          ? {
+              reason: usersErrorReason,
+              message:
+                sources.users.error ??
+                (locale === "en"
+                  ? "No platform staff records yet."
+                  : "目前尚無平台人員資料。"),
+            }
+          : undefined,
+      },
+      {
+        key: "fleet",
+        section: copy.sections.peopleFleet,
+        href: "/fleet",
+        label: locale === "en" ? "Fleet & compliance" : "車隊與法遵",
+        note:
+          locale === "en"
+            ? "Vehicles, drivers, contracts, exclusivity, offboarding."
+            : "車輛、司機、合約、exclusivity 與 offboarding。",
+        icon: "fleet",
+        metric: String(metrics.activeDrivers),
+        detail:
+          locale === "en"
+            ? `${metrics.staleDrivers} stale location drivers`
+            : `${metrics.staleDrivers} 名 stale location 司機`,
+        availableActions: [
+          {
+            action: "open_fleet",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/fleet",
+          },
+        ],
+      },
+      {
+        key: "switchboard",
+        section: copy.sections.commerce,
+        href: "/switchboard",
+        label: locale === "en" ? "Public info & placards" : "公開資訊與牌貼",
+        note:
+          locale === "en"
+            ? "Public disclosures, placard generation, route-facing notices."
+            : "公開資訊、牌貼產生與對外公告。",
+        icon: "switchboard",
+        availableActions: [
+          {
+            action: "open_switchboard",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/switchboard",
+          },
+        ],
+      },
+      {
+        key: "pricing",
+        section: copy.sections.commerce,
+        href: "/pricing",
+        label: locale === "en" ? "Pricing" : "費率治理",
+        note:
+          locale === "en"
+            ? "Pricing rules, fee plans, subsidy rules, publish history."
+            : "費率規則、費用方案、補貼規則與發佈歷程。",
+        icon: "pricing",
+        availableActions: [
+          {
+            action: "open_pricing",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/pricing",
+          },
+          {
+            action: "publish_pricing",
+            enabled: false,
+            disabledReasonCode: "publish_from_pricing_workspace",
+            requiresReason: true,
+            riskLevel: "high",
+            label: locale === "en" ? "Publish rule" : "發佈規則",
+            href: "/pricing",
+          },
+        ],
+      },
+      {
+        key: "payments",
+        section: copy.sections.commerce,
+        href: "/payments",
+        label: locale === "en" ? "Settlement governance" : "結算與帳務",
+        note:
+          locale === "en"
+            ? "Invoices, driver statements, reconciliation issues, reimbursements."
+            : "租戶發票、司機對帳單、對帳議題與代墊批次。",
+        icon: "payments",
+        metric: String(metrics.pendingReconciliation),
+        detail:
+          locale === "en"
+            ? `${sources.issues.data.length} total issues`
+            : `${sources.issues.data.length} 筆議題`,
+        availableActions: [
+          {
+            action: "open_payments",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/payments",
+          },
+          {
+            action: "open_reimbursements",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Reimbursements" : "代墊批次",
+            href: "/payments/reimbursements",
+          },
+        ],
+        emptyState: issuesErrorReason
+          ? {
+              reason: issuesErrorReason,
+              message:
+                sources.issues.error ??
+                (locale === "en"
+                  ? "No reconciliation issues are currently routed here."
+                  : "目前沒有路由到此處的對帳議題。"),
+            }
+          : undefined,
+      },
+      {
+        key: "adapter-registry",
+        section: copy.sections.commerce,
+        href: "/adapter-registry",
+        label: locale === "en" ? "Adapter registry" : "平台 Adapter",
+        note:
+          locale === "en"
+            ? "External platform adapters, credentials, production pause controls."
+            : "外部平台 adapter、憑證與 production pause control。",
+        icon: "adapters",
+        availableActions: [
+          {
+            action: "open_adapters",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/adapter-registry",
+          },
+          {
+            action: "open_ops_forwarded_board",
+            enabled: true,
+            riskLevel: "low",
+            label:
+              locale === "en" ? "Ops forwarded board" : "Ops forwarded board",
+            resourceLink: {
+              targetApp: "ops-console",
+              route: "/dispatch",
+              resourceType: "forwarded_dispatch_board",
+              resourceId: "platform",
+              openMode: "new_tab",
+              label:
+                locale === "en"
+                  ? "Open ops forwarded board"
+                  : "開啟 ops forwarded board",
+            },
+          },
+        ],
+      },
+      {
+        key: "health",
+        section: copy.sections.opsRisk,
+        href: "/health",
+        label: locale === "en" ? "Platform health" : "平台健康",
+        note:
+          locale === "en"
+            ? "Platform alerts, dispatch lag, webhook queue, adapter health."
+            : "平台告警、dispatch lag、webhook queue 與 adapter health。",
+        icon: "health",
+        metric: String(metrics.criticalAlerts),
+        detail:
+          locale === "en" ? "critical platform alerts" : "平台 critical alerts",
+        availableActions: [
+          {
+            action: "open_health",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/health",
+          },
+        ],
+        emptyState: healthReason
+          ? {
+              reason: healthReason,
+              message:
+                sources.observability.error ??
+                (locale === "en"
+                  ? "The observability source did not return a usable snapshot."
+                  : "observability 來源未回傳可用快照。"),
+            }
+          : undefined,
+      },
+      {
+        key: "notices",
+        section: copy.sections.opsRisk,
+        href: "/notices",
+        label: locale === "en" ? "Notices & maintenance" : "公告與維護",
+        note:
+          locale === "en"
+            ? "Critical notices, maintenance mode, broadcast history."
+            : "critical notice、maintenance mode 與廣播歷史。",
+        icon: "notices",
+        availableActions: [
+          {
+            action: "open_notices",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/notices",
+          },
+          {
+            action: "create_notice",
+            enabled: true,
+            riskLevel: "medium",
+            label: locale === "en" ? "Create notice" : "建立公告",
+            href: "/notices",
+          },
+        ],
+      },
+      {
+        key: "audit",
+        section: copy.sections.opsRisk,
+        href: "/audit",
+        label: locale === "en" ? "Audit & evidence" : "稽核與證據",
+        note:
+          locale === "en"
+            ? "Audit log, legal hold, deletion exception visibility."
+            : "稽核日誌、legal hold 與 deletion exception 檢視。",
+        icon: "audit",
+        metric: String(sources.audit.data.length),
+        detail: locale === "en" ? "recent records" : "近期紀錄",
+        availableActions: [
+          {
+            action: "open_audit",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/audit",
+          },
+          {
+            action: "open_cross_app_audit",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Ops audit" : "Ops audit",
+            resourceLink: {
+              targetApp: "ops-console",
+              route: "/audit",
+              resourceType: "audit_log",
+              resourceId: "platform",
+              openMode: "new_tab",
+              label: locale === "en" ? "Open ops audit" : "開啟 ops audit",
+            },
+          },
+        ],
+        emptyState: auditErrorReason
+          ? {
+              reason: auditErrorReason,
+              message:
+                sources.audit.error ??
+                (locale === "en"
+                  ? "No audit records were returned in the last 24 hours."
+                  : "最近 24 小時沒有稽核紀錄。"),
+            }
+          : undefined,
+      },
+      {
+        key: "feature-flags",
+        section: copy.sections.opsRisk,
+        href: "/feature-flags",
+        label: locale === "en" ? "Feature flags" : "功能旗標",
+        note:
+          locale === "en"
+            ? "Platform write authority for rollout switches."
+            : "rollout switch 的平台寫入權限。",
+        icon: "flags",
+        availableActions: [
+          {
+            action: "open_feature_flags",
+            enabled: true,
+            riskLevel: "low",
+            label: locale === "en" ? "Open" : "查看",
+            href: "/feature-flags",
+          },
+        ],
+      },
+    ] as ModuleCard[];
+  }, [copy.sections, locale, metrics, sources]);
+
+  const filteredModules = useMemo(() => {
+    if (!moduleQuery.trim()) {
+      return moduleCards;
+    }
+
+    const query = moduleQuery.trim().toLowerCase();
+
+    return moduleCards.filter((card) => {
+      return [card.label, card.note, card.href, card.section].some((value) =>
+        value.toLowerCase().includes(query),
+      );
+    });
+  }, [moduleCards, moduleQuery]);
+
+  const groupedModules = useMemo(() => {
+    const groups = new Map<string, ModuleCard[]>();
+
+    for (const card of filteredModules) {
+      const current = groups.get(card.section) ?? [];
+      current.push(card);
+      groups.set(card.section, current);
+    }
+
+    return Array.from(groups.entries());
+  }, [filteredModules]);
+
+  const recentAudit = useMemo<AuditTableRow[]>(
+    () =>
+      sources.audit.data.slice(0, 5).map((record) => ({
+        auditId: record.auditId,
+        createdAt: record.createdAt,
+        module: record.moduleName,
+        action: record.actionName,
+        actorId: record.actorId,
+        actorType: record.actorType,
+        tenantId: record.tenantId,
+        requestId: record.requestId,
+      })),
+    [sources.audit.data],
+  );
+  const workspaceLinks = useMemo(() => {
+    const links = new Map<string, HomeAction>();
+
+    for (const item of governanceQueue) {
+      if (item.resourceLink) {
+        links.set(item.resourceLink.route, {
+          action: `link-${item.resourceLink.resourceId}`,
+          enabled: true,
+          riskLevel: "low",
+          label: item.resourceLink.label,
+          resourceLink: item.resourceLink,
+        });
+      }
+    }
+
+    for (const card of moduleCards) {
+      for (const action of card.availableActions) {
+        if (action.resourceLink) {
+          links.set(action.resourceLink.route, action);
+        }
+      }
+    }
+
+    return Array.from(links.values());
+  }, [governanceQueue, moduleCards]);
   const governanceItemCount =
     governanceQueue.length + metrics.rollbackTenants + metrics.criticalAlerts;
-  const showLoadingState = loading && !snapshot;
-  const queueBadgeTone = queueTone(governanceQueue);
+  const showDegradedBanner =
+    refresh.dataFreshness === "degraded" || metrics.criticalAlerts > 0;
+  const showLoadingState = loading && !lastLoadedAt;
 
   const auditColumns: CanvasTableColumn<AuditTableRow>[] = [
     {
@@ -519,272 +1796,389 @@ export default function HomePage() {
     },
     {
       h: copy.auditModule,
-      w: 140,
-      r: (row) => row.moduleName,
+      w: 120,
+      mono: true,
+      r: (row) => row.module,
     },
     {
-      h: copy.auditAction,
-      w: 180,
+      h: copy.auditActionLabel,
+      w: 170,
       mono: true,
-      r: (row) => row.actionName,
+      r: (row) => row.action,
     },
     {
       h: copy.auditActor,
       r: (row) => (
         <div style={actorCellStyle}>
-          <span style={actorPrimaryStyle}>{row.actorId ?? "system"}</span>
-          <span style={actorMetaStyle}>{row.actorType}</span>
-          {row.tenantId ? (
-            <span style={actorMetaStyle}>{row.tenantId}</span>
-          ) : null}
+          <span style={actorPrimaryStyle}>{row.actorId}</span>
+          <span style={actorMetaStyle}>
+            {row.actorType}
+            {row.tenantId ? ` · ${row.tenantId}` : ""}
+          </span>
         </div>
       ),
     },
     {
       h: copy.auditRequest,
-      w: 180,
+      w: 160,
       mono: true,
       r: (row) => row.requestId,
     },
   ];
 
   return (
-    <div>
+    <CanvasShell
+      theme={theme}
+      nav={buildPlatformNav(locale)}
+      active="home"
+      currentPath="/"
+      brandLabel={locale === "en" ? "DRTS" : "DRTS"}
+      brandSubLabel={locale === "en" ? "PLATFORM ADMIN" : "PLATFORM ADMIN"}
+      breadcrumb={[copy.title]}
+      env="production"
+      versionLabel="canvas"
+      searchPlaceholder={copy.searchPlaceholder}
+      avatarLabel={locale === "en" ? "PA" : "平台"}
+      style={shellStyle}
+    >
       <CanvasPageHeader
-        theme={th}
-        sticky={false}
+        theme={theme}
         title={copy.title}
         subtitle={copy.subtitle(governanceItemCount)}
         actions={
           <CanvasBtn
-            theme={th}
-            variant="secondary"
-            size="sm"
-            onClick={() => void loadSnapshot()}
+            theme={theme}
+            icon="arrow"
+            onClick={() => void loadSnapshot("manual")}
           >
-            {loading && snapshot ? copy.refreshing : copy.refresh}
+            {refreshing ? copy.refreshing : copy.refresh}
           </CanvasBtn>
         }
       />
 
       <div style={pageBodyStyle}>
-        {error ? (
+        {showLoadingState ? (
+          <CanvasCard theme={theme} title={copy.title} subtitle={copy.loading}>
+            <div style={moduleDetailStyle}>{copy.loading}</div>
+          </CanvasCard>
+        ) : null}
+
+        {showDegradedBanner ? (
           <CanvasBanner
-            theme={th}
-            tone="danger"
-            icon="warn"
-            title={copy.loadErrorTitle}
-            body={error}
+            theme={theme}
+            tone={metrics.criticalAlerts > 0 ? "danger" : "warn"}
+            title={
+              locale === "en"
+                ? "Platform home is showing a degraded snapshot"
+                : "平台首頁目前顯示降級快照"
+            }
+            body={
+              locale === "en"
+                ? `${errorCount} source(s) reported errors or critical health alerts. Review /health and /audit before acting on stale data.`
+                : `${errorCount} 個來源回報錯誤或 critical health alert。操作前請先查看 /health 與 /audit。`
+            }
           />
         ) : null}
 
-        {showLoadingState ? (
-          <CanvasCard theme={th}>
-            <div style={emptyStateStyle}>{copy.loading}</div>
-          </CanvasCard>
-        ) : snapshot ? (
-          <>
-            <div style={kpiGridStyle}>
-              <CanvasKPI
-                theme={th}
-                label={copy.kpiTenants}
-                value={metrics.activeTenants}
-                sub={
-                  locale === "en"
-                    ? `${metrics.pilotTenants} in pilot · ${metrics.sandboxTenants} in sandbox`
-                    : `${metrics.pilotTenants} 在 pilot · ${metrics.sandboxTenants} 在 sandbox`
-                }
-                delta={
-                  metrics.rollbackTenants > 0
-                    ? locale === "en"
-                      ? `${metrics.rollbackTenants} hold`
-                      : `${metrics.rollbackTenants} hold`
-                    : undefined
-                }
-                deltaTone={metrics.rollbackTenants > 0 ? "down" : "neutral"}
-              />
-              <CanvasKPI
-                theme={th}
-                label={copy.kpiPartners}
-                value={metrics.partnerEntries}
-                sub={
-                  locale === "en"
-                    ? "Readiness and credential package coverage"
-                    : "readiness 與憑證包覆蓋"
-                }
-                delta={
-                  locale === "en"
-                    ? `${metrics.partnerAttention} pending follow-up`
-                    : `${metrics.partnerAttention} 筆待補`
-                }
-                deltaTone={metrics.partnerAttention > 0 ? "neutral" : "up"}
-              />
-              <CanvasKPI
-                theme={th}
-                label={copy.kpiDrivers}
-                value={metrics.driverEligible}
-                sub={
-                  locale === "en"
-                    ? "Dispatch-eligible drivers in current observability snapshot"
-                    : "當前 observability 快照中的可派司機"
-                }
-                delta={
-                  metrics.staleDrivers > 0
-                    ? locale === "en"
-                      ? `${metrics.staleDrivers} stale`
-                      : `${metrics.staleDrivers} 筆 stale`
-                    : locale === "en"
-                      ? "healthy"
-                      : "穩定"
-                }
-                deltaTone={metrics.staleDrivers > 0 ? "down" : "up"}
-              />
-              <CanvasKPI
-                theme={th}
-                label={copy.kpiRecon}
-                value={metrics.openIssues}
-                sub={
-                  locale === "en"
-                    ? `${metrics.criticalAlerts} critical platform alert(s)`
-                    : `${metrics.criticalAlerts} 筆重大平台告警`
-                }
-                hint={
-                  unresolvedIssueHint ??
-                  (locale === "en" ? "no open issue ids" : "目前無待處理 issue")
-                }
-              />
+        <div style={kpiGridStyle}>
+          <CanvasKPI
+            theme={theme}
+            label={copy.kpiTenants}
+            value={String(metrics.activeTenants)}
+            delta={`${metrics.pilotTenants} pilot · ${metrics.sandboxTenants} sandbox`}
+            sub={`${metrics.rollbackTenants} rollback hold`}
+          />
+          <CanvasKPI
+            theme={theme}
+            label={copy.kpiPartners}
+            value={String(metrics.partnerEntries)}
+            delta={`${metrics.partnerAttention} attention`}
+            sub={
+              locale === "en"
+                ? "entry readiness + credentials"
+                : "entry readiness + credentials"
+            }
+          />
+          <CanvasKPI
+            theme={theme}
+            label={copy.kpiDrivers}
+            value={String(metrics.activeDrivers)}
+            delta={`${metrics.staleDrivers} stale`}
+            sub={
+              locale === "en"
+                ? "dispatch-eligible from observability"
+                : "來自 observability 的 dispatch-eligible"
+            }
+          />
+          <CanvasKPI
+            theme={theme}
+            label={copy.kpiRecon}
+            value={String(metrics.pendingReconciliation)}
+            delta={`${sources.issues.data.length} total`}
+            sub={
+              locale === "en"
+                ? "platform-owned reconciliation queue"
+                : "平台持有的 reconciliation queue"
+            }
+          />
+        </div>
+
+        <div style={splitGridStyle}>
+          <CanvasCard
+            theme={theme}
+            title={copy.queueTitle}
+            subtitle={copy.queueSubtitle}
+            actions={
+              <CanvasBtn
+                theme={theme}
+                variant="ghost"
+                onClick={() => router.push("/health")}
+              >
+                {copy.queueAll}
+              </CanvasBtn>
+            }
+          >
+            <div style={queueStackStyle}>
+              {governanceQueue.length === 0 ? (
+                <div style={inlineEmptyStateStyle}>
+                  <CanvasPill theme={theme} tone="info" dot>
+                    {locale === "en" ? "No blockers" : "目前無阻塞"}
+                  </CanvasPill>
+                  <div style={moduleDetailStyle}>{copy.noQueue}</div>
+                </div>
+              ) : (
+                governanceQueue.map((item) => (
+                  <CanvasBanner
+                    key={item.id}
+                    theme={theme}
+                    tone={item.tone}
+                    title={item.title}
+                    body={item.description}
+                    actions={renderActionButtons(locale, item.actions, router)}
+                  />
+                ))
+              )}
             </div>
+          </CanvasCard>
 
-            <div style={sectionSplitStyle}>
-              <div style={sectionMainStyle}>
-                <CanvasCard
-                  theme={th}
-                  title={
-                    <div style={sectionTitleStyle}>
-                      <span>{copy.todayTitle}</span>
-                      <CanvasPill theme={th} tone={queueBadgeTone}>
-                        {copy.queueCount(governanceQueue.length)}
-                      </CanvasPill>
-                    </div>
-                  }
-                  subtitle={copy.todaySubtitle}
-                  actions={
-                    <CanvasBtn
-                      theme={th}
-                      variant="ghost"
-                      size="sm"
-                      icon="ext"
-                      onClick={() => router.push("/health")}
-                    >
-                      {copy.openAll}
-                    </CanvasBtn>
-                  }
-                >
-                  <div style={bannerStackStyle}>
-                    {governanceQueue.length > 0 ? (
-                      governanceQueue.map((item, index) => (
-                        <CanvasBanner
-                          key={item.id}
-                          theme={th}
-                          tone={item.tone}
-                          icon="warn"
-                          title={item.title}
-                          body={item.description}
-                          actions={
-                            <CanvasBtn
-                              theme={th}
-                              variant={index === 0 ? "primary" : "secondary"}
-                              size="sm"
-                              onClick={() => router.push(item.href)}
-                            >
-                              {copy.viewRoute}
-                            </CanvasBtn>
-                          }
-                        />
-                      ))
-                    ) : (
-                      <div style={emptyStateStyle}>{copy.noTodos}</div>
-                    )}
-                  </div>
-                </CanvasCard>
+          <CanvasCard
+            theme={theme}
+            title={copy.workspaceTitle}
+            subtitle={copy.workspaceSubtitle}
+          >
+            <div style={statusGridStyle}>
+              <div style={statusRowStyle}>
+                <span>{copy.refreshTier}</span>
+                <CanvasPill theme={theme} tone="accent">
+                  {formatRefreshTier(locale, HOME_REFRESH_TIER)}
+                </CanvasPill>
               </div>
-
-              <div style={sectionSideStyle}>
-                <CanvasCard
-                  theme={th}
-                  title={copy.quickLinksTitle}
-                  subtitle={copy.quickLinksSubtitle}
+              <div style={statusRowStyle}>
+                <span>{copy.healthState}</span>
+                <CanvasPill
+                  theme={theme}
+                  tone={toneForEmptyReason(
+                    refresh.dataFreshness === "degraded"
+                      ? "fetch_failed"
+                      : refresh.dataFreshness === "stale"
+                        ? "filtered_empty"
+                        : "no_data",
+                  )}
                 >
-                  <div style={quickLinkGridStyle}>
-                    {copy.routes.map((route) => (
-                      <Link
-                        key={route.href}
-                        href={route.href}
-                        style={quickLinkStyle}
+                  {formatHealthStatus(locale, refresh)}
+                </CanvasPill>
+              </div>
+              <div style={statusRowStyle}>
+                <span>{copy.routeCoverage}</span>
+                <span style={actorPrimaryStyle}>{copy.routeCoverageValue}</span>
+              </div>
+              <div style={statusRowStyle}>
+                <span>{copy.crossApp}</span>
+                <span style={actorPrimaryStyle}>{copy.crossAppValue}</span>
+              </div>
+              <div style={statusRowStyle}>
+                <span>{copy.lastGenerated}</span>
+                <span style={actorMetaStyle}>
+                  {formatDateTime(refresh.generatedAt)}
+                </span>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <span style={actorPrimaryStyle}>
+                  {copy.workspaceLinksTitle}
+                </span>
+                <div style={workspaceLinkStackStyle}>
+                  {workspaceLinks.slice(0, 4).map((action) => (
+                    <button
+                      key={action.action}
+                      type="button"
+                      onClick={() => openAction(router, action)}
+                      style={{
+                        ...workspaceLinkStyle,
+                        cursor: action.enabled ? "pointer" : "not-allowed",
+                        textAlign: "left",
+                        color: theme.text,
+                        fontFamily: theme.fontFamily,
+                      }}
+                    >
+                      <span style={inlineEmptyStateTitleStyle}>
+                        {action.label}
+                      </span>
+                      <span style={inlineEmptyStateHintStyle}>
+                        {action.resourceLink?.route ?? action.href}
+                        {action.resourceLink?.openMode === "new_tab"
+                          ? ` · ${copy.showNewTab}`
+                          : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </CanvasCard>
+        </div>
+
+        <CanvasCard
+          theme={theme}
+          title={copy.routesTitle}
+          subtitle={copy.routesSubtitle}
+        >
+          <div style={moduleToolbarStyle}>
+            <input
+              value={moduleQuery}
+              onChange={(event) => setModuleQuery(event.target.value)}
+              placeholder={copy.searchPlaceholder}
+              style={inputStyle}
+            />
+            <CanvasPill
+              theme={theme}
+              tone={
+                filteredModules.length === moduleCards.length
+                  ? "neutral"
+                  : "accent"
+              }
+            >
+              {filteredModules.length}/{moduleCards.length}
+            </CanvasPill>
+          </div>
+
+          {groupedModules.length === 0 ? (
+            renderEmptyState(
+              locale,
+              {
+                reason: "filtered_empty",
+                message: copy.filteredEmpty,
+              },
+              (action) => openAction(router, action),
+              () => setModuleQuery(""),
+            )
+          ) : (
+            <div style={moduleSectionStyle}>
+              {groupedModules.map(([section, cards]) => (
+                <div key={section} style={moduleSectionStyle}>
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  >
+                    <CanvasPill theme={theme} tone="neutral">
+                      {section}
+                    </CanvasPill>
+                  </div>
+                  <div style={moduleCardGridStyle}>
+                    {cards.map((card) => (
+                      <CanvasCard
+                        key={card.key}
+                        theme={theme}
+                        title={
+                          <Link
+                            href={card.href}
+                            style={{
+                              color: theme.text,
+                              textDecoration: "none",
+                            }}
+                          >
+                            {card.label}
+                          </Link>
+                        }
+                        subtitle={card.note}
                       >
-                        <span style={quickLinkIconStyle}>
-                          <CanvasIcon name={route.icon} size={14} />
-                        </span>
-                        <span style={quickLinkTextStyle}>
-                          <strong style={{ fontSize: 12.5 }}>
-                            {route.label}
-                          </strong>
-                          <span style={{ color: th.textMuted, fontSize: 11.5 }}>
-                            {route.note}
-                          </span>
-                        </span>
-                        <CanvasIcon
-                          name="chevR"
-                          size={12}
-                          style={{ color: th.textDim, flexShrink: 0 }}
-                        />
-                      </Link>
+                        <div style={moduleSectionStyle}>
+                          <div style={moduleHeaderStyle}>
+                            <div style={moduleIconStyle}>
+                              <CanvasIcon name={card.icon} />
+                            </div>
+                            <div style={moduleMetaStyle}>
+                              {card.metric ? (
+                                <span style={moduleMetricStyle}>
+                                  {card.metric}
+                                </span>
+                              ) : null}
+                              {card.detail ? (
+                                <span style={moduleDetailStyle}>
+                                  {card.detail}
+                                </span>
+                              ) : null}
+                              <span style={actorMetaStyle}>{card.href}</span>
+                            </div>
+                          </div>
+
+                          {renderEmptyState(locale, card.emptyState, (action) =>
+                            openAction(router, action),
+                          )}
+
+                          {renderActionButtons(
+                            locale,
+                            card.availableActions,
+                            router,
+                          )}
+                        </div>
+                      </CanvasCard>
                     ))}
                   </div>
-                </CanvasCard>
-              </div>
-            </div>
-
-            <CanvasCard
-              theme={th}
-              title={
-                <div style={sectionTitleStyle}>
-                  <span>{copy.recentTitle}</span>
-                  <CanvasPill theme={th} tone="accent">
-                    24h
-                  </CanvasPill>
                 </div>
-              }
-              subtitle={copy.recentSubtitle}
-              actions={
-                <CanvasBtn
-                  theme={th}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => router.push("/audit")}
-                >
-                  {copy.openAudit}
-                </CanvasBtn>
-              }
-              padding={0}
+              ))}
+            </div>
+          )}
+        </CanvasCard>
+
+        <CanvasCard
+          theme={theme}
+          title={copy.auditTitle}
+          subtitle={copy.auditSubtitle}
+          actions={
+            <CanvasBtn
+              theme={theme}
+              variant="ghost"
+              onClick={() => router.push("/audit")}
             >
-              {recentAudit.length > 0 ? (
-                <CanvasTable<AuditTableRow>
-                  theme={th}
-                  columns={auditColumns}
-                  rows={recentAudit as AuditTableRow[]}
-                />
-              ) : (
-                <div style={emptyStateStyle}>{copy.noAudit}</div>
-              )}
-            </CanvasCard>
-          </>
-        ) : (
-          <CanvasCard theme={th}>
-            <div style={emptyStateStyle}>{copy.noSnapshot}</div>
-          </CanvasCard>
-        )}
+              {copy.auditAction}
+            </CanvasBtn>
+          }
+        >
+          {recentAudit.length === 0 ? (
+            renderEmptyState(
+              locale,
+              {
+                reason: sources.audit.error
+                  ? isPermissionError(sources.audit.error)
+                    ? "permission_denied"
+                    : "fetch_failed"
+                  : "no_data",
+                message:
+                  sources.audit.error ??
+                  (locale === "en"
+                    ? "No audit records were returned for the last 24 hours."
+                    : "最近 24 小時沒有回傳稽核紀錄。"),
+              },
+              (action) => openAction(router, action),
+            )
+          ) : (
+            <CanvasTable
+              theme={theme}
+              columns={auditColumns}
+              rows={recentAudit}
+            />
+          )}
+        </CanvasCard>
       </div>
-    </div>
+    </CanvasShell>
   );
 }
