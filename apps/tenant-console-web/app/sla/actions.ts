@@ -67,6 +67,7 @@ export async function updateTenantSlaProfileAction(
   revalidatePath("/sla");
   revalidatePath("/settings");
   revalidatePath("/audit");
+  revalidatePath("/integration-governance");
 
   return receipt;
 }
@@ -85,6 +86,7 @@ export async function recalculateTenantSlaBookingsAction(
 
   revalidatePath("/sla");
   revalidatePath("/audit");
+  revalidatePath("/integration-governance");
 
   return receipt;
 }

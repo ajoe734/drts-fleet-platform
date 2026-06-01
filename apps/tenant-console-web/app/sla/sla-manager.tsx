@@ -40,6 +40,11 @@ type CrossAppLinkItem = {
 
 type SlaActionKey = "update_sla_profile" | "recalculate_sla_bookings";
 
+type ActionReceiptState = {
+  actionKey: SlaActionKey;
+  receipt: ActionReceipt;
+};
+
 type EmptyStateConfig = {
   reason: TenantSlaEmptyReason;
   title: string;
@@ -417,6 +422,30 @@ function formatUpdatedByLine(
   return updatedBy ? `${dateLabel} · ${updatedBy}` : dateLabel;
 }
 
+function getRecalculationStatus(
+  receiptState: ActionReceiptState | null,
+  lastRecalculationAt: string | null,
+) {
+  const receipt =
+    receiptState?.actionKey === "recalculate_sla_bookings"
+      ? receiptState.receipt
+      : null;
+
+  if (receipt?.actionId && receipt.resourceType === "tenant_sla") {
+    if (receipt.status === "accepted") {
+      return "queued";
+    }
+    if (receipt.status === "completed") {
+      return "completed";
+    }
+    if (receipt.status === "failed") {
+      return "failed";
+    }
+  }
+
+  return lastRecalculationAt ? "history" : "idle";
+}
+
 function getActiveEmptyState(
   previewEmptyReason: TenantSlaEmptyReason | null,
   emptyState: EmptyStateEnvelope | null,
@@ -558,7 +587,9 @@ export function SlaManager({
     null,
   );
   const [pendingReason, setPendingReason] = useState("");
-  const [receipt, setReceipt] = useState<ActionReceipt | null>(null);
+  const [receiptState, setReceiptState] = useState<ActionReceiptState | null>(
+    null,
+  );
   const [actionError, setActionError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -589,6 +620,10 @@ export function SlaManager({
         ? recalcAction
         : null;
   const pendingActionPrompt = buildActionPrompt(pendingAction);
+  const recalculationStatus = getRecalculationStatus(
+    receiptState,
+    lastRecalculationAt,
+  );
   const attainmentUnavailableLabel =
     profile && !activeEmptyState ? "待 SLA attainment read model" : "—";
   const attainmentItems = [
@@ -619,7 +654,12 @@ export function SlaManager({
     },
     {
       k: "updatedAt",
-      v: formatUpdatedByLine(profile?.updatedAt, updatedBy),
+      v: formatDateTime(profile?.updatedAt),
+      mono: true,
+    },
+    {
+      k: "updatedBy",
+      v: updatedBy ?? "—",
       mono: true,
     },
   ];
@@ -672,13 +712,13 @@ export function SlaManager({
           ? "更新 SLA profile 前必須填寫變更原因。"
           : "重算既有訂單前必須填寫操作原因。",
       );
-      setReceipt(null);
+      setReceiptState(null);
       return;
     }
 
     startTransition(async () => {
       setActionError(null);
-      setReceipt(null);
+      setReceiptState(null);
       try {
         const nextReceipt =
           actionKey === "update_sla_profile"
@@ -715,7 +755,7 @@ export function SlaManager({
                 });
               })()
             : await recalculateTenantSlaBookingsAction(reason.trim());
-        setReceipt(nextReceipt);
+        setReceiptState({ actionKey, receipt: nextReceipt });
         setPendingActionKey(null);
         setPendingReason("");
         router.refresh();
@@ -865,38 +905,63 @@ export function SlaManager({
           />
         ) : null}
 
-        {receipt ? (
+        {receiptState ? (
           <CanvasCard theme={th} title="Action receipt">
             <CanvasBanner
               theme={th}
-              tone={getReceiptTone(receipt)}
-              title={`status · ${receipt.status}`}
-              body={receipt.message}
+              tone={getReceiptTone(receiptState.receipt)}
+              title={`status · ${receiptState.receipt.status}`}
+              body={receiptState.receipt.message}
             />
             <div style={{ height: 12 }} />
             <CanvasDL
               theme={th}
               cols={1}
               items={[
-                { k: "status", v: receipt.status, mono: true },
-                { k: "actionId", v: receipt.actionId, mono: true },
-                { k: "auditId", v: receipt.auditId, mono: true },
-                { k: "resource", v: receipt.resourceId, mono: true },
+                {
+                  k: "status",
+                  v: receiptState.receipt.status,
+                  mono: true,
+                },
+                { k: "action", v: receiptState.actionKey, mono: true },
+                {
+                  k: "actionId",
+                  v: receiptState.receipt.actionId,
+                  mono: true,
+                },
+                {
+                  k: "auditId",
+                  v: receiptState.receipt.auditId,
+                  mono: true,
+                },
+                {
+                  k: "resource",
+                  v: receiptState.receipt.resourceId,
+                  mono: true,
+                },
               ]}
             />
             <div style={{ height: 12 }} />
-            <Link href={buildAuditHref(receipt)} style={linkStyle}>
+            <Link href={buildAuditHref(receiptState.receipt)} style={linkStyle}>
               查看對應 audit →
             </Link>
           </CanvasCard>
         ) : null}
 
-        {lastRecalculationAt ? (
+        {lastRecalculationAt || recalculationStatus === "queued" ? (
           <CanvasBanner
             theme={th}
-            tone="info"
-            title="最近一次既有訂單重算請求"
-            body={`最近一次重算請求於 ${formatDateTime(lastRecalculationAt)} 送出。既有訂單會保留建立時 snapshot，直到該次重算將新的 SLA profile 套用完成。`}
+            tone={recalculationStatus === "queued" ? "warn" : "info"}
+            title={
+              recalculationStatus === "queued"
+                ? "既有訂單 SLA 重算已排入佇列"
+                : "最近一次既有訂單重算請求"
+            }
+            body={
+              recalculationStatus === "queued"
+                ? `本次重算請求已 accepted，auditId=${receiptState?.receipt.auditId ?? "—"}。既有訂單在背景重算完成前，仍保留建立時 snapshot。`
+                : `最近一次重算請求於 ${formatDateTime(lastRecalculationAt)} 送出。既有訂單會保留建立時 snapshot，直到該次重算將新的 SLA profile 套用完成。`
+            }
           />
         ) : null}
 
@@ -1084,6 +1149,16 @@ export function SlaManager({
                       <div style={summaryValueStyle}>
                         {profile ? "configured" : (emptyState?.reason ?? "—")}
                       </div>
+                    </div>
+                    <div>
+                      <div style={summaryLabelStyle}>provenance</div>
+                      <div style={summaryValueStyle}>
+                        {formatUpdatedByLine(profile?.updatedAt, updatedBy)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={summaryLabelStyle}>recalculation state</div>
+                      <div style={summaryValueStyle}>{recalculationStatus}</div>
                     </div>
                     <div>
                       <div style={summaryLabelStyle}>last recalculation</div>
