@@ -31,7 +31,11 @@ import { disableCostCenterAction, upsertCostCenterAction } from "./actions";
 import type { CostCenterFlashPayload } from "./constants";
 
 type CostCentersManagerProps = {
-  costCenters: TenantCostCenterRecord[];
+  costCenters: Array<
+    TenantCostCenterRecord & {
+      availableActions?: ResourceActionDescriptor[];
+    }
+  >;
   quotaSummariesByCode: Partial<Record<string, TenantCostCenterQuotaSummary>>;
   approvalRules: TenantApprovalRuleRecord[];
   users: TenantUserRoleRecord[];
@@ -322,6 +326,14 @@ const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
 });
 
 const numberFormatter = new Intl.NumberFormat("en-US");
+const T5_REFRESH_INTERVAL_MS = 30_000;
+
+function getRefreshMetaLabel(lastRefreshAt: string | null) {
+  if (!lastRefreshAt) {
+    return "自動輪詢每 30 秒一次";
+  }
+  return `自動輪詢每 30 秒一次 · 最近請求 ${formatDateTime(lastRefreshAt)}`;
+}
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "—";
@@ -555,16 +567,13 @@ function buildTopLevelAction(): CostCenterAction {
   };
 }
 
-function buildRowActions(
+function buildFallbackRowActions(
   costCenter: TenantCostCenterRecord,
-): CostCenterAction[] {
-  const updateAction: CostCenterAction = {
+): ResourceActionDescriptor[] {
+  const updateAction: ResourceActionDescriptor = {
     action: "update",
     enabled: true,
     riskLevel: "medium",
-    label: "更新",
-    intent: "update",
-    code: costCenter.code,
   };
 
   if (costCenter.activeFlag) {
@@ -575,9 +584,6 @@ function buildRowActions(
         enabled: true,
         riskLevel: "high",
         requiresReason: true,
-        label: "停用",
-        intent: "disable",
-        code: costCenter.code,
       },
     ];
   }
@@ -588,11 +594,91 @@ function buildRowActions(
       action: "reactivate",
       enabled: true,
       riskLevel: "medium",
-      label: "重新啟用",
-      intent: "reactivate",
-      code: costCenter.code,
     },
   ];
+}
+
+function toCostCenterActionLabel(action: string) {
+  switch (action) {
+    case "create":
+      return "新增";
+    case "update":
+      return "更新";
+    case "disable":
+      return "停用";
+    case "reactivate":
+      return "重新啟用";
+    default:
+      return null;
+  }
+}
+
+function toCostCenterActionIntent(action: string): ManagerMode {
+  switch (action) {
+    case "create":
+    case "update":
+    case "disable":
+    case "reactivate":
+      return action;
+    default:
+      return null;
+  }
+}
+
+function buildRowActions(
+  costCenter: TenantCostCenterRecord & {
+    availableActions?: ResourceActionDescriptor[];
+  },
+): CostCenterAction[] {
+  const sourceActions =
+    costCenter.availableActions && costCenter.availableActions.length > 0
+      ? costCenter.availableActions
+      : buildFallbackRowActions(costCenter);
+
+  const resolvedActions: CostCenterAction[] = [];
+
+  sourceActions.forEach((action) => {
+    const intent = toCostCenterActionIntent(action.action);
+    const label = toCostCenterActionLabel(action.action);
+    if (!intent || !label) {
+      return;
+    }
+
+    resolvedActions.push({
+      ...action,
+      label,
+      intent,
+      code: costCenter.code,
+    });
+  });
+
+  return resolvedActions.length > 0
+    ? resolvedActions
+    : buildFallbackRowActions(costCenter).map((action) => ({
+        ...action,
+        label: toCostCenterActionLabel(action.action) ?? action.action,
+        intent: toCostCenterActionIntent(action.action) ?? "update",
+        code: costCenter.code,
+      }));
+}
+
+function buildLinkedUserHref(userId: string) {
+  return `/users?userId=${encodeURIComponent(userId)}`;
+}
+
+function buildStateMeta(row: CostCenterRow) {
+  if (row.activeFlag) {
+    return "可用於新建立與 quota attribution。";
+  }
+  return row.disabledReason?.trim() || "停用後保留歷史 attribution。";
+}
+
+function buildStateTone(row: CostCenterRow): CanvasTone {
+  return row.activeFlag ? "success" : "neutral";
+}
+
+function buildStateLabel(row: CostCenterRow) {
+  return row.activeFlag ? "Active" : "Disabled";
 }
 
 function buildDraft(
@@ -702,6 +788,7 @@ export function CostCentersManager({
   const router = useRouter();
   const [flash, setFlash] = useState<CostCenterFlashPayload | null>(null);
   const [pending, startTransition] = useTransition();
+  const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("");
   const [showDisabled, setShowDisabled] = useState(true);
@@ -806,6 +893,18 @@ export function CostCentersManager({
     setDisableReason(target?.disabledReason ?? "");
   }, [mode, selectedCode, costCenters]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (pending) {
+        return;
+      }
+      setLastRefreshAt(new Date().toISOString());
+      router.refresh();
+    }, T5_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(timer);
+  }, [pending, router]);
+
   function closeEditor() {
     setMode(null);
     setSelectedCode(null);
@@ -893,11 +992,34 @@ export function CostCentersManager({
       ),
     },
     {
+      h: "STATE",
+      w: 160,
+      r: (row) => (
+        <div style={titleStackStyle}>
+          <span>
+            <CanvasPill theme={th} tone={buildStateTone(row)}>
+              {buildStateLabel(row)}
+            </CanvasPill>
+          </span>
+          <span style={titleMetaStyle}>{buildStateMeta(row)}</span>
+        </div>
+      ),
+    },
+    {
       h: "OWNER",
       w: 150,
       r: (row) => (
         <div style={titleStackStyle}>
-          <span style={titlePrimaryStyle}>{row.ownerName ?? "未指定"}</span>
+          {row.ownerUserId ? (
+            <Link
+              href={buildLinkedUserHref(row.ownerUserId)}
+              style={{ ...linkStyle, ...titlePrimaryStyle }}
+            >
+              {row.ownerName ?? row.ownerUserId}
+            </Link>
+          ) : (
+            <span style={titlePrimaryStyle}>{row.ownerName ?? "未指定"}</span>
+          )}
           <span style={titleMetaStyle}>
             {row.ownerUserId ?? "可改派 tenant user"}
           </span>
@@ -1003,7 +1125,10 @@ export function CostCentersManager({
               theme={th}
               icon="refresh"
               size="sm"
-              onClick={() => router.refresh()}
+              onClick={() => {
+                setLastRefreshAt(new Date().toISOString());
+                router.refresh();
+              }}
             >
               重新整理
             </CanvasBtn>
@@ -1047,7 +1172,7 @@ export function CostCentersManager({
           tone="info"
           icon="warn"
           title="T5 refresh tier 已接上目錄、quota、rules、reports 四個切片"
-          body={`最新 quota refresh: ${formatDateTime(freshestQuotaAt)} · approval linkage 請往 /rules 深入，report attribution 請往 /reports 深入。`}
+          body={`${getRefreshMetaLabel(lastRefreshAt)} · 最新 quota refresh: ${formatDateTime(freshestQuotaAt)} · approval linkage 請往 /rules 深入，report attribution 請往 /reports 深入。`}
         />
 
         <div style={topGridStyle}>
@@ -1132,7 +1257,10 @@ export function CostCentersManager({
                     <CanvasBtn
                       theme={th}
                       size="sm"
-                      onClick={() => router.refresh()}
+                      onClick={() => {
+                        setLastRefreshAt(new Date().toISOString());
+                        router.refresh();
+                      }}
                     >
                       重新整理
                     </CanvasBtn>
