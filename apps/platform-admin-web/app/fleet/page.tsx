@@ -4,6 +4,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import { getCrossAppBaseUrl } from "@/lib/runtime-config";
 import {
   formatPlatformCodeLabel,
   getPlatformLabel,
@@ -233,6 +234,29 @@ const tabButtonStyle = (selected: boolean): CSSProperties => ({
   fontSize: 12.5,
   fontWeight: 600,
   cursor: "pointer",
+});
+
+const tabBadgeStyle = (tone: CanvasTone): CSSProperties => ({
+  minWidth: 20,
+  height: 20,
+  padding: "0 6px",
+  borderRadius: 999,
+  display: "inline-grid",
+  placeItems: "center",
+  fontSize: 11,
+  fontWeight: 700,
+  background:
+    tone === "warn"
+      ? "rgba(245, 158, 11, 0.18)"
+      : tone === "accent"
+        ? theme.accentBg
+        : "rgba(148, 163, 184, 0.16)",
+  color:
+    tone === "warn"
+      ? "#9a6700"
+      : tone === "accent"
+        ? theme.accent
+        : theme.textMuted,
 });
 
 const splitStyle: CSSProperties = {
@@ -573,12 +597,20 @@ function normalizeLinks(
   return links && links.length > 0 ? links : fallback;
 }
 
+function resolveCrossAppHref(link: CrossAppResourceLink) {
+  try {
+    return new URL(link.route, getCrossAppBaseUrl(link.targetApp)).toString();
+  } catch {
+    return link.route;
+  }
+}
+
 function getFleetCopy(locale: string) {
   return locale === "en"
     ? {
         title: "Fleet & compliance",
         subtitle:
-          "Multi-tab governance for vehicles, drivers, contracts, device binding, exclusivity, and offboarding.",
+          "Fleet & compliance governance across vehicles, drivers, contracts, device binding, exclusivity, and offboarding.",
         summaryBlockedVehicles: "Blocked vehicles",
         summaryBlockedDrivers: "Blocked drivers",
         summaryPendingExclusivity: "Exclusivity backlog",
@@ -711,9 +743,9 @@ function getFleetCopy(locale: string) {
         },
       }
     : {
-        title: "車隊與法遵",
+        title: "車隊與合規治理",
         subtitle:
-          "把車輛、司機、合約、裝置綁定、排他審查與下線流程收進同一個治理畫面。",
+          "把車輛、司機、合約、裝置綁定、排他審查與下線狀態機收進同一個治理畫面。",
         summaryBlockedVehicles: "受阻車輛",
         summaryBlockedDrivers: "受阻司機",
         summaryPendingExclusivity: "排他審查待辦",
@@ -2137,7 +2169,7 @@ export default function FleetPage() {
     return links.map((link) => (
       <a
         key={`${link.targetApp}:${link.resourceType}:${link.resourceId}:${link.route}`}
-        href={link.route}
+        href={resolveCrossAppHref(link)}
         target={link.openMode === "new_tab" ? "_blank" : undefined}
         rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
       >
@@ -2771,6 +2803,18 @@ export default function FleetPage() {
           <div style={{ padding: 16, display: "grid", gap: 14 }}>
             <div style={tabBarStyle}>
               {TAB_ORDER.map((tab) => {
+                const badgeCount =
+                  tab === "drivers"
+                    ? licenseWarningCount
+                    : tab === "exclusivity"
+                      ? pendingExclusivityCount
+                      : tab === "offboard"
+                        ? offboardingCount
+                        : 0;
+                const badgeTone: CanvasTone =
+                  tab === "drivers" || tab === "exclusivity"
+                    ? "warn"
+                    : "accent";
                 return (
                   <button
                     key={tab}
@@ -2778,7 +2822,22 @@ export default function FleetPage() {
                     onClick={() => setTab(tab)}
                     style={tabButtonStyle(activeTab === tab)}
                   >
-                    {copy.tab[tab]} ({countsByTab[tab]})
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <span>
+                        {copy.tab[tab]} ({countsByTab[tab]})
+                      </span>
+                      {badgeCount > 0 ? (
+                        <span style={tabBadgeStyle(badgeTone)}>
+                          {badgeCount}
+                        </span>
+                      ) : null}
+                    </span>
                   </button>
                 );
               })}
