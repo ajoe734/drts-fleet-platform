@@ -1,11 +1,11 @@
 import type { CSSProperties } from "react";
 import type {
+  ApiSuccessEnvelope,
   AuditLogRecord,
   CrossAppResourceLink,
   EmptyStateEnvelope,
   EmptyReason,
   IdentityContext,
-  RefreshTier,
   ResourceActionDescriptor,
   TenantApiKeyRecord,
   TenantBillingProfile,
@@ -47,8 +47,7 @@ const th = buildCanvasTheme({
   density: "compact",
 });
 
-const SETTINGS_REFRESH_TIER: RefreshTier = "slow";
-const SETTINGS_REFRESH = getRefreshTierDefinition(SETTINGS_REFRESH_TIER);
+const SETTINGS_PAGE_TIER = getRefreshTierDefinition("slow");
 const APP_BASE_URLS: Record<CrossAppResourceLink["targetApp"], string> = {
   "ops-console": "http://localhost:3003",
   "platform-admin": "http://localhost:3002",
@@ -260,32 +259,48 @@ const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
   timeStyle: "short",
 });
 
-type RuntimeRecord<T> = T & {
+type RuntimeListEnvelope<T> = {
+  items: T[];
+  refresh: UiRefreshMetadata;
   availableActions?: ResourceActionDescriptor[];
   emptyState?: EmptyStateEnvelope;
 };
 
-type RuntimeListEnvelope<T> = {
-  items: T[];
+type RuntimeResourceEnvelope<T> = {
+  item: T;
+  refresh: UiRefreshMetadata;
   availableActions?: ResourceActionDescriptor[];
   emptyState?: EmptyStateEnvelope;
+};
+
+type RuntimeResourceSurface<T> = {
+  item: T | null;
+  refresh: UiRefreshMetadata | null;
+  availableActions: ResourceActionDescriptor[];
+  emptyState: EmptyStateEnvelope | null;
+  legacy: boolean;
+};
+
+type RuntimeListSurface<T> = {
+  items: T[];
+  refresh: UiRefreshMetadata | null;
+  availableActions: ResourceActionDescriptor[];
+  emptyState: EmptyStateEnvelope | null;
+  legacy: boolean;
 };
 
 type SettingsData = {
-  identity: RuntimeRecord<IdentityContext> | null;
-  billingProfile: RuntimeRecord<TenantBillingProfile> | null;
-  preferences: RuntimeRecord<TenantNotificationPreferences> | null;
-  sla: RuntimeRecord<TenantSlaProfile> | null;
-  governance: RuntimeRecord<TenantIntegrationGovernancePackage> | null;
-  quotaSummary: RuntimeRecord<TenantQuotaSummary> | null;
-  users: RuntimeListEnvelope<TenantUserRoleRecord> | null;
-  apiKeys: RuntimeListEnvelope<TenantApiKeyRecord> | null;
-  webhooks: RuntimeListEnvelope<TenantWebhookEndpoint> | null;
-  auditLogs: RuntimeListEnvelope<AuditLogRecord> | null;
-  availableActions: ResourceActionDescriptor[];
-  unsupportedActions: ResourceActionDescriptor[];
+  identity: RuntimeResourceSurface<IdentityContext>;
+  billingProfile: RuntimeResourceSurface<TenantBillingProfile>;
+  preferences: RuntimeResourceSurface<TenantNotificationPreferences>;
+  sla: RuntimeResourceSurface<TenantSlaProfile>;
+  governance: RuntimeResourceSurface<TenantIntegrationGovernancePackage>;
+  quotaSummary: RuntimeResourceSurface<TenantQuotaSummary>;
+  users: RuntimeListSurface<TenantUserRoleRecord>;
+  apiKeys: RuntimeListSurface<TenantApiKeyRecord>;
+  webhooks: RuntimeListSurface<TenantWebhookEndpoint>;
+  auditLogs: RuntimeListSurface<AuditLogRecord>;
   errors: string[];
-  refresh: UiRefreshMetadata;
 };
 
 type ActionLink = {
@@ -329,11 +344,6 @@ type RuntimeChip =
 
 type ActionSource = {
   availableActions?: ResourceActionDescriptor[];
-};
-
-type RuntimeEnvelope<T> = {
-  data: T;
-  refresh?: UiRefreshMetadata;
 };
 
 function formatDate(value: string | null | undefined) {
@@ -424,62 +434,9 @@ function getChannelRank(channel: TenantNotificationSubscription["channel"]) {
   }
 }
 
-function parseTimestamp(value: string | null | undefined) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function mergeRefreshMetadata(
-  refreshes: Array<UiRefreshMetadata | null | undefined>,
-  errors: string[],
-): UiRefreshMetadata {
-  const resolvedRefreshes = refreshes.filter(
-    (refresh): refresh is UiRefreshMetadata =>
-      refresh !== null && refresh !== undefined,
-  );
-
-  if (resolvedRefreshes.length === 0) {
-    return {
-      generatedAt: new Date(0).toISOString(),
-      staleAfterMs: SETTINGS_REFRESH.staleAfterMs,
-      dataFreshness: errors.length > 0 ? "degraded" : "unknown",
-      source: "static",
-    };
-  }
-
-  const freshest = resolvedRefreshes.reduce((latest, current) => {
-    const latestTs = parseTimestamp(latest.generatedAt)?.getTime() ?? 0;
-    const currentTs = parseTimestamp(current.generatedAt)?.getTime() ?? 0;
-    return currentTs > latestTs ? current : latest;
-  });
-
-  const dataFreshness =
-    errors.length > 0
-      ? "degraded"
-      : resolvedRefreshes.some(
-            (refresh) => refresh.dataFreshness === "degraded",
-          )
-        ? "degraded"
-        : resolvedRefreshes.some((refresh) => refresh.dataFreshness === "stale")
-          ? "stale"
-          : resolvedRefreshes.some(
-                (refresh) => refresh.dataFreshness === "unknown",
-              )
-            ? "unknown"
-            : "fresh";
-
-  return {
-    generatedAt: freshest.generatedAt,
-    staleAfterMs: freshest.staleAfterMs,
-    dataFreshness,
-    source: freshest.source,
-  };
-}
-
 async function fetchTenantRuntime<T>(
   path: string,
-): Promise<RuntimeEnvelope<T>> {
+): Promise<ApiSuccessEnvelope<T>> {
   const response = await fetch(`${API_URL}${path}`, {
     cache: "no-store",
     headers: {
@@ -494,7 +451,139 @@ async function fetchTenantRuntime<T>(
     throw new Error(`${response.status} ${response.statusText}`);
   }
 
-  return (await response.json()) as RuntimeEnvelope<T>;
+  return (await response.json()) as ApiSuccessEnvelope<T>;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function parseRefreshMetadata(value: unknown): UiRefreshMetadata | null {
+  if (!isObject(value)) return null;
+  if (
+    typeof value.generatedAt !== "string" ||
+    typeof value.staleAfterMs !== "number" ||
+    typeof value.dataFreshness !== "string" ||
+    typeof value.source !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    generatedAt: value.generatedAt,
+    staleAfterMs: value.staleAfterMs,
+    dataFreshness: value.dataFreshness as UiRefreshMetadata["dataFreshness"],
+    source: value.source as UiRefreshMetadata["source"],
+  };
+}
+
+function parseEmptyStateEnvelope(value: unknown): EmptyStateEnvelope | null {
+  if (
+    !isObject(value) ||
+    typeof value.reason !== "string" ||
+    typeof value.messageCode !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    reason: value.reason as EmptyReason,
+    messageCode: value.messageCode,
+    ...(function () {
+      const nextAction = parseActionDescriptor(value.nextAction);
+      return nextAction ? { nextAction } : {};
+    })(),
+  };
+}
+
+function parseAvailableActions(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as ResourceActionDescriptor[];
+  }
+
+  return value.flatMap((item) => {
+    const descriptor = parseActionDescriptor(item);
+    return descriptor ? [descriptor] : [];
+  });
+}
+
+function parseActionDescriptor(
+  value: unknown,
+): ResourceActionDescriptor | null {
+  if (
+    !isObject(value) ||
+    typeof value.action !== "string" ||
+    typeof value.enabled !== "boolean" ||
+    typeof value.riskLevel !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    action: value.action,
+    enabled: value.enabled,
+    riskLevel: value.riskLevel as ResourceActionDescriptor["riskLevel"],
+    ...(typeof value.disabledReasonCode === "string"
+      ? { disabledReasonCode: value.disabledReasonCode }
+      : {}),
+    ...(typeof value.requiresReason === "boolean"
+      ? { requiresReason: value.requiresReason }
+      : {}),
+  };
+}
+
+function parseResourceSurface<T>(payload: unknown): RuntimeResourceSurface<T> {
+  if (isObject(payload) && "item" in payload) {
+    const envelope = payload as RuntimeResourceEnvelope<T>;
+    const refresh = parseRefreshMetadata(envelope.refresh);
+    return {
+      item: envelope.item ?? null,
+      refresh,
+      availableActions: parseAvailableActions(envelope.availableActions),
+      emptyState: parseEmptyStateEnvelope(envelope.emptyState),
+      legacy: refresh === null,
+    };
+  }
+
+  if (isObject(payload)) {
+    return {
+      item: payload as T,
+      refresh: null,
+      availableActions: [],
+      emptyState: null,
+      legacy: true,
+    };
+  }
+
+  return {
+    item: null,
+    refresh: null,
+    availableActions: [],
+    emptyState: null,
+    legacy: true,
+  };
+}
+
+function parseListSurface<T>(payload: unknown): RuntimeListSurface<T> {
+  if (isObject(payload) && Array.isArray(payload.items)) {
+    const envelope = payload as RuntimeListEnvelope<T>;
+    const refresh = parseRefreshMetadata(envelope.refresh);
+    return {
+      items: envelope.items,
+      refresh,
+      availableActions: parseAvailableActions(envelope.availableActions),
+      emptyState: parseEmptyStateEnvelope(envelope.emptyState),
+      legacy: refresh === null,
+    };
+  }
+
+  return {
+    items: [],
+    refresh: null,
+    availableActions: [],
+    emptyState: null,
+    legacy: true,
+  };
 }
 
 function flattenAvailableActions(
@@ -591,7 +680,6 @@ const SETTINGS_ACTION_REGISTRY: Record<string, ActionRegistryEntry> = {
 
 function buildActionLink(
   descriptor: ResourceActionDescriptor,
-  tenantCode: string,
   overrides?: ActionLinkOverride,
 ): ActionLink | null {
   const resolved = SETTINGS_ACTION_REGISTRY[descriptor.action];
@@ -627,7 +715,6 @@ function buildActionLink(
 
 function mapActionLinks(
   actions: ResourceActionDescriptor[] | undefined,
-  tenantCode: string,
   overrides: Partial<Record<string, ActionLinkOverride>> = {},
 ) {
   if (!actions || actions.length === 0) return [];
@@ -635,7 +722,6 @@ function mapActionLinks(
   return actions.flatMap((descriptor) => {
     const actionLink = buildActionLink(
       descriptor,
-      tenantCode,
       overrides[descriptor.action],
     );
     return actionLink ? [actionLink] : [];
@@ -759,6 +845,10 @@ function getFreshnessTone(refresh: UiRefreshMetadata): CanvasTone {
   if (refresh.dataFreshness === "stale") return "warn";
   if (refresh.dataFreshness === "degraded") return "warn";
   return "neutral";
+}
+
+function formatRefreshChipValue(refresh: UiRefreshMetadata) {
+  return `${refresh.dataFreshness} · ${refresh.source}`;
 }
 
 function getEmptyReasonTone(reason: EmptyReason): CanvasTone {
@@ -931,49 +1021,29 @@ async function loadSettingsData(): Promise<SettingsData> {
     webhooks,
     auditLogs,
   ] = await Promise.allSettled([
-    fetchTenantRuntime<RuntimeRecord<IdentityContext>>("/api/identity/context"),
-    fetchTenantRuntime<RuntimeRecord<TenantBillingProfile>>(
-      "/api/tenant/billing/profile",
-    ),
-    fetchTenantRuntime<RuntimeRecord<TenantNotificationPreferences>>(
-      "/api/tenant/notifications",
-    ),
-    fetchTenantRuntime<RuntimeRecord<TenantSlaProfile>>("/api/tenant/sla"),
-    fetchTenantRuntime<RuntimeRecord<TenantIntegrationGovernancePackage>>(
-      "/api/tenant/integration-governance",
-    ),
-    fetchTenantRuntime<RuntimeRecord<TenantQuotaSummary>>("/api/tenant/quotas"),
-    fetchTenantRuntime<RuntimeListEnvelope<TenantUserRoleRecord>>(
-      "/api/tenant/users",
-    ),
-    fetchTenantRuntime<RuntimeListEnvelope<TenantApiKeyRecord>>(
-      "/api/tenant/api-keys",
-    ),
-    fetchTenantRuntime<RuntimeListEnvelope<TenantWebhookEndpoint>>(
-      "/api/tenant/webhooks",
-    ),
-    fetchTenantRuntime<RuntimeListEnvelope<AuditLogRecord>>(
-      "/api/tenant/audit",
-    ),
+    fetchTenantRuntime<unknown>("/api/identity/context"),
+    fetchTenantRuntime<unknown>("/api/tenant/billing/profile"),
+    fetchTenantRuntime<unknown>("/api/tenant/notifications"),
+    fetchTenantRuntime<unknown>("/api/tenant/sla"),
+    fetchTenantRuntime<unknown>("/api/tenant/integration-governance"),
+    fetchTenantRuntime<unknown>("/api/tenant/quotas"),
+    fetchTenantRuntime<unknown>("/api/tenant/users"),
+    fetchTenantRuntime<unknown>("/api/tenant/api-keys"),
+    fetchTenantRuntime<unknown>("/api/tenant/webhooks"),
+    fetchTenantRuntime<unknown>("/api/tenant/audit"),
   ]);
 
   const errors: string[] = [];
   const tag = (label: string, reason: unknown) =>
     `${label}: ${reason instanceof Error ? reason.message : "未知錯誤"}`;
-  const getRefresh = <T,>(
+  const missingRuntimeLabels: string[] = [];
+  const markRuntimeGap = (
     label: string,
-    result: PromiseSettledResult<RuntimeEnvelope<T>>,
+    surface: { legacy: boolean; refresh: UiRefreshMetadata | null },
   ) => {
-    if (result.status !== "fulfilled") {
-      return null;
+    if (surface.legacy || surface.refresh === null) {
+      missingRuntimeLabels.push(label);
     }
-
-    if (!result.value.refresh) {
-      errors.push(`${label}: missing UiRefreshMetadata envelope`);
-      return null;
-    }
-
-    return result.value.refresh;
   };
 
   if (identity.status === "rejected")
@@ -996,54 +1066,66 @@ async function loadSettingsData(): Promise<SettingsData> {
     errors.push(tag("租戶稽核", auditLogs.reason));
 
   const identityValue =
-    identity.status === "fulfilled" ? identity.value.data : null;
+    identity.status === "fulfilled"
+      ? parseResourceSurface<IdentityContext>(identity.value.data)
+      : parseResourceSurface<IdentityContext>(null);
   const billingValue =
-    billingProfile.status === "fulfilled" ? billingProfile.value.data : null;
+    billingProfile.status === "fulfilled"
+      ? parseResourceSurface<TenantBillingProfile>(billingProfile.value.data)
+      : parseResourceSurface<TenantBillingProfile>(null);
   const preferenceValue =
-    preferences.status === "fulfilled" ? preferences.value.data : null;
-  const slaValue = sla.status === "fulfilled" ? sla.value.data : null;
+    preferences.status === "fulfilled"
+      ? parseResourceSurface<TenantNotificationPreferences>(
+          preferences.value.data,
+        )
+      : parseResourceSurface<TenantNotificationPreferences>(null);
+  const slaValue =
+    sla.status === "fulfilled"
+      ? parseResourceSurface<TenantSlaProfile>(sla.value.data)
+      : parseResourceSurface<TenantSlaProfile>(null);
   const governanceValue =
-    governance.status === "fulfilled" ? governance.value.data : null;
+    governance.status === "fulfilled"
+      ? parseResourceSurface<TenantIntegrationGovernancePackage>(
+          governance.value.data,
+        )
+      : parseResourceSurface<TenantIntegrationGovernancePackage>(null);
   const quotaValue =
-    quotaSummary.status === "fulfilled" ? quotaSummary.value.data : null;
-  const usersValue = users.status === "fulfilled" ? users.value.data : null;
+    quotaSummary.status === "fulfilled"
+      ? parseResourceSurface<TenantQuotaSummary>(quotaSummary.value.data)
+      : parseResourceSurface<TenantQuotaSummary>(null);
+  const usersValue =
+    users.status === "fulfilled"
+      ? parseListSurface<TenantUserRoleRecord>(users.value.data)
+      : parseListSurface<TenantUserRoleRecord>(null);
   const apiKeysValue =
-    apiKeys.status === "fulfilled" ? apiKeys.value.data : null;
+    apiKeys.status === "fulfilled"
+      ? parseListSurface<TenantApiKeyRecord>(apiKeys.value.data)
+      : parseListSurface<TenantApiKeyRecord>(null);
   const webhooksValue =
-    webhooks.status === "fulfilled" ? webhooks.value.data : null;
+    webhooks.status === "fulfilled"
+      ? parseListSurface<TenantWebhookEndpoint>(webhooks.value.data)
+      : parseListSurface<TenantWebhookEndpoint>(null);
   const auditLogsValue =
-    auditLogs.status === "fulfilled" ? auditLogs.value.data : null;
-  const availableActions = flattenAvailableActions(
-    identityValue,
-    billingValue,
-    preferenceValue,
-    slaValue,
-    governanceValue,
-    quotaValue,
-    usersValue,
-    apiKeysValue,
-    webhooksValue,
-    auditLogsValue,
-  );
-  const supportedActions = new Set(Object.keys(SETTINGS_ACTION_REGISTRY));
-  const unsupportedActions = availableActions.filter(
-    (descriptor) => !supportedActions.has(descriptor.action),
-  );
-  const refresh = mergeRefreshMetadata(
-    [
-      getRefresh("租戶身分", identity),
-      getRefresh("計費設定", billingProfile),
-      getRefresh("通知訂閱", preferences),
-      getRefresh("SLA 門檻", sla),
-      getRefresh("整合治理", governance),
-      getRefresh("租戶配額", quotaSummary),
-      getRefresh("租戶人員", users),
-      getRefresh("API 金鑰", apiKeys),
-      getRefresh("Webhook", webhooks),
-      getRefresh("租戶稽核", auditLogs),
-    ],
-    errors,
-  );
+    auditLogs.status === "fulfilled"
+      ? parseListSurface<AuditLogRecord>(auditLogs.value.data)
+      : parseListSurface<AuditLogRecord>(null);
+
+  markRuntimeGap("租戶身分", identityValue);
+  markRuntimeGap("計費設定", billingValue);
+  markRuntimeGap("通知訂閱", preferenceValue);
+  markRuntimeGap("SLA 門檻", slaValue);
+  markRuntimeGap("整合治理", governanceValue);
+  markRuntimeGap("租戶配額", quotaValue);
+  markRuntimeGap("租戶人員", usersValue);
+  markRuntimeGap("API 金鑰", apiKeysValue);
+  markRuntimeGap("Webhook", webhooksValue);
+  markRuntimeGap("租戶稽核", auditLogsValue);
+
+  if (missingRuntimeLabels.length > 0) {
+    errors.push(
+      `legacy payload without UiRefreshMetadata: ${missingRuntimeLabels.join(" · ")}`,
+    );
+  }
 
   return {
     identity: identityValue,
@@ -1056,62 +1138,60 @@ async function loadSettingsData(): Promise<SettingsData> {
     apiKeys: apiKeysValue,
     webhooks: webhooksValue,
     auditLogs: auditLogsValue,
-    availableActions,
-    unsupportedActions,
     errors,
-    refresh,
   };
 }
 
 export default async function SettingsPage() {
   const data = await loadSettingsData();
 
-  const tenantCode = data.identity?.tenantId ?? DEMO_TENANT_ID;
-  const displayName = data.billingProfile?.invoiceTitle ?? "未設定";
-  const taxId = data.billingProfile?.taxId ?? "未設定";
-  const billingContact = data.billingProfile
-    ? `${data.billingProfile.contactName ?? "未指派"} · ${data.billingProfile.email}`
+  const tenantCode = data.identity.item?.tenantId ?? DEMO_TENANT_ID;
+  const displayName = data.billingProfile.item?.invoiceTitle ?? "未設定";
+  const taxId = data.billingProfile.item?.taxId ?? "未設定";
+  const billingContact = data.billingProfile.item
+    ? `${data.billingProfile.item.contactName ?? "未指派"} · ${data.billingProfile.item.email}`
     : "未設定";
-  const billingAddress = data.billingProfile?.address ?? "未設定";
-  const authMode = data.identity?.authMode ?? "—";
+  const billingAddress = data.billingProfile.item?.address ?? "未設定";
+  const authMode = data.identity.item?.authMode ?? "—";
   const roleSummary =
-    data.identity?.roles
+    data.identity.item?.roles
       .slice(0, 3)
       .map((role) => role.replace(/^tc_/, ""))
       .join(" · ") ?? "—";
 
-  const apiKeyLifetime = data.governance
-    ? `${data.governance.apiKeyPolicy.defaultLifetimeDays} 天 (最長 ${data.governance.apiKeyPolicy.maxLifetimeDays} 天)`
+  const apiKeyLifetime = data.governance.item
+    ? `${data.governance.item.apiKeyPolicy.defaultLifetimeDays} 天 (最長 ${data.governance.item.apiKeyPolicy.maxLifetimeDays} 天)`
     : "—";
-  const webhookRetry = data.governance
-    ? `${data.governance.webhookPolicy.retryPolicy.maxAttempts} 次重送`
+  const webhookRetry = data.governance.item
+    ? `${data.governance.item.webhookPolicy.retryPolicy.maxAttempts} 次重送`
     : "—";
   const subscriptions =
-    data.preferences?.subscriptions?.slice().sort(compareSubscriptions) ?? [];
+    data.preferences.item?.subscriptions?.slice().sort(compareSubscriptions) ??
+    [];
   const baselineSubscriptions =
-    data.governance?.baselineNotificationSubscriptions
+    data.governance.item?.baselineNotificationSubscriptions
       ?.slice()
       .sort(compareSubscriptions) ?? [];
-  const checklist = data.governance?.onboardingChecklist ?? [];
-  const baselineEvents = data.governance?.baselineWebhookEvents ?? [];
+  const checklist = data.governance.item?.onboardingChecklist ?? [];
+  const baselineEvents = data.governance.item?.baselineWebhookEvents ?? [];
   const notificationRows: SettingsNotificationRow[] = (
     subscriptions.length > 0 ? subscriptions : baselineSubscriptions
   ).map((subscription) => ({
     ...subscription,
     updatedAt:
       subscriptions.length > 0
-        ? (data.preferences?.updatedAt ?? null)
-        : (data.governance?.generatedAt ?? null),
+        ? (data.preferences.item?.updatedAt ?? null)
+        : (data.governance.item?.generatedAt ?? null),
   }));
   const notificationFootnote =
     subscriptions.length > 0
-      ? `最後更新 ${formatUpdated(data.preferences?.updatedAt)}`
+      ? `最後更新 ${formatUpdated(data.preferences.item?.updatedAt)}`
       : baselineSubscriptions.length > 0
-        ? `尚未覆寫租戶訂閱，顯示治理基線 ${formatUpdated(data.governance?.generatedAt)}`
+        ? `尚未覆寫租戶訂閱，顯示治理基線 ${formatUpdated(data.governance.item?.generatedAt)}`
         : "尚未設定任何通知事件";
-  const quotaSummary = data.quotaSummary;
+  const quotaSummary = data.quotaSummary.item;
   const currentStageValue = TENANT_CONSOLE_ENV;
-  const consentValue = getConsentValue(data.preferences);
+  const consentValue = getConsentValue(data.preferences.item);
   const settingsModuleRoutes = [
     "/settings",
     "/users",
@@ -1124,31 +1204,43 @@ export default async function SettingsPage() {
   const moduleCatalogCount =
     settingsModuleRoutes.length + deferredModuleRoutes.length;
   const capabilityChips = [
-    {
-      label: "billing_profile",
-      tone: "accent" as const,
-    },
-    {
-      label: "notification_baseline",
-      tone: "info" as const,
-    },
-    {
-      label: "sla_thresholds",
-      tone: "accent" as const,
-    },
-    {
-      label: "api_key_policy",
-      tone: "info" as const,
-    },
-    {
-      label: "webhook_governance",
-      tone: "info" as const,
-    },
-  ];
+    data.billingProfile.item
+      ? {
+          label: "billing_profile",
+          tone: "accent" as const,
+        }
+      : null,
+    subscriptions.length > 0 || baselineSubscriptions.length > 0
+      ? {
+          label: "notification_baseline",
+          tone: "info" as const,
+        }
+      : null,
+    data.sla.item
+      ? {
+          label: "sla_thresholds",
+          tone: "accent" as const,
+        }
+      : null,
+    data.governance.item?.apiKeyPolicy
+      ? {
+          label: "api_key_policy",
+          tone: "info" as const,
+        }
+      : null,
+    data.governance.item?.webhookPolicy
+      ? {
+          label: "webhook_governance",
+          tone: "info" as const,
+        }
+      : null,
+  ].filter(
+    (chip): chip is { label: string; tone: "accent" | "info" } => chip !== null,
+  );
 
   const generalActions = dedupeActionLinks([
-    ...mapActionLinks(data.billingProfile?.availableActions, tenantCode),
-    ...mapActionLinks(data.auditLogs?.availableActions, tenantCode, {
+    ...mapActionLinks(data.billingProfile.availableActions),
+    ...mapActionLinks(data.auditLogs.availableActions, {
       view_tenant_audit_evidence: {
         label: "檢視稽核",
         href: "/audit",
@@ -1157,46 +1249,101 @@ export default async function SettingsPage() {
     }),
   ]);
   const notificationActions = dedupeActionLinks([
-    ...mapActionLinks(data.preferences?.availableActions, tenantCode),
-    ...mapActionLinks(data.sla?.availableActions, tenantCode),
+    ...mapActionLinks(data.preferences.availableActions),
+    ...mapActionLinks(data.sla.availableActions),
   ]);
   const integrationActions = dedupeActionLinks([
-    ...mapActionLinks(data.apiKeys?.availableActions, tenantCode),
-    ...mapActionLinks(data.webhooks?.availableActions, tenantCode),
+    ...mapActionLinks(data.apiKeys.availableActions),
+    ...mapActionLinks(data.webhooks.availableActions),
   ]);
   const peopleActions = dedupeActionLinks(
-    mapActionLinks(data.users?.availableActions, tenantCode),
+    mapActionLinks(data.users.availableActions),
   );
-  const pageActions = dedupeActionLinks(
-    mapActionLinks(data.availableActions, tenantCode, {
-      view_tenant_audit_evidence: {
-        label: "檢視稽核",
-        href: "/audit",
-        note: "same-tab",
-      },
-    }),
+  const headerActions = dedupeActionLinks([
+    ...generalActions,
+    ...notificationActions,
+    ...integrationActions,
+    ...peopleActions,
+  ]);
+  const unsupportedActions = flattenAvailableActions(
+    data.billingProfile,
+    data.preferences,
+    data.sla,
+    data.users,
+    data.apiKeys,
+    data.webhooks,
+    data.auditLogs,
+  ).filter((descriptor) => !SETTINGS_ACTION_REGISTRY[descriptor.action]);
+  const runtimeSurfaces = [
+    {
+      label: "identity",
+      refresh: data.identity.refresh,
+      legacy: data.identity.legacy,
+    },
+    {
+      label: "billing",
+      refresh: data.billingProfile.refresh,
+      legacy: data.billingProfile.legacy,
+    },
+    {
+      label: "notifications",
+      refresh: data.preferences.refresh,
+      legacy: data.preferences.legacy,
+    },
+    { label: "sla", refresh: data.sla.refresh, legacy: data.sla.legacy },
+    {
+      label: "governance",
+      refresh: data.governance.refresh,
+      legacy: data.governance.legacy,
+    },
+    {
+      label: "quota",
+      refresh: data.quotaSummary.refresh,
+      legacy: data.quotaSummary.legacy,
+    },
+    { label: "users", refresh: data.users.refresh, legacy: data.users.legacy },
+    {
+      label: "api_keys",
+      refresh: data.apiKeys.refresh,
+      legacy: data.apiKeys.legacy,
+    },
+    {
+      label: "webhooks",
+      refresh: data.webhooks.refresh,
+      legacy: data.webhooks.legacy,
+    },
+    {
+      label: "audit",
+      refresh: data.auditLogs.refresh,
+      legacy: data.auditLogs.legacy,
+    },
+  ];
+  const degradedModules = runtimeSurfaces.filter(
+    (surface) =>
+      surface.refresh !== null && surface.refresh.dataFreshness !== "fresh",
+  );
+  const legacyModules = runtimeSurfaces.filter(
+    (surface) => surface.legacy || surface.refresh === null,
   );
   const runtimeChips: RuntimeChip[] = [
     {
-      label: "refresh tier",
-      value: SETTINGS_REFRESH.label,
+      label: "page tier",
+      value: SETTINGS_PAGE_TIER.label,
       mono: true,
     },
-    {
-      label: "freshness",
-      value: data.refresh.dataFreshness,
-      tone: getFreshnessTone(data.refresh),
-    },
-    {
-      label: "generated",
-      value: formatUpdated(data.refresh.generatedAt),
-      mono: true,
-    },
-    {
-      label: "source",
-      value: data.refresh.source,
-      mono: true,
-    },
+    ...runtimeSurfaces.map((surface) =>
+      surface.refresh
+        ? ({
+            label: surface.label,
+            value: formatRefreshChipValue(surface.refresh),
+            tone: getFreshnessTone(surface.refresh),
+          } satisfies RuntimeChip)
+        : ({
+            label: surface.label,
+            value: "legacy",
+            mono: true,
+          } satisfies RuntimeChip),
+    ),
   ];
 
   const sitemapEntries: SettingsSitemapEntry[] = [
@@ -1280,13 +1427,12 @@ export default async function SettingsPage() {
       key: "notifications",
       title: "通知訂閱",
       route: "/notifications",
-      envelope: data.preferences?.emptyState ?? null,
+      envelope: data.preferences.emptyState,
       actions: dedupeActionLinks(
         mapActionLinks(
-          data.preferences?.emptyState?.nextAction
+          data.preferences.emptyState?.nextAction
             ? [data.preferences.emptyState.nextAction]
-            : data.preferences?.availableActions,
-          tenantCode,
+            : data.preferences.availableActions,
         ),
       ),
     },
@@ -1294,13 +1440,12 @@ export default async function SettingsPage() {
       key: "users",
       title: "人員與角色",
       route: "/users",
-      envelope: data.users?.emptyState ?? null,
+      envelope: data.users.emptyState,
       actions: dedupeActionLinks(
         mapActionLinks(
-          data.users?.emptyState?.nextAction
+          data.users.emptyState?.nextAction
             ? [data.users.emptyState.nextAction]
-            : data.users?.availableActions,
-          tenantCode,
+            : data.users.availableActions,
         ),
       ),
     },
@@ -1308,13 +1453,12 @@ export default async function SettingsPage() {
       key: "api-keys",
       title: "API 金鑰",
       route: "/api-keys",
-      envelope: data.apiKeys?.emptyState ?? null,
+      envelope: data.apiKeys.emptyState,
       actions: dedupeActionLinks(
         mapActionLinks(
-          data.apiKeys?.emptyState?.nextAction
+          data.apiKeys.emptyState?.nextAction
             ? [data.apiKeys.emptyState.nextAction]
-            : data.apiKeys?.availableActions,
-          tenantCode,
+            : data.apiKeys.availableActions,
         ),
       ),
     },
@@ -1322,13 +1466,12 @@ export default async function SettingsPage() {
       key: "webhooks",
       title: "Webhook",
       route: "/webhooks",
-      envelope: data.webhooks?.emptyState ?? null,
+      envelope: data.webhooks.emptyState,
       actions: dedupeActionLinks(
         mapActionLinks(
-          data.webhooks?.emptyState?.nextAction
+          data.webhooks.emptyState?.nextAction
             ? [data.webhooks.emptyState.nextAction]
-            : data.webhooks?.availableActions,
-          tenantCode,
+            : data.webhooks.availableActions,
           {
             create_webhook_endpoint: {
               label: "檢查 Webhook",
@@ -1342,13 +1485,12 @@ export default async function SettingsPage() {
       key: "audit",
       title: "租戶稽核",
       route: "/audit",
-      envelope: data.auditLogs?.emptyState ?? null,
+      envelope: data.auditLogs.emptyState,
       actions: dedupeActionLinks(
         mapActionLinks(
-          data.auditLogs?.emptyState?.nextAction
+          data.auditLogs.emptyState?.nextAction
             ? [data.auditLogs.emptyState.nextAction]
-            : data.auditLogs?.availableActions,
-          tenantCode,
+            : data.auditLogs.availableActions,
           {
             view_tenant_audit_evidence: {
               label: "檢視稽核",
@@ -1379,7 +1521,7 @@ export default async function SettingsPage() {
         activeTab="一般"
         actions={
           <div style={actionRowStyle}>
-            {pageActions.map((action, index) =>
+            {headerActions.map((action, index) =>
               renderActionLink(action, `header-${index}`),
             )}
           </div>
@@ -1387,17 +1529,22 @@ export default async function SettingsPage() {
       />
 
       <div style={pageBodyStyle}>
-        {data.refresh.dataFreshness !== "fresh" ? (
+        {degradedModules.length > 0 ? (
           <CanvasBanner
             theme={th}
             tone="warn"
             icon="warn"
-            title="設定快照不是 fresh"
-            body={`refresh tier ${SETTINGS_REFRESH.label} · generated ${formatUpdated(data.refresh.generatedAt)} · source ${data.refresh.source}`}
+            title="部分 settings module snapshot 不是 fresh"
+            body={degradedModules
+              .map((surface) => {
+                if (!surface.refresh) return surface.label;
+                return `${surface.label}=${surface.refresh.dataFreshness} @ ${formatUpdated(surface.refresh.generatedAt)}`;
+              })
+              .join(" · ")}
           />
         ) : null}
 
-        {data.availableActions.length === 0 ? (
+        {headerActions.length === 0 ? (
           <CanvasBanner
             theme={th}
             tone="info"
@@ -1407,13 +1554,23 @@ export default async function SettingsPage() {
           />
         ) : null}
 
-        {data.unsupportedActions.length > 0 ? (
+        {legacyModules.length > 0 ? (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="warn"
+            title="部分 module 仍是 legacy payload"
+            body={`缺少 UiRefreshMetadata / ui-runtime envelope：${legacyModules.map((surface) => surface.label).join(" · ")}`}
+          />
+        ) : null}
+
+        {unsupportedActions.length > 0 ? (
           <CanvasBanner
             theme={th}
             tone="warn"
             icon="warn"
             title="部分 backend actions 尚未對應到 settings CTA"
-            body={data.unsupportedActions
+            body={unsupportedActions
               .map((descriptor) => descriptor.action)
               .join(" · ")}
           />
@@ -1566,9 +1723,9 @@ export default async function SettingsPage() {
             <div style={summaryStackStyle}>
               <div style={actionPanelStyle}>
                 <div style={sectionLabelStyle}>availableActions</div>
-                {pageActions.length > 0 ? (
+                {headerActions.length > 0 ? (
                   <div style={actionRowStyle}>
-                    {pageActions.map((action, index) =>
+                    {headerActions.map((action, index) =>
                       renderActionLink(action, `page-action-${index}`),
                     )}
                   </div>
@@ -1585,14 +1742,14 @@ export default async function SettingsPage() {
                 items={[
                   {
                     k: "realm",
-                    v: data.identity?.realm ?? "tenant",
+                    v: data.identity.item?.realm ?? "tenant",
                     mono: true,
                   },
                   { k: "auth mode", v: authMode, mono: true },
                   { k: "角色摘要", v: roleSummary, mono: true },
                   {
                     k: "billing email",
-                    v: data.billingProfile?.email ?? "—",
+                    v: data.billingProfile.item?.email ?? "—",
                     mono: true,
                   },
                   {
@@ -1600,8 +1757,8 @@ export default async function SettingsPage() {
                     v: billingAddress,
                   },
                   {
-                    k: "last snapshot",
-                    v: formatUpdated(data.refresh.generatedAt),
+                    k: "billing snapshot",
+                    v: formatUpdated(data.billingProfile.refresh?.generatedAt),
                     mono: true,
                   },
                 ]}
@@ -1641,19 +1798,29 @@ export default async function SettingsPage() {
                 <CanvasKPI
                   theme={th}
                   label="等候"
-                  value={data.sla ? `${data.sla.waitThresholdMin}m` : "—"}
+                  value={
+                    data.sla.item ? `${data.sla.item.waitThresholdMin}m` : "—"
+                  }
                   sub="等候門檻"
                 />
                 <CanvasKPI
                   theme={th}
                   label="抵達"
-                  value={data.sla ? `${data.sla.arrivalThresholdMin}m` : "—"}
+                  value={
+                    data.sla.item
+                      ? `${data.sla.item.arrivalThresholdMin}m`
+                      : "—"
+                  }
                   sub="抵達門檻"
                 />
                 <CanvasKPI
                   theme={th}
                   label="完成"
-                  value={data.sla ? `${data.sla.completionThresholdMin}m` : "—"}
+                  value={
+                    data.sla.item
+                      ? `${data.sla.item.completionThresholdMin}m`
+                      : "—"
+                  }
                   sub="完成門檻"
                 />
                 <CanvasKPI
@@ -1698,7 +1865,7 @@ export default async function SettingsPage() {
                   {
                     k: "更新時間",
                     v: formatUpdated(
-                      quotaSummary?.refreshedAt ?? data.sla?.updatedAt,
+                      quotaSummary?.refreshedAt ?? data.sla.item?.updatedAt,
                     ),
                     mono: true,
                   },
