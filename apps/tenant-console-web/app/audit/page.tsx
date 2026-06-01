@@ -1,10 +1,12 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import type {
+  ApiListData,
   AuditLogRecord,
   CrossAppResourceLink,
   EmptyReason,
   ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -200,6 +202,12 @@ type ActionVisualSpec = {
   helper: string;
 };
 
+type TenantAuditListLike = ApiListData<AuditLogRecord> & {
+  availableActions?: ResourceActionDescriptor[];
+  refreshMetadata?: UiRefreshMetadata;
+  refresh?: UiRefreshMetadata;
+};
+
 const ACTOR_REALM_OPTIONS = [
   "tenant",
   "ops",
@@ -261,6 +269,28 @@ function formatAuditAt(value: string | null | undefined) {
 
 function formatGeneratedAt(value: Date) {
   return generatedAtFormatter.format(value);
+}
+
+function normalizeAuditListResponse(
+  input: AuditLogRecord[] | TenantAuditListLike,
+): {
+  items: AuditLogRecord[];
+  availableActions: ResourceActionDescriptor[];
+  refreshMetadata: UiRefreshMetadata | null;
+} {
+  if (Array.isArray(input)) {
+    return {
+      items: input,
+      availableActions: [],
+      refreshMetadata: null,
+    };
+  }
+
+  return {
+    items: input.items ?? [],
+    availableActions: input.availableActions ?? [],
+    refreshMetadata: input.refreshMetadata ?? input.refresh ?? null,
+  };
 }
 
 function getActorRealm(
@@ -960,14 +990,22 @@ export default async function AuditPage({
 
   let logs: AuditLogRecord[] = [];
   let loadError: string | null = null;
+  let serverActions: ResourceActionDescriptor[] = [];
+  let refreshMetadata: UiRefreshMetadata | null = null;
 
   try {
-    logs = ((await client.listTenantAuditLogs()) as AuditLogRecord[])
+    const auditResponse = normalizeAuditListResponse(
+      await client.listTenantAuditLogs(),
+    );
+
+    logs = auditResponse.items
       .slice()
       .sort(
         (left, right) =>
           Date.parse(right.createdAt) - Date.parse(left.createdAt),
       );
+    serverActions = auditResponse.availableActions;
+    refreshMetadata = auditResponse.refreshMetadata;
   } catch (error) {
     loadError = error instanceof Error ? error.message : "unknown error";
   }
@@ -989,7 +1027,10 @@ export default async function AuditPage({
     hasFilter,
   });
   const visibleLogs = emptyReason ? [] : filteredLogs;
-  const pageActions = getPageActions({ hasRows: visibleLogs.length > 0 });
+  const pageActions =
+    serverActions.length > 0
+      ? serverActions
+      : getPageActions({ hasRows: visibleLogs.length > 0 });
   const actionLookup = new Map(
     pageActions.map((action) => [action.action, action] as const),
   );
@@ -1045,7 +1086,27 @@ export default async function AuditPage({
             tenant scope {logs.length}
           </CanvasPill>
           <CanvasPill theme={th} tone="neutral">
-            snapshot {formatGeneratedAt(generatedAt)}
+            snapshot{" "}
+            {formatGeneratedAt(
+              refreshMetadata?.generatedAt
+                ? new Date(refreshMetadata.generatedAt)
+                : generatedAt,
+            )}
+          </CanvasPill>
+          <CanvasPill
+            theme={th}
+            tone={
+              refreshMetadata?.dataFreshness === "degraded"
+                ? "warn"
+                : refreshMetadata?.dataFreshness === "stale"
+                  ? "danger"
+                  : "neutral"
+            }
+          >
+            {refreshMetadata?.dataFreshness ?? "manual"}
+          </CanvasPill>
+          <CanvasPill theme={th} tone="neutral">
+            source {refreshMetadata?.source ?? "live"}
           </CanvasPill>
         </div>
 
