@@ -14,7 +14,7 @@ ExecStart=%h/workspace/drts-fleet-platform/scripts/canonical-root-watchdog.py
 # When the wave-dispatch / sprint branches are intentionally checked out
 # on canonical root, add them via an env override file at
 # ~/.config/drts/canonical-root.env containing e.g.:
-#   ORCH_CANONICAL_BRANCH=claude/ui-impl-wave-dispatch-202605,dev,main
+#   ORCH_CANONICAL_BRANCH=claude/ui-impl-wave-dispatch-202605-rebased-root,dev,main
 # EnvironmentFile=-: leading dash makes the file optional.
 EnvironmentFile=-%h/.config/drts/canonical-root.env
 
