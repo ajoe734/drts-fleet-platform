@@ -47,7 +47,6 @@ const kpiGridStyle: CSSProperties = {
 
 const contentGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.45fr) minmax(280px, 0.85fr)",
   gap: 16,
   alignItems: "start",
 };
@@ -57,8 +56,9 @@ const mainLaneStyle: CSSProperties = {
   gap: 16,
 };
 
-const sideLaneStyle: CSSProperties = {
+const secondaryGridStyle: CSSProperties = {
   display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
   gap: 16,
 };
 
@@ -233,13 +233,19 @@ const emptyStateStyle: CSSProperties = {
 };
 
 const emptyReasonPreviewStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
   gap: 8,
 };
 
 const tableCardStyle: CSSProperties = {
   overflow: "hidden",
+};
+
+const captionStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: th.textMuted,
+  lineHeight: 1.5,
 };
 
 const actorToneByScope = {
@@ -261,10 +267,6 @@ const auditDateFormatter = new Intl.DateTimeFormat("zh-Hant", {
   timeStyle: "medium",
 });
 
-const dayFormatter = new Intl.DateTimeFormat("zh-Hant", {
-  dateStyle: "medium",
-});
-
 type SearchParamsInput = Record<string, string | string[] | undefined>;
 
 type FilterState = {
@@ -276,6 +278,7 @@ type FilterState = {
   auditId: string;
   expanded: string;
   empty: EmptyReason | "";
+  download: string;
 };
 
 type ResourceLink = {
@@ -345,6 +348,7 @@ function parseFilters(searchParams: SearchParamsInput): FilterState {
     auditId: getSingleParam(searchParams, "auditId"),
     expanded: getSingleParam(searchParams, "expanded"),
     empty: isEmptyReason(emptyParam) ? emptyParam : "",
+    download: getSingleParam(searchParams, "download"),
   };
 }
 
@@ -358,6 +362,7 @@ function buildAuditHref(overrides: Partial<FilterState>) {
     auditId: "",
     expanded: "",
     empty: "",
+    download: "",
     ...overrides,
   };
   const params = new URLSearchParams();
@@ -370,6 +375,7 @@ function buildAuditHref(overrides: Partial<FilterState>) {
   if (merged.auditId) params.set("auditId", merged.auditId);
   if (merged.expanded) params.set("expanded", merged.expanded);
   if (merged.empty) params.set("empty", merged.empty);
+  if (merged.download) params.set("download", merged.download);
 
   const query = params.toString();
   return query ? `/audit?${query}` : "/audit";
@@ -381,12 +387,6 @@ function formatAuditAt(value: string | null | undefined) {
   return Number.isNaN(parsed.getTime())
     ? "—"
     : auditDateFormatter.format(parsed);
-}
-
-function formatDay(value: string | null | undefined) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "—" : dayFormatter.format(parsed);
 }
 
 function formatArtifactAt(value: string | null | undefined) {
@@ -505,6 +505,11 @@ function buildRequestAuditLink(filters: FilterState, auditId: string) {
 
 function buildResourceLink(record: AuditLogRecord): ResourceLink {
   const auditRoute = `/audit?auditId=${encodeURIComponent(record.auditId)}`;
+  const resourceId = record.resourceId
+    ? encodeURIComponent(record.resourceId)
+    : "";
+  const resourceType = record.resourceType.toLowerCase();
+  const moduleName = record.moduleName.toLowerCase();
 
   switch (record.resourceType) {
     case "booking":
@@ -556,10 +561,46 @@ function buildResourceLink(record: AuditLogRecord): ResourceLink {
       break;
   }
 
+  if (
+    resourceType.includes("complaint") ||
+    resourceType.includes("incident") ||
+    resourceType.includes("dispatch") ||
+    moduleName.includes("complaint") ||
+    moduleName.includes("incident") ||
+    moduleName.includes("dispatch")
+  ) {
+    return {
+      href: buildBaseUrl(
+        OPS_CONSOLE_URL,
+        record.resourceId && resourceType.includes("complaint")
+          ? `/complaints/${resourceId}`
+          : auditRoute,
+      ),
+      label: "在 Ops Console 追查",
+      external: true,
+      appLabel: "Ops Console",
+    };
+  }
+
+  if (
+    resourceType.includes("feature_flag") ||
+    resourceType.includes("tenant_override") ||
+    resourceType.includes("governance") ||
+    moduleName.includes("governance") ||
+    moduleName.includes("feature")
+  ) {
+    return {
+      href: buildBaseUrl(PLATFORM_ADMIN_URL, auditRoute),
+      label: "在 Platform Admin 追查",
+      external: true,
+      appLabel: "Platform Admin",
+    };
+  }
+
   if (record.actorType === "ops_user") {
     return {
       href: buildBaseUrl(OPS_CONSOLE_URL, auditRoute),
-      label: "在 Ops Console 開啟",
+      label: "在 Ops Console 開啟稽核",
       external: true,
       appLabel: "Ops Console",
     };
@@ -568,7 +609,7 @@ function buildResourceLink(record: AuditLogRecord): ResourceLink {
   if (record.actorType === "platform_admin") {
     return {
       href: buildBaseUrl(PLATFORM_ADMIN_URL, auditRoute),
-      label: "在 Platform Admin 開啟",
+      label: "在 Platform Admin 開啟稽核",
       external: true,
       appLabel: "Platform Admin",
     };
@@ -652,6 +693,16 @@ function describeErrorReason(error: unknown): EmptyReason {
   const normalized = message.toLowerCase();
 
   if (
+    normalized.includes("404") ||
+    normalized.includes("501") ||
+    normalized.includes("not provisioned") ||
+    normalized.includes("not_provisioned") ||
+    normalized.includes("not implemented")
+  ) {
+    return "not_provisioned";
+  }
+
+  if (
     normalized.includes("403") ||
     normalized.includes("401") ||
     normalized.includes("forbidden") ||
@@ -677,12 +728,12 @@ function buildEmptyState(reason: EmptyReason): EmptyStateSpec {
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "稽核治理尚未完成 provisioning",
-        body: "列表可讀，但簽章匯出與治理附件尚未在此租戶啟用，需先完成設定與治理接線。",
+        title: "此租戶尚未完成稽核治理接線",
+        body: "Audit trail route 已開通，但此 tenant 的 audit export / evidence governance 尚未 provisioning；這不是 no_data。",
         tone: "warn",
         actions: [
           { href: "/settings", label: "查看租戶設定" },
-          { href: "/audit", label: "回到稽核" },
+          { href: "/integration-governance", label: "查看整合就緒度" },
         ],
       };
     case "permission_denied":
@@ -690,21 +741,30 @@ function buildEmptyState(reason: EmptyReason): EmptyStateSpec {
         title: "目前角色無法讀取稽核資料",
         body: "此畫面僅對具 audit read 權限的租戶角色開放，請由 `tc_admin` 或 `tc_finance` 協助。",
         tone: "danger",
-        actions: [{ href: "/users", label: "查看角色配置" }],
+        actions: [
+          { href: "/users", label: "查看角色配置" },
+          { href: "/audit", label: "返回稽核首頁" },
+        ],
       };
     case "external_unavailable":
       return {
         title: "上游稽核服務暫時不可用",
         body: `Tenant snapshot 無法自 ${API_URL} 取得最新資料。此頁 refresh tier 為 T6，只支援手動重新整理。`,
         tone: "warn",
-        actions: [{ href: "/audit", label: "重新整理" }],
+        actions: [
+          { href: "/audit", label: "重新整理" },
+          { href: "/reports", label: "改查報表" },
+        ],
       };
     case "fetch_failed":
       return {
         title: "稽核資料讀取失敗",
         body: "保留目前篩選條件後重試；若持續失敗，請帶著 request correlation 聯絡平台支援。",
         tone: "danger",
-        actions: [{ href: "/audit", label: "重新整理" }],
+        actions: [
+          { href: "/audit", label: "重新整理" },
+          { href: "/audit?download=1", label: "重試簽章匯出" },
+        ],
       };
     case "filtered_empty":
       return {
@@ -713,7 +773,10 @@ function buildEmptyState(reason: EmptyReason): EmptyStateSpec {
         tone: "info",
         actions: [
           { href: "/audit", label: "清除篩選" },
-          { href: buildAuditHref({ empty: "" }), label: "退出空態預覽" },
+          {
+            href: buildAuditHref({ empty: "", download: "" }),
+            label: "退出空態預覽",
+          },
         ],
       };
     case "no_data":
@@ -784,6 +847,25 @@ function renderActionLink(
       {label}
     </a>
   );
+}
+
+function emptyReasonLabel(reason: EmptyReason) {
+  switch (reason) {
+    case "no_data":
+      return "No data";
+    case "not_provisioned":
+      return "Not provisioned";
+    case "fetch_failed":
+      return "Fetch failed";
+    case "permission_denied":
+      return "Permission denied";
+    case "external_unavailable":
+      return "External unavailable";
+    case "filtered_empty":
+      return "Filtered empty";
+    default:
+      return reason;
+  }
 }
 
 function buildTableColumns(
@@ -996,7 +1078,9 @@ export default async function AuditPage({
       : null);
   const emptyState = emptyReason ? buildEmptyState(emptyReason) : null;
   const exportLoadState =
-    exportAction.enabled && !emptyState ? await loadAuditExport(filters) : null;
+    exportAction.enabled && !emptyState && filters.download === "1"
+      ? await loadAuditExport(filters)
+      : null;
   const exportState = buildExportState(
     exportCount,
     exportLoadState?.download ?? null,
@@ -1006,37 +1090,38 @@ export default async function AuditPage({
     "disabledReasonCode" in exportAction
       ? exportAction.disabledReasonCode
       : undefined;
-  const exportActionResolved =
-    exportAction.enabled && exportState.download?.downloadUrl
-      ? exportAction
-      : {
-          ...exportAction,
-          enabled: false,
-          disabledReasonCode:
-            exportDisabledReason ??
-            exportState.error ??
-            "Signed export unavailable",
-        };
+  const exportActionResolved = exportAction.enabled
+    ? exportAction
+    : {
+        ...exportAction,
+        enabled: false,
+        disabledReasonCode:
+          exportDisabledReason ??
+          exportState.error ??
+          "Signed export unavailable",
+      };
   const exportReady = Boolean(exportState.download?.downloadUrl);
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
-        title="稽核"
-        subtitle="cross-actor visibility · request correlation · refresh tier T6"
+        title="稽核紀錄"
+        subtitle="不可變 · request correlation · cross-actor visibility · refresh tier T6"
         actions={
           <>
             {renderActionLink(filterAction, "/audit", "清除篩選")}
             {renderActionLink(
               refreshAction,
-              buildAuditHref(filters),
+              buildAuditHref({ ...filters, download: "" }),
               "重新整理",
             )}
             {renderActionLink(
               exportActionResolved,
-              exportState.download?.downloadUrl ?? "#",
-              exportReady ? "下載簽章匯出" : "匯出篩選結果",
+              exportReady
+                ? (exportState.download?.downloadUrl ?? "#")
+                : buildAuditHref({ ...filters, empty: "", download: "1" }),
+              exportReady ? "下載簽章匯出" : "產生簽章匯出",
             )}
           </>
         }
@@ -1086,8 +1171,8 @@ export default async function AuditPage({
           <div style={mainLaneStyle}>
             <CanvasCard
               theme={th}
-              title="篩選"
-              subtitle="server-side on tenant snapshot"
+              title="篩選與匯出"
+              subtitle="Filter by actor / module / action / time range, then manually refresh or export the current subset."
             >
               <form
                 action="/audit"
@@ -1192,8 +1277,8 @@ export default async function AuditPage({
                     重設
                   </a>
                   <span style={secondaryTextStyle}>
-                    Refresh tier T6: manual refresh only. Export follows the
-                    current filtered subset.
+                    Refresh tier T6: manual refresh only. Export is explicit and
+                    follows the current filtered subset.
                   </span>
                 </div>
               </form>
@@ -1277,10 +1362,28 @@ export default async function AuditPage({
                     ).map((reason) => (
                       <a
                         key={reason}
-                        href={buildAuditHref({ ...filters, empty: reason })}
-                        style={inlineLinkStyle}
+                        href={buildAuditHref({
+                          ...filters,
+                          empty: reason,
+                          download: "",
+                        })}
+                        style={{
+                          ...summaryCellStyle,
+                          textDecoration: "none",
+                          color: th.text,
+                          gap: 6,
+                        }}
                       >
-                        {reason}
+                        <CanvasPill
+                          theme={th}
+                          tone={
+                            reason === emptyReason ? emptyState.tone : "neutral"
+                          }
+                          dot
+                        >
+                          {emptyReasonLabel(reason)}
+                        </CanvasPill>
+                        <span style={captionStyle}>{reason}</span>
                       </a>
                     ))}
                   </div>
@@ -1332,7 +1435,7 @@ export default async function AuditPage({
                       },
                       {
                         label: "Created At",
-                        value: formatDay(focusedRow.record.createdAt),
+                        value: formatAuditAt(focusedRow.record.createdAt),
                         mono: true,
                       },
                     ]}
@@ -1420,133 +1523,133 @@ export default async function AuditPage({
               </CanvasCard>
             ) : null}
           </div>
+        </div>
 
-          <div style={sideLaneStyle}>
-            <CanvasCard
-              theme={th}
-              title="Cross-actor coverage"
-              subtitle="Each actor realm stays visually distinct for Q-TEN13 review."
-            >
-              <div style={summaryGridStyle}>
-                {(
+        <div style={secondaryGridStyle}>
+          <CanvasCard
+            theme={th}
+            title="Cross-actor coverage"
+            subtitle="Each actor realm stays visually distinct for Q-TEN13 review."
+          >
+            <div style={summaryGridStyle}>
+              {(
+                [
                   [
-                    [
-                      "tenant",
-                      "Tenant admins / finance can verify tenant-originated changes.",
-                    ],
-                    [
-                      "ops",
-                      "Ops interventions remain visible without leaving the tenant realm.",
-                    ],
-                    [
-                      "platform",
-                      "Platform overrides and governance actions are surfaced distinctly.",
-                    ],
-                    [
-                      "system",
-                      "Automations stay readable even when no human actor is attached.",
-                    ],
-                    [
-                      "partner",
-                      "Partner API key mutations remain attributable in the shared audit lane.",
-                    ],
-                  ] as Array<[keyof typeof actorToneByScope, string]>
-                ).map(([scope, body]) => (
-                  <div key={scope} style={summaryCellStyle}>
-                    <CanvasPill theme={th} tone={actorToneByScope[scope]} dot>
-                      {actorScopeLabel(scope)}
-                    </CanvasPill>
-                    <div style={summarySubStyle}>{body}</div>
-                  </div>
-                ))}
-              </div>
-            </CanvasCard>
+                    "tenant",
+                    "Tenant admins / finance can verify tenant-originated changes.",
+                  ],
+                  [
+                    "ops",
+                    "Ops interventions remain visible without leaving the tenant realm.",
+                  ],
+                  [
+                    "platform",
+                    "Platform overrides and governance actions are surfaced distinctly.",
+                  ],
+                  [
+                    "system",
+                    "Automations stay readable even when no human actor is attached.",
+                  ],
+                  [
+                    "partner",
+                    "Partner API key mutations remain attributable in the shared audit lane.",
+                  ],
+                ] as Array<[keyof typeof actorToneByScope, string]>
+              ).map(([scope, body]) => (
+                <div key={scope} style={summaryCellStyle}>
+                  <CanvasPill theme={th} tone={actorToneByScope[scope]} dot>
+                    {actorScopeLabel(scope)}
+                  </CanvasPill>
+                  <div style={summarySubStyle}>{body}</div>
+                </div>
+              ))}
+            </div>
+          </CanvasCard>
 
-            <CanvasCard
-              theme={th}
-              title="Current filter summary"
-              subtitle="What this snapshot is showing right now."
-            >
-              <div style={summaryGridStyle}>
-                <div style={summaryCellStyle}>
-                  <span style={summaryLabelStyle}>Request-linked rows</span>
-                  <span style={summaryValueStyle}>{requestLinkedCount}</span>
-                  <span style={summarySubStyle}>
-                    Rows retaining request correlation.
-                  </span>
-                </div>
-                <div style={summaryCellStyle}>
-                  <span style={summaryLabelStyle}>Signed export</span>
-                  <span style={summaryValueStyle}>{exportState.rowCount}</span>
-                  <span style={summarySubStyle}>
-                    {exportReady
-                      ? `Artifact ready · ${formatArtifactAt(exportState.download?.expiresAt)} 到期`
-                      : exportState.error
-                        ? "Artifact unavailable while export endpoint is failing."
-                        : "Visible rows eligible for the next signed export."}
-                  </span>
-                </div>
-                <div style={summaryCellStyle}>
-                  <span style={summaryLabelStyle}>Artifact hash</span>
-                  <span style={summaryValueStyle}>
-                    {shortenManifestHash(exportState.download?.manifestHash)}
-                  </span>
-                  <span style={summarySubStyle}>
-                    {exportReady
-                      ? `Subject ${exportState.download?.subjectId} · immutable signed subset`
-                      : "Manifest hash appears after a signed export is issued."}
-                  </span>
-                </div>
-                <div style={summaryCellStyle}>
-                  <span style={summaryLabelStyle}>Pinned query</span>
-                  <span style={summaryValueStyle}>
-                    {filters.auditId ? "Deep-linked" : "Ad hoc"}
-                  </span>
-                  <span style={summarySubStyle}>
-                    {filters.auditId
-                      ? "Opened from a receipt or copied audit/request link."
-                      : "Browsing the tenant audit snapshot directly."}
-                  </span>
-                </div>
+          <CanvasCard
+            theme={th}
+            title="Current filter summary"
+            subtitle="What this snapshot is showing right now."
+          >
+            <div style={summaryGridStyle}>
+              <div style={summaryCellStyle}>
+                <span style={summaryLabelStyle}>Request-linked rows</span>
+                <span style={summaryValueStyle}>{requestLinkedCount}</span>
+                <span style={summarySubStyle}>
+                  Rows retaining request correlation.
+                </span>
               </div>
-            </CanvasCard>
+              <div style={summaryCellStyle}>
+                <span style={summaryLabelStyle}>Signed export</span>
+                <span style={summaryValueStyle}>{exportState.rowCount}</span>
+                <span style={summarySubStyle}>
+                  {exportReady
+                    ? `Artifact ready · ${formatArtifactAt(exportState.download?.expiresAt)} 到期`
+                    : exportState.error
+                      ? "Artifact unavailable while export endpoint is failing."
+                      : "Visible rows eligible for the next signed export."}
+                </span>
+              </div>
+              <div style={summaryCellStyle}>
+                <span style={summaryLabelStyle}>Artifact hash</span>
+                <span style={summaryValueStyle}>
+                  {shortenManifestHash(exportState.download?.manifestHash)}
+                </span>
+                <span style={summarySubStyle}>
+                  {exportReady
+                    ? `Subject ${exportState.download?.subjectId} · immutable signed subset`
+                    : "Manifest hash appears after a signed export is issued."}
+                </span>
+              </div>
+              <div style={summaryCellStyle}>
+                <span style={summaryLabelStyle}>Pinned query</span>
+                <span style={summaryValueStyle}>
+                  {filters.auditId ? "Deep-linked" : "Ad hoc"}
+                </span>
+                <span style={summarySubStyle}>
+                  {filters.auditId
+                    ? "Opened from a receipt or copied audit/request link."
+                    : "Browsing the tenant audit snapshot directly."}
+                </span>
+              </div>
+            </div>
+          </CanvasCard>
 
-            <CanvasCard
-              theme={th}
-              title="Exit paths"
-              subtitle="Cross-app deep links open a new tab when the owning console is outside tenant."
-            >
-              <ul style={listStyle}>
-                <li style={listItemStyle}>
-                  <span style={primaryTextStyle}>Tenant resources</span>
-                  <span style={secondaryTextStyle}>
-                    Booking, invoice, report, settings, users, and cost-center
-                    records open in-app.
-                  </span>
-                </li>
-                <li style={listItemStyle}>
-                  <span style={primaryTextStyle}>Ops-owned follow-up</span>
-                  <span style={secondaryTextStyle}>
-                    Unknown ops-origin rows exit to `Ops Console
-                    /audit?auditId=...` in a new tab.
-                  </span>
-                </li>
-                <li
-                  style={{
-                    ...listItemStyle,
-                    borderBottom: "none",
-                    paddingBottom: 0,
-                  }}
-                >
-                  <span style={primaryTextStyle}>Platform-owned follow-up</span>
-                  <span style={secondaryTextStyle}>
-                    Governance or platform-admin trails exit to `Platform Admin
-                    /audit?auditId=...`.
-                  </span>
-                </li>
-              </ul>
-            </CanvasCard>
-          </div>
+          <CanvasCard
+            theme={th}
+            title="Exit paths"
+            subtitle="Cross-app deep links open a new tab when the owning console is outside tenant."
+          >
+            <ul style={listStyle}>
+              <li style={listItemStyle}>
+                <span style={primaryTextStyle}>Tenant resources</span>
+                <span style={secondaryTextStyle}>
+                  Booking, invoice, report, settings, users, and cost-center
+                  records open in-app.
+                </span>
+              </li>
+              <li style={listItemStyle}>
+                <span style={primaryTextStyle}>Ops-owned follow-up</span>
+                <span style={secondaryTextStyle}>
+                  Unknown ops-origin rows exit to `Ops Console
+                  /audit?auditId=...` in a new tab.
+                </span>
+              </li>
+              <li
+                style={{
+                  ...listItemStyle,
+                  borderBottom: "none",
+                  paddingBottom: 0,
+                }}
+              >
+                <span style={primaryTextStyle}>Platform-owned follow-up</span>
+                <span style={secondaryTextStyle}>
+                  Governance or platform-admin trails exit to `Platform Admin
+                  /audit?auditId=...`.
+                </span>
+              </li>
+            </ul>
+          </CanvasCard>
         </div>
       </div>
     </div>
