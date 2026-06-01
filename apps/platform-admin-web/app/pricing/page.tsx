@@ -21,12 +21,24 @@ import {
 } from "@drts/ui-web";
 import type {
   CrossAppResourceLink,
+  EmptyReason,
   ResourceActionDescriptor,
+  RefreshTier,
   UiRefreshMetadata,
 } from "@drts/contracts";
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
-const REFRESH_INTERVAL_MS = 30_000;
+const REFRESH_TIER: RefreshTier = "medium_slow";
+const REFRESH_INTERVALS_MS: Record<RefreshTier, number> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: 0,
+};
+const REFRESH_INTERVAL_MS = REFRESH_INTERVALS_MS[REFRESH_TIER];
 const STALE_AFTER_MS = 55_000;
 
 type PricingTabId = "passenger" | "driver" | "subsidy" | "history";
@@ -66,6 +78,14 @@ type VersionRow = {
   crossLinks?: CrossAppResourceLink[];
 };
 
+type EmptyStateDescriptor = {
+  tone: Exclude<CanvasTone, "neutral">;
+  title: string;
+  body: string;
+  nextAction?: ResourceActionDescriptor;
+  links?: CrossAppResourceLink[];
+};
+
 const TAB_IDS: PricingTabId[] = ["passenger", "driver", "subsidy", "history"];
 
 const PRICING_EMPTY_REASONS = [
@@ -77,7 +97,7 @@ const PRICING_EMPTY_REASONS = [
   "filtered_empty",
 ] as const;
 
-type PricingEmptyReason = (typeof PRICING_EMPTY_REASONS)[number];
+type PricingEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
 
 const EMPTY_REASON_OPTIONS: Array<{
   value: "live" | PricingEmptyReason;
@@ -556,6 +576,40 @@ function toneForRisk(
   return "info";
 }
 
+function mergeActionDescriptors(
+  actions: ResourceActionDescriptor[],
+): ResourceActionDescriptor[] {
+  const merged = new Map<string, ResourceActionDescriptor>();
+
+  for (const action of actions) {
+    const existing = merged.get(action.action);
+    if (!existing) {
+      merged.set(action.action, { ...action });
+      continue;
+    }
+
+    const riskOrder = { low: 0, medium: 1, high: 2 } as const;
+    const disabledReasonCode =
+      !existing.enabled && !action.enabled
+        ? (action.disabledReasonCode ?? existing.disabledReasonCode)
+        : undefined;
+    merged.set(action.action, {
+      action: action.action,
+      enabled: existing.enabled || action.enabled,
+      riskLevel:
+        riskOrder[action.riskLevel] > riskOrder[existing.riskLevel]
+          ? action.riskLevel
+          : existing.riskLevel,
+      ...(existing.requiresReason || action.requiresReason
+        ? { requiresReason: true }
+        : {}),
+      ...(disabledReasonCode ? { disabledReasonCode } : {}),
+    });
+  }
+
+  return [...merged.values()];
+}
+
 function formatActionLabel(action: string) {
   return action
     .split("_")
@@ -566,7 +620,7 @@ function formatActionLabel(action: string) {
 function emptyStateDescriptor(
   reason: PricingEmptyReason,
   locale: string,
-): { tone: Exclude<CanvasTone, "neutral">; title: string; body: string } {
+): EmptyStateDescriptor {
   const zh = locale !== "en";
   switch (reason) {
     case "no_data":
@@ -576,6 +630,11 @@ function emptyStateDescriptor(
         body: zh
           ? "系統已連線，但這個 tab 尚未建立任何版本。"
           : "The read model is healthy, but this lane has no versions yet.",
+        nextAction: {
+          action: "create_draft",
+          enabled: true,
+          riskLevel: "medium",
+        },
       };
     case "not_provisioned":
       return {
@@ -584,6 +643,11 @@ function emptyStateDescriptor(
         body: zh
           ? "先完成 partner / tenant / settlement provision，再建立 pricing draft。"
           : "Finish partner, tenant, or settlement provisioning before creating a pricing draft.",
+        nextAction: {
+          action: "open_provisioning",
+          enabled: true,
+          riskLevel: "low",
+        },
       };
     case "fetch_failed":
       return {
@@ -594,6 +658,21 @@ function emptyStateDescriptor(
         body: zh
           ? "請使用 refresh 或查看 audit / adapter health 追蹤原因。"
           : "Use refresh or inspect audit and adapter health to trace the failure.",
+        nextAction: {
+          action: "retry_fetch",
+          enabled: true,
+          riskLevel: "medium",
+        },
+        links: [
+          {
+            targetApp: "platform-admin",
+            route: "/audit?resourceType=pricing",
+            resourceType: "audit_event",
+            resourceId: "pricing-read-model",
+            openMode: "new_tab",
+            label: zh ? "查看 pricing audit" : "View pricing audit",
+          },
+        ],
       };
     case "permission_denied":
       return {
@@ -614,6 +693,18 @@ function emptyStateDescriptor(
         body: zh
           ? "可先查看已發布版本與 audit；發布與 retire 先暫停。"
           : "Published history remains visible, but publish and retire flows are paused.",
+        links: [
+          {
+            targetApp: "ops-console",
+            route: "/health?dependency=settlement",
+            resourceType: "dependency_health",
+            resourceId: "settlement",
+            openMode: "new_tab",
+            label: zh
+              ? "查看結算依賴健康度"
+              : "View settlement dependency health",
+          },
+        ],
       };
     case "filtered_empty":
       return {
@@ -645,6 +736,7 @@ function RefreshMeta({
         theme={theme}
         cols={2}
         items={[
+          { label: "refreshTier", value: REFRESH_TIER, mono: true },
           {
             label: copy.lastRefresh,
             value: formatDateTime(metadata.generatedAt),
@@ -660,6 +752,62 @@ function RefreshMeta({
         ]}
       />
     </CanvasCard>
+  );
+}
+
+function EmptyStatePreview({
+  descriptor,
+  theme,
+  locale,
+  onAction,
+}: {
+  descriptor: EmptyStateDescriptor;
+  theme: CanvasTheme;
+  locale: string;
+  onAction: (action: ResourceActionDescriptor, subject: string) => void;
+}) {
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <CanvasBanner
+        theme={theme}
+        tone={descriptor.tone}
+        title={descriptor.title}
+        body={descriptor.body}
+      />
+      {descriptor.nextAction ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          <CanvasBtn
+            theme={theme}
+            variant={
+              descriptor.nextAction.riskLevel === "low" ? "ghost" : "primary"
+            }
+            onClick={() =>
+              onAction(
+                descriptor.nextAction!,
+                locale === "en" ? "Empty state" : "空狀態",
+              )
+            }
+          >
+            {formatActionLabel(descriptor.nextAction.action)}
+          </CanvasBtn>
+        </div>
+      ) : null}
+      {descriptor.links?.length ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+          {descriptor.links.map((link) => (
+            <a
+              key={`${link.targetApp}-${link.route}`}
+              href={link.route}
+              target="_blank"
+              rel="noreferrer"
+              style={linkStyle(theme)}
+            >
+              {link.label}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -680,6 +828,7 @@ export default function PricingPage() {
   const [historyFilter, setHistoryFilter] = useState("all");
   const [historyScopeFilter, setHistoryScopeFilter] = useState("all");
   const [historyPeriodFilter, setHistoryPeriodFilter] = useState("all");
+  const [showRetired, setShowRetired] = useState(true);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingActionKey, setPendingActionKey] = useState<string | null>(null);
 
@@ -725,6 +874,7 @@ export default function PricingPage() {
         return false;
       if (historyScopeFilter !== "all" && row.scope !== historyScopeFilter)
         return false;
+      if (!showRetired && row.status === "retired") return false;
       if (historyPeriodFilter === "all") return true;
 
       const ageMs = Date.now() - Date.parse(row.publishedAt);
@@ -734,33 +884,67 @@ export default function PricingPage() {
         return ageMs <= 90 * 24 * 60 * 60 * 1000;
       return true;
     });
-  }, [historyFilter, historyPeriodFilter, historyScopeFilter]);
+  }, [historyFilter, historyPeriodFilter, historyScopeFilter, showRetired]);
 
   const visibleItems = useMemo(() => {
-    switch (activeTab) {
-      case "driver":
-        return DRIVER_PLANS;
-      case "subsidy":
-        return SUBSIDY_RULES;
-      case "history":
-        return [];
-      case "passenger":
-      default:
-        return PASSENGER_RULES;
-    }
-  }, [activeTab]);
+    const items = (() => {
+      switch (activeTab) {
+        case "driver":
+          return DRIVER_PLANS;
+        case "subsidy":
+          return SUBSIDY_RULES;
+        case "history":
+          return [];
+        case "passenger":
+        default:
+          return PASSENGER_RULES;
+      }
+    })();
+
+    return showRetired
+      ? items
+      : items.filter((item) => item.status !== "retired");
+  }, [activeTab, showRetired]);
+
+  const createDraftAction = useMemo<ResourceActionDescriptor | null>(() => {
+    if (activeTab === "history") return null;
+    return {
+      action: "create_draft",
+      enabled: emptyPreview !== "permission_denied",
+      riskLevel: "medium",
+      ...(emptyPreview === "permission_denied"
+        ? { disabledReasonCode: "role_read_only" }
+        : {}),
+    };
+  }, [activeTab, emptyPreview]);
 
   const topLevelActions = useMemo<ResourceActionDescriptor[]>(() => {
-    if (activeTab === "history") {
-      return [
-        { action: "view_version_history", enabled: true, riskLevel: "low" },
-      ];
-    }
-    return [
-      { action: "create_draft", enabled: true, riskLevel: "medium" },
-      ...visibleItems.flatMap((item) => item.availableActions).slice(0, 2),
-    ];
-  }, [activeTab, visibleItems]);
+    const scopedActions =
+      activeTab === "history"
+        ? visibleHistory.flatMap((row) => row.availableActions)
+        : visibleItems.flatMap((item) => item.availableActions);
+
+    return mergeActionDescriptors(
+      createDraftAction ? [createDraftAction, ...scopedActions] : scopedActions,
+    );
+  }, [activeTab, createDraftAction, visibleHistory, visibleItems]);
+
+  const activeEmptyDescriptor = useMemo(
+    () =>
+      emptyPreview === "live"
+        ? null
+        : emptyStateDescriptor(emptyPreview, locale),
+    [emptyPreview, locale],
+  );
+
+  const emptyStateGallery = useMemo(
+    () =>
+      PRICING_EMPTY_REASONS.map((reason) => ({
+        reason,
+        descriptor: emptyStateDescriptor(reason, locale),
+      })),
+    [locale],
+  );
 
   const counts = {
     passenger: PASSENGER_RULES.length,
@@ -855,12 +1039,6 @@ export default function PricingPage() {
     </div>
   );
 
-  const showEmptyState = emptyPreview !== "live";
-  const emptyDescriptor =
-    showEmptyState && activeTab !== "history"
-      ? emptyStateDescriptor(emptyPreview, locale)
-      : null;
-
   return (
     <CanvasShell
       theme={theme}
@@ -885,21 +1063,13 @@ export default function PricingPage() {
             <CanvasBtn theme={theme} onClick={handleRefresh} icon="arrow">
               {copy.manualRefresh}
             </CanvasBtn>
-            {activeTab !== "history" ? (
+            {createDraftAction ? (
               <CanvasBtn
                 theme={theme}
                 variant="primary"
                 icon="plus"
-                onClick={() =>
-                  handleAction(
-                    {
-                      action: "create_draft",
-                      enabled: true,
-                      riskLevel: "medium",
-                    },
-                    copy.title,
-                  )
-                }
+                onClick={() => handleAction(createDraftAction, copy.title)}
+                disabled={!createDraftAction.enabled}
               >
                 {copy.createDraft}
               </CanvasBtn>
@@ -1051,6 +1221,19 @@ export default function PricingPage() {
                     </select>
                   </CanvasField>
                 ) : null}
+
+                <label style={checkboxFieldStyle(theme)}>
+                  <input
+                    type="checkbox"
+                    checked={showRetired}
+                    onChange={(event) => setShowRetired(event.target.checked)}
+                  />
+                  <span>
+                    {locale === "en"
+                      ? "Show retired versions"
+                      : "顯示 retired 版本"}
+                  </span>
+                </label>
               </div>
             </CanvasCard>
 
@@ -1183,13 +1366,27 @@ export default function PricingPage() {
                   </table>
                 )}
               </CanvasCard>
-            ) : showEmptyState && emptyDescriptor ? (
-              <CanvasBanner
+            ) : activeEmptyDescriptor ? (
+              <CanvasCard
                 theme={theme}
-                tone={emptyDescriptor.tone}
-                title={emptyDescriptor.title}
-                body={emptyDescriptor.body}
-              />
+                title={
+                  locale === "en"
+                    ? `${tabLabel(activeTab, locale)} empty state`
+                    : `${tabLabel(activeTab, locale)} 空狀態`
+                }
+                subtitle={
+                  locale === "en"
+                    ? "Previewing the packet-required EmptyReason rendering."
+                    : "預覽 packet 要求的 EmptyReason 呈現。"
+                }
+              >
+                <EmptyStatePreview
+                  descriptor={activeEmptyDescriptor}
+                  theme={theme}
+                  locale={locale}
+                  onAction={handleAction}
+                />
+              </CanvasCard>
             ) : (
               <div style={{ display: "grid", gap: 16 }}>
                 {visibleItems.map((item) => (
@@ -1299,28 +1496,31 @@ export default function PricingPage() {
             <CanvasCard
               theme={theme}
               title={
-                locale === "en"
-                  ? "EmptyReason contract"
-                  : "EmptyReason contract"
+                locale === "en" ? "EmptyReason gallery" : "EmptyReason gallery"
               }
               subtitle={
                 locale === "en"
-                  ? "All six packet-required states render distinctly."
-                  : "依 packet 要求，六種狀態需各自獨立呈現。"
+                  ? "All six packet-required states render as distinct banners with their own CTA/links."
+                  : "依 packet 要求，六種狀態以不同 banner 與 CTA/links 獨立呈現。"
               }
             >
               <div style={{ display: "grid", gap: 8 }}>
-                {PRICING_EMPTY_REASONS.map((reason) => (
-                  <div key={reason} style={legendRowStyle}>
-                    <CanvasPill
+                {emptyStateGallery.map(({ reason, descriptor }) => (
+                  <div key={reason} style={emptyGalleryCardStyle(theme)}>
+                    <div style={legendRowStyle}>
+                      <CanvasPill theme={theme} tone={descriptor.tone}>
+                        {reason}
+                      </CanvasPill>
+                      <span style={{ color: theme.textMuted }}>
+                        {copy.emptyLabels[reason]}
+                      </span>
+                    </div>
+                    <EmptyStatePreview
+                      descriptor={descriptor}
                       theme={theme}
-                      tone={emptyStateDescriptor(reason, locale).tone}
-                    >
-                      {reason}
-                    </CanvasPill>
-                    <span style={{ color: theme.textMuted }}>
-                      {copy.emptyLabels[reason]}
-                    </span>
+                      locale={locale}
+                      onAction={handleAction}
+                    />
                   </div>
                 ))}
               </div>
@@ -1424,6 +1624,22 @@ const controlsGridStyle = {
   gap: 12,
 };
 
+function checkboxFieldStyle(theme: CanvasTheme) {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 10,
+    minHeight: 38,
+    padding: "0 12px",
+    borderRadius: 10,
+    border: `1px solid ${theme.border}`,
+    background: theme.surfaceHi,
+    color: theme.text,
+    fontFamily: theme.fontFamily,
+    fontSize: 13,
+  } as const;
+}
+
 function selectStyle(theme: CanvasTheme) {
   return {
     width: "100%",
@@ -1525,3 +1741,14 @@ const legendRowStyle = {
   gap: 10,
   flexWrap: "wrap" as const,
 };
+
+function emptyGalleryCardStyle(theme: CanvasTheme) {
+  return {
+    display: "grid",
+    gap: 12,
+    padding: 14,
+    borderRadius: 14,
+    border: `1px solid ${theme.border}`,
+    background: theme.surfaceHi,
+  } as const;
+}
