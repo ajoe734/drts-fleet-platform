@@ -220,6 +220,12 @@ const metricNoteStyle = {
   lineHeight: 1.4,
 } satisfies CSSProperties;
 
+const metricStackStyle = {
+  display: "grid",
+  gap: 6,
+  marginTop: 10,
+} satisfies CSSProperties;
+
 const emptyWrapStyle = {
   display: "grid",
   gap: 14,
@@ -773,6 +779,43 @@ function buildHealthLink(adapter: AdapterRegistryRecord) {
   return `/health?adapterId=${encodeURIComponent(adapter.id)}`;
 }
 
+function readSearchParam(
+  searchParams: ReturnType<typeof useSearchParams>,
+  key: string,
+) {
+  const value = searchParams.get(key);
+  return value?.trim() ? value.trim() : null;
+}
+
+function normalizeEnvironmentFilter(value: string | null) {
+  switch (value?.toLowerCase()) {
+    case "pilot":
+      return "staging";
+    case "production":
+    case "sandbox":
+    case "staging":
+    case "development":
+      return value.toLowerCase();
+    default:
+      return "all";
+  }
+}
+
+function normalizeHealthFilter(value: string | null) {
+  switch (value?.toLowerCase()) {
+    case "down":
+      return "unhealthy";
+    case "healthy":
+    case "degraded":
+    case "unhealthy":
+    case "attention":
+    case "paused":
+      return value.toLowerCase();
+    default:
+      return "all";
+  }
+}
+
 function buildAuditId(action: string, adapterId?: string | null) {
   return `audit_${action}_${(adapterId ?? "registry").replace(/[^a-z0-9]/gi, "").slice(-10) || "root"}_${Date.now().toString(36)}`;
 }
@@ -781,16 +824,31 @@ export default function AdapterRegistryPage() {
   const { t, locale } = useTranslation();
   const searchParams = useSearchParams();
   const client = usePlatformAdminClient();
+  const initialSearchValue = readSearchParam(searchParams, "search") ?? "";
+  const initialPlatformCode = readSearchParam(searchParams, "platformCode");
+  const initialEntry = readSearchParam(searchParams, "entry");
+  const initialEnvironment = normalizeEnvironmentFilter(
+    readSearchParam(searchParams, "environment"),
+  );
+  const initialHealth = normalizeHealthFilter(
+    readSearchParam(searchParams, "health"),
+  );
+  const requestedAdapterId = readSearchParam(searchParams, "adapterId");
 
   const [adapters, setAdapters] = useState<AdapterRegistryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedAdapterId, setSelectedAdapterId] = useState<string | null>(
-    null,
+    requestedAdapterId,
   );
-  const [searchValue, setSearchValue] = useState("");
-  const [environmentFilter, setEnvironmentFilter] = useState("all");
-  const [healthFilter, setHealthFilter] = useState("all");
+  const [searchValue, setSearchValue] = useState(
+    initialPlatformCode
+      ? `${initialSearchValue} ${initialPlatformCode}`.trim()
+      : initialSearchValue,
+  );
+  const [environmentFilter, setEnvironmentFilter] =
+    useState(initialEnvironment);
+  const [healthFilter, setHealthFilter] = useState(initialHealth);
   const [previewEmptyReason, setPreviewEmptyReason] = useState<
     EmptyReason | "live"
   >((searchParams.get("emptyReason") as EmptyReason | null) ?? "live");
@@ -862,8 +920,17 @@ export default function AdapterRegistryPage() {
           cancel: "Cancel",
           detailExit: "Route exits",
           detailEntry: "Entry routes",
+          activeEntry: "Active entry",
+          entrySidebar: "Sidebar",
+          entryPartner: "Partner linkage",
+          entryHealth: "Health drill-in",
+          entryOpsDispatch: "Ops dispatch forwarded board",
+          entryUnknown: "Route shell",
           adapterType: "Adapter type",
           supportedActions: "Supported actions",
+          supportedActionsSummary: "Supported actions on registry card",
+          webhookUrl: "Webhook URL",
+          credentialPosture: "Credential posture",
           credentialSummary: "Credential summary",
           routeSidebar: "Sidebar navigation",
           routeDispatch: "Cross-app from ops dispatch (new tab)",
@@ -945,8 +1012,17 @@ export default function AdapterRegistryPage() {
           cancel: "取消",
           detailExit: "離開路徑",
           detailEntry: "進入路徑",
+          activeEntry: "目前入口",
+          entrySidebar: "側邊欄",
+          entryPartner: "合作夥伴 linkage",
+          entryHealth: "Health drill-in",
+          entryOpsDispatch: "Ops dispatch forwarded board",
+          entryUnknown: "Route shell",
           adapterType: "Adapter type",
           supportedActions: "Supported actions",
+          supportedActionsSummary: "卡片支援動作摘要",
+          webhookUrl: "Webhook URL",
+          credentialPosture: "Credential posture",
           credentialSummary: "Credential 摘要",
           routeSidebar: "從側邊欄進入",
           routeDispatch: "從 ops dispatch cross-app 進入（新分頁）",
@@ -1122,17 +1198,30 @@ export default function AdapterRegistryPage() {
     const draftAction = adapters
       .flatMap((adapter) => adapter.availableActions ?? [])
       .find((descriptor) => descriptor.action === "create_adapter_config");
-    if (draftAction) {
-      return [draftAction];
-    }
-    return [
-      {
-        action: "create_adapter_config",
-        enabled: true,
-        riskLevel: "high",
-      },
-    ];
+    return draftAction ? [draftAction] : [];
   }, [adapters]);
+
+  const activeEntryLabel = useMemo(() => {
+    switch (initialEntry) {
+      case "ops-dispatch":
+        return copy.entryOpsDispatch;
+      case "partners":
+        return copy.entryPartner;
+      case "health":
+        return copy.entryHealth;
+      case "sidebar":
+        return copy.entrySidebar;
+      default:
+        return copy.entryUnknown;
+    }
+  }, [
+    copy.entryHealth,
+    copy.entryOpsDispatch,
+    copy.entryPartner,
+    copy.entrySidebar,
+    copy.entryUnknown,
+    initialEntry,
+  ]);
 
   const handleActionIntent = useCallback(
     (descriptor: ResourceActionDescriptor, adapterId: string | null) => {
@@ -1632,6 +1721,10 @@ export default function AdapterRegistryPage() {
                     value: copy.routeSidebar,
                   },
                   {
+                    label: copy.activeEntry,
+                    value: activeEntryLabel,
+                  },
+                  {
                     label: locale === "en" ? "Cross-app entry" : "跨 app 入口",
                     value: copy.routeDispatch,
                   },
@@ -1850,6 +1943,34 @@ export default function AdapterRegistryPage() {
                             },
                           ]}
                         />
+                        <div style={metricStackStyle}>
+                          <div style={secondaryTextStyle}>
+                            <strong>{copy.webhookUrl}:</strong>{" "}
+                            {adapter.webhookStatus?.url ?? "—"}
+                          </div>
+                          <div style={secondaryTextStyle}>
+                            <strong>{copy.supportedActionsSummary}:</strong>{" "}
+                            {adapter.supportedActions
+                              .map((item) => item.name)
+                              .join(", ") || "—"}
+                          </div>
+                          <div style={secondaryTextStyle}>
+                            <strong>{copy.credentialPosture}:</strong>{" "}
+                            {adapter.credentialMeta?.configured
+                              ? locale === "en"
+                                ? "configured"
+                                : "已設定"
+                              : locale === "en"
+                                ? "missing"
+                                : "缺少"}
+                            {" · "}
+                            {adapter.credentialMeta?.rotatedAt
+                              ? formatDateTime(adapter.credentialMeta.rotatedAt)
+                              : "—"}
+                            {" · "}
+                            {adapter.credentialMeta?.rotationOwner ?? "—"}
+                          </div>
+                        </div>
                       </button>
 
                       <div style={cardActionRowStyle}>
