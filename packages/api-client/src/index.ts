@@ -70,6 +70,7 @@ import type {
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
   DriverLocationHeartbeatCommand,
+  DriverOpsInstruction,
   DriverProfileRecord,
   DriverRegistryRecord,
   DriverRejectTaskCommand,
@@ -96,6 +97,7 @@ import type {
   IncidentRecord,
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
+  SearchResultRecord,
   ServiceRecoveryActionRecord,
   InitiateVehicleOffboardingCommand,
   InsurancePolicyRecord,
@@ -250,6 +252,17 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * Query for the per-realm cross-entity header search (Q-X07 / Q-X08).
+ * `q` is the free-text term; `types` optionally narrows the searched
+ * categories (e.g. "orders", "drivers"). A single string or a list are
+ * both accepted and serialized as repeated `types=` params.
+ */
+export interface SearchQuery {
+  q: string;
+  types?: string | string[];
+}
+
 interface ListEnvelope<T> {
   items: T[];
 }
@@ -291,6 +304,39 @@ function createRequestToken(): string {
 function hasHeader(headers: Record<string, string>, key: string): boolean {
   const target = key.toLowerCase();
   return Object.keys(headers).some((header) => header.toLowerCase() === target);
+}
+
+/**
+ * Normalize a search endpoint payload into a flat `SearchResultRecord[]`.
+ * Per-realm backends return results in different envelopes — a flat array,
+ * a `{ groups: [{ category, items }] }` wrapper, an `{ items }`/`{ results }`
+ * list, or a record keyed by category. Each record carries its own
+ * `category`, so callers can re-group per Q-X08 without the backend shape.
+ */
+function flattenSearchResults(data: unknown): SearchResultRecord[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data as SearchResultRecord[];
+  if (typeof data !== "object") return [];
+
+  const payload = data as Record<string, unknown>;
+
+  if (Array.isArray(payload.groups)) {
+    return payload.groups.flatMap((group) => {
+      const items = (group as { items?: unknown }).items;
+      return Array.isArray(items) ? (items as SearchResultRecord[]) : [];
+    });
+  }
+
+  for (const key of ["items", "results"] as const) {
+    if (Array.isArray(payload[key])) {
+      return payload[key] as SearchResultRecord[];
+    }
+  }
+
+  // Record keyed by category, e.g. { tenants: [...], partners: [...] }.
+  return Object.values(payload).flatMap((value) =>
+    Array.isArray(value) ? (value as SearchResultRecord[]) : [],
+  );
 }
 
 export class ApiClient {
@@ -913,6 +959,39 @@ export class ApiClient {
     });
   }
 
+  // ── Driver: Ops Instructions (Q-DRV04 manual-fallback banner) ──
+
+  /**
+   * Ops-issued instructions surfaced to the driver, primarily for
+   * manual-fallback coordination on forwarded orders (Q-DRV04). Pass
+   * `taskId` to scope the list to a single task's active instructions.
+   */
+  async listOpsInstructions(filters?: {
+    taskId?: string;
+  }): Promise<DriverOpsInstruction[]> {
+    const params = new URLSearchParams();
+    if (filters?.taskId) params.set("taskId", filters.taskId);
+    const query = params.toString();
+    const url = query
+      ? `/api/driver/ops-instructions?${query}`
+      : "/api/driver/ops-instructions";
+    return this.getList<DriverOpsInstruction>(url);
+  }
+
+  /**
+   * Acknowledge an ops instruction from the driver app, dismissing the
+   * in-app banner. Returns the updated instruction record.
+   */
+  async acknowledgeOpsInstruction(
+    instructionId: string,
+    command: { acknowledgedAt?: string } = {},
+  ): Promise<DriverOpsInstruction> {
+    return this.post<DriverOpsInstruction>(
+      `/api/driver/ops-instructions/${encodeURIComponent(instructionId)}/acknowledge`,
+      { body: command },
+    );
+  }
+
   // ── Call Center ──
 
   async listCallSessions(): Promise<CallSessionRecord[]> {
@@ -1315,6 +1394,50 @@ export class ApiClient {
       ? `/api/platform-earnings/by-platform?period=${encodeURIComponent(period)}`
       : "/api/platform-earnings/by-platform";
     return this.get<PlatformEarningsByPlatformResponse>(url);
+  }
+
+  // ── Cross-App Search (Q-X07 / Q-X08) ──
+
+  /**
+   * Ops-console cross-entity search: orders, dispatch, drivers, vehicles,
+   * complaints, incidents. Backs `GET /api/ops/search`.
+   */
+  async searchOps(query: SearchQuery): Promise<SearchResultRecord[]> {
+    return this.search("/api/ops/search", query);
+  }
+
+  /**
+   * Platform-admin cross-entity search: tenants, partners, users, adapter
+   * registry, audit events. Backs `GET /api/platform/search`.
+   */
+  async searchPlatform(query: SearchQuery): Promise<SearchResultRecord[]> {
+    return this.search("/api/platform/search", query);
+  }
+
+  /**
+   * Tenant-console cross-entity search: bookings, passengers, addresses,
+   * cost centers, invoices. Backs `GET /api/tenant/search` (tenant scope is
+   * taken from the configured `x-tenant-id` default header).
+   */
+  async searchTenant(query: SearchQuery): Promise<SearchResultRecord[]> {
+    return this.search("/api/tenant/search", query);
+  }
+
+  private async search(
+    basePath: string,
+    query: SearchQuery,
+  ): Promise<SearchResultRecord[]> {
+    const params = new URLSearchParams();
+    params.set("q", query.q);
+    if (query.types !== undefined) {
+      const types = Array.isArray(query.types) ? query.types : [query.types];
+      for (const type of types) {
+        if (type) params.append("types", type);
+      }
+    }
+    const qs = params.toString();
+    const data = await this.get<unknown>(qs ? `${basePath}?${qs}` : basePath);
+    return flattenSearchResults(data);
   }
 
   // ── Reporting & Filing ──
