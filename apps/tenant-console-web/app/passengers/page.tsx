@@ -55,16 +55,10 @@ const metricsStyle: CSSProperties = {
   gap: 12,
 };
 
-const contentGridStyle: CSSProperties = {
+const detailGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.9fr) minmax(280px, 0.95fr)",
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
   gap: 16,
-};
-
-const sideStackStyle: CSSProperties = {
-  display: "grid",
-  gap: 16,
-  alignContent: "start",
 };
 
 const primaryCellStyle: CSSProperties = {
@@ -152,6 +146,28 @@ const actionWrapStyle: CSSProperties = {
   flexWrap: "wrap",
   gap: 6,
   justifyContent: "flex-end",
+};
+
+const sectionStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 16,
+};
+
+const tableMetaRowStyle: CSSProperties = {
+  padding: "12px 16px",
+  borderBottom: `1px solid ${th.border}`,
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+  justifyContent: "space-between",
+};
+
+const tableMetaGroupStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
 };
 
 const warningListStyle: CSSProperties = {
@@ -1274,8 +1290,41 @@ export default async function PassengersPage({
           </div>
         </CanvasCard>
 
-        <div style={contentGridStyle}>
+        <div style={sectionStackStyle}>
+          {duplicateWarnings.length > 0 ? (
+            <CanvasBanner
+              theme={th}
+              tone="warn"
+              icon="warn"
+              title="發現 duplicate-name warning"
+              body={duplicateWarnings
+                .map(
+                  (warning) =>
+                    `${warning.label} · ${warning.passengerIds.join(" / ")}`,
+                )
+                .join(" · ")}
+            />
+          ) : null}
+
           <CanvasCard theme={th} padding={0} style={cardStyle}>
+            <div style={tableMetaRowStyle}>
+              <div style={tableMetaGroupStyle}>
+                <CanvasPill theme={th} tone="info">
+                  visible {rows.length}
+                </CanvasPill>
+                <CanvasPill theme={th} tone="neutral">
+                  availableActions {pageActions.length}
+                </CanvasPill>
+                <CanvasPill theme={th} tone="neutral">
+                  T5 / 30s
+                </CanvasPill>
+              </div>
+              <div style={tableMetaGroupStyle}>
+                <span style={subtleMonoStyle}>
+                  active / inactive · department · name / employee no / mobile
+                </span>
+              </div>
+            </div>
             {filteredEmptyState ? (
               renderEmptyState(
                 filteredEmptyState,
@@ -1291,7 +1340,7 @@ export default async function PassengersPage({
             )}
           </CanvasCard>
 
-          <div style={sideStackStyle}>
+          <div style={detailGridStyle}>
             <CanvasCard
               theme={th}
               title="Directory notes"
@@ -1360,31 +1409,6 @@ export default async function PassengersPage({
 
             <CanvasCard
               theme={th}
-              title="Duplicate-name warning"
-              subtitle="backend-detected or local fallback grouping"
-            >
-              {duplicateWarnings.length > 0 ? (
-                <div style={warningListStyle}>
-                  {duplicateWarnings.map((warning) => (
-                    <div key={warning.key} style={warningItemStyle}>
-                      <div style={{ color: th.text, fontWeight: 600 }}>
-                        {warning.label}
-                      </div>
-                      <div style={subtleMonoStyle}>
-                        {warning.passengerIds.join(" · ")}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={emptyBodyStyle}>
-                  目前未發現 duplicate-name warning。
-                </div>
-              )}
-            </CanvasCard>
-
-            <CanvasCard
-              theme={th}
               title="Deep links"
               subtitle="cross-app and support links"
             >
@@ -1416,29 +1440,29 @@ export default async function PassengersPage({
                 </div>
               )}
             </CanvasCard>
-
-            {disabledActionLinks.length > 0 ? (
-              <CanvasCard
-                theme={th}
-                title="Disabled actions"
-                subtitle="descriptor reasons"
-              >
-                <div style={warningListStyle}>
-                  {disabledActionLinks.map((link, index) => (
-                    <div key={`${link.key}-${index}`} style={warningItemStyle}>
-                      <div style={{ color: th.text, fontWeight: 600 }}>
-                        {link.label}
-                      </div>
-                      <div style={emptyBodyStyle}>
-                        {formatDisabledReason(link.disabledReasonCode) ??
-                          "action currently disabled"}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CanvasCard>
-            ) : null}
           </div>
+
+          {disabledActionLinks.length > 0 ? (
+            <CanvasCard
+              theme={th}
+              title="Disabled actions"
+              subtitle="descriptor reasons"
+            >
+              <div style={warningListStyle}>
+                {disabledActionLinks.map((link, index) => (
+                  <div key={`${link.key}-${index}`} style={warningItemStyle}>
+                    <div style={{ color: th.text, fontWeight: 600 }}>
+                      {link.label}
+                    </div>
+                    <div style={emptyBodyStyle}>
+                      {formatDisabledReason(link.disabledReasonCode) ??
+                        "action currently disabled"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CanvasCard>
+          ) : null}
         </div>
       </div>
     </div>
