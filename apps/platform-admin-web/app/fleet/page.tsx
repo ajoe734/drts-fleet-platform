@@ -39,7 +39,6 @@ import {
 } from "@drts/ui-web";
 
 const REFRESH_TIER: RefreshTier = "medium_slow";
-const REFRESH_INTERVAL_MS = 30_000;
 const OPS_CONSOLE_ORIGIN =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN?.replace(/\/$/, "") ?? "";
 
@@ -378,6 +377,37 @@ function formatFreshness(
     : `快照時間 ${formatDateTime(lastFetchedAt)}`;
 }
 
+function refreshIntervalMs(tier: RefreshTier) {
+  switch (tier) {
+    case "urgent":
+      return 5_000;
+    case "fast":
+      return 3_000;
+    case "dispatch":
+      return 5_000;
+    case "medium":
+      return 15_000;
+    case "medium_slow":
+    case "slow":
+      return 30_000;
+    case "manual":
+    default:
+      return null;
+  }
+}
+
+function refreshTierLabel(locale: Locale, tier: RefreshTier) {
+  const interval = refreshIntervalMs(tier);
+  if (!interval) {
+    return locale === "en"
+      ? `Refresh tier ${tier} / manual`
+      : `更新層級 ${tier} / 手動`;
+  }
+  return locale === "en"
+    ? `Refresh tier ${tier} / ${Math.round(interval / 1000)}s`
+    : `更新層級 ${tier} / ${Math.round(interval / 1000)} 秒`;
+}
+
 function actionLabel(locale: string, action: string) {
   const en: Record<string, string> = {
     refresh_tab: "Refresh",
@@ -395,6 +425,8 @@ function actionLabel(locale: string, action: string) {
     advance_offboarding_step: "Advance",
     complete_debranding: "Complete debranding",
     open_ops_driver: "ops-console",
+    edit_contract_terms: "Edit terms",
+    open_audit: "View audit",
   };
   const zh: Record<string, string> = {
     refresh_tab: "重新整理",
@@ -412,6 +444,8 @@ function actionLabel(locale: string, action: string) {
     advance_offboarding_step: "推進",
     complete_debranding: "完成除標識",
     open_ops_driver: "ops 操作面",
+    edit_contract_terms: "調整條款",
+    open_audit: "查看稽核",
   };
   return (locale === "en" ? en : zh)[action] ?? action;
 }
@@ -636,6 +670,18 @@ function openExternal(href: string) {
   window.open(href, "_blank", "noopener,noreferrer");
 }
 
+function openCrossAppLink(
+  link: CrossAppResourceLink | null | undefined,
+  fallbackRoute: string,
+) {
+  const href = resolveCrossAppHref(link, fallbackRoute);
+  if (link?.openMode === "same_tab") {
+    window.location.assign(href);
+    return;
+  }
+  openExternal(href);
+}
+
 export default function FleetPage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -672,6 +718,7 @@ export default function FleetPage() {
     useState<UiRefreshMetadata | null>(null);
   const [exclusivitiesRefreshMetadata, setExclusivitiesRefreshMetadata] =
     useState<UiRefreshMetadata | null>(null);
+  const pollIntervalMs = refreshIntervalMs(REFRESH_TIER);
 
   useEffect(() => {
     setActiveTab(queryTab);
@@ -725,11 +772,14 @@ export default function FleetPage() {
 
   useEffect(() => {
     void loadFleet();
+    if (!pollIntervalMs) {
+      return;
+    }
     const timer = window.setInterval(() => {
       void loadFleet();
-    }, REFRESH_INTERVAL_MS);
+    }, pollIntervalMs);
     return () => window.clearInterval(timer);
-  }, [loadFleet]);
+  }, [loadFleet, pollIntervalMs]);
 
   const updateUrlForTab = useCallback((tab: TabKey) => {
     const params = new URLSearchParams(window.location.search);
@@ -929,22 +979,18 @@ export default function FleetPage() {
             if (context.kind !== "vehicle") {
               return;
             }
-            openExternal(
-              resolveCrossAppHref(
-                context.vehicle.opsLink,
-                `/vehicles/${context.vehicle.vehicleId}`,
-              ),
+            openCrossAppLink(
+              context.vehicle.opsLink,
+              `/vehicles/${context.vehicle.vehicleId}`,
             );
             break;
           case "open_ops_driver":
             if (context.kind !== "driver") {
               return;
             }
-            openExternal(
-              resolveCrossAppHref(
-                context.driver.opsLink,
-                `/drivers/${context.driver.driverId}`,
-              ),
+            openCrossAppLink(
+              context.driver.opsLink,
+              `/drivers/${context.driver.driverId}`,
             );
             break;
           default:
@@ -976,12 +1022,12 @@ export default function FleetPage() {
           offboarding: "Offboarding",
         }
       : {
-          vehicles: "Vehicles",
-          drivers: "Drivers",
-          contracts: "Contracts",
-          device_binding: "Device Binding",
-          exclusivity: "Exclusivity Reviews",
-          offboarding: "Offboarding",
+          vehicles: "車輛",
+          drivers: "司機",
+          contracts: "合約",
+          device_binding: "裝置綁定",
+          exclusivity: "排他審核",
+          offboarding: "退場流程",
         };
 
   const activeBindings = useMemo<DeviceBindingRow[]>(
@@ -1100,6 +1146,28 @@ export default function FleetPage() {
     previewEmptyReason ||
     envelopeEmptyReason ||
     (error ? "fetch_failed" : tabCounts[activeTab] === 0 ? "no_data" : null);
+  const activeEmptyState = useMemo(() => {
+    switch (activeTab) {
+      case "vehicles":
+      case "offboarding":
+        return vehiclesEmptyState;
+      case "drivers":
+      case "device_binding":
+        return driversEmptyState;
+      case "contracts":
+        return contractsEmptyState;
+      case "exclusivity":
+        return exclusivitiesEmptyState;
+      default:
+        return null;
+    }
+  }, [
+    activeTab,
+    contractsEmptyState,
+    driversEmptyState,
+    exclusivitiesEmptyState,
+    vehiclesEmptyState,
+  ]);
 
   const activePageActions = pageActions[activeTab];
   const emptyConfig = activeEmptyReason
@@ -1176,25 +1244,23 @@ export default function FleetPage() {
         r: (row) =>
           renderStackedCell(
             row.plateNo,
-            row.vehicleId,
-            row.supplyLifecycle.lastTrace?.occurredAt
-              ? formatDateTime(row.supplyLifecycle.lastTrace.occurredAt)
-              : row.updatedAt,
+            `${row.vehicleId} · ${row.supportedServiceBuckets.join(" · ")}`,
+            row.updatedAt,
           ),
       },
       {
-        h: locale === "en" ? "Coverage" : "營運範圍",
-        w: 210,
+        h: locale === "en" ? "Registry" : "登錄資訊",
+        w: 240,
         r: (row) =>
           renderStackedCell(
             row.operatingArea,
-            row.supportedServiceBuckets.join(" · "),
-            row.supplyLifecycle.contract.contractId ?? "—",
+            `contract ${row.supplyLifecycle.contract.contractId ?? "—"}`,
+            row.supplyLifecycle.insurance.endAt ?? "—",
           ),
       },
       {
         h: locale === "en" ? "Compliance" : "合規",
-        w: 180,
+        w: 220,
         r: (row) => (
           <div style={stackedCellStyle}>
             <CanvasPill
@@ -1206,23 +1272,30 @@ export default function FleetPage() {
             </CanvasPill>
             <CanvasPill
               theme={theme}
-              tone={row.exclusivityApproved ? "success" : "warn"}
+              tone={
+                row.supplyLifecycle.contract.lifecycleStatus === "active"
+                  ? "success"
+                  : "warn"
+              }
               dot
             >
-              {row.exclusivityApproved
-                ? locale === "en"
-                  ? "exclusivity approved"
-                  : "排他已核准"
-                : locale === "en"
-                  ? "exclusivity pending"
-                  : "排他待審"}
+              {locale === "en"
+                ? `contract ${row.supplyLifecycle.contract.lifecycleStatus}`
+                : `合約 ${formatPlatformCodeLabel(
+                    locale,
+                    row.supplyLifecycle.contract.lifecycleStatus,
+                  )}`}
             </CanvasPill>
+            <div style={secondaryCellTextStyle}>
+              {locale === "en" ? "regulatory profile" : "法遵檔案"}:{" "}
+              {row.supplyLifecycle.lastTrace?.entityType ?? "vehicle"}
+            </div>
           </div>
         ),
       },
       {
-        h: locale === "en" ? "Dispatchable" : "派遣資格",
-        w: 220,
+        h: locale === "en" ? "Dispatch readiness" : "派遣就緒",
+        w: 240,
         r: (row) =>
           renderStackedCell(
             <CanvasPill
@@ -1245,7 +1318,10 @@ export default function FleetPage() {
               : locale === "en"
                 ? "No active dispatch blocks"
                 : "目前沒有阻擋原因",
-            row.supplyLifecycle.insurance.endAt ?? "—",
+            row.supplyLifecycle.lastTrace?.message ??
+              (locale === "en"
+                ? "No compliance trace yet"
+                : "目前沒有合規追蹤"),
           ),
       },
       {
@@ -1273,27 +1349,32 @@ export default function FleetPage() {
           renderStackedCell(
             row.name,
             row.driverId,
-            row.deviceBindings[0]?.deviceId ?? "—",
+            row.deviceBindings[0]?.deviceLabel ??
+              row.deviceBindings[0]?.deviceId ??
+              "—",
           ),
       },
       {
-        h: locale === "en" ? "License" : "執照",
-        w: 140,
-        r: (row) => (
-          <CanvasPill
-            theme={theme}
-            tone={row.licensesValid ? "success" : "warn"}
-            dot
-          >
-            {row.licensesValid
-              ? locale === "en"
-                ? "valid"
-                : "有效"
-              : locale === "en"
-                ? "warning"
-                : "需處理"}
-          </CanvasPill>
-        ),
+        h: locale === "en" ? "License & lifecycle" : "執照與生命週期",
+        w: 220,
+        r: (row) =>
+          renderStackedCell(
+            <CanvasPill
+              theme={theme}
+              tone={row.licensesValid ? "success" : "warn"}
+              dot
+            >
+              {row.licensesValid
+                ? locale === "en"
+                  ? "license valid"
+                  : "執照有效"
+                : locale === "en"
+                  ? "license warning"
+                  : "執照需處理"}
+            </CanvasPill>,
+            formatPlatformCodeLabel(locale, row.lifecycleStatus),
+            row.profileUpdatedAt ?? row.updatedAt,
+          ),
       },
       {
         h: locale === "en" ? "Dispatch readiness" : "派遣狀態",
@@ -1318,8 +1399,8 @@ export default function FleetPage() {
           ),
       },
       {
-        h: locale === "en" ? "Binding" : "裝置綁定",
-        w: 180,
+        h: locale === "en" ? "Binding & contract" : "綁定與契約",
+        w: 210,
         r: (row) =>
           renderStackedCell(
             row.deviceBindings[0]?.deviceLabel ??
@@ -1330,7 +1411,13 @@ export default function FleetPage() {
               : locale === "en"
                 ? "No active device"
                 : "目前沒有裝置",
-            row.updatedAt,
+            row.dispatchEligible
+              ? locale === "en"
+                ? "Contract aligned"
+                : "契約狀態正常"
+              : locale === "en"
+                ? "Contract or compliance block"
+                : "契約或合規阻擋中",
           ),
       },
       {
@@ -1371,7 +1458,11 @@ export default function FleetPage() {
         h: locale === "en" ? "Contract" : "合約",
         w: 140,
         r: (row) =>
-          renderStackedCell(row.contractId, row.contractType, row.status),
+          renderStackedCell(
+            row.contractId,
+            `${row.contractType} · ${row.status}`,
+            row.updatedAt,
+          ),
       },
       {
         h: locale === "en" ? "Counterparty" : "合作方",
@@ -1391,7 +1482,8 @@ export default function FleetPage() {
         r: (row) =>
           renderStackedCell(
             `${row.startAt} → ${row.endAt}`,
-            row.lifecycleStatus,
+            formatPlatformCodeLabel(locale, row.lifecycleStatus),
+            row.approvedBy ?? "—",
           ),
       },
       {
@@ -1477,18 +1569,22 @@ export default function FleetPage() {
         r: (row) =>
           renderStackedCell(
             row.vehicleId,
-            row.declarationStatus,
-            row.updatedAt,
+            formatPlatformCodeLabel(locale, row.declarationStatus),
+            row.reviewedAt ?? row.updatedAt,
           ),
       },
       {
-        h: locale === "en" ? "Provider" : "排他對象",
-        w: 210,
+        h: locale === "en" ? "Scope & provider" : "範圍與對象",
+        w: 240,
         r: (row) =>
           renderStackedCell(
             row.exclusiveProviderName ?? "—",
             `${row.effectiveStart ?? "—"} → ${row.effectiveEnd ?? "—"}`,
-            row.reviewerId ?? "—",
+            row.reviewerId
+              ? `${locale === "en" ? "reviewer" : "審核者"} ${row.reviewerId}`
+              : locale === "en"
+                ? "awaiting reviewer"
+                : "等待審核者",
           ),
       },
       {
@@ -1577,18 +1673,23 @@ export default function FleetPage() {
           renderStackedCell(
             row.supplyLifecycle.offboarding.debrandingTicketId ?? "—",
             row.supplyLifecycle.offboarding.reason ?? "—",
-            row.supplyLifecycle.offboarding.debrandingDueAt ?? "—",
+            row.supplyLifecycle.offboarding.notes ??
+              row.supplyLifecycle.offboarding.debrandingDueAt ??
+              "—",
           ),
       },
       {
-        h: locale === "en" ? "Timeline" : "時間點",
-        w: 220,
+        h: locale === "en" ? "Timeline & actor" : "時間軸與執行者",
+        w: 240,
         r: (row) => {
           const offboarding = row.supplyLifecycle.offboarding;
           return renderStackedCell(
             offboarding.requestedAt ?? "—",
             offboarding.effectiveAt ?? "—",
-            offboarding.completedAt ?? offboarding.debrandingCompletedAt ?? "—",
+            offboarding.requestedBy ??
+              offboarding.completedAt ??
+              offboarding.debrandingCompletedAt ??
+              "—",
           );
         },
       },
@@ -1917,11 +2018,7 @@ export default function FleetPage() {
         <CanvasCard
           theme={theme}
           title={activeTabLabel}
-          subtitle={
-            locale === "en"
-              ? `Refresh tier ${REFRESH_TIER} / 30s · ${activeFreshnessLabel}`
-              : `Refresh tier ${REFRESH_TIER} / 30s · ${activeFreshnessLabel}`
-          }
+          subtitle={`${refreshTierLabel(locale, REFRESH_TIER)} · ${activeFreshnessLabel}`}
         >
           {activeEmptyReason && emptyConfig ? (
             <div style={emptyPanelStyle(emptyConfig.tone)}>
@@ -1946,6 +2043,12 @@ export default function FleetPage() {
                 <CanvasBtn theme={theme} onClick={() => void loadFleet()}>
                   {locale === "en" ? "Refresh tab" : "重新整理"}
                 </CanvasBtn>
+                {activeEmptyState?.nextAction
+                  ? renderActionButtons([activeEmptyState.nextAction], {
+                      kind: "page",
+                      tab: activeTab,
+                    })
+                  : null}
               </div>
             </div>
           ) : (
