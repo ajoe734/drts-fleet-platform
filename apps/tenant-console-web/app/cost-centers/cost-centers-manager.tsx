@@ -71,8 +71,10 @@ type CostCenterRow = {
   activeFlag: boolean;
   disabledReason: string | null;
   quotaLabel: string;
+  quotaMeta: string;
   usageLabel: string;
   usageMeta: string;
+  usagePercent: number | null;
   approvalLabel: string;
   approvalMeta: string;
   reportLabel: string;
@@ -225,6 +227,11 @@ const actionRowStyle: CSSProperties = {
   gap: 6,
 };
 
+const actionColumnStyle: CSSProperties = {
+  ...actionRowStyle,
+  justifyContent: "flex-end",
+};
+
 const inlineButtonStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -299,6 +306,21 @@ const emptyBodyStyle: CSSProperties = {
   fontSize: 12.5,
   maxWidth: 460,
   lineHeight: 1.5,
+};
+
+const progressTrackStyle: CSSProperties = {
+  flex: 1,
+  height: 6,
+  background: th.surface,
+  borderRadius: 999,
+  overflow: "hidden",
+  minWidth: 72,
+};
+
+const progressMetaStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
 };
 
 const listStyle: CSSProperties = {
@@ -526,6 +548,19 @@ function formatQuotaLabel(summary?: TenantCostCenterQuotaSummary) {
   return `${formatCount(summary.limit.bookingCountLimit)} 趟 / 月`;
 }
 
+function formatQuotaMeta(summary?: TenantCostCenterQuotaSummary) {
+  if (!summary) return "配額切片暫未同步";
+  if (summary.inheritedFromTenant) {
+    return "沿用租戶配額規則";
+  }
+  if (summary.limit.amountMinorLimit !== null) {
+    return `${summary.limit.currency} ${formatCount(
+      Math.round(summary.limit.amountMinorLimit / 100),
+    )}`;
+  }
+  return "成本中心直接覆寫";
+}
+
 function formatUsageLabel(summary?: TenantCostCenterQuotaSummary) {
   if (!summary) return "—";
   return `${formatCount(
@@ -547,6 +582,30 @@ function formatUsageMeta(summary?: TenantCostCenterQuotaSummary) {
   return summary.inheritedFromTenant
     ? "沿用租戶月配額"
     : "此成本中心無硬性上限";
+}
+
+function getUsagePercent(summary?: TenantCostCenterQuotaSummary) {
+  if (!summary) return null;
+  if (
+    summary.limit.bookingCountLimit !== null &&
+    summary.limit.bookingCountLimit > 0
+  ) {
+    const used =
+      summary.usage.confirmedBookingCount +
+      summary.usage.pendingReservedBookingCount;
+    return Math.max(
+      0,
+      Math.min(100, Math.round((used / summary.limit.bookingCountLimit) * 100)),
+    );
+  }
+  return null;
+}
+
+function getUsageBarTone(percent: number | null) {
+  if (percent === null) return th.textDim;
+  if (percent >= 90) return th.danger;
+  if (percent >= 80) return th.warn;
+  return th.success;
 }
 
 function isOverQuota(summary?: TenantCostCenterQuotaSummary) {
@@ -679,6 +738,16 @@ function buildStateTone(row: CostCenterRow): CanvasTone {
 
 function buildStateLabel(row: CostCenterRow) {
   return row.activeFlag ? "Active" : "Disabled";
+}
+
+function getActionHelpText(action: CostCenterAction) {
+  if (action.enabled) {
+    if (action.intent === "disable" && action.requiresReason) {
+      return "需要填寫停用原因";
+    }
+    return `${action.riskLevel} risk action`;
+  }
+  return action.disabledReasonCode ?? "目前無法執行";
 }
 
 function buildDraft(
@@ -826,8 +895,10 @@ export function CostCentersManager({
         activeFlag: costCenter.activeFlag,
         disabledReason: costCenter.disabledReason,
         quotaLabel: formatQuotaLabel(quotaSummary),
+        quotaMeta: formatQuotaMeta(quotaSummary),
         usageLabel: formatUsageLabel(quotaSummary),
         usageMeta: formatUsageMeta(quotaSummary),
+        usagePercent: getUsagePercent(quotaSummary),
         approvalLabel: approval.label,
         approvalMeta: approval.meta,
         reportLabel: reports.label,
@@ -965,7 +1036,7 @@ export function CostCentersManager({
     {
       h: "CODE",
       k: "code",
-      w: 120,
+      w: 124,
       mono: true,
       r: (row) => (
         <span
@@ -981,7 +1052,7 @@ export function CostCentersManager({
     },
     {
       h: "NAME",
-      w: 210,
+      w: 214,
       r: (row) => (
         <div style={titleStackStyle}>
           <span style={titlePrimaryStyle}>{row.name}</span>
@@ -993,7 +1064,7 @@ export function CostCentersManager({
     },
     {
       h: "STATE",
-      w: 160,
+      w: 150,
       r: (row) => (
         <div style={titleStackStyle}>
           <span>
@@ -1007,7 +1078,7 @@ export function CostCentersManager({
     },
     {
       h: "OWNER",
-      w: 150,
+      w: 144,
       r: (row) => (
         <div style={titleStackStyle}>
           {row.ownerUserId ? (
@@ -1028,31 +1099,51 @@ export function CostCentersManager({
     },
     {
       h: "配額",
-      w: 124,
-      mono: true,
-      align: "right",
-      r: (row) => row.quotaLabel,
+      w: 138,
+      r: (row) => (
+        <div style={titleStackStyle}>
+          <span style={{ ...titlePrimaryStyle, ...monoStyle }}>
+            {row.quotaLabel}
+          </span>
+          <span style={titleMetaStyle}>{row.quotaMeta}</span>
+        </div>
+      ),
     },
     {
       h: "使用",
-      w: 170,
+      w: 188,
       r: (row) => (
         <div style={titleStackStyle}>
           <span
             style={{
               ...titlePrimaryStyle,
+              ...monoStyle,
               color: row.overQuota ? th.danger : th.text,
             }}
           >
             {row.usageLabel}
           </span>
+          <div style={progressMetaStyle}>
+            <div style={progressTrackStyle}>
+              <div
+                style={{
+                  width: `${row.usagePercent ?? 0}%`,
+                  height: "100%",
+                  background: getUsageBarTone(row.usagePercent),
+                }}
+              />
+            </div>
+            <span style={{ ...titleMetaStyle, ...monoStyle }}>
+              {row.usagePercent === null ? "—" : `${row.usagePercent}%`}
+            </span>
+          </div>
           <span style={titleMetaStyle}>{row.usageMeta}</span>
         </div>
       ),
     },
     {
-      h: "APPROVAL",
-      w: 180,
+      h: "審批 / 報表",
+      w: 236,
       r: (row) => (
         <div style={titleStackStyle}>
           <span style={titlePrimaryStyle}>{row.approvalLabel}</span>
@@ -1064,21 +1155,12 @@ export function CostCentersManager({
               {row.approvalMeta}
             </Link>
           </span>
-        </div>
-      ),
-    },
-    {
-      h: "REPORTS",
-      w: 180,
-      r: (row) => (
-        <div style={titleStackStyle}>
-          <span style={titlePrimaryStyle}>{row.reportLabel}</span>
           <span style={titleMetaStyle}>
             <Link
               href={`/reports?costCenter=${encodeURIComponent(row.code)}`}
               style={linkStyle}
             >
-              {row.reportMeta}
+              {`${row.reportLabel} · ${row.reportMeta}`}
             </Link>
           </span>
         </div>
@@ -1088,13 +1170,14 @@ export function CostCentersManager({
       h: "ACTIONS",
       w: 160,
       r: (row) => (
-        <div style={actionRowStyle}>
+        <div style={actionColumnStyle}>
           {row.availableActions.map((action) => (
             <button
               key={`${row.code}:${action.action}`}
               type="button"
               disabled={pending || !action.enabled}
               onClick={() => openAction(action)}
+              title={getActionHelpText(action)}
               style={{
                 ...(action.intent === "disable"
                   ? inlineDangerButtonStyle
@@ -1117,8 +1200,8 @@ export function CostCentersManager({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="成本中心"
-        subtitle="Directory · quota posture · approval linkage · report attribution"
+        title="成本中心 · Cost Centers"
+        subtitle="部門 · 月配額 · 預設審批規則 (Q-TEN11)"
         actions={
           <>
             <CanvasBtn
@@ -1171,8 +1254,8 @@ export function CostCentersManager({
           theme={th}
           tone="info"
           icon="warn"
-          title="T5 refresh tier 已接上目錄、quota、rules、reports 四個切片"
-          body={`${getRefreshMetaLabel(lastRefreshAt)} · 最新 quota refresh: ${formatDateTime(freshestQuotaAt)} · approval linkage 請往 /rules 深入，report attribution 請往 /reports 深入。`}
+          title="T5 refresh tier：成本中心目錄、quota、rules、reports 每 30 秒輪詢"
+          body={`${getRefreshMetaLabel(lastRefreshAt)} · 最新 quota refresh ${formatDateTime(freshestQuotaAt)} · owner 連到 /users，approval linkage 連到 /rules，report attribution 連到 /reports。`}
         />
 
         <div style={topGridStyle}>
@@ -1447,6 +1530,12 @@ export function CostCentersManager({
             <CanvasCard theme={th}>
               <div style={sectionLabelStyle}>Cross-app deep links</div>
               <ul style={listStyle}>
+                <li>
+                  <Link href="/users" style={linkStyle}>
+                    /users
+                  </Link>{" "}
+                  追 owner tenant user、角色指派與 cost center ownership。
+                </li>
                 <li>
                   <Link href="/rules" style={linkStyle}>
                     /rules
