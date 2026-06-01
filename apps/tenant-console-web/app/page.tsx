@@ -352,6 +352,13 @@ type WorkspaceActionTile = {
   external?: boolean;
 };
 
+type WorkspaceActionSource = {
+  descriptor: ResourceActionDescriptor;
+  bookingId?: string;
+  orderStatus?: BookingRecord["orderStatus"];
+  subSystem?: TenantIntegrationReadinessItem["subSystem"];
+};
+
 type HomePageData = {
   identity: IdentityContext | null;
   featureFlags: FeatureFlagSummary | null;
@@ -542,100 +549,221 @@ function buildWorkspaceAvailableActions(
   data: HomePageData,
   bookings: WorkspaceBookingRecord[],
 ) {
-  const actionMap = new Map<string, ResourceActionDescriptor>();
+  const actionMap = new Map<string, WorkspaceActionSource>();
 
   for (const booking of bookings) {
     for (const descriptor of booking.availableActions ?? []) {
-      if (!actionMap.has(descriptor.action))
-        actionMap.set(descriptor.action, descriptor);
+      const existing = actionMap.get(descriptor.action);
+      if (!existing || (!existing.descriptor.enabled && descriptor.enabled)) {
+        actionMap.set(descriptor.action, {
+          descriptor,
+          bookingId: booking.bookingId,
+          orderStatus: booking.orderStatus,
+        });
+      }
     }
   }
 
   for (const item of data.readiness?.items ?? []) {
-    if (item.nextAction && !actionMap.has(item.nextAction.action)) {
-      actionMap.set(item.nextAction.action, item.nextAction);
+    if (!item.nextAction) continue;
+
+    const existing = actionMap.get(item.nextAction.action);
+    if (
+      !existing ||
+      (!existing.descriptor.enabled && item.nextAction.enabled)
+    ) {
+      actionMap.set(item.nextAction.action, {
+        descriptor: item.nextAction,
+        subSystem: item.subSystem,
+      });
     }
   }
 
-  return [
-    "create_booking",
-    "view_todays_bookings",
-    "open_integration_governance",
-    "open_ops_case",
-  ]
-    .map((action) => actionMap.get(action))
-    .filter((descriptor): descriptor is ResourceActionDescriptor =>
-      Boolean(descriptor),
-    );
+  return Array.from(actionMap.values());
+}
+
+function titleCaseAction(action: string) {
+  return action
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getActionRouteHint(action: string) {
+  if (
+    action.includes("booking") ||
+    action === "create" ||
+    action === "update" ||
+    action === "cancel"
+  ) {
+    return "bookings";
+  }
+  if (action.includes("integration")) return "integration-governance";
+  if (action.includes("webhook")) return "webhooks";
+  if (action.includes("api_key") || action.includes("api-key"))
+    return "api-keys";
+  if (action.includes("notification")) return "notifications";
+  if (action.includes("sla")) return "sla";
+  if (action.includes("report")) return "reports";
+  if (action.includes("invoice")) return "invoices";
+  if (action.includes("billing") || action.includes("quota")) return "billing";
+  if (action.includes("user") || action.includes("access")) return "users";
+  if (action.includes("rule") || action.includes("approval")) return "rules";
+  if (action.includes("audit")) return "audit";
+  if (action.includes("address")) return "addresses";
+  if (action.includes("passenger")) return "passengers";
+  if (action.includes("cost_center") || action.includes("cost-center"))
+    return "cost-centers";
+  if (action.includes("feature_flag") || action.includes("feature-flag"))
+    return "feature-flags";
+  if (action.includes("setting")) return "settings";
+  if (action.includes("ops")) return "cross-app";
+  return null;
+}
+
+function describeActionSource(action: WorkspaceActionSource) {
+  if (action.bookingId && action.orderStatus) {
+    return `訂單 ${action.bookingId} · ${action.orderStatus}`;
+  }
+  if (action.subSystem) {
+    return `整合子系統 ${action.subSystem}`;
+  }
+  return "workspace runtime";
+}
+
+function buildActionTile(
+  action: WorkspaceActionSource,
+  crossAppLinks: CrossAppResourceLink[],
+): WorkspaceActionTile | null {
+  const { descriptor } = action;
+
+  if (descriptor.action === "create_booking") {
+    return {
+      key: descriptor.action,
+      title: "建立叫車",
+      href: "/bookings/new",
+      label: "New booking",
+      description:
+        "同步 command 入口；若外部確認尚未完成，後續頁面會呈現 accepted+pending。",
+      descriptor,
+    };
+  }
+
+  if (descriptor.action === "view_todays_bookings") {
+    return {
+      key: descriptor.action,
+      title: "查看今日訂單",
+      href: "/bookings",
+      label: "Today's bookings",
+      description:
+        "查看 T5 cadence 的 booking 狀態，不從角色或狀態字串推導可操作性。",
+      descriptor,
+    };
+  }
+
+  if (descriptor.action === "open_integration_governance") {
+    return {
+      key: descriptor.action,
+      title: "整合就緒度",
+      href: "/integration-governance",
+      label: "Open integration governance",
+      description:
+        "聚合 API key、webhook、notifications、SLA、reports readiness 的單一入口。",
+      descriptor,
+    };
+  }
+
+  if (descriptor.action === "open_ops_case") {
+    const link = crossAppLinks[0];
+    if (!link) return null;
+
+    return {
+      key: descriptor.action,
+      title: "跨應用追蹤",
+      href: buildCrossAppHref(link),
+      label: link.label,
+      description:
+        "外部依賴 blocked 或跨 actor 事件時，直接新分頁跳往 owning app 追蹤。",
+      descriptor,
+      external: link.openMode === "new_tab",
+    };
+  }
+
+  const routeHint = getActionRouteHint(descriptor.action);
+  if (routeHint === "cross-app") {
+    const link = crossAppLinks[0];
+    if (!link) return null;
+
+    return {
+      key: `${descriptor.action}:${link.resourceId}`,
+      title: titleCaseAction(descriptor.action),
+      href: buildCrossAppHref(link),
+      label: link.label,
+      description: `${describeActionSource(action)} · cross-app follow-up`,
+      descriptor,
+      external: link.openMode === "new_tab",
+    };
+  }
+
+  if (routeHint === "bookings" && action.bookingId) {
+    return {
+      key: `${descriptor.action}:${action.bookingId}`,
+      title: titleCaseAction(descriptor.action),
+      href: `/bookings/${action.bookingId}`,
+      label: action.bookingId,
+      description: `${describeActionSource(action)} · booking-driven CTA`,
+      descriptor,
+    };
+  }
+
+  if (routeHint) {
+    return {
+      key: descriptor.action,
+      title: titleCaseAction(descriptor.action),
+      href: `/${routeHint}`,
+      label: titleCaseAction(descriptor.action),
+      description: `${describeActionSource(action)} · surfaced from availableActions`,
+      descriptor,
+    };
+  }
+
+  if (action.bookingId) {
+    return {
+      key: `${descriptor.action}:${action.bookingId}`,
+      title: titleCaseAction(descriptor.action),
+      href: `/bookings/${action.bookingId}`,
+      label: action.bookingId,
+      description: `${describeActionSource(action)} · inspect booking context`,
+      descriptor,
+    };
+  }
+
+  return null;
 }
 
 function buildQuickActions(
-  availableActions: ResourceActionDescriptor[],
+  availableActions: WorkspaceActionSource[],
   crossAppLinks: CrossAppResourceLink[],
 ): WorkspaceActionTile[] {
-  return availableActions.flatMap((descriptor) => {
-    if (descriptor.action === "create_booking") {
-      return [
-        {
-          key: descriptor.action,
-          title: "建立叫車",
-          href: "/bookings/new",
-          label: "New booking",
-          description:
-            "同步 command 入口；若外部確認尚未完成，後續頁面會呈現 accepted+pending。",
-          descriptor,
-        },
-      ];
-    }
+  const priority = new Map<string, number>([
+    ["create_booking", 0],
+    ["view_todays_bookings", 1],
+    ["open_integration_governance", 2],
+    ["open_ops_case", 3],
+  ]);
 
-    if (descriptor.action === "view_todays_bookings") {
-      return [
-        {
-          key: descriptor.action,
-          title: "查看今日訂單",
-          href: "/bookings",
-          label: "Today's bookings",
-          description:
-            "查看 T5 cadence 的 booking 狀態，不從角色或狀態字串推導可操作性。",
-          descriptor,
-        },
-      ];
-    }
-
-    if (descriptor.action === "open_integration_governance") {
-      return [
-        {
-          key: descriptor.action,
-          title: "整合就緒度",
-          href: "/integration-governance",
-          label: "Open integration governance",
-          description:
-            "聚合 API key、webhook、notifications、SLA、reports readiness 的單一入口。",
-          descriptor,
-        },
-      ];
-    }
-
-    if (descriptor.action === "open_ops_case") {
-      const link = crossAppLinks[0];
-      if (!link) return [];
-
-      return [
-        {
-          key: descriptor.action,
-          title: "跨應用追蹤",
-          href: buildCrossAppHref(link),
-          label: link.label,
-          description:
-            "外部依賴 blocked 或跨 actor 事件時，直接新分頁跳往 owning app 追蹤。",
-          descriptor,
-          external: link.openMode === "new_tab",
-        },
-      ];
-    }
-
-    return [];
-  });
+  return availableActions
+    .map((action) => buildActionTile(action, crossAppLinks))
+    .filter((tile): tile is WorkspaceActionTile => Boolean(tile))
+    .sort((left, right) => {
+      const leftGroup = left.key.split(":")[0] ?? left.key;
+      const rightGroup = right.key.split(":")[0] ?? right.key;
+      const leftPriority = priority.get(leftGroup) ?? 50;
+      const rightPriority = priority.get(rightGroup) ?? 50;
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+      return left.title.localeCompare(right.title, "zh-Hant");
+    });
 }
 
 function buildSitemapSections(
@@ -861,35 +989,32 @@ function buildEmptyReasonShowcase(
   data: HomePageData,
   activeBookings: WorkspaceBookingRecord[],
   actionMap: Map<string, ResourceActionDescriptor>,
+  sitemapSections: SitemapSection[],
 ) {
-  const activeReasons = new Set<WorkspaceEmptyReason>();
   const readinessItems = data.readiness?.items ?? [];
-
-  if (activeBookings.length === 0) {
-    activeReasons.add(
-      data.bookings.length === 0 ? "no_data" : "filtered_empty",
-    );
-  }
-
-  if (readinessItems.some((item) => item.status === "not_provisioned")) {
-    activeReasons.add("not_provisioned");
-  }
-
-  if (data.errors.length > 0) {
-    activeReasons.add("fetch_failed");
-  }
-
-  if (data.identity && !data.identity.roles.includes("tc_admin")) {
-    activeReasons.add("permission_denied");
-  }
-
-  if (readinessItems.some((item) => item.status === "blocked")) {
-    activeReasons.add("external_unavailable");
-  }
-
-  if (activeReasons.size === 0) {
-    activeReasons.add("filtered_empty");
-  }
+  const visibleModuleCount = sitemapSections.reduce(
+    (sum, section) =>
+      sum +
+      section.routes.filter((route) => route.enabled && route.href !== "/")
+        .length,
+    0,
+  );
+  const currentReason: WorkspaceEmptyReason =
+    data.errors.length > 0
+      ? "fetch_failed"
+      : visibleModuleCount === 0
+        ? "permission_denied"
+        : readinessItems.some((item) => item.status === "blocked")
+          ? "external_unavailable"
+          : readinessItems.some((item) => item.status === "not_provisioned")
+            ? "not_provisioned"
+            : activeBookings.length === 0
+              ? data.bookings.length === 0
+                ? visibleModuleCount > 0
+                  ? "no_data"
+                  : "filtered_empty"
+                : "filtered_empty"
+              : "filtered_empty";
 
   const nextActions = new Map<WorkspaceEmptyReason, ResourceActionDescriptor>();
   const createBookingAction = actionMap.get("create_booking");
@@ -931,7 +1056,7 @@ function buildEmptyReasonShowcase(
           ? { nextAction: nextActions.get(reason)! }
           : {}),
       } satisfies EmptyStateEnvelope,
-      active: activeReasons.has(reason),
+      active: currentReason === reason,
     }),
   );
 }
@@ -1192,14 +1317,12 @@ export default async function HomePage() {
   const availableActions = buildWorkspaceAvailableActions(data, data.bookings);
   const crossAppLinks = buildCrossAppLinks(data.notifications);
   const actionMap = new Map(
-    availableActions.map((descriptor) => [descriptor.action, descriptor]),
+    availableActions.map((action) => [
+      action.descriptor.action,
+      action.descriptor,
+    ]),
   );
   const quickActions = buildQuickActions(availableActions, crossAppLinks);
-  const emptyReasonCards = buildEmptyReasonShowcase(
-    data,
-    activeBookings,
-    actionMap,
-  );
   const tenantId = data.identity?.tenantId ?? DEMO_TENANT_ID;
   const tenantStatus =
     blockedReadiness > 0 ? "degraded" : data.readiness ? "active" : "unknown";
@@ -1209,6 +1332,12 @@ export default async function HomePage() {
     TENANT_CONSOLE_CONTEXT.split(" ")[0];
   const subtitle = `${formatDate(refresh.generatedAt)} · 本月配額 ${formatQuotaUsage(data.quotaSummary)}`;
   const sitemapSections = buildSitemapSections(data, blockedReadiness);
+  const emptyReasonCards = buildEmptyReasonShowcase(
+    data,
+    activeBookings,
+    actionMap,
+    sitemapSections,
+  );
   const moduleSummaries = buildModuleSummaries(
     data,
     sitemapSections,
