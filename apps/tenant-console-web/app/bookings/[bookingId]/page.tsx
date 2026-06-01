@@ -41,6 +41,7 @@ type EmptyStateCopy = {
   body: string;
   ctaHref: string;
   ctaLabel: string;
+  detail: string;
   title: string;
   tone: "default" | "warning";
 };
@@ -90,6 +91,8 @@ const EMPTY_REASON_COPY: Record<EmptyReason, EmptyStateCopy> = {
   no_data: {
     title: "No booking data exists yet",
     body: "This tenant has booking access, but no booking record exists in the current workspace snapshot.",
+    detail:
+      "Use the booking creation flow if this link came from a stale notification or a list row that no longer points to a created booking.",
     ctaLabel: "Create a booking",
     ctaHref: "/bookings/new",
     tone: "default",
@@ -97,6 +100,8 @@ const EMPTY_REASON_COPY: Record<EmptyReason, EmptyStateCopy> = {
   not_provisioned: {
     title: "Booking module is not provisioned",
     body: "Tenant setup is incomplete, so booking detail cannot be hydrated until provisioning finishes.",
+    detail:
+      "Provisioning is a tenant setup dependency rather than a route failure, so this state stays distinct from transient load errors.",
     ctaLabel: "Open settings",
     ctaHref: "/settings",
     tone: "warning",
@@ -104,6 +109,8 @@ const EMPTY_REASON_COPY: Record<EmptyReason, EmptyStateCopy> = {
   fetch_failed: {
     title: "The booking snapshot could not be loaded",
     body: "The backend request failed before a usable read model was returned. Retry or inspect the audit lane for the last successful mutation.",
+    detail:
+      "Treat this as a temporary transport or server problem until a later refresh proves otherwise.",
     ctaLabel: "Back to bookings",
     ctaHref: "/bookings",
     tone: "warning",
@@ -111,6 +118,8 @@ const EMPTY_REASON_COPY: Record<EmptyReason, EmptyStateCopy> = {
   permission_denied: {
     title: "This actor cannot read the booking detail",
     body: "The booking exists, but the current tenant actor does not have read scope for this record.",
+    detail:
+      "The route is valid, but the current actor is outside the allowed read scope for the tenant-owned record.",
     ctaLabel: "Back to bookings",
     ctaHref: "/bookings",
     tone: "warning",
@@ -118,6 +127,8 @@ const EMPTY_REASON_COPY: Record<EmptyReason, EmptyStateCopy> = {
   external_unavailable: {
     title: "The linked external system is unavailable",
     body: "Tenant truth is still readable, but one or more external dispatch details cannot be refreshed right now.",
+    detail:
+      "Keep the tenant record visible and surface the degraded external dependency explicitly instead of blanking the whole page.",
     ctaLabel: "Open audit",
     ctaHref: "/audit",
     tone: "warning",
@@ -125,6 +136,8 @@ const EMPTY_REASON_COPY: Record<EmptyReason, EmptyStateCopy> = {
   filtered_empty: {
     title: "This deep link no longer matches the current filters",
     body: "The booking detail route is valid, but the surrounding filtered context no longer contains the record you expected.",
+    detail:
+      "This is a navigation-context mismatch, not a missing booking. Reset the list context and reopen the detail from a live row.",
     ctaLabel: "Reset booking filters",
     ctaHref: "/bookings",
     tone: "default",
@@ -448,6 +461,57 @@ function describeApprovalState(state: BookingRecord["approvalState"]) {
   }
 }
 
+function formatActionLabel(action: ResourceActionDescriptor["action"]) {
+  switch (action) {
+    case "update":
+      return "Update booking";
+    case "cancel":
+      return "Cancel booking";
+    case "resubmit_approval":
+      return "Resubmit approval";
+    default:
+      return action;
+  }
+}
+
+function describeActionDescriptor(action: ResourceActionDescriptor) {
+  switch (action.action) {
+    case "update":
+      return action.enabled
+        ? "Tenant-safe field edits are currently allowed."
+        : `Disabled: ${describeReadOnlyReason(action.disabledReasonCode ?? null)}`;
+    case "cancel":
+      return action.enabled
+        ? action.requiresReason
+          ? "Cancellation is available and requires an explicit reason."
+          : "Cancellation is available."
+        : `Disabled: ${describeReadOnlyReason(action.disabledReasonCode ?? null)}`;
+    case "resubmit_approval":
+      return action.enabled
+        ? "A prior approval outcome can be resubmitted from the rules lane."
+        : "Approval resubmission is currently unavailable.";
+    default:
+      return action.enabled
+        ? "This action is currently available."
+        : `Disabled: ${action.disabledReasonCode ?? "unavailable"}`;
+  }
+}
+
+function getEmptyStateToneClassName(
+  reason: EmptyReason,
+  tone: EmptyStateCopy["tone"],
+) {
+  if (tone === "warning") {
+    return "booking-empty-state-warning";
+  }
+
+  if (reason === "filtered_empty") {
+    return "booking-empty-state-muted";
+  }
+
+  return "booking-empty-state-default";
+}
+
 function renderEmptyState(reason: EmptyReason, bookingId: string) {
   let copy: EmptyStateCopy;
   switch (reason) {
@@ -485,12 +549,18 @@ function renderEmptyState(reason: EmptyReason, bookingId: string) {
         title={copy.title}
         description={copy.body}
       >
-        <div className="booking-empty-state">
-          <span
-            className={`status-chip${copy.tone === "warning" ? " booking-pill-warning" : ""}`}
-          >
-            {reason}
-          </span>
+        <div
+          className={`booking-empty-state ${getEmptyStateToneClassName(reason, copy.tone)}`}
+        >
+          <div className="booking-empty-state-head">
+            <span
+              className={`status-chip${copy.tone === "warning" ? " booking-pill-warning" : " booking-pill-accent"}`}
+            >
+              {reason}
+            </span>
+            <span className="status-chip">Booking detail</span>
+          </div>
+          <p className="booking-empty-state-detail">{copy.detail}</p>
           <div className="link-row">
             <Link
               className="action-button action-button-primary"
@@ -604,6 +674,36 @@ export default async function BookingDetailPage({
   const costCenterHref = booking.costCenter
     ? `/cost-centers?code=${encodeURIComponent(booking.costCenter)}`
     : "/cost-centers";
+  const actionSummary = bookingView.actions.map((action) => ({
+    action,
+    detail: describeActionDescriptor(action),
+    label: formatActionLabel(action.action),
+  }));
+  const activeAssignment = ACTIVE_ORDER_STATUSES.has(booking.orderStatus);
+  const relatedContextLinks = [
+    {
+      href: passengerHref,
+      label: "Passenger profile",
+      note: "Linked rider directory record.",
+    },
+    {
+      href: pickupAddressHref,
+      label: "Pickup address",
+      note: "Open the address lane with the pickup query prefilled.",
+    },
+    {
+      href: dropoffAddressHref,
+      label: "Dropoff address",
+      note: "Open the address lane with the destination query prefilled.",
+    },
+    {
+      href: costCenterHref,
+      label: "Cost center",
+      note: booking.costCenter
+        ? "Review the linked finance governance context."
+        : "No cost center is attached, but the governance lane remains available.",
+    },
+  ];
 
   return (
     <div className="page-shell">
@@ -644,97 +744,81 @@ export default async function BookingDetailPage({
         </CalloutPanel>
       ) : null}
 
-      <section className="surface-grid surface-grid-wide">
+      <section className="booking-summary-grid">
         <SurfaceCard
-          kicker="Refresh tier"
-          title="Tenant booking detail refreshes on T5"
-          description="This screen is a tenant slow-lane detail surface: auto refresh is slow, manual review remains available, and stale states must be explicit."
+          kicker="Snapshot"
+          title="Editability, approval, and refresh posture"
+          description="The canvas keeps the operational summary above the fold so tenant users can see whether they can act before reading the full record."
         >
-          <div className="booking-refresh-card">
-            <div className="chip-row">
-              <span className="status-chip booking-pill-accent">T5 slow</span>
-              <span className="status-chip">fresh snapshot</span>
-            </div>
-            <dl className="definition-grid">
-              <div>
-                <dt>Generated</dt>
-                <dd>{formatDateTime(bookingView.generatedAt)}</dd>
-              </div>
-              <div>
-                <dt>Last booking update</dt>
-                <dd>{formatDateTime(booking.updatedAt)}</dd>
-              </div>
-              <div>
-                <dt>Source</dt>
-                <dd>live tenant API</dd>
-              </div>
-              <div>
-                <dt>Manual refresh</dt>
-                <dd>
-                  Browser refresh, notification reopen, or command receipt
-                  refresh
-                </dd>
-              </div>
-            </dl>
-          </div>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Status"
-          title="Editability and approval posture"
-          description="Per Q-TEN05, editability is driven by action descriptors plus editableUntil, not by guessing from the status label alone."
-        >
-          <div className="detail-stack">
+          <div className="booking-summary-card">
             <div className="chip-row">
               <span className="status-badge">{booking.orderStatus}</span>
               <span className="status-chip">Booking {booking.status}</span>
               <span
                 className={`status-chip${editable ? " booking-pill-success" : " booking-pill-warning"}`}
               >
-                {editable ? "Editable" : "Read only"}
+                {editable ? "Editable now" : "Read only"}
               </span>
               <span className={getSourceToneClassName(source.tone)}>
                 {source.badge}
               </span>
             </div>
-            <dl className="definition-grid">
-              <div>
-                <dt>editableUntil</dt>
-                <dd>{formatDateTime(bookingView.editableUntil)}</dd>
-              </div>
-              <div>
-                <dt>readOnlyReasonCode</dt>
-                <dd>{bookingView.readOnlyReasonCode ?? "None"}</dd>
-              </div>
-              <div>
-                <dt>Approval state</dt>
-                <dd>{booking.approvalState}</dd>
-              </div>
-              <div>
-                <dt>Approval requests</dt>
-                <dd>{booking.approvalRequestIds.length}</dd>
-              </div>
-            </dl>
-            <div className="booking-inline-note">
-              {describeEditableWindow(bookingView.editableUntil, editable)}
-            </div>
-            {booking.approvalState === "pending" ? (
-              <CalloutPanel
-                title="Approval-required state"
-                description={describeApprovalState(booking.approvalState)}
-                tone="warning"
-              >
+            <div className="booking-summary-highlights">
+              <article className="booking-highlight-card">
+                <span className="booking-highlight-label">editableUntil</span>
+                <strong>{formatDateTime(bookingView.editableUntil)}</strong>
                 <p>
-                  This booking should not be treated as editable just because it
-                  is not terminal. Wait for approval or use the rules lane.
+                  {describeEditableWindow(bookingView.editableUntil, editable)}
                 </p>
-              </CalloutPanel>
-            ) : null}
+              </article>
+              <article className="booking-highlight-card">
+                <span className="booking-highlight-label">
+                  Approval posture
+                </span>
+                <strong>{booking.approvalState}</strong>
+                <p>{describeApprovalState(booking.approvalState)}</p>
+              </article>
+              <article className="booking-highlight-card">
+                <span className="booking-highlight-label">Refresh tier</span>
+                <strong>T5</strong>
+                <p>
+                  Generated {formatDateTime(bookingView.generatedAt)}. Refresh
+                  manually when stale or after an accepted command.
+                </p>
+              </article>
+            </div>
             {!editable ? (
-              <p className="muted-copy">
-                {describeReadOnlyReason(bookingView.readOnlyReasonCode)}
-              </p>
+              <div className="booking-inline-note">
+                <strong>readOnlyReasonCode</strong>
+                <span>{bookingView.readOnlyReasonCode ?? "None"}</span>
+                <p>{describeReadOnlyReason(bookingView.readOnlyReasonCode)}</p>
+              </div>
             ) : null}
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard
+          kicker="Actions"
+          title="Backend-driven action availability"
+          description="Every CTA on this page is derived from `availableActions`, with disabled states preserved and explained instead of hidden."
+        >
+          <div className="booking-action-summary-list">
+            {actionSummary.map(({ action, detail, label }) => (
+              <article className="booking-action-summary" key={action.action}>
+                <div className="booking-action-summary-head">
+                  <strong>{label}</strong>
+                  <div className="chip-row">
+                    <span
+                      className={`status-chip${action.enabled ? " booking-pill-success" : " booking-pill-warning"}`}
+                    >
+                      {action.enabled ? "Enabled" : "Disabled"}
+                    </span>
+                    <span className="status-chip">{action.riskLevel} risk</span>
+                  </div>
+                </div>
+                <p>{detail}</p>
+              </article>
+            ))}
           </div>
         </SurfaceCard>
       </section>
@@ -855,21 +939,22 @@ export default async function BookingDetailPage({
               </div>
             </dl>
             <div className="booking-reference-links">
-              <Link className="text-link" href={passengerHref}>
-                Open passenger directory reference
-              </Link>
-              <Link className="text-link" href={pickupAddressHref}>
-                Open pickup address reference
-              </Link>
-              <Link className="text-link" href={dropoffAddressHref}>
-                Open dropoff address reference
-              </Link>
-              <Link className="text-link" href={costCenterHref}>
-                Open cost center governance
-              </Link>
-              <Link className="text-link" href={bookingFiltersHref}>
-                Return to booking list context
-              </Link>
+              {relatedContextLinks.map((link) => (
+                <div className="booking-reference-link" key={link.label}>
+                  <Link className="text-link" href={link.href}>
+                    {link.label}
+                  </Link>
+                  <span className="list-note">{link.note}</span>
+                </div>
+              ))}
+              <div className="booking-reference-link">
+                <Link className="text-link" href={bookingFiltersHref}>
+                  Booking list context
+                </Link>
+                <span className="list-note">
+                  Return to the filtered booking oversight route.
+                </span>
+              </div>
             </div>
           </SurfaceCard>
 
@@ -969,44 +1054,54 @@ export default async function BookingDetailPage({
             title="Driver / vehicle assignment"
             description="If dispatch has already attached a fulfillment leg, tenant users can see the assignment state without gaining dispatch control."
           >
-            <dl className="definition-grid">
-              <div>
-                <dt>Assignment state</dt>
-                <dd>
-                  {ACTIVE_ORDER_STATUSES.has(booking.orderStatus)
-                    ? "Active driver assignment"
-                    : "No active assignment published"}
-                </dd>
+            <div className="booking-assignment-panel">
+              <div className="chip-row">
+                <span
+                  className={`status-chip${activeAssignment ? " booking-pill-success" : ""}`}
+                >
+                  {activeAssignment
+                    ? "Active assignment"
+                    : "No live assignment"}
+                </span>
+                <span className="status-chip">
+                  {activeAssignment ? "ETA visible when published" : "ETA idle"}
+                </span>
               </div>
-              <div>
-                <dt>ETA</dt>
-                <dd>
-                  {ACTIVE_ORDER_STATUSES.has(booking.orderStatus)
-                    ? "Live ETA pending from dispatch read model"
-                    : "Not active"}
-                </dd>
-              </div>
-              <div>
-                <dt>Order status</dt>
-                <dd>{booking.orderStatus}</dd>
-              </div>
-              <div>
-                <dt>Escalation</dt>
-                <dd>
-                  {source.domain === "forwarded_authority"
-                    ? "Ops console deep link available"
-                    : "Tenant detail remains the primary owner view"}
-                </dd>
-              </div>
-              <div>
-                <dt>Command receipt</dt>
-                <dd>
-                  {bookingView.commandReceipt
-                    ? `${bookingView.commandReceipt.status} · ${bookingView.commandReceipt.actionId}`
-                    : "No pending receipt"}
-                </dd>
-              </div>
-            </dl>
+              <dl className="definition-grid">
+                <div>
+                  <dt>Assignment state</dt>
+                  <dd>
+                    {activeAssignment
+                      ? "Dispatch has an active fulfillment leg in progress."
+                      : "No active driver assignment is published on the tenant read model."}
+                  </dd>
+                </div>
+                <div>
+                  <dt>ETA</dt>
+                  <dd>
+                    {activeAssignment
+                      ? "Live ETA pending from dispatch read model"
+                      : "Not active"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Escalation</dt>
+                  <dd>
+                    {source.domain === "forwarded_authority"
+                      ? "Ops console deep link available"
+                      : "Tenant detail remains the primary owner view"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Command receipt</dt>
+                  <dd>
+                    {bookingView.commandReceipt
+                      ? `${bookingView.commandReceipt.status} · ${bookingView.commandReceipt.actionId}`
+                      : "No pending receipt"}
+                  </dd>
+                </div>
+              </dl>
+            </div>
           </SurfaceCard>
 
           <SurfaceCard
@@ -1028,21 +1123,28 @@ export default async function BookingDetailPage({
             title="Cross-app and follow-up links"
             description="Phase 1 keeps the apps separate, so follow-up routes stay explicit instead of masquerading as one runtime shell."
           >
-            <ul className="panel-list">
+            <div className="booking-deep-link-list">
               {bookingView.deepLinks.map((link) => (
-                <li key={link.label}>
-                  <Link
-                    className="text-link"
-                    href={link.href}
-                    target={link.external ? "_blank" : undefined}
-                    rel={link.external ? "noreferrer" : undefined}
-                  >
-                    {link.label}
-                  </Link>
-                  <span className="list-note">{link.note}</span>
-                </li>
+                <article className="booking-deep-link-card" key={link.label}>
+                  <div className="booking-deep-link-head">
+                    <Link
+                      className="text-link"
+                      href={link.href}
+                      target={link.external ? "_blank" : undefined}
+                      rel={link.external ? "noreferrer" : undefined}
+                    >
+                      {link.label}
+                    </Link>
+                    {link.external ? (
+                      <span className="status-chip">Cross-app</span>
+                    ) : (
+                      <span className="status-chip">In app</span>
+                    )}
+                  </div>
+                  <p className="list-note">{link.note}</p>
+                </article>
               ))}
-            </ul>
+            </div>
             <p className="muted-copy">
               Cross-app routes open in a new tab when authority belongs to ops
               or another deployment.
