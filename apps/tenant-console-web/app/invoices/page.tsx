@@ -52,43 +52,38 @@ const pageStyle: CSSProperties = {
   gap: 16,
 };
 
-const summaryGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+const pageLeadStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  justifyContent: "space-between",
   gap: 12,
 };
 
-const summaryCardBodyStyle: CSSProperties = {
+const pageLeadCopyStyle: CSSProperties = {
+  maxWidth: 720,
+  color: th.textMuted,
+  fontSize: 12.5,
+  lineHeight: 1.55,
+};
+
+const pageLeadMetaStyle: CSSProperties = {
   display: "flex",
-  flexDirection: "column",
+  flexWrap: "wrap",
+  alignItems: "center",
   gap: 8,
 };
 
-const summaryLabelStyle: CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  letterSpacing: 0.4,
-  textTransform: "uppercase",
-  color: th.textMuted,
-};
-
-const summaryValueStyle: CSSProperties = {
-  fontSize: 24,
-  lineHeight: 1.05,
-  fontWeight: 800,
-  color: th.text,
-  fontFamily: th.monoFamily,
-};
-
-const summarySubtleStyle: CSSProperties = {
-  color: th.textMuted,
-  fontSize: 12,
-  lineHeight: 1.45,
+const registerCardBodyStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+  padding: 16,
 };
 
 const filterGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.3fr) repeat(2, minmax(180px, 0.8fr)) auto",
+  gridTemplateColumns: "minmax(0, 1.35fr) repeat(2, minmax(160px, 0.7fr)) auto",
   gap: 12,
   alignItems: "end",
 };
@@ -137,6 +132,13 @@ const primaryButtonStyle: CSSProperties = {
   fontWeight: 700,
   fontFamily: th.fontFamily,
   cursor: "pointer",
+};
+
+const registerMetaStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
 };
 
 const pageGridStyle: CSSProperties = {
@@ -232,6 +234,13 @@ const emptyStateWrapStyle: CSSProperties = {
   alignItems: "flex-start",
 };
 
+const emptyReasonCardStyle: CSSProperties = {
+  borderRadius: 18,
+  border: `1px solid ${th.border}`,
+  background: "rgba(255,255,255,0.02)",
+  padding: 16,
+};
+
 const emptyTitleStyle: CSSProperties = {
   fontSize: 20,
   fontWeight: 700,
@@ -259,11 +268,30 @@ const inlineLinkStyle: CSSProperties = {
   lineHeight: 1.45,
 };
 
+const activeInvoiceLinkStyle: CSSProperties = {
+  ...actionChipStyle,
+  minHeight: 32,
+  background: th.surface,
+};
+
+const selectedInvoiceLinkStyle: CSSProperties = {
+  ...activeInvoiceLinkStyle,
+  borderColor: th.accent,
+  color: th.accent,
+  boxShadow: `0 0 0 1px ${th.accent} inset`,
+};
+
 type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 type InvoiceActionView = ResourceActionDescriptor & {
   label: string;
   href?: string;
+};
+
+type InvoiceRuntimeRecord = TenantInvoiceRecord & {
+  availableActions?: ResourceActionDescriptor[];
+  deepLinks?: CrossAppResourceLink[];
+  refresh?: UiRefreshMetadata;
 };
 
 type InvoiceViewRecord = TenantInvoiceRecord & {
@@ -376,21 +404,66 @@ function deriveInvoiceStatus(invoice: TenantInvoiceRecord) {
   return invoice.status;
 }
 
+function normalizeRuntimeAction(
+  action: ResourceActionDescriptor,
+  invoice: TenantInvoiceRecord,
+): InvoiceActionView {
+  const invoiceId = encodeURIComponent(invoice.invoiceId);
+
+  switch (action.action) {
+    case "download_artifact":
+      return {
+        ...action,
+        label: "下載簽名檔",
+        ...(invoice.artifactUrl ? { href: invoice.artifactUrl } : {}),
+      };
+    case "view_detail":
+      return {
+        ...action,
+        label: "檢視詳情",
+        href: `/invoices?invoiceId=${invoiceId}`,
+      };
+    case "open_billing":
+      return {
+        ...action,
+        label: "返回帳務概覽",
+        href: `/billing?invoiceId=${invoiceId}`,
+      };
+    case "open_platform_audit":
+      return {
+        ...action,
+        label: "平台稽核",
+        href: `/audit?resourceType=tenant_invoice&resourceId=${invoiceId}`,
+      };
+    default:
+      return {
+        ...action,
+        label: action.action,
+      };
+  }
+}
+
 function buildInvoiceActions(
   invoice: TenantInvoiceRecord,
+  expiresAt: string | null,
 ): InvoiceActionView[] {
   const invoiceId = encodeURIComponent(invoice.invoiceId);
+  const artifactExpired = isIsoPast(expiresAt);
 
   return [
     {
       action: "download_artifact",
-      enabled: Boolean(invoice.artifactUrl),
+      enabled: Boolean(invoice.artifactUrl) && !artifactExpired,
       riskLevel: "low",
       label: "下載簽名檔",
-      ...(invoice.artifactUrl ? { href: invoice.artifactUrl } : {}),
+      ...(invoice.artifactUrl && !artifactExpired
+        ? { href: invoice.artifactUrl }
+        : {}),
       ...(!invoice.artifactUrl
         ? { disabledReasonCode: "artifact_missing" }
-        : {}),
+        : artifactExpired
+          ? { disabledReasonCode: "artifact_expired" }
+          : {}),
     },
     {
       action: "view_detail",
@@ -444,13 +517,23 @@ function buildInvoiceDeepLinks(
 }
 
 function normalizeInvoice(invoice: TenantInvoiceRecord): InvoiceViewRecord {
+  const expiresAt = parseArtifactExpiry(invoice.artifactUrl);
+  const runtimeInvoice = invoice as InvoiceRuntimeRecord;
+  const normalizedActions = runtimeInvoice.availableActions?.length
+    ? runtimeInvoice.availableActions.map((action) =>
+        normalizeRuntimeAction(action, invoice),
+      )
+    : buildInvoiceActions(invoice, expiresAt);
+
   return {
     ...invoice,
     dueDate: invoice.status === "paid" ? null : addDays(invoice.periodEnd, 14),
-    expiresAt: parseArtifactExpiry(invoice.artifactUrl),
+    expiresAt,
     statusView: deriveInvoiceStatus(invoice),
-    availableActions: buildInvoiceActions(invoice),
-    deepLinks: buildInvoiceDeepLinks(invoice),
+    availableActions: normalizedActions,
+    deepLinks: runtimeInvoice.deepLinks?.length
+      ? runtimeInvoice.deepLinks
+      : buildInvoiceDeepLinks(invoice),
   };
 }
 
@@ -718,6 +801,9 @@ function describeAction(action: InvoiceActionView) {
   if (action.disabledReasonCode === "artifact_missing") {
     return `${action.label}不可用`;
   }
+  if (action.disabledReasonCode === "artifact_expired") {
+    return `${action.label}已過期`;
+  }
   return `${action.label}已停用`;
 }
 
@@ -858,7 +944,6 @@ export default async function InvoicesPage({
     selectedInvoice?.availableActions.find(
       (action) => action.action === "download_artifact",
     ) ?? null;
-  const summary = summarizeInvoices(filteredInvoices);
   const rows: InvoiceRow[] = filteredInvoices.map((invoice) => ({
     ...invoice,
   }));
@@ -870,7 +955,12 @@ export default async function InvoicesPage({
       mono: true,
       r: (row) => (
         <div>
-          <div style={invoicePrimaryStyle}>{row.invoiceId}</div>
+          <Link
+            href={`/invoices?invoiceId=${encodeURIComponent(row.invoiceId)}`}
+            style={invoicePrimaryStyle}
+          >
+            {row.invoiceId}
+          </Link>
           <div style={invoiceSecondaryStyle}>
             {formatDateInput(row.createdAt) || "—"}
           </div>
@@ -958,6 +1048,26 @@ export default async function InvoicesPage({
       />
 
       <div style={pageStyle}>
+        <div style={pageLeadStyle}>
+          <div style={pageLeadCopyStyle}>
+            狀態與 CTA 以 backend read model 為準，頁面只負責呈現
+            `availableActions`、 `EmptyReason`、refresh tier 與 cross-app deep
+            links，不從 client 推導角色權限。
+          </div>
+          <div style={pageLeadMetaStyle}>
+            <CanvasPill
+              theme={th}
+              tone="info"
+            >{`T5 · ${REFRESH_TIER}`}</CanvasPill>
+            <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
+              {data.refresh.dataFreshness}
+            </CanvasPill>
+            <CanvasPill theme={th} tone="neutral">
+              {`${filteredInvoices.length} visible`}
+            </CanvasPill>
+          </div>
+        </div>
+
         {data.errors.length > 0 ? (
           <CanvasBanner
             theme={th}
@@ -968,151 +1078,137 @@ export default async function InvoicesPage({
           />
         ) : null}
 
-        <div style={summaryGridStyle}>
-          <CanvasCard theme={th} title="Visible invoices">
-            <div style={summaryCardBodyStyle}>
-              <div style={summaryLabelStyle}>count</div>
-              <div style={summaryValueStyle}>{filteredInvoices.length}</div>
-              <div style={summarySubtleStyle}>
-                {allInvoices.length} total in current tenant scope
-              </div>
-            </div>
-          </CanvasCard>
-
-          <CanvasCard theme={th} title="Open exposure">
-            <div style={summaryCardBodyStyle}>
-              <div style={summaryLabelStyle}>overdue</div>
-              <div style={summaryValueStyle}>{summary.overdueCount}</div>
-              <div style={summarySubtleStyle}>
-                issued invoices past implied due date
-              </div>
-            </div>
-          </CanvasCard>
-
-          <CanvasCard theme={th} title="Artifact health">
-            <div style={summaryCardBodyStyle}>
-              <div style={summaryLabelStyle}>expired</div>
-              <div style={summaryValueStyle}>{summary.expiredArtifacts}</div>
-              <div style={summarySubtleStyle}>
-                signed links already past expiresAt
-              </div>
-            </div>
-          </CanvasCard>
-
-          <CanvasCard theme={th} title="Visible amount">
-            <div style={summaryCardBodyStyle}>
-              <div style={summaryLabelStyle}>total</div>
-              <div style={summaryValueStyle}>{summary.totalAmount}</div>
-              <div style={summarySubtleStyle}>filtered register aggregate</div>
-            </div>
-          </CanvasCard>
-        </div>
-
-        <CanvasCard
-          theme={th}
-          title="Filter register"
-          subtitle={`generated ${formatDateInput(data.refresh.generatedAt)} · stale after ${Math.round(
-            data.refresh.staleAfterMs / 1000,
-          )}s`}
-        >
-          <form action="/invoices" method="get" style={filterGridStyle}>
-            <input type="hidden" name="invoiceId" value={filters.invoiceId} />
-
-            <div style={fieldStackStyle}>
-              <label htmlFor="invoice-query" style={fieldLabelStyle}>
-                Search by invoice id
-              </label>
-              <input
-                id="invoice-query"
-                name="q"
-                defaultValue={filters.query}
-                placeholder="inv_2026_05_001"
-                style={fieldControlStyle}
-              />
-            </div>
-
-            <div style={fieldStackStyle}>
-              <label htmlFor="invoice-status" style={fieldLabelStyle}>
-                Status
-              </label>
-              <select
-                id="invoice-status"
-                name="status"
-                defaultValue={filters.status}
-                style={fieldControlStyle}
-              >
-                {STATUS_FILTERS.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div style={fieldStackStyle}>
-              <label htmlFor="invoice-period" style={fieldLabelStyle}>
-                Period
-              </label>
-              <select
-                id="invoice-period"
-                name="period"
-                defaultValue={filters.period}
-                style={fieldControlStyle}
-              >
-                <option value="">all periods</option>
-                {periodOptions.map((period) => (
-                  <option key={period} value={period}>
-                    {period}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div style={filterActionsStyle}>
-              <button type="submit" style={primaryButtonStyle}>
-                套用篩選
-              </button>
-              <Link href="/invoices" style={inlineLinkStyle}>
-                清除
-              </Link>
-            </div>
-          </form>
-        </CanvasCard>
+        {data.refresh.dataFreshness !== "fresh" ? (
+          <CanvasBanner
+            theme={th}
+            tone={data.refresh.dataFreshness === "degraded" ? "danger" : "warn"}
+            icon="warn"
+            title="Snapshot freshness warning"
+            body={`目前內容產生於 ${formatDateInput(
+              data.refresh.generatedAt,
+            )}，refresh tier 為 T5 / ${REFRESH_TIER}。資料不是 fresh 時，頁面必須明確提示而不是假裝即時。`}
+          />
+        ) : null}
 
         <div style={pageGridStyle}>
           <CanvasCard
             theme={th}
             title="Invoice register"
-            subtitle={`${filteredInvoices.length} visible / ${allInvoices.length} total`}
-            padding={0}
+            subtitle="status / period / invoice id filters · overdue and artifact expiry stay visible"
             style={tableCardStyle}
           >
-            {emptyState && emptyDescription ? (
-              <div style={emptyStateWrapStyle}>
-                <CanvasPill theme={th} tone={emptyDescription.tone}>
-                  {emptyState.reason}
-                </CanvasPill>
-                <div style={emptyTitleStyle}>{emptyDescription.title}</div>
-                <div style={helperTextStyle}>{emptyDescription.body}</div>
-                <div style={helperTextStyle}>
-                  messageCode: {emptyState.messageCode}
-                  {emptyState.nextAction
-                    ? ` · nextAction: ${formatActionLabel(emptyState.nextAction)}`
-                    : ""}
+            <div style={registerCardBodyStyle}>
+              <form action="/invoices" method="get" style={filterGridStyle}>
+                <input
+                  type="hidden"
+                  name="invoiceId"
+                  value={filters.invoiceId}
+                />
+
+                <div style={fieldStackStyle}>
+                  <label htmlFor="invoice-query" style={fieldLabelStyle}>
+                    Search by invoice id
+                  </label>
+                  <input
+                    id="invoice-query"
+                    name="q"
+                    defaultValue={filters.query}
+                    placeholder="inv_2026_05_001"
+                    style={fieldControlStyle}
+                  />
                 </div>
-                {emptyActionHref ? (
-                  <Link href={emptyActionHref} style={inlineLinkStyle}>
-                    {emptyDescription.ctaLabel}
+
+                <div style={fieldStackStyle}>
+                  <label htmlFor="invoice-status" style={fieldLabelStyle}>
+                    Status
+                  </label>
+                  <select
+                    id="invoice-status"
+                    name="status"
+                    defaultValue={filters.status}
+                    style={fieldControlStyle}
+                  >
+                    {STATUS_FILTERS.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={fieldStackStyle}>
+                  <label htmlFor="invoice-period" style={fieldLabelStyle}>
+                    Period
+                  </label>
+                  <select
+                    id="invoice-period"
+                    name="period"
+                    defaultValue={filters.period}
+                    style={fieldControlStyle}
+                  >
+                    <option value="">all periods</option>
+                    {periodOptions.map((period) => (
+                      <option key={period} value={period}>
+                        {period}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={filterActionsStyle}>
+                  <button type="submit" style={primaryButtonStyle}>
+                    套用篩選
+                  </button>
+                  <Link href="/invoices" style={inlineLinkStyle}>
+                    清除
                   </Link>
-                ) : null}
+                </div>
+              </form>
+
+              <div style={registerMetaStyle}>
+                <CanvasPill theme={th} tone="neutral">
+                  {`${allInvoices.length} total`}
+                </CanvasPill>
+                <CanvasPill theme={th} tone="danger">
+                  {`${summarizeInvoices(filteredInvoices).overdueCount} overdue`}
+                </CanvasPill>
+                <CanvasPill theme={th} tone="warn">
+                  {`${summarizeInvoices(filteredInvoices).expiredArtifacts} expired artifacts`}
+                </CanvasPill>
+                <CanvasPill theme={th} tone="info">
+                  {summarizeInvoices(filteredInvoices).totalAmount}
+                </CanvasPill>
               </div>
-            ) : (
-              <CanvasTable<InvoiceRow>
-                theme={th}
-                columns={columns}
-                rows={rows}
-              />
-            )}
+
+              {emptyState && emptyDescription ? (
+                <div
+                  style={{ ...emptyStateWrapStyle, ...emptyReasonCardStyle }}
+                >
+                  <CanvasPill theme={th} tone={emptyDescription.tone}>
+                    {emptyState.reason}
+                  </CanvasPill>
+                  <div style={emptyTitleStyle}>{emptyDescription.title}</div>
+                  <div style={helperTextStyle}>{emptyDescription.body}</div>
+                  <div style={helperTextStyle}>
+                    messageCode: {emptyState.messageCode}
+                    {emptyState.nextAction
+                      ? ` · nextAction: ${formatActionLabel(emptyState.nextAction)}`
+                      : ""}
+                  </div>
+                  {emptyActionHref ? (
+                    <Link href={emptyActionHref} style={inlineLinkStyle}>
+                      {emptyDescription.ctaLabel}
+                    </Link>
+                  ) : null}
+                </div>
+              ) : (
+                <CanvasTable<InvoiceRow>
+                  theme={th}
+                  columns={columns}
+                  rows={rows}
+                />
+              )}
+            </div>
           </CanvasCard>
 
           <div style={sideStackStyle}>
@@ -1219,6 +1315,33 @@ export default async function InvoicesPage({
                       <div style={fieldLabelStyle}>Available actions</div>
                       <div style={actionRowStyle}>
                         {selectedInvoice.availableActions.map(renderActionLink)}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={fieldLabelStyle}>Invoice picker</div>
+                      <div style={actionRowStyle}>
+                        {filteredInvoices.slice(0, 6).map((invoice) => {
+                          const selected =
+                            invoice.invoiceId === selectedInvoice.invoiceId;
+                          return (
+                            <Link
+                              key={invoice.invoiceId}
+                              href={`/invoices?invoiceId=${encodeURIComponent(
+                                invoice.invoiceId,
+                              )}&status=${filters.status}&period=${encodeURIComponent(
+                                filters.period,
+                              )}&q=${encodeURIComponent(filters.query)}`}
+                              style={
+                                selected
+                                  ? selectedInvoiceLinkStyle
+                                  : activeInvoiceLinkStyle
+                              }
+                            >
+                              {invoice.invoiceId}
+                            </Link>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
