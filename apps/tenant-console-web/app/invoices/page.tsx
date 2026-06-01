@@ -26,6 +26,7 @@ import {
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { formatDateInput } from "@/lib/formatters";
+import { getRefreshTierDescriptor } from "@/lib/refresh-tier";
 
 export const dynamic = "force-dynamic";
 
@@ -506,35 +507,30 @@ function describeEmptyState(reason: EmptyReason) {
         title: "尚未完成帳務設定",
         body: "租戶 billing profile 尚未準備好，先補齊 invoice title、稅籍與月結設定，再回到發票頁。",
         tone: "warn" as const,
-        ctaLabel: "前往 /billing",
       };
     case "fetch_failed":
       return {
         title: "發票快照讀取失敗",
         body: "本次載入沒有取得可信的 invoice register，頁面保留語境並要求使用者重試，而不是誤導成沒有資料。",
         tone: "danger" as const,
-        ctaLabel: "重試本頁",
       };
     case "permission_denied":
       return {
         title: "目前角色沒有發票可見權限",
         body: "這不是 empty data。後端拒絕此角色查看 tenant invoice，需回到角色或權限設定處理。",
         tone: "neutral" as const,
-        ctaLabel: "檢查 /users",
       };
     case "external_unavailable":
       return {
         title: "外部 artifact 服務暫時不可用",
         body: "發票頁仍存在，但簽名下載或相關外部依賴無法提供完整結果，必須保留治理與稽核去向。",
         tone: "warn" as const,
-        ctaLabel: "查看 Platform Admin 稽核",
       };
     case "filtered_empty":
       return {
         title: "目前篩選條件沒有符合的發票",
         body: "保留 status、period 與 invoice id 的查詢語境，並提供清楚的回復路徑，避免把搜尋失敗誤解為 tenant 沒有任何 invoice。",
         tone: "info" as const,
-        ctaLabel: "清除篩選",
       };
     case "no_data":
     default:
@@ -542,7 +538,6 @@ function describeEmptyState(reason: EmptyReason) {
         title: "這個租戶目前還沒有發票",
         body: "系統讀取正常，但目前 tenant scope 尚未產出任何 invoice record；使用者仍可回到帳務概覽或稽核確認月結狀態。",
         tone: "info" as const,
-        ctaLabel: "回到 /billing",
       };
   }
 }
@@ -643,6 +638,25 @@ function resolveEmptyStateActionHref(action: ResourceActionDescriptor) {
       return "/audit?resourceType=tenant_invoice";
     default:
       return null;
+  }
+}
+
+function getEmptyStateActionLabel(action: ResourceActionDescriptor) {
+  switch (action.action) {
+    case "open_billing_setup":
+      return "前往帳務設定";
+    case "refresh_snapshot":
+      return "重新整理快照";
+    case "review_access":
+      return "檢查角色權限";
+    case "open_platform_audit":
+      return "前往平台稽核";
+    case "clear_filters":
+      return "清除篩選";
+    case "open_billing":
+      return "前往帳務概覽";
+    default:
+      return formatActionLabel(action);
   }
 }
 
@@ -789,6 +803,7 @@ export default async function InvoicesPage({
   const emptyDescription = computedEmptyReason
     ? describeEmptyState(computedEmptyReason)
     : null;
+  const refreshTier = getRefreshTierDescriptor(REFRESH_TIER);
   const refreshWindow = formatRefreshWindow(data.refresh?.staleAfterMs);
 
   const selectedInvoice =
@@ -818,6 +833,10 @@ export default async function InvoicesPage({
   const emptyStateActionHref = emptyState?.nextAction
     ? resolveEmptyStateActionHref(emptyState.nextAction)
     : null;
+  const emptyStateActionLabel =
+    emptyState?.nextAction && emptyState.nextAction.enabled
+      ? getEmptyStateActionLabel(emptyState.nextAction)
+      : null;
   const rows: InvoiceRow[] = filteredInvoices.map((invoice) => ({
     ...invoice,
   }));
@@ -899,7 +918,7 @@ export default async function InvoicesPage({
             <CanvasPill
               theme={th}
               tone="info"
-            >{`T5 · ${REFRESH_TIER}${refreshWindow ? ` · ${refreshWindow}` : ""}`}</CanvasPill>
+            >{`T5 · ${REFRESH_TIER} · ${refreshTier.cadenceLabel}${refreshWindow ? ` · staleAfter ${refreshWindow}` : ""}`}</CanvasPill>
             {data.refresh ? (
               <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
                 {data.refresh.dataFreshness}
@@ -936,7 +955,7 @@ export default async function InvoicesPage({
             <CanvasPill
               theme={th}
               tone="info"
-            >{`T5 · ${REFRESH_TIER}`}</CanvasPill>
+            >{`T5 · ${REFRESH_TIER} · ${refreshTier.cadenceLabel}`}</CanvasPill>
             {data.refresh ? (
               <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
                 {data.refresh.dataFreshness}
@@ -1083,7 +1102,9 @@ export default async function InvoicesPage({
                       ? ` · nextAction: ${formatActionLabel(emptyState.nextAction)}`
                       : ""}
                   </div>
-                  {emptyState.nextAction?.enabled && emptyStateActionHref ? (
+                  {emptyState.nextAction?.enabled &&
+                  emptyStateActionHref &&
+                  emptyStateActionLabel ? (
                     <Link
                       href={emptyStateActionHref}
                       style={{
@@ -1092,7 +1113,7 @@ export default async function InvoicesPage({
                         background: th.surface,
                       }}
                     >
-                      {emptyDescription.ctaLabel}
+                      {emptyStateActionLabel}
                     </Link>
                   ) : null}
                 </div>
