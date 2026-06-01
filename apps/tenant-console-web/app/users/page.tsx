@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type {
   CrossAppResourceLink,
   EmptyReason,
+  IdentityContext,
   RefreshTier,
   ResourceActionDescriptor,
   TenantRoleCatalogRecord,
@@ -52,19 +53,33 @@ const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "flex",
   flexDirection: "column",
-  gap: 16,
+  gap: 18,
 };
 
-const controlCardStyle: CSSProperties = {
+const stripGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.35fr) minmax(300px, 0.95fr)",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 12,
+};
+
+const stripCardStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: `1px solid ${th.border}`,
+  background: th.surface,
+};
+
+const summaryGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.3fr) minmax(300px, 0.9fr)",
   gap: 16,
 };
 
-const controlStackStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 14,
+const stackStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
 };
 
 const pillRowStyle: CSSProperties = {
@@ -146,6 +161,22 @@ const metricLabelStyle: CSSProperties = {
   lineHeight: 1.4,
 };
 
+const stripLabelStyle: CSSProperties = {
+  color: th.textDim,
+  fontSize: 10.5,
+  lineHeight: 1.3,
+  letterSpacing: 0.4,
+  textTransform: "uppercase",
+  fontFamily: th.monoFamily,
+};
+
+const stripValueStyle: CSSProperties = {
+  color: th.text,
+  fontSize: 12.5,
+  fontWeight: 600,
+  lineHeight: 1.35,
+};
+
 const authorityMetaStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
@@ -209,6 +240,17 @@ const linkMetaStyle: CSSProperties = {
   lineHeight: 1.45,
 };
 
+const hintCopyStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.45,
+};
+
+const emptyReasonListStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
 const numberFormatter = new Intl.NumberFormat("en");
 
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
@@ -241,6 +283,8 @@ type UserRow = Record<string, unknown> &
   };
 
 type UsersPageData = {
+  identity: IdentityContext | null;
+  identityError: string | null;
   users: RuntimeTenantUserRecord[];
   roles: TenantRoleCatalogRecord[];
   failures: LoadFailure[];
@@ -258,6 +302,15 @@ type RuntimeTenantUserRecord = TenantUserRoleRecord & {
   availableActions?: ResourceActionDescriptor[];
   lastLoginAt?: string | null;
 };
+
+const EMPTY_REASON_ORDER: EmptyReason[] = [
+  "no_data",
+  "not_provisioned",
+  "fetch_failed",
+  "permission_denied",
+  "external_unavailable",
+  "filtered_empty",
+];
 
 const ROLE_CANVAS_LABEL: Record<string, string> = {
   tc_admin: "tenant_admin",
@@ -662,7 +715,8 @@ function resolveCrossAppHref(link: CrossAppResourceLink) {
 
 async function loadUsersData(): Promise<UsersPageData> {
   const client = getTenantClient();
-  const [usersResult, rolesResult] = await Promise.allSettled([
+  const [identityResult, usersResult, rolesResult] = await Promise.allSettled([
+    client.getIdentityContext() as Promise<IdentityContext>,
     client.listTenantUsers() as Promise<RuntimeTenantUserRecord[]>,
     client.listTenantRoles() as Promise<TenantRoleCatalogRecord[]>,
   ]);
@@ -694,7 +748,17 @@ async function loadUsersData(): Promise<UsersPageData> {
     });
   }
 
-  return { users, roles, failures };
+  return {
+    identity:
+      identityResult.status === "fulfilled" ? identityResult.value : null,
+    identityError:
+      identityResult.status === "rejected"
+        ? toErrorMessage(identityResult.reason)
+        : null,
+    users,
+    roles,
+    failures,
+  };
 }
 
 function ActionDescriptorButton({
@@ -789,15 +853,26 @@ function EmptyStateBlock({
   );
 }
 
+function getActorChip(identity: IdentityContext | null, tenantId: string) {
+  if (!identity) return `tenant / production / ${tenantId}`;
+  return `${identity.realm} / production / ${identity.tenantId ?? tenantId}`;
+}
+
+function getActorSummary(identity: IdentityContext | null) {
+  if (!identity) return "identity unavailable";
+  return `${identity.actorId ?? identity.actorType} · ${identity.authMode} · roles=${identity.roles.join(", ") || "none"}`;
+}
+
 export default async function UsersPage({
   searchParams,
 }: {
   searchParams?: Promise<SearchParams> | SearchParams;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : {};
-  const { users, roles, failures } = await loadUsersData();
+  const { identity, identityError, users, roles, failures } =
+    await loadUsersData();
   const refreshMetadata = deriveRefreshMetadata(failures);
-  const tenantId = users[0]?.tenantId ?? DEMO_TENANT_ID;
+  const tenantId = identity?.tenantId ?? users[0]?.tenantId ?? DEMO_TENANT_ID;
   const assignableRoles = roles.filter((role) => role.assignable);
   const pageInviteAction = getPageInviteAction(assignableRoles);
   const roleFilter = normalizeRoleFilter(resolvedSearchParams.role, roles);
@@ -850,6 +925,9 @@ export default async function UsersPage({
   });
   const allStatusHref = buildQueryString(resolvedSearchParams, {
     status: null,
+    emptyReason: null,
+  });
+  const emptyReasonClearHref = buildQueryString(resolvedSearchParams, {
     emptyReason: null,
   });
 
@@ -907,7 +985,7 @@ export default async function UsersPage({
     },
     {
       h: "ACTIONS",
-      w: 240,
+      w: 250,
       r: (row) => {
         const updateRole = getAction(row.availableActions, "role");
         const suspend = getAction(row.availableActions, "suspend");
@@ -937,7 +1015,7 @@ export default async function UsersPage({
             </div>
             <span style={userMetaStyle}>
               availableActions[{row.actionAuthority}]:
-              {row.availableActions.map((action: ResourceActionDescriptor) =>
+              {row.availableActions.map((action) =>
                 action.enabled ? ` ${action.action}` : ` ${action.action}[off]`,
               )}
             </span>
@@ -983,6 +1061,16 @@ export default async function UsersPage({
           body={`目前顯示的是 ${formatRefreshAt(refreshMetadata.generatedAt)} 產生的 snapshot · dataFreshness=${refreshMetadata.dataFreshness} · source=${refreshMetadata.source}`}
         />
 
+        {identityError ? (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="warn"
+            title="身份上下文讀取失敗"
+            body={`IdentityContext 無法讀取，因此頁面改以 tenant users snapshot 推導 tenant 範圍。${identityError}`}
+          />
+        ) : null}
+
         {fallbackActionUsers > 0 ? (
           <CanvasBanner
             theme={th}
@@ -1008,9 +1096,50 @@ export default async function UsersPage({
           />
         ) : null}
 
-        <div style={controlCardStyle}>
+        <div style={stripGridStyle}>
+          <div style={stripCardStyle}>
+            <div style={stripLabelStyle}>Identity Chip</div>
+            <div style={stripValueStyle}>
+              {getActorChip(identity, tenantId)}
+            </div>
+            <div style={hintCopyStyle}>{getActorSummary(identity)}</div>
+          </div>
+
+          <div style={stripCardStyle}>
+            <div style={stripLabelStyle}>Roster Snapshot</div>
+            <div style={pillRowStyle}>
+              <CanvasPill theme={th} tone="accent">
+                {formatCount(users.length)} users
+              </CanvasPill>
+              <CanvasPill theme={th} tone="success">
+                {formatCount(activeUsers)} active
+              </CanvasPill>
+              <CanvasPill theme={th} tone="warn">
+                {formatCount(invitedUsers)} pending_invite
+              </CanvasPill>
+              <CanvasPill theme={th} tone="neutral">
+                {formatCount(suspendedUsers)} suspended
+              </CanvasPill>
+            </div>
+            <div style={hintCopyStyle}>
+              latest roster update{" "}
+              {latestUpdated ? formatUpdated(latestUpdated) : "—"}
+            </div>
+          </div>
+
+          <div style={stripCardStyle}>
+            <div style={stripLabelStyle}>Cross-App Exits</div>
+            <div style={stripValueStyle}>Audit drill-outs stay explicit</div>
+            <div style={hintCopyStyle}>
+              Tenant audit same-tab；ops/platform deep links new-tab per packet
+              §3.10。
+            </div>
+          </div>
+        </div>
+
+        <div style={summaryGridStyle}>
           <CanvasCard theme={th} title="篩選" subtitle="role + status">
-            <div style={controlStackStyle}>
+            <div style={stackStyle}>
               <CanvasField
                 theme={th}
                 label="Role"
@@ -1037,6 +1166,7 @@ export default async function UsersPage({
                   ))}
                 </div>
               </CanvasField>
+
               <CanvasField
                 theme={th}
                 label="Status"
@@ -1083,32 +1213,17 @@ export default async function UsersPage({
 
           <CanvasCard
             theme={th}
-            title="Roster 摘要"
-            subtitle="tc_admin scope · must-show counters"
+            title="Authority / Refresh"
+            subtitle="spec-required context without leaving the users surface"
           >
-            <div style={controlStackStyle}>
-              <div style={pillRowStyle}>
-                <CanvasPill theme={th} tone="accent">
-                  {formatCount(users.length)} users
-                </CanvasPill>
-                <CanvasPill theme={th} tone="success">
-                  {formatCount(activeUsers)} active
-                </CanvasPill>
-                <CanvasPill theme={th} tone="warn">
-                  {formatCount(invitedUsers)} pending_invite
-                </CanvasPill>
-                <CanvasPill theme={th} tone="neutral">
-                  {formatCount(suspendedUsers)} suspended
-                </CanvasPill>
-              </div>
-
-              <div style={supportingGridStyle}>
+            <div style={stackStyle}>
+              <div style={stripGridStyle}>
                 <div>
                   <div style={metricValueStyle}>
-                    {formatCount(users.length)}
+                    {formatCount(filteredUsers.length)}
                   </div>
                   <div style={metricLabelStyle}>
-                    roster entries currently returned by `/api/tenant/users`
+                    visible roster rows after role/status filter
                   </div>
                 </div>
                 <div>
@@ -1127,13 +1242,13 @@ export default async function UsersPage({
                 cols={1}
                 items={[
                   {
-                    k: "Latest roster update",
-                    v: latestUpdated ? formatUpdated(latestUpdated) : "—",
+                    k: "Primary persona",
+                    v: "tc_admin only",
                     mono: true,
                   },
                   {
-                    k: "Page owner",
-                    v: "tc_admin only",
+                    k: "Refresh tier",
+                    v: `T5 / ${TENANT_REFRESH_TIER} / ${TENANT_REFRESH_CADENCE_MS / 1000}s`,
                     mono: true,
                   },
                   {
@@ -1200,6 +1315,41 @@ export default async function UsersPage({
                 )}
               />
             )}
+          </CanvasCard>
+
+          <CanvasCard
+            theme={th}
+            title="Empty reason variants"
+            subtitle="6 states from ui-runtime; use query links to verify distinct rendering"
+          >
+            <div style={emptyReasonListStyle}>
+              <div style={pillRowStyle}>
+                {EMPTY_REASON_ORDER.map((reason) => (
+                  <FilterPillLink
+                    key={reason}
+                    href={buildQueryString(resolvedSearchParams, {
+                      emptyReason: reason,
+                    })}
+                    active={forcedEmptyReason === reason}
+                    label={reason}
+                    tone={forcedEmptyReason === reason ? "warn" : "neutral"}
+                  />
+                ))}
+              </div>
+
+              <div style={hintCopyStyle}>
+                目前 override: {forcedEmptyReason ?? "none"} · reviewers
+                可逐一切換確認 6 種 `EmptyReason` 在同一張 roster card
+                走不同文案與 CTA。
+              </div>
+
+              <a href={emptyReasonClearHref} style={linkCardStyle}>
+                <span style={linkTitleStyle}>Clear empty-state override</span>
+                <span style={linkMetaStyle}>
+                  回到實際後端回傳的使用者清單與 failures 推導結果
+                </span>
+              </a>
+            </div>
           </CanvasCard>
 
           <CanvasCard
