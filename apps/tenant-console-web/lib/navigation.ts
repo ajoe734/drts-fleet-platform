@@ -83,6 +83,12 @@ export const tenantNavEntries: TenantNavEntry[] = [
   },
   { divider: "帳務" },
   {
+    key: "billing",
+    href: "/billing",
+    icon: "billing",
+    label: "帳務概覽",
+  },
+  {
     key: "invoices",
     href: "/invoices",
     icon: "billing",
