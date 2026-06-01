@@ -305,16 +305,6 @@ function formatThresholdInput(value: number | null | undefined) {
   return typeof value === "number" ? String(value) : "";
 }
 
-function buildFeedbackFromReceipt(receipt: ActionReceipt) {
-  return {
-    tone:
-      receipt.status === "completed" ? ("success" as const) : ("info" as const),
-    title: receipt.status === "completed" ? "SLA 已更新" : "重算已受理",
-    message: receipt.message,
-    receipt,
-  };
-}
-
 function getActiveEmptyState(
   emptyState: EmptyStateEnvelope | null,
   loadErrorMessage: string | null,
@@ -349,6 +339,17 @@ function getRefreshDeadline(metadata: UiRefreshMetadata | null) {
   return generatedAt + metadata.staleAfterMs;
 }
 
+function getReceiptTone(receipt: ActionReceipt) {
+  switch (receipt.status) {
+    case "completed":
+      return "success";
+    case "failed":
+      return "danger";
+    default:
+      return "info";
+  }
+}
+
 export function SlaManager({
   view,
   loadErrorMessage,
@@ -373,12 +374,8 @@ export function SlaManager({
     formatThresholdInput(profile?.completionThresholdMin),
   );
   const [reason, setReason] = useState("");
-  const [feedback, setFeedback] = useState<{
-    tone: "success" | "danger" | "warn" | "info";
-    title: string;
-    message: string;
-    receipt?: ActionReceipt;
-  } | null>(null);
+  const [receipt, setReceipt] = useState<ActionReceipt | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const updateAction = getAction(availableActions, "update_sla_profile");
@@ -397,11 +394,6 @@ export function SlaManager({
     refreshTier && refreshMetadata?.generatedAt,
   );
   const refreshDeadline = getRefreshDeadline(refreshMetadata);
-  const hasPendingResync =
-    feedback?.receipt?.status === "accepted" ||
-    Boolean(lastRecalculationAt) ||
-    refreshMetadata?.dataFreshness === "stale" ||
-    refreshMetadata?.dataFreshness === "degraded";
 
   useEffect(() => {
     setWaitThresholdMin(formatThresholdInput(profile?.waitThresholdMin));
@@ -440,53 +432,43 @@ export function SlaManager({
     return () => window.clearTimeout(timer);
   }, [refreshDeadline, router]);
 
-  useEffect(() => {
-    if (!hasPendingResync) return;
-    const timer = window.setTimeout(() => {
-      router.refresh();
-    }, 5000);
-    return () => window.clearTimeout(timer);
-  }, [hasPendingResync, router, refreshMetadata?.generatedAt]);
-
   const handleUpdate = () => {
     startTransition(async () => {
+      setActionError(null);
+      setReceipt(null);
       try {
-        const receipt = await updateTenantSlaProfileAction({
+        const nextReceipt = await updateTenantSlaProfileAction({
           waitThresholdMin: Number(waitThresholdMin),
           arrivalThresholdMin: Number(arrivalThresholdMin),
           completionThresholdMin: Number(completionThresholdMin),
           reason,
         });
-        setFeedback(buildFeedbackFromReceipt(receipt));
+        setReceipt(nextReceipt);
         setReason("");
         router.refresh();
       } catch (error) {
-        setFeedback({
-          tone: "danger",
-          title: "操作失敗",
-          message:
-            error instanceof Error ? error.message : "SLA update failed.",
-        });
+        setActionError(
+          error instanceof Error ? error.message : "SLA update failed.",
+        );
       }
     });
   };
 
   const handleRecalculate = () => {
     startTransition(async () => {
+      setActionError(null);
+      setReceipt(null);
       try {
-        const receipt = await recalculateTenantSlaBookingsAction(reason);
-        setFeedback(buildFeedbackFromReceipt(receipt));
+        const nextReceipt = await recalculateTenantSlaBookingsAction(reason);
+        setReceipt(nextReceipt);
         setReason("");
         router.refresh();
       } catch (error) {
-        setFeedback({
-          tone: "danger",
-          title: "操作失敗",
-          message:
-            error instanceof Error
-              ? error.message
-              : "SLA recalculation request failed.",
-        });
+        setActionError(
+          error instanceof Error
+            ? error.message
+            : "SLA recalculation request failed.",
+        );
       }
     });
   };
@@ -522,29 +504,36 @@ export function SlaManager({
       />
 
       <div style={pageBodyStyle}>
-        {feedback ? (
+        {actionError ? (
           <CanvasBanner
             theme={th}
-            tone={feedback.tone}
-            title={feedback.title}
-            body={feedback.message}
+            tone="danger"
+            title="操作失敗"
+            body={actionError}
           />
         ) : null}
 
-        {feedback?.receipt ? (
-          <CanvasCard theme={th} title="Write receipt">
+        {receipt ? (
+          <CanvasCard theme={th} title="Action receipt">
+            <CanvasBanner
+              theme={th}
+              tone={getReceiptTone(receipt)}
+              title={`status · ${receipt.status}`}
+              body={receipt.message}
+            />
+            <div style={{ height: 12 }} />
             <CanvasDL
               theme={th}
               cols={1}
               items={[
-                { k: "status", v: feedback.receipt.status, mono: true },
-                { k: "actionId", v: feedback.receipt.actionId, mono: true },
-                { k: "auditId", v: feedback.receipt.auditId, mono: true },
-                { k: "resource", v: feedback.receipt.resourceId, mono: true },
+                { k: "status", v: receipt.status, mono: true },
+                { k: "actionId", v: receipt.actionId, mono: true },
+                { k: "auditId", v: receipt.auditId, mono: true },
+                { k: "resource", v: receipt.resourceId, mono: true },
               ]}
             />
             <div style={{ height: 12 }} />
-            <Link href={buildAuditHref(feedback.receipt)} style={linkStyle}>
+            <Link href={buildAuditHref(receipt)} style={linkStyle}>
               查看對應 audit →
             </Link>
           </CanvasCard>
@@ -567,15 +556,6 @@ export function SlaManager({
             body={`source=${refreshMetadata!.source} · generatedAt=${formatDateTime(
               refreshMetadata!.generatedAt,
             )} · staleAfterMs=${refreshMetadata!.staleAfterMs}${refreshDeadline ? ` · next resync ${formatDateTime(new Date(refreshDeadline).toISOString())}` : ""}`}
-          />
-        ) : null}
-
-        {hasPendingResync ? (
-          <CanvasBanner
-            theme={th}
-            tone="warn"
-            title="Snapshot resync in progress"
-            body="This page keeps polling until accepted commands and recalculation progress are confirmed by a fresh backend snapshot."
           />
         ) : null}
 
