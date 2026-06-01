@@ -193,6 +193,25 @@ const actionCellStyle: CSSProperties = {
   justifyContent: "flex-end",
 };
 
+// A disabled action keeps its affordance visible (packet §3.5 / ui-runtime.ts
+// ResourceActionDescriptor: `enabled:false` + `disabledReasonCode` ⇒ show
+// disabled, do not hide) and renders the reason as read-only copy — not only a
+// hover tooltip — so the "why can't I act" answer is visible without a pointer.
+const disabledActionStyle: CSSProperties = {
+  display: "inline-flex",
+  flexDirection: "column",
+  alignItems: "flex-end",
+  gap: 2,
+};
+
+const disabledReasonStyle: CSSProperties = {
+  fontSize: 10,
+  lineHeight: 1.3,
+  color: th.textDim,
+  maxWidth: 120,
+  textAlign: "right",
+};
+
 const emptyStateStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
@@ -748,16 +767,28 @@ export default async function BookingsPage({
                 icon: undefined,
               };
               if (!action.enabled) {
+                // Disabled affordance: render the backend per-action
+                // disabledReasonCode (falling back to the row read-only
+                // reason) as visible copy, not only a hover tooltip.
+                const reason = readableReason(
+                  action.disabledReasonCode ?? row.readOnlyReasonCode,
+                );
                 return (
-                  <CanvasBtn
+                  <span
                     key={action.action}
-                    theme={th}
-                    size="xs"
-                    icon={presentation.icon}
-                    disabled
+                    style={disabledActionStyle}
+                    title={reason}
                   >
-                    {presentation.label}
-                  </CanvasBtn>
+                    <CanvasBtn
+                      theme={th}
+                      size="xs"
+                      icon={presentation.icon}
+                      disabled
+                    >
+                      {presentation.label}
+                    </CanvasBtn>
+                    <span style={disabledReasonStyle}>{reason}</span>
+                  </span>
                 );
               }
               // Enabled mutate actions route to the detail command surface,
