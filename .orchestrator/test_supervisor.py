@@ -7363,3 +7363,60 @@ class PruneBlockersTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BreakFullDeadlockTests(unittest.TestCase):
+    CONFIG = {
+        "agents": {"claude2": {"provider": "claude2"}},
+        "supervisor": {"deadlock_breaker_cooldown_seconds": 1800},
+        "ready_dispatcher": {},
+    }
+
+    def _wedged_state(self):
+        return {
+            "workers": {},
+            "queue": {"events": {}},
+            "chair_review": {"blocked": {"reason": "no lane"}},
+            "provider_pauses": {"claude2": {"kind": "auth", "resume_at": None, "paused_at": supervisor.utc_now()}},
+            "quota_paused_agents": {},
+        }
+
+    _STATUS = {"tasks": [{"id": "T1", "status": "backlog"}]}
+
+    def test_clears_lane_when_wedged_and_probe_healthy(self):
+        state = self._wedged_state()
+        report = {"providers": {"claude2": {"installed": True, "auth_ready": True}}}
+        with mock.patch.object(supervisor, "_force_recovery_probe", return_value=report), \
+             mock.patch.object(supervisor, "write_activity_log"):
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertTrue(changed)
+        self.assertNotIn("claude2", state["provider_pauses"])
+
+    def test_escalates_operator_attention_when_unrecoverable(self):
+        state = self._wedged_state()
+        report = {"providers": {"claude2": {"installed": True, "auth_ready": False}}}
+        with mock.patch.object(supervisor, "_force_recovery_probe", return_value=report), \
+             mock.patch.object(supervisor, "write_activity_log") as wal:
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertTrue(changed)
+        self.assertIn("claude2", state["provider_pauses"])  # still paused
+        self.assertIn("operator_attention", state["deadlock_recovery"])
+        kinds = [c.args[1].get("type") for c in wal.call_args_list]
+        self.assertIn("operator_attention_required", kinds)
+
+    def test_noop_when_workers_active(self):
+        state = self._wedged_state()
+        state["workers"] = {"w1": {"agent_id": "claude2", "status": "running"}}
+        probe = mock.Mock()
+        with mock.patch.object(supervisor, "_force_recovery_probe", probe):
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertFalse(changed)
+        probe.assert_not_called()
+
+    def test_noop_when_chair_not_blocked(self):
+        state = self._wedged_state()
+        state["chair_review"] = {}
+        with mock.patch.object(supervisor, "_force_recovery_probe") as probe:
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertFalse(changed)
+        probe.assert_not_called()
