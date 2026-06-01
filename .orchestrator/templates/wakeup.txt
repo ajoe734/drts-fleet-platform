@@ -10,6 +10,8 @@
 狀態更新請優先使用 `scripts/ai-status.sh` 或 `python3 scripts/ai_status.py`。
 不要用臨時 Python/heredoc 直接改 `ai-status.json`、`current-work.md` 或 `ai-activity-log.jsonl`。
 `current-work.md` 與 dashboard 類檔案是給人看的摘要，不是預設 machine truth。
+
+**不要 `Read ai-status.json` 整檔**：那個檔目前 ~2 MB（≈ 500K tokens），每讀一次都會把 500K input tokens 灌進你下一輪 context。若你需要看單一 task 狀態，用 `scripts/ai-status.sh show {{task_id}}` 或 `python3 scripts/ai_status.py get-task {{task_id}}`（單 task slice，<2 KB）。若需要看當前 in_progress / blocked 列表，用 `scripts/ai-status.sh list --status in_progress`。只有 supervisor / chair 角色才有理由讀整檔。
 如果你的工具清單沒有 shell，就不要呼叫不存在的 shell tool；若需要執行檢查，先用可用工具完成檔案修改與 evidence 記錄，並明確說明無法執行的驗證。
 
 重要：不能只在最後文字回覆「完成」。supervisor 只認 machine truth 狀態。

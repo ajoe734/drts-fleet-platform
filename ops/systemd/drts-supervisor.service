@@ -33,12 +33,15 @@ RestartSec=10
 MemoryMax=4G
 MemoryHigh=3G
 
-# Watchdog: DISABLED. supervisor.py does not yet call sd_notify(WATCHDOG=1),
-# so a non-zero WatchdogSec fired every interval on a healthy supervisor and
-# killed it mid-dispatch (observed: ~every 15 min, NRestarts climbed to 19,
-# codex lane repeatedly dropped to 0). Re-enable ONLY after supervisor.py
-# implements periodic sd_notify. Restart=on-failure still covers real crashes.
-WatchdogSec=0
+# Watchdog: 1800s (30 min). supervisor.py now calls _sd_notify("WATCHDOG=1")
+# on every run_once tick (OPS-SUPERVISOR-SD-NOTIFY-001), so systemd correctly
+# detects a hung tick loop (no heartbeat for 30 min) and SIGKILL-restarts the
+# supervisor. Healthy supervisors heartbeat well under the deadline, so this
+# no longer kills happy processes (the OPS-SUPERVISOR-WATCHDOG-OFF-001 bug).
+# 30 min is generous to absorb a slow startup reconcile / cold cache without
+# false-positive kills; lower if you want faster hang detection.
+NotifyAccess=main
+WatchdogSec=1800
 
 # Journald is the canonical log; the .orchestrator/logs/supervisor-bg.log
 # trail is still written by supervisor itself for backward compatibility
