@@ -5,7 +5,7 @@
 
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -23,12 +23,20 @@ import type {
   SettlementMatrixRecord,
   TenantInvoiceRecord,
 } from "@drts/contracts";
+import type {
+  EmptyReason,
+  EmptyStateEnvelope,
+  RefreshTier,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
   CanvasDL,
   CanvasField,
+  CanvasIcon,
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
@@ -46,6 +54,36 @@ import type {
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_FINANCE_ACTOR_ID = "finance.console";
 const REOPEN_WARN_THRESHOLD = 5;
+
+// Cross-app sub-route (packet §4.2 / §5.11 "Exit: /payments/reimbursements").
+const REIMBURSEMENTS_ROUTE = "/payments/reimbursements";
+
+// Refresh model per packet §3.2 (Q-X01/Q-X02): /payments is tier T4
+// (admin medium-slow, 30s). The page picks cadence from the shared
+// RefreshTier enum rather than hard-coding a magic number.
+const PAGE_REFRESH_TIER: RefreshTier = "medium_slow";
+const REFRESH_TIER_CADENCE_MS: Record<RefreshTier, number | null> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: null,
+};
+const PAGE_REFRESH_CADENCE_MS = REFRESH_TIER_CADENCE_MS[PAGE_REFRESH_TIER];
+
+// Action identifiers used to drive CTAs from `availableActions` per packet
+// §3.5 (Q-X13). Backend descriptors are preferred; when finance records do
+// not yet carry `availableActions` (pending UI-BE-006) the page falls back
+// to deterministic defaults derived from record state, keeping the CTA
+// surface descriptor-driven rather than hard-coded in JSX.
+const ISSUE_ACTION_ASSIGN = "assign_issue";
+const ISSUE_ACTION_COMMENT = "comment_issue";
+const ISSUE_ACTION_RESOLVE = "resolve_issue";
+const ISSUE_ACTION_REOPEN = "reopen_issue";
+const BATCH_ACTION_APPROVE = "approve_reimbursement_batch";
+const BATCH_ACTION_MARK_PAID = "mark_reimbursement_paid";
 const PLATFORM_THEME = buildCanvasTheme({
   surface: "platform",
   density: "compact",
@@ -74,13 +112,15 @@ const RECONCILIATION_RESOLUTION_OPTIONS: (typeof RECONCILIATION_ISSUE_RESOLUTION
     "no_action_required",
     "resolved_other",
   ];
-const ISSUE_STATUS_PRIORITY: Record<ReconciliationIssueRecord["status"], number> =
-  {
-    reopened: 0,
-    open: 1,
-    assigned: 2,
-    resolved: 3,
-  };
+const ISSUE_STATUS_PRIORITY: Record<
+  ReconciliationIssueRecord["status"],
+  number
+> = {
+  reopened: 0,
+  open: 1,
+  assigned: 2,
+  resolved: 3,
+};
 type IssueTableRow = ReconciliationIssueRecord & Record<string, unknown>;
 type MatrixTableRow = SettlementMatrixRecord & Record<string, unknown>;
 type InvoiceTableRow = TenantInvoiceRecord & Record<string, unknown>;
@@ -272,7 +312,8 @@ function hoursBetween(startAt?: string | null, endAt?: string | null) {
 
 function average(values: Array<number | null>) {
   const list = values.filter(
-    (value): value is number => typeof value === "number" && Number.isFinite(value),
+    (value): value is number =>
+      typeof value === "number" && Number.isFinite(value),
   );
   if (list.length === 0) {
     return null;
@@ -378,14 +419,6 @@ function sectionGridStyle(columns: string): React.CSSProperties {
   };
 }
 
-function emptyStateStyle(theme: CanvasTheme): React.CSSProperties {
-  return {
-    padding: 18,
-    color: theme.textMuted,
-    fontSize: 12.5,
-  };
-}
-
 function cellStackStyle(options?: {
   mono?: boolean;
   align?: "left" | "right";
@@ -398,6 +431,302 @@ function cellStackStyle(options?: {
     textAlign: options?.align ?? "left",
     fontFamily: options?.mono ? PLATFORM_THEME.monoFamily : undefined,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EmptyReason — six distinct treatments per packet §3.6 (Q-X15).
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CanvasToneNonNeutral = Exclude<CanvasTone, "neutral">;
+
+const EMPTY_REASON_VISUALS: Record<
+  EmptyReason,
+  { tone: CanvasToneNonNeutral; icon: string }
+> = {
+  no_data: { tone: "info", icon: "reports" },
+  not_provisioned: { tone: "accent", icon: "integrationGov" },
+  fetch_failed: { tone: "danger", icon: "warn" },
+  permission_denied: { tone: "warn", icon: "audit" },
+  external_unavailable: { tone: "warn", icon: "webhooks" },
+  filtered_empty: { tone: "neutral" as CanvasToneNonNeutral, icon: "filter" },
+  // driver-app only (Q-DRV01); included for exhaustiveness, never shown here.
+  driver_not_eligible: { tone: "warn", icon: "x" },
+};
+
+function emptyReasonCopy(
+  locale: string,
+  reason: EmptyReason,
+): { title: string; body: string } {
+  const en: Record<EmptyReason, { title: string; body: string }> = {
+    no_data: {
+      title: "No records yet",
+      body: "Nothing has been recorded for this view. New records appear as finance activity lands.",
+    },
+    not_provisioned: {
+      title: "Not provisioned",
+      body: "This dataset is not configured for the current scope yet. Provision it to start collecting records.",
+    },
+    fetch_failed: {
+      title: "Could not load data",
+      body: "The request failed. The snapshot below may be stale — retry to fetch the latest.",
+    },
+    permission_denied: {
+      title: "You cannot view this",
+      body: "Your platform-admin role does not include read scope for this resource.",
+    },
+    external_unavailable: {
+      title: "Upstream unavailable",
+      body: "An external dependency is unreachable, so this data cannot be shown right now.",
+    },
+    filtered_empty: {
+      title: "No matches for this filter",
+      body: "Records exist, but none match the active filter. Clear or widen the filter to see them.",
+    },
+    driver_not_eligible: {
+      title: "Not eligible",
+      body: "No work is available for this actor.",
+    },
+  };
+  const zh: Record<EmptyReason, { title: string; body: string }> = {
+    no_data: {
+      title: "尚無紀錄",
+      body: "此檢視尚未有任何紀錄；待財務活動產生後會自動出現。",
+    },
+    not_provisioned: {
+      title: "尚未開通",
+      body: "此資料集尚未針對目前範圍設定。完成開通後即可開始收錄紀錄。",
+    },
+    fetch_failed: {
+      title: "資料載入失敗",
+      body: "請求失敗，下方快照可能為舊資料；請重試以取得最新內容。",
+    },
+    permission_denied: {
+      title: "無檢視權限",
+      body: "你的平台管理角色不含此資源的讀取範圍。",
+    },
+    external_unavailable: {
+      title: "上游不可用",
+      body: "外部相依服務目前無法連線，暫時無法顯示此資料。",
+    },
+    filtered_empty: {
+      title: "篩選後無符合項目",
+      body: "已有紀錄，但沒有符合目前篩選條件者；清除或放寬篩選即可顯示。",
+    },
+    driver_not_eligible: {
+      title: "不符資格",
+      body: "目前沒有可指派給此對象的工作。",
+    },
+  };
+  return (locale === "en" ? en : zh)[reason];
+}
+
+function EmptyStateView({
+  theme,
+  locale,
+  envelope,
+  retryLabel,
+  onRetry,
+  nextActionLabel,
+  onNextAction,
+}: {
+  theme: CanvasTheme;
+  locale: string;
+  envelope: EmptyStateEnvelope;
+  retryLabel: string;
+  onRetry?: () => void;
+  nextActionLabel?: string;
+  onNextAction?: () => void;
+}) {
+  const visuals = EMPTY_REASON_VISUALS[envelope.reason];
+  const text = emptyReasonCopy(locale, envelope.reason);
+  const showRetry = envelope.reason === "fetch_failed" && onRetry;
+  const nextAction = envelope.nextAction;
+  return (
+    <div style={{ padding: 18 }}>
+      <CanvasBanner
+        theme={theme}
+        tone={visuals.tone === "neutral" ? "info" : visuals.tone}
+        icon={visuals.icon as never}
+        title={
+          <span data-empty-reason={envelope.reason}>
+            {text.title}
+            <span
+              style={{
+                marginLeft: 8,
+                fontSize: 10.5,
+                fontWeight: 600,
+                color: theme.textMuted,
+                fontFamily: theme.monoFamily,
+              }}
+            >
+              {envelope.reason}
+            </span>
+          </span>
+        }
+        body={text.body}
+        actions={
+          showRetry ? (
+            <CanvasBtn
+              theme={theme}
+              variant="secondary"
+              size="xs"
+              icon="arrow"
+              onClick={onRetry}
+            >
+              {retryLabel}
+            </CanvasBtn>
+          ) : nextAction && nextAction.enabled && onNextAction ? (
+            <CanvasBtn
+              theme={theme}
+              variant="primary"
+              size="xs"
+              icon="plus"
+              onClick={onNextAction}
+            >
+              {nextActionLabel ?? nextAction.action}
+            </CanvasBtn>
+          ) : undefined
+        }
+      />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// availableActions — CTAs driven by ResourceActionDescriptor per packet §3.5.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Pull backend `availableActions` off a record if present (forward-compatible
+ * with UI-BE-006); otherwise return null so callers apply derived defaults. */
+function backendActions(record: unknown): ResourceActionDescriptor[] | null {
+  const candidate = (record as { availableActions?: unknown })
+    ?.availableActions;
+  return Array.isArray(candidate)
+    ? (candidate as ResourceActionDescriptor[])
+    : null;
+}
+
+/**
+ * Renders one CTA from a {@link ResourceActionDescriptor}. Visibility,
+ * enabled-state, and the disabled tooltip all come from the descriptor — not
+ * hard-coded role/status logic. High-risk actions require an explicit confirm;
+ * `requiresReason` is enforced by the per-row reason inputs the handlers read.
+ */
+function ActionButton({
+  theme,
+  descriptor,
+  label,
+  icon,
+  variant,
+  busy,
+  confirmText,
+  onRun,
+}: {
+  theme: CanvasTheme;
+  descriptor: ResourceActionDescriptor;
+  label: string;
+  icon: string;
+  variant?: "primary" | "secondary";
+  busy?: boolean;
+  confirmText?: string;
+  onRun: () => void;
+}) {
+  const disabled = !descriptor.enabled || busy;
+  const handleClick = () => {
+    if (descriptor.riskLevel === "high" && confirmText) {
+      if (typeof window !== "undefined" && !window.confirm(confirmText)) {
+        return;
+      }
+    }
+    onRun();
+  };
+  const button = (
+    <CanvasBtn
+      theme={theme}
+      variant={
+        variant ?? (descriptor.riskLevel === "high" ? "primary" : "secondary")
+      }
+      danger={descriptor.riskLevel === "high"}
+      icon={icon as never}
+      disabled={disabled}
+      onClick={handleClick}
+    >
+      {label}
+    </CanvasBtn>
+  );
+  if (!descriptor.enabled && descriptor.disabledReasonCode) {
+    return (
+      <span title={descriptor.disabledReasonCode} style={{ display: "block" }}>
+        {button}
+      </span>
+    );
+  }
+  return button;
+}
+
+/**
+ * Reconciliation-issue CTAs per packet §5.11. Backend `availableActions`
+ * win when present; otherwise derive from issue state. Resolve escalates to
+ * high-risk (requires reason) when the issue has linked financial exposure;
+ * reopen is always high-risk + requires reason.
+ */
+function resolveIssueActions(
+  issue: ReconciliationIssueRecord,
+): ResourceActionDescriptor[] {
+  const backend = backendActions(issue);
+  if (backend) return backend;
+  if (issue.status === "resolved") {
+    return [
+      {
+        action: ISSUE_ACTION_REOPEN,
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      },
+    ];
+  }
+  const financialImpact = Boolean(
+    issue.linkedInvoiceId || issue.linkedReimbursementBatchId,
+  );
+  return [
+    { action: ISSUE_ACTION_ASSIGN, enabled: true, riskLevel: "medium" },
+    { action: ISSUE_ACTION_COMMENT, enabled: true, riskLevel: "medium" },
+    {
+      action: ISSUE_ACTION_RESOLVE,
+      enabled: true,
+      requiresReason: financialImpact,
+      riskLevel: financialImpact ? "high" : "medium",
+    },
+  ];
+}
+
+/**
+ * Reimbursement-batch CTAs surfaced on /payments. Risk levels follow packet
+ * §3.4: approve = medium, mark-paid = high (requires reason). The full
+ * approval→export→paid→reconciled queue lives at {@link REIMBURSEMENTS_ROUTE}.
+ */
+function resolveBatchActions(
+  batch: ReimbursementBatchRecord,
+): ResourceActionDescriptor[] {
+  const backend = backendActions(batch);
+  if (backend) return backend;
+  const actions: ResourceActionDescriptor[] = [];
+  if (!batch.approvedAt) {
+    actions.push({
+      action: BATCH_ACTION_APPROVE,
+      enabled: true,
+      riskLevel: "medium",
+    });
+  }
+  if (batch.status !== "paid") {
+    actions.push({
+      action: BATCH_ACTION_MARK_PAID,
+      enabled: true,
+      requiresReason: true,
+      riskLevel: "high",
+    });
+  }
+  return actions;
 }
 
 export default function PaymentsPage() {
@@ -421,6 +750,13 @@ export default function PaymentsPage() {
   >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Refresh-tier (packet §3.2 T4): track the last successful snapshot time
+  // and a low-frequency tick so the stale affordance recomputes on its own.
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  // Inbound cross-app deep link (packet §3.10): ops-console /revenue mismatch
+  // drawer links here with ?issueId=… so we can focus the matching row.
+  const [focusIssueId, setFocusIssueId] = useState<string | null>(null);
   const [invoiceFilter, setInvoiceFilter] = useState<
     "all" | "paid" | "draft" | "issued"
   >("all");
@@ -504,6 +840,7 @@ export default function PaymentsPage() {
       setReimbursements(reimbursementRecords ?? []);
       setReconciliationIssues(issueRecords ?? []);
       setSettlementMatrix(settlementMatrixRecords ?? []);
+      setLastRefreshedAt(Date.now());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -545,6 +882,39 @@ export default function PaymentsPage() {
   useEffect(() => {
     void loadFinance();
   }, [loadFinance]);
+
+  // T4 tiered polling (packet §3.2). Cadence comes from the shared RefreshTier
+  // enum; polling pauses while the tab is hidden to avoid wasted fetches.
+  useEffect(() => {
+    if (PAGE_REFRESH_CADENCE_MS == null) {
+      return;
+    }
+    const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) {
+        return;
+      }
+      void loadFinance();
+    }, PAGE_REFRESH_CADENCE_MS);
+    return () => clearInterval(timer);
+  }, [loadFinance]);
+
+  // Low-frequency clock so the "stale" affordance updates without a refetch.
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 5_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Resolve inbound cross-app deep link target once on mount.
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const target = params.get("issueId");
+    if (target) {
+      setFocusIssueId(target);
+    }
+  }, []);
 
   async function handleGenerateInvoice(event: React.FormEvent) {
     event.preventDefault();
@@ -831,15 +1201,19 @@ export default function PaymentsPage() {
   const recentIssues = reconciliationIssues.filter((issue) =>
     withinDays(issue.updatedAt || issue.createdAt, 30),
   );
-  const issueWindow = recentIssues.length > 0 ? recentIssues : reconciliationIssues;
+  const issueWindow =
+    recentIssues.length > 0 ? recentIssues : reconciliationIssues;
   const reopenedWindowCount = issueWindow.filter(
     (issue) => issue.reopenCount > 0 || issue.status === "reopened",
   ).length;
   const reopenRate =
-    issueWindow.length > 0 ? (reopenedWindowCount / issueWindow.length) * 100 : 0;
+    issueWindow.length > 0
+      ? (reopenedWindowCount / issueWindow.length) * 100
+      : 0;
   const reopenRateWarning = reopenRate >= REOPEN_WARN_THRESHOLD;
   const resolvedWindow = issueWindow.filter((issue) => issue.resolvedAt);
-  const handlingWindow = resolvedWindow.length > 0 ? resolvedWindow : openIssues;
+  const handlingWindow =
+    resolvedWindow.length > 0 ? resolvedWindow : openIssues;
   const averageHandlingHours = average(
     handlingWindow.map((issue) =>
       hoursBetween(issue.createdAt, issue.resolvedAt ?? issue.updatedAt),
@@ -867,7 +1241,9 @@ export default function PaymentsPage() {
     (issue) => issue.channelKey === "phone_dispatch",
   ).length;
 
-  const invoicesById = new Map(invoices.map((invoice) => [invoice.invoiceId, invoice]));
+  const invoicesById = new Map(
+    invoices.map((invoice) => [invoice.invoiceId, invoice]),
+  );
   const reimbursementsById = new Map(
     reimbursements.map((batch) => [batch.batchId, batch]),
   );
@@ -1004,11 +1380,14 @@ export default function PaymentsPage() {
           queueProfileTitle: "Queue 總覽",
           queueProfileSubtitle: "目前治理切面",
           releaseControlsTitle: "產出控制",
-          releaseControlsSubtitle: "不離開 payments route 直接產 invoice 與 statements。",
+          releaseControlsSubtitle:
+            "不離開 payments route 直接產 invoice 與 statements。",
           issueActionsTitle: "Reconciliation workflow actions",
-          issueActionsSubtitle: "指派、補 evidence、結案與重開都維持在同一個 control plane。",
+          issueActionsSubtitle:
+            "指派、補 evidence、結案與重開都維持在同一個 control plane。",
           createIssueTitle: "開立 reconciliation issue",
-          createIssueSubtitle: "一次補齊 actor、context 與第一筆 evidence note。",
+          createIssueSubtitle:
+            "一次補齊 actor、context 與第一筆 evidence note。",
           outstandingLabel: "當期 outstanding",
           exposureLabel: "差額累計",
           handlingLabel: "平均處理時間",
@@ -1025,6 +1404,145 @@ export default function PaymentsPage() {
           actorLabel: "財務操作人 ID",
           loading: t("payments.loading"),
         };
+
+  const ux =
+    locale === "en"
+      ? {
+          refresh: "Refresh",
+          refreshing: "Refreshing…",
+          live: "Live",
+          stale: "Stale",
+          lastUpdated: (when: string) => `Updated ${when}`,
+          neverLoaded: "Not loaded yet",
+          autoTier: `auto · ${
+            PAGE_REFRESH_CADENCE_MS ? PAGE_REFRESH_CADENCE_MS / 1000 : 0
+          }s`,
+          retry: "Retry",
+          readOnly: "Read-only",
+          reimbursementsLink: "Reimbursement batch queue",
+          reimbursementsLinkSub: "Approve → export → paid → reconciled",
+          deepLinkTitle: "Opened from a cross-app link",
+          deepLinkBody: (id: string) =>
+            `Focused reconciliation issue ${id} (linked from ops-console).`,
+          confirmReopen:
+            "Reopen this resolved issue? This is a high-risk action and requires a reason.",
+          confirmResolveHigh:
+            "Resolve an issue with linked financial exposure? This is high-risk and requires a resolution summary.",
+          confirmMarkPaid:
+            "Mark this batch as paid? Confirm external remittance first — this is a high-risk, irreversible state change.",
+        }
+      : {
+          refresh: "重新整理",
+          refreshing: "更新中…",
+          live: "即時",
+          stale: "已過期",
+          lastUpdated: (when: string) => `更新於 ${when}`,
+          neverLoaded: "尚未載入",
+          autoTier: `自動 · ${
+            PAGE_REFRESH_CADENCE_MS ? PAGE_REFRESH_CADENCE_MS / 1000 : 0
+          }s`,
+          retry: "重試",
+          readOnly: "唯讀",
+          reimbursementsLink: "代墊批次佇列",
+          reimbursementsLinkSub: "核准 → 匯出 → 付款 → 對帳",
+          deepLinkTitle: "由跨應用連結開啟",
+          deepLinkBody: (id: string) =>
+            `已聚焦對帳 issue ${id}（來自 ops-console 連結）。`,
+          confirmReopen: "確定重開此已結案 issue？此為高風險動作且需填寫原因。",
+          confirmResolveHigh:
+            "此 issue 有關聯金額，確定結案？此為高風險動作且需填寫結案摘要。",
+          confirmMarkPaid:
+            "確定將此批次標記為已付款？請先確認外部匯款；此為高風險且不可逆的狀態變更。",
+        };
+
+  // Derived refresh envelope (packet §3.2 / Q-X01). Real UiRefreshMetadata is
+  // preferred when the client begins returning it (UI-CL-001); until then the
+  // page derives freshness from the last successful snapshot.
+  const refreshMeta: UiRefreshMetadata = useMemo(
+    () => ({
+      generatedAt: lastRefreshedAt
+        ? new Date(lastRefreshedAt).toISOString()
+        : new Date().toISOString(),
+      staleAfterMs: PAGE_REFRESH_CADENCE_MS ?? 0,
+      dataFreshness: error ? "degraded" : "fresh",
+      source: "live",
+    }),
+    [lastRefreshedAt, error],
+  );
+  const staleAgeMs =
+    lastRefreshedAt != null ? Math.max(0, nowTick - lastRefreshedAt) : null;
+  const isStale =
+    staleAgeMs != null &&
+    PAGE_REFRESH_CADENCE_MS != null &&
+    staleAgeMs > PAGE_REFRESH_CADENCE_MS * 1.5;
+
+  const issueActionMeta: Record<string, { label: string; icon: string }> = {
+    [ISSUE_ACTION_ASSIGN]: {
+      label: t("payments.reconciliation.assign"),
+      icon: "copy",
+    },
+    [ISSUE_ACTION_COMMENT]: {
+      label: t("payments.reconciliation.addComment"),
+      icon: "plus",
+    },
+    [ISSUE_ACTION_RESOLVE]: {
+      label: t("payments.reconciliation.resolve"),
+      icon: "check",
+    },
+    [ISSUE_ACTION_REOPEN]: {
+      label: t("payments.reconciliation.reopen"),
+      icon: "arrow",
+    },
+  };
+  const runIssueAction = (action: string, issue: ReconciliationIssueRecord) => {
+    switch (action) {
+      case ISSUE_ACTION_ASSIGN:
+        return void handleAssignIssue(issue);
+      case ISSUE_ACTION_COMMENT:
+        return void handleCommentIssue(issue);
+      case ISSUE_ACTION_RESOLVE:
+        return void handleResolveIssue(issue);
+      case ISSUE_ACTION_REOPEN:
+        return void handleReopenIssue(issue);
+      default:
+        return undefined;
+    }
+  };
+  const issueConfirmText = (action: string) =>
+    action === ISSUE_ACTION_REOPEN
+      ? ux.confirmReopen
+      : action === ISSUE_ACTION_RESOLVE
+        ? ux.confirmResolveHigh
+        : undefined;
+
+  const batchActionMeta: Record<string, { label: string; icon: string }> = {
+    [BATCH_ACTION_APPROVE]: { label: t("payments.approve"), icon: "check" },
+    [BATCH_ACTION_MARK_PAID]: {
+      label: t("payments.markPaid"),
+      icon: "billing",
+    },
+  };
+  const runBatchAction = (action: string, batch: ReimbursementBatchRecord) => {
+    switch (action) {
+      case BATCH_ACTION_APPROVE:
+        return void handleApproveBatch(batch);
+      case BATCH_ACTION_MARK_PAID:
+        return void handleMarkPaid(batch);
+      default:
+        return undefined;
+    }
+  };
+  const batchConfirmText = (action: string) =>
+    action === BATCH_ACTION_MARK_PAID ? ux.confirmMarkPaid : undefined;
+
+  // Per-section empty-state envelopes (packet §3.6). Reasons are derived from
+  // real signals; a backend `emptyState` envelope would take precedence once
+  // the client surfaces it.
+  const deriveEmptyState = (
+    reason: EmptyReason,
+    messageCode: string,
+    nextAction?: ResourceActionDescriptor,
+  ): EmptyStateEnvelope => ({ reason, messageCode, nextAction });
 
   const tabs = [
     t("payments.matrix.title"),
@@ -1043,7 +1561,12 @@ export default function PaymentsPage() {
       icon: "health",
     },
     { divider: navLabels.tenantGroup },
-    { key: "tenants", href: "/tenants", label: navLabels.tenants, icon: "tenants" },
+    {
+      key: "tenants",
+      href: "/tenants",
+      label: navLabels.tenants,
+      icon: "tenants",
+    },
     {
       key: "partners",
       href: "/partners",
@@ -1071,7 +1594,10 @@ export default function PaymentsPage() {
       href: "/payments",
       label: navLabels.payments,
       icon: "payments",
-      badge: openReconciliationCount > 0 ? String(openReconciliationCount) : undefined,
+      badge:
+        openReconciliationCount > 0
+          ? String(openReconciliationCount)
+          : undefined,
       badgeTone: openReconciliationCount > 0 ? "danger" : "neutral",
       matchPaths: ["/payments"],
     },
@@ -1231,9 +1757,7 @@ export default function PaymentsPage() {
         issue.status === "resolved" ? (
           <div style={cellStackStyle()}>
             <span>
-              {issue.resolutionSummary ??
-                issue.comments.at(-1)?.message ??
-                "—"}
+              {issue.resolutionSummary ?? issue.comments.at(-1)?.message ?? "—"}
             </span>
             <span style={{ color: theme.textMuted, fontSize: 11 }}>
               {t("payments.reconciliation.commentCount", {
@@ -1310,7 +1834,9 @@ export default function PaymentsPage() {
               }
               style={nativeControlStyle(theme)}
             >
-              <option value="">{t("payments.reconciliation.resolveCode")}</option>
+              <option value="">
+                {t("payments.reconciliation.resolveCode")}
+              </option>
               {RECONCILIATION_RESOLUTION_OPTIONS.map((code) => (
                 <option key={code} value={code}>
                   {formatPlatformCodeLabel(locale, code)}
@@ -1345,51 +1871,39 @@ export default function PaymentsPage() {
     {
       h: "Actions",
       w: 206,
-      r: (issue) => (
-        <div style={{ display: "grid", gap: 8, minWidth: 180 }}>
-          {issue.status !== "resolved" ? (
-            <>
-              <CanvasBtn
-                theme={theme}
-                variant="secondary"
-                icon="copy"
-                disabled={issueActionId === issue.issueId}
-                onClick={() => void handleAssignIssue(issue)}
-              >
-                {t("payments.reconciliation.assign")}
-              </CanvasBtn>
-              <CanvasBtn
-                theme={theme}
-                variant="secondary"
-                icon="plus"
-                disabled={issueActionId === issue.issueId}
-                onClick={() => void handleCommentIssue(issue)}
-              >
-                {t("payments.reconciliation.addComment")}
-              </CanvasBtn>
-              <CanvasBtn
-                theme={theme}
-                variant="primary"
-                icon="check"
-                disabled={issueActionId === issue.issueId}
-                onClick={() => void handleResolveIssue(issue)}
-              >
-                {t("payments.reconciliation.resolve")}
-              </CanvasBtn>
-            </>
-          ) : (
-            <CanvasBtn
-              theme={theme}
-              variant="secondary"
-              icon="arrow"
-              disabled={issueActionId === issue.issueId}
-              onClick={() => void handleReopenIssue(issue)}
-            >
-              {t("payments.reconciliation.reopen")}
-            </CanvasBtn>
-          )}
-        </div>
-      ),
+      r: (issue) => {
+        const actions = resolveIssueActions(issue);
+        const busy = issueActionId === issue.issueId;
+        if (actions.length === 0) {
+          return (
+            <CanvasPill theme={theme} tone="neutral">
+              {ux.readOnly}
+            </CanvasPill>
+          );
+        }
+        return (
+          <div style={{ display: "grid", gap: 8, minWidth: 180 }}>
+            {actions.map((descriptor) => {
+              const meta = issueActionMeta[descriptor.action] ?? {
+                label: descriptor.action,
+                icon: "more",
+              };
+              return (
+                <ActionButton
+                  key={descriptor.action}
+                  theme={theme}
+                  descriptor={descriptor}
+                  label={meta.label}
+                  icon={meta.icon}
+                  busy={busy}
+                  confirmText={issueConfirmText(descriptor.action)}
+                  onRun={() => runIssueAction(descriptor.action, issue)}
+                />
+              );
+            })}
+          </div>
+        );
+      },
     },
   ];
 
@@ -1421,7 +1935,9 @@ export default function PaymentsPage() {
       w: 216,
       r: (row) => (
         <div style={cellStackStyle()}>
-          <span>{describeMatrixField("invoiceOwner", row, row.invoiceOwner)}</span>
+          <span>
+            {describeMatrixField("invoiceOwner", row, row.invoiceOwner)}
+          </span>
           <span style={{ color: theme.textMuted, fontSize: 11 }}>
             {describeMatrixField("invoice", row, row.invoicePath)}
           </span>
@@ -1436,8 +1952,7 @@ export default function PaymentsPage() {
     {
       h: t("payments.matrix.col.payout"),
       w: 172,
-      r: (row) =>
-        describeMatrixField("payout", row, row.driverPayoutAuthority),
+      r: (row) => describeMatrixField("payout", row, row.driverPayoutAuthority),
     },
     {
       h: t("payments.matrix.col.discount"),
@@ -1463,7 +1978,11 @@ export default function PaymentsPage() {
       h: t("payments.matrix.col.ledger"),
       w: 112,
       r: (row) => (
-        <CanvasPill theme={theme} tone={ledgerModeTone(row.localLedgerMode)} dot>
+        <CanvasPill
+          theme={theme}
+          tone={ledgerModeTone(row.localLedgerMode)}
+          dot
+        >
           {describeLedgerMode(row.localLedgerMode)}
         </CanvasPill>
       ),
@@ -1525,7 +2044,8 @@ export default function PaymentsPage() {
       w: 200,
       r: (invoice) => (
         <div style={{ ...cellStackStyle(), maxWidth: 200 }}>
-          {formatDateTime(invoice.periodStart)} - {formatDateTime(invoice.periodEnd)}
+          {formatDateTime(invoice.periodStart)} -{" "}
+          {formatDateTime(invoice.periodEnd)}
         </div>
       ),
     },
@@ -1538,7 +2058,11 @@ export default function PaymentsPage() {
             href={invoice.artifactUrl}
             target="_blank"
             rel="noreferrer"
-            style={{ color: theme.accent, textDecoration: "none", fontWeight: 600 }}
+            style={{
+              color: theme.accent,
+              textDecoration: "none",
+              fontWeight: 600,
+            }}
           >
             {t("payments.downloadPdf")}
           </a>
@@ -1690,7 +2214,9 @@ export default function PaymentsPage() {
       w: 220,
       r: (batch) => (
         <input
-          value={remittanceProofs[batch.batchId] ?? batch.remittanceProofId ?? ""}
+          value={
+            remittanceProofs[batch.batchId] ?? batch.remittanceProofId ?? ""
+          }
           onChange={(event) =>
             setRemittanceProofs((current) => ({
               ...current,
@@ -1715,34 +2241,43 @@ export default function PaymentsPage() {
     {
       h: t("common.actions"),
       w: 160,
-      r: (batch) => (
-        <div style={{ display: "grid", gap: 8, minWidth: 140 }}>
-          {!batch.approvedAt ? (
-            <CanvasBtn
-              theme={theme}
-              variant="secondary"
-              icon="check"
-              disabled={batchActionId === batch.batchId}
-              onClick={() => void handleApproveBatch(batch)}
-            >
-              {t("payments.approve")}
-            </CanvasBtn>
-          ) : null}
-          {batch.status !== "paid" ? (
-            <CanvasBtn
-              theme={theme}
-              variant="primary"
-              icon="billing"
-              disabled={batchActionId === batch.batchId}
-              onClick={() => void handleMarkPaid(batch)}
-            >
-              {batchActionId === batch.batchId
-                ? t("payments.saving")
-                : t("payments.markPaid")}
-            </CanvasBtn>
-          ) : null}
-        </div>
-      ),
+      r: (batch) => {
+        const actions = resolveBatchActions(batch);
+        const busy = batchActionId === batch.batchId;
+        if (actions.length === 0) {
+          return (
+            <CanvasPill theme={theme} tone="neutral">
+              {ux.readOnly}
+            </CanvasPill>
+          );
+        }
+        return (
+          <div style={{ display: "grid", gap: 8, minWidth: 140 }}>
+            {actions.map((descriptor) => {
+              const meta = batchActionMeta[descriptor.action] ?? {
+                label: descriptor.action,
+                icon: "more",
+              };
+              return (
+                <ActionButton
+                  key={descriptor.action}
+                  theme={theme}
+                  descriptor={descriptor}
+                  label={
+                    busy && descriptor.action === BATCH_ACTION_MARK_PAID
+                      ? t("payments.saving")
+                      : meta.label
+                  }
+                  icon={meta.icon}
+                  busy={busy}
+                  confirmText={batchConfirmText(descriptor.action)}
+                  onRun={() => runBatchAction(descriptor.action, batch)}
+                />
+              );
+            })}
+          </div>
+        );
+      },
     },
   ];
 
@@ -1769,7 +2304,39 @@ export default function PaymentsPage() {
           activeTab={tabs[4]}
           actions={
             <>
-              <CanvasBtn theme={theme} icon="reports" disabled>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginRight: 4,
+                }}
+                title={`tier ${PAGE_REFRESH_TIER} · ${refreshMeta.source} · ${refreshMeta.dataFreshness}`}
+              >
+                <CanvasPill
+                  theme={theme}
+                  tone={isStale ? "warn" : "success"}
+                  dot
+                >
+                  {isStale ? ux.stale : ux.live}
+                </CanvasPill>
+                <span style={{ fontSize: 11, color: theme.textMuted }}>
+                  {lastRefreshedAt
+                    ? ux.lastUpdated(formatDateTime(refreshMeta.generatedAt))
+                    : ux.neverLoaded}
+                  {" · "}
+                  {ux.autoTier}
+                </span>
+              </div>
+              <CanvasBtn
+                theme={theme}
+                icon="arrow"
+                disabled={loading}
+                onClick={() => void loadFinance()}
+              >
+                {loading ? ux.refreshing : ux.refresh}
+              </CanvasBtn>
+              <CanvasBtn theme={theme} icon="ext" disabled>
                 {copy.export}
               </CanvasBtn>
               <CanvasBtn
@@ -1790,7 +2357,11 @@ export default function PaymentsPage() {
 
         <div style={pageBodyStyle(theme)}>
           {loading ? (
-            <CanvasCard theme={theme} title={copy.pageTitle} subtitle={copy.loading}>
+            <CanvasCard
+              theme={theme}
+              title={copy.pageTitle}
+              subtitle={copy.loading}
+            >
               <div style={{ color: theme.textMuted, fontSize: 12.5 }}>
                 {copy.loading}
               </div>
@@ -1803,6 +2374,27 @@ export default function PaymentsPage() {
                   tone="danger"
                   title={`${getPlatformLabel(locale, "error")}: ${error}`}
                   body={copy.queueSubtitle}
+                  actions={
+                    <CanvasBtn
+                      theme={theme}
+                      variant="secondary"
+                      size="xs"
+                      icon="arrow"
+                      onClick={() => void loadFinance()}
+                    >
+                      {ux.retry}
+                    </CanvasBtn>
+                  }
+                />
+              ) : null}
+
+              {focusIssueId ? (
+                <CanvasBanner
+                  theme={theme}
+                  tone="info"
+                  icon="ext"
+                  title={ux.deepLinkTitle}
+                  body={ux.deepLinkBody(focusIssueId)}
                 />
               ) : null}
 
@@ -1871,7 +2463,11 @@ export default function PaymentsPage() {
                   theme={theme}
                   label={copy.reopenRateLabel}
                   value={`${reopenRate.toFixed(1)}%`}
-                  delta={reopenRateWarning ? copy.reopenDeltaWarn : copy.reopenDeltaOk}
+                  delta={
+                    reopenRateWarning
+                      ? copy.reopenDeltaWarn
+                      : copy.reopenDeltaOk
+                  }
                   deltaTone={reopenRateWarning ? "down" : "up"}
                   sub={`${copy.queueWindow} · ${issueWindow.length}`}
                 />
@@ -1903,9 +2499,16 @@ export default function PaymentsPage() {
                       rows={sortedIssues as IssueTableRow[]}
                     />
                   ) : (
-                    <div style={emptyStateStyle(theme)}>
-                      {t("payments.reconciliation.empty")}
-                    </div>
+                    <EmptyStateView
+                      theme={theme}
+                      locale={locale}
+                      envelope={deriveEmptyState(
+                        error ? "fetch_failed" : "no_data",
+                        "payments.reconciliation.empty",
+                      )}
+                      retryLabel={ux.retry}
+                      onRetry={() => void loadFinance()}
+                    />
                   )}
                 </CanvasCard>
 
@@ -1960,7 +2563,9 @@ export default function PaymentsPage() {
                     <CanvasField theme={theme} label={copy.actorLabel}>
                       <input
                         value={financeActorId}
-                        onChange={(event) => setFinanceActorId(event.target.value)}
+                        onChange={(event) =>
+                          setFinanceActorId(event.target.value)
+                        }
                         style={nativeControlStyle(theme, { mono: true })}
                       />
                     </CanvasField>
@@ -2007,11 +2612,13 @@ export default function PaymentsPage() {
                             }
                             style={nativeControlStyle(theme)}
                           >
-                            {RECONCILIATION_ISSUE_TYPE_OPTIONS.map((issueType) => (
-                              <option key={issueType} value={issueType}>
-                                {formatPlatformCodeLabel(locale, issueType)}
-                              </option>
-                            ))}
+                            {RECONCILIATION_ISSUE_TYPE_OPTIONS.map(
+                              (issueType) => (
+                                <option key={issueType} value={issueType}>
+                                  {formatPlatformCodeLabel(locale, issueType)}
+                                </option>
+                              ),
+                            )}
                           </select>
                         </CanvasField>
                         <CanvasField
@@ -2029,11 +2636,13 @@ export default function PaymentsPage() {
                             }
                             style={nativeControlStyle(theme)}
                           >
-                            {RECONCILIATION_CHANNEL_OPTIONS.map((channelKey) => (
-                              <option key={channelKey} value={channelKey}>
-                                {describeMatrixChannel(channelKey)}
-                              </option>
-                            ))}
+                            {RECONCILIATION_CHANNEL_OPTIONS.map(
+                              (channelKey) => (
+                                <option key={channelKey} value={channelKey}>
+                                  {describeMatrixChannel(channelKey)}
+                                </option>
+                              ),
+                            )}
                           </select>
                         </CanvasField>
                         <CanvasField
@@ -2210,7 +2819,9 @@ export default function PaymentsPage() {
                           <CanvasField
                             theme={theme}
                             label={t("payments.reconciliation.artifactIds")}
-                            hint={t("payments.reconciliation.artifactPlaceholder")}
+                            hint={t(
+                              "payments.reconciliation.artifactPlaceholder",
+                            )}
                           >
                             <input
                               value={newIssue.artifactIds}
@@ -2231,7 +2842,8 @@ export default function PaymentsPage() {
                         disabled={issueDraftPending || !newIssue.summary.trim()}
                         style={nativeSubmitStyle(theme, {
                           primary: true,
-                          disabled: issueDraftPending || !newIssue.summary.trim(),
+                          disabled:
+                            issueDraftPending || !newIssue.summary.trim(),
                         })}
                       >
                         {issueDraftPending
@@ -2254,7 +2866,9 @@ export default function PaymentsPage() {
                     >
                       <input
                         value={invoiceTenantId}
-                        onChange={(event) => setInvoiceTenantId(event.target.value)}
+                        onChange={(event) =>
+                          setInvoiceTenantId(event.target.value)
+                        }
                         style={nativeControlStyle(theme, { mono: true })}
                       />
                     </CanvasField>
@@ -2278,7 +2892,9 @@ export default function PaymentsPage() {
                       <input
                         type="date"
                         value={invoicePeriodEnd}
-                        onChange={(event) => setInvoicePeriodEnd(event.target.value)}
+                        onChange={(event) =>
+                          setInvoicePeriodEnd(event.target.value)
+                        }
                         style={nativeControlStyle(theme)}
                       />
                     </CanvasField>
@@ -2347,9 +2963,16 @@ export default function PaymentsPage() {
                     rows={sortedIssues as IssueTableRow[]}
                   />
                 ) : (
-                  <div style={emptyStateStyle(theme)}>
-                    {t("payments.reconciliation.empty")}
-                  </div>
+                  <EmptyStateView
+                    theme={theme}
+                    locale={locale}
+                    envelope={deriveEmptyState(
+                      error ? "fetch_failed" : "no_data",
+                      "payments.reconciliation.empty",
+                    )}
+                    retryLabel={ux.retry}
+                    onRetry={() => void loadFinance()}
+                  />
                 )}
               </CanvasCard>
 
@@ -2366,9 +2989,16 @@ export default function PaymentsPage() {
                     rows={sortedMatrix as MatrixTableRow[]}
                   />
                 ) : (
-                  <div style={emptyStateStyle(theme)}>
-                    {t("payments.matrix.empty")}
-                  </div>
+                  <EmptyStateView
+                    theme={theme}
+                    locale={locale}
+                    envelope={deriveEmptyState(
+                      error ? "fetch_failed" : "not_provisioned",
+                      "payments.matrix.empty",
+                    )}
+                    retryLabel={ux.retry}
+                    onRetry={() => void loadFinance()}
+                  />
                 )}
               </CanvasCard>
 
@@ -2379,17 +3009,21 @@ export default function PaymentsPage() {
                 padding={0}
                 actions={
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {(["all", "paid", "issued", "draft"] as const).map((value) => (
-                      <CanvasBtn
-                        key={value}
-                        theme={theme}
-                        size="xs"
-                        variant={invoiceFilter === value ? "primary" : "secondary"}
-                        onClick={() => setInvoiceFilter(value)}
-                      >
-                        {formatPlatformCodeLabel(locale, value)}
-                      </CanvasBtn>
-                    ))}
+                    {(["all", "paid", "issued", "draft"] as const).map(
+                      (value) => (
+                        <CanvasBtn
+                          key={value}
+                          theme={theme}
+                          size="xs"
+                          variant={
+                            invoiceFilter === value ? "primary" : "secondary"
+                          }
+                          onClick={() => setInvoiceFilter(value)}
+                        >
+                          {formatPlatformCodeLabel(locale, value)}
+                        </CanvasBtn>
+                      ),
+                    )}
                   </div>
                 }
               >
@@ -2400,7 +3034,29 @@ export default function PaymentsPage() {
                     rows={filteredInvoices as InvoiceTableRow[]}
                   />
                 ) : (
-                  <div style={emptyStateStyle(theme)}>{t("payments.noInvoices")}</div>
+                  <EmptyStateView
+                    theme={theme}
+                    locale={locale}
+                    envelope={deriveEmptyState(
+                      error
+                        ? "fetch_failed"
+                        : invoiceFilter !== "all" && invoices.length > 0
+                          ? "filtered_empty"
+                          : "no_data",
+                      "payments.noInvoices",
+                      invoiceFilter !== "all" && invoices.length > 0
+                        ? {
+                            action: "clear_filter",
+                            enabled: true,
+                            riskLevel: "low",
+                          }
+                        : undefined,
+                    )}
+                    retryLabel={ux.retry}
+                    onRetry={() => void loadFinance()}
+                    nextActionLabel={formatPlatformCodeLabel(locale, "all")}
+                    onNextAction={() => setInvoiceFilter("all")}
+                  />
                 )}
               </CanvasCard>
 
@@ -2417,9 +3073,16 @@ export default function PaymentsPage() {
                     rows={statements as StatementTableRow[]}
                   />
                 ) : (
-                  <div style={emptyStateStyle(theme)}>
-                    {t("payments.noStatements")}
-                  </div>
+                  <EmptyStateView
+                    theme={theme}
+                    locale={locale}
+                    envelope={deriveEmptyState(
+                      error ? "fetch_failed" : "no_data",
+                      "payments.noStatements",
+                    )}
+                    retryLabel={ux.retry}
+                    onRetry={() => void loadFinance()}
+                  />
                 )}
               </CanvasCard>
 
@@ -2428,6 +3091,27 @@ export default function PaymentsPage() {
                 title={t("payments.reimbursementsTitle")}
                 subtitle={`${pendingReimbursements.length} pending · ${paidReimbursementMinor.toLocaleString()} settled`}
                 padding={0}
+                actions={
+                  <a
+                    href={REIMBURSEMENTS_ROUTE}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "4px 8px",
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      color: theme.accent,
+                      border: `1px solid ${theme.border}`,
+                      borderRadius: 7,
+                      textDecoration: "none",
+                    }}
+                    title={ux.reimbursementsLinkSub}
+                  >
+                    <CanvasIcon name="arrow" size={12} />
+                    {ux.reimbursementsLink}
+                  </a>
+                }
               >
                 {reimbursements.length > 0 ? (
                   <CanvasTable
@@ -2436,9 +3120,16 @@ export default function PaymentsPage() {
                     rows={reimbursements as ReimbursementTableRow[]}
                   />
                 ) : (
-                  <div style={emptyStateStyle(theme)}>
-                    {t("payments.noReimbursements")}
-                  </div>
+                  <EmptyStateView
+                    theme={theme}
+                    locale={locale}
+                    envelope={deriveEmptyState(
+                      error ? "fetch_failed" : "no_data",
+                      "payments.noReimbursements",
+                    )}
+                    retryLabel={ux.retry}
+                    onRetry={() => void loadFinance()}
+                  />
                 )}
               </CanvasCard>
 
@@ -2456,18 +3147,27 @@ export default function PaymentsPage() {
                     items={[
                       {
                         k: t("payments.invoiceTotal"),
-                        v: formatMinorMoney(totalInvoiceAmountMinor, exposureCurrency),
+                        v: formatMinorMoney(
+                          totalInvoiceAmountMinor,
+                          exposureCurrency,
+                        ),
                         mono: true,
                       },
                       {
                         k: t("payments.statementNet"),
-                        v: formatMinorMoney(totalStatementNetMinor, exposureCurrency),
+                        v: formatMinorMoney(
+                          totalStatementNetMinor,
+                          exposureCurrency,
+                        ),
                         mono: true,
                       },
                     ]}
                   />
                 </CanvasCard>
-                <CanvasCard theme={theme} title={t("payments.pendingReimbursements")}>
+                <CanvasCard
+                  theme={theme}
+                  title={t("payments.pendingReimbursements")}
+                >
                   <CanvasDL
                     theme={theme}
                     cols={1}
