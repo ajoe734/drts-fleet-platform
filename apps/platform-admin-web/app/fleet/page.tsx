@@ -673,8 +673,8 @@ function getFleetCopy(locale: string) {
           },
         },
         actions: {
-          enableDispatch: "Mark dispatchable",
-          disableDispatch: "Place dispatch hold",
+          restoreCompliance: "Restore compliance",
+          placeComplianceHold: "Place compliance hold",
           activateDriver: "Activate driver",
           suspendDriver: "Suspend driver",
           retireDriver: "Retire driver",
@@ -798,8 +798,8 @@ function getFleetCopy(locale: string) {
           },
         },
         actions: {
-          enableDispatch: "標記可派遣",
-          disableDispatch: "加上派遣 hold",
+          restoreCompliance: "恢復合規",
+          placeComplianceHold: "加上合規 hold",
           activateDriver: "啟用司機",
           suspendDriver: "停用司機",
           retireDriver: "退休司機",
@@ -899,7 +899,7 @@ export default function FleetPage() {
       vehicle.supplyLifecycle.exclusivity.reviewStatus !== "approved";
     return [
       {
-        action: `vehicle.dispatch.enable:${vehicle.vehicleId}`,
+        action: `vehicle.compliance.restore:${vehicle.vehicleId}`,
         enabled: !vehicle.dispatchableFlag && !blockedByExclusivity,
         disabledReasonCode: vehicle.dispatchableFlag
           ? "already_dispatchable"
@@ -909,7 +909,7 @@ export default function FleetPage() {
         riskLevel: "medium",
       },
       {
-        action: `vehicle.dispatch.disable:${vehicle.vehicleId}`,
+        action: `vehicle.compliance.hold:${vehicle.vehicleId}`,
         enabled: vehicle.dispatchableFlag,
         disabledReasonCode: vehicle.dispatchableFlag
           ? undefined
@@ -2153,20 +2153,20 @@ export default function FleetPage() {
       ...vehicle.availableActions.map((descriptor: ResourceActionDescriptor) =>
         presentAction(
           descriptor,
-          descriptor.action.startsWith("vehicle.dispatch.enable")
-            ? copy.actions.enableDispatch
-            : copy.actions.disableDispatch,
-          descriptor.action.startsWith("vehicle.dispatch.enable")
+          descriptor.action.startsWith("vehicle.compliance.restore")
+            ? copy.actions.restoreCompliance
+            : copy.actions.placeComplianceHold,
+          descriptor.action.startsWith("vehicle.compliance.restore")
             ? locale === "en"
-              ? "Dispatch can only be re-enabled after compliance blockers are cleared."
-              : "只有在合規阻塞解除後，才可恢復派遣。"
+              ? "Restoring compliance clears the governance hold once insurance and exclusivity checks are satisfied."
+              : "保險與排他檢查滿足後，恢復合規會解除治理 hold。"
             : locale === "en"
-              ? "This applies a governance hold before ops dispatch can resume."
-              : "這會先套用治理 hold，再由營運端恢復派遣。",
+              ? "This applies a compliance hold so ops cannot resume dispatch until governance follow-up is complete."
+              : "這會加上合規 hold，直到治理追蹤完成前 ops 都不能恢復派遣。",
           async () => {
             await client.updateVehicleCompliance(vehicle.vehicleId, {
               dispatchableFlag: descriptor.action.startsWith(
-                "vehicle.dispatch.enable",
+                "vehicle.compliance.restore",
               ),
             });
           },
@@ -2929,16 +2929,41 @@ export default function FleetPage() {
                           : "無阻塞",
                     },
                     {
+                      k: locale === "en" ? "Insurance status" : "保險狀態",
+                      v: formatPlatformCodeLabel(
+                        locale,
+                        selectedVehicle.insuranceStatus,
+                      ),
+                    },
+                    {
+                      k: locale === "en" ? "Compliance gate" : "合規閘門",
+                      v: selectedVehicle.dispatchableFlag
+                        ? locale === "en"
+                          ? "Open"
+                          : "開啟"
+                        : locale === "en"
+                          ? "Held"
+                          : "保留",
+                    },
+                    {
                       k: locale === "en" ? "Insurance expiry" : "保險到期",
                       v: formatTimestamp(selectedVehicle.insuranceExpiresAt),
                     },
                     {
                       k: locale === "en" ? "Exclusivity review" : "排他審查",
-                      v: formatPlatformCodeLabel(
+                      v: `${formatPlatformCodeLabel(
                         locale,
                         selectedVehicle.supplyLifecycle.exclusivity
                           .reviewStatus,
-                      ),
+                      )} · ${
+                        selectedVehicle.exclusivityApproved
+                          ? locale === "en"
+                            ? "approved for dispatch"
+                            : "可恢復派遣"
+                          : locale === "en"
+                            ? "blocking dispatch"
+                            : "持續阻塞派遣"
+                      }`,
                     },
                   ]}
                 />
@@ -3493,6 +3518,23 @@ export default function FleetPage() {
                             (current: InitiateVehicleOffboardingCommand) => ({
                               ...current,
                               debrandingTicketId: event.target.value,
+                            }),
+                          )
+                        }
+                        style={inlineInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={locale === "en" ? "Notes" : "備註"}
+                    >
+                      <input
+                        value={offboardingForm.notes ?? ""}
+                        onChange={(event) =>
+                          setOffboardingForm(
+                            (current: InitiateVehicleOffboardingCommand) => ({
+                              ...current,
+                              notes: event.target.value,
                             }),
                           )
                         }
