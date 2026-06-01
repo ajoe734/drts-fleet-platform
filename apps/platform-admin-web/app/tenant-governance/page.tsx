@@ -33,10 +33,18 @@ import type { CanvasTableColumn, CanvasTone } from "@drts/ui-web";
 
 const PAGE_SIZE = 12;
 const REFRESH_TIER = "medium_slow" satisfies RefreshTier;
-const T4_REFRESH_MS = 30_000;
 const QUOTA_WARNING_THRESHOLD = 80;
 const QUOTA_DANGER_THRESHOLD = 95;
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+const REFRESH_TIER_MS: Record<RefreshTier, number> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: 0,
+};
 
 type RiskFilter =
   | "all"
@@ -54,6 +62,12 @@ type GovernanceAction = {
   descriptor: ResourceActionDescriptor;
   link: CrossAppResourceLink;
   hint: string;
+};
+type EmptyStateAction = {
+  label: string;
+  href?: string;
+  openMode?: CrossAppResourceLink["openMode"];
+  onClick?: () => void;
 };
 type TenantGovernanceRow = PlatformTenantGovernanceSummaryRow & {
   availableActions?: ResourceActionDescriptor[];
@@ -515,8 +529,11 @@ function resolveTenantActions(
   row: TenantGovernanceRow,
 ): GovernanceAction[] {
   const fallbackActions = buildFallbackTenantActions(locale, row);
-  if (!row.availableActions?.length) {
+  if (typeof row.availableActions === "undefined") {
     return fallbackActions;
+  }
+  if (row.availableActions.length === 0) {
+    return [];
   }
 
   const fallbackByAction = new Map(
@@ -556,7 +573,7 @@ function resolveDrillTargets(
   locale: string,
   row: TenantGovernanceRow,
 ): CrossAppResourceLink[] {
-  if (row.drillTargets?.length) {
+  if (typeof row.drillTargets !== "undefined") {
     return row.drillTargets;
   }
 
@@ -606,11 +623,11 @@ function renderActionControl(
 function EmptyStateCard({
   locale,
   reason,
-  onRefresh,
+  action,
 }: {
   locale: string;
   reason: EmptyPreviewReason;
-  onRefresh: () => void;
+  action: EmptyStateAction;
 }) {
   const copy =
     locale === "en"
@@ -719,9 +736,20 @@ function EmptyStateCard({
         </span>
       </div>
       <div>
-        <CanvasBtn theme={theme} onClick={onRefresh}>
-          {state.cta}
-        </CanvasBtn>
+        {action.href ? (
+          <a
+            href={action.href}
+            target={action.openMode === "new_tab" ? "_blank" : undefined}
+            rel={action.openMode === "new_tab" ? "noreferrer" : undefined}
+            style={actionButtonStyle(false, "primary")}
+          >
+            {action.label || state.cta}
+          </a>
+        ) : (
+          <CanvasBtn theme={theme} onClick={action.onClick}>
+            {action.label || state.cta}
+          </CanvasBtn>
+        )}
       </div>
     </div>
   );
@@ -741,6 +769,7 @@ export default function TenantGovernancePage() {
   const [error, setError] = useState<string | null>(null);
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const refreshIntervalMs = REFRESH_TIER_MS[REFRESH_TIER];
 
   const copy =
     locale === "en"
@@ -749,7 +778,6 @@ export default function TenantGovernancePage() {
           subtitle:
             "quota usage · approval backlog · cost-center health · governance risk — Q-ADM01",
           refresh: "Refresh",
-          refreshTier: "T4 · medium-slow · 30s",
           freshnessReady: "Fresh",
           freshnessStale: "Stale",
           freshnessDegraded: "Degraded",
@@ -826,7 +854,6 @@ export default function TenantGovernancePage() {
           subtitle:
             "quota usage · approval backlog · cost-center health · governance risk — Q-ADM01",
           refresh: "重新整理",
-          refreshTier: "T4 · medium-slow · 30 秒",
           freshnessReady: "Fresh",
           freshnessStale: "Stale",
           freshnessDegraded: "Degraded",
@@ -929,11 +956,14 @@ export default function TenantGovernancePage() {
   }, [loadSummary]);
 
   useEffect(() => {
+    if (refreshIntervalMs <= 0) {
+      return;
+    }
     const intervalId = window.setInterval(() => {
       void loadSummary(true);
-    }, T4_REFRESH_MS);
+    }, refreshIntervalMs);
     return () => window.clearInterval(intervalId);
-  }, [loadSummary]);
+  }, [loadSummary, refreshIntervalMs]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -1260,6 +1290,7 @@ export default function TenantGovernancePage() {
   const generatedAt = refreshMeta?.generatedAt
     ? new Date(refreshMeta.generatedAt)
     : lastLoadedAt;
+  const staleAfterMs = refreshMeta?.staleAfterMs ?? refreshIntervalMs;
   const freshness = useMemo(() => {
     if (refreshMeta?.dataFreshness) {
       return refreshMeta.dataFreshness;
@@ -1267,11 +1298,11 @@ export default function TenantGovernancePage() {
     if (!generatedAt) {
       return "unknown";
     }
-    if (now - generatedAt.getTime() > T4_REFRESH_MS) {
+    if (staleAfterMs > 0 && now - generatedAt.getTime() > staleAfterMs) {
       return "stale";
     }
     return "fresh";
-  }, [generatedAt, now, refreshMeta?.dataFreshness]);
+  }, [generatedAt, now, refreshMeta?.dataFreshness, staleAfterMs]);
 
   const emptyReason: EmptyPreviewReason | null = useMemo(() => {
     if (previewReason) {
@@ -1314,6 +1345,37 @@ export default function TenantGovernancePage() {
         : freshness === "fresh"
           ? copy.freshnessReady
           : copy.freshnessUnknown;
+  const refreshTierLabel =
+    locale === "en"
+      ? `T4 · ${REFRESH_TIER.replace("_", "-")} · ${Math.round(refreshIntervalMs / 1000)}s`
+      : `T4 · ${REFRESH_TIER.replace("_", "-")} · ${Math.round(refreshIntervalMs / 1000)} 秒`;
+  const emptyStateAction = useMemo<EmptyStateAction>(() => {
+    if (emptyReason === "not_provisioned") {
+      return {
+        label: locale === "en" ? "Open tenants" : "前往租戶",
+        href: "/tenants",
+        openMode: "same_tab",
+      };
+    }
+    if (emptyReason === "filtered_empty") {
+      return {
+        label: locale === "en" ? "Clear filter" : "清除篩選",
+        onClick: () => setFilter("all"),
+      };
+    }
+    return {
+      label:
+        emptyReason === "permission_denied" ||
+        emptyReason === "fetch_failed" ||
+        emptyReason === "external_unavailable" ||
+        emptyReason === "no_data"
+          ? copy.refresh
+          : locale === "en"
+            ? "Refresh"
+            : "重新整理",
+      onClick: () => void loadSummary(),
+    };
+  }, [copy.refresh, emptyReason, locale, loadSummary]);
 
   if (loading && !summary) {
     return (
@@ -1339,7 +1401,7 @@ export default function TenantGovernancePage() {
         actions={
           <>
             <CanvasPill theme={theme} tone="accent">
-              {copy.refreshTier}
+              {refreshTierLabel}
             </CanvasPill>
             <CanvasPill theme={theme} tone={freshnessTone} dot>
               {freshnessLabel}
@@ -1539,13 +1601,14 @@ export default function TenantGovernancePage() {
                 <EmptyStateCard
                   locale={locale}
                   reason={emptyReason ?? "no_data"}
-                  onRefresh={() => {
-                    if (filter !== "all" && baseItems.length > 0) {
-                      setFilter("all");
-                      return;
-                    }
-                    void loadSummary();
-                  }}
+                  action={
+                    filter !== "all" && baseItems.length > 0
+                      ? {
+                          label: locale === "en" ? "Clear filter" : "清除篩選",
+                          onClick: () => setFilter("all"),
+                        }
+                      : emptyStateAction
+                  }
                 />
               )}
             </div>
@@ -1631,13 +1694,7 @@ export default function TenantGovernancePage() {
               <EmptyStateCard
                 locale={locale}
                 reason={emptyReason}
-                onRefresh={() => {
-                  if (emptyReason === "filtered_empty") {
-                    setFilter("all");
-                    return;
-                  }
-                  void loadSummary();
-                }}
+                action={emptyStateAction}
               />
             ) : (
               <CanvasTable<TableRow>
