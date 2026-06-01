@@ -62,7 +62,11 @@ type PlatformAdminUsersRuntimeView = {
   };
   health: {
     status: string;
-    degradedServices: string[];
+    degradedServices: Array<{
+      service: string;
+      impact: string;
+      severity: "warning" | "critical";
+    }>;
     lastCheckedAt: string;
   };
   emptyState?: {
@@ -1126,10 +1130,10 @@ export default function UsersPage() {
                 </CanvasPill>
                 <CanvasPill
                   theme={theme}
-                  tone={view?.refresh.dataFreshness === "fresh" ? "success" : "warn"}
+                  tone={view?.refresh?.dataFreshness === "fresh" ? "success" : "warn"}
                   dot
                 >
-                  {copy.freshnessLabel} · {view?.refresh.dataFreshness ?? "—"}
+                  {copy.freshnessLabel} · {view?.refresh?.dataFreshness ?? "—"}
                 </CanvasPill>
                 <CanvasPill theme={theme} tone="neutral">
                   {refreshCadenceLabel}
@@ -1166,11 +1170,11 @@ export default function UsersPage() {
                   cols={2}
                   items={[
                     { label: copy.refreshTierLabel, value: "T4", mono: true },
-                    { label: copy.freshnessLabel, value: view?.refresh.dataFreshness ?? "—", mono: true },
-                    { label: copy.sourceLabel, value: view?.refresh.source ?? "—", mono: true },
+                    { label: copy.freshnessLabel, value: view?.refresh?.dataFreshness ?? "—", mono: true },
+                    { label: copy.sourceLabel, value: view?.refresh?.source ?? "—", mono: true },
                     {
                       label: copy.generatedLabel,
-                      value: view?.refresh.generatedAt
+                      value: view?.refresh?.generatedAt
                         ? formatDateTime(view.refresh.generatedAt)
                         : "—",
                       mono: true,
@@ -1201,35 +1205,35 @@ export default function UsersPage() {
                 cols={1}
                 items={[
                   { label: copy.refreshTierLabel, value: "T4", mono: true },
-                  { label: copy.freshnessLabel, value: view?.refresh.dataFreshness ?? "—", mono: true },
+                  { label: copy.freshnessLabel, value: view?.refresh?.dataFreshness ?? "—", mono: true },
                   { label: locale === "en" ? "Refresh" : "更新節奏", value: refreshCadenceLabel, mono: true },
                   {
                     label: copy.generatedLabel,
-                    value: view?.refresh.generatedAt
+                    value: view?.refresh?.generatedAt
                       ? formatDateTime(view.refresh.generatedAt)
                       : "—",
                     mono: true,
                   },
-                  { label: copy.sourceLabel, value: view?.refresh.source ?? "—", mono: true },
+                  { label: copy.sourceLabel, value: view?.refresh?.source ?? "—", mono: true },
                   {
                     label: copy.healthHealthy,
                     value:
-                      view?.health.status === "healthy"
+                      view?.health?.status === "healthy"
                         ? copy.healthHealthy
                         : copy.healthDegraded,
                   },
                 ]}
               />
 
-              {view?.health.degradedServices.length ? (
+              {view?.health?.degradedServices.length ? (
                 <div style={{ marginTop: 16 }}>
                   <div style={{ marginBottom: 8, color: theme.textMuted, fontSize: 12 }}>
                     {copy.healthDegraded}
                   </div>
                   <div style={linkListStyle}>
                     {view.health.degradedServices.map((service) => (
-                      <CanvasPill key={service} theme={theme} tone="warn">
-                        {service}
+                      <CanvasPill key={service.service} theme={theme} tone="warn">
+                        {service.service}
                       </CanvasPill>
                     ))}
                   </div>

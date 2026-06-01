@@ -129,3 +129,74 @@ describe("PlatformAdminService.publishPlacardVersion", () => {
     );
   });
 });
+
+describe("PlatformAdminService.listPlatformAdminUsers", () => {
+  it("returns the runtime view envelope with refresh metadata, list actions, and per-user deep links", () => {
+    const { service } = createService();
+
+    const view = service.listPlatformAdminUsers();
+    const superAdmin = view.items.find((user) => user.roleCode === "pa_super_admin");
+    const suspendedUser = view.items.find((user) => user.status === "suspended");
+
+    expect(view.availableActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "create_platform_admin_user",
+          enabled: true,
+          riskLevel: "medium",
+        }),
+      ]),
+    );
+    expect(view.refresh.staleAfterMs).toBe(30_000);
+    expect(view.health.status).toBe("healthy");
+    expect(superAdmin?.resourceLinks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "View audit trail",
+          targetApp: "platform-admin",
+        }),
+        expect.objectContaining({
+          label: "Open platform health",
+          route: "/health",
+        }),
+      ]),
+    );
+    expect(suspendedUser?.availableActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "update_role",
+          riskLevel: "medium",
+        }),
+        expect.objectContaining({
+          action: "reactivate_user",
+          enabled: true,
+          requiresReason: true,
+          riskLevel: "high",
+        }),
+      ]),
+    );
+  });
+
+  it("disables mutating the final active super admin", () => {
+    const { service } = createService();
+
+    const superAdmin = service
+      .listPlatformAdminUsers()
+      .items.find((user) => user.roleCode === "pa_super_admin");
+
+    expect(superAdmin?.availableActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "update_role",
+          enabled: false,
+          disabledReasonCode: "role_locked_last_super_admin",
+        }),
+        expect.objectContaining({
+          action: "suspend_user",
+          enabled: false,
+          disabledReasonCode: "role_locked_last_super_admin",
+        }),
+      ]),
+    );
+  });
+});

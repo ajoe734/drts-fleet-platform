@@ -132,7 +132,7 @@ export class PlatformAdminController {
   @Get("users")
   listPlatformAdminUsers(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      { items: this.platformAdminService.listPlatformAdminUsers() },
+      this.platformAdminService.listPlatformAdminUsers(),
       requestId,
     );
   }

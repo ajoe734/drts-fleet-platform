@@ -10,6 +10,8 @@ import type {
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
+  EmptyReason,
+  EmptyStateEnvelope,
   GeneratePlacardVersionCommand,
   PlacardVersionRecord,
   PlatformAdminUserMutationResult,
@@ -26,6 +28,7 @@ import type {
   SetPlatformMaintenanceModeCommand,
   TenantInvoiceRecord,
   UiHealthEnvelope,
+  UiRefreshMetadata,
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
@@ -625,8 +628,18 @@ export class PlatformAdminService implements OnModuleInit {
 
   // ── Platform Admin Users ──────────────────────────────────────────────────
 
-  listPlatformAdminUsers(): PlatformAdminUserRecord[] {
-    return this.platformAdminUsers.map((u) => ({ ...u }));
+  listPlatformAdminUsers(): PlatformAdminUsersView {
+    const items = this.platformAdminUsers.map((user) =>
+      this.decoratePlatformAdminUser(user),
+    );
+
+    return {
+      items,
+      availableActions: this.buildPlatformAdminUserListActions(),
+      refresh: this.buildUsersRefreshMetadata(),
+      health: this.buildUsersHealthEnvelope(),
+      emptyState: items.length === 0 ? this.buildUsersEmptyState("no_data") : undefined,
+    };
   }
 
   createPlatformAdminUser(
@@ -655,6 +668,7 @@ export class PlatformAdminService implements OnModuleInit {
       status: "invited",
       createdAt: now,
       updatedAt: now,
+      availableActions: [],
     };
     this.platformAdminUsers.push({ ...user });
     const auditLog = this.recordAudit(
@@ -675,7 +689,7 @@ export class PlatformAdminService implements OnModuleInit {
       requestId,
     );
     return {
-      user: { ...user },
+      user: this.decoratePlatformAdminUser(user),
       receipt: this.buildUserMutationReceipt(
         "create_platform_admin_user",
         auditLog.auditId,
@@ -725,7 +739,7 @@ export class PlatformAdminService implements OnModuleInit {
       requestId,
     );
     return {
-      user: { ...user },
+      user: this.decoratePlatformAdminUser(user),
       receipt: this.buildUserMutationReceipt(
         "update_platform_admin_user_role",
         auditLog.auditId,
@@ -1084,6 +1098,173 @@ export class PlatformAdminService implements OnModuleInit {
       resourceId: userId,
       status: "completed",
       message,
+    };
+  }
+
+  private decoratePlatformAdminUser(
+    user: PlatformAdminUserRecord,
+  ): PlatformAdminUserRecord {
+    return {
+      ...user,
+      availableActions: this.buildPlatformAdminUserActions(user),
+      resourceLinks: this.buildPlatformAdminUserLinks(user),
+    };
+  }
+
+  private buildPlatformAdminUserListActions(): ResourceActionDescriptor[] {
+    return [
+      {
+        action: "create_platform_admin_user",
+        enabled: true,
+        riskLevel: "medium",
+      },
+    ];
+  }
+
+  private buildPlatformAdminUserActions(
+    user: PlatformAdminUserRecord,
+  ): ResourceActionDescriptor[] {
+    const isLockedSuperAdmin =
+      user.roleCode === "pa_super_admin" &&
+      user.status === "active" &&
+      this.platformAdminUsers.filter(
+        (candidate) =>
+          candidate.roleCode === "pa_super_admin" && candidate.status === "active",
+      ).length <= 1;
+
+    const updateRoleDescriptor: ResourceActionDescriptor = {
+      action: "update_role",
+      enabled: !isLockedSuperAdmin,
+      riskLevel: "medium",
+      ...(isLockedSuperAdmin
+        ? { disabledReasonCode: "role_locked_last_super_admin" }
+        : {}),
+    };
+
+    const suspendDescriptor: ResourceActionDescriptor = {
+      action: "suspend_user",
+      enabled:
+        !isLockedSuperAdmin &&
+        (user.status === "active" || user.status === "invited"),
+      riskLevel: "high",
+      requiresReason: true,
+      ...((isLockedSuperAdmin || user.status === "suspended")
+        ? {
+            disabledReasonCode: isLockedSuperAdmin
+              ? "role_locked_last_super_admin"
+              : "user_already_suspended",
+          }
+        : {}),
+    };
+
+    if (user.status === "suspended") {
+      return [
+        updateRoleDescriptor,
+        {
+          action: "reactivate_user",
+          enabled: true,
+          riskLevel: "high",
+          requiresReason: true,
+        },
+      ];
+    }
+
+    return [updateRoleDescriptor, suspendDescriptor];
+  }
+
+  private buildPlatformAdminUserLinks(
+    user: PlatformAdminUserRecord,
+  ): CrossAppResourceLink[] {
+    const sharedAuditLink: CrossAppResourceLink = {
+      targetApp: "platform-admin",
+      route: `/audit?resourceType=platform_admin_user&resourceId=${encodeURIComponent(user.userId)}`,
+      resourceType: "audit_log",
+      resourceId: user.userId,
+      openMode: "same_tab",
+      label: "View audit trail",
+    };
+
+    const roleLink: Record<string, CrossAppResourceLink | undefined> = {
+      pa_tenant_mgr: {
+        targetApp: "ops-console",
+        route: "/dispatch/boards/tenant-governance",
+        resourceType: "ops_board",
+        resourceId: "tenant-governance",
+        openMode: "new_tab",
+        label: "Open tenant governance board",
+      },
+      pa_partner_mgr: {
+        targetApp: "platform-admin",
+        route: "/partners",
+        resourceType: "partner_entry",
+        resourceId: "partners",
+        openMode: "same_tab",
+        label: "Open partner entry queue",
+      },
+      pa_fleet_gov: {
+        targetApp: "platform-admin",
+        route: "/fleet",
+        resourceType: "fleet_governance",
+        resourceId: "fleet",
+        openMode: "same_tab",
+        label: "Open fleet governance",
+      },
+      pa_finance_gov: {
+        targetApp: "platform-admin",
+        route: "/payments?queue=reconciliation",
+        resourceType: "reconciliation_issue",
+        resourceId: "reconciliation",
+        openMode: "same_tab",
+        label: "Open reconciliation queue",
+      },
+      pa_ops_risk_gov: {
+        targetApp: "ops-console",
+        route: "/audit?scope=platform-risk",
+        resourceType: "audit_log",
+        resourceId: "platform-risk",
+        openMode: "new_tab",
+        label: "Open ops risk audit",
+      },
+      pa_super_admin: {
+        targetApp: "platform-admin",
+        route: "/health",
+        resourceType: "platform_health",
+        resourceId: "health",
+        openMode: "same_tab",
+        label: "Open platform health",
+      },
+    };
+
+    return [sharedAuditLink, roleLink[user.roleCode]].filter(
+      (link): link is CrossAppResourceLink => Boolean(link),
+    );
+  }
+
+  private buildUsersRefreshMetadata(): UiRefreshMetadata {
+    return {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: PLATFORM_ADMIN_USERS_REFRESH_MS,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+  }
+
+  private buildUsersHealthEnvelope(): UiHealthEnvelope {
+    return {
+      status: "healthy",
+      degradedServices: [],
+      lastCheckedAt: new Date().toISOString(),
+    };
+  }
+
+  private buildUsersEmptyState(reason: EmptyReason): EmptyStateEnvelope {
+    return {
+      reason,
+      messageCode: `platform_admin.users.empty.${reason}`,
+      nextAction:
+        reason === "no_data" || reason === "not_provisioned"
+          ? this.buildPlatformAdminUserListActions()[0]
+          : undefined,
     };
   }
 
