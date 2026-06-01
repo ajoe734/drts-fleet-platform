@@ -303,11 +303,16 @@ type SettingsSitemapEntry = {
   actions: ActionLink[];
 };
 
-type EmptyReasonCard = {
-  reason: EmptyReason;
+type EmptyStateSurface = {
+  key: string;
   title: string;
-  body: string;
-  nextAction?: ActionLink;
+  route: string;
+  envelope: EmptyStateEnvelope;
+  actions: ActionLink[];
+};
+
+type EmptyStateSurfaceCandidate = Omit<EmptyStateSurface, "envelope"> & {
+  envelope: EmptyStateEnvelope | null;
 };
 
 type RuntimeChip =
@@ -329,12 +334,7 @@ type ActionSource = {
 type RuntimeEnvelope<T> = {
   data: T;
   refresh?: UiRefreshMetadata;
-  meta?: {
-    timestamp?: string;
-  };
 };
-
-type SearchParamRecord = Record<string, string | string[] | undefined>;
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "—";
@@ -430,29 +430,6 @@ function parseTimestamp(value: string | null | undefined) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function toFreshness(latestTimestamp: Date | null, errors: string[]) {
-  if (latestTimestamp === null) {
-    return errors.length > 0 ? "degraded" : "unknown";
-  }
-
-  const ageMs = Date.now() - latestTimestamp.getTime();
-  if (errors.length > 0) return "degraded";
-  return ageMs > SETTINGS_REFRESH.staleAfterMs ? "stale" : "fresh";
-}
-
-function buildFallbackRefresh(
-  generatedAt: string | null | undefined,
-  errors: string[],
-): UiRefreshMetadata {
-  const resolvedGeneratedAt = generatedAt ?? new Date().toISOString();
-  return {
-    generatedAt: resolvedGeneratedAt,
-    staleAfterMs: SETTINGS_REFRESH.staleAfterMs,
-    dataFreshness: toFreshness(parseTimestamp(resolvedGeneratedAt), errors),
-    source: "live",
-  };
-}
-
 function mergeRefreshMetadata(
   refreshes: Array<UiRefreshMetadata | null | undefined>,
   errors: string[],
@@ -463,7 +440,12 @@ function mergeRefreshMetadata(
   );
 
   if (resolvedRefreshes.length === 0) {
-    return buildFallbackRefresh(null, errors);
+    return {
+      generatedAt: new Date(0).toISOString(),
+      staleAfterMs: SETTINGS_REFRESH.staleAfterMs,
+      dataFreshness: errors.length > 0 ? "degraded" : "unknown",
+      source: "static",
+    };
   }
 
   const freshest = resolvedRefreshes.reduce((latest, current) => {
@@ -489,14 +471,10 @@ function mergeRefreshMetadata(
 
   return {
     generatedAt: freshest.generatedAt,
-    staleAfterMs: SETTINGS_REFRESH.staleAfterMs,
+    staleAfterMs: freshest.staleAfterMs,
     dataFreshness,
     source: freshest.source,
   };
-}
-
-function firstParam(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
 }
 
 async function fetchTenantRuntime<T>(
@@ -844,6 +822,102 @@ function getEmptyReasonCardStyle(reason: EmptyReason): CSSProperties {
   }
 }
 
+function getEmptyReasonCopy(reason: EmptyReason) {
+  switch (reason) {
+    case "no_data":
+      return {
+        title: "尚無租戶覆寫",
+        body: "新租戶尚未建立自訂通知與治理覆寫時，這是合法空狀態。",
+      };
+    case "not_provisioned":
+      return {
+        title: "模組未開通",
+        body: "例如 webhook engine 或專屬通知 channel 尚未為此 tenant provision。",
+      };
+    case "fetch_failed":
+      return {
+        title: "讀取失敗",
+        body: "後端無法提供目前篩選結果，必須顯示失敗原因，而不是假裝沒有資料。",
+      };
+    case "permission_denied":
+      return {
+        title: "權限不足",
+        body: "當前 actor 只有受限 posture，不能操作這個設定面或資料子集。",
+      };
+    case "external_unavailable":
+      return {
+        title: "外部依賴降級",
+        body: "上游身分、通知或第三方 delivery 供應商異常時，要保留降級說明與 trace 入口。",
+      };
+    case "driver_not_eligible":
+      return {
+        title: "不適用於租戶頁",
+        body: "這是 driver app 專用空狀態；若後端誤送到 tenant surface，仍保留顯式標記。",
+      };
+    case "filtered_empty":
+      return {
+        title: "篩選後無結果",
+        body: "目前篩選條件過窄，因此結果為空；這與真正沒有資料不同。",
+      };
+  }
+}
+
+function hasEmptyStateEnvelope(
+  surface: EmptyStateSurfaceCandidate,
+): surface is EmptyStateSurface {
+  return surface.envelope !== null;
+}
+
+function renderEmptyStateSurface(surface: EmptyStateSurface) {
+  const copy = getEmptyReasonCopy(surface.envelope.reason);
+
+  return (
+    <div
+      key={surface.key}
+      style={getEmptyReasonCardStyle(surface.envelope.reason)}
+    >
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <CanvasPill
+          theme={th}
+          tone={getEmptyReasonTone(surface.envelope.reason)}
+        >
+          {copy.title}
+        </CanvasPill>
+        <span style={sitemapRouteStyle}>{surface.title}</span>
+        <span style={sitemapRouteStyle}>{surface.route}</span>
+      </div>
+      <div
+        style={{
+          marginTop: 8,
+          fontSize: 12,
+          color: th.textMuted,
+          lineHeight: 1.5,
+        }}
+      >
+        {copy.body}
+      </div>
+      <div style={{ ...sitemapRouteStyle, marginTop: 8 }}>
+        reason={surface.envelope.reason} · messageCode=
+        {surface.envelope.messageCode}
+      </div>
+      {surface.actions.length > 0 ? (
+        <div style={{ ...actionRowStyle, marginTop: 10 }}>
+          {surface.actions.map((action, index) =>
+            renderActionLink(action, `${surface.key}-${index}`),
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 async function loadSettingsData(): Promise<SettingsData> {
   const [
     identity,
@@ -886,6 +960,21 @@ async function loadSettingsData(): Promise<SettingsData> {
   const errors: string[] = [];
   const tag = (label: string, reason: unknown) =>
     `${label}: ${reason instanceof Error ? reason.message : "未知錯誤"}`;
+  const getRefresh = <T,>(
+    label: string,
+    result: PromiseSettledResult<RuntimeEnvelope<T>>,
+  ) => {
+    if (result.status !== "fulfilled") {
+      return null;
+    }
+
+    if (!result.value.refresh) {
+      errors.push(`${label}: missing UiRefreshMetadata envelope`);
+      return null;
+    }
+
+    return result.value.refresh;
+  };
 
   if (identity.status === "rejected")
     errors.push(tag("租戶身分", identity.reason));
@@ -942,46 +1031,16 @@ async function loadSettingsData(): Promise<SettingsData> {
   );
   const refresh = mergeRefreshMetadata(
     [
-      identity.status === "fulfilled"
-        ? (identity.value.refresh ??
-          buildFallbackRefresh(identity.value.meta?.timestamp, errors))
-        : null,
-      billingProfile.status === "fulfilled"
-        ? (billingProfile.value.refresh ??
-          buildFallbackRefresh(billingProfile.value.meta?.timestamp, errors))
-        : null,
-      preferences.status === "fulfilled"
-        ? (preferences.value.refresh ??
-          buildFallbackRefresh(preferences.value.meta?.timestamp, errors))
-        : null,
-      sla.status === "fulfilled"
-        ? (sla.value.refresh ??
-          buildFallbackRefresh(sla.value.meta?.timestamp, errors))
-        : null,
-      governance.status === "fulfilled"
-        ? (governance.value.refresh ??
-          buildFallbackRefresh(governance.value.meta?.timestamp, errors))
-        : null,
-      quotaSummary.status === "fulfilled"
-        ? (quotaSummary.value.refresh ??
-          buildFallbackRefresh(quotaSummary.value.meta?.timestamp, errors))
-        : null,
-      users.status === "fulfilled"
-        ? (users.value.refresh ??
-          buildFallbackRefresh(users.value.meta?.timestamp, errors))
-        : null,
-      apiKeys.status === "fulfilled"
-        ? (apiKeys.value.refresh ??
-          buildFallbackRefresh(apiKeys.value.meta?.timestamp, errors))
-        : null,
-      webhooks.status === "fulfilled"
-        ? (webhooks.value.refresh ??
-          buildFallbackRefresh(webhooks.value.meta?.timestamp, errors))
-        : null,
-      auditLogs.status === "fulfilled"
-        ? (auditLogs.value.refresh ??
-          buildFallbackRefresh(auditLogs.value.meta?.timestamp, errors))
-        : null,
+      getRefresh("租戶身分", identity),
+      getRefresh("計費設定", billingProfile),
+      getRefresh("通知訂閱", preferences),
+      getRefresh("SLA 門檻", sla),
+      getRefresh("整合治理", governance),
+      getRefresh("租戶配額", quotaSummary),
+      getRefresh("租戶人員", users),
+      getRefresh("API 金鑰", apiKeys),
+      getRefresh("Webhook", webhooks),
+      getRefresh("租戶稽核", auditLogs),
     ],
     errors,
   );
@@ -1004,15 +1063,8 @@ async function loadSettingsData(): Promise<SettingsData> {
   };
 }
 
-export default async function SettingsPage({
-  searchParams,
-}: {
-  searchParams?: Promise<SearchParamRecord>;
-}) {
+export default async function SettingsPage() {
   const data = await loadSettingsData();
-  const resolvedSearchParams: SearchParamRecord = await (searchParams ??
-    Promise.resolve({} as SearchParamRecord));
-  const activeEmptyReason = firstParam(resolvedSearchParams.emptyReason);
 
   const tenantCode = data.identity?.tenantId ?? DEMO_TENANT_ID;
   const displayName = data.billingProfile?.invoiceTitle ?? "未設定";
@@ -1115,12 +1167,15 @@ export default async function SettingsPage({
   const peopleActions = dedupeActionLinks(
     mapActionLinks(data.users?.availableActions, tenantCode),
   );
-  const pageActions = dedupeActionLinks([
-    ...generalActions,
-    ...notificationActions,
-    ...integrationActions,
-    ...peopleActions,
-  ]);
+  const pageActions = dedupeActionLinks(
+    mapActionLinks(data.availableActions, tenantCode, {
+      view_tenant_audit_evidence: {
+        label: "檢視稽核",
+        href: "/audit",
+        note: "same-tab",
+      },
+    }),
+  );
   const runtimeChips: RuntimeChip[] = [
     {
       label: "refresh tier",
@@ -1220,100 +1275,99 @@ export default async function SettingsPage({
     },
   ];
 
-  const notProvisionedWebhookAction = mapActionLinks(
-    data.webhooks?.emptyState?.nextAction
-      ? [data.webhooks.emptyState.nextAction]
-      : data.webhooks?.availableActions,
-    tenantCode,
+  const emptyStateSurfaceCandidates: EmptyStateSurfaceCandidate[] = [
     {
-      create_webhook_endpoint: {
-        label: "檢查 Webhook",
-        href: "/webhooks",
-      },
-    },
-  )[0];
-
-  const emptyReasonCards: EmptyReasonCard[] = [
-    {
-      reason: "no_data",
-      title: "尚無租戶覆寫",
-      body: "新租戶尚未建立自訂通知與治理覆寫時，這是合法空狀態。",
+      key: "notifications",
+      title: "通知訂閱",
+      route: "/notifications",
+      envelope: data.preferences?.emptyState ?? null,
+      actions: dedupeActionLinks(
+        mapActionLinks(
+          data.preferences?.emptyState?.nextAction
+            ? [data.preferences.emptyState.nextAction]
+            : data.preferences?.availableActions,
+          tenantCode,
+        ),
+      ),
     },
     {
-      reason: "not_provisioned",
-      title: "模組未開通",
-      body: "例如 webhook engine 或專屬通知 channel 尚未為此 tenant provision。",
-      ...(notProvisionedWebhookAction
-        ? { nextAction: notProvisionedWebhookAction }
-        : {}),
+      key: "users",
+      title: "人員與角色",
+      route: "/users",
+      envelope: data.users?.emptyState ?? null,
+      actions: dedupeActionLinks(
+        mapActionLinks(
+          data.users?.emptyState?.nextAction
+            ? [data.users.emptyState.nextAction]
+            : data.users?.availableActions,
+          tenantCode,
+        ),
+      ),
     },
     {
-      reason: "fetch_failed",
-      title: "讀取失敗",
-      body: "讀 billing / SLA / notification snapshot 時後端回應失敗，需明確展示而不是假空白。",
+      key: "api-keys",
+      title: "API 金鑰",
+      route: "/api-keys",
+      envelope: data.apiKeys?.emptyState ?? null,
+      actions: dedupeActionLinks(
+        mapActionLinks(
+          data.apiKeys?.emptyState?.nextAction
+            ? [data.apiKeys.emptyState.nextAction]
+            : data.apiKeys?.availableActions,
+          tenantCode,
+        ),
+      ),
     },
     {
-      reason: "permission_denied",
-      title: "權限不足",
-      body: "非 `tc_admin` 只能看到受限 posture，不能進行跨模組設定變更。",
+      key: "webhooks",
+      title: "Webhook",
+      route: "/webhooks",
+      envelope: data.webhooks?.emptyState ?? null,
+      actions: dedupeActionLinks(
+        mapActionLinks(
+          data.webhooks?.emptyState?.nextAction
+            ? [data.webhooks.emptyState.nextAction]
+            : data.webhooks?.availableActions,
+          tenantCode,
+          {
+            create_webhook_endpoint: {
+              label: "檢查 Webhook",
+              href: "/webhooks",
+            },
+          },
+        ),
+      ),
     },
     {
-      reason: "external_unavailable",
-      title: "外部依賴降級",
-      body: "若身分、通知或第三方 delivery 供應商失聯，設定頁要保留降級說明。",
-      nextAction: {
-        descriptor: {
-          action: "open_ops_trace",
-          enabled: true,
-          riskLevel: "low",
-        },
-        label: "看營運 trace",
-        link: {
-          targetApp: "ops-console",
-          route: "/complaints",
-          resourceType: "incident",
-          resourceId: tenantCode,
-          openMode: "new_tab",
-          label: "前往 ops-console /complaints",
-        },
-      },
-    },
-    {
-      reason: "filtered_empty",
-      title: "篩選後無結果",
-      body: "通知事件 key / scope 篩選過窄時，應和真正沒資料分開處理。",
+      key: "audit",
+      title: "租戶稽核",
+      route: "/audit",
+      envelope: data.auditLogs?.emptyState ?? null,
+      actions: dedupeActionLinks(
+        mapActionLinks(
+          data.auditLogs?.emptyState?.nextAction
+            ? [data.auditLogs.emptyState.nextAction]
+            : data.auditLogs?.availableActions,
+          tenantCode,
+          {
+            view_tenant_audit_evidence: {
+              label: "檢視稽核",
+              href: "/audit",
+              note: "same-tab",
+            },
+          },
+        ),
+      ),
     },
   ];
-  const observedEmptyReasons = new Set<EmptyReason>();
-
-  if (data.errors.length > 0) {
-    observedEmptyReasons.add("fetch_failed");
-  }
-  if (
-    data.availableActions.length > 0 &&
-    data.availableActions.every((action) => !action.enabled)
-  ) {
-    observedEmptyReasons.add("permission_denied");
-  }
-  if (data.webhooks?.emptyState) {
-    observedEmptyReasons.add(data.webhooks.emptyState.reason);
-  }
-  if (data.apiKeys?.emptyState) {
-    observedEmptyReasons.add(data.apiKeys.emptyState.reason);
-  }
-  if (data.users?.emptyState) {
-    observedEmptyReasons.add(data.users.emptyState.reason);
-  }
-  if (
-    data.preferences &&
-    data.preferences.subscriptions.length === 0 &&
-    baselineSubscriptions.length === 0
-  ) {
-    observedEmptyReasons.add("no_data");
-  }
-  if (activeEmptyReason === "filtered_empty") {
-    observedEmptyReasons.add("filtered_empty");
-  }
+  const notificationEmptyStateSurface =
+    emptyStateSurfaceCandidates[0] &&
+    hasEmptyStateEnvelope(emptyStateSurfaceCandidates[0])
+      ? emptyStateSurfaceCandidates[0]
+      : null;
+  const emptyStateSurfaces = emptyStateSurfaceCandidates.filter(
+    hasEmptyStateEnvelope,
+  );
 
   return (
     <div>
@@ -1565,6 +1619,10 @@ export default async function SettingsPage({
           >
             {notificationRows.length > 0 ? (
               <SettingsNotificationTable rows={notificationRows} />
+            ) : notificationEmptyStateSurface ? (
+              <div style={{ padding: "14px" }}>
+                {renderEmptyStateSurface(notificationEmptyStateSurface)}
+              </div>
             ) : (
               <div style={emptyStateStyle}>尚未訂閱任何事件通知</div>
             )}
@@ -1796,52 +1854,21 @@ export default async function SettingsPage({
 
             <CanvasCard
               theme={th}
-              title="EmptyReason contract coverage"
-              subtitle="`/settings` 本身沒有單一後端 endpoint，因此用 shared contract 說明六種空狀態如何落地。"
+              title="Runtime empty states"
+              subtitle="各 module 回傳的 `emptyState` 直接映射到畫面，不再用 query param 或本地假資料示範。"
             >
-              <div style={emptyReasonGridStyle}>
-                {emptyReasonCards.map((card) => (
-                  <div
-                    key={card.reason}
-                    style={getEmptyReasonCardStyle(card.reason)}
-                  >
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 8 }}
-                    >
-                      <CanvasPill
-                        theme={th}
-                        tone={getEmptyReasonTone(card.reason)}
-                      >
-                        {card.title}
-                      </CanvasPill>
-                      <span style={sitemapRouteStyle}>{card.reason}</span>
-                      {observedEmptyReasons.has(card.reason) ? (
-                        <CanvasPill theme={th} tone="accent">
-                          active
-                        </CanvasPill>
-                      ) : null}
-                    </div>
-                    <div
-                      style={{
-                        marginTop: 8,
-                        fontSize: 12,
-                        color: th.textMuted,
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      {card.body}
-                    </div>
-                    {card.nextAction ? (
-                      <div style={{ marginTop: 10 }}>
-                        {renderActionLink(
-                          card.nextAction,
-                          `empty-${card.reason}`,
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
+              {emptyStateSurfaces.length > 0 ? (
+                <div style={emptyReasonGridStyle}>
+                  {emptyStateSurfaces.map((surface) =>
+                    renderEmptyStateSurface(surface),
+                  )}
+                </div>
+              ) : (
+                <div style={emptyStateStyle}>
+                  目前沒有 module 回傳 `emptyState`；此頁維持正常 snapshot
+                  posture。
+                </div>
+              )}
             </CanvasCard>
           </div>
         </div>
