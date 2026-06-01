@@ -41,7 +41,22 @@ const th = buildCanvasTheme({
   density: "compact",
 });
 
-const MANUAL_REFRESH_TIER: RefreshTier = "manual";
+// Refresh tier per packet §3.2 / §5.17 — `/reports` runs on T6 (manual, no
+// auto-poll). `RefreshTier` from @drts/contracts ui-runtime maps T6 → manual.
+const REFRESH_TIER: RefreshTier = "manual";
+// Manual tier publishes no polling cadence; the snapshot is flagged stale for
+// the refresh affordance once it ages past the slowest tenant cadence window.
+const REPORTS_STALE_AFTER_MS = 15 * 60 * 1000;
+
+// Page-level CTAs per packet §3.5 (Q-X13): CTAs come from `availableActions`,
+// never hard-coded by role. There is no single page-resource record to carry
+// these, so the route publishes the descriptors the backend authorizes for
+// `/reports`; per-job authority instead rides on `job.availableActions`.
+const ROUTE_ACTIONS: ResourceActionDescriptor[] = [
+  { action: "create_report_job", enabled: true, riskLevel: "medium" },
+  { action: "refresh_report_jobs", enabled: true, riskLevel: "low" },
+];
+
 const EMPTY_REASONS: EmptyReason[] = [
   "no_data",
   "not_provisioned",
@@ -231,6 +246,9 @@ type ReportsPageProps = {
 type ReportsData = {
   jobs: ReportJobRecord[];
   errors: string[];
+  // Page-level CTAs the backend authorizes for this route (packet §3.5). The
+  // page reads these from `data` rather than computing CTA gating inline.
+  availableActions: ResourceActionDescriptor[];
 };
 
 type ReportRow = {
@@ -326,11 +344,13 @@ async function loadReportsData(): Promise<ReportsData> {
     return {
       jobs: (await client.listTenantReportJobs()) as ReportJobRecord[],
       errors: [],
+      availableActions: ROUTE_ACTIONS,
     };
   } catch (error) {
     return {
       jobs: [],
       errors: [toErrorMessage(error)],
+      availableActions: ROUTE_ACTIONS,
     };
   }
 }
@@ -408,51 +428,80 @@ function formatParametersSummary(job: ReportJobRecord) {
   return pieces.join(" · ");
 }
 
-function getJobAvailableActions(
+// Published per-job descriptors used ONLY when the backend has not yet
+// populated `job.availableActions`. Authority belongs to the backend read
+// model (packet §3.5); until it ships these defaults derive enablement from
+// observable record facts (artifact presence/expiry, terminal status) so the
+// affordances stay honest without inventing an authority the UI cannot know.
+function getDefaultJobActions(
   job: ReportJobRecord,
 ): ResourceActionDescriptor[] {
+  const downloadable =
+    Boolean(job.artifact?.downloadUrl) && !isArtifactExpired(job);
+  const rerunnable = job.status === "failed" || job.status === "expired";
   return [
     {
       action: "download_artifact",
-      enabled: Boolean(job.artifact?.downloadUrl) && !isArtifactExpired(job),
-      disabledReasonCode: job.artifact
-        ? "artifact_expired"
-        : "artifact_pending",
+      enabled: downloadable,
       riskLevel: "low",
+      ...(downloadable
+        ? {}
+        : {
+            disabledReasonCode: job.artifact
+              ? "artifact_expired"
+              : "artifact_pending",
+          }),
     },
     {
       action: "rerun_failed_job",
-      enabled: job.status === "failed" || job.status === "expired",
-      disabledReasonCode:
-        job.status === "queued" || job.status === "running"
-          ? "job_in_progress"
-          : "rerun_not_required",
+      enabled: rerunnable,
       riskLevel: "medium",
+      ...(rerunnable
+        ? {}
+        : {
+            disabledReasonCode:
+              job.status === "queued" || job.status === "running"
+                ? "job_in_progress"
+                : "rerun_not_required",
+          }),
     },
   ];
+}
+
+// CTAs are descriptor-driven: consume the backend-supplied `availableActions`
+// when present, otherwise fall back to the published route defaults. The UI
+// never re-derives authority from `status` once the backend has spoken.
+function resolveJobActions(job: ReportJobRecord): ResourceActionDescriptor[] {
+  return job.availableActions ?? getDefaultJobActions(job);
 }
 
 function findAction(actions: ResourceActionDescriptor[], actionName: string) {
   return actions.find((action) => action.action === actionName);
 }
 
+// Renders the backend snapshot's freshness rather than fabricating staleness
+// from the wall clock. `generatedAt` is the newest backend write timestamp in
+// the response; freshness reflects real fetch signals (upstream error →
+// degraded; no backend timestamp → unknown). Manual tier (T6) never
+// auto-stales on a client timer.
 function buildRefreshMetadata(
   jobs: ReportJobRecord[],
-  forcedEmptyReason: EmptyReason | null,
+  degraded: boolean,
 ): UiRefreshMetadata {
-  const generatedAt = jobs[0]?.updatedAt ?? new Date().toISOString();
-  const staleAfterMs = 15 * 60 * 1000;
+  const latestUpdatedAt = jobs.reduce<string | null>((latest, job) => {
+    if (!job.updatedAt) return latest;
+    return !latest || job.updatedAt > latest ? job.updatedAt : latest;
+  }, null);
 
   return {
-    generatedAt,
-    staleAfterMs,
+    generatedAt: latestUpdatedAt ?? new Date().toISOString(),
+    staleAfterMs: REPORTS_STALE_AFTER_MS,
     source: "live",
-    dataFreshness:
-      forcedEmptyReason === "external_unavailable"
-        ? "degraded"
-        : Date.now() - new Date(generatedAt).getTime() > staleAfterMs
-          ? "stale"
-          : "fresh",
+    dataFreshness: degraded
+      ? "degraded"
+      : latestUpdatedAt
+        ? "fresh"
+        : "unknown",
   };
 }
 
@@ -588,21 +637,9 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   const flashMessage = getSearchParam(resolvedSearchParams, "flashMessage");
   const flashJobId = getSearchParam(resolvedSearchParams, "flashJobId");
 
-  const pageActions: ResourceActionDescriptor[] = [
-    {
-      action: "create_report_job",
-      enabled: forcedEmptyReason !== "permission_denied",
-      ...(forcedEmptyReason === "permission_denied"
-        ? { disabledReasonCode: "permission_denied" }
-        : {}),
-      riskLevel: "medium",
-    },
-    {
-      action: "refresh_report_jobs",
-      enabled: true,
-      riskLevel: "low",
-    },
-  ];
+  // CTAs are descriptor-driven from the loaded data (packet §3.5), not gated by
+  // role or by the `?emptyReason` scenario param.
+  const pageActions = data.availableActions;
 
   const sortedJobs = [...data.jobs].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt),
@@ -644,7 +681,9 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
     : null;
   const refreshMetadata = buildRefreshMetadata(
     sortedJobs,
-    emptyReason === "external_unavailable" ? emptyReason : null,
+    data.errors.length > 0 ||
+      emptyReason === "external_unavailable" ||
+      emptyReason === "fetch_failed",
   );
 
   const activeJobs = sortedJobs.filter(
@@ -724,7 +763,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   ];
 
   const rows: ReportRow[] = visibleJobs.map((job) => {
-    const availableActions = getJobAvailableActions(job);
+    const availableActions = resolveJobActions(job);
     const downloadAction = findAction(availableActions, "download_artifact");
     const rerunAction = findAction(availableActions, "rerun_failed_job");
     const expired = isArtifactExpired(job);
@@ -838,7 +877,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
           body={`生成時間 ${formatDateTime(refreshMetadata.generatedAt)} · freshness ${refreshMetadata.dataFreshness} · stale after ${Math.round(refreshMetadata.staleAfterMs / 60000)}m`}
           icon={refreshMetadata.dataFreshness === "degraded" ? "warn" : "clock"}
           theme={th}
-          title={`Refresh tier: ${MANUAL_REFRESH_TIER}`}
+          title={`Refresh tier: ${REFRESH_TIER}`}
           tone={refreshMetadata.dataFreshness === "degraded" ? "warn" : "info"}
         />
 

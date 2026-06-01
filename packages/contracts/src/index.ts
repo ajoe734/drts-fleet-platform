@@ -3725,6 +3725,13 @@ export interface ReportJobRecord {
   artifact: ReportArtifactRecord | null;
   createdAt: string;
   updatedAt: string;
+  // Per-resource action authority (Q-X13 / packet §3.5). Backend returns the
+  // permitted actions per job so the UI renders CTAs from `availableActions`
+  // instead of inferring authority from `status`. Optional + additive: lands in
+  // the same PR as its sole consumer (tenant-console `/reports`) per the
+  // ui-runtime field-addition convention; backends that have not adopted the
+  // read model yet simply omit it.
+  availableActions?: ResourceActionDescriptor[];
 }
 
 export interface DispatchRecordingIndexRowRecord {
