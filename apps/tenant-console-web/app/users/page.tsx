@@ -459,13 +459,6 @@ function buildQueryString(
   return query.length > 0 ? `/users?${query}` : "/users";
 }
 
-function getAction(
-  availableActions: ResourceActionDescriptor[],
-  action: string,
-) {
-  return availableActions.find((entry) => entry.action === action);
-}
-
 function buildUserRows(
   users: RuntimeTenantUserRecord[],
   roles: TenantRoleCatalogRecord[],
@@ -630,11 +623,55 @@ function getActionLabel(action: string) {
       return "更新角色";
     case "suspend":
       return "停用";
+    case "resend_invitation":
+      return "重送邀請";
+    case "resend_invite":
+      return "重送邀請";
     case "refresh":
       return "重新整理";
     default:
       return action;
   }
+}
+
+function getActionIcon(action: string) {
+  switch (action) {
+    case "invite":
+      return "plus";
+    case "refresh":
+      return "refresh";
+    case "suspend":
+      return "warn";
+    default:
+      return undefined;
+  }
+}
+
+function getActionSortOrder(action: string) {
+  switch (action) {
+    case "invite":
+      return 0;
+    case "refresh":
+      return 1;
+    case "role":
+      return 2;
+    case "resend_invitation":
+    case "resend_invite":
+      return 3;
+    case "suspend":
+      return 4;
+    default:
+      return 100;
+  }
+}
+
+function sortAvailableActions(actions: ResourceActionDescriptor[]) {
+  return [...actions].sort((left, right) => {
+    const orderDelta =
+      getActionSortOrder(left.action) - getActionSortOrder(right.action);
+    if (orderDelta !== 0) return orderDelta;
+    return left.action.localeCompare(right.action, "en");
+  });
 }
 
 function ActionDescriptorButton({
@@ -645,7 +682,7 @@ function ActionDescriptorButton({
 }: {
   descriptor: ResourceActionDescriptor | undefined;
   label: string;
-  icon?: "plus" | "refresh" | "warn" | "ext";
+  icon?: "plus" | "refresh" | "warn" | "ext" | undefined;
   size?: "xs" | "sm" | "md";
 }) {
   if (!descriptor) return null;
@@ -670,6 +707,37 @@ function ActionDescriptorButton({
         {label}
       </CanvasBtn>
     </span>
+  );
+}
+
+function ActionDescriptorList({
+  actions,
+  size = "sm",
+  excludeActions = [],
+}: {
+  actions: ResourceActionDescriptor[];
+  size?: "xs" | "sm" | "md";
+  excludeActions?: string[];
+}) {
+  const visibleActions = sortAvailableActions(actions).filter(
+    (descriptor) => !excludeActions.includes(descriptor.action),
+  );
+  if (visibleActions.length === 0) return null;
+
+  return (
+    <>
+      {visibleActions.map((descriptor) => (
+        <ActionDescriptorButton
+          key={descriptor.action}
+          descriptor={descriptor}
+          label={getActionLabel(descriptor.action)}
+          size={size}
+          {...(getActionIcon(descriptor.action)
+            ? { icon: getActionIcon(descriptor.action) }
+            : {})}
+        />
+      ))}
+    </>
   );
 }
 
@@ -783,7 +851,6 @@ export default async function UsersPage({
   });
   const tenantId = identity?.tenantId ?? users[0]?.tenantId ?? DEMO_TENANT_ID;
   const assignableRoles = roles.filter((role) => role.assignable);
-  const pageInviteAction = getAction(availableActions, "invite");
   const roleFilter = normalizeRoleFilter(resolvedSearchParams.role, roles);
   const statusFilter = normalizeStatusFilter(resolvedSearchParams.status);
 
@@ -869,28 +936,14 @@ export default async function UsersPage({
     },
     {
       h: "ACTIONS",
-      w: 200,
-      r: (row) => {
-        const updateRole = getAction(row.availableActions, "role");
-        const suspend = getAction(row.availableActions, "suspend");
-
-        return (
-          <div style={rowActionMetaStyle}>
-            <div style={rowActionStyle}>
-              <ActionDescriptorButton
-                descriptor={updateRole}
-                label="更新角色"
-                size="xs"
-              />
-              <ActionDescriptorButton
-                descriptor={suspend}
-                label="停用"
-                size="xs"
-              />
-            </div>
+      w: 260,
+      r: (row) => (
+        <div style={rowActionMetaStyle}>
+          <div style={rowActionStyle}>
+            <ActionDescriptorList actions={row.availableActions} size="xs" />
           </div>
-        );
-      },
+        </div>
+      ),
     },
   ];
 
@@ -912,10 +965,9 @@ export default async function UsersPage({
                 重新整理
               </CanvasBtn>
             </a>
-            <ActionDescriptorButton
-              descriptor={pageInviteAction}
-              label="邀請"
-              icon="plus"
+            <ActionDescriptorList
+              actions={availableActions}
+              excludeActions={["refresh"]}
             />
           </>
         }
@@ -1126,7 +1178,7 @@ export default async function UsersPage({
         <CanvasCard
           theme={th}
           title="Tenant roster"
-          subtitle="user id · display name · email · role · status · invited at · updated at"
+          subtitle="user id · display name · email · role · status · updated at"
           padding={0}
         >
           {emptyReason && emptyConfig ? (
