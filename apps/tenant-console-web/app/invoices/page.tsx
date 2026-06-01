@@ -36,7 +36,6 @@ const th = buildCanvasTheme({
 });
 
 const REFRESH_TIER: RefreshTier = "slow";
-const REFRESH_INTERVAL_MS = 30_000;
 const STATUS_FILTERS = ["all", "draft", "issued", "paid", "overdue"] as const;
 const pageStyle: CSSProperties = {
   padding: 24,
@@ -304,7 +303,7 @@ type InvoicesPageData = {
   billingProfile: TenantBillingProfile | null;
   invoices: InvoiceViewRecord[];
   errors: string[];
-  refresh: UiRefreshMetadata;
+  refresh: UiRefreshMetadata | null;
   emptyState: EmptyStateEnvelope | null;
 };
 
@@ -312,36 +311,6 @@ function toErrorMessage(error: unknown) {
   return error instanceof Error
     ? error.message
     : "Unknown tenant invoice error.";
-}
-
-function parseHttpStatus(error: unknown) {
-  const match = toErrorMessage(error).match(/API error (\d{3})/);
-  return match ? Number.parseInt(match[1] ?? "", 10) : null;
-}
-
-function isSignerError(error: unknown) {
-  const message = toErrorMessage(error).toLowerCase();
-  return (
-    message.includes("signer") ||
-    message.includes("signed url") ||
-    message.includes("artifact") ||
-    message.includes("unavailable")
-  );
-}
-
-function classifyRequestError(error: unknown): EmptyReason {
-  const status = parseHttpStatus(error);
-  if (status === 401 || status === 403) return "permission_denied";
-  if (status === 404 || status === 422) return "not_provisioned";
-  if (
-    status === 502 ||
-    status === 503 ||
-    status === 504 ||
-    isSignerError(error)
-  ) {
-    return "external_unavailable";
-  }
-  return "fetch_failed";
 }
 
 function toPeriodKey(value: string | null | undefined) {
@@ -471,18 +440,6 @@ async function loadInvoicesData(): Promise<InvoicesPageData> {
 
   if (invoicesResult.status === "fulfilled") {
     emptyState = invoicesResult.value.emptyState ?? null;
-  } else if (invoices.length === 0) {
-    if (invoicesResult.status === "rejected") {
-      emptyState = buildEmptyState(
-        classifyRequestError(invoicesResult.reason),
-        null,
-      );
-    } else if (billingResult.status === "rejected") {
-      emptyState = buildEmptyState(
-        classifyRequestError(billingResult.reason),
-        null,
-      );
-    }
   }
 
   return {
@@ -493,12 +450,7 @@ async function loadInvoicesData(): Promise<InvoicesPageData> {
     refresh:
       invoicesResult.status === "fulfilled"
         ? invoicesResult.value.refresh
-        : {
-            generatedAt: new Date().toISOString(),
-            staleAfterMs: REFRESH_INTERVAL_MS,
-            dataFreshness: errors.length > 0 ? "degraded" : "fresh",
-            source: "live",
-          },
+        : null,
     emptyState,
   };
 }
@@ -543,77 +495,19 @@ function getRefreshTone(refresh: UiRefreshMetadata): CanvasTone {
   return "info";
 }
 
-function buildEmptyState(
-  reason: EmptyReason,
-  filters: InvoiceFilters | null,
-): EmptyStateEnvelope {
-  switch (reason) {
-    case "not_provisioned":
-      return {
-        reason,
-        messageCode: "tenant_invoice_not_provisioned",
-        nextAction: {
-          action: "open_billing_setup",
-          enabled: true,
-          riskLevel: "medium",
-        },
-      };
-    case "fetch_failed":
-      return {
-        reason,
-        messageCode: "tenant_invoice_fetch_failed",
-        nextAction: {
-          action: "refresh_snapshot",
-          enabled: true,
-          riskLevel: "low",
-        },
-      };
-    case "permission_denied":
-      return {
-        reason,
-        messageCode: "tenant_invoice_permission_denied",
-        nextAction: {
-          action: "review_access",
-          enabled: true,
-          riskLevel: "low",
-        },
-      };
-    case "external_unavailable":
-      return {
-        reason,
-        messageCode: "tenant_invoice_artifact_signer_unavailable",
-        nextAction: {
-          action: "open_platform_audit",
-          enabled: true,
-          riskLevel: "low",
-        },
-      };
-    case "filtered_empty":
-      return {
-        reason,
-        messageCode:
-          filters &&
-          (filters.query || filters.period || filters.status !== "all")
-            ? "tenant_invoice_filtered_empty"
-            : "tenant_invoice_empty",
-        nextAction: {
-          action: "clear_filters",
-          enabled: true,
-          riskLevel: "low",
-        },
-      };
-    case "no_data":
-    default:
-      return {
-        reason,
-        messageCode: "tenant_invoice_no_data",
-        nextAction: {
-          action: "open_billing",
-          enabled: true,
-          riskLevel: "low",
-        },
-      };
-  }
+function buildFilteredEmptyState(filters: InvoiceFilters): EmptyStateEnvelope {
+  return {
+    reason: "filtered_empty",
+    messageCode:
+      filters.query || filters.period || filters.status !== "all"
+        ? "tenant_invoice_filtered_empty"
+        : "tenant_invoice_empty",
+    nextAction: {
+      action: "clear_filters",
+      enabled: true,
+      riskLevel: "low",
+    },
+  };
 }
 
 function describeEmptyState(reason: EmptyReason) {
@@ -838,7 +732,7 @@ export default async function InvoicesPage({
 
   const emptyState =
     computedEmptyReason === "filtered_empty"
-      ? buildEmptyState("filtered_empty", filters)
+      ? buildFilteredEmptyState(filters)
       : data.emptyState;
   const emptyDescription = computedEmptyReason
     ? describeEmptyState(computedEmptyReason)
@@ -938,9 +832,11 @@ export default async function InvoicesPage({
               theme={th}
               tone="info"
             >{`T5 · ${REFRESH_TIER} · 30s`}</CanvasPill>
-            <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
-              {data.refresh.dataFreshness}
-            </CanvasPill>
+            {data.refresh ? (
+              <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
+                {data.refresh.dataFreshness}
+              </CanvasPill>
+            ) : null}
             {selectedArtifactAction?.enabled && selectedArtifactAction.href ? (
               <Link
                 href={selectedArtifactAction.href}
@@ -973,9 +869,11 @@ export default async function InvoicesPage({
               theme={th}
               tone="info"
             >{`T5 · ${REFRESH_TIER}`}</CanvasPill>
-            <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
-              {data.refresh.dataFreshness}
-            </CanvasPill>
+            {data.refresh ? (
+              <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
+                {data.refresh.dataFreshness}
+              </CanvasPill>
+            ) : null}
             <CanvasPill theme={th} tone="neutral">
               {`${filteredInvoices.length} visible`}
             </CanvasPill>
@@ -992,7 +890,7 @@ export default async function InvoicesPage({
           />
         ) : null}
 
-        {data.refresh.dataFreshness !== "fresh" ? (
+        {data.refresh && data.refresh.dataFreshness !== "fresh" ? (
           <CanvasBanner
             theme={th}
             tone={data.refresh.dataFreshness === "degraded" ? "danger" : "warn"}
