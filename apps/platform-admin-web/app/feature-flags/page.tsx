@@ -12,6 +12,7 @@ import {
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import type {
+  ActionReceipt,
   CrossAppResourceLink,
   EmptyReason,
   FeatureFlag,
@@ -59,15 +60,17 @@ type FeatureFlagOverrideRecord = {
   enabled: boolean;
   description: string;
   updatedAt: string;
-  updatedBy?: string;
-  crossLink: CrossAppResourceLink;
+  lastChangedBy?: string | null;
+  crossLink?: CrossAppResourceLink | null;
   availableActions?: ResourceActionDescriptor[];
+  rolloutState?: RolloutState;
 };
 
 type RuntimeFeatureFlagRecord = FeatureFlag & {
   availableActions?: ResourceActionDescriptor[];
-  updatedBy?: string;
-  lastChangedBy?: string;
+  lastChangedBy?: string | null;
+  rolloutState?: RolloutState;
+  resourceLink?: CrossAppResourceLink | null;
 };
 
 type RuntimeFeatureFlagSummary = FeatureFlagSummary & {
@@ -78,10 +81,20 @@ type RuntimeFeatureFlagSummary = FeatureFlagSummary & {
   refreshTier?: RefreshTier;
 };
 
+type RuntimeFeatureFlagMutationResult = RuntimeFeatureFlagRecord & {
+  receipt?:
+    | (ActionReceipt & { resourceLink?: CrossAppResourceLink | null })
+    | null;
+  auditId?: string;
+  status?: ActionReceipt["status"];
+  message?: string;
+  resourceLink?: CrossAppResourceLink | null;
+};
+
 type FeatureFlagRow = {
   key: string;
   description: string;
-  global: FeatureFlag | null;
+  global: RuntimeFeatureFlagRecord | null;
   overrides: FeatureFlagOverrideRecord[];
   selectedTenantOverride: FeatureFlagOverrideRecord | null;
   selectedTenantSnapshot: RuntimeFeatureFlagRecord | null;
@@ -149,6 +162,10 @@ type EmptyReasonMeta = {
 const REFRESH_TIER: RefreshTier = "medium_slow";
 const OPS_CONSOLE_BASE_URL =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003";
+const PLATFORM_ADMIN_BASE_URL =
+  process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3002";
+const TENANT_CONSOLE_BASE_URL =
+  process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3001";
 
 const ACTION_META: Record<string, ActionMeta> = {
   toggle_global: {
@@ -613,29 +630,15 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
   ];
 }
 
-function buildOpsDeepLink(
-  tenant: PlatformAdminTenantRecord,
-  key: string,
-): CrossAppResourceLink {
-  const params = new URLSearchParams({
-    tenantId: tenant.id,
-    tenantCode: tenant.code,
-    flagKey: key,
-    source: "platform-admin",
-  });
-
-  return {
-    targetApp: "ops-console",
-    route: `/dispatch?${params.toString()}`,
-    resourceType: "tenant_dispatch_context",
-    resourceId: tenant.id,
-    openMode: "new_tab",
-    label: `Ops dispatch context · ${tenant.code}`,
-  };
-}
-
 function crossAppHref(link: CrossAppResourceLink) {
-  return `${OPS_CONSOLE_BASE_URL.replace(/\/$/, "")}${link.route}`;
+  const baseUrl =
+    link.targetApp === "tenant-console"
+      ? TENANT_CONSOLE_BASE_URL
+      : link.targetApp === "platform-admin"
+        ? PLATFORM_ADMIN_BASE_URL
+        : OPS_CONSOLE_BASE_URL;
+
+  return `${baseUrl.replace(/\/$/, "")}${link.route}`;
 }
 
 function auditHref(key: string) {
@@ -712,18 +715,85 @@ function sortFlags(flags: FeatureFlag[]) {
   return [...flags].sort((left, right) => left.key.localeCompare(right.key));
 }
 
-function runtimeUpdatedBy(flag: RuntimeFeatureFlagRecord | null | undefined) {
-  return flag?.lastChangedBy ?? flag?.updatedBy ?? null;
+function latestChangedBy(
+  record:
+    | RuntimeFeatureFlagRecord
+    | FeatureFlagOverrideRecord
+    | null
+    | undefined,
+) {
+  return record?.lastChangedBy ?? null;
 }
 
-function isDeprecatedFlag(key: string, description: string) {
-  const text = `${key} ${description}`.toLowerCase();
-  return (
-    text.includes("deprecated") ||
-    text.includes("legacy") ||
-    text.includes("sunset") ||
-    text.includes("retired")
-  );
+function timestampValue(value: string | null | undefined) {
+  if (!value) {
+    return 0;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function resolveRolloutState(
+  global: RuntimeFeatureFlagRecord | null,
+  overrides: FeatureFlagOverrideRecord[],
+  selectedTenantSnapshot: RuntimeFeatureFlagRecord | null,
+): RolloutState {
+  const explicitState =
+    selectedTenantSnapshot?.rolloutState ??
+    global?.rolloutState ??
+    overrides.find((override) => override.rolloutState)?.rolloutState;
+
+  if (explicitState) {
+    return explicitState;
+  }
+
+  if (!global && overrides.length > 0) {
+    return "tenant_only";
+  }
+
+  const effectiveStates = new Set<boolean>();
+  if (global) {
+    effectiveStates.add(global.enabled);
+  }
+  for (const override of overrides) {
+    effectiveStates.add(override.enabled);
+  }
+
+  return effectiveStates.size > 1 ? "mid_rollout" : "fully_rolled_out";
+}
+
+function buildMutationReceiptState({
+  row,
+  fallbackTitle,
+  fallbackMessage,
+  fallbackResourceLink,
+  result,
+}: {
+  row: FeatureFlagRow;
+  fallbackTitle: string;
+  fallbackMessage: string;
+  fallbackResourceLink?: CrossAppResourceLink | null;
+  result?: RuntimeFeatureFlagMutationResult | null;
+}): ReceiptState {
+  const receipt = result?.receipt;
+  const status = receipt?.status ?? result?.status ?? "completed";
+  const auditId = receipt?.auditId ?? result?.auditId;
+  const message = receipt?.message ?? result?.message ?? fallbackMessage;
+  const resourceLink =
+    receipt?.resourceLink ??
+    result?.resourceLink ??
+    fallbackResourceLink ??
+    null;
+
+  return {
+    status: status === "failed" ? "failed" : "completed",
+    title: fallbackTitle,
+    message,
+    auditHref: auditId
+      ? `/audit?auditId=${encodeURIComponent(auditId)}`
+      : auditHref(row.key),
+    resourceLink,
+  };
 }
 
 function buildRows({
@@ -767,11 +837,14 @@ function buildRows({
         enabled: flag.enabled,
         description: flag.description,
         updatedAt: flag.updatedAt,
-        crossLink: buildOpsDeepLink(tenant, flag.key),
+        crossLink: flag.resourceLink ?? null,
       };
-      const updatedBy = runtimeUpdatedBy(flag);
-      if (updatedBy) {
-        overrideRecord.updatedBy = updatedBy;
+      if (flag.rolloutState) {
+        overrideRecord.rolloutState = flag.rolloutState;
+      }
+      const changedBy = latestChangedBy(flag);
+      if (changedBy) {
+        overrideRecord.lastChangedBy = changedBy;
       }
       if (flag.availableActions) {
         overrideRecord.availableActions = flag.availableActions;
@@ -798,35 +871,29 @@ function buildRows({
         selectedTenantOverride?.description ??
         overrides[0]?.description ??
         "—";
-      const deprecated = isDeprecatedFlag(key, description);
-      const effectiveStates = new Set<boolean>();
-      if (global) {
-        effectiveStates.add(global.enabled);
-      }
-      for (const override of overrides) {
-        effectiveStates.add(override.enabled);
-      }
-
-      const rolloutState: RolloutState = deprecated
-        ? "deprecated"
-        : !global && overrides.length > 0
-          ? "tenant_only"
-          : effectiveStates.size > 1
-            ? "mid_rollout"
-            : "fully_rolled_out";
-
-      const timestamps = [
-        global?.updatedAt ?? "",
-        ...overrides.map((override) => override.updatedAt),
-      ].filter(Boolean);
-      const latestUpdatedAt =
-        timestamps.sort((left, right) => right.localeCompare(left))[0] ?? "";
-      const updatedBy =
-        runtimeUpdatedBy(selectedTenantSnapshot) ??
-        selectedTenantOverride?.updatedBy ??
-        runtimeUpdatedBy(global as RuntimeFeatureFlagRecord | null) ??
-        overrides.find((override) => override.updatedBy)?.updatedBy ??
-        null;
+      const rolloutState = resolveRolloutState(
+        global as RuntimeFeatureFlagRecord | null,
+        overrides,
+        selectedTenantSnapshot,
+      );
+      const latestRecord = [
+        global as RuntimeFeatureFlagRecord | null,
+        selectedTenantSnapshot,
+        ...overrides,
+      ]
+        .filter(
+          (
+            candidate,
+          ): candidate is
+            | RuntimeFeatureFlagRecord
+            | FeatureFlagOverrideRecord => Boolean(candidate?.updatedAt),
+        )
+        .sort(
+          (left, right) =>
+            timestampValue(right.updatedAt) - timestampValue(left.updatedAt),
+        )[0];
+      const latestUpdatedAt = latestRecord?.updatedAt ?? "";
+      const updatedBy = latestChangedBy(latestRecord);
 
       return {
         key,
@@ -849,6 +916,9 @@ function availableActionsForRow(row: FeatureFlagRow, selectedTenantId: string) {
     }
     if (row.selectedTenantOverride?.availableActions) {
       return row.selectedTenantOverride.availableActions;
+    }
+    if (row.selectedTenantSnapshot || row.selectedTenantOverride) {
+      return [];
     }
   }
 
@@ -1708,11 +1778,10 @@ export default function FeatureFlagsPage() {
     ? availableActionsForRow(selectedRow, selectedTenantId)
     : [];
   const selectedOpsLink =
-    selectedRow && selectedTenant
-      ? buildOpsDeepLink(selectedTenant, selectedRow.key)
-      : (selectedRow?.selectedTenantOverride?.crossLink ??
-        selectedRow?.overrides[0]?.crossLink ??
-        null);
+    selectedRow?.selectedTenantSnapshot?.resourceLink ??
+    selectedRow?.selectedTenantOverride?.crossLink ??
+    selectedRow?.overrides[0]?.crossLink ??
+    null;
 
   function buildDescriptorPresentation(
     row: FeatureFlagRow,
@@ -2005,27 +2074,30 @@ export default function FeatureFlagsPage() {
 
     try {
       if (pendingAction.kind === "toggle_global") {
-        await client.updateFeatureFlag(
+        const result = (await client.updateFeatureFlag(
           pendingAction.row.key,
           pendingAction.nextEnabled,
           { reason: actionReason.trim() },
+        )) as RuntimeFeatureFlagMutationResult;
+        setReceipt(
+          buildMutationReceiptState({
+            row: pendingAction.row,
+            fallbackTitle:
+              locale === "en" ? "Global default updated" : "已更新全域預設值",
+            fallbackMessage:
+              locale === "en"
+                ? `${pendingAction.row.key} now resolves ${pendingAction.nextEnabled ? "enabled" : "disabled"} by default.`
+                : `${pendingAction.row.key} 的平台預設已切換為${
+                    pendingAction.nextEnabled ? "啟用" : "停用"
+                  }。`,
+            fallbackResourceLink:
+              pendingAction.row.selectedTenantSnapshot?.resourceLink ??
+              pendingAction.row.selectedTenantOverride?.crossLink ??
+              pendingAction.row.overrides[0]?.crossLink ??
+              null,
+            result,
+          }),
         );
-        setReceipt({
-          status: "completed",
-          title:
-            locale === "en" ? "Global default updated" : "已更新全域預設值",
-          message:
-            locale === "en"
-              ? `${pendingAction.row.key} now resolves ${pendingAction.nextEnabled ? "enabled" : "disabled"} by default.`
-              : `${pendingAction.row.key} 的平台預設已切換為${
-                  pendingAction.nextEnabled ? "啟用" : "停用"
-                }。`,
-          auditHref: auditHref(pendingAction.row.key),
-          resourceLink:
-            pendingAction.row.selectedTenantOverride?.crossLink ??
-            pendingAction.row.overrides[0]?.crossLink ??
-            null,
-        });
       } else if (pendingAction.kind === "add_tenant_override") {
         const overrideCommand =
           pendingAction.description.trim().length > 0
@@ -2039,61 +2111,64 @@ export default function FeatureFlagsPage() {
                 reason: actionReason.trim(),
               };
 
-        await client.upsertFeatureFlagTenantOverride(
+        const result = (await client.upsertFeatureFlagTenantOverride(
           pendingAction.row.key,
           pendingAction.tenantId,
           overrideCommand,
-        );
+        )) as RuntimeFeatureFlagMutationResult;
 
         const targetTenant =
           tenants.find((tenant) => tenant.id === pendingAction.tenantId) ??
           null;
 
-        setReceipt({
-          status: "completed",
-          title:
-            locale === "en"
-              ? "Tenant override applied"
-              : "已套用 tenant override",
-          message:
-            locale === "en"
-              ? `${pendingAction.row.key} now carries a tenant-specific value for ${targetTenant?.code ?? pendingAction.tenantId}.`
-              : `${pendingAction.row.key} 已為 ${
-                  targetTenant?.code ?? pendingAction.tenantId
-                } 寫入 tenant-specific override。`,
-          auditHref: auditHref(pendingAction.row.key),
-          resourceLink: targetTenant
-            ? buildOpsDeepLink(targetTenant, pendingAction.row.key)
-            : null,
-        });
+        setReceipt(
+          buildMutationReceiptState({
+            row: pendingAction.row,
+            fallbackTitle:
+              locale === "en"
+                ? "Tenant override applied"
+                : "已套用 tenant override",
+            fallbackMessage:
+              locale === "en"
+                ? `${pendingAction.row.key} now carries a tenant-specific value for ${targetTenant?.code ?? pendingAction.tenantId}.`
+                : `${pendingAction.row.key} 已為 ${
+                    targetTenant?.code ?? pendingAction.tenantId
+                  } 寫入 tenant-specific override。`,
+            fallbackResourceLink:
+              result.resourceLink ??
+              pendingAction.row.selectedTenantSnapshot?.resourceLink ??
+              null,
+            result,
+          }),
+        );
       } else {
-        await client.removeFeatureFlagTenantOverride(
+        const result = (await client.removeFeatureFlagTenantOverride(
           pendingAction.row.key,
           pendingAction.tenantId,
           { reason: actionReason.trim() },
-        );
+        )) as RuntimeFeatureFlagMutationResult;
 
         const targetTenant =
           tenants.find((tenant) => tenant.id === pendingAction.tenantId) ??
           null;
 
-        setReceipt({
-          status: "completed",
-          title:
-            locale === "en"
-              ? "Tenant override removed"
-              : "已移除 tenant override",
-          message:
-            locale === "en"
-              ? `${pendingAction.row.key} now falls back to the platform default for ${targetTenant?.code ?? pendingAction.tenantId}.`
-              : `${pendingAction.row.key} 已為 ${
-                  targetTenant?.code ?? pendingAction.tenantId
-                } 移除 tenant override，並回退到平台預設值。`,
-          auditHref: auditHref(pendingAction.row.key),
-          resourceLink: targetTenant
-            ? buildOpsDeepLink(targetTenant, pendingAction.row.key)
-            : null,
-        });
+        setReceipt(
+          buildMutationReceiptState({
+            row: pendingAction.row,
+            fallbackTitle:
+              locale === "en"
+                ? "Tenant override removed"
+                : "已移除 tenant override",
+            fallbackMessage:
+              locale === "en"
+                ? `${pendingAction.row.key} now falls back to the platform default for ${targetTenant?.code ?? pendingAction.tenantId}.`
+                : `${pendingAction.row.key} 已為 ${
+                    targetTenant?.code ?? pendingAction.tenantId
+                  } 移除 tenant override，並回退到平台預設值。`,
+            fallbackResourceLink: result.resourceLink ?? null,
+            result,
+          }),
+        );
       }
 
       setPendingAction(null);
@@ -2580,17 +2655,19 @@ export default function FeatureFlagsPage() {
                             <div style={secondaryMonoStyle}>
                               {formatDateTime(override.updatedAt)}
                             </div>
-                            <div style={metaRowStyle}>
-                              <a
-                                href={crossAppHref(override.crossLink)}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={deepLinkStyle}
-                              >
-                                {copy.viewOps}
-                                <CanvasIcon name="ext" size={12} />
-                              </a>
-                            </div>
+                            {override.crossLink ? (
+                              <div style={metaRowStyle}>
+                                <a
+                                  href={crossAppHref(override.crossLink)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={deepLinkStyle}
+                                >
+                                  {copy.viewOps}
+                                  <CanvasIcon name="ext" size={12} />
+                                </a>
+                              </div>
+                            ) : null}
                           </div>
                         ))
                       ) : (
