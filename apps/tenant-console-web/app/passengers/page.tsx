@@ -33,20 +33,47 @@ const th = buildCanvasTheme({
 const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "grid",
-  gap: 18,
+  gap: 16,
 };
 
 const kpiGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
   gap: 12,
 };
 
-const overviewGridStyle: CSSProperties = {
+const signalGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.35fr) minmax(300px, 0.85fr)",
+  gridTemplateColumns: "minmax(0, 1.2fr) minmax(280px, 0.8fr)",
   gap: 16,
   alignItems: "start",
+};
+
+const sitemapCardStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+};
+
+const sitemapTrailStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 8,
+  color: th.textMuted,
+  fontSize: 12,
+};
+
+const sitemapBadgeStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 26,
+  padding: "0 10px",
+  borderRadius: 999,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  color: th.text,
+  fontSize: 11.5,
+  fontWeight: 600,
 };
 
 const filterBarStyle: CSSProperties = {
@@ -161,6 +188,11 @@ const linkButtonStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+const quietButtonStyle: CSSProperties = {
+  ...linkButtonStyle,
+  background: "rgba(255,255,255,0.02)",
+};
+
 const actionChipStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -195,7 +227,7 @@ const infoListStyle: CSSProperties = {
 
 const heroSummaryStyle: CSSProperties = {
   display: "grid",
-  gap: 14,
+  gap: 12,
 };
 
 const summaryStatGridStyle: CSSProperties = {
@@ -316,6 +348,13 @@ const detailSubtitleStyle: CSSProperties = {
 const detailSectionStyle: CSSProperties = {
   display: "grid",
   gap: 8,
+};
+
+const nameMetaStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+  alignItems: "center",
 };
 
 const deepLinkListStyle: CSSProperties = {
@@ -1005,6 +1044,39 @@ function getActionSummary(action: ResourceActionDescriptor) {
   }
 }
 
+function renderHeaderAction(
+  action: ResourceActionDescriptor,
+  label: string,
+  variant: "page" | "record" = "page",
+) {
+  const style =
+    action.enabled && variant === "page"
+      ? {
+          ...linkButtonStyle,
+          background: `linear-gradient(135deg, ${th.accent}, ${th.accentHi})`,
+          borderColor: "transparent",
+          color: "#06131a",
+        }
+      : action.enabled
+        ? quietButtonStyle
+        : {
+            ...quietButtonStyle,
+            opacity: 0.55,
+            cursor: "not-allowed",
+          };
+
+  return (
+    <span
+      key={`${variant}-${action.action}`}
+      style={style}
+      title={getActionSummary(action)}
+      aria-disabled={!action.enabled}
+    >
+      {label}
+    </span>
+  );
+}
+
 function renderEmptyState(
   reason: PassengerEmptyReason,
   primaryAction: ResourceActionDescriptor | null,
@@ -1036,10 +1108,7 @@ function renderEmptyState(
           {view.ctaLabel}
         </Link>
       ) : view.usePrimaryAction && primaryAction ? (
-        renderActionDescriptor(
-          primaryAction,
-          getActionLabel(primaryAction.action),
-        )
+        renderHeaderAction(primaryAction, getActionLabel(primaryAction.action))
       ) : null}
       <CanvasPill theme={th} tone={view.tone}>
         emptyReason: {reason}
@@ -1322,13 +1391,18 @@ export default async function PassengersPage({
           >
             {row.fullName}
           </Link>
-          <div style={infoListStyle}>
+          <div style={nameMetaStyle}>
             <CanvasPill theme={th} tone="info">
               {row.kindLabel}
             </CanvasPill>
             {row.duplicateName ? (
               <CanvasPill theme={th} tone="warn">
                 同名
+              </CanvasPill>
+            ) : null}
+            {(row.qualityIssues?.length ?? 0) > 0 ? (
+              <CanvasPill theme={th} tone="neutral">
+                quality {row.qualityIssues?.length}
               </CanvasPill>
             ) : null}
           </div>
@@ -1433,22 +1507,33 @@ export default async function PassengersPage({
           .map((issue) => getQualityIssueSummary(issue))
           .join(" ")
       : "目前選取的 passenger record 沒有 backend quality issue。";
+  const consentedCount = passengers.filter(
+    (passenger) =>
+      typeof passenger.metadata?.consentVersion === "string" &&
+      passenger.metadata.consentVersion.trim().length > 0,
+  ).length;
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
         title="乘客通訊錄"
-        subtitle="快速建單預填主資料 · 軟停用保留歷史 · CTA 依 availableActions"
+        subtitle="員工 · 訪客 · 啟用狀態 · 同意書版本 · 軟停用 only (Q-TEN06)"
         tabs={tabs as ReactNode[]}
         activeTab={activeTab}
         actions={
           <div style={actionsWrapStyle}>
-            <Link href={refreshHref} style={linkButtonStyle}>
+            <span
+              style={quietButtonStyle}
+              title="CSV bulk onboarding flow 尚未接入"
+            >
+              CSV 匯入
+            </span>
+            <Link href={refreshHref} style={quietButtonStyle}>
               重新整理
             </Link>
             {pageActions.map((action) =>
-              renderActionDescriptor(action, getActionLabel(action.action)),
+              renderHeaderAction(action, getActionLabel(action.action)),
             )}
           </div>
         }
@@ -1516,68 +1601,24 @@ export default async function PassengersPage({
           />
         </div>
 
-        <div style={overviewGridStyle}>
+        <div style={signalGridStyle}>
           <CanvasCard
             theme={th}
-            title="目錄摘要"
-            subtitle="Passenger directory 是 `/bookings/new` 的預填來源；停用後會從 picker 隱藏，但歷史訂單仍保留快照。"
+            title="Sitemap / 入口出口"
+            subtitle="入口來自 Sidebar；出口保留 passenger detail 與 `/bookings/new` 預填 deep link。"
             style={heroCardStyle}
           >
-            <div style={heroSummaryStyle}>
+            <div style={sitemapCardStyle}>
+              <div style={sitemapTrailStyle}>
+                <span style={sitemapBadgeStyle}>Tenant Console</span>
+                <span>/</span>
+                <span style={sitemapBadgeStyle}>資料維護</span>
+                <span>/</span>
+                <span style={sitemapBadgeStyle}>乘客</span>
+              </div>
               <div style={helperTextStyle}>
-                這個畫面同時承接員工與訪客名冊。列表優先顯示啟用資料，若 backend
-                回報 duplicate-name 或 quality issue，會在 row
-                與詳情側欄同步標示。
-              </div>
-              <div style={summaryStatGridStyle}>
-                <div style={summaryStatStyle}>
-                  <div style={summaryStatLabelStyle}>目前可見</div>
-                  <div style={summaryStatValueStyle}>{rows.length}</div>
-                  <div style={subtleTextStyle}>
-                    {visibleEmployeeCount} 員工 / {visibleVisitorCount} 訪客
-                  </div>
-                </div>
-                <div style={summaryStatStyle}>
-                  <div style={summaryStatLabelStyle}>同名警示</div>
-                  <div style={summaryStatValueStyle}>
-                    {visibleDuplicateCount}
-                  </div>
-                  <div style={subtleTextStyle}>
-                    依姓名偵測，需搭配工號或手機辨識
-                  </div>
-                </div>
-                <div style={summaryStatStyle}>
-                  <div style={summaryStatLabelStyle}>資料品質</div>
-                  <div style={summaryStatValueStyle}>
-                    {visibleQualityIssueCount}
-                  </div>
-                  <div style={subtleTextStyle}>
-                    backend flags 直接保留在 roster 與 detail
-                  </div>
-                </div>
-              </div>
-
-              <div style={directoryStateGridStyle}>
-                <div style={stateMetricStyle}>
-                  <div style={summaryStatLabelStyle}>全部</div>
-                  <div style={stateMetricValueStyle}>{counts.all}</div>
-                  <div style={subtleTextStyle}>完整名冊</div>
-                </div>
-                <div style={stateMetricStyle}>
-                  <div style={summaryStatLabelStyle}>員工</div>
-                  <div style={stateMetricValueStyle}>{counts.employee}</div>
-                  <div style={subtleTextStyle}>主要預訂對象</div>
-                </div>
-                <div style={stateMetricStyle}>
-                  <div style={summaryStatLabelStyle}>訪客</div>
-                  <div style={stateMetricValueStyle}>{counts.visitor}</div>
-                  <div style={subtleTextStyle}>臨時或外部訪客</div>
-                </div>
-                <div style={stateMetricStyle}>
-                  <div style={summaryStatLabelStyle}>已停用</div>
-                  <div style={stateMetricValueStyle}>{counts.disabled}</div>
-                  <div style={subtleTextStyle}>歷史可見、picker 隱藏</div>
-                </div>
+                右側 rail 聚合 passenger detail、availableActions、audit 與
+                cross-app deep links；選取名冊列後可直接導向建單預填。
               </div>
             </div>
           </CanvasCard>
@@ -1616,6 +1657,70 @@ export default async function PassengersPage({
             </div>
           </CanvasCard>
         </div>
+
+        <CanvasCard
+          theme={th}
+          title="目錄摘要"
+          subtitle="Passenger directory 是 `/bookings/new` 的預填來源；停用後會從 picker 隱藏，但歷史訂單仍保留快照。"
+          style={heroCardStyle}
+        >
+          <div style={heroSummaryStyle}>
+            <div style={helperTextStyle}>
+              這個畫面同時承接員工與訪客名冊。列表優先顯示啟用資料，若 backend
+              回報 duplicate-name 或 quality issue，會在 row
+              與詳情側欄同步標示。
+            </div>
+            <div style={summaryStatGridStyle}>
+              <div style={summaryStatStyle}>
+                <div style={summaryStatLabelStyle}>目前可見</div>
+                <div style={summaryStatValueStyle}>{rows.length}</div>
+                <div style={subtleTextStyle}>
+                  {visibleEmployeeCount} 員工 / {visibleVisitorCount} 訪客
+                </div>
+              </div>
+              <div style={summaryStatStyle}>
+                <div style={summaryStatLabelStyle}>同名警示</div>
+                <div style={summaryStatValueStyle}>{visibleDuplicateCount}</div>
+                <div style={subtleTextStyle}>需搭配工號或手機辨識</div>
+              </div>
+              <div style={summaryStatStyle}>
+                <div style={summaryStatLabelStyle}>資料品質</div>
+                <div style={summaryStatValueStyle}>
+                  {visibleQualityIssueCount}
+                </div>
+                <div style={subtleTextStyle}>backend flags 保留在 roster</div>
+              </div>
+              <div style={summaryStatStyle}>
+                <div style={summaryStatLabelStyle}>同意書版本</div>
+                <div style={summaryStatValueStyle}>{consentedCount}</div>
+                <div style={subtleTextStyle}>metadata consentVersion</div>
+              </div>
+            </div>
+
+            <div style={directoryStateGridStyle}>
+              <div style={stateMetricStyle}>
+                <div style={summaryStatLabelStyle}>全部</div>
+                <div style={stateMetricValueStyle}>{counts.all}</div>
+                <div style={subtleTextStyle}>完整名冊</div>
+              </div>
+              <div style={stateMetricStyle}>
+                <div style={summaryStatLabelStyle}>員工</div>
+                <div style={stateMetricValueStyle}>{counts.employee}</div>
+                <div style={subtleTextStyle}>主要預訂對象</div>
+              </div>
+              <div style={stateMetricStyle}>
+                <div style={summaryStatLabelStyle}>訪客</div>
+                <div style={stateMetricValueStyle}>{counts.visitor}</div>
+                <div style={subtleTextStyle}>臨時或外部訪客</div>
+              </div>
+              <div style={stateMetricStyle}>
+                <div style={summaryStatLabelStyle}>已停用</div>
+                <div style={stateMetricValueStyle}>{counts.disabled}</div>
+                <div style={subtleTextStyle}>歷史可見、picker 隱藏</div>
+              </div>
+            </div>
+          </div>
+        </CanvasCard>
 
         <CanvasCard
           theme={th}
