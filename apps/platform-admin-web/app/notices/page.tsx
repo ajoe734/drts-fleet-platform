@@ -74,6 +74,12 @@ function getCopy(locale: string) {
         refreshDetail: "每 30 秒自動刷新，保留手動刷新。",
         lastRefresh: "最後刷新",
         currentPolicy: "目前策略",
+        routeMapTitle: "Route map",
+        routeMapBody:
+          "單一路由 `/notices` 透過三個 tabs 承載公告、維護模式與廣播歷史。",
+        downstreamTitle: "Cross-app exits",
+        downstreamBody:
+          "critical / maintenance 會把 banner 推到 ops、tenant、driver 體驗；deep link 依 contract 開新分頁。",
         tabs: {
           notices: "Notices",
           maint: "Maintenance Mode",
@@ -114,6 +120,9 @@ function getCopy(locale: string) {
         statusFilter: "狀態篩選",
         historyFilter: "投遞狀態",
         currentState: "目前狀態",
+        currentReason: "目前原因",
+        lastEnabledAt: "上次啟用",
+        actionReasonField: "這次操作原因",
         updatedAt: "更新時間",
         createdAt: "建立時間",
         createdBy: "建立者",
@@ -159,6 +168,9 @@ function getCopy(locale: string) {
         noticeEmptyHint: "可加上 `?emptyReason=` 驗證六種空狀態。",
         allFilter: "全部",
         noDataFallback: "尚無資料",
+        readOnly: "唯讀",
+        readOnlyHint: "你可查看這筆資料，但目前沒有可執行動作。",
+        readOnlyHistory: "此分頁唯讀，僅顯示跨 app 投遞結果。",
         openLink: "開啟",
         audienceLabel: {
           all: "全部",
@@ -193,6 +205,12 @@ function getCopy(locale: string) {
           "Auto refresh every 30s with manual refresh kept visible.",
         lastRefresh: "Last refresh",
         currentPolicy: "Current policy",
+        routeMapTitle: "Route map",
+        routeMapBody:
+          "A single `/notices` route hosts notices, maintenance mode, and broadcast history via tabs.",
+        downstreamTitle: "Cross-app exits",
+        downstreamBody:
+          "Critical and maintenance notices push banners to ops, tenant, and driver experiences. Contract deep links open in a new tab.",
         tabs: {
           notices: "Notices",
           maint: "Maintenance Mode",
@@ -234,6 +252,9 @@ function getCopy(locale: string) {
         statusFilter: "Status filter",
         historyFilter: "Delivery filter",
         currentState: "Current state",
+        currentReason: "Current reason",
+        lastEnabledAt: "Last enabled",
+        actionReasonField: "Action reason",
         updatedAt: "Updated",
         createdAt: "Created",
         createdBy: "Created by",
@@ -280,6 +301,11 @@ function getCopy(locale: string) {
         noticeEmptyHint: "Use `?emptyReason=` to verify all six empty states.",
         allFilter: "All",
         noDataFallback: "No data",
+        readOnly: "Read-only",
+        readOnlyHint:
+          "You can inspect this record, but no actions are available.",
+        readOnlyHistory:
+          "This tab is read-only and only shows cross-app delivery results.",
         openLink: "Open",
         audienceLabel: {
           all: "All",
@@ -376,6 +402,21 @@ function normalizeMaintenanceActions(
   maintenance: MaintenanceRecord | null,
 ): ResourceActionDescriptor[] {
   return maintenance?.availableActions ?? [];
+}
+
+function getMaintenanceAction(
+  maintenance: MaintenanceRecord | null,
+  enabled: boolean,
+): ResourceActionDescriptor | null {
+  const expectedAction = enabled
+    ? "clear_maintenance_mode"
+    : "set_maintenance_mode";
+  const actions = normalizeMaintenanceActions(maintenance);
+  return (
+    actions.find((action) => action.action === expectedAction) ??
+    actions[0] ??
+    null
+  );
 }
 
 function getSeverityTone(severity: PlatformNoticeSeverity) {
@@ -574,7 +615,11 @@ function EmptyStateCard({
       glyph: "05",
     },
   };
-  const style = styleMap[reason] ?? styleMap.no_data;
+  const style = styleMap[reason] ?? {
+    accent: "#0f766e",
+    glow: "rgba(15,118,110,0.12)",
+    glyph: "00",
+  };
 
   return (
     <div
@@ -680,7 +725,7 @@ export default function NoticesPage() {
   const [formReason, setFormReason] = useState("");
   const [formScheduledAt, setFormScheduledAt] = useState("");
   const [maintEnabled, setMaintEnabled] = useState(false);
-  const [maintReason, setMaintReason] = useState("");
+  const [maintActionReason, setMaintActionReason] = useState("");
   const [maintScheduledStart, setMaintScheduledStart] = useState("");
   const [maintScheduledEnd, setMaintScheduledEnd] = useState("");
 
@@ -704,7 +749,7 @@ export default function NoticesPage() {
       setMaintenance(maintenanceData.item);
       setMaintenanceEmptyState(maintenanceData.emptyState ?? null);
       setMaintEnabled(Boolean(maintenanceData.item?.enabled));
-      setMaintReason(maintenanceData.item?.reason ?? "");
+      setMaintActionReason("");
       setMaintScheduledStart(maintenanceData.item?.scheduledStart ?? "");
       setMaintScheduledEnd(maintenanceData.item?.scheduledEnd ?? "");
       setLastRefreshAt(new Date().toISOString());
@@ -757,7 +802,7 @@ export default function NoticesPage() {
     const state = notice.deliverySummary?.state;
     return state === "pending" || state === "delivering";
   }).length;
-  const maintenanceAction = normalizeMaintenanceActions(maintenance)[0];
+  const maintenanceAction = getMaintenanceAction(maintenance, maintEnabled);
 
   const updateTab = useCallback(
     (nextTab: NoticeTab) => {
@@ -824,7 +869,7 @@ export default function NoticesPage() {
   }
 
   async function handleSaveMaintenance() {
-    if (maintenanceAction?.requiresReason && !maintReason.trim()) {
+    if (maintenanceAction?.requiresReason && !maintActionReason.trim()) {
       setError(copy.maintenanceRequiredReason);
       return;
     }
@@ -834,7 +879,7 @@ export default function NoticesPage() {
     try {
       await client.setMaintenanceMode({
         enabled: maintEnabled,
-        reason: maintReason.trim() || null,
+        reason: maintActionReason.trim() || null,
         scheduledStart: maintScheduledStart || null,
         scheduledEnd: maintScheduledEnd || null,
       });
@@ -890,13 +935,22 @@ export default function NoticesPage() {
   function renderNoticeActions(notice: NoticeRecord) {
     const actions = normalizeNoticeActions(notice);
     if (!actions.length) {
-      return <span style={{ color: "#64748b" }}>{copy.noDataFallback}</span>;
+      return (
+        <div style={{ display: "grid", gap: 6 }}>
+          <span className="admin-badge admin-badge--neutral">
+            {copy.readOnly}
+          </span>
+          <span style={{ color: "#64748b", fontSize: 13 }}>
+            {copy.readOnlyHint}
+          </span>
+        </div>
+      );
     }
 
     return (
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {actions.map((action) => {
-          if (action.action === "resolve_notice") {
+          if (action.action === "resolve_notice" && action.enabled) {
             return (
               <button
                 key={action.action}
@@ -907,6 +961,18 @@ export default function NoticesPage() {
                 onClick={() => void handleResolveNotice(notice.noticeId)}
               >
                 {copy.resolve}
+              </button>
+            );
+          }
+          if (action.action === "view_broadcast_history" && action.enabled) {
+            return (
+              <button
+                key={action.action}
+                type="button"
+                className="admin-btn admin-btn--secondary admin-btn--sm"
+                onClick={() => updateTab("history")}
+              >
+                {getActionLabel(locale, action.action)}
               </button>
             );
           }
@@ -1103,6 +1169,7 @@ export default function NoticesPage() {
                 <input
                   type="checkbox"
                   checked={maintEnabled}
+                  disabled={!maintenanceAction?.enabled}
                   onChange={(event) => setMaintEnabled(event.target.checked)}
                 />
                 <span className="admin-switch-slider" />
@@ -1117,16 +1184,31 @@ export default function NoticesPage() {
             <label style={fieldGroupStyle}>
               <span style={fieldLabelStyle}>{copy.reasonField}</span>
               <input
-                value={maintReason}
-                onChange={(event) => setMaintReason(event.target.value)}
+                value={maintenance?.reason ?? ""}
+                disabled
+                style={{
+                  ...fieldStyle,
+                  color: "#475569",
+                  background: "rgba(241,245,249,0.9)",
+                }}
+                placeholder={copy.noReason}
+              />
+            </label>
+            <label style={fieldGroupStyle}>
+              <span style={fieldLabelStyle}>{copy.actionReasonField}</span>
+              <input
+                value={maintActionReason}
+                disabled={!maintenanceAction?.enabled}
+                onChange={(event) => setMaintActionReason(event.target.value)}
                 style={fieldStyle}
-                placeholder={copy.reasonField}
+                placeholder={copy.actionReasonField}
               />
             </label>
             <label style={fieldGroupStyle}>
               <span style={fieldLabelStyle}>{copy.scheduleStartField}</span>
               <input
                 value={maintScheduledStart}
+                disabled={!maintenanceAction?.enabled}
                 onChange={(event) => setMaintScheduledStart(event.target.value)}
                 style={fieldStyle}
                 placeholder="2026-05-27T02:00:00Z"
@@ -1136,6 +1218,7 @@ export default function NoticesPage() {
               <span style={fieldLabelStyle}>{copy.scheduleEndField}</span>
               <input
                 value={maintScheduledEnd}
+                disabled={!maintenanceAction?.enabled}
                 onChange={(event) => setMaintScheduledEnd(event.target.value)}
                 style={fieldStyle}
                 placeholder="2026-05-27T04:00:00Z"
@@ -1173,6 +1256,12 @@ export default function NoticesPage() {
               </div>
             </div>
             <div style={fieldBoxStyle}>
+              <div style={metaLabelStyle}>{copy.currentReason}</div>
+              <div style={{ marginTop: 6 }}>
+                {maintenance.reason || copy.noReason}
+              </div>
+            </div>
+            <div style={fieldBoxStyle}>
               <div style={metaLabelStyle}>{copy.scheduledWindow}</div>
               <div style={{ marginTop: 6 }}>
                 {formatWindow(
@@ -1191,6 +1280,14 @@ export default function NoticesPage() {
             <div style={fieldBoxStyle}>
               <div style={metaLabelStyle}>{copy.updatedBy}</div>
               <div style={{ marginTop: 6 }}>{maintenance.updatedBy || "—"}</div>
+            </div>
+            <div style={fieldBoxStyle}>
+              <div style={metaLabelStyle}>{copy.lastEnabledAt}</div>
+              <div style={{ marginTop: 6 }}>
+                {maintenance.lastEnabledAt
+                  ? formatDateTime(maintenance.lastEnabledAt)
+                  : "—"}
+              </div>
             </div>
           </div>
 
@@ -1228,7 +1325,9 @@ export default function NoticesPage() {
             >
               {savingMaintenance
                 ? copy.savingMaintenance
-                : copy.saveMaintenance}
+                : maintenanceAction?.action === "clear_maintenance_mode"
+                  ? copy.clearAction
+                  : copy.saveMaintenance}
             </button>
           </div>
         </div>
@@ -1261,7 +1360,7 @@ export default function NoticesPage() {
                 {copy.activeBanner}
               </div>
               <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 8 }}>
-                {maintReason || maintenance.reason || copy.maintenanceOn}
+                {maintActionReason || maintenance.reason || copy.maintenanceOn}
               </div>
               <p
                 style={{
@@ -1273,6 +1372,21 @@ export default function NoticesPage() {
                 {copy.maintenancePreviewBody}
               </p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {maintScheduledStart || maintScheduledEnd ? (
+                  <span
+                    className="admin-badge"
+                    style={{
+                      background: "rgba(255,255,255,0.16)",
+                      color: "#fff",
+                    }}
+                  >
+                    {formatWindow(
+                      maintScheduledStart,
+                      maintScheduledEnd,
+                      copy.noWindow,
+                    )}
+                  </span>
+                ) : null}
                 {(maintenance.affectedServices ?? []).map((service: string) => (
                   <span
                     key={service}
@@ -1333,6 +1447,9 @@ export default function NoticesPage() {
               {copy.historyTableTitle}
             </div>
             <p style={sectionHintStyle}>{copy.historyTableHint}</p>
+            <p style={{ ...sectionHintStyle, marginTop: 8 }}>
+              {copy.readOnlyHistory}
+            </p>
           </div>
           <label style={{ ...fieldGroupStyle, minWidth: 180 }}>
             <span style={fieldLabelStyle}>{copy.historyFilter}</span>
@@ -1512,6 +1629,8 @@ export default function NoticesPage() {
                 padding: 18,
                 background: "rgba(255,255,255,0.08)",
                 backdropFilter: "blur(10px)",
+                display: "grid",
+                gap: 8,
               }}
             >
               <div
@@ -1526,6 +1645,24 @@ export default function NoticesPage() {
               </div>
               <div style={{ marginTop: 8, color: "rgba(255,255,255,0.78)" }}>
                 {copy.refreshDetail}
+              </div>
+              <div style={{ marginTop: 4 }}>
+                <ActionMeta
+                  locale={locale}
+                  action={
+                    maintenanceAction ?? {
+                      action: "set_maintenance_mode",
+                      enabled: true,
+                      requiresReason: true,
+                      riskLevel: "high",
+                    }
+                  }
+                  label={
+                    maintenanceAction?.action === "clear_maintenance_mode"
+                      ? copy.clearAction
+                      : copy.setAction
+                  }
+                />
               </div>
             </div>
           </div>
@@ -1591,6 +1728,85 @@ export default function NoticesPage() {
           </div>
         </div>
       ) : null}
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.1fr) minmax(320px, 0.9fr)",
+          gap: 16,
+        }}
+      >
+        <div className="admin-card" style={{ marginBottom: 0 }}>
+          <div style={sectionHeaderStyle}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>
+                {copy.routeMapTitle}
+              </div>
+              <p style={sectionHintStyle}>{copy.routeMapBody}</p>
+            </div>
+            <span className="admin-badge admin-badge--neutral">/notices</span>
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+              gap: 12,
+            }}
+          >
+            {TAB_PARAM_VALUES.map((tab, index) => (
+              <div
+                key={tab}
+                style={{
+                  borderRadius: 16,
+                  border: "1px solid rgba(148,163,184,0.22)",
+                  padding: 16,
+                  background:
+                    activeTab === tab
+                      ? "linear-gradient(180deg, rgba(15,23,42,0.06), rgba(255,255,255,0.96))"
+                      : "rgba(255,255,255,0.82)",
+                }}
+              >
+                <div style={metaLabelStyle}>{`0${index + 1}`}</div>
+                <div style={{ marginTop: 8, fontWeight: 800 }}>
+                  {copy.tabs[tab]}
+                </div>
+                <div
+                  style={{ marginTop: 6, color: "#64748b", lineHeight: 1.6 }}
+                >
+                  {tab === "notices"
+                    ? copy.noticesTableHint
+                    : tab === "maint"
+                      ? copy.maintenanceHint
+                      : copy.historyTableHint}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="admin-card" style={{ marginBottom: 0 }}>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>
+            {copy.downstreamTitle}
+          </div>
+          <p style={{ ...sectionHintStyle, marginTop: 6 }}>
+            {copy.downstreamBody}
+          </p>
+          <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+            <div style={fieldBoxStyle}>
+              <div style={metaLabelStyle}>{copy.noticeSummary}</div>
+              <div style={{ marginTop: 8 }}>
+                {renderLinkSet(maintenance?.crossAppLinks)}
+              </div>
+            </div>
+            <div style={fieldBoxStyle}>
+              <div style={metaLabelStyle}>{copy.historyTableTitle}</div>
+              <div style={{ marginTop: 8 }}>
+                {renderLinkSet(notices[0]?.crossAppLinks)}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div
         className="admin-card"
