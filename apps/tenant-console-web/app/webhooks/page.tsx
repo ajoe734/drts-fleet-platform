@@ -858,7 +858,7 @@ async function deleteWebhook(formData: FormData) {
       throw new Error("刪除 webhook 需要 reason。");
     }
 
-    await client.deleteWebhookEndpoint(webhookId);
+    await client.deleteWebhookEndpoint(webhookId, { reason });
     revalidatePath("/webhooks");
     destination = `/webhooks?success=${encodeURIComponent("Webhook endpoint 已刪除。")}`;
   } catch (error) {
@@ -1312,6 +1312,9 @@ export default async function WebhooksPage({
         activeTab="Endpoints"
         actions={
           <>
+            <a href="#payload-schema" style={actionLinkStyle}>
+              payload schema
+            </a>
             {createEndpointAction
               ? renderActionDescriptor(
                   createEndpointAction,
@@ -1963,6 +1966,24 @@ export default async function WebhooksPage({
             )}
           </CanvasCard>
         </div>
+
+        <CanvasCard
+          theme={th}
+          title="Payload schema"
+          subtitle="對齊 canvas header action；前端只提供契約查閱，不自行生成或偽造 webhook payload"
+        >
+          <div id="payload-schema" style={inlineStackStyle}>
+            <div style={metaValueStyle}>
+              `WebhookEventPayload&lt;T&gt;` 是 canonical wire contract。tenant
+              UI 只顯示 endpoint / delivery / signature metadata，raw payload
+              與簽名生成仍由後端 authority 管理。
+            </div>
+            <div style={helperTextStyle}>
+              事件型別、resource identity 與 snake_case payload 規約由
+              `@drts/contracts` 提供；此頁不新增本地 schema 或 mock payload。
+            </div>
+          </div>
+        </CanvasCard>
 
         <CanvasCard
           theme={th}

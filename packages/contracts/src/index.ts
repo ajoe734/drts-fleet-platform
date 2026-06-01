@@ -895,6 +895,11 @@ export interface UpdateTenantWebhookEndpointCommand {
   url?: string;
   events?: string[];
   status?: TenantWebhookEndpointStatus;
+  reason?: string;
+}
+
+export interface DeleteTenantWebhookEndpointCommand {
+  reason: string;
 }
 
 export interface SendTestWebhookCommand {

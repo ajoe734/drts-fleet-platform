@@ -26,6 +26,7 @@ import type {
   EscalateTenantBookingApprovalRequestCommand,
   IdentityContext,
   CreateTenantWebhookEndpointCommand,
+  DeleteTenantWebhookEndpointCommand,
   IssueTenantApiKeyCommand,
   IssuePartnerIngressCredentialCommand,
   PartnerEligibilityAdapterAttemptRecord,
@@ -4356,8 +4357,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   deleteWebhookEndpoint(
     tenantId: string,
     webhookId: string,
+    command: DeleteTenantWebhookEndpointCommand,
     requestId?: string,
   ) {
+    this.assertNonBlank(command.reason, "reason");
     const removed = this.webhookEndpoints.find(
       (endpoint) =>
         endpoint.tenantId === tenantId && endpoint.webhookId === webhookId,
@@ -4394,7 +4397,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         resourceType: "webhook_endpoint",
         resourceId: removed.webhookId,
         oldValuesSummary: this.toWebhookResponse(removed),
-        newValuesSummary: { deleted: true },
+        newValuesSummary: { deleted: true, reason: command.reason.trim() },
       },
       requestId,
     );
@@ -4541,6 +4544,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     const now = new Date().toISOString();
     if (requestedStatus === "disabled") {
+      this.assertNonBlank(command.reason, "reason");
       endpoint.status = "disabled";
       endpoint.runtimeMetadata.disabledAt = now;
       endpoint.runtimeMetadata.disableReason = "manual_disable";
@@ -4576,7 +4580,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         resourceType: "webhook_endpoint",
         resourceId: endpoint.webhookId,
         oldValuesSummary: oldValues,
-        newValuesSummary: this.toWebhookResponse(endpoint),
+        newValuesSummary: {
+          ...this.toWebhookResponse(endpoint),
+          ...(requestedStatus === "disabled"
+            ? { reason: command.reason?.trim() ?? null }
+            : {}),
+        },
       },
       requestId,
     );

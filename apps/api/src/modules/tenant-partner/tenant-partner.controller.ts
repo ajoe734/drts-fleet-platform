@@ -20,6 +20,7 @@ import type {
   IssuePartnerIngressCredentialCommand,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
+  DeleteTenantWebhookEndpointCommand,
   DisableTenantCostCenterCommand,
   EvaluateTenantApprovalRuleCommand,
   ListOpsPendingApprovalRequestsQuery,
@@ -1083,6 +1084,7 @@ export class TenantPartnerController {
   @Delete("tenant/webhooks/:webhookId")
   deleteWebhookEndpoint(
     @Param("webhookId") webhookId: string,
+    @Body() command: DeleteTenantWebhookEndpointCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -1090,6 +1092,7 @@ export class TenantPartnerController {
       this.tenantPartnerService.deleteWebhookEndpoint(
         this.requireTenantId(tenantId),
         webhookId,
+        command,
         requestId,
       ) ?? {
         status: "not_found",

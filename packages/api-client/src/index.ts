@@ -194,6 +194,7 @@ import type {
   TenantRoleCatalogRecord,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
+  DeleteTenantWebhookEndpointCommand,
   TransferCallToComplaintCommand,
   TransferCallToIncidentCommand,
   EscalateComplaintToIncidentCommand,
@@ -1600,15 +1601,22 @@ export class ApiClient {
     webhookId: string,
     command: { reason: string },
   ): Promise<TenantWebhookEndpoint> {
-    void command;
     return this.post(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`, {
       // Tenant API still models disable through the update endpoint.
-      body: { status: "disabled" },
+      body: { status: "disabled", reason: command.reason },
     });
   }
 
-  async deleteWebhookEndpoint(webhookId: string) {
-    return this.delete(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`);
+  async deleteWebhookEndpoint(
+    webhookId: string,
+    command: DeleteTenantWebhookEndpointCommand,
+  ) {
+    return this.delete(
+      `/api/tenant/webhooks/${encodeURIComponent(webhookId)}`,
+      {
+        body: command,
+      },
+    );
   }
 
   async listWebhookDeliveries(
