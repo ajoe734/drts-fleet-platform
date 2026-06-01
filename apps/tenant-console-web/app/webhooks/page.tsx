@@ -8,6 +8,8 @@ import type {
   IdentityContext,
   NotificationRecord,
   ResourceActionDescriptor,
+  TenantIntegrationReadinessItem,
+  TenantIntegrationReadinessSummary,
   TenantIntegrationGovernancePackage,
   TenantWebhookEndpoint,
   TenantWebhookEndpointStatus,
@@ -343,15 +345,19 @@ type EmptyStateCopy = {
   tone: "info" | "success" | "danger" | "accent" | "warn";
 };
 
+type BannerTone = EmptyStateCopy["tone"];
+
 type WebhooksPageData = {
   identity: IdentityContext | null;
   governance: TenantIntegrationGovernancePackage | null;
+  readiness: TenantIntegrationReadinessSummary | null;
   notifications: NotificationRecord[];
   endpoints: TenantWebhookEndpoint[];
   deliveries: WebhookDeliveryRecord[];
   endpointError: string | null;
   deliveryError: string | null;
   governanceError: string | null;
+  readinessError: string | null;
   identityError: string | null;
   notificationsError: string | null;
   loadedAt: string;
@@ -994,12 +1000,16 @@ async function loadWebhooksPageData(): Promise<WebhooksPageData> {
   const [
     identityResult,
     governanceResult,
+    readinessResult,
     endpointsResult,
     deliveriesResult,
     notificationsResult,
   ] = await Promise.allSettled([
     client.getIdentityContext() as Promise<IdentityContext>,
     client.getTenantIntegrationGovernancePackage() as Promise<TenantIntegrationGovernancePackage>,
+    client.get<TenantIntegrationReadinessSummary>(
+      "/api/tenant/integration-governance/readiness",
+    ) as Promise<TenantIntegrationReadinessSummary>,
     client.listWebhooks() as Promise<TenantWebhookEndpoint[]>,
     client.get<{ items: WebhookDeliveryRecord[] }>(
       "/api/tenant/webhooks/deliveries",
@@ -1014,6 +1024,8 @@ async function loadWebhooksPageData(): Promise<WebhooksPageData> {
       identityResult.status === "fulfilled" ? identityResult.value : null,
     governance:
       governanceResult.status === "fulfilled" ? governanceResult.value : null,
+    readiness:
+      readinessResult.status === "fulfilled" ? readinessResult.value : null,
     notifications:
       notificationsResult.status === "fulfilled"
         ? notificationsResult.value
@@ -1038,6 +1050,10 @@ async function loadWebhooksPageData(): Promise<WebhooksPageData> {
       governanceResult.status === "rejected"
         ? toErrorMessage(governanceResult.reason)
         : null,
+    readinessError:
+      readinessResult.status === "rejected"
+        ? toErrorMessage(readinessResult.reason)
+        : null,
     identityError:
       identityResult.status === "rejected"
         ? toErrorMessage(identityResult.reason)
@@ -1048,6 +1064,40 @@ async function loadWebhooksPageData(): Promise<WebhooksPageData> {
         : null,
     loadedAt: new Date().toISOString(),
   };
+}
+
+function getWebhookReadiness(
+  readiness: TenantIntegrationReadinessSummary | null,
+) {
+  return readiness?.items.find((item) => item.subSystem === "webhooks") ?? null;
+}
+
+function getReadinessTone(
+  readiness: TenantIntegrationReadinessItem | null,
+): CanvasTone {
+  switch (readiness?.status) {
+    case "ready":
+      return "success";
+    case "partial":
+      return "accent";
+    case "blocked":
+      return "danger";
+    case "not_provisioned":
+      return "warn";
+    default:
+      return "neutral";
+  }
+}
+
+function getReadinessLabel(readiness: TenantIntegrationReadinessItem | null) {
+  return readiness?.status ?? "unknown";
+}
+
+function getReadinessBannerTone(
+  readiness: TenantIntegrationReadinessItem | null,
+): BannerTone {
+  const tone = getReadinessTone(readiness);
+  return tone === "neutral" ? "info" : tone;
 }
 
 function EventChecklist({
@@ -1691,6 +1741,7 @@ export default async function WebhooksPage({
       : undefined) ?? null;
   const summary = summarizeDeliveries(scopedDeliveries);
   const pageActions = getPageActions(data.governance?.availableActions);
+  const webhookReadiness = getWebhookReadiness(data.readiness);
   const selectedEndpointActions = selectedWebhook
     ? getEndpointActions(selectedWebhook, statusFilter)
     : [];
@@ -1722,7 +1773,9 @@ export default async function WebhooksPage({
     ...(selectedDeliveryId ? { selectedDeliveryId } : {}),
   });
   const engineInactive =
-    endpointReason === "not_provisioned" && data.endpoints.length === 0;
+    (webhookReadiness?.status === "not_provisioned" ||
+      endpointReason === "not_provisioned") &&
+    data.endpoints.length === 0;
   const notifications = data.notifications
     .filter((notification) => {
       const haystack =
@@ -1889,6 +1942,7 @@ export default async function WebhooksPage({
   const globalErrors = [
     data.identityError ? `身分: ${data.identityError}` : null,
     data.governanceError ? `治理: ${data.governanceError}` : null,
+    data.readinessError ? `readiness: ${data.readinessError}` : null,
     data.notificationsError ? `通知: ${data.notificationsError}` : null,
   ].filter(Boolean) as string[];
 
@@ -1956,6 +2010,22 @@ export default async function WebhooksPage({
                   {selectedWebhook
                     ? selectedWebhook.url
                     : "All endpoints + delivery visibility"}
+                </p>
+              </div>
+              <div style={metricCardStyle}>
+                <span style={metricLabelStyle}>Readiness</span>
+                <div>
+                  <CanvasPill
+                    theme={th}
+                    tone={getReadinessTone(webhookReadiness)}
+                    dot
+                  >
+                    {getReadinessLabel(webhookReadiness)}
+                  </CanvasPill>
+                </div>
+                <p style={mutedStyle}>
+                  {webhookReadiness?.detail ??
+                    "Integration readiness summary is not currently available."}
                 </p>
               </div>
             </div>
@@ -2054,6 +2124,21 @@ export default async function WebhooksPage({
           />
         ) : null}
 
+        {webhookReadiness &&
+        webhookReadiness.status !== "ready" &&
+        !engineInactive ? (
+          <CanvasBanner
+            theme={th}
+            tone={getReadinessBannerTone(webhookReadiness)}
+            icon="info"
+            title={`Webhook readiness: ${webhookReadiness.status}`}
+            body={
+              webhookReadiness.detail ??
+              "Backend integration readiness reports this subsystem as not fully ready."
+            }
+          />
+        ) : null}
+
         {createModeBlocked ? (
           <CanvasBanner
             theme={th}
@@ -2096,7 +2181,11 @@ export default async function WebhooksPage({
                 tone={endpointEmptyCopy.tone}
                 icon="info"
                 title={endpointEmptyCopy.title}
-                body={endpointEmptyCopy.body}
+                body={
+                  webhookReadiness?.detail
+                    ? `${endpointEmptyCopy.body} ${webhookReadiness.detail}`
+                    : endpointEmptyCopy.body
+                }
               />
               <div style={buttonWrapStyle}>
                 <Link
