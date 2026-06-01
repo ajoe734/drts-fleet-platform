@@ -4196,6 +4196,47 @@ export interface FeatureFlagTenantOverrideCommand {
 }
 
 // ---------------------------------------------------------------------------
+// Q-X16: Tenant per-realm feature visibility (read-scoped)
+//
+// GET /api/tenant/feature-flags -> TenantFeatureFlagView
+//
+// Read-only tenant-console mirror of platform feature-flag governance,
+// filtered to the calling tenant realm so a perceived module gap can be
+// explained as gated rather than broken (tenant-console packet §5.19). Full
+// mutation/governance stays in platform-admin; no tenant write contract is
+// exposed here.
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a flag value is the platform-wide default or has been overridden
+ * specifically for the calling tenant.
+ */
+export type TenantFeatureFlagScope = "global_default" | "tenant_override";
+
+/**
+ * Rollout posture for a flag. `rolling_out` surfaces a mid-rollout flag whose
+ * value differs across tenants (packet §5.19 "rolling out" state variant).
+ */
+export type TenantFeatureFlagRolloutStatus = "stable" | "rolling_out";
+
+export interface TenantFeatureFlagRecord {
+  key: string;
+  enabled: boolean;
+  scope: TenantFeatureFlagScope;
+  rolloutStatus: TenantFeatureFlagRolloutStatus;
+  description: string;
+  /** ISO timestamp of the last change visible to this tenant, or null. */
+  lastChangedAt: string | null;
+  /** Platform user reference that last changed the flag, or null. */
+  lastChangedBy: string | null;
+}
+
+export interface TenantFeatureFlagView {
+  flags: TenantFeatureFlagRecord[];
+  generatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
 // W8-001E: Ops and driver domain completion
 //
 // Incident, maintenance, shift/attendance, and driver settings contracts.

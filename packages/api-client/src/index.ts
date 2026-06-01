@@ -86,6 +86,7 @@ import type {
   EvidenceSubjectGovernanceRecord,
   FeatureFlag,
   FeatureFlagSummary,
+  TenantFeatureFlagView,
   FilingPackageAccepted,
   FilingPackageDetailRecord,
   FilingPackageListRecord,
@@ -466,6 +467,12 @@ export class ApiClient {
       `/api/admin/flags/${key}/enabled`,
     );
     return result.enabled;
+  }
+
+  // Q-X16: tenant per-realm read-scoped feature visibility. The tenant realm
+  // is taken from the client's tenant headers; no admin scope is required.
+  async listTenantFeatureFlags(): Promise<TenantFeatureFlagView> {
+    return this.get<TenantFeatureFlagView>("/api/tenant/feature-flags");
   }
 
   // ── Identity ──
