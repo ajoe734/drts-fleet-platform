@@ -84,6 +84,7 @@ type FeatureFlagRow = {
   global: FeatureFlag | null;
   overrides: FeatureFlagOverrideRecord[];
   selectedTenantOverride: FeatureFlagOverrideRecord | null;
+  selectedTenantSnapshot: RuntimeFeatureFlagRecord | null;
   rolloutState: RolloutState;
   latestUpdatedAt: string;
   updatedBy: string;
@@ -716,13 +717,6 @@ function runtimeUpdatedBy(flag: RuntimeFeatureFlagRecord | null | undefined) {
   return flag?.lastChangedBy ?? flag?.updatedBy ?? null;
 }
 
-function normalizeAvailableActions(
-  actions: ResourceActionDescriptor[] | undefined,
-  fallback: ResourceActionDescriptor[],
-) {
-  return Array.isArray(actions) && actions.length > 0 ? actions : fallback;
-}
-
 function isDeprecatedFlag(key: string, description: string) {
   const text = `${key} ${description}`.toLowerCase();
   return (
@@ -731,61 +725,6 @@ function isDeprecatedFlag(key: string, description: string) {
     text.includes("sunset") ||
     text.includes("retired")
   );
-}
-
-function buildAvailableActions({
-  global,
-  selectedTenantId,
-  selectedTenantOverride,
-}: {
-  global: FeatureFlag | null;
-  selectedTenantId: string;
-  selectedTenantOverride: FeatureFlagOverrideRecord | null;
-}): ResourceActionDescriptor[] {
-  const withDisabledReason = (
-    descriptor: ResourceActionDescriptor,
-    disabledReasonCode?: string,
-  ): ResourceActionDescriptor =>
-    disabledReasonCode ? { ...descriptor, disabledReasonCode } : descriptor;
-
-  return [
-    withDisabledReason(
-      {
-        action: "toggle_global",
-        enabled: Boolean(global),
-        requiresReason: true,
-        riskLevel: "high",
-      },
-      global ? undefined : "global_default_missing",
-    ),
-    withDisabledReason(
-      {
-        action: "add_tenant_override",
-        enabled: Boolean(selectedTenantId),
-        requiresReason: true,
-        riskLevel: "high",
-      },
-      selectedTenantId ? undefined : "select_tenant_scope_first",
-    ),
-    withDisabledReason(
-      {
-        action: "remove_tenant_override",
-        enabled: Boolean(selectedTenantOverride),
-        requiresReason: true,
-        riskLevel: "high",
-      },
-      !selectedTenantId
-        ? "select_tenant_scope_first"
-        : !selectedTenantOverride
-          ? "no_override_for_selected_scope"
-          : undefined,
-    ),
-    {
-      action: "view_change_history",
-      enabled: true,
-      riskLevel: "low",
-    },
-  ];
 }
 
 function getActionDescriptor(
@@ -810,6 +749,7 @@ function buildRows({
     sortFlags(globalFlags).map((flag) => [flag.key, flag]),
   );
   const overridesByKey = new Map<string, FeatureFlagOverrideRecord[]>();
+  const selectedTenantFlagsByKey = new Map<string, RuntimeFeatureFlagRecord>();
   const allKeys = new Set<string>(globalByKey.keys());
 
   for (const tenant of tenants) {
@@ -820,6 +760,9 @@ function buildRows({
 
     for (const flag of summary.flags) {
       allKeys.add(flag.key);
+      if (tenant.id === selectedTenantId) {
+        selectedTenantFlagsByKey.set(flag.key, flag);
+      }
       if (!flag.tenantId) {
         continue;
       }
@@ -853,10 +796,12 @@ function buildRows({
       const overrides = [...(overridesByKey.get(key) ?? [])].sort(
         (left, right) => left.tenantCode.localeCompare(right.tenantCode),
       );
+      const selectedTenantSnapshot = selectedTenantFlagsByKey.get(key) ?? null;
       const selectedTenantOverride =
         overrides.find((override) => override.tenantId === selectedTenantId) ??
         null;
       const description =
+        selectedTenantSnapshot?.description ??
         global?.description ??
         selectedTenantOverride?.description ??
         overrides[0]?.description ??
@@ -884,16 +829,8 @@ function buildRows({
       ].filter(Boolean);
       const latestUpdatedAt =
         timestamps.sort((left, right) => right.localeCompare(left))[0] ?? "";
-      const fallbackActions = buildAvailableActions({
-        global,
-        selectedTenantId,
-        selectedTenantOverride,
-      });
-      const runtimeActions =
-        selectedTenantOverride?.availableActions ??
-        overrides[0]?.availableActions ??
-        (global as RuntimeFeatureFlagRecord | null)?.availableActions;
       const updatedBy =
+        runtimeUpdatedBy(selectedTenantSnapshot) ??
         selectedTenantOverride?.updatedBy ??
         runtimeUpdatedBy(global as RuntimeFeatureFlagRecord | null) ??
         overrides.find((override) => override.updatedBy)?.updatedBy ??
@@ -905,6 +842,7 @@ function buildRows({
         global,
         overrides,
         selectedTenantOverride,
+        selectedTenantSnapshot,
         rolloutState,
         latestUpdatedAt,
         updatedBy:
@@ -914,10 +852,10 @@ function buildRows({
             : overrides.length > 0
               ? `${overrides.length} override scope(s) · actor pending contract`
               : "platform default · actor pending contract"),
-        availableActions: normalizeAvailableActions(
-          runtimeActions,
-          fallbackActions,
-        ),
+        availableActions:
+          selectedTenantSnapshot?.availableActions ??
+          (global as RuntimeFeatureFlagRecord | null)?.availableActions ??
+          [],
       };
     });
 }
@@ -2001,9 +1939,11 @@ export default function FeatureFlagsPage() {
                 )!,
                 tenantId: selectedTenantId,
                 enabled:
+                  row.selectedTenantSnapshot?.enabled ??
                   row.selectedTenantOverride?.enabled ??
                   !(row.global?.enabled ?? false),
                 description:
+                  row.selectedTenantSnapshot?.description ??
                   row.selectedTenantOverride?.description ??
                   row.global?.description ??
                   "",
@@ -2225,9 +2165,11 @@ export default function FeatureFlagsPage() {
                   descriptor: selectedAddOverride,
                   tenantId: selectedTenantId,
                   enabled:
+                    selectedRow.selectedTenantSnapshot?.enabled ??
                     selectedRow.selectedTenantOverride?.enabled ??
                     !(selectedRow.global?.enabled ?? false),
                   description:
+                    selectedRow.selectedTenantSnapshot?.description ??
                     selectedRow.selectedTenantOverride?.description ??
                     selectedRow.global?.description ??
                     "",
@@ -2604,8 +2546,8 @@ export default function FeatureFlagsPage() {
                         },
                         {
                           label: copy.overrideState,
-                          value: selectedRow.selectedTenantOverride
-                            ? selectedRow.selectedTenantOverride.enabled
+                          value: selectedRow.selectedTenantSnapshot
+                            ? selectedRow.selectedTenantSnapshot.enabled
                               ? copy.enabled
                               : copy.disabled
                             : copy.noGlobal,
