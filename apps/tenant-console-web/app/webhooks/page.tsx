@@ -366,6 +366,19 @@ type RotateSecretReceipt = {
   webhookId: string;
 };
 
+type RotateWebhookSecretResponse = {
+  data: {
+    webhookId: string;
+    secretVersion: number;
+    secretPreview: string;
+    rotationCount?: number;
+    rotatedAt: string;
+    plaintextSecret?: string;
+    secret?: string;
+    plaintextKey?: string;
+  };
+};
+
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "未知錯誤";
 }
@@ -778,20 +791,10 @@ function decorateActions(
   });
 }
 
-function derivePageActions(
+function getPageActions(
   governanceActions: ResourceActionDescriptor[] | undefined,
-  endpointReason: EmptyReason | null,
 ): ActionDescriptor[] {
-  return decorateActions(governanceActions ?? []).map((action) =>
-    action.action === "createWebhookEndpoint" &&
-    endpointReason === "not_provisioned"
-      ? {
-          ...action,
-          enabled: false,
-          disabledReasonCode: "engine_not_provisioned",
-        }
-      : action,
-  );
+  return decorateActions(governanceActions ?? []);
 }
 
 function deriveActiveTab(options: {
@@ -1015,7 +1018,7 @@ async function rotateWebhookSecretRequest(
     secret: string;
     rotationReason?: string;
   },
-) {
+): Promise<RotateWebhookSecretResponse> {
   const response = await fetch(
     `${API_URL}/api/tenant/webhooks/${encodeURIComponent(webhookId)}/rotate-secret`,
     {
@@ -1036,7 +1039,7 @@ async function rotateWebhookSecretRequest(
     throw new Error(`API error ${response.status}: ${await response.text()}`);
   }
 
-  return response.json();
+  return response.json() as Promise<RotateWebhookSecretResponse>;
 }
 
 async function createWebhookAction(formData: FormData) {
@@ -1158,12 +1161,17 @@ async function rotateWebhookSecretAction(formData: FormData) {
       secret,
       ...(rotationReason ? { rotationReason } : {}),
     });
+    const revealedSecret =
+      result.data.plaintextSecret ??
+      result.data.secret ??
+      result.data.plaintextKey ??
+      secret;
     const cookieStore = await cookies();
     cookieStore.set(
       ROTATE_SECRET_RECEIPT_COOKIE,
       encodeRotateSecretReceipt({
         endpointUrl,
-        secret,
+        secret: revealedSecret,
         secretPreview: result.data.secretPreview,
         secretVersion: result.data.secretVersion,
         rotatedAt: result.data.rotatedAt,
@@ -1430,7 +1438,11 @@ function RotateSecretForm({ webhook }: { webhook: TenantWebhookEndpoint }) {
             />
           </CanvasField>
         </div>
-        <CanvasField theme={th} label="NEW SECRET">
+        <CanvasField
+          theme={th}
+          label="NEW SECRET"
+          hint="目前 rotate command 仍需提交新的 secret；送出後 UI 會立刻進入 plaintext-once receipt，提供 copy / download，再回到 masked preview。"
+        >
           <input
             name="secret"
             placeholder="whsec_new..."
@@ -1440,7 +1452,7 @@ function RotateSecretForm({ webhook }: { webhook: TenantWebhookEndpoint }) {
         <CanvasField
           theme={th}
           label="ROTATION REASON"
-          hint="Backend route 支援 rotationReason；這裡保留高風險操作的審計上下文。"
+          hint="送出後會立即進入 plaintext-once receipt，提供 copy / download；主列表之後只保留 masked preview。"
         >
           <textarea
             name="rotationReason"
@@ -1522,10 +1534,7 @@ export default async function WebhooksPage({
         )
       : undefined) ?? null;
   const summary = summarizeDeliveries(scopedDeliveries);
-  const pageActions = derivePageActions(
-    data.governance?.availableActions,
-    endpointReason,
-  );
+  const pageActions = getPageActions(data.governance?.availableActions);
   const selectedEndpointActions = selectedWebhook
     ? getEndpointActions(selectedWebhook, statusFilter)
     : [];
