@@ -272,7 +272,6 @@ type LoadFailure = {
 type UserRow = Record<string, unknown> &
   TenantUserRoleRecord & {
     availableActions: ResourceActionDescriptor[];
-    lastLoginAt: string | null;
     roleDisplayName: string;
   };
 
@@ -301,19 +300,16 @@ type EmptyStateConfig = {
 
 type RuntimeTenantUserRecord = TenantUserRoleRecord & {
   availableActions?: ResourceActionDescriptor[];
-  lastLoginAt?: string | null;
 };
 
 const ROLE_CANVAS_LABEL: Record<string, string> = {
   tc_admin: "tenant_admin",
   tc_operator: "operator",
   tc_finance: "finance",
-  tc_integration_mgr: "integration_mgr",
   tc_viewer: "viewer",
   tenant_admin: "tenant_admin",
   tenant_ops_admin: "operator",
   tenant_finance_admin: "finance",
-  tenant_integration_mgr: "integration_mgr",
   tenant_viewer: "viewer",
 };
 
@@ -321,13 +317,11 @@ const ROLE_SORT_ORDER: Record<string, number> = {
   tc_admin: 0,
   tc_operator: 1,
   tc_finance: 2,
-  tc_integration_mgr: 3,
-  tc_viewer: 4,
+  tc_viewer: 3,
   tenant_admin: 0,
   tenant_ops_admin: 1,
   tenant_finance_admin: 2,
-  tenant_integration_mgr: 3,
-  tenant_viewer: 4,
+  tenant_viewer: 3,
 };
 
 const STATUS_SORT_ORDER: Record<TenantUserRoleRecord["status"], number> = {
@@ -483,7 +477,6 @@ function buildUserRows(
     availableActions: Array.isArray(user.availableActions)
       ? user.availableActions
       : [],
-    lastLoginAt: "lastLoginAt" in user ? (user.lastLoginAt ?? null) : null,
     roleDisplayName:
       roleLookup.get(user.roleCode)?.displayName ?? getRoleLabel(user.roleCode),
   }));
@@ -637,8 +630,6 @@ function getActionLabel(action: string) {
       return "更新角色";
     case "suspend":
       return "停用";
-    case "resend_invitation":
-      return "重送邀請";
     case "refresh":
       return "重新整理";
     default:
@@ -787,11 +778,9 @@ export default async function UsersPage({
     refreshMetadata: backendRefreshMetadata,
     crossAppLinks: backendCrossAppLinks,
   } = await loadUsersData();
-  const refreshHref = backendRefreshMetadata
-    ? buildQueryString(resolvedSearchParams, {
-        refreshedAt: Date.now().toString(),
-      })
-    : null;
+  const refreshHref = buildQueryString(resolvedSearchParams, {
+    refreshedAt: Date.now().toString(),
+  });
   const tenantId = identity?.tenantId ?? users[0]?.tenantId ?? DEMO_TENANT_ID;
   const assignableRoles = roles.filter((role) => role.assignable);
   const pageInviteAction = getAction(availableActions, "invite");
@@ -873,33 +862,17 @@ export default async function UsersPage({
       ),
     },
     {
-      h: "INVITED",
-      w: 140,
-      mono: true,
-      r: (row) => formatUpdated(row.invitedAt),
-    },
-    {
-      h: "LAST LOGIN",
+      h: "UPDATED",
       w: 150,
       mono: true,
-      r: (row) => formatUpdated(row.lastLoginAt),
+      r: (row) => formatUpdated(row.updatedAt),
     },
     {
       h: "ACTIONS",
-      w: 250,
+      w: 200,
       r: (row) => {
         const updateRole = getAction(row.availableActions, "role");
         const suspend = getAction(row.availableActions, "suspend");
-        const resendInvitation = getAction(
-          row.availableActions,
-          "resend_invitation",
-        );
-        const extraActions = row.availableActions.filter(
-          (action) =>
-            action.action !== "role" &&
-            action.action !== "suspend" &&
-            action.action !== "resend_invitation",
-        );
 
         return (
           <div style={rowActionMetaStyle}>
@@ -914,19 +887,6 @@ export default async function UsersPage({
                 label="停用"
                 size="xs"
               />
-              <ActionDescriptorButton
-                descriptor={resendInvitation}
-                label="重送邀請"
-                size="xs"
-              />
-              {extraActions.map((action) => (
-                <ActionDescriptorButton
-                  key={action.action}
-                  descriptor={action}
-                  label={getActionLabel(action.action)}
-                  size="xs"
-                />
-              ))}
             </div>
           </div>
         );
@@ -939,21 +899,19 @@ export default async function UsersPage({
       <CanvasPageHeader
         theme={th}
         title="使用者"
-        subtitle="只有 tc_admin 可操作 · tenant_admin / operator / finance / integration_mgr / viewer"
+        subtitle="只有 tc_admin 可操作 · tenant_admin / operator / finance / viewer"
         actions={
           <>
-            {refreshHref ? (
-              <a href={refreshHref} style={{ textDecoration: "none" }}>
-                <CanvasBtn
-                  theme={th}
-                  variant="secondary"
-                  icon="refresh"
-                  size="sm"
-                >
-                  重新整理
-                </CanvasBtn>
-              </a>
-            ) : null}
+            <a href={refreshHref} style={{ textDecoration: "none" }}>
+              <CanvasBtn
+                theme={th}
+                variant="secondary"
+                icon="refresh"
+                size="sm"
+              >
+                重新整理
+              </CanvasBtn>
+            </a>
             <ActionDescriptorButton
               descriptor={pageInviteAction}
               label="邀請"
@@ -976,15 +934,7 @@ export default async function UsersPage({
             title={`Refresh tier T5 · ${TENANT_REFRESH_CADENCE_MS / 1000}s cadence · ${TENANT_REFRESH_TIER}`}
             body={`目前顯示的是 ${backendRefreshMetadata.generatedAt} 產生的 snapshot · dataFreshness=${backendRefreshMetadata.dataFreshness} · source=${backendRefreshMetadata.source}`}
           />
-        ) : (
-          <CanvasBanner
-            theme={th}
-            tone="warn"
-            icon="warn"
-            title={`Refresh tier T5 · ${TENANT_REFRESH_CADENCE_MS / 1000}s cadence · ${TENANT_REFRESH_TIER}`}
-            body="後端尚未提供 UiRefreshMetadata；此頁只顯示 spec tier 與手動重新整理入口，不再本地推導 freshness 狀態。"
-          />
-        )}
+        ) : null}
 
         {identityError ? (
           <CanvasBanner
@@ -1176,7 +1126,7 @@ export default async function UsersPage({
         <CanvasCard
           theme={th}
           title="Tenant roster"
-          subtitle="user id · display name · email · role · status · invited at · last login"
+          subtitle="user id · display name · email · role · status · invited at · updated at"
           padding={0}
         >
           {emptyReason && emptyConfig ? (
