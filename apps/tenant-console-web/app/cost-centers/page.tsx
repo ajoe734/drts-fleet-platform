@@ -260,11 +260,18 @@ function parseEmptyReason(value: string | undefined): EmptyReason | null {
     : null;
 }
 
+type CatalogFailure = { reason: EmptyReason; message: string };
+
 type CostCentersPageData = {
   costCenters: TenantCostCenterRecord[];
   quotaSummariesByCode: Partial<Record<string, TenantCostCenterQuotaSummary>>;
   approvalRules: TenantApprovalRuleRecord[];
   coverage: TenantCostCenterCoverageReport | null;
+  // Failure of the primary cost-center catalog read, classified onto the
+  // EmptyReason taxonomy so the empty state can infer not_provisioned /
+  // permission_denied / external_unavailable instead of always "fetch_failed".
+  catalogFailure: CatalogFailure | null;
+  // Non-fatal failures of secondary reads (quota, approval rules, coverage).
   errors: string[];
   generatedAt: string | null;
 };
@@ -298,9 +305,13 @@ async function loadCostCentersData(): Promise<CostCentersPageData> {
   const coverage =
     coverageResult.status === "fulfilled" ? coverageResult.value : null;
 
-  if (costCentersResult.status === "rejected") {
-    errors.push(`成本中心目錄: ${toErrorMessage(costCentersResult.reason)}`);
-  }
+  // The catalog read is the primary signal. Classify its failure onto the
+  // EmptyReason taxonomy; secondary reads below only degrade into a warn banner.
+  const catalogFailure =
+    costCentersResult.status === "rejected"
+      ? classifyLoadFailure(costCentersResult.reason)
+      : null;
+
   if (approvalRulesResult.status === "rejected") {
     errors.push(`審批規則: ${toErrorMessage(approvalRulesResult.reason)}`);
   }
@@ -344,6 +355,7 @@ async function loadCostCentersData(): Promise<CostCentersPageData> {
     quotaSummariesByCode,
     approvalRules,
     coverage,
+    catalogFailure,
     errors,
     generatedAt,
   };
@@ -351,6 +363,28 @@ async function loadCostCentersData(): Promise<CostCentersPageData> {
 
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "未知錯誤";
+}
+
+// The tenant list endpoints surface failures as `Error("API error <status>: …")`.
+// Map the HTTP class onto the EmptyReason taxonomy (packet §3.6) so the empty
+// state stays honest — a brand-new / un-provisioned tenant reads as
+// `not_provisioned`, not a generic "fetch failed". Mirrors the sibling
+// addresses/page.tsx convention.
+function classifyLoadFailure(error: unknown): CatalogFailure {
+  const message = toErrorMessage(error);
+  const statusMatch = message.match(/API error (\d{3})/);
+  const status = statusMatch ? Number(statusMatch[1]) : null;
+
+  if (status === 401 || status === 403) {
+    return { reason: "permission_denied", message };
+  }
+  if (status === 404 || status === 501) {
+    return { reason: "not_provisioned", message };
+  }
+  if (status !== null && status >= 502 && status <= 504) {
+    return { reason: "external_unavailable", message };
+  }
+  return { reason: "fetch_failed", message };
 }
 
 function formatUpdated(value: string | null | undefined) {
@@ -709,6 +743,7 @@ export default async function CostCentersPage({
     quotaSummariesByCode,
     approvalRules,
     coverage,
+    catalogFailure,
     errors,
     generatedAt,
   } = await loadCostCentersData();
@@ -750,11 +785,14 @@ export default async function CostCentersPage({
   ).length;
 
   // Empty state: explicit ?emptyReason override wins (lets the design surface
-  // each of the six distinct states), then inference from the loaded data.
+  // each of the six distinct states), then real inference from the loaded data.
+  // The primary catalog failure is classified (not_provisioned / permission_denied
+  // / external_unavailable / fetch_failed); a clean-but-empty read is no_data when
+  // unfiltered, filtered_empty when a view filter hides existing rows.
   let emptyReason: EmptyReason | null = emptyReasonOverride;
   if (!emptyReason && rows.length === 0) {
-    if (errors.length > 0 && costCenters.length === 0) {
-      emptyReason = "fetch_failed";
+    if (catalogFailure) {
+      emptyReason = catalogFailure.reason;
     } else if (costCenters.length === 0) {
       emptyReason = view === "all" ? "no_data" : "filtered_empty";
     } else {
