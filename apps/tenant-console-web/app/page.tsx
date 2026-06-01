@@ -21,7 +21,7 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
-import { getTenantClient } from "@/lib/api-client";
+import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
 import { formatCount, formatDateTime, formatMoney } from "@/lib/formatters";
 
 export const dynamic = "force-dynamic";
@@ -105,8 +105,19 @@ function toSlice<T>(
 
 async function loadDashboardData(): Promise<DashboardData> {
   const client = getTenantClient();
+  const degradedSlices: string[] = [];
+
+  // Identity must resolve before feature flags are fetched so module
+  // visibility is scoped to the *current* tenant (packet §5.1) rather than a
+  // hard-coded demo tenant. The demo tenant is only a fallback when identity
+  // itself is unavailable.
+  const [identityResult] = await Promise.allSettled([
+    client.getIdentityContext() as Promise<IdentityContext>,
+  ]);
+  const identity = toSlice("Identity", identityResult, null, degradedSlices);
+  const resolvedTenantId = identity.value?.tenantId ?? DEMO_TENANT_ID;
+
   const [
-    identityResult,
     flagsResult,
     bookingsResult,
     invoicesResult,
@@ -116,8 +127,7 @@ async function loadDashboardData(): Promise<DashboardData> {
     apiKeysResult,
     webhooksResult,
   ] = await Promise.allSettled([
-    client.getIdentityContext() as Promise<IdentityContext>,
-    client.getFeatureFlags({ tenantId: "tenant-demo-001" }),
+    client.getFeatureFlags({ tenantId: resolvedTenantId }),
     client.listTenantBookings(),
     client.listInvoices(),
     client.listTenantNotificationFeed(),
@@ -127,10 +137,8 @@ async function loadDashboardData(): Promise<DashboardData> {
     client.listWebhooks(),
   ]);
 
-  const degradedSlices: string[] = [];
-
   return {
-    identity: toSlice("Identity", identityResult, null, degradedSlices),
+    identity,
     featureFlags: toSlice("Feature flags", flagsResult, null, degradedSlices),
     bookings: toSlice("Bookings", bookingsResult, [], degradedSlices),
     invoices: toSlice("Invoices", invoicesResult, [], degradedSlices),
