@@ -28,6 +28,7 @@ import type {
   CreatePlatformTenantCommand,
   EmptyReason,
   EmptyStateEnvelope,
+  PlatformAdminUserRecord,
   PlatformAdminTenantRecord,
   PlatformAdminTenantListItem,
   PlatformAdminTenantListResponse,
@@ -76,6 +77,11 @@ type NormalizedTenantList = {
 type PendingTenantAction = {
   tenant: TenantListItem;
   action: ResourceActionDescriptor;
+};
+
+type OwnerAssignment = {
+  label: string;
+  user: PlatformAdminUserRecord | null;
 };
 
 const DEFAULT_CREATE_ACTION: ResourceActionDescriptor = {
@@ -183,6 +189,25 @@ const secondaryTextStyle: CSSProperties = {
   fontSize: 11.5,
   color: th.textMuted,
   lineHeight: 1.45,
+};
+
+const ownerStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+};
+
+const ownerLinkStyle: CSSProperties = {
+  display: "grid",
+  gap: 2,
+  textDecoration: "none",
+  color: th.text,
+};
+
+const ownerLabelStyle: CSSProperties = {
+  fontSize: 10.5,
+  color: th.textDim,
+  letterSpacing: 0.32,
+  textTransform: "uppercase",
 };
 
 const actionRowStyle: CSSProperties = {
@@ -610,6 +635,12 @@ function getRefreshTierDisplay(refreshTier: RefreshTier) {
   return refreshTier === "medium_slow" ? "T4" : refreshTier;
 }
 
+function getRefreshIntervalMs(refresh: UiRefreshMetadata | null) {
+  return refresh?.staleAfterMs && refresh.staleAfterMs > 0
+    ? refresh.staleAfterMs
+    : T4_REFRESH_MS;
+}
+
 function getEmptyStateCopy(locale: string, reason: EmptyReason, count: number) {
   const copy: Record<
     EmptyReason,
@@ -696,6 +727,45 @@ function getFilterTone(active: boolean, stage: TenantStageFilter): CanvasTone {
   return stage === "rollback_hold" ? "danger" : "accent";
 }
 
+function normalizeLookupKey(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function buildUserLookup(users: PlatformAdminUserRecord[]) {
+  const lookup = new Map<string, PlatformAdminUserRecord>();
+  for (const user of users) {
+    for (const key of [user.userId, user.email, user.displayName]) {
+      const normalized = normalizeLookupKey(key);
+      if (normalized && !lookup.has(normalized)) {
+        lookup.set(normalized, user);
+      }
+    }
+  }
+  return lookup;
+}
+
+function resolveOwnerAssignments(
+  tenant: TenantListItem,
+  userLookup: Map<string, PlatformAdminUserRecord>,
+): OwnerAssignment[] {
+  return [
+    {
+      label: "cutover",
+      user:
+        userLookup.get(normalizeLookupKey(tenant.rollout.cutoverOwner)) ?? null,
+    },
+    {
+      label: "rollback",
+      user:
+        userLookup.get(normalizeLookupKey(tenant.rollout.rollbackOwner)) ??
+        null,
+    },
+  ].map((assignment) => ({
+    ...assignment,
+    user: assignment.user,
+  }));
+}
+
 function getActionDialogCopy(
   locale: string,
   tenant: TenantListItem,
@@ -744,6 +814,9 @@ export default function TenantsPage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
   const lastSuccessAtRef = useRef<number | null>(null);
+  const [platformUsers, setPlatformUsers] = useState<PlatformAdminUserRecord[]>(
+    [],
+  );
   const [tenantList, setTenantList] = useState<NormalizedTenantList>({
     items: [],
     availableActions: [],
@@ -816,6 +889,8 @@ export default function TenantsPage() {
           openWorkspace: "Open workspace",
           openOps: "Ops view",
           noOwners: "cutover / rollback owner not assigned",
+          userDirectoryDegraded:
+            "Owner directory unavailable; showing snapshot names only.",
           createTitle: "Create tenant",
           createSubtitle:
             "Bootstrap tenant identity, quotas, module footprint, and sandbox posture before any rollout promotion.",
@@ -878,6 +953,8 @@ export default function TenantsPage() {
           openWorkspace: "開啟工作區",
           openOps: "營運視圖",
           noOwners: "尚未指定 cutover / rollback owner",
+          userDirectoryDegraded:
+            "平台使用者目錄暫時不可用，先顯示 snapshot 名稱。",
           createTitle: "建立租戶",
           createSubtitle:
             "在任何 rollout promotion 前，先建立 tenant identity、配額、模組範圍與 sandbox posture。",
@@ -904,6 +981,14 @@ export default function TenantsPage() {
       ) as Record<(typeof PLATFORM_TENANT_MODULES)[number], string>,
     [locale],
   );
+  const platformUserLookup = useMemo(
+    () => buildUserLookup(platformUsers),
+    [platformUsers],
+  );
+  const pollIntervalMs = useMemo(
+    () => getRefreshIntervalMs(tenantList.refresh),
+    [tenantList.refresh],
+  );
 
   const loadTenants = useCallback(
     async (mode: "initial" | "manual" | "interval") => {
@@ -914,9 +999,19 @@ export default function TenantsPage() {
       }
 
       try {
-        const result = await client.getPlatformTenantList();
-        const normalized = normalizeTenantListResponse(result);
+        const [tenantResult, userResult] = await Promise.allSettled([
+          client.getPlatformTenantList(),
+          client.listPlatformAdminUsers(),
+        ]);
+        if (tenantResult.status !== "fulfilled") {
+          throw tenantResult.reason;
+        }
+
+        const normalized = normalizeTenantListResponse(tenantResult.value);
         setTenantList(normalized);
+        if (userResult.status === "fulfilled") {
+          setPlatformUsers(userResult.value);
+        }
         setError(null);
         lastSuccessAtRef.current = Date.now();
       } catch (fetchError) {
@@ -971,13 +1066,13 @@ export default function TenantsPage() {
     void run("initial");
     const intervalId = window.setInterval(() => {
       void run("interval");
-    }, T4_REFRESH_MS);
+    }, pollIntervalMs);
 
     return () => {
       active = false;
       window.clearInterval(intervalId);
     };
-  }, [loadTenants]);
+  }, [loadTenants, pollIntervalMs]);
 
   const handleTenantAction = useCallback(
     async (tenant: TenantListItem, action: ResourceActionDescriptor) => {
@@ -1286,16 +1381,53 @@ export default function TenantsPage() {
         h: copy.columns.owners,
         w: 170,
         r: (tenant) => (
-          <div style={stackedCellStyle}>
+          <div style={ownerStackStyle}>
             {tenant.rollout.cutoverOwner || tenant.rollout.rollbackOwner ? (
-              <>
-                <span style={secondaryTextStyle}>
-                  cutover: {tenant.rollout.cutoverOwner ?? "—"}
-                </span>
-                <span style={secondaryTextStyle}>
-                  rollback: {tenant.rollout.rollbackOwner ?? "—"}
-                </span>
-              </>
+              resolveOwnerAssignments(tenant, platformUserLookup).map(
+                (assignment) => {
+                  const snapshotName =
+                    assignment.label === "cutover"
+                      ? tenant.rollout.cutoverOwner
+                      : tenant.rollout.rollbackOwner;
+                  const ownerName =
+                    assignment.user?.displayName ?? snapshotName;
+                  return (
+                    <div key={`${tenant.id}-${assignment.label}`}>
+                      <span style={ownerLabelStyle}>{assignment.label}</span>
+                      {ownerName ? (
+                        assignment.user ? (
+                          <Link
+                            href={`/users?userId=${encodeURIComponent(
+                              assignment.user.userId,
+                            )}`}
+                            style={ownerLinkStyle}
+                          >
+                            <span>{ownerName}</span>
+                            <span
+                              style={{ ...secondaryTextStyle, ...monoStyle }}
+                            >
+                              {assignment.user.email} ·{" "}
+                              {formatPlatformCodeLabel(
+                                locale,
+                                assignment.user.status,
+                              )}
+                            </span>
+                          </Link>
+                        ) : (
+                          <div style={stackedCellStyle}>
+                            <span>{ownerName}</span>
+                            <span style={secondaryTextStyle}>
+                              {copy.userDirectoryDegraded}
+                            </span>
+                          </div>
+                        )
+                      ) : (
+                        <span style={secondaryTextStyle}>—</span>
+                      )}
+                    </div>
+                  );
+                },
+              )
             ) : (
               <span style={secondaryTextStyle}>{copy.noOwners}</span>
             )}
@@ -1354,6 +1486,12 @@ export default function TenantsPage() {
                   target="_blank"
                   rel="noreferrer"
                   style={actionPillButtonStyle("neutral", false)}
+                  title={
+                    tenant.operationalViewLink?.label ??
+                    (locale === "en"
+                      ? "Open ops-console dispatch board in a new tab"
+                      : "在新分頁開啟 ops-console dispatch board")
+                  }
                 >
                   {copy.openOps}
                 </a>
@@ -1378,7 +1516,14 @@ export default function TenantsPage() {
         },
       },
     ],
-    [copy, handleTenantAction, locale, moduleLabels, mutatingTenantId],
+    [
+      copy,
+      handleTenantAction,
+      locale,
+      moduleLabels,
+      mutatingTenantId,
+      platformUserLookup,
+    ],
   );
 
   const exportVisibleTenants = () => {
