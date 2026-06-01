@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { useEffect, useState, useTransition } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -390,10 +391,6 @@ function formatActionCaption(action: ResourceActionDescriptor) {
   return `${actionLabel(action.action)} 目前不可執行：${disabledReasonLabel(action.disabledReasonCode)}`;
 }
 
-function buildAuditHref(receipt: ActionReceipt) {
-  return `/audit?auditId=${encodeURIComponent(receipt.auditId)}`;
-}
-
 function resolveResourceHref(link: CrossAppResourceLink) {
   if (link.targetApp === "tenant-console") {
     return link.route;
@@ -496,6 +493,43 @@ function getReceiptTone(receipt: ActionReceipt) {
   }
 }
 
+function isSameTabLink(link: CrossAppResourceLink) {
+  return link.openMode === "same_tab" && link.targetApp === "tenant-console";
+}
+
+function renderResourceLink(
+  link: CrossAppResourceLink,
+  key: string,
+  suffix?: ReactNode,
+) {
+  const content = (
+    <>
+      {link.label}
+      {suffix ?? (isSameTabLink(link) ? " →" : " ↗")}
+    </>
+  );
+
+  if (isSameTabLink(link)) {
+    return (
+      <Link key={key} href={resolveResourceHref(link)} style={linkStyle}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <a
+      key={key}
+      href={resolveResourceHref(link)}
+      style={linkStyle}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {content}
+    </a>
+  );
+}
+
 function parseThresholdValue(
   value: string,
   fieldLabel: string,
@@ -560,14 +594,11 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
   const refreshTier = view?.refreshTier ?? null;
   const refreshMetadata = view?.refreshMetadata ?? null;
   const resourceLinks = view?.resourceLinks ?? [];
-  const sameAppLinks = resourceLinks.filter(
-    (link) =>
-      link.targetApp === "tenant-console" && link.openMode === "same_tab",
-  );
-  const crossAppLinks = resourceLinks.filter(
-    (link) =>
-      !(link.targetApp === "tenant-console" && link.openMode === "same_tab"),
-  );
+  const sameAppLinks = resourceLinks.filter((link) => isSameTabLink(link));
+  const crossAppLinks = resourceLinks.filter((link) => !isSameTabLink(link));
+  const auditResourceLink =
+    resourceLinks.find((link) => link.resourceType === "tenant_sla_audit") ??
+    null;
   const [waitThresholdMin, setWaitThresholdMin] = useState(
     formatThresholdInput(profile?.waitThresholdMin),
   );
@@ -966,9 +997,22 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
               ]}
             />
             <div style={{ height: 12 }} />
-            <Link href={buildAuditHref(receiptState.receipt)} style={linkStyle}>
-              查看對應 audit →
-            </Link>
+            {auditResourceLink ? (
+              renderResourceLink(
+                auditResourceLink,
+                `${auditResourceLink.targetApp}:${auditResourceLink.route}:receipt`,
+                <>
+                  {" "}
+                  · auditId={receiptState.receipt.auditId}
+                  {isSameTabLink(auditResourceLink) ? " →" : " ↗"}
+                </>,
+              )
+            ) : (
+              <div style={noteStyle}>
+                本次 receipt 未附可用 audit deep link；auditId ·{" "}
+                {receiptState.receipt.auditId}
+              </div>
+            )}
           </CanvasCard>
         ) : null}
 
@@ -1183,25 +1227,9 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                       <div style={{ ...summaryValueStyle, ...linkRowStyle }}>
                         {resourceLinks.length > 0 ? (
                           resourceLinks.map((link) =>
-                            link.openMode === "same_tab" &&
-                            link.targetApp === "tenant-console" ? (
-                              <Link
-                                key={`${link.targetApp}:${link.route}:summary`}
-                                href={resolveResourceHref(link)}
-                                style={linkStyle}
-                              >
-                                {link.label} →
-                              </Link>
-                            ) : (
-                              <a
-                                key={`${link.targetApp}:${link.route}:summary`}
-                                href={resolveResourceHref(link)}
-                                style={linkStyle}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                {link.label} ↗
-                              </a>
+                            renderResourceLink(
+                              link,
+                              `${link.targetApp}:${link.route}:summary`,
                             ),
                           )
                         ) : (
@@ -1216,30 +1244,22 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
             <CanvasCard theme={th} title="深連結與後續追蹤">
               <div style={summaryCardStyle}>
                 <div style={noteStyle}>
-                  Tenant Console 內部追蹤維持同站導覽；跨 app 追蹤依 Q-X03
-                  以新分頁開啟。
+                  下列 deep links 全數直接使用 SLA view `resourceLinks`
+                  metadata，不在前端額外拼接 route。
                 </div>
                 <div style={inlineLinkRowStyle}>
-                  {sameAppLinks.map((link) => (
-                    <Link
-                      key={`${link.targetApp}:${link.route}`}
-                      href={resolveResourceHref(link)}
-                      style={linkStyle}
-                    >
-                      {link.label} →
-                    </Link>
-                  ))}
-                  {crossAppLinks.map((link) => (
-                    <a
-                      key={`${link.targetApp}:${link.route}`}
-                      href={resolveResourceHref(link)}
-                      style={linkStyle}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {link.label} ↗
-                    </a>
-                  ))}
+                  {sameAppLinks.map((link) =>
+                    renderResourceLink(
+                      link,
+                      `${link.targetApp}:${link.route}:follow-up`,
+                    ),
+                  )}
+                  {crossAppLinks.map((link) =>
+                    renderResourceLink(
+                      link,
+                      `${link.targetApp}:${link.route}:follow-up`,
+                    ),
+                  )}
                 </div>
               </div>
             </CanvasCard>
