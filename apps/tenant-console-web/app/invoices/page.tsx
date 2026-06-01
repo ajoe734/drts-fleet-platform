@@ -316,7 +316,9 @@ function parseArtifactExpiry(artifactUrl: string | null) {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function readOptionalString(value: unknown) {
@@ -544,6 +546,61 @@ function buildFallbackCrossAppLinks(
   ];
 }
 
+function getActionLabel(action: string) {
+  switch (action) {
+    case "download_artifact":
+      return "下載 PDF";
+    case "view_detail":
+      return "查看明細";
+    case "review_billing_setup":
+      return "檢查設定";
+    case "review_audit":
+      return "前往稽核";
+    case "clear_filters":
+      return "清除篩選";
+    case "refresh":
+      return "重新整理";
+    default:
+      return action;
+  }
+}
+
+function resolveInvoiceSupportAction(
+  action: ResourceActionDescriptor,
+  options: {
+    clearHref: string;
+    refreshHref: string;
+  },
+) {
+  switch (action.action) {
+    case "review_billing_setup":
+      return {
+        href: "/settings",
+        label: getActionLabel(action.action),
+      };
+    case "review_audit":
+      return {
+        href: "/audit",
+        label: getActionLabel(action.action),
+      };
+    case "clear_filters":
+      return {
+        href: options.clearHref,
+        label: getActionLabel(action.action),
+      };
+    case "refresh":
+      return {
+        href: options.refreshHref,
+        label: getActionLabel(action.action),
+      };
+    default:
+      return {
+        href: null,
+        label: getActionLabel(action.action),
+      };
+  }
+}
+
 function buildInvoiceActions(invoice: InvoiceViewRecord): InvoiceAction[] {
   return [
     {
@@ -551,7 +608,7 @@ function buildInvoiceActions(invoice: InvoiceViewRecord): InvoiceAction[] {
       enabled:
         invoice.artifactState === "ready" && Boolean(invoice.artifactUrl),
       riskLevel: "low",
-      label: "下載 PDF",
+      label: getActionLabel("download_artifact"),
       ...(invoice.artifactState === "expired"
         ? { disabledReasonCode: "artifact_expired" }
         : invoice.artifactState === "missing"
@@ -566,7 +623,7 @@ function buildInvoiceActions(invoice: InvoiceViewRecord): InvoiceAction[] {
       enabled: true,
       riskLevel: "low",
       href: `/invoices?invoice=${encodeURIComponent(invoice.invoiceId)}`,
-      label: "查看明細",
+      label: getActionLabel("view_detail"),
     },
   ];
 }
@@ -578,7 +635,7 @@ function toInvoiceAction(
   if (descriptor.action === "download_artifact") {
     return {
       ...descriptor,
-      label: "下載 PDF",
+      label: getActionLabel(descriptor.action),
       ...(invoice.artifactState === "ready" && invoice.artifactUrl
         ? { href: invoice.artifactUrl, target: "_blank" as const }
         : {}),
@@ -589,18 +646,19 @@ function toInvoiceAction(
     return {
       ...descriptor,
       href: `/invoices?invoice=${encodeURIComponent(invoice.invoiceId)}`,
-      label: "查看明細",
+      label: getActionLabel(descriptor.action),
     };
   }
 
   return {
     ...descriptor,
-    label: descriptor.action,
+    label: getActionLabel(descriptor.action),
   };
 }
 
 function toInvoiceViewRecord(invoice: TenantInvoiceRecord): InvoiceViewRecord {
-  const invoiceRecord = invoice as TenantInvoiceRecord & Record<string, unknown>;
+  const invoiceRecord = invoice as TenantInvoiceRecord &
+    Record<string, unknown>;
   const dueAt = readOptionalString(invoiceRecord.dueAt);
   const expiresAt =
     readOptionalString(invoiceRecord.expiresAt) ??
@@ -807,6 +865,9 @@ function renderEmptyState(
   };
 
   const view = config[empty.reason];
+  const resolvedNextAction = empty.nextAction
+    ? resolveInvoiceSupportAction(empty.nextAction, options)
+    : null;
 
   return (
     <div style={emptyStateStyle}>
@@ -815,7 +876,18 @@ function renderEmptyState(
       </CanvasPill>
       <div style={emptyTitleStyle}>{view.title}</div>
       <div style={emptyBodyStyle}>{view.body}</div>
-      {view.ctaHref && view.ctaLabel ? (
+      {empty.nextAction?.enabled && resolvedNextAction?.href ? (
+        <Link href={resolvedNextAction.href} style={actionLinkBaseStyle}>
+          {resolvedNextAction.label}
+        </Link>
+      ) : empty.nextAction ? (
+        <span
+          style={disabledActionStyle}
+          title={empty.nextAction.disabledReasonCode}
+        >
+          {resolvedNextAction?.label ?? getActionLabel(empty.nextAction.action)}
+        </span>
+      ) : view.ctaHref && view.ctaLabel ? (
         <Link href={view.ctaHref} style={actionLinkBaseStyle}>
           {view.ctaLabel}
         </Link>
@@ -1367,7 +1439,9 @@ export default async function InvoicesPage({
                     <a
                       key={`${link.targetApp}-${link.resourceType}-${link.resourceId}-${link.route}`}
                       href={buildCrossAppHref(link)}
-                      target={link.openMode === "new_tab" ? "_blank" : undefined}
+                      target={
+                        link.openMode === "new_tab" ? "_blank" : undefined
+                      }
                       rel={
                         link.openMode === "new_tab" ? "noreferrer" : undefined
                       }
