@@ -23,8 +23,6 @@ import {
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
@@ -61,9 +59,78 @@ const kpiGridStyle: CSSProperties = {
 
 const heroGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
+  gridTemplateColumns: "minmax(0, 1.45fr) minmax(320px, 1fr)",
   gap: 16,
   alignItems: "start",
+};
+
+const heroCardStyle: CSSProperties = {
+  position: "relative",
+  overflow: "hidden",
+  background: `linear-gradient(135deg, ${th.surface} 0%, ${th.bgRaised} 58%, rgba(15, 118, 110, 0.14) 100%)`,
+};
+
+const heroCardInnerStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 18,
+};
+
+const heroEyebrowStyle: CSSProperties = {
+  color: th.textDim,
+  fontSize: 11,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+};
+
+const heroTitleStyle: CSSProperties = {
+  color: th.text,
+  fontSize: 28,
+  lineHeight: 1.05,
+  fontWeight: 700,
+};
+
+const heroBodyStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 13,
+  lineHeight: 1.65,
+  maxWidth: 720,
+};
+
+const heroSummaryGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+};
+
+const heroSummaryCardStyle: CSSProperties = {
+  borderRadius: 16,
+  padding: "14px 14px 12px",
+  border: `1px solid ${th.border}`,
+  background: "rgba(255,255,255,0.72)",
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+};
+
+const heroSummaryLabelStyle: CSSProperties = {
+  color: th.textDim,
+  fontSize: 10.5,
+  letterSpacing: "0.12em",
+  textTransform: "uppercase",
+};
+
+const heroSummaryValueStyle: CSSProperties = {
+  color: th.text,
+  fontSize: 20,
+  lineHeight: 1.1,
+  fontWeight: 700,
+};
+
+const heroSummaryBodyStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.5,
 };
 
 const splitGridStyle: CSSProperties = {
@@ -80,10 +147,20 @@ const laneStyle: CSSProperties = {
   minWidth: 0,
 };
 
-const reminderStackStyle: CSSProperties = {
+const focusStackStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
-  gap: 10,
+  gap: 12,
+};
+
+const focusItemStyle: CSSProperties = {
+  borderRadius: 16,
+  border: `1px solid ${th.border}`,
+  padding: "14px 14px 12px",
+  background: th.surface,
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
 };
 
 const quickActionGridStyle: CSSProperties = {
@@ -152,6 +229,12 @@ const chipRowStyle: CSSProperties = {
   gap: 6,
 };
 
+const stackedMetaStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+};
+
 const emptyGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
@@ -200,6 +283,22 @@ const sitemapLinkStyle: CSSProperties = {
 const linkRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
+  gap: 8,
+};
+
+const moduleGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+};
+
+const moduleCardStyle: CSSProperties = {
+  borderRadius: 16,
+  border: `1px solid ${th.border}`,
+  padding: 14,
+  background: th.surface,
+  display: "flex",
+  flexDirection: "column",
   gap: 8,
 };
 
@@ -253,14 +352,6 @@ type WorkspaceActionTile = {
   external?: boolean;
 };
 
-type BookingRow = {
-  bookingId: string;
-  passenger: string;
-  route: string;
-  window: string;
-  state: string;
-};
-
 type HomePageData = {
   identity: IdentityContext | null;
   featureFlags: FeatureFlagSummary | null;
@@ -286,6 +377,14 @@ type SitemapSection = {
   title: string;
   description: string;
   routes: SitemapRoute[];
+};
+
+type ModuleSummary = {
+  key: string;
+  title: string;
+  countLabel: string;
+  body: string;
+  tone: CanvasTone;
 };
 
 const EMPTY_REASON_META: Record<
@@ -441,11 +540,11 @@ function buildCrossAppHref(link: CrossAppResourceLink) {
 
 function buildWorkspaceAvailableActions(
   data: HomePageData,
-  activeBookings: WorkspaceBookingRecord[],
+  bookings: WorkspaceBookingRecord[],
 ) {
   const actionMap = new Map<string, ResourceActionDescriptor>();
 
-  for (const booking of activeBookings) {
+  for (const booking of bookings) {
     for (const descriptor of booking.availableActions ?? []) {
       if (!actionMap.has(descriptor.action))
         actionMap.set(descriptor.action, descriptor);
@@ -859,6 +958,69 @@ function buildCrossAppLinks(
   return Array.from(links.values());
 }
 
+function buildModuleSummaries(
+  data: HomePageData,
+  sitemapSections: SitemapSection[],
+  blockedReadiness: number,
+): ModuleSummary[] {
+  const readinessItems = data.readiness?.items ?? [];
+  const visibleRouteCount = sitemapSections.reduce(
+    (sum, section) =>
+      sum + section.routes.filter((route) => route.enabled).length,
+    0,
+  );
+  const hiddenRouteCount = sitemapSections.reduce(
+    (sum, section) =>
+      sum + section.routes.filter((route) => !route.enabled).length,
+    0,
+  );
+  const readyCount = readinessItems.filter(
+    (item) => item.status === "ready",
+  ).length;
+  const partialCount = readinessItems.filter(
+    (item) => item.status === "partial",
+  ).length;
+  const notProvisionedCount = readinessItems.filter(
+    (item) => item.status === "not_provisioned",
+  ).length;
+
+  return [
+    {
+      key: "modules",
+      title: "Visible modules",
+      countLabel: `${formatCount(visibleRouteCount)} routes`,
+      body:
+        hiddenRouteCount > 0
+          ? `${formatCount(hiddenRouteCount)} routes gated by feature visibility or authority.`
+          : "All Workspace exits are currently visible for this actor.",
+      tone: hiddenRouteCount > 0 ? "warn" : "success",
+    },
+    {
+      key: "integration",
+      title: "Integration health",
+      countLabel: `${formatCount(readyCount)} ready / ${formatCount(readinessItems.length)}`,
+      body:
+        blockedReadiness > 0
+          ? `${formatCount(blockedReadiness)} subsystems blocked and require cross-app follow-up.`
+          : partialCount > 0
+            ? `${formatCount(partialCount)} subsystems are partial but readable.`
+            : "All reported subsystems are ready on the current T5 snapshot.",
+      tone:
+        blockedReadiness > 0 ? "danger" : partialCount > 0 ? "warn" : "success",
+    },
+    {
+      key: "provisioning",
+      title: "Provisioning prompts",
+      countLabel: `${formatCount(notProvisionedCount)} open`,
+      body:
+        notProvisionedCount > 0
+          ? "Home must distinguish not_provisioned from empty data and preserve next actions."
+          : "No module is currently waiting on first-time provisioning.",
+      tone: notProvisionedCount > 0 ? "accent" : "neutral",
+    },
+  ];
+}
+
 function ActionLink({
   href,
   label,
@@ -1027,7 +1189,7 @@ export default async function HomePage() {
     data.readiness?.computedAt ?? data.quotaSummary?.refreshedAt,
   );
   const refreshPresentation = getRefreshPresentation(refresh, blockedReadiness);
-  const availableActions = buildWorkspaceAvailableActions(data, activeBookings);
+  const availableActions = buildWorkspaceAvailableActions(data, data.bookings);
   const crossAppLinks = buildCrossAppLinks(data.notifications);
   const actionMap = new Map(
     availableActions.map((descriptor) => [descriptor.action, descriptor]),
@@ -1046,71 +1208,18 @@ export default async function HomePage() {
     data.identity?.actorId ??
     TENANT_CONSOLE_CONTEXT.split(" ")[0];
   const subtitle = `${formatDate(refresh.generatedAt)} · 本月配額 ${formatQuotaUsage(data.quotaSummary)}`;
-  const bookingRows: BookingRow[] = activeBookings
-    .slice(0, 5)
-    .map((booking) => ({
-      bookingId: booking.bookingId,
-      passenger: booking.passenger.name,
-      route: `${booking.pickup.address} → ${booking.dropoff.address}`,
-      window: `${formatDateTime(booking.reservationWindowStart)} - ${formatDateTime(booking.reservationWindowEnd)}`,
-      state: booking.orderStatus,
-    }));
-  const bookingColumns: CanvasTableColumn<BookingRow>[] = [
-    {
-      h: "BK",
-      k: "bookingId",
-      mono: true,
-      w: 132,
-      r: (row) => (
-        <Link
-          href={`/bookings/${row.bookingId}`}
-          style={{ color: th.accent, fontWeight: 700, textDecoration: "none" }}
-        >
-          {row.bookingId}
-        </Link>
-      ),
-    },
-    { h: "PASS", k: "passenger", w: 110 },
-    {
-      h: "PICKUP → DROP",
-      k: "route",
-      r: (row) => <span style={smallMetaStyle}>{row.route}</span>,
-    },
-    {
-      h: "WIN",
-      k: "window",
-      mono: true,
-      w: 190,
-    },
-    {
-      h: "STATE",
-      k: "state",
-      w: 140,
-      r: (row) => (
-        <CanvasPill
-          theme={th}
-          tone={
-            row.state === "assigned"
-              ? "success"
-              : row.state === "broadcasting"
-                ? "info"
-                : row.state === "approval_required"
-                  ? "warn"
-                  : row.state === "dispatch_failed" ||
-                      row.state === "dispatch_timeout" ||
-                      row.state === "exception_hold" ||
-                      row.state === "no_supply"
-                    ? "danger"
-                    : "neutral"
-          }
-          dot
-        >
-          {row.state}
-        </CanvasPill>
-      ),
-    },
-  ];
   const sitemapSections = buildSitemapSections(data, blockedReadiness);
+  const moduleSummaries = buildModuleSummaries(
+    data,
+    sitemapSections,
+    blockedReadiness,
+  );
+  const unreadCrossAppCount = data.notifications.filter(
+    (notification) =>
+      notification.status === "unread" && Boolean(notification.resourceLink),
+  ).length;
+  const topNotification =
+    unreadNotifications[0] ?? data.notifications[0] ?? null;
   const openInvoiceAmount = openInvoices.reduce(
     (sum, invoice) => sum + invoice.amount.amountMinor,
     0,
@@ -1182,6 +1291,135 @@ export default async function HomePage() {
           </CanvasPill>
         </div>
 
+        <div style={heroGridStyle}>
+          <CanvasCard
+            theme={th}
+            title="Workspace overview"
+            subtitle="tenant identity context + module capability framing"
+            style={heroCardStyle}
+          >
+            <div style={heroCardInnerStyle}>
+              <div style={stackedMetaStyle}>
+                <span style={heroEyebrowStyle}>
+                  Workspace home · T5 snapshot
+                </span>
+                <strong style={heroTitleStyle}>
+                  {data.billingProfile?.invoiceTitle ?? tenantId}
+                </strong>
+                <span style={heroBodyStyle}>
+                  在 session start 先確認 tenant
+                  身分、可見模組、整合健康度與今天可執行的 command。 首頁 CTA
+                  僅來自 `availableActions`，不從角色字串硬編。
+                </span>
+              </div>
+
+              <div style={chipRowStyle}>
+                <CanvasPill theme={th} tone="accent">
+                  actor {data.identity?.actorType ?? "tenant_admin"}
+                </CanvasPill>
+                <CanvasPill theme={th} tone="info">
+                  tenant {tenantId}
+                </CanvasPill>
+                <CanvasPill
+                  theme={th}
+                  tone={blockedReadiness > 0 ? "warn" : "success"}
+                >
+                  {blockedReadiness > 0 ? "degraded" : "healthy"}
+                </CanvasPill>
+                <CanvasPill theme={th} tone="neutral">
+                  env {TENANT_CONSOLE_ENV}
+                </CanvasPill>
+              </div>
+
+              <div style={heroSummaryGridStyle}>
+                {moduleSummaries.map((item) => (
+                  <div key={item.key} style={heroSummaryCardStyle}>
+                    <span style={heroSummaryLabelStyle}>{item.title}</span>
+                    <strong style={heroSummaryValueStyle}>
+                      {item.countLabel}
+                    </strong>
+                    <span style={heroSummaryBodyStyle}>{item.body}</span>
+                    <CanvasPill theme={th} tone={item.tone}>
+                      {item.key}
+                    </CanvasPill>
+                  </div>
+                ))}
+              </div>
+
+              <div style={linkRowStyle}>
+                {quickActions.length > 0 ? (
+                  quickActions
+                    .slice(0, 3)
+                    .map((action, index) => (
+                      <ActionLink
+                        key={action.key}
+                        href={action.href}
+                        disabled={!action.descriptor.enabled}
+                        label={action.label}
+                        variant={index === 0 ? "primary" : "secondary"}
+                        {...(action.external ? { external: true } : {})}
+                      />
+                    ))
+                ) : (
+                  <span style={smallMetaStyle}>
+                    No home CTA returned in `availableActions`; page stays
+                    readable but does not invent commands.
+                  </span>
+                )}
+              </div>
+            </div>
+          </CanvasCard>
+
+          <CanvasCard
+            theme={th}
+            title="Today focus"
+            subtitle={TENANT_CONSOLE_SEARCH_PLACEHOLDER}
+          >
+            <div style={focusStackStyle}>
+              <div style={focusItemStyle}>
+                <span style={heroSummaryLabelStyle}>Urgent bookings</span>
+                <strong style={heroSummaryValueStyle}>
+                  {formatCount(attentionBookings.length)}
+                </strong>
+                <span style={heroSummaryBodyStyle}>
+                  {attentionBookings.length > 0
+                    ? "dispatch_failed / timeout / exception_hold items need triage."
+                    : "No booking currently requires urgent follow-up."}
+                </span>
+              </div>
+              <div style={focusItemStyle}>
+                <span style={heroSummaryLabelStyle}>Unread notices</span>
+                <strong style={heroSummaryValueStyle}>
+                  {formatCount(unreadNotifications.length)}
+                </strong>
+                <span style={heroSummaryBodyStyle}>
+                  {unreadCrossAppCount > 0
+                    ? `${formatCount(unreadCrossAppCount)} unread items include cross-app trails.`
+                    : "Inbox is local-only right now; no external trail on unread items."}
+                </span>
+              </div>
+              {blockedReadiness > 0 ? (
+                <CanvasBanner
+                  theme={th}
+                  tone="warn"
+                  icon="warn"
+                  title={`${formatCount(blockedReadiness)} 個整合子系統 blocked`}
+                  body="Workspace 保留 deep link 到 owning app，讓租戶可直接追到 ops 或 platform 處理面。"
+                />
+              ) : null}
+              {topNotification ? (
+                <CanvasBanner
+                  theme={th}
+                  tone="info"
+                  icon="info"
+                  title={topNotification.title}
+                  body={topNotification.message}
+                />
+              ) : null}
+            </div>
+          </CanvasCard>
+        </div>
+
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
@@ -1226,81 +1464,6 @@ export default async function HomePage() {
           />
         </div>
 
-        <div style={heroGridStyle}>
-          <CanvasCard
-            theme={th}
-            title="進行中訂單"
-            subtitle="pending bookings count + recent updates"
-            padding={0}
-          >
-            {bookingRows.length > 0 ? (
-              <CanvasTable<BookingRow>
-                theme={th}
-                columns={bookingColumns}
-                rows={bookingRows}
-              />
-            ) : (
-              <div style={{ ...emptyStateStyle, margin: 16 }}>
-                <strong style={{ color: th.text }}>
-                  今天沒有進行中的 booking
-                </strong>
-                <span style={mutedStyle}>
-                  輪詢刷新後會在這裡呈現
-                  broadcasting、assigned、approval-required 等狀態。
-                </span>
-              </div>
-            )}
-          </CanvasCard>
-
-          <CanvasCard
-            theme={th}
-            title="提醒"
-            subtitle={TENANT_CONSOLE_SEARCH_PLACEHOLDER}
-          >
-            <div style={reminderStackStyle}>
-              {blockedReadiness > 0 ? (
-                <CanvasBanner
-                  theme={th}
-                  tone="warn"
-                  icon="warn"
-                  title={`${formatCount(blockedReadiness)} 個整合子系統 blocked`}
-                  body="Workspace 保留 deep link 到 owning app，讓租戶可直接追到 ops 或 platform 處理面。"
-                />
-              ) : null}
-              {unreadNotifications[0] ? (
-                <CanvasBanner
-                  theme={th}
-                  tone="info"
-                  icon="info"
-                  title={unreadNotifications[0].title}
-                  body={unreadNotifications[0].message}
-                />
-              ) : null}
-              <CanvasBanner
-                theme={th}
-                tone={
-                  data.quotaSummary?.usage.remainingPercent !== null &&
-                  (data.quotaSummary?.usage.remainingPercent ?? 0) < 25
-                    ? "warn"
-                    : "success"
-                }
-                icon={
-                  data.quotaSummary?.usage.remainingPercent !== null &&
-                  (data.quotaSummary?.usage.remainingPercent ?? 0) < 25
-                    ? "warn"
-                    : "ok"
-                }
-                title={`本月配額 ${formatQuotaUsage(data.quotaSummary)}`}
-                body={
-                  data.billingProfile
-                    ? `${data.billingProfile.invoiceTitle} · ${data.billingProfile.email}`
-                    : "計費與配額資料尚未完整返回。"
-                }
-              />
-            </div>
-          </CanvasCard>
-        </div>
-
         <div style={splitGridStyle}>
           <div style={laneStyle}>
             <CanvasCard
@@ -1309,42 +1472,56 @@ export default async function HomePage() {
               subtitle="availableActions-driven CTAs"
             >
               <div style={quickActionGridStyle}>
-                {quickActions.map((action) => (
-                  <CanvasCard
-                    key={action.key}
-                    theme={th}
-                    title={action.title}
-                    subtitle={action.description}
-                    style={quickActionCardStyle}
-                  >
-                    <CanvasPill
+                {quickActions.length > 0 ? (
+                  quickActions.map((action) => (
+                    <CanvasCard
+                      key={action.key}
                       theme={th}
-                      tone={getActionTone(action.descriptor)}
+                      title={action.title}
+                      subtitle={action.description}
+                      style={quickActionCardStyle}
                     >
-                      {action.label}
-                    </CanvasPill>
-                    <span style={smallMetaStyle}>
-                      action:{" "}
-                      <span style={monoStyle}>{action.descriptor.action}</span>
-                    </span>
-                    {action.descriptor.disabledReasonCode ? (
+                      <CanvasPill
+                        theme={th}
+                        tone={getActionTone(action.descriptor)}
+                      >
+                        {action.label}
+                      </CanvasPill>
                       <span style={smallMetaStyle}>
-                        disabled: {action.descriptor.disabledReasonCode}
+                        action:{" "}
+                        <span style={monoStyle}>
+                          {action.descriptor.action}
+                        </span>
                       </span>
-                    ) : null}
-                    <div style={{ marginTop: "auto" }}>
-                      <ActionLink
-                        href={action.href}
-                        disabled={!action.descriptor.enabled}
-                        label={action.external ? "新分頁開啟" : "前往"}
-                        variant={
-                          action.descriptor.enabled ? "secondary" : "ghost"
-                        }
-                        {...(action.external ? { external: true } : {})}
-                      />
-                    </div>
-                  </CanvasCard>
-                ))}
+                      {action.descriptor.disabledReasonCode ? (
+                        <span style={smallMetaStyle}>
+                          disabled: {action.descriptor.disabledReasonCode}
+                        </span>
+                      ) : null}
+                      <div style={{ marginTop: "auto" }}>
+                        <ActionLink
+                          href={action.href}
+                          disabled={!action.descriptor.enabled}
+                          label={action.external ? "新分頁開啟" : "前往"}
+                          variant={
+                            action.descriptor.enabled ? "secondary" : "ghost"
+                          }
+                          {...(action.external ? { external: true } : {})}
+                        />
+                      </div>
+                    </CanvasCard>
+                  ))
+                ) : (
+                  <div style={emptyStateStyle}>
+                    <strong style={{ color: th.text }}>
+                      尚未收到首頁可執行動作
+                    </strong>
+                    <span style={mutedStyle}>
+                      Home 不自行補猜 CTA；等待 backend 在 `availableActions` 或
+                      `nextAction` 返回真正可操作入口。
+                    </span>
+                  </div>
+                )}
               </div>
             </CanvasCard>
 
@@ -1441,6 +1618,32 @@ export default async function HomePage() {
                   <span style={mutedStyle}>
                     聚合 readiness 失敗時，不宣稱 integrations healthy。
                   </span>
+                </div>
+              ) : null}
+              {(data.readiness?.items.length ?? 0) > 0 ? (
+                <div style={moduleGridStyle}>
+                  {(data.readiness?.items ?? []).map((item) => (
+                    <div
+                      key={`${item.subSystem}-summary`}
+                      style={moduleCardStyle}
+                    >
+                      <div style={chipRowStyle}>
+                        <CanvasPill
+                          theme={th}
+                          tone={getReadinessTone(item.status)}
+                        >
+                          {getReadinessLabel(item.status)}
+                        </CanvasPill>
+                        <CanvasPill theme={th} tone="neutral">
+                          {item.subSystem}
+                        </CanvasPill>
+                      </div>
+                      <strong style={listTitleStyle}>{item.subSystem}</strong>
+                      <span style={mutedStyle}>
+                        {item.detail ?? "No integration detail returned."}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               ) : null}
             </div>
