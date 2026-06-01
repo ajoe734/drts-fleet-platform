@@ -7,10 +7,12 @@ import type {
   ApproveReimbursementBatchCommand,
   AssignReconciliationIssueCommand,
   AuditLogRecord,
+  CrossAppResourceLink,
   CreateReconciliationIssueCommand,
   DriverFeePlanRecord,
   DriverStatementLineRecord,
   DriverStatementRecord,
+  EmptyStateEnvelope,
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
   InvoiceLineRecord,
@@ -21,11 +23,15 @@ import type {
   ReconciliationIssueRecord,
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
+  ResourceActionDescriptor,
   ResolveReconciliationIssueCommand,
   ReopenReconciliationIssueCommand,
   SettlementMatrixRecord,
   TenantBillingProfile,
+  TenantInvoiceListData,
   TenantInvoiceRecord,
+  TenantInvoiceRuntimeRecord,
+  UiRefreshMetadata,
   UpdateTenantBillingProfileCommand,
 } from "@drts/contracts";
 
@@ -54,6 +60,7 @@ import { ForwarderService } from "../forwarder/forwarder.service";
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_CURRENCY = "NTD";
 const LIVE_SETTLEMENT_PRICING_VERSION = "tenant-pricing-live";
+const TENANT_REFRESH_INTERVAL_MS = 30_000;
 
 type SettlementTripSnapshot = {
   settlementId: string;
@@ -533,10 +540,169 @@ export class BillingSettlementService implements OnModuleInit {
     return `Completed owned trip ${trip.orderId}`;
   }
 
+  private toTenantInvoiceRuntimeRecord(
+    invoice: TenantInvoiceRecord,
+  ): TenantInvoiceRuntimeRecord {
+    const cloned = this.cloneInvoice(invoice);
+
+    return {
+      ...cloned,
+      availableActions: this.buildTenantInvoiceActions(cloned),
+      deepLinks: this.buildTenantInvoiceDeepLinks(cloned),
+    };
+  }
+
+  private buildTenantInvoiceActions(
+    invoice: TenantInvoiceRecord,
+  ): ResourceActionDescriptor[] {
+    const artifactExpired = this.isInvoiceArtifactExpired(invoice.artifactUrl);
+
+    return [
+      {
+        action: "download_artifact",
+        enabled: Boolean(invoice.artifactUrl) && !artifactExpired,
+        riskLevel: "low",
+        ...(!invoice.artifactUrl
+          ? { disabledReasonCode: "artifact_missing" }
+          : artifactExpired
+            ? { disabledReasonCode: "artifact_expired" }
+            : {}),
+      },
+      {
+        action: "view_detail",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "open_billing",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "open_platform_audit",
+        enabled: true,
+        riskLevel: "low",
+      },
+    ];
+  }
+
+  private buildTenantInvoiceDeepLinks(
+    invoice: TenantInvoiceRecord,
+  ): CrossAppResourceLink[] {
+    const invoiceId = encodeURIComponent(invoice.invoiceId);
+
+    return [
+      {
+        targetApp: "tenant-console",
+        route: `/billing?invoiceId=${invoiceId}`,
+        resourceType: "invoice",
+        resourceId: invoice.invoiceId,
+        openMode: "same_tab",
+        label: "返回帳務概覽",
+      },
+      {
+        targetApp: "tenant-console",
+        route: `/audit?resourceType=tenant_invoice&resourceId=${invoiceId}`,
+        resourceType: "audit_event",
+        resourceId: invoice.invoiceId,
+        openMode: "same_tab",
+        label: "查看租戶稽核",
+      },
+      {
+        targetApp: "platform-admin",
+        route: `/payments?invoiceId=${invoiceId}`,
+        resourceType: "invoice",
+        resourceId: invoice.invoiceId,
+        openMode: "new_tab",
+        label: "前往 Platform Admin 付款治理",
+      },
+      {
+        targetApp: "platform-admin",
+        route: `/audit?resourceType=tenant_invoice&resourceId=${invoiceId}`,
+        resourceType: "audit_event",
+        resourceId: invoice.invoiceId,
+        openMode: "new_tab",
+        label: "前往 Platform Admin 稽核",
+      },
+    ];
+  }
+
+  private buildTenantInvoicesEmptyState(tenantId: string): EmptyStateEnvelope {
+    if (!this.tenantBillingProfiles.has(tenantId)) {
+      return {
+        reason: "not_provisioned",
+        messageCode: "tenant_invoice_not_provisioned",
+        nextAction: {
+          action: "open_billing_setup",
+          enabled: true,
+          riskLevel: "medium",
+        },
+      };
+    }
+
+    return {
+      reason: "no_data",
+      messageCode: "tenant_invoice_no_data",
+      nextAction: {
+        action: "open_billing",
+        enabled: true,
+        riskLevel: "low",
+      },
+    };
+  }
+
+  private isInvoiceArtifactExpired(artifactUrl: string | null) {
+    if (!artifactUrl) {
+      return false;
+    }
+
+    try {
+      const parsed = new URL(artifactUrl);
+      const expiresAt = parsed.searchParams.get("expires_at");
+      if (!expiresAt) {
+        return false;
+      }
+
+      const expiresAtMs = Date.parse(expiresAt);
+      return Number.isFinite(expiresAtMs) && expiresAtMs < Date.now();
+    } catch {
+      return false;
+    }
+  }
+
   listTenantInvoices(tenantId: string) {
     return this.tenantInvoices
       .filter((invoice) => invoice.tenantId === tenantId)
       .map((invoice) => this.cloneInvoice(invoice));
+  }
+
+  listTenantInvoicesRuntime(tenantId: string): TenantInvoiceListData {
+    const items = this.tenantInvoices
+      .filter((invoice) => invoice.tenantId === tenantId)
+      .map((invoice) => this.toTenantInvoiceRuntimeRecord(invoice));
+
+    const refresh: UiRefreshMetadata = {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: TENANT_REFRESH_INTERVAL_MS,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+    const emptyState =
+      items.length === 0
+        ? this.buildTenantInvoicesEmptyState(tenantId)
+        : undefined;
+
+    return {
+      items,
+      pageInfo: {
+        page: 1,
+        pageSize: items.length > 0 ? items.length : 20,
+        totalItems: items.length,
+        totalPages: items.length > 0 ? 1 : 0,
+      },
+      refresh,
+      ...(emptyState ? { emptyState } : {}),
+    };
   }
 
   listPlatformInvoices() {

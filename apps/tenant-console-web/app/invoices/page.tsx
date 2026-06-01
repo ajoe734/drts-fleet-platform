@@ -9,7 +9,9 @@ import type {
   RefreshTier,
   ResourceActionDescriptor,
   TenantBillingProfile,
+  TenantInvoiceListData,
   TenantInvoiceRecord,
+  TenantInvoiceRuntimeRecord,
   UiRefreshMetadata,
 } from "@drts/contracts";
 import {
@@ -36,15 +38,6 @@ const th = buildCanvasTheme({
 const REFRESH_TIER: RefreshTier = "slow";
 const REFRESH_INTERVAL_MS = 30_000;
 const STATUS_FILTERS = ["all", "draft", "issued", "paid", "overdue"] as const;
-const EMPTY_REASONS: EmptyReason[] = [
-  "no_data",
-  "not_provisioned",
-  "fetch_failed",
-  "permission_denied",
-  "external_unavailable",
-  "filtered_empty",
-];
-
 const pageStyle: CSSProperties = {
   padding: 24,
   display: "flex",
@@ -288,18 +281,14 @@ type InvoiceActionView = ResourceActionDescriptor & {
   href?: string;
 };
 
-type InvoiceRuntimeRecord = TenantInvoiceRecord & {
-  availableActions?: ResourceActionDescriptor[];
-  deepLinks?: CrossAppResourceLink[];
-  refresh?: UiRefreshMetadata;
-};
-
-type InvoiceViewRecord = TenantInvoiceRecord & {
+type InvoiceViewRecord = Omit<
+  TenantInvoiceRuntimeRecord,
+  "availableActions"
+> & {
   dueDate: string | null;
   expiresAt: string | null;
   statusView: BillingDocumentStatus | "overdue";
   availableActions: InvoiceActionView[];
-  deepLinks: CrossAppResourceLink[];
 };
 
 type InvoiceRow = InvoiceViewRecord & Record<string, unknown>;
@@ -309,7 +298,6 @@ type InvoiceFilters = {
   period: string;
   status: StatusFilter;
   invoiceId: string;
-  emptyReason: EmptyReason | null;
 };
 
 type InvoicesPageData = {
@@ -317,7 +305,7 @@ type InvoicesPageData = {
   invoices: InvoiceViewRecord[];
   errors: string[];
   refresh: UiRefreshMetadata;
-  emptyReason: EmptyReason | null;
+  emptyState: EmptyStateEnvelope | null;
 };
 
 function toErrorMessage(error: unknown) {
@@ -443,87 +431,13 @@ function normalizeRuntimeAction(
   }
 }
 
-function buildInvoiceActions(
-  invoice: TenantInvoiceRecord,
-  expiresAt: string | null,
-): InvoiceActionView[] {
-  const invoiceId = encodeURIComponent(invoice.invoiceId);
-  const artifactExpired = isIsoPast(expiresAt);
-
-  return [
-    {
-      action: "download_artifact",
-      enabled: Boolean(invoice.artifactUrl) && !artifactExpired,
-      riskLevel: "low",
-      label: "下載簽名檔",
-      ...(invoice.artifactUrl && !artifactExpired
-        ? { href: invoice.artifactUrl }
-        : {}),
-      ...(!invoice.artifactUrl
-        ? { disabledReasonCode: "artifact_missing" }
-        : artifactExpired
-          ? { disabledReasonCode: "artifact_expired" }
-          : {}),
-    },
-    {
-      action: "view_detail",
-      enabled: true,
-      riskLevel: "low",
-      label: "檢視詳情",
-      href: `/invoices?invoiceId=${invoiceId}`,
-    },
-  ];
-}
-
-function buildInvoiceDeepLinks(
-  invoice: TenantInvoiceRecord,
-): CrossAppResourceLink[] {
-  const invoiceId = encodeURIComponent(invoice.invoiceId);
-
-  return [
-    {
-      targetApp: "tenant-console",
-      route: `/billing?invoiceId=${invoiceId}`,
-      resourceType: "invoice",
-      resourceId: invoice.invoiceId,
-      openMode: "same_tab",
-      label: "返回帳務概覽",
-    },
-    {
-      targetApp: "tenant-console",
-      route: `/audit?resourceType=tenant_invoice&resourceId=${invoiceId}`,
-      resourceType: "audit_event",
-      resourceId: invoice.invoiceId,
-      openMode: "same_tab",
-      label: "查看租戶稽核",
-    },
-    {
-      targetApp: "platform-admin",
-      route: `/payments?invoiceId=${invoiceId}`,
-      resourceType: "invoice",
-      resourceId: invoice.invoiceId,
-      openMode: "new_tab",
-      label: "前往 Platform Admin 付款治理",
-    },
-    {
-      targetApp: "platform-admin",
-      route: `/audit?resourceType=tenant_invoice&resourceId=${invoiceId}`,
-      resourceType: "audit_event",
-      resourceId: invoice.invoiceId,
-      openMode: "new_tab",
-      label: "前往 Platform Admin 稽核",
-    },
-  ];
-}
-
-function normalizeInvoice(invoice: TenantInvoiceRecord): InvoiceViewRecord {
+function normalizeInvoice(
+  invoice: TenantInvoiceRuntimeRecord,
+): InvoiceViewRecord {
   const expiresAt = parseArtifactExpiry(invoice.artifactUrl);
-  const runtimeInvoice = invoice as InvoiceRuntimeRecord;
-  const normalizedActions = runtimeInvoice.availableActions?.length
-    ? runtimeInvoice.availableActions.map((action) =>
-        normalizeRuntimeAction(action, invoice),
-      )
-    : buildInvoiceActions(invoice, expiresAt);
+  const normalizedActions = invoice.availableActions.map((action) =>
+    normalizeRuntimeAction(action, invoice),
+  );
 
   return {
     ...invoice,
@@ -531,26 +445,22 @@ function normalizeInvoice(invoice: TenantInvoiceRecord): InvoiceViewRecord {
     expiresAt,
     statusView: deriveInvoiceStatus(invoice),
     availableActions: normalizedActions,
-    deepLinks: runtimeInvoice.deepLinks?.length
-      ? runtimeInvoice.deepLinks
-      : buildInvoiceDeepLinks(invoice),
   };
 }
 
 async function loadInvoicesData(): Promise<InvoicesPageData> {
   const client = getTenantClient();
-  const generatedAt = new Date().toISOString();
   const [billingResult, invoicesResult] = await Promise.allSettled([
     client.getBillingProfile() as Promise<TenantBillingProfile>,
-    client.listInvoices() as Promise<TenantInvoiceRecord[]>,
+    client.listInvoicesRuntime() as Promise<TenantInvoiceListData>,
   ]);
 
   const invoices =
     invoicesResult.status === "fulfilled"
-      ? invoicesResult.value.map(normalizeInvoice)
+      ? invoicesResult.value.items.map(normalizeInvoice)
       : [];
   const errors: string[] = [];
-  let emptyReason: EmptyReason | null = null;
+  let emptyState: EmptyStateEnvelope | null = null;
 
   if (billingResult.status === "rejected") {
     errors.push(`Billing profile: ${toErrorMessage(billingResult.reason)}`);
@@ -559,15 +469,19 @@ async function loadInvoicesData(): Promise<InvoicesPageData> {
     errors.push(`Invoice register: ${toErrorMessage(invoicesResult.reason)}`);
   }
 
-  if (invoices.length === 0) {
+  if (invoicesResult.status === "fulfilled") {
+    emptyState = invoicesResult.value.emptyState ?? null;
+  } else if (invoices.length === 0) {
     if (invoicesResult.status === "rejected") {
-      emptyReason = classifyRequestError(invoicesResult.reason);
+      emptyState = buildEmptyState(
+        classifyRequestError(invoicesResult.reason),
+        null,
+      );
     } else if (billingResult.status === "rejected") {
-      emptyReason = classifyRequestError(billingResult.reason);
-    } else if (!billingResult.value.invoiceTitle.trim()) {
-      emptyReason = "not_provisioned";
-    } else {
-      emptyReason = "no_data";
+      emptyState = buildEmptyState(
+        classifyRequestError(billingResult.reason),
+        null,
+      );
     }
   }
 
@@ -576,13 +490,16 @@ async function loadInvoicesData(): Promise<InvoicesPageData> {
       billingResult.status === "fulfilled" ? billingResult.value : null,
     invoices,
     errors,
-    refresh: {
-      generatedAt,
-      staleAfterMs: REFRESH_INTERVAL_MS,
-      dataFreshness: errors.length > 0 ? "degraded" : "fresh",
-      source: "live",
-    },
-    emptyReason,
+    refresh:
+      invoicesResult.status === "fulfilled"
+        ? invoicesResult.value.refresh
+        : {
+            generatedAt: new Date().toISOString(),
+            staleAfterMs: REFRESH_INTERVAL_MS,
+            dataFreshness: errors.length > 0 ? "degraded" : "fresh",
+            source: "live",
+          },
+    emptyState,
   };
 }
 
@@ -595,7 +512,6 @@ function parseFilters(
   };
 
   const statusRaw = first("status");
-  const emptyReasonRaw = first("emptyReason");
 
   return {
     query: first("q").trim(),
@@ -604,9 +520,6 @@ function parseFilters(
       ? (statusRaw as StatusFilter)
       : "all",
     invoiceId: first("invoiceId").trim(),
-    emptyReason: EMPTY_REASONS.includes(emptyReasonRaw as EmptyReason)
-      ? (emptyReasonRaw as EmptyReason)
-      : null,
   };
 }
 
@@ -632,7 +545,7 @@ function getRefreshTone(refresh: UiRefreshMetadata): CanvasTone {
 
 function buildEmptyState(
   reason: EmptyReason,
-  filters: InvoiceFilters,
+  filters: InvoiceFilters | null,
 ): EmptyStateEnvelope {
   switch (reason) {
     case "not_provisioned":
@@ -679,7 +592,8 @@ function buildEmptyState(
       return {
         reason,
         messageCode:
-          filters.query || filters.period || filters.status !== "all"
+          filters &&
+          (filters.query || filters.period || filters.status !== "all")
             ? "tenant_invoice_filtered_empty"
             : "tenant_invoice_empty",
         nextAction: {
@@ -916,16 +830,16 @@ export default async function InvoicesPage({
   });
 
   const computedEmptyReason =
-    filters.emptyReason ??
-    (filteredInvoices.length === 0
+    filteredInvoices.length === 0
       ? filters.query || filters.period || filters.status !== "all"
         ? "filtered_empty"
-        : data.emptyReason
-      : null);
+        : (data.emptyState?.reason ?? null)
+      : null;
 
-  const emptyState = computedEmptyReason
-    ? buildEmptyState(computedEmptyReason, filters)
-    : null;
+  const emptyState =
+    computedEmptyReason === "filtered_empty"
+      ? buildEmptyState("filtered_empty", filters)
+      : data.emptyState;
   const emptyDescription = computedEmptyReason
     ? describeEmptyState(computedEmptyReason)
     : null;
@@ -940,7 +854,7 @@ export default async function InvoicesPage({
     allInvoices[0] ??
     null;
 
-  const selectedArtifactAction =
+  const selectedArtifactAction: InvoiceActionView | null =
     selectedInvoice?.availableActions.find(
       (action) => action.action === "download_artifact",
     ) ?? null;

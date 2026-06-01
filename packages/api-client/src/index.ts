@@ -186,6 +186,7 @@ import type {
   TenantCostCenterRecord,
   TenantCostCenterQuotaSummary,
   TenantIntegrationGovernancePackage,
+  TenantInvoiceListData,
   TenantInvoiceRecord,
   TenantPassengerRecord,
   TenantQuotaLedgerEntry,
@@ -1051,6 +1052,10 @@ export class ApiClient {
 
   async listInvoices(): Promise<TenantInvoiceRecord[]> {
     return this.getList<TenantInvoiceRecord>("/api/tenant/invoices");
+  }
+
+  async listInvoicesRuntime(): Promise<TenantInvoiceListData> {
+    return this.get<TenantInvoiceListData>("/api/tenant/invoices");
   }
 
   async generateInvoice(command: GenerateTenantInvoiceCommand) {

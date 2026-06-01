@@ -30,6 +30,8 @@
  * consuming UI, so the contract change and its sole consumer move together.
  */
 
+import type { ApiPageInfo, TenantInvoiceRecord } from "./index";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared primitives
 // ─────────────────────────────────────────────────────────────────────────────
@@ -381,6 +383,22 @@ export interface TenantIntegrationReadinessSummary {
   tenantId: string;
   items: TenantIntegrationReadinessItem[];
   computedAt: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Q-TEN02 / Q-X01 / Q-X03 / Q-X13 / Q-X15 — TenantInvoice runtime list
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TenantInvoiceRuntimeRecord extends TenantInvoiceRecord {
+  availableActions: ResourceActionDescriptor[];
+  deepLinks: CrossAppResourceLink[];
+}
+
+export interface TenantInvoiceListData {
+  items: TenantInvoiceRuntimeRecord[];
+  pageInfo: ApiPageInfo;
+  refresh: UiRefreshMetadata;
+  emptyState?: EmptyStateEnvelope;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
