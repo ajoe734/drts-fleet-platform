@@ -920,6 +920,25 @@ function buildExportFields(filters: FilterState) {
   ].filter(([, value]) => Boolean(value));
 }
 
+function hasActiveFilters(filters: FilterState) {
+  return Boolean(
+    filters.actor ||
+    filters.module ||
+    filters.action ||
+    filters.from ||
+    filters.to ||
+    filters.auditId,
+  );
+}
+
+function orderPageActions(actions: ResourceActionDescriptor[]) {
+  const order = ["refresh", "export"] as const;
+  const lookup = new Map(actions.map((action) => [action.action, action]));
+  return order
+    .map((actionName) => lookup.get(actionName))
+    .filter((action): action is ResourceActionDescriptor => Boolean(action));
+}
+
 export default async function AuditPage({
   searchParams,
 }: {
@@ -977,9 +996,9 @@ export default async function AuditPage({
     Boolean(record.requestId),
   ).length;
   const availableActions = auditView?.availableActions ?? [];
+  const pageActions = orderPageActions(availableActions);
   const filterAction = findAvailableAction(availableActions, "filter");
   const refreshAction = findAvailableAction(availableActions, "refresh");
-  const exportAction = findAvailableAction(availableActions, "export");
   const emptyReason = auditView?.emptyState?.reason ?? errorReason;
   const emptyState = emptyReason
     ? buildEmptyState(
@@ -998,6 +1017,8 @@ export default async function AuditPage({
   const snapshotGeneratedAt = auditView?.refreshMetadata?.generatedAt
     ? formatAuditAt(auditView.refreshMetadata.generatedAt)
     : "—";
+  const refreshTierLabel = formatRefreshTier(auditView?.refreshTier);
+  const hasFilters = hasActiveFilters(filters);
 
   return (
     <div>
@@ -1007,47 +1028,51 @@ export default async function AuditPage({
         subtitle="不可變 · 7 年保存 · 含所有 actor realm 對 tenant 資源的動作 (Q-TEN13)"
         actions={
           <>
-            {refreshAction
-              ? renderActionLink(
-                  refreshAction,
-                  buildActionHref(refreshAction, filters),
-                  actionLabel(refreshAction),
-                )
-              : null}
-            {exportAction ? (
-              <form
-                action={buildActionHref(exportAction, filters)}
-                method="post"
-                style={{ display: "inline-flex" }}
-              >
-                {buildExportFields(filters).map(([name, value]) => (
-                  <input
-                    key={`export-${name}`}
-                    type="hidden"
-                    name={name}
-                    value={value}
-                  />
-                ))}
-                <button
-                  type="submit"
-                  disabled={!exportAction.enabled}
-                  title={exportAction.disabledReasonCode}
-                  style={{
-                    ...linkButtonBaseStyle,
-                    background: "transparent",
-                    color: th.textMuted,
-                    ...(exportAction.enabled
-                      ? null
-                      : {
-                          opacity: 0.45,
-                          cursor: "not-allowed",
-                        }),
-                  }}
+            {pageActions.map((action) =>
+              action.action === "export" ? (
+                <form
+                  key={`header-${action.action}`}
+                  action={buildActionHref(action, filters)}
+                  method="post"
+                  style={{ display: "inline-flex" }}
                 >
-                  {actionLabel(exportAction)}
-                </button>
-              </form>
-            ) : null}
+                  {buildExportFields(filters).map(([name, value]) => (
+                    <input
+                      key={`export-${name}`}
+                      type="hidden"
+                      name={name}
+                      value={value}
+                    />
+                  ))}
+                  <button
+                    type="submit"
+                    disabled={!action.enabled}
+                    title={action.disabledReasonCode}
+                    style={{
+                      ...linkButtonBaseStyle,
+                      background: "transparent",
+                      color: th.textMuted,
+                      ...(action.enabled
+                        ? null
+                        : {
+                            opacity: 0.45,
+                            cursor: "not-allowed",
+                          }),
+                    }}
+                  >
+                    {actionLabel(action)}
+                  </button>
+                </form>
+              ) : (
+                <span key={`header-${action.action}`}>
+                  {renderActionLink(
+                    action,
+                    buildActionHref(action, filters),
+                    actionLabel(action),
+                  )}
+                </span>
+              ),
+            )}
           </>
         }
       />
@@ -1064,7 +1089,7 @@ export default async function AuditPage({
         <CanvasCard
           theme={th}
           title="篩選與手動刷新"
-          subtitle="依 actor / module / action / time range 篩選；本頁 refresh tier 為 T6 manual。"
+          subtitle={`依 actor / module / action / time range 篩選；本頁 refresh tier 為 ${refreshTierLabel}。`}
         >
           <form
             action="/audit"
@@ -1165,16 +1190,18 @@ export default async function AuditPage({
                   {actionLabel(filterAction)}
                 </button>
               ) : null}
-              <a
-                href="/audit"
-                style={{
-                  ...linkButtonBaseStyle,
-                  background: th.surface,
-                  color: th.text,
-                }}
-              >
-                重設
-              </a>
+              {hasFilters ? (
+                <a
+                  href="/audit"
+                  style={{
+                    ...linkButtonBaseStyle,
+                    background: th.surface,
+                    color: th.text,
+                  }}
+                >
+                  重設
+                </a>
+              ) : null}
               {refreshAction
                 ? renderActionLink(
                     refreshAction,
@@ -1183,8 +1210,7 @@ export default async function AuditPage({
                   )
                 : null}
               <span style={secondaryTextStyle}>
-                Snapshot {snapshotGeneratedAt} ·{" "}
-                {formatRefreshTier(auditView?.refreshTier)}
+                Snapshot {snapshotGeneratedAt} · {refreshTierLabel}
                 {" · "}
                 export issues a signed artifact for the current filtered subset.
               </span>
@@ -1224,9 +1250,7 @@ export default async function AuditPage({
               </div>
               <div style={stripCardStyle}>
                 <span style={summaryLabelStyle}>Refresh tier</span>
-                <span style={summaryValueStyle}>
-                  {formatRefreshTier(auditView?.refreshTier)}
-                </span>
+                <span style={summaryValueStyle}>{refreshTierLabel}</span>
                 <span style={summarySubStyle}>
                   Snapshot {snapshotGeneratedAt} · signed export follows the
                   current filtered subset.
