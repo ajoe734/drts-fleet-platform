@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { PlatformAdapter, UpdatePlatformAdapterCommand } from "@drts/contracts";
 import { EditAdapterModal } from "./EditAdapterModal";
 import { ApiClient } from "@drts/api-client";
@@ -96,6 +97,7 @@ function isAttentionAdapter(adapter: PlatformAdapter) {
 
 export function AdapterList() {
   const { t, locale } = useTranslation();
+  const searchParams = useSearchParams();
   const [adapters, setAdapters] = useState<PlatformAdapter[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +123,18 @@ export function AdapterList() {
 
     fetchAdapters();
   }, []);
+
+  useEffect(() => {
+    const filterParam = searchParams.get("filter");
+    if (
+      filterParam === "all" ||
+      filterParam === "forwarded" ||
+      filterParam === "enabled" ||
+      filterParam === "attention"
+    ) {
+      setFilter(filterParam);
+    }
+  }, [searchParams]);
 
   const copy =
     locale === "en"
@@ -165,7 +179,19 @@ export function AdapterList() {
           actions: "操作",
         };
 
+  const platformCodeFilter = searchParams
+    .get("platformCode")
+    ?.toLowerCase()
+    .trim();
+
   const filteredAdapters = adapters.filter((adapter) => {
+    if (
+      platformCodeFilter &&
+      adapter.platformCode.toLowerCase() !== platformCodeFilter
+    ) {
+      return false;
+    }
+
     switch (filter) {
       case "forwarded":
         return adapter.isForwarded;
@@ -287,7 +313,14 @@ export function AdapterList() {
           ]}
         >
           {filteredAdapters.map((adapter) => (
-            <Tr key={adapter.id} highlighted={isAttentionAdapter(adapter)}>
+            <Tr
+              key={adapter.id}
+              highlighted={
+                isAttentionAdapter(adapter) ||
+                (Boolean(platformCodeFilter) &&
+                  adapter.platformCode.toLowerCase() === platformCodeFilter)
+              }
+            >
               <Td density="compact">
                 <DataCellStack
                   primary={
