@@ -250,8 +250,7 @@ export default function NoticesPage() {
   const activeCount =
     workspace?.notices.items.filter(
       (item: PlatformNoticeWorkspaceRecord) => item.status === "active",
-    ).length ??
-    0;
+    ).length ?? 0;
 
   if (loading && !workspace) {
     return <div className="admin-empty">{t("notices.loading")}</div>;
@@ -259,6 +258,8 @@ export default function NoticesPage() {
 
   const dataFreshness = workspace?.refresh.dataFreshness ?? "unknown";
   const maintenance = workspace?.maintenance.currentState;
+  const noticeCreateAction = workspace?.notices.availableActions[0];
+  const maintenanceAction = workspace?.maintenance.availableActions[0];
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -288,7 +289,9 @@ export default function NoticesPage() {
             }}
           >
             <div>
-              <div style={{ fontWeight: 700, fontSize: 13 }}>{receipt.message}</div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>
+                {receipt.message}
+              </div>
               <div style={{ fontSize: 12, color: "#475569" }}>
                 audit {receipt.auditId} · action {receipt.actionId}
               </div>
@@ -374,33 +377,32 @@ export default function NoticesPage() {
           </button>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {activeTab === "notices" && workspace?.notices.availableActions[0] && (
+          {activeTab === "notices" && noticeCreateAction && (
             <button
               className="admin-btn admin-btn--primary"
               onClick={() =>
                 openAction({
                   kind: "create",
-                  descriptor: workspace.notices.availableActions[0],
+                  descriptor: noticeCreateAction,
                 })
               }
             >
               {t("notices.newNotice")}
             </button>
           )}
-          {activeTab === "maintenance" &&
-            workspace?.maintenance.availableActions[0] && (
-              <button
-                className="admin-btn admin-btn--primary"
-                onClick={() =>
-                  openAction({
-                    kind: "maintenance",
-                    descriptor: workspace.maintenance.availableActions[0],
-                  })
-                }
-              >
-                {actionLabel(workspace.maintenance.availableActions[0].action)}
-              </button>
-            )}
+          {activeTab === "maintenance" && maintenanceAction && (
+            <button
+              className="admin-btn admin-btn--primary"
+              onClick={() =>
+                openAction({
+                  kind: "maintenance",
+                  descriptor: maintenanceAction,
+                })
+              }
+            >
+              {actionLabel(maintenanceAction.action)}
+            </button>
+          )}
           <button
             className="admin-btn admin-btn--secondary"
             onClick={() => void loadWorkspace("refresh")}
@@ -432,7 +434,8 @@ export default function NoticesPage() {
           }}
         >
           <div style={{ fontSize: 13 }}>
-            Snapshot generated {formatDateTime(workspace?.refresh.generatedAt || "")}
+            Snapshot generated{" "}
+            {formatDateTime(workspace?.refresh.generatedAt || "")}
             {" · "}
             {formatPlatformCodeLabel(locale, dataFreshness)}
             {" · "}
@@ -488,7 +491,10 @@ export default function NoticesPage() {
               </table>
             </div>
           ) : (
-            renderEmptyState(workspace?.notices.emptyState, workspace?.notices.availableActions[0])
+            renderEmptyState(
+              workspace?.notices.emptyState,
+              workspace?.notices.availableActions[0],
+            )
           )}
         </div>
       )}
@@ -538,7 +544,9 @@ export default function NoticesPage() {
                     <input
                       type="checkbox"
                       checked={maintEnabled}
-                      onChange={(event) => setMaintEnabled(event.target.checked)}
+                      onChange={(event) =>
+                        setMaintEnabled(event.target.checked)
+                      }
                     />
                     <span className="admin-switch-slider" />
                   </label>
@@ -589,7 +597,9 @@ export default function NoticesPage() {
                   <input
                     type="datetime-local"
                     value={maintScheduledEnd}
-                    onChange={(event) => setMaintScheduledEnd(event.target.value)}
+                    onChange={(event) =>
+                      setMaintScheduledEnd(event.target.value)
+                    }
                     style={inputStyle()}
                   />
                 }
@@ -599,7 +609,9 @@ export default function NoticesPage() {
 
           <div className="admin-card" style={{ display: "grid", gap: 14 }}>
             <div>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Banner preview</div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                Banner preview
+              </div>
               <div
                 style={{
                   padding: 14,
@@ -608,10 +620,14 @@ export default function NoticesPage() {
                   background: "linear-gradient(135deg, #fff1f2, #ffffff)",
                 }}
               >
-                <div style={{ fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>
+                <div
+                  style={{ fontWeight: 700, color: "#991b1b", marginBottom: 6 }}
+                >
                   {workspace.maintenance.previewTitle}
                 </div>
-                <div style={{ fontSize: 13, color: "#7f1d1d", lineHeight: 1.5 }}>
+                <div
+                  style={{ fontSize: 13, color: "#7f1d1d", lineHeight: 1.5 }}
+                >
                   {workspace.maintenance.previewBody}
                 </div>
               </div>
@@ -638,8 +654,8 @@ export default function NoticesPage() {
         </div>
       )}
 
-      {activeTab === "history" && (
-        workspace?.history.items.length ? (
+      {activeTab === "history" &&
+        (workspace?.history.items.length ? (
           <div className="admin-card" style={{ overflowX: "auto" }}>
             <table className="admin-table">
               <thead>
@@ -655,25 +671,33 @@ export default function NoticesPage() {
               </thead>
               <tbody>
                 {workspace.history.items.map((record) => (
-                  <HistoryRow key={record.noticeId} locale={locale} record={record} />
+                  <HistoryRow
+                    key={record.noticeId}
+                    locale={locale}
+                    record={record}
+                  />
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
           renderEmptyState(workspace?.history.emptyState)
-        )
-      )}
+        ))}
 
       {pendingAction && (
         <div style={modalScrimStyle}>
           <div className="admin-card" style={modalCardStyle}>
             <div style={{ display: "grid", gap: 6 }}>
               <div style={{ fontSize: 12, color: "#64748b" }}>
-                {formatPlatformCodeLabel(locale, pendingAction.descriptor.riskLevel)}
+                {formatPlatformCodeLabel(
+                  locale,
+                  pendingAction.descriptor.riskLevel,
+                )}
                 {" risk action"}
               </div>
-              <h3 style={{ margin: 0 }}>{actionLabel(pendingAction.descriptor.action)}</h3>
+              <h3 style={{ margin: 0 }}>
+                {actionLabel(pendingAction.descriptor.action)}
+              </h3>
               <p style={{ margin: 0, color: "#475569", lineHeight: 1.5 }}>
                 {actionHelpText(pendingAction)}
               </p>
@@ -708,10 +732,13 @@ export default function NoticesPage() {
                 onClick={() => void submitPendingAction()}
                 disabled={
                   submitting ||
-                  (pendingAction.descriptor.requiresReason && !reasonDraft.trim())
+                  (pendingAction.descriptor.requiresReason &&
+                    !reasonDraft.trim())
                 }
               >
-                {submitting ? t("notices.updating") : actionLabel(pendingAction.descriptor.action)}
+                {submitting
+                  ? t("notices.updating")
+                  : actionLabel(pendingAction.descriptor.action)}
               </button>
             </div>
           </div>
@@ -767,7 +794,9 @@ function NoticeComposer(props: {
             <select
               value={props.severity}
               onChange={(event) =>
-                props.onSeverityChange(event.target.value as PlatformNoticeSeverity)
+                props.onSeverityChange(
+                  event.target.value as PlatformNoticeSeverity,
+                )
               }
               style={inputStyle()}
             >
@@ -785,7 +814,9 @@ function NoticeComposer(props: {
             <select
               value={props.audience}
               onChange={(event) =>
-                props.onAudienceChange(event.target.value as PlatformNoticeAudience)
+                props.onAudienceChange(
+                  event.target.value as PlatformNoticeAudience,
+                )
               }
               style={inputStyle()}
             >
@@ -803,7 +834,9 @@ function NoticeComposer(props: {
             <input
               type="datetime-local"
               value={props.scheduledAt}
-              onChange={(event) => props.onScheduledAtChange(event.target.value)}
+              onChange={(event) =>
+                props.onScheduledAtChange(event.target.value)
+              }
               style={inputStyle()}
             />
           }
@@ -829,13 +862,20 @@ function NoticeRow(props: {
   notice: PlatformNoticeWorkspaceRecord;
   onAction: (target: ActionTarget) => void;
 }) {
-  const action = props.notice.availableActions[0];
+  const action: ResourceActionDescriptor = props.notice.availableActions[0] ?? {
+    action: "resolve_notice",
+    enabled: false,
+    riskLevel: "medium",
+    disabledReasonCode: "no_action_available",
+  };
 
   return (
     <tr>
       <td style={monoCellStyle}>{props.notice.noticeId}</td>
       <td>
-        <div style={{ fontWeight: 700, marginBottom: 4 }}>{props.notice.title}</div>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>
+          {props.notice.title}
+        </div>
         <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.45 }}>
           {props.notice.body}
         </div>
@@ -915,11 +955,15 @@ function HistoryRow(props: {
         {props.record.deliveredAudienceLabels.join(" / ")}
       </td>
       <td>
-        <span className={`admin-badge ${broadcastBadge(props.record.deliveryStatus)}`}>
+        <span
+          className={`admin-badge ${broadcastBadge(props.record.deliveryStatus)}`}
+        >
           {props.record.deliveryDetail}
         </span>
       </td>
-      <td style={{ fontSize: 12 }}>{formatDateTime(props.record.broadcastAt)}</td>
+      <td style={{ fontSize: 12 }}>
+        {formatDateTime(props.record.broadcastAt)}
+      </td>
       <td>
         <div style={{ display: "grid", gap: 6 }}>
           {props.record.crossAppLinks.map((link) => (
@@ -1029,7 +1073,8 @@ function inputStyle(multiline = false): React.CSSProperties {
 }
 
 const monoCellStyle: React.CSSProperties = {
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+  fontFamily:
+    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
   fontSize: 12,
 };
 
