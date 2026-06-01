@@ -9,6 +9,7 @@ import type {
 } from "@drts/contracts";
 import {
   CanvasBanner,
+  CanvasDL,
   CanvasCard,
   CanvasField,
   CanvasKPI,
@@ -228,6 +229,57 @@ const actionHintStyle: CSSProperties = {
   alignItems: "center",
 };
 
+const heroGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.7fr) minmax(280px, 0.95fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
+const sideStackStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const helperListStyle: CSSProperties = {
+  margin: 0,
+  paddingLeft: 18,
+  display: "grid",
+  gap: 8,
+  color: th.textMuted,
+  fontSize: 12.5,
+  lineHeight: 1.6,
+};
+
+const statusMatrixStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+  gap: 8,
+};
+
+const statusCardStyle: CSSProperties = {
+  padding: 10,
+  borderRadius: 10,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceLo,
+  display: "grid",
+  gap: 6,
+};
+
+const statusLabelStyle: CSSProperties = {
+  fontSize: 10.5,
+  letterSpacing: 0.4,
+  textTransform: "uppercase",
+  color: th.textDim,
+};
+
+const statusBodyStyle: CSSProperties = {
+  fontSize: 12.5,
+  color: th.text,
+  lineHeight: 1.5,
+};
+
 type QueryValue = string | string[] | undefined;
 
 type AuditQuery = {
@@ -249,6 +301,11 @@ type AuditRow = {
   resource: ReactNode;
   request: string;
   detail: ReactNode;
+};
+
+type ActionVisualSpec = {
+  label: string;
+  helper: string;
 };
 
 function getQueryValue(value: QueryValue) {
@@ -672,6 +729,36 @@ function buildQueryString(query: AuditQuery) {
   return value ? `?${value}` : "";
 }
 
+function getActionVisualSpec(action: string): ActionVisualSpec {
+  switch (action) {
+    case "filter":
+      return {
+        label: "Filter",
+        helper: "依 actor / module / action / time range 收斂 tenant scope。",
+      };
+    case "refresh":
+      return {
+        label: "Refresh",
+        helper: "T6 manual tier，不做自動輪詢。",
+      };
+    case "export":
+      return {
+        label: "Export",
+        helper: "輸出目前篩選結果，對應 signed artifact workflow。",
+      };
+    case "view_audit_receipt":
+      return {
+        label: "Receipt link",
+        helper: "接住 action receipt 的 auditId deep link。",
+      };
+    default:
+      return {
+        label: action,
+        helper: "由 availableActions 決定顯示與可用性。",
+      };
+  }
+}
+
 function getPageActions(input: {
   hasRows: boolean;
   hasFocusedRecord: boolean;
@@ -895,6 +982,13 @@ export default async function AuditPage({
     ? buildCsvHref(visibleLogs)
     : null;
   const rows = buildAuditRows(visibleLogs);
+  const actionLookup = new Map(
+    pageActions.map((action) => [action.action, action] as const),
+  );
+  const filterAction = actionLookup.get("filter");
+  const refreshAction = actionLookup.get("refresh");
+  const exportAction = actionLookup.get("export");
+  const receiptAction = actionLookup.get("view_audit_receipt");
   const columns: CanvasTableColumn<AuditRow>[] = [
     { h: "When", k: "at", w: 170, mono: true },
     { h: "Actor", k: "actor", w: 220 },
@@ -1007,126 +1101,235 @@ export default async function AuditPage({
           />
         ) : null}
 
-        <CanvasCard
-          theme={th}
-          title="篩選與動作"
-          subtitle="依 actor、module、action、time range 調查，並保留 request correlation。"
-          actions={
-            <div style={actionHintStyle}>
-              {pageActions.map((action) => (
-                <CanvasPill
-                  key={action.action}
-                  theme={th}
-                  tone={action.enabled ? "accent" : "neutral"}
+        <div style={heroGridStyle}>
+          <CanvasCard
+            theme={th}
+            title="篩選與動作"
+            subtitle="依 actor、module、action、time range 調查，並保留 request correlation。"
+            actions={
+              <div style={actionHintStyle}>
+                {pageActions.map((action) => {
+                  const spec = getActionVisualSpec(action.action);
+                  return (
+                    <CanvasPill
+                      key={action.action}
+                      theme={th}
+                      tone={action.enabled ? "accent" : "neutral"}
+                    >
+                      {spec.label}
+                      {action.enabled
+                        ? ""
+                        : ` · ${action.disabledReasonCode ?? "disabled"}`}
+                    </CanvasPill>
+                  );
+                })}
+              </div>
+            }
+          >
+            <form action="/audit" method="get" style={filterBarStyle}>
+              <div style={compactFieldStyle}>
+                <span style={labelStyle}>Actor realm</span>
+                <select
+                  defaultValue={query.actor}
+                  name="actor"
+                  style={selectStyle}
                 >
-                  {action.action}
-                  {action.enabled
-                    ? ""
-                    : ` · ${action.disabledReasonCode ?? "disabled"}`}
-                </CanvasPill>
-              ))}
-            </div>
-          }
-        >
-          <form action="/audit" method="get" style={filterBarStyle}>
-            <div style={compactFieldStyle}>
-              <span style={labelStyle}>Actor realm</span>
-              <select
-                defaultValue={query.actor}
-                name="actor"
-                style={selectStyle}
-              >
-                <option value="">All actor realms</option>
-                {actorOptions.map((actor) => (
-                  <option key={actor} value={actor}>
-                    {actor}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div style={compactFieldStyle}>
-              <span style={labelStyle}>Module</span>
-              <select
-                defaultValue={query.module}
-                name="module"
-                style={selectStyle}
-              >
-                <option value="">All modules</option>
-                {moduleOptions.map((moduleName) => (
-                  <option key={moduleName} value={moduleName}>
-                    {moduleName}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div style={compactFieldStyle}>
-              <span style={labelStyle}>Action</span>
-              <select
-                defaultValue={query.action}
-                name="action"
-                style={selectStyle}
-              >
-                <option value="">All actions</option>
-                {actionOptions.map((actionName) => (
-                  <option key={actionName} value={actionName}>
-                    {actionName}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div style={compactFieldStyle}>
-              <CanvasField theme={th} label="From">
-                <input
-                  defaultValue={query.from}
-                  name="from"
+                  <option value="">All actor realms</option>
+                  {actorOptions.map((actor) => (
+                    <option key={actor} value={actor}>
+                      {actor}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={compactFieldStyle}>
+                <span style={labelStyle}>Module</span>
+                <select
+                  defaultValue={query.module}
+                  name="module"
                   style={selectStyle}
-                  type="date"
-                />
-              </CanvasField>
-            </div>
-            <div style={compactFieldStyle}>
-              <CanvasField theme={th} label="To">
-                <input
-                  defaultValue={query.to}
-                  name="to"
+                >
+                  <option value="">All modules</option>
+                  {moduleOptions.map((moduleName) => (
+                    <option key={moduleName} value={moduleName}>
+                      {moduleName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={compactFieldStyle}>
+                <span style={labelStyle}>Action</span>
+                <select
+                  defaultValue={query.action}
+                  name="action"
                   style={selectStyle}
-                  type="date"
-                />
-              </CanvasField>
-            </div>
-            <div style={compactFieldStyle}>
-              <span style={labelStyle}>Empty state demo</span>
-              <select
-                defaultValue={query.emptyReason}
-                name="emptyReason"
-                style={selectStyle}
-              >
-                <option value="">Live data</option>
-                <option value="no_data">no_data</option>
-                <option value="not_provisioned">not_provisioned</option>
-                <option value="fetch_failed">fetch_failed</option>
-                <option value="permission_denied">permission_denied</option>
-                <option value="external_unavailable">
-                  external_unavailable
-                </option>
-                <option value="filtered_empty">filtered_empty</option>
-              </select>
-            </div>
-            <div style={{ ...formActionStyle, gridColumn: "1 / -1" }}>
-              <input name="auditId" type="hidden" value={query.auditId} />
-              <button style={buttonPrimaryStyle} type="submit">
-                套用篩選
-              </button>
-              <Link href="/audit" style={linkStyle}>
-                清除條件
-              </Link>
-              <span style={subtleCopyStyle}>
-                Receipt deep link 可帶 `auditId` 進來；跨 app
-                連結一律新分頁開啟。
-              </span>
-            </div>
-          </form>
-        </CanvasCard>
+                >
+                  <option value="">All actions</option>
+                  {actionOptions.map((actionName) => (
+                    <option key={actionName} value={actionName}>
+                      {actionName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={compactFieldStyle}>
+                <CanvasField theme={th} label="From">
+                  <input
+                    defaultValue={query.from}
+                    name="from"
+                    style={selectStyle}
+                    type="date"
+                  />
+                </CanvasField>
+              </div>
+              <div style={compactFieldStyle}>
+                <CanvasField theme={th} label="To">
+                  <input
+                    defaultValue={query.to}
+                    name="to"
+                    style={selectStyle}
+                    type="date"
+                  />
+                </CanvasField>
+              </div>
+              <div style={compactFieldStyle}>
+                <CanvasField
+                  theme={th}
+                  label="Audit receipt"
+                  hint="接受 `auditId` deep link，保留完整 tenant scope。"
+                >
+                  <input
+                    defaultValue={query.auditId}
+                    name="auditId"
+                    placeholder="audit_..."
+                    style={selectStyle}
+                    type="text"
+                  />
+                </CanvasField>
+              </div>
+              <div style={compactFieldStyle}>
+                <span style={labelStyle}>Empty state demo</span>
+                <select
+                  defaultValue={query.emptyReason}
+                  name="emptyReason"
+                  style={selectStyle}
+                >
+                  <option value="">Live data</option>
+                  <option value="no_data">no_data</option>
+                  <option value="not_provisioned">not_provisioned</option>
+                  <option value="fetch_failed">fetch_failed</option>
+                  <option value="permission_denied">permission_denied</option>
+                  <option value="external_unavailable">
+                    external_unavailable
+                  </option>
+                  <option value="filtered_empty">filtered_empty</option>
+                </select>
+              </div>
+              <div style={{ ...formActionStyle, gridColumn: "1 / -1" }}>
+                {filterAction?.enabled ? (
+                  <button style={buttonPrimaryStyle} type="submit">
+                    套用篩選
+                  </button>
+                ) : (
+                  <span aria-disabled="true" style={buttonDisabledStyle}>
+                    套用篩選
+                  </span>
+                )}
+                <Link href="/audit" style={linkStyle}>
+                  清除條件
+                </Link>
+                {refreshAction?.enabled ? (
+                  <Link
+                    href={`/audit${buildQueryString(query)}`}
+                    style={buttonSecondaryStyle}
+                  >
+                    手動刷新
+                  </Link>
+                ) : null}
+                {exportHref ? (
+                  <a
+                    download="tenant-audit-export.csv"
+                    href={exportHref}
+                    style={buttonSecondaryStyle}
+                  >
+                    匯出篩選結果
+                  </a>
+                ) : (
+                  <span
+                    aria-disabled="true"
+                    style={buttonDisabledStyle}
+                    title={exportAction?.disabledReasonCode}
+                  >
+                    匯出篩選結果
+                  </span>
+                )}
+                <span style={subtleCopyStyle}>
+                  Receipt deep link 可帶 `auditId` 進來；跨 app
+                  連結一律新分頁開啟。
+                </span>
+              </div>
+            </form>
+          </CanvasCard>
+
+          <div style={sideStackStyle}>
+            <CanvasCard
+              theme={th}
+              title="可用動作"
+              subtitle="頁面 CTA 不以角色硬編碼，而由 availableActions 驅動。"
+            >
+              <div style={statusMatrixStyle}>
+                {pageActions.map((action) => {
+                  const spec = getActionVisualSpec(action.action);
+                  return (
+                    <div key={action.action} style={statusCardStyle}>
+                      <span style={statusLabelStyle}>{spec.label}</span>
+                      <strong style={statusBodyStyle}>
+                        {action.enabled ? "enabled" : "disabled"}
+                      </strong>
+                      <span style={subtleCopyStyle}>
+                        {action.enabled
+                          ? spec.helper
+                          : (action.disabledReasonCode ?? "disabled")}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={th}
+              title="調查焦點"
+              subtitle="對齊 packet §5.18 的 primary task / decision points / exit。"
+            >
+              <CanvasDL
+                theme={th}
+                cols={1}
+                items={[
+                  {
+                    k: "Primary task",
+                    v: "追查租戶資源上誰做了什麼，不分 actor realm。",
+                  },
+                  {
+                    k: "Decision points",
+                    v: "是否有意外的 ops / platform 動作，需要後續跟進。",
+                  },
+                  {
+                    k: "Exit",
+                    v: "租戶資源留在本 app；ops / platform 資源改開對應 console。",
+                  },
+                  {
+                    k: "Focused receipt",
+                    v: receiptAction?.enabled
+                      ? (focusedLog?.auditId ?? query.auditId)
+                      : "沒有 receipt context",
+                    mono: true,
+                  },
+                ]}
+              />
+            </CanvasCard>
+          </div>
+        </div>
 
         <CanvasCard
           theme={th}
@@ -1212,6 +1415,20 @@ export default async function AuditPage({
               ? `目前 audit API 讀取失敗：${loadError}`
               : `目前篩選 query: ${buildQueryString(query) || "none"}。Tenant-owned resource 一律留在本 app；ops / platform-owned evidence 走 deep link 新分頁。若後端尚未提供 EmptyStateEnvelope，本頁以錯誤型別與查詢結果退化推導；若要驗證 6 種 distinct states，可用上方 empty state demo 選單切換。`}
           </p>
+          <ul style={helperListStyle}>
+            <li>
+              tenant-owned: booking、invoice、cost_center、tenant_user
+              等資源直接回到 Tenant Console。
+            </li>
+            <li>
+              ops-owned: complaint / incident 會新分頁開啟 Ops Console 的對應
+              detail 或 audit route。
+            </li>
+            <li>
+              platform-owned: tenant 設定或 platform/system actor
+              影響的證據改導向 Platform Admin。
+            </li>
+          </ul>
         </CanvasCard>
       </div>
     </div>
