@@ -1,9 +1,7 @@
 import type { CSSProperties } from "react";
 import type {
   AuditLogRecord,
-  ControlledDownloadRecord,
   EmptyReason,
-  ExportTenantAuditCommand,
   ResourceActionDescriptor,
   TenantAuditListView,
 } from "@drts/contracts";
@@ -242,7 +240,7 @@ type FilterState = {
   to: string;
   auditId: string;
   expanded: string;
-  download: string;
+  exportError: string;
 };
 
 type ResourceLink = {
@@ -278,11 +276,6 @@ type EmptyStateSpec = {
   messageCode?: string;
 };
 
-type ExportState = {
-  download: ControlledDownloadRecord | null;
-  error: string | null;
-};
-
 function getSingleParam(searchParams: SearchParamsInput, key: string): string {
   const value = searchParams[key];
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
@@ -309,7 +302,7 @@ function parseFilters(searchParams: SearchParamsInput): FilterState {
     to: getSingleParam(searchParams, "to"),
     auditId: getSingleParam(searchParams, "auditId"),
     expanded: getSingleParam(searchParams, "expanded"),
-    download: getSingleParam(searchParams, "download"),
+    exportError: getSingleParam(searchParams, "exportError"),
   };
 }
 
@@ -322,7 +315,7 @@ function buildAuditHref(overrides: Partial<FilterState>) {
     to: "",
     auditId: "",
     expanded: "",
-    download: "",
+    exportError: "",
     ...overrides,
   };
   const params = new URLSearchParams();
@@ -334,21 +327,13 @@ function buildAuditHref(overrides: Partial<FilterState>) {
   if (merged.to) params.set("to", merged.to);
   if (merged.auditId) params.set("auditId", merged.auditId);
   if (merged.expanded) params.set("expanded", merged.expanded);
-  if (merged.download) params.set("download", merged.download);
+  if (merged.exportError) params.set("exportError", merged.exportError);
 
   const query = params.toString();
   return query ? `/audit?${query}` : "/audit";
 }
 
 function formatAuditAt(value: string | null | undefined) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime())
-    ? "—"
-    : auditDateFormatter.format(parsed);
-}
-
-function formatArtifactAt(value: string | null | undefined) {
   if (!value) return "—";
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime())
@@ -660,9 +645,9 @@ function buildActionHref(
 ) {
   switch (action.action) {
     case "refresh":
-      return buildAuditHref({ ...filters, ...overrides, download: "" });
+      return buildAuditHref({ ...filters, ...overrides, exportError: "" });
     case "export":
-      return buildAuditHref({ ...filters, ...overrides, download: "1" });
+      return "/audit/export";
     case "filter":
       return "/audit";
     default:
@@ -783,7 +768,7 @@ function actionLabel(action: ResourceActionDescriptor, emptyState = false) {
     case "export":
       return emptyState ? "匯出目前篩選" : "產生簽章匯出";
     case "filter":
-      return emptyState ? "調整篩選" : "清除篩選";
+      return emptyState ? "調整篩選" : "套用篩選";
     default:
       return emptyState ? `執行 ${action.action}` : action.action;
   }
@@ -910,9 +895,7 @@ async function loadAuditLogs(
   };
 }
 
-function normalizeExportScope(
-  value: string,
-): NonNullable<ExportTenantAuditCommand["actorScope"]> | null {
+function normalizeExportScope(value: string) {
   switch (value) {
     case "tenant":
     case "ops":
@@ -925,66 +908,16 @@ function normalizeExportScope(
   }
 }
 
-function buildExportCommand(filters: FilterState): ExportTenantAuditCommand {
-  return {
-    actorScope: normalizeExportScope(filters.actor),
-    moduleName: filters.module || null,
-    actionName: filters.action || null,
-    from: filters.from || null,
-    to: filters.to || null,
-    auditId: filters.auditId || null,
-  } as ExportTenantAuditCommand;
-}
-
-async function loadAuditExport(filters: FilterState): Promise<ExportState> {
-  try {
-    const client = getTenantClient();
-    const download = (await client.exportTenantAudit(
-      buildExportCommand(filters),
-    )) as ControlledDownloadRecord;
-    return { download, error: null };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { download: null, error: message };
-  }
-}
-
-function buildExportState(
-  download: ControlledDownloadRecord | null,
-  error: string | null,
-): ExportState {
-  return {
-    download,
-    error,
-  };
-}
-
-function shortenManifestHash(value: string | null | undefined) {
-  if (!value) return "—";
-  if (value.length <= 24) return value;
-  return `${value.slice(0, 16)}…${value.slice(-8)}`;
-}
-
-function describeExportState(state: ExportState) {
-  if (state.download) {
-    return {
-      label: "下載簽章匯出",
-      summary: `Artifact ready · ${formatArtifactAt(state.download.expiresAt)} 到期`,
-    };
-  }
-
-  if (state.error) {
-    return {
-      label: "重新申請簽章匯出",
-      summary:
-        "Artifact issuance failed; retry after refreshing the current snapshot.",
-    };
-  }
-
-  return {
-    label: "產生簽章匯出",
-    summary: "匯出會產生 immutable signed subset。",
-  };
+function buildExportFields(filters: FilterState) {
+  return [
+    ["actor", filters.actor],
+    ["module", filters.module],
+    ["action", filters.action],
+    ["from", filters.from],
+    ["to", filters.to],
+    ["auditId", filters.auditId],
+    ["expanded", filters.expanded],
+  ].filter(([, value]) => Boolean(value));
 }
 
 export default async function AuditPage({
@@ -1062,16 +995,6 @@ export default async function AuditPage({
         auditView?.emptyState?.nextAction,
       )
     : [];
-  const exportLoadState =
-    exportAction?.enabled && !emptyState && filters.download === "1"
-      ? await loadAuditExport(filters)
-      : null;
-  const exportState = buildExportState(
-    exportLoadState?.download ?? null,
-    exportLoadState?.error ?? null,
-  );
-  const exportReady = Boolean(exportState.download?.downloadUrl);
-  const exportPresentation = describeExportState(exportState);
   const snapshotGeneratedAt = auditView?.refreshMetadata?.generatedAt
     ? formatAuditAt(auditView.refreshMetadata.generatedAt)
     : "—";
@@ -1084,17 +1007,47 @@ export default async function AuditPage({
         subtitle="不可變 · 7 年保存 · 含所有 actor realm 對 tenant 資源的動作 (Q-TEN13)"
         actions={
           <>
-            {exportAction
+            {refreshAction
               ? renderActionLink(
-                  exportAction,
-                  exportReady
-                    ? (exportState.download?.downloadUrl ?? "#")
-                    : buildActionHref(exportAction, filters),
-                  exportReady
-                    ? exportPresentation.label
-                    : actionLabel(exportAction),
+                  refreshAction,
+                  buildActionHref(refreshAction, filters),
+                  actionLabel(refreshAction),
                 )
               : null}
+            {exportAction ? (
+              <form
+                action={buildActionHref(exportAction, filters)}
+                method="post"
+                style={{ display: "inline-flex" }}
+              >
+                {buildExportFields(filters).map(([name, value]) => (
+                  <input
+                    key={`export-${name}`}
+                    type="hidden"
+                    name={name}
+                    value={value}
+                  />
+                ))}
+                <button
+                  type="submit"
+                  disabled={!exportAction.enabled}
+                  title={exportAction.disabledReasonCode}
+                  style={{
+                    ...linkButtonBaseStyle,
+                    background: "transparent",
+                    color: th.textMuted,
+                    ...(exportAction.enabled
+                      ? null
+                      : {
+                          opacity: 0.45,
+                          cursor: "not-allowed",
+                        }),
+                  }}
+                >
+                  {actionLabel(exportAction)}
+                </button>
+              </form>
+            ) : null}
           </>
         }
       />
@@ -1194,22 +1147,24 @@ export default async function AuditPage({
             </div>
 
             <div style={controlRowStyle}>
-              <button
-                type="submit"
-                disabled={filterAction ? !filterAction.enabled : false}
-                title={filterAction?.disabledReasonCode}
-                style={{
-                  ...linkButtonBaseStyle,
-                  background: th.accent,
-                  borderColor: th.accent,
-                  color: "#fff",
-                  ...(filterAction && !filterAction.enabled
-                    ? { opacity: 0.45, cursor: "not-allowed" }
-                    : null),
-                }}
-              >
-                {filterAction ? actionLabel(filterAction) : "套用篩選"}
-              </button>
+              {filterAction ? (
+                <button
+                  type="submit"
+                  disabled={!filterAction.enabled}
+                  title={filterAction.disabledReasonCode}
+                  style={{
+                    ...linkButtonBaseStyle,
+                    background: th.accent,
+                    borderColor: th.accent,
+                    color: "#fff",
+                    ...(filterAction.enabled
+                      ? null
+                      : { opacity: 0.45, cursor: "not-allowed" }),
+                  }}
+                >
+                  {actionLabel(filterAction)}
+                </button>
+              ) : null}
               <a
                 href="/audit"
                 style={{
@@ -1231,7 +1186,7 @@ export default async function AuditPage({
                 Snapshot {snapshotGeneratedAt} ·{" "}
                 {formatRefreshTier(auditView?.refreshTier)}
                 {" · "}
-                export follows current filtered subset.
+                export issues a signed artifact for the current filtered subset.
               </span>
             </div>
           </form>
@@ -1268,12 +1223,13 @@ export default async function AuditPage({
                 </span>
               </div>
               <div style={stripCardStyle}>
-                <span style={summaryLabelStyle}>Signed export</span>
+                <span style={summaryLabelStyle}>Refresh tier</span>
                 <span style={summaryValueStyle}>
-                  {shortenManifestHash(exportState.download?.manifestHash)}
+                  {formatRefreshTier(auditView?.refreshTier)}
                 </span>
                 <span style={summarySubStyle}>
-                  {exportPresentation.summary}
+                  Snapshot {snapshotGeneratedAt} · signed export follows the
+                  current filtered subset.
                 </span>
               </div>
             </div>
@@ -1290,13 +1246,13 @@ export default async function AuditPage({
             </div>
           ) : null}
 
-          {exportState.error ? (
+          {filters.exportError ? (
             <div style={{ padding: 16 }}>
               <CanvasBanner
                 theme={th}
                 tone="warn"
                 title="Signed export is temporarily unavailable"
-                body={exportState.error}
+                body={filters.exportError}
               />
             </div>
           ) : null}
