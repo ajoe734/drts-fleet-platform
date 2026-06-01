@@ -62,6 +62,11 @@ type ActionTarget =
       enabled: boolean;
     };
 
+type MaintenanceActionMap = {
+  setAction: ResourceActionDescriptor | null;
+  clearAction: ResourceActionDescriptor | null;
+};
+
 export default function NoticesPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -205,7 +210,17 @@ export default function NoticesPage() {
   const createNoticeAction = workspace?.notices.availableActions.find(
     (descriptor) => descriptor.action === "create_notice",
   );
-  const tabActions = getTabActions(workspace, activeTab);
+  const maintenanceActions = getMaintenanceActions(
+    workspace?.maintenance.availableActions,
+  );
+  const maintenanceIntentAction = getMaintenanceIntentAction(
+    maintenanceActions,
+    maintEnabled,
+  );
+  const canToggleMaintenance = Boolean(
+    maintenanceActions.setAction || maintenanceActions.clearAction,
+  );
+  const tabActions = getTabActions(workspace, activeTab, maintEnabled);
   const dataFreshness = workspace?.refresh.dataFreshness ?? "unknown";
 
   if (loading && !workspace) {
@@ -339,7 +354,13 @@ export default function NoticesPage() {
             tone="secondary"
             emptyLabel="No tab-level actions for this view"
             onAction={(descriptor) =>
-              handleTabAction(descriptor, activeTab, openAction)
+              handleTabAction(
+                descriptor,
+                activeTab,
+                maintEnabled,
+                maintenanceActions,
+                openAction,
+              )
             }
           />
           <button
@@ -501,6 +522,7 @@ export default function NoticesPage() {
                       onChange={(event) =>
                         setMaintEnabled(event.target.checked)
                       }
+                      disabled={!canToggleMaintenance}
                     />
                     <span className="admin-switch-slider" />
                   </label>
@@ -582,18 +604,29 @@ export default function NoticesPage() {
               </div>
 
               <div style={toolbarActionsStyle}>
-                <ActionGroup
-                  actions={workspace.maintenance.availableActions}
-                  tone="primary"
-                  emptyLabel="Maintenance state is read-only"
-                  onAction={(descriptor) =>
-                    openAction({
-                      kind: "maintenance",
-                      descriptor,
-                      enabled: descriptor.action !== "clear_maintenance_mode",
-                    })
-                  }
-                />
+                {maintenanceIntentAction ? (
+                  <ActionGroup
+                    actions={[maintenanceIntentAction]}
+                    tone="primary"
+                    emptyLabel="Maintenance state is read-only"
+                    onAction={(descriptor) =>
+                      openAction({
+                        kind: "maintenance",
+                        descriptor,
+                        enabled: maintEnabled,
+                      })
+                    }
+                  />
+                ) : (
+                  <div style={readOnlyNoteStyle}>
+                    Maintenance state is read-only
+                  </div>
+                )}
+              </div>
+              <div style={mutedBodyStyle}>
+                {maintEnabled
+                  ? "Saving applies the current reason and scheduled window, then propagates the maintenance banner across downstream apps."
+                  : "Clearing removes the active maintenance banner. Keep the toggle on if you intend to activate the next scheduled window."}
               </div>
             </section>
           </div>
@@ -1219,17 +1252,25 @@ function SnapshotPill(props: { label: string; value: string }) {
 function getTabActions(
   workspace: PlatformNoticesWorkspaceResponse | null,
   activeTab: TabId,
+  maintEnabled: boolean,
 ) {
   if (!workspace) return [];
   if (activeTab === "notices") return workspace.notices.availableActions;
-  if (activeTab === "maintenance")
-    return workspace.maintenance.availableActions;
+  if (activeTab === "maintenance") {
+    const nextAction = getMaintenanceIntentAction(
+      getMaintenanceActions(workspace.maintenance.availableActions),
+      maintEnabled,
+    );
+    return nextAction ? [nextAction] : [];
+  }
   return [];
 }
 
 function handleTabAction(
   descriptor: ResourceActionDescriptor,
   activeTab: TabId,
+  maintEnabled: boolean,
+  maintenanceActions: MaintenanceActionMap,
   openAction: (target: ActionTarget) => void,
 ) {
   if (activeTab === "notices") {
@@ -1237,12 +1278,39 @@ function handleTabAction(
     return;
   }
   if (activeTab === "maintenance") {
+    const nextDescriptor =
+      getMaintenanceIntentAction(maintenanceActions, maintEnabled) ??
+      descriptor;
     openAction({
       kind: "maintenance",
-      descriptor,
-      enabled: descriptor.action !== "clear_maintenance_mode",
+      descriptor: nextDescriptor,
+      enabled: maintEnabled,
     });
   }
+}
+
+function getMaintenanceActions(
+  actions: ResourceActionDescriptor[] | undefined,
+): MaintenanceActionMap {
+  return {
+    setAction:
+      actions?.find(
+        (descriptor) => descriptor.action === "set_maintenance_mode",
+      ) ?? null,
+    clearAction:
+      actions?.find(
+        (descriptor) => descriptor.action === "clear_maintenance_mode",
+      ) ?? null,
+  };
+}
+
+function getMaintenanceIntentAction(
+  actions: MaintenanceActionMap,
+  maintEnabled: boolean,
+) {
+  return maintEnabled
+    ? (actions.setAction ?? null)
+    : (actions.clearAction ?? null);
 }
 
 function canSubmitAction(
