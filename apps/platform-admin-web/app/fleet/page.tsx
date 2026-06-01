@@ -159,6 +159,7 @@ const EMPTY_REASON_VALUES: EmptyReason[] = [
   "fetch_failed",
   "permission_denied",
   "external_unavailable",
+  "driver_not_eligible",
   "filtered_empty",
 ];
 const theme = buildCanvasTheme({
@@ -395,6 +396,7 @@ const emptyToneMap: Record<
   fetch_failed: { tone: "danger", icon: "!" },
   permission_denied: { tone: "warning", icon: "L" },
   external_unavailable: { tone: "warning", icon: "X" },
+  driver_not_eligible: { tone: "warning", icon: "D" },
   filtered_empty: { tone: "info", icon: "?" },
 };
 
@@ -495,7 +497,7 @@ function currentOffboardingStep(vehicle: VehicleRegistryRecord) {
   ) {
     return "debranding_pending";
   }
-  if (status === "scheduled" || status === "in_progress") {
+  if (status === "scheduled") {
     return "dispatch_disabled";
   }
   if (status !== "none") return "initiated";
@@ -698,6 +700,11 @@ function getFleetCopy(locale: string) {
             description:
               "This workflow depends on an upstream system that is currently degraded or unavailable.",
           },
+          driver_not_eligible: {
+            title: "Driver is not eligible",
+            description:
+              "A driver-scoped workflow is blocked because the upstream eligibility gate has not passed.",
+          },
           filtered_empty: {
             title: "No matches for the current filter",
             description:
@@ -823,6 +830,11 @@ function getFleetCopy(locale: string) {
             title: "外部依賴不可用",
             description: "這個流程依賴的外部系統目前降級或不可用。",
           },
+          driver_not_eligible: {
+            title: "司機目前不可執行",
+            description:
+              "這個司機工作流被上游 eligibility gate 擋下，尚未達成可執行條件。",
+          },
           filtered_empty: {
             title: "篩選後沒有結果",
             description:
@@ -900,6 +912,7 @@ export default function FleetPage() {
   const [offboardingForm, setOffboardingForm] = useState(
     createInitialOffboardingForm(),
   );
+  const [offboardingVehicleId, setOffboardingVehicleId] = useState("");
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(
     null,
   );
@@ -933,19 +946,19 @@ export default function FleetPage() {
       {
         action: `vehicle.compliance.restore:${vehicle.vehicleId}`,
         enabled: !vehicle.dispatchableFlag && !blockedByExclusivity,
-        disabledReasonCode: vehicle.dispatchableFlag
-          ? "already_dispatchable"
+        ...(vehicle.dispatchableFlag
+          ? { disabledReasonCode: "already_dispatchable" }
           : blockedByExclusivity
-            ? "exclusivity_not_approved"
-            : undefined,
+            ? { disabledReasonCode: "exclusivity_not_approved" }
+            : {}),
         riskLevel: "medium",
       },
       {
         action: `vehicle.compliance.hold:${vehicle.vehicleId}`,
         enabled: vehicle.dispatchableFlag,
-        disabledReasonCode: vehicle.dispatchableFlag
-          ? undefined
-          : "already_held",
+        ...(!vehicle.dispatchableFlag
+          ? { disabledReasonCode: "already_held" }
+          : {}),
         riskLevel: "medium",
       },
     ];
@@ -989,16 +1002,18 @@ export default function FleetPage() {
       {
         action: `exclusivity.approve:${vehicleId}`,
         enabled: reviewStatus === "pending",
-        disabledReasonCode:
-          reviewStatus === "pending" ? undefined : "review_not_pending",
+        ...(reviewStatus !== "pending"
+          ? { disabledReasonCode: "review_not_pending" }
+          : {}),
         riskLevel: "high",
         requiresReason: true,
       },
       {
         action: `exclusivity.reject:${vehicleId}`,
         enabled: reviewStatus === "pending",
-        disabledReasonCode:
-          reviewStatus === "pending" ? undefined : "review_not_pending",
+        ...(reviewStatus !== "pending"
+          ? { disabledReasonCode: "review_not_pending" }
+          : {}),
         riskLevel: "high",
         requiresReason: true,
       },
@@ -1093,56 +1108,37 @@ export default function FleetPage() {
               ? "commission"
               : "mixed",
       }));
-      const mappedExclusivities: ExclusivityRow[] = mappedVehicles.map(
-        (vehicle) => {
-          const record = (
-            (exclusivityRows ??
-              []) as RuntimeResource<DispatchExclusivityRecord>[]
-          ).find((item) => item.vehicleId === vehicle.vehicleId) ?? {
-            vehicleId: vehicle.vehicleId,
-            declarationStatus:
-              vehicle.supplyLifecycle.exclusivity.declarationStatus ??
-              "missing",
-            declarationFileId:
-              vehicle.supplyLifecycle.exclusivity.declarationFileId ?? null,
-            reviewStatus: vehicle.supplyLifecycle.exclusivity.reviewStatus,
-            lifecycleStatus:
-              vehicle.supplyLifecycle.exclusivity.lifecycleStatus,
-            reviewerId: null,
-            reviewedAt: vehicle.supplyLifecycle.exclusivity.reviewedAt ?? null,
-            exclusiveProviderName:
-              vehicle.supplyLifecycle.exclusivity.providerName ?? null,
-            effectiveStart:
-              vehicle.supplyLifecycle.exclusivity.effectiveStart ?? null,
-            effectiveEnd:
-              vehicle.supplyLifecycle.exclusivity.effectiveEnd ?? null,
-            terminationReason: null,
-            updatedAt:
-              vehicle.supplyLifecycle.exclusivity.updatedAt ??
-              vehicle.updatedAt,
-          };
-          return {
-            id: vehicle.vehicleId,
-            vehicleId: vehicle.vehicleId,
-            operatingArea: vehicle.operatingArea,
-            dispatchableFlag: vehicle.dispatchableFlag,
-            record,
-            availableActions: normalizeActions(
-              record.availableActions,
-              buildExclusivityActions(
-                vehicle.vehicleId,
-                record.reviewStatus,
-                record.declarationStatus,
-              ),
+      const vehicleById = new Map(
+        mappedVehicles.map((vehicle) => [vehicle.vehicleId, vehicle] as const),
+      );
+      const mappedExclusivities: ExclusivityRow[] = (
+        (exclusivityRows ?? []) as RuntimeResource<DispatchExclusivityRecord>[]
+      ).map((record) => {
+        const vehicle = vehicleById.get(record.vehicleId);
+        return {
+          id: record.vehicleId,
+          vehicleId: record.vehicleId,
+          operatingArea: vehicle?.operatingArea ?? "—",
+          dispatchableFlag: vehicle?.dispatchableFlag ?? false,
+          record,
+          availableActions: normalizeActions(
+            record.availableActions,
+            buildExclusivityActions(
+              record.vehicleId,
+              record.reviewStatus,
+              record.declarationStatus,
             ),
-            crossAppLinks: normalizeLinks(record.crossAppLinks, [
-              opsVehicleLink(locale, vehicle.vehicleId),
-            ]),
-            scopeLabel: `vehicle:${vehicle.vehicleId}`,
-            submittedAt: record.updatedAt,
-            submitter: "fleet_admin",
-          };
-        },
+          ),
+          crossAppLinks: normalizeLinks(record.crossAppLinks, [
+            opsVehicleLink(locale, record.vehicleId),
+          ]),
+          scopeLabel: `vehicle:${record.vehicleId}`,
+          submittedAt: record.updatedAt,
+          submitter: record.reviewerId ?? "fleet_admin",
+        };
+      });
+      const activeOffboardingVehicles = mappedVehicles.filter(
+        (vehicle) => vehicle.supplyLifecycle.offboarding.status !== "none",
       );
 
       setVehicles(mappedVehicles);
@@ -1170,14 +1166,17 @@ export default function FleetPage() {
         return null;
       });
       setSelectedExclusivityId(
-        (current) =>
-          current ??
-          mappedExclusivities[0]?.vehicleId ??
-          mappedVehicles[0]?.vehicleId ??
-          null,
+        (current) => current ?? mappedExclusivities[0]?.vehicleId ?? null,
       );
       setSelectedOffboardingId(
-        (current) => current ?? mappedVehicles[0]?.vehicleId ?? null,
+        (current) => current ?? activeOffboardingVehicles[0]?.vehicleId ?? null,
+      );
+      setOffboardingVehicleId(
+        (current) =>
+          current ||
+          activeOffboardingVehicles[0]?.vehicleId ||
+          mappedVehicles[0]?.vehicleId ||
+          "",
       );
       setRefreshMeta({
         generatedAt: new Date().toISOString(),
@@ -1315,8 +1314,9 @@ export default function FleetPage() {
           {
             action: `binding.revoke:${binding.bindingId}`,
             enabled: binding.status === "active",
-            disabledReasonCode:
-              binding.status === "active" ? undefined : "no_active_binding",
+            ...(binding.status !== "active"
+              ? { disabledReasonCode: "no_active_binding" }
+              : {}),
             requiresReason: true,
             riskLevel: "high",
           },
@@ -1333,60 +1333,62 @@ export default function FleetPage() {
 
   const exclusivityRows = exclusivities;
 
-  const offboardingRows: OffboardingRow[] = vehicles.map((vehicle) => ({
-    id: vehicle.vehicleId,
-    vehicle,
-    timeline: offboardingTimeline(vehicle),
-    availableActions: normalizeActions(
-      (
-        vehicle.supplyLifecycle.offboarding as RuntimeResource<
-          VehicleRegistryRecord["supplyLifecycle"]["offboarding"]
-        >
-      ).availableActions,
-      [
-        {
-          action: `offboarding.initiate:${vehicle.vehicleId}`,
-          enabled: vehicle.supplyLifecycle.offboarding.status === "none",
-          riskLevel: "high",
-          requiresReason: true,
-        },
-        {
-          action: `offboarding.advance:${vehicle.vehicleId}`,
-          enabled:
-            vehicle.supplyLifecycle.offboarding.status !== "none" &&
-            vehicle.supplyLifecycle.offboarding.status !== "completed" &&
-            vehicle.dispatchableFlag,
-          disabledReasonCode:
-            vehicle.supplyLifecycle.offboarding.status === "none"
-              ? "offboarding_not_started"
-              : vehicle.dispatchableFlag
-                ? undefined
-                : "already_held",
-          riskLevel: "medium",
-        },
-        {
-          action: `offboarding.complete:${vehicle.vehicleId}`,
-          enabled:
-            vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending",
-          disabledReasonCode:
-            vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending"
-              ? undefined
-              : "debranding_not_pending",
-          riskLevel: "medium",
-        },
-      ],
-    ),
-    crossAppLinks: normalizeLinks(vehicle.crossAppLinks, [
-      opsVehicleLink(locale, vehicle.vehicleId),
-    ]),
-    actor:
-      vehicle.supplyLifecycle.offboarding.requestedBy ||
-      (locale === "en" ? "Governance queue" : "治理佇列"),
-    evidence:
-      vehicle.supplyLifecycle.offboarding.debrandingTicketId ||
-      vehicle.supplyLifecycle.offboarding.notes ||
-      "—",
-  }));
+  const offboardingRows: OffboardingRow[] = vehicles
+    .filter((vehicle) => vehicle.supplyLifecycle.offboarding.status !== "none")
+    .map((vehicle) => ({
+      id: vehicle.vehicleId,
+      vehicle,
+      timeline: offboardingTimeline(vehicle),
+      availableActions: normalizeActions(
+        (
+          vehicle.supplyLifecycle.offboarding as RuntimeResource<
+            VehicleRegistryRecord["supplyLifecycle"]["offboarding"]
+          >
+        ).availableActions,
+        [
+          {
+            action: `offboarding.initiate:${vehicle.vehicleId}`,
+            enabled: vehicle.supplyLifecycle.offboarding.status === "none",
+            riskLevel: "high",
+            requiresReason: true,
+          },
+          {
+            action: `offboarding.advance:${vehicle.vehicleId}`,
+            enabled:
+              vehicle.supplyLifecycle.offboarding.status !== "none" &&
+              vehicle.supplyLifecycle.offboarding.status !== "completed" &&
+              vehicle.dispatchableFlag,
+            ...(vehicle.supplyLifecycle.offboarding.status === "none"
+              ? { disabledReasonCode: "offboarding_not_started" }
+              : !vehicle.dispatchableFlag
+                ? { disabledReasonCode: "already_held" }
+                : {}),
+            riskLevel: "medium",
+          },
+          {
+            action: `offboarding.complete:${vehicle.vehicleId}`,
+            enabled:
+              vehicle.supplyLifecycle.offboarding.debrandingStatus ===
+              "pending",
+            ...(vehicle.supplyLifecycle.offboarding.debrandingStatus !==
+            "pending"
+              ? { disabledReasonCode: "debranding_not_pending" }
+              : {}),
+            riskLevel: "medium",
+          },
+        ],
+      ),
+      crossAppLinks: normalizeLinks(vehicle.crossAppLinks, [
+        opsVehicleLink(locale, vehicle.vehicleId),
+      ]),
+      actor:
+        vehicle.supplyLifecycle.offboarding.requestedBy ||
+        (locale === "en" ? "Governance queue" : "治理佇列"),
+      evidence:
+        vehicle.supplyLifecycle.offboarding.debrandingTicketId ||
+        vehicle.supplyLifecycle.offboarding.notes ||
+        "—",
+    }));
 
   const filteredVehicles = vehicles.filter((vehicle) =>
     matchesText(
@@ -1585,6 +1587,7 @@ export default function FleetPage() {
       h: copy.tab.vehicles,
       r: (_, index) => {
         const vehicle = filteredVehicles[index];
+        if (!vehicle) return null;
         return (
           <button
             type="button"
@@ -1603,6 +1606,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Profile" : "法規檔案",
       r: (_, index) => {
         const vehicle = filteredVehicles[index];
+        if (!vehicle) return null;
         return (
           <div style={stackStyle}>
             <span>{vehicle.operatingArea || "—"}</span>
@@ -1617,6 +1621,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Type / binding" : "車種 / 綁定",
       r: (_, index) => {
         const vehicle = filteredVehicles[index];
+        if (!vehicle) return null;
         return (
           <div style={stackStyle}>
             <span>{vehicle.supportedServiceBuckets.join(", ") || "—"}</span>
@@ -1631,6 +1636,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Insurance" : "保險",
       r: (_, index) => {
         const vehicle = filteredVehicles[index];
+        if (!vehicle) return null;
         return (
           <div style={stackStyle}>
             <CanvasPill
@@ -1651,6 +1657,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Dispatch" : "派遣",
       r: (_, index) => {
         const vehicle = filteredVehicles[index];
+        if (!vehicle) return null;
         return (
           <CanvasPill
             theme={theme}
@@ -1672,6 +1679,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Compliance status" : "合規狀態",
       r: (_, index) => {
         const vehicle = filteredVehicles[index];
+        if (!vehicle) return null;
         return (
           <div style={stackStyle}>
             {vehicle.supplyLifecycle.dispatch.blockedReasons.length === 0 ? (
@@ -1701,6 +1709,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Actions" : "動作",
       r: (_, index) => {
         const vehicle = filteredVehicles[index];
+        if (!vehicle) return null;
         return (
           <div style={compactActionRowStyle}>{vehicleActions(vehicle)}</div>
         );
@@ -1713,6 +1722,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Driver" : "司機",
       r: (_, index) => {
         const driver = filteredDrivers[index];
+        if (!driver) return null;
         return (
           <button
             type="button"
@@ -1731,6 +1741,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Lifecycle" : "生命週期",
       r: (_, index) => {
         const driver = filteredDrivers[index];
+        if (!driver) return null;
         return (
           <CanvasPill
             theme={theme}
@@ -1746,6 +1757,7 @@ export default function FleetPage() {
       h: locale === "en" ? "License expiry" : "證照到期",
       r: (_, index) => {
         const driver = filteredDrivers[index];
+        if (!driver) return null;
         return (
           <div style={stackStyle}>
             <CanvasPill
@@ -1772,6 +1784,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Service / binding" : "服務 / 綁定",
       r: (_, index) => {
         const driver = filteredDrivers[index];
+        if (!driver) return null;
         return (
           <div style={stackStyle}>
             <span>{driver.supportedServiceBuckets.join(", ") || "—"}</span>
@@ -1797,6 +1810,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Contract / dispatch" : "合約 / 派遣",
       r: (_, index) => {
         const driver = filteredDrivers[index];
+        if (!driver) return null;
         return (
           <div style={stackStyle}>
             <CanvasPill
@@ -1832,6 +1846,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Actions" : "動作",
       r: (_, index) => {
         const driver = filteredDrivers[index];
+        if (!driver) return null;
         return <div style={compactActionRowStyle}>{driverActions(driver)}</div>;
       },
     },
@@ -1842,6 +1857,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Contract" : "合約",
       r: (_, index) => {
         const contract = filteredContracts[index];
+        if (!contract) return null;
         return (
           <button
             type="button"
@@ -1858,12 +1874,13 @@ export default function FleetPage() {
     },
     {
       h: locale === "en" ? "Vehicle" : "車輛",
-      r: (_, index) => filteredContracts[index].vehicleId,
+      r: (_, index) => filteredContracts[index]?.vehicleId ?? "—",
     },
     {
       h: locale === "en" ? "Parties" : "合約對象",
       r: (_, index) => {
         const contract = filteredContracts[index];
+        if (!contract) return null;
         return (
           <div style={stackStyle}>
             <span>{contract.partnerId}</span>
@@ -1876,6 +1893,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Effective" : "期間",
       r: (_, index) => {
         const contract = filteredContracts[index];
+        if (!contract) return null;
         return (
           <div style={stackStyle}>
             <span>{formatTimestamp(contract.startAt)}</span>
@@ -1890,6 +1908,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Status" : "狀態",
       r: (_, index) => {
         const contract = filteredContracts[index];
+        if (!contract) return null;
         return (
           <CanvasPill
             theme={theme}
@@ -1905,6 +1924,7 @@ export default function FleetPage() {
       h: locale === "en" ? "Actions" : "動作",
       r: (_, index) => {
         const contract = filteredContracts[index];
+        if (!contract) return null;
         return (
           <div style={compactActionRowStyle}>{contractActions(contract)}</div>
         );
@@ -3084,97 +3104,100 @@ export default function FleetPage() {
                     {renderCrossAppLinks(selectedDriver.crossAppLinks)}
                   </div>
                 </div>
-                <CanvasCard theme={theme}>
-                  <div id="fleet-driver-form" />
-                  <div style={{ padding: 14, display: "grid", gap: 12 }}>
-                    <strong>{copy.createDriver}</strong>
-                    <span style={secondaryTextStyle}>
-                      {copy.createDriverHelp}
-                    </span>
-                    <CanvasField
-                      theme={theme}
-                      label={locale === "en" ? "Name" : "姓名"}
-                    >
-                      <input
-                        value={driverForm.name}
-                        onChange={(event) =>
-                          setDriverForm((current) => ({
-                            ...current,
-                            name: event.target.value,
-                          }))
-                        }
-                        style={inlineInputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={theme}
-                      label={locale === "en" ? "Phone" : "電話"}
-                    >
-                      <input
-                        value={driverForm.phone}
-                        onChange={(event) =>
-                          setDriverForm((current) => ({
-                            ...current,
-                            phone: event.target.value,
-                          }))
-                        }
-                        style={inlineInputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField theme={theme} label="Email">
-                      <input
-                        value={driverForm.email}
-                        onChange={(event) =>
-                          setDriverForm((current) => ({
-                            ...current,
-                            email: event.target.value,
-                          }))
-                        }
-                        style={inlineInputStyle}
-                      />
-                    </CanvasField>
-                    <label
-                      style={{ display: "flex", gap: 8, alignItems: "center" }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={driverForm.licensesValid}
-                        onChange={(event) =>
-                          setDriverForm((current) => ({
-                            ...current,
-                            licensesValid: event.target.checked,
-                          }))
-                        }
-                      />
-                      <span style={secondaryTextStyle}>
-                        {locale === "en" ? "Licenses valid" : "證照有效"}
-                      </span>
-                    </label>
-                    <CanvasBtn
-                      theme={theme}
-                      variant="primary"
-                      disabled={
-                        !driverForm.name.trim() ||
-                        busyActionId === "driver:create"
-                      }
-                      onClick={() =>
-                        void runAction("driver:create", async () => {
-                          await client.createDriverMaster({
-                            name: driverForm.name.trim(),
-                            phone: driverForm.phone.trim() || null,
-                            email: driverForm.email.trim() || null,
-                            licensesValid: driverForm.licensesValid,
-                            supportedServiceBuckets: ["standard_taxi"],
-                          });
-                          setDriverForm(createInitialDriverForm());
-                        })
-                      }
-                    >
-                      {copy.createDriver}
-                    </CanvasBtn>
-                  </div>
-                </CanvasCard>
               </>
+            ) : null}
+
+            {activeTab === "drivers" ? (
+              <CanvasCard theme={theme}>
+                <div id="fleet-driver-form" />
+                <div style={{ padding: 14, display: "grid", gap: 12 }}>
+                  <strong>{copy.createDriver}</strong>
+                  <span style={secondaryTextStyle}>
+                    {copy.createDriverHelp}
+                  </span>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Name" : "姓名"}
+                  >
+                    <input
+                      value={driverForm.name}
+                      onChange={(event) =>
+                        setDriverForm((current) => ({
+                          ...current,
+                          name: event.target.value,
+                        }))
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Phone" : "電話"}
+                  >
+                    <input
+                      value={driverForm.phone}
+                      onChange={(event) =>
+                        setDriverForm((current) => ({
+                          ...current,
+                          phone: event.target.value,
+                        }))
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField theme={theme} label="Email">
+                    <input
+                      value={driverForm.email}
+                      onChange={(event) =>
+                        setDriverForm((current) => ({
+                          ...current,
+                          email: event.target.value,
+                        }))
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <label
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={driverForm.licensesValid}
+                      onChange={(event) =>
+                        setDriverForm((current) => ({
+                          ...current,
+                          licensesValid: event.target.checked,
+                        }))
+                      }
+                    />
+                    <span style={secondaryTextStyle}>
+                      {locale === "en" ? "Licenses valid" : "證照有效"}
+                    </span>
+                  </label>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    disabled={
+                      !driverForm.name.trim() ||
+                      busyActionId === "driver:create"
+                    }
+                    onClick={() =>
+                      void runAction("driver:create", async () => {
+                        await client.createDriverMaster({
+                          name: driverForm.name.trim(),
+                          phone: driverForm.phone.trim() || null,
+                          email: driverForm.email.trim() || null,
+                          licensesValid: driverForm.licensesValid,
+                          supportedServiceBuckets: ["standard_taxi"],
+                        });
+                        setDriverForm(createInitialDriverForm());
+                      })
+                    }
+                  >
+                    {copy.createDriver}
+                  </CanvasBtn>
+                </div>
+              </CanvasCard>
             ) : null}
 
             {activeTab === "contracts" && selectedContract ? (
@@ -3527,81 +3550,6 @@ export default function FleetPage() {
                     </div>
                   ))}
                 </div>
-                <CanvasCard theme={theme}>
-                  <div style={{ padding: 14, display: "grid", gap: 10 }}>
-                    <strong>{copy.detail.evidence}</strong>
-                    <CanvasField
-                      theme={theme}
-                      label={locale === "en" ? "Reason" : "原因"}
-                    >
-                      <input
-                        value={offboardingForm.reason}
-                        onChange={(event) =>
-                          setOffboardingForm(
-                            (current: InitiateVehicleOffboardingCommand) => ({
-                              ...current,
-                              reason: event.target.value,
-                            }),
-                          )
-                        }
-                        style={inlineInputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={theme}
-                      label={locale === "en" ? "Requested by" : "申請人"}
-                    >
-                      <input
-                        value={offboardingForm.requestedBy ?? ""}
-                        onChange={(event) =>
-                          setOffboardingForm(
-                            (current: InitiateVehicleOffboardingCommand) => ({
-                              ...current,
-                              requestedBy: event.target.value,
-                            }),
-                          )
-                        }
-                        style={inlineInputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={theme}
-                      label={
-                        locale === "en" ? "Debranding ticket" : "去識別化單號"
-                      }
-                    >
-                      <input
-                        value={offboardingForm.debrandingTicketId ?? ""}
-                        onChange={(event) =>
-                          setOffboardingForm(
-                            (current: InitiateVehicleOffboardingCommand) => ({
-                              ...current,
-                              debrandingTicketId: event.target.value,
-                            }),
-                          )
-                        }
-                        style={inlineInputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={theme}
-                      label={locale === "en" ? "Notes" : "備註"}
-                    >
-                      <input
-                        value={offboardingForm.notes ?? ""}
-                        onChange={(event) =>
-                          setOffboardingForm(
-                            (current: InitiateVehicleOffboardingCommand) => ({
-                              ...current,
-                              notes: event.target.value,
-                            }),
-                          )
-                        }
-                        style={inlineInputStyle}
-                      />
-                    </CanvasField>
-                  </div>
-                </CanvasCard>
                 <div style={actionRowStyle}>
                   {offboardingActions(selectedOffboarding)}
                 </div>
@@ -3609,6 +3557,132 @@ export default function FleetPage() {
                   {renderCrossAppLinks(selectedOffboarding.crossAppLinks)}
                 </div>
               </>
+            ) : null}
+
+            {activeTab === "offboard" ? (
+              <CanvasCard theme={theme}>
+                <div id="fleet-offboarding-form" />
+                <div style={{ padding: 14, display: "grid", gap: 10 }}>
+                  <strong>{copy.actions.initiateOffboarding}</strong>
+                  <span style={secondaryTextStyle}>
+                    {locale === "en"
+                      ? "Use this form to start a governed offboarding workflow even when no active records exist yet."
+                      : "即使目前沒有進行中的紀錄，也可由此啟動受治理的下線工作流。"}
+                  </span>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Vehicle ID" : "車輛 ID"}
+                  >
+                    <input
+                      value={offboardingVehicleId}
+                      onChange={(event) =>
+                        setOffboardingVehicleId(event.target.value)
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Reason" : "原因"}
+                  >
+                    <input
+                      value={offboardingForm.reason}
+                      onChange={(event) =>
+                        setOffboardingForm(
+                          (current: InitiateVehicleOffboardingCommand) => ({
+                            ...current,
+                            reason: event.target.value,
+                          }),
+                        )
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Requested by" : "申請人"}
+                  >
+                    <input
+                      value={offboardingForm.requestedBy ?? ""}
+                      onChange={(event) =>
+                        setOffboardingForm(
+                          (current: InitiateVehicleOffboardingCommand) => ({
+                            ...current,
+                            requestedBy: event.target.value,
+                          }),
+                        )
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={
+                      locale === "en" ? "Debranding ticket" : "去識別化單號"
+                    }
+                  >
+                    <input
+                      value={offboardingForm.debrandingTicketId ?? ""}
+                      onChange={(event) =>
+                        setOffboardingForm(
+                          (current: InitiateVehicleOffboardingCommand) => ({
+                            ...current,
+                            debrandingTicketId: event.target.value,
+                          }),
+                        )
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={locale === "en" ? "Notes" : "備註"}
+                  >
+                    <input
+                      value={offboardingForm.notes ?? ""}
+                      onChange={(event) =>
+                        setOffboardingForm(
+                          (current: InitiateVehicleOffboardingCommand) => ({
+                            ...current,
+                            notes: event.target.value,
+                          }),
+                        )
+                      }
+                      style={inlineInputStyle}
+                    />
+                  </CanvasField>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    danger
+                    disabled={
+                      !offboardingVehicleId.trim() ||
+                      !offboardingForm.reason.trim() ||
+                      busyActionId === "offboarding:create"
+                    }
+                    onClick={() =>
+                      void runAction("offboarding:create", async () => {
+                        await client.initiateVehicleOffboarding(
+                          offboardingVehicleId.trim(),
+                          {
+                            ...offboardingForm,
+                            reason: offboardingForm.reason.trim(),
+                            requestedBy:
+                              offboardingForm.requestedBy?.trim() || null,
+                            debrandingTicketId:
+                              offboardingForm.debrandingTicketId?.trim() ||
+                              null,
+                            notes: offboardingForm.notes?.trim() || null,
+                          },
+                        );
+                        setOffboardingForm(createInitialOffboardingForm());
+                      })
+                    }
+                  >
+                    {copy.actions.initiateOffboarding}
+                  </CanvasBtn>
+                </div>
+              </CanvasCard>
             ) : null}
 
             {!selectedRecord ? (
