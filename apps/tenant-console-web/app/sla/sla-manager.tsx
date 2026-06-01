@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
@@ -312,6 +312,16 @@ const REFRESH_TIER_LABEL: Record<RefreshTier, string> = {
   manual: "手動更新",
 };
 
+const REFRESH_TIER_INTERVAL_MS: Record<RefreshTier, number | null> = {
+  urgent: 5000,
+  fast: 3000,
+  dispatch: 5000,
+  medium: 15000,
+  medium_slow: 30000,
+  slow: 30000,
+  manual: null,
+};
+
 function formatActionCaption(action: ResourceActionDescriptor) {
   if (action.enabled) return `${actionLabel(action.action)} 可直接執行`;
   return `${actionLabel(action.action)} 目前不可執行：${disabledReasonLabel(action.disabledReasonCode)}`;
@@ -319,6 +329,10 @@ function formatActionCaption(action: ResourceActionDescriptor) {
 
 function buildAuditHref(receipt: ActionReceipt) {
   return `/audit?auditId=${encodeURIComponent(receipt.auditId)}`;
+}
+
+function formatThresholdInput(value: number | null | undefined) {
+  return typeof value === "number" ? String(value) : "";
 }
 
 export function SlaManager({
@@ -335,15 +349,13 @@ export function SlaManager({
 }: SlaManagerProps) {
   const router = useRouter();
   const [waitThresholdMin, setWaitThresholdMin] = useState(
-    profile?.waitThresholdMin ? String(profile.waitThresholdMin) : "",
+    formatThresholdInput(profile?.waitThresholdMin),
   );
   const [arrivalThresholdMin, setArrivalThresholdMin] = useState(
-    profile?.arrivalThresholdMin ? String(profile.arrivalThresholdMin) : "",
+    formatThresholdInput(profile?.arrivalThresholdMin),
   );
   const [completionThresholdMin, setCompletionThresholdMin] = useState(
-    profile?.completionThresholdMin
-      ? String(profile.completionThresholdMin)
-      : "",
+    formatThresholdInput(profile?.completionThresholdMin),
   );
   const [reason, setReason] = useState("");
   const [feedback, setFeedback] = useState<{
@@ -356,16 +368,46 @@ export function SlaManager({
 
   const updateAction = getAction(availableActions, "update_sla_profile");
   const recalcAction = getAction(availableActions, "recalculate_sla_bookings");
+  const nextAction = emptyState?.nextAction ?? null;
   const activeEmptyState = emptyState
     ? EMPTY_STATE_CONFIG[emptyState.reason]
     : null;
-  const showEditor = Boolean(profile) || Boolean(updateAction);
+  const showEditor =
+    Boolean(profile) ||
+    ((emptyState?.reason === "not_provisioned" ||
+      emptyState?.reason === "no_data") &&
+      Boolean(updateAction));
   const reasonRequired = Boolean(
     updateAction?.requiresReason || recalcAction?.requiresReason,
   );
   const refreshMetadataAvailable = Boolean(
     refreshTier && refreshMetadata?.generatedAt,
   );
+
+  useEffect(() => {
+    setWaitThresholdMin(formatThresholdInput(profile?.waitThresholdMin));
+    setArrivalThresholdMin(formatThresholdInput(profile?.arrivalThresholdMin));
+    setCompletionThresholdMin(
+      formatThresholdInput(profile?.completionThresholdMin),
+    );
+  }, [
+    profile?.waitThresholdMin,
+    profile?.arrivalThresholdMin,
+    profile?.completionThresholdMin,
+    profile?.updatedAt,
+  ]);
+
+  useEffect(() => {
+    if (!refreshTier) return;
+    const intervalMs = REFRESH_TIER_INTERVAL_MS[refreshTier];
+    if (!intervalMs) return;
+
+    const timer = window.setInterval(() => {
+      router.refresh();
+    }, intervalMs);
+
+    return () => window.clearInterval(timer);
+  }, [refreshTier, router]);
 
   const handleUpdate = () => {
     startTransition(async () => {
@@ -447,6 +489,13 @@ export function SlaManager({
         subtitle="wait · arrival · completion 三個門檻 · 單位 = 分鐘"
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <CanvasBtn
+              theme={th}
+              onClick={() => router.refresh()}
+              disabled={isPending}
+            >
+              重新整理
+            </CanvasBtn>
             <CanvasPill theme={th} tone="accent">
               refresh tier ·{" "}
               {refreshTier
@@ -533,15 +582,13 @@ export function SlaManager({
               <div style={noteStyle}>
                 messageCode · {emptyState?.messageCode ?? "—"}
               </div>
-              {emptyState?.nextAction ? (
+              {nextAction ? (
                 <div style={emptyActionStyle}>
                   <div style={summaryLabelStyle}>recommended action</div>
                   <div style={summaryValueStyle}>
-                    {actionLabel(emptyState.nextAction.action)}
+                    {actionLabel(nextAction.action)}
                   </div>
-                  <div style={noteStyle}>
-                    {formatActionCaption(emptyState.nextAction)}
-                  </div>
+                  <div style={noteStyle}>{formatActionCaption(nextAction)}</div>
                 </div>
               ) : null}
               <div style={linkRowStyle}>
@@ -668,13 +715,12 @@ export function SlaManager({
                   {updateAction || recalcAction
                     ? `availableActions 決定 CTA 顯示；${reasonRequired ? "目前可執行動作需要 reason，送出後會刷新本頁與相關 deep links。" : "送出後會刷新本頁與相關 deep links。"}`
                     : "目前 API 沒有回傳可操作的 SLA 動作。"}
-                  {emptyState?.nextAction ? (
+                  {nextAction ? (
                     <div style={actionHintStyle}>
                       <span>
-                        emptyState.nextAction ·{" "}
-                        {actionLabel(emptyState.nextAction.action)}
+                        emptyState.nextAction · {actionLabel(nextAction.action)}
                       </span>
-                      <span>{formatActionCaption(emptyState.nextAction)}</span>
+                      <span>{formatActionCaption(nextAction)}</span>
                     </div>
                   ) : null}
                 </div>
