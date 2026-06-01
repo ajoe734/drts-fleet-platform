@@ -49,13 +49,7 @@ export default async function SlaPage() {
       ) : null}
 
       <SlaManager
-        profile={data.view?.profile ?? null}
-        updatedBy={data.view?.updatedBy ?? "—"}
-        lastRecalculationAt={data.view?.lastRecalculationAt ?? null}
-        availableActions={data.view?.availableActions ?? []}
-        emptyState={data.view?.emptyState ?? null}
-        refreshTier={data.view?.refreshTier ?? null}
-        refreshMetadata={data.view?.refreshMetadata ?? null}
+        view={data.view}
         loadErrorMessage={data.errorMessage}
         links={[
           { href: "/integration-governance", label: "查看整合就緒度" },

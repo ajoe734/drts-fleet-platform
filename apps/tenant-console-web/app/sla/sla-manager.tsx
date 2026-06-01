@@ -44,22 +44,27 @@ type CrossAppLinkItem = {
 };
 
 type EmptyStateConfig = {
-  reason: EmptyStateEnvelope["reason"];
+  reason: TenantSlaEmptyReason;
   title: string;
   body: string;
   tone: "warn" | "danger" | "info" | "success" | "accent";
 };
 
-type TenantSlaEmptyReason = EmptyStateEnvelope["reason"];
+type TenantSlaEmptyReason = Exclude<
+  EmptyStateEnvelope["reason"],
+  "driver_not_eligible"
+>;
 
 type SlaManagerProps = {
-  profile: SlaSnapshot | null;
-  updatedBy: string | null;
-  lastRecalculationAt: string | null;
-  availableActions: ResourceActionDescriptor[];
-  emptyState: EmptyStateEnvelope | null;
-  refreshTier: RefreshTier | null;
-  refreshMetadata: UiRefreshMetadata | null;
+  view: {
+    profile: SlaSnapshot | null;
+    updatedBy: string | null;
+    lastRecalculationAt: string | null;
+    availableActions: ResourceActionDescriptor[];
+    emptyState: EmptyStateEnvelope | null;
+    refreshTier: RefreshTier;
+    refreshMetadata: UiRefreshMetadata;
+  } | null;
   loadErrorMessage: string | null;
   links: LinkItem[];
   crossAppLinks: CrossAppLinkItem[];
@@ -223,12 +228,6 @@ const EMPTY_STATE_CONFIG: Record<TenantSlaEmptyReason, EmptyStateConfig> = {
     body: "SLA profile 目前受外部計算或同步服務影響而不可用。請稍後重試並留意平台公告。",
     tone: "danger",
   },
-  driver_not_eligible: {
-    reason: "driver_not_eligible",
-    title: "資料狀態不適用於租戶主控台",
-    body: "後端回傳了 driver-app 專用的 empty reason。此 SLA profile 應由後端改正 tenant-scoped 狀態後再顯示。",
-    tone: "danger",
-  },
   filtered_empty: {
     reason: "filtered_empty",
     title: "目前篩選條件下沒有結果",
@@ -335,19 +334,54 @@ function formatThresholdInput(value: number | null | undefined) {
   return typeof value === "number" ? String(value) : "";
 }
 
+function getActiveEmptyState(
+  emptyState: EmptyStateEnvelope | null,
+  loadErrorMessage: string | null,
+) {
+  if (emptyState?.reason && emptyState.reason in EMPTY_STATE_CONFIG) {
+    return EMPTY_STATE_CONFIG[emptyState.reason as TenantSlaEmptyReason];
+  }
+  if (!emptyState && loadErrorMessage) {
+    return EMPTY_STATE_CONFIG.fetch_failed;
+  }
+  return null;
+}
+
+function getRefreshTone(metadata: UiRefreshMetadata | null) {
+  switch (metadata?.dataFreshness) {
+    case "fresh":
+      return "success";
+    case "stale":
+      return "warn";
+    case "degraded":
+    case "unknown":
+      return "danger";
+    default:
+      return "accent";
+  }
+}
+
+function getRefreshDeadline(metadata: UiRefreshMetadata | null) {
+  if (!metadata) return null;
+  const generatedAt = new Date(metadata.generatedAt).getTime();
+  if (Number.isNaN(generatedAt)) return null;
+  return generatedAt + metadata.staleAfterMs;
+}
+
 export function SlaManager({
-  profile,
-  updatedBy,
-  lastRecalculationAt,
-  availableActions,
-  emptyState,
-  refreshTier,
-  refreshMetadata,
+  view,
   loadErrorMessage,
   links,
   crossAppLinks,
 }: SlaManagerProps) {
   const router = useRouter();
+  const profile = view?.profile ?? null;
+  const updatedBy = view?.updatedBy ?? null;
+  const lastRecalculationAt = view?.lastRecalculationAt ?? null;
+  const availableActions = view?.availableActions ?? [];
+  const emptyState = view?.emptyState ?? null;
+  const refreshTier = view?.refreshTier ?? null;
+  const refreshMetadata = view?.refreshMetadata ?? null;
   const [waitThresholdMin, setWaitThresholdMin] = useState(
     formatThresholdInput(profile?.waitThresholdMin),
   );
@@ -369,9 +403,7 @@ export function SlaManager({
   const updateAction = getAction(availableActions, "update_sla_profile");
   const recalcAction = getAction(availableActions, "recalculate_sla_bookings");
   const nextAction = emptyState?.nextAction ?? null;
-  const activeEmptyState = emptyState
-    ? EMPTY_STATE_CONFIG[emptyState.reason]
-    : null;
+  const activeEmptyState = getActiveEmptyState(emptyState, loadErrorMessage);
   const showEditor =
     Boolean(profile) ||
     ((emptyState?.reason === "not_provisioned" ||
@@ -383,6 +415,12 @@ export function SlaManager({
   const refreshMetadataAvailable = Boolean(
     refreshTier && refreshMetadata?.generatedAt,
   );
+  const refreshDeadline = getRefreshDeadline(refreshMetadata);
+  const hasPendingResync =
+    feedback?.receipt?.status === "accepted" ||
+    Boolean(lastRecalculationAt) ||
+    refreshMetadata?.dataFreshness === "stale" ||
+    refreshMetadata?.dataFreshness === "degraded";
 
   useEffect(() => {
     setWaitThresholdMin(formatThresholdInput(profile?.waitThresholdMin));
@@ -408,6 +446,26 @@ export function SlaManager({
 
     return () => window.clearInterval(timer);
   }, [refreshTier, router]);
+
+  useEffect(() => {
+    if (!refreshDeadline) return;
+    const msUntilDeadline = refreshDeadline - Date.now();
+    const timer = window.setTimeout(
+      () => {
+        router.refresh();
+      },
+      msUntilDeadline > 0 ? msUntilDeadline : 0,
+    );
+    return () => window.clearTimeout(timer);
+  }, [refreshDeadline, router]);
+
+  useEffect(() => {
+    if (!hasPendingResync) return;
+    const timer = window.setTimeout(() => {
+      router.refresh();
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [hasPendingResync, router, refreshMetadata?.generatedAt]);
 
   const handleUpdate = () => {
     startTransition(async () => {
@@ -503,14 +561,7 @@ export function SlaManager({
                 : "—"}
             </CanvasPill>
             {refreshMetadataAvailable ? (
-              <CanvasPill
-                theme={th}
-                tone={
-                  refreshMetadata!.dataFreshness === "fresh"
-                    ? "success"
-                    : "warn"
-                }
-              >
+              <CanvasPill theme={th} tone={getRefreshTone(refreshMetadata)}>
                 freshness · {refreshMetadata!.dataFreshness}
               </CanvasPill>
             ) : null}
@@ -559,11 +610,29 @@ export function SlaManager({
         {refreshMetadataAvailable ? (
           <CanvasBanner
             theme={th}
-            tone="info"
+            tone={getRefreshTone(refreshMetadata)}
             title={`Refresh cadence · ${REFRESH_TIER_CODE[refreshTier!]} · ${REFRESH_TIER_LABEL[refreshTier!]}`}
-            body={`metadata source=${refreshMetadata!.source} · generatedAt=${formatDateTime(
+            body={`source=${refreshMetadata!.source} · generatedAt=${formatDateTime(
               refreshMetadata!.generatedAt,
-            )} · staleAfterMs=${refreshMetadata!.staleAfterMs}`}
+            )} · staleAfterMs=${refreshMetadata!.staleAfterMs}${refreshDeadline ? ` · next resync ${formatDateTime(new Date(refreshDeadline).toISOString())}` : ""}`}
+          />
+        ) : null}
+
+        {hasPendingResync ? (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            title="Snapshot resync in progress"
+            body="This page keeps polling until accepted commands and recalculation progress are confirmed by a fresh backend snapshot."
+          />
+        ) : null}
+
+        {emptyState?.reason === "driver_not_eligible" ? (
+          <CanvasBanner
+            theme={th}
+            tone="danger"
+            title="Unsupported empty-state reason"
+            body="Backend returned driver_not_eligible for a tenant SLA route. This page only accepts the six tenant-console empty reasons from Q-X15/Q-TEN02."
           />
         ) : null}
 
@@ -721,6 +790,15 @@ export function SlaManager({
                         emptyState.nextAction · {actionLabel(nextAction.action)}
                       </span>
                       <span>{formatActionCaption(nextAction)}</span>
+                    </div>
+                  ) : null}
+                  {availableActions.length > 0 ? (
+                    <div style={actionHintStyle}>
+                      {availableActions.map((action) => (
+                        <span key={action.action}>
+                          {formatActionCaption(action)}
+                        </span>
+                      ))}
                     </div>
                   ) : null}
                 </div>
