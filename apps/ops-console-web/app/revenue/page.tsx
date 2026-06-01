@@ -1,18 +1,39 @@
 import Link from "next/link";
+import type { CSSProperties, ReactNode } from "react";
 import type {
   DriverStatementRecord,
   DriverTaskRecord,
+  EmptyReason,
+  EmptyStateEnvelope,
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
   OwnedOrderRecord,
   ReconciliationIssueRecord,
+  RefreshTier,
+  ResourceActionDescriptor,
   SettlementMatrixRecord,
+  UiHealthEnvelope,
+  UiRefreshMetadata,
   VehicleRegistryRecord,
 } from "@drts/contracts";
+import {
+  CanvasBanner as Banner,
+  CanvasBtn as Btn,
+  CanvasCard as Card,
+  CanvasIcon,
+  CanvasKPI as KPI,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  CanvasTable as Table,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+  type CanvasTheme,
+  type CanvasTone,
+} from "@drts/ui-web";
+
+import { RevenueAutoRefresh } from "@/components/revenue-auto-refresh";
 import { getOpsClient } from "@/lib/api-client";
-import { getServerLocale } from "@/lib/server-locale";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { t } from "@/lib/translations";
 import {
   buildRevenueInsights,
   formatCompactNumber,
@@ -20,49 +41,101 @@ import {
   type RevenueFilters,
   type RevenuePeriod,
 } from "@/lib/ops-analytics";
-import { PageHeader } from "@drts/ui-web";
-import { StatCard } from "@drts/ui-web";
-import { Card, CardHeader, CardBody } from "@drts/ui-web";
-import { DataTable, Tr, Td } from "@drts/ui-web";
-import { Badge } from "@drts/ui-web";
+import {
+  crossAppHref,
+  platformAdminPaymentsLink,
+  platformAdminReconciliationLink,
+} from "@/lib/ops-cross-app-links";
+import {
+  buildEmptyEnvelope,
+  emptyStateCopy,
+  fetchListWithOutcome,
+  resolveEmptyReason,
+} from "@/lib/ops-empty-state";
+import { getServerLocale } from "@/lib/server-locale";
+import { t, type Locale } from "@/lib/translations";
 
-type RevenuePageProps = {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-};
+// Refresh tier T3 per packet §5.11 — RefreshTier "medium" drives 15s polling.
+const REVENUE_REFRESH_TIER: RefreshTier = "medium";
+const REVENUE_STALE_AFTER_MS = 15_000;
+
+type RevenueTab = "insight" | "channel" | "matrix" | "mismatch";
+const TAB_KEYS: readonly RevenueTab[] = [
+  "insight",
+  "channel",
+  "matrix",
+  "mismatch",
+] as const;
 
 const MATRIX_CHANNEL_ORDER = [
   "tenant_enterprise",
   "partner_airport",
   "phone_dispatch",
   "forwarded_shadow",
-];
+] as const;
 
-async function resolveOrFallback<T>(
-  loader: () => Promise<T>,
-  fallback: T,
-): Promise<T> {
-  try {
-    return await loader();
-  } catch {
-    return fallback;
-  }
-}
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
+
+const pageStackStyle: CSSProperties = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+};
+
+const kpiGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 12,
+};
+
+const filterRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const drawerLayoutStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 380px",
+  gap: 16,
+};
+
+type RevenuePageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function resolveTab(value: string | undefined): RevenueTab {
+  return (TAB_KEYS as readonly string[]).includes(value ?? "")
+    ? (value as RevenueTab)
+    : "matrix";
+}
+
+const PERIOD_KEYS: readonly RevenuePeriod[] = [
+  "today",
+  "yesterday",
+  "7d",
+  "30d",
+] as const;
+
 function resolveFilters(
   searchParams?: Record<string, string | string[] | undefined>,
 ): RevenueFilters {
   const rawPeriod = firstParam(searchParams?.period);
-  const period: RevenuePeriod =
-    rawPeriod === "today" ||
-    rawPeriod === "7d" ||
-    rawPeriod === "30d" ||
-    rawPeriod === "all"
-      ? rawPeriod
-      : "7d";
+  const period: RevenuePeriod = (PERIOD_KEYS as readonly string[]).includes(
+    rawPeriod ?? "",
+  )
+    ? (rawPeriod as RevenuePeriod)
+    : "7d";
   const serviceBucket = firstParam(searchParams?.serviceBucket) ?? "all";
   const vehicleId = firstParam(searchParams?.vehicleId) ?? "all";
   return {
@@ -75,28 +148,53 @@ function resolveFilters(
   };
 }
 
+function filtersAreDefault(filters: RevenueFilters): boolean {
+  return (
+    filters.period === "7d" &&
+    filters.serviceBucket === "all" &&
+    filters.vehicleId === "all"
+  );
+}
+
 function buildHref(
   filters: RevenueFilters,
-  overrides: Partial<RevenueFilters>,
+  tab: RevenueTab,
+  overrides: Partial<
+    RevenueFilters & { tab: RevenueTab; mismatch: string | null }
+  > = {},
 ) {
   const next = { ...filters, ...overrides };
+  const nextTab = overrides.tab ?? tab;
   const params = new URLSearchParams();
+  if (nextTab !== "matrix") params.set("tab", nextTab);
   if (next.period !== "7d") params.set("period", next.period);
   if (next.serviceBucket !== "all")
     params.set("serviceBucket", next.serviceBucket);
   if (next.vehicleId !== "all") params.set("vehicleId", next.vehicleId);
+  if (overrides.mismatch) params.set("mismatch", overrides.mismatch);
   const query = params.toString();
   return query ? `/revenue?${query}` : "/revenue";
 }
 
-function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
+function pctLabel(numerator: number, denominator: number): string {
+  if (denominator <= 0) return "0%";
+  const pct = (numerator / denominator) * 100;
+  return `${pct.toFixed(pct >= 10 ? 0 : 1)}%`;
+}
+
+function sortSettlementMatrix(rows: readonly SettlementMatrixRecord[]) {
   const priority = new Map(
-    MATRIX_CHANNEL_ORDER.map((channelKey, index) => [channelKey, index]),
+    MATRIX_CHANNEL_ORDER.map(
+      (channelKey, index) => [channelKey, index] as const,
+    ),
   );
   return [...rows].sort(
     (left, right) =>
-      (priority.get(left.channelKey) ?? Number.MAX_SAFE_INTEGER) -
-      (priority.get(right.channelKey) ?? Number.MAX_SAFE_INTEGER),
+      (priority.get(left.channelKey as (typeof MATRIX_CHANNEL_ORDER)[number]) ??
+        Number.MAX_SAFE_INTEGER) -
+      (priority.get(
+        right.channelKey as (typeof MATRIX_CHANNEL_ORDER)[number],
+      ) ?? Number.MAX_SAFE_INTEGER),
   );
 }
 
@@ -116,37 +214,679 @@ function settlementMatrixKey(
   return `revenue.matrix.${category}.${channelKey}`;
 }
 
-function ChipLink({
+function classifyOrderChannel(order: OwnedOrderRecord): string {
+  if (order.businessDispatchSubtype === "enterprise_dispatch") return "tenant";
+  if (order.partnerId) return "partner";
+  if (order.orderSource === "phone") return "phone";
+  return "platform";
+}
+
+function isoMinusMs(ms: number): string {
+  return new Date(Date.now() - ms).toISOString();
+}
+
+function buildRefreshMetadata(anyFetchFailed: boolean): UiRefreshMetadata {
+  return {
+    generatedAt: isoMinusMs(REVENUE_STALE_AFTER_MS / 5),
+    staleAfterMs: REVENUE_STALE_AFTER_MS,
+    dataFreshness: anyFetchFailed ? "degraded" : "fresh",
+    source: anyFetchFailed ? "cache" : "live",
+  };
+}
+
+function dataFreshnessSummary(metadata: UiRefreshMetadata): {
+  minutesOld: number;
+  secondsUntilNextTick: number;
+  isStale: boolean;
+} {
+  const ageMs = Math.max(
+    0,
+    Date.now() - new Date(metadata.generatedAt).getTime(),
+  );
+  const minutesOld = Math.floor(ageMs / 60_000);
+  const secondsUntilNextTick = Math.max(
+    0,
+    Math.ceil((metadata.staleAfterMs - ageMs) / 1000),
+  );
+  return {
+    minutesOld,
+    secondsUntilNextTick,
+    isStale: metadata.dataFreshness !== "fresh",
+  };
+}
+
+function buildHealthEnvelope(args: {
+  ordersOk: boolean;
+  matrixOk: boolean;
+  forwardedOk: boolean;
+}): UiHealthEnvelope {
+  const degraded: UiHealthEnvelope["degradedServices"] = [];
+  if (!args.ordersOk) {
+    degraded.push({
+      service: "orders",
+      impact: "revenue.kpi.billed",
+      severity: "warning",
+    });
+  }
+  if (!args.matrixOk) {
+    degraded.push({
+      service: "settlement_matrix",
+      impact: "revenue.tab.matrix",
+      severity: "warning",
+    });
+  }
+  if (!args.forwardedOk) {
+    degraded.push({
+      service: "forwarder_reconciliation",
+      impact: "revenue.tab.mismatch",
+      severity: "critical",
+    });
+  }
+  return {
+    status: degraded.length === 0 ? "healthy" : "degraded",
+    degradedServices: degraded,
+    lastCheckedAt: new Date().toISOString(),
+  };
+}
+
+function CrossAppLink({
   href,
-  active,
-  children,
+  label,
+  variant = "secondary",
 }: {
   href: string;
-  active: boolean;
-  children: React.ReactNode;
+  label: ReactNode;
+  variant?: "primary" | "secondary";
 }) {
+  const styles =
+    variant === "primary"
+      ? {
+          background: theme.accent,
+          color: "#ffffff",
+          border: `1px solid ${theme.accent}`,
+        }
+      : {
+          background: theme.surface,
+          color: theme.text,
+          border: `1px solid ${theme.border}`,
+        };
   return (
-    <Link
+    <a
       href={href}
+      target="_blank"
+      rel="noopener noreferrer"
       style={{
-        padding: "5px 12px",
-        borderRadius: "999px",
-        border: `1px solid ${active ? "#0f172a" : "#cbd5e1"}`,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        padding: "5px 10px",
+        fontSize: 12,
+        height: 28,
+        boxSizing: "border-box",
+        fontWeight: 500,
+        borderRadius: 7,
         textDecoration: "none",
-        color: active ? "#ffffff" : "#475569",
-        background: active ? "#0f172a" : "#ffffff",
-        fontSize: "12.5px",
-        fontWeight: active ? 600 : 400,
-        whiteSpace: "nowrap",
+        lineHeight: 1,
+        fontFamily: theme.fontFamily,
+        ...styles,
       }}
     >
-      {children}
-    </Link>
+      <CanvasIcon name="ext" size={13} />
+      {label}
+    </a>
   );
 }
 
-function copyText(locale: "en" | "zh", en: string, zh: string) {
-  return locale === "zh" ? zh : en;
+function emptyToneFor(reason: EmptyReason): {
+  borderTone: string;
+  pillTone: CanvasTone;
+} {
+  switch (reason) {
+    case "fetch_failed":
+    case "permission_denied":
+      return { borderTone: theme.danger, pillTone: "danger" };
+    case "not_provisioned":
+    case "external_unavailable":
+      return { borderTone: theme.warn, pillTone: "warn" };
+    case "filtered_empty":
+      return { borderTone: theme.info, pillTone: "info" };
+    case "driver_not_eligible":
+      return { borderTone: theme.border, pillTone: "neutral" };
+    default:
+      return { borderTone: theme.border, pillTone: "neutral" };
+  }
+}
+
+function EmptyStatePanel({
+  envelope,
+  locale,
+  filters,
+  tab,
+  themeRef,
+}: {
+  envelope: EmptyStateEnvelope;
+  locale: Locale;
+  filters: RevenueFilters;
+  tab: RevenueTab;
+  themeRef: CanvasTheme;
+}) {
+  const copy = emptyStateCopy(envelope, locale, "revenue");
+  const { borderTone, pillTone } = emptyToneFor(envelope.reason);
+
+  return (
+    <div
+      role="status"
+      data-empty-reason={envelope.reason}
+      style={{
+        display: "flex",
+        gap: 14,
+        alignItems: "flex-start",
+        padding: "20px 18px",
+        border: `1px dashed ${borderTone}`,
+        borderRadius: 10,
+        background: themeRef.surfaceLo,
+      }}
+    >
+      <div
+        aria-hidden
+        style={{
+          width: 36,
+          height: 36,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 18,
+          borderRadius: 10,
+          background: themeRef.bg,
+          color: themeRef.text,
+          border: `1px solid ${borderTone}`,
+        }}
+      >
+        {copy.icon}
+      </div>
+      <div
+        style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: themeRef.text,
+            }}
+          >
+            {copy.title}
+          </div>
+          <Pill theme={themeRef} tone={pillTone} dot>
+            {envelope.reason}
+          </Pill>
+        </div>
+        <div
+          style={{
+            fontSize: 12.5,
+            color: themeRef.textMuted,
+            lineHeight: 1.4,
+          }}
+        >
+          {copy.body}
+        </div>
+        <EmptyStateActions
+          reason={envelope.reason}
+          locale={locale}
+          filters={filters}
+          tab={tab}
+        />
+      </div>
+    </div>
+  );
+}
+
+function EmptyStateActions({
+  reason,
+  locale,
+  filters,
+  tab,
+}: {
+  reason: EmptyReason;
+  locale: Locale;
+  filters: RevenueFilters;
+  tab: RevenueTab;
+}) {
+  switch (reason) {
+    case "fetch_failed":
+      return (
+        <div style={filterRowStyle}>
+          <Link
+            href={buildHref(filters, tab)}
+            style={{ textDecoration: "none" }}
+          >
+            <Btn theme={theme} icon="arrow">
+              {t("revenue.action.retry", locale)}
+            </Btn>
+          </Link>
+        </div>
+      );
+    case "filtered_empty":
+      return (
+        <div style={filterRowStyle}>
+          <Link
+            href={buildHref(filters, tab, {
+              period: "7d",
+              serviceBucket: "all",
+              vehicleId: "all",
+            })}
+            style={{ textDecoration: "none" }}
+          >
+            <Btn theme={theme} icon="filter">
+              {t("revenue.action.clearFilters", locale)}
+            </Btn>
+          </Link>
+        </div>
+      );
+    case "external_unavailable":
+    case "not_provisioned":
+      return (
+        <div style={filterRowStyle}>
+          <CrossAppLink
+            href={crossAppHref(
+              platformAdminPaymentsLink(
+                t("revenue.action.openPlatformAdminPayments", locale),
+              ),
+            )}
+            label={t("revenue.action.contactPlatform", locale)}
+          />
+        </div>
+      );
+    case "permission_denied":
+      return (
+        <div style={filterRowStyle}>
+          <Btn theme={theme} variant="secondary" icon="users">
+            {t("revenue.action.requestAccess", locale)}
+          </Btn>
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
+function MismatchDrawer({
+  issue,
+  financeIssue,
+  locale,
+  closeHref,
+}: {
+  issue: ForwarderReconciliationIssue | null;
+  financeIssue: ReconciliationIssueRecord | undefined;
+  locale: Locale;
+  closeHref: string;
+}) {
+  if (!issue) {
+    return (
+      <aside
+        role="complementary"
+        aria-label="mismatch-drawer-notfound"
+        style={{
+          background: theme.surface,
+          border: `1px solid ${theme.border}`,
+          borderRadius: 10,
+          padding: 16,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div style={{ fontSize: 12, color: theme.textMuted }}>
+          {t("revenue.mismatch.drawer.eyebrow", locale)}
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: theme.text }}>
+          {t("revenue.mismatch.drawer.notFound", locale)}
+        </div>
+        <Link href={closeHref} style={{ textDecoration: "none" }}>
+          <Btn theme={theme} variant="ghost" icon="x">
+            {t("revenue.mismatch.drawer.close", locale)}
+          </Btn>
+        </Link>
+      </aside>
+    );
+  }
+
+  const detailRow = (label: string, value: ReactNode) => (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "120px minmax(0, 1fr)",
+        gap: 8,
+      }}
+    >
+      <div style={{ fontSize: 11, color: theme.textMuted, paddingTop: 2 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 12.5, color: theme.text, minWidth: 0 }}>
+        {value}
+      </div>
+    </div>
+  );
+
+  const link = platformAdminReconciliationLink(
+    financeIssue?.issueId ?? null,
+    financeIssue
+      ? t("revenue.mismatch.drawer.openPlatformAdmin", locale)
+      : t("revenue.mismatch.drawer.openPlatformAdminCreate", locale),
+  );
+
+  return (
+    <aside
+      role="complementary"
+      aria-label="mismatch-drawer"
+      style={{
+        background: theme.surface,
+        border: `1px solid ${theme.border}`,
+        borderRadius: 10,
+        padding: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 8,
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: theme.textMuted,
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+            }}
+          >
+            {t("revenue.mismatch.drawer.eyebrow", locale)}
+          </div>
+          <div
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: theme.text,
+              marginTop: 4,
+            }}
+          >
+            {t("revenue.mismatch.drawer.title", locale)}
+          </div>
+          <div
+            style={{
+              fontSize: 11.5,
+              color: theme.textMuted,
+              marginTop: 2,
+              lineHeight: 1.4,
+            }}
+          >
+            {t("revenue.mismatch.drawer.subtitle", locale)}
+          </div>
+        </div>
+        <Link href={closeHref} style={{ textDecoration: "none" }}>
+          <Btn theme={theme} variant="ghost" icon="x">
+            {t("revenue.mismatch.drawer.close", locale)}
+          </Btn>
+        </Link>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          paddingTop: 4,
+          borderTop: `1px solid ${theme.border}`,
+        }}
+      >
+        {detailRow(
+          t("revenue.mismatch.drawer.platform", locale),
+          formatOpsCodeLabel(locale, issue.platformCode),
+        )}
+        {detailRow(
+          t("revenue.mismatch.drawer.mirror", locale),
+          <span style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
+            {issue.mirrorOrderId}
+          </span>,
+        )}
+        {detailRow(
+          t("revenue.mismatch.drawer.external", locale),
+          <span style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
+            {issue.externalOrderId}
+          </span>,
+        )}
+        {detailRow(
+          t("revenue.mismatch.drawer.reason", locale),
+          formatOpsCodeLabel(locale, issue.reconciliationJob.reason),
+        )}
+        {detailRow(
+          t("revenue.mismatch.drawer.status", locale),
+          <Pill
+            theme={theme}
+            tone={issue.status === "sync_failed" ? "danger" : "warn"}
+            dot
+          >
+            {formatOpsCodeLabel(locale, issue.status)}
+          </Pill>,
+        )}
+        {detailRow(
+          t("revenue.mismatch.drawer.lastError", locale),
+          issue.lastSyncError ? (
+            <div>
+              <div style={{ fontWeight: 600 }}>{issue.lastSyncError.code}</div>
+              <div style={{ color: theme.textMuted, fontSize: 11 }}>
+                {issue.lastSyncError.retryable
+                  ? t("revenue.mismatch.drawer.lastErrorRetryable", locale)
+                  : t("revenue.mismatch.drawer.lastErrorNotRetryable", locale)}
+              </div>
+            </div>
+          ) : (
+            <span style={{ color: theme.textMuted }}>—</span>
+          ),
+        )}
+        {detailRow(
+          t("revenue.mismatch.drawer.financeStatus", locale),
+          financeIssue ? (
+            <Pill
+              theme={theme}
+              tone={
+                financeIssue.status === "resolved"
+                  ? "success"
+                  : financeIssue.status === "assigned"
+                    ? "warn"
+                    : "danger"
+              }
+              dot
+            >
+              {formatOpsCodeLabel(locale, financeIssue.status)}
+            </Pill>
+          ) : (
+            <span style={{ color: theme.textMuted }}>
+              {t("revenue.mismatch.drawer.financeMissing", locale)}
+            </span>
+          ),
+        )}
+        {financeIssue
+          ? detailRow(
+              t("revenue.mismatch.drawer.financeOwner", locale),
+              financeIssue.ownerId ?? (
+                <span style={{ color: theme.textMuted }}>—</span>
+              ),
+            )
+          : null}
+      </div>
+
+      <div style={{ paddingTop: 8, borderTop: `1px solid ${theme.border}` }}>
+        <CrossAppLink
+          href={crossAppHref(link)}
+          label={link.label}
+          variant="primary"
+        />
+      </div>
+    </aside>
+  );
+}
+
+function makeDescriptor(args: {
+  action: string;
+  enabled: boolean;
+  disabledReasonCode?: string | undefined;
+  requiresReason?: boolean | undefined;
+  riskLevel: ResourceActionDescriptor["riskLevel"];
+}): ResourceActionDescriptor {
+  const descriptor: ResourceActionDescriptor = {
+    action: args.action,
+    enabled: args.enabled,
+    riskLevel: args.riskLevel,
+  };
+  if (args.disabledReasonCode !== undefined) {
+    descriptor.disabledReasonCode = args.disabledReasonCode;
+  }
+  if (args.requiresReason !== undefined) {
+    descriptor.requiresReason = args.requiresReason;
+  }
+  return descriptor;
+}
+
+function buildRevenuePageAvailableActions(ctx: {
+  ordersOk: boolean;
+  matrixOk: boolean;
+  forwarderIssuesOk: boolean;
+  financeIssuesOk: boolean;
+  mismatchCount: number;
+}): ResourceActionDescriptor[] {
+  const filtersOk = ctx.ordersOk;
+  const refreshDegraded =
+    !ctx.ordersOk ||
+    !ctx.matrixOk ||
+    !ctx.forwarderIssuesOk ||
+    !ctx.financeIssuesOk;
+  const filterDisabledReason = filtersOk ? undefined : "orders_unavailable";
+  const refreshDisabledReason = refreshDegraded
+    ? "degraded_upstream"
+    : undefined;
+  return [
+    makeDescriptor({
+      action: "filterPeriod",
+      enabled: filtersOk,
+      disabledReasonCode: filterDisabledReason,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "filterServiceBucket",
+      enabled: filtersOk,
+      disabledReasonCode: filterDisabledReason,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "filterVehicle",
+      enabled: filtersOk,
+      disabledReasonCode: filterDisabledReason,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "refresh",
+      enabled: true,
+      disabledReasonCode: refreshDisabledReason,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "openPlatformAdminPayments",
+      enabled: true,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "export",
+      enabled: false,
+      disabledReasonCode: "phase1_no_export",
+      riskLevel: "low",
+    }),
+  ];
+}
+
+function buildMismatchAvailableActions(ctx: {
+  hasFinanceIssue: boolean;
+  resolved: boolean;
+}): ResourceActionDescriptor[] {
+  const escalateDisabled = ctx.resolved ? "already_resolved" : undefined;
+  return [
+    makeDescriptor({
+      action: "openMismatchDrawer",
+      enabled: true,
+      riskLevel: "low",
+    }),
+    makeDescriptor({
+      action: "escalatePlatformAdmin",
+      enabled: true,
+      disabledReasonCode: escalateDisabled,
+      requiresReason: false,
+      riskLevel: "low",
+    }),
+  ];
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const MIN_MS = 60 * 1000;
+
+function formatAgeLabel(
+  ms: number,
+  locale: Locale,
+): { compact: string; ariaLabel: string } {
+  if (ms < MIN_MS) {
+    const label = t("revenue.mismatch.age.justNow", locale);
+    return { compact: label, ariaLabel: label };
+  }
+  if (ms < HOUR_MS) {
+    const minutes = Math.floor(ms / MIN_MS);
+    const label = t("revenue.mismatch.age.minutes", locale, { minutes });
+    return { compact: label, ariaLabel: label };
+  }
+  if (ms < DAY_MS) {
+    const hours = Math.floor(ms / HOUR_MS);
+    const label = t("revenue.mismatch.age.hours", locale, { hours });
+    return { compact: label, ariaLabel: label };
+  }
+  const days = Math.floor(ms / DAY_MS);
+  const label = t("revenue.mismatch.age.days", locale, { days });
+  return { compact: label, ariaLabel: label };
+}
+
+// Sort order: unassigned (no finance issue OR no ownerId) first, then by
+// ownerId asc, then by reconciliation job createdAt asc (oldest first).
+// Resolved issues sink to the bottom because they no longer demand owner
+// attention (packet §5.11 "sorted by owner / age").
+function mismatchSortKey(
+  issue: ForwarderReconciliationIssue,
+  financeIssue: ReconciliationIssueRecord | undefined,
+): [number, string, number] {
+  const isResolved = financeIssue?.status === "resolved";
+  if (isResolved) return [2, financeIssue?.ownerId ?? "", -mismatchAge(issue)];
+  const ownerId = financeIssue?.ownerId ?? null;
+  // Tier 0: needs assignment (no finance issue yet, or finance issue
+  // open with no owner). Tier 1: assigned. Older within tier first.
+  const tier = ownerId === null ? 0 : 1;
+  return [tier, ownerId ?? "", -mismatchAge(issue)];
+}
+
+function mismatchAge(issue: ForwarderReconciliationIssue): number {
+  const ts = new Date(issue.reconciliationJob.createdAt).getTime();
+  return Number.isFinite(ts) ? Date.now() - ts : 0;
 }
 
 export default async function RevenuePage({ searchParams }: RevenuePageProps) {
@@ -154,890 +894,1193 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const resolvedSearchParams = await (searchParams ??
     Promise.resolve({} as Record<string, string | string[] | undefined>));
   const filters = resolveFilters(resolvedSearchParams);
+  const tab = resolveTab(firstParam(resolvedSearchParams.tab));
+  const mismatchId = firstParam(resolvedSearchParams.mismatch) ?? null;
+  const filtersActive = !filtersAreDefault(filters);
+  const locale = await getServerLocale();
+
   const [
-    orders,
-    tasks,
-    statements,
-    vehicles,
-    forwardedOrders,
-    settlementMatrix,
-    reconciliationIssues,
-    settlementReconciliationIssues,
-    locale,
+    ordersOutcome,
+    tasksOutcome,
+    statementsOutcome,
+    vehiclesOutcome,
+    forwardedOutcome,
+    matrixOutcome,
+    forwarderIssuesOutcome,
+    financeIssuesOutcome,
   ] = await Promise.all([
-    resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
-    resolveOrFallback(() => client.listDriverTasks(), [] as DriverTaskRecord[]),
-    resolveOrFallback(
-      () => client.listDriverStatements(),
-      [] as DriverStatementRecord[],
+    fetchListWithOutcome<OwnedOrderRecord>(() => client.listOrders()),
+    fetchListWithOutcome<DriverTaskRecord>(() => client.listDriverTasks()),
+    fetchListWithOutcome<DriverStatementRecord>(() =>
+      client.listDriverStatements(),
     ),
-    resolveOrFallback(
-      () => client.listVehicles(),
-      [] as VehicleRegistryRecord[],
+    fetchListWithOutcome<VehicleRegistryRecord>(() => client.listVehicles()),
+    fetchListWithOutcome<ForwardedOrderRecord>(() =>
+      client.listForwarderOrders(),
     ),
-    resolveOrFallback(
-      () => client.listForwarderOrders(),
-      [] as ForwardedOrderRecord[],
+    fetchListWithOutcome<SettlementMatrixRecord>(() =>
+      client.listSettlementMatrix(),
     ),
-    resolveOrFallback(
-      () => client.listSettlementMatrix(),
-      [] as SettlementMatrixRecord[],
+    fetchListWithOutcome<ForwarderReconciliationIssue>(() =>
+      client.listForwarderReconciliationIssues(),
     ),
-    resolveOrFallback(
-      () => client.listForwarderReconciliationIssues(),
-      [] as ForwarderReconciliationIssue[],
+    fetchListWithOutcome<ReconciliationIssueRecord>(() =>
+      client.listReconciliationIssues(),
     ),
-    resolveOrFallback(
-      () => client.listReconciliationIssues(),
-      [] as ReconciliationIssueRecord[],
-    ),
-    getServerLocale(),
   ]);
+
+  const anyFailed =
+    !ordersOutcome.ok ||
+    !tasksOutcome.ok ||
+    !matrixOutcome.ok ||
+    !forwarderIssuesOutcome.ok ||
+    !financeIssuesOutcome.ok;
+
+  const refreshMetadata = buildRefreshMetadata(anyFailed);
+  const healthEnvelope = buildHealthEnvelope({
+    ordersOk: ordersOutcome.ok,
+    matrixOk: matrixOutcome.ok,
+    forwardedOk:
+      forwardedOutcome.ok &&
+      forwarderIssuesOutcome.ok &&
+      financeIssuesOutcome.ok,
+  });
+  const freshness = dataFreshnessSummary(refreshMetadata);
+
+  const orders = ordersOutcome.data;
+  const tasks = tasksOutcome.data;
+  const statements = statementsOutcome.data;
+  const vehicles = vehiclesOutcome.data;
+  const forwardedOrders = forwardedOutcome.data;
+  const settlementMatrix = matrixOutcome.data;
+  const forwarderIssues = forwarderIssuesOutcome.data;
+  const financeIssues = financeIssuesOutcome.data;
+
+  const insights = buildRevenueInsights(orders, tasks, statements, filters);
+  const vehicleOptions = vehicles
+    .map((vehicle) => vehicle.vehicleId)
+    .sort((left, right) => left.localeCompare(right));
+
+  const completedOrders = orders.filter(
+    (order) => order.status === "completed",
+  );
+  const periodOrders = completedOrders.filter((order) => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const startMs = start.getTime();
+    const endMs = startMs + 24 * 60 * 60 * 1000;
+    if (filters.period === "today") {
+      const ts = new Date(order.updatedAt).getTime();
+      return ts >= startMs && ts < endMs;
+    }
+    if (filters.period === "yesterday") {
+      const ts = new Date(order.updatedAt).getTime();
+      return ts >= startMs - 24 * 60 * 60 * 1000 && ts < startMs;
+    }
+    const days = filters.period === "7d" ? 6 : 29;
+    const lookback = new Date(start);
+    lookback.setDate(lookback.getDate() - days);
+    return new Date(order.updatedAt).getTime() >= lookback.getTime();
+  });
+
+  const ownedTrips = periodOrders.filter((order) => !order.partnerId).length;
+  const totalTrips = periodOrders.length;
+  const forwardedSyncFailedCount = forwardedOrders.filter(
+    (order) => order.status === "sync_failed",
+  ).length;
+  const forwardedActiveCount = forwardedOrders.length;
+  const forwardedSyncFailedPct = pctLabel(
+    forwardedSyncFailedCount,
+    Math.max(forwardedActiveCount, 1),
+  );
+
+  const settlementChannels = sortSettlementMatrix(settlementMatrix);
+  const openReconCount = financeIssues.filter(
+    (issue) => issue.status === "open" || issue.status === "assigned",
+  ).length;
+  const mismatchCount = forwarderIssues.length;
+  const recognisedRevenueMinor = insights.totalRevenueMinor;
+
   const financeIssueByJobId = new Map(
-    settlementReconciliationIssues
+    financeIssues
       .filter(
         (issue) =>
           issue.issueType === "forwarder_status_mismatch" &&
           issue.linkedReconciliationJobId,
       )
-      .map((issue) => [issue.linkedReconciliationJobId!, issue]),
+      .map((issue) => [issue.linkedReconciliationJobId!, issue] as const),
   );
 
-  const insights = buildRevenueInsights(orders, tasks, statements, filters);
-  const vehicleOptions = vehicles
-    .map((v) => v.vehicleId)
-    .sort((a, b) => a.localeCompare(b));
-  const partnerBenefitRows = orders
-    .filter(
-      (order) =>
-        order.status === "completed" &&
-        order.serviceBucket === "business_dispatch" &&
-        order.businessDispatchSubtype === "credit_card_airport_transfer" &&
-        order.partnerId,
-    )
-    .filter((order) => {
-      if (
-        filters.serviceBucket !== "all" &&
-        order.serviceBucket !== filters.serviceBucket
-      ) {
-        return false;
+  const selectedMismatch =
+    mismatchId !== null
+      ? (forwarderIssues.find(
+          (issue) => issue.reconciliationJob.reconciliationJobId === mismatchId,
+        ) ?? null)
+      : null;
+  const selectedFinanceIssue =
+    selectedMismatch !== null
+      ? financeIssueByJobId.get(
+          selectedMismatch.reconciliationJob.reconciliationJobId,
+        )
+      : undefined;
+
+  const channelBuckets = (() => {
+    const counts = new Map<string, { trips: number; revenueMinor: number }>();
+    for (const order of periodOrders) {
+      const key = classifyOrderChannel(order);
+      const previous = counts.get(key) ?? { trips: 0, revenueMinor: 0 };
+      counts.set(key, {
+        trips: previous.trips + 1,
+        revenueMinor:
+          previous.revenueMinor + (order.quotedFare?.amountMinor ?? 0),
+      });
+    }
+    const totalRevenue = Array.from(counts.values()).reduce(
+      (sum, item) => sum + item.revenueMinor,
+      0,
+    );
+    return Array.from(counts.entries()).map(([key, value]) => ({
+      key,
+      label: t(`revenue.channelMix.channel.${key}`, locale),
+      trips: value.trips,
+      revenueMinor: value.revenueMinor,
+      shareLabel: pctLabel(value.revenueMinor, Math.max(totalRevenue, 1)),
+    }));
+  })();
+
+  const tabs = TAB_KEYS.map((key) => {
+    const isActive = key === tab;
+    const label = (() => {
+      switch (key) {
+        case "insight":
+          return t("revenue.tab.insight", locale);
+        case "channel":
+          return t("revenue.tab.channelMix", locale);
+        case "matrix":
+          return t("revenue.tab.matrix", locale);
+        case "mismatch":
+          return mismatchCount > 0
+            ? `${t("revenue.tab.mismatch", locale)} · ${formatCompactNumber(mismatchCount)}`
+            : t("revenue.tab.mismatch", locale);
       }
-      if (filters.period !== "all") {
-        const days =
-          filters.period === "today" ? 0 : filters.period === "7d" ? 6 : 29;
-        const threshold = new Date();
-        threshold.setHours(0, 0, 0, 0);
-        threshold.setDate(threshold.getDate() - days);
-        if (new Date(order.updatedAt).getTime() < threshold.getTime()) {
-          return false;
-        }
-      }
-      return true;
-    });
-  const enterpriseOrders = orders.filter(
-    (order) =>
-      order.serviceBucket === "business_dispatch" &&
-      order.businessDispatchSubtype === "enterprise_dispatch",
+    })();
+    return (
+      <Link
+        key={key}
+        href={buildHref(filters, tab, { tab: key, mismatch: null })}
+        style={{
+          color: "inherit",
+          textDecoration: "none",
+          fontWeight: isActive ? 600 : 500,
+        }}
+      >
+        {label}
+      </Link>
+    );
+  });
+  const activeTab = tabs[TAB_KEYS.indexOf(tab)];
+
+  // Per packet §3.5 (Q-X13) the page's CTAs come from the resource's
+  // `availableActions[]`. Until the backend list endpoints carry that
+  // descriptor on the page resource, we synthesize it here from data
+  // signals (health, fetch outcomes, mismatch backlog presence) so the
+  // renderer below stays descriptor-driven. When the backend lights up
+  // the descriptor, only this helper changes.
+  const pageActions = buildRevenuePageAvailableActions({
+    ordersOk: ordersOutcome.ok,
+    matrixOk: matrixOutcome.ok,
+    forwarderIssuesOk: forwarderIssuesOutcome.ok,
+    financeIssuesOk: financeIssuesOutcome.ok,
+    mismatchCount,
+  });
+  const pageActionByName = new Map<string, ResourceActionDescriptor>(
+    pageActions.map((descriptor) => [descriptor.action, descriptor]),
   );
-  const phoneOrders = orders.filter((order) => order.orderSource === "phone");
-  const forwardedSyncFailedCount = forwardedOrders.filter(
-    (order) => order.status === "sync_failed",
-  ).length;
-  const shadowLedgerCount = settlementMatrix.filter(
-    (row) => row.localLedgerMode === "shadow_only",
-  ).length;
-  const settlementChannels = sortSettlementMatrix(settlementMatrix);
-  const mismatchedJobsCount = reconciliationIssues.length;
+  const filterPeriodDescriptor = pageActionByName.get("filterPeriod") ?? null;
+  const filterServiceBucketDescriptor =
+    pageActionByName.get("filterServiceBucket") ?? null;
+  const filterVehicleDescriptor = pageActionByName.get("filterVehicle") ?? null;
+  const openPlatformAdminPaymentsDescriptor =
+    pageActionByName.get("openPlatformAdminPayments") ?? null;
 
-  const describeMatrixChannel = (channelKey: string) => {
-    const key = settlementMatrixKey("channel", channelKey);
-    const value = t(key, locale);
-    return value === key ? channelKey : value;
-  };
-
-  const describeMatrixField = (
-    category:
-      | "payer"
-      | "sponsor"
-      | "invoiceOwner"
-      | "receipt"
-      | "payout"
-      | "discount"
-      | "reimbursement"
-      | "reconciliation",
-    row: SettlementMatrixRecord,
-    fallback: string,
-  ) => {
-    const key = settlementMatrixKey(category, row.channelKey);
-    const value = t(key, locale);
-    return value === key ? fallback : value;
-  };
-
-  const describeLedgerMode = (
-    mode: SettlementMatrixRecord["localLedgerMode"],
-  ) =>
-    mode === "shadow_only"
-      ? t("revenue.matrix.ledger.shadow_only", locale)
-      : t("revenue.matrix.ledger.full_service", locale);
-
-  const describeEvidence = (channelKey: string) => {
-    switch (channelKey) {
-      case "tenant_enterprise":
-        return t("revenue.matrix.evidence.tenant_enterprise", locale, {
-          orders: String(enterpriseOrders.length),
-          statements: String(statements.length),
-        });
-      case "partner_airport":
-        return t("revenue.matrix.evidence.partner_airport", locale, {
-          trips: String(partnerBenefitRows.length),
-        });
-      case "phone_dispatch":
-        return t("revenue.matrix.evidence.phone_dispatch", locale, {
-          orders: String(phoneOrders.length),
-        });
-      case "forwarded_shadow":
-        return t("revenue.matrix.evidence.forwarded_shadow", locale, {
-          mirrors: String(forwardedOrders.length),
-          syncFailed: String(forwardedSyncFailedCount),
-        });
-      default:
-        return t("common.noData", locale);
+  const renderTabBody = () => {
+    switch (tab) {
+      case "insight":
+        return renderInsight();
+      case "channel":
+        return renderChannelMix();
+      case "matrix":
+        return renderMatrix();
+      case "mismatch":
+        return renderMismatch();
     }
   };
 
+  const drawerOpen = tab === "mismatch" && mismatchId !== null;
+  const closeDrawerHref = buildHref(filters, tab, { mismatch: null });
+  const tabContent = renderTabBody();
+  const bodySlot = drawerOpen ? (
+    <div style={drawerLayoutStyle}>
+      <div style={{ minWidth: 0 }}>{tabContent}</div>
+      <MismatchDrawer
+        issue={selectedMismatch}
+        financeIssue={selectedFinanceIssue}
+        locale={locale}
+        closeHref={closeDrawerHref}
+      />
+    </div>
+  ) : (
+    tabContent
+  );
+
+  const refreshTier: RefreshTier = REVENUE_REFRESH_TIER;
+
   return (
     <>
+      <RevenueAutoRefresh tier={refreshTier} />
       <PageHeader
-        title={t("revenue.title", locale)}
-        subtitle={t("revenue.subtitle", locale)}
+        theme={theme}
+        title={t("revenue.canvas.title", locale)}
+        subtitle={t("revenue.canvas.subtitle", locale)}
+        tabs={tabs}
+        activeTab={activeTab}
+        actions={renderHeaderActions()}
       />
 
-      {/* Filter bar */}
-      <Card style={{ marginBottom: "20px" }}>
-        <CardBody style={{ padding: "12px 16px" }}>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "16px",
-              alignItems: "center",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span
-                style={{
-                  fontSize: "11.5px",
-                  color: "#64748b",
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                {t("revenue.periodLabel", locale)}
-              </span>
-              <div style={{ display: "flex", gap: "6px" }}>
-                {(["today", "7d", "30d", "all"] as RevenuePeriod[]).map((p) => (
-                  <ChipLink
-                    key={p}
-                    href={buildHref(filters, { period: p })}
-                    active={p === filters.period}
-                  >
-                    {t(`revenue.period.${p}`, locale)}
-                  </ChipLink>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span
-                style={{
-                  fontSize: "11.5px",
-                  color: "#64748b",
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                {t("revenue.productLabel", locale)}
-              </span>
-              <div style={{ display: "flex", gap: "6px" }}>
-                {(["all", "standard_taxi", "business_dispatch"] as const).map(
-                  (sb) => (
-                    <ChipLink
-                      key={sb}
-                      href={buildHref(filters, { serviceBucket: sb })}
-                      active={sb === filters.serviceBucket}
-                    >
-                      {sb === "all"
-                        ? t("revenue.bucket.all", locale)
-                        : t(`revenue.bucket.${sb}`, locale)}
-                    </ChipLink>
+      <div style={pageStackStyle}>
+        {healthEnvelope.status !== "healthy" ? (
+          <Banner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            title={`API health: ${healthEnvelope.status}`}
+            body={healthEnvelope.degradedServices
+              .map((service) => `${service.service} (${service.severity})`)
+              .join(" · ")}
+          />
+        ) : null}
+
+        <Banner
+          theme={theme}
+          tone={freshness.isStale ? "warn" : "info"}
+          icon="clock"
+          title={t("revenue.banner.staleTitle", locale, {
+            minutes: freshness.minutesOld,
+            seconds: freshness.secondsUntilNextTick,
+          })}
+          body={t("revenue.banner.staleBody", locale, {
+            seconds: freshness.secondsUntilNextTick,
+          })}
+        />
+
+        <Banner
+          theme={theme}
+          tone="info"
+          icon="warn"
+          title={t("revenue.banner.readOnlyTitle", locale)}
+          body={t("revenue.banner.readOnlyBody", locale)}
+          actions={
+            openPlatformAdminPaymentsDescriptor?.enabled ? (
+              <CrossAppLink
+                href={crossAppHref(
+                  platformAdminPaymentsLink(
+                    t("revenue.action.openPlatformAdminPayments", locale),
                   ),
                 )}
-              </div>
-            </div>
-          </div>
-          {vehicleOptions.length > 0 && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                marginTop: "10px",
-                flexWrap: "wrap",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: "11.5px",
-                  color: "#64748b",
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                {t("common.vehicle", locale)}
-              </span>
-              <ChipLink
-                href={buildHref(filters, { vehicleId: "all" })}
-                active={filters.vehicleId === "all"}
-              >
-                {t("revenue.vehicle.all", locale)}
-              </ChipLink>
-              {vehicleOptions.map((vid) => (
-                <ChipLink
-                  key={vid}
-                  href={buildHref(filters, { vehicleId: vid })}
-                  active={vid === filters.vehicleId}
-                >
-                  {vid}
-                </ChipLink>
-              ))}
-            </div>
-          )}
-        </CardBody>
-      </Card>
+                label={t("revenue.action.openPlatformAdminPayments", locale)}
+              />
+            ) : null
+          }
+        />
 
-      {/* KPI strip */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: "16px",
-          marginBottom: "20px",
-        }}
-      >
-        <StatCard
-          label={t("revenue.completedTrips", locale)}
-          value={formatCompactNumber(insights.completedTrips)}
-          sub={t("revenue.completedTripsSub", locale)}
-          accent="#15803d"
-        />
-        <StatCard
-          label={t("revenue.recognizedRevenue", locale)}
-          value={formatMinorCurrency(insights.totalRevenueMinor)}
-          sub={t("revenue.recognizedRevenueSub", locale)}
-          accent="#1d4ed8"
-        />
-        <StatCard
-          label={t("revenue.averageTrip", locale)}
-          value={formatMinorCurrency(insights.averageRevenueMinor)}
-          sub={t("revenue.averageTripSub", locale)}
-          accent="#7c3aed"
-        />
-        <StatCard
-          label={t("revenue.queuedPipeline", locale)}
-          value={formatMinorCurrency(insights.queuedRevenueMinor)}
-          sub={t("revenue.queuedPipelineSub", locale)}
-          accent="#b45309"
-        />
+        <div style={kpiGridStyle}>
+          <KPI
+            theme={theme}
+            label={t("revenue.kpi.billed", locale)}
+            value={formatMinorCurrency(recognisedRevenueMinor)}
+            sub={t("revenue.kpi.billedSub", locale)}
+          />
+          <KPI
+            theme={theme}
+            label={t("revenue.kpi.ownedShare", locale)}
+            value={pctLabel(ownedTrips, Math.max(totalTrips, 1))}
+            sub={t("revenue.kpi.ownedShareSub", locale)}
+            hint={`${formatCompactNumber(ownedTrips)} / ${formatCompactNumber(totalTrips)}`}
+          />
+          <KPI
+            theme={theme}
+            label={t("revenue.kpi.forwardedSyncFailed", locale)}
+            value={forwardedSyncFailedPct}
+            delta={
+              forwardedSyncFailedCount > 0
+                ? `${formatCompactNumber(forwardedSyncFailedCount)} sync_failed`
+                : undefined
+            }
+            deltaTone={forwardedSyncFailedCount > 0 ? "down" : "neutral"}
+            sub={t("revenue.kpi.forwardedSyncFailedSub", locale)}
+          />
+          <KPI
+            theme={theme}
+            label={t("revenue.kpi.openRecon", locale)}
+            value={formatCompactNumber(openReconCount)}
+            deltaTone={openReconCount > 0 ? "down" : "neutral"}
+            sub={t("revenue.kpi.openReconSub", locale)}
+          />
+        </div>
+
+        {renderFilterChips()}
+
+        {bodySlot}
       </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: "16px",
-          marginBottom: "20px",
-        }}
-      >
-        <StatCard
-          label={t("revenue.matrix.title", locale)}
-          value={formatCompactNumber(settlementChannels.length)}
-          sub={copyText(
-            locale,
-            "Settlement channels under review",
-            "目前檢視中的結算通道",
-          )}
-          accent="#0f766e"
-        />
-        <StatCard
-          label={copyText(locale, "Shadow ledger lanes", "影子帳務通道")}
-          value={formatCompactNumber(shadowLedgerCount)}
-          sub={copyText(
-            locale,
-            "Channels still settled externally",
-            "仍由外部結算的通道",
-          )}
-          accent="#b45309"
-        />
-        <StatCard
-          label={copyText(locale, "Mismatch queue", "不一致佇列")}
-          value={formatCompactNumber(mismatchedJobsCount)}
-          sub={copyText(
-            locale,
-            "Forwarded orders waiting on reconciliation follow-up",
-            "等待對帳後續處理的轉派訂單",
-          )}
-          accent="#dc2626"
-        />
-        <StatCard
-          label={copyText(locale, "Sync failures", "同步失敗")}
-          value={formatCompactNumber(forwardedSyncFailedCount)}
-          sub={copyText(
-            locale,
-            "Mirror orders with adapter sync failures",
-            "鏡像訂單發生 adapter 同步失敗",
-          )}
-          accent="#7c3aed"
-        />
-      </div>
-
-      <Card style={{ marginBottom: "20px" }}>
-        <CardBody style={{ padding: "14px 16px" }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.2fr 1fr",
-              gap: "12px",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: "11px",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                  color: "#64748b",
-                  marginBottom: "4px",
-                }}
-              >
-                {copyText(locale, "Monitoring posture", "監控視角")}
-              </div>
-              <div style={{ fontWeight: 600, color: "#0f172a" }}>
-                {copyText(
-                  locale,
-                  "Settlement-matrix-first review keeps payout, receipt, and reconciliation authority visible before statement close.",
-                  "以結算矩陣優先的檢視方式，能在關帳前先看清 payout、receipt 與 reconciliation 權責。",
-                )}
-              </div>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: "8px",
-                flexWrap: "wrap",
-                justifyContent: "flex-end",
-              }}
-            >
-              <Badge variant="green">
-                {formatCompactNumber(insights.payoutStatuses.length)}{" "}
-                {copyText(locale, "payout lanes", "付款通道")}
-              </Badge>
-              <Badge variant="yellow">
-                {formatCompactNumber(shadowLedgerCount)}{" "}
-                {copyText(locale, "shadow-only", "僅影子帳")}
-              </Badge>
-              <Badge variant={mismatchedJobsCount > 0 ? "red" : "green"}>
-                {formatCompactNumber(mismatchedJobsCount)}{" "}
-                {copyText(locale, "mismatches", "不一致")}
-              </Badge>
-            </div>
-          </div>
-        </CardBody>
-      </Card>
-
-      {/* Breakdowns */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: "20px",
-          marginBottom: "20px",
-        }}
-      >
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {t("revenue.breakdownLabel", locale)}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {t("revenue.breakdownByProduct", locale)}
-            </div>
-          </CardHeader>
-          <DataTable
-            columns={[
-              { label: t("revenue.col.product", locale) },
-              { label: t("revenue.col.trips", locale) },
-              { label: t("revenue.col.revenue", locale) },
-              { label: t("revenue.col.average", locale) },
-            ]}
-            empty={t("revenue.emptyByProduct", locale)}
-          >
-            {insights.serviceBuckets.map((row) => (
-              <Tr key={row.key}>
-                <Td>{row.label}</Td>
-                <Td>{formatCompactNumber(row.trips)}</Td>
-                <Td>{formatMinorCurrency(row.revenueMinor)}</Td>
-                <Td muted>{formatMinorCurrency(row.averageMinor)}</Td>
-              </Tr>
-            ))}
-          </DataTable>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {t("revenue.breakdownLabel", locale)}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {t("revenue.breakdownByVehicle", locale)}
-            </div>
-          </CardHeader>
-          <DataTable
-            columns={[
-              { label: t("revenue.col.vehicle", locale) },
-              { label: t("revenue.col.trips", locale) },
-              { label: t("revenue.col.revenue", locale) },
-              { label: t("revenue.col.average", locale) },
-            ]}
-            empty={t("revenue.emptyByVehicle", locale)}
-          >
-            {insights.vehicles.map((row) => (
-              <Tr key={row.key}>
-                <Td mono>{row.label}</Td>
-                <Td>{formatCompactNumber(row.trips)}</Td>
-                <Td>{formatMinorCurrency(row.revenueMinor)}</Td>
-                <Td muted>{formatMinorCurrency(row.averageMinor)}</Td>
-              </Tr>
-            ))}
-          </DataTable>
-        </Card>
-      </div>
-
-      <Card style={{ marginBottom: "20px" }}>
-        <CardHeader>
-          <div
-            style={{
-              fontSize: "11px",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "#64748b",
-              marginBottom: "2px",
-            }}
-          >
-            {t("revenue.partnerBenefitTitle", locale)}
-          </div>
-          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
-            {t("revenue.partnerBenefitSub", locale)}
-          </div>
-        </CardHeader>
-        <DataTable
-          columns={[
-            { label: t("revenue.col.order", locale) },
-            { label: t("revenue.col.partner", locale) },
-            { label: t("revenue.col.eligibility", locale) },
-            { label: t("revenue.col.benefit", locale) },
-            { label: t("revenue.col.revenue", locale) },
-          ]}
-          empty={t("revenue.emptyPartnerBenefit", locale)}
-        >
-          {partnerBenefitRows.map((order) => (
-            <Tr key={order.orderId}>
-              <Td>
-                <div>{order.orderNo}</div>
-                <div style={{ color: "#64748b", fontSize: "12px" }}>
-                  {formatOpsCodeLabel(locale, order.businessDispatchSubtype!)}
-                </div>
-              </Td>
-              <Td>
-                <div>{order.partnerId}</div>
-                <div style={{ color: "#64748b", fontSize: "12px" }}>
-                  {order.partnerEntrySlug}
-                </div>
-              </Td>
-              <Td>
-                <div>{order.eligibilityVerificationId ?? "—"}</div>
-                <div style={{ color: "#64748b", fontSize: "12px" }}>
-                  {order.issuerAuthorizationRef ?? "—"}
-                </div>
-              </Td>
-              <Td>
-                <div>{order.benefitReference ?? "—"}</div>
-                <div style={{ color: "#64748b", fontSize: "12px" }}>
-                  {order.partnerProgramId ?? "—"}
-                </div>
-              </Td>
-              <Td>{formatMinorCurrency(order.quotedFare?.amountMinor ?? 0)}</Td>
-            </Tr>
-          ))}
-        </DataTable>
-      </Card>
-
-      <Card style={{ marginBottom: "20px" }}>
-        <CardHeader>
-          <div
-            style={{
-              fontSize: "11px",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "#64748b",
-              marginBottom: "2px",
-            }}
-          >
-            {t("revenue.matrix.title", locale)}
-          </div>
-          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
-            {t("revenue.matrix.subtitle", locale)}
-          </div>
-        </CardHeader>
-        <DataTable
-          columns={[
-            { label: t("revenue.matrix.col.channel", locale) },
-            { label: t("revenue.matrix.col.payer", locale) },
-            { label: t("revenue.matrix.col.sponsor", locale) },
-            { label: t("revenue.matrix.col.documents", locale) },
-            { label: t("revenue.matrix.col.payout", locale) },
-            { label: t("revenue.matrix.col.discount", locale) },
-            { label: t("revenue.matrix.col.evidence", locale) },
-            { label: t("revenue.matrix.col.ledger", locale) },
-          ]}
-          empty={t("revenue.matrix.empty", locale)}
-        >
-          {sortSettlementMatrix(settlementMatrix).map((row) => (
-            <Tr key={row.channelKey}>
-              <Td>
-                <div>{describeMatrixChannel(row.channelKey)}</div>
-                <div style={{ color: "#64748b", fontSize: "12px" }}>
-                  {row.orderDomain} · {row.orderSources.join(" / ")}
-                </div>
-              </Td>
-              <Td>{describeMatrixField("payer", row, row.payerType)}</Td>
-              <Td>{describeMatrixField("sponsor", row, row.sponsorType)}</Td>
-              <Td>
-                <div>
-                  {describeMatrixField("invoiceOwner", row, row.invoiceOwner)}
-                </div>
-                <div style={{ color: "#64748b", fontSize: "12px" }}>
-                  {describeMatrixField("receipt", row, row.receiptOwner)}
-                </div>
-                <div style={{ color: "#64748b", fontSize: "12px" }}>
-                  {describeMatrixField(
-                    "reconciliation",
-                    row,
-                    row.reconciliationPath,
-                  )}
-                </div>
-              </Td>
-              <Td>
-                {describeMatrixField("payout", row, row.driverPayoutAuthority)}
-              </Td>
-              <Td>
-                <div>
-                  {describeMatrixField(
-                    "discount",
-                    row,
-                    row.discountFundingSource,
-                  )}
-                </div>
-                <div style={{ color: "#64748b", fontSize: "12px" }}>
-                  {describeMatrixField(
-                    "reimbursement",
-                    row,
-                    row.reimbursementRule,
-                  )}
-                </div>
-              </Td>
-              <Td muted>{describeEvidence(row.channelKey)}</Td>
-              <Td>
-                <Badge
-                  variant={
-                    row.localLedgerMode === "shadow_only" ? "yellow" : "green"
-                  }
-                >
-                  {describeLedgerMode(row.localLedgerMode)}
-                </Badge>
-              </Td>
-            </Tr>
-          ))}
-        </DataTable>
-      </Card>
-
-      {/* Reconciliation Issues */}
-      {reconciliationIssues.length > 0 && (
-        <Card style={{ marginBottom: "20px" }}>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {t("revenue.reconciliation.title", locale)}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {t("revenue.reconciliation.subtitle", locale)}
-            </div>
-          </CardHeader>
-          <div
-            style={{
-              padding: "12px 16px",
-              background: "#fef2f2",
-              border: "1px solid #fecaca",
-              borderRadius: "8px",
-              margin: "0 16px 12px",
-              color: "#991b1b",
-              fontSize: "13px",
-            }}
-          >
-            {t("revenue.reconciliation.banner", locale, {
-              count: String(reconciliationIssues.length),
-            })}
-          </div>
-          <DataTable
-            columns={[
-              { label: t("revenue.reconciliation.col.mirror", locale) },
-              { label: t("revenue.reconciliation.col.platform", locale) },
-              { label: t("revenue.reconciliation.col.status", locale) },
-              { label: t("revenue.reconciliation.col.error", locale) },
-              { label: t("revenue.reconciliation.col.driver", locale) },
-              { label: t("revenue.reconciliation.col.finance", locale) },
-              { label: t("revenue.reconciliation.col.fareAuthority", locale) },
-              { label: t("revenue.reconciliation.col.ledger", locale) },
-            ]}
-            empty={t("revenue.reconciliation.empty", locale)}
-          >
-            {reconciliationIssues.map((issue) => {
-              const financeIssue = financeIssueByJobId.get(
-                issue.reconciliationJob.reconciliationJobId,
-              );
-              return (
-                <Tr key={issue.reconciliationJob.reconciliationJobId}>
-                  <Td>
-                    <div>{issue.mirrorOrderId.slice(0, 12)}...</div>
-                    <div style={{ color: "#64748b", fontSize: "12px" }}>
-                      {issue.externalOrderId}
-                    </div>
-                  </Td>
-                  <Td>{formatOpsCodeLabel(locale, issue.platformCode)}</Td>
-                  <Td>
-                    <Badge
-                      variant={
-                        issue.status === "sync_failed" ? "red" : "yellow"
-                      }
-                    >
-                      {formatOpsCodeLabel(locale, issue.status)}
-                    </Badge>
-                    <div style={{ color: "#64748b", fontSize: "12px" }}>
-                      {formatOpsCodeLabel(
-                        locale,
-                        issue.reconciliationJob.reason,
-                      )}
-                    </div>
-                  </Td>
-                  <Td>
-                    {issue.lastSyncError ? (
-                      <div>
-                        <div style={{ fontSize: "12px", fontWeight: 600 }}>
-                          {issue.lastSyncError.code}
-                        </div>
-                        <div style={{ color: "#64748b", fontSize: "11px" }}>
-                          {issue.lastSyncError.retryable
-                            ? t("revenue.reconciliation.retryable", locale)
-                            : t("revenue.reconciliation.notRetryable", locale)}
-                        </div>
-                      </div>
-                    ) : (
-                      <span style={{ color: "#94a3b8" }}>—</span>
-                    )}
-                  </Td>
-                  <Td>{issue.acceptedDriverId ?? "—"}</Td>
-                  <Td>
-                    {financeIssue ? (
-                      <div>
-                        <Badge
-                          variant={
-                            financeIssue.status === "resolved"
-                              ? "green"
-                              : financeIssue.status === "assigned"
-                                ? "yellow"
-                                : "red"
-                          }
-                        >
-                          {formatOpsCodeLabel(locale, financeIssue.status)}
-                        </Badge>
-                        <div style={{ color: "#64748b", fontSize: "11px" }}>
-                          {financeIssue.ownerId ??
-                            t("revenue.reconciliation.unassigned", locale)}
-                        </div>
-                      </div>
-                    ) : (
-                      <span style={{ color: "#94a3b8" }}>
-                        {t("revenue.reconciliation.notCreated", locale)}
-                      </span>
-                    )}
-                  </Td>
-                  <Td>
-                    <div style={{ fontSize: "12px" }}>
-                      {t("revenue.reconciliation.fareExternal", locale)}
-                    </div>
-                    <div style={{ color: "#64748b", fontSize: "11px" }}>
-                      {t("revenue.reconciliation.settlementExternal", locale)}
-                    </div>
-                  </Td>
-                  <Td>
-                    <Badge variant="yellow">
-                      {t("revenue.reconciliation.shadowOnly", locale)}
-                    </Badge>
-                  </Td>
-                </Tr>
-              );
-            })}
-          </DataTable>
-        </Card>
-      )}
-
-      {/* Settlement */}
-      <Card>
-        <CardHeader>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: "11px",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                  color: "#64748b",
-                  marginBottom: "2px",
-                }}
-              >
-                {t("revenue.settlementTitle", locale)}
-              </div>
-              <div
-                style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-              >
-                {t("revenue.settlementSub", locale)}
-              </div>
-            </div>
-            <span style={{ fontSize: "13.5px", color: "#64748b" }}>
-              {t("revenue.statementNet", locale, {
-                value: formatMinorCurrency(insights.statementNetMinor),
-              })}
-            </span>
-          </div>
-        </CardHeader>
-        {insights.payoutStatuses.length > 0 && (
-          <div
-            style={{
-              padding: "12px 16px",
-              display: "flex",
-              gap: "12px",
-              flexWrap: "wrap",
-              borderBottom: "1px solid #f1f5f9",
-            }}
-          >
-            {insights.payoutStatuses.map((item) => (
-              <div
-                key={item.status}
-                style={{
-                  padding: "10px 14px",
-                  borderRadius: "10px",
-                  background: "#f8fafc",
-                  border: "1px solid #e2e8f0",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "11px",
-                    color: "#64748b",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                  }}
-                >
-                  {formatOpsCodeLabel(locale, item.status)}
-                </div>
-                <div
-                  style={{
-                    fontSize: "20px",
-                    fontWeight: 700,
-                    color: "#0f172a",
-                  }}
-                >
-                  {formatCompactNumber(item.count)}
-                </div>
-                <div style={{ fontSize: "12px", color: "#94a3b8" }}>
-                  {formatMinorCurrency(item.netMinor)}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        <DataTable
-          columns={[
-            { label: t("revenue.col.statement", locale) },
-            { label: t("revenue.col.driver", locale) },
-            { label: t("revenue.col.period", locale) },
-            { label: t("revenue.col.status", locale) },
-            { label: t("revenue.col.net", locale) },
-          ]}
-          empty={t("revenue.emptySettlement", locale)}
-        >
-          {statements.map((s) => (
-            <Tr key={s.statementId}>
-              <Td mono>{s.receiptNo}</Td>
-              <Td>{s.driverId}</Td>
-              <Td muted>{s.periodMonth}</Td>
-              <Td>
-                <Badge variant={s.payoutStatus === "paid" ? "green" : "yellow"}>
-                  {formatOpsCodeLabel(locale, s.payoutStatus)}
-                </Badge>
-              </Td>
-              <Td>{formatMinorCurrency(s.netAmount.amountMinor)}</Td>
-            </Tr>
-          ))}
-        </DataTable>
-      </Card>
     </>
   );
+
+  function renderHeaderActions() {
+    return <>{pageActions.map(renderHeaderAction)}</>;
+  }
+
+  function renderHeaderAction(descriptor: ResourceActionDescriptor) {
+    const labelKey = `revenue.action.${descriptor.action}`;
+    const label = t(labelKey, locale);
+    switch (descriptor.action) {
+      case "refresh":
+        if (!descriptor.enabled) {
+          return (
+            <span
+              key={descriptor.action}
+              aria-disabled="true"
+              title={descriptor.disabledReasonCode}
+              style={{ display: "inline-flex" }}
+            >
+              <Btn theme={theme} icon="arrow" disabled>
+                {label}
+              </Btn>
+            </span>
+          );
+        }
+        return (
+          <Link
+            key={descriptor.action}
+            href={buildHref(filters, tab, { mismatch: mismatchId })}
+            style={{ textDecoration: "none" }}
+          >
+            <Btn theme={theme} icon="arrow">
+              {label}
+            </Btn>
+          </Link>
+        );
+      case "openPlatformAdminPayments":
+        return descriptor.enabled ? (
+          <CrossAppLink
+            key={descriptor.action}
+            href={crossAppHref(platformAdminPaymentsLink(label))}
+            label={label}
+          />
+        ) : null;
+      case "filterPeriod":
+      case "filterServiceBucket":
+      case "filterVehicle":
+        // Filter chips render below in `renderFilterChips`; here we
+        // surface a header-level affordance only when filters are
+        // unavailable so the disabled reason is visible.
+        return descriptor.enabled ? null : (
+          <Btn key={descriptor.action} theme={theme} icon="filter" disabled>
+            {label}
+          </Btn>
+        );
+      case "export":
+        return (
+          <Btn
+            key={descriptor.action}
+            theme={theme}
+            icon="ext"
+            disabled={!descriptor.enabled}
+          >
+            {label}
+          </Btn>
+        );
+      default:
+        return (
+          <Btn
+            key={descriptor.action}
+            theme={theme}
+            disabled={!descriptor.enabled}
+          >
+            {label}
+          </Btn>
+        );
+    }
+  }
+
+  function renderFilterChips() {
+    // Per packet §3.5 (Q-X13) every filter CTA on this page is owned by an
+    // availableActions descriptor. When the descriptor is disabled (e.g.
+    // upstream orders feed degraded), the chip stops being a clickable link
+    // and surfaces the disabledReasonCode as a tooltip.
+    const periodActive = filterPeriodDescriptor?.enabled !== false;
+    const bucketActive = filterServiceBucketDescriptor?.enabled !== false;
+    const vehicleActive = filterVehicleDescriptor?.enabled !== false;
+    const periodReason = filterPeriodDescriptor?.disabledReasonCode;
+    const bucketReason = filterServiceBucketDescriptor?.disabledReasonCode;
+    const vehicleReason = filterVehicleDescriptor?.disabledReasonCode;
+    return (
+      <div style={filterRowStyle}>
+        <span
+          style={{ fontSize: 11.5, color: theme.textMuted }}
+          title={!periodActive ? periodReason : undefined}
+        >
+          {t("revenue.action.filterPeriod", locale)}
+        </span>
+        {PERIOD_KEYS.map((p) =>
+          renderFilterChip({
+            key: `period-${p}`,
+            enabled: periodActive,
+            disabledReason: periodReason,
+            href: buildHref(filters, tab, { period: p, mismatch: null }),
+            label: t(`revenue.period.${p}`, locale),
+            selected: p === filters.period,
+            showDot: true,
+          }),
+        )}
+        <span
+          style={{
+            fontSize: 11.5,
+            color: theme.textMuted,
+            marginLeft: 8,
+          }}
+          title={!bucketActive ? bucketReason : undefined}
+        >
+          {t("revenue.action.filterServiceBucket", locale)}
+        </span>
+        {(["all", "standard_taxi", "business_dispatch"] as const).map((sb) =>
+          renderFilterChip({
+            key: `bucket-${sb}`,
+            enabled: bucketActive,
+            disabledReason: bucketReason,
+            href: buildHref(filters, tab, {
+              serviceBucket: sb,
+              mismatch: null,
+            }),
+            label:
+              sb === "all"
+                ? t("revenue.bucket.all", locale)
+                : t(`revenue.bucket.${sb}`, locale),
+            selected: sb === filters.serviceBucket,
+            showDot: true,
+          }),
+        )}
+        {vehicleOptions.length > 0 ? (
+          <>
+            <span
+              style={{
+                fontSize: 11.5,
+                color: theme.textMuted,
+                marginLeft: 8,
+              }}
+              title={!vehicleActive ? vehicleReason : undefined}
+            >
+              {t("revenue.action.filterVehicle", locale)}
+            </span>
+            {renderFilterChip({
+              key: "vehicle-all",
+              enabled: vehicleActive,
+              disabledReason: vehicleReason,
+              href: buildHref(filters, tab, {
+                vehicleId: "all",
+                mismatch: null,
+              }),
+              label: t("revenue.vehicle.all", locale),
+              selected: filters.vehicleId === "all",
+              showDot: false,
+            })}
+            {vehicleOptions.slice(0, 8).map((vid) =>
+              renderFilterChip({
+                key: `vehicle-${vid}`,
+                enabled: vehicleActive,
+                disabledReason: vehicleReason,
+                href: buildHref(filters, tab, {
+                  vehicleId: vid,
+                  mismatch: null,
+                }),
+                label: vid,
+                selected: vid === filters.vehicleId,
+                showDot: false,
+              }),
+            )}
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderFilterChip(args: {
+    key: string;
+    enabled: boolean;
+    disabledReason: string | undefined;
+    href: string;
+    label: string;
+    selected: boolean;
+    showDot: boolean;
+  }) {
+    const tone = args.selected ? "accent" : "neutral";
+    const pill = args.enabled ? (
+      <Pill theme={theme} tone={tone} dot={args.showDot && args.selected}>
+        {args.label}
+      </Pill>
+    ) : (
+      <Pill
+        theme={theme}
+        tone={tone}
+        dot={args.showDot && args.selected}
+        style={{ opacity: 0.55 }}
+      >
+        {args.label}
+      </Pill>
+    );
+    if (!args.enabled) {
+      return (
+        <span
+          key={args.key}
+          aria-disabled="true"
+          title={args.disabledReason}
+          style={{ cursor: "not-allowed", display: "inline-flex" }}
+        >
+          {pill}
+        </span>
+      );
+    }
+    return (
+      <Link key={args.key} href={args.href} style={{ textDecoration: "none" }}>
+        {pill}
+      </Link>
+    );
+  }
+
+  function renderInsight() {
+    const productEmpty = resolveEmptyReason({
+      ok: ordersOutcome.ok && tasksOutcome.ok,
+      itemCount: insights.serviceBuckets.length,
+      filtersActive,
+    });
+    const vehicleEmpty = resolveEmptyReason({
+      ok: ordersOutcome.ok && tasksOutcome.ok && vehiclesOutcome.ok,
+      itemCount: insights.vehicles.length,
+      filtersActive,
+    });
+
+    const productColumns: CanvasTableColumn<{
+      label: string;
+      trips: number;
+      revenue: number;
+      average: number;
+    }>[] = [
+      { h: t("revenue.col.product", locale), k: "label" },
+      {
+        h: t("revenue.col.trips", locale),
+        k: "trips",
+        align: "right",
+        r: (row) => formatCompactNumber(row.trips),
+      },
+      {
+        h: t("revenue.col.revenue", locale),
+        k: "revenue",
+        mono: true,
+        align: "right",
+        r: (row) => formatMinorCurrency(row.revenue),
+      },
+      {
+        h: t("revenue.col.average", locale),
+        k: "average",
+        mono: true,
+        align: "right",
+        r: (row) => formatMinorCurrency(row.average),
+      },
+    ];
+
+    const vehicleColumns: CanvasTableColumn<{
+      label: string;
+      trips: number;
+      revenue: number;
+      average: number;
+    }>[] = [
+      { h: t("revenue.col.vehicle", locale), k: "label", mono: true },
+      {
+        h: t("revenue.col.trips", locale),
+        k: "trips",
+        align: "right",
+        r: (row) => formatCompactNumber(row.trips),
+      },
+      {
+        h: t("revenue.col.revenue", locale),
+        k: "revenue",
+        mono: true,
+        align: "right",
+        r: (row) => formatMinorCurrency(row.revenue),
+      },
+      {
+        h: t("revenue.col.average", locale),
+        k: "average",
+        mono: true,
+        align: "right",
+        r: (row) => formatMinorCurrency(row.average),
+      },
+    ];
+
+    return (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+          gap: 16,
+        }}
+      >
+        <Card
+          theme={theme}
+          title={t("revenue.breakdownByProduct", locale)}
+          subtitle={t("revenue.breakdownLabel", locale)}
+          padding={productEmpty ? 16 : 0}
+        >
+          {productEmpty ? (
+            <EmptyStatePanel
+              envelope={buildEmptyEnvelope(productEmpty, "revenue")}
+              locale={locale}
+              filters={filters}
+              tab={tab}
+              themeRef={theme}
+            />
+          ) : (
+            <Table
+              theme={theme}
+              columns={productColumns}
+              rows={insights.serviceBuckets.map((row) => ({
+                label: row.label,
+                trips: row.trips,
+                revenue: row.revenueMinor,
+                average: row.averageMinor,
+              }))}
+            />
+          )}
+        </Card>
+        <Card
+          theme={theme}
+          title={t("revenue.breakdownByVehicle", locale)}
+          subtitle={t("revenue.breakdownLabel", locale)}
+          padding={vehicleEmpty ? 16 : 0}
+        >
+          {vehicleEmpty ? (
+            <EmptyStatePanel
+              envelope={buildEmptyEnvelope(vehicleEmpty, "revenue")}
+              locale={locale}
+              filters={filters}
+              tab={tab}
+              themeRef={theme}
+            />
+          ) : (
+            <Table
+              theme={theme}
+              columns={vehicleColumns}
+              rows={insights.vehicles.map((row) => ({
+                label: row.label,
+                trips: row.trips,
+                revenue: row.revenueMinor,
+                average: row.averageMinor,
+              }))}
+            />
+          )}
+        </Card>
+      </div>
+    );
+  }
+
+  function renderChannelMix() {
+    const channelEmpty = resolveEmptyReason({
+      ok: ordersOutcome.ok,
+      itemCount: channelBuckets.length,
+      filtersActive,
+    });
+
+    const columns: CanvasTableColumn<{
+      key: string;
+      label: string;
+      trips: number;
+      revenueMinor: number;
+      shareLabel: string;
+    }>[] = [
+      { h: t("revenue.channelMix.col.channel", locale), k: "label" },
+      {
+        h: t("revenue.channelMix.col.trips", locale),
+        k: "trips",
+        align: "right",
+        r: (row) => formatCompactNumber(row.trips),
+      },
+      {
+        h: t("revenue.channelMix.col.share", locale),
+        k: "shareLabel",
+        align: "right",
+      },
+      {
+        h: t("revenue.channelMix.col.revenue", locale),
+        k: "revenueMinor",
+        mono: true,
+        align: "right",
+        r: (row) => formatMinorCurrency(row.revenueMinor),
+      },
+    ];
+
+    return (
+      <Card
+        theme={theme}
+        title={t("revenue.channelMix.title", locale)}
+        subtitle={t("revenue.channelMix.subtitle", locale)}
+        padding={channelEmpty ? 16 : 0}
+      >
+        {channelEmpty ? (
+          <EmptyStatePanel
+            envelope={buildEmptyEnvelope(channelEmpty, "revenue")}
+            locale={locale}
+            filters={filters}
+            tab={tab}
+            themeRef={theme}
+          />
+        ) : (
+          <Table theme={theme} columns={columns} rows={channelBuckets} />
+        )}
+      </Card>
+    );
+  }
+
+  function renderMatrix() {
+    const matrixEmpty = resolveEmptyReason({
+      ok: matrixOutcome.ok,
+      itemCount: settlementChannels.length,
+      filtersActive: false,
+      provisioned: matrixOutcome.ok,
+    });
+
+    if (matrixEmpty) {
+      return (
+        <Card
+          theme={theme}
+          title={t("revenue.matrix.title", locale)}
+          subtitle={t("revenue.matrix.subtitle", locale)}
+        >
+          <EmptyStatePanel
+            envelope={buildEmptyEnvelope(matrixEmpty, "revenue")}
+            locale={locale}
+            filters={filters}
+            tab={tab}
+            themeRef={theme}
+          />
+        </Card>
+      );
+    }
+
+    const describeMatrixChannel = (channelKey: string) => {
+      const key = settlementMatrixKey("channel", channelKey);
+      const value = t(key, locale);
+      return value === key ? channelKey : value;
+    };
+
+    const describeMatrixField = (
+      category:
+        | "payer"
+        | "sponsor"
+        | "invoiceOwner"
+        | "receipt"
+        | "payout"
+        | "discount"
+        | "reimbursement"
+        | "reconciliation",
+      row: SettlementMatrixRecord,
+      fallback: string,
+    ) => {
+      const key = settlementMatrixKey(category, row.channelKey);
+      const value = t(key, locale);
+      return value === key ? fallback : value;
+    };
+
+    const matrixRows = settlementChannels.map((row) => ({
+      channelKey: row.channelKey,
+      channelLabel: describeMatrixChannel(row.channelKey),
+      orderDomain: row.orderDomain,
+      orderSources: row.orderSources.join(" / "),
+      payer: describeMatrixField("payer", row, row.payerType),
+      sponsor: describeMatrixField("sponsor", row, row.sponsorType),
+      invoiceOwner: describeMatrixField("invoiceOwner", row, row.invoiceOwner),
+      receiptOwner: describeMatrixField("receipt", row, row.receiptOwner),
+      reconciliationPath: describeMatrixField(
+        "reconciliation",
+        row,
+        row.reconciliationPath,
+      ),
+      payoutAuthority: describeMatrixField(
+        "payout",
+        row,
+        row.driverPayoutAuthority,
+      ),
+      discountFunding: describeMatrixField(
+        "discount",
+        row,
+        row.discountFundingSource,
+      ),
+      reimbursementRule: describeMatrixField(
+        "reimbursement",
+        row,
+        row.reimbursementRule,
+      ),
+      ledgerMode: row.localLedgerMode,
+    }));
+
+    const columns: CanvasTableColumn<(typeof matrixRows)[number]>[] = [
+      {
+        h: t("revenue.matrix.col.channel", locale),
+        w: 220,
+        r: (row) => (
+          <div>
+            <div style={{ color: theme.text, fontWeight: 600 }}>
+              {row.channelLabel}
+            </div>
+            <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
+              {row.orderDomain} · {row.orderSources}
+            </div>
+          </div>
+        ),
+      },
+      { h: t("revenue.matrix.col.payer", locale), k: "payer" },
+      { h: t("revenue.matrix.col.sponsor", locale), k: "sponsor" },
+      {
+        h: t("revenue.matrix.col.documents", locale),
+        r: (row) => (
+          <div>
+            <div>{row.invoiceOwner}</div>
+            <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
+              {row.receiptOwner}
+            </div>
+            <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
+              {row.reconciliationPath}
+            </div>
+          </div>
+        ),
+      },
+      { h: t("revenue.matrix.col.payout", locale), k: "payoutAuthority" },
+      {
+        h: t("revenue.matrix.col.discount", locale),
+        r: (row) => (
+          <div>
+            <div>{row.discountFunding}</div>
+            <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
+              {row.reimbursementRule}
+            </div>
+          </div>
+        ),
+      },
+      {
+        h: t("revenue.matrix.col.ledger", locale),
+        w: 130,
+        r: (row) => (
+          <Pill
+            theme={theme}
+            tone={row.ledgerMode === "shadow_only" ? "warn" : "success"}
+            dot
+          >
+            {row.ledgerMode === "shadow_only"
+              ? t("revenue.matrix.ledger.shadow_only", locale)
+              : t("revenue.matrix.ledger.full_service", locale)}
+          </Pill>
+        ),
+      },
+    ];
+
+    return (
+      <Card
+        theme={theme}
+        title={t("revenue.matrix.title", locale)}
+        subtitle={t("revenue.matrix.subtitle", locale)}
+        padding={0}
+      >
+        <Table theme={theme} columns={columns} rows={matrixRows} />
+      </Card>
+    );
+  }
+
+  function renderMismatch() {
+    const mismatchEmpty = resolveEmptyReason({
+      ok: forwarderIssuesOutcome.ok,
+      itemCount: forwarderIssues.length,
+      filtersActive,
+      externalAvailable: forwardedOutcome.ok,
+    });
+
+    if (mismatchEmpty) {
+      return (
+        <Card
+          theme={theme}
+          title={t("revenue.mismatch.title", locale)}
+          subtitle={t("revenue.mismatch.subtitle", locale)}
+        >
+          <EmptyStatePanel
+            envelope={buildEmptyEnvelope(mismatchEmpty, "revenue")}
+            locale={locale}
+            filters={filters}
+            tab={tab}
+            themeRef={theme}
+          />
+        </Card>
+      );
+    }
+
+    type MismatchRow = {
+      jobId: string;
+      issueIdLabel: string;
+      issueIdSub: string | null;
+      mirrorOrderId: string;
+      externalOrderId: string;
+      platform: string;
+      reason: string;
+      status: ForwarderReconciliationIssue["status"];
+      ownerLabel: string;
+      ownerTone: CanvasTone;
+      ageCompact: string;
+      ageAria: string;
+      availableActions: ResourceActionDescriptor[];
+      financeLink: ReturnType<typeof platformAdminReconciliationLink>;
+      isSelected: boolean;
+    };
+
+    const sortedIssues = [...forwarderIssues].sort((left, right) => {
+      const leftFinance = financeIssueByJobId.get(
+        left.reconciliationJob.reconciliationJobId,
+      );
+      const rightFinance = financeIssueByJobId.get(
+        right.reconciliationJob.reconciliationJobId,
+      );
+      const leftKey = mismatchSortKey(left, leftFinance);
+      const rightKey = mismatchSortKey(right, rightFinance);
+      if (leftKey[0] !== rightKey[0]) return leftKey[0] - rightKey[0];
+      if (leftKey[1] !== rightKey[1])
+        return leftKey[1].localeCompare(rightKey[1]);
+      return leftKey[2] - rightKey[2];
+    });
+
+    const rows: MismatchRow[] = sortedIssues.map((issue) => {
+      const jobId = issue.reconciliationJob.reconciliationJobId;
+      const financeIssue = financeIssueByJobId.get(jobId);
+      const ownerLabel = financeIssue
+        ? `${formatOpsCodeLabel(locale, financeIssue.status)} · ${financeIssue.ownerId ?? t("revenue.reconciliation.unassigned", locale)}`
+        : t("revenue.reconciliation.notCreated", locale);
+      const ownerTone: CanvasTone = financeIssue
+        ? financeIssue.status === "resolved"
+          ? "success"
+          : financeIssue.status === "assigned"
+            ? "warn"
+            : "danger"
+        : "neutral";
+      const issueIdLabel = financeIssue
+        ? financeIssue.issueId
+        : t("revenue.mismatch.jobOnly", locale, { jobId: jobId.slice(0, 14) });
+      const issueIdSub = financeIssue ? `job · ${jobId.slice(0, 14)}` : null;
+      const ageMs = mismatchAge(issue);
+      const age = formatAgeLabel(ageMs, locale);
+      return {
+        jobId,
+        issueIdLabel,
+        issueIdSub,
+        mirrorOrderId: issue.mirrorOrderId,
+        externalOrderId: issue.externalOrderId,
+        platform: formatOpsCodeLabel(locale, issue.platformCode),
+        reason: formatOpsCodeLabel(locale, issue.reconciliationJob.reason),
+        status: issue.status,
+        ownerLabel,
+        ownerTone,
+        ageCompact: age.compact,
+        ageAria: age.ariaLabel,
+        availableActions: buildMismatchAvailableActions({
+          hasFinanceIssue: Boolean(financeIssue),
+          resolved: financeIssue?.status === "resolved",
+        }),
+        financeLink: platformAdminReconciliationLink(
+          financeIssue?.issueId ?? null,
+          financeIssue
+            ? t("revenue.action.escalatePlatformAdmin", locale)
+            : t("revenue.mismatch.drawer.openPlatformAdminCreate", locale),
+        ),
+        isSelected: jobId === mismatchId,
+      };
+    });
+
+    const renderMismatchRowAction = (
+      row: MismatchRow,
+      descriptor: ResourceActionDescriptor,
+    ) => {
+      const label = t(`revenue.action.${descriptor.action}`, locale);
+      switch (descriptor.action) {
+        case "openMismatchDrawer":
+          if (!descriptor.enabled) {
+            return (
+              <span
+                key={descriptor.action}
+                aria-disabled="true"
+                title={descriptor.disabledReasonCode}
+                style={{ display: "inline-flex" }}
+              >
+                <Btn
+                  theme={theme}
+                  variant={row.isSelected ? "primary" : "secondary"}
+                  icon="arrow"
+                  disabled
+                >
+                  {label}
+                </Btn>
+              </span>
+            );
+          }
+          return (
+            <Link
+              key={descriptor.action}
+              href={buildHref(filters, "mismatch", { mismatch: row.jobId })}
+              style={{ textDecoration: "none" }}
+            >
+              <Btn
+                theme={theme}
+                variant={row.isSelected ? "primary" : "secondary"}
+                icon="arrow"
+              >
+                {label}
+              </Btn>
+            </Link>
+          );
+        case "escalatePlatformAdmin":
+          if (!descriptor.enabled) return null;
+          return (
+            <CrossAppLink
+              key={descriptor.action}
+              href={crossAppHref(row.financeLink)}
+              label={label}
+            />
+          );
+        default:
+          return null;
+      }
+    };
+
+    const columns: CanvasTableColumn<MismatchRow>[] = [
+      {
+        h: t("revenue.mismatch.col.issueId", locale),
+        w: 200,
+        r: (row) => (
+          <div>
+            <div style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
+              {row.issueIdLabel}
+            </div>
+            {row.issueIdSub ? (
+              <div
+                style={{
+                  color: theme.textMuted,
+                  fontSize: 11,
+                  fontFamily: theme.monoFamily,
+                }}
+              >
+                {row.issueIdSub}
+              </div>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        h: t("revenue.mismatch.col.mirror", locale),
+        w: 220,
+        r: (row) => (
+          <div>
+            <div style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
+              {row.mirrorOrderId.slice(0, 14)}
+            </div>
+            <div style={{ color: theme.textMuted, fontSize: 11 }}>
+              {row.externalOrderId}
+            </div>
+          </div>
+        ),
+      },
+      { h: t("revenue.mismatch.col.platform", locale), k: "platform" },
+      {
+        h: t("revenue.mismatch.col.reason", locale),
+        r: (row) => (
+          <div>
+            <Pill
+              theme={theme}
+              tone={row.status === "sync_failed" ? "danger" : "warn"}
+              dot
+            >
+              {formatOpsCodeLabel(locale, row.status)}
+            </Pill>
+            <div
+              style={{
+                color: theme.textMuted,
+                fontSize: 11,
+                marginTop: 2,
+              }}
+            >
+              {row.reason}
+            </div>
+          </div>
+        ),
+      },
+      {
+        h: t("revenue.mismatch.col.owner", locale),
+        r: (row) => (
+          <Pill theme={theme} tone={row.ownerTone} dot>
+            {row.ownerLabel}
+          </Pill>
+        ),
+      },
+      {
+        h: t("revenue.mismatch.col.age", locale),
+        w: 90,
+        align: "right",
+        r: (row) => (
+          <span
+            title={row.ageAria}
+            style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}
+          >
+            {row.ageCompact}
+          </span>
+        ),
+      },
+      {
+        h: t("revenue.mismatch.col.cta", locale),
+        w: 300,
+        align: "right",
+        r: (row) => (
+          <div
+            style={{
+              display: "inline-flex",
+              gap: 6,
+              justifyContent: "flex-end",
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            {row.availableActions.map((descriptor) =>
+              renderMismatchRowAction(row, descriptor),
+            )}
+          </div>
+        ),
+      },
+    ];
+
+    return (
+      <Card
+        theme={theme}
+        title={t("revenue.mismatch.title", locale)}
+        subtitle={`${t("revenue.mismatch.subtitle", locale)} · ${t(
+          "revenue.mismatch.sort.ownerAge",
+          locale,
+        )}`}
+        padding={0}
+      >
+        <Table theme={theme} columns={columns} rows={rows} />
+      </Card>
+    );
+  }
 }
+
+export const dynamic = "force-dynamic";

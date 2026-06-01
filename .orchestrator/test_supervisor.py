@@ -939,6 +939,180 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
         self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
 
+    def test_dispatcher_round_robins_ready_reviews_across_lanes(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"claude": 5, "claude2": 3},
+                "max_dispatches_per_tick": 2,
+            },
+            "agents": {
+                "claude": {
+                    "id": "claude",
+                    "display_name": "Claude",
+                    "provider": "claude",
+                },
+                "claude2": {
+                    "id": "claude2",
+                    "display_name": "Claude2",
+                    "provider": "claude2",
+                },
+            },
+            "providers": {},
+        }
+        state = {"queue": {"events": {}}, "workers": {}, "seen_event_keys": {}}
+        status = {
+            "tasks": [
+                {"id": "CLAUDE-REV-1", "status": "review", "owner": "Codex", "reviewer": "Claude", "depends_on": []},
+                {"id": "CLAUDE-REV-2", "status": "review", "owner": "Codex", "reviewer": "Claude", "depends_on": []},
+                {"id": "CLAUDE2-REV-1", "status": "review", "owner": "Codex", "reviewer": "Claude2", "depends_on": []},
+                {"id": "CLAUDE2-REV-2", "status": "review", "owner": "Codex", "reviewer": "Claude2", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertTrue(changed)
+        queued = [(call.args[1]["task_id"], call.args[1]["target_agent"]) for call in queue_delivery_event.call_args_list]
+        self.assertEqual(
+            queued,
+            [("CLAUDE-REV-1", "Claude"), ("CLAUDE2-REV-1", "Claude2")],
+        )
+
+    def test_dispatcher_returns_to_first_lane_after_each_ready_lane_gets_one(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"claude": 5, "claude2": 3},
+                "max_dispatches_per_tick": 3,
+            },
+            "agents": {
+                "claude": {
+                    "id": "claude",
+                    "display_name": "Claude",
+                    "provider": "claude",
+                },
+                "claude2": {
+                    "id": "claude2",
+                    "display_name": "Claude2",
+                    "provider": "claude2",
+                },
+            },
+            "providers": {},
+        }
+        state = {"queue": {"events": {}}, "workers": {}, "seen_event_keys": {}}
+        status = {
+            "tasks": [
+                {"id": "CLAUDE-REV-1", "status": "review", "owner": "Codex", "reviewer": "Claude", "depends_on": []},
+                {"id": "CLAUDE-REV-2", "status": "review", "owner": "Codex", "reviewer": "Claude", "depends_on": []},
+                {"id": "CLAUDE2-REV-1", "status": "review", "owner": "Codex", "reviewer": "Claude2", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertTrue(changed)
+        queued = [(call.args[1]["task_id"], call.args[1]["target_agent"]) for call in queue_delivery_event.call_args_list]
+        self.assertEqual(
+            queued,
+            [("CLAUDE-REV-1", "Claude"), ("CLAUDE2-REV-1", "Claude2"), ("CLAUDE-REV-2", "Claude")],
+        )
+
+    def test_dispatcher_rotates_start_lane_across_ticks(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"claude": 5, "claude2": 3, "codex": 3, "codex2": 3},
+                "max_dispatches_per_tick": 2,
+            },
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+                "claude2": {"id": "claude2", "display_name": "Claude2", "provider": "claude2"},
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "codex2": {"id": "codex2", "display_name": "Codex2", "provider": "codex2"},
+            },
+            "providers": {},
+        }
+        status = {
+            "tasks": [
+                {"id": "CLAUDE-REV-1", "status": "review", "owner": "Ops", "reviewer": "Claude", "depends_on": []},
+                {"id": "CLAUDE2-REV-1", "status": "review", "owner": "Ops", "reviewer": "Claude2", "depends_on": []},
+                {"id": "CODEX-REV-1", "status": "review", "owner": "Ops", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-REV-1", "status": "review", "owner": "Ops", "reviewer": "Codex2", "depends_on": []},
+            ]
+        }
+        first_state = {"queue": {"events": {}}, "workers": {}, "seen_event_keys": {}, "ready_dispatcher": {}}
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as first_queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, first_state, provider_report={})
+
+        self.assertTrue(changed)
+        first_queued = [
+            (call.args[1]["task_id"], call.args[1]["target_agent"]) for call in first_queue_delivery_event.call_args_list
+        ]
+        self.assertEqual(
+            first_queued,
+            [("CLAUDE-REV-1", "Claude"), ("CLAUDE2-REV-1", "Claude2")],
+        )
+        self.assertEqual(first_state["ready_dispatcher"]["next_agent_cursor"], 2)
+
+        second_state = {
+            "queue": {"events": {}},
+            "workers": {},
+            "seen_event_keys": {},
+            "ready_dispatcher": {"next_agent_cursor": first_state["ready_dispatcher"]["next_agent_cursor"]},
+        }
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as second_queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, second_state, provider_report={})
+
+        self.assertTrue(changed)
+        second_queued = [
+            (call.args[1]["task_id"], call.args[1]["target_agent"]) for call in second_queue_delivery_event.call_args_list
+        ]
+        self.assertEqual(
+            second_queued,
+            [("CODEX-REV-1", "Codex"), ("CODEX2-REV-1", "Codex2")],
+        )
+
     def test_outstanding_delivery_counts_skip_events_with_active_workers(self) -> None:
         config = {
             "ready_dispatcher": {
@@ -7022,5 +7196,227 @@ class SdNotifyTests(unittest.TestCase):
         fake_sock.close.assert_called_once()
 
 
+class ProviderReportPreloadTests(unittest.TestCase):
+    # OPS-PROVIDER-REPORT-PRELOAD: caller can pre-load provider_report once per
+    # tick and thread it through first_viable_agent / poll_workers /
+    # maybe_reassign_task_after_worker_failure instead of each of those
+    # reloading it from disk independently.
+
+    def _config(self) -> dict:
+        return {
+            "agents": [
+                {"display_name": "Codex"},
+                {"display_name": "Claude"},
+            ],
+            "provider_report_path": "/dev/null",
+            "supervisor": {},
+            "ready_dispatcher": {},
+        }
+
+    def test_first_viable_agent_uses_passed_provider_report(self) -> None:
+        # When provider_report is passed, load_provider_report MUST NOT be called.
+        sentinel = {"providers": {"Codex": {"auth_ready": True}}}
+        with mock.patch.object(supervisor, "load_provider_report") as mock_load, \
+             mock.patch.object(supervisor, "known_agent_display_names", return_value={"Codex", "Claude"}), \
+             mock.patch.object(supervisor, "is_agent_dispatch_paused", return_value=False) as mock_paused:
+            result = supervisor.first_viable_agent(
+                self._config(),
+                ["Codex", "Claude"],
+                exclude=set(),
+                state={"workers": {}},
+                provider_report=sentinel,
+            )
+        mock_load.assert_not_called()
+        # is_agent_dispatch_paused must receive the same sentinel.
+        self.assertEqual(mock_paused.call_args.kwargs.get("provider_report"), sentinel)
+        self.assertEqual(result, "Codex")
+
+    def test_first_viable_agent_falls_back_to_load_when_none(self) -> None:
+        # Backwards-compatible: if caller does not pass provider_report and
+        # state is given, the function still loads one itself.
+        loaded = {"providers": {"Codex": {"auth_ready": True}}}
+        with mock.patch.object(supervisor, "load_provider_report", return_value=loaded) as mock_load, \
+             mock.patch.object(supervisor, "known_agent_display_names", return_value={"Codex"}), \
+             mock.patch.object(supervisor, "is_agent_dispatch_paused", return_value=False) as mock_paused:
+            result = supervisor.first_viable_agent(
+                self._config(),
+                ["Codex"],
+                exclude=set(),
+                state={"workers": {}},
+            )
+        mock_load.assert_called_once()
+        self.assertEqual(mock_paused.call_args.kwargs.get("provider_report"), loaded)
+        self.assertEqual(result, "Codex")
+
+    def test_poll_workers_accepts_provider_report_kwarg(self) -> None:
+        # Verifies the new poll_workers signature accepts an optional 3rd
+        # positional arg and threads it into retry_due_workers without
+        # triggering a second load_provider_report call.
+        config = self._config()
+        state: dict = {"workers": {}, "queue": {"events": {}}}
+        sentinel = {"providers": {}}
+        with mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}), \
+             mock.patch.object(supervisor, "task_index_from_status", return_value={}), \
+             mock.patch.object(supervisor, "load_status", return_value={}), \
+             mock.patch.object(supervisor, "redispatch_candidate_statuses", return_value=set()), \
+             mock.patch.object(supervisor, "ready_dispatch_settings", return_value={"active_worker_statuses": []}), \
+             mock.patch.object(supervisor, "retry_due_workers", return_value=False) as mock_retry, \
+             mock.patch.object(supervisor, "load_provider_report") as mock_load:
+            # MUST NOT raise; signature accepts the 3rd positional arg.
+            supervisor.poll_workers(config, state, sentinel)
+        # When provider_report is given, load_provider_report MUST NOT be called.
+        mock_load.assert_not_called()
+        # retry_due_workers must receive the sentinel that was passed in.
+        self.assertEqual(mock_retry.call_args[0][2], sentinel)
+class PruneDoneTasksTests(unittest.TestCase):
+    """`prune_done_tasks` bounds ai-status.json's tasks array.
+
+    Without this prune the array accumulated 646 done tasks / ~1.0 MB by the
+    2026-05-30 incident, pushing ai-status.json past the 256 KB cap the
+    chair/coordination worker's Read tool enforces. See
+    feedback_ai_status_handoff_bloat.
+    """
+
+    def test_noop_under_keep_threshold(self) -> None:
+        s = {"tasks": [{"id": f"D{i}", "status": "done"} for i in range(100)]}
+        supervisor.prune_done_tasks(s, keep=150)
+        self.assertEqual(len(s["tasks"]), 100)
+        self.assertNotIn("archived_task_ids", s)
+
+    def test_active_tasks_always_preserved(self) -> None:
+        tasks = (
+            [{"id": f"D{i}", "status": "done"} for i in range(2000)]
+            + [{"id": f"A{i}", "status": "in_progress"} for i in range(5)]
+            + [{"id": f"B{i}", "status": "todo"} for i in range(5)]
+        )
+        s = {"tasks": list(tasks)}
+        supervisor.prune_done_tasks(s, keep=10)
+        statuses = [t["status"] for t in s["tasks"]]
+        self.assertEqual(statuses.count("in_progress"), 5)
+        self.assertEqual(statuses.count("todo"), 5)
+        self.assertEqual(statuses.count("done"), 10, "only the last `keep` done tasks survive")
+
+    def test_keeps_most_recent_done_and_preserves_order(self) -> None:
+        # Interleave active + done; prune must keep the done *tail* and leave the
+        # relative order of surviving entries intact.
+        tasks = []
+        for i in range(1000):
+            tasks.append({"id": f"T{i}", "status": "done"})
+            if i % 100 == 0:
+                tasks.append({"id": f"ACT{i}", "status": "todo"})
+        s = {"tasks": list(tasks)}
+        supervisor.prune_done_tasks(s, keep=3)
+        done_ids = [t["id"] for t in s["tasks"] if t["status"] == "done"]
+        self.assertEqual(done_ids, ["T997", "T998", "T999"])
+        # all active survive, in original order
+        active_ids = [t["id"] for t in s["tasks"] if t["status"] == "todo"]
+        self.assertEqual(active_ids, [f"ACT{i}" for i in range(0, 1000, 100)])
+
+    def test_dropped_ids_recorded_in_archive_without_duplicates(self) -> None:
+        s = {
+            "tasks": [{"id": f"D{i}", "status": "done"} for i in range(10)],
+            "archived_task_ids": ["D0"],  # already archived once
+        }
+        supervisor.prune_done_tasks(s, keep=3)
+        # D0..D6 dropped; D0 not duplicated; recent D7..D9 kept in tasks.
+        self.assertEqual([t["id"] for t in s["tasks"]], ["D7", "D8", "D9"])
+        self.assertEqual(s["archived_task_ids"].count("D0"), 1)
+        for i in range(7):
+            self.assertIn(f"D{i}", s["archived_task_ids"])
+
+    def test_missing_and_non_list_tasks_are_safe(self) -> None:
+        empty: dict = {}
+        supervisor.prune_done_tasks(empty, keep=150)
+        self.assertNotIn("tasks", empty)
+        bad = {"tasks": "not-a-list"}
+        supervisor.prune_done_tasks(bad, keep=150)
+        self.assertEqual(bad["tasks"], "not-a-list")
+
+
+class PruneBlockersTests(unittest.TestCase):
+    """`prune_blockers` keeps every open blocker plus the recent resolved tail."""
+
+    def test_open_blockers_always_preserved(self) -> None:
+        blockers = (
+            [{"task_id": f"R{i}", "status": "resolved"} for i in range(500)]
+            + [{"task_id": "OPEN1", "status": "open"}]
+        )
+        s = {"blockers": list(blockers)}
+        supervisor.prune_blockers(s, keep=10)
+        statuses = [b["status"] for b in s["blockers"]]
+        self.assertEqual(statuses.count("open"), 1, "open blockers must survive prune")
+        self.assertEqual(statuses.count("resolved"), 10)
+
+    def test_keeps_most_recent_resolved(self) -> None:
+        s = {"blockers": [{"task_id": f"R{i}", "status": "resolved"} for i in range(100)]}
+        supervisor.prune_blockers(s, keep=2)
+        self.assertEqual([b["task_id"] for b in s["blockers"]], ["R98", "R99"])
+
+    def test_noop_under_threshold_and_safe_on_bad_input(self) -> None:
+        s = {"blockers": [{"status": "resolved"}] * 5}
+        supervisor.prune_blockers(s, keep=100)
+        self.assertEqual(len(s["blockers"]), 5)
+        empty: dict = {}
+        supervisor.prune_blockers(empty, keep=100)  # must not raise
+        self.assertNotIn("blockers", empty)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class BreakFullDeadlockTests(unittest.TestCase):
+    CONFIG = {
+        "agents": {"claude2": {"provider": "claude2"}},
+        "supervisor": {"deadlock_breaker_cooldown_seconds": 1800},
+        "ready_dispatcher": {},
+    }
+
+    def _wedged_state(self):
+        return {
+            "workers": {},
+            "queue": {"events": {}},
+            "chair_review": {"blocked": {"reason": "no lane"}},
+            "provider_pauses": {"claude2": {"kind": "auth", "resume_at": None, "paused_at": supervisor.utc_now()}},
+            "quota_paused_agents": {},
+        }
+
+    _STATUS = {"tasks": [{"id": "T1", "status": "backlog"}]}
+
+    def test_clears_lane_when_wedged_and_probe_healthy(self):
+        state = self._wedged_state()
+        report = {"providers": {"claude2": {"installed": True, "auth_ready": True}}}
+        with mock.patch.object(supervisor, "_force_recovery_probe", return_value=report), \
+             mock.patch.object(supervisor, "write_activity_log"):
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertTrue(changed)
+        self.assertNotIn("claude2", state["provider_pauses"])
+
+    def test_escalates_operator_attention_when_unrecoverable(self):
+        state = self._wedged_state()
+        report = {"providers": {"claude2": {"installed": True, "auth_ready": False}}}
+        with mock.patch.object(supervisor, "_force_recovery_probe", return_value=report), \
+             mock.patch.object(supervisor, "write_activity_log") as wal:
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertTrue(changed)
+        self.assertIn("claude2", state["provider_pauses"])  # still paused
+        self.assertIn("operator_attention", state["deadlock_recovery"])
+        kinds = [c.args[1].get("type") for c in wal.call_args_list]
+        self.assertIn("operator_attention_required", kinds)
+
+    def test_noop_when_workers_active(self):
+        state = self._wedged_state()
+        state["workers"] = {"w1": {"agent_id": "claude2", "status": "running"}}
+        probe = mock.Mock()
+        with mock.patch.object(supervisor, "_force_recovery_probe", probe):
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertFalse(changed)
+        probe.assert_not_called()
+
+    def test_noop_when_chair_not_blocked(self):
+        state = self._wedged_state()
+        state["chair_review"] = {}
+        with mock.patch.object(supervisor, "_force_recovery_probe") as probe:
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertFalse(changed)
+        probe.assert_not_called()
