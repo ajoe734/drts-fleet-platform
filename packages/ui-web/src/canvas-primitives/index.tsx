@@ -673,6 +673,7 @@ export interface BtnProps {
   theme?: CanvasTheme;
   variant?: "primary" | "secondary" | "ghost";
   size?: "xs" | "sm" | "md";
+  type?: "button" | "submit" | "reset";
   icon?: CanvasIconName | ReactNode;
   children: ReactNode;
   danger?: boolean;
@@ -685,6 +686,7 @@ export function Btn({
   theme: providedTheme,
   variant = "secondary",
   size = "sm",
+  type = "button",
   icon,
   children,
   danger = false,
@@ -724,7 +726,7 @@ export function Btn({
 
   return (
     <button
-      type="button"
+      type={type}
       disabled={disabled}
       onClick={onClick}
       style={{
