@@ -14,8 +14,10 @@ import {
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
+  CanvasTable,
   buildCanvasTheme,
   type CanvasShellNavItem,
+  type CanvasTableColumn,
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -58,6 +60,18 @@ type PricingItem = {
   metricA: string;
   metricB: string;
   notes: string;
+  serviceFeeBps?: string;
+  reimbursementMode?: string;
+  feeStructure?: string;
+  subsidyLinkage?: string;
+  subsidyTrigger?: string;
+  subsidyAmount?: string;
+  serviceBuckets?: Array<{
+    bucket: string;
+    base: string;
+    continuation: string;
+    serviceFee: string;
+  }>;
   quotedFareAuthority?: string;
   overrideActorTypes?: string[];
   overrideRequiredFields?: string[];
@@ -125,10 +139,38 @@ const PASSENGER_RULES: PricingItem[] = [
     summary: "Service fee 850 bps · reimbursement mixed",
     metricA: "850 bps",
     metricB: "Mixed reimbursement",
+    serviceFeeBps: "850",
+    reimbursementMode: "Mixed",
     notes: "Conflict check pending for airport-sponsored trips.",
     quotedFareAuthority: "Canonical quoted fare engine",
     overrideActorTypes: ["ops_dispatch", "tenant_dispatch_lead"],
     overrideRequiredFields: ["override_reason", "quoted_fare_snapshot"],
+    serviceBuckets: [
+      {
+        bucket: "standard",
+        base: "NT$ 85 / start",
+        continuation: "NT$ 5 / 250m",
+        serviceFee: "180 bps",
+      },
+      {
+        bucket: "business",
+        base: "NT$ 120 / start",
+        continuation: "NT$ 6 / 200m",
+        serviceFee: "220 bps",
+      },
+      {
+        bucket: "airport",
+        base: "NT$ 180 / start",
+        continuation: "Flat by zone",
+        serviceFee: "250 bps",
+      },
+      {
+        bucket: "wheelchair",
+        base: "NT$ 95 / start",
+        continuation: "NT$ 5 / 250m",
+        serviceFee: "90 bps + subsidy",
+      },
+    ],
     availableActions: [
       { action: "edit_draft", enabled: true, riskLevel: "medium" },
       {
@@ -161,6 +203,8 @@ const PASSENGER_RULES: PricingItem[] = [
     summary: "Service fee 1200 bps · platform funded reimbursement",
     metricA: "1200 bps",
     metricB: "Platform funded",
+    serviceFeeBps: "1200",
+    reimbursementMode: "Platform funded",
     notes: "Supersedes v2026.04 after peak transfer review.",
     quotedFareAuthority: "Airport settlement catalog",
     overrideActorTypes: ["ops_dispatch"],
@@ -204,6 +248,8 @@ const DRIVER_PLANS: PricingItem[] = [
     summary: "Base fee + sponsor offset for mixed funding routes",
     metricA: "Base 65 TWD / trip",
     metricB: "Links subsidy pack S-12",
+    feeStructure: "Base 65 TWD / trip",
+    subsidyLinkage: "Subsidy pack S-12",
     notes: "In-flight trip overlap warning for overnight airport queue.",
     availableActions: [
       { action: "edit_draft", enabled: true, riskLevel: "medium" },
@@ -238,6 +284,8 @@ const DRIVER_PLANS: PricingItem[] = [
     summary: "Retired after cross-tenant uplift rollout",
     metricA: "45 TWD / trip",
     metricB: "No subsidy linkage",
+    feeStructure: "45 TWD / trip",
+    subsidyLinkage: "No subsidy linkage",
     notes: "Kept visible for audit and statement lineage.",
     availableActions: [
       {
@@ -262,6 +310,8 @@ const SUBSIDY_RULES: PricingItem[] = [
     summary: "20% reimbursement for sponsor-backed late trips",
     metricA: "20% / max 160 TWD",
     metricB: "Trigger: airport_partner_night",
+    subsidyAmount: "20% / max 160 TWD",
+    subsidyTrigger: "airport_partner_night",
     notes: "Cross-app notice linked for driver payout expectations.",
     availableActions: [
       {
@@ -478,9 +528,28 @@ function pageCopy(locale: string) {
         conflictTitle: "Publish safeguards",
         conflictBody:
           "Publishing is atomic per scope. Drafts surface scope conflicts and in-flight trip overlap warnings before a high-risk publish.",
+        tabBannerTitle: "Canonical quoted fare authority",
+        tabBannerBody:
+          "The backend remains the pricing source of truth. Manual override flows must preserve actor type and required governance fields.",
+        tabBannerBodyDriver:
+          "Fee plans must remain aligned with subsidy linkage before publish. Scope conflicts stay visible until the overlap check clears.",
+        tabBannerBodySubsidy:
+          "Subsidy rules are versioned with the same atomic replace contract. Trigger clarity and payout traceability are mandatory before publish.",
         historyTitle: "Published versions",
         historySubtitle:
           "Cross-tab chronology for passenger pricing, fee plans, and subsidy rules.",
+        tableVersion: "Version",
+        tableName: "Name",
+        tableStatus: "Status",
+        tableServiceFee: "Service fee bps",
+        tableReimburse: "Reimbursement",
+        tableTrigger: "Trigger",
+        tableAmount: "Amount / percentage",
+        tableFeeStructure: "Per-trip fee structure",
+        tableSubsidyLinkage: "Subsidy linkage",
+        serviceBucketTitle: "Service bucket fee breakdown",
+        serviceBucketSubtitle:
+          "Passenger pricing keeps the per-bucket fee mix visible before publish.",
         rowHistory: "History",
         rowPublishedBy: "Published by",
         rowPublishedAt: "Published at",
@@ -532,9 +601,28 @@ function pageCopy(locale: string) {
         conflictTitle: "發布防護",
         conflictBody:
           "同 scope 發布採原子替換；草稿先顯示 scope conflict 與 in-flight trip overlap 警告，再進入高風險發布。",
+        tabBannerTitle: "canonical quoted fare authority",
+        tabBannerBody:
+          "後端是唯一計價真值；任何 manual override 都必須保留 actor type 與治理必填欄位。",
+        tabBannerBodyDriver:
+          "費用方案在 publish 前必須與 subsidy linkage 對齊；scope conflict 會持續顯示到 overlap check 清除為止。",
+        tabBannerBodySubsidy:
+          "補貼規則沿用同一套 atomic replace 版本契約；publish 前必須確認 trigger 清楚且 payout 可追溯。",
         historyTitle: "已發布版本",
         historySubtitle:
           "乘客計價、司機費用方案、補貼規則的跨 tab 發布時間線。",
+        tableVersion: "版本",
+        tableName: "名稱",
+        tableStatus: "狀態",
+        tableServiceFee: "服務費 bps",
+        tableReimburse: "代墊 / 補貼模式",
+        tableTrigger: "觸發條件",
+        tableAmount: "補貼額 / 比例",
+        tableFeeStructure: "單趟費用結構",
+        tableSubsidyLinkage: "補貼連動",
+        serviceBucketTitle: "服務 bucket fee 拆解",
+        serviceBucketSubtitle:
+          "乘客計價在 publish 前保留各 bucket 的費率組成可見。",
         rowHistory: "版本歷程",
         rowPublishedBy: "發布人",
         rowPublishedAt: "發布時間",
@@ -953,6 +1041,119 @@ export default function PricingPage() {
     history: VERSION_HISTORY.length,
   };
 
+  const pricingColumns = useMemo<CanvasTableColumn<PricingItem>[]>(() => {
+    if (activeTab === "passenger") {
+      return [
+        { h: copy.tableVersion, w: 110, r: (row) => monoCell(row.version) },
+        { h: copy.tableName, w: 220, r: (row) => row.name },
+        {
+          h: copy.tableStatus,
+          w: 108,
+          r: (row) => (
+            <CanvasPill theme={theme} tone={toneForStatus(row.status)}>
+              {row.status}
+            </CanvasPill>
+          ),
+        },
+        {
+          h: copy.tableServiceFee,
+          w: 132,
+          r: (row) =>
+            monoCell(row.serviceFeeBps ? `${row.serviceFeeBps}` : "—"),
+        },
+        {
+          h: copy.tableReimburse,
+          w: 188,
+          r: (row) => row.reimbursementMode ?? row.metricB,
+        },
+        { h: copy.scope, w: 188, r: (row) => monoCell(row.scope) },
+        {
+          h: copy.effective,
+          w: 220,
+          r: (row) =>
+            monoCell(
+              `${formatDateTime(row.effectiveFrom)} → ${row.effectiveTo ? formatDateTime(row.effectiveTo) : "—"}`,
+            ),
+        },
+      ];
+    }
+
+    if (activeTab === "driver") {
+      return [
+        { h: copy.tableVersion, w: 110, r: (row) => monoCell(row.version) },
+        { h: copy.tableName, w: 224, r: (row) => row.name },
+        {
+          h: copy.tableStatus,
+          w: 108,
+          r: (row) => (
+            <CanvasPill theme={theme} tone={toneForStatus(row.status)}>
+              {row.status}
+            </CanvasPill>
+          ),
+        },
+        { h: copy.scope, w: 170, r: (row) => monoCell(row.scope) },
+        {
+          h: copy.tableFeeStructure,
+          w: 220,
+          r: (row) => row.feeStructure ?? row.metricA,
+        },
+        {
+          h: copy.tableSubsidyLinkage,
+          w: 170,
+          r: (row) => row.subsidyLinkage ?? row.metricB,
+        },
+        {
+          h: copy.effective,
+          w: 220,
+          r: (row) =>
+            monoCell(
+              `${formatDateTime(row.effectiveFrom)} → ${row.effectiveTo ? formatDateTime(row.effectiveTo) : "—"}`,
+            ),
+        },
+      ];
+    }
+
+    return [
+      { h: copy.tableVersion, w: 110, r: (row) => monoCell(row.version) },
+      { h: copy.tableName, w: 224, r: (row) => row.name },
+      {
+        h: copy.tableStatus,
+        w: 108,
+        r: (row) => (
+          <CanvasPill theme={theme} tone={toneForStatus(row.status)}>
+            {row.status}
+          </CanvasPill>
+        ),
+      },
+      {
+        h: copy.tableTrigger,
+        w: 260,
+        r: (row) => monoCell(row.subsidyTrigger ?? row.metricB),
+      },
+      {
+        h: copy.tableAmount,
+        w: 160,
+        r: (row) => row.subsidyAmount ?? row.metricA,
+      },
+      { h: copy.scope, w: 168, r: (row) => monoCell(row.scope) },
+      {
+        h: copy.effective,
+        w: 220,
+        r: (row) =>
+          monoCell(
+            `${formatDateTime(row.effectiveFrom)} → ${row.effectiveTo ? formatDateTime(row.effectiveTo) : "—"}`,
+          ),
+      },
+    ];
+  }, [activeTab, copy, theme]);
+
+  const tabBannerBody =
+    activeTab === "driver"
+      ? copy.tabBannerBodyDriver
+      : activeTab === "subsidy"
+        ? copy.tabBannerBodySubsidy
+        : copy.tabBannerBody;
+
   const handleTabChange = (tab: PricingTabId) => {
     router.replace(tab === "passenger" ? "/pricing" : `/pricing?tab=${tab}`);
   };
@@ -1037,6 +1238,61 @@ export default function PricingPage() {
         );
       })}
     </div>
+  );
+
+  const historyColumns = useMemo<CanvasTableColumn<VersionRow>[]>(
+    () => [
+      { h: copy.tableVersion, w: 140, r: (row) => monoCell(row.versionType) },
+      { h: copy.tableName, w: 220, r: (row) => row.name },
+      { h: copy.scope, w: 188, r: (row) => monoCell(row.scope) },
+      {
+        h: copy.rowPublishedAt,
+        w: 180,
+        r: (row) => monoCell(formatDateTime(row.publishedAt)),
+      },
+      { h: copy.rowPublishedBy, w: 140, r: (row) => row.publishedBy },
+      { h: copy.rowSupersedes, w: 120, r: (row) => monoCell(row.supersedes) },
+      {
+        h: copy.tableStatus,
+        w: 112,
+        r: (row) => (
+          <CanvasPill theme={theme} tone={toneForStatus(row.status)}>
+            {row.status}
+          </CanvasPill>
+        ),
+      },
+      {
+        h: copy.actionsLabel,
+        w: 280,
+        r: (row) => (
+          <div style={{ display: "grid", gap: 8 }}>
+            {renderActions(row.availableActions, row.name)}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+              <a
+                href={`/audit?resourceType=pricing&resourceId=${row.id}`}
+                target="_blank"
+                rel="noreferrer"
+                style={linkStyle(theme)}
+              >
+                {copy.auditLink}
+              </a>
+              {row.crossLinks?.map((link) => (
+                <a
+                  key={link.route}
+                  href={link.route}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={linkStyle(theme)}
+                >
+                  {link.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        ),
+      },
+    ],
+    [copy, theme, renderActions],
   );
 
   return (
@@ -1263,6 +1519,13 @@ export default function PricingPage() {
               />
             ) : null}
 
+            <CanvasBanner
+              theme={theme}
+              tone="info"
+              title={copy.tabBannerTitle}
+              body={tabBannerBody}
+            />
+
             <CanvasCard
               theme={theme}
               title={copy.conflictTitle}
@@ -1289,81 +1552,11 @@ export default function PricingPage() {
                     }
                   />
                 ) : (
-                  <table style={tableStyle(theme)}>
-                    <thead>
-                      <tr>
-                        <th style={tableHeadStyle(theme)}>Version lane</th>
-                        <th style={tableHeadStyle(theme)}>Name</th>
-                        <th style={tableHeadStyle(theme)}>{copy.scope}</th>
-                        <th style={tableHeadStyle(theme)}>
-                          {copy.rowPublishedAt}
-                        </th>
-                        <th style={tableHeadStyle(theme)}>
-                          {copy.rowPublishedBy}
-                        </th>
-                        <th style={tableHeadStyle(theme)}>
-                          {copy.rowSupersedes}
-                        </th>
-                        <th style={tableHeadStyle(theme)}>
-                          {copy.actionsLabel}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleHistory.map((row) => (
-                        <tr key={row.id}>
-                          <td style={tableCellStyle(theme)}>
-                            <CanvasPill
-                              theme={theme}
-                              tone={toneForStatus(row.status)}
-                            >
-                              {row.versionType}
-                            </CanvasPill>
-                          </td>
-                          <td style={tableCellStyle(theme)}>
-                            <div style={rowTitleStyle}>{row.name}</div>
-                            <div style={rowSubtleStyle}>
-                              {formatDateTime(row.publishedAt)}
-                            </div>
-                          </td>
-                          <td style={tableCellStyle(theme)}>{row.scope}</td>
-                          <td style={tableCellStyle(theme)}>
-                            {formatDateTime(row.publishedAt)}
-                          </td>
-                          <td style={tableCellStyle(theme)}>
-                            {row.publishedBy}
-                          </td>
-                          <td style={tableCellStyle(theme)}>
-                            {row.supersedes}
-                          </td>
-                          <td style={tableCellStyle(theme)}>
-                            <div style={{ display: "grid", gap: 8 }}>
-                              {renderActions(row.availableActions, row.name)}
-                              <a
-                                href={`/audit?resourceType=pricing&resourceId=${row.id}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={linkStyle(theme)}
-                              >
-                                {copy.auditLink}
-                              </a>
-                              {row.crossLinks?.map((link) => (
-                                <a
-                                  key={link.route}
-                                  href={link.route}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  style={linkStyle(theme)}
-                                >
-                                  {link.label}
-                                </a>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <CanvasTable
+                    theme={theme}
+                    columns={historyColumns}
+                    rows={visibleHistory}
+                  />
                 )}
               </CanvasCard>
             ) : activeEmptyDescriptor ? (
@@ -1389,6 +1582,38 @@ export default function PricingPage() {
               </CanvasCard>
             ) : (
               <div style={{ display: "grid", gap: 16 }}>
+                <CanvasCard theme={theme} padding={0}>
+                  <CanvasTable
+                    theme={theme}
+                    columns={pricingColumns}
+                    rows={visibleItems}
+                  />
+                </CanvasCard>
+
+                {activeTab === "passenger" &&
+                visibleItems[0]?.serviceBuckets ? (
+                  <CanvasCard
+                    theme={theme}
+                    title={copy.serviceBucketTitle}
+                    subtitle={copy.serviceBucketSubtitle}
+                  >
+                    <div style={bucketGridStyle}>
+                      {visibleItems[0].serviceBuckets.map((bucket) => (
+                        <div key={bucket.bucket} style={bucketCardStyle(theme)}>
+                          <div style={bucketTitleStyle}>{bucket.bucket}</div>
+                          <div style={bucketBodyStyle(theme)}>
+                            <div>{bucket.base}</div>
+                            <div>{bucket.continuation}</div>
+                            <div style={{ color: theme.accent }}>
+                              {bucket.serviceFee}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CanvasCard>
+                ) : null}
+
                 {visibleItems.map((item) => (
                   <CanvasCard
                     key={item.id}
@@ -1415,7 +1640,34 @@ export default function PricingPage() {
                             value: `${formatDateTime(item.effectiveFrom)} → ${item.effectiveTo ? formatDateTime(item.effectiveTo) : "—"}`,
                             mono: true,
                           },
-                          { label: item.metricA, value: item.metricB },
+                          {
+                            label:
+                              activeTab === "passenger"
+                                ? copy.tableServiceFee
+                                : activeTab === "driver"
+                                  ? copy.tableFeeStructure
+                                  : copy.tableAmount,
+                            value:
+                              activeTab === "passenger"
+                                ? (item.serviceFeeBps ?? item.metricA)
+                                : activeTab === "driver"
+                                  ? (item.feeStructure ?? item.metricA)
+                                  : (item.subsidyAmount ?? item.metricA),
+                          },
+                          {
+                            label:
+                              activeTab === "passenger"
+                                ? copy.tableReimburse
+                                : activeTab === "driver"
+                                  ? copy.tableSubsidyLinkage
+                                  : copy.tableTrigger,
+                            value:
+                              activeTab === "passenger"
+                                ? (item.reimbursementMode ?? item.metricB)
+                                : activeTab === "driver"
+                                  ? (item.subsidyLinkage ?? item.metricB)
+                                  : (item.subsidyTrigger ?? item.metricB),
+                          },
                           { label: copy.notes, value: item.notes },
                         ]}
                       />
@@ -1653,50 +1905,52 @@ function selectStyle(theme: CanvasTheme) {
   } as const;
 }
 
-function tableStyle(theme: CanvasTheme) {
-  return {
-    width: "100%",
-    borderCollapse: "collapse" as const,
-    fontSize: 13,
-    color: theme.text,
-  };
+function monoCell(value: string) {
+  return <span style={monoTextStyle}>{value}</span>;
 }
-
-function tableHeadStyle(theme: CanvasTheme) {
-  return {
-    textAlign: "left" as const,
-    padding: "0 0 10px",
-    borderBottom: `1px solid ${theme.border}`,
-    fontSize: 11,
-    textTransform: "uppercase" as const,
-    letterSpacing: 0.5,
-    color: theme.textDim,
-  };
-}
-
-function tableCellStyle(theme: CanvasTheme) {
-  return {
-    padding: "14px 10px 14px 0",
-    borderBottom: `1px solid ${theme.border}`,
-    verticalAlign: "top" as const,
-  };
-}
-
-const rowTitleStyle = {
-  fontWeight: 700,
-};
-
-const rowSubtleStyle = {
-  color: "#64748b",
-  fontSize: 12,
-  marginTop: 4,
-};
 
 const detailGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: 12,
 };
+
+const bucketGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: 10,
+};
+
+const monoTextStyle = {
+  fontFamily:
+    '"SFMono-Regular", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  fontSize: 11,
+};
+
+function bucketCardStyle(theme: CanvasTheme) {
+  return {
+    border: `1px solid ${theme.border}`,
+    borderRadius: 10,
+    padding: 10,
+    background: theme.surfaceHi,
+  } as const;
+}
+
+const bucketTitleStyle = {
+  fontWeight: 700,
+  marginBottom: 6,
+  ...monoTextStyle,
+};
+
+function bucketBodyStyle(theme: CanvasTheme) {
+  return {
+    display: "grid",
+    gap: 4,
+    color: theme.textMuted,
+    fontSize: 12,
+    lineHeight: 1.55,
+  } as const;
+}
 
 function policyCardStyle(theme: CanvasTheme) {
   return {
