@@ -356,81 +356,85 @@ export default async function ReportsPage({
           )}
         </CanvasCard>
 
-        <CanvasCard
-          theme={th}
-          title="工作明細"
-          subtitle={
-            detail
-              ? `${detail.jobType} · ${detail.jobId}`
-              : "從上方選一筆 job 以檢視 artifact 與 evidence 資訊"
-          }
-        >
-          {detail ? (
-            <>
-              <div style={detailGridStyle}>
-                <div style={detailBlockStyle}>
-                  <span style={detailLabelStyle}>Status</span>
-                  <span style={detailValueStyle}>{detail.status}</span>
+        <div id="job-detail">
+          <CanvasCard
+            theme={th}
+            title="工作明細"
+            subtitle={
+              detail
+                ? `${detail.jobType} · ${detail.jobId}`
+                : "從上方選一筆 job 以檢視 artifact 與 evidence 資訊"
+            }
+          >
+            {detail ? (
+              <>
+                <div style={detailGridStyle}>
+                  <div style={detailBlockStyle}>
+                    <span style={detailLabelStyle}>Status</span>
+                    <span style={detailValueStyle}>{detail.status}</span>
+                  </div>
+                  <div style={detailBlockStyle}>
+                    <span style={detailLabelStyle}>Format</span>
+                    <span style={detailValueStyle}>{detail.format}</span>
+                  </div>
+                  <div style={detailBlockStyle}>
+                    <span style={detailLabelStyle}>Created</span>
+                    <span style={detailValueStyle}>
+                      {formatDateTime(detail.createdAt)}
+                    </span>
+                  </div>
+                  <div style={detailBlockStyle}>
+                    <span style={detailLabelStyle}>Updated</span>
+                    <span style={detailValueStyle}>
+                      {formatDateTime(detail.updatedAt)}
+                    </span>
+                  </div>
                 </div>
-                <div style={detailBlockStyle}>
-                  <span style={detailLabelStyle}>Format</span>
-                  <span style={detailValueStyle}>{detail.format}</span>
-                </div>
-                <div style={detailBlockStyle}>
-                  <span style={detailLabelStyle}>Created</span>
-                  <span style={detailValueStyle}>
-                    {formatDateTime(detail.createdAt)}
-                  </span>
-                </div>
-                <div style={detailBlockStyle}>
-                  <span style={detailLabelStyle}>Updated</span>
-                  <span style={detailValueStyle}>
-                    {formatDateTime(detail.updatedAt)}
-                  </span>
-                </div>
-              </div>
 
-              <div style={{ ...detailBlockStyle, marginTop: 16 }}>
-                <span style={detailLabelStyle}>Filters</span>
-                <span style={detailValueStyle}>
-                  {formatFilters(detail.filters)}
-                </span>
-              </div>
-
-              <div style={{ ...detailBlockStyle, marginTop: 16 }}>
-                <span style={detailLabelStyle}>Artifact</span>
-                {detail.artifact ? (
-                  <a
-                    href={detail.artifact.downloadUrl}
-                    rel="noreferrer"
-                    style={linkStyle}
-                    target="_blank"
-                  >
-                    Download signed artifact
-                  </a>
-                ) : (
-                  <span style={detailValueStyle}>Artifact 尚未就緒。</span>
-                )}
-              </div>
-
-              {detail.rows && detail.rows.length > 0 ? (
                 <div style={{ ...detailBlockStyle, marginTop: 16 }}>
-                  <span style={detailLabelStyle}>Evidence rows</span>
-                  <ul style={listStyle}>
-                    {detail.rows.slice(0, 5).map((row) => (
-                      <li key={row.orderId}>
-                        {row.orderNo} · call {row.callId ?? "—"} · recording{" "}
-                        {row.recordingId ?? "missing"}
-                      </li>
-                    ))}
-                  </ul>
+                  <span style={detailLabelStyle}>Filters</span>
+                  <span style={detailValueStyle}>
+                    {formatFilters(detail.filters)}
+                  </span>
                 </div>
-              ) : null}
-            </>
-          ) : (
-            <div style={emptyStateStyle}>選取一筆 report job 以檢視明細。</div>
-          )}
-        </CanvasCard>
+
+                <div style={{ ...detailBlockStyle, marginTop: 16 }}>
+                  <span style={detailLabelStyle}>Artifact</span>
+                  {detail.artifact ? (
+                    <a
+                      href={detail.artifact.downloadUrl}
+                      rel="noreferrer"
+                      style={linkStyle}
+                      target="_blank"
+                    >
+                      Download signed artifact
+                    </a>
+                  ) : (
+                    <span style={detailValueStyle}>Artifact 尚未就緒。</span>
+                  )}
+                </div>
+
+                {detail.rows && detail.rows.length > 0 ? (
+                  <div style={{ ...detailBlockStyle, marginTop: 16 }}>
+                    <span style={detailLabelStyle}>Evidence rows</span>
+                    <ul style={listStyle}>
+                      {detail.rows.slice(0, 5).map((row) => (
+                        <li key={row.orderId}>
+                          {row.orderNo} · call {row.callId ?? "—"} · recording{" "}
+                          {row.recordingId ?? "missing"}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div style={emptyStateStyle}>
+                選取一筆 report job 以檢視明細。
+              </div>
+            )}
+          </CanvasCard>
+        </div>
       </div>
     </div>
   );
