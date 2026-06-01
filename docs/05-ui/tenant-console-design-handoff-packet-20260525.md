@@ -64,6 +64,13 @@ From spec §9.3. Partner booking user is **NOT** in this packet (moved to partne
 
 `tc_admin` is the most powerful tenant-scoped role per spec §9.6.5 ("只有 tenant admin 可操作"). The visual must NOT hard-code; CTAs come from `availableActions` per resource (Q-X13).
 
+For contract authority, treat the table above as IA/persona shorthand only.
+The authoritative assignable role codes still come from `GET /api/tenant/roles`.
+At the current Phase 1 contract surface that catalog is
+`tenant_admin`, `tenant_ops_admin`, `tenant_finance_admin`, and
+`tenant_viewer`. There is no separate `tc_integration_mgr` role code for the
+`/users` page to invent locally.
+
 **Important:** All roles are scoped within the tenant — there is no cross-tenant authority at this level (cross-tenant operations live in ops-console or platform-admin). This is enforced by backend; visual designer just respects the principle.
 
 ---
@@ -444,13 +451,12 @@ Schema per page (same as previous packets): spec ref / refresh tier / primary pe
 - **Primary persona / roles:** `tc_admin` only ("只有 tenant admin 可操作" per spec)
 - **Primary task:** Manage tenant internal users and their roles.
 - **Must-show data:**
-  - user list: user id, display name, email, role, status, invited at, last login
+  - user list: user id, display name, email, role, status, invited at, updated at
   - Filter by role, by status
 - **Must-support actions** per `availableActions`:
   - Invite user (medium)
   - Update role (medium)
-  - Suspend (high — requires reason)
-  - Resend invitation (medium)
+  - Update status to active/suspended via the existing role-update command
 - **Decision points:**
   - What role is correct?
   - Should this user be suspended pending investigation?
@@ -458,6 +464,11 @@ Schema per page (same as previous packets): spec ref / refresh tier / primary pe
   - Empty (only the admin themselves)
   - Pending invitations visible
   - Suspended users visible (separate filter)
+- **Contract note:** Current canonical backend surface does not expose a
+  dedicated resend-invite command, a required-reason suspend payload, a
+  `lastLogin` field, or a separate integration-manager role code. `/users`
+  must consume the existing backend role catalog and invite/update contracts
+  verbatim.
 - **Entry:** Sidebar
 - **Exit:** None terminal
 
@@ -782,7 +793,7 @@ Schema per page (same as previous packets): spec ref / refresh tier / primary pe
 | `/bookings/[id]`          | booking detail with `availableActions` + `editableUntil` (Q-TEN05), audit subset                 | update command, cancel command (per Q-TEN04)                                                                            |
 | `/passengers`             | passenger list (TBD)                                                                             | create, update, soft deactivate (Q-TEN06)                                                                               |
 | `/addresses`              | address list (TBD)                                                                               | create, update, soft deactivate (Q-TEN06)                                                                               |
-| `/users`                  | `createTenantUser` reads, role catalog                                                           | `createTenantUser`, update role, suspend                                                                                |
+| `/users`                  | `listTenantUsers`, `listTenantRoles`                                                            | `createTenantUser`, `updateTenantRole` (role + status); no resend-invite command                                        |
 | `/notifications`          | subscription matrix (TBD)                                                                        | update subscriptions                                                                                                    |
 | `/sla`                    | SLA profile read (TBD)                                                                           | update SLA (Q-TEN07 minutes), recalculate existing bookings (admin command)                                             |
 | `/webhooks`               | webhook endpoints + delivery logs (real engine per Q-TEN08)                                      | `createWebhookEndpoint` (note "test_pending" status per existing memory), update, disable, delete, rotate secret, retry |

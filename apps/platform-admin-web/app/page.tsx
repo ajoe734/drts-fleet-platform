@@ -66,6 +66,9 @@ const pageBodyStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 16,
+  width: "100%",
+  maxWidth: 1280,
+  margin: "0 auto",
 };
 
 const kpiGridStyle: CSSProperties = {
@@ -167,6 +170,12 @@ const actorMetaStyle: CSSProperties = {
   fontSize: 11.5,
   lineHeight: 1.35,
 };
+
+const ALERT_STATE_PRIORITY = {
+  critical: 0,
+  warning: 1,
+  healthy: 2,
+} as const;
 
 function needsPartnerAttention(entry: PartnerChannelEntryRecord) {
   return entry.status !== "active" || partnerHasReadinessGaps(entry);
@@ -386,6 +395,28 @@ export default function HomePage() {
     const partners = snapshot?.partners ?? [];
     const issues = snapshot?.issues ?? [];
     const observability = snapshot?.observability;
+    const platformAlerts =
+      observability?.alerts.filter(
+        (
+          alert: NonNullable<
+            OperationalObservabilitySnapshot["alerts"]
+          >[number],
+        ) => alert.routes.includes("platform"),
+      ) ?? [];
+    const unresolvedIssues = issues.filter(
+      (issue) => issue.status !== "resolved",
+    );
+    const bankPartners = partners.filter(
+      (partner) =>
+        Boolean(partner.bankCode) ||
+        partner.businessDispatchSubtype.startsWith("credit_card"),
+    ).length;
+    const hotelPartners = partners.filter((partner) =>
+      partner.businessDispatchSubtype.includes("hotel"),
+    ).length;
+    const enterprisePartners = partners.filter((partner) =>
+      partner.businessDispatchSubtype.includes("enterprise"),
+    ).length;
 
     return {
       activeTenants: tenants.filter((tenant) => tenant.status === "active")
@@ -400,17 +431,23 @@ export default function HomePage() {
       ).length,
       partnerEntries: partners.length,
       partnerAttention: partners.filter(needsPartnerAttention).length,
-      openIssues: issues.filter((issue) => issue.status !== "resolved").length,
+      bankPartners,
+      hotelPartners,
+      enterprisePartners,
+      openIssues: unresolvedIssues.length,
+      partnerIssues: unresolvedIssues.filter(
+        (issue) => issue.source === "finance_manual",
+      ).length,
+      forwardedIssues: unresolvedIssues.filter(
+        (issue) => issue.source === "forwarder_auto",
+      ).length,
+      activeDrivers: observability?.driverState.availableDrivers ?? 0,
       driverEligible: observability?.driverState.dispatchEligibleDrivers ?? 0,
+      totalDrivers: observability?.driverState.totalDrivers ?? 0,
       staleDrivers: observability?.driverState.staleLocationDrivers ?? 0,
-      criticalAlerts:
-        observability?.alerts.filter(
-          (
-            alert: NonNullable<
-              OperationalObservabilitySnapshot["alerts"]
-            >[number],
-          ) => alert.routes.includes("platform") && alert.state === "critical",
-        ).length ?? 0,
+      criticalAlerts: platformAlerts.filter(
+        (alert) => alert.state === "critical",
+      ).length,
     };
   }, [snapshot]);
 
@@ -419,11 +456,20 @@ export default function HomePage() {
       return [];
     }
 
-    const alerts = snapshot.observability?.alerts.filter(
-      (
-        alert: NonNullable<OperationalObservabilitySnapshot["alerts"]>[number],
-      ) => alert.routes.includes("platform"),
-    );
+    const alerts =
+      snapshot.observability?.alerts
+        .filter(
+          (
+            alert: NonNullable<
+              OperationalObservabilitySnapshot["alerts"]
+            >[number],
+          ) => alert.routes.includes("platform"),
+        )
+        .sort(
+          (left, right) =>
+            ALERT_STATE_PRIORITY[left.state] -
+            ALERT_STATE_PRIORITY[right.state],
+        ) ?? [];
     const rollbackTenant = snapshot.tenants.find(
       (tenant) => tenant.status === "rollback_hold",
     );
@@ -505,8 +551,7 @@ export default function HomePage() {
       .slice(0, 3)
       .map((issue) => issue.issueId)
       .join(", ") || undefined;
-  const governanceItemCount =
-    governanceQueue.length + metrics.rollbackTenants + metrics.criticalAlerts;
+  const governanceItemCount = governanceQueue.length;
   const showLoadingState = loading && !snapshot;
   const queueBadgeTone = queueTone(governanceQueue);
 
@@ -609,8 +654,8 @@ export default function HomePage() {
                 value={metrics.partnerEntries}
                 sub={
                   locale === "en"
-                    ? "Readiness and credential package coverage"
-                    : "readiness 與憑證包覆蓋"
+                    ? `${metrics.bankPartners} bank · ${metrics.hotelPartners + metrics.enterprisePartners} hotel / enterprise`
+                    : `${metrics.bankPartners} 銀行 · ${metrics.hotelPartners + metrics.enterprisePartners} 飯店 / 企業`
                 }
                 delta={
                   locale === "en"
@@ -622,11 +667,11 @@ export default function HomePage() {
               <CanvasKPI
                 theme={th}
                 label={copy.kpiDrivers}
-                value={metrics.driverEligible}
+                value={metrics.activeDrivers}
                 sub={
                   locale === "en"
-                    ? "Dispatch-eligible drivers in current observability snapshot"
-                    : "當前 observability 快照中的可派司機"
+                    ? `${metrics.driverEligible} dispatch-eligible · ${metrics.totalDrivers} total`
+                    : `${metrics.driverEligible} 可派 · ${metrics.totalDrivers} 總數`
                 }
                 delta={
                   metrics.staleDrivers > 0
@@ -643,6 +688,14 @@ export default function HomePage() {
                 theme={th}
                 label={copy.kpiRecon}
                 value={metrics.openIssues}
+                delta={
+                  metrics.openIssues > 0
+                    ? locale === "en"
+                      ? `${metrics.partnerIssues} partner · ${metrics.forwardedIssues} forwarded`
+                      : `${metrics.partnerIssues} partner · ${metrics.forwardedIssues} forwarded`
+                    : undefined
+                }
+                deltaTone={metrics.openIssues > 0 ? "neutral" : "up"}
                 sub={
                   locale === "en"
                     ? `${metrics.criticalAlerts} critical platform alert(s)`

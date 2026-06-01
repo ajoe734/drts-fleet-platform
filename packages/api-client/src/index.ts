@@ -319,6 +319,17 @@ export class ApiClient {
   }
 
   /**
+   * Generic GET preserving the success envelope. Useful for callers that
+   * need response metadata such as backend timestamps.
+   */
+  async getEnvelope<T>(
+    path: string,
+    options?: RequestOptions,
+  ): Promise<ApiSuccessEnvelope<T>> {
+    return this.requestEnvelope<T>("GET", path, options);
+  }
+
+  /**
    * Generic POST with envelope unwrapping.
    */
   async post<T>(path: string, options?: RequestOptions): Promise<T> {
@@ -346,6 +357,13 @@ export class ApiClient {
     return this.request<T>("DELETE", path, options);
   }
 
+  async getListEnvelope<T>(
+    path: string,
+    options?: RequestOptions,
+  ): Promise<ApiSuccessEnvelope<ListEnvelope<T>>> {
+    return this.requestEnvelope<ListEnvelope<T>>("GET", path, options);
+  }
+
   private async getList<T>(
     path: string,
     options?: RequestOptions,
@@ -354,11 +372,29 @@ export class ApiClient {
     return Array.isArray(result) ? result : (result.items ?? []);
   }
 
+  private async requestEnvelope<T>(
+    method: string,
+    path: string,
+    options?: RequestOptions,
+  ): Promise<ApiSuccessEnvelope<T>> {
+    const envelope = await this.fetchEnvelope<T>(method, path, options);
+    return deepToCamelCase(envelope) as ApiSuccessEnvelope<T>;
+  }
+
   private async request<T>(
     method: string,
     path: string,
     options?: RequestOptions,
   ): Promise<T> {
+    const envelope = await this.fetchEnvelope<T>(method, path, options);
+    return deepToCamelCase(envelope.data) as T;
+  }
+
+  private async fetchEnvelope<T>(
+    method: string,
+    path: string,
+    options?: RequestOptions,
+  ): Promise<ApiSuccessEnvelope<T>> {
     const requestPath = this.pathTransform ? this.pathTransform(path) : path;
     const url = `${this.baseUrl}${requestPath}`;
     const controller = new AbortController();
@@ -396,8 +432,7 @@ export class ApiClient {
         throw new Error(`API error ${response.status}: ${errorText}`);
       }
 
-      const envelope: ApiSuccessEnvelope<T> = await response.json();
-      return deepToCamelCase(envelope.data) as T;
+      return (await response.json()) as ApiSuccessEnvelope<T>;
     } finally {
       clearTimeout(timeoutId);
     }
@@ -546,6 +581,42 @@ export class ApiClient {
   ): Promise<OpsPendingApprovalRequestRecord> {
     return this.post<OpsPendingApprovalRequestRecord>(
       `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/acknowledge-breach`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async approveOpsApprovalRequest(
+    approvalRequestId: string,
+    command: ApproveTenantBookingApprovalRequestCommand = {},
+  ): Promise<OpsPendingApprovalRequestRecord> {
+    return this.post<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/approve`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async rejectOpsApprovalRequest(
+    approvalRequestId: string,
+    command: RejectTenantBookingApprovalRequestCommand,
+  ): Promise<OpsPendingApprovalRequestRecord> {
+    return this.post<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/reject`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async escalateOpsApprovalRequest(
+    approvalRequestId: string,
+    command: EscalateTenantBookingApprovalRequestCommand = {},
+  ): Promise<OpsPendingApprovalRequestRecord> {
+    return this.post<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/escalate`,
       {
         body: command,
       },
