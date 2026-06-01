@@ -493,6 +493,25 @@ function actionStyle({
   };
 }
 
+function actionStatusStyle({
+  active = false,
+  compact = false,
+}: {
+  active?: boolean | undefined;
+  compact?: boolean | undefined;
+}): CSSProperties {
+  return {
+    display: "grid",
+    gap: 4,
+    minHeight: compact ? 26 : 30,
+    padding: compact ? "5px 8px" : "6px 10px",
+    borderRadius: 8,
+    border: `1px dashed ${active ? theme.accentBorder : theme.border}`,
+    background: active ? theme.accentBg : theme.surfaceLo,
+    color: active ? theme.accent : theme.textMuted,
+  };
+}
+
 function renderAction(
   locale: LocalizedLocale,
   origins: ReturnType<typeof resolveAppOrigins>,
@@ -524,21 +543,36 @@ function renderAction(
 
   if (!action.descriptor.enabled || (!href && !action.onClick)) {
     return (
-      <div style={{ display: "grid", gap: 4 }}>
-        <button
-          type="button"
-          disabled
-          title={reason ?? undefined}
-          style={actionStyle({
-            active: options?.active,
-            disabled: true,
-            compact: options?.compact,
-          })}
+      <div
+        title={reason ?? undefined}
+        style={actionStatusStyle({
+          active: options?.active,
+          compact: options?.compact,
+        })}
+      >
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: options?.compact ? 11.5 : 12,
+            fontWeight: 600,
+            lineHeight: 1,
+          }}
         >
-          {content}
-        </button>
-        {options?.showReason && reason ? (
+          <span>{action.label}</span>
+          <span style={monoTextStyle}>
+            {locale === "en" ? "read-only" : "唯讀"}
+          </span>
+        </div>
+        {reason ? (
           <div style={monoTextStyle}>{reason}</div>
+        ) : options?.showReason ? (
+          <div style={monoTextStyle}>
+            {locale === "en"
+              ? "Visible here, but no runnable action is available."
+              : "此處僅提供狀態可見性，沒有可執行動作。"}
+          </div>
         ) : null}
       </div>
     );
