@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 const th = buildCanvasTheme({
   surface: "tenant",
-  dark: true,
+  dark: false,
   density: "compact",
 });
 

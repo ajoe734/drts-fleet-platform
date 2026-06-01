@@ -204,6 +204,12 @@ const actionHintStyle: CSSProperties = {
   marginTop: 12,
 };
 
+const sectionStackStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
 const summaryCardStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
@@ -641,6 +647,78 @@ export function SlaManager({
     });
   };
 
+  const emptyStateCard = activeEmptyState ? (
+    <CanvasCard theme={th}>
+      <div style={emptyStateStyle}>
+        <CanvasPill theme={th} tone={activeEmptyState.tone}>
+          {activeEmptyState.reason}
+        </CanvasPill>
+        <div style={emptyStateHeroStyle}>
+          <div
+            style={{
+              ...emptyStateBadgeStyle,
+              background:
+                activeEmptyState.tone === "danger"
+                  ? "#ffe4e6"
+                  : activeEmptyState.tone === "warn"
+                    ? "#fef3c7"
+                    : "#ccfbf1",
+              color:
+                activeEmptyState.tone === "danger"
+                  ? "#be123c"
+                  : activeEmptyState.tone === "warn"
+                    ? "#b45309"
+                    : "#0f766e",
+            }}
+          >
+            {EMPTY_STATE_MONOGRAM[activeEmptyState.reason]}
+          </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>
+              {activeEmptyState.title}
+            </div>
+            <div style={{ ...noteStyle, maxWidth: 560 }}>
+              {activeEmptyState.body}
+            </div>
+            {loadErrorMessage ? (
+              <div style={noteStyle}>error · {loadErrorMessage}</div>
+            ) : null}
+          </div>
+        </div>
+        <div style={noteStyle}>
+          messageCode · {emptyState?.messageCode ?? "—"}
+        </div>
+        {nextAction ? (
+          <div style={emptyActionStyle}>
+            <div style={summaryLabelStyle}>recommended action</div>
+            <div style={summaryValueStyle}>
+              {actionLabel(nextAction.action)}
+            </div>
+            <div style={noteStyle}>{formatActionCaption(nextAction)}</div>
+          </div>
+        ) : null}
+        <div style={linkRowStyle}>
+          {links.map((link) => (
+            <Link key={link.href} href={link.href} style={linkStyle}>
+              {link.label} →
+            </Link>
+          ))}
+          {crossAppLinks.map((link) => (
+            <a
+              key={link.href}
+              href={link.href}
+              style={linkStyle}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {link.label} ↗
+            </a>
+          ))}
+        </div>
+      </div>
+    </CanvasCard>
+  ) : null;
+
   return (
     <div>
       <CanvasPageHeader
@@ -736,324 +814,251 @@ export function SlaManager({
           />
         ) : null}
 
-        {activeEmptyState && !showEditor ? (
-          <CanvasCard theme={th}>
-            <div style={emptyStateStyle}>
-              <CanvasPill theme={th} tone={activeEmptyState.tone}>
-                {activeEmptyState.reason}
-              </CanvasPill>
-              <div style={emptyStateHeroStyle}>
-                <div
-                  style={{
-                    ...emptyStateBadgeStyle,
-                    background:
-                      activeEmptyState.tone === "danger"
-                        ? "#ffe4e6"
-                        : activeEmptyState.tone === "warn"
-                          ? "#fef3c7"
-                          : "#ccfbf1",
-                    color:
-                      activeEmptyState.tone === "danger"
-                        ? "#be123c"
-                        : activeEmptyState.tone === "warn"
-                          ? "#b45309"
-                          : "#0f766e",
-                  }}
-                >
-                  {EMPTY_STATE_MONOGRAM[activeEmptyState.reason]}
-                </div>
-                <div style={{ display: "grid", gap: 10 }}>
-                  <div style={{ fontSize: 22, fontWeight: 700 }}>
-                    {activeEmptyState.title}
-                  </div>
-                  <div style={{ ...noteStyle, maxWidth: 560 }}>
-                    {activeEmptyState.body}
-                  </div>
-                  {loadErrorMessage ? (
-                    <div style={noteStyle}>error · {loadErrorMessage}</div>
-                  ) : null}
-                </div>
-              </div>
-              <div style={noteStyle}>
-                messageCode · {emptyState?.messageCode ?? "—"}
-              </div>
-              {nextAction ? (
-                <div style={emptyActionStyle}>
-                  <div style={summaryLabelStyle}>recommended action</div>
-                  <div style={summaryValueStyle}>
-                    {actionLabel(nextAction.action)}
-                  </div>
-                  <div style={noteStyle}>{formatActionCaption(nextAction)}</div>
-                </div>
-              ) : null}
-              <div style={linkRowStyle}>
-                {links.map((link) => (
-                  <Link key={link.href} href={link.href} style={linkStyle}>
-                    {link.label} →
-                  </Link>
-                ))}
-                {crossAppLinks.map((link) => (
-                  <a
-                    key={link.href}
-                    href={link.href}
-                    style={linkStyle}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {link.label} ↗
-                  </a>
-                ))}
-              </div>
-            </div>
-          </CanvasCard>
+        {!showEditor ? (
+          emptyStateCard
         ) : (
-          <div style={gridStyle}>
-            <CanvasCard
-              theme={th}
-              title="當前門檻 · waitThresholdMin / arrivalThresholdMin / completionThresholdMin"
-            >
-              {activeEmptyState ? (
+          <div style={sectionStackStyle}>
+            {emptyStateCard}
+            <div style={gridStyle}>
+              <CanvasCard
+                theme={th}
+                title="當前門檻 · waitThresholdMin / arrivalThresholdMin / completionThresholdMin"
+              >
                 <CanvasBanner
                   theme={th}
-                  tone={activeEmptyState.tone}
-                  title={activeEmptyState.title}
-                  body={`${activeEmptyState.body}${emptyState?.nextAction ? ` 建議動作：${actionLabel(emptyState.nextAction.action)}。` : ""}${loadErrorMessage ? ` 錯誤訊息：${loadErrorMessage}` : ""}`}
+                  tone="info"
+                  title="變更影響範圍 · Q-TEN07"
+                  body="Threshold changes affect new bookings and newly computed SLA events. Existing bookings keep SLA profile snapshot at creation unless explicitly recalculated by admin command."
                 />
-              ) : null}
 
-              <CanvasBanner
-                theme={th}
-                tone="info"
-                title="變更影響範圍 · Q-TEN07"
-                body="Threshold changes affect new bookings and newly computed SLA events. Existing bookings keep SLA profile snapshot at creation unless explicitly recalculated by admin command."
-              />
+                <div style={{ height: 14 }} />
 
-              <div style={{ height: 14 }} />
+                <div style={kpiGridStyle}>
+                  <CanvasField
+                    theme={th}
+                    label="waitThresholdMin · 等候門檻"
+                    hint="超過此分鐘數標記為 wait 違規"
+                  >
+                    <div style={inputShellStyle}>
+                      <input
+                        value={waitThresholdMin}
+                        onChange={(event) =>
+                          setWaitThresholdMin(event.target.value)
+                        }
+                        inputMode="numeric"
+                        style={nativeInputStyle}
+                        aria-label="waitThresholdMin"
+                        disabled={isPending || !updateAction?.enabled}
+                        placeholder="分鐘"
+                      />
+                      <div style={inputMetaStyle}>
+                        <span>unit</span>
+                        <span>min</span>
+                      </div>
+                    </div>
+                  </CanvasField>
+                  <CanvasField
+                    theme={th}
+                    label="arrivalThresholdMin · 抵達門檻"
+                    hint="ETA 與實際抵達差異上限"
+                  >
+                    <div style={inputShellStyle}>
+                      <input
+                        value={arrivalThresholdMin}
+                        onChange={(event) =>
+                          setArrivalThresholdMin(event.target.value)
+                        }
+                        inputMode="numeric"
+                        style={nativeInputStyle}
+                        aria-label="arrivalThresholdMin"
+                        disabled={isPending || !updateAction?.enabled}
+                        placeholder="分鐘"
+                      />
+                      <div style={inputMetaStyle}>
+                        <span>unit</span>
+                        <span>min</span>
+                      </div>
+                    </div>
+                  </CanvasField>
+                  <CanvasField
+                    theme={th}
+                    label="completionThresholdMin · 完成門檻"
+                    hint="預估 vs 實際行車時間差異上限"
+                  >
+                    <div style={inputShellStyle}>
+                      <input
+                        value={completionThresholdMin}
+                        onChange={(event) =>
+                          setCompletionThresholdMin(event.target.value)
+                        }
+                        inputMode="numeric"
+                        style={nativeInputStyle}
+                        aria-label="completionThresholdMin"
+                        disabled={isPending || !updateAction?.enabled}
+                        placeholder="分鐘"
+                      />
+                      <div style={inputMetaStyle}>
+                        <span>unit</span>
+                        <span>min</span>
+                      </div>
+                    </div>
+                  </CanvasField>
+                </div>
 
-              <div style={kpiGridStyle}>
-                <CanvasField
-                  theme={th}
-                  label="waitThresholdMin · 等候門檻"
-                  hint="超過此分鐘數標記為 wait 違規"
-                >
-                  <div style={inputShellStyle}>
-                    <input
-                      value={waitThresholdMin}
-                      onChange={(event) =>
-                        setWaitThresholdMin(event.target.value)
+                <div style={{ marginTop: 14 }}>
+                  <CanvasField
+                    theme={th}
+                    label="變更原因"
+                    hint="High-risk actions require a non-empty reason for audit."
+                  >
+                    <textarea
+                      value={reason}
+                      onChange={(event) => setReason(event.target.value)}
+                      style={nativeTextAreaStyle}
+                      disabled={isPending || (!updateAction && !recalcAction)}
+                      aria-label="reason"
+                      placeholder={
+                        reasonRequired
+                          ? "請填寫操作原因，會寫入 audit trail"
+                          : undefined
                       }
-                      inputMode="numeric"
-                      style={nativeInputStyle}
-                      aria-label="waitThresholdMin"
-                      disabled={isPending || !updateAction?.enabled}
-                      placeholder="分鐘"
                     />
-                    <div style={inputMetaStyle}>
-                      <span>unit</span>
-                      <span>min</span>
-                    </div>
-                  </div>
-                </CanvasField>
-                <CanvasField
-                  theme={th}
-                  label="arrivalThresholdMin · 抵達門檻"
-                  hint="ETA 與實際抵達差異上限"
-                >
-                  <div style={inputShellStyle}>
-                    <input
-                      value={arrivalThresholdMin}
-                      onChange={(event) =>
-                        setArrivalThresholdMin(event.target.value)
-                      }
-                      inputMode="numeric"
-                      style={nativeInputStyle}
-                      aria-label="arrivalThresholdMin"
-                      disabled={isPending || !updateAction?.enabled}
-                      placeholder="分鐘"
-                    />
-                    <div style={inputMetaStyle}>
-                      <span>unit</span>
-                      <span>min</span>
-                    </div>
-                  </div>
-                </CanvasField>
-                <CanvasField
-                  theme={th}
-                  label="completionThresholdMin · 完成門檻"
-                  hint="預估 vs 實際行車時間差異上限"
-                >
-                  <div style={inputShellStyle}>
-                    <input
-                      value={completionThresholdMin}
-                      onChange={(event) =>
-                        setCompletionThresholdMin(event.target.value)
-                      }
-                      inputMode="numeric"
-                      style={nativeInputStyle}
-                      aria-label="completionThresholdMin"
-                      disabled={isPending || !updateAction?.enabled}
-                      placeholder="分鐘"
-                    />
-                    <div style={inputMetaStyle}>
-                      <span>unit</span>
-                      <span>min</span>
-                    </div>
-                  </div>
-                </CanvasField>
-              </div>
+                  </CanvasField>
+                </div>
 
-              <div style={{ marginTop: 14 }}>
-                <CanvasField
-                  theme={th}
-                  label="變更原因"
-                  hint="High-risk actions require a non-empty reason for audit."
-                >
-                  <textarea
-                    value={reason}
-                    onChange={(event) => setReason(event.target.value)}
-                    style={nativeTextAreaStyle}
-                    disabled={isPending || (!updateAction && !recalcAction)}
-                    aria-label="reason"
-                    placeholder={
-                      reasonRequired
-                        ? "請填寫操作原因，會寫入 audit trail"
-                        : undefined
-                    }
-                  />
-                </CanvasField>
-              </div>
-
-              <div style={footerStyle}>
-                <div style={noteStyle}>
-                  {updateAction || recalcAction
-                    ? `availableActions 決定 CTA 顯示；${reasonRequired ? "目前可執行動作需要 reason，送出後會刷新本頁與相關 deep links。" : "送出後會刷新本頁與相關 deep links。"}`
-                    : "目前 API 沒有回傳可操作的 SLA 動作。"}
-                  {nextAction ? (
-                    <div style={actionHintStyle}>
-                      <span>
-                        emptyState.nextAction · {actionLabel(nextAction.action)}
-                      </span>
-                      <span>{formatActionCaption(nextAction)}</span>
-                    </div>
-                  ) : null}
-                  {availableActions.length > 0 ? (
-                    <div style={actionHintStyle}>
-                      {availableActions.map((action) => (
-                        <span key={action.action}>
-                          {formatActionCaption(action)}
+                <div style={footerStyle}>
+                  <div style={noteStyle}>
+                    {updateAction || recalcAction
+                      ? `availableActions 決定 CTA 顯示；${reasonRequired ? "目前可執行動作需要 reason，送出後會刷新本頁與相關 deep links。" : "送出後會刷新本頁與相關 deep links。"}`
+                      : "目前 API 沒有回傳可操作的 SLA 動作。"}
+                    {nextAction ? (
+                      <div style={actionHintStyle}>
+                        <span>
+                          emptyState.nextAction ·{" "}
+                          {actionLabel(nextAction.action)}
                         </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-                <div style={actionRowStyle}>
-                  {recalcAction ? (
-                    <CanvasBtn
-                      theme={th}
-                      onClick={handleRecalculate}
-                      disabled={isPending || !recalcAction.enabled}
-                    >
-                      {recalcAction.enabled
-                        ? "重算既有訂單"
-                        : `重算既有訂單 · ${disabledReasonLabel(
-                            recalcAction.disabledReasonCode,
-                          )}`}
-                    </CanvasBtn>
-                  ) : null}
-                  {updateAction ? (
-                    <CanvasBtn
-                      theme={th}
-                      variant="primary"
-                      onClick={handleUpdate}
-                      disabled={isPending || !updateAction.enabled}
-                    >
-                      {updateAction.enabled
-                        ? "儲存設定"
-                        : `儲存設定 · ${disabledReasonLabel(
-                            updateAction.disabledReasonCode,
-                          )}`}
-                    </CanvasBtn>
-                  ) : null}
-                </div>
-              </div>
-            </CanvasCard>
-
-            <CanvasCard theme={th} title="效益 · SLA 檔案狀態">
-              <div style={summaryCardStyle}>
-                <div style={statListStyle}>
-                  {metricRows.map((row) => (
-                    <div key={row.label} style={statRowStyle}>
-                      <div style={statKeyStyle}>{row.label}</div>
-                      <div style={statValueStyle}>{row.value}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={summaryListStyle}>
-                  <div>
-                    <div style={summaryLabelStyle}>updatedAt</div>
-                    <div style={summaryValueStyle}>
-                      {formatDateTime(profile?.updatedAt)}
-                    </div>
+                        <span>{formatActionCaption(nextAction)}</span>
+                      </div>
+                    ) : null}
+                    {availableActions.length > 0 ? (
+                      <div style={actionHintStyle}>
+                        {availableActions.map((action) => (
+                          <span key={action.action}>
+                            {formatActionCaption(action)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
-                  <div>
-                    <div style={summaryLabelStyle}>updated by</div>
-                    <div style={summaryValueStyle}>{updatedBy ?? "—"}</div>
-                  </div>
-                  <div>
-                    <div style={summaryLabelStyle}>recalculation</div>
-                    <div style={summaryValueStyle}>
-                      {lastRecalculationAt
-                        ? `pending since ${formatDateTime(lastRecalculationAt)}`
-                        : "idle"}
-                    </div>
+                  <div style={actionRowStyle}>
+                    {recalcAction ? (
+                      <CanvasBtn
+                        theme={th}
+                        onClick={handleRecalculate}
+                        disabled={isPending || !recalcAction.enabled}
+                      >
+                        {recalcAction.enabled
+                          ? "重算既有訂單"
+                          : `重算既有訂單 · ${disabledReasonLabel(
+                              recalcAction.disabledReasonCode,
+                            )}`}
+                      </CanvasBtn>
+                    ) : null}
+                    {updateAction ? (
+                      <CanvasBtn
+                        theme={th}
+                        variant="primary"
+                        onClick={handleUpdate}
+                        disabled={isPending || !updateAction.enabled}
+                      >
+                        {updateAction.enabled
+                          ? "儲存設定"
+                          : `儲存設定 · ${disabledReasonLabel(
+                              updateAction.disabledReasonCode,
+                            )}`}
+                      </CanvasBtn>
+                    ) : null}
                   </div>
                 </div>
+              </CanvasCard>
 
-                <CanvasDL
-                  theme={th}
-                  cols={1}
-                  items={[
-                    {
-                      k: "waitThresholdMin",
-                      v: profile ? `${profile.waitThresholdMin} min` : "—",
-                      mono: true,
-                    },
-                    {
-                      k: "arrivalThresholdMin",
-                      v: profile ? `${profile.arrivalThresholdMin} min` : "—",
-                      mono: true,
-                    },
-                    {
-                      k: "completionThresholdMin",
-                      v: profile
-                        ? `${profile.completionThresholdMin} min`
-                        : "—",
-                      mono: true,
-                    },
-                  ]}
-                />
+              <CanvasCard theme={th} title="效益 · SLA 檔案狀態">
+                <div style={summaryCardStyle}>
+                  <div style={statListStyle}>
+                    {metricRows.map((row) => (
+                      <div key={row.label} style={statRowStyle}>
+                        <div style={statKeyStyle}>{row.label}</div>
+                        <div style={statValueStyle}>{row.value}</div>
+                      </div>
+                    ))}
+                  </div>
 
-                <div style={linkRowStyle}>
-                  {links.map((link) => (
-                    <Link key={link.href} href={link.href} style={linkStyle}>
-                      {link.label} →
-                    </Link>
-                  ))}
-                  {crossAppLinks.map((link) => (
-                    <a
-                      key={link.href}
-                      href={link.href}
-                      style={linkStyle}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {link.label} ↗
-                    </a>
-                  ))}
+                  <div style={summaryListStyle}>
+                    <div>
+                      <div style={summaryLabelStyle}>updatedAt</div>
+                      <div style={summaryValueStyle}>
+                        {formatDateTime(profile?.updatedAt)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={summaryLabelStyle}>updated by</div>
+                      <div style={summaryValueStyle}>{updatedBy ?? "—"}</div>
+                    </div>
+                    <div>
+                      <div style={summaryLabelStyle}>recalculation</div>
+                      <div style={summaryValueStyle}>
+                        {lastRecalculationAt
+                          ? `pending since ${formatDateTime(lastRecalculationAt)}`
+                          : "idle"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <CanvasDL
+                    theme={th}
+                    cols={1}
+                    items={[
+                      {
+                        k: "waitThresholdMin",
+                        v: profile ? `${profile.waitThresholdMin} min` : "—",
+                        mono: true,
+                      },
+                      {
+                        k: "arrivalThresholdMin",
+                        v: profile ? `${profile.arrivalThresholdMin} min` : "—",
+                        mono: true,
+                      },
+                      {
+                        k: "completionThresholdMin",
+                        v: profile
+                          ? `${profile.completionThresholdMin} min`
+                          : "—",
+                        mono: true,
+                      },
+                    ]}
+                  />
+
+                  <div style={linkRowStyle}>
+                    {links.map((link) => (
+                      <Link key={link.href} href={link.href} style={linkStyle}>
+                        {link.label} →
+                      </Link>
+                    ))}
+                    {crossAppLinks.map((link) => (
+                      <a
+                        key={link.href}
+                        href={link.href}
+                        style={linkStyle}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {link.label} ↗
+                      </a>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </CanvasCard>
+              </CanvasCard>
+            </div>
           </div>
         )}
       </div>

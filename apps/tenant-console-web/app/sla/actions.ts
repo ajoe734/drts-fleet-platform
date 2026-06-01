@@ -12,8 +12,8 @@ type UpdateSlaPayload = {
 };
 
 function normalizePositiveInteger(value: number, field: string) {
-  if (!Number.isInteger(value) || value < 1) {
-    throw new Error(`${field} must be a positive integer.`);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${field} must be a non-negative integer.`);
   }
   return value;
 }
