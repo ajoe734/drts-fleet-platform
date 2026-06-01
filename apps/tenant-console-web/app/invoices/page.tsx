@@ -32,7 +32,7 @@ export const dynamic = "force-dynamic";
 
 const th = buildCanvasTheme({
   surface: "tenant",
-  dark: true,
+  dark: false,
   density: "compact",
 });
 
@@ -42,7 +42,7 @@ const pageStyle: CSSProperties = {
   padding: 24,
   display: "flex",
   flexDirection: "column",
-  gap: 16,
+  gap: 20,
 };
 
 const pageLeadStyle: CSSProperties = {
@@ -54,10 +54,10 @@ const pageLeadStyle: CSSProperties = {
 };
 
 const pageLeadCopyStyle: CSSProperties = {
-  maxWidth: 720,
+  maxWidth: 760,
   color: th.textMuted,
   fontSize: 12.5,
-  lineHeight: 1.55,
+  lineHeight: 1.6,
 };
 
 const pageLeadMetaStyle: CSSProperties = {
@@ -71,7 +71,46 @@ const registerCardBodyStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 14,
-  padding: 16,
+  padding: 18,
+};
+
+const summaryGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: 12,
+};
+
+const summaryCardStyle: CSSProperties = {
+  borderRadius: 16,
+  border: `1px solid ${th.border}`,
+  background: th.surface,
+  padding: "14px 16px",
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  boxShadow: "0 14px 28px rgba(15, 23, 42, 0.05)",
+};
+
+const summaryLabelStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 11.5,
+  fontWeight: 700,
+  letterSpacing: 0.32,
+  textTransform: "uppercase",
+};
+
+const summaryValueStyle: CSSProperties = {
+  color: th.text,
+  fontSize: 24,
+  lineHeight: 1,
+  fontWeight: 800,
+  fontFamily: th.monoFamily,
+};
+
+const summaryCaptionStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 12,
+  lineHeight: 1.45,
 };
 
 const filterGridStyle: CSSProperties = {
@@ -136,7 +175,7 @@ const registerMetaStyle: CSSProperties = {
 
 const pageGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.5fr) minmax(300px, 0.9fr)",
+  gridTemplateColumns: "minmax(0, 1.55fr) minmax(320px, 0.92fr)",
   gap: 16,
   alignItems: "start",
 };
@@ -155,6 +194,7 @@ const helperTextStyle: CSSProperties = {
 
 const tableCardStyle: CSSProperties = {
   overflow: "hidden",
+  boxShadow: "0 20px 44px rgba(15, 23, 42, 0.06)",
 };
 
 const invoicePrimaryStyle: CSSProperties = {
@@ -167,6 +207,13 @@ const invoiceSecondaryStyle: CSSProperties = {
   marginTop: 4,
   color: th.textMuted,
   fontSize: 11.5,
+};
+
+const artifactCellStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  alignItems: "flex-start",
 };
 
 const actionRowStyle: CSSProperties = {
@@ -261,6 +308,14 @@ const inlineLinkStyle: CSSProperties = {
   lineHeight: 1.45,
 };
 
+const artifactLinkStyle: CSSProperties = {
+  ...inlineLinkStyle,
+  maxWidth: 200,
+  overflowWrap: "anywhere",
+  fontSize: 11.5,
+  lineHeight: 1.35,
+};
+
 const activeInvoiceLinkStyle: CSSProperties = {
   ...actionChipStyle,
   minHeight: 32,
@@ -325,6 +380,16 @@ function formatCanvasMoney(value: MoneyAmount | null | undefined) {
   return `${currencyLabel} ${new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
   }).format(amount)}`;
+}
+
+function formatArtifactUrl(value: string | null | undefined) {
+  if (!value) return "—";
+  try {
+    const parsed = new URL(value);
+    return `${parsed.host}${parsed.pathname}`;
+  } catch {
+    return value;
+  }
 }
 
 function isIsoPast(value: string | null | undefined) {
@@ -540,6 +605,27 @@ function describeEmptyState(reason: EmptyReason) {
         tone: "info" as const,
       };
   }
+}
+
+function getArtifactState(invoice: InvoiceViewRecord) {
+  if (!invoice.artifactUrl) {
+    return {
+      label: "artifact missing",
+      tone: "neutral" as const,
+    };
+  }
+
+  if (invoice.expiresAt && isIsoPast(invoice.expiresAt)) {
+    return {
+      label: "artifact expired",
+      tone: "warn" as const,
+    };
+  }
+
+  return {
+    label: "artifact ready",
+    tone: "success" as const,
+  };
 }
 
 function formatStatusLabel(status: InvoiceViewRecord["statusView"]) {
@@ -882,6 +968,7 @@ export default async function InvoicesPage({
   const rows: InvoiceRow[] = filteredInvoices.map((invoice) => ({
     ...invoice,
   }));
+  const invoiceSummary = summarizeInvoices(filteredInvoices);
 
   const columns: CanvasTableColumn<InvoiceRow>[] = [
     {
@@ -891,7 +978,7 @@ export default async function InvoicesPage({
       r: (row) => (
         <div>
           <Link
-            href={`/invoices?invoiceId=${encodeURIComponent(row.invoiceId)}`}
+            href={buildInvoiceDetailHref(row.invoiceId, filters)}
             style={invoicePrimaryStyle}
           >
             {row.invoiceId}
@@ -935,6 +1022,35 @@ export default async function InvoicesPage({
       w: 120,
       mono: true,
       r: (row) => formatDateInput(row.createdAt) || "—",
+    },
+    {
+      h: "ARTIFACT",
+      w: 220,
+      r: (row) => {
+        const artifactState = getArtifactState(row);
+        return (
+          <div style={artifactCellStyle}>
+            <CanvasPill theme={th} tone={artifactState.tone}>
+              {artifactState.label}
+            </CanvasPill>
+            {row.artifactUrl ? (
+              <Link
+                href={row.artifactUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={artifactLinkStyle}
+              >
+                {formatArtifactUrl(row.artifactUrl)}
+              </Link>
+            ) : (
+              <span style={monoHintStyle}>no artifact URL</span>
+            )}
+            <span style={monoHintStyle}>
+              expiresAt {formatDateInput(row.expiresAt) || "—"}
+            </span>
+          </div>
+        );
+      },
     },
     {
       h: "ACTIONS",
@@ -1010,6 +1126,39 @@ export default async function InvoicesPage({
             <CanvasPill theme={th} tone="neutral">
               {`${filteredInvoices.length} visible`}
             </CanvasPill>
+          </div>
+        </div>
+
+        <div style={summaryGridStyle}>
+          <div style={summaryCardStyle}>
+            <div style={summaryLabelStyle}>Visible invoices</div>
+            <div style={summaryValueStyle}>{filteredInvoices.length}</div>
+            <div style={summaryCaptionStyle}>
+              current register slice after status, period, and id filters
+            </div>
+          </div>
+          <div style={summaryCardStyle}>
+            <div style={summaryLabelStyle}>Overdue</div>
+            <div style={summaryValueStyle}>{invoiceSummary.overdueCount}</div>
+            <div style={summaryCaptionStyle}>
+              urgency state stays distinct from regular `issued`
+            </div>
+          </div>
+          <div style={summaryCardStyle}>
+            <div style={summaryLabelStyle}>Expired artifacts</div>
+            <div style={summaryValueStyle}>
+              {invoiceSummary.expiredArtifacts}
+            </div>
+            <div style={summaryCaptionStyle}>
+              signed-download links may expire while invoice metadata remains
+            </div>
+          </div>
+          <div style={summaryCardStyle}>
+            <div style={summaryLabelStyle}>Visible amount</div>
+            <div style={summaryValueStyle}>{invoiceSummary.totalAmount}</div>
+            <div style={summaryCaptionStyle}>
+              finance users can validate the current slice before opening detail
+            </div>
           </div>
         </div>
 
@@ -1119,13 +1268,13 @@ export default async function InvoicesPage({
                   {`${allInvoices.length} total`}
                 </CanvasPill>
                 <CanvasPill theme={th} tone="danger">
-                  {`${summarizeInvoices(filteredInvoices).overdueCount} overdue`}
+                  {`${invoiceSummary.overdueCount} overdue`}
                 </CanvasPill>
                 <CanvasPill theme={th} tone="warn">
-                  {`${summarizeInvoices(filteredInvoices).expiredArtifacts} expired artifacts`}
+                  {`${invoiceSummary.expiredArtifacts} expired artifacts`}
                 </CanvasPill>
                 <CanvasPill theme={th} tone="info">
-                  {summarizeInvoices(filteredInvoices).totalAmount}
+                  {invoiceSummary.totalAmount}
                 </CanvasPill>
               </div>
 
