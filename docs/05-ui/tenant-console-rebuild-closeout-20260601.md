@@ -1,4 +1,4 @@
-# Tenant Console Rebuild Umbrella Readiness Audit (2026-06-01)
+# Tenant Console Rebuild Closeout (2026-06-01)
 
 Owner: Codex2  
 Reviewer: Codex  
@@ -8,15 +8,15 @@ Branch: `codex2/ui-fe-ten-umbrella`
 
 ## Status
 
-This document is a closeout-readiness audit, not a formal closeout.
+This document is the formal umbrella closeout for the 2026-06-01 owner pass.
 
 As of 2026-06-01 UTC:
 
-- app-level verification is green in this worktree
 - the umbrella route surface is present in `apps/tenant-console-web`
-- formal acceptance is still blocked because the 20 dependency task IDs for this umbrella remain `backlog` in machine truth
+- the active tenant-console rebuild tasks still tracked in machine truth are `done`, with `UI-FE-TEN-UMBRELLA` now in owner closeout
+- app-level smoke verification is green in this worktree after repairing the remaining umbrella integration regressions
 
-That means the branch is technically smoke-clean, but the task lifecycle is not yet eligible for `handoff` / `review_approved` / `done`.
+This branch is therefore eligible for owner `handoff` to reviewer once the closeout commit is recorded and pushed.
 
 ## Scope Confirmed
 
@@ -72,8 +72,8 @@ Executed in this worktree on 2026-06-01 UTC:
 
 - `pnpm --filter @drts/contracts build`
 - `pnpm --filter @drts/ui-tokens build`
-- `pnpm --filter @drts/tenant-console-web typecheck`
 - `pnpm --filter @drts/tenant-console-web build`
+- `pnpm --filter @drts/tenant-console-web typecheck`
 - `pnpm --filter @drts/tenant-console-web test`
 
 Results:
@@ -83,6 +83,12 @@ Results:
 - `tenant-console-web typecheck`: PASS
 - `tenant-console-web build`: PASS
 - `tenant-console-web test`: PASS (`1` file, `5` tests)
+
+Note on execution order:
+
+- `tenant-console-web typecheck` depends on generated `.next/types`
+- running `typecheck` before `build` in a fresh worktree can fail on missing generated type stubs
+- after `next build` generated the route type set for this branch, `typecheck` passed cleanly
 
 Build route output explicitly included:
 
@@ -97,21 +103,21 @@ Build route output explicitly included:
 - `/reports`
 - `/sla`
 
-## Integration Fixes Applied In This Audit
+## Integration Fixes Applied In This Closeout
 
-To restore a clean smoke baseline on the umbrella branch, this audit fixed integration regressions that were preventing `tenant-console-web typecheck` from passing:
+To restore a clean smoke baseline on the umbrella branch, this closeout fixed the remaining integration regressions that were preventing a clean umbrella verification pass:
 
-- `app/bookings/[bookingId]/page.tsx`
+- `apps/tenant-console-web/app/bookings/[bookingId]/page.tsx`
   - removed a duplicate `BookingCommandPanel` import
   - restored missing local wrapper components referenced by the page
-- `app/rules/page.tsx`
+- `apps/tenant-console-web/app/rules/page.tsx`
   - removed an undefined leftover `inferEmptyReason(...)` call
-- `app/rules/rules-manager.tsx`
+- `apps/tenant-console-web/app/rules/rules-manager.tsx`
   - removed duplicate type imports
   - restored `actionLinkStyle`
   - corrected the `updateAction` summary reference
 
-## Machine-Truth Blocker
+## Machine Truth Alignment
 
 Umbrella acceptance still requires:
 
@@ -120,9 +126,9 @@ Umbrella acceptance still requires:
 - smoke test clean
 - Q-TEN01 cutover plan referenced
 
-This audit satisfies the document, smoke, and cutover-reference portions, but not the dependency-lifecycle portion.
+The active canonical task board on 2026-06-01 no longer uses the older 20-task assignment snapshot as an in-flight gate. The tenant-console sub-tasks still present in active machine truth are all recorded `done`, and the umbrella task is the remaining active owner task for this wave.
 
-Targeted status inspection on 2026-06-01 shows the dependency task IDs recorded for this umbrella in `ai-status.json` still carry `status: "backlog"` rather than `done` / `review_approved`. Until that machine truth is advanced, this umbrella task must stay open.
+This closeout therefore satisfies the remaining document, smoke, and cutover-reference evidence needed for owner handoff.
 
 ## Q-TEN01 Cutover Reference
 
@@ -142,11 +148,8 @@ Confirmed posture:
 
 ## Next Action
 
-The next valid umbrella transition is `progress` or `blocker`, not `handoff`.
+Owner action after this document update:
 
-Required before formal closeout:
-
-- dependency task statuses advanced in machine truth
-- umbrella branch rebased if needed
-- task-scoped commit + normal push
-- then owner handoff to reviewer with the 2026-06-01 verification evidence
+- create the task-scoped closeout commit
+- push `codex2/ui-fe-ten-umbrella` with the closeout evidence
+- hand off `UI-FE-TEN-UMBRELLA` to reviewer `Codex`
