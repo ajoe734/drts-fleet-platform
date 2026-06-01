@@ -432,6 +432,13 @@ function deriveUpdateAction(
   };
 }
 
+/**
+ * The active empty-state is derived from the page's own load outcome, returning
+ * only a fixed set of contract literals ("fetch_failed" | "not_provisioned" |
+ * "no_data"). It never casts a raw backend `emptyState.reason` into the tenant
+ * enum, so no out-of-set value (e.g. a driver-app `driver_not_eligible`) can
+ * reach an unguarded lookup.
+ */
 function deriveActiveEmptyReason(data: NotificationsPageData): {
   reason: CanvasEmptyReason;
   detail: string;
@@ -755,6 +762,14 @@ export default async function NotificationsPage() {
           subtitle="六種 EmptyReason 視覺差異 · 配合 Q-X15 統一處理"
         >
           <div style={emptyCatalogStyle}>
+            {/*
+             * Tenant-console catalog renders 6 EmptyReason states per acceptance.
+             * The 7th contract value, `driver_not_eligible`, is a driver-app-only
+             * state and is intentionally omitted here. The display map
+             * (`CANVAS_EMPTY_REASONS`) is still a complete `Record<EmptyReason,…>`
+             * so any reason key resolves safely; nothing casts a runtime value
+             * into this list, so there is no out-of-range / crash path.
+             */}
             {(
               [
                 "no_data",
