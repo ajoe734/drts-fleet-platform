@@ -70,6 +70,7 @@ import type {
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
   DriverLocationHeartbeatCommand,
+  DriverOpsInstruction,
   DriverProfileRecord,
   DriverRegistryRecord,
   DriverRejectTaskCommand,
@@ -911,6 +912,39 @@ export class ApiClient {
       body: command,
       ...(options?.headers ? { headers: options.headers } : {}),
     });
+  }
+
+  // ── Driver: Ops Instructions (Q-DRV04 manual-fallback banner) ──
+
+  /**
+   * Ops-issued instructions surfaced to the driver, primarily for
+   * manual-fallback coordination on forwarded orders (Q-DRV04). Pass
+   * `taskId` to scope the list to a single task's active instructions.
+   */
+  async listOpsInstructions(filters?: {
+    taskId?: string;
+  }): Promise<DriverOpsInstruction[]> {
+    const params = new URLSearchParams();
+    if (filters?.taskId) params.set("taskId", filters.taskId);
+    const query = params.toString();
+    const url = query
+      ? `/api/driver/ops-instructions?${query}`
+      : "/api/driver/ops-instructions";
+    return this.getList<DriverOpsInstruction>(url);
+  }
+
+  /**
+   * Acknowledge an ops instruction from the driver app, dismissing the
+   * in-app banner. Returns the updated instruction record.
+   */
+  async acknowledgeOpsInstruction(
+    instructionId: string,
+    command: { acknowledgedAt?: string } = {},
+  ): Promise<DriverOpsInstruction> {
+    return this.post<DriverOpsInstruction>(
+      `/api/driver/ops-instructions/${encodeURIComponent(instructionId)}/acknowledge`,
+      { body: command },
+    );
   }
 
   // ── Call Center ──
