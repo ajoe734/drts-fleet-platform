@@ -1,5 +1,8 @@
 import type {
+  CrossAppResourceLink,
   EmptyReason,
+  RefreshTier,
+  ResourceActionDescriptor,
   TenantAddressRecord,
   TenantCostCenterRecord,
   TenantPassengerRecord,
@@ -14,6 +17,91 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const EMPTY_REASONS: readonly EmptyReason[] = [
+  "no_data",
+  "not_provisioned",
+  "fetch_failed",
+  "permission_denied",
+  "external_unavailable",
+  "filtered_empty",
+] as const;
+
+const ROUTE_ACTIONS: readonly ResourceActionDescriptor[] = [
+  {
+    action: "submit_booking",
+    enabled: true,
+    riskLevel: "medium",
+  },
+  {
+    action: "cancel_form",
+    enabled: true,
+    riskLevel: "low",
+  },
+  {
+    action: "save_draft",
+    enabled: false,
+    disabledReasonCode: "drafts_not_supported",
+    riskLevel: "low",
+  },
+] as const;
+
+const CROSS_APP_LINKS: readonly CrossAppResourceLink[] = [
+  {
+    targetApp: "ops-console",
+    route: "/audit?resourceType=tenant_booking_command",
+    resourceType: "audit_entry",
+    resourceId: "tenant-booking-command",
+    openMode: "new_tab",
+    label: "Ops command audit",
+  },
+  {
+    targetApp: "platform-admin",
+    route: "/webhooks?scope=tenant-booking",
+    resourceType: "webhook_delivery",
+    resourceId: "tenant-booking",
+    openMode: "new_tab",
+    label: "Platform webhook diagnostics",
+  },
+] as const;
+
+function getEmptyReasonMessage(
+  kind: BookingCreateDirectorySnapshot["kind"],
+  reason: EmptyReason,
+) {
+  switch (reason) {
+    case "not_provisioned":
+      return kind === "cost_centers"
+        ? "No active cost-center register is published for this tenant yet."
+        : "This prerequisite directory has not been provisioned for the tenant yet.";
+    case "fetch_failed":
+      return "Directory data could not be loaded from the tenant API. Refresh before creating a booking command.";
+    case "permission_denied":
+      return "Your tenant role can view the booking form but cannot read this directory payload.";
+    case "external_unavailable":
+      return "The upstream source for this directory is temporarily unavailable. Retry after the dependency recovers.";
+    case "filtered_empty":
+      return "Current filters or inactive-only state hide all eligible records for booking prefill.";
+    case "no_data":
+    default:
+      return kind === "cost_centers"
+        ? "No active cost-center rows are available for quota and approval evaluation."
+        : "No active directory rows are available yet for booking prefill.";
+  }
+}
+
+function parseEmptyReason(
+  value: string | string[] | undefined,
+): EmptyReason | null {
+  const normalized = Array.isArray(value) ? value[0] : value;
+  if (!normalized) {
+    return null;
+  }
+
+  return EMPTY_REASONS.includes(normalized as EmptyReason)
+    ? (normalized as EmptyReason)
+    : null;
+}
+
 function buildDirectorySnapshot(params: {
   kind: BookingCreateDirectorySnapshot["kind"];
   label: string;
@@ -21,12 +109,28 @@ function buildDirectorySnapshot(params: {
   ctaLabel: string;
   result:
     | PromiseSettledResult<
-        TenantPassengerRecord[] | TenantAddressRecord[] | TenantCostCenterRecord[]
+        | TenantPassengerRecord[]
+        | TenantAddressRecord[]
+        | TenantCostCenterRecord[]
       >
     | undefined;
   activeCount: number;
+  overrideReason?: EmptyReason | null;
 }): BookingCreateDirectorySnapshot {
-  const { kind, label, href, ctaLabel, result, activeCount } = params;
+  const { kind, label, href, ctaLabel, result, activeCount, overrideReason } =
+    params;
+
+  if (overrideReason) {
+    return {
+      kind,
+      label,
+      href,
+      ctaLabel,
+      count: 0,
+      reason: overrideReason,
+      message: getEmptyReasonMessage(kind, overrideReason),
+    };
+  }
 
   if (!result || result.status === "rejected") {
     return {
@@ -36,8 +140,7 @@ function buildDirectorySnapshot(params: {
       ctaLabel,
       count: 0,
       reason: "fetch_failed",
-      message:
-        "Directory data could not be loaded from the tenant API. Retry the page refresh before creating a command.",
+      message: getEmptyReasonMessage(kind, "fetch_failed"),
     };
   }
 
@@ -51,8 +154,8 @@ function buildDirectorySnapshot(params: {
       reason: null,
       message:
         kind === "cost_centers"
-          ? "Canonical tenant cost-center rows are available for quota and approval evaluation."
-          : "Directory-backed records are available for quick booking prefill.",
+          ? "Canonical cost-center rows are available for quota and approval preview."
+          : "Directory-backed records are available for booking prefill shortcuts.",
     };
   }
 
@@ -66,10 +169,7 @@ function buildDirectorySnapshot(params: {
     ctaLabel,
     count: 0,
     reason: emptyReason,
-    message:
-      emptyReason === "not_provisioned"
-        ? "No active cost-center register is published for this tenant yet."
-        : "This tenant does not have any active records yet for booking prefill.",
+    message: getEmptyReasonMessage(kind, emptyReason),
   };
 }
 
@@ -116,6 +216,7 @@ export default async function NewBookingPage({
       ctaLabel: "Open passengers",
       result: passengersResult,
       activeCount: activePassengers.length,
+      overrideReason: parseEmptyReason(resolvedSearchParams.passengersReason),
     }),
     buildDirectorySnapshot({
       kind: "addresses",
@@ -124,6 +225,7 @@ export default async function NewBookingPage({
       ctaLabel: "Open addresses",
       result: addressesResult,
       activeCount: activeAddresses.length,
+      overrideReason: parseEmptyReason(resolvedSearchParams.addressesReason),
     }),
     buildDirectorySnapshot({
       kind: "cost_centers",
@@ -132,6 +234,7 @@ export default async function NewBookingPage({
       ctaLabel: "Open cost centers",
       result: costCentersResult,
       activeCount: activeCostCenters.length,
+      overrideReason: parseEmptyReason(resolvedSearchParams.costCentersReason),
     }),
   ];
 
@@ -148,15 +251,19 @@ export default async function NewBookingPage({
     dataFreshness: "fresh",
     source: "live",
   };
+  const refreshTier: RefreshTier = "manual";
 
   return (
     <TenantBookingCreateForm
       addresses={activeAddresses}
+      availableActions={[...ROUTE_ACTIONS]}
       costCenters={activeCostCenters}
+      crossAppLinks={[...CROSS_APP_LINKS]}
       directorySnapshots={directorySnapshots}
       initialPrefill={initialPrefill}
       passengers={activePassengers}
       refreshMetadata={refreshMetadata}
+      refreshTier={refreshTier}
     />
   );
 }

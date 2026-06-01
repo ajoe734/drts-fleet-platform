@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type {
+  ActionReceipt,
   BookingRecord,
   CreateTenantBookingCommand,
 } from "@drts/contracts";
@@ -12,12 +13,24 @@ export async function POST(request: NextRequest) {
     const client = createTenantClient(API_URL, DEMO_TENANT_ID, DEMO_ACTOR_ID);
     const response = (await client.createTenantBooking(body)) as
       | BookingRecord
+      | ActionReceipt
       | { booking?: BookingRecord };
 
+    const receipt =
+      response && typeof response === "object" && "actionId" in response
+        ? (response as ActionReceipt)
+        : null;
     const booking =
       response && typeof response === "object" && "bookingId" in response
         ? (response as BookingRecord)
         : (response as { booking?: BookingRecord }).booking;
+
+    if (receipt?.status === "accepted") {
+      return NextResponse.json(
+        { ok: true, receipt, booking: booking ?? null },
+        { status: 202 },
+      );
+    }
 
     if (!booking) {
       return NextResponse.json(
