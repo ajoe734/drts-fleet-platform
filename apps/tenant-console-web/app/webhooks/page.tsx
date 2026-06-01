@@ -725,6 +725,8 @@ function getActionTone(action: string): CanvasTone | undefined {
 
 function getPageActionHref(action: string) {
   switch (action) {
+    case "payload_schema":
+      return "/webhooks#payload-schema";
     case "createWebhookEndpoint":
       return "/webhooks?mode=create";
     default:
@@ -2058,6 +2060,43 @@ export default async function WebhooksPage({
                     .deliveryFailureNotificationChannel ?? "—"}
                 </span>
               </div>
+            </div>
+          </CanvasCard>
+        </div>
+
+        <div id="payload-schema">
+          <CanvasCard
+            theme={th}
+            title="Payload schema"
+            subtitle="Header CTA target. Visibility still comes from governance.availableActions[]."
+          >
+            <div style={stackStyle}>
+              <div style={detailLineStyle}>
+                <span>test event</span>
+                <span style={monoStyle}>
+                  {data.governance?.webhookPolicy.testEventType ?? "—"}
+                </span>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <span style={metricLabelStyle}>baseline events</span>
+                {baselineEvents.length > 0 ? (
+                  <div style={chipWrapStyle}>
+                    {baselineEvents.map((eventType) => (
+                      <CanvasPill key={eventType} theme={th} tone="info">
+                        {eventType}
+                      </CanvasPill>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={mutedStyle}>
+                    Governance package 尚未提供 baseline event schema。
+                  </p>
+                )}
+              </div>
+              <p style={mutedStyle}>
+                Endpoint create / update 必須沿用這組 event schema；UI
+                不自行發明 額外 payload 類型。
+              </p>
             </div>
           </CanvasCard>
         </div>
