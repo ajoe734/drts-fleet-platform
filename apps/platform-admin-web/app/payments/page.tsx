@@ -443,13 +443,26 @@ function getActionDescriptor(
   return actions.find((descriptor) => descriptor.action === action) ?? null;
 }
 
-function resourceActions(
+function resolveResourceActions(
   record: RuntimeActionedResource | null | undefined,
-  fallbackActions: ResourceActionDescriptor[],
 ) {
-  return record?.availableActions?.length
-    ? record.availableActions
-    : fallbackActions;
+  return record?.availableActions ?? [];
+}
+
+function findAvailableActionDescriptor(
+  action: string,
+  records: (RuntimeActionedResource | null | undefined)[],
+) {
+  for (const record of records) {
+    const descriptor = getActionDescriptor(
+      resolveResourceActions(record),
+      action,
+    );
+    if (descriptor) {
+      return descriptor;
+    }
+  }
+  return null;
 }
 
 function detectEmptyReason(error: string | null): PaymentsEmptyReason | null {
@@ -1125,38 +1138,24 @@ export default function PaymentsPage() {
       describeMatrixChannel,
     );
 
-  const paymentsPageActions: ResourceActionDescriptor[] = [
-    listAction("generate_invoices", "medium"),
-    listAction("generate_driver_statements", "medium"),
-    listAction("create_reconciliation_issue", "medium"),
+  const paymentsActionSources: RuntimeActionedResource[] = [
+    ...invoices,
+    ...statements,
+    ...reconciliationIssues,
+    ...settlementMatrix,
   ];
-
-  const issueActionsFor = (
-    issue: ReconciliationIssueRecord,
-  ): ResourceActionDescriptor[] => [
-    listAction("assign_issue", "medium", {
-      enabled: issue.status !== "resolved",
-      disabledReasonCode: "already_resolved",
-    }),
-    listAction("comment_with_artifacts", "medium", {
-      enabled: issue.status !== "resolved",
-      disabledReasonCode: "already_resolved",
-    }),
-    listAction(
-      "resolve_issue",
-      issue.status === "reopened" ? "high" : "medium",
-      {
-        enabled: issue.status !== "resolved",
-        disabledReasonCode: "already_resolved",
-        requiresReason: issue.status === "reopened",
-      },
-    ),
-    listAction("reopen_issue", "high", {
-      enabled: issue.status === "resolved",
-      disabledReasonCode: "issue_not_resolved",
-      requiresReason: true,
-    }),
-  ];
+  const generateInvoicesAction = findAvailableActionDescriptor(
+    "generate_invoices",
+    paymentsActionSources,
+  );
+  const generateStatementsAction = findAvailableActionDescriptor(
+    "generate_driver_statements",
+    paymentsActionSources,
+  );
+  const createIssueAction = findAvailableActionDescriptor(
+    "create_reconciliation_issue",
+    paymentsActionSources,
+  );
 
   const issueOpsLinkFor = (
     issue: ReconciliationIssueRecord,
@@ -1182,19 +1181,13 @@ export default function PaymentsPage() {
     ...((
       rootEmptyReason === "fetch_failed"
         ? listAction("retry_refresh", "low")
-        : getActionDescriptor(
-            paymentsPageActions,
-            "create_reconciliation_issue",
-          )
+        : createIssueAction
     )
       ? {
           nextAction:
             rootEmptyReason === "fetch_failed"
               ? listAction("retry_refresh", "low")
-              : getActionDescriptor(
-                  paymentsPageActions,
-                  "create_reconciliation_issue",
-                )!,
+              : createIssueAction!,
         }
       : {}),
   };
@@ -1221,13 +1214,13 @@ export default function PaymentsPage() {
     ...((
       filteredInvoices.length === 0 && invoices.length > 0
         ? listAction("clear_invoice_filter", "low")
-        : getActionDescriptor(paymentsPageActions, "generate_invoices")
+        : generateInvoicesAction
     )
       ? {
           nextAction:
             filteredInvoices.length === 0 && invoices.length > 0
               ? listAction("clear_invoice_filter", "low")
-              : getActionDescriptor(paymentsPageActions, "generate_invoices")!,
+              : generateInvoicesAction!,
         }
       : {}),
   };
@@ -1238,12 +1231,9 @@ export default function PaymentsPage() {
       rootEmptyReason ?? "no_data",
       t("payments.noStatements"),
     ),
-    ...(getActionDescriptor(paymentsPageActions, "generate_driver_statements")
+    ...(generateStatementsAction
       ? {
-          nextAction: getActionDescriptor(
-            paymentsPageActions,
-            "generate_driver_statements",
-          )!,
+          nextAction: generateStatementsAction,
         }
       : {}),
   };
@@ -1404,15 +1394,6 @@ export default function PaymentsPage() {
       {openReconciliationCount > 0 ? ` · ${openReconciliationCount}` : ""}
     </>,
   ];
-  const generateInvoicesAction = getActionDescriptor(
-    paymentsPageActions,
-    "generate_invoices",
-  );
-  const generateStatementsAction = getActionDescriptor(
-    paymentsPageActions,
-    "generate_driver_statements",
-  );
-
   const shellNav: CanvasShellNavItem[] = [
     { key: "home", href: "/", label: navLabels.home, icon: "dashboard" },
     {
@@ -1768,9 +1749,8 @@ export default function PaymentsPage() {
       h: "Actions",
       w: 206,
       r: (issue) => {
-        const issueActions = resourceActions(
+        const issueActions = resolveResourceActions(
           issue as RuntimeIssueRecord,
-          issueActionsFor(issue),
         );
         const assignAction = getActionDescriptor(issueActions, "assign_issue");
         const commentAction = getActionDescriptor(
@@ -2225,21 +2205,15 @@ export default function PaymentsPage() {
               <CanvasBtn theme={theme} icon="reports" disabled>
                 {copy.export}
               </CanvasBtn>
-              {renderContractAction(
-                getActionDescriptor(
-                  paymentsPageActions,
-                  "create_reconciliation_issue",
-                ),
-                {
-                  label: copy.openIssue,
-                  icon: "plus",
-                  primary: true,
-                  onClick: () =>
-                    document
-                      .getElementById("payments-create-issue")
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" }),
-                },
-              )}
+              {renderContractAction(createIssueAction, {
+                label: copy.openIssue,
+                icon: "plus",
+                primary: true,
+                onClick: () =>
+                  document
+                    .getElementById("payments-create-issue")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+              })}
             </>
           }
         />
