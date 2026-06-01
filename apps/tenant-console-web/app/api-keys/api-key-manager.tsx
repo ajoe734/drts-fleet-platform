@@ -674,9 +674,9 @@ function getEmptyStateCatalog(
     permission_denied: {
       tone: "neutral" as CanvasTone,
       title: "目前身分只有只讀權限",
-      body: "你可以查看 masked credential 與 audit context，但 issue / rotate / revoke 不可用。",
-      ctaLabel: "查看 Ops 稽核",
-      ctaHref: externalLinks[1].href,
+      body: "你可以查看 masked credential 與 in-app audit context，但 issue / rotate / revoke 不可用。",
+      ctaLabel: "查看稽核紀錄",
+      ctaHref: "/audit",
     },
     external_unavailable: {
       tone: "warn" as CanvasTone,
