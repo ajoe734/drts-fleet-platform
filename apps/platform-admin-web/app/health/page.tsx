@@ -20,6 +20,7 @@ import type {
   UiHealthEnvelope,
   UiRefreshMetadata,
 } from "@drts/contracts";
+import { REFRESH_TIER_CADENCE_MS, REFRESH_TIER_LABELS } from "@drts/contracts";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
@@ -41,17 +42,8 @@ import {
 } from "@drts/ui-web";
 
 const REFRESH_TIER: RefreshTier = "medium_slow";
-const REFRESH_TIER_LABEL = "T4";
-const REFRESH_CADENCE_MS: Record<RefreshTier, number> = {
-  urgent: 5_000,
-  fast: 3_000,
-  dispatch: 5_000,
-  medium: 15_000,
-  medium_slow: 30_000,
-  slow: 30_000,
-  manual: 0,
-};
-const REFRESH_INTERVAL_MS = REFRESH_CADENCE_MS[REFRESH_TIER];
+const REFRESH_TIER_LABEL = REFRESH_TIER_LABELS[REFRESH_TIER];
+const REFRESH_INTERVAL_MS = REFRESH_TIER_CADENCE_MS[REFRESH_TIER];
 
 type HealthView = "alerts" | "adapters";
 type RouteFilter = "all" | "platform" | "ops";
@@ -708,12 +700,13 @@ function resolveCrossAppHref(link: CrossAppResourceLink): string | null {
 function buildEmptyState(
   view: HealthView,
   errorReason: EmptyReason | null,
+  showErrorState: boolean,
   routeFilter: RouteFilter,
   totalAlerts: number,
   filteredAlerts: number,
   adapterCount: number,
 ): EmptyStateEnvelope | null {
-  if (errorReason) {
+  if (errorReason && showErrorState) {
     return {
       reason: errorReason,
       messageCode: `health.empty.${errorReason}`,
@@ -895,6 +888,7 @@ export default function HealthPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasLoadedSnapshot, setHasLoadedSnapshot] = useState(false);
   const [view, setView] = useState<HealthView>("alerts");
   const [routeFilter, setRouteFilter] = useState<RouteFilter>("platform");
   const [now, setNow] = useState(Date.now());
@@ -905,9 +899,8 @@ export default function HealthPage() {
         setRefreshing(true);
       } else {
         setLoading(true);
+        setError(null);
       }
-
-      setError(null);
 
       try {
         const [adapterData, operationalData] = await Promise.all([
@@ -917,6 +910,8 @@ export default function HealthPage() {
 
         setAdapters(adapterData);
         setObservability(operationalData);
+        setHasLoadedSnapshot(true);
+        setError(null);
       } catch (nextError: unknown) {
         setError(
           nextError instanceof Error ? nextError.message : String(nextError),
@@ -1097,6 +1092,8 @@ export default function HealthPage() {
   );
 
   const activeSurface = useMemo<ActiveSurface>(() => {
+    const showErrorEmptyState = !hasLoadedSnapshot;
+
     if (view === "alerts") {
       return {
         title: t("health.tab.alerts"),
@@ -1108,6 +1105,7 @@ export default function HealthPage() {
         emptyState: buildEmptyState(
           "alerts",
           errorReason,
+          showErrorEmptyState,
           routeFilter,
           sortedAlerts.length,
           alertRows.length,
@@ -1134,6 +1132,7 @@ export default function HealthPage() {
       emptyState: buildEmptyState(
         "adapters",
         errorReason,
+        showErrorEmptyState,
         routeFilter,
         sortedAlerts.length,
         alertRows.length,
@@ -1157,6 +1156,7 @@ export default function HealthPage() {
     sortedAlerts.length,
     t,
     view,
+    hasLoadedSnapshot,
   ]);
 
   const emptyStateAction = activeSurface.emptyState?.nextAction

@@ -116,6 +116,33 @@ export type RefreshTier =
   | "slow"
   | "manual";
 
+/**
+ * Shared tier-to-cadence mapping consumed by app shells when wiring polling.
+ * Keeps page-level implementations aligned with the Q-X02 fixed tiers.
+ */
+export const REFRESH_TIER_CADENCE_MS: Readonly<Record<RefreshTier, number>> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: 0,
+};
+
+/**
+ * Visual shorthand used by the canvas packet for the 7 refresh tiers.
+ */
+export const REFRESH_TIER_LABELS: Readonly<Record<RefreshTier, string>> = {
+  urgent: "T0",
+  fast: "T1",
+  dispatch: "T2",
+  medium: "T3",
+  medium_slow: "T4",
+  slow: "T5",
+  manual: "T6",
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Q-X13 — ResourceActionDescriptor
 // ─────────────────────────────────────────────────────────────────────────────
