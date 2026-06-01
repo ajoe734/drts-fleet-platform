@@ -107,7 +107,15 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const T4_REFRESH_MS = 30_000;
+const REFRESH_TIER_INTERVALS_MS: Record<RefreshTier, number | null> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: null,
+};
 
 const shellStyle = {
   margin: "-32px",
@@ -587,11 +595,25 @@ function findAction(
   return actions.find((action) => aliases.includes(action.action)) ?? null;
 }
 
+function refreshTierIntervalMs(refreshTier: RefreshTier): number | null {
+  return REFRESH_TIER_INTERVALS_MS[refreshTier];
+}
+
+function refreshCadenceLabel(refreshTier: RefreshTier, locale: string): string {
+  const intervalMs = refreshTierIntervalMs(refreshTier);
+  if (intervalMs === null) {
+    return locale === "en" ? "manual refresh" : "手動更新";
+  }
+
+  const seconds = Math.round(intervalMs / 1000);
+  return locale === "en" ? `${seconds}s cadence` : `${seconds} 秒 cadence`;
+}
+
 function resolveCredentialEmptyReason(
   entry: PartnerDetailRecord,
   credentials: PartnerIngressCredentialRecord[],
   visibleCredentialCount: number,
-  error: string | null,
+  credentialError: string | null,
 ): EmptyReason | null {
   if (credentials.length > 0) {
     if (visibleCredentialCount === 0) {
@@ -599,7 +621,7 @@ function resolveCredentialEmptyReason(
     }
     return null;
   }
-  if (error) {
+  if (credentialError) {
     return "fetch_failed";
   }
   if (entry.status === "revoked") {
@@ -1242,7 +1264,9 @@ export default function PartnerDetailPage() {
   const [issuedCredential, setIssuedCredential] =
     useState<PartnerIngressCredentialIssued | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [entryError, setEntryError] = useState<string | null>(null);
+  const [credentialError, setCredentialError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [changingStatus, setChangingStatus] = useState<ActionIntent | null>(
     null,
@@ -1281,7 +1305,8 @@ export default function PartnerDetailPage() {
       }
 
       setLoading(true);
-      setError(null);
+      setEntryError(null);
+      setActionError(null);
 
       try {
         const entries =
@@ -1296,21 +1321,30 @@ export default function PartnerDetailPage() {
           setIssuedCredential(null);
         }
 
+        setCredentialError(null);
         if (selected) {
-          const nextCredentials =
-            await client.listPlatformPartnerIngressCredentials(
-              selected.entrySlug,
+          try {
+            const nextCredentials =
+              await client.listPlatformPartnerIngressCredentials(
+                selected.entrySlug,
+              );
+            setCredentials(nextCredentials ?? []);
+          } catch (cause: unknown) {
+            setCredentialError(
+              cause instanceof Error ? cause.message : String(cause),
             );
-          setCredentials(nextCredentials ?? []);
+            setCredentials([]);
+          }
         } else {
           setCredentials([]);
         }
         setLastLoadedAt(new Date().toISOString());
       } catch (cause: unknown) {
-        setError(cause instanceof Error ? cause.message : String(cause));
+        setEntryError(cause instanceof Error ? cause.message : String(cause));
         setEntry(null);
         setEditForm(EMPTY_ENTRY_FORM);
         setCredentials([]);
+        setCredentialError(null);
       } finally {
         setLoading(false);
       }
@@ -1322,15 +1356,19 @@ export default function PartnerDetailPage() {
     void loadEntry();
   }, [loadEntry]);
 
+  const refreshTier =
+    entry?.refreshTier ?? ("medium_slow" satisfies RefreshTier);
+  const refreshIntervalMs = refreshTierIntervalMs(refreshTier);
+
   useEffect(() => {
-    if (!entrySlug) {
+    if (!entrySlug || refreshIntervalMs === null) {
       return undefined;
     }
     const timer = window.setInterval(() => {
       void loadEntry({ preserveIssuedCredential: true });
-    }, T4_REFRESH_MS);
+    }, refreshIntervalMs);
     return () => window.clearInterval(timer);
-  }, [entrySlug, loadEntry]);
+  }, [entrySlug, loadEntry, refreshIntervalMs]);
 
   const updateFormField = <Key extends keyof EntryFormState>(
     key: Key,
@@ -1700,10 +1738,10 @@ export default function PartnerDetailPage() {
             entry,
             credentials,
             filteredCredentials.length,
-            error,
+            credentialError,
           )
         : null,
-    [credentials, entry, error, filteredCredentials.length],
+    [credentialError, credentials, entry, filteredCredentials.length],
   );
 
   const deepLinks = useMemo(
@@ -1741,13 +1779,16 @@ export default function PartnerDetailPage() {
     [credentials.length, locale, readinessMissingCount],
   );
 
-  const refreshTier =
-    entry?.refreshTier ?? ("medium_slow" satisfies RefreshTier);
   const isStaleData = Boolean(
     lastLoadedAt &&
-    Date.now() - new Date(lastLoadedAt).getTime() > T4_REFRESH_MS,
+    refreshIntervalMs !== null &&
+    Date.now() - new Date(lastLoadedAt).getTime() > refreshIntervalMs,
   );
-  const freshnessTone = error ? "danger" : isStaleData ? "warn" : "success";
+  const freshnessTone = entryError
+    ? "danger"
+    : isStaleData
+      ? "warn"
+      : "success";
 
   const linkageItems = useMemo(
     () => [
@@ -1788,7 +1829,7 @@ export default function PartnerDetailPage() {
       },
       {
         k: locale === "en" ? "Refresh tier" : "Refresh tier",
-        v: `${refreshTier} · 30s`,
+        v: `${refreshTier} · ${refreshCadenceLabel(refreshTier, locale)}`,
         mono: true,
       },
     ],
@@ -1819,7 +1860,7 @@ export default function PartnerDetailPage() {
       },
       {
         k: locale === "en" ? "Refresh target" : "Refresh target",
-        v: `${refreshTier} · 30s`,
+        v: `${refreshTier} · ${refreshCadenceLabel(refreshTier, locale)}`,
         mono: true,
       },
     ],
@@ -1906,7 +1947,7 @@ export default function PartnerDetailPage() {
         setPendingAction(null);
         await loadEntry({ preserveIssuedCredential: true });
       } catch (cause: unknown) {
-        setError(cause instanceof Error ? cause.message : String(cause));
+        setActionError(cause instanceof Error ? cause.message : String(cause));
       } finally {
         setChangingStatus(null);
         setRevokingCredentialId(null);
@@ -1920,7 +1961,7 @@ export default function PartnerDetailPage() {
       return;
     }
     setSaving(true);
-    setError(null);
+    setActionError(null);
     try {
       await client.updatePlatformPartnerEntry(
         entry.entrySlug,
@@ -1928,7 +1969,7 @@ export default function PartnerDetailPage() {
       );
       await loadEntry();
     } catch (cause: unknown) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setActionError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setSaving(false);
     }
@@ -1985,7 +2026,7 @@ export default function PartnerDetailPage() {
                 : "Partner entry 無法使用"
             }
             subtitle={
-              error ??
+              entryError ??
               (locale === "en" ? "Entry not found." : "找不到此 entry。")
             }
             actions={
@@ -2001,7 +2042,7 @@ export default function PartnerDetailPage() {
             tone="danger"
             title={locale === "en" ? "Entry not found" : "找不到 entry"}
             body={
-              error ??
+              entryError ??
               (locale === "en"
                 ? "The partner entry could not be resolved from the current dataset."
                 : "目前資料集中找不到這筆 partner entry。")
@@ -2103,7 +2144,7 @@ export default function PartnerDetailPage() {
             }
           />
 
-          {error ? (
+          {actionError ? (
             <Banner
               theme={theme}
               tone="danger"
@@ -2112,7 +2153,7 @@ export default function PartnerDetailPage() {
                   ? "Unable to update partner entry"
                   : "Partner entry 更新失敗"
               }
-              body={error}
+              body={actionError}
             />
           ) : null}
 
@@ -2123,8 +2164,8 @@ export default function PartnerDetailPage() {
               title={locale === "en" ? "Data is stale" : "資料已變舊"}
               body={
                 locale === "en"
-                  ? `This snapshot is older than the T4 30-second target. Refresh before making activation or credential decisions.`
-                  : "目前畫面超過 T4 的 30 秒更新目標。請先重新整理，再做啟用或 credential 決策。"
+                  ? `This snapshot is older than the ${refreshCadenceLabel(refreshTier, locale)} target. Refresh before making activation or credential decisions.`
+                  : `目前畫面超過 ${refreshCadenceLabel(refreshTier, locale)} 更新目標。請先重新整理，再做啟用或 credential 決策。`
               }
             />
           ) : null}
@@ -2217,8 +2258,8 @@ export default function PartnerDetailPage() {
             <KPI
               theme={theme}
               label={locale === "en" ? "Refresh tier" : "Refresh tier"}
-              value="T4"
-              sub={locale === "en" ? "30s cadence" : "30 秒 cadence"}
+              value={refreshTier}
+              sub={refreshCadenceLabel(refreshTier, locale)}
               hint={
                 lastLoadedAt
                   ? `${locale === "en" ? "Last refresh" : "最近更新"} ${formatDateTime(
@@ -2881,14 +2922,16 @@ export default function PartnerDetailPage() {
                             issueAction.disabledReasonCode,
                             locale,
                           )
-                        : rotateAction && !rotateAction.enabled
-                          ? disabledReasonLabel(
-                              rotateAction.disabledReasonCode,
-                              locale,
-                            )
-                          : locale === "en"
-                            ? "Issue, rotate, and revoke controls are driven by availableActions and remain audit-logged."
-                            : "核發、輪替與撤銷控制皆由 availableActions 驅動，且會寫入 audit。"}
+                        : credentialError
+                          ? credentialError
+                          : rotateAction && !rotateAction.enabled
+                            ? disabledReasonLabel(
+                                rotateAction.disabledReasonCode,
+                                locale,
+                              )
+                            : locale === "en"
+                              ? "Issue, rotate, and revoke controls are driven by availableActions and remain audit-logged."
+                              : "核發、輪替與撤銷控制皆由 availableActions 驅動，且會寫入 audit。"}
                     </div>
                     <div style={filterRowStyle}>
                       {(["active", "revoked", "all"] as const).map(
