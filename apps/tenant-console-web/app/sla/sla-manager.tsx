@@ -59,7 +59,7 @@ type TenantSlaEmptyReason = Exclude<
 
 type SlaManagerProps = {
   view: TenantSlaProfileView | null;
-  loadErrorMessage: string | null;
+  transportErrorMessage: string | null;
   links: LinkItem[];
   crossAppLinks: CrossAppLinkItem[];
 };
@@ -445,15 +445,9 @@ function getRecalculationStatus(
   return lastRecalculationAt ? "history" : "idle";
 }
 
-function getActiveEmptyState(
-  emptyState: EmptyStateEnvelope | null,
-  loadErrorMessage: string | null,
-) {
+function getActiveEmptyState(emptyState: EmptyStateEnvelope | null) {
   if (emptyState?.reason && emptyState.reason in EMPTY_STATE_CONFIG) {
     return EMPTY_STATE_CONFIG[emptyState.reason as TenantSlaEmptyReason];
-  }
-  if (!emptyState && loadErrorMessage) {
-    return EMPTY_STATE_CONFIG.fetch_failed;
   }
   return null;
 }
@@ -487,23 +481,6 @@ function getRefreshDeadline(metadata: UiRefreshMetadata | null) {
   const generatedAt = new Date(metadata.generatedAt).getTime();
   if (Number.isNaN(generatedAt)) return null;
   return generatedAt + metadata.staleAfterMs;
-}
-
-function isPendingRecalculationAction(
-  action: ResourceActionDescriptor | null,
-  receiptState: ActionReceiptState | null,
-) {
-  if (receiptState?.actionKey === "recalculate_sla_bookings") {
-    return receiptState.receipt.status === "accepted";
-  }
-
-  if (!action || action.enabled) {
-    return false;
-  }
-
-  return /pending|queued|processing|in_progress/i.test(
-    action.disabledReasonCode ?? "",
-  );
 }
 
 function getReceiptTone(receipt: ActionReceipt) {
@@ -573,7 +550,7 @@ function buildActionPrompt(action: ResourceActionDescriptor | null) {
 
 export function SlaManager({
   view,
-  loadErrorMessage,
+  transportErrorMessage,
   links,
   crossAppLinks,
 }: SlaManagerProps) {
@@ -608,7 +585,7 @@ export function SlaManager({
   const recalcAction = getAction(availableActions, "recalculate_sla_bookings");
   const nextAction = emptyState?.nextAction ?? null;
   const effectiveEmptyReason = getTenantSlaEmptyReason(emptyState?.reason);
-  const activeEmptyState = getActiveEmptyState(emptyState, loadErrorMessage);
+  const activeEmptyState = getActiveEmptyState(emptyState);
   const showEditor =
     Boolean(profile) ||
     ((effectiveEmptyReason === "not_provisioned" ||
@@ -629,37 +606,8 @@ export function SlaManager({
     receiptState,
     lastRecalculationAt,
   );
-  const pendingRecalculation =
-    recalculationStatus === "queued" ||
-    isPendingRecalculationAction(recalcAction, receiptState);
-  const attainmentUnavailableLabel =
-    profile && !activeEmptyState ? "待 SLA attainment read model" : "—";
-  const attainmentItems = [
-    {
-      k: "總 SLA 評估趟次",
-      v: attainmentUnavailableLabel,
-      mono: true,
-    },
-    {
-      k: "達標",
-      v: attainmentUnavailableLabel,
-      mono: true,
-    },
-    {
-      k: "wait 違規",
-      v: attainmentUnavailableLabel,
-      mono: true,
-    },
-    {
-      k: "arrival 違規",
-      v: attainmentUnavailableLabel,
-      mono: true,
-    },
-    {
-      k: "completion 違規",
-      v: attainmentUnavailableLabel,
-      mono: true,
-    },
+  const pendingRecalculation = recalculationStatus === "queued";
+  const summaryItems = [
     {
       k: "updatedAt",
       v: formatDateTime(profile?.updatedAt),
@@ -668,6 +616,28 @@ export function SlaManager({
     {
       k: "updatedBy",
       v: updatedBy ?? "—",
+      mono: true,
+    },
+    {
+      k: "profile state",
+      v: profile ? "configured" : (emptyState?.reason ?? "—"),
+      mono: true,
+    },
+    {
+      k: "recalculation state",
+      v: recalculationStatus,
+      mono: true,
+    },
+    {
+      k: "last recalculation",
+      v: lastRecalculationAt ? formatDateTime(lastRecalculationAt) : "idle",
+      mono: true,
+    },
+    {
+      k: "refresh tier",
+      v: refreshTier
+        ? `${REFRESH_TIER_CODE[refreshTier]} / ${refreshTier}`
+        : "—",
       mono: true,
     },
   ];
@@ -831,13 +801,10 @@ export function SlaManager({
             <div style={{ ...noteStyle, maxWidth: 560 }}>
               {activeEmptyState.body}
             </div>
-            {loadErrorMessage ? (
-              <div style={noteStyle}>error · {loadErrorMessage}</div>
-            ) : null}
           </div>
         </div>
         <div style={noteStyle}>
-          messageCode · {emptyState?.messageCode ?? "transport.fetch_failed"}
+          messageCode · {emptyState?.messageCode ?? "—"}
         </div>
         {nextAction ? (
           <div style={emptyActionStyle}>
@@ -908,6 +875,44 @@ export function SlaManager({
             title="操作失敗"
             body={actionError}
           />
+        ) : null}
+
+        {transportErrorMessage && !view ? (
+          <CanvasCard theme={th}>
+            <div style={emptyStateStyle}>
+              <CanvasPill theme={th} tone="danger">
+                transport_error
+              </CanvasPill>
+              <div style={{ display: "grid", gap: 10 }}>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>
+                  SLA view 暫時無法載入
+                </div>
+                <div style={{ ...noteStyle, maxWidth: 560 }}>
+                  這是 transport/request failure，不屬於 Q-X15 的六種
+                  EmptyReason。 請重新整理，或改從整合就緒度與 audit 追查。
+                </div>
+                <div style={noteStyle}>error · {transportErrorMessage}</div>
+              </div>
+              <div style={linkRowStyle}>
+                {links.map((link) => (
+                  <Link key={link.href} href={link.href} style={linkStyle}>
+                    {link.label} →
+                  </Link>
+                ))}
+                {crossAppLinks.map((link) => (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    style={linkStyle}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {link.label} ↗
+                  </a>
+                ))}
+              </div>
+            </div>
+          </CanvasCard>
         ) : null}
 
         {receiptState ? (
@@ -990,7 +995,7 @@ export function SlaManager({
           />
         ) : null}
 
-        {!showEditor ? (
+        {!view && transportErrorMessage ? null : !showEditor ? (
           emptyStateCard
         ) : (
           <div style={sectionStackStyle}>
@@ -1142,19 +1147,13 @@ export function SlaManager({
 
               <CanvasCard theme={th} title="效益 · 上月 SLA 達成率">
                 <div style={summaryCardStyle}>
-                  <CanvasDL theme={th} cols={1} items={attainmentItems} />
+                  <CanvasDL theme={th} cols={1} items={summaryItems} />
                   <div style={noteStyle}>
-                    此卡片依照設計稿保留 SLA 達成率位置；目前 read model
-                    尚未回傳上月統計，因此先顯示 profile provenance
-                    與最近一次重算時間。
+                    設計稿右側卡片保留 SLA attainment 區塊位置；目前 contract
+                    僅提供 profile、refresh 與 recalculation
+                    metadata，故這裡只呈現已回傳欄位，不自行推估達成率。
                   </div>
                   <div style={summaryListStyle}>
-                    <div>
-                      <div style={summaryLabelStyle}>profile state</div>
-                      <div style={summaryValueStyle}>
-                        {profile ? "configured" : (emptyState?.reason ?? "—")}
-                      </div>
-                    </div>
                     <div>
                       <div style={summaryLabelStyle}>provenance</div>
                       <div style={summaryValueStyle}>
@@ -1166,11 +1165,9 @@ export function SlaManager({
                       <div style={summaryValueStyle}>{recalculationStatus}</div>
                     </div>
                     <div>
-                      <div style={summaryLabelStyle}>last recalculation</div>
+                      <div style={summaryLabelStyle}>cross-app links</div>
                       <div style={summaryValueStyle}>
-                        {lastRecalculationAt
-                          ? formatDateTime(lastRecalculationAt)
-                          : "idle"}
+                        audit / ops-console / integration-governance
                       </div>
                     </div>
                   </div>

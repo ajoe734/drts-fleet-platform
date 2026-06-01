@@ -17,17 +17,18 @@ const pageBodyStyle = {
 
 async function loadSlaPageData(): Promise<{
   view: TenantSlaProfileView | null;
-  errorMessage: string | null;
+  transportErrorMessage: string | null;
 }> {
   const client = getTenantClient();
 
   try {
     const view = await client.getSlaProfileView();
-    return { view, errorMessage: null };
+    return { view, transportErrorMessage: null };
   } catch (error) {
     return {
       view: null,
-      errorMessage: error instanceof Error ? error.message : "Unknown error",
+      transportErrorMessage:
+        error instanceof Error ? error.message : "Unknown error",
     };
   }
 }
@@ -37,20 +38,20 @@ export default async function SlaPage() {
 
   return (
     <div>
-      {data.errorMessage ? (
+      {data.transportErrorMessage ? (
         <div style={pageBodyStyle}>
           <CanvasBanner
             theme={th}
             tone="warn"
-            title="SLA page loaded with fallback state"
-            body={data.errorMessage}
+            title="SLA profile request failed"
+            body={data.transportErrorMessage}
           />
         </div>
       ) : null}
 
       <SlaManager
         view={data.view}
-        loadErrorMessage={data.errorMessage}
+        transportErrorMessage={data.transportErrorMessage}
         links={[
           { href: "/integration-governance", label: "查看整合就緒度" },
           {
