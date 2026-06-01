@@ -15,7 +15,13 @@ import {
   formatPlatformCodeLabel,
   getPlatformLabel,
 } from "@/lib/localized-labels";
-import { CredentialStatus } from "../../../../packages/contracts/src/platform-adapter-registry";
+import {
+  AdapterType,
+  CredentialStatus,
+  Environment,
+  FinanceAuthorityMode,
+  RolloutStatus,
+} from "../../../../packages/contracts/src/platform-adapter-registry";
 import type {
   PlatformAdapter,
   UpdatePlatformAdapterCommand,
@@ -860,6 +866,101 @@ function buildAuditId(action: string, adapterId?: string | null) {
   return `audit_${action}_${(adapterId ?? "registry").replace(/[^a-z0-9]/gi, "").slice(-10) || "root"}_${Date.now().toString(36)}`;
 }
 
+function buildCreatedAdapter(
+  adapters: AdapterRegistryRecord[],
+): AdapterRegistryRecord {
+  const reference = adapters[0];
+  const createdAt = new Date().toISOString();
+  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+  const platformCode = `NEW-${suffix}`;
+
+  return normalizeAdapterRecord({
+    id: `adapter-${Date.now().toString(36)}`,
+    platformCode,
+    name: `New Platform Adapter ${suffix}`,
+    description:
+      "Newly provisioned adapter config awaiting credential completion and rollout validation.",
+    version: reference?.version ?? "1.0.0",
+    environment: Environment.SANDBOX,
+    rolloutStage: Environment.SANDBOX,
+    adapterType: reference?.adapterType ?? AdapterType.EXTERNAL_COMBINED,
+    isForwarded: reference?.isForwarded ?? true,
+    config: { isEnabled: false },
+    rolloutStatus: RolloutStatus.NOT_STARTED,
+    credentialStatus: CredentialStatus.NOT_CONFIGURED,
+    webhookStatus: {
+      url: `https://hooks.${platformCode.toLowerCase()}.example.com/dispatch`,
+      isEnabled: false,
+      lastEventTimestamp: null,
+      lastStatus: "UNKNOWN",
+      lastStatusCode: null,
+    },
+    healthStatus: {
+      lastCheckTimestamp: createdAt,
+      status: "DEGRADED",
+      message: "Awaiting credentials and first outbound health validation.",
+    },
+    policies: {
+      serviceBuckets: reference?.policies.serviceBuckets ?? ["standard"],
+      maxCandidates: reference?.policies.maxCandidates ?? 3,
+      acceptTimeoutSeconds: reference?.policies.acceptTimeoutSeconds ?? 30,
+      manualFallbackThresholdSeconds:
+        reference?.policies.manualFallbackThresholdSeconds ?? 90,
+      manualFallbackThresholdCount:
+        reference?.policies.manualFallbackThresholdCount ?? 2,
+      financeAuthorityMode:
+        reference?.policies.financeAuthorityMode ??
+        FinanceAuthorityMode.EXTERNAL,
+    },
+    featureFlags: {
+      driverExternalOrderAcceptEnabled: false,
+      driverExternalOrderRejectEnabled: false,
+      platformEarningsEnabled: false,
+      platformPresenceEnabled: false,
+    },
+    supportedActions: [
+      { name: "accept", description: "Forward acceptance to upstream." },
+      { name: "reject", description: "Forward rejection to upstream." },
+      {
+        name: "callback_retry",
+        description: "Retry failed callback delivery to upstream.",
+      },
+    ],
+    draft: true,
+    warn: true,
+    createdAt,
+    updatedAt: createdAt,
+    availableActions: [
+      {
+        action: "edit_credentials",
+        enabled: true,
+        riskLevel: "high",
+      },
+      {
+        action: "edit_config",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      {
+        action: "enable_adapter",
+        enabled: true,
+        riskLevel: "high",
+      },
+    ],
+    capabilityFlags: {
+      canRelayAccept: true,
+      canRelayReject: true,
+    },
+    credentialMeta: {
+      configured: false,
+      expiring: false,
+      rotatedAt: null,
+      rotationOwner: null,
+    },
+    operationalPause: null,
+  });
+}
+
 export default function AdapterRegistryPage() {
   const { t, locale } = useTranslation();
   const searchParams = useSearchParams();
@@ -1353,6 +1454,52 @@ export default function AdapterRegistryPage() {
             rotatedAt: new Date().toISOString(),
             rotationOwner: "pa_super_admin",
             expiring: false,
+          },
+        }));
+      } else if (descriptor.action === "create_adapter_config") {
+        const created = buildCreatedAdapter(adapters);
+        setAdapters((current) => [created, ...current]);
+        setRefreshMeta(
+          deriveRefreshMetadata([created, ...adapters], new Date()),
+        );
+        setSelectedAdapterId(created.id);
+        setPreviewEmptyReason("live");
+      } else if (adapter && descriptor.action === "edit_config") {
+        applyAdapterMutation(adapter.id, (current) => ({
+          ...current,
+          draft: false,
+          warn: false,
+          rolloutStatus: RolloutStatus.IN_PROGRESS,
+          policies: {
+            ...current.policies,
+            maxCandidates: current.policies.maxCandidates + 1,
+            manualFallbackThresholdCount:
+              (current.policies.manualFallbackThresholdCount ?? 1) + 1,
+          },
+          featureFlags: {
+            ...current.featureFlags,
+            platformPresenceEnabled: true,
+          },
+          healthStatus: {
+            ...current.healthStatus,
+            lastCheckTimestamp: new Date().toISOString(),
+            message: "Configuration updated and staged for rollout validation.",
+          },
+        }));
+      } else if (adapter && descriptor.action === "edit_credentials") {
+        applyAdapterMutation(adapter.id, (current) => ({
+          ...current,
+          credentialStatus: CredentialStatus.PENDING,
+          credentialMeta: {
+            configured: true,
+            expiring: false,
+            rotatedAt: current.credentialMeta?.rotatedAt ?? null,
+            rotationOwner: "pa_super_admin",
+          },
+          healthStatus: {
+            ...current.healthStatus,
+            message:
+              "Credential payload updated; waiting for downstream validation.",
           },
         }));
       }
