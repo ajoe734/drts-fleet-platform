@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type { CSSProperties, ReactNode } from "react";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -49,18 +49,19 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
-const CLIENT_PAGE_SIZE = 12;
+const CLIENT_PAGE_SIZE = 8;
 const SUMMARY_FETCH_SIZE = 500;
 const REFRESH_TIER: RefreshTier = "medium_slow";
 const REFRESH_INTERVAL_MS = 30_000;
 const STALE_AFTER_MS = 65_000;
 
-const th = buildCanvasTheme({
+const theme = buildCanvasTheme({
   surface: "platform",
   dark: true,
   density: "compact",
 });
 
+type LocalizedLocale = "en" | "zh";
 type SupportedFreshness = UiRefreshMetadata["dataFreshness"];
 type GovernanceFilter =
   | "all"
@@ -69,7 +70,6 @@ type GovernanceFilter =
   | "cost_center_attention"
   | "rollout_risk"
   | "expiry_feeds";
-type LocalizedLocale = "en" | "zh";
 
 type DashboardSnapshot = {
   summary: PlatformTenantGovernanceSummaryResponse;
@@ -80,51 +80,56 @@ type DashboardSnapshot = {
 type GovernanceAction = {
   descriptor: ResourceActionDescriptor;
   label: string;
-  href?: string;
-  onClick?: () => void;
-  crossApp?: CrossAppResourceLink;
+  href?: string | undefined;
+  crossApp?: CrossAppResourceLink | undefined;
+  onClick?: (() => void) | undefined;
 };
 
-type GovernanceRowView = Record<string, unknown> &
+type GovernanceRow = Record<string, unknown> &
   PlatformTenantGovernanceSummaryRow & {
-    _selected?: boolean;
     tenantRecord: PlatformAdminTenantRecord | null;
     highestGateStatus: PlatformTenantGateStatus | null;
     blockedGateCount: number;
     rolloutHold: boolean;
-    quotaState: "ok" | "warn" | "critical";
-    costCenterState: "healthy" | "limited" | "missing";
-    governanceRiskCount: number;
-    governanceRiskLabels: string[];
-    hasAgedBacklog: boolean;
-    hasApproverGap: boolean;
-    approvalSignals: string[];
-    visibleActions: GovernanceAction[];
+    quotaTone: CanvasTone;
+    quotaLabel: string;
+    costCenterTone: CanvasTone;
+    costCenterLabel: string;
+    approvalLabels: string[];
+    riskLabels: string[];
+    actions: GovernanceAction[];
     detailActions: GovernanceAction[];
+    riskScore: number;
   };
 
 const pageRootStyle = {
   minHeight: "100%",
-  background: th.bg,
-  color: th.text,
+  background: theme.bg,
+  color: theme.text,
   borderRadius: 12,
   overflow: "hidden",
-  fontFamily: th.fontFamily,
+  fontFamily: theme.fontFamily,
+} satisfies CSSProperties;
+
+const loadingStyle = {
+  padding: 24,
+  borderRadius: 12,
+  background: theme.bg,
+  color: theme.textMuted,
+  fontFamily: theme.fontFamily,
 } satisfies CSSProperties;
 
 const pageBodyStyle = {
-  padding: 24,
-  display: "flex",
-  flexDirection: "column",
+  display: "grid",
   gap: 16,
+  padding: 24,
 } satisfies CSSProperties;
 
-const loadingStateStyle = {
-  padding: 24,
-  color: th.textMuted,
-  fontFamily: th.fontFamily,
-  background: th.bg,
-  borderRadius: 12,
+const toolbarStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 8,
 } satisfies CSSProperties;
 
 const kpiGridStyle = {
@@ -133,73 +138,62 @@ const kpiGridStyle = {
   gap: 12,
 } satisfies CSSProperties;
 
-const topGridStyle = {
+const contentGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gridTemplateColumns: "minmax(0, 1.6fr) minmax(320px, 0.9fr)",
   gap: 16,
 } satisfies CSSProperties;
 
-const toolbarRowStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-  alignItems: "center",
+const sidebarStackStyle = {
+  display: "grid",
+  gap: 16,
+  alignContent: "start",
 } satisfies CSSProperties;
 
 const actionRowStyle = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
-  alignItems: "flex-start",
+  alignItems: "center",
 } satisfies CSSProperties;
 
-const actionStackStyle = {
+const metricGridStyle = {
   display: "grid",
-  gap: 4,
-} satisfies CSSProperties;
-
-const detailGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
   gap: 12,
 } satisfies CSSProperties;
 
-const detailMetricStyle = {
+const metricCardStyle = {
   display: "grid",
-  gap: 5,
+  gap: 6,
   padding: 12,
-  borderRadius: 9,
-  border: `1px solid ${th.border}`,
-  background: th.surfaceLo,
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
 } satisfies CSSProperties;
 
-const stackedValueStyle = {
-  display: "grid",
-  gap: 4,
-} satisfies CSSProperties;
-
-const monoSubtleStyle = {
-  fontSize: 10.5,
-  color: th.textDim,
-  fontFamily: th.monoFamily,
-} satisfies CSSProperties;
-
-const secondaryTextStyle = {
-  fontSize: 11.5,
-  color: th.textMuted,
-  lineHeight: 1.45,
-} satisfies CSSProperties;
-
-const ruleListStyle = {
+const listStyle = {
   display: "grid",
   gap: 10,
 } satisfies CSSProperties;
 
-const ruleRowStyle = {
+const listRowStyle = {
   display: "grid",
-  gap: 5,
+  gap: 6,
   paddingBottom: 10,
-  borderBottom: `1px solid ${th.border}`,
+  borderBottom: `1px solid ${theme.border}`,
+} satisfies CSSProperties;
+
+const secondaryTextStyle = {
+  fontSize: 11.5,
+  color: theme.textMuted,
+  lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const monoTextStyle = {
+  fontSize: 10.5,
+  color: theme.textDim,
+  fontFamily: theme.monoFamily,
 } satisfies CSSProperties;
 
 function formatNumber(locale: LocalizedLocale, value: number) {
@@ -229,6 +223,46 @@ function formatDateTime(locale: LocalizedLocale, value: string) {
   });
 }
 
+function toCanvasTone(value: string): CanvasTone {
+  if (value === "warning") {
+    return "warn";
+  }
+  if (
+    value === "success" ||
+    value === "warn" ||
+    value === "danger" ||
+    value === "info" ||
+    value === "accent" ||
+    value === "neutral"
+  ) {
+    return value;
+  }
+  return "neutral";
+}
+
+function freshnessTone(freshness: SupportedFreshness): CanvasTone {
+  switch (freshness) {
+    case "degraded":
+      return "danger";
+    case "stale":
+      return "warn";
+    case "fresh":
+      return "success";
+    default:
+      return "neutral";
+  }
+}
+
+function quotaTone(percent: number): CanvasTone {
+  if (percent >= 95) {
+    return "danger";
+  }
+  if (percent >= 80) {
+    return "warn";
+  }
+  return "success";
+}
+
 function toneForAlert(flag: PlatformTenantGovernanceAlertFlag): CanvasTone {
   switch (flag) {
     case "quota_above_95_percent":
@@ -240,74 +274,125 @@ function toneForAlert(flag: PlatformTenantGovernanceAlertFlag): CanvasTone {
   }
 }
 
-function alertLabel(
-  locale: LocalizedLocale,
-  flag: PlatformTenantGovernanceAlertFlag,
-) {
-  if (locale === "en") {
-    switch (flag) {
-      case "no_approvers_configured":
-        return "No approvers";
-      case "quota_above_95_percent":
-        return "Quota > 95%";
-      case "pending_approval_over_48h":
-      default:
-        return "Backlog > 48h";
-    }
+function highestGateStatus(
+  tenant: PlatformAdminTenantRecord | null,
+): PlatformTenantGateStatus | null {
+  if (!tenant) {
+    return null;
   }
-
-  switch (flag) {
-    case "no_approvers_configured":
-      return "未配置 approver";
-    case "quota_above_95_percent":
-      return "Quota > 95%";
-    case "pending_approval_over_48h":
-    default:
-      return "待審逾 48h";
+  const statuses = [
+    tenant.rollout.sandboxStatus,
+    tenant.rollout.pilotStatus,
+    tenant.rollout.productionStatus,
+  ];
+  if (statuses.includes("blocked")) {
+    return "blocked";
   }
+  if (statuses.includes("ready")) {
+    return "ready";
+  }
+  if (statuses.includes("pending")) {
+    return "pending";
+  }
+  return statuses.includes("approved") ? "approved" : null;
 }
 
-function filterTone(active: boolean, count: number): CanvasTone {
-  if (active) {
-    return count > 0 ? "accent" : "neutral";
+function parseEmptyReason(value: string | null): EmptyReason | null {
+  if (
+    value === "no_data" ||
+    value === "not_provisioned" ||
+    value === "fetch_failed" ||
+    value === "permission_denied" ||
+    value === "external_unavailable" ||
+    value === "filtered_empty"
+  ) {
+    return value;
   }
-  if (count === 0) {
-    return "neutral";
-  }
-  return count > 3 ? "warn" : "info";
+  return null;
 }
 
-function toCanvasTone(tone: ReturnType<typeof tenantStageTone>): CanvasTone;
-function toCanvasTone(tone: ReturnType<typeof tenantStatusTone>): CanvasTone;
-function toCanvasTone(tone: string): CanvasTone {
-  if (tone === "warning") {
-    return "warn";
+function parseFreshness(value: string | null): SupportedFreshness | null {
+  if (
+    value === "fresh" ||
+    value === "stale" ||
+    value === "degraded" ||
+    value === "unknown"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function classifyErrorReason(error: string): EmptyReason {
+  const normalized = error.toLowerCase();
+  if (
+    normalized.includes("403") ||
+    normalized.includes("forbidden") ||
+    normalized.includes("permission") ||
+    normalized.includes("unauthor")
+  ) {
+    return "permission_denied";
   }
   if (
-    tone === "success" ||
-    tone === "warn" ||
-    tone === "danger" ||
-    tone === "info" ||
-    tone === "accent" ||
-    tone === "neutral"
+    normalized.includes("not provisioned") ||
+    normalized.includes("not configured") ||
+    normalized.includes("missing feed")
   ) {
-    return tone;
+    return "not_provisioned";
   }
-  return "neutral";
+  if (
+    normalized.includes("external") ||
+    normalized.includes("dependency") ||
+    normalized.includes("timeout") ||
+    normalized.includes("502") ||
+    normalized.includes("503") ||
+    normalized.includes("504")
+  ) {
+    return "external_unavailable";
+  }
+  return "fetch_failed";
 }
 
-function freshnessTone(freshness: SupportedFreshness): CanvasTone {
-  switch (freshness) {
-    case "degraded":
-      return "danger";
-    case "stale":
-      return "warn";
-    case "unknown":
-      return "neutral";
-    case "fresh":
-    default:
-      return "success";
+function buildDescriptor(
+  action: string,
+  enabled: boolean,
+  riskLevel: ResourceActionDescriptor["riskLevel"],
+  disabledReasonCode?: string,
+): ResourceActionDescriptor {
+  return disabledReasonCode
+    ? { action, enabled, riskLevel, disabledReasonCode }
+    : { action, enabled, riskLevel };
+}
+
+function disabledReasonLabel(locale: LocalizedLocale, code?: string) {
+  if (!code) {
+    return null;
   }
+
+  const labels: Record<string, { en: string; zh: string }> = {
+    cross_app_origin_missing: {
+      en: "Cross-app origin is not configured.",
+      zh: "這個環境尚未配置 cross-app origin。",
+    },
+    no_pending_approvals: {
+      en: "No pending approvals for this tenant.",
+      zh: "這個 tenant 目前沒有待審項目。",
+    },
+    no_matching_signals: {
+      en: "There are no tenants in this signal cluster.",
+      zh: "目前沒有 tenant 落在這個訊號群組。",
+    },
+    feed_not_provisioned: {
+      en: "The expiry feed is not provisioned yet.",
+      zh: "到期 feed 尚未 provision。",
+    },
+  };
+
+  const label = labels[code];
+  if (!label) {
+    return code;
+  }
+  return locale === "en" ? label.en : label.zh;
 }
 
 function resolveAppOrigins() {
@@ -342,130 +427,15 @@ function buildCrossAppHref(
   return `${origin}${link.route}`;
 }
 
-function quotaMeterStyle(): CSSProperties {
-  return {
-    display: "grid",
-    gridTemplateColumns: "1fr auto",
-    gap: 8,
-    alignItems: "center",
-  };
-}
-
-function classifyErrorReason(error: string): EmptyReason {
-  const normalized = error.toLowerCase();
-  if (
-    normalized.includes("403") ||
-    normalized.includes("forbidden") ||
-    normalized.includes("permission") ||
-    normalized.includes("unauthor")
-  ) {
-    return "permission_denied";
-  }
-  if (
-    normalized.includes("not provisioned") ||
-    normalized.includes("not configured") ||
-    normalized.includes("missing feed") ||
-    normalized.includes("unsupported")
-  ) {
-    return "not_provisioned";
-  }
-  if (
-    normalized.includes("external") ||
-    normalized.includes("upstream") ||
-    normalized.includes("dependency") ||
-    normalized.includes("timeout") ||
-    normalized.includes("502") ||
-    normalized.includes("503") ||
-    normalized.includes("504")
-  ) {
-    return "external_unavailable";
-  }
-  return "fetch_failed";
-}
-
-function parseEmptyReason(value: string | null): EmptyReason | null {
-  if (
-    value === "no_data" ||
-    value === "not_provisioned" ||
-    value === "fetch_failed" ||
-    value === "permission_denied" ||
-    value === "external_unavailable" ||
-    value === "filtered_empty"
-  ) {
-    return value;
-  }
-  return null;
-}
-
-function parseFreshness(
-  value: string | null,
-): UiRefreshMetadata["dataFreshness"] | null {
-  if (
-    value === "fresh" ||
-    value === "stale" ||
-    value === "degraded" ||
-    value === "unknown"
-  ) {
-    return value;
-  }
-  return null;
-}
-
-function disabledReasonLabel(locale: LocalizedLocale, code?: string) {
-  if (!code) {
-    return null;
-  }
-
-  const labels: Record<string, { en: string; zh: string }> = {
-    no_pending_approvals: {
-      en: "No pending approvals for this tenant.",
-      zh: "這個 tenant 目前沒有待審批項目。",
-    },
-    cross_app_origin_missing: {
-      en: "Cross-app origin is not configured in this environment.",
-      zh: "這個環境尚未配置 cross-app origin。",
-    },
-    feed_not_provisioned: {
-      en: "The underlying expiry feed is not provisioned yet.",
-      zh: "底層到期 feed 尚未 provision。",
-    },
-    no_matching_signals: {
-      en: "There are no tenants in this signal cluster right now.",
-      zh: "目前沒有 tenant 落在這個訊號群組。",
-    },
-  };
-
-  const entry = labels[code];
-  if (!entry) {
-    return code;
-  }
-  return locale === "en" ? entry.en : entry.zh;
-}
-
-function buildDescriptor(
-  action: string,
-  enabled: boolean,
-  riskLevel: ResourceActionDescriptor["riskLevel"],
-  disabledReasonCode?: string,
-): ResourceActionDescriptor {
-  return disabledReasonCode
-    ? { action, enabled, riskLevel, disabledReasonCode }
-    : { action, enabled, riskLevel };
-}
-
 function actionStyle({
   active = false,
   disabled = false,
   compact = false,
 }: {
-  active?: boolean;
-  disabled?: boolean;
-  compact?: boolean;
+  active?: boolean | undefined;
+  disabled?: boolean | undefined;
+  compact?: boolean | undefined;
 }): CSSProperties {
-  const bg = active ? th.accentBg : disabled ? th.surfaceLo : th.surface;
-  const bd = active ? th.accentBorder : th.border;
-  const fg = active ? th.accent : disabled ? th.textDim : th.text;
-
   return {
     display: "inline-flex",
     alignItems: "center",
@@ -474,34 +444,32 @@ function actionStyle({
     minHeight: compact ? 26 : 30,
     padding: compact ? "5px 8px" : "6px 10px",
     borderRadius: 8,
-    border: `1px solid ${bd}`,
-    background: bg,
-    color: fg,
+    border: `1px solid ${active ? theme.accentBorder : theme.border}`,
+    background: active
+      ? theme.accentBg
+      : disabled
+        ? theme.surfaceLo
+        : theme.surface,
+    color: active ? theme.accent : disabled ? theme.textDim : theme.text,
     fontSize: compact ? 11.5 : 12,
     fontWeight: 600,
     lineHeight: 1,
     textDecoration: "none",
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.58 : 1,
-    boxShadow: active ? `inset 0 0 0 1px ${th.accentBorder}` : "none",
   };
 }
 
-function renderAction({
-  action,
-  locale,
-  origins,
-  compact = false,
-  active = false,
-  showReason = false,
-}: {
-  action: GovernanceAction;
-  locale: LocalizedLocale;
-  origins: ReturnType<typeof resolveAppOrigins>;
-  compact?: boolean;
-  active?: boolean;
-  showReason?: boolean;
-}) {
+function renderAction(
+  locale: LocalizedLocale,
+  origins: ReturnType<typeof resolveAppOrigins>,
+  action: GovernanceAction,
+  options?: {
+    active?: boolean;
+    compact?: boolean;
+    showReason?: boolean;
+  },
+) {
   const reason = disabledReasonLabel(
     locale,
     action.descriptor.disabledReasonCode,
@@ -509,14 +477,13 @@ function renderAction({
   const href = action.crossApp
     ? buildCrossAppHref(origins, action.crossApp)
     : (action.href ?? null);
-  const isExternal =
-    action.crossApp?.targetApp !== undefined &&
+  const external =
+    action.crossApp?.targetApp &&
     action.crossApp.targetApp !== "platform-admin";
-
   const content = (
     <>
       <span>{action.label}</span>
-      {isExternal && action.descriptor.enabled ? (
+      {external && action.descriptor.enabled ? (
         <ArrowUpRight size={12} />
       ) : null}
     </>
@@ -524,17 +491,21 @@ function renderAction({
 
   if (!action.descriptor.enabled || (!href && !action.onClick)) {
     return (
-      <div style={actionStackStyle}>
+      <div style={{ display: "grid", gap: 4 }}>
         <button
           type="button"
           disabled
           title={reason ?? undefined}
-          style={actionStyle({ active, disabled: true, compact })}
+          style={actionStyle({
+            active: options?.active,
+            disabled: true,
+            compact: options?.compact,
+          })}
         >
           {content}
         </button>
-        {showReason && reason ? (
-          <div style={monoSubtleStyle}>{reason}</div>
+        {options?.showReason && reason ? (
+          <div style={monoTextStyle}>{reason}</div>
         ) : null}
       </div>
     );
@@ -545,7 +516,10 @@ function renderAction({
       <button
         type="button"
         onClick={action.onClick}
-        style={actionStyle({ active, compact })}
+        style={actionStyle({
+          active: options?.active,
+          compact: options?.compact,
+        })}
       >
         {content}
       </button>
@@ -560,9 +534,12 @@ function renderAction({
     return (
       <a
         href={href}
-        target={isExternal ? "_blank" : undefined}
-        rel={isExternal ? "noreferrer" : undefined}
-        style={actionStyle({ active, compact })}
+        target={external ? "_blank" : undefined}
+        rel={external ? "noreferrer" : undefined}
+        style={actionStyle({
+          active: options?.active,
+          compact: options?.compact,
+        })}
       >
         {content}
       </a>
@@ -570,199 +547,255 @@ function renderAction({
   }
 
   return (
-    <Link href={href} style={actionStyle({ active, compact })}>
+    <Link
+      href={href}
+      style={actionStyle({
+        active: options?.active,
+        compact: options?.compact,
+      })}
+    >
       {content}
     </Link>
   );
 }
 
-function highestGateStatus(
-  tenant: PlatformAdminTenantRecord | null,
-): PlatformTenantGateStatus | null {
-  if (!tenant) {
-    return null;
-  }
-
-  const statuses = [
-    tenant.rollout.sandboxStatus,
-    tenant.rollout.pilotStatus,
-    tenant.rollout.productionStatus,
-  ];
-  if (statuses.includes("blocked")) {
-    return "blocked";
-  }
-  if (statuses.includes("ready")) {
-    return "ready";
-  }
-  if (statuses.includes("pending")) {
-    return "pending";
-  }
-  return statuses.includes("approved") ? "approved" : null;
-}
-
-function riskSummaryTone(count: number): CanvasTone {
-  if (count >= 3) {
-    return "danger";
-  }
-  if (count >= 1) {
-    return "warn";
-  }
-  return "success";
-}
-
-function renderQuotaMeter(locale: LocalizedLocale, percent: number) {
+function quotaMeter(locale: LocalizedLocale, percent: number) {
   const clamped = Math.max(0, Math.min(percent, 100));
+  const tone = quotaTone(percent);
   const color =
-    clamped >= 95 ? th.danger : clamped >= 80 ? th.warn : th.success;
+    tone === "danger"
+      ? theme.danger
+      : tone === "warn"
+        ? theme.warn
+        : theme.success;
 
   return (
-    <div style={quotaMeterStyle()}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
       <div
         style={{
           height: 6,
           borderRadius: 999,
-          background: th.surfaceLo,
+          background: theme.surfaceLo,
           overflow: "hidden",
         }}
       >
         <div
           style={{
-            height: "100%",
             width: `${clamped}%`,
-            background: color,
+            height: "100%",
             borderRadius: 999,
+            background: color,
           }}
         />
       </div>
-      <span style={monoSubtleStyle}>{formatPercent(locale, percent)}</span>
+      <span style={monoTextStyle}>{formatPercent(locale, percent)}</span>
     </div>
   );
 }
 
-function renderRiskLabels(
+function alertLabel(
   locale: LocalizedLocale,
-  row: GovernanceRowView,
-): ReactNode {
-  const labels = [
-    ...row.alertFlags.map((flag) => ({
-      label: alertLabel(locale, flag),
-      tone: toneForAlert(flag),
-    })),
-  ];
-
-  if (row.rolloutHold) {
-    labels.push({
-      label: locale === "en" ? "Rollback hold" : "Rollback hold",
-      tone: "danger" as const,
-    });
+  flag: PlatformTenantGovernanceAlertFlag,
+) {
+  if (locale === "en") {
+    switch (flag) {
+      case "no_approvers_configured":
+        return "No approvers";
+      case "quota_above_95_percent":
+        return "Quota > 95%";
+      default:
+        return "Backlog > 48h";
+    }
   }
-  if (row.blockedGateCount > 0) {
-    labels.push({
-      label:
+  switch (flag) {
+    case "no_approvers_configured":
+      return "未配置 approver";
+    case "quota_above_95_percent":
+      return "Quota > 95%";
+    default:
+      return "待審逾 48h";
+  }
+}
+
+function emptyStateContent(reason: EmptyReason, locale: LocalizedLocale) {
+  const map: Record<
+    EmptyReason,
+    {
+      tone: Exclude<CanvasTone, "neutral">;
+      icon: ReactNode;
+      title: string;
+      body: string;
+      code: string;
+    }
+  > = {
+    no_data: {
+      tone: "info",
+      icon: <Building2 size={16} />,
+      title:
         locale === "en"
-          ? `${row.blockedGateCount} blocked gate`
-          : `${row.blockedGateCount} 個 blocked gate`,
-      tone: "warn" as const,
-    });
-  }
-  if (labels.length === 0) {
-    labels.push({
-      label: locale === "en" ? "All clear" : "全部正常",
-      tone: "success" as const,
-    });
-  }
+          ? "No tenants are publishing governance data yet"
+          : "目前還沒有 tenant 發布治理資料",
+      body:
+        locale === "en"
+          ? "The dashboard is ready, but there are no governance rows to aggregate yet."
+          : "看板已接好，但目前還沒有可彙總的治理列。",
+      code: "empty.no_data",
+    },
+    not_provisioned: {
+      tone: "warn",
+      icon: <DatabaseZap size={16} />,
+      title:
+        locale === "en"
+          ? "Required source feed is not provisioned"
+          : "必要來源 feed 尚未 provision",
+      body:
+        locale === "en"
+          ? "Missing expiry data stays explicit instead of being flattened into zero."
+          : "缺失的到期資料會被明確顯示，不會被假裝成 0。",
+      code: "empty.not_provisioned",
+    },
+    fetch_failed: {
+      tone: "danger",
+      icon: <AlertTriangle size={16} />,
+      title:
+        locale === "en"
+          ? "Unable to load governance snapshot"
+          : "無法載入治理快照",
+      body:
+        locale === "en"
+          ? "The initial control-plane fetch failed before any usable snapshot was cached."
+          : "初次抓取失敗，而且還沒有可回退的成功快照。",
+      code: "empty.fetch_failed",
+    },
+    permission_denied: {
+      tone: "danger",
+      icon: <ShieldOff size={16} />,
+      title:
+        locale === "en"
+          ? "You can reach the shell but not the governance data"
+          : "目前只可到達頁面 shell，無法讀取治理資料",
+      body:
+        locale === "en"
+          ? "The dashboard preserves route access separately from data authority."
+          : "這裡保留 route 可達與資料讀取權限的差異。",
+      code: "empty.permission_denied",
+    },
+    external_unavailable: {
+      tone: "warn",
+      icon: <BadgeAlert size={16} />,
+      title:
+        locale === "en"
+          ? "An upstream dependency is unavailable"
+          : "上游相依服務暫時不可用",
+      body:
+        locale === "en"
+          ? "One of the systems needed to build a complete read is unavailable."
+          : "組出完整讀取所需的其中一個相依系統目前不可用。",
+      code: "empty.external_unavailable",
+    },
+    filtered_empty: {
+      tone: "info",
+      icon: <FilterX size={16} />,
+      title:
+        locale === "en"
+          ? "No tenants match the current governance focus"
+          : "目前沒有 tenant 符合這個治理焦點",
+      body:
+        locale === "en"
+          ? "This empty state belongs to the active filter, not to the dashboard overall."
+          : "這是當前 filter 的空狀態，不代表整個 dashboard 沒資料。",
+      code: "empty.filtered_empty",
+    },
+    driver_not_eligible: {
+      tone: "info",
+      icon: <CircleOff size={16} />,
+      title: "",
+      body: "",
+      code: "",
+    },
+  };
 
-  return (
-    <div style={actionRowStyle}>
-      {labels.slice(0, 3).map((item) => (
-        <CanvasPill key={item.label} theme={th} tone={item.tone} dot>
-          {item.label}
-        </CanvasPill>
-      ))}
-    </div>
-  );
+  return map[reason];
 }
 
 export default function TenantGovernancePage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
   const searchParams = useSearchParams();
+  const language: LocalizedLocale = locale === "en" ? "en" : "zh";
+  const previewEmptyReason = parseEmptyReason(searchParams.get("emptyReason"));
+  const previewFreshness = parseFreshness(searchParams.get("freshness"));
+
   const [origins, setOrigins] = useState<ReturnType<typeof resolveAppOrigins>>({
     "platform-admin": "",
     "ops-console": "",
     "tenant-console": "",
   });
-  const language = locale === "en" ? "en" : "zh";
-  const previewEmptyReason = parseEmptyReason(searchParams.get("emptyReason"));
-  const previewFreshness = parseFreshness(searchParams.get("freshness"));
-
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
-  const [page, setPage] = useState(1);
-  const [filter, setFilter] = useState<GovernanceFilter>("all");
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [freshnessTick, setFreshnessTick] = useState(Date.now());
+  const [filter, setFilter] = useState<GovernanceFilter>("all");
+  const [page, setPage] = useState(1);
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
 
   const copy =
     language === "en"
       ? {
           title: "Cross-tenant Governance",
           subtitle:
-            "Quota usage, approval backlog, cost-center health, and governance risk in one platform-owned dashboard.",
+            "Quota usage, approval backlog, cost-center health, and governance risk on one platform-owned dashboard.",
           refresh: "Refresh now",
-          refreshTier: "Refresh tier",
-          snapshot: "Snapshot",
-          source: "Source",
-          tableTitle: "Governance heat map",
-          tableSubtitle:
-            "Rows stay read-only here; operators drill into tenant, payments, audit, or tenant-console source modules from the action set.",
-          detailTitle: "Tenant governance rail",
-          detailSubtitle:
-            "Selected tenant context with same-app and cross-app drill targets.",
-          filterTitle: "Governance focus lanes",
-          filterSubtitle:
-            "All CTA visibility is driven from page-local availableActions descriptors, not hard-coded by role.",
-          backlogTitle: "Approval backlog by type",
-          backlogSubtitle:
-            "Cross-tenant queue depth grouped by the signals available in the current read model.",
-          riskTitle: "Governance risk register",
-          riskSubtitle:
-            "Rollout risk is live; credential and contract expiry remain explicit feed gaps until upstream data lands.",
-          emptyTitle: "No governance rows to display",
-          clearFilter: "Clear filter",
           focus: "Focus",
-          previous: "Previous",
-          next: "Next",
           openTenant: "Tenant detail",
           openPayments: "Payments",
           openAudit: "Audit",
           openCostCenters: "Tenant Console · Cost centers",
           openRules: "Tenant Console · Rules",
           openOps: "Ops Console · Dispatch",
-          selectedHint:
-            "Cross-app routes open in a new tab by default when the target origin is configured.",
-          noSelection: "Select a tenant row to inspect detail context.",
-          loading: "Loading tenant governance dashboard…",
+          heatmapTitle: "Quota usage heat map",
+          heatmapSubtitle: "Top governance pressure across tenants this month.",
+          selectedTitle: "Tenant governance rail",
+          selectedSubtitle:
+            "Same-app and cross-app drill targets stay explicit.",
+          filtersTitle: "Governance focus lanes",
+          filtersSubtitle:
+            "Filters, row actions, and drill CTAs are rendered from action descriptors.",
+          backlogTitle: "Approval backlog",
+          backlogSubtitle:
+            "Cross-tenant queue pressure visible in this read model.",
+          riskTitle: "Governance risk register",
+          riskSubtitle:
+            "Rollout risk is live; expiry feeds remain explicit gaps.",
+          emptyTitle: "No governance rows to display",
+          clearFilter: "Clear filter",
+          previous: "Previous",
+          next: "Next",
+          refreshTier: "Refresh tier",
+          snapshot: "Snapshot",
+          source: "Source",
+          pageSummary: (current: number, total: number, rows: number) =>
+            `Page ${current} of ${total} · ${rows} row(s)`,
+          resultSummary: (total: number, filtered: number) =>
+            `${filtered} of ${total} tenant(s) match the current focus.`,
           staleBannerTitle: "Governance snapshot is stale",
           staleBannerBody:
             "The dashboard is past the T4 freshness window. Manual refresh remains available while the last good snapshot stays visible.",
           degradedBannerTitle: "Governance snapshot is degraded",
           degradedBannerBody:
-            "A background refresh failed. The dashboard is showing the last successful snapshot while retry remains available.",
+            "A background refresh failed. The last successful snapshot is still visible.",
           truncationTitle: "Showing a partial snapshot",
           truncationBody: (items: number, total: number) =>
-            `Loaded ${items} of ${total} governance rows. Increase the summary fetch size before relying on this dashboard for full-tenant sweeps.`,
-          pageSummary: (current: number, total: number, rows: number) =>
-            `Page ${current} of ${total} · ${rows} row(s) visible`,
-          resultSummary: (rows: number, filtered: number) =>
-            `${filtered} of ${rows} tenant(s) match the current governance focus.`,
-          aggregate: {
-            quota: "Quota pressure",
-            backlog: "Pending approvals",
-            costCenters: "Cost-center attention",
-            risks: "Governance risk signals",
+            `Loaded ${items} of ${total} governance rows. Increase the summary fetch size before using this for a full sweep.`,
+          table: {
+            tenant: "Tenant",
+            plan: "Plan",
+            usage: "Usage (MTD)",
+            percent: "%",
+            status: "Status",
+            backlog: "Backlog",
+            actions: "Available actions",
           },
           filters: {
             all: "All tenants",
@@ -772,106 +805,65 @@ export default function TenantGovernancePage() {
             rollout_risk: "Rollout risk",
             expiry_feeds: "Expiry feeds",
           },
-          backlog: {
-            total: "Open queue depth",
-            aged: "Aged backlog > 48h",
-            approverGap: "No approvers configured",
-            clear: "Tenants with zero backlog",
-          },
-          register: {
-            rollbackHold: "Rollback hold",
-            blockedGates: "Blocked rollout gates",
-            credentialFeed: "Credential expiry feed",
-            contractFeed: "Contract expiry feed",
-          },
-          table: {
-            tenant: "Tenant",
-            rollout: "Rollout",
-            costCenters: "Cost-center health",
-            approvals: "Approval backlog",
-            quota: "Quota burn",
-            risks: "Risk signals",
-            actions: "Available actions",
-          },
-          states: {
-            stage: "Stage",
-            status: "Status",
-            gate: "Gate",
-            filters: "Filters",
-            modules: "Enabled modules",
-            integration: "Integration",
-          },
-          detail: {
-            headers: {
-              overview: "Governance overview",
-              signals: "Signal breakdown",
-              actions: "Drill targets",
-            },
-            quota: "Quota burn",
-            approvals: "Pending approvals",
-            costCenters: "Cost centers",
-            rules: "Active rules",
-            rollout: "Rollout posture",
-            healthy: "Healthy",
-            noData: "No tenant selected",
+          kpi: {
+            quota: "Quota warning (>80%)",
+            backlog: "Cross-tenant approval backlog",
+            cost: "Cost-center attention",
+            risk: "Governance risk signals",
           },
         }
       : {
           title: "跨租戶治理",
           subtitle:
-            "把 quota 使用、approval backlog、cost-center 健康與治理風險放在同一張平台治理看板。",
+            "把 quota 使用、approval backlog、cost-center 健康與治理風險收斂到同一張平台治理看板。",
           refresh: "立即重新整理",
-          refreshTier: "Refresh tier",
-          snapshot: "快照時間",
-          source: "資料來源",
-          tableTitle: "治理熱區總表",
-          tableSubtitle:
-            "這裡只做跨租戶讀取與分流；真正的操作要從 action set 進 tenant、payments、audit 或 tenant-console 原始工作面。",
-          detailTitle: "租戶治理側欄",
-          detailSubtitle:
-            "選定 tenant 後，保留同 app 與 cross-app drill target 的完整上下文。",
-          filterTitle: "治理聚焦路徑",
-          filterSubtitle:
-            "所有 CTA 都由 page-local availableActions descriptor 驅動，而不是把角色硬編進畫面。",
-          backlogTitle: "Approval backlog 分型",
-          backlogSubtitle:
-            "依目前 read model 可見的訊號，把跨租戶待審壓力拆成幾種治理注意點。",
-          riskTitle: "治理風險登錄",
-          riskSubtitle:
-            "Rollout 風險是 live；credential / contract 到期目前仍以明確 feed gap 呈現，直到上游資料落地。",
-          emptyTitle: "目前沒有可顯示的治理列",
-          clearFilter: "清除篩選",
           focus: "聚焦",
-          previous: "上一頁",
-          next: "下一頁",
           openTenant: "Tenant 詳情",
           openPayments: "Payments",
           openAudit: "Audit",
           openCostCenters: "Tenant Console · Cost centers",
           openRules: "Tenant Console · Rules",
           openOps: "Ops Console · Dispatch",
-          selectedHint:
-            "Cross-app 路由預設新分頁開啟；若目標 app origin 未配置，CTA 會保留 disabled reason。",
-          noSelection: "先選一列 tenant，再看 detail rail。",
-          loading: "正在載入 tenant governance dashboard…",
+          heatmapTitle: "Quota 使用熱圖",
+          heatmapSubtitle: "本月最需要治理注意的 tenant。",
+          selectedTitle: "租戶治理側欄",
+          selectedSubtitle:
+            "保留同 app 與 cross-app drill target 的完整上下文。",
+          filtersTitle: "治理聚焦路徑",
+          filtersSubtitle:
+            "Filter、列動作與 drill CTA 都由 action descriptor 渲染。",
+          backlogTitle: "Approval backlog",
+          backlogSubtitle: "目前 read model 可見的跨租戶待審壓力。",
+          riskTitle: "治理風險登錄",
+          riskSubtitle:
+            "Rollout risk 是 live；expiry feeds 仍以明確 gap 呈現。",
+          emptyTitle: "目前沒有可顯示的治理列",
+          clearFilter: "清除篩選",
+          previous: "上一頁",
+          next: "下一頁",
+          refreshTier: "Refresh tier",
+          snapshot: "快照時間",
+          source: "資料來源",
+          pageSummary: (current: number, total: number, rows: number) =>
+            `第 ${current} / ${total} 頁 · 顯示 ${rows} 筆`,
+          resultSummary: (total: number, filtered: number) =>
+            `目前有 ${filtered} / ${total} 個 tenant 符合治理焦點。`,
           staleBannerTitle: "治理快照已過時",
           staleBannerBody:
             "這個 dashboard 已超過 T4 freshness 視窗；目前保留最後一次成功快照，仍可手動 refresh。",
           degradedBannerTitle: "治理快照來源降級",
-          degradedBannerBody:
-            "背景 refresh 失敗，頁面保留最後一次成功快照，同時提供手動重試。",
+          degradedBannerBody: "背景 refresh 失敗，頁面保留最後一次成功快照。",
           truncationTitle: "目前只載入部分快照",
           truncationBody: (items: number, total: number) =>
-            `目前只載入 ${items} / ${total} 筆治理資料；若要拿它做全租戶 sweep，需先提高 summary fetch size。`,
-          pageSummary: (current: number, total: number, rows: number) =>
-            `第 ${current} / ${total} 頁 · 顯示 ${rows} 筆`,
-          resultSummary: (rows: number, filtered: number) =>
-            `目前有 ${filtered} / ${rows} 個 tenant 符合治理焦點。`,
-          aggregate: {
-            quota: "Quota 壓力",
-            backlog: "待審批總量",
-            costCenters: "Cost-center 注意戶",
-            risks: "治理風險訊號",
+            `目前只載入 ${items} / ${total} 筆治理資料；若要做全租戶 sweep，需先提高 summary fetch size。`,
+          table: {
+            tenant: "Tenant",
+            plan: "Plan",
+            usage: "Usage (MTD)",
+            percent: "%",
+            status: "Status",
+            backlog: "Backlog",
+            actions: "Available actions",
           },
           filters: {
             all: "全部租戶",
@@ -881,123 +873,69 @@ export default function TenantGovernancePage() {
             rollout_risk: "Rollout 風險",
             expiry_feeds: "Expiry feeds",
           },
-          backlog: {
-            total: "待審總深度",
-            aged: "逾 48h 待審",
-            approverGap: "未配置 approver",
-            clear: "零 backlog 租戶",
-          },
-          register: {
-            rollbackHold: "Rollback hold",
-            blockedGates: "Blocked rollout gate",
-            credentialFeed: "Credential 到期 feed",
-            contractFeed: "Contract 到期 feed",
-          },
-          table: {
-            tenant: "Tenant",
-            rollout: "Rollout",
-            costCenters: "Cost-center 健康",
-            approvals: "Approval backlog",
-            quota: "Quota 燃燒",
-            risks: "風險訊號",
-            actions: "Available actions",
-          },
-          states: {
-            stage: "Stage",
-            status: "Status",
-            gate: "Gate",
-            filters: "Filters",
-            modules: "Enabled modules",
-            integration: "Integration",
-          },
-          detail: {
-            headers: {
-              overview: "治理概況",
-              signals: "訊號拆解",
-              actions: "Drill target",
-            },
-            quota: "Quota 燃燒",
-            approvals: "待審批",
-            costCenters: "Cost centers",
-            rules: "Active rules",
-            rollout: "Rollout 姿態",
-            healthy: "健康",
-            noData: "尚未選定 tenant",
+          kpi: {
+            quota: "Quota 警戒 (>80%)",
+            backlog: "跨租戶審批 backlog",
+            cost: "Cost-center 異常",
+            risk: "治理風險訊號",
           },
         };
 
-  const loadDashboard = useCallback(
-    async (mode: "initial" | "refresh") => {
-      if (mode === "initial") {
-        setLoading(true);
-      } else {
-        setRefreshing(true);
-      }
+  async function loadDashboard(mode: "initial" | "refresh") {
+    if (mode === "initial") {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
 
-      try {
-        const query: PlatformTenantGovernanceSummaryQuery = {
-          page: 1,
-          pageSize: SUMMARY_FETCH_SIZE,
-        };
+    try {
+      const query: PlatformTenantGovernanceSummaryQuery = {
+        page: 1,
+        pageSize: SUMMARY_FETCH_SIZE,
+      };
+      const [tenants, summary] = await Promise.all([
+        client.listPlatformTenants(),
+        client.getPlatformTenantGovernanceSummary(query),
+      ]);
 
-        const [tenants, summary] = await Promise.all([
-          client.listPlatformTenants(),
-          client.getPlatformTenantGovernanceSummary(query),
-        ]);
-
-        setSnapshot({
-          tenants,
-          summary,
-          refresh: {
-            generatedAt: new Date().toISOString(),
-            staleAfterMs: STALE_AFTER_MS,
-            dataFreshness: "fresh",
-            source: "live",
-          },
-        });
-        setError(null);
-      } catch (cause) {
-        const message = cause instanceof Error ? cause.message : String(cause);
-        setError(message);
-      } finally {
-        if (mode === "initial") {
-          setLoading(false);
-        }
-        setRefreshing(false);
-      }
-    },
-    [client],
-  );
+      setSnapshot({
+        tenants,
+        summary,
+        refresh: {
+          generatedAt: new Date().toISOString(),
+          staleAfterMs: STALE_AFTER_MS,
+          dataFreshness: "fresh",
+          source: "live",
+        },
+      });
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
 
   useEffect(() => {
     setOrigins(resolveAppOrigins());
-  }, []);
-
-  useEffect(() => {
     void loadDashboard("initial");
-  }, [loadDashboard]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
+    const refreshTimer = window.setInterval(() => {
       void loadDashboard("refresh");
     }, REFRESH_INTERVAL_MS);
-
-    return () => window.clearInterval(interval);
-  }, [loadDashboard]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
+    const freshnessTimer = window.setInterval(() => {
       setFreshnessTick(Date.now());
-    }, 1000);
-
-    return () => window.clearInterval(interval);
+    }, 1_000);
+    return () => {
+      window.clearInterval(refreshTimer);
+      window.clearInterval(freshnessTimer);
+    };
   }, []);
 
   const refreshMeta = useMemo(() => {
     if (!snapshot) {
       return null;
     }
-
     const age =
       freshnessTick - new Date(snapshot.refresh.generatedAt).getTime();
     const computedFreshness: SupportedFreshness =
@@ -1013,18 +951,20 @@ export default function TenantGovernancePage() {
     };
   }, [error, freshnessTick, previewFreshness, snapshot]);
 
-  const rows = useMemo<GovernanceRowView[]>(() => {
+  const rows = useMemo<GovernanceRow[]>(() => {
     if (!snapshot) {
       return [];
     }
 
-    const tenantIndex = new Map(
+    const tenantMap = new Map(
       snapshot.tenants.map((tenant) => [tenant.id, tenant]),
     );
+    const tenantConsoleMissing = !origins["tenant-console"];
+    const opsMissing = !origins["ops-console"];
 
     return snapshot.summary.items
       .map((item) => {
-        const tenantRecord = tenantIndex.get(item.tenantId) ?? null;
+        const tenantRecord = tenantMap.get(item.tenantId) ?? null;
         const highestGate = highestGateStatus(tenantRecord);
         const blockedGateCount = tenantRecord
           ? [
@@ -1036,37 +976,50 @@ export default function TenantGovernancePage() {
         const rolloutHold =
           item.tenantStatus === "rollback_hold" ||
           tenantRecord?.status === "rollback_hold";
-        const quotaState =
-          item.monthlyQuotaPercentUsed >= 95
-            ? "critical"
-            : item.monthlyQuotaPercentUsed >= 80
-              ? "warn"
+        const quotaStatusTone = quotaTone(item.monthlyQuotaPercentUsed);
+        const quotaLabel =
+          quotaStatusTone === "danger"
+            ? "over_threshold"
+            : quotaStatusTone === "warn"
+              ? "warning"
               : "ok";
-        const costCenterState =
+        const costCenterStatusTone: CanvasTone =
           item.costCenterCount === 0
-            ? "missing"
+            ? "danger"
             : item.activeRuleCount === 0 || item.costCenterCount < 2
-              ? "limited"
-              : "healthy";
-        const hasAgedBacklog = item.alertFlags.includes(
-          "pending_approval_over_48h",
-        );
-        const hasApproverGap = item.alertFlags.includes(
-          "no_approvers_configured",
-        );
-        const approvalSignals = [
-          hasAgedBacklog
+              ? "warn"
+              : "success";
+        const costCenterLabel =
+          item.costCenterCount === 0
             ? language === "en"
-              ? "Aged backlog > 48h"
-              : "待審逾 48h"
-            : null,
-          hasApproverGap
+              ? "missing"
+              : "缺失"
+            : item.activeRuleCount === 0 || item.costCenterCount < 2
+              ? language === "en"
+                ? "attention"
+                : "注意"
+              : language === "en"
+                ? "healthy"
+                : "健康";
+        const approvalLabels = [
+          item.pendingApprovalCount > 0
             ? language === "en"
-              ? "Approver gap"
-              : "Approver 缺口"
+              ? `${item.pendingApprovalCount} open`
+              : `${item.pendingApprovalCount} 筆待審`
+            : language === "en"
+              ? "Clear"
+              : "清空",
+          item.oldestPendingApprovalAgeHours !== null
+            ? language === "en"
+              ? `Oldest ${item.oldestPendingApprovalAgeHours}h`
+              : `最久 ${item.oldestPendingApprovalAgeHours}h`
             : null,
+          ...item.alertFlags
+            .filter((flag) => flag !== "quota_above_95_percent")
+            .map((flag) => alertLabel(language, flag)),
         ].filter(Boolean) as string[];
-        const governanceRiskLabels = [
+        const riskLabels = [
+          ...item.alertFlags.map((flag) => alertLabel(language, flag)),
           rolloutHold
             ? language === "en"
               ? "Rollback hold"
@@ -1077,53 +1030,36 @@ export default function TenantGovernancePage() {
               ? `${blockedGateCount} blocked gate`
               : `${blockedGateCount} 個 blocked gate`
             : null,
-          quotaState === "critical"
-            ? language === "en"
-              ? "Critical quota burn"
-              : "Quota 高風險"
-            : quotaState === "warn"
-              ? language === "en"
-                ? "Quota watch"
-                : "Quota 觀察"
-              : null,
-          hasAgedBacklog
-            ? language === "en"
-              ? "Aged backlog"
-              : "逾時 backlog"
-            : null,
-          hasApproverGap
-            ? language === "en"
-              ? "No approvers"
-              : "未配置 approver"
-            : null,
-          costCenterState !== "healthy"
-            ? language === "en"
-              ? "Cost-center attention"
-              : "Cost-center 需注意"
-            : null,
         ].filter(Boolean) as string[];
-        const governanceRiskCount = governanceRiskLabels.length;
-
-        const tenantLink = `/tenants/${item.tenantId}`;
-        const paymentsLink = `/payments?tenantId=${encodeURIComponent(item.tenantId)}`;
-        const auditLink = `/audit?resourceType=tenant&resourceId=${encodeURIComponent(item.tenantId)}`;
-        const tenantConsoleOriginMissing = !origins["tenant-console"];
-        const opsOriginMissing = !origins["ops-console"];
-
         const detailActions: GovernanceAction[] = [
           {
             descriptor: buildDescriptor("open_tenant_detail", true, "low"),
             label: copy.openTenant,
-            href: tenantLink,
+            href: `/tenants/${item.tenantId}`,
+          },
+          {
+            descriptor: buildDescriptor(
+              "open_payments_queue",
+              item.pendingApprovalCount > 0,
+              "low",
+              item.pendingApprovalCount > 0
+                ? undefined
+                : "no_pending_approvals",
+            ),
+            label: copy.openPayments,
+            href: `/payments?tenantId=${encodeURIComponent(item.tenantId)}`,
+          },
+          {
+            descriptor: buildDescriptor("open_audit", true, "low"),
+            label: copy.openAudit,
+            href: `/audit?resourceType=tenant&resourceId=${encodeURIComponent(item.tenantId)}`,
           },
           {
             descriptor: buildDescriptor(
               "open_tenant_cost_centers",
-              !tenantConsoleOriginMissing,
+              !tenantConsoleMissing,
               "low",
-              tenantConsoleOriginMissing
-                ? "cross_app_origin_missing"
-                : undefined,
+              tenantConsoleMissing ? "cross_app_origin_missing" : undefined,
             ),
             label: copy.openCostCenters,
             crossApp: {
@@ -1138,11 +1074,9 @@ export default function TenantGovernancePage() {
           {
             descriptor: buildDescriptor(
               "open_tenant_rules",
-              !tenantConsoleOriginMissing,
+              !tenantConsoleMissing,
               "low",
-              tenantConsoleOriginMissing
-                ? "cross_app_origin_missing"
-                : undefined,
+              tenantConsoleMissing ? "cross_app_origin_missing" : undefined,
             ),
             label: copy.openRules,
             crossApp: {
@@ -1154,32 +1088,15 @@ export default function TenantGovernancePage() {
               label: copy.openRules,
             },
           },
-          {
-            descriptor: buildDescriptor(
-              "open_payments_queue",
-              item.pendingApprovalCount > 0,
-              "low",
-              item.pendingApprovalCount > 0
-                ? undefined
-                : "no_pending_approvals",
-            ),
-            label: copy.openPayments,
-            href: paymentsLink,
-          },
-          {
-            descriptor: buildDescriptor("open_audit", true, "low"),
-            label: copy.openAudit,
-            href: auditLink,
-          },
         ];
 
         if (tenantRecord && tenantRecord.rollout.stage !== "sandbox") {
           detailActions.push({
             descriptor: buildDescriptor(
               "open_ops_dispatch",
-              !opsOriginMissing,
+              !opsMissing,
               "low",
-              opsOriginMissing ? "cross_app_origin_missing" : undefined,
+              opsMissing ? "cross_app_origin_missing" : undefined,
             ),
             label: copy.openOps,
             crossApp: {
@@ -1193,48 +1110,48 @@ export default function TenantGovernancePage() {
           });
         }
 
-        const visibleActions: GovernanceAction[] = [
-          {
-            descriptor: buildDescriptor("focus_row", true, "low"),
-            label: copy.focus,
-            onClick: () => setSelectedTenantId(item.tenantId),
-          },
-          detailActions[0]!,
-          detailActions[3]!,
-        ];
-
         return {
           ...item,
           tenantRecord,
           highestGateStatus: highestGate,
           blockedGateCount,
           rolloutHold,
-          quotaState,
-          costCenterState,
-          governanceRiskCount,
-          governanceRiskLabels,
-          hasAgedBacklog,
-          hasApproverGap,
-          approvalSignals,
-          visibleActions,
+          quotaTone: quotaStatusTone,
+          quotaLabel,
+          costCenterTone: costCenterStatusTone,
+          costCenterLabel,
+          approvalLabels,
+          riskLabels,
+          riskScore:
+            (quotaStatusTone === "danger"
+              ? 2
+              : quotaStatusTone === "warn"
+                ? 1
+                : 0) +
+            blockedGateCount +
+            (rolloutHold ? 2 : 0) +
+            item.alertFlags.length,
+          actions: [
+            {
+              descriptor: buildDescriptor("focus_row", true, "low"),
+              label: copy.focus,
+              onClick: () => setSelectedTenantId(item.tenantId),
+            },
+            detailActions[0]!,
+            detailActions[1]!,
+          ],
           detailActions,
-        } satisfies GovernanceRowView;
+        };
       })
       .sort((left, right) => {
-        if (right.governanceRiskCount !== left.governanceRiskCount) {
-          return right.governanceRiskCount - left.governanceRiskCount;
+        if (right.riskScore !== left.riskScore) {
+          return right.riskScore - left.riskScore;
         }
-        if (right.monthlyQuotaPercentUsed !== left.monthlyQuotaPercentUsed) {
-          return right.monthlyQuotaPercentUsed - left.monthlyQuotaPercentUsed;
-        }
-        if (right.pendingApprovalCount !== left.pendingApprovalCount) {
-          return right.pendingApprovalCount - left.pendingApprovalCount;
-        }
-        return left.tenantName.localeCompare(right.tenantName);
+        return right.monthlyQuotaPercentUsed - left.monthlyQuotaPercentUsed;
       });
   }, [copy, language, origins, snapshot]);
 
-  const filterStats = useMemo(() => {
+  const filterActions = useMemo(() => {
     const counts = {
       all: rows.length,
       quota_pressure: rows.filter((row) => row.monthlyQuotaPercentUsed >= 80)
@@ -1242,7 +1159,7 @@ export default function TenantGovernancePage() {
       approval_backlog: rows.filter((row) => row.pendingApprovalCount > 0)
         .length,
       cost_center_attention: rows.filter(
-        (row) => row.costCenterState !== "healthy",
+        (row) => row.costCenterTone !== "success",
       ).length,
       rollout_risk: rows.filter(
         (row) => row.rolloutHold || row.blockedGateCount > 0,
@@ -1250,65 +1167,53 @@ export default function TenantGovernancePage() {
       expiry_feeds: 0,
     } satisfies Record<GovernanceFilter, number>;
 
-    return counts;
-  }, [rows]);
-
-  const filterActions = useMemo(() => {
-    const createFilterAction = (
+    const buildFilterAction = (
       key: GovernanceFilter,
       enabled: boolean,
       disabledReasonCode?: string,
-    ): GovernanceAction =>
-      enabled
-        ? {
-            descriptor: buildDescriptor(
-              `filter_${key}`,
-              enabled,
-              "low",
-              disabledReasonCode,
-            ),
-            label: copy.filters[key],
-            onClick: () => setFilter(key),
-          }
-        : {
-            descriptor: buildDescriptor(
-              `filter_${key}`,
-              enabled,
-              "low",
-              disabledReasonCode,
-            ),
-            label: copy.filters[key],
-          };
+    ): GovernanceAction => ({
+      descriptor: buildDescriptor(
+        `filter_${key}`,
+        enabled,
+        "low",
+        disabledReasonCode,
+      ),
+      label: copy.filters[key],
+      onClick: enabled ? () => setFilter(key) : undefined,
+    });
 
     return {
-      all: createFilterAction("all", true),
-      quota_pressure: createFilterAction(
-        "quota_pressure",
-        filterStats.quota_pressure > 0,
-        "no_matching_signals",
-      ),
-      approval_backlog: createFilterAction(
-        "approval_backlog",
-        filterStats.approval_backlog > 0,
-        "no_matching_signals",
-      ),
-      cost_center_attention: createFilterAction(
-        "cost_center_attention",
-        filterStats.cost_center_attention > 0,
-        "no_matching_signals",
-      ),
-      rollout_risk: createFilterAction(
-        "rollout_risk",
-        filterStats.rollout_risk > 0,
-        "no_matching_signals",
-      ),
-      expiry_feeds: createFilterAction(
-        "expiry_feeds",
-        false,
-        "feed_not_provisioned",
-      ),
-    } satisfies Record<GovernanceFilter, GovernanceAction>;
-  }, [copy.filters, filterStats]);
+      counts,
+      actions: {
+        all: buildFilterAction("all", true),
+        quota_pressure: buildFilterAction(
+          "quota_pressure",
+          counts.quota_pressure > 0,
+          "no_matching_signals",
+        ),
+        approval_backlog: buildFilterAction(
+          "approval_backlog",
+          counts.approval_backlog > 0,
+          "no_matching_signals",
+        ),
+        cost_center_attention: buildFilterAction(
+          "cost_center_attention",
+          counts.cost_center_attention > 0,
+          "no_matching_signals",
+        ),
+        rollout_risk: buildFilterAction(
+          "rollout_risk",
+          counts.rollout_risk > 0,
+          "no_matching_signals",
+        ),
+        expiry_feeds: buildFilterAction(
+          "expiry_feeds",
+          false,
+          "feed_not_provisioned",
+        ),
+      } satisfies Record<GovernanceFilter, GovernanceAction>,
+    };
+  }, [copy.filters, rows]);
 
   const filteredRows = useMemo(() => {
     switch (filter) {
@@ -1317,14 +1222,13 @@ export default function TenantGovernancePage() {
       case "approval_backlog":
         return rows.filter((row) => row.pendingApprovalCount > 0);
       case "cost_center_attention":
-        return rows.filter((row) => row.costCenterState !== "healthy");
+        return rows.filter((row) => row.costCenterTone !== "success");
       case "rollout_risk":
         return rows.filter(
           (row) => row.rolloutHold || row.blockedGateCount > 0,
         );
       case "expiry_feeds":
         return [];
-      case "all":
       default:
         return rows;
     }
@@ -1338,11 +1242,6 @@ export default function TenantGovernancePage() {
     1,
     Math.ceil(filteredRows.length / CLIENT_PAGE_SIZE),
   );
-
-  useEffect(() => {
-    setPage((current) => Math.min(current, totalPages));
-  }, [totalPages]);
-
   const pagedRows = useMemo(
     () =>
       filteredRows.slice(
@@ -1353,11 +1252,14 @@ export default function TenantGovernancePage() {
   );
 
   useEffect(() => {
+    setPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
     if (filteredRows.length === 0) {
       setSelectedTenantId(null);
       return;
     }
-
     if (
       !selectedTenantId ||
       !filteredRows.some((row) => row.tenantId === selectedTenantId)
@@ -1369,50 +1271,39 @@ export default function TenantGovernancePage() {
   const selectedTenant =
     filteredRows.find((row) => row.tenantId === selectedTenantId) ?? null;
 
-  const rowsForTable = pagedRows.map((row) => ({
-    ...row,
-    _selected: row.tenantId === selectedTenantId,
-  }));
-
   const aggregates = useMemo(() => {
-    const totalPendingApprovals = rows.reduce(
+    const quotaWarn = rows.filter(
+      (row) => row.monthlyQuotaPercentUsed >= 80,
+    ).length;
+    const approvalBacklog = rows.reduce(
       (sum, row) => sum + row.pendingApprovalCount,
       0,
     );
-    const quotaCriticalCount = rows.filter(
-      (row) => row.monthlyQuotaPercentUsed >= 95,
+    const costCenterAttention = rows.filter(
+      (row) => row.costCenterTone !== "success",
     ).length;
-    const quotaWatchCount = rows.filter(
-      (row) => row.monthlyQuotaPercentUsed >= 80,
-    ).length;
-    const costCenterAttentionCount = rows.filter(
-      (row) => row.costCenterState !== "healthy",
-    ).length;
-    const agedBacklogTenants = rows.filter((row) => row.hasAgedBacklog).length;
-    const approverGapTenants = rows.filter((row) => row.hasApproverGap).length;
-    const rollbackHoldCount = rows.filter((row) => row.rolloutHold).length;
-    const blockedGateCount = rows.filter(
-      (row) => row.blockedGateCount > 0,
-    ).length;
-    const riskSignalCount = rows.reduce(
-      (sum, row) => sum + row.governanceRiskCount,
+    const riskSignals = rows.reduce(
+      (sum, row) => sum + row.riskLabels.length,
       0,
     );
-    const zeroBacklogCount = rows.filter(
-      (row) => row.pendingApprovalCount === 0,
+    const approvalAged = rows.filter((row) =>
+      row.alertFlags.includes("pending_approval_over_48h"),
     ).length;
+    const noApprovers = rows.filter((row) =>
+      row.alertFlags.includes("no_approvers_configured"),
+    ).length;
+    const rollbackHolds = rows.filter((row) => row.rolloutHold).length;
+    const blockedGates = rows.filter((row) => row.blockedGateCount > 0).length;
 
     return {
-      totalPendingApprovals,
-      quotaCriticalCount,
-      quotaWatchCount,
-      costCenterAttentionCount,
-      agedBacklogTenants,
-      approverGapTenants,
-      rollbackHoldCount,
-      blockedGateCount,
-      riskSignalCount,
-      zeroBacklogCount,
+      quotaWarn,
+      approvalBacklog,
+      costCenterAttention,
+      riskSignals,
+      approvalAged,
+      noApprovers,
+      rollbackHolds,
+      blockedGates,
     };
   }, [rows]);
 
@@ -1432,7 +1323,7 @@ export default function TenantGovernancePage() {
     return null;
   }, [error, filter, filteredRows.length, previewEmptyReason, rows.length]);
 
-  const emptyStateAction = useMemo<GovernanceAction | null>(() => {
+  const emptyAction = useMemo<GovernanceAction | null>(() => {
     switch (resolvedEmptyReason) {
       case "fetch_failed":
       case "external_unavailable":
@@ -1457,308 +1348,151 @@ export default function TenantGovernancePage() {
       default:
         return null;
     }
-  }, [
-    copy.clearFilter,
-    copy.openTenant,
-    copy.refresh,
-    loadDashboard,
-    resolvedEmptyReason,
-  ]);
+  }, [copy.clearFilter, copy.openTenant, copy.refresh, resolvedEmptyReason]);
 
-  const tableColumns = useMemo<CanvasTableColumn<GovernanceRowView>[]>(
+  const tableColumns = useMemo<CanvasTableColumn<GovernanceRow>[]>(
     () => [
       {
         h: copy.table.tenant,
-        w: 250,
+        w: 220,
         r: (row) => (
-          <div style={stackedValueStyle}>
+          <div style={{ display: "grid", gap: 4 }}>
             <button
               type="button"
               onClick={() => setSelectedTenantId(row.tenantId)}
               style={{
-                background: "transparent",
-                border: 0,
                 padding: 0,
-                color: th.text,
+                border: 0,
+                background: "transparent",
+                color: theme.text,
                 textAlign: "left",
-                fontWeight: 600,
+                fontWeight: 700,
                 cursor: "pointer",
-                fontFamily: th.fontFamily,
+                fontFamily: theme.fontFamily,
               }}
             >
               {row.tenantName}
             </button>
-            <span style={monoSubtleStyle}>
+            <span style={monoTextStyle}>
               {row.tenantCode} · {row.tenantId}
             </span>
           </div>
         ),
       },
       {
-        h: copy.table.rollout,
-        w: 170,
+        h: copy.table.plan,
+        w: 120,
         r: (row) => (
-          <div style={stackedValueStyle}>
-            <CanvasPill
-              theme={th}
-              tone={toCanvasTone(tenantStageTone(row.tenantRolloutStage))}
-              dot
-            >
-              {copy.states.stage}:{" "}
-              {formatPlatformCodeLabel(language, row.tenantRolloutStage)}
+          <span style={monoTextStyle}>
+            {formatNumber(
+              language,
+              row.tenantRecord?.quotas.monthlyBookings ?? 0,
+            )}
+            /mo
+          </span>
+        ),
+      },
+      {
+        h: copy.table.usage,
+        w: 120,
+        align: "right",
+        r: (row) => {
+          const quotaLimit = row.tenantRecord?.quotas.monthlyBookings ?? 0;
+          const used = Math.round(
+            (row.monthlyQuotaPercentUsed / 100) * quotaLimit,
+          );
+          return (
+            <span style={monoTextStyle}>{formatNumber(language, used)}</span>
+          );
+        },
+      },
+      {
+        h: copy.table.percent,
+        w: 200,
+        r: (row) => quotaMeter(language, row.monthlyQuotaPercentUsed),
+      },
+      {
+        h: copy.table.status,
+        w: 140,
+        r: (row) => (
+          <div style={{ display: "grid", gap: 6 }}>
+            <CanvasPill theme={theme} tone={row.quotaTone} dot>
+              {row.quotaLabel}
             </CanvasPill>
-            <CanvasPill
-              theme={th}
-              tone={toCanvasTone(tenantStatusTone(row.tenantStatus))}
-              dot
-            >
-              {copy.states.status}:{" "}
-              {formatPlatformCodeLabel(language, row.tenantStatus)}
-            </CanvasPill>
-            {row.highestGateStatus ? (
+            {row.riskLabels.length > 0 ? (
               <CanvasPill
-                theme={th}
-                tone={toCanvasTone(tenantStageTone(row.highestGateStatus))}
+                theme={theme}
+                tone={toneForAlert(
+                  row.alertFlags[0] ?? "pending_approval_over_48h",
+                )}
+                dot
               >
-                {copy.states.gate}:{" "}
-                {formatPlatformCodeLabel(language, row.highestGateStatus)}
+                {row.riskLabels[0]}
               </CanvasPill>
             ) : null}
           </div>
         ),
       },
       {
-        h: copy.table.costCenters,
+        h: copy.table.backlog,
         w: 170,
         r: (row) => (
-          <div style={stackedValueStyle}>
-            <span style={{ fontWeight: 600 }}>
-              {formatNumber(language, row.costCenterCount)}
-            </span>
-            <span style={secondaryTextStyle}>
-              {language === "en"
-                ? row.costCenterState === "missing"
-                  ? "No cost centers linked"
-                  : row.costCenterState === "limited"
-                    ? "Coverage is thin or rules are sparse"
-                    : "Coverage is healthy"
-                : row.costCenterState === "missing"
-                  ? "尚未連結任何 cost center"
-                  : row.costCenterState === "limited"
-                    ? "覆蓋或規則仍偏薄"
-                    : "覆蓋狀態健康"}
-            </span>
-          </div>
-        ),
-      },
-      {
-        h: copy.table.approvals,
-        w: 180,
-        r: (row) => (
-          <div style={stackedValueStyle}>
-            <span style={{ fontWeight: 600 }}>
+          <div style={{ display: "grid", gap: 4 }}>
+            <span style={{ fontWeight: 700 }}>
               {formatNumber(language, row.pendingApprovalCount)}
             </span>
             <span style={secondaryTextStyle}>
-              {language === "en" ? "Oldest" : "最舊"} ·{" "}
               {formatAge(language, row.oldestPendingApprovalAgeHours)}
             </span>
-            {row.approvalSignals.length > 0 ? (
-              <span style={monoSubtleStyle}>
-                {row.approvalSignals.join(" · ")}
-              </span>
-            ) : null}
           </div>
         ),
-      },
-      {
-        h: copy.table.quota,
-        w: 190,
-        r: (row) => renderQuotaMeter(language, row.monthlyQuotaPercentUsed),
-      },
-      {
-        h: copy.table.risks,
-        w: 240,
-        r: (row) => renderRiskLabels(language, row),
       },
       {
         h: copy.table.actions,
         w: 220,
         r: (row) => (
           <div style={actionRowStyle}>
-            {row.visibleActions.map((action) => (
-              <React.Fragment key={action.descriptor.action}>
-                {renderAction({
-                  action,
-                  locale: language,
-                  origins,
+            {row.actions.map((action) => (
+              <div key={action.descriptor.action}>
+                {renderAction(language, origins, action, {
                   compact: true,
                   active:
                     action.descriptor.action === "focus_row" &&
-                    row.tenantId === selectedTenantId,
+                    selectedTenantId === row.tenantId,
                 })}
-              </React.Fragment>
+              </div>
             ))}
           </div>
         ),
       },
     ],
-    [copy, language, origins, selectedTenantId],
+    [copy.table, language, origins, selectedTenantId],
   );
 
-  const emptyStateCard = useMemo(() => {
-    if (!resolvedEmptyReason) {
-      return null;
-    }
-
-    const stateMap: Record<
-      EmptyReason,
-      {
-        tone: Exclude<CanvasTone, "neutral">;
-        icon: ReactNode;
-        title: string;
-        body: string;
-        code: string;
-      }
-    > = {
-      no_data: {
-        tone: "info",
-        icon: <Building2 size={16} />,
-        title:
-          language === "en"
-            ? "No tenants are publishing governance data yet"
-            : "目前還沒有 tenant 發布治理資料",
-        body:
-          language === "en"
-            ? "The cross-tenant dashboard is wired, but there are no governance rows to aggregate yet."
-            : "跨租戶 dashboard 已經接上，但目前還沒有可供彙總的治理列。",
-        code: "empty.no_data",
-      },
-      not_provisioned: {
-        tone: "warn",
-        icon: <DatabaseZap size={16} />,
-        title:
-          language === "en"
-            ? "Required source feed is not provisioned"
-            : "必要來源 feed 尚未 provision",
-        body:
-          language === "en"
-            ? "This view keeps the missing source explicit instead of faking zeroes for unavailable expiry data."
-            : "這個畫面會明確標示缺失來源，而不是把尚未接上的到期資料假裝成 0。",
-        code: "empty.not_provisioned",
-      },
-      fetch_failed: {
-        tone: "danger",
-        icon: <AlertTriangle size={16} />,
-        title:
-          language === "en"
-            ? "Unable to load governance snapshot"
-            : "無法載入治理快照",
-        body:
-          language === "en"
-            ? "The control-plane fetch failed before any usable snapshot was cached."
-            : "控制平面抓取失敗，而且還沒有可回退的成功快照。",
-        code: "empty.fetch_failed",
-      },
-      permission_denied: {
-        tone: "danger",
-        icon: <ShieldOff size={16} />,
-        title:
-          language === "en"
-            ? "You can reach the page shell but not the governance data"
-            : "目前只可到達頁面 shell，無法讀取治理資料",
-        body:
-          language === "en"
-            ? "The dashboard preserves the distinction between route access and data authority."
-            : "這裡保留 route 可達與資料讀取權限之間的差異，不把它混成 generic error。",
-        code: "empty.permission_denied",
-      },
-      external_unavailable: {
-        tone: "warn",
-        icon: <BadgeAlert size={16} />,
-        title:
-          language === "en"
-            ? "An upstream dependency is unavailable"
-            : "上游相依服務暫時不可用",
-        body:
-          language === "en"
-            ? "The dashboard cannot complete a full read because one of the dependent systems is unavailable."
-            : "這張 dashboard 無法完成完整讀取，因為其中一個相依系統暫時不可用。",
-        code: "empty.external_unavailable",
-      },
-      filtered_empty: {
-        tone: "info",
-        icon: <FilterX size={16} />,
-        title:
-          language === "en"
-            ? "No tenants match the current governance focus"
-            : "目前沒有 tenant 符合這個治理焦點",
-        body:
-          language === "en"
-            ? "The empty state is specific to the active filter, not to the dashboard as a whole."
-            : "這是當前 filter 的空狀態，不代表整個 dashboard 沒有資料。",
-        code: "empty.filtered_empty",
-      },
-      driver_not_eligible: {
-        tone: "info",
-        icon: <CircleOff size={16} />,
-        title: "",
-        body: "",
-        code: "",
-      },
-    };
-
-    const state = stateMap[resolvedEmptyReason];
-
-    return (
-      <CanvasCard theme={th} title={copy.emptyTitle}>
-        <div style={{ display: "grid", gap: 12 }}>
-          <CanvasBanner
-            theme={th}
-            tone={state.tone}
-            icon={state.icon}
-            title={state.title}
-            body={state.body}
-          />
-          <div style={monoSubtleStyle}>{state.code}</div>
-          {emptyStateAction ? (
-            <div style={actionRowStyle}>
-              {renderAction({
-                action: emptyStateAction,
-                locale: language,
-                origins,
-              })}
-            </div>
-          ) : null}
-        </div>
-      </CanvasCard>
-    );
-  }, [
-    copy.emptyTitle,
-    emptyStateAction,
-    language,
-    origins,
-    resolvedEmptyReason,
-  ]);
-
   if (loading && !snapshot) {
-    return <div style={loadingStateStyle}>{copy.loading}</div>;
+    return (
+      <div style={loadingStyle}>
+        {language === "en"
+          ? "Loading tenant governance dashboard…"
+          : "正在載入 tenant governance dashboard…"}
+      </div>
+    );
   }
 
   return (
     <div style={pageRootStyle}>
       <CanvasPageHeader
-        theme={th}
+        theme={theme}
         title={copy.title}
         subtitle={copy.subtitle}
         actions={
           <>
-            <CanvasPill theme={th} tone="info">
+            <CanvasPill theme={theme} tone="info">
               T4 · 30s
             </CanvasPill>
             {refreshMeta ? (
               <CanvasPill
-                theme={th}
+                theme={theme}
                 tone={freshnessTone(refreshMeta.dataFreshness)}
                 dot
               >
@@ -1766,7 +1500,7 @@ export default function TenantGovernancePage() {
               </CanvasPill>
             ) : null}
             <CanvasBtn
-              theme={th}
+              theme={theme}
               variant="secondary"
               onClick={() => void loadDashboard("refresh")}
               disabled={refreshing}
@@ -1779,33 +1513,33 @@ export default function TenantGovernancePage() {
       />
 
       <div style={pageBodyStyle}>
-        <div style={toolbarRowStyle}>
-          <CanvasPill theme={th} tone="neutral">
+        <div style={toolbarStyle}>
+          <CanvasPill theme={theme} tone="neutral">
             {copy.refreshTier}: T4 / {REFRESH_TIER}
           </CanvasPill>
           {refreshMeta ? (
             <>
               <CanvasPill
-                theme={th}
+                theme={theme}
                 tone={freshnessTone(refreshMeta.dataFreshness)}
               >
                 {copy.snapshot}:{" "}
                 {formatDateTime(language, refreshMeta.generatedAt)}
               </CanvasPill>
-              <CanvasPill theme={th} tone="neutral">
+              <CanvasPill theme={theme} tone="neutral">
                 {copy.source}: {refreshMeta.source}
               </CanvasPill>
             </>
           ) : null}
           <span style={{ flex: 1 }} />
-          <span style={monoSubtleStyle}>
+          <span style={monoTextStyle}>
             {copy.resultSummary(rows.length, filteredRows.length)}
           </span>
         </div>
 
         {refreshMeta?.dataFreshness === "stale" ? (
           <CanvasBanner
-            theme={th}
+            theme={theme}
             tone="warn"
             icon={<AlertTriangle size={15} />}
             title={copy.staleBannerTitle}
@@ -1815,7 +1549,7 @@ export default function TenantGovernancePage() {
 
         {refreshMeta?.dataFreshness === "degraded" ? (
           <CanvasBanner
-            theme={th}
+            theme={theme}
             tone="danger"
             icon={<ShieldAlert size={15} />}
             title={copy.degradedBannerTitle}
@@ -1826,7 +1560,7 @@ export default function TenantGovernancePage() {
         {snapshot &&
         snapshot.summary.pageInfo.totalItems > snapshot.summary.items.length ? (
           <CanvasBanner
-            theme={th}
+            theme={theme}
             tone="warn"
             icon={<BadgeAlert size={15} />}
             title={copy.truncationTitle}
@@ -1837,286 +1571,101 @@ export default function TenantGovernancePage() {
           />
         ) : null}
 
-        {error && rows.length === 0 && resolvedEmptyReason === null ? (
-          <CanvasBanner
-            theme={th}
-            tone="danger"
-            icon={<AlertTriangle size={15} />}
-            title={copy.degradedBannerTitle}
-            body={error}
-          />
-        ) : null}
-
         <div style={kpiGridStyle}>
           <CanvasKPI
-            theme={th}
-            label={copy.aggregate.quota}
-            value={formatNumber(language, aggregates.quotaWatchCount)}
+            theme={theme}
+            label={copy.kpi.quota}
+            value={formatNumber(language, aggregates.quotaWarn)}
             delta={
-              aggregates.quotaCriticalCount > 0
-                ? language === "en"
-                  ? `${aggregates.quotaCriticalCount} critical`
-                  : `${aggregates.quotaCriticalCount} 高風險`
-                : undefined
+              language === "en"
+                ? `${rows.length} tenants`
+                : `跨 ${rows.length} 個租戶`
             }
-            deltaTone={aggregates.quotaCriticalCount > 0 ? "down" : "neutral"}
+            deltaTone={aggregates.quotaWarn > 0 ? "down" : "neutral"}
+            sub={language === "en" ? "thresholdWarning" : "thresholdWarning"}
+          />
+          <CanvasKPI
+            theme={theme}
+            label={copy.kpi.backlog}
+            value={formatNumber(language, aggregates.approvalBacklog)}
+            delta={
+              language === "en"
+                ? `${aggregates.approvalAged} aged`
+                : `${aggregates.approvalAged} 戶逾時`
+            }
+            deltaTone={aggregates.approvalBacklog > 0 ? "down" : "neutral"}
             sub={
               language === "en"
-                ? "Tenants at or above 80% monthly burn"
-                : "月度燃燒率達 80% 以上的 tenant"
+                ? "ops_approval_triage active"
+                : "ops_approval_triage 處理中"
             }
           />
           <CanvasKPI
-            theme={th}
-            label={copy.aggregate.backlog}
-            value={formatNumber(language, aggregates.totalPendingApprovals)}
-            delta={
-              aggregates.agedBacklogTenants > 0
-                ? language === "en"
-                  ? `${aggregates.agedBacklogTenants} aged`
-                  : `${aggregates.agedBacklogTenants} 戶逾時`
-                : undefined
-            }
-            deltaTone={aggregates.agedBacklogTenants > 0 ? "down" : "neutral"}
+            theme={theme}
+            label={copy.kpi.cost}
+            value={formatNumber(language, aggregates.costCenterAttention)}
             sub={
               language === "en"
-                ? "Cross-tenant queue depth"
-                : "跨租戶待審總深度"
+                ? "Month-end cost-center review required"
+                : "超過 month-end 預警"
             }
           />
           <CanvasKPI
-            theme={th}
-            label={copy.aggregate.costCenters}
-            value={formatNumber(language, aggregates.costCenterAttentionCount)}
-            delta={
-              language === "en"
-                ? `${formatNumber(language, rows.length - aggregates.costCenterAttentionCount)} healthy`
-                : `${formatNumber(language, rows.length - aggregates.costCenterAttentionCount)} 戶健康`
-            }
-            deltaTone={aggregates.costCenterAttentionCount > 0 ? "down" : "up"}
+            theme={theme}
+            label={copy.kpi.risk}
+            value={formatNumber(language, aggregates.riskSignals)}
             sub={
               language === "en"
-                ? "Cost-center or rule coverage needs review"
-                : "Cost-center 或 rule 覆蓋需要複核"
-            }
-          />
-          <CanvasKPI
-            theme={th}
-            label={copy.aggregate.risks}
-            value={formatNumber(language, aggregates.riskSignalCount)}
-            delta={
-              language === "en"
-                ? `${aggregates.rollbackHoldCount} hold · ${aggregates.blockedGateCount} blocked`
-                : `${aggregates.rollbackHoldCount} 戶 hold · ${aggregates.blockedGateCount} 戶 blocked`
-            }
-            deltaTone={
-              aggregates.rollbackHoldCount + aggregates.blockedGateCount > 0
-                ? "down"
-                : "neutral"
-            }
-            sub={
-              language === "en"
-                ? "Active governance signals across the fleet"
-                : "目前全域治理訊號總量"
+                ? `hold ${aggregates.rollbackHolds} · blocked ${aggregates.blockedGates} · approver gap ${aggregates.noApprovers}`
+                : `hold ${aggregates.rollbackHolds} · blocked ${aggregates.blockedGates} · approver gap ${aggregates.noApprovers}`
             }
           />
         </div>
 
-        <div style={topGridStyle}>
-          <CanvasCard
-            theme={th}
-            title={copy.filterTitle}
-            subtitle={copy.filterSubtitle}
-          >
+        {resolvedEmptyReason ? (
+          <CanvasCard theme={theme} title={copy.emptyTitle}>
             <div style={{ display: "grid", gap: 12 }}>
-              <div style={actionRowStyle}>
-                {(Object.keys(filterActions) as GovernanceFilter[]).map(
-                  (key) => (
-                    <div key={key}>
-                      {renderAction({
-                        action: filterActions[key],
-                        locale: language,
-                        origins,
-                        active: filter === key,
-                      })}
-                    </div>
-                  ),
-                )}
+              <CanvasBanner
+                theme={theme}
+                tone={emptyStateContent(resolvedEmptyReason, language).tone}
+                icon={emptyStateContent(resolvedEmptyReason, language).icon}
+                title={emptyStateContent(resolvedEmptyReason, language).title}
+                body={emptyStateContent(resolvedEmptyReason, language).body}
+              />
+              <div style={monoTextStyle}>
+                {emptyStateContent(resolvedEmptyReason, language).code}
               </div>
-              <div style={actionRowStyle}>
-                {(Object.keys(filterStats) as GovernanceFilter[]).map((key) => (
-                  <CanvasPill
-                    key={`count-${key}`}
-                    theme={th}
-                    tone={filterTone(filter === key, filterStats[key])}
-                    dot={key !== "all"}
-                  >
-                    {copy.filters[key]} ·{" "}
-                    {formatNumber(language, filterStats[key])}
-                  </CanvasPill>
-                ))}
-              </div>
-            </div>
-          </CanvasCard>
-
-          <CanvasCard
-            theme={th}
-            title={copy.backlogTitle}
-            subtitle={copy.backlogSubtitle}
-          >
-            <div style={ruleListStyle}>
-              {[
-                {
-                  key: copy.backlog.total,
-                  value: formatNumber(
-                    language,
-                    aggregates.totalPendingApprovals,
-                  ),
-                  tone: riskSummaryTone(
-                    aggregates.totalPendingApprovals > 0 ? 1 : 0,
-                  ),
-                  note:
-                    language === "en"
-                      ? "Absolute queue depth visible from the current read model."
-                      : "從目前 read model 可直接看到的待審深度。",
-                },
-                {
-                  key: copy.backlog.aged,
-                  value: formatNumber(language, aggregates.agedBacklogTenants),
-                  tone: riskSummaryTone(aggregates.agedBacklogTenants),
-                  note:
-                    language === "en"
-                      ? "Rows carrying the `pending_approval_over_48h` signal."
-                      : "帶有 `pending_approval_over_48h` 訊號的租戶。",
-                },
-                {
-                  key: copy.backlog.approverGap,
-                  value: formatNumber(language, aggregates.approverGapTenants),
-                  tone: riskSummaryTone(aggregates.approverGapTenants),
-                  note:
-                    language === "en"
-                      ? "Rows carrying the `no_approvers_configured` signal."
-                      : "帶有 `no_approvers_configured` 訊號的租戶。",
-                },
-                {
-                  key: copy.backlog.clear,
-                  value: formatNumber(language, aggregates.zeroBacklogCount),
-                  tone: "success" as const,
-                  note:
-                    language === "en"
-                      ? "Tenants with zero pending approvals."
-                      : "目前沒有待審項目的租戶。",
-                },
-              ].map((item) => (
-                <div key={item.key} style={ruleRowStyle}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                    }}
-                  >
-                    <span style={{ fontWeight: 600 }}>{item.key}</span>
-                    <CanvasPill theme={th} tone={item.tone}>
-                      {item.value}
-                    </CanvasPill>
-                  </div>
-                  <div style={secondaryTextStyle}>{item.note}</div>
+              {emptyAction ? (
+                <div style={actionRowStyle}>
+                  {renderAction(language, origins, emptyAction)}
                 </div>
-              ))}
+              ) : null}
             </div>
           </CanvasCard>
-
-          <CanvasCard
-            theme={th}
-            title={copy.riskTitle}
-            subtitle={copy.riskSubtitle}
-          >
-            <div style={ruleListStyle}>
-              {[
-                {
-                  key: copy.register.rollbackHold,
-                  value: formatNumber(language, aggregates.rollbackHoldCount),
-                  tone: riskSummaryTone(aggregates.rollbackHoldCount),
-                  note:
-                    language === "en"
-                      ? "Tenants currently held out of promotion or continued rollout."
-                      : "目前被 hold、不能繼續 promote 或 rollout 的租戶。",
-                },
-                {
-                  key: copy.register.blockedGates,
-                  value: formatNumber(language, aggregates.blockedGateCount),
-                  tone: riskSummaryTone(aggregates.blockedGateCount),
-                  note:
-                    language === "en"
-                      ? "At least one rollout gate is blocked in the tenant lifecycle record."
-                      : "租戶生命週期記錄中至少有一個 rollout gate 為 blocked。",
-                },
-                {
-                  key: copy.register.credentialFeed,
-                  value: language === "en" ? "Gap" : "Gap",
-                  tone: "warn" as const,
-                  note:
-                    language === "en"
-                      ? "Expiry feed is intentionally surfaced as not provisioned rather than hidden."
-                      : "到期 feed 目前刻意標成 not provisioned，而不是直接隱藏。",
-                },
-                {
-                  key: copy.register.contractFeed,
-                  value: language === "en" ? "Gap" : "Gap",
-                  tone: "warn" as const,
-                  note:
-                    language === "en"
-                      ? "Contract expiry remains an explicit read-model gap in this slice."
-                      : "Contract 到期目前仍是這個 slice 的明確 read-model 缺口。",
-                },
-              ].map((item) => (
-                <div key={item.key} style={ruleRowStyle}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 12,
-                    }}
-                  >
-                    <span style={{ fontWeight: 600 }}>{item.key}</span>
-                    <CanvasPill theme={th} tone={item.tone}>
-                      {item.value}
-                    </CanvasPill>
-                  </div>
-                  <div style={secondaryTextStyle}>{item.note}</div>
-                </div>
-              ))}
-            </div>
-          </CanvasCard>
-        </div>
-
-        {emptyStateCard}
-
-        {resolvedEmptyReason === null ? (
-          <>
+        ) : (
+          <div style={contentGridStyle}>
             <CanvasCard
-              theme={th}
-              title={copy.tableTitle}
-              subtitle={copy.tableSubtitle}
+              theme={theme}
+              title={copy.heatmapTitle}
+              subtitle={copy.heatmapSubtitle}
               actions={
-                <CanvasPill theme={th} tone="neutral">
+                <CanvasPill theme={theme} tone="neutral">
                   {copy.pageSummary(page, totalPages, pagedRows.length)}
                 </CanvasPill>
               }
             >
               <CanvasTable
-                theme={th}
+                theme={theme}
                 columns={tableColumns}
-                rows={rowsForTable}
+                rows={pagedRows}
               />
-              <div style={{ ...toolbarRowStyle, marginTop: 14 }}>
+              <div style={{ ...toolbarStyle, marginTop: 14 }}>
                 <span style={secondaryTextStyle}>
                   {copy.pageSummary(page, totalPages, pagedRows.length)}
                 </span>
                 <span style={{ flex: 1 }} />
                 <CanvasBtn
-                  theme={th}
+                  theme={theme}
                   variant="secondary"
                   disabled={page <= 1}
                   onClick={() => setPage((current) => Math.max(1, current - 1))}
@@ -2124,7 +1673,7 @@ export default function TenantGovernancePage() {
                   {copy.previous}
                 </CanvasBtn>
                 <CanvasBtn
-                  theme={th}
+                  theme={theme}
                   variant="secondary"
                   disabled={page >= totalPages}
                   onClick={() =>
@@ -2136,192 +1685,336 @@ export default function TenantGovernancePage() {
               </div>
             </CanvasCard>
 
-            <CanvasCard
-              theme={th}
-              title={
-                selectedTenant
-                  ? `${copy.detailTitle} · ${selectedTenant.tenantName}`
-                  : copy.detailTitle
-              }
-              subtitle={copy.detailSubtitle}
-            >
-              {selectedTenant ? (
-                <div style={{ display: "grid", gap: 16 }}>
-                  <div style={detailGridStyle}>
-                    <div style={detailMetricStyle}>
-                      <div style={monoSubtleStyle}>
-                        {copy.detail.headers.overview}
-                      </div>
-                      <div
-                        style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                      >
-                        <CanvasPill
-                          theme={th}
-                          tone={toCanvasTone(
-                            tenantStageTone(selectedTenant.tenantRolloutStage),
-                          )}
-                          dot
-                        >
-                          {copy.states.stage}:{" "}
-                          {formatPlatformCodeLabel(
-                            language,
-                            selectedTenant.tenantRolloutStage,
-                          )}
-                        </CanvasPill>
-                        <CanvasPill
-                          theme={th}
-                          tone={toCanvasTone(
-                            tenantStatusTone(selectedTenant.tenantStatus),
-                          )}
-                          dot
-                        >
-                          {copy.states.status}:{" "}
-                          {formatPlatformCodeLabel(
-                            language,
-                            selectedTenant.tenantStatus,
-                          )}
-                        </CanvasPill>
-                        {selectedTenant.highestGateStatus ? (
-                          <CanvasPill
-                            theme={th}
-                            tone={toCanvasTone(
-                              tenantStageTone(selectedTenant.highestGateStatus),
-                            )}
-                          >
-                            {copy.states.gate}:{" "}
-                            {formatPlatformCodeLabel(
-                              language,
-                              selectedTenant.highestGateStatus,
-                            )}
-                          </CanvasPill>
-                        ) : null}
-                      </div>
-                      <div style={secondaryTextStyle}>
-                        {copy.states.modules}:{" "}
-                        {formatNumber(
+            <div style={sidebarStackStyle}>
+              <CanvasCard
+                theme={theme}
+                title={copy.filtersTitle}
+                subtitle={copy.filtersSubtitle}
+              >
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div style={actionRowStyle}>
+                    {(
+                      Object.keys(filterActions.actions) as GovernanceFilter[]
+                    ).map((key) => (
+                      <div key={key}>
+                        {renderAction(
                           language,
-                          selectedTenant.tenantRecord?.enabledModules.length ??
-                            0,
-                        )}{" "}
-                        · {copy.states.integration}:{" "}
-                        {selectedTenant.tenantRecord
-                          ? formatPlatformCodeLabel(
-                              language,
-                              selectedTenant.tenantRecord.integrationPackage
-                                .mode,
-                            )
-                          : "—"}
-                      </div>
-                    </div>
-
-                    <div style={detailMetricStyle}>
-                      <div style={monoSubtleStyle}>
-                        {copy.detail.headers.signals}
-                      </div>
-                      <div style={{ fontWeight: 700, fontSize: 18 }}>
-                        {formatNumber(
-                          language,
-                          selectedTenant.governanceRiskCount,
+                          origins,
+                          filterActions.actions[key],
+                          {
+                            active: filter === key,
+                          },
                         )}
                       </div>
-                      <div style={secondaryTextStyle}>
-                        {selectedTenant.governanceRiskLabels.length > 0
-                          ? selectedTenant.governanceRiskLabels.join(" · ")
-                          : copy.detail.healthy}
+                    ))}
+                  </div>
+                  <div style={actionRowStyle}>
+                    {(
+                      Object.keys(filterActions.counts) as GovernanceFilter[]
+                    ).map((key) => (
+                      <CanvasPill
+                        key={key}
+                        theme={theme}
+                        tone={filter === key ? "accent" : "neutral"}
+                        dot={key !== "all"}
+                      >
+                        {copy.filters[key]} ·{" "}
+                        {formatNumber(language, filterActions.counts[key])}
+                      </CanvasPill>
+                    ))}
+                  </div>
+                </div>
+              </CanvasCard>
+
+              <CanvasCard
+                theme={theme}
+                title={copy.backlogTitle}
+                subtitle={copy.backlogSubtitle}
+              >
+                <div style={listStyle}>
+                  {[
+                    {
+                      label:
+                        language === "en" ? "Open queue depth" : "待審總深度",
+                      value: formatNumber(language, aggregates.approvalBacklog),
+                      note:
+                        language === "en"
+                          ? "Cross-tenant approval requests visible now."
+                          : "目前 read model 可見的跨租戶待審量。",
+                    },
+                    {
+                      label:
+                        language === "en"
+                          ? "Aged backlog > 48h"
+                          : "逾 48h 待審",
+                      value: formatNumber(language, aggregates.approvalAged),
+                      note:
+                        language === "en"
+                          ? "Rows carrying `pending_approval_over_48h`."
+                          : "帶有 `pending_approval_over_48h` 訊號的列。",
+                    },
+                    {
+                      label:
+                        language === "en"
+                          ? "No approvers configured"
+                          : "未配置 approver",
+                      value: formatNumber(language, aggregates.noApprovers),
+                      note:
+                        language === "en"
+                          ? "Rows carrying `no_approvers_configured`."
+                          : "帶有 `no_approvers_configured` 訊號的列。",
+                    },
+                  ].map((item) => (
+                    <div key={item.label} style={listRowStyle}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 12,
+                        }}
+                      >
+                        <span style={{ fontWeight: 600 }}>{item.label}</span>
+                        <CanvasPill theme={theme} tone="warn">
+                          {item.value}
+                        </CanvasPill>
+                      </div>
+                      <div style={secondaryTextStyle}>{item.note}</div>
+                    </div>
+                  ))}
+                </div>
+              </CanvasCard>
+
+              <CanvasCard
+                theme={theme}
+                title={copy.riskTitle}
+                subtitle={copy.riskSubtitle}
+              >
+                <div style={listStyle}>
+                  {[
+                    {
+                      label:
+                        language === "en" ? "Rollback hold" : "Rollback hold",
+                      value: formatNumber(language, aggregates.rollbackHolds),
+                      note:
+                        language === "en"
+                          ? "Tenants currently held out of continued promotion."
+                          : "目前被 hold、不能繼續 promote 的租戶。",
+                    },
+                    {
+                      label:
+                        language === "en"
+                          ? "Blocked rollout gates"
+                          : "Blocked rollout gate",
+                      value: formatNumber(language, aggregates.blockedGates),
+                      note:
+                        language === "en"
+                          ? "At least one lifecycle gate is blocked."
+                          : "至少有一個 rollout gate 為 blocked。",
+                    },
+                    {
+                      label:
+                        language === "en"
+                          ? "Credential expiry feed"
+                          : "Credential 到期 feed",
+                      value: "Gap",
+                      note:
+                        language === "en"
+                          ? "Explicitly rendered as not provisioned."
+                          : "刻意以 not provisioned 顯示。",
+                    },
+                    {
+                      label:
+                        language === "en"
+                          ? "Contract expiry feed"
+                          : "Contract 到期 feed",
+                      value: "Gap",
+                      note:
+                        language === "en"
+                          ? "Still an explicit read-model gap for this slice."
+                          : "目前仍是這個 slice 的 read-model gap。",
+                    },
+                  ].map((item) => (
+                    <div key={item.label} style={listRowStyle}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          gap: 12,
+                        }}
+                      >
+                        <span style={{ fontWeight: 600 }}>{item.label}</span>
+                        <CanvasPill
+                          theme={theme}
+                          tone={item.value === "Gap" ? "warn" : "danger"}
+                        >
+                          {item.value}
+                        </CanvasPill>
+                      </div>
+                      <div style={secondaryTextStyle}>{item.note}</div>
+                    </div>
+                  ))}
+                </div>
+              </CanvasCard>
+
+              <CanvasCard
+                theme={theme}
+                title={
+                  selectedTenant
+                    ? `${copy.selectedTitle} · ${selectedTenant.tenantName}`
+                    : copy.selectedTitle
+                }
+                subtitle={copy.selectedSubtitle}
+              >
+                {selectedTenant ? (
+                  <div style={{ display: "grid", gap: 16 }}>
+                    <div style={metricGridStyle}>
+                      <div style={metricCardStyle}>
+                        <div style={monoTextStyle}>Rollout</div>
+                        <div style={actionRowStyle}>
+                          <CanvasPill
+                            theme={theme}
+                            tone={toCanvasTone(
+                              tenantStageTone(
+                                selectedTenant.tenantRolloutStage,
+                              ),
+                            )}
+                            dot
+                          >
+                            {formatPlatformCodeLabel(
+                              language,
+                              selectedTenant.tenantRolloutStage,
+                            )}
+                          </CanvasPill>
+                          <CanvasPill
+                            theme={theme}
+                            tone={toCanvasTone(
+                              tenantStatusTone(selectedTenant.tenantStatus),
+                            )}
+                            dot
+                          >
+                            {formatPlatformCodeLabel(
+                              language,
+                              selectedTenant.tenantStatus,
+                            )}
+                          </CanvasPill>
+                          {selectedTenant.highestGateStatus ? (
+                            <CanvasPill
+                              theme={theme}
+                              tone={toCanvasTone(
+                                tenantStageTone(
+                                  selectedTenant.highestGateStatus,
+                                ),
+                              )}
+                            >
+                              {formatPlatformCodeLabel(
+                                language,
+                                selectedTenant.highestGateStatus,
+                              )}
+                            </CanvasPill>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div style={metricCardStyle}>
+                        <div style={monoTextStyle}>Cost-center health</div>
+                        <CanvasPill
+                          theme={theme}
+                          tone={selectedTenant.costCenterTone}
+                          dot
+                        >
+                          {selectedTenant.costCenterLabel}
+                        </CanvasPill>
+                        <div style={secondaryTextStyle}>
+                          {formatNumber(
+                            language,
+                            selectedTenant.costCenterCount,
+                          )}{" "}
+                          cost center ·{" "}
+                          {formatNumber(
+                            language,
+                            selectedTenant.activeRuleCount,
+                          )}{" "}
+                          active rule
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div style={detailGridStyle}>
-                    <div style={detailMetricStyle}>
-                      <div style={monoSubtleStyle}>{copy.detail.quota}</div>
-                      <div style={{ fontWeight: 700, fontSize: 18 }}>
-                        {formatPercent(
+                    <div style={metricGridStyle}>
+                      <div style={metricCardStyle}>
+                        <div style={monoTextStyle}>Quota burn</div>
+                        <div style={{ fontWeight: 700, fontSize: 18 }}>
+                          {formatPercent(
+                            language,
+                            selectedTenant.monthlyQuotaPercentUsed,
+                          )}
+                        </div>
+                        {quotaMeter(
                           language,
                           selectedTenant.monthlyQuotaPercentUsed,
                         )}
                       </div>
-                      {renderQuotaMeter(
-                        language,
-                        selectedTenant.monthlyQuotaPercentUsed,
-                      )}
-                    </div>
-                    <div style={detailMetricStyle}>
-                      <div style={monoSubtleStyle}>{copy.detail.approvals}</div>
-                      <div style={{ fontWeight: 700, fontSize: 18 }}>
-                        {formatNumber(
-                          language,
-                          selectedTenant.pendingApprovalCount,
-                        )}
-                      </div>
-                      <div style={secondaryTextStyle}>
-                        {formatAge(
-                          language,
-                          selectedTenant.oldestPendingApprovalAgeHours,
-                        )}
+                      <div style={metricCardStyle}>
+                        <div style={monoTextStyle}>Approval backlog</div>
+                        <div style={{ fontWeight: 700, fontSize: 18 }}>
+                          {formatNumber(
+                            language,
+                            selectedTenant.pendingApprovalCount,
+                          )}
+                        </div>
+                        <div style={secondaryTextStyle}>
+                          {formatAge(
+                            language,
+                            selectedTenant.oldestPendingApprovalAgeHours,
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div style={detailMetricStyle}>
-                      <div style={monoSubtleStyle}>
-                        {copy.detail.costCenters}
-                      </div>
-                      <div style={{ fontWeight: 700, fontSize: 18 }}>
-                        {formatNumber(language, selectedTenant.costCenterCount)}
-                      </div>
-                      <div style={secondaryTextStyle}>
-                        {selectedTenant.costCenterState === "missing"
-                          ? language === "en"
-                            ? "No cost centers linked"
-                            : "尚未連結 cost center"
-                          : selectedTenant.costCenterState === "limited"
-                            ? language === "en"
-                              ? "Coverage needs attention"
-                              : "覆蓋仍需注意"
-                            : copy.detail.healthy}
-                      </div>
-                    </div>
-                    <div style={detailMetricStyle}>
-                      <div style={monoSubtleStyle}>{copy.detail.rules}</div>
-                      <div style={{ fontWeight: 700, fontSize: 18 }}>
-                        {formatNumber(language, selectedTenant.activeRuleCount)}
-                      </div>
-                      <div style={secondaryTextStyle}>
-                        {selectedTenant.activeRuleCount > 0
-                          ? language === "en"
-                            ? "Active governance rules present"
-                            : "目前已有 active governance rules"
-                          : language === "en"
-                            ? "No active governance rules"
-                            : "目前沒有 active governance rule"}
-                      </div>
-                    </div>
-                  </div>
 
-                  <div style={{ display: "grid", gap: 12 }}>
-                    <div style={monoSubtleStyle}>
-                      {copy.detail.headers.actions}
+                    <div style={metricCardStyle}>
+                      <div style={monoTextStyle}>Signals</div>
+                      <div style={actionRowStyle}>
+                        {selectedTenant.riskLabels.length > 0 ? (
+                          selectedTenant.riskLabels.map((label, index) => (
+                            <CanvasPill
+                              key={`${label}-${index}`}
+                              theme={theme}
+                              tone={index === 0 ? "danger" : "warn"}
+                              dot
+                            >
+                              {label}
+                            </CanvasPill>
+                          ))
+                        ) : (
+                          <CanvasPill theme={theme} tone="success" dot>
+                            {language === "en" ? "All clear" : "全部正常"}
+                          </CanvasPill>
+                        )}
+                      </div>
                     </div>
-                    <div style={actionRowStyle}>
-                      {selectedTenant.detailActions.map((action) => (
-                        <React.Fragment key={action.descriptor.action}>
-                          {renderAction({
-                            action,
-                            locale: language,
-                            origins,
-                            showReason: true,
-                          })}
-                        </React.Fragment>
-                      ))}
+
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <div style={monoTextStyle}>Drill targets</div>
+                      <div style={actionRowStyle}>
+                        {selectedTenant.detailActions.map((action) => (
+                          <div key={action.descriptor.action}>
+                            {renderAction(language, origins, action, {
+                              showReason: true,
+                            })}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div style={secondaryTextStyle}>{copy.selectedHint}</div>
                   </div>
-                </div>
-              ) : (
-                <div style={secondaryTextStyle}>{copy.noSelection}</div>
-              )}
-            </CanvasCard>
-          </>
-        ) : null}
+                ) : (
+                  <div style={secondaryTextStyle}>
+                    {language === "en"
+                      ? "Select a tenant row to inspect detail context."
+                      : "先選一列 tenant，再看 detail rail。"}
+                  </div>
+                )}
+              </CanvasCard>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
