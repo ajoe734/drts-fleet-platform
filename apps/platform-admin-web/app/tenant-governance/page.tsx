@@ -35,6 +35,11 @@ const PAGE_SIZE = 12;
 const REFRESH_TIER = "medium_slow" satisfies RefreshTier;
 const QUOTA_WARNING_THRESHOLD = 80;
 const QUOTA_DANGER_THRESHOLD = 95;
+const DEFAULT_APP_ORIGINS = {
+  "platform-admin": "http://localhost:3002",
+  "ops-console": "http://localhost:3003",
+  "tenant-console": "http://localhost:3000",
+} satisfies Record<CrossAppResourceLink["targetApp"], string>;
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 const REFRESH_TIER_MS: Record<RefreshTier, number> = {
   urgent: 5_000,
@@ -284,9 +289,13 @@ function disabledReasonLabel(locale: string, code?: string) {
     case "no_pending_approvals":
       return locale === "en" ? "No pending approvals" : "目前沒有待審案件";
     case "no_recent_governance_alerts":
-      return locale === "en" ? "No recent governance alerts" : "目前沒有治理警示";
+      return locale === "en"
+        ? "No recent governance alerts"
+        : "目前沒有治理警示";
     case "tenant_not_active":
-      return locale === "en" ? "Tenant is not active yet" : "租戶尚未進入 active";
+      return locale === "en"
+        ? "Tenant is not active yet"
+        : "租戶尚未進入 active";
     default:
       return locale === "en" ? "Unavailable" : "目前不可用";
   }
@@ -317,14 +326,10 @@ function formatRelativeRefresh(locale: string, value: Date | null) {
     return locale === "en" ? "just now" : "剛剛";
   }
   if (diffSeconds < 60) {
-    return locale === "en"
-      ? `${diffSeconds}s ago`
-      : `${diffSeconds} 秒前`;
+    return locale === "en" ? `${diffSeconds}s ago` : `${diffSeconds} 秒前`;
   }
   const diffMinutes = Math.floor(diffSeconds / 60);
-  return locale === "en"
-    ? `${diffMinutes}m ago`
-    : `${diffMinutes} 分鐘前`;
+  return locale === "en" ? `${diffMinutes}m ago` : `${diffMinutes} 分鐘前`;
 }
 
 function classifyErrorReason(message: string | null): EmptyPreviewReason {
@@ -348,10 +353,7 @@ function classifyErrorReason(message: string | null): EmptyPreviewReason {
   return "fetch_failed";
 }
 
-function matchesFilter(
-  row: TenantGovernanceRow,
-  filter: RiskFilter,
-) {
+function matchesFilter(row: TenantGovernanceRow, filter: RiskFilter) {
   if (filter === "all") {
     return true;
   }
@@ -587,6 +589,7 @@ function resolveDrillTargets(
 function renderActionControl(
   action: GovernanceAction,
   locale: string,
+  href: string,
   tone: "primary" | "secondary" = "secondary",
 ) {
   const disabledTitle = action.descriptor.enabled
@@ -610,7 +613,7 @@ function renderActionControl(
   return (
     <a
       key={action.key}
-      href={action.link.route}
+      href={href}
       target={action.link.openMode === "new_tab" ? "_blank" : undefined}
       rel={action.link.openMode === "new_tab" ? "noreferrer" : undefined}
       style={actionButtonStyle(false, tone)}
@@ -618,6 +621,27 @@ function renderActionControl(
       {action.label}
     </a>
   );
+}
+
+function resolveCrossAppHref(link: CrossAppResourceLink): string {
+  if (typeof window !== "undefined" && link.targetApp === "platform-admin") {
+    return link.route;
+  }
+
+  const configuredOrigin =
+    link.targetApp === "platform-admin"
+      ? process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL
+      : link.targetApp === "ops-console"
+        ? process.env.NEXT_PUBLIC_OPS_CONSOLE_URL
+        : process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL;
+
+  const origin = configuredOrigin || DEFAULT_APP_ORIGINS[link.targetApp];
+
+  try {
+    return new URL(link.route, origin).toString();
+  } catch {
+    return link.route;
+  }
 }
 
 function EmptyStateCard({
@@ -709,6 +733,7 @@ function EmptyStateCard({
         };
 
   const state = copy[reason];
+  const emptyActionHandler = action.onClick ?? (() => undefined);
 
   return (
     <div style={emptyStateWrapStyle}>
@@ -730,7 +755,9 @@ function EmptyStateCard({
         </CanvasPill>
       </div>
       <div style={{ display: "grid", gap: 6 }}>
-        <strong style={{ fontSize: 18, color: theme.text }}>{state.title}</strong>
+        <strong style={{ fontSize: 18, color: theme.text }}>
+          {state.title}
+        </strong>
         <span style={{ color: theme.textMuted, lineHeight: 1.6 }}>
           {state.body}
         </span>
@@ -746,7 +773,7 @@ function EmptyStateCard({
             {action.label || state.cta}
           </a>
         ) : (
-          <CanvasBtn theme={theme} onClick={action.onClick}>
+          <CanvasBtn theme={theme} onClick={emptyActionHandler}>
             {action.label || state.cta}
           </CanvasBtn>
         )}
@@ -759,8 +786,9 @@ export default function TenantGovernancePage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
   const searchParams = useSearchParams();
-  const [summary, setSummary] =
-    useState<TenantGovernanceSummaryData | null>(null);
+  const [summary, setSummary] = useState<TenantGovernanceSummaryData | null>(
+    null,
+  );
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<RiskFilter>("all");
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
@@ -894,7 +922,8 @@ export default function TenantGovernancePage() {
           selected: "已選取",
           pageSummary: (current: number, total: number, items: number) =>
             `第 ${current} / ${Math.max(total, 1)} 頁 · 顯示 ${items} 筆`,
-          summaryLabel: (count: number) => `目前頁面快照共有 ${count} 個 tenant`,
+          summaryLabel: (count: number) =>
+            `目前頁面快照共有 ${count} 個 tenant`,
           quotaSub: (count: number) => `${count} 個 tenant 超過警戒線`,
           backlogSub: "導向 payments 與 approval follow-up 面",
           costCenterSub: "coverage 缺口或 approver posture 問題",
@@ -1039,6 +1068,14 @@ export default function TenantGovernancePage() {
         : ([] as CrossAppResourceLink[]),
     [locale, selectedTenant],
   );
+  const selectedDrillTargetHrefs = useMemo(
+    () =>
+      selectedDrillTargets.map((target) => ({
+        target,
+        href: resolveCrossAppHref(target),
+      })),
+    [selectedDrillTargets],
+  );
 
   const metrics = useMemo(() => {
     const quotaWarningCount = visibleItems.filter(
@@ -1097,8 +1134,7 @@ export default function TenantGovernancePage() {
     () =>
       [...visibleItems]
         .filter(
-          (item) =>
-            item.pendingApprovalCount > 0 || item.alertFlags.length > 0,
+          (item) => item.pendingApprovalCount > 0 || item.alertFlags.length > 0,
         )
         .sort((left, right) => {
           if (right.pendingApprovalCount !== left.pendingApprovalCount) {
@@ -1107,9 +1143,7 @@ export default function TenantGovernancePage() {
           if (right.alertFlags.length !== left.alertFlags.length) {
             return right.alertFlags.length - left.alertFlags.length;
           }
-          return (
-            right.monthlyQuotaPercentUsed - left.monthlyQuotaPercentUsed
-          );
+          return right.monthlyQuotaPercentUsed - left.monthlyQuotaPercentUsed;
         })
         .slice(0, 6),
     [visibleItems],
@@ -1151,7 +1185,9 @@ export default function TenantGovernancePage() {
           <div style={{ display: "grid", gap: 6 }}>
             <CanvasPill
               theme={theme}
-              tone={normalizeCanvasTone(tenantStageTone(row.tenantRolloutStage))}
+              tone={normalizeCanvasTone(
+                tenantStageTone(row.tenantRolloutStage),
+              )}
               dot
             >
               {copy.stage}:{" "}
@@ -1184,9 +1220,7 @@ export default function TenantGovernancePage() {
         w: 190,
         r: (row) => (
           <div style={{ display: "grid", gap: 6 }}>
-            <div
-              style={{ display: "flex", gap: 8, alignItems: "center" }}
-            >
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <div style={heatBarTrackStyle}>
                 <div
                   style={{
@@ -1234,7 +1268,12 @@ export default function TenantGovernancePage() {
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {row.alertFlags.length > 0 ? (
               row.alertFlags.map((flag) => (
-                <CanvasPill key={`${row.tenantId}-${flag}`} theme={theme} tone={alertTone(flag)} dot>
+                <CanvasPill
+                  key={`${row.tenantId}-${flag}`}
+                  theme={theme}
+                  tone={alertTone(flag)}
+                  dot
+                >
                   {alertLabel(locale, flag)}
                 </CanvasPill>
               ))
@@ -1265,6 +1304,7 @@ export default function TenantGovernancePage() {
                 renderActionControl(
                   action,
                   locale,
+                  resolveCrossAppHref(action.link),
                   index === 0 ? "primary" : "secondary",
                 ),
               )}
@@ -1563,7 +1603,8 @@ export default function TenantGovernancePage() {
                             width: `${Math.min(row.monthlyQuotaPercentUsed, 100)}%`,
                             height: "100%",
                             background:
-                              row.monthlyQuotaPercentUsed > QUOTA_DANGER_THRESHOLD
+                              row.monthlyQuotaPercentUsed >
+                              QUOTA_DANGER_THRESHOLD
                                 ? theme.danger
                                 : row.monthlyQuotaPercentUsed >
                                     QUOTA_WARNING_THRESHOLD
@@ -1757,7 +1798,9 @@ export default function TenantGovernancePage() {
                     <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
                       {copy.selectedSummary}
                     </span>
-                    <strong style={{ fontSize: 16 }}>{selectedTenant.tenantName}</strong>
+                    <strong style={{ fontSize: 16 }}>
+                      {selectedTenant.tenantName}
+                    </strong>
                     <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
                       {selectedTenant.tenantCode} · {selectedTenant.tenantId}
                     </span>
@@ -1771,13 +1814,17 @@ export default function TenantGovernancePage() {
                     </strong>
                     <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
                       {copy.columns.approvals}:{" "}
-                      {selectedTenant.pendingApprovalCount.toLocaleString(locale)}
+                      {selectedTenant.pendingApprovalCount.toLocaleString(
+                        locale,
+                      )}
                     </span>
                   </div>
                 </div>
 
                 <div style={actionGridStyle}>
-                  <strong style={{ fontSize: 13.5 }}>{copy.selectedActions}</strong>
+                  <strong style={{ fontSize: 13.5 }}>
+                    {copy.selectedActions}
+                  </strong>
                   {selectedActions.map((action, index) => (
                     <div key={`action-${action.key}`} style={actionCardStyle}>
                       <div
@@ -1811,14 +1858,19 @@ export default function TenantGovernancePage() {
                       <span style={{ color: theme.textMuted, lineHeight: 1.5 }}>
                         {action.hint}
                       </span>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <div
+                        style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+                      >
                         {renderActionControl(
                           action,
                           locale,
+                          resolveCrossAppHref(action.link),
                           index === 0 ? "primary" : "secondary",
                         )}
                         {!action.descriptor.enabled ? (
-                          <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+                          <span
+                            style={{ color: theme.textMuted, fontSize: 11.5 }}
+                          >
                             {disabledReasonLabel(
                               locale,
                               action.descriptor.disabledReasonCode,
@@ -1831,12 +1883,14 @@ export default function TenantGovernancePage() {
                 </div>
 
                 <div style={actionGridStyle}>
-                  <strong style={{ fontSize: 13.5 }}>{copy.selectedDrill}</strong>
+                  <strong style={{ fontSize: 13.5 }}>
+                    {copy.selectedDrill}
+                  </strong>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {selectedDrillTargets.map((target) => (
+                    {selectedDrillTargetHrefs.map(({ target, href }) => (
                       <a
                         key={`${target.targetApp}:${target.route}`}
-                        href={target.route}
+                        href={href}
                         target={
                           target.openMode === "new_tab" ? "_blank" : undefined
                         }
