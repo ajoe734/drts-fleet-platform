@@ -1107,6 +1107,13 @@ function parseEvents(formData: FormData) {
   return [...new Set([...baselineEvents, ...extraEvents])];
 }
 
+function sameEvents(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  const leftSorted = [...left].sort();
+  const rightSorted = [...right].sort();
+  return leftSorted.every((value, index) => value === rightSorted[index]);
+}
+
 async function rotateWebhookSecretRequest(
   webhookId: string,
   body: {
@@ -1218,7 +1225,26 @@ async function updateWebhookAction(formData: FormData) {
       throw new Error("停用 endpoint 時必須填寫 reason。");
     }
 
-    await client.updateWebhookEndpoint(webhookId, command);
+    if (
+      command.status === "disabled" &&
+      currentEndpoint.status !== "disabled"
+    ) {
+      const nextUrl = command.url?.trim() ?? "";
+      const urlChanged = nextUrl !== currentEndpoint.url;
+      const eventsChanged = !sameEvents(events, currentEndpoint.events);
+
+      if (urlChanged || eventsChanged) {
+        throw new Error(
+          "停用 flow 只允許執行 disableWebhookEndpoint；請先儲存 URL / events 變更，再單獨停用 endpoint。",
+        );
+      }
+
+      await client.disableWebhookEndpoint(webhookId, {
+        reason: disableReason,
+      });
+    } else {
+      await client.updateWebhookEndpoint(webhookId, command);
+    }
     revalidatePath("/webhooks");
     redirect(
       `/webhooks?webhookId=${encodeURIComponent(webhookId)}&success=${encodeURIComponent(
