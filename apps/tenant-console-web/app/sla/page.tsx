@@ -76,21 +76,9 @@ function buildFallbackView(reason: EmptyReason): TenantSlaProfileView {
   return {
     profile: null,
     emptyState: buildPreviewEmptyState(reason),
-    availableActions: [
-      {
-        action: "update_sla_profile",
-        enabled: true,
-        riskLevel: "high",
-        requiresReason: true,
-      },
-      {
-        action: "recalculate_sla_bookings",
-        enabled: false,
-        disabledReasonCode: "sla_not_provisioned",
-        riskLevel: "high",
-        requiresReason: true,
-      },
-    ],
+    // Fallback states must not invent write authority that the backend did
+    // not return.
+    availableActions: [],
     refreshTier: "slow",
     refreshMetadata: {
       generatedAt: new Date().toISOString(),

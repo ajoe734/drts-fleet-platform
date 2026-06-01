@@ -238,6 +238,16 @@ function getAction(
   return matched ?? fallback;
 }
 
+function buildUnavailableAction(action: string): ResourceActionDescriptor {
+  return {
+    action,
+    enabled: false,
+    disabledReasonCode: "backend_action_unavailable",
+    riskLevel: "high",
+    requiresReason: true,
+  };
+}
+
 function disabledReasonLabel(reason: string | undefined) {
   if (!reason) return "Unavailable";
   return reason.replaceAll("_", " ");
@@ -295,22 +305,12 @@ export function SlaManager({
   const updateAction = getAction(
     availableActions,
     ["update_sla_profile", "save"],
-    {
-      action: "update_sla_profile",
-      enabled: true,
-      riskLevel: "high",
-      requiresReason: true,
-    },
+    buildUnavailableAction("update_sla_profile"),
   );
   const recalcAction = getAction(
     availableActions,
     ["recalculate_sla_bookings", "recalculate"],
-    {
-      action: "recalculate_sla_bookings",
-      enabled: true,
-      riskLevel: "high",
-      requiresReason: true,
-    },
+    buildUnavailableAction("recalculate_sla_bookings"),
   );
 
   const activeEmptyState =
