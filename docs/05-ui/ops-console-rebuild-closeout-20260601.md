@@ -1,6 +1,6 @@
 # Ops Console Rebuild — Umbrella Closeout (2026-06-01)
 
-Owner: Claude · Reviewer: Claude2
+Owner: Claude · Reviewer: Codex2
 Task: `UI-FE-OPS-UMBRELLA`
 Spec packet: [`docs/05-ui/ops-console-design-handoff-packet-20260525.md`](./ops-console-design-handoff-packet-20260525.md) (per-page briefs are §5.1–§5.20)
 Umbrella branch: `claude/ui-fe-ops-umbrella` (base `origin/dev @ 64cb4597`), HEAD `9153760c`
@@ -28,14 +28,14 @@ Each sub-task was independently reviewed and finalized to `done` under its own t
 
 What this closeout **did** execute, against the umbrella branch `claude/ui-fe-ops-umbrella` (HEAD `9153760c`, base `origin/dev @ 64cb4597`; this branch carries only the additive route reconstruction + this doc on top of `dev`), re-run fresh on **2026-06-01T09:09–09:10Z**:
 
-| Check                    | Command                                                          | Result        |
-| ------------------------ | ---------------------------------------------------------------- | ------------- |
-| Install                  | `pnpm install --frozen-lockfile`                                 | PASS (exit 0) |
-| Prereq build             | `pnpm --filter @drts/contracts build`                            | PASS (exit 0) |
-| Prereq build             | `pnpm --filter @drts/ui-tokens build`                            | PASS (exit 0) |
-| Prereq build             | `pnpm --filter @drts/ui-web build`                               | PASS (exit 0) |
-| Typecheck                | `pnpm --filter @drts/ops-console-web typecheck` (`tsc --noEmit`) | PASS (exit 0) |
-| Production build / smoke | `pnpm --filter @drts/ops-console-web build` (`next build`)       | PASS (exit 0) |
+| Check                    | Command                                                          | Result         |
+| ------------------------ | ---------------------------------------------------------------- | -------------- |
+| Install                  | `pnpm install --frozen-lockfile`                                 | PASS (exit 0)  |
+| Prereq build             | `pnpm --filter @drts/contracts build`                            | PASS (exit 0)  |
+| Prereq build             | `pnpm --filter @drts/ui-tokens build`                            | PASS (exit 0)  |
+| Prereq build             | `pnpm --filter @drts/ui-web build`                               | PASS (exit 0)  |
+| Typecheck                | `pnpm --filter @drts/ops-console-web typecheck` (`tsc --noEmit`) | PASS (exit 0)  |
+| Production build / smoke | `pnpm --filter @drts/ops-console-web build` (`next build`)       | PASS (exit 0)  |
 | Storybook build          | `pnpm --filter @drts/ui-web build-storybook`                     | PASS (exit 0)¹ |
 
 ¹ The storybook bundle **builds**, but its story set covers tenant / platform / partner surfaces only — there are **no Ops Console parity stories**. A green `build-storybook` does not satisfy the "storybook parity stories pass" clause; see [Storybook parity status](#storybook-parity-status).
@@ -57,28 +57,28 @@ That is **20 of 20** §5 route paths present and compiling. Path presence is **n
 `Trunk serves` legend (for `origin/dev @ 64cb4597`, which the umbrella branch is based on):
 **rebuilt** = `dev` carries a post-rebuild canvas page; **pre-rebuild** = `dev` still carries pre-rebuild content (the approved rebuild is on the owner branch only); **reconstructed** = route file was absent from `dev` and is additively reconstructed onto the umbrella branch by this closeout.
 
-| §5   | Route (packet)            | Sub-task        | Done agent | Approved artifact (commit · branch of record)              | Done (UTC)           | Trunk serves          |
-| ---- | ------------------------- | --------------- | ---------- | ---------------------------------------------------------- | -------------------- | --------------------- |
-| 5.1  | `/dashboard`              | UI-FE-OPS-DSH   | Codex2     | `961d2b64` · `origin/dev`²                                 | 2026-05-26T14:33:44Z | rebuilt               |
-| 5.2  | `/dispatch`               | UI-FE-OPS-DSP   | Claude     | `3cad1681` · `origin/claude/ui-fe-ops-dsp`                 | 2026-06-01T01:39:52Z | rebuilt³              |
-| 5.3  | `/dispatch/[dispatchId]`⁴ | UI-FE-OPS-DSPID | Claude     | `9679480b` · `origin/claude/ui-fe-ops-dspid`               | 2026-06-01T07:20:14Z | pre-rebuild           |
-| 5.4  | `/callcenter`             | UI-FE-OPS-CC    | Claude2    | `314daff9` · `origin/claude2/ui-fe-ops-cc`                 | 2026-06-01T03:12:04Z | pre-rebuild (draft)   |
-| 5.5  | `/complaints`             | UI-FE-OPS-CMP   | Claude2    | `4777a5a9` · `origin/claude2/ui-fe-ops-cmp`                | 2026-06-01T07:22:17Z | pre-rebuild (draft)   |
-| 5.6  | `/complaints/[caseNo]`    | UI-FE-OPS-CMPID | Claude     | `6bcce14c` · `origin/claude/ui-fe-ops-cmpid`               | 2026-06-01T00:06:44Z | reconstructed⁵        |
-| 5.7  | `/incidents`              | UI-FE-OPS-INC   | Claude     | `d57c1c3c` · `origin/claude/ui-fe-ops-inc`                 | 2026-06-01T01:39:49Z | rebuilt³              |
-| 5.8  | `/incidents/[incidentId]` | UI-FE-OPS-INCID | Claude     | `74488fcd` · `origin/claude/ui-fe-ops-incid`               | 2026-06-01T07:38:45Z | pre-rebuild           |
-| 5.9  | `/approval-requests`      | UI-FE-OPS-APR   | Codex2     | `da75b550` · `origin/codex2/ui-fe-ops-apr`⁶                | 2026-05-27T05:49:20Z | reconstructed⁷        |
-| 5.10 | `/reports`                | UI-FE-OPS-RPT   | Claude     | `06f51973` · `origin/claude/ui-fe-ops-rpt`                 | 2026-06-01T00:47:07Z | pre-rebuild (draft)   |
-| 5.11 | `/revenue`                | UI-FE-OPS-REV   | Codex      | `64cb4597` · `origin/dev`⁸                                 | 2026-05-29T04:14:51Z | rebuilt               |
-| 5.12 | `/attendance`             | UI-FE-OPS-ATT   | Claude     | `54a37cbe` · `origin/claude/ui-fe-ops-att`                 | 2026-06-01T07:23:15Z | rebuilt³              |
-| 5.13 | `/maintenance`            | UI-FE-OPS-MNT   | Claude     | `5c60732e` · `origin/claude/ui-fe-ops-mnt`                 | 2026-06-01T03:02:16Z | pre-rebuild (draft)   |
-| 5.14 | `/drivers`                | UI-FE-OPS-DRV   | Claude     | `43e33e1c` · `origin/claude/ui-fe-ops-drv`⁹                | 2026-06-01T05:08:02Z | pre-rebuild (draft)   |
-| 5.15 | `/drivers/[driverId]`     | UI-FE-OPS-DRVID | Claude     | `0c01bb37` · `origin/claude/ui-fe-ops-drvid`               | 2026-06-01T06:44:18Z | pre-rebuild           |
-| 5.16 | `/vehicles`               | UI-FE-OPS-VEH   | Codex2     | `c42ac488` · `origin/codex2/ui-fe-ops-veh`                 | 2026-05-27T06:39:37Z | rebuilt               |
-| 5.17 | `/vehicles/[vehicleId]`   | UI-FE-OPS-VEHID | Codex2     | `b9fe9412` · `origin/codex2/ui-fe-ops-vehid`               | 2026-05-28T10:34:40Z | rebuilt               |
-| 5.18 | `/contracts`              | UI-FE-OPS-CON   | Claude2    | `45fd9bae` · `origin/claude2/ui-fe-ops-con`                | 2026-06-01T07:21:18Z | pre-rebuild (draft)   |
-| 5.19 | `/contracts/[contractId]` | UI-FE-OPS-CONID | Claude     | `3b30f0a7` · `origin/claude/ui-fe-ops-conid`¹⁰             | 2026-06-01T01:00:45Z | reconstructed¹¹       |
-| 5.20 | `/feature-flags`          | UI-FE-OPS-FF    | Claude     | `684d69f9` · `origin/claude/ui-fe-ops-ff`                  | 2026-06-01T02:36:00Z | pre-rebuild (draft)   |
+| §5   | Route (packet)            | Sub-task        | Done agent | Approved artifact (commit · branch of record)  | Done (UTC)           | Trunk serves        |
+| ---- | ------------------------- | --------------- | ---------- | ---------------------------------------------- | -------------------- | ------------------- |
+| 5.1  | `/dashboard`              | UI-FE-OPS-DSH   | Codex2     | `961d2b64` · `origin/dev`²                     | 2026-05-26T14:33:44Z | rebuilt             |
+| 5.2  | `/dispatch`               | UI-FE-OPS-DSP   | Claude     | `3cad1681` · `origin/claude/ui-fe-ops-dsp`     | 2026-06-01T01:39:52Z | rebuilt³            |
+| 5.3  | `/dispatch/[dispatchId]`⁴ | UI-FE-OPS-DSPID | Claude     | `9679480b` · `origin/claude/ui-fe-ops-dspid`   | 2026-06-01T07:20:14Z | pre-rebuild         |
+| 5.4  | `/callcenter`             | UI-FE-OPS-CC    | Claude2    | `314daff9` · `origin/claude2/ui-fe-ops-cc`     | 2026-06-01T03:12:04Z | pre-rebuild (draft) |
+| 5.5  | `/complaints`             | UI-FE-OPS-CMP   | Claude2    | `4777a5a9` · `origin/claude2/ui-fe-ops-cmp`    | 2026-06-01T07:22:17Z | pre-rebuild (draft) |
+| 5.6  | `/complaints/[caseNo]`    | UI-FE-OPS-CMPID | Claude     | `6bcce14c` · `origin/claude/ui-fe-ops-cmpid`   | 2026-06-01T00:06:44Z | reconstructed⁵      |
+| 5.7  | `/incidents`              | UI-FE-OPS-INC   | Claude     | `d57c1c3c` · `origin/claude/ui-fe-ops-inc`     | 2026-06-01T01:39:49Z | rebuilt³            |
+| 5.8  | `/incidents/[incidentId]` | UI-FE-OPS-INCID | Claude     | `74488fcd` · `origin/claude/ui-fe-ops-incid`   | 2026-06-01T07:38:45Z | pre-rebuild         |
+| 5.9  | `/approval-requests`      | UI-FE-OPS-APR   | Codex2     | `da75b550` · `origin/codex2/ui-fe-ops-apr`⁶    | 2026-05-27T05:49:20Z | reconstructed⁷      |
+| 5.10 | `/reports`                | UI-FE-OPS-RPT   | Claude     | `06f51973` · `origin/claude/ui-fe-ops-rpt`     | 2026-06-01T00:47:07Z | pre-rebuild (draft) |
+| 5.11 | `/revenue`                | UI-FE-OPS-REV   | Codex      | `64cb4597` · `origin/dev`⁸                     | 2026-05-29T04:14:51Z | rebuilt             |
+| 5.12 | `/attendance`             | UI-FE-OPS-ATT   | Claude     | `54a37cbe` · `origin/claude/ui-fe-ops-att`     | 2026-06-01T07:23:15Z | rebuilt³            |
+| 5.13 | `/maintenance`            | UI-FE-OPS-MNT   | Claude     | `5c60732e` · `origin/claude/ui-fe-ops-mnt`     | 2026-06-01T03:02:16Z | pre-rebuild (draft) |
+| 5.14 | `/drivers`                | UI-FE-OPS-DRV   | Claude     | `43e33e1c` · `origin/claude/ui-fe-ops-drv`⁹    | 2026-06-01T05:08:02Z | pre-rebuild (draft) |
+| 5.15 | `/drivers/[driverId]`     | UI-FE-OPS-DRVID | Claude     | `0c01bb37` · `origin/claude/ui-fe-ops-drvid`   | 2026-06-01T06:44:18Z | pre-rebuild         |
+| 5.16 | `/vehicles`               | UI-FE-OPS-VEH   | Codex2     | `c42ac488` · `origin/codex2/ui-fe-ops-veh`     | 2026-05-27T06:39:37Z | rebuilt             |
+| 5.17 | `/vehicles/[vehicleId]`   | UI-FE-OPS-VEHID | Codex2     | `b9fe9412` · `origin/codex2/ui-fe-ops-vehid`   | 2026-05-28T10:34:40Z | rebuilt             |
+| 5.18 | `/contracts`              | UI-FE-OPS-CON   | Claude2    | `45fd9bae` · `origin/claude2/ui-fe-ops-con`    | 2026-06-01T07:21:18Z | pre-rebuild (draft) |
+| 5.19 | `/contracts/[contractId]` | UI-FE-OPS-CONID | Claude     | `3b30f0a7` · `origin/claude/ui-fe-ops-conid`¹⁰ | 2026-06-01T01:00:45Z | reconstructed¹¹     |
+| 5.20 | `/feature-flags`          | UI-FE-OPS-FF    | Claude     | `684d69f9` · `origin/claude/ui-fe-ops-ff`      | 2026-06-01T02:36:00Z | pre-rebuild (draft) |
 
 Foundation dependency: `UI-FE-TOKENS` — Codex, `4b8af668`, `origin/codex/ui-fe-tokens`, 2026-05-31T14:15:56Z. Consumed by the prereq `@drts/ui-tokens` build above (PASS).
 
@@ -99,12 +99,12 @@ Every commit hash above was verified reachable from a remote branch at regenerat
 
 This is the umbrella's central question and the part the 2026-05-28 draft got wrong. Counting against `origin/dev @ 64cb4597`:
 
-| Trunk state                                                                 | Count | Routes                                                                                                                  |
-| --------------------------------------------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------- |
-| Rebuild present on `origin/dev`                                             | 7     | `/dashboard`, `/dispatch`, `/incidents`, `/revenue`, `/attendance`, `/vehicles`, `/vehicles/[vehicleId]`               |
-| Rebuild reconstructed onto umbrella branch (route absent from `dev`)        | 3     | `/approval-requests`, `/complaints/[caseNo]`, `/contracts/[contractId]`                                                |
-| Rebuild on owner branch only — `dev` serves distinct pre-rebuild blobs¹²    | 7     | `/callcenter`, `/complaints`, `/reports`, `/maintenance`, `/drivers`, `/contracts`, `/feature-flags`                   |
-| Rebuild on owner branch only — `dev` serves a pre-rebuild detail snapshot   | 3     | `/dispatch/[dispatchId]`, `/incidents/[incidentId]`, `/drivers/[driverId]`                                             |
+| Trunk state                                                               | Count | Routes                                                                                                   |
+| ------------------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------- |
+| Rebuild present on `origin/dev`                                           | 7     | `/dashboard`, `/dispatch`, `/incidents`, `/revenue`, `/attendance`, `/vehicles`, `/vehicles/[vehicleId]` |
+| Rebuild reconstructed onto umbrella branch (route absent from `dev`)      | 3     | `/approval-requests`, `/complaints/[caseNo]`, `/contracts/[contractId]`                                  |
+| Rebuild on owner branch only — `dev` serves distinct pre-rebuild blobs¹²  | 7     | `/callcenter`, `/complaints`, `/reports`, `/maintenance`, `/drivers`, `/contracts`, `/feature-flags`     |
+| Rebuild on owner branch only — `dev` serves a pre-rebuild detail snapshot | 3     | `/dispatch/[dispatchId]`, `/incidents/[incidentId]`, `/drivers/[driverId]`                               |
 
 ¹² The 7 list pages on `origin/dev @ 64cb4597` are **7 distinct blobs**, not one shared `[DRAFT/BLOCKED]` draft (an earlier draft of this doc wrongly cited a single blob `9a387ebd`): `/callcenter` `c3db0a51` (1930 ln), `/complaints` `cd78e904` (1415 ln), `/reports` `17f12413` (1484 ln), `/maintenance` `7bb37be4` (1067 ln), `/drivers` `dc5cfff3` (273 ln), `/contracts` `aa00b31b` (312 ln), `/feature-flags` `5aa1d0d1` (133 ln). Only `/drivers` and `/contracts` contain `DRAFT`/`BLOCKED` markers; the other 5 are substantial earlier implementations. Each is smaller than its owner-branch rebuild (e.g. `/callcenter` dev 1930 vs owner 3373; `/drivers` dev 273 vs owner 1550; `/feature-flags` dev 133 vs owner 1275), so all 7 are pre-rebuild content the owner-lane rebuild supersedes.
 
@@ -128,14 +128,14 @@ The three §5 routes that had reached `done` in machine truth but were **absent 
 
 ## Acceptance assessment
 
-| Acceptance clause                               | Verdict                                                                                                                                                                                                                                                                       |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| All 20 sub-tasks done                           | **Met** (board/machine-truth): all 20 + `UI-FE-TOKENS` are `done`/archived; every approved artifact is on a reachable remote branch.                                                                                                                                          |
-| Closeout doc references each per spec packet §5 | **Met**: this document, signoff matrix §5.1–§5.20, with reachable commit + branch of record per surface.                                                                                                                                                                      |
-| Smoke test in dev VM clean                      | **Partially met.** Umbrella-branch `pnpm install`, prereq builds, `tsc --noEmit`, and `next build` all exit 0; all 20 §5 route paths resolve; the `/approval-requests` nav 404 is cleared. **But the build serves the approved rebuild for only 10 of 20 surfaces** — 10 build from pre-rebuild content on `dev` (see [Dev-trunk integration status](#dev-trunk-integration-status)). A dev-VM smoke test of the *rebuilt* Ops Console is therefore not yet possible end-to-end on the trunk. |
-| Storybook parity stories pass                   | **Not met**: no Ops Console parity stories exist; never authored.                                                                                                                                                                                                            |
+| Acceptance clause                               | Verdict                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| All 20 sub-tasks done                           | **Met** (board/machine-truth): all 20 + `UI-FE-TOKENS` are `done`/archived; every approved artifact is on a reachable remote branch.                                                                                                                                                                                                                                                                                                                                                          |
+| Closeout doc references each per spec packet §5 | **Met**: this document, signoff matrix §5.1–§5.20, with reachable commit + branch of record per surface.                                                                                                                                                                                                                                                                                                                                                                                      |
+| Smoke test in dev VM clean                      | **Partially met.** Umbrella-branch `pnpm install`, prereq builds, `tsc --noEmit`, and `next build` all exit 0; all 20 §5 route paths resolve; the `/approval-requests` nav 404 is cleared. **But the build serves the approved rebuild for only 10 of 20 surfaces** — 10 build from pre-rebuild content on `dev` (see [Dev-trunk integration status](#dev-trunk-integration-status)). A dev-VM smoke test of the _rebuilt_ Ops Console is therefore not yet possible end-to-end on the trunk. |
+| Storybook parity stories pass                   | **Not met**: no Ops Console parity stories exist; never authored.                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
-Two clauses are fully met. **"Smoke test clean" is only partially met** (build is green; rebuilt-content integration covers 10/20 of the trunk), and **"storybook parity stories" is not met**. Both remaining gaps require work beyond a doc closeout: a trunk-consolidation merge wave (follow-up #1) and a story-authoring workstream (follow-up #2). This closeout therefore **does not self-finalize to `done`**; it hands the regenerated provenance + honest integration status to reviewer `Claude2` for triage of the open clauses. The ship-target decision below is now resolved to (a) `origin/dev`, routing both open clauses to follow-up waves W1/W2 without weakening either gate.
+Two clauses are fully met. **"Smoke test clean" is only partially met** (build is green; rebuilt-content integration covers 10/20 of the trunk), and **"storybook parity stories" is not met**. Both remaining gaps require work beyond a doc closeout: a trunk-consolidation merge wave (follow-up #1) and a story-authoring workstream (follow-up #2). This closeout therefore **does not self-finalize to `done`**; it hands the regenerated provenance + honest integration status to reviewer `Codex2` for triage of the open clauses. The ship-target decision below is now resolved to (a) `origin/dev`, routing both open clauses to follow-up waves W1/W2 without weakening either gate.
 
 ## Ship-target decision — resolved to (a) `origin/dev`
 
@@ -146,7 +146,7 @@ The reviewer's reopen asked to confirm whether owner-branch-only artifacts match
 - **W1 `UI-FE-OPS-TRUNK-CONSOLIDATE`** (backlog, `depends_on UI-FE-OPS-UMBRELLA`) — closes clause 3 by merging the 10 owner-branch rebuilds onto `dev`.
 - **W2 `UI-FE-OPS-STORYBOOK-PARITY`** (backlog, `depends_on UI-FE-OPS-UMBRELLA`) — closes clause 4 by authoring the missing `ops-*` parity stories.
 
-The umbrella will finalize to `done` only after W1 + W2 complete and a true dev-VM smoke passes 20/20. Until then it remains owner-side open with this honest provenance handed to reviewer `Claude2`.
+The umbrella will finalize to `done` only after W1 + W2 complete and a true dev-VM smoke passes 20/20. Until then it remains owner-side open with this honest provenance handed to reviewer `Codex2`.
 
 ## Recommended follow-ups
 
@@ -162,7 +162,7 @@ The prior provenance matrix (2026-05-28 draft, and the partial 2026-06-01 revisi
 - Re-derived each surface's branch of record + commit from the latest `done` event in `ai-activity-log.jsonl`, then verified each hash reachable via `git branch -r --contains`.
 - Replaced 3 orphaned `done`-event commits with their current reachable location (`35ae4509`→`961d2b64`/`dev` for DSH; `26587e81`→`da75b550`/owner branch for APR; `6ccce080`→`64cb4597`/`dev` for REV).
 - Corrected `DRV` from the dev merge-base `6adb27a6` to the artifact commit `43e33e1c`; kept `DSP` (`3cad1681`) and `CONID` (`3b30f0a7`), which were correct in the prior matrix (the reviewer's alternate `b40953a6`/`17c59a22` were a superseded source blob and a prior push-log tip, respectively).
-- Corrected the doc header `Reviewer` from `Codex2` to `Claude2`.
+- Corrected the doc header `Reviewer` back to `Codex2` (the canonical task reviewer in machine truth). An earlier revision of this doc wrongly set it to `Claude2`; the reviewer's reopen flagged this discrepancy and it is now reconciled to the task's recorded reviewer.
 - Re-ran the full build + storybook evidence chain (2026-06-01T09:09–09:10Z) and added the `Trunk serves` column + [Dev-trunk integration status](#dev-trunk-integration-status), which corrects the prior "20 of 20 integrated / smoke clean" claim to the true 10-of-20 rebuilt-on-trunk state.
 
 ## Files added/changed by this closeout
