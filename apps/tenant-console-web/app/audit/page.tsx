@@ -11,7 +11,6 @@ import {
   CanvasBanner,
   CanvasCard,
   CanvasDL,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -37,29 +36,6 @@ const PLATFORM_ADMIN_URL =
 const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "grid",
-  gap: 16,
-};
-
-const kpiGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-  gap: 12,
-};
-
-const contentGridStyle: CSSProperties = {
-  display: "grid",
-  gap: 16,
-  alignItems: "start",
-};
-
-const mainLaneStyle: CSSProperties = {
-  display: "grid",
-  gap: 16,
-};
-
-const secondaryGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
   gap: 16,
 };
 
@@ -211,21 +187,6 @@ const detailCodeStyle: CSSProperties = {
   overflowX: "auto",
 };
 
-const listStyle: CSSProperties = {
-  margin: 0,
-  padding: 0,
-  listStyle: "none",
-  display: "grid",
-  gap: 10,
-};
-
-const listItemStyle: CSSProperties = {
-  paddingBottom: 10,
-  borderBottom: `1px solid ${th.border}`,
-  display: "grid",
-  gap: 4,
-};
-
 const emptyStateStyle: CSSProperties = {
   padding: "24px 20px",
   display: "grid",
@@ -235,6 +196,27 @@ const emptyStateStyle: CSSProperties = {
 
 const tableCardStyle: CSSProperties = {
   overflow: "hidden",
+};
+
+const stripGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+};
+
+const stripCardStyle: CSSProperties = {
+  padding: 12,
+  borderBottom: `1px solid ${th.border}`,
+  background: th.surfaceLo,
+  display: "grid",
+  gap: 4,
+};
+
+const legendRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
 };
 
 const actorToneByScope = {
@@ -554,13 +536,14 @@ function buildResourceLink(record: AuditLogRecord): ResourceLink {
     moduleName.includes("incident") ||
     moduleName.includes("dispatch")
   ) {
+    const opsRoute =
+      record.resourceId && resourceType.includes("complaint")
+        ? `/complaints?caseNo=${resourceId}`
+        : record.resourceId && resourceType.includes("incident")
+          ? `/incidents?incidentId=${resourceId}`
+          : auditRoute;
     return {
-      href: buildBaseUrl(
-        OPS_CONSOLE_URL,
-        record.resourceId && resourceType.includes("complaint")
-          ? `/complaints/${resourceId}`
-          : auditRoute,
-      ),
+      href: buildBaseUrl(OPS_CONSOLE_URL, opsRoute),
       label: "在 Ops Console 追查",
       external: true,
       appLabel: "Ops Console",
@@ -809,7 +792,6 @@ function actionLabel(action: ResourceActionDescriptor, emptyState = false) {
 
 function buildEmptyStateActions(
   reason: EmptyReason,
-  filters: FilterState,
   availableActions: ResourceActionDescriptor[],
   nextAction?: ResourceActionDescriptor,
 ) {
@@ -838,17 +820,22 @@ function buildTableColumns(
 ): CanvasTableColumn<AuditTableRow>[] {
   return [
     {
-      h: "AT",
-      w: 150,
+      h: "WHEN",
+      w: 168,
       mono: true,
       r: (row) => row.createdAtLabel,
     },
     {
       h: "ACTOR",
-      w: 220,
+      w: 280,
       r: (row) => (
         <div style={stackedCellStyle}>
-          <span style={primaryTextStyle}>{row.actorLabel}</span>
+          <div style={legendRowStyle}>
+            <CanvasPill theme={th} tone={actorToneByScope[row.actorScope]} dot>
+              {actorScopeLabel(row.actorScope)}
+            </CanvasPill>
+            <span style={primaryTextStyle}>{row.actorLabel}</span>
+          </div>
           <span style={secondaryTextStyle}>{row.actorSubLabel}</span>
           {row.masked ? (
             <span style={secondaryTextStyle}>masked sensitive identity</span>
@@ -857,37 +844,34 @@ function buildTableColumns(
       ),
     },
     {
-      h: "SCOPE",
-      w: 108,
-      r: (row) => (
-        <CanvasPill theme={th} tone={actorToneByScope[row.actorScope]} dot>
-          {actorScopeLabel(row.actorScope)}
-        </CanvasPill>
-      ),
+      h: "MODULE",
+      w: 148,
+      mono: true,
+      r: (row) => row.record.moduleName,
     },
     {
-      h: "MODULE / ACTION",
-      w: 210,
+      h: "ACTION",
+      w: 220,
+      mono: true,
       r: (row) => (
-        <div style={stackedCellStyle}>
-          <span style={monoTextStyle}>{row.record.moduleName}</span>
-          <span style={secondaryTextStyle}>{row.record.actionName}</span>
-        </div>
+        <span style={{ ...monoTextStyle, color: th.accent }}>
+          {row.record.actionName}
+        </span>
       ),
     },
     {
       h: "RESOURCE",
-      w: 230,
+      w: 228,
       r: (row) => (
         <div style={stackedCellStyle}>
-          <span>{row.resourceLabel}</span>
+          <span style={monoTextStyle}>{row.resourceLabel}</span>
           <span style={secondaryTextStyle}>{row.resourceLink.appLabel}</span>
         </div>
       ),
     },
     {
       h: "REQUEST",
-      w: 170,
+      w: 180,
       mono: true,
       r: (row) => row.record.requestId || "—",
     },
@@ -1042,7 +1026,6 @@ export default async function AuditPage({
   ).length;
   const exportCount = rows.length;
   const availableActions = auditView?.availableActions ?? [];
-  const filterAction = findAvailableAction(availableActions, "filter");
   const refreshAction = findAvailableAction(availableActions, "refresh");
   const exportAction = findAvailableAction(availableActions, "export");
   const emptyReason = auditView?.emptyState?.reason ?? errorReason;
@@ -1056,7 +1039,6 @@ export default async function AuditPage({
   const emptyStateActions = emptyReason
     ? buildEmptyStateActions(
         emptyReason,
-        filters,
         availableActions,
         auditView?.emptyState?.nextAction,
       )
@@ -1071,29 +1053,18 @@ export default async function AuditPage({
     exportLoadState?.error ?? null,
   );
   const exportReady = Boolean(exportState.download?.downloadUrl);
+  const snapshotGeneratedAt = auditView?.refreshMetadata?.generatedAt
+    ? formatAuditAt(auditView.refreshMetadata.generatedAt)
+    : "—";
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
-        title="稽核紀錄"
-        subtitle={`不可變 · request correlation · cross-actor visibility · refresh tier ${formatRefreshTier(auditView?.refreshTier)}`}
+        title="稽核 · cross-actor"
+        subtitle="不可變 · 7 年保存 · 含所有 actor realm 對 tenant 資源的動作 (Q-TEN13)"
         actions={
           <>
-            {filterAction
-              ? renderActionLink(
-                  filterAction,
-                  "/audit",
-                  actionLabel(filterAction),
-                )
-              : null}
-            {refreshAction
-              ? renderActionLink(
-                  refreshAction,
-                  buildActionHref(refreshAction, filters),
-                  actionLabel(refreshAction),
-                )
-              : null}
             {exportAction
               ? renderActionLink(
                   exportAction,
@@ -1112,497 +1083,393 @@ export default async function AuditPage({
           theme={th}
           tone="info"
           icon="audit"
-          title="Tenant audit includes tenant, ops, platform, system, and partner actors on tenant-owned resources"
-          body="Q-TEN13 要求租戶側可檢視跨 actor realm 的租戶資源操作。此頁保留 request correlation，並對 sensitive fields 做 policy-safe masking。"
+          title="跨 actor 可見性 · Q-TEN13"
+          body="本租戶可看到 tenant、ops、platform、system、partner actor 對 tenant-owned resources 的操作。敏感欄位維持 policy-safe masking，並保留 request correlation。"
         />
 
-        <div style={kpiGridStyle}>
-          <CanvasKPI
-            theme={th}
-            label="Visible Rows"
-            value={String(records.length)}
-            sub={
-              auditView
-                ? `generated ${formatAuditAt(auditView.refreshMetadata.generatedAt)}`
-                : "current snapshot"
-            }
-          />
-          <CanvasKPI
-            theme={th}
-            label="Actor Scopes"
-            value={String(visibleActorScopes.length)}
-            sub={visibleActorScopes.join(" · ") || "—"}
-          />
-          <CanvasKPI
-            theme={th}
-            label="Modules"
-            value={String(moduleCount)}
-            sub="distinct modules in current filter"
-          />
-          <CanvasKPI
-            theme={th}
-            label="Masked Fields"
-            value={String(maskedActorCount)}
-            sub="rows with policy-safe identity masking"
-          />
-        </div>
-
-        <div style={contentGridStyle}>
-          <div style={mainLaneStyle}>
-            <CanvasCard
-              theme={th}
-              title="篩選與匯出"
-              subtitle="Filter by actor / module / action / time range, then manually refresh or export the current subset."
-            >
-              <form
-                action="/audit"
-                method="get"
-                style={{ display: "grid", gap: 14 }}
-              >
-                <div style={filterGridStyle}>
-                  <label style={fieldStackStyle}>
-                    <span style={fieldLabelStyle}>Actor Scope</span>
-                    <select
-                      defaultValue={filters.actor}
-                      name="actor"
-                      style={inputStyle}
-                    >
-                      <option value="">全部</option>
-                      {actorOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {actorScopeLabel(option)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={fieldStackStyle}>
-                    <span style={fieldLabelStyle}>Module</span>
-                    <select
-                      defaultValue={filters.module}
-                      name="module"
-                      style={inputStyle}
-                    >
-                      <option value="">全部</option>
-                      {moduleOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={fieldStackStyle}>
-                    <span style={fieldLabelStyle}>Action</span>
-                    <select
-                      defaultValue={filters.action}
-                      name="action"
-                      style={inputStyle}
-                    >
-                      <option value="">全部</option>
-                      {actionOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={fieldStackStyle}>
-                    <span style={fieldLabelStyle}>From</span>
-                    <input
-                      defaultValue={filters.from}
-                      name="from"
-                      type="date"
-                      style={inputStyle}
-                    />
-                  </label>
-                  <label style={fieldStackStyle}>
-                    <span style={fieldLabelStyle}>To</span>
-                    <input
-                      defaultValue={filters.to}
-                      name="to"
-                      type="date"
-                      style={inputStyle}
-                    />
-                  </label>
-                  <label style={fieldStackStyle}>
-                    <span style={fieldLabelStyle}>Audit ID</span>
-                    <input
-                      defaultValue={filters.auditId}
-                      name="auditId"
-                      placeholder="audit-…"
-                      style={monoInputStyle}
-                    />
-                  </label>
-                </div>
-
-                <div style={controlRowStyle}>
-                  <button
-                    type="submit"
-                    style={{
-                      ...linkButtonBaseStyle,
-                      background: th.accent,
-                      borderColor: th.accent,
-                      color: "#fff",
-                    }}
-                  >
-                    套用篩選
-                  </button>
-                  <a
-                    href="/audit"
-                    style={{
-                      ...linkButtonBaseStyle,
-                      background: th.surface,
-                      color: th.text,
-                    }}
-                  >
-                    重設
-                  </a>
-                  <span style={secondaryTextStyle}>
-                    Refresh tier {formatRefreshTier(auditView?.refreshTier)}:
-                    manual refresh only. Export is explicit and follows the
-                    current filtered subset.
-                  </span>
-                </div>
-              </form>
-            </CanvasCard>
-
-            <CanvasCard
-              theme={th}
-              title="稽核列表"
-              subtitle="Cross-actor rows remain visible on tenant-owned resources regardless of actor realm."
-              padding={0}
-              style={tableCardStyle}
-            >
-              {errorMessage ? (
-                <div style={{ padding: 16 }}>
-                  <CanvasBanner
-                    theme={th}
-                    tone="warn"
-                    title="Latest fetch returned an error"
-                    body={errorMessage}
-                  />
-                </div>
-              ) : null}
-
-              {exportState.error ? (
-                <div style={{ padding: 16 }}>
-                  <CanvasBanner
-                    theme={th}
-                    tone="warn"
-                    title="Signed export is temporarily unavailable"
-                    body={exportState.error}
-                  />
-                </div>
-              ) : null}
-
-              {emptyState ? (
-                <div style={emptyStateStyle}>
-                  <CanvasPill theme={th} tone={emptyState.tone} dot>
-                    {emptyReason}
-                  </CanvasPill>
-                  <div>
-                    <div
-                      style={{ fontSize: 18, fontWeight: 700, color: th.text }}
-                    >
-                      {emptyState.title}
-                    </div>
-                    <div
-                      style={{
-                        ...secondaryTextStyle,
-                        marginTop: 6,
-                        maxWidth: 640,
-                      }}
-                    >
-                      {emptyState.body}
-                    </div>
-                    {emptyState.messageCode ? (
-                      <div
-                        style={{
-                          ...secondaryTextStyle,
-                          marginTop: 8,
-                          fontFamily: th.monoFamily,
-                        }}
-                      >
-                        {emptyState.messageCode}
-                      </div>
-                    ) : null}
-                  </div>
-                  {emptyStateActions.length > 0 ? (
-                    <div style={controlRowStyle}>
-                      {emptyStateActions.map((action) => (
-                        <span key={`empty-${action.action}`}>
-                          {renderActionLink(
-                            action,
-                            buildActionHref(action, filters),
-                            actionLabel(action, true),
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <CanvasTable<AuditTableRow>
-                  theme={th}
-                  rows={tableRows}
-                  columns={buildTableColumns(filters)}
+        <CanvasCard
+          theme={th}
+          title="篩選與手動刷新"
+          subtitle="依 actor / module / action / time range 篩選；本頁 refresh tier 為 T6 manual。"
+        >
+          <form
+            action="/audit"
+            method="get"
+            style={{ display: "grid", gap: 14 }}
+          >
+            <div style={filterGridStyle}>
+              <label style={fieldStackStyle}>
+                <span style={fieldLabelStyle}>Actor Scope</span>
+                <select
+                  defaultValue={filters.actor}
+                  name="actor"
+                  style={inputStyle}
+                >
+                  <option value="">全部</option>
+                  {actorOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {actorScopeLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={fieldStackStyle}>
+                <span style={fieldLabelStyle}>Module</span>
+                <select
+                  defaultValue={filters.module}
+                  name="module"
+                  style={inputStyle}
+                >
+                  <option value="">全部</option>
+                  {moduleOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={fieldStackStyle}>
+                <span style={fieldLabelStyle}>Action</span>
+                <select
+                  defaultValue={filters.action}
+                  name="action"
+                  style={inputStyle}
+                >
+                  <option value="">全部</option>
+                  {actionOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={fieldStackStyle}>
+                <span style={fieldLabelStyle}>From</span>
+                <input
+                  defaultValue={filters.from}
+                  name="from"
+                  type="date"
+                  style={inputStyle}
                 />
-              )}
-            </CanvasCard>
-
-            {focusedRow ? (
-              <CanvasCard
-                theme={th}
-                title="稽核細節"
-                subtitle="Expanded detail for the currently focused audit record."
-              >
-                <div id="audit-detail" style={{ display: "grid", gap: 16 }}>
-                  <CanvasDL
-                    theme={th}
-                    cols={2}
-                    items={[
-                      {
-                        label: "Audit ID",
-                        value: focusedRow.record.auditId,
-                        mono: true,
-                      },
-                      {
-                        label: "Request ID",
-                        value: focusedRow.record.requestId || "—",
-                        mono: true,
-                      },
-                      {
-                        label: "Actor Type",
-                        value: focusedRow.record.actorType,
-                        mono: true,
-                      },
-                      {
-                        label: "Tenant",
-                        value: focusedRow.record.tenantId ?? "—",
-                        mono: true,
-                      },
-                      {
-                        label: "Resource",
-                        value: focusedRow.resourceLabel,
-                        mono: true,
-                      },
-                      {
-                        label: "Created At",
-                        value: formatAuditAt(focusedRow.record.createdAt),
-                        mono: true,
-                      },
-                    ]}
-                  />
-
-                  <div style={summaryGridStyle}>
-                    <div style={summaryCellStyle}>
-                      <span style={summaryLabelStyle}>Exit path</span>
-                      <span style={summaryValueStyle}>
-                        {focusedRow.resourceLink.appLabel}
-                      </span>
-                      <span style={summarySubStyle}>
-                        In-app for tenant resources, new tab for
-                        ops/platform-owned follow-up.
-                      </span>
-                    </div>
-                    <div style={summaryCellStyle}>
-                      <span style={summaryLabelStyle}>Masking</span>
-                      <span style={summaryValueStyle}>
-                        {focusedRow.masked
-                          ? "Sensitive fields masked"
-                          : "No masking applied"}
-                      </span>
-                      <span style={summarySubStyle}>
-                        Email / contact-like values are rendered with
-                        policy-safe obfuscation.
-                      </span>
-                    </div>
-                    <div style={summaryCellStyle}>
-                      <span style={summaryLabelStyle}>Correlation</span>
-                      <span style={summaryValueStyle}>
-                        {focusedRow.record.requestId
-                          ? "Request-linked"
-                          : "Standalone"}
-                      </span>
-                      <span style={summarySubStyle}>
-                        Use request ID to trace the same action across services.
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={detailGridStyle}>
-                    <div>
-                      <div style={fieldLabelStyle}>Old Values Summary</div>
-                      <pre style={detailCodeStyle}>{focusedRow.oldSummary}</pre>
-                    </div>
-                    <div>
-                      <div style={fieldLabelStyle}>New Values Summary</div>
-                      <pre style={detailCodeStyle}>{focusedRow.newSummary}</pre>
-                    </div>
-                  </div>
-
-                  <div style={controlRowStyle}>
-                    <a
-                      href={focusedRow.requestAuditLink}
-                      style={{
-                        ...linkButtonBaseStyle,
-                        background: th.surface,
-                        color: th.text,
-                      }}
-                    >
-                      固定連結此稽核列
-                    </a>
-                    <a
-                      href={focusedRow.resourceLink.href}
-                      target={
-                        focusedRow.resourceLink.external ? "_blank" : undefined
-                      }
-                      rel={
-                        focusedRow.resourceLink.external
-                          ? "noreferrer"
-                          : undefined
-                      }
-                      style={{
-                        ...linkButtonBaseStyle,
-                        background: th.accent,
-                        borderColor: th.accent,
-                        color: "#fff",
-                      }}
-                    >
-                      {focusedRow.resourceLink.label}
-                    </a>
-                  </div>
-                </div>
-              </CanvasCard>
-            ) : null}
-          </div>
-        </div>
-
-        <div style={secondaryGridStyle}>
-          <CanvasCard
-            theme={th}
-            title="Cross-actor coverage"
-            subtitle="Each actor realm stays visually distinct for Q-TEN13 review."
-          >
-            <div style={summaryGridStyle}>
-              {(
-                [
-                  [
-                    "tenant",
-                    "Tenant admins / finance can verify tenant-originated changes.",
-                  ],
-                  [
-                    "ops",
-                    "Ops interventions remain visible without leaving the tenant realm.",
-                  ],
-                  [
-                    "platform",
-                    "Platform overrides and governance actions are surfaced distinctly.",
-                  ],
-                  [
-                    "system",
-                    "Automations stay readable even when no human actor is attached.",
-                  ],
-                  [
-                    "partner",
-                    "Partner API key mutations remain attributable in the shared audit lane.",
-                  ],
-                ] as Array<[keyof typeof actorToneByScope, string]>
-              ).map(([scope, body]) => (
-                <div key={scope} style={summaryCellStyle}>
-                  <CanvasPill theme={th} tone={actorToneByScope[scope]} dot>
-                    {actorScopeLabel(scope)}
-                  </CanvasPill>
-                  <div style={summarySubStyle}>{body}</div>
-                </div>
-              ))}
+              </label>
+              <label style={fieldStackStyle}>
+                <span style={fieldLabelStyle}>To</span>
+                <input
+                  defaultValue={filters.to}
+                  name="to"
+                  type="date"
+                  style={inputStyle}
+                />
+              </label>
+              <label style={fieldStackStyle}>
+                <span style={fieldLabelStyle}>Audit ID</span>
+                <input
+                  defaultValue={filters.auditId}
+                  name="auditId"
+                  placeholder="audit-…"
+                  style={monoInputStyle}
+                />
+              </label>
             </div>
-          </CanvasCard>
 
-          <CanvasCard
-            theme={th}
-            title="Current filter summary"
-            subtitle="What this snapshot is showing right now."
-          >
-            <div style={summaryGridStyle}>
-              <div style={summaryCellStyle}>
-                <span style={summaryLabelStyle}>Request-linked rows</span>
+            <div style={controlRowStyle}>
+              <button
+                type="submit"
+                style={{
+                  ...linkButtonBaseStyle,
+                  background: th.accent,
+                  borderColor: th.accent,
+                  color: "#fff",
+                }}
+              >
+                套用篩選
+              </button>
+              <a
+                href="/audit"
+                style={{
+                  ...linkButtonBaseStyle,
+                  background: th.surface,
+                  color: th.text,
+                }}
+              >
+                重設
+              </a>
+              {refreshAction
+                ? renderActionLink(
+                    refreshAction,
+                    buildActionHref(refreshAction, filters),
+                    actionLabel(refreshAction),
+                  )
+                : null}
+              <span style={secondaryTextStyle}>
+                Snapshot {snapshotGeneratedAt} ·{" "}
+                {formatRefreshTier(auditView?.refreshTier)}
+                {" · "}
+                export follows current filtered subset.
+              </span>
+            </div>
+          </form>
+        </CanvasCard>
+
+        <CanvasCard
+          theme={th}
+          title="稽核紀錄"
+          subtitle="Cross-actor rows stay visible for tenant-owned resources regardless of actor realm."
+          padding={0}
+          style={tableCardStyle}
+        >
+          {!emptyState ? (
+            <div style={stripGridStyle}>
+              <div style={stripCardStyle}>
+                <span style={summaryLabelStyle}>Visible rows</span>
+                <span style={summaryValueStyle}>{records.length}</span>
+                <span style={summarySubStyle}>
+                  Modules {moduleCount} · scopes {visibleActorScopes.length}
+                </span>
+              </div>
+              <div style={stripCardStyle}>
+                <span style={summaryLabelStyle}>Masked identities</span>
+                <span style={summaryValueStyle}>{maskedActorCount}</span>
+                <span style={summarySubStyle}>
+                  Sensitive actor / field values stay obfuscated.
+                </span>
+              </div>
+              <div style={stripCardStyle}>
+                <span style={summaryLabelStyle}>Request-linked</span>
                 <span style={summaryValueStyle}>{requestLinkedCount}</span>
                 <span style={summarySubStyle}>
                   Rows retaining request correlation.
                 </span>
               </div>
-              <div style={summaryCellStyle}>
+              <div style={stripCardStyle}>
                 <span style={summaryLabelStyle}>Signed export</span>
-                <span style={summaryValueStyle}>{exportState.rowCount}</span>
-                <span style={summarySubStyle}>
-                  {exportReady
-                    ? `Artifact ready · ${formatArtifactAt(exportState.download?.expiresAt)} 到期`
-                    : exportState.error
-                      ? "Artifact unavailable while export endpoint is failing."
-                      : "Visible rows eligible for the next signed export."}
-                </span>
-              </div>
-              <div style={summaryCellStyle}>
-                <span style={summaryLabelStyle}>Artifact hash</span>
                 <span style={summaryValueStyle}>
                   {shortenManifestHash(exportState.download?.manifestHash)}
                 </span>
                 <span style={summarySubStyle}>
                   {exportReady
-                    ? `Subject ${exportState.download?.subjectId} · immutable signed subset`
-                    : "Manifest hash appears after a signed export is issued."}
-                </span>
-              </div>
-              <div style={summaryCellStyle}>
-                <span style={summaryLabelStyle}>Pinned query</span>
-                <span style={summaryValueStyle}>
-                  {filters.auditId ? "Deep-linked" : "Ad hoc"}
-                </span>
-                <span style={summarySubStyle}>
-                  {filters.auditId
-                    ? "Opened from a receipt or copied audit/request link."
-                    : "Browsing the tenant audit snapshot directly."}
+                    ? `Artifact ready · ${formatArtifactAt(exportState.download?.expiresAt)} 到期`
+                    : "匯出會產生 immutable signed subset。"}
                 </span>
               </div>
             </div>
-          </CanvasCard>
+          ) : null}
 
+          {errorMessage ? (
+            <div style={{ padding: 16 }}>
+              <CanvasBanner
+                theme={th}
+                tone="warn"
+                title="Latest fetch returned an error"
+                body={errorMessage}
+              />
+            </div>
+          ) : null}
+
+          {exportState.error ? (
+            <div style={{ padding: 16 }}>
+              <CanvasBanner
+                theme={th}
+                tone="warn"
+                title="Signed export is temporarily unavailable"
+                body={exportState.error}
+              />
+            </div>
+          ) : null}
+
+          {emptyState ? (
+            <div style={emptyStateStyle}>
+              <CanvasPill theme={th} tone={emptyState.tone} dot>
+                {emptyReason}
+              </CanvasPill>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: th.text }}>
+                  {emptyState.title}
+                </div>
+                <div
+                  style={{
+                    ...secondaryTextStyle,
+                    marginTop: 6,
+                    maxWidth: 640,
+                  }}
+                >
+                  {emptyState.body}
+                </div>
+                {emptyState.messageCode ? (
+                  <div
+                    style={{
+                      ...secondaryTextStyle,
+                      marginTop: 8,
+                      fontFamily: th.monoFamily,
+                    }}
+                  >
+                    {emptyState.messageCode}
+                  </div>
+                ) : null}
+              </div>
+              {emptyStateActions.length > 0 ? (
+                <div style={controlRowStyle}>
+                  {emptyStateActions.map((action) => (
+                    <span key={`empty-${action.action}`}>
+                      {renderActionLink(
+                        action,
+                        buildActionHref(action, filters),
+                        actionLabel(action, true),
+                      )}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <CanvasTable<AuditTableRow>
+              theme={th}
+              rows={tableRows}
+              columns={buildTableColumns(filters)}
+            />
+          )}
+        </CanvasCard>
+
+        {focusedRow ? (
           <CanvasCard
             theme={th}
-            title="Exit paths"
-            subtitle="Cross-app deep links open a new tab when the owning console is outside tenant."
+            title="稽核細節"
+            subtitle="Expanded detail for the selected record, with deep links back to the owning console."
           >
-            <ul style={listStyle}>
-              <li style={listItemStyle}>
-                <span style={primaryTextStyle}>Tenant resources</span>
-                <span style={secondaryTextStyle}>
-                  Booking, invoice, report, settings, users, and cost-center
-                  records open in-app.
-                </span>
-              </li>
-              <li style={listItemStyle}>
-                <span style={primaryTextStyle}>Ops-owned follow-up</span>
-                <span style={secondaryTextStyle}>
-                  Unknown ops-origin rows exit to `Ops Console
-                  /audit?auditId=...` in a new tab.
-                </span>
-              </li>
-              <li
-                style={{
-                  ...listItemStyle,
-                  borderBottom: "none",
-                  paddingBottom: 0,
-                }}
-              >
-                <span style={primaryTextStyle}>Platform-owned follow-up</span>
-                <span style={secondaryTextStyle}>
-                  Governance or platform-admin trails exit to `Platform Admin
-                  /audit?auditId=...`.
-                </span>
-              </li>
-            </ul>
+            <div id="audit-detail" style={{ display: "grid", gap: 16 }}>
+              <div style={legendRowStyle}>
+                {(
+                  ["tenant", "ops", "platform", "system", "partner"] as Array<
+                    keyof typeof actorToneByScope
+                  >
+                ).map((scope) => (
+                  <CanvasPill
+                    key={scope}
+                    theme={th}
+                    tone={actorToneByScope[scope]}
+                    dot
+                  >
+                    {actorScopeLabel(scope)}
+                  </CanvasPill>
+                ))}
+              </div>
+
+              <CanvasDL
+                theme={th}
+                cols={2}
+                items={[
+                  {
+                    label: "Audit ID",
+                    value: focusedRow.record.auditId,
+                    mono: true,
+                  },
+                  {
+                    label: "Request ID",
+                    value: focusedRow.record.requestId || "—",
+                    mono: true,
+                  },
+                  {
+                    label: "Actor Type",
+                    value: focusedRow.record.actorType,
+                    mono: true,
+                  },
+                  {
+                    label: "Tenant",
+                    value: focusedRow.record.tenantId ?? "—",
+                    mono: true,
+                  },
+                  {
+                    label: "Resource",
+                    value: focusedRow.resourceLabel,
+                    mono: true,
+                  },
+                  {
+                    label: "Created At",
+                    value: formatAuditAt(focusedRow.record.createdAt),
+                    mono: true,
+                  },
+                ]}
+              />
+
+              <div style={summaryGridStyle}>
+                <div style={summaryCellStyle}>
+                  <span style={summaryLabelStyle}>Exit path</span>
+                  <span style={summaryValueStyle}>
+                    {focusedRow.resourceLink.appLabel}
+                  </span>
+                  <span style={summarySubStyle}>
+                    Tenant resources stay in-app; ops / platform follow-up opens
+                    a new tab.
+                  </span>
+                </div>
+                <div style={summaryCellStyle}>
+                  <span style={summaryLabelStyle}>Masking</span>
+                  <span style={summaryValueStyle}>
+                    {focusedRow.masked
+                      ? "Sensitive fields masked"
+                      : "No masking applied"}
+                  </span>
+                  <span style={summarySubStyle}>
+                    Email, contact, token, and similar values stay policy-safe.
+                  </span>
+                </div>
+                <div style={summaryCellStyle}>
+                  <span style={summaryLabelStyle}>Correlation</span>
+                  <span style={summaryValueStyle}>
+                    {focusedRow.record.requestId
+                      ? "Request-linked"
+                      : "Standalone"}
+                  </span>
+                  <span style={summarySubStyle}>
+                    Use request ID to trace the same action across app
+                    boundaries.
+                  </span>
+                </div>
+              </div>
+
+              <div style={detailGridStyle}>
+                <div>
+                  <div style={fieldLabelStyle}>Old Values Summary</div>
+                  <pre style={detailCodeStyle}>{focusedRow.oldSummary}</pre>
+                </div>
+                <div>
+                  <div style={fieldLabelStyle}>New Values Summary</div>
+                  <pre style={detailCodeStyle}>{focusedRow.newSummary}</pre>
+                </div>
+              </div>
+
+              <div style={controlRowStyle}>
+                <a
+                  href={focusedRow.requestAuditLink}
+                  style={{
+                    ...linkButtonBaseStyle,
+                    background: th.surface,
+                    color: th.text,
+                  }}
+                >
+                  固定連結此稽核列
+                </a>
+                <a
+                  href={focusedRow.resourceLink.href}
+                  target={
+                    focusedRow.resourceLink.external ? "_blank" : undefined
+                  }
+                  rel={
+                    focusedRow.resourceLink.external ? "noreferrer" : undefined
+                  }
+                  style={{
+                    ...linkButtonBaseStyle,
+                    background: th.accent,
+                    borderColor: th.accent,
+                    color: "#fff",
+                  }}
+                >
+                  {focusedRow.resourceLink.label}
+                </a>
+              </div>
+            </div>
           </CanvasCard>
-        </div>
+        ) : null}
       </div>
     </div>
   );
