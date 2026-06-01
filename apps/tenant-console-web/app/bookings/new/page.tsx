@@ -2,7 +2,6 @@ import type {
   BusinessDispatchSubtype,
   EmptyReason,
   EmptyStateEnvelope,
-  RefreshTier,
   ResourceActionDescriptor,
   TenantAddressRecord,
   TenantCostCenterRecord,
@@ -19,7 +18,6 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const BOOKING_CREATE_REFRESH_TIER: RefreshTier = "manual";
 const EMPTY_REASON_VALUES: EmptyReason[] = [
   "no_data",
   "not_provisioned",
@@ -34,7 +32,7 @@ function toErrorMessage(error: unknown) {
 }
 
 function firstParam(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
 }
 
 function parseEmptyReason(
@@ -218,13 +216,14 @@ export default async function NewBookingPage({
     firstParam(resolvedSearchParams.dropoffAddressId) ||
     (addressRole === "dropoff" ? legacyAddressId : "");
   const prefillPassenger = passengerId
-    ? activePassengers.find((row) => row.passengerId === passengerId) ?? null
+    ? (activePassengers.find((row) => row.passengerId === passengerId) ?? null)
     : null;
   const prefillPickup = pickupAddressId
-    ? activeAddresses.find((row) => row.addressId === pickupAddressId) ?? null
+    ? (activeAddresses.find((row) => row.addressId === pickupAddressId) ?? null)
     : null;
   const prefillDropoff = dropoffAddressId
-    ? activeAddresses.find((row) => row.addressId === dropoffAddressId) ?? null
+    ? (activeAddresses.find((row) => row.addressId === dropoffAddressId) ??
+      null)
     : null;
 
   const actions: TenantBookingCreatePageModel["actions"] = {
@@ -238,6 +237,14 @@ export default async function NewBookingPage({
     manageCostCenters: buildAction("manage_cost_centers", "low"),
     reviewRules: buildAction("review_rules", "low"),
   };
+  const availableActions: TenantBookingCreatePageModel["availableActions"] = [
+    actions.submit,
+    actions.cancel,
+    buildAction("save_draft", "low", {
+      enabled: false,
+      disabledReasonCode: "draft_unsupported",
+    }),
+  ];
 
   const invalidPrefill =
     (Boolean(passengerId) && !prefillPassenger) ||
@@ -251,7 +258,7 @@ export default async function NewBookingPage({
   ].filter(Boolean) as string[];
 
   const pageModel: TenantBookingCreatePageModel = {
-    refreshTier: BOOKING_CREATE_REFRESH_TIER,
+    refreshTier: "na",
     refresh: {
       generatedAt,
       staleAfterMs: 30_000,
@@ -270,6 +277,7 @@ export default async function NewBookingPage({
       ),
       actions,
     }),
+    availableActions,
     actions,
     links: {
       bookings: "/bookings",
@@ -287,9 +295,7 @@ export default async function NewBookingPage({
       direction:
         firstParam(resolvedSearchParams.direction) === "pickup" ||
         firstParam(resolvedSearchParams.direction) === "dropoff"
-          ? (firstParam(resolvedSearchParams.direction) as
-              | "pickup"
-              | "dropoff")
+          ? (firstParam(resolvedSearchParams.direction) as "pickup" | "dropoff")
           : "",
       selectedPassengerId: prefillPassenger?.passengerId ?? "",
       pickupAddressId: prefillPickup?.addressId ?? "",

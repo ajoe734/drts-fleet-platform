@@ -58,6 +58,8 @@ type BookingCreateActionMap = {
   reviewRules: ResourceActionDescriptor;
 };
 
+type BookingCreateRouteAction = "submit_command" | "cancel" | "save_draft";
+
 type BookingCreatePrefillModel = {
   businessDispatchSubtype: BusinessDispatchSubtype;
   direction: "" | "pickup" | "dropoff";
@@ -69,10 +71,11 @@ type BookingCreatePrefillModel = {
 };
 
 export type TenantBookingCreatePageModel = {
-  refreshTier: RefreshTier;
+  refreshTier: RefreshTier | "na";
   refresh: UiRefreshMetadata;
   health: UiHealthEnvelope;
   emptyState: EmptyStateEnvelope | null;
+  availableActions: ResourceActionDescriptor[];
   actions: BookingCreateActionMap;
   links: {
     bookings: string;
@@ -365,21 +368,6 @@ function toneForDecision(result: TenantApprovalEvaluationResult | null) {
   }
 }
 
-function toneForRefreshTier(
-  tier: RefreshTier,
-): "neutral" | "info" | "success" | "warn" {
-  switch (tier) {
-    case "manual":
-      return "info";
-    case "urgent":
-    case "fast":
-    case "dispatch":
-      return "success";
-    default:
-      return "neutral";
-  }
-}
-
 function labelForRefreshTier(tier: RefreshTier) {
   switch (tier) {
     case "manual":
@@ -399,6 +387,19 @@ function labelForRefreshTier(tier: RefreshTier) {
     default:
       return tier;
   }
+}
+
+function findAvailableAction(
+  actions: ResourceActionDescriptor[],
+  action: BookingCreateRouteAction,
+) {
+  return actions.find((descriptor) => descriptor.action === action) ?? null;
+}
+
+function describeRefreshTier(
+  tier: TenantBookingCreatePageModel["refreshTier"],
+) {
+  return tier === "na" ? "N/A" : labelForRefreshTier(tier);
 }
 
 function actionSurfaceStyle(
@@ -843,6 +844,18 @@ export function TenantBookingCreateForm({
     approvalEvaluation?.outcome?.blocked === true ||
     missingRequiredFields ||
     Object.keys(formatErrors).length > 0;
+  const submitAction = findAvailableAction(
+    pageModel.availableActions,
+    "submit_command",
+  );
+  const cancelAction = findAvailableAction(
+    pageModel.availableActions,
+    "cancel",
+  );
+  const saveDraftAction = findAvailableAction(
+    pageModel.availableActions,
+    "save_draft",
+  );
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -1100,16 +1113,13 @@ export function TenantBookingCreateForm({
         subtitle="代訂或本人 · 預約 / 即時 · 同步 command 模式 (Q-TEN04)"
         actions={
           <>
-            <ActionLink
-              descriptor={pageModel.actions.viewBookings}
-              href={pageModel.links.bookings}
-              label="返回訂單列表"
-            />
-            <ActionButton
-              descriptor={pageModel.actions.refresh}
-              label={navigationPending ? "重新載入中..." : "Refresh"}
-              onClick={refreshPage}
-            />
+            {cancelAction ? (
+              <ActionLink
+                descriptor={cancelAction}
+                href={pageModel.links.bookings}
+                label="返回訂單列表"
+              />
+            ) : null}
           </>
         }
       />
@@ -1123,11 +1133,10 @@ export function TenantBookingCreateForm({
           <div style={metaItemStyle}>
             <span style={labelStyle}>Refresh Tier</span>
             <div style={chipRowStyle}>
-              <CanvasPill
-                theme={th}
-                tone={toneForRefreshTier(pageModel.refreshTier)}
-              >
-                {labelForRefreshTier(pageModel.refreshTier)}
+              <CanvasPill theme={th} tone="neutral">
+                {pageModel.refreshTier === "na"
+                  ? "N/A · form route"
+                  : labelForRefreshTier(pageModel.refreshTier)}
               </CanvasPill>
               <CanvasPill theme={th} tone="neutral">
                 {formatAge(pageModel.refresh.generatedAt, nowMs)}
@@ -1160,21 +1169,15 @@ export function TenantBookingCreateForm({
           <div style={metaItemStyle}>
             <span style={labelStyle}>Must-Support Actions</span>
             <div style={chipRowStyle}>
-              <CanvasPill
-                theme={th}
-                tone={pageModel.actions.submit.enabled ? "info" : "neutral"}
-              >
-                submit_command
-              </CanvasPill>
-              <CanvasPill
-                theme={th}
-                tone={pageModel.actions.cancel.enabled ? "neutral" : "warn"}
-              >
-                cancel
-              </CanvasPill>
-              <CanvasPill theme={th} tone="neutral">
-                draft unsupported
-              </CanvasPill>
+              {pageModel.availableActions.map((descriptor) => (
+                <CanvasPill
+                  key={descriptor.action}
+                  theme={th}
+                  tone={descriptor.enabled ? "info" : "neutral"}
+                >
+                  {descriptor.action}
+                </CanvasPill>
+              ))}
             </div>
           </div>
         </div>
@@ -1216,7 +1219,7 @@ export function TenantBookingCreateForm({
           <CanvasBanner
             theme={th}
             icon={pageFreshness === "degraded" ? "warn" : "clock"}
-            body={`Generated ${formatAge(pageModel.refresh.generatedAt, nowMs)} · ${formatDateTime(pageModel.refresh.generatedAt)} · refresh tier ${labelForRefreshTier(pageModel.refreshTier)}`}
+            body={`Generated ${formatAge(pageModel.refresh.generatedAt, nowMs)} · ${formatDateTime(pageModel.refresh.generatedAt)} · refresh tier ${describeRefreshTier(pageModel.refreshTier)}`}
             title={
               pageFreshness === "degraded"
                 ? "Directory snapshot is degraded"
@@ -2115,29 +2118,41 @@ export function TenantBookingCreateForm({
                 </div>
 
                 <div style={actionRowStyle}>
-                  <ActionLink
-                    descriptor={pageModel.actions.cancel}
-                    href={pageModel.links.bookings}
-                    label="Cancel"
-                  />
+                  {cancelAction ? (
+                    <ActionLink
+                      descriptor={cancelAction}
+                      href={pageModel.links.bookings}
+                      label="Cancel"
+                    />
+                  ) : null}
                   <div style={{ flex: 1 }} />
-                  <span style={{ color: "#64748b", fontSize: 12.5 }}>
-                    No draft action
-                  </span>
-                  <ActionButton
-                    descriptor={pageModel.actions.submit}
-                    disabled={submitDisabled}
-                    label={
-                      submitting || navigationPending
-                        ? "Submitting..."
-                        : approvalEvaluation?.outcome?.decision ===
-                            "require_approval"
-                          ? "Submit for approval"
-                          : "Create booking"
-                    }
-                    primary
-                    type="submit"
-                  />
+                  {saveDraftAction ? (
+                    <ActionButton
+                      descriptor={saveDraftAction}
+                      disabled
+                      label="另存草稿"
+                    />
+                  ) : (
+                    <span style={{ color: "#64748b", fontSize: 12.5 }}>
+                      No draft action
+                    </span>
+                  )}
+                  {submitAction ? (
+                    <ActionButton
+                      descriptor={submitAction}
+                      disabled={submitDisabled}
+                      label={
+                        submitting || navigationPending
+                          ? "Submitting..."
+                          : approvalEvaluation?.outcome?.decision ===
+                              "require_approval"
+                            ? "Submit for approval"
+                            : "Create booking"
+                      }
+                      primary
+                      type="submit"
+                    />
+                  ) : null}
                 </div>
               </CanvasCard>
             </div>
