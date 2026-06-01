@@ -73,7 +73,7 @@ its reviewer / approval-time / commit / canvas anchor / parity story is
 Status: shipped
 Owner: `Codex`
 Reviewer: `Codex2`
-Last checked: `2026-05-14`
+Last checked: `2026-05-18`
 
 ### Decision
 
@@ -82,6 +82,13 @@ quota preview, and approval-evaluation contracts.
 
 Keep estimated spend as preview-only input, allow booking-on-behalf metadata,
 and omit any unpublished draft-save or tenant-side quoted-fare override path.
+
+### Post-decision delivery note
+
+The planning unblock completed on 2026-05-14. A later 2026-05-16 reopen fixed
+datetime-local seeding on the shipped form without changing the accepted
+contract boundary or UI scope. Treat any missing branch anchor for the later
+fixes as closeout/history repair, not as a renewed product-decision gap.
 
 ### Why this is blocked
 

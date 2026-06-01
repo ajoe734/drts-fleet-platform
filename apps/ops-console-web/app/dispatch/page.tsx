@@ -1,5 +1,4 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
 import type {
   AdapterHealthRecord,
   DispatchCandidate,
@@ -38,6 +37,13 @@ type DispatchPageProps = {
 };
 
 type DispatchView = "forwarded" | "owned";
+type DispatchBoard =
+  | "ready_queue"
+  | "assigned"
+  | "exception_hold"
+  | "no_eligible_supply"
+  | "governance_blocked"
+  | "forwarded_mirror";
 type OwnedStateFilter =
   | "all"
   | "queued"
@@ -60,43 +66,33 @@ type CanvasTone = "accent" | "danger" | "info" | "neutral" | "success" | "warn";
 type OwnedQueueRow = Record<string, unknown> & {
   orderId: string;
   orderNo: string;
-  orderCell: ReactNode;
   tenant: string;
   pickup: string;
   dropoff: string;
-  routeCell: ReactNode;
   window: string;
   service: string;
   state: string;
-  stateCell: ReactNode;
   driver: string;
   vehicle: string;
-  driverCell: ReactNode;
   eta: string;
   candidates: string;
   gateLabel: string;
   gateTone: CanvasTone;
-  gateCell: ReactNode;
   _selected?: boolean;
 };
 
 type ForwardedQueueRow = Record<string, unknown> & {
   mirrorOrderId: string;
-  mirrorCell: ReactNode;
   source: string;
   externalOrderId: string;
   pickup: string;
   dropoff: string;
-  routeCell: ReactNode;
   window: string;
   state: ForwardedOrderRecord["status"];
-  stateCell: ReactNode;
   adapter: string;
   adapterTone: CanvasTone;
-  adapterCell: ReactNode;
   mismatchLabel: string;
   mismatchTone: CanvasTone;
-  mismatchCell: ReactNode;
   _selected?: boolean;
 };
 
@@ -215,14 +211,19 @@ function resolveForwardedFilter(
 
 function buildDispatchHref({
   orderId,
+  board,
   state,
   view,
 }: {
   view: DispatchView;
+  board?: DispatchBoard;
   state?: string;
   orderId?: string;
 }) {
   const params = new URLSearchParams();
+  if (board) {
+    params.set("board", board);
+  }
   if (view === "forwarded") {
     params.set("view", "forwarded");
   }
@@ -234,6 +235,53 @@ function buildDispatchHref({
   }
   const query = params.toString();
   return query ? `/dispatch?${query}` : "/dispatch";
+}
+
+function resolveBoardConfig(board: string | undefined): {
+  view?: DispatchView;
+  state?: string;
+  activeTabKey?: string;
+} {
+  switch (board) {
+    case "forwarded_mirror":
+      return {
+        view: "forwarded",
+        state: "attention",
+        activeTabKey: "forwarded",
+      };
+    case "governance_blocked":
+      return {
+        view: "owned",
+        state: "override_pending",
+        activeTabKey: "override_pending",
+      };
+    case "no_eligible_supply":
+      return {
+        view: "owned",
+        state: "no_supply",
+        activeTabKey: "no_supply",
+      };
+    case "exception_hold":
+      return {
+        view: "owned",
+        state: "exception_hold",
+        activeTabKey: "owned",
+      };
+    case "assigned":
+      return {
+        view: "owned",
+        state: "assigned",
+        activeTabKey: "owned",
+      };
+    case "ready_queue":
+      return {
+        view: "owned",
+        state: "queued",
+        activeTabKey: "owned",
+      };
+    default:
+      return {};
+  }
 }
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
@@ -696,18 +744,23 @@ export default async function DispatchPage({
       )) as Promise<Record<string, string | string[] | undefined>>,
   ]);
 
-  const view = resolveView(firstParam(resolvedSearchParams?.view));
+  const boardParam = firstParam(resolvedSearchParams?.board);
+  const boardConfig = resolveBoardConfig(boardParam);
+  const view =
+    boardConfig.view ?? resolveView(firstParam(resolvedSearchParams?.view));
   const focusOrderId = firstParam(resolvedSearchParams?.orderId) ?? "";
-  const stateParam = firstParam(resolvedSearchParams?.state);
+  const stateParam =
+    boardConfig.state ?? firstParam(resolvedSearchParams?.state);
 
   const activeTabKey =
-    view === "forwarded"
+    boardConfig.activeTabKey ??
+    (view === "forwarded"
       ? "forwarded"
       : stateParam === "override_pending"
         ? "override_pending"
         : stateParam === "no_supply"
           ? "no_supply"
-          : "owned";
+          : "owned");
   const { active: activeTab, tabs } = buildTabLinks(activeTabKey);
 
   if (view === "forwarded") {
@@ -795,16 +848,6 @@ export default async function DispatchPage({
 
       return {
         mirrorOrderId: order.mirrorOrderId,
-        mirrorCell: (
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <span style={{ color: theme.accent, fontWeight: 700 }}>
-              {order.mirrorOrderId}
-            </span>
-            <span style={{ color: theme.textDim, fontSize: 11 }}>
-              {order.status}
-            </span>
-          </div>
-        ),
         source: formatOpsCodeLabel(locale, order.platformCode),
         externalOrderId: order.externalOrderId,
         pickup:
@@ -825,43 +868,40 @@ export default async function DispatchPage({
           ]) ?? "—",
         window: formatForwardedWindow(order, locale),
         state: order.status,
-        stateCell: (
-          <Pill theme={theme} tone={getForwardedStateTone(order.status)} dot>
-            {order.status}
-          </Pill>
-        ),
         adapter: adapterHealth
           ? `${order.platformCode} · ${adapterHealth.status}`
           : order.platformCode,
         adapterTone: adapterHealth
           ? getAdapterTone(adapterHealth.status)
           : "neutral",
-        adapterCell: (
-          <Pill
-            theme={theme}
-            tone={
-              adapterHealth
-                ? getAdapterTone(adapterHealth.status)
-                : "neutral"
-            }
-          >
-            {adapterHealth
-              ? `${order.platformCode} · ${adapterHealth.status}`
-              : order.platformCode}
-          </Pill>
-        ),
         mismatchLabel: mismatch.label,
         mismatchTone: mismatch.tone,
-        mismatchCell: (
-          <Pill
-            theme={theme}
-            tone={mismatch.tone}
-            dot={mismatch.tone !== "success"}
-          >
-            {mismatch.label}
-          </Pill>
+        _selected: focusOrderId === order.mirrorOrderId,
+      };
+    });
+
+    const forwardedColumns: CanvasTableColumn<ForwardedQueueRow>[] = [
+      {
+        h: "MIRROR ID",
+        w: 132,
+        mono: true,
+        r: (row) => (
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ color: theme.accent, fontWeight: 700 }}>
+              {row.mirrorOrderId}
+            </span>
+            <span style={{ color: theme.textDim, fontSize: 11 }}>
+              {row.state}
+            </span>
+          </div>
         ),
-        routeCell: (
+      },
+      { h: "SOURCE", k: "source", w: 144 },
+      { h: "EXTERNAL", k: "externalOrderId", w: 156, mono: true },
+      {
+        h: "PICKUP → DROP",
+        w: 380,
+        r: (row) => (
           <div
             style={{
               display: "flex",
@@ -870,60 +910,44 @@ export default async function DispatchPage({
               whiteSpace: "normal",
             }}
           >
-            <span>
-              {readForwardedValue(order, [
-                "pickupSummary",
-                "pickupAddress",
-                "pickup.addressName",
-                "pickup.address",
-                "pickup",
-              ]) ?? "—"}
-            </span>
+            <span>{row.pickup}</span>
             <span style={{ color: theme.textDim, fontSize: 11 }}>
-              ↓{" "}
-              {readForwardedValue(order, [
-                "dropoffSummary",
-                "dropoffAddress",
-                "dropoff.addressName",
-                "dropoff.address",
-                "dropoff",
-              ]) ?? "—"}
+              ↓ {row.dropoff}
             </span>
           </div>
         ),
-        _selected: focusOrderId === order.mirrorOrderId,
-      };
-    });
-
-    const forwardedColumns: CanvasTableColumn<ForwardedQueueRow>[] = [
-      {
-        h: "MIRROR ID",
-        k: "mirrorCell",
-        w: 132,
-        mono: true,
-      },
-      { h: "SOURCE", k: "source", w: 144 },
-      { h: "EXTERNAL", k: "externalOrderId", w: 156, mono: true },
-      {
-        h: "PICKUP → DROP",
-        k: "routeCell",
-        w: 380,
       },
       { h: "WIN", k: "window", w: 132, mono: true },
       {
         h: "STATE",
-        k: "stateCell",
         w: 172,
+        r: (row) => (
+          <Pill theme={theme} tone={getForwardedStateTone(row.state)} dot>
+            {row.state}
+          </Pill>
+        ),
       },
       {
         h: "ADAPTER",
-        k: "adapterCell",
         w: 150,
+        r: (row) => (
+          <Pill theme={theme} tone={row.adapterTone}>
+            {row.adapter}
+          </Pill>
+        ),
       },
       {
         h: "MISMATCH",
-        k: "mismatchCell",
         w: 170,
+        r: (row) => (
+          <Pill
+            theme={theme}
+            tone={row.mismatchTone}
+            dot={row.mismatchTone !== "success"}
+          >
+            {row.mismatchLabel}
+          </Pill>
+        ),
       },
     ];
 
@@ -1264,27 +1288,52 @@ export default async function DispatchPage({
     return {
       orderId: order.orderId,
       orderNo: order.orderNo,
-      orderCell: (
+      tenant: getTenantLabel(order),
+      pickup: getAddressLabel(order.pickup),
+      dropoff: getAddressLabel(order.dropoff),
+      window: formatWindow(order, locale),
+      service: order.serviceBucket,
+      state,
+      driver: task?.driverId ?? "—",
+      vehicle: task?.vehicleId ?? "—",
+      eta: formatEtaLabel(
+        job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes,
+      ),
+      candidates: String(candidates.length),
+      gateLabel: gate.label,
+      gateTone: gate.tone,
+      _selected: focusOrderId === order.orderId,
+    };
+  });
+
+  const ownedColumns: CanvasTableColumn<OwnedQueueRow>[] = [
+    {
+      h: "ORDER",
+      w: 132,
+      mono: true,
+      r: (row) => (
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Link
-            href={`/dispatch/${encodeURIComponent(order.orderId)}`}
+            href={`/dispatch/${encodeURIComponent(row.orderId)}`}
             style={{
               color: theme.accent,
               fontWeight: 700,
               textDecoration: "none",
             }}
           >
-            {order.orderNo}
+            {row.orderNo}
           </Link>
           <span style={{ color: theme.textDim, fontSize: 11 }}>
-            {order.orderId}
+            {row.orderId}
           </span>
         </div>
       ),
-      tenant: getTenantLabel(order),
-      pickup: getAddressLabel(order.pickup),
-      dropoff: getAddressLabel(order.dropoff),
-      routeCell: (
+    },
+    { h: "TENANT", k: "tenant", w: 148, mono: true },
+    {
+      h: "PICKUP → DROP",
+      w: 380,
+      r: (row) => (
         <div
           style={{
             display: "flex",
@@ -1293,77 +1342,51 @@ export default async function DispatchPage({
             whiteSpace: "normal",
           }}
         >
-          <span>{getAddressLabel(order.pickup)}</span>
+          <span>{row.pickup}</span>
           <span style={{ color: theme.textDim, fontSize: 11 }}>
-            ↓ {getAddressLabel(order.dropoff)}
+            ↓ {row.dropoff}
           </span>
         </div>
       ),
-      window: formatWindow(order, locale),
-      service: order.serviceBucket,
-      state,
-      stateCell: (
-        <Pill theme={theme} tone={getStateTone(state)} dot>
-          {state}
-        </Pill>
-      ),
-      driver: task?.driverId ?? "—",
-      vehicle: task?.vehicleId ?? "—",
-      driverCell: (
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <span>{task?.driverId ?? "—"}</span>
-          <span style={{ color: theme.textDim, fontSize: 11 }}>
-            {task?.vehicleId ?? "—"}
-          </span>
-        </div>
-      ),
-      eta: formatEtaLabel(
-        job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes,
-      ),
-      candidates: String(candidates.length),
-      gateLabel: gate.label,
-      gateTone: gate.tone,
-      gateCell: (
-        <Pill theme={theme} tone={gate.tone} dot={gate.tone !== "success"}>
-          {gate.label}
-        </Pill>
-      ),
-      _selected: focusOrderId === order.orderId,
-    };
-  });
-
-  const ownedColumns: CanvasTableColumn<OwnedQueueRow>[] = [
-    {
-      h: "ORDER",
-      k: "orderCell",
-      w: 132,
-      mono: true,
-    },
-    { h: "TENANT", k: "tenant", w: 148, mono: true },
-    {
-      h: "PICKUP → DROP",
-      k: "routeCell",
-      w: 380,
     },
     { h: "WIN", k: "window", w: 132, mono: true },
     { h: "SVC", k: "service", w: 124, mono: true },
     {
       h: "STATE",
-      k: "stateCell",
       w: 160,
+      r: (row) => (
+        <Pill theme={theme} tone={getStateTone(row.state)} dot>
+          {row.state}
+        </Pill>
+      ),
     },
     {
       h: "DRIVER",
-      k: "driverCell",
       w: 126,
       mono: true,
+      r: (row) => (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span>{row.driver}</span>
+          <span style={{ color: theme.textDim, fontSize: 11 }}>
+            {row.vehicle}
+          </span>
+        </div>
+      ),
     },
     { h: "ETA", k: "eta", w: 76, mono: true },
     { h: "CAND", k: "candidates", w: 64, mono: true, align: "right" },
     {
       h: "GATE",
-      k: "gateCell",
       w: 176,
+      r: (row) => (
+        <Pill
+          theme={theme}
+          tone={row.gateTone}
+          dot={row.gateTone !== "success"}
+        >
+          {row.gateLabel}
+        </Pill>
+      ),
     },
   ];
 

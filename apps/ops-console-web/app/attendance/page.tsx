@@ -1,617 +1,599 @@
 import Link from "next/link";
-import type { AttendanceRecord, ShiftRecord } from "@drts/contracts";
+import type {
+  AttendanceRecord,
+  DriverRegistryRecord,
+  ShiftRecord,
+} from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { t } from "@/lib/translations";
-import { PageHeader, StatCard, Card, CardHeader, CardBody } from "@drts/ui-web";
-import { Badge, DataTable, Td, Tr } from "@drts/ui-web";
+import { t, type Locale } from "@/lib/translations";
+import {
+  CanvasBanner as Banner,
+  CanvasBtn as Btn,
+  CanvasCard as Card,
+  CanvasKPI as KPI,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  buildCanvasTheme,
+  type CanvasTheme,
+  type CanvasTone,
+} from "@drts/ui-web";
 
-function formatDt(value: string | null | undefined): string {
-  if (!value) return "—";
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
+type AttendancePageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+type AttendanceView = "today" | "week" | "exceptions";
+
+type GanttRow = {
+  shiftId: string;
+  driverLabel: string;
+  status: ShiftRecord["status"];
+  segmentLeft: number;
+  segmentWidth: number;
+  startLabel: string;
+  endLabel: string;
+};
+
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
+
+const pageBodyStyle = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 16,
+};
+
+const kpiGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 12,
+};
+
+const ganttGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "120px minmax(720px, 1fr)",
+  fontSize: 11,
+  gap: "0 8px",
+};
+
+const ganttHeaderStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(24, minmax(0, 1fr))",
+  color: theme.textDim,
+  paddingBottom: 4,
+  borderBottom: `1px solid ${theme.border}`,
+  fontFamily: theme.monoFamily,
+};
+
+const ganttTrackStyle = {
+  position: "absolute" as const,
+  inset: 0,
+  display: "grid",
+  gridTemplateColumns: "repeat(24, minmax(0, 1fr))",
+};
+
+const ganttSegmentBaseStyle = {
+  position: "absolute" as const,
+  top: 6,
+  height: 16,
+  borderRadius: 4,
+  fontSize: 10,
+  paddingLeft: 6,
+  lineHeight: "14px",
+  fontFamily: theme.monoFamily,
+  overflow: "hidden" as const,
+  whiteSpace: "nowrap" as const,
+};
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function resolveView(value: string | undefined): AttendanceView {
+  if (value === "week" || value === "exceptions") {
     return value;
   }
+  return "today";
 }
 
-function formatTime(value: string | null | undefined): string {
-  if (!value) return "—";
-  try {
-    return new Intl.DateTimeFormat("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-      timeZone: "UTC",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
-}
-
-function hoursValue(value: number | null | undefined): string {
-  if (value == null) return "—";
-  return `${value.toFixed(1)}h`;
-}
-
-function trackPercent(value: string | null | undefined) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const minutes = date.getUTCHours() * 60 + date.getUTCMinutes();
-  return Math.max(0, Math.min(100, (minutes / (24 * 60)) * 100));
-}
-
-function copy(locale: "en" | "zh", en: string, zh: string) {
-  return locale === "zh" ? zh : en;
-}
-
-function todayDateKey() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function shiftDurationHours(shift: ShiftRecord) {
-  if (typeof shift.totalHours === "number") return shift.totalHours;
-  const end = shift.clockedOutAt ? new Date(shift.clockedOutAt) : new Date();
-  const start = new Date(shift.clockedInAt);
-  const diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
-  return diff > 0 ? diff : 0;
-}
-
-function timelineBadgeVariant(status: AttendanceRecord["status"]) {
-  switch (status) {
-    case "present":
-      return "green";
-    case "absent":
-      return "red";
-    default:
-      return "yellow";
-  }
-}
-
-function shiftBadgeVariant(status: ShiftRecord["status"]) {
-  switch (status) {
-    case "active":
-      return "blue";
-    case "abandoned":
-      return "red";
-    default:
-      return "gray";
-  }
-}
-
-export default async function AttendancePage() {
-  const [client, locale] = await Promise.all([
-    getServerOpsClient(),
-    getServerLocale(),
-  ]);
-  let shifts: ShiftRecord[] = [];
-  let attendance: AttendanceRecord[] = [];
-  let error: string | null = null;
-
-  try {
-    const [shiftsResult, attendanceResult] = await Promise.all([
-      client.listShifts(),
-      client.listAttendance(),
-    ]);
-    shifts = (shiftsResult as { items?: ShiftRecord[] })?.items ?? shiftsResult;
-    attendance =
-      (attendanceResult as { items?: AttendanceRecord[] })?.items ??
-      attendanceResult;
-  } catch (e) {
-    error = e instanceof Error ? e.message : t("common.unknown", locale);
-  }
-
-  const activeShifts = shifts
-    .filter((shift) => shift.status === "active")
-    .sort((left, right) => left.clockedInAt.localeCompare(right.clockedInAt));
-  const completedShifts = shifts
-    .filter((shift) => shift.status !== "active")
-    .sort((left, right) => right.clockedInAt.localeCompare(left.clockedInAt));
-  const recentAttendance = [...attendance]
-    .sort((left, right) =>
-      `${right.date}${right.clockedInAt}`.localeCompare(
-        `${left.date}${left.clockedInAt}`,
-      ),
-    )
-    .slice(0, 8);
-  const exceptionAttendance = attendance.filter(
-    (record) => record.status === "partial" || record.status === "absent",
-  );
-  const longRunningShifts = activeShifts.filter(
-    (shift) => shiftDurationHours(shift) >= 10,
-  );
-  const vehiclelessShifts = activeShifts.filter((shift) => !shift.vehicleId);
-  const totalTrackedHours = attendance.reduce(
-    (sum, record) => sum + (record.totalHours ?? 0),
+function startOfUtcDay(date: Date) {
+  return Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+    0,
+    0,
+    0,
     0,
   );
-  const currentAttendanceDate = todayDateKey();
-  const completedTodayCount = attendance.filter(
-    (record) =>
-      record.status === "present" && record.date === currentAttendanceDate,
+}
+
+function endOfUtcDay(date: Date) {
+  return startOfUtcDay(date) + 24 * 60 * 60 * 1000;
+}
+
+function startOfTrailingWeek(date: Date) {
+  return startOfUtcDay(date) - 6 * 24 * 60 * 60 * 1000;
+}
+
+function asTime(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function intersectsRange(
+  start: string | null | undefined,
+  end: string | null | undefined,
+  rangeStart: number,
+  rangeEnd: number,
+) {
+  const startTime = asTime(start);
+  if (startTime === null) {
+    return false;
+  }
+  const endTime = asTime(end) ?? rangeEnd;
+  return startTime < rangeEnd && endTime >= rangeStart;
+}
+
+function isAttendanceInRange(
+  record: AttendanceRecord,
+  rangeStart: number,
+  rangeEnd: number,
+) {
+  const dateStart = Date.parse(`${record.date}T00:00:00.000Z`);
+  return Number.isFinite(dateStart)
+    ? dateStart >= rangeStart && dateStart < rangeEnd
+    : false;
+}
+
+function formatCanvasDateLabel(locale: Locale, value: Date) {
+  const year = value.getUTCFullYear();
+  const month = `${value.getUTCMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getUTCDate()}`.padStart(2, "0");
+  const weekday = new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    weekday: locale === "zh" ? "short" : "short",
+    timeZone: "UTC",
+  }).format(value);
+
+  return locale === "zh"
+    ? `${year}-${month}-${day} (${weekday})`
+    : `${year}-${month}-${day} (${weekday})`;
+}
+
+function formatHourTick(hour: number) {
+  return hour.toString().padStart(2, "0");
+}
+
+function formatSegmentHour(value: number) {
+  const whole = Math.floor(value);
+  const minutes = Math.round((value - whole) * 60);
+  const normalizedMinutes = minutes === 60 ? 0 : minutes;
+  const normalizedHour = minutes === 60 ? whole + 1 : whole;
+  if (normalizedMinutes === 0) {
+    return normalizedHour.toString().padStart(2, "0");
+  }
+  return `${normalizedHour.toString().padStart(2, "0")}:${normalizedMinutes
+    .toString()
+    .padStart(2, "0")}`;
+}
+
+function formatAttendanceRate(
+  numerator: number,
+  denominator: number,
+  locale: Locale,
+) {
+  if (denominator === 0) {
+    return locale === "en" ? "No records" : "無記錄";
+  }
+  return `${Math.round((numerator / denominator) * 100)}%`;
+}
+
+function shiftTone(status: ShiftRecord["status"]): CanvasTone {
+  if (status === "completed") return "success";
+  if (status === "abandoned") return "danger";
+  return "info";
+}
+
+function renderTabLink(
+  href: string,
+  label: string,
+  selected: boolean,
+  activeTheme: CanvasTheme,
+) {
+  return (
+    <Link
+      href={href}
+      style={{
+        color: selected ? activeTheme.text : activeTheme.textMuted,
+        textDecoration: "none",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+      }}
+    >
+      <span>{label}</span>
+    </Link>
+  );
+}
+
+function buildDriverLookup(drivers: DriverRegistryRecord[]) {
+  return new Map(drivers.map((driver) => [driver.driverId, driver]));
+}
+
+function buildGanttRows(
+  shifts: ShiftRecord[],
+  driversById: Map<string, DriverRegistryRecord>,
+  rangeStart: number,
+  rangeEnd: number,
+  now: number,
+): GanttRow[] {
+  return shifts
+    .filter((shift) =>
+      intersectsRange(
+        shift.clockedInAt,
+        shift.clockedOutAt,
+        rangeStart,
+        rangeEnd,
+      ),
+    )
+    .sort((left, right) => {
+      const leftPriority =
+        left.status === "active" ? 0 : left.status === "completed" ? 1 : 2;
+      const rightPriority =
+        right.status === "active" ? 0 : right.status === "completed" ? 1 : 2;
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority;
+      }
+      return left.clockedInAt.localeCompare(right.clockedInAt);
+    })
+    .slice(0, 8)
+    .map((shift) => {
+      const driver = driversById.get(shift.driverId);
+      const startTime = Math.max(
+        asTime(shift.clockedInAt) ?? rangeStart,
+        rangeStart,
+      );
+      const rawEndTime =
+        asTime(shift.clockedOutAt) ??
+        (shift.status === "active"
+          ? Math.min(now, rangeEnd)
+          : startTime + 60 * 60 * 1000);
+      const endTime = Math.max(
+        startTime + 30 * 60 * 1000,
+        Math.min(rawEndTime, rangeEnd),
+      );
+      const leftHours = (startTime - rangeStart) / (60 * 60 * 1000);
+      const widthHours = Math.max(
+        (endTime - startTime) / (60 * 60 * 1000),
+        0.5,
+      );
+
+      return {
+        shiftId: shift.shiftId,
+        driverLabel: driver?.name ?? shift.driverId,
+        status: shift.status,
+        segmentLeft: (leftHours / 24) * 100,
+        segmentWidth: (Math.min(widthHours, 24) / 24) * 100,
+        startLabel: formatSegmentHour(leftHours),
+        endLabel: formatSegmentHour(Math.min(leftHours + widthHours, 24)),
+      };
+    });
+}
+
+export default async function AttendancePage({
+  searchParams,
+}: AttendancePageProps) {
+  const [locale, client, params] = await Promise.all([
+    getServerLocale(),
+    getServerOpsClient(),
+    searchParams ??
+      Promise.resolve({} as Record<string, string | string[] | undefined>),
+  ]);
+
+  const view = resolveView(firstParam(params.view));
+  const nowDate = new Date();
+  const now = nowDate.getTime();
+  const todayStart = startOfUtcDay(nowDate);
+  const todayEnd = endOfUtcDay(nowDate);
+  const weekStart = startOfTrailingWeek(nowDate);
+  const weekEnd = todayEnd;
+
+  let shifts: ShiftRecord[] = [];
+  let attendanceRecords: AttendanceRecord[] = [];
+  let drivers: DriverRegistryRecord[] = [];
+  let loadError: string | null = null;
+
+  try {
+    [shifts, attendanceRecords, drivers] = await Promise.all([
+      client.listShifts(),
+      client.listAttendance(),
+      client.listDrivers(),
+    ]);
+  } catch (error) {
+    loadError =
+      error instanceof Error ? error.message : t("common.unknown", locale);
+  }
+
+  const driversById = buildDriverLookup(drivers);
+  const todayShifts = shifts.filter((shift) =>
+    intersectsRange(
+      shift.clockedInAt,
+      shift.clockedOutAt,
+      todayStart,
+      todayEnd,
+    ),
+  );
+  const weekShifts = shifts.filter((shift) =>
+    intersectsRange(shift.clockedInAt, shift.clockedOutAt, weekStart, weekEnd),
+  );
+  const todayAttendance = attendanceRecords.filter((record) =>
+    isAttendanceInRange(record, todayStart, todayEnd),
+  );
+  const weekAttendance = attendanceRecords.filter((record) =>
+    isAttendanceInRange(record, weekStart, weekEnd),
+  );
+
+  const scopeShifts = view === "week" ? weekShifts : todayShifts;
+  const scopeAttendance = view === "week" ? weekAttendance : todayAttendance;
+  const scheduledDrivers = new Set(scopeShifts.map((shift) => shift.driverId))
+    .size;
+  const activeShifts = scopeShifts.filter((shift) => shift.status === "active");
+  const completedShifts = scopeShifts.filter(
+    (shift) => shift.status === "completed",
+  );
+  const absentCount = scopeAttendance.filter(
+    (record) => record.status === "absent",
   ).length;
-  const monitorCards = [
+  const partialCount = scopeAttendance.filter(
+    (record) => record.status === "partial",
+  ).length;
+  const exceptionCount = absentCount + partialCount;
+  const ganttRows = buildGanttRows(
+    todayShifts,
+    driversById,
+    todayStart,
+    todayEnd,
+    now,
+  );
+
+  const subtitle = formatCanvasDateLabel(locale, nowDate);
+  const tabConfigs = [
     {
-      label: copy(locale, "Active shifts", "進行中班次"),
-      value: activeShifts.length,
-      sub: copy(locale, "Drivers currently on duty", "目前正在值勤的駕駛"),
-      accent: "#2563eb",
+      key: "today" as const,
+      href: "/attendance",
+      label: locale === "en" ? "Today" : "今日",
     },
     {
-      label: copy(locale, "Attendance exceptions", "出勤異常"),
-      value: exceptionAttendance.length,
-      sub: copy(
-        locale,
-        "Partial or absent attendance records",
-        "部分出勤或缺勤紀錄",
-      ),
-      accent: "#dc2626",
+      key: "week" as const,
+      href: "/attendance?view=week",
+      label: locale === "en" ? "This week" : "本週",
     },
     {
-      label: copy(locale, "Extended shifts", "延長班次"),
-      value: longRunningShifts.length,
-      sub: copy(
-        locale,
-        "Active shifts already over 10 hours",
-        "進行中且超過 10 小時",
-      ),
-      accent: "#d97706",
-    },
-    {
-      label: copy(locale, "Tracked hours", "追蹤工時"),
-      value: hoursValue(totalTrackedHours),
-      sub: copy(
-        locale,
-        "Hours captured in attendance records",
-        "出勤紀錄累計工時",
-      ),
-      accent: "#15803d",
+      key: "exceptions" as const,
+      href: "/attendance?view=exceptions",
+      label: locale === "en" ? "Exceptions" : "異常",
     },
   ];
+  const tabs = tabConfigs.map((tab) =>
+    renderTabLink(tab.href, tab.label, tab.key === view, theme),
+  );
+  const activeTab = tabs[tabConfigs.findIndex((tab) => tab.key === view)];
+  const lateCount = partialCount;
 
   return (
-    <>
+    <div
+      style={{
+        background: theme.bg,
+        color: theme.text,
+        minHeight: "100%",
+      }}
+    >
       <PageHeader
+        theme={theme}
         title={t("attendance.title", locale)}
-        subtitle={t("attendance.subtitle", locale)}
+        subtitle={subtitle}
+        tabs={tabs}
+        activeTab={activeTab}
+        actions={
+          <Btn theme={theme} variant="primary" icon="ext">
+            {locale === "en" ? "Export" : "匯出"}
+          </Btn>
+        }
       />
 
-      {error && (
-        <div
-          style={{
-            background: "#fee2e2",
-            border: "1px solid #fca5a5",
-            borderRadius: "8px",
-            padding: "12px 16px",
-            color: "#b91c1c",
-            fontSize: "13.5px",
-            marginBottom: "20px",
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: "16px",
-          marginBottom: "20px",
-        }}
-      >
-        {monitorCards.map((card) => (
-          <StatCard
-            key={card.label}
-            label={card.label}
-            value={String(card.value)}
-            sub={card.sub}
-            accent={card.accent}
+      <div style={pageBodyStyle}>
+        {loadError ? (
+          <Banner
+            theme={theme}
+            tone="danger"
+            title={
+              locale === "en"
+                ? "Attendance data is temporarily unavailable"
+                : "出勤資料暫時無法載入"
+            }
+            body={loadError}
           />
-        ))}
-      </div>
+        ) : null}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1.3fr 0.9fr",
-          gap: "20px",
-          marginBottom: "20px",
-        }}
-      >
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {copy(locale, "Shift monitor", "班次監控")}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {copy(locale, "Live clock-in board", "當班監控看板")}
-            </div>
-          </CardHeader>
-          <DataTable
-            columns={[
-              { label: t("attendance.col.driver", locale) },
-              { label: t("attendance.col.vehicle", locale) },
-              { label: t("attendance.col.clockedIn", locale) },
-              { label: copy(locale, "Duty span", "班次時長") },
-              { label: t("attendance.col.location", locale) },
-            ]}
-            empty={t("attendance.emptyShifts", locale)}
-          >
-            {activeShifts.map((shift) => (
-              <Tr key={shift.shiftId}>
-                <Td>
-                  <div style={{ fontWeight: 600 }}>{shift.driverId}</div>
-                  <div style={{ color: "#64748b", fontSize: "12px" }}>
-                    {shift.shiftId}
-                  </div>
-                </Td>
-                <Td>
-                  {shift.vehicleId ?? "—"}
-                  {!shift.vehicleId && (
-                    <div style={{ color: "#dc2626", fontSize: "12px" }}>
-                      {copy(locale, "Needs vehicle assignment", "待補車輛指派")}
-                    </div>
-                  )}
-                </Td>
-                <Td muted>{formatDt(shift.clockedInAt)}</Td>
-                <Td>
-                  <Badge
-                    variant={
-                      shiftDurationHours(shift) >= 10 ? "yellow" : "blue"
-                    }
-                  >
-                    {hoursValue(shiftDurationHours(shift))}
-                  </Badge>
-                </Td>
-                <Td muted>{shift.startLocation ?? "—"}</Td>
-              </Tr>
-            ))}
-          </DataTable>
-        </Card>
+        {view === "exceptions" && exceptionCount > 0 ? (
+          <Banner
+            theme={theme}
+            tone={absentCount > 0 ? "danger" : "warn"}
+            title={
+              locale === "en"
+                ? `${exceptionCount} attendance exceptions need follow-up`
+                : `${exceptionCount} 筆出勤異常待追蹤`
+            }
+            body={
+              locale === "en"
+                ? `${absentCount} absent, ${lateCount} partial attendance in the current service day.`
+                : `目前服務日有 ${absentCount} 筆未到、${lateCount} 筆部分出勤。`
+            }
+          />
+        ) : null}
 
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {copy(locale, "Supervisor cues", "值班提示")}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {copy(locale, "Attention queue", "需關注項目")}
-            </div>
-          </CardHeader>
-          <CardBody style={{ display: "grid", gap: "12px" }}>
-            <div
-              style={{
-                padding: "12px 14px",
-                borderRadius: "12px",
-                background: "#eff6ff",
-                border: "1px solid #bfdbfe",
-              }}
-            >
-              <div
-                style={{ fontSize: "12px", color: "#1d4ed8", fontWeight: 600 }}
-              >
-                {copy(locale, "Completed today", "今日完成出勤")}
-              </div>
-              <div
-                style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a" }}
-              >
-                {completedTodayCount}
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b" }}>
-                {copy(
-                  locale,
-                  "Present attendance rows dated today",
-                  "日期為今日的已完成出勤筆數",
-                )}
-              </div>
-            </div>
-            <div
-              style={{
-                padding: "12px 14px",
-                borderRadius: "12px",
-                background: "#fff7ed",
-                border: "1px solid #fed7aa",
-              }}
-            >
-              <div
-                style={{ fontSize: "12px", color: "#c2410c", fontWeight: 600 }}
-              >
-                {copy(locale, "No-vehicle active shifts", "未掛車進行中班次")}
-              </div>
-              <div
-                style={{ fontSize: "24px", fontWeight: 700, color: "#0f172a" }}
-              >
-                {vehiclelessShifts.length}
-              </div>
-              <div style={{ fontSize: "12px", color: "#64748b" }}>
-                {copy(
-                  locale,
-                  "Clocked-in drivers still waiting on vehicle pairing",
-                  "已上班但仍未完成車輛配對",
-                )}
-              </div>
-            </div>
-            <div
-              style={{
-                padding: "12px 14px",
-                borderRadius: "12px",
-                background: "#fef2f2",
-                border: "1px solid #fecaca",
-              }}
-            >
-              <div
-                style={{ fontSize: "12px", color: "#b91c1c", fontWeight: 600 }}
-              >
-                {copy(locale, "Attendance exceptions", "出勤異常")}
-              </div>
-              <div style={{ display: "grid", gap: "8px", marginTop: "10px" }}>
-                {exceptionAttendance.slice(0, 3).map((record) => (
-                  <div key={record.attendanceId}>
-                    <div
-                      style={{
-                        fontSize: "13px",
-                        fontWeight: 600,
-                        color: "#0f172a",
-                      }}
-                    >
-                      {record.driverId}
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#64748b" }}>
-                      {record.date} ·{" "}
-                      {formatOpsCodeLabel(locale, record.status)}
-                    </div>
-                  </div>
-                ))}
-                {exceptionAttendance.length === 0 && (
-                  <div style={{ fontSize: "12px", color: "#64748b" }}>
-                    {copy(
-                      locale,
-                      "No partial or absent records.",
-                      "目前沒有部分出勤或缺勤紀錄。",
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardBody>
-        </Card>
-      </div>
-
-      <Card style={{ marginBottom: "20px" }}>
-        <CardHeader>
-          <div
-            style={{
-              fontSize: "11px",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "#64748b",
-              marginBottom: "2px",
-            }}
-          >
-            {copy(locale, "Shift timeline", "班次時間軸")}
-          </div>
-          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
-            {copy(
+        <div style={kpiGridStyle}>
+          <KPI
+            theme={theme}
+            label={locale === "en" ? "Scheduled drivers" : "排班司機"}
+            value={scheduledDrivers}
+          />
+          <KPI
+            theme={theme}
+            label={t("attendance.activeShifts", locale)}
+            value={activeShifts.length}
+            sub={formatAttendanceRate(
+              activeShifts.length,
+              scopeShifts.length,
               locale,
-              "Gantt-style attendance visibility",
-              "甘特式出勤可視化",
             )}
-          </div>
-        </CardHeader>
-        <div style={{ display: "grid", gap: "10px", padding: "0 16px 16px" }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "220px 1fr 80px",
-              gap: "12px",
-              color: "#64748b",
-              fontSize: "12px",
-            }}
-          >
-            <span>{copy(locale, "Driver / day", "駕駛 / 日期")}</span>
-            <span>00:00 - 24:00 UTC</span>
-            <span>{copy(locale, "Hours", "工時")}</span>
-          </div>
-          {recentAttendance.length > 0 ? (
-            recentAttendance.map((record) => {
-              const start = trackPercent(record.clockedInAt) ?? 0;
-              const end = trackPercent(record.clockedOutAt) ?? 100;
-              return (
-                <div
-                  key={record.attendanceId}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "220px 1fr 80px",
-                    gap: "12px",
-                    alignItems: "center",
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 600, color: "#0f172a" }}>
-                      {record.driverId}
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#64748b" }}>
-                      {record.date} · {formatTime(record.clockedInAt)} -{" "}
-                      {formatTime(record.clockedOutAt)}
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      position: "relative",
-                      height: "12px",
-                      borderRadius: "999px",
-                      background: "#e2e8f0",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: `${Math.min(start, end)}%`,
-                        width: `${Math.max(6, Math.abs(end - start))}%`,
-                        top: 0,
-                        bottom: 0,
-                        borderRadius: "999px",
-                        background:
-                          record.status === "present"
-                            ? "#22c55e"
-                            : record.status === "absent"
-                              ? "#ef4444"
-                              : "#f59e0b",
-                      }}
-                    />
-                  </div>
-                  <div
-                    style={{ display: "grid", gap: "4px", justifyItems: "end" }}
-                  >
-                    <Badge variant={timelineBadgeVariant(record.status)}>
-                      {formatOpsCodeLabel(locale, record.status)}
-                    </Badge>
-                    <span style={{ fontSize: "12px", color: "#64748b" }}>
-                      {hoursValue(record.totalHours)}
+          />
+          <KPI
+            theme={theme}
+            label={t("attendance.completedShifts", locale)}
+            value={completedShifts.length}
+          />
+          <KPI
+            theme={theme}
+            label={locale === "en" ? "Exception / late" : "異常 / 遲到"}
+            value={exceptionCount}
+            delta={
+              absentCount > 0
+                ? locale === "en"
+                  ? `${absentCount} absent`
+                  : `${absentCount} 未到`
+                : undefined
+            }
+            deltaTone={exceptionCount > 0 ? "down" : "neutral"}
+            sub={
+              partialCount > 0
+                ? locale === "en"
+                  ? `${partialCount} partial`
+                  : `${partialCount} 部分出勤`
+                : undefined
+            }
+          />
+        </div>
+
+        <Card
+          theme={theme}
+          title={locale === "en" ? "On-duty gantt" : "當班甘特"}
+          actions={
+            <>
+              <Pill theme={theme} tone="info" dot>
+                {locale === "en" ? "active" : "進行中"}
+              </Pill>
+              <Pill theme={theme} tone="success" dot>
+                {locale === "en" ? "completed" : "已完成"}
+              </Pill>
+              {scopeShifts.some((shift) => shift.status === "abandoned") ? (
+                <Pill theme={theme} tone="danger" dot>
+                  {locale === "en" ? "abandoned" : "中止"}
+                </Pill>
+              ) : null}
+            </>
+          }
+          padding={16}
+        >
+          {ganttRows.length > 0 ? (
+            <div style={{ overflowX: "auto" }}>
+              <div style={ganttGridStyle}>
+                <div />
+                <div style={ganttHeaderStyle}>
+                  {Array.from({ length: 24 }, (_, index) => (
+                    <span key={index} style={{ textAlign: "center" }}>
+                      {formatHourTick(index)}
                     </span>
-                  </div>
+                  ))}
                 </div>
-              );
-            })
+
+                {ganttRows.map((row) => {
+                  const tone = shiftTone(row.status);
+                  const borderColor =
+                    tone === "success"
+                      ? theme.success
+                      : tone === "danger"
+                        ? theme.danger
+                        : theme.accent;
+                  const backgroundColor =
+                    tone === "success"
+                      ? "rgba(52, 211, 153, 0.14)"
+                      : tone === "danger"
+                        ? "rgba(248, 113, 113, 0.14)"
+                        : theme.accentBg;
+
+                  return (
+                    <div key={row.shiftId} style={{ display: "contents" }}>
+                      <div
+                        style={{
+                          padding: "6px 0",
+                          borderBottom: `1px dashed ${theme.border}`,
+                          fontSize: 12,
+                          display: "flex",
+                          alignItems: "center",
+                        }}
+                      >
+                        {row.driverLabel}
+                      </div>
+                      <div
+                        style={{
+                          position: "relative",
+                          height: 28,
+                          borderBottom: `1px dashed ${theme.border}`,
+                        }}
+                      >
+                        <div style={ganttTrackStyle}>
+                          {Array.from({ length: 24 }, (_, index) => (
+                            <span
+                              key={index}
+                              style={{
+                                borderLeft:
+                                  index === 0
+                                    ? "none"
+                                    : `1px solid ${theme.border}`,
+                                opacity: 0.45,
+                              }}
+                            />
+                          ))}
+                        </div>
+                        <div
+                          style={{
+                            ...ganttSegmentBaseStyle,
+                            left: `${row.segmentLeft}%`,
+                            width: `${row.segmentWidth}%`,
+                            border: `1px solid ${borderColor}`,
+                            background: backgroundColor,
+                            color: borderColor,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <span>
+                            {row.startLabel}–{row.endLabel}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           ) : (
-            <div style={{ fontSize: "13px", color: "#64748b" }}>
-              {t("attendance.emptyAttendance", locale)}
+            <div style={{ color: theme.textMuted, fontSize: 12.5 }}>
+              {t("attendance.emptyShifts", locale)}
             </div>
           )}
-        </div>
-      </Card>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: "20px",
-          marginBottom: "20px",
-        }}
-      >
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {copy(locale, "Attendance ledger", "出勤帳本")}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {t("attendance.attendanceRecords", locale)}
-            </div>
-          </CardHeader>
-          <DataTable
-            columns={[
-              { label: t("attendance.col.attendanceId", locale) },
-              { label: t("attendance.col.driver", locale) },
-              { label: t("attendance.col.date", locale) },
-              { label: t("attendance.col.status", locale) },
-              { label: t("attendance.col.hours", locale) },
-            ]}
-            empty={t("attendance.emptyAttendance", locale)}
-          >
-            {attendance.slice(0, 20).map((record) => (
-              <Tr key={record.attendanceId}>
-                <Td mono>{record.attendanceId}</Td>
-                <Td>{record.driverId}</Td>
-                <Td muted>{record.date}</Td>
-                <Td>
-                  <Badge variant={timelineBadgeVariant(record.status)}>
-                    {formatOpsCodeLabel(locale, record.status)}
-                  </Badge>
-                </Td>
-                <Td muted>{hoursValue(record.totalHours)}</Td>
-              </Tr>
-            ))}
-          </DataTable>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {copy(locale, "Closed shifts", "已結束班次")}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {t("attendance.completedShifts", locale)}
-            </div>
-          </CardHeader>
-          <DataTable
-            columns={[
-              { label: t("attendance.col.shiftId", locale) },
-              { label: t("attendance.col.driver", locale) },
-              { label: t("attendance.col.status", locale) },
-              { label: t("attendance.col.clockedIn", locale) },
-              { label: t("attendance.col.clockedOut", locale) },
-              { label: t("attendance.col.hours", locale) },
-            ]}
-            empty={t("attendance.emptyCompleted", locale)}
-          >
-            {completedShifts.slice(0, 10).map((shift) => (
-              <Tr key={shift.shiftId}>
-                <Td mono>{shift.shiftId}</Td>
-                <Td>{shift.driverId}</Td>
-                <Td>
-                  <Badge variant={shiftBadgeVariant(shift.status)}>
-                    {formatOpsCodeLabel(locale, shift.status)}
-                  </Badge>
-                </Td>
-                <Td muted>{formatDt(shift.clockedInAt)}</Td>
-                <Td muted>{formatDt(shift.clockedOutAt)}</Td>
-                <Td muted>{hoursValue(shift.totalHours)}</Td>
-              </Tr>
-            ))}
-          </DataTable>
         </Card>
       </div>
-
-      <Link
-        href="/dashboard"
-        style={{ color: "#0f172a", textDecoration: "none", fontWeight: 600 }}
-      >
-        {copy(locale, "Back to dashboard", "返回儀表板")}
-      </Link>
-    </>
+    </div>
   );
 }

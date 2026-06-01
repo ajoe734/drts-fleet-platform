@@ -41,18 +41,18 @@ If any one is set, **all 13 verification-body fields below are required** (with 
 | `costCenterCode`  | string  | `WF-TGV-001` cost-center registry                                     | governance-aware |
 | `costCenterName`  | string  | resolved at billing time from the cost-center registry snapshot       | governance-aware |
 | `ownerUserId`     | uuid    | the user (driver dispatcher / requester) attributed to the booking    | governance-aware |
-| `legacy_unmapped` | boolean | `true` only when the booking pre-dates the cost-center mapping window | see §3.7         |
+| `legacy_unmapped` | boolean | `true` only when the booking pre-dates the cost-center mapping window | see §3.3         |
 
-`costCenterName` is resolved at _billing time_ (not booking time) so historical renames do not corrupt the bill. The booking record retains the IDs; the billing record carries the rendered name snapshot. Human-facing display names such as `ownerName` may still be rendered by downstream reporting, but they are not part of the 13-field verification body for this Phase 1 acceptance slice.
+`costCenterName` is resolved at _billing time_ (not booking time) so historical renames do not corrupt the bill. The booking record retains the IDs; the billing record carries the rendered names. `ownerName` is optional enrichment.
 
 ### 3.2 Approval evaluation
 
-| Field               | Type | Source                                                                                                         | Required when                   |
-| ------------------- | ---- | -------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `approvalRequestId` | uuid | the originating approval request (one request can span multiple evaluations)                                   | booking ran approval evaluation |
-| `approvalState`     | enum | terminal state of the approval at booking confirmation: `approved`, `auto_approved`, `escalated_then_approved` | same as above                   |
+| Field                  | Type | Source                                                                                                         | Required when                   |
+| ---------------------- | ---- | -------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `approvalRequestId`    | uuid | the originating approval request (one request can span multiple evaluations)                                   | booking ran approval evaluation |
+| `approvalState`        | enum | terminal state of the approval at booking confirmation: `approved`, `auto_approved`, `escalated_then_approved` | same as above                   |
 
-For governance-aware billing, the approval must have terminated in one of the three "approved" states above. Rejected approvals do not produce billable bookings.
+`approvalEvaluationId` is optional reference enrichment.
 
 ### 3.3 Quota usage
 
