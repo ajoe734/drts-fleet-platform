@@ -1,0 +1,16 @@
+[Unit]
+Description=DRTS canonical-root branch watchdog — every 60s
+Documentation=file:%h/workspace/drts-fleet-platform/ops/canonical-root-lock/README.md
+
+[Timer]
+# Fast cadence — drift should be caught within ~1 min, not 5. Cheap
+# enough to run frequently (one `git rev-parse` + `git status`).
+OnBootSec=15s
+OnUnitActiveSec=60s
+Persistent=true
+AccuracySec=10s
+
+Unit=drts-canonical-root-watch.service
+
+[Install]
+WantedBy=timers.target

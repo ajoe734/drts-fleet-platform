@@ -2,9 +2,9 @@
 
 **Task:** `FIN-GOV-001` - governance-aware billing and reporting live evidence pack
 **Intended owner:** `Codex2`
-**Intended reviewer:** `Codex`
+**Intended reviewer:** `Claude2`
 **Collected:** `2026-05-19 (UTC)`
-**Current read:** `PARTIAL - static evidence consolidated; 2026-05-19 live rerun reconfirmed blocked by credential/ingress gates`
+**Current read:** `PARTIAL - static evidence consolidated; 2026-05-26 revalidation still blocked by trunk visibility gaps plus IAP / WIF / IAM gates for the live uplift`
 
 ---
 
@@ -130,9 +130,11 @@ Interpretation:
 
 ### 4.2 Token helper failure on this machine
 
-Active CLI account:
+Active CLI accounts probed:
 
 - `bobo.du@cctech-support.com`
+- `edna@cctech-support.com`
+- `lupinchen@cctech-support.com`
 
 Attempted helper:
 
@@ -140,20 +142,15 @@ Attempted helper:
 
 Underlying failure:
 
-`gcloud auth print-access-token` returned:
+Each of `gcloud auth print-access-token` and `gcloud auth print-identity-token`
+returned:
 
 `Reauthentication failed. cannot prompt during non-interactive execution.`
 
-The impersonated fallback path failed with the same reauthentication error when
-running:
-
-`gcloud auth print-identity-token --include-email --project drts-staging-bobo-20260502 --impersonate-service-account github-actions-deployer@drts-staging-bobo-20260502.iam.gserviceaccount.com --audiences 1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`
-
 Interpretation:
 
-- this workspace had an active `gcloud` account selected
-- the local credentials were stale for non-interactive token minting
-- no fresh IAP token could be produced from this session
+- all locally configured human `gcloud` credentials are stale for non-interactive token minting
+- no fresh email-bearing IAP token can be produced from this session via user-account auth
 
 ### 4.3 Direct Cloud Run fallback
 
@@ -175,17 +172,30 @@ Interpretation:
 - the live collection path is effectively gated on the protected staging host
   plus valid bearer credentials
 
+### 4.4 2026-05-23 revalidation
+
+Fresh probes on `2026-05-23` still stop before any governed E2E request can be issued:
+
+- `curl -i -sS --max-time 20 https://api.staging.drts-fleet.cctech-support.com/api/health` still returns HTTP `302` with `Invalid IAP credentials: empty token`
+- `gh secret list --repo ajoe734/drts-fleet-platform | grep 'WIF'` shows `DEV_WIF_PROVIDER`, `DEV_WIF_SERVICE_ACCOUNT`, `STAGING_WIF_SERVICE_ACCOUNT`, `WIF_PROVIDER`, and `WIF_SERVICE_ACCOUNT`, but **no** `STAGING_WIF_PROVIDER`
+- the missing `STAGING_WIF_PROVIDER` explains why the staging GitHub Actions auth path falls back to older provider settings unless the workflow adds an explicit fallback order
+
+Interpretation:
+
+- the protected staging host is still reachable but still requires a valid email-bearing IAP token
+- repo-side staging WIF configuration remains incomplete on this date
+- `WF-FIN-GOV-001` cannot honestly claim `PASS (live staging evidence)` until the auth path is repaired and a strict-mode governed rerun succeeds
+
 ---
 
 ## 5. Blocker Summary
 
-Fresh staging live evidence for the governance-aware `WF-FIN-001` sub-slice is
-currently blocked by two concrete environment issues:
+Fresh staging live evidence for the governance-aware `WF-FIN-GOV-001` slice is
+currently blocked by three concrete environment issues:
 
-1. non-interactive IAP token minting is unavailable on this machine because the
-   current `gcloud` session requires reauthentication
-2. the older direct Cloud Run origin is not serving the expected `/api/*`
-   routes as a usable fallback
+1. non-interactive user-account IAP token minting is unavailable on this machine because every probed `gcloud` account requires reauthentication
+2. the repo currently exposes `STAGING_WIF_SERVICE_ACCOUNT` but not `STAGING_WIF_PROVIDER`, so the CI-side staging auth path still lacks the intended provider configuration
+3. the older direct Cloud Run origin is not serving the expected `/api/*` routes as a usable fallback
 
 Until one of those is resolved, this task can only deliver a consolidated
 static-evidence packet plus a reproducible blocker record. The 2026-05-19
@@ -214,3 +224,52 @@ When valid staging credentials are available, rerun at minimum:
 
 Only that follow-up pass should be used to argue for a `WF-FIN-001` live gate
 upgrade.
+
+---
+
+## 7. 2026-05-26 Dispatch Revalidation Addendum
+
+The latest isolated-worktree revalidation for `PH1GC-FIN-GOV-001` did not
+collect new live billing/reporting artifacts. It reconfirmed two separate
+blockers:
+
+1. `origin/dev` still has not absorbed the corrected directive-`§H`
+   13-field spec/UAT body carried on `codex2/ph1gc-fin-gov-001`, even though
+   the branch is fully caught up with trunk (`git rev-list --left-right --count
+origin/dev...HEAD` = `0 40`).
+2. The governed staging rerun needed for `WF-FIN-GOV-001 = PASS (live staging
+evidence)` still cannot start from this workspace because the bearer/direct
+   origin path remains blocked by IAP / IAM / WIF issues.
+
+Repo-local verification at branch head `05b9c190` remained green:
+
+- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
+- `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
+- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run`
+- `git diff --check`
+
+This addendum therefore does not upgrade the evidence classification. The
+honest read is still `PARTIAL / static evidence consolidated` until trunk
+absorbs the corrected artifact chain and a fresh strict-mode governed staging
+rerun yields reviewer-readable invoice/report artifacts.
+
+## 8. 2026-05-26 Blocker-Sidecar Refresh
+
+The owner-lane dispatch advanced the branch to `4f205da8` only to refresh the
+blocker evidence; it did not collect new governed staging artifacts.
+
+- `git rev-parse HEAD` = `4f205da881e3925bcb4cd29d7a910e4376304d76`
+- `git rev-list --left-right --count origin/dev...HEAD` = `0 41`
+- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed
+- `STRICT_VERIFICATION_BODY=1 bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh` passed
+- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run` still lists `E2E-010-governance-aware-billing-reporting.sh`
+- `git diff --check` passed
+- `origin/dev` still exposes the pre-fix spec/UAT field set (`ownerName`,
+  `approvalEvaluationId`) instead of the corrected directive-`§H` body carried
+  on this branch
+- `origin/dev` still shows `WF-FIN-GOV-001` only as `PASS (static evidence)`
+
+This refresh leaves the evidence classification unchanged: `PARTIAL / static
+evidence consolidated`, still blocked on both trunk absorption of the corrected
+artifact chain and a green governed staging rerun with reviewer-readable
+invoice/report outputs.
