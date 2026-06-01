@@ -14,6 +14,7 @@ type TenantNavIcon =
   | "plus"
   | "passengers"
   | "addresses"
+  | "notifications"
   | "billing"
   | "flags"
   | "reports"
@@ -70,6 +71,12 @@ export const tenantNavEntries: TenantNavEntry[] = [
     label: "地址簿",
   },
   {
+    key: "notifications",
+    href: "/notifications",
+    icon: "notifications",
+    label: "通知",
+  },
+  {
     key: "costcenter",
     href: "/cost-centers",
     icon: "billing",
@@ -83,6 +90,12 @@ export const tenantNavEntries: TenantNavEntry[] = [
   },
   { divider: "帳務" },
   {
+    key: "billing",
+    href: "/billing",
+    icon: "billing",
+    label: "帳務總覽",
+  },
+  {
     key: "invoices",
     href: "/invoices",
     icon: "billing",
@@ -95,6 +108,12 @@ export const tenantNavEntries: TenantNavEntry[] = [
     label: "報表",
   },
   { divider: "整合" },
+  {
+    key: "integration-governance",
+    href: "/integration-governance",
+    icon: "apiKeys",
+    label: "整合就緒度",
+  },
   {
     key: "apikeys",
     href: "/api-keys",
@@ -115,10 +134,22 @@ export const tenantNavEntries: TenantNavEntry[] = [
   },
   { divider: "組織" },
   {
+    key: "sla",
+    href: "/sla",
+    icon: "flags",
+    label: "SLA",
+  },
+  {
     key: "users",
     href: "/users",
     icon: "users",
     label: "人員與角色",
+  },
+  {
+    key: "feature-flags",
+    href: "/feature-flags",
+    icon: "flags",
+    label: "功能旗標",
   },
   {
     key: "settings",
