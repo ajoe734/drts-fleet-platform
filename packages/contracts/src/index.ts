@@ -3,6 +3,7 @@ import type { PlatformCode } from "./platform-codes";
 import type {
   DriverMatchingSuppression,
   ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
@@ -1656,6 +1657,14 @@ export interface TenantIntegrationGovernancePackage {
   baselineWebhookEvents: string[];
   baselineNotificationSubscriptions: TenantNotificationSubscription[];
   onboardingChecklist: string[];
+  // Q-X13 / ui-authority-actions-contract §8(1,4): the tenant-settings
+  // capability set is embedded on this governance envelope so the console
+  // renders CTAs from descriptors instead of hard-coding role→action mapping.
+  // A 0-length array means settings are read-only for the current actor.
+  availableActions?: ResourceActionDescriptor[];
+  // Q-X01 / ui-runtime §UiRefreshMetadata: per-response freshness envelope so
+  // the console renders an honest stale indicator instead of inventing one.
+  refresh?: UiRefreshMetadata;
 }
 
 // --- Orders ---

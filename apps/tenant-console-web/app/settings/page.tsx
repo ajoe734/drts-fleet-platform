@@ -11,6 +11,7 @@ import type {
   TenantNotificationPreferences,
   TenantQuotaSummary,
   TenantSlaProfile,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -278,9 +279,15 @@ async function loadSettingsData(): Promise<SettingsData> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// availableActions (Q-X13): CTAs are descriptor-driven, never hard-coded by
-// role. /settings folds into the owning modules (§7 open question + §4.2), so
-// each capability surfaces as a descriptor-backed deep link to its module.
+// availableActions (Q-X13 / ui-authority-actions-contract §8): CTAs are
+// descriptor-driven. Per §8(4) the UI MUST consume the `availableActions[]`
+// embedded on the response (here the governance envelope) and MUST NOT hard-code
+// a role→action mapping. /settings folds into the owning modules (§7 + §4.2), so
+// each descriptor surfaces as a deep link to its module.
+//
+// label / href / icon are pure PRESENTATION keyed by `descriptor.action`; the
+// authority (which actions exist, enabled vs disabled, disabledReasonCode) comes
+// from the descriptor. §6 lets the FE narrow display but never widen availability.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ModuleAction = {
@@ -292,102 +299,95 @@ type ModuleAction = {
   crossApp?: boolean;
 };
 
+type ModuleActionPresentation = {
+  label: string;
+  href: string;
+  icon: ModuleActionIcon;
+  crossApp?: boolean;
+};
+
+const MODULE_ACTION_PRESENTATION: Record<string, ModuleActionPresentation> = {
+  manage_billing: { label: "計費設定", href: "/billing", icon: "billing" },
+  manage_notifications: {
+    label: "通知預設",
+    href: "/notifications",
+    icon: "notifications",
+  },
+  manage_sla: { label: "SLA 門檻", href: "/sla", icon: "sla" },
+  manage_integration: {
+    label: "整合治理",
+    href: "/integration-governance",
+    icon: "integrationGov",
+  },
+  manage_users: { label: "人員與角色", href: "/users", icon: "users" },
+  view_feature_flags: {
+    label: "功能旗標",
+    href: "/feature-flags",
+    icon: "flags",
+  },
+  rotate_signing_secret: {
+    label: "輪替簽章金鑰",
+    href: "/api-keys",
+    icon: "apiKeys",
+  },
+  open_platform_governance: {
+    label: "平台治理 (read-only)",
+    href: `${PLATFORM_ADMIN_BASE_URL}/feature-flags`,
+    icon: "ext",
+    crossApp: true,
+  },
+};
+
 const DISABLED_REASON_LABELS: Record<string, string> = {
   requires_platform_approval: "需平台核准",
   permission_denied: "權限不足",
   not_provisioned: "尚未開通",
 };
 
-function buildModuleActions(data: SettingsData): ModuleAction[] {
-  // The rotate-signing-secret affordance stays visible but disabled when the
-  // governance package requires platform break-glass approval — demonstrating
-  // the enabled:false + disabledReasonCode tooltip contract (Q-X13).
+// Local fallback used ONLY when the governance response does not embed
+// `availableActions` (older backend / governance read failed). Mirrors the
+// `synthesizeRefreshMetadata` convention: the page prefers the embedded array
+// and degrades to this conservative default so the demo still renders a hub.
+// The rotate-signing-secret affordance stays visible but disabled when the
+// governance package requires platform break-glass approval (Q-X13).
+function synthesizeModuleActions(
+  data: SettingsData,
+): ResourceActionDescriptor[] {
   const breakGlassGated =
     data.governance?.apiKeyPolicy.breakGlassRequiresPlatformApproval ?? true;
 
   return [
+    { action: "manage_billing", enabled: true, riskLevel: "medium" },
+    { action: "manage_notifications", enabled: true, riskLevel: "medium" },
+    { action: "manage_sla", enabled: true, riskLevel: "medium" },
+    { action: "manage_integration", enabled: true, riskLevel: "medium" },
+    { action: "manage_users", enabled: true, riskLevel: "medium" },
+    { action: "view_feature_flags", enabled: true, riskLevel: "low" },
     {
-      descriptor: {
-        action: "manage_billing",
-        enabled: true,
-        riskLevel: "medium",
-      },
-      label: "計費設定",
-      href: "/billing",
-      icon: "billing",
+      action: "rotate_signing_secret",
+      enabled: !breakGlassGated,
+      riskLevel: "high",
+      requiresReason: true,
+      ...(breakGlassGated
+        ? { disabledReasonCode: "requires_platform_approval" }
+        : {}),
     },
-    {
-      descriptor: {
-        action: "manage_notifications",
-        enabled: true,
-        riskLevel: "medium",
-      },
-      label: "通知預設",
-      href: "/notifications",
-      icon: "notifications",
-    },
-    {
-      descriptor: { action: "manage_sla", enabled: true, riskLevel: "medium" },
-      label: "SLA 門檻",
-      href: "/sla",
-      icon: "sla",
-    },
-    {
-      descriptor: {
-        action: "manage_integration",
-        enabled: true,
-        riskLevel: "medium",
-      },
-      label: "整合治理",
-      href: "/integration-governance",
-      icon: "integrationGov",
-    },
-    {
-      descriptor: {
-        action: "manage_users",
-        enabled: true,
-        riskLevel: "medium",
-      },
-      label: "人員與角色",
-      href: "/users",
-      icon: "users",
-    },
-    {
-      descriptor: {
-        action: "view_feature_flags",
-        enabled: true,
-        riskLevel: "low",
-      },
-      label: "功能旗標",
-      href: "/feature-flags",
-      icon: "flags",
-    },
-    {
-      descriptor: {
-        action: "rotate_signing_secret",
-        enabled: !breakGlassGated,
-        riskLevel: "high",
-        requiresReason: true,
-        ...(breakGlassGated
-          ? { disabledReasonCode: "requires_platform_approval" }
-          : {}),
-      },
-      label: "輪替簽章金鑰",
-      href: "/api-keys",
-      icon: "apiKeys",
-    },
-    {
-      descriptor: {
-        action: "open_platform_governance",
-        enabled: true,
-        riskLevel: "low",
-      },
-      label: "平台治理 (read-only)",
-      href: `${PLATFORM_ADMIN_BASE_URL}/feature-flags`,
-      icon: "ext",
-      crossApp: true,
-    },
+    { action: "open_platform_governance", enabled: true, riskLevel: "low" },
   ];
+}
+
+// §8(4): consume the embedded descriptors; fall back only when absent. Unknown
+// action codes are skipped (no presentation = nothing to render), which keeps
+// the FE from widening availability for actions it does not understand (§6).
+function resolveModuleActions(data: SettingsData): ModuleAction[] {
+  const descriptors =
+    data.governance?.availableActions ?? synthesizeModuleActions(data);
+
+  return descriptors.flatMap((descriptor) => {
+    const presentation = MODULE_ACTION_PRESENTATION[descriptor.action];
+    if (!presentation) return [];
+    return [{ descriptor, ...presentation }];
+  });
 }
 
 function ModuleActionButton({ action }: { action: ModuleAction }) {
@@ -540,6 +540,46 @@ function SettingsEmptyState({ reason }: { reason: EmptyReason }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Refresh freshness (Q-X01): the page consumes the `UiRefreshMetadata` envelope
+// embedded on the response and only synthesizes a fallback when it is absent.
+// The RefreshTier enum supplies the polling cadence (a separate concern from
+// snapshot freshness) so neither value is a bare magic number.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function synthesizeRefreshMetadata(
+  generatedAt: string,
+  freshness: UiRefreshMetadata["dataFreshness"],
+): UiRefreshMetadata {
+  return {
+    generatedAt,
+    staleAfterMs: REFRESH_TIER_CADENCE_MS[SETTINGS_REFRESH_TIER] ?? 30000,
+    dataFreshness: freshness,
+    source: "live",
+  };
+}
+
+const FRESHNESS_TONE: Record<UiRefreshMetadata["dataFreshness"], CanvasTone> = {
+  fresh: "success",
+  stale: "warn",
+  degraded: "warn",
+  unknown: "neutral",
+};
+
+const FRESHNESS_LABEL: Record<UiRefreshMetadata["dataFreshness"], string> = {
+  fresh: "最新",
+  stale: "已過期",
+  degraded: "降級資料",
+  unknown: "狀態未知",
+};
+
+const SOURCE_LABEL: Record<UiRefreshMetadata["source"], string> = {
+  live: "即時",
+  cache: "快取",
+  sandbox: "沙箱",
+  static: "靜態",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -598,7 +638,18 @@ export default async function SettingsPage() {
   const notificationValue =
     enabledSubscriptions === null ? "—" : `${enabledSubscriptions} 條訂閱`;
 
-  const moduleActions = buildModuleActions(data);
+  const moduleActions = resolveModuleActions(data);
+
+  // §3.2 / Q-X01: prefer the freshness envelope embedded on the governance
+  // response; synthesize a fallback only when it (or the read) is absent.
+  const refresh =
+    data.governance?.refresh ??
+    synthesizeRefreshMetadata(
+      data.governance?.generatedAt ?? new Date().toISOString(),
+      data.governance ? "fresh" : "unknown",
+    );
+  const refreshTone = FRESHNESS_TONE[refresh.dataFreshness];
+  const snapshotLabel = `${FRESHNESS_LABEL[refresh.dataFreshness]} · ${SOURCE_LABEL[refresh.source]} · ${formatDate(refresh.generatedAt)}`;
 
   return (
     <div>
@@ -635,12 +686,14 @@ export default async function SettingsPage() {
       />
 
       <div style={pageBodyStyle}>
-        {/* Refresh tier wired (packet §3.2): T5 Tenant slow, explicit affordance. */}
+        {/* Refresh tier wired (packet §3.2): T5 Tenant slow cadence + the
+            snapshot freshness consumed from the response envelope (Q-X01). */}
         <div style={freshnessRowStyle}>
-          <CanvasPill theme={th} tone="neutral" dot>
+          <CanvasPill theme={th} tone={refreshTone} dot>
             T5 · slow
           </CanvasPill>
-          <span>自動更新 {cadenceLabel}</span>
+          <span>{snapshotLabel}</span>
+          <span>· 自動更新 {cadenceLabel}</span>
           <Link href="/settings" style={linkResetStyle}>
             <CanvasBtn theme={th} size="xs" variant="ghost" icon="ok">
               重新整理
