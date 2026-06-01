@@ -1326,37 +1326,35 @@ export default function TenantsPage() {
     [loadTenants],
   );
 
-  const postTenantWrite = useCallback(
-    async <T,>(path: string, body?: unknown) => {
-      const requestId =
-        globalThis.crypto?.randomUUID?.() ??
-        `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      const apiBaseUrl = getRuntimeApiBaseUrl().replace(/\/$/, "");
-      const response = await fetch(`${apiBaseUrl}${path}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Request-Id": requestId,
-          "Idempotency-Key": requestId,
-        },
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      });
+  const postTenantWrite = useCallback(async (path: string, body?: unknown) => {
+    const requestId =
+      globalThis.crypto?.randomUUID?.() ??
+      `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const apiBaseUrl = getRuntimeApiBaseUrl().replace(/\/$/, "");
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Request-Id": requestId,
+        "Idempotency-Key": requestId,
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
 
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(`API error ${response.status}: ${message}`);
-      }
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(`API error ${response.status}: ${message}`);
+    }
 
-      const envelope = (await response.json()) as ApiSuccessEnvelope<T>;
+    const envelope =
+      (await response.json()) as ApiSuccessEnvelope<ActionReceipt>;
 
-      return {
-        envelope,
-        requestId,
-        receipt: normalizeActionReceipt(envelope.data, requestId),
-      };
-    },
-    [],
-  );
+    return {
+      envelope,
+      requestId,
+      receipt: normalizeActionReceipt(envelope.data, requestId),
+    };
+  }, []);
 
   const executeTenantAction = useCallback(
     async (tenant: TenantListItem, action: ResourceActionDescriptor) => {
@@ -1435,11 +1433,10 @@ export default function TenantsPage() {
             : {}),
         };
 
-        const { requestId, receipt: nextReceipt } =
-          await postTenantWrite<PlatformAdminTenantRecord>(
-            "/api/platform-admin/tenants",
-            command,
-          );
+        const { requestId, receipt: nextReceipt } = await postTenantWrite(
+          "/api/platform-admin/tenants",
+          command,
+        );
         setReceipt(
           nextReceipt ?? {
             actionId: requestId,
@@ -1481,8 +1478,10 @@ export default function TenantsPage() {
           return;
         }
 
-        const { requestId, receipt: nextReceipt } =
-          await postTenantWrite<PlatformAdminTenantRecord>(path, command);
+        const { requestId, receipt: nextReceipt } = await postTenantWrite(
+          path,
+          command,
+        );
         setReceipt(
           nextReceipt ?? {
             actionId: requestId,

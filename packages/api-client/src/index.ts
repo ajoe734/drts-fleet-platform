@@ -6,6 +6,7 @@
  */
 
 import type {
+  ActionReceipt,
   AcknowledgeOpsApprovalRequestBreachCommand,
   AddComplaintCaseNoteCommand,
   AddReconciliationIssueCommentCommand,
@@ -2043,8 +2044,8 @@ export class ApiClient {
 
   async createPlatformTenant(
     command: CreatePlatformTenantCommand,
-  ): Promise<PlatformAdminTenantRecord> {
-    return this.post<PlatformAdminTenantRecord>("/api/platform-admin/tenants", {
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>("/api/platform-admin/tenants", {
       body: command,
     });
   }
@@ -2182,19 +2183,25 @@ export class ApiClient {
   async suspendTenant(
     tenantId: string,
     command?: PlatformTenantLifecycleActionCommand,
-  ): Promise<unknown> {
-    return this.post(`/api/platform-admin/tenants/${tenantId}/suspend`, {
-      ...(command ? { body: command } : {}),
-    });
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>(
+      `/api/platform-admin/tenants/${tenantId}/suspend`,
+      {
+        ...(command ? { body: command } : {}),
+      },
+    );
   }
 
   async activateTenant(
     tenantId: string,
     command?: PlatformTenantLifecycleActionCommand,
-  ): Promise<unknown> {
-    return this.post(`/api/platform-admin/tenants/${tenantId}/activate`, {
-      ...(command ? { body: command } : {}),
-    });
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>(
+      `/api/platform-admin/tenants/${tenantId}/activate`,
+      {
+        ...(command ? { body: command } : {}),
+      },
+    );
   }
 
   async inviteTenantRole(
@@ -2220,8 +2227,8 @@ export class ApiClient {
   async rollbackHoldTenant(
     tenantId: string,
     command?: PlatformTenantLifecycleActionCommand,
-  ): Promise<PlatformAdminTenantRecord> {
-    return this.post<PlatformAdminTenantRecord>(
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>(
       `/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/rollback-hold`,
       {
         ...(command ? { body: command } : {}),
