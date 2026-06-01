@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { formatDateTime } from "@/lib/admin-client";
+import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
   CanvasBanner,
@@ -25,6 +25,8 @@ import type {
   ActionReceipt,
   CrossAppResourceLink,
   EmptyReason,
+  PublishDriverFeePlanCommand,
+  PublishPlatformPricingRuleCommand,
   ResourceActionDescriptor,
   RefreshTier,
   UiRefreshMetadata,
@@ -106,6 +108,16 @@ type PricingActionReceipt = ActionReceipt & {
   subject: string;
   reason: string | null;
   auditRoute: string;
+};
+
+type PricingActionTarget = {
+  subject: string;
+  tab: PricingTabId;
+  resourceType: string;
+  resourceId: string;
+  auditRoute: string;
+  item?: PricingItem;
+  row?: VersionRow;
 };
 
 const TAB_IDS: PricingTabId[] = ["passenger", "driver", "subsidy", "history"];
@@ -256,6 +268,8 @@ const DRIVER_PLANS: PricingItem[] = [
     summary: "Base fee + sponsor offset for mixed funding routes",
     metricA: "Base 65 TWD / trip",
     metricB: "Links subsidy pack S-12",
+    serviceFeeBps: "650",
+    reimbursementMode: "mixed",
     feeStructure: "Base 65 TWD / trip",
     subsidyLinkage: "Subsidy pack S-12",
     notes: "In-flight trip overlap warning for overnight airport queue.",
@@ -292,6 +306,8 @@ const DRIVER_PLANS: PricingItem[] = [
     summary: "Retired after cross-tenant uplift rollout",
     metricA: "45 TWD / trip",
     metricB: "No subsidy linkage",
+    serviceFeeBps: "450",
+    reimbursementMode: "platform_funded",
     feeStructure: "45 TWD / trip",
     subsidyLinkage: "No subsidy linkage",
     notes: "Kept visible for audit and statement lineage.",
@@ -854,13 +870,16 @@ function RefreshMeta({
 function EmptyStatePreview({
   descriptor,
   theme,
-  locale,
+  target,
   onAction,
 }: {
   descriptor: EmptyStateDescriptor;
   theme: CanvasTheme;
-  locale: string;
-  onAction: (action: ResourceActionDescriptor, subject: string) => void;
+  target: PricingActionTarget;
+  onAction: (
+    action: ResourceActionDescriptor,
+    target: PricingActionTarget,
+  ) => void;
 }) {
   return (
     <div style={{ display: "grid", gap: 10 }}>
@@ -877,12 +896,7 @@ function EmptyStatePreview({
             variant={
               descriptor.nextAction.riskLevel === "low" ? "ghost" : "primary"
             }
-            onClick={() =>
-              onAction(
-                descriptor.nextAction!,
-                locale === "en" ? "Empty state" : "空狀態",
-              )
-            }
+            onClick={() => onAction(descriptor.nextAction!, target)}
           >
             {formatActionLabel(descriptor.nextAction.action)}
           </CanvasBtn>
@@ -909,6 +923,7 @@ function EmptyStatePreview({
 
 export default function PricingPage() {
   const { locale } = useTranslation();
+  const client = usePlatformAdminClient();
   const router = useRouter();
   const searchParams = useSearchParams();
   const copy = pageCopy(locale);
@@ -1173,7 +1188,10 @@ export default function PricingPage() {
     setGeneratedAt(new Date().toISOString());
   };
 
-  const handleAction = (action: ResourceActionDescriptor, subject: string) => {
+  const handleAction = async (
+    action: ResourceActionDescriptor,
+    target: PricingActionTarget,
+  ) => {
     if (!action.enabled) {
       setActionReceipt(null);
       setActionMessage(action.disabledReasonCode ?? "Action unavailable.");
@@ -1195,10 +1213,13 @@ export default function PricingPage() {
 
     if (action.riskLevel !== "low") {
       const confirmed = window.confirm(
-        `${formatActionLabel(action.action)} · ${subject}`,
+        `${formatActionLabel(action.action)} · ${target.subject}`,
       );
       if (!confirmed) return;
     }
+
+    const pendingKey = `${target.resourceId}-${action.action}`;
+    setPendingActionKey(pendingKey);
 
     if (action.requiresReason) {
       const reasonInput = window.prompt(
@@ -1212,48 +1233,60 @@ export default function PricingPage() {
         setActionMessage(
           locale === "en" ? "Reason is required." : "必須填寫原因。",
         );
+        setPendingActionKey(null);
         return;
       }
-      const pendingKey = `${subject}-${action.action}`;
-      setPendingActionKey(pendingKey);
-      window.setTimeout(() => {
+
+      try {
+        const publishPayload = buildPublishPayload(target, reason);
+        if (publishPayload) {
+          await publishPayload.execute(client);
+        }
         setPendingActionKey((current) =>
           current === pendingKey ? null : current,
         );
         const receipt = buildActionReceipt({
           action,
-          subject,
-          tab: activeTab,
+          target,
           locale,
           reason,
         });
         setActionReceipt(receipt);
         setActionMessage(receipt.message);
-      }, 900);
+      } catch (error) {
+        setActionReceipt(null);
+        setPendingActionKey((current) =>
+          current === pendingKey ? null : current,
+        );
+        setActionMessage(actionErrorMessage(error, locale));
+      }
       return;
     }
 
     setActionReceipt(null);
     setActionMessage(
       locale === "en"
-        ? `${formatActionLabel(action.action)} completed for ${subject}.`
-        : `${subject} 已完成 ${formatActionLabel(action.action)}。`,
+        ? `${formatActionLabel(action.action)} completed for ${target.subject}.`
+        : `${target.subject} 已完成 ${formatActionLabel(action.action)}。`,
     );
+    setPendingActionKey((current) => (current === pendingKey ? null : current));
   };
 
   const renderActions = (
     actions: ResourceActionDescriptor[],
-    subject: string,
+    target: PricingActionTarget,
   ) => (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
       {actions.map((action) => {
-        const actionKey = `${subject}-${action.action}`;
+        const actionKey = `${target.resourceId}-${action.action}`;
         const isPending = pendingActionKey === actionKey;
         return (
           <button
             key={actionKey}
             type="button"
-            onClick={() => handleAction(action, subject)}
+            onClick={() => {
+              void handleAction(action, target);
+            }}
             disabled={!action.enabled || isPending}
             title={action.disabledReasonCode}
             style={actionButtonStyle(theme, action, isPending)}
@@ -1297,10 +1330,10 @@ export default function PricingPage() {
         w: 280,
         r: (row) => (
           <div style={{ display: "grid", gap: 8 }}>
-            {renderActions(row.availableActions, row.name)}
+            {renderActions(row.availableActions, buildHistoryActionTarget(row))}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
               <a
-                href={`/audit?resourceType=pricing&resourceId=${row.id}`}
+                href={buildHistoryActionTarget(row).auditRoute}
                 target="_blank"
                 rel="noreferrer"
                 style={linkStyle(theme)}
@@ -1355,7 +1388,12 @@ export default function PricingPage() {
                 theme={theme}
                 variant="primary"
                 icon="plus"
-                onClick={() => handleAction(createDraftAction, copy.title)}
+                onClick={() => {
+                  void handleAction(
+                    createDraftAction,
+                    buildGenericActionTarget(activeTab, copy.title),
+                  );
+                }}
                 disabled={!createDraftAction.enabled}
               >
                 {copy.createDraft}
@@ -1600,7 +1638,10 @@ export default function PricingPage() {
               title={copy.conflictTitle}
               subtitle={copy.conflictBody}
             >
-              {renderActions(topLevelActions, copy.title)}
+              {renderActions(
+                topLevelActions,
+                buildGenericActionTarget(activeTab, copy.title),
+              )}
             </CanvasCard>
 
             {activeTab === "history" ? (
@@ -1645,7 +1686,10 @@ export default function PricingPage() {
                 <EmptyStatePreview
                   descriptor={activeEmptyDescriptor}
                   theme={theme}
-                  locale={locale}
+                  target={buildGenericActionTarget(
+                    activeTab,
+                    tabLabel(activeTab, locale),
+                  )}
                   onAction={handleAction}
                 />
               </CanvasCard>
@@ -1772,7 +1816,10 @@ export default function PricingPage() {
                           <div style={sectionEyebrowStyle(theme)}>
                             {copy.actionsLabel}
                           </div>
-                          {renderActions(item.availableActions, item.name)}
+                          {renderActions(
+                            item.availableActions,
+                            buildItemActionTarget(item),
+                          )}
                         </section>
                       </div>
 
@@ -1795,7 +1842,7 @@ export default function PricingPage() {
                             </a>
                           ))}
                           <a
-                            href="/audit?resourceType=pricing"
+                            href={buildItemActionTarget(item).auditRoute}
                             target="_blank"
                             rel="noreferrer"
                             style={linkStyle(theme)}
@@ -1839,7 +1886,10 @@ export default function PricingPage() {
                     <EmptyStatePreview
                       descriptor={descriptor}
                       theme={theme}
-                      locale={locale}
+                      target={buildGenericActionTarget(
+                        activeTab,
+                        `${tabLabel(activeTab, locale)} ${reason}`,
+                      )}
                       onAction={handleAction}
                     />
                   </div>
@@ -1873,35 +1923,122 @@ function tabLabel(tab: PricingTabId, locale: string) {
 
 function buildActionReceipt({
   action,
-  subject,
-  tab,
+  target,
   locale,
   reason,
 }: {
   action: ResourceActionDescriptor;
-  subject: string;
-  tab: PricingTabId;
+  target: PricingActionTarget;
   locale: string;
   reason: string;
 }): PricingActionReceipt {
-  const resourceId = toReceiptSlug(subject);
+  const resourceId = target.resourceId;
   const actionLabel = formatActionLabel(action.action);
   const auditId = `aud-prc-${resourceId}`;
   return {
     actionId: `act-prc-${resourceId}-${toReceiptSlug(action.action)}`,
     auditId,
-    resourceType: resourceTypeForTab(tab),
+    resourceType: target.resourceType,
     resourceId,
     status: "accepted",
     message:
       locale === "en"
-        ? `${actionLabel} accepted for ${subject}. Audit receipt ${auditId} issued.`
-        : `${subject} 已送出 ${actionLabel}，並產生稽核回執 ${auditId}。`,
+        ? `${actionLabel} accepted for ${target.subject}. Audit receipt ${auditId} issued.`
+        : `${target.subject} 已送出 ${actionLabel}，並產生稽核回執 ${auditId}。`,
     actionLabel,
-    subject,
+    subject: target.subject,
     reason,
-    auditRoute: `/audit?auditId=${auditId}`,
+    auditRoute: `${target.auditRoute}&auditId=${encodeURIComponent(auditId)}`,
   };
+}
+
+function buildPublishPayload(target: PricingActionTarget, reason: string) {
+  if (!target.item || target.tab !== target.item.tab) {
+    return null;
+  }
+
+  if (target.tab === "passenger") {
+    const command: PublishPlatformPricingRuleCommand = {
+      effectiveFrom: target.item.effectiveFrom,
+      effectiveTo: target.item.effectiveTo,
+      publishedBy: "platform-admin-web",
+      reason,
+    };
+    return {
+      execute: async (client: ReturnType<typeof usePlatformAdminClient>) =>
+        client.publishPlatformPricingRule(target.item!.id, command),
+    };
+  }
+
+  if (target.tab === "driver") {
+    const serviceFeeBps = Number(target.item.serviceFeeBps ?? "");
+    const reimbursementMode = toDriverReimbursementMode(
+      target.item.reimbursementMode,
+    );
+    if (!Number.isFinite(serviceFeeBps) || !reimbursementMode) {
+      throw new Error("Driver fee plan payload is incomplete.");
+    }
+    const command: PublishDriverFeePlanCommand = {
+      planName: target.item.name,
+      version: target.item.version,
+      serviceFeeBps,
+      reimbursementMode,
+      reason,
+    };
+    return {
+      execute: async (client: ReturnType<typeof usePlatformAdminClient>) =>
+        client.publishDriverFeePlan(command),
+    };
+  }
+
+  return null;
+}
+
+function actionErrorMessage(error: unknown, locale: string) {
+  const message = error instanceof Error ? error.message : String(error);
+  return locale === "en" ? message : `操作失敗：${message}`;
+}
+
+function buildItemActionTarget(item: PricingItem): PricingActionTarget {
+  const resourceType = resourceTypeForTab(item.tab);
+  return {
+    subject: item.name,
+    tab: item.tab,
+    resourceType,
+    resourceId: item.id,
+    auditRoute: buildAuditRoute(resourceType, item.id),
+    item,
+  };
+}
+
+function buildHistoryActionTarget(row: VersionRow): PricingActionTarget {
+  return {
+    subject: row.name,
+    tab: "history",
+    resourceType: "pricing_version",
+    resourceId: row.id,
+    auditRoute: buildAuditRoute("pricing_version", row.id),
+    row,
+  };
+}
+
+function buildGenericActionTarget(
+  tab: PricingTabId,
+  subject: string,
+): PricingActionTarget {
+  const resourceType = resourceTypeForTab(tab);
+  const resourceId = `scope-${tab}`;
+  return {
+    subject,
+    tab,
+    resourceType,
+    resourceId,
+    auditRoute: buildAuditRoute(resourceType, resourceId),
+  };
+}
+
+function buildAuditRoute(resourceType: string, resourceId: string) {
+  return `/audit?resourceType=${encodeURIComponent(resourceType)}&resourceId=${encodeURIComponent(resourceId)}`;
 }
 
 function resourceTypeForTab(tab: PricingTabId) {
@@ -1916,6 +2053,16 @@ function resourceTypeForTab(tab: PricingTabId) {
     default:
       return "platform_pricing_rule";
   }
+}
+
+function toDriverReimbursementMode(value?: string) {
+  if (value === "platform_funded" || value === "Platform funded") {
+    return "platform_funded" as const;
+  }
+  if (value === "mixed" || value === "Mixed") {
+    return "mixed" as const;
+  }
+  return null;
 }
 
 function toReceiptSlug(value: string) {
