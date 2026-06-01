@@ -67,19 +67,25 @@ function buildAvailableActions(
     {
       action: "issue",
       enabled: !issueDisabledReasonCode,
-      disabledReasonCode: issueDisabledReasonCode,
+      ...(issueDisabledReasonCode
+        ? { disabledReasonCode: issueDisabledReasonCode }
+        : {}),
       riskLevel: "high",
     },
     {
       action: "rotate",
       enabled: !rotateDisabledReasonCode,
-      disabledReasonCode: rotateDisabledReasonCode,
+      ...(rotateDisabledReasonCode
+        ? { disabledReasonCode: rotateDisabledReasonCode }
+        : {}),
       riskLevel: "high",
     },
     {
       action: "revoke",
       enabled: !revokeDisabledReasonCode,
-      disabledReasonCode: revokeDisabledReasonCode,
+      ...(revokeDisabledReasonCode
+        ? { disabledReasonCode: revokeDisabledReasonCode }
+        : {}),
       requiresReason: true,
       riskLevel: "high",
     },
