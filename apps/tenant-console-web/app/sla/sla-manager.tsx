@@ -9,6 +9,7 @@ import type {
   EmptyStateEnvelope,
   RefreshTier,
   ResourceActionDescriptor,
+  TenantSlaProfileView,
   UiRefreshMetadata,
 } from "@drts/contracts";
 import {
@@ -25,13 +26,6 @@ import {
   recalculateTenantSlaBookingsAction,
   updateTenantSlaProfileAction,
 } from "./actions";
-
-type SlaSnapshot = {
-  waitThresholdMin: number;
-  arrivalThresholdMin: number;
-  completionThresholdMin: number;
-  updatedAt: string;
-};
 
 type LinkItem = {
   href: string;
@@ -56,15 +50,7 @@ type TenantSlaEmptyReason = Exclude<
 >;
 
 type SlaManagerProps = {
-  view: {
-    profile: SlaSnapshot | null;
-    updatedBy: string | null;
-    lastRecalculationAt: string | null;
-    availableActions: ResourceActionDescriptor[];
-    emptyState: EmptyStateEnvelope | null;
-    refreshTier: RefreshTier;
-    refreshMetadata: UiRefreshMetadata;
-  } | null;
+  view: TenantSlaProfileView | null;
   loadErrorMessage: string | null;
   links: LinkItem[];
   crossAppLinks: CrossAppLinkItem[];
@@ -276,21 +262,6 @@ function actionLabel(action: string) {
   }
 }
 
-function buildFeedback(payload: {
-  tone: "success" | "danger" | "warn" | "info";
-  title: string;
-  message: string;
-  receipt?: ActionReceipt;
-}) {
-  return payload.receipt
-    ? payload
-    : {
-        tone: payload.tone,
-        title: payload.title,
-        message: payload.message,
-      };
-}
-
 const REFRESH_TIER_CODE: Record<RefreshTier, string> = {
   urgent: "T0",
   fast: "T1",
@@ -332,6 +303,16 @@ function buildAuditHref(receipt: ActionReceipt) {
 
 function formatThresholdInput(value: number | null | undefined) {
   return typeof value === "number" ? String(value) : "";
+}
+
+function buildFeedbackFromReceipt(receipt: ActionReceipt) {
+  return {
+    tone:
+      receipt.status === "completed" ? ("success" as const) : ("info" as const),
+    title: receipt.status === "completed" ? "SLA 已更新" : "重算已受理",
+    message: receipt.message,
+    receipt,
+  };
 }
 
 function getActiveEmptyState(
@@ -470,26 +451,13 @@ export function SlaManager({
   const handleUpdate = () => {
     startTransition(async () => {
       try {
-        const result = await updateTenantSlaProfileAction({
+        const receipt = await updateTenantSlaProfileAction({
           waitThresholdMin: Number(waitThresholdMin),
           arrivalThresholdMin: Number(arrivalThresholdMin),
           completionThresholdMin: Number(completionThresholdMin),
           reason,
         });
-        setFeedback(
-          result.receipt
-            ? buildFeedback({
-                tone: "success",
-                title: "SLA 已更新",
-                message: result.message,
-                receipt: result.receipt,
-              })
-            : buildFeedback({
-                tone: "success",
-                title: "SLA 已更新",
-                message: result.message,
-              }),
-        );
+        setFeedback(buildFeedbackFromReceipt(receipt));
         setReason("");
         router.refresh();
       } catch (error) {
@@ -506,24 +474,8 @@ export function SlaManager({
   const handleRecalculate = () => {
     startTransition(async () => {
       try {
-        const result = await recalculateTenantSlaBookingsAction(reason);
-        setFeedback(
-          result.receipt
-            ? buildFeedback({
-                tone: "info",
-                title:
-                  result.receipt.status === "accepted"
-                    ? "重算已受理"
-                    : "重算已送出",
-                message: result.message,
-                receipt: result.receipt,
-              })
-            : buildFeedback({
-                tone: "info",
-                title: "重算已送出",
-                message: result.message,
-              }),
-        );
+        const receipt = await recalculateTenantSlaBookingsAction(reason);
+        setFeedback(buildFeedbackFromReceipt(receipt));
         setReason("");
         router.refresh();
       } catch (error) {

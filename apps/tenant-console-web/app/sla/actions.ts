@@ -11,23 +11,6 @@ type UpdateSlaPayload = {
   reason: string;
 };
 
-type ActionResult = {
-  ok: boolean;
-  message: string;
-  receipt?: ActionReceipt | undefined;
-};
-
-function isActionReceipt(value: unknown): value is ActionReceipt {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    "actionId" in value &&
-    "auditId" in value &&
-    "resourceId" in value &&
-    "status" in value,
-  );
-}
-
 function normalizePositiveInteger(value: number, field: string) {
   if (!Number.isInteger(value) || value < 1) {
     throw new Error(`${field} must be a positive integer.`);
@@ -43,61 +26,76 @@ function normalizeReason(value: string) {
   return normalized;
 }
 
+function isActionReceipt(value: unknown): value is ActionReceipt {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "actionId" in value &&
+    "auditId" in value &&
+    "resourceId" in value &&
+    "resourceType" in value &&
+    "status" in value &&
+    "message" in value,
+  );
+}
+
+function assertActionReceipt(
+  value: unknown,
+  operation: "update_sla_profile" | "recalculate_sla_bookings",
+): ActionReceipt {
+  if (!isActionReceipt(value)) {
+    throw new Error(
+      `Expected ActionReceipt from tenant SLA ${operation}, but received an incompatible response.`,
+    );
+  }
+  return value;
+}
+
 export async function updateTenantSlaProfileAction(
   payload: UpdateSlaPayload,
-): Promise<ActionResult> {
+): Promise<ActionReceipt> {
   const client = getTenantClient();
 
-  const response = await client.updateSlaProfile({
-    waitThresholdMin: normalizePositiveInteger(
-      payload.waitThresholdMin,
-      "waitThresholdMin",
-    ),
-    arrivalThresholdMin: normalizePositiveInteger(
-      payload.arrivalThresholdMin,
-      "arrivalThresholdMin",
-    ),
-    completionThresholdMin: normalizePositiveInteger(
-      payload.completionThresholdMin,
-      "completionThresholdMin",
-    ),
-    reason: normalizeReason(payload.reason),
-  });
-
-  const receipt = isActionReceipt(response) ? response : undefined;
-  const responseMessage =
-    response && typeof response === "object" && "message" in response
-      ? String(response.message)
-      : response && typeof response === "object" && "status" in response
-        ? `SLA profile ${String(response.status)}.`
-        : "SLA profile updated.";
+  const receipt = assertActionReceipt(
+    await client.updateSlaProfile({
+      waitThresholdMin: normalizePositiveInteger(
+        payload.waitThresholdMin,
+        "waitThresholdMin",
+      ),
+      arrivalThresholdMin: normalizePositiveInteger(
+        payload.arrivalThresholdMin,
+        "arrivalThresholdMin",
+      ),
+      completionThresholdMin: normalizePositiveInteger(
+        payload.completionThresholdMin,
+        "completionThresholdMin",
+      ),
+      reason: normalizeReason(payload.reason),
+    }),
+    "update_sla_profile",
+  );
 
   revalidatePath("/sla");
   revalidatePath("/settings");
   revalidatePath("/audit");
 
-  return {
-    ok: true,
-    message: receipt?.message ?? responseMessage,
-    ...(receipt ? { receipt } : {}),
-  };
+  return receipt;
 }
 
 export async function recalculateTenantSlaBookingsAction(
   reason: string,
-): Promise<ActionResult> {
+): Promise<ActionReceipt> {
   const client = getTenantClient();
 
-  const receipt = (await client.recalculateSlaBookings({
-    reason: normalizeReason(reason),
-  })) as ActionReceipt;
+  const receipt = assertActionReceipt(
+    await client.recalculateSlaBookings({
+      reason: normalizeReason(reason),
+    }),
+    "recalculate_sla_bookings",
+  );
 
   revalidatePath("/sla");
   revalidatePath("/audit");
 
-  return {
-    ok: true,
-    message: receipt.message,
-    receipt,
-  };
+  return receipt;
 }
