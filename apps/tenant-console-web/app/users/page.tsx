@@ -294,7 +294,6 @@ type LoadFailure = {
 type UserRow = Record<string, unknown> &
   TenantUserRoleRecord & {
     availableActions: ResourceActionDescriptor[];
-    lastLoginAt?: string | null;
     roleDisplayName: string;
   };
 
@@ -323,7 +322,6 @@ type EmptyStateConfig = {
 
 type RuntimeTenantUserRecord = TenantUserRoleRecord & {
   availableActions?: ResourceActionDescriptor[];
-  lastLoginAt?: string | null;
 };
 
 const ROLE_CANVAS_LABEL: Record<string, string> = {
@@ -540,13 +538,18 @@ function deriveEmptyReason({
   rolesCount,
   failures,
   emptyState,
+  hasOnlyTenantAdminRoster,
 }: {
   filteredUsersCount: number;
   usersCount: number;
   rolesCount: number;
   failures: LoadFailure[];
   emptyState: EmptyStateEnvelope | null;
+  hasOnlyTenantAdminRoster: boolean;
 }): EmptyReason | null {
+  if (hasOnlyTenantAdminRoster) {
+    return "no_data";
+  }
   if (filteredUsersCount === 0 && usersCount > 0) {
     return "filtered_empty";
   }
@@ -565,6 +568,10 @@ function deriveEmptyReason({
     return "not_provisioned";
   }
   return "no_data";
+}
+
+function hasOnlyTenantAdminRoster(users: TenantUserRoleRecord[]) {
+  return users.length === 1 && isTenantAdminRole(users[0]?.roleCode ?? "");
 }
 
 function getEmptyStateConfig(
@@ -710,15 +717,14 @@ async function loadUsersData(): Promise<UsersPageData> {
 function getActionLabel(action: string) {
   switch (action) {
     case "invite":
+    case "create_user":
+    case "create_tenant_user":
       return "邀請";
     case "role":
+    case "update_tenant_role":
       return "更新角色";
     case "suspend":
       return "停用";
-    case "resend_invitation":
-      return "重送邀請";
-    case "resend_invite":
-      return "重送邀請";
     case "refresh":
       return "重新整理";
     default:
@@ -742,16 +748,16 @@ function getActionIcon(action: string) {
 function getActionSortOrder(action: string) {
   switch (action) {
     case "invite":
+    case "create_user":
+    case "create_tenant_user":
       return 0;
     case "refresh":
       return 1;
     case "role":
+    case "update_tenant_role":
       return 2;
-    case "resend_invitation":
-    case "resend_invite":
-      return 3;
     case "suspend":
-      return 4;
+      return 3;
     default:
       return 100;
   }
@@ -945,6 +951,7 @@ export default async function UsersPage({
   const assignableRoles = roles.filter((role) => role.assignable);
   const roleFilter = normalizeRoleFilter(resolvedSearchParams.role, roles);
   const statusFilter = normalizeStatusFilter(resolvedSearchParams.status);
+  const selfOnlyAdminRoster = hasOnlyTenantAdminRoster(users);
   const inviteAction = pickAction(availableActions, [
     "invite",
     "create_user",
@@ -965,6 +972,7 @@ export default async function UsersPage({
     rolesCount: roles.length,
     failures,
     emptyState,
+    hasOnlyTenantAdminRoster: selfOnlyAdminRoster,
   });
   const emptyConfig = emptyReason
     ? getEmptyStateConfig(
@@ -1042,12 +1050,6 @@ export default async function UsersPage({
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.invitedAt),
-    },
-    {
-      h: "LAST LOGIN",
-      w: 150,
-      mono: true,
-      r: (row) => formatUpdated(row.lastLoginAt as string | null | undefined),
     },
     {
       h: "UPDATED",
@@ -1252,7 +1254,7 @@ export default async function UsersPage({
               <div style={metricGridStyle}>
                 <div style={metricCardStyle}>
                   <div style={metricValueStyle}>
-                    {formatCount(filteredUsers.length)}
+                    {formatCount(emptyReason ? 0 : filteredUsers.length)}
                   </div>
                   <div style={metricLabelStyle}>visible rows</div>
                 </div>
@@ -1322,7 +1324,7 @@ export default async function UsersPage({
         <CanvasCard
           theme={th}
           title="Tenant roster"
-          subtitle="user id · display name · email · role · status · invited at · last login"
+          subtitle="user id · display name · email · role · status · invited at · updated"
           padding={0}
         >
           {emptyReason && emptyConfig ? (
