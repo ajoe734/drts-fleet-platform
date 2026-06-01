@@ -292,6 +292,11 @@ export function opsDispatchLink(orderId: string): CrossAppResourceLink {
   };
 }
 
+// Packet §4.2 / §3.10 (Q-X03): the tenant complaint reference deep-links to the
+// ops-console complaint view, read-scoped, new tab. The spec sketches the target
+// as `/complaints/[caseNo]`, but the tenant `BookingRecord` carries no complaint
+// caseNo (no complaint linkage in @drts/contracts), so the faithful read-scoped
+// realization is the order-filtered complaints view rather than a fabricated path.
 export function opsComplaintsLink(orderId: string): CrossAppResourceLink {
   return {
     targetApp: "ops-console",
