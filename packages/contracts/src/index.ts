@@ -1,6 +1,7 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type {
+  CrossAppResourceLink,
   DriverMatchingSuppression,
   ResourceActionDescriptor,
 } from "./ui-runtime";
@@ -2380,6 +2381,16 @@ export interface BookingRecord {
   readOnlyReasonCode?: string | null;
   availableActions?: ResourceActionDescriptor[];
   slaStatus?: BookingSlaStatus | null;
+  /**
+   * Backend-resolved cross-app deep links for this booking (packet §3.10 /
+   * Q-X03). Forwarded / partner-fulfilled bookings keep lifecycle authority on
+   * the ops lane, so the read model emits the read-scoped reconciliation link
+   * (targetApp + route + resource identity + openMode + label) instead of the
+   * tenant console fabricating it from an env origin + orderId. Optional and
+   * additive: the console only resolves the deployment origin for relative
+   * routes and never invents the descriptor (`crossAppLinks ?? []`).
+   */
+  crossAppLinks?: CrossAppResourceLink[] | null;
   createdAt: string;
   updatedAt: string;
 }

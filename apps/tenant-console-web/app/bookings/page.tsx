@@ -8,7 +8,10 @@ import type {
   OwnedOrderStatus,
   RefreshTier,
 } from "@drts/contracts";
-import { BUSINESS_DISPATCH_SUBTYPES, OWNED_ORDER_STATUSES } from "@drts/contracts";
+import {
+  BUSINESS_DISPATCH_SUBTYPES,
+  OWNED_ORDER_STATUSES,
+} from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -29,7 +32,7 @@ import {
   toggleStatus,
 } from "@/lib/booking-list";
 import { getTenantClient } from "@/lib/api-client";
-import { formatDateTime, formatMoney } from "@/lib/formatters";
+import { formatDateTime } from "@/lib/formatters";
 import { getBookingSourceVisibility } from "@/lib/source-domain";
 
 export const dynamic = "force-dynamic";
@@ -223,37 +226,55 @@ const paginationRowStyle: CSSProperties = {
   color: th.textMuted,
 };
 
-// ── Cross-app deep links (packet §3.10) ──────────────────────────────────────
-// Forwarded / partner-fulfilled bookings keep their lifecycle authority on the
-// ops lane; the tenant surface offers a read-scoped reconciliation link that
-// opens in a new tab (never same-tab navigation between deployed apps).
-function resolveOpsConsoleOrigin(): string {
-  const candidates = [
-    process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN,
-    process.env.OPS_CONSOLE_ORIGIN,
-  ];
-  const resolved = candidates.find(
+// ── Cross-app deep links (packet §3.10 / Q-X03) ──────────────────────────────
+// Cross-app links are NOT fabricated here. The booking read model emits a
+// `CrossAppResourceLink[]` per booking (e.g. a read-scoped ops reconciliation
+// link for forwarded / partner-fulfilled bookings whose lifecycle authority
+// lives on the ops lane). The tenant console only binds a relative `route` to
+// the target app's deployment origin — it never invents the descriptor itself.
+const CROSS_APP_ORIGIN_ENV: Record<
+  CrossAppResourceLink["targetApp"],
+  { vars: (string | undefined)[]; fallback: string }
+> = {
+  "ops-console": {
+    vars: [
+      process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN,
+      process.env.OPS_CONSOLE_ORIGIN,
+    ],
+    fallback: "http://localhost:3003",
+  },
+  "platform-admin": {
+    vars: [
+      process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN,
+      process.env.PLATFORM_ADMIN_ORIGIN,
+    ],
+    fallback: "http://localhost:3002",
+  },
+  "tenant-console": {
+    vars: [
+      process.env.NEXT_PUBLIC_TENANT_CONSOLE_ORIGIN,
+      process.env.TENANT_CONSOLE_ORIGIN,
+    ],
+    fallback: "http://localhost:3000",
+  },
+};
+
+function resolveCrossAppOrigin(
+  targetApp: CrossAppResourceLink["targetApp"],
+): string {
+  const { vars, fallback } = CROSS_APP_ORIGIN_ENV[targetApp];
+  const resolved = vars.find(
     (candidate) => typeof candidate === "string" && candidate.trim().length > 0,
   );
-  return resolved ? resolved.replace(/\/$/, "") : "http://localhost:3003";
-}
-
-function buildOpsReconciliationLink(booking: BookingRecord): CrossAppResourceLink {
-  return {
-    targetApp: "ops-console",
-    route: `/dispatch?orderId=${encodeURIComponent(booking.orderId)}`,
-    resourceType: "owned_order",
-    resourceId: booking.orderId,
-    openMode: "new_tab",
-    label: "ops 對帳",
-  };
+  return (resolved ?? fallback).replace(/\/$/, "");
 }
 
 function crossAppHref(link: CrossAppResourceLink): string {
   if (/^https?:\/\//.test(link.route)) {
     return link.route;
   }
-  return `${resolveOpsConsoleOrigin()}${link.route.startsWith("/") ? link.route : `/${link.route}`}`;
+  const origin = resolveCrossAppOrigin(link.targetApp);
+  return `${origin}${link.route.startsWith("/") ? link.route : `/${link.route}`}`;
 }
 
 // ── Empty state (packet §3.6 — all 6 tenant EmptyReason values) ──────────────
@@ -337,9 +358,7 @@ function describeEmptyState(
 function emptyReasonFromError(error: unknown): EmptyReason {
   const message = error instanceof Error ? error.message : String(error);
   const statusMatch = message.match(/API error (\d{3})/);
-  const status = statusMatch
-    ? Number.parseInt(statusMatch[1] ?? "", 10)
-    : null;
+  const status = statusMatch ? Number.parseInt(statusMatch[1] ?? "", 10) : null;
 
   if (status === 401 || status === 403) {
     return "permission_denied";
@@ -358,7 +377,11 @@ function emptyReasonFromError(error: unknown): EmptyReason {
 // never hard-coded by role, and editability is never inferred from status.
 const ACTION_PRESENTATION: Record<
   string,
-  { label: string; icon: Parameters<typeof CanvasBtn>[0]["icon"]; danger?: boolean }
+  {
+    label: string;
+    icon: Parameters<typeof CanvasBtn>[0]["icon"];
+    danger?: boolean;
+  }
 > = {
   update: { label: "更新", icon: "check" },
   cancel: { label: "取消", icon: "x", danger: true },
@@ -405,7 +428,9 @@ function orderStatusTone(status: OwnedOrderStatus): CanvasTone {
   }
 }
 
-function slaTone(state: NonNullable<BookingRecord["slaStatus"]>["state"]): CanvasTone {
+function slaTone(
+  state: NonNullable<BookingRecord["slaStatus"]>["state"],
+): CanvasTone {
   switch (state) {
     case "breached":
       return "danger";
@@ -480,7 +505,11 @@ function FilterForm({ query }: { query: BookingListQuery }) {
       </label>
       <label style={fieldStackStyle}>
         <span>服務類型</span>
-        <select name="subtype" defaultValue={query.subtype} style={controlStyle}>
+        <select
+          name="subtype"
+          defaultValue={query.subtype}
+          style={controlStyle}
+        >
           <option value="">全部類型</option>
           {BUSINESS_DISPATCH_SUBTYPES.map((subtype) => (
             <option key={subtype} value={subtype}>
@@ -707,7 +736,6 @@ export default async function BookingsPage({
       w: 220,
       align: "right",
       r: (row) => {
-        const source = getBookingSourceVisibility(row);
         const actions = row.availableActions ?? [];
         const mutateActions = actions.filter(
           (action) => action.action === "update" || action.action === "cancel",
@@ -715,11 +743,10 @@ export default async function BookingsPage({
         return (
           <div style={actionCellStyle}>
             {mutateActions.map((action) => {
-              const presentation =
-                ACTION_PRESENTATION[action.action] ?? {
-                  label: action.action,
-                  icon: undefined,
-                };
+              const presentation = ACTION_PRESENTATION[action.action] ?? {
+                label: action.action,
+                icon: undefined,
+              };
               if (!action.enabled) {
                 return (
                   <CanvasBtn
@@ -761,18 +788,23 @@ export default async function BookingsPage({
                 {readableReason(row.readOnlyReasonCode)}
               </span>
             ) : null}
-            {source.domain !== "owned" ? (
+            {(row.crossAppLinks ?? []).map((link) => (
               <a
-                href={crossAppHref(buildOpsReconciliationLink(row))}
-                target="_blank"
-                rel="noopener noreferrer"
+                key={`${link.targetApp}:${link.resourceType}:${link.resourceId}:${link.route}`}
+                href={crossAppHref(link)}
+                target={link.openMode === "new_tab" ? "_blank" : undefined}
+                rel={
+                  link.openMode === "new_tab"
+                    ? "noopener noreferrer"
+                    : undefined
+                }
                 style={linkStyle}
               >
                 <CanvasBtn theme={th} size="xs" icon="ext">
-                  ops 對帳
+                  {link.label}
                 </CanvasBtn>
               </a>
-            ) : null}
+            ))}
             <Link href={`/bookings/${row.bookingId}`} style={linkStyle}>
               <CanvasBtn theme={th} size="xs" variant="primary" icon="arrow">
                 詳情
@@ -822,7 +854,8 @@ export default async function BookingsPage({
             </CanvasBtn>
           </Link>
           <span style={refreshNoteStyle}>
-            叫車狀態由 ops / 派遣端在上游觸發，會於下一次輪詢時投影到此處。看到「已完成」或「已指派」可能比實際操作晚數十秒，屬正常延遲。
+            叫車狀態由 ops /
+            派遣端在上游觸發，會於下一次輪詢時投影到此處。看到「已完成」或「已指派」可能比實際操作晚數十秒，屬正常延遲。
           </span>
         </div>
 
@@ -858,7 +891,11 @@ export default async function BookingsPage({
         <CanvasCard theme={th} padding={0} style={cardStyle}>
           {rows.length > 0 ? (
             <>
-              <CanvasTable<BookingRow> theme={th} columns={columns} rows={rows} />
+              <CanvasTable<BookingRow>
+                theme={th}
+                columns={columns}
+                rows={rows}
+              />
               <div style={paginationRowStyle}>
                 <span>
                   顯示 {rows.length} / {result.total} 筆（第 {result.page} /{" "}
