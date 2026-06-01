@@ -602,7 +602,9 @@ function buildAuditRows(logs: AuditLogRecord[]): AuditRow[] {
               {formatResourceLabel(log)}
             </a>
           ) : (
-            <span style={{ color: th.textMuted }}>{formatResourceLabel(log)}</span>
+            <span style={{ color: th.textMuted }}>
+              {formatResourceLabel(log)}
+            </span>
           )}
         </div>
       ),
@@ -688,20 +690,22 @@ function getPageActions(input: {
     {
       action: "export",
       enabled: input.hasRows,
-      disabledReasonCode: input.hasRows ? undefined : "no_matching_rows",
+      ...(input.hasRows ? {} : { disabledReasonCode: "no_matching_rows" }),
       riskLevel: "low",
     },
     {
       action: "view_audit_receipt",
       enabled: input.hasFocusedRecord,
-      disabledReasonCode: input.hasFocusedRecord ? undefined : "no_receipt_context",
+      ...(input.hasFocusedRecord
+        ? {}
+        : { disabledReasonCode: "no_receipt_context" }),
       riskLevel: "low",
     },
   ];
 }
 
 function escapeCsvCell(value: string) {
-  return `"${value.replaceAll("\"", "\"\"")}"`;
+  return `"${value.replaceAll('"', '""')}"`;
 }
 
 function buildCsvHref(logs: AuditLogRecord[]) {
@@ -814,8 +818,9 @@ function getEmptyCopy(
         tone: "info",
         title: "目前篩選條件沒有命中紀錄",
         body: "Cross-actor audit 仍存在，但此組 actor/module/action/time 條件下沒有相符列。清除篩選即可回到完整 tenant scope。",
-        actionLabel:
-          exportAction?.enabled === false ? "清除篩選後才可匯出" : undefined,
+        ...(exportAction?.enabled === false
+          ? { actionLabel: "清除篩選後才可匯出" }
+          : {}),
       };
     case "no_data":
     default:
@@ -851,15 +856,15 @@ export default async function AuditPage({
 
   const filteredLogs = loadError ? [] : filterLogs(logs, query);
   const focusedLog = query.auditId
-    ? logs.find((log) => log.auditId === query.auditId) ?? null
+    ? (logs.find((log) => log.auditId === query.auditId) ?? null)
     : null;
   const hasFilter = Boolean(
     query.actor ||
-      query.module ||
-      query.action ||
-      query.from ||
-      query.to ||
-      query.auditId,
+    query.module ||
+    query.action ||
+    query.from ||
+    query.to ||
+    query.auditId,
   );
   const pageActions = getPageActions({
     hasRows: filteredLogs.length > 0,
@@ -874,12 +879,19 @@ export default async function AuditPage({
   });
   const emptyCopy = emptyReason ? getEmptyCopy(emptyReason, pageActions) : null;
 
-  const actorOptions = Array.from(new Set(logs.map((log) => getActorRealm(log.actorType))));
-  const moduleOptions = Array.from(new Set(logs.map((log) => log.moduleName))).sort();
-  const actionOptions = Array.from(new Set(logs.map((log) => log.actionName))).sort();
+  const actorOptions = Array.from(
+    new Set(logs.map((log) => getActorRealm(log.actorType))),
+  );
+  const moduleOptions = Array.from(
+    new Set(logs.map((log) => log.moduleName)),
+  ).sort();
+  const actionOptions = Array.from(
+    new Set(logs.map((log) => log.actionName)),
+  ).sort();
 
   const visibleLogs = emptyReason ? [] : filteredLogs;
-  const exportHref = pageActions.find((action) => action.action === "export")?.enabled
+  const exportHref = pageActions.find((action) => action.action === "export")
+    ?.enabled
     ? buildCsvHref(visibleLogs)
     : null;
   const rows = buildAuditRows(visibleLogs);
@@ -904,18 +916,28 @@ export default async function AuditPage({
             <CanvasPill theme={th} tone="neutral" dot>
               T6 manual refresh
             </CanvasPill>
-            <Link href={`/audit${buildQueryString(query)}`} style={buttonSecondaryStyle}>
+            <Link
+              href={`/audit${buildQueryString(query)}`}
+              style={buttonSecondaryStyle}
+            >
               手動刷新
             </Link>
             {exportHref ? (
-              <a download="tenant-audit-export.csv" href={exportHref} style={buttonSecondaryStyle}>
+              <a
+                download="tenant-audit-export.csv"
+                href={exportHref}
+                style={buttonSecondaryStyle}
+              >
                 匯出篩選結果
               </a>
             ) : (
               <span
                 aria-disabled="true"
                 style={buttonDisabledStyle}
-                title={pageActions.find((action) => action.action === "export")?.disabledReasonCode}
+                title={
+                  pageActions.find((action) => action.action === "export")
+                    ?.disabledReasonCode
+                }
               >
                 匯出篩選結果
               </span>
@@ -936,7 +958,9 @@ export default async function AuditPage({
             theme={th}
             label="Visible rows"
             value={visibleLogs.length}
-            sub={emptyReason ? "0 visible" : `${logs.length} total in tenant scope`}
+            sub={
+              emptyReason ? "0 visible" : `${logs.length} total in tenant scope`
+            }
           />
           <CanvasKPI
             theme={th}
@@ -970,7 +994,11 @@ export default async function AuditPage({
           <CanvasBanner
             theme={th}
             tone={focusedLog ? "accent" : "warn"}
-            title={focusedLog ? `Receipt deep link · ${query.auditId}` : "Receipt deep link 未命中"}
+            title={
+              focusedLog
+                ? `Receipt deep link · ${query.auditId}`
+                : "Receipt deep link 未命中"
+            }
             body={
               focusedLog
                 ? "此頁已接住 ActionReceipt 的 `auditId`。下方列表保留完整 tenant scope，同時你可用 focused record 追查單筆 evidence。"
@@ -1003,7 +1031,11 @@ export default async function AuditPage({
           <form action="/audit" method="get" style={filterBarStyle}>
             <div style={compactFieldStyle}>
               <span style={labelStyle}>Actor realm</span>
-              <select defaultValue={query.actor} name="actor" style={selectStyle}>
+              <select
+                defaultValue={query.actor}
+                name="actor"
+                style={selectStyle}
+              >
                 <option value="">All actor realms</option>
                 {actorOptions.map((actor) => (
                   <option key={actor} value={actor}>
@@ -1014,7 +1046,11 @@ export default async function AuditPage({
             </div>
             <div style={compactFieldStyle}>
               <span style={labelStyle}>Module</span>
-              <select defaultValue={query.module} name="module" style={selectStyle}>
+              <select
+                defaultValue={query.module}
+                name="module"
+                style={selectStyle}
+              >
                 <option value="">All modules</option>
                 {moduleOptions.map((moduleName) => (
                   <option key={moduleName} value={moduleName}>
@@ -1025,7 +1061,11 @@ export default async function AuditPage({
             </div>
             <div style={compactFieldStyle}>
               <span style={labelStyle}>Action</span>
-              <select defaultValue={query.action} name="action" style={selectStyle}>
+              <select
+                defaultValue={query.action}
+                name="action"
+                style={selectStyle}
+              >
                 <option value="">All actions</option>
                 {actionOptions.map((actionName) => (
                   <option key={actionName} value={actionName}>
@@ -1066,7 +1106,9 @@ export default async function AuditPage({
                 <option value="not_provisioned">not_provisioned</option>
                 <option value="fetch_failed">fetch_failed</option>
                 <option value="permission_denied">permission_denied</option>
-                <option value="external_unavailable">external_unavailable</option>
+                <option value="external_unavailable">
+                  external_unavailable
+                </option>
                 <option value="filtered_empty">filtered_empty</option>
               </select>
             </div>
@@ -1079,7 +1121,8 @@ export default async function AuditPage({
                 清除條件
               </Link>
               <span style={subtleCopyStyle}>
-                Receipt deep link 可帶 `auditId` 進來；跨 app 連結一律新分頁開啟。
+                Receipt deep link 可帶 `auditId` 進來；跨 app
+                連結一律新分頁開啟。
               </span>
             </div>
           </form>
@@ -1103,16 +1146,26 @@ export default async function AuditPage({
               }}
             >
               <div style={chipRowStyle}>
-                <CanvasPill theme={th} tone={getActorPillTone(focusedLog.actorType)} dot>
+                <CanvasPill
+                  theme={th}
+                  tone={getActorPillTone(focusedLog.actorType)}
+                  dot
+                >
                   focused record
                 </CanvasPill>
                 <CanvasPill theme={th} tone="neutral">
                   {focusedLog.auditId}
                 </CanvasPill>
               </div>
-              <p style={{ ...emptyStateBodyStyle, maxWidth: "none", textAlign: "left" }}>
-                {formatAuditAt(focusedLog.createdAt)} · {focusedLog.moduleName} /{" "}
-                {focusedLog.actionName} · request {focusedLog.requestId}
+              <p
+                style={{
+                  ...emptyStateBodyStyle,
+                  maxWidth: "none",
+                  textAlign: "left",
+                }}
+              >
+                {formatAuditAt(focusedLog.createdAt)} · {focusedLog.moduleName}{" "}
+                / {focusedLog.actionName} · request {focusedLog.requestId}
               </p>
             </div>
           ) : null}
@@ -1148,7 +1201,13 @@ export default async function AuditPage({
               platform-admin new tab
             </CanvasPill>
           </div>
-          <p style={{ ...emptyStateBodyStyle, maxWidth: "none", textAlign: "left" }}>
+          <p
+            style={{
+              ...emptyStateBodyStyle,
+              maxWidth: "none",
+              textAlign: "left",
+            }}
+          >
             {loadError
               ? `目前 audit API 讀取失敗：${loadError}`
               : `目前篩選 query: ${buildQueryString(query) || "none"}。Tenant-owned resource 一律留在本 app；ops / platform-owned evidence 走 deep link 新分頁。若後端尚未提供 EmptyStateEnvelope，本頁以錯誤型別與查詢結果退化推導；若要驗證 6 種 distinct states，可用上方 empty state demo 選單切換。`}
