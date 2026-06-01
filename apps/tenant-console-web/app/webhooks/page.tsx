@@ -256,6 +256,24 @@ const checkboxCardStyle: CSSProperties = {
   fontSize: 12,
 };
 
+const topMetaRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.8fr) minmax(280px, 1fr)",
+  gap: 16,
+};
+
+const pageEmptyWrapStyle: CSSProperties = {
+  padding: 24,
+  display: "grid",
+  gap: 14,
+};
+
+const replayGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+};
+
 const shortDateTimeFormatter = new Intl.DateTimeFormat("sv-SE", {
   year: "numeric",
   month: "2-digit",
@@ -789,6 +807,17 @@ function derivePageActions(
         }
       : action,
   );
+}
+
+function deriveActiveTab(options: {
+  mode: ViewMode;
+  selectedWebhookId?: string;
+  selectedDeliveryId?: string;
+}) {
+  if (options.mode === "rotate") return "Replay";
+  if (options.selectedDeliveryId) return "Replay";
+  if (options.selectedWebhookId) return "Deliveries";
+  return "Endpoints";
 }
 
 function getEndpointActions(
@@ -1493,6 +1522,13 @@ export default async function WebhooksPage({
     canManage,
     endpointReason,
   );
+  const activeTab = deriveActiveTab({
+    mode,
+    ...(selectedWebhookId ? { selectedWebhookId } : {}),
+    ...(selectedDeliveryId ? { selectedDeliveryId } : {}),
+  });
+  const engineInactive =
+    endpointReason === "not_provisioned" && data.endpoints.length === 0;
   const notifications = data.notifications
     .filter((notification) => {
       const haystack =
@@ -1662,10 +1698,14 @@ export default async function WebhooksPage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="Webhook management"
-        subtitle="端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — real engine per Q-TEN08"
-        tabs={["Endpoints", "Deliveries"]}
-        activeTab={selectedWebhookId ? "Deliveries" : "Endpoints"}
+        title="Webhook"
+        subtitle="端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — 後端 engine 是否啟用直接決定畫面 (Q-TEN08)"
+        tabs={[
+          `Endpoints${data.endpoints.length > 0 ? ` · ${data.endpoints.length}` : ""}`,
+          "Deliveries",
+          "Replay",
+        ]}
+        activeTab={activeTab}
         actions={
           <>
             {pageActions.map((action, index) =>
@@ -1676,44 +1716,76 @@ export default async function WebhooksPage({
       />
 
       <div style={pageBodyStyle}>
-        <CanvasCard
-          theme={th}
-          title="Refresh tier"
-          subtitle="Tenant Console `/webhooks` 屬 T5 Tenant slow。依 packet，detail page 提供手動 refresh；stale 狀態由 backend freshness contract 決定，前端不自行猜測。"
-          actions={
-            <Link href="/webhooks" style={getLinkButtonStyle()}>
-              Refresh now
-            </Link>
-          }
-        >
-          <div style={metricGridStyle}>
-            <div style={metricCardStyle}>
-              <span style={metricLabelStyle}>Refresh tier</span>
-              <span style={metricValueStyle}>T5</span>
-              <p style={mutedStyle}>{REFRESH_TIER_LABEL}</p>
+        <div style={topMetaRowStyle}>
+          <CanvasCard
+            theme={th}
+            title="Refresh tier"
+            subtitle="`/webhooks` 屬 T5 Tenant slow。前端只提供手動 refresh；資料新鮮度以 backend contract 為準。"
+            actions={
+              <Link href="/webhooks" style={getLinkButtonStyle()}>
+                Refresh now
+              </Link>
+            }
+          >
+            <div style={metricGridStyle}>
+              <div style={metricCardStyle}>
+                <span style={metricLabelStyle}>Refresh tier</span>
+                <span style={metricValueStyle}>T5</span>
+                <p style={mutedStyle}>{REFRESH_TIER_LABEL}</p>
+              </div>
+              <div style={metricCardStyle}>
+                <span style={metricLabelStyle}>Snapshot</span>
+                <span style={{ ...metricValueStyle, fontSize: 18 }}>
+                  {formatDateTime(
+                    data.governance?.generatedAt ?? data.loadedAt,
+                  )}
+                </span>
+                <p style={mutedStyle}>governance.generatedAt / page load</p>
+              </div>
+              <div style={metricCardStyle}>
+                <span style={metricLabelStyle}>Scope</span>
+                <span style={{ ...metricValueStyle, fontSize: 18 }}>
+                  {selectedWebhook ? "single endpoint" : "tenant-wide"}
+                </span>
+                <p style={mutedStyle}>
+                  {selectedWebhook
+                    ? selectedWebhook.url
+                    : "All endpoints + delivery visibility"}
+                </p>
+              </div>
             </div>
-            <div style={metricCardStyle}>
-              <span style={metricLabelStyle}>Snapshot</span>
-              <span style={{ ...metricValueStyle, fontSize: 18 }}>
-                {formatDateTime(data.governance?.generatedAt ?? data.loadedAt)}
-              </span>
-              <p style={mutedStyle}>
-                governance.generatedAt / page load timestamp
-              </p>
+          </CanvasCard>
+
+          <CanvasCard
+            theme={th}
+            title="Governance policy"
+            subtitle="Retry / validation policy comes from the governance package."
+          >
+            <div style={stackStyle}>
+              <div style={detailLineStyle}>
+                <span>test event</span>
+                <span style={monoStyle}>
+                  {data.governance?.webhookPolicy.testEventType ?? "—"}
+                </span>
+              </div>
+              <div style={detailLineStyle}>
+                <span>retry policy</span>
+                <span style={monoStyle}>
+                  {data.governance
+                    ? `${data.governance.webhookPolicy.retryPolicy.maxAttempts} attempts`
+                    : "—"}
+                </span>
+              </div>
+              <div style={detailLineStyle}>
+                <span>failure notice</span>
+                <span style={monoStyle}>
+                  {data.governance?.webhookPolicy
+                    .deliveryFailureNotificationChannel ?? "—"}
+                </span>
+              </div>
             </div>
-            <div style={metricCardStyle}>
-              <span style={metricLabelStyle}>Scope</span>
-              <span style={{ ...metricValueStyle, fontSize: 18 }}>
-                {selectedWebhook ? "single endpoint" : "tenant-wide"}
-              </span>
-              <p style={mutedStyle}>
-                {selectedWebhook
-                  ? selectedWebhook.url
-                  : "All endpoints + all deliveries"}
-              </p>
-            </div>
-          </div>
-        </CanvasCard>
+          </CanvasCard>
+        </div>
 
         {success ? (
           <CanvasBanner
@@ -1745,93 +1817,138 @@ export default async function WebhooksPage({
           />
         ) : null}
 
-        <div style={threeColumnStyle}>
-          <CanvasCard theme={th} title="Endpoint posture">
-            <div style={metricGridStyle}>
-              <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>active</span>
-                <span style={metricValueStyle}>
-                  {
-                    data.endpoints.filter(
-                      (endpoint) => endpoint.status === "active",
-                    ).length
-                  }
-                </span>
-              </div>
-              <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>test_pending</span>
-                <span style={metricValueStyle}>
-                  {
-                    data.endpoints.filter(
-                      (endpoint) => endpoint.status === "test_pending",
-                    ).length
-                  }
-                </span>
-              </div>
-              <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>failure cluster</span>
-                <span style={metricValueStyle}>
-                  {countFailureClusters(data.endpoints)}
-                </span>
-              </div>
-            </div>
-          </CanvasCard>
+        {engineInactive && endpointEmptyCopy ? (
           <CanvasCard
             theme={th}
-            title="Delivery health"
-            subtitle={
-              selectedWebhook
-                ? "Current endpoint view"
-                : "Tenant-wide delivery snapshot"
-            }
+            title="Webhook engine"
+            subtitle="Page-level empty state per Q-TEN08. The route must not imply fake endpoint or delivery data when the real engine is not provisioned."
           >
-            <div style={metricGridStyle}>
-              <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>delivered</span>
-                <span style={metricValueStyle}>{summary.delivered}</span>
+            <div style={pageEmptyWrapStyle}>
+              <CanvasBanner
+                theme={th}
+                tone={endpointEmptyCopy.tone}
+                icon="info"
+                title={endpointEmptyCopy.title}
+                body={endpointEmptyCopy.body}
+              />
+              <div style={buttonWrapStyle}>
+                {endpointEmptyCopy.cta ? (
+                  <Link
+                    href={endpointEmptyCopy.cta.href}
+                    style={getLinkButtonStyle()}
+                  >
+                    {endpointEmptyCopy.cta.label}
+                  </Link>
+                ) : null}
+                <Link
+                  href="/integration-governance"
+                  style={getLinkButtonStyle({ primary: true })}
+                >
+                  Open integration governance
+                </Link>
+                <Link href="/notifications" style={getLinkButtonStyle()}>
+                  Notification routing
+                </Link>
               </div>
-              <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>queued</span>
-                <span style={metricValueStyle}>{summary.queued}</span>
-              </div>
-              <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>failed</span>
-                <span style={metricValueStyle}>{summary.failed}</span>
-              </div>
+              <p style={mutedStyle}>
+                Cross-app operational triage remains available below, but the
+                primary page surface stays empty until provisioning is complete.
+              </p>
             </div>
           </CanvasCard>
-          <CanvasCard
-            theme={th}
-            title="Governance policy"
-            subtitle="Spec 要求顯示 retry / validation policy，而不是發明不存在的 replay engine。"
-          >
-            <div style={stackStyle}>
-              <div style={detailLineStyle}>
-                <span>test event</span>
-                <span style={monoStyle}>
-                  {data.governance?.webhookPolicy.testEventType ?? "—"}
-                </span>
-              </div>
-              <div style={detailLineStyle}>
-                <span>retry policy</span>
-                <span style={monoStyle}>
-                  {data.governance
-                    ? `${data.governance.webhookPolicy.retryPolicy.maxAttempts} attempts`
-                    : "—"}
-                </span>
-              </div>
-              <div style={detailLineStyle}>
-                <span>failure notice</span>
-                <span style={monoStyle}>
-                  {data.governance?.webhookPolicy
-                    .deliveryFailureNotificationChannel ?? "—"}
-                </span>
-              </div>
-            </div>
-          </CanvasCard>
-        </div>
+        ) : null}
 
-        {(mode === "create" || mode === "edit") &&
+        {!engineInactive ? (
+          <div style={threeColumnStyle}>
+            <CanvasCard theme={th} title="Endpoint posture">
+              <div style={metricGridStyle}>
+                <div style={metricCardStyle}>
+                  <span style={metricLabelStyle}>active</span>
+                  <span style={metricValueStyle}>
+                    {
+                      data.endpoints.filter(
+                        (endpoint) => endpoint.status === "active",
+                      ).length
+                    }
+                  </span>
+                </div>
+                <div style={metricCardStyle}>
+                  <span style={metricLabelStyle}>test_pending</span>
+                  <span style={metricValueStyle}>
+                    {
+                      data.endpoints.filter(
+                        (endpoint) => endpoint.status === "test_pending",
+                      ).length
+                    }
+                  </span>
+                </div>
+                <div style={metricCardStyle}>
+                  <span style={metricLabelStyle}>failure cluster</span>
+                  <span style={metricValueStyle}>
+                    {countFailureClusters(data.endpoints)}
+                  </span>
+                </div>
+              </div>
+            </CanvasCard>
+            <CanvasCard
+              theme={th}
+              title="Delivery health"
+              subtitle={
+                selectedWebhook
+                  ? "Current endpoint view"
+                  : "Tenant-wide delivery snapshot"
+              }
+            >
+              <div style={metricGridStyle}>
+                <div style={metricCardStyle}>
+                  <span style={metricLabelStyle}>delivered</span>
+                  <span style={metricValueStyle}>{summary.delivered}</span>
+                </div>
+                <div style={metricCardStyle}>
+                  <span style={metricLabelStyle}>queued</span>
+                  <span style={metricValueStyle}>{summary.queued}</span>
+                </div>
+                <div style={metricCardStyle}>
+                  <span style={metricLabelStyle}>failed</span>
+                  <span style={metricValueStyle}>{summary.failed}</span>
+                </div>
+              </div>
+            </CanvasCard>
+            <CanvasCard
+              theme={th}
+              title="Replay posture"
+              subtitle="Retry remains contract-driven. UI renders the state but does not invent a replay engine."
+            >
+              <div style={replayGridStyle}>
+                <div style={metricCardStyle}>
+                  <span style={metricLabelStyle}>retryable failed</span>
+                  <span style={metricValueStyle}>
+                    {
+                      scopedDeliveries.filter((delivery) =>
+                        getDeliveryActions(
+                          delivery,
+                          canManage,
+                          statusFilter,
+                        ).some(
+                          (action) =>
+                            action.action === "retryFailedDelivery" &&
+                            action.enabled,
+                        ),
+                      ).length
+                    }
+                  </span>
+                </div>
+                <div style={metricCardStyle}>
+                  <span style={metricLabelStyle}>queued retries</span>
+                  <span style={metricValueStyle}>{summary.queued}</span>
+                </div>
+              </div>
+            </CanvasCard>
+          </div>
+        ) : null}
+
+        {!engineInactive &&
+        (mode === "create" || mode === "edit") &&
         (mode !== "edit" || selectedWebhook) ? (
           <EndpointForm
             mode={mode}
@@ -1840,300 +1957,339 @@ export default async function WebhooksPage({
           />
         ) : null}
 
-        {mode === "rotate" && selectedWebhook ? (
+        {!engineInactive && mode === "rotate" && selectedWebhook ? (
           <RotateSecretForm webhook={selectedWebhook} />
         ) : null}
 
-        <div style={twoColumnStyle}>
-          <CanvasCard
-            theme={th}
-            title="Endpoints"
-            subtitle="availableActions visualized as visible CTAs: enabled, disabled-with-reason, never hidden."
-            actions={
-              <div style={buttonWrapStyle}>
-                {["all", "active", "test_pending", "disabled"].map((value) => {
-                  const href =
-                    value === "all"
-                      ? "/webhooks"
-                      : `/webhooks?status=${encodeURIComponent(value)}`;
-                  return (
-                    <Link
-                      key={value}
-                      href={href}
-                      style={getLinkButtonStyle({
-                        primary: statusFilter === value,
-                      })}
-                    >
-                      {value}
-                    </Link>
-                  );
-                })}
-              </div>
-            }
-            padding={0}
-          >
-            {endpointReason && endpointEmptyCopy ? (
-              <div style={{ padding: 16 }}>
-                <CanvasBanner
-                  theme={th}
-                  tone={endpointEmptyCopy.tone}
-                  icon="info"
-                  title={endpointEmptyCopy.title}
-                  body={endpointEmptyCopy.body}
-                />
-                {endpointEmptyCopy.cta ? (
-                  <div style={{ marginTop: 12 }}>
-                    <Link
-                      href={endpointEmptyCopy.cta.href}
-                      style={getLinkButtonStyle()}
-                    >
-                      {endpointEmptyCopy.cta.label}
-                    </Link>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <CanvasTable<EndpointRow>
-                theme={th}
-                columns={endpointColumns}
-                rows={filteredEndpoints.map(toEndpointRow)}
-              />
-            )}
-          </CanvasCard>
-
-          <CanvasCard
-            theme={th}
-            title={selectedWebhook ? "Selected endpoint" : "Action matrix"}
-            subtitle={
-              selectedWebhook
-                ? "Per-endpoint actions and contract notes"
-                : "Pick an endpoint to inspect delivery scope or update actions."
-            }
-          >
-            {selectedWebhook ? (
-              <div style={stackStyle}>
-                <div style={panelStyle}>
-                  <div style={{ color: th.text, fontWeight: 600 }}>
-                    {selectedWebhook.url}
-                  </div>
-                  <div style={codeLabelStyle}>{selectedWebhook.webhookId}</div>
-                  <div style={chipWrapStyle}>
-                    {selectedWebhook.events.map((eventType) => (
-                      <CanvasPill key={eventType} theme={th} tone="info">
-                        {eventType}
-                      </CanvasPill>
-                    ))}
-                  </div>
-                </div>
+        {!engineInactive ? (
+          <div style={twoColumnStyle}>
+            <CanvasCard
+              theme={th}
+              title={`端點 · ${filteredEndpoints.length} entries`}
+              subtitle="availableActions visualized as visible CTAs: enabled, disabled-with-reason, never hidden."
+              actions={
                 <div style={buttonWrapStyle}>
-                  {getEndpointActions(
-                    selectedWebhook,
-                    canManage,
-                    statusFilter,
-                  ).map((action, index) =>
-                    renderAction(action, `endpoint-${index}`),
+                  {["all", "active", "test_pending", "disabled"].map(
+                    (value) => {
+                      const href =
+                        value === "all"
+                          ? "/webhooks"
+                          : `/webhooks?status=${encodeURIComponent(value)}`;
+                      return (
+                        <Link
+                          key={value}
+                          href={href}
+                          style={getLinkButtonStyle({
+                            primary: statusFilter === value,
+                          })}
+                        >
+                          {value}
+                        </Link>
+                      );
+                    },
                   )}
                 </div>
-                <p style={mutedStyle}>
-                  Endpoint 層保留 lifecycle actions；delivery-specific `retry
-                  failed` 會在下方 delivery rows / selected delivery detail 依
-                  `delivery.availableActions` 顯示。
-                </p>
-              </div>
-            ) : (
-              <div style={stackStyle}>
-                <CanvasBanner
+              }
+              padding={0}
+            >
+              {endpointReason && endpointEmptyCopy ? (
+                <div style={{ padding: 16 }}>
+                  <CanvasBanner
+                    theme={th}
+                    tone={endpointEmptyCopy.tone}
+                    icon="info"
+                    title={endpointEmptyCopy.title}
+                    body={endpointEmptyCopy.body}
+                  />
+                  {endpointEmptyCopy.cta ? (
+                    <div style={{ marginTop: 12 }}>
+                      <Link
+                        href={endpointEmptyCopy.cta.href}
+                        style={getLinkButtonStyle()}
+                      >
+                        {endpointEmptyCopy.cta.label}
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <CanvasTable<EndpointRow>
                   theme={th}
-                  tone="info"
-                  icon="info"
-                  title="Select an endpoint"
-                  body="從左側列表點選 `delivery log` / `更新` / `rotate secret` 即可進入 per-endpoint flow。"
+                  columns={endpointColumns}
+                  rows={filteredEndpoints.map(toEndpointRow)}
                 />
-                <ul style={listStyle}>
-                  <li>Create / update 由真實 backend route 支援。</li>
-                  <li>
-                    Rotate secret 直接呼叫
-                    `/api/tenant/webhooks/:id/rotate-secret`。
-                  </li>
-                  <li>
-                    Delivery row 會直接反映 `retryFailedDelivery` 的
-                    enabled/disabled 狀態。
-                  </li>
-                </ul>
-              </div>
-            )}
-          </CanvasCard>
-        </div>
+              )}
+            </CanvasCard>
 
-        <div style={twoColumnStyle}>
-          <CanvasCard
-            theme={th}
-            title={selectedWebhook ? "Delivery log" : "Recent deliveries"}
-            subtitle={
-              selectedWebhook
-                ? `${selectedWebhook.url} · real engine records only`
-                : "Tenant-wide delivery stream · no mock replay rows"
-            }
-            actions={
-              selectedWebhook ? (
-                <Link href="/webhooks" style={getLinkButtonStyle()}>
-                  Clear endpoint scope
-                </Link>
-              ) : null
-            }
-            padding={0}
-          >
-            {deliveryReason && deliveryEmptyCopy ? (
-              <div style={{ padding: 16 }}>
-                <CanvasBanner
-                  theme={th}
-                  tone={deliveryEmptyCopy.tone}
-                  icon="info"
-                  title={deliveryEmptyCopy.title}
-                  body={deliveryEmptyCopy.body}
-                />
-                {deliveryEmptyCopy.cta ? (
-                  <div style={{ marginTop: 12 }}>
-                    <Link
-                      href={deliveryEmptyCopy.cta.href}
-                      style={getLinkButtonStyle()}
-                    >
-                      {deliveryEmptyCopy.cta.label}
-                    </Link>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <CanvasTable<DeliveryRow>
-                theme={th}
-                columns={deliveryColumns}
-                rows={scopedDeliveries.slice(0, 12).map(toDeliveryRow)}
-                dense
-              />
-            )}
-          </CanvasCard>
-
-          <CanvasCard
-            theme={th}
-            title={selectedDelivery ? "Selected delivery" : "Related signals"}
-            subtitle={
-              selectedDelivery
-                ? "Per-delivery actions come from delivery.availableActions[]."
-                : "Entry/exit per packet: notification deep link + integration governance + audit."
-            }
-          >
-            <div style={stackStyle}>
-              {selectedDelivery ? (
-                <div style={panelStyle}>
-                  <div style={{ color: th.text, fontWeight: 600 }}>
-                    {selectedDelivery.eventType}
-                  </div>
-                  <div style={detailLineStyle}>
-                    <span>delivery</span>
-                    <span style={monoStyle}>{selectedDelivery.deliveryId}</span>
-                  </div>
-                  <div style={detailLineStyle}>
-                    <span>endpoint</span>
-                    <span style={monoStyle}>{selectedDelivery.webhookId}</span>
-                  </div>
-                  <div style={detailLineStyle}>
-                    <span>signature</span>
-                    <span style={monoStyle}>{selectedDelivery.signature}</span>
-                  </div>
-                  <div style={detailLineStyle}>
-                    <span>attempt</span>
-                    <span style={monoStyle}>{selectedDelivery.attempt}</span>
+            <CanvasCard
+              theme={th}
+              title={selectedWebhook ? "Selected endpoint" : "Action matrix"}
+              subtitle={
+                selectedWebhook
+                  ? "Per-endpoint actions and contract notes"
+                  : "Pick an endpoint to inspect delivery scope or update actions."
+              }
+            >
+              {selectedWebhook ? (
+                <div style={stackStyle}>
+                  <div style={panelStyle}>
+                    <div style={{ color: th.text, fontWeight: 600 }}>
+                      {selectedWebhook.url}
+                    </div>
+                    <div style={codeLabelStyle}>
+                      {selectedWebhook.webhookId}
+                    </div>
+                    <div style={chipWrapStyle}>
+                      {selectedWebhook.events.map((eventType) => (
+                        <CanvasPill key={eventType} theme={th} tone="info">
+                          {eventType}
+                        </CanvasPill>
+                      ))}
+                    </div>
                   </div>
                   <div style={buttonWrapStyle}>
-                    {getDeliveryActions(
-                      selectedDelivery,
+                    {getEndpointActions(
+                      selectedWebhook,
                       canManage,
                       statusFilter,
                     ).map((action, index) =>
-                      renderAction(action, `delivery-${index}`),
+                      renderAction(action, `endpoint-${index}`),
                     )}
-                    <Link
-                      href={
-                        selectedWebhookId
-                          ? `/webhooks?webhookId=${encodeURIComponent(selectedWebhookId)}`
-                          : "/webhooks"
-                      }
-                      style={getLinkButtonStyle()}
-                    >
-                      Clear delivery scope
-                    </Link>
                   </div>
                   <p style={mutedStyle}>
-                    Retry CTA 直接跟著 delivery read model 的
-                    `availableActions`；若 backend 尚未提供 retry
-                    endpoint，畫面會保留 disabled reason。
+                    Endpoint 層保留 lifecycle actions；delivery-specific `retry
+                    failed` 會在下方 delivery rows / selected delivery detail 依
+                    `delivery.availableActions` 顯示。
                   </p>
                 </div>
-              ) : null}
-              <div style={panelStyle}>
-                <div style={{ color: th.text, fontWeight: 600 }}>
-                  Notification feed
+              ) : (
+                <div style={stackStyle}>
+                  <CanvasBanner
+                    theme={th}
+                    tone="info"
+                    icon="info"
+                    title="Select an endpoint"
+                    body="從左側列表點選 `delivery log` / `更新` / `rotate secret` 即可進入 per-endpoint flow。"
+                  />
+                  <ul style={listStyle}>
+                    <li>Create / update 由真實 backend route 支援。</li>
+                    <li>
+                      Rotate secret 直接呼叫
+                      `/api/tenant/webhooks/:id/rotate-secret`。
+                    </li>
+                    <li>
+                      Delivery row 會直接反映 `retryFailedDelivery` 的
+                      enabled/disabled 狀態。
+                    </li>
+                  </ul>
                 </div>
-                {notifications.length > 0 ? (
-                  notifications.map((notification) => (
-                    <div
-                      key={notification.notificationId}
-                      style={detailLineStyle}
-                    >
-                      <span>{notification.title}</span>
+              )}
+            </CanvasCard>
+          </div>
+        ) : null}
+
+        {!engineInactive ? (
+          <div style={twoColumnStyle}>
+            <CanvasCard
+              theme={th}
+              title={selectedWebhook ? "Delivery log" : "近 24h 投遞"}
+              subtitle={
+                selectedWebhook
+                  ? `${selectedWebhook.url} · real engine records only`
+                  : "Tenant-wide delivery stream · no mock replay rows"
+              }
+              actions={
+                selectedWebhook ? (
+                  <Link href="/webhooks" style={getLinkButtonStyle()}>
+                    Clear endpoint scope
+                  </Link>
+                ) : null
+              }
+              padding={0}
+            >
+              {deliveryReason && deliveryEmptyCopy ? (
+                <div style={{ padding: 16 }}>
+                  <CanvasBanner
+                    theme={th}
+                    tone={deliveryEmptyCopy.tone}
+                    icon="info"
+                    title={deliveryEmptyCopy.title}
+                    body={deliveryEmptyCopy.body}
+                  />
+                  {deliveryEmptyCopy.cta ? (
+                    <div style={{ marginTop: 12 }}>
+                      <Link
+                        href={deliveryEmptyCopy.cta.href}
+                        style={getLinkButtonStyle()}
+                      >
+                        {deliveryEmptyCopy.cta.label}
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <CanvasTable<DeliveryRow>
+                  theme={th}
+                  columns={deliveryColumns}
+                  rows={scopedDeliveries.slice(0, 12).map(toDeliveryRow)}
+                  dense
+                />
+              )}
+            </CanvasCard>
+
+            <CanvasCard
+              theme={th}
+              title={
+                selectedDelivery ? "Selected delivery" : "Replay / signals"
+              }
+              subtitle={
+                selectedDelivery
+                  ? "Per-delivery actions come from delivery.availableActions[]."
+                  : "Entry/exit per packet: notification deep link + integration governance + audit."
+              }
+            >
+              <div style={stackStyle}>
+                {selectedDelivery ? (
+                  <div style={panelStyle}>
+                    <div style={{ color: th.text, fontWeight: 600 }}>
+                      {selectedDelivery.eventType}
+                    </div>
+                    <div style={detailLineStyle}>
+                      <span>delivery</span>
                       <span style={monoStyle}>
-                        {formatDateTime(notification.createdAt)}
+                        {selectedDelivery.deliveryId}
                       </span>
                     </div>
-                  ))
-                ) : (
-                  <p style={mutedStyle}>
-                    目前 notification feed 沒有 webhook / delivery 相關項目。
-                  </p>
-                )}
-                <Link href="/notifications" style={secondaryLinkStyle}>
-                  Open notification preferences
-                </Link>
-              </div>
-              <div style={panelStyle}>
-                <div style={{ color: th.text, fontWeight: 600 }}>
-                  Cross-app deep links
-                </div>
-                {externalLinks.map((link) => (
-                  <div key={link.label} style={{ display: "grid", gap: 4 }}>
-                    {link.href ? (
-                      <a
-                        href={link.href}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={primaryLinkStyle}
-                      >
-                        {link.label}
-                      </a>
-                    ) : (
-                      <span style={primaryLinkStyle}>{link.label}</span>
-                    )}
-                    <span style={subtleTextStyle}>{link.description}</span>
-                    {!link.href ? (
-                      <span style={subtleTextStyle}>
-                        Missing base URL env; configure
-                        `NEXT_PUBLIC_OPS_CONSOLE_URL` /
-                        `NEXT_PUBLIC_PLATFORM_ADMIN_URL` to activate new-tab
-                        navigation.
+                    <div style={detailLineStyle}>
+                      <span>endpoint</span>
+                      <span style={monoStyle}>
+                        {selectedDelivery.webhookId}
                       </span>
-                    ) : null}
+                    </div>
+                    <div style={detailLineStyle}>
+                      <span>signature</span>
+                      <span style={monoStyle}>
+                        {selectedDelivery.signature}
+                      </span>
+                    </div>
+                    <div style={detailLineStyle}>
+                      <span>attempt</span>
+                      <span style={monoStyle}>{selectedDelivery.attempt}</span>
+                    </div>
+                    <div style={buttonWrapStyle}>
+                      {getDeliveryActions(
+                        selectedDelivery,
+                        canManage,
+                        statusFilter,
+                      ).map((action, index) =>
+                        renderAction(action, `delivery-${index}`),
+                      )}
+                      <Link
+                        href={
+                          selectedWebhookId
+                            ? `/webhooks?webhookId=${encodeURIComponent(selectedWebhookId)}`
+                            : "/webhooks"
+                        }
+                        style={getLinkButtonStyle()}
+                      >
+                        Clear delivery scope
+                      </Link>
+                    </div>
+                    <p style={mutedStyle}>
+                      Retry CTA 直接跟著 delivery read model 的
+                      `availableActions`；若 backend 尚未提供 retry
+                      endpoint，畫面會保留 disabled reason。
+                    </p>
                   </div>
-                ))}
-                <Link href="/integration-governance" style={secondaryLinkStyle}>
-                  Tenant integration governance
-                </Link>
-                <Link href="/audit" style={secondaryLinkStyle}>
-                  Tenant audit trail
-                </Link>
+                ) : null}
+                <div style={panelStyle}>
+                  <div style={{ color: th.text, fontWeight: 600 }}>
+                    Notification feed
+                  </div>
+                  {notifications.length > 0 ? (
+                    notifications.map((notification) => (
+                      <div
+                        key={notification.notificationId}
+                        style={detailLineStyle}
+                      >
+                        <span>{notification.title}</span>
+                        <span style={monoStyle}>
+                          {formatDateTime(notification.createdAt)}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p style={mutedStyle}>
+                      目前 notification feed 沒有 webhook / delivery 相關項目。
+                    </p>
+                  )}
+                  <Link href="/notifications" style={secondaryLinkStyle}>
+                    Open notification preferences
+                  </Link>
+                </div>
+                <div style={panelStyle}>
+                  <div style={{ color: th.text, fontWeight: 600 }}>
+                    Replay notes
+                  </div>
+                  <p style={mutedStyle}>
+                    本頁的 replay 只顯示 backend 已公開的 retry posture。若
+                    `retryFailedDelivery` 尚未啟用，畫面會保留 disabled
+                    reason，而不是假造可重送流程。
+                  </p>
+                  <p style={mutedStyle}>
+                    需要跨系統排查時，請使用頁面底部的 deep links 前往 ops
+                    triage、governance 或 audit。
+                  </p>
+                </div>
               </div>
+            </CanvasCard>
+          </div>
+        ) : null}
+
+        <CanvasCard
+          theme={th}
+          title="Cross-app deep links"
+          subtitle="Entry paths required by the packet: notification, integration governance, audit, and ops triage."
+        >
+          <div style={stackStyle}>
+            <div style={buttonWrapStyle}>
+              <Link href="/notifications" style={getLinkButtonStyle()}>
+                Notification preferences
+              </Link>
+              <Link href="/integration-governance" style={getLinkButtonStyle()}>
+                Integration governance
+              </Link>
+              <Link href="/audit" style={getLinkButtonStyle()}>
+                Tenant audit trail
+              </Link>
             </div>
-          </CanvasCard>
-        </div>
+            {externalLinks.map((link) => (
+              <div key={link.label} style={{ display: "grid", gap: 4 }}>
+                {link.href ? (
+                  <a
+                    href={link.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={primaryLinkStyle}
+                  >
+                    {link.label}
+                  </a>
+                ) : (
+                  <span style={primaryLinkStyle}>{link.label}</span>
+                )}
+                <span style={subtleTextStyle}>{link.description}</span>
+                {!link.href ? (
+                  <span style={subtleTextStyle}>
+                    Missing base URL env; configure
+                    `NEXT_PUBLIC_OPS_CONSOLE_URL` /
+                    `NEXT_PUBLIC_PLATFORM_ADMIN_URL` to activate new-tab
+                    navigation.
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </CanvasCard>
       </div>
     </div>
   );
