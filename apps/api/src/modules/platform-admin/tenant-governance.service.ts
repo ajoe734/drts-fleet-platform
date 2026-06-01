@@ -1,13 +1,18 @@
 import { Injectable } from "@nestjs/common";
 
+import { REFRESH_TIER_CADENCE_MS } from "@drts/contracts";
 import type {
+  CrossAppResourceLink,
   PlatformAdminTenantRecord,
   PlatformTenantGovernanceSummaryQuery,
   PlatformTenantGovernanceSummaryResponse,
   PlatformTenantGovernanceSummaryRow,
+  RefreshTier,
+  ResourceActionDescriptor,
   TenantApprovalRuleRecord,
   TenantCostCenterRecord,
   TenantUserRoleRecord,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
@@ -16,6 +21,7 @@ import { TenantsService } from "./tenants.service";
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
+const TENANT_GOVERNANCE_REFRESH_TIER = "medium_slow" satisfies RefreshTier;
 const QUOTA_ALERT_THRESHOLD_PERCENT = 95;
 const PENDING_APPROVAL_ALERT_THRESHOLD_HOURS = 48;
 const HOUR_IN_MS = 60 * 60 * 1000;
@@ -67,6 +73,7 @@ export class PlatformTenantGovernanceService {
         totalItems,
         totalPages,
       },
+      refresh: this.buildRefreshMetadata(),
     };
   }
 
@@ -132,6 +139,119 @@ export class PlatformTenantGovernanceService {
       pendingApprovalCount: pendingApprovalRequests.length,
       oldestPendingApprovalAgeHours,
       alertFlags,
+      availableActions: this.buildAvailableActions({
+        tenant,
+        alertFlags,
+        monthlyQuotaPercentUsed,
+        pendingApprovalCount: pendingApprovalRequests.length,
+      }),
+      drillTargets: this.buildDrillTargets(tenant.id),
+    };
+  }
+
+  private buildAvailableActions({
+    tenant,
+    alertFlags,
+    monthlyQuotaPercentUsed,
+    pendingApprovalCount,
+  }: {
+    tenant: PlatformAdminTenantRecord;
+    alertFlags: PlatformTenantGovernanceSummaryRow["alertFlags"];
+    monthlyQuotaPercentUsed: number;
+    pendingApprovalCount: number;
+  }): ResourceActionDescriptor[] {
+    const auditEnabled =
+      alertFlags.length > 0 ||
+      monthlyQuotaPercentUsed > QUOTA_ALERT_THRESHOLD_PERCENT;
+    const opsEnabled = tenant.status === "active";
+
+    return [
+      {
+        action: "view_tenant_detail",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "open_cost_center_health",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "open_payments_triage",
+        enabled: pendingApprovalCount > 0,
+        ...(pendingApprovalCount > 0
+          ? {}
+          : { disabledReasonCode: "no_pending_approvals" }),
+        riskLevel: "low",
+      },
+      {
+        action: "open_audit",
+        enabled: auditEnabled,
+        ...(auditEnabled
+          ? {}
+          : { disabledReasonCode: "no_recent_governance_alerts" }),
+        riskLevel: "low",
+      },
+      {
+        action: "open_ops_operational_view",
+        enabled: opsEnabled,
+        ...(opsEnabled ? {} : { disabledReasonCode: "tenant_not_active" }),
+        riskLevel: "low",
+      },
+    ];
+  }
+
+  private buildDrillTargets(tenantId: string): CrossAppResourceLink[] {
+    return [
+      {
+        targetApp: "platform-admin",
+        route: `/tenants/${encodeURIComponent(tenantId)}`,
+        resourceType: "platform_tenant",
+        resourceId: tenantId,
+        openMode: "same_tab",
+        label: "Tenant detail",
+      },
+      {
+        targetApp: "platform-admin",
+        route: `/payments?tenantId=${encodeURIComponent(tenantId)}`,
+        resourceType: "approval_backlog",
+        resourceId: tenantId,
+        openMode: "same_tab",
+        label: "Payments triage",
+      },
+      {
+        targetApp: "platform-admin",
+        route: `/audit?resourceType=platform_tenant&resourceId=${encodeURIComponent(tenantId)}`,
+        resourceType: "platform_tenant",
+        resourceId: tenantId,
+        openMode: "same_tab",
+        label: "Audit trail",
+      },
+      {
+        targetApp: "tenant-console",
+        route: `/cost-centers?tenantId=${encodeURIComponent(tenantId)}`,
+        resourceType: "tenant_cost_center",
+        resourceId: tenantId,
+        openMode: "new_tab",
+        label: "Tenant cost centers",
+      },
+      {
+        targetApp: "ops-console",
+        route: `/dispatch?view=owned&tenantId=${encodeURIComponent(tenantId)}`,
+        resourceType: "tenant_operational_view",
+        resourceId: tenantId,
+        openMode: "new_tab",
+        label: "Ops operational view",
+      },
+    ];
+  }
+
+  private buildRefreshMetadata(): UiRefreshMetadata {
+    return {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: REFRESH_TIER_CADENCE_MS[TENANT_GOVERNANCE_REFRESH_TIER],
+      dataFreshness: "fresh",
+      source: "live",
     };
   }
 

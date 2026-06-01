@@ -9,6 +9,7 @@ import {
   tenantStageTone,
   tenantStatusTone,
 } from "@/components/tenant-governance-shared";
+import { REFRESH_TIER_CADENCE_MS } from "@drts/contracts";
 import type {
   CrossAppResourceLink,
   EmptyReason,
@@ -17,7 +18,6 @@ import type {
   PlatformTenantGovernanceSummaryRow,
   RefreshTier,
   ResourceActionDescriptor,
-  UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -41,15 +41,6 @@ const DEFAULT_APP_ORIGINS = {
   "tenant-console": "http://localhost:3000",
 } satisfies Record<CrossAppResourceLink["targetApp"], string>;
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
-const REFRESH_TIER_MS: Record<RefreshTier, number> = {
-  urgent: 5_000,
-  fast: 3_000,
-  dispatch: 5_000,
-  medium: 15_000,
-  medium_slow: 30_000,
-  slow: 30_000,
-  manual: 0,
-};
 
 type RiskFilter =
   | "all"
@@ -65,7 +56,7 @@ type GovernanceAction = {
   key: string;
   label: string;
   descriptor: ResourceActionDescriptor;
-  link: CrossAppResourceLink;
+  link: CrossAppResourceLink | null;
   hint: string;
 };
 type EmptyStateAction = {
@@ -73,19 +64,6 @@ type EmptyStateAction = {
   href?: string;
   openMode?: CrossAppResourceLink["openMode"];
   onClick?: () => void;
-};
-type TenantGovernanceRow = PlatformTenantGovernanceSummaryRow & {
-  availableActions?: ResourceActionDescriptor[];
-  drillTargets?: CrossAppResourceLink[];
-};
-type TenantGovernanceSummaryData = PlatformTenantGovernanceSummaryResponse & {
-  items: TenantGovernanceRow[];
-  emptyState?: {
-    reason: EmptyPreviewReason;
-    messageCode: string;
-    nextAction?: ResourceActionDescriptor;
-  };
-  refresh?: UiRefreshMetadata;
 };
 
 const pageRootStyle = {
@@ -353,7 +331,23 @@ function classifyErrorReason(message: string | null): EmptyPreviewReason {
   return "fetch_failed";
 }
 
-function matchesFilter(row: TenantGovernanceRow, filter: RiskFilter) {
+function isEmptyPreviewReason(
+  value: EmptyReason | null | undefined,
+): value is EmptyPreviewReason {
+  return (
+    value === "no_data" ||
+    value === "not_provisioned" ||
+    value === "fetch_failed" ||
+    value === "permission_denied" ||
+    value === "external_unavailable" ||
+    value === "filtered_empty"
+  );
+}
+
+function matchesFilter(
+  row: PlatformTenantGovernanceSummaryRow,
+  filter: RiskFilter,
+) {
   if (filter === "all") {
     return true;
   }
@@ -380,208 +374,149 @@ function humanizeActionLabel(locale: string, action: string) {
   return normalized || "未命名動作";
 }
 
-function buildFallbackTenantActions(
-  locale: string,
-  row: TenantGovernanceRow,
-): GovernanceAction[] {
-  const reviewPaymentsEnabled = row.pendingApprovalCount > 0;
-  const auditEnabled = row.alertFlags.length > 0;
-  const opsEnabled = row.tenantStatus === "active";
+function actionPresentation(locale: string, action: string) {
+  if (locale === "en") {
+    switch (action) {
+      case "view_tenant_detail":
+        return {
+          label: "Tenant detail",
+          hint: "Inspect rollout, modules, and onboarding package state.",
+        };
+      case "open_cost_center_health":
+        return {
+          label: "Tenant cost centers",
+          hint: "Open the source module that owns cost-center coverage.",
+        };
+      case "open_payments_triage":
+        return {
+          label: "Payments triage",
+          hint: "Jump into backlog and reconciliation follow-up.",
+        };
+      case "open_audit":
+        return {
+          label: "Audit trail",
+          hint: "Filter the evidence stream to this tenant.",
+        };
+      case "open_ops_operational_view":
+        return {
+          label: "Ops operational view",
+          hint: "Cross-check whether the issue is isolated or systemic in ops.",
+        };
+      default:
+        return {
+          label: humanizeActionLabel(locale, action),
+          hint: "Backend exposed this action, but the dashboard only has a generic presentation for it.",
+        };
+    }
+  }
 
-  return [
-    {
-      key: "tenant-detail",
-      label: locale === "en" ? "Tenant detail" : "租戶詳情",
-      descriptor: {
-        action: "view_tenant_detail",
-        enabled: true,
-        riskLevel: "low",
-      },
-      link: {
-        targetApp: "platform-admin",
-        route: `/tenants/${encodeURIComponent(row.tenantId)}`,
-        resourceType: "platform_tenant",
-        resourceId: row.tenantId,
-        openMode: "same_tab",
-        label: locale === "en" ? "Tenant detail" : "租戶詳情",
-      },
-      hint:
-        locale === "en"
-          ? "Inspect rollout, modules, and package state."
-          : "檢查 rollout、模組與 onboarding package。",
-    },
-    {
-      key: "tenant-cost-centers",
-      label: locale === "en" ? "Tenant cost centers" : "Tenant cost centers",
-      descriptor: {
-        action: "open_cost_center_health",
-        enabled: true,
-        riskLevel: "low",
-      },
-      link: {
-        targetApp: "tenant-console",
-        route: `/cost-centers?tenantId=${encodeURIComponent(row.tenantId)}`,
-        resourceType: "tenant_cost_center",
-        resourceId: row.tenantId,
-        openMode: "new_tab",
-        label: locale === "en" ? "Tenant cost centers" : "Tenant cost centers",
-      },
-      hint:
-        locale === "en"
-          ? "Open the source module that owns cost-center coverage."
-          : "開啟成本中心 coverage 的來源模組。",
-    },
-    {
-      key: "tenant-rules",
-      label: locale === "en" ? "Approval rules" : "審批規則",
-      descriptor: {
-        action: "open_approval_rules",
-        enabled: true,
-        riskLevel: "low",
-      },
-      link: {
-        targetApp: "tenant-console",
-        route: `/rules?tenantId=${encodeURIComponent(row.tenantId)}`,
-        resourceType: "tenant_approval_rule",
-        resourceId: row.tenantId,
-        openMode: "new_tab",
-        label: locale === "en" ? "Approval rules" : "審批規則",
-      },
-      hint:
-        locale === "en"
-          ? "Review the rule surface behind approval backlog and approver gaps."
-          : "檢查 approval backlog 與 approver 缺口背後的規則面。",
-    },
-    {
-      key: "payments",
-      label: locale === "en" ? "Payments triage" : "付款治理",
-      descriptor: {
-        action: "open_payments_triage",
-        enabled: reviewPaymentsEnabled,
-        ...(reviewPaymentsEnabled
-          ? {}
-          : { disabledReasonCode: "no_pending_approvals" }),
-        riskLevel: "low",
-      },
-      link: {
-        targetApp: "platform-admin",
-        route: `/payments?tenantId=${encodeURIComponent(row.tenantId)}`,
-        resourceType: "approval_backlog",
-        resourceId: row.tenantId,
-        openMode: "same_tab",
-        label: locale === "en" ? "Payments triage" : "付款治理",
-      },
-      hint:
-        locale === "en"
-          ? "Jump into backlog and reconciliation follow-up."
-          : "進入 backlog 與 reconciliation 後續處理。",
-    },
-    {
-      key: "audit",
-      label: locale === "en" ? "Audit trail" : "稽核軌跡",
-      descriptor: {
-        action: "open_audit",
-        enabled: auditEnabled,
-        ...(auditEnabled
-          ? {}
-          : { disabledReasonCode: "no_recent_governance_alerts" }),
-        riskLevel: "low",
-      },
-      link: {
-        targetApp: "platform-admin",
-        route: `/audit?resourceType=platform_tenant&resourceId=${encodeURIComponent(row.tenantId)}`,
-        resourceType: "platform_tenant",
-        resourceId: row.tenantId,
-        openMode: "same_tab",
-        label: locale === "en" ? "Audit trail" : "稽核軌跡",
-      },
-      hint:
-        locale === "en"
-          ? "Filter the evidence stream to this tenant."
-          : "把 evidence stream 篩到這個 tenant。",
-    },
-    {
-      key: "ops-console",
-      label: locale === "en" ? "Ops operational view" : "Ops operational view",
-      descriptor: {
-        action: "open_ops_operational_view",
-        enabled: opsEnabled,
-        ...(opsEnabled ? {} : { disabledReasonCode: "tenant_not_active" }),
-        riskLevel: "low",
-      },
-      link: {
-        targetApp: "ops-console",
-        route: `/dispatch?view=owned&tenantId=${encodeURIComponent(row.tenantId)}`,
-        resourceType: "tenant_operational_view",
-        resourceId: row.tenantId,
-        openMode: "new_tab",
-        label:
-          locale === "en" ? "Ops operational view" : "Ops operational view",
-      },
-      hint:
-        locale === "en"
-          ? "Cross-check whether the issue is isolated or systemic in ops."
-          : "到 ops 交叉確認問題是 isolated 還是 systemic。",
-    },
-  ];
+  switch (action) {
+    case "view_tenant_detail":
+      return {
+        label: "租戶詳情",
+        hint: "檢查 rollout、模組與 onboarding package 狀態。",
+      };
+    case "open_cost_center_health":
+      return {
+        label: "Tenant cost centers",
+        hint: "開啟成本中心 coverage 的來源模組。",
+      };
+    case "open_payments_triage":
+      return {
+        label: "付款治理",
+        hint: "進入 backlog 與 reconciliation 後續處理。",
+      };
+    case "open_audit":
+      return {
+        label: "稽核軌跡",
+        hint: "把 evidence stream 篩到這個 tenant。",
+      };
+    case "open_ops_operational_view":
+      return {
+        label: "Ops operational view",
+        hint: "到 ops 交叉確認問題是 isolated 還是 systemic。",
+      };
+    default:
+      return {
+        label: humanizeActionLabel(locale, action),
+        hint: "後端已公開此 action，但 dashboard 目前只套用通用呈現。",
+      };
+  }
 }
 
 function resolveTenantActions(
   locale: string,
-  row: TenantGovernanceRow,
+  row: PlatformTenantGovernanceSummaryRow,
 ): GovernanceAction[] {
-  const fallbackActions = buildFallbackTenantActions(locale, row);
-  if (typeof row.availableActions === "undefined") {
-    return fallbackActions;
-  }
-  if (row.availableActions.length === 0) {
-    return [];
-  }
-
-  const fallbackByAction = new Map(
-    fallbackActions.map((action) => [action.descriptor.action, action]),
-  );
-
   return row.availableActions.map((descriptor) => {
-    const matched = fallbackByAction.get(descriptor.action);
-    if (matched) {
-      return {
-        ...matched,
-        descriptor,
-      };
-    }
+    const presentation = actionPresentation(locale, descriptor.action);
 
     return {
       key: `${row.tenantId}-${descriptor.action}`,
-      label: humanizeActionLabel(locale, descriptor.action),
+      label: presentation.label,
       descriptor,
-      link: {
-        targetApp: "platform-admin",
-        route: `/tenants/${encodeURIComponent(row.tenantId)}`,
-        resourceType: "platform_tenant",
-        resourceId: row.tenantId,
-        openMode: "same_tab",
-        label: locale === "en" ? "Tenant detail" : "租戶詳情",
-      },
-      hint:
-        locale === "en"
-          ? "This action is available for the tenant, but the dashboard only has a generic fallback route."
-          : "這個 tenant 可執行此動作，但 dashboard 目前只有通用 fallback route。",
+      link: findActionLink(descriptor, row.drillTargets),
+      hint: presentation.hint,
     };
   });
 }
 
-function resolveDrillTargets(
-  locale: string,
-  row: TenantGovernanceRow,
-): CrossAppResourceLink[] {
-  if (typeof row.drillTargets !== "undefined") {
-    return row.drillTargets;
+function findActionLink(
+  descriptor: ResourceActionDescriptor,
+  drillTargets: CrossAppResourceLink[],
+) {
+  switch (descriptor.action) {
+    case "view_tenant_detail":
+      return (
+        drillTargets.find(
+          (target) =>
+            target.targetApp === "platform-admin" &&
+            target.resourceType === "platform_tenant",
+        ) ?? null
+      );
+    case "open_cost_center_health":
+      return (
+        drillTargets.find(
+          (target) =>
+            target.targetApp === "tenant-console" &&
+            target.resourceType === "tenant_cost_center",
+        ) ?? null
+      );
+    case "open_payments_triage":
+      return (
+        drillTargets.find(
+          (target) =>
+            target.targetApp === "platform-admin" &&
+            target.resourceType === "approval_backlog",
+        ) ?? null
+      );
+    case "open_audit":
+      return (
+        drillTargets.find(
+          (target) =>
+            target.targetApp === "platform-admin" &&
+            target.route.startsWith("/audit"),
+        ) ?? null
+      );
+    case "open_ops_operational_view":
+      return (
+        drillTargets.find(
+          (target) =>
+            target.targetApp === "ops-console" &&
+            target.resourceType === "tenant_operational_view",
+        ) ?? null
+      );
+    default:
+      return drillTargets[0] ?? null;
   }
+}
 
+function resolveDrillTargets(
+  row: PlatformTenantGovernanceSummaryRow,
+): CrossAppResourceLink[] {
   const deduped = new Map<string, CrossAppResourceLink>();
-  for (const action of buildFallbackTenantActions(locale, row)) {
-    deduped.set(`${action.link.targetApp}:${action.link.route}`, action.link);
+  for (const target of row.drillTargets) {
+    deduped.set(`${target.targetApp}:${target.route}`, target);
   }
   return [...deduped.values()];
 }
@@ -589,14 +524,19 @@ function resolveDrillTargets(
 function renderActionControl(
   action: GovernanceAction,
   locale: string,
-  href: string,
+  href: string | null,
   tone: "primary" | "secondary" = "secondary",
 ) {
-  const disabledTitle = action.descriptor.enabled
-    ? undefined
-    : disabledReasonLabel(locale, action.descriptor.disabledReasonCode);
+  const disabledTitle =
+    action.descriptor.enabled && href
+      ? undefined
+      : action.descriptor.enabled
+        ? locale === "en"
+          ? "Route unavailable"
+          : "目前沒有對應路由"
+        : disabledReasonLabel(locale, action.descriptor.disabledReasonCode);
 
-  if (!action.descriptor.enabled) {
+  if (!action.descriptor.enabled || !href) {
     return (
       <button
         key={action.key}
@@ -610,12 +550,14 @@ function renderActionControl(
     );
   }
 
+  const link = action.link;
+
   return (
     <a
       key={action.key}
       href={href}
-      target={action.link.openMode === "new_tab" ? "_blank" : undefined}
-      rel={action.link.openMode === "new_tab" ? "noreferrer" : undefined}
+      target={link?.openMode === "new_tab" ? "_blank" : undefined}
+      rel={link?.openMode === "new_tab" ? "noreferrer" : undefined}
       style={actionButtonStyle(false, tone)}
     >
       {action.label}
@@ -623,7 +565,10 @@ function renderActionControl(
   );
 }
 
-function resolveCrossAppHref(link: CrossAppResourceLink): string {
+function resolveCrossAppHref(link: CrossAppResourceLink | null): string | null {
+  if (!link) {
+    return null;
+  }
   if (typeof window !== "undefined" && link.targetApp === "platform-admin") {
     return link.route;
   }
@@ -786,18 +731,15 @@ export default function TenantGovernancePage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
   const searchParams = useSearchParams();
-  const [summary, setSummary] = useState<TenantGovernanceSummaryData | null>(
-    null,
-  );
+  const [summary, setSummary] =
+    useState<PlatformTenantGovernanceSummaryResponse | null>(null);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState<RiskFilter>("all");
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-  const refreshIntervalMs = REFRESH_TIER_MS[REFRESH_TIER];
+  const refreshIntervalMs = REFRESH_TIER_CADENCE_MS[REFRESH_TIER];
 
   const copy =
     locale === "en"
@@ -969,7 +911,6 @@ export default function TenantGovernancePage() {
           pageSize: PAGE_SIZE,
         });
         setSummary(result);
-        setLastLoadedAt(new Date());
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -993,14 +934,6 @@ export default function TenantGovernancePage() {
     }, refreshIntervalMs);
     return () => window.clearInterval(intervalId);
   }, [loadSummary, refreshIntervalMs]);
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setNow(Date.now());
-    }, 1_000);
-    return () => window.clearInterval(intervalId);
-  }, []);
-
   const baseItems = summary?.items ?? [];
   const refreshMeta = summary?.refresh;
   const emptyStateEnvelope = summary?.emptyState;
@@ -1064,15 +997,15 @@ export default function TenantGovernancePage() {
   const selectedDrillTargets = useMemo(
     () =>
       selectedTenant
-        ? resolveDrillTargets(locale, selectedTenant)
+        ? resolveDrillTargets(selectedTenant)
         : ([] as CrossAppResourceLink[]),
-    [locale, selectedTenant],
+    [selectedTenant],
   );
   const selectedDrillTargetHrefs = useMemo(
     () =>
       selectedDrillTargets.map((target) => ({
         target,
-        href: resolveCrossAppHref(target),
+        href: resolveCrossAppHref(target) ?? target.route,
       })),
     [selectedDrillTargets],
   );
@@ -1317,38 +1250,21 @@ export default function TenantGovernancePage() {
   );
 
   const previewReasonRaw = searchParams.get("emptyReason");
-  const previewReason: EmptyPreviewReason | null =
-    previewReasonRaw === "no_data" ||
-    previewReasonRaw === "not_provisioned" ||
-    previewReasonRaw === "fetch_failed" ||
-    previewReasonRaw === "permission_denied" ||
-    previewReasonRaw === "external_unavailable" ||
-    previewReasonRaw === "filtered_empty"
-      ? previewReasonRaw
-      : null;
+  let previewReason: EmptyPreviewReason | null = null;
+  if (isEmptyPreviewReason(previewReasonRaw as EmptyReason)) {
+    previewReason = previewReasonRaw as EmptyPreviewReason;
+  }
 
   const generatedAt = refreshMeta?.generatedAt
     ? new Date(refreshMeta.generatedAt)
-    : lastLoadedAt;
-  const staleAfterMs = refreshMeta?.staleAfterMs ?? refreshIntervalMs;
-  const freshness = useMemo(() => {
-    if (refreshMeta?.dataFreshness) {
-      return refreshMeta.dataFreshness;
-    }
-    if (!generatedAt) {
-      return "unknown";
-    }
-    if (staleAfterMs > 0 && now - generatedAt.getTime() > staleAfterMs) {
-      return "stale";
-    }
-    return "fresh";
-  }, [generatedAt, now, refreshMeta?.dataFreshness, staleAfterMs]);
+    : null;
+  const freshness = refreshMeta?.dataFreshness ?? "unknown";
 
   const emptyReason: EmptyPreviewReason | null = useMemo(() => {
     if (previewReason) {
       return previewReason;
     }
-    if (emptyStateEnvelope?.reason) {
+    if (isEmptyPreviewReason(emptyStateEnvelope?.reason)) {
       return emptyStateEnvelope.reason;
     }
     if (error) {
@@ -1844,12 +1760,12 @@ export default function TenantGovernancePage() {
                           <CanvasPill
                             theme={theme}
                             tone={
-                              action.link.openMode === "new_tab"
+                              action.link?.openMode === "new_tab"
                                 ? "accent"
                                 : "neutral"
                             }
                           >
-                            {action.link.openMode === "new_tab"
+                            {action.link?.openMode === "new_tab"
                               ? copy.external
                               : copy.internal}
                           </CanvasPill>

@@ -116,6 +116,20 @@ export type RefreshTier =
   | "slow"
   | "manual";
 
+/**
+ * Shared cadence map keyed by `RefreshTier`. Frontends should consume this
+ * instead of hard-coding page-local polling intervals.
+ */
+export const REFRESH_TIER_CADENCE_MS: Record<RefreshTier, number> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: 0,
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Q-X13 — ResourceActionDescriptor
 // ─────────────────────────────────────────────────────────────────────────────

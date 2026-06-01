@@ -1,5 +1,11 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  CrossAppResourceLink,
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -4609,10 +4615,15 @@ export interface PlatformTenantGovernanceSummaryRow {
   pendingApprovalCount: number;
   oldestPendingApprovalAgeHours: number | null;
   alertFlags: PlatformTenantGovernanceAlertFlag[];
+  availableActions: ResourceActionDescriptor[];
+  drillTargets: CrossAppResourceLink[];
 }
 
 export type PlatformTenantGovernanceSummaryResponse =
-  ApiListData<PlatformTenantGovernanceSummaryRow>;
+  ApiListData<PlatformTenantGovernanceSummaryRow> & {
+    emptyState?: EmptyStateEnvelope;
+    refresh: UiRefreshMetadata;
+  };
 
 export interface CreatePlatformTenantCommand {
   name: string;
