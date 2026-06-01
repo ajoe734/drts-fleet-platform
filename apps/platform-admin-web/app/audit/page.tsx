@@ -90,6 +90,19 @@ type ActionFeedback = {
   body: string;
 };
 
+type HoldFormState = {
+  caseNumber: string;
+  reasonCode: (typeof EVIDENCE_LEGAL_HOLD_REASON_CODES)[number];
+  reasonNote: string;
+};
+
+type ExceptionFormState = {
+  reviewerActorId: string;
+  reasonCode: (typeof EVIDENCE_DELETION_EXCEPTION_REASON_CODES)[number];
+  reasonNote: string;
+  expiresAt: string;
+};
+
 const pageStyle = {
   display: "grid",
   gap: 16,
@@ -430,10 +443,7 @@ function matchesSubject(record: AuditLogRecord, subjectId: string) {
   return buildSubjectCandidates(record).includes(subjectId);
 }
 
-function inferCrossLink(
-  record: AuditLogRecord,
-  locale: Locale,
-): CrossLink | null {
+function inferCrossLinks(record: AuditLogRecord, locale: Locale): CrossLink[] {
   const resourceType = record.resourceType.toLowerCase();
   const moduleName = record.moduleName.toLowerCase();
   const resourceId = record.resourceId ?? record.auditId;
@@ -448,13 +458,15 @@ function inferCrossLink(
     process.env.NEXT_PUBLIC_TENANT_CONSOLE_ORIGIN ||
     "";
 
+  const links: CrossLink[] = [];
+
   if (resourceType.includes("tenant") && record.resourceId) {
-    return {
+    links.push({
       href: `/tenants/${encodeURIComponent(record.resourceId)}`,
       label: text(locale, "Tenant detail", "租戶詳情"),
       app: "platform-admin",
       openInNewTab: false,
-    };
+    });
   }
 
   if (
@@ -464,30 +476,30 @@ function inferCrossLink(
     resourceType.includes("reimbursement") ||
     moduleName.includes("payments")
   ) {
-    return {
+    links.push({
       href: `/payments?resourceId=${encodeURIComponent(resourceId)}`,
       label: text(locale, "Settlement governance", "結算治理"),
       app: "platform-admin",
       openInNewTab: false,
-    };
+    });
   }
 
   if (resourceType.includes("adapter") || moduleName.includes("adapter")) {
-    return {
+    links.push({
       href: `/adapter-registry?resourceId=${encodeURIComponent(resourceId)}`,
       label: text(locale, "Adapter registry", "介接登錄"),
       app: "platform-admin",
       openInNewTab: false,
-    };
+    });
   }
 
   if (resourceType.includes("notice") || moduleName.includes("notice")) {
-    return {
+    links.push({
       href: `/notices?resourceId=${encodeURIComponent(resourceId)}`,
       label: text(locale, "Notices", "公告與維護"),
       app: "platform-admin",
       openInNewTab: false,
-    };
+    });
   }
 
   if (
@@ -496,24 +508,30 @@ function inferCrossLink(
     moduleName.includes("ops")
   ) {
     const hrefBase = opsOrigin || platformOrigin;
-    return {
+    links.push({
       href: `${hrefBase}/audit?auditId=${encodeURIComponent(record.auditId)}`,
       label: text(locale, "Open in Ops Console", "在 Ops Console 開啟"),
       app: "ops-console",
       openInNewTab: true,
-    };
+    });
   }
 
   if (moduleName.includes("tenant") && tenantOrigin) {
-    return {
+    links.push({
       href: `${tenantOrigin}/audit?auditId=${encodeURIComponent(record.auditId)}`,
       label: text(locale, "Open in Tenant Console", "在 Tenant Console 開啟"),
       app: "tenant-console",
       openInNewTab: true,
-    };
+    });
   }
 
-  return null;
+  return links.filter(
+    (link, index, current) =>
+      current.findIndex(
+        (candidate) =>
+          candidate.href === link.href && candidate.label === link.label,
+      ) === index,
+  );
 }
 
 function findAvailableAction(
@@ -553,12 +571,12 @@ export default function AuditPage() {
     timeRange: searchParams.get("timeRange") ?? "24",
     query: searchParams.get("auditId") ?? searchParams.get("resourceId") ?? "",
   });
-  const [holdForm, setHoldForm] = useState({
+  const [holdForm, setHoldForm] = useState<HoldFormState>({
     caseNumber: "",
     reasonCode: EVIDENCE_LEGAL_HOLD_REASON_CODES[0],
     reasonNote: "",
   });
-  const [exceptionForm, setExceptionForm] = useState({
+  const [exceptionForm, setExceptionForm] = useState<ExceptionFormState>({
     reviewerActorId: DEFAULT_REVIEWER_ACTOR_ID,
     reasonCode: EVIDENCE_DELETION_EXCEPTION_REASON_CODES[0],
     reasonNote: "",
@@ -675,16 +693,16 @@ export default function AuditPage() {
       !selectedAuditId ||
       !filteredRecords.some((record) => record.auditId === selectedAuditId)
     ) {
-      setSelectedAuditId(filteredRecords[0].auditId);
+      setSelectedAuditId(filteredRecords[0]?.auditId ?? null);
     }
   }, [filteredRecords, selectedAuditId]);
 
   const selectedRecord =
     filteredRecords.find((record) => record.auditId === selectedAuditId) ??
     null;
-  const selectedCrossLink = selectedRecord
-    ? inferCrossLink(selectedRecord, locale)
-    : null;
+  const selectedCrossLinks = selectedRecord
+    ? inferCrossLinks(selectedRecord, locale)
+    : [];
 
   const selectedGovernance = useMemo(() => {
     if (!selectedRecord) return { hold: null, deletionException: null };
@@ -730,13 +748,35 @@ export default function AuditPage() {
 
   const holdsEmptyReason = useMemo<EmptyReason>(() => {
     if (sharedErrorReason) return sharedErrorReason;
+    if (policies.length === 0 && records.length === 0) return "not_provisioned";
     return activeLegalHolds.length === 0 ? "no_data" : "no_data";
-  }, [activeLegalHolds.length, sharedErrorReason]);
+  }, [
+    activeLegalHolds.length,
+    policies.length,
+    records.length,
+    sharedErrorReason,
+  ]);
 
   const exceptionsEmptyReason = useMemo<EmptyReason>(() => {
     if (sharedErrorReason) return sharedErrorReason;
+    if (policies.length === 0 && records.length === 0) return "not_provisioned";
     return activeDeletionExceptions.length === 0 ? "no_data" : "no_data";
-  }, [activeDeletionExceptions.length, sharedErrorReason]);
+  }, [
+    activeDeletionExceptions.length,
+    policies.length,
+    records.length,
+    sharedErrorReason,
+  ]);
+
+  const resetFilters = useCallback(() => {
+    setFilters({
+      moduleName: "",
+      actorType: "",
+      resourceType: "",
+      timeRange: "24",
+      query: "",
+    });
+  }, []);
 
   const emptyAction = useMemo<ResourceActionDescriptor | undefined>(() => {
     switch (emptyReason) {
@@ -1437,6 +1477,7 @@ export default function AuditPage() {
                     reason={emptyReason}
                     nextAction={emptyAction}
                     onAction={() => void loadData()}
+                    onResetFilters={resetFilters}
                   />
                 ) : (
                   <div style={tableWrapStyle}>
@@ -1475,7 +1516,7 @@ export default function AuditPage() {
                             activeDeletionExceptions.find((candidate) =>
                               matchesSubject(record, candidate.subjectId),
                             );
-                          const crossLink = inferCrossLink(record, locale);
+                          const crossLinks = inferCrossLinks(record, locale);
                           const expanded = expandedAuditId === record.auditId;
                           const selected = selectedAuditId === record.auditId;
                           return (
@@ -1650,25 +1691,30 @@ export default function AuditPage() {
                                   </div>
                                 </td>
                                 <td style={tdStyle}>
-                                  {crossLink ? (
-                                    <button
-                                      type="button"
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        openLink(crossLink);
-                                      }}
-                                      style={{
-                                        border: "none",
-                                        background: "transparent",
-                                        color: theme.accent,
-                                        fontWeight: 700,
-                                        padding: 0,
-                                        cursor: "pointer",
-                                        textAlign: "left",
-                                      }}
-                                    >
-                                      {crossLink.label}
-                                    </button>
+                                  {crossLinks.length > 0 ? (
+                                    <div style={{ display: "grid", gap: 6 }}>
+                                      {crossLinks.map((crossLink) => (
+                                        <button
+                                          key={`${record.auditId}-${crossLink.href}`}
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            openLink(crossLink);
+                                          }}
+                                          style={{
+                                            border: "none",
+                                            background: "transparent",
+                                            color: theme.accent,
+                                            fontWeight: 700,
+                                            padding: 0,
+                                            cursor: "pointer",
+                                            textAlign: "left",
+                                          }}
+                                        >
+                                          {crossLink.label}
+                                        </button>
+                                      ))}
+                                    </div>
                                   ) : (
                                     <span style={subTextStyle}>—</span>
                                   )}
@@ -1737,6 +1783,7 @@ export default function AuditPage() {
                       reason={sharedErrorReason ?? emptyReason}
                       nextAction={emptyAction}
                       onAction={() => void loadData()}
+                      onResetFilters={resetFilters}
                     />
                   ) : (
                     <>
@@ -1805,14 +1852,17 @@ export default function AuditPage() {
                               "跨 app action receipt 目標",
                             )}
                           </CanvasPill>
-                          {selectedCrossLink ? (
-                            <button
-                              type="button"
-                              style={appLinkStyle}
-                              onClick={() => openLink(selectedCrossLink)}
-                            >
-                              {selectedCrossLink.label}
-                            </button>
+                          {selectedCrossLinks.length > 0 ? (
+                            selectedCrossLinks.map((link) => (
+                              <button
+                                key={link.href}
+                                type="button"
+                                style={appLinkStyle}
+                                onClick={() => openLink(link)}
+                              >
+                                {link.label}
+                              </button>
+                            ))
                           ) : (
                             <CanvasPill theme={theme} tone="neutral">
                               {text(
@@ -2254,12 +2304,14 @@ function EmptyStateCard({
   reason,
   nextAction,
   onAction,
+  onResetFilters,
   compact = false,
 }: {
   locale: Locale;
   reason: EmptyReason;
-  nextAction?: ResourceActionDescriptor;
+  nextAction: ResourceActionDescriptor | undefined;
   onAction: () => void;
+  onResetFilters?: () => void;
   compact?: boolean;
 }) {
   const copy: Record<EmptyReason, { title: string; body: string }> = {
@@ -2360,7 +2412,16 @@ function EmptyStateCard({
         {content.title}
       </div>
       <div style={subTextStyle}>{content.body}</div>
-      {nextAction?.action === "refresh" ? (
+      {reason === "filtered_empty" && onResetFilters ? (
+        <div style={actionRowStyle}>
+          <CanvasBtn theme={theme} onClick={onResetFilters} disabled={compact}>
+            {text(locale, "Reset filters", "重設篩選")}
+          </CanvasBtn>
+          <CanvasBtn theme={theme} onClick={onAction} disabled={compact}>
+            {text(locale, "Refresh now", "立即刷新")}
+          </CanvasBtn>
+        </div>
+      ) : nextAction?.action === "refresh" ? (
         <CanvasBtn theme={theme} onClick={onAction} disabled={compact}>
           {text(locale, "Refresh now", "立即刷新")}
         </CanvasBtn>
@@ -2656,7 +2717,7 @@ function HoldTable({
   holds: ActionableEvidenceLegalHoldRecord[];
   locale: Locale;
   emptyReason: EmptyReason;
-  onRelease: (hold: EvidenceLegalHoldRecord) => void;
+  onRelease: (hold: ActionableEvidenceLegalHoldRecord) => void;
 }) {
   return (
     <CanvasCard theme={theme}>
@@ -2746,7 +2807,7 @@ function ExceptionTable({
   exceptions: ActionableEvidenceDeletionExceptionRecord[];
   locale: Locale;
   emptyReason: EmptyReason;
-  onResolve: (exception: EvidenceDeletionExceptionRecord) => void;
+  onResolve: (exception: ActionableEvidenceDeletionExceptionRecord) => void;
 }) {
   return (
     <CanvasCard theme={theme}>
