@@ -481,6 +481,10 @@ function findAvailableActionDescriptor(
   return null;
 }
 
+function isActionEnabled(descriptor: ResourceActionDescriptor | null) {
+  return descriptor?.enabled === true;
+}
+
 function detectEmptyReason(error: string | null): PaymentsEmptyReason | null {
   if (!error) {
     return null;
@@ -822,6 +826,13 @@ export default function PaymentsPage() {
 
   async function handleGenerateInvoice(event: React.FormEvent) {
     event.preventDefault();
+    if (!isActionEnabled(generateInvoicesAction)) {
+      setError(
+        generateInvoicesAction?.disabledReasonCode ??
+          "generate_invoices unavailable",
+      );
+      return;
+    }
     setInvoicePending(true);
     setError(null);
     try {
@@ -846,6 +857,13 @@ export default function PaymentsPage() {
 
   async function handleGenerateStatements(event: React.FormEvent) {
     event.preventDefault();
+    if (!isActionEnabled(generateStatementsAction)) {
+      setError(
+        generateStatementsAction?.disabledReasonCode ??
+          "generate_driver_statements unavailable",
+      );
+      return;
+    }
     setStatementPending(true);
     setError(null);
     try {
@@ -862,6 +880,13 @@ export default function PaymentsPage() {
 
   async function handleCreateReconciliationIssue(event: React.FormEvent) {
     event.preventDefault();
+    if (!isActionEnabled(createIssueAction)) {
+      setError(
+        createIssueAction?.disabledReasonCode ??
+          "create_reconciliation_issue unavailable",
+      );
+      return;
+    }
     setIssueDraftPending(true);
     setError(null);
     try {
@@ -1185,16 +1210,105 @@ export default function PaymentsPage() {
   });
   const issueLinksFor = (issue: RuntimeIssueRecord) =>
     resolveCrossAppLinks(issue, [issueOpsLinkFor(issue)]);
-  const settlementContextIssues = sortedIssues.filter(
-    (issue) =>
-      issue.tenantId ||
-      issue.partnerId ||
-      issue.partnerProgramId ||
-      issue.sponsorReference ||
-      issue.mirrorOrderId ||
-      issue.externalOrderId ||
-      issue.linkedReconciliationJobId,
-  );
+  const matrixIssuesForRow = (row: SettlementMatrixRecord) =>
+    sortedIssues.filter((issue) => {
+      if (issue.channelKey !== row.channelKey) {
+        return false;
+      }
+      if (row.localLedgerMode === "shadow_only") {
+        return issue.forwardedFinanceContext != null;
+      }
+      return true;
+    });
+
+  const renderMatrixContextCell = (row: SettlementMatrixRecord) => {
+    const rowIssues = matrixIssuesForRow(row);
+    const primaryIssue = rowIssues[0] ?? null;
+    const rowLinks = primaryIssue ? issueLinksFor(primaryIssue) : [];
+
+    return (
+      <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
+        <CanvasDL
+          theme={theme}
+          cols={1}
+          items={[
+            {
+              k: t("payments.form.tenantId"),
+              v: primaryIssue?.tenantId ?? "—",
+              mono: true,
+            },
+            {
+              k: t("payments.reconciliation.partnerId"),
+              v: primaryIssue?.partnerId ?? "—",
+              mono: true,
+            },
+            {
+              k: t("payments.reconciliation.partnerProgramId"),
+              v: primaryIssue?.partnerProgramId ?? "—",
+              mono: true,
+            },
+            {
+              k: t("payments.reconciliation.sponsorReference"),
+              v: primaryIssue?.sponsorReference ?? "—",
+              mono: true,
+            },
+            {
+              k: t("payments.reconciliation.mirrorOrderId"),
+              v: primaryIssue?.mirrorOrderId ?? primaryIssue?.orderId ?? "—",
+              mono: true,
+            },
+            {
+              k: t("payments.reconciliation.externalOrderId"),
+              v: primaryIssue?.externalOrderId ?? "—",
+              mono: true,
+            },
+            {
+              k: t("payments.reconciliation.linkedJobId"),
+              v: primaryIssue?.linkedReconciliationJobId ?? "—",
+              mono: true,
+            },
+          ]}
+        />
+        <div style={{ display: "grid", gap: 6 }}>
+          {primaryIssue ? (
+            <a
+              href="#payments-reconciliation-queue"
+              style={{
+                color: theme.accent,
+                textDecoration: "none",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {copy.matrixContextIssueLabel}: {primaryIssue.issueId}
+            </a>
+          ) : (
+            <span style={{ color: theme.textMuted, fontSize: 12 }}>
+              {locale === "en"
+                ? "No linked reconciliation issue"
+                : "尚未連結 reconciliation issue"}
+            </span>
+          )}
+          {rowLinks.map((link) => (
+            <a
+              key={`${row.channelKey}-${link.targetApp}-${link.route}-inline`}
+              href={link.route}
+              target={link.openMode === "new_tab" ? "_blank" : undefined}
+              rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
+              style={{
+                color: theme.accent,
+                textDecoration: "none",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {link.label}
+            </a>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   const rootEmptyReason = detectEmptyReason(error);
   const issueEmptyConfig: EmptyStateConfig = {
@@ -1930,6 +2044,11 @@ export default function PaymentsPage() {
           </span>
         </div>
       ),
+    },
+    {
+      h: locale === "en" ? "Preserved identifiers" : "保留識別欄位",
+      w: 298,
+      r: (row) => renderMatrixContextCell(row),
     },
     {
       h: t("payments.matrix.col.ledger"),
@@ -2755,14 +2874,14 @@ export default function PaymentsPage() {
                         disabled={
                           issueDraftPending ||
                           !newIssue.summary.trim() ||
-                          createIssueAction?.enabled === false
+                          !isActionEnabled(createIssueAction)
                         }
                         style={nativeSubmitStyle(theme, {
                           primary: true,
                           disabled:
                             issueDraftPending ||
                             !newIssue.summary.trim() ||
-                            createIssueAction?.enabled === false,
+                            !isActionEnabled(createIssueAction),
                         })}
                       >
                         {issueDraftPending
@@ -2825,13 +2944,13 @@ export default function PaymentsPage() {
                       )}
                       disabled={
                         invoicePending ||
-                        generateInvoicesAction?.enabled === false
+                        !isActionEnabled(generateInvoicesAction)
                       }
                       style={nativeSubmitStyle(theme, {
                         primary: true,
                         disabled:
                           invoicePending ||
-                          generateInvoicesAction?.enabled === false,
+                          !isActionEnabled(generateInvoicesAction),
                       })}
                     >
                       {invoicePending
@@ -2870,13 +2989,13 @@ export default function PaymentsPage() {
                       )}
                       disabled={
                         statementPending ||
-                        generateStatementsAction?.enabled === false
+                        !isActionEnabled(generateStatementsAction)
                       }
                       style={nativeSubmitStyle(theme, {
                         primary: true,
                         disabled:
                           statementPending ||
-                          generateStatementsAction?.enabled === false,
+                          !isActionEnabled(generateStatementsAction),
                       })}
                     >
                       {statementPending
@@ -2912,175 +3031,31 @@ export default function PaymentsPage() {
               >
                 {sortedMatrix.length > 0 ? (
                   <>
+                    <div
+                      style={{
+                        padding: "16px 16px 0",
+                        display: "grid",
+                        gap: 4,
+                      }}
+                    >
+                      <div style={{ fontWeight: 600 }}>
+                        {copy.matrixContextTitle}
+                      </div>
+                      <div
+                        style={{
+                          color: theme.textMuted,
+                          fontSize: 12.5,
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {copy.matrixContextSubtitle}
+                      </div>
+                    </div>
                     <CanvasTable
                       theme={theme}
                       columns={settlementColumns}
                       rows={sortedMatrix as MatrixTableRow[]}
                     />
-                    {settlementContextIssues.length > 0 ? (
-                      <div
-                        style={{
-                          borderTop: `1px solid ${theme.border}`,
-                          padding: 16,
-                          display: "grid",
-                          gap: 12,
-                        }}
-                      >
-                        <div style={{ display: "grid", gap: 4 }}>
-                          <div style={{ fontWeight: 600 }}>
-                            {copy.matrixContextTitle}
-                          </div>
-                          <div
-                            style={{
-                              color: theme.textMuted,
-                              fontSize: 12.5,
-                              lineHeight: 1.5,
-                            }}
-                          >
-                            {copy.matrixContextSubtitle}
-                          </div>
-                        </div>
-
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns:
-                              "repeat(auto-fit, minmax(240px, 1fr))",
-                            gap: 12,
-                          }}
-                        >
-                          {settlementContextIssues.slice(0, 6).map((issue) => (
-                            <div
-                              key={`settlement-context-${issue.issueId}`}
-                              style={{
-                                border: `1px solid ${theme.border}`,
-                                background: theme.bgRaised,
-                                borderRadius: 10,
-                                padding: 12,
-                                display: "grid",
-                                gap: 10,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "space-between",
-                                  gap: 8,
-                                  flexWrap: "wrap",
-                                }}
-                              >
-                                <CanvasPill
-                                  theme={theme}
-                                  tone={issueStatusTone(issue.status)}
-                                  dot
-                                >
-                                  {issue.issueId}
-                                </CanvasPill>
-                                <CanvasPill theme={theme} tone="neutral">
-                                  {describeMatrixChannel(issue.channelKey)}
-                                </CanvasPill>
-                              </div>
-
-                              <CanvasDL
-                                theme={theme}
-                                cols={1}
-                                items={[
-                                  {
-                                    k: t("payments.form.tenantId"),
-                                    v: issue.tenantId ?? "—",
-                                    mono: true,
-                                  },
-                                  {
-                                    k: t("payments.reconciliation.partnerId"),
-                                    v: issue.partnerId ?? "—",
-                                    mono: true,
-                                  },
-                                  {
-                                    k: t(
-                                      "payments.reconciliation.partnerProgramId",
-                                    ),
-                                    v: issue.partnerProgramId ?? "—",
-                                    mono: true,
-                                  },
-                                  {
-                                    k: t(
-                                      "payments.reconciliation.sponsorReference",
-                                    ),
-                                    v: issue.sponsorReference ?? "—",
-                                    mono: true,
-                                  },
-                                  {
-                                    k: t(
-                                      "payments.reconciliation.mirrorOrderId",
-                                    ),
-                                    v:
-                                      issue.mirrorOrderId ??
-                                      issue.orderId ??
-                                      "—",
-                                    mono: true,
-                                  },
-                                  {
-                                    k: t(
-                                      "payments.reconciliation.externalOrderId",
-                                    ),
-                                    v: issue.externalOrderId ?? "—",
-                                    mono: true,
-                                  },
-                                  {
-                                    k: t("payments.reconciliation.linkedJobId"),
-                                    v: issue.linkedReconciliationJobId ?? "—",
-                                    mono: true,
-                                  },
-                                ]}
-                              />
-
-                              <div
-                                style={{
-                                  display: "flex",
-                                  gap: 10,
-                                  flexWrap: "wrap",
-                                  fontSize: 12,
-                                  fontWeight: 600,
-                                }}
-                              >
-                                <a
-                                  href="#payments-reconciliation-queue"
-                                  style={{
-                                    color: theme.accent,
-                                    textDecoration: "none",
-                                  }}
-                                >
-                                  {copy.matrixContextIssueLabel}
-                                </a>
-                                {issueLinksFor(issue).map((link) => (
-                                  <a
-                                    key={`${issue.issueId}-${link.targetApp}-${link.route}-matrix`}
-                                    href={link.route}
-                                    target={
-                                      link.openMode === "new_tab"
-                                        ? "_blank"
-                                        : undefined
-                                    }
-                                    rel={
-                                      link.openMode === "new_tab"
-                                        ? "noreferrer"
-                                        : undefined
-                                    }
-                                    style={{
-                                      color: theme.accent,
-                                      textDecoration: "none",
-                                    }}
-                                  >
-                                    {link.label}
-                                  </a>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
                   </>
                 ) : (
                   renderEmptyState(matrixEmptyConfig)
