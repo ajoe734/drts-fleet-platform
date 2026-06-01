@@ -404,6 +404,24 @@ function resolveResourceHref(link: CrossAppResourceLink) {
   return `${appBaseUrl}${link.route}`;
 }
 
+function withLinkSearchParams(
+  link: CrossAppResourceLink,
+  entries: Array<[string, string | null | undefined]>,
+) {
+  const [pathname, rawSearch = ""] = link.route.split("?");
+  const params = new URLSearchParams(rawSearch);
+
+  for (const [key, value] of entries) {
+    if (!value) {
+      continue;
+    }
+    params.set(key, value);
+  }
+
+  const nextSearch = params.toString();
+  return nextSearch ? `${pathname}?${nextSearch}` : pathname;
+}
+
 function formatThresholdInput(value: number | null | undefined) {
   return typeof value === "number" ? String(value) : "";
 }
@@ -501,7 +519,9 @@ function renderResourceLink(
   link: CrossAppResourceLink,
   key: string,
   suffix?: ReactNode,
+  hrefOverride?: string,
 ) {
+  const href = hrefOverride ?? resolveResourceHref(link);
   const content = (
     <>
       {link.label}
@@ -511,20 +531,14 @@ function renderResourceLink(
 
   if (isSameTabLink(link)) {
     return (
-      <Link key={key} href={resolveResourceHref(link)} style={linkStyle}>
+      <Link key={key} href={href} style={linkStyle}>
         {content}
       </Link>
     );
   }
 
   return (
-    <a
-      key={key}
-      href={resolveResourceHref(link)}
-      style={linkStyle}
-      target="_blank"
-      rel="noreferrer"
-    >
+    <a key={key} href={href} style={linkStyle} target="_blank" rel="noreferrer">
       {content}
     </a>
   );
@@ -644,6 +658,12 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
     lastRecalculationAt,
   );
   const pendingRecalculation = recalculationStatus === "queued";
+  const receiptAuditHref =
+    auditResourceLink && receiptState?.receipt.auditId
+      ? withLinkSearchParams(auditResourceLink, [
+          ["auditId", receiptState.receipt.auditId],
+        ])
+      : null;
   const summaryItems = [
     {
       k: "updatedAt",
@@ -1006,6 +1026,7 @@ export function SlaManager({ view, transportErrorMessage }: SlaManagerProps) {
                   · auditId={receiptState.receipt.auditId}
                   {isSameTabLink(auditResourceLink) ? " →" : " ↗"}
                 </>,
+                receiptAuditHref ?? undefined,
               )
             ) : (
               <div style={noteStyle}>
