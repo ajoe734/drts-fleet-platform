@@ -141,14 +141,6 @@ const pageStackStyle = {
   padding: 24,
 } satisfies CSSProperties;
 
-const utilityRowStyle = {
-  display: "flex",
-  gap: 8,
-  alignItems: "center",
-  justifyContent: "space-between",
-  flexWrap: "wrap",
-} satisfies CSSProperties;
-
 const utilityClusterStyle = {
   display: "flex",
   gap: 8,
@@ -159,10 +151,98 @@ const utilityClusterStyle = {
 const toolbarStyle = {
   display: "grid",
   gap: 12,
-  padding: 16,
+  padding: 18,
   border: `1px solid ${theme.border}`,
-  borderRadius: 10,
-  background: theme.surface,
+  borderRadius: 18,
+  background:
+    "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(244,247,251,0.94) 100%)",
+  boxShadow: "0 16px 40px rgba(15, 23, 42, 0.08)",
+} satisfies CSSProperties;
+
+const heroGridStyle = {
+  display: "grid",
+  gap: 14,
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+} satisfies CSSProperties;
+
+const heroPanelStyle = {
+  display: "grid",
+  gap: 18,
+  padding: 20,
+  borderRadius: 24,
+  border: `1px solid ${theme.border}`,
+  background:
+    "linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 41, 59, 0.94) 52%, rgba(67, 56, 202, 0.92) 100%)",
+  color: "#f8fafc",
+  boxShadow: "0 26px 60px rgba(15, 23, 42, 0.28)",
+} satisfies CSSProperties;
+
+const heroPanelTitleStyle = {
+  display: "grid",
+  gap: 8,
+} satisfies CSSProperties;
+
+const heroMetricGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+} satisfies CSSProperties;
+
+const heroMetricCardStyle = {
+  display: "grid",
+  gap: 6,
+  padding: "14px 16px",
+  borderRadius: 18,
+  background: "rgba(248, 250, 252, 0.1)",
+  border: "1px solid rgba(255, 255, 255, 0.16)",
+  backdropFilter: "blur(10px)",
+} satisfies CSSProperties;
+
+const heroAsideStyle = {
+  display: "grid",
+  gap: 12,
+} satisfies CSSProperties;
+
+const signalCardStyle = {
+  display: "grid",
+  gap: 10,
+  padding: 18,
+  borderRadius: 22,
+  border: `1px solid ${theme.border}`,
+  background:
+    "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%)",
+  boxShadow: "0 18px 40px rgba(15, 23, 42, 0.08)",
+} satisfies CSSProperties;
+
+const rosterCardStyle = {
+  display: "grid",
+  gap: 16,
+  padding: 18,
+  borderRadius: 24,
+  border: `1px solid ${theme.border}`,
+  background:
+    "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(244,247,251,0.96) 100%)",
+  boxShadow: "0 20px 44px rgba(15, 23, 42, 0.08)",
+} satisfies CSSProperties;
+
+const rosterHeaderStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "flex-start",
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const rosterHeaderTextStyle = {
+  display: "grid",
+  gap: 4,
+} satisfies CSSProperties;
+
+const rosterStatRowStyle = {
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
+  flexWrap: "wrap",
 } satisfies CSSProperties;
 
 const searchRowStyle = {
@@ -286,9 +366,19 @@ const emptyStateStyle = {
   display: "grid",
   justifyItems: "center",
   gap: 10,
-  padding: "32px 24px",
+  padding: "52px 24px",
   textAlign: "center",
   color: theme.textMuted,
+} satisfies CSSProperties;
+
+const emptyBadgeWrapStyle = {
+  width: 56,
+  height: 56,
+  display: "grid",
+  placeItems: "center",
+  borderRadius: 999,
+  background: theme.surfaceLo,
+  border: `1px solid ${theme.border}`,
 } satisfies CSSProperties;
 
 const toastViewportStyle = {
@@ -792,6 +882,12 @@ export default function TenantsPage() {
           rollbackBannerBody: (count: number) =>
             `${count} tenants are in rollback hold and need governance attention before the next promotion.`,
           readyGate: "Ready gate",
+          rosterTitle: "Lifecycle roster",
+          rosterSubtitle:
+            "Use backend-granted actions and deep links to move tenants through sandbox, pilot, and production without hard-coded role assumptions.",
+          cueTitle: "Watchlist",
+          cueBody:
+            "Production cutovers, rollback ownership, and cross-app follow-up should all stay visible from the same roster.",
           createTitle: "Create tenant",
           createSubtitle:
             "Bootstrap the tenant identity, modules, quota envelope, and onboarding contact.",
@@ -849,6 +945,14 @@ export default function TenantsPage() {
               hint: "Cross-app operational views may still have more context while this source recovers.",
               tone: "warn" as CanvasTone,
               icon: "health" as const,
+            },
+            driver_not_eligible: {
+              badge: "Not eligible",
+              title: "This actor cannot operate the current tenant slice",
+              body: "The roster response was authority-scoped to a driver-specific eligibility outcome rather than a readable tenant list.",
+              hint: "Treat this as a distinct contract state rather than a generic empty list.",
+              tone: "danger" as CanvasTone,
+              icon: "warn" as const,
             },
             filtered_empty: {
               badge: "No filter matches",
@@ -937,6 +1041,12 @@ export default function TenantsPage() {
           rollbackBannerBody: (count: number) =>
             `${count} 個租戶目前處於 rollback hold，需要先完成治理判讀後才能再次推進。`,
           readyGate: "Ready gate",
+          rosterTitle: "Lifecycle roster",
+          rosterSubtitle:
+            "使用 backend 提供的 actions 與 cross-app deep links 推進 tenant，避免把角色權限硬寫在前端。",
+          cueTitle: "Watchlist",
+          cueBody:
+            "Production cutover、rollback owner 與 cross-app follow-up 應該在同一張名單裡持續可見。",
           createTitle: "建立租戶",
           createSubtitle: "補齊租戶身份、模組、配額與 onboarding 聯絡資訊。",
           clearFilters: "清除篩選",
@@ -993,6 +1103,14 @@ export default function TenantsPage() {
               hint: "可先改走 cross-app operational view 取得更多上下文。",
               tone: "warn" as CanvasTone,
               icon: "health" as const,
+            },
+            driver_not_eligible: {
+              badge: "Not eligible",
+              title: "目前 actor 無法操作這組 tenant slice",
+              body: "這次回應是 driver-eligibility 類型的 authority scope，而不是可讀的 tenant roster。",
+              hint: "這是獨立 contract state，不應被當成一般空列表處理。",
+              tone: "danger" as CanvasTone,
+              icon: "warn" as const,
             },
             filtered_empty: {
               badge: "No filter matches",
@@ -1973,120 +2091,236 @@ export default function TenantsPage() {
           </div>
         ) : null}
 
-        <div style={utilityRowStyle}>
-          <div style={utilityClusterStyle}>
-            <CanvasPill theme={theme} tone="neutral">
-              {copy.refreshTier}
-            </CanvasPill>
-            <CanvasPill
-              theme={theme}
-              tone={readyGateCount > 0 ? "accent" : "neutral"}
-            >
-              {copy.readyGate} {formatLocaleNumber(locale, readyGateCount)}
-            </CanvasPill>
-            {freshness ? (
-              <CanvasPill
-                theme={theme}
-                tone={freshness.dataFreshness === "stale" ? "warn" : "neutral"}
-              >
-                {
-                  copy.freshness[
-                    freshness.dataFreshness as keyof typeof copy.freshness
-                  ]
-                }{" "}
-                · {copy.source[freshness.source as keyof typeof copy.source]}
-              </CanvasPill>
-            ) : null}
-          </div>
-          {loadState?.requestId ? (
-            <span style={monoStyle}>
-              {copy.requestId}: {truncate(loadState.requestId, 18)}
-            </span>
-          ) : null}
-        </div>
-
-        <div style={toolbarStyle}>
-          <div style={searchRowStyle}>
-            <div style={searchWrapStyle}>
-              <CanvasIcon name="search" size={14} style={searchIconStyle} />
-              <input
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder={copy.searchPlaceholder}
-                style={searchInputStyle}
-              />
+        <div style={heroGridStyle}>
+          <section style={heroPanelStyle}>
+            <div style={heroPanelTitleStyle}>
+              <div style={utilityClusterStyle}>
+                <CanvasPill theme={theme} tone="accent">
+                  {copy.refreshTier}
+                </CanvasPill>
+                <CanvasPill
+                  theme={theme}
+                  tone={readyGateCount > 0 ? "accent" : "neutral"}
+                >
+                  {copy.readyGate} {formatLocaleNumber(locale, readyGateCount)}
+                </CanvasPill>
+                {freshness ? (
+                  <CanvasPill
+                    theme={theme}
+                    tone={
+                      freshness.dataFreshness === "stale" ? "warn" : "neutral"
+                    }
+                  >
+                    {
+                      copy.freshness[
+                        freshness.dataFreshness as keyof typeof copy.freshness
+                      ]
+                    }{" "}
+                    ·{" "}
+                    {copy.source[freshness.source as keyof typeof copy.source]}
+                  </CanvasPill>
+                ) : null}
+              </div>
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1 }}>
+                  {copy.rosterTitle}
+                </div>
+                <div
+                  style={{
+                    color: "rgba(226, 232, 240, 0.86)",
+                    lineHeight: 1.6,
+                    maxWidth: 760,
+                  }}
+                >
+                  {copy.rosterSubtitle}
+                </div>
+              </div>
             </div>
-            <CanvasPill theme={theme} tone="neutral">
-              {copy.searchSummary(filteredTenants.length)}
-            </CanvasPill>
-            {freshness ? (
-              <CanvasPill theme={theme} tone="neutral">
-                {copy.freshnessAt} · {formatDateTime(freshness.generatedAt)}
-              </CanvasPill>
-            ) : null}
-          </div>
 
-          <div style={filterRowStyle}>
-            <span style={subtleLabelStyle}>{copy.filters.stage}</span>
-            {(
-              [
-                ["all", copy.filters.allStages, stageCounts.all],
-                ["production", copy.tabs.production, stageCounts.production],
-                ["pilot", copy.tabs.pilot, stageCounts.pilot],
-                ["sandbox", copy.tabs.sandbox, stageCounts.sandbox],
-                ["hold", copy.tabs.hold, stageCounts.hold],
-              ] as const
-            ).map(([value, label, count]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setStageFilter(value)}
-                style={filterButtonStyle}
-              >
-                <CanvasPill
-                  theme={theme}
-                  tone={stageFilter === value ? "accent" : "neutral"}
-                  dot={value !== "all"}
-                >
-                  {label} {formatLocaleNumber(locale, count)}
-                </CanvasPill>
-              </button>
-            ))}
-          </div>
+            <div style={heroMetricGridStyle}>
+              {[
+                {
+                  label: locale === "en" ? "Visible tenants" : "目前可見租戶",
+                  value: formatLocaleNumber(locale, filteredTenants.length),
+                  note: copy.searchSummary(filteredTenants.length),
+                },
+                {
+                  label:
+                    locale === "en" ? "Production live" : "Production live",
+                  value: formatLocaleNumber(locale, stageCounts.production),
+                  note:
+                    locale === "en"
+                      ? `${formatLocaleNumber(locale, statusCounts.active)} active lifecycle records`
+                      : `${formatLocaleNumber(locale, statusCounts.active)} 筆 active lifecycle`,
+                },
+                {
+                  label: locale === "en" ? "Ready gates" : "Ready gates",
+                  value: formatLocaleNumber(locale, readyGateCount),
+                  note:
+                    locale === "en"
+                      ? "Promotion candidates waiting for approval"
+                      : "等待核准推進的 promotion candidates",
+                },
+                {
+                  label: locale === "en" ? "Rollback holds" : "Rollback holds",
+                  value: formatLocaleNumber(locale, rollbackHoldCount),
+                  note:
+                    locale === "en"
+                      ? "Urgent lifecycle interventions on this roster"
+                      : "名單中的高優先治理介入項",
+                },
+              ].map((metric) => (
+                <div key={metric.label} style={heroMetricCardStyle}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                      color: "rgba(191, 219, 254, 0.88)",
+                    }}
+                  >
+                    {metric.label}
+                  </span>
+                  <span style={{ fontSize: 26, fontWeight: 800 }}>
+                    {metric.value}
+                  </span>
+                  <span
+                    style={{
+                      color: "rgba(226, 232, 240, 0.8)",
+                      fontSize: 12,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {metric.note}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
 
-          <div style={filterRowStyle}>
-            <span style={subtleLabelStyle}>{copy.filters.status}</span>
-            {(
-              [
-                ["all", copy.filters.allStatuses, statusCounts.all],
-                ["draft", "draft", statusCounts.draft],
-                ["active", "active", statusCounts.active],
-                ["paused", "paused", statusCounts.paused],
-                ["rollback_hold", "rollback_hold", statusCounts.rollback_hold],
-              ] as const
-            ).map(([value, label, count]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setStatusFilter(value)}
-                style={filterButtonStyle}
-              >
-                <CanvasPill
-                  theme={theme}
-                  tone={
-                    statusFilter === value
-                      ? value === "all"
-                        ? "accent"
-                        : statusTone(value)
-                      : "neutral"
-                  }
-                  dot={value !== "all"}
-                >
-                  {label} {formatLocaleNumber(locale, count)}
+          <aside style={heroAsideStyle}>
+            <section style={signalCardStyle}>
+              <div style={{ display: "grid", gap: 4 }}>
+                <span style={{ color: theme.text, fontWeight: 700 }}>
+                  {copy.cueTitle}
+                </span>
+                <span style={{ ...subtleLabelStyle, color: theme.textMuted }}>
+                  {copy.cueBody}
+                </span>
+              </div>
+              <div style={rosterStatRowStyle}>
+                <CanvasPill theme={theme} tone="warn">
+                  {locale === "en" ? "Rollback prep" : "Rollback prep"}{" "}
+                  {formatLocaleNumber(
+                    locale,
+                    tenants.filter((tenant) => !tenant.rollout.rollbackPrepared)
+                      .length,
+                  )}
                 </CanvasPill>
-              </button>
-            ))}
-          </div>
+                <CanvasPill theme={theme} tone="neutral">
+                  {locale === "en" ? "Draft tenants" : "Draft tenants"}{" "}
+                  {formatLocaleNumber(locale, statusCounts.draft)}
+                </CanvasPill>
+              </div>
+              {freshness ? (
+                <span style={monoStyle}>
+                  {copy.freshnessAt}: {formatDateTime(freshness.generatedAt)}
+                </span>
+              ) : null}
+              {loadState?.requestId ? (
+                <span style={monoStyle}>
+                  {copy.requestId}: {truncate(loadState.requestId, 18)}
+                </span>
+              ) : null}
+            </section>
+
+            <section style={toolbarStyle}>
+              <div style={searchRowStyle}>
+                <div style={searchWrapStyle}>
+                  <CanvasIcon name="search" size={14} style={searchIconStyle} />
+                  <input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder={copy.searchPlaceholder}
+                    style={searchInputStyle}
+                  />
+                </div>
+                <CanvasPill theme={theme} tone="neutral">
+                  {copy.searchSummary(filteredTenants.length)}
+                </CanvasPill>
+              </div>
+
+              <div style={filterRowStyle}>
+                <span style={subtleLabelStyle}>{copy.filters.stage}</span>
+                {(
+                  [
+                    ["all", copy.filters.allStages, stageCounts.all],
+                    [
+                      "production",
+                      copy.tabs.production,
+                      stageCounts.production,
+                    ],
+                    ["pilot", copy.tabs.pilot, stageCounts.pilot],
+                    ["sandbox", copy.tabs.sandbox, stageCounts.sandbox],
+                    ["hold", copy.tabs.hold, stageCounts.hold],
+                  ] as const
+                ).map(([value, label, count]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setStageFilter(value)}
+                    style={filterButtonStyle}
+                  >
+                    <CanvasPill
+                      theme={theme}
+                      tone={stageFilter === value ? "accent" : "neutral"}
+                      dot={value !== "all"}
+                    >
+                      {label} {formatLocaleNumber(locale, count)}
+                    </CanvasPill>
+                  </button>
+                ))}
+              </div>
+
+              <div style={filterRowStyle}>
+                <span style={subtleLabelStyle}>{copy.filters.status}</span>
+                {(
+                  [
+                    ["all", copy.filters.allStatuses, statusCounts.all],
+                    ["draft", "draft", statusCounts.draft],
+                    ["active", "active", statusCounts.active],
+                    ["paused", "paused", statusCounts.paused],
+                    [
+                      "rollback_hold",
+                      "rollback_hold",
+                      statusCounts.rollback_hold,
+                    ],
+                  ] as const
+                ).map(([value, label, count]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setStatusFilter(value)}
+                    style={filterButtonStyle}
+                  >
+                    <CanvasPill
+                      theme={theme}
+                      tone={
+                        statusFilter === value
+                          ? value === "all"
+                            ? "accent"
+                            : statusTone(value)
+                          : "neutral"
+                      }
+                      dot={value !== "all"}
+                    >
+                      {label} {formatLocaleNumber(locale, count)}
+                    </CanvasPill>
+                  </button>
+                ))}
+              </div>
+            </section>
+          </aside>
         </div>
 
         {error ? (
@@ -2330,7 +2564,26 @@ export default function TenantsPage() {
           </CanvasCard>
         ) : null}
 
-        <CanvasCard theme={theme} padding={0}>
+        <section style={rosterCardStyle}>
+          <div style={rosterHeaderStyle}>
+            <div style={rosterHeaderTextStyle}>
+              <span style={{ color: theme.text, fontWeight: 700 }}>
+                {copy.rosterTitle}
+              </span>
+              <span style={subtleLabelStyle}>{copy.rosterSubtitle}</span>
+            </div>
+            <div style={rosterStatRowStyle}>
+              <CanvasPill theme={theme} tone="neutral">
+                {copy.searchSummary(filteredTenants.length)}
+              </CanvasPill>
+              {freshness ? (
+                <CanvasPill theme={theme} tone="neutral">
+                  {copy.freshnessAt} · {formatDateTime(freshness.generatedAt)}
+                </CanvasPill>
+              ) : null}
+            </div>
+          </div>
+
           {filteredTenants.length > 0 ? (
             <CanvasTable<TenantRow>
               theme={theme}
@@ -2339,7 +2592,9 @@ export default function TenantsPage() {
             />
           ) : (
             <div style={emptyStateStyle}>
-              <CanvasIcon name={emptyVisual.icon} size={24} />
+              <div style={emptyBadgeWrapStyle}>
+                <CanvasIcon name={emptyVisual.icon} size={24} />
+              </div>
               <CanvasPill theme={theme} tone={emptyVisual.tone}>
                 {emptyVisual.badge}
               </CanvasPill>
@@ -2390,7 +2645,7 @@ export default function TenantsPage() {
               ) : null}
             </div>
           )}
-        </CanvasCard>
+        </section>
       </div>
       {confirmIntent ? (
         <div style={modalViewportStyle}>
