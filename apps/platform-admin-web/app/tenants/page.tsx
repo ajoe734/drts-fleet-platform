@@ -73,6 +73,11 @@ type NormalizedTenantList = {
   refreshTier: RefreshTier;
 };
 
+type PendingTenantAction = {
+  tenant: TenantListItem;
+  action: ResourceActionDescriptor;
+};
+
 const DEFAULT_CREATE_ACTION: ResourceActionDescriptor = {
   action: "create",
   enabled: true,
@@ -246,6 +251,41 @@ const loadingStateStyle: CSSProperties = {
 const createPanelStyle: CSSProperties = {
   display: "grid",
   gap: 14,
+};
+
+const modalBackdropStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  display: "grid",
+  placeItems: "center",
+  padding: 24,
+  background: "rgba(15, 23, 42, 0.56)",
+  zIndex: 1000,
+};
+
+const modalCardStyle: CSSProperties = {
+  width: "min(560px, 100%)",
+  display: "grid",
+  gap: 16,
+  padding: 24,
+  borderRadius: 20,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  boxShadow: "0 24px 64px rgba(15, 23, 42, 0.24)",
+};
+
+const modalFooterStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
+const reasonTextAreaStyle: CSSProperties = {
+  ...inputStyle,
+  minHeight: 112,
+  resize: "vertical",
+  lineHeight: 1.5,
 };
 
 const createGridStyle: CSSProperties = {
@@ -656,6 +696,50 @@ function getFilterTone(active: boolean, stage: TenantStageFilter): CanvasTone {
   return stage === "rollback_hold" ? "danger" : "accent";
 }
 
+function getActionDialogCopy(
+  locale: string,
+  tenant: TenantListItem,
+  action: ResourceActionDescriptor,
+) {
+  const label = getActionLabel(locale, action.action);
+  return {
+    riskLabel:
+      action.riskLevel === "high"
+        ? locale === "en"
+          ? "High risk"
+          : "高風險"
+        : locale === "en"
+          ? "Medium risk"
+          : "中風險",
+    title:
+      locale === "en"
+        ? `${label} for ${tenant.name}`
+        : `對 ${tenant.name} 執行「${label}」`,
+    body:
+      action.riskLevel === "high"
+        ? locale === "en"
+          ? "This action changes live tenant governance state and requires an explicit confirmation trail."
+          : "這個動作會改變正式租戶治理狀態，必須留下明確的確認軌跡。"
+        : locale === "en"
+          ? "Review the tenant posture before continuing."
+          : "請先確認租戶目前的治理狀態，再繼續執行。",
+    reasonLabel: locale === "en" ? "Reason for audit trail" : "提供稽核原因",
+    reasonPlaceholder:
+      locale === "en"
+        ? "Explain why this governance change is needed."
+        : "請說明為何需要這次治理變更。",
+    confirm:
+      action.riskLevel === "high"
+        ? locale === "en"
+          ? "Confirm action"
+          : "確認執行"
+        : locale === "en"
+          ? "Continue"
+          : "繼續",
+    cancel: locale === "en" ? "Cancel" : "取消",
+  };
+}
+
 export default function TenantsPage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -677,6 +761,9 @@ export default function TenantsPage() {
   const [createForm, setCreateForm] =
     useState<TenantFormState>(EMPTY_TENANT_FORM);
   const [mutatingTenantId, setMutatingTenantId] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] =
+    useState<PendingTenantAction | null>(null);
+  const [actionReason, setActionReason] = useState("");
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
 
   const copy =
@@ -714,10 +801,10 @@ export default function TenantsPage() {
           },
           filters: {
             all: "All",
-            sandbox: "sandbox",
-            pilot: "pilot",
-            production: "production",
-            rollback_hold: "rollback_hold",
+            sandbox: "Sandbox",
+            pilot: "Pilot",
+            production: "Production",
+            rollback_hold: "Rollback hold",
           },
           statuses: {
             all: "All statuses",
@@ -776,10 +863,10 @@ export default function TenantsPage() {
           },
           filters: {
             all: "全部",
-            sandbox: "sandbox",
-            pilot: "pilot",
-            production: "production",
-            rollback_hold: "rollback_hold",
+            sandbox: "Sandbox",
+            pilot: "Pilot",
+            production: "Production",
+            rollback_hold: "Rollback hold",
           },
           statuses: {
             all: "全部狀態",
@@ -906,52 +993,34 @@ export default function TenantsPage() {
         return;
       }
 
-      if (action.riskLevel !== "low") {
-        const confirmed = window.confirm(
-          locale === "en"
-            ? `Run "${getActionLabel(locale, action.action)}" for ${tenant.name}?`
-            : `要對 ${tenant.name} 執行「${getActionLabel(locale, action.action)}」嗎？`,
-        );
-        if (!confirmed) {
-          return;
+      if (action.riskLevel === "low") {
+        setMutatingTenantId(tenant.id);
+        setError(null);
+        try {
+          if (action.action === "activate") {
+            await client.activateTenant(tenant.id);
+          } else if (action.action === "suspend") {
+            await client.suspendTenant(tenant.id);
+          } else if (action.action === "rollback_hold") {
+            await client.rollbackHoldTenant(tenant.id);
+          } else {
+            return;
+          }
+          await loadTenants("manual");
+        } catch (actionError) {
+          setError(
+            actionError instanceof Error
+              ? `${copy.actionFailed}: ${actionError.message}`
+              : copy.actionFailed,
+          );
+        } finally {
+          setMutatingTenantId(null);
         }
+        return;
       }
 
-      let lifecycleCommand: PlatformTenantLifecycleActionCommand | undefined;
-      if (action.requiresReason) {
-        const reason = window.prompt(
-          locale === "en"
-            ? "Reason is required for this action."
-            : "此動作需要輸入原因。",
-        );
-        lifecycleCommand = getReasonCommand(reason);
-        if (!lifecycleCommand) {
-          return;
-        }
-      }
-
-      setMutatingTenantId(tenant.id);
-      setError(null);
-      try {
-        if (action.action === "activate") {
-          await client.activateTenant(tenant.id, lifecycleCommand);
-        } else if (action.action === "suspend") {
-          await client.suspendTenant(tenant.id, lifecycleCommand);
-        } else if (action.action === "rollback_hold") {
-          await client.rollbackHoldTenant(tenant.id, lifecycleCommand);
-        } else {
-          return;
-        }
-        await loadTenants("manual");
-      } catch (actionError) {
-        setError(
-          actionError instanceof Error
-            ? `${copy.actionFailed}: ${actionError.message}`
-            : copy.actionFailed,
-        );
-      } finally {
-        setMutatingTenantId(null);
-      }
+      setActionReason("");
+      setPendingAction({ tenant, action });
     },
     [client, copy.actionFailed, loadTenants, locale],
   );
@@ -980,6 +1049,56 @@ export default function TenantsPage() {
     },
     [loadTenants],
   );
+
+  const handleActionDialogClose = useCallback(() => {
+    if (mutatingTenantId) {
+      return;
+    }
+    setPendingAction(null);
+    setActionReason("");
+  }, [mutatingTenantId]);
+
+  const handleActionDialogConfirm = useCallback(async () => {
+    if (!pendingAction) {
+      return;
+    }
+
+    const lifecycleCommand: PlatformTenantLifecycleActionCommand | undefined =
+      pendingAction.action.requiresReason
+        ? getReasonCommand(actionReason)
+        : undefined;
+    if (pendingAction.action.requiresReason && !lifecycleCommand) {
+      return;
+    }
+
+    setMutatingTenantId(pendingAction.tenant.id);
+    setError(null);
+    try {
+      if (pendingAction.action.action === "activate") {
+        await client.activateTenant(pendingAction.tenant.id, lifecycleCommand);
+      } else if (pendingAction.action.action === "suspend") {
+        await client.suspendTenant(pendingAction.tenant.id, lifecycleCommand);
+      } else if (pendingAction.action.action === "rollback_hold") {
+        await client.rollbackHoldTenant(
+          pendingAction.tenant.id,
+          lifecycleCommand,
+        );
+      } else {
+        return;
+      }
+      setPendingAction(null);
+      setActionReason("");
+      await loadTenants("manual");
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error
+          ? `${copy.actionFailed}: ${actionError.message}`
+          : copy.actionFailed,
+      );
+    } finally {
+      setMutatingTenantId(null);
+    }
+  }, [actionReason, client, copy.actionFailed, loadTenants, pendingAction]);
 
   const handleCreate = useCallback(
     async (event: React.FormEvent) => {
@@ -1324,6 +1443,11 @@ export default function TenantsPage() {
   const effectiveEmptyState = emptyState
     ? getEmptyStateCopy(locale, emptyState.reason, tenantList.items.length)
     : null;
+  const pendingActionSubmitDisabled = pendingAction
+    ? mutatingTenantId === pendingAction.tenant.id ||
+      (pendingAction.action.requiresReason === true &&
+        actionReason.trim().length === 0)
+    : false;
 
   return (
     <CanvasShell
@@ -1405,7 +1529,10 @@ export default function TenantsPage() {
                     tone={getFilterTone(stageFilter === value, value)}
                     dot={value !== "all"}
                   >
-                    {label} {formatLocaleNumber(locale, count)}
+                    {value === "all"
+                      ? label
+                      : formatPlatformCodeLabel(locale, value)}{" "}
+                    {formatLocaleNumber(locale, count)}
                   </CanvasPill>
                 </button>
               ))}
@@ -1442,11 +1569,17 @@ export default function TenantsPage() {
                   style={inputStyle}
                 >
                   <option value="all">{copy.filters.all}</option>
-                  <option value="sandbox">{copy.filters.sandbox}</option>
-                  <option value="pilot">{copy.filters.pilot}</option>
-                  <option value="production">{copy.filters.production}</option>
+                  <option value="sandbox">
+                    {formatPlatformCodeLabel(locale, "sandbox")}
+                  </option>
+                  <option value="pilot">
+                    {formatPlatformCodeLabel(locale, "pilot")}
+                  </option>
+                  <option value="production">
+                    {formatPlatformCodeLabel(locale, "production")}
+                  </option>
                   <option value="rollback_hold">
-                    {copy.filters.rollback_hold}
+                    {formatPlatformCodeLabel(locale, "rollback_hold")}
                   </option>
                 </select>
               </CanvasField>
@@ -1459,11 +1592,17 @@ export default function TenantsPage() {
                   style={inputStyle}
                 >
                   <option value="all">{copy.statuses.all}</option>
-                  <option value="draft">{copy.statuses.draft}</option>
-                  <option value="active">{copy.statuses.active}</option>
-                  <option value="paused">{copy.statuses.paused}</option>
+                  <option value="draft">
+                    {formatPlatformCodeLabel(locale, "draft")}
+                  </option>
+                  <option value="active">
+                    {formatPlatformCodeLabel(locale, "active")}
+                  </option>
+                  <option value="paused">
+                    {formatPlatformCodeLabel(locale, "paused")}
+                  </option>
                   <option value="rollback_hold">
-                    {copy.statuses.rollback_hold}
+                    {formatPlatformCodeLabel(locale, "rollback_hold")}
                   </option>
                 </select>
               </CanvasField>
@@ -1481,7 +1620,8 @@ export default function TenantsPage() {
                 {formatLocaleNumber(locale, tenantList.items.length)}
               </CanvasPill>
               <CanvasPill theme={th} tone={statusTone("rollback_hold")}>
-                rollback_hold {formatLocaleNumber(locale, counts.rollback_hold)}
+                {formatPlatformCodeLabel(locale, "rollback_hold")}{" "}
+                {formatLocaleNumber(locale, counts.rollback_hold)}
               </CanvasPill>
             </div>
           </div>
@@ -1494,6 +1634,16 @@ export default function TenantsPage() {
             icon="warn"
             title={copy.loadErrorTitle}
             body={error}
+          />
+        ) : null}
+
+        {counts.rollback_hold > 0 ? (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="warn"
+            title={copy.rollbackTitle}
+            body={copy.rollbackBanner(counts.rollback_hold)}
           />
         ) : null}
 
@@ -1548,8 +1698,12 @@ export default function TenantsPage() {
                       }
                       style={inputStyle}
                     >
-                      <option value="active">{copy.statuses.active}</option>
-                      <option value="inactive">{copy.statuses.paused}</option>
+                      <option value="active">
+                        {formatPlatformCodeLabel(locale, "active")}
+                      </option>
+                      <option value="inactive">
+                        {formatPlatformCodeLabel(locale, "inactive")}
+                      </option>
                     </select>
                   </CanvasField>
                 </div>
@@ -1777,7 +1931,9 @@ export default function TenantsPage() {
           ) : effectiveEmptyState ? (
             <div style={emptyStateWrapStyle}>
               <CanvasPill theme={th} tone={effectiveEmptyState.tone}>
-                {emptyState?.reason}
+                {emptyState?.reason
+                  ? formatPlatformCodeLabel(locale, emptyState.reason)
+                  : ""}
               </CanvasPill>
               <div style={{ display: "grid", gap: 4 }}>
                 <strong>{effectiveEmptyState.title}</strong>
@@ -1805,6 +1961,134 @@ export default function TenantsPage() {
           ) : null}
         </CanvasCard>
       </div>
+
+      {pendingAction ? (
+        <div style={modalBackdropStyle} role="presentation">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tenant-action-dialog-title"
+            style={modalCardStyle}
+          >
+            <div style={{ display: "grid", gap: 6 }}>
+              <CanvasPill
+                theme={th}
+                tone={
+                  pendingAction.action.riskLevel === "high" ? "danger" : "warn"
+                }
+              >
+                {
+                  getActionDialogCopy(
+                    locale,
+                    pendingAction.tenant,
+                    pendingAction.action,
+                  ).riskLabel
+                }
+              </CanvasPill>
+              <strong id="tenant-action-dialog-title">
+                {
+                  getActionDialogCopy(
+                    locale,
+                    pendingAction.tenant,
+                    pendingAction.action,
+                  ).title
+                }
+              </strong>
+              <span style={secondaryTextStyle}>
+                {
+                  getActionDialogCopy(
+                    locale,
+                    pendingAction.tenant,
+                    pendingAction.action,
+                  ).body
+                }
+              </span>
+            </div>
+
+            <CanvasDL
+              theme={th}
+              cols={1}
+              items={[
+                {
+                  k: locale === "en" ? "Tenant" : "租戶",
+                  v: pendingAction.tenant.name,
+                },
+                {
+                  k: locale === "en" ? "Action" : "動作",
+                  v: getActionLabel(locale, pendingAction.action.action),
+                },
+                {
+                  k: locale === "en" ? "Current status" : "目前狀態",
+                  v: formatPlatformCodeLabel(
+                    locale,
+                    pendingAction.tenant.status,
+                  ),
+                },
+              ]}
+            />
+
+            {pendingAction.action.requiresReason ? (
+              <CanvasField
+                theme={th}
+                label={
+                  getActionDialogCopy(
+                    locale,
+                    pendingAction.tenant,
+                    pendingAction.action,
+                  ).reasonLabel
+                }
+              >
+                <textarea
+                  value={actionReason}
+                  onChange={(event) => setActionReason(event.target.value)}
+                  placeholder={
+                    getActionDialogCopy(
+                      locale,
+                      pendingAction.tenant,
+                      pendingAction.action,
+                    ).reasonPlaceholder
+                  }
+                  style={reasonTextAreaStyle}
+                />
+              </CanvasField>
+            ) : null}
+
+            <div style={modalFooterStyle}>
+              <CanvasBtn
+                theme={th}
+                variant="secondary"
+                onClick={handleActionDialogClose}
+                disabled={mutatingTenantId === pendingAction.tenant.id}
+              >
+                {
+                  getActionDialogCopy(
+                    locale,
+                    pendingAction.tenant,
+                    pendingAction.action,
+                  ).cancel
+                }
+              </CanvasBtn>
+              <button
+                type="button"
+                onClick={() => void handleActionDialogConfirm()}
+                disabled={pendingActionSubmitDisabled}
+                style={actionPillButtonStyle(
+                  actionTone(pendingAction.action),
+                  pendingActionSubmitDisabled,
+                )}
+              >
+                {
+                  getActionDialogCopy(
+                    locale,
+                    pendingAction.tenant,
+                    pendingAction.action,
+                  ).confirm
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </CanvasShell>
   );
 }
