@@ -311,7 +311,13 @@ type EmptyStateModel = {
   title: string;
   description: string;
   tone: "neutral" | "warning" | "success" | "tenant";
-  actions?: ResourceActionDescriptor[];
+  primaryAction?: ResourceActionDescriptor | null;
+  supportActions?: Array<
+    | "open_integration_governance"
+    | "refresh_page"
+    | "open_platform_health"
+    | "clear_endpoint_filter"
+  >;
 };
 
 type WebhooksPageData = {
@@ -532,65 +538,16 @@ function resolveCrossAppHref(link: CrossAppResourceLink) {
 function getEndpointActions(
   endpoint: ActionableEndpoint,
 ): ResourceActionDescriptor[] {
-  if (endpoint.availableActions && endpoint.availableActions.length > 0) {
-    return endpoint.availableActions;
-  }
-
-  return [
-    {
-      action: "view_delivery_log",
-      enabled: true,
-      riskLevel: "low",
-    },
-    {
-      action: "update_endpoint",
-      enabled: true,
-      riskLevel: "medium",
-    },
-    {
-      action: "disable_endpoint",
-      enabled: endpoint.status !== "disabled",
-      disabledReasonCode:
-        endpoint.status === "disabled" ? "already_disabled" : undefined,
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "delete_endpoint",
-      enabled: true,
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "rotate_secret",
-      enabled: true,
-      requiresReason: true,
-      riskLevel: "high",
-    },
-    {
-      action: "retry_failed_delivery",
-      enabled: false,
-      disabledReasonCode: "engine_auto_retry_only",
-      riskLevel: "medium",
-    },
-  ];
+  return endpoint.availableActions ?? [];
 }
 
 function getPageActions(
-  engineActive: boolean,
   endpoints: ActionableEndpoint[],
   readiness: TenantIntegrationReadinessSummary | null,
 ): ResourceActionDescriptor[] {
   const uniqueActions = new Map<string, ResourceActionDescriptor>();
   const webhookReadiness =
     readiness?.items.find((item) => item.subSystem === "webhooks") ?? null;
-  const fallbackCreateAction: ResourceActionDescriptor =
-    webhookReadiness?.nextAction ?? {
-      action: "create_endpoint",
-      enabled: engineActive,
-      disabledReasonCode: engineActive ? undefined : "engine_not_provisioned",
-      riskLevel: "medium",
-    };
 
   for (const endpoint of endpoints) {
     for (const descriptor of endpoint.availableActions ?? []) {
@@ -600,29 +557,17 @@ function getPageActions(
     }
   }
 
-  if (uniqueActions.size > 0) {
-    if (!uniqueActions.has("payload_schema")) {
-      uniqueActions.set("payload_schema", {
-        action: "payload_schema",
-        enabled: true,
-        riskLevel: "low",
-      });
-    }
-    if (!uniqueActions.has("create_endpoint")) {
-      uniqueActions.set("create_endpoint", fallbackCreateAction);
-    }
-
-    return Array.from(uniqueActions.values());
+  if (
+    webhookReadiness?.nextAction &&
+    !uniqueActions.has(webhookReadiness.nextAction.action)
+  ) {
+    uniqueActions.set(
+      webhookReadiness.nextAction.action,
+      webhookReadiness.nextAction,
+    );
   }
 
-  return [
-    {
-      action: "payload_schema",
-      enabled: true,
-      riskLevel: "low",
-    },
-    fallbackCreateAction,
-  ];
+  return Array.from(uniqueActions.values());
 }
 
 function getActionDescriptor(
@@ -644,7 +589,10 @@ function formatRetryPolicy(
   return `${retryPolicy.maxAttempts} attempts · base ${retryPolicy.initialBackoffSeconds}s × ${retryPolicy.backoffMultiplier} · max ${retryPolicy.maxBackoffSeconds}s`;
 }
 
-function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
+function getEmptyStateModel(
+  reason: EmptyReason,
+  createEndpointAction: ResourceActionDescriptor | null,
+): EmptyStateModel {
   switch (reason) {
     case "not_provisioned":
       return {
@@ -653,13 +601,7 @@ function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
         description:
           "此租戶目前沒有可用的 webhook engine。系統不會回填假端點或假投遞紀錄，需先完成整合開通。",
         tone: "warning",
-        actions: [
-          {
-            action: "open_integration_governance",
-            enabled: true,
-            riskLevel: "low",
-          },
-        ],
+        supportActions: ["open_integration_governance"],
       };
     case "fetch_failed":
       return {
@@ -668,18 +610,7 @@ function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
         description:
           "本次請求無法取得 endpoint 或 delivery read model。請先手動 refresh，必要時檢查平台健康。",
         tone: "warning",
-        actions: [
-          {
-            action: "refresh_page",
-            enabled: true,
-            riskLevel: "low",
-          },
-          {
-            action: "open_platform_health",
-            enabled: true,
-            riskLevel: "low",
-          },
-        ],
+        supportActions: ["refresh_page", "open_platform_health"],
       };
     case "permission_denied":
       return {
@@ -688,13 +619,7 @@ function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
         description:
           "當前 actor 沒有 webhook 可見性或寫入權限，因此只顯示受限資訊。",
         tone: "neutral",
-        actions: [
-          {
-            action: "open_integration_governance",
-            enabled: true,
-            riskLevel: "low",
-          },
-        ],
+        supportActions: ["open_integration_governance"],
       };
     case "external_unavailable":
       return {
@@ -703,18 +628,7 @@ function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
         description:
           "Webhook engine 仍存在，但目前外部相依或平台 queue 降級，請改從 delivery log 與平台健康頁追查。",
         tone: "warning",
-        actions: [
-          {
-            action: "open_platform_health",
-            enabled: true,
-            riskLevel: "low",
-          },
-          {
-            action: "open_integration_governance",
-            enabled: true,
-            riskLevel: "low",
-          },
-        ],
+        supportActions: ["open_platform_health", "open_integration_governance"],
       };
     case "filtered_empty":
       return {
@@ -723,13 +637,7 @@ function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
         description:
           "清除 endpoint 聚焦或切回全部 deliveries，即可查看其他 webhook activity。",
         tone: "tenant",
-        actions: [
-          {
-            action: "clear_endpoint_filter",
-            enabled: true,
-            riskLevel: "low",
-          },
-        ],
+        supportActions: ["clear_endpoint_filter"],
       };
     case "no_data":
     default:
@@ -739,13 +647,7 @@ function getEmptyStateModel(reason: EmptyReason): EmptyStateModel {
         description:
           "目前沒有任何 tenant webhook endpoint。請先建立第一個端點，再進行事件訂閱與 delivery 驗證。",
         tone: "tenant",
-        actions: [
-          {
-            action: "create_endpoint",
-            enabled: true,
-            riskLevel: "medium",
-          },
-        ],
+        primaryAction: createEndpointAction,
       };
   }
 }
@@ -1066,70 +968,72 @@ function renderEmptyStateActions(
   model: EmptyStateModel,
   platformFailureHref: string,
 ) {
-  if (!model.actions || model.actions.length === 0) return null;
+  const actionNodes: ReactNode[] = [];
 
-  return (
-    <div style={actionRowStyle}>
-      {model.actions.map((action) => {
-        if (action.action === "create_endpoint") {
-          return renderActionDescriptor(
-            action,
-            "/webhooks?create=true",
-            "新增端點",
-            "primary",
-          );
-        }
+  if (model.primaryAction?.action === "create_endpoint") {
+    actionNodes.push(
+      renderActionDescriptor(
+        model.primaryAction,
+        "/webhooks?create=true",
+        "新增端點",
+        "primary",
+      ),
+    );
+  }
 
-        if (action.action === "open_integration_governance") {
-          return renderActionDescriptor(
-            action,
-            "/integration-governance",
-            "前往整合就緒度",
-          );
-        }
+  for (const action of model.supportActions ?? []) {
+    if (action === "open_integration_governance") {
+      actionNodes.push(
+        <Link
+          key={action}
+          href="/integration-governance"
+          style={actionLinkStyle}
+        >
+          前往整合就緒度
+        </Link>,
+      );
+      continue;
+    }
 
-        if (action.action === "refresh_page") {
-          return renderActionDescriptor(action, "/webhooks", "重新整理");
-        }
+    if (action === "refresh_page") {
+      actionNodes.push(
+        <Link key={action} href="/webhooks" style={actionLinkStyle}>
+          重新整理
+        </Link>,
+      );
+      continue;
+    }
 
-        if (action.action === "clear_endpoint_filter") {
-          return renderActionDescriptor(
-            action,
-            "/webhooks#delivery-log",
-            "顯示全部 deliveries",
-          );
-        }
+    if (action === "clear_endpoint_filter") {
+      actionNodes.push(
+        <Link
+          key={action}
+          href="/webhooks#delivery-log"
+          style={actionLinkStyle}
+        >
+          顯示全部 deliveries
+        </Link>,
+      );
+      continue;
+    }
 
-        if (action.action === "open_platform_health") {
-          if (!action.enabled) {
-            return (
-              <span
-                key={action.action}
-                style={disabledActionStyle}
-                title={action.disabledReasonCode ?? "disabled"}
-              >
-                Platform Admin health
-              </span>
-            );
-          }
+    if (action === "open_platform_health") {
+      actionNodes.push(
+        <a
+          key={action}
+          href={platformFailureHref}
+          target="_blank"
+          rel="noreferrer"
+          style={actionLinkStyle}
+        >
+          Platform Admin health
+        </a>,
+      );
+    }
+  }
 
-          return (
-            <a
-              key={action.action}
-              href={platformFailureHref}
-              target="_blank"
-              rel="noreferrer"
-              style={actionLinkStyle}
-            >
-              Platform Admin health
-            </a>
-          );
-        }
-
-        return null;
-      })}
-    </div>
-  );
+  if (actionNodes.length === 0) return null;
+  return <div style={actionRowStyle}>{actionNodes}</div>;
 }
 
 function renderDescriptorHint(descriptor: ResourceActionDescriptor | null) {
@@ -1260,22 +1164,13 @@ export default async function WebhooksPage({
   const pageEmptyReason =
     emptyReason && emptyReason !== "filtered_empty" ? emptyReason : null;
 
-  const engineActive = pageEmptyReason !== "not_provisioned";
-  const allPageActions = getPageActions(
-    engineActive,
-    data.endpoints,
-    data.readiness,
-  );
-  const payloadSchemaAction =
-    allPageActions.find(
-      (descriptor) => descriptor.action === "payload_schema",
-    ) ?? null;
+  const allPageActions = getPageActions(data.endpoints, data.readiness);
   const createEndpointAction =
     allPageActions.find(
       (descriptor) => descriptor.action === "create_endpoint",
     ) ?? null;
   const emptyModel = pageEmptyReason
-    ? getEmptyStateModel(pageEmptyReason)
+    ? getEmptyStateModel(pageEmptyReason, createEndpointAction)
     : null;
   const refreshAge = Math.max(
     0,
@@ -1417,13 +1312,6 @@ export default async function WebhooksPage({
         activeTab="Endpoints"
         actions={
           <>
-            {payloadSchemaAction
-              ? renderActionDescriptor(
-                  payloadSchemaAction,
-                  "/integration-governance",
-                  "payload schema",
-                )
-              : null}
             {createEndpointAction
               ? renderActionDescriptor(
                   createEndpointAction,
@@ -1741,15 +1629,7 @@ export default async function WebhooksPage({
                           );
                         }
 
-                        return (
-                          <span
-                            key={descriptor.action}
-                            style={disabledActionStyle}
-                            title={descriptor.disabledReasonCode}
-                          >
-                            Retry failed delivery
-                          </span>
-                        );
+                        return null;
                       })}
                     </div>
 
