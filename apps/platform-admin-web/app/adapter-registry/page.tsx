@@ -69,6 +69,7 @@ type AdapterActionKey =
   | "disable_adapter"
   | "edit_config"
   | "pause_operational_traffic"
+  | "resume_operational_traffic"
   | "retry_failed_callback"
   | "rotate_credentials";
 
@@ -81,6 +82,7 @@ type ReceiptState = {
   tone: Exclude<CanvasTone, "neutral">;
   title: string;
   body: string;
+  auditId?: string | null;
   auditHref?: string | null;
 };
 
@@ -382,6 +384,7 @@ function toActionLabel(locale: string, action: string) {
     disable_adapter: "停用 adapter",
     edit_config: "編輯 config",
     pause_operational_traffic: "暫停 operational traffic",
+    resume_operational_traffic: "恢復 operational traffic",
     retry_failed_callback: "重送失敗 callback",
     rotate_credentials: "輪替 credentials",
   };
@@ -392,6 +395,7 @@ function toActionLabel(locale: string, action: string) {
     disable_adapter: "Disable adapter",
     edit_config: "Edit config",
     pause_operational_traffic: "Pause operational traffic",
+    resume_operational_traffic: "Resume operational traffic",
     retry_failed_callback: "Retry failed callback",
     rotate_credentials: "Rotate credentials",
   };
@@ -527,6 +531,19 @@ function deriveAvailableActions(
   const productionDisableNeedsReason =
     adapter.environment === "PRODUCTION" ||
     adapter.rolloutStage === "PRODUCTION";
+  const pauseAction: ResourceActionDescriptor = adapter.operationalPause
+    ?.ttlUntil
+    ? {
+        action: "resume_operational_traffic",
+        enabled: true,
+        riskLevel: "medium",
+      }
+    : {
+        action: "pause_operational_traffic",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      };
   const base: ResourceActionDescriptor[] = [
     {
       action: adapter.config.isEnabled ? "disable_adapter" : "enable_adapter",
@@ -552,12 +569,7 @@ function deriveAvailableActions(
         : {}),
       riskLevel: "high",
     },
-    {
-      action: "pause_operational_traffic",
-      enabled: true,
-      requiresReason: true,
-      riskLevel: "high",
-    },
+    pauseAction,
     {
       action: "retry_failed_callback",
       enabled: adapter.webhookStatus?.lastStatus === "FAILURE",
@@ -582,6 +594,7 @@ function deriveAvailableActions(
 function authorityGroup(action: string) {
   switch (action as AdapterActionKey) {
     case "pause_operational_traffic":
+    case "resume_operational_traffic":
     case "retry_failed_callback":
       return "ops";
     case "create_adapter_config":
@@ -723,6 +736,10 @@ function buildHealthLink(adapter: AdapterRegistryRecord) {
   return `/health?adapterId=${encodeURIComponent(adapter.id)}`;
 }
 
+function buildAuditId(action: string, adapterId?: string | null) {
+  return `audit_${action}_${(adapterId ?? "registry").replace(/[^a-z0-9]/gi, "").slice(-10) || "root"}_${Date.now().toString(36)}`;
+}
+
 export default function AdapterRegistryPage() {
   const { t, locale } = useTranslation();
   const searchParams = useSearchParams();
@@ -807,6 +824,9 @@ export default function AdapterRegistryPage() {
           cancel: "Cancel",
           detailExit: "Route exits",
           detailEntry: "Entry routes",
+          adapterType: "Adapter type",
+          supportedActions: "Supported actions",
+          credentialSummary: "Credential summary",
           routeSidebar: "Sidebar navigation",
           routeDispatch: "Cross-app from ops dispatch (new tab)",
           routeExitHealth: "Exit to /health",
@@ -826,6 +846,11 @@ export default function AdapterRegistryPage() {
           rotationOwner: "Rotation owner",
           webhookStatus: "Webhook status",
           viewAudit: "View audit",
+          auditId: "Audit ID",
+          disabledReason: "Disabled reason",
+          refreshSource: "Refresh source",
+          refreshWindow: "Refresh window",
+          refreshCadence: "Refresh cadence",
         }
       : {
           pageTitle: "Adapter Registry",
@@ -878,6 +903,9 @@ export default function AdapterRegistryPage() {
           cancel: "取消",
           detailExit: "離開路徑",
           detailEntry: "進入路徑",
+          adapterType: "Adapter type",
+          supportedActions: "Supported actions",
+          credentialSummary: "Credential 摘要",
           routeSidebar: "從側邊欄進入",
           routeDispatch: "從 ops dispatch cross-app 進入（新分頁）",
           routeExitHealth: "離開到 /health",
@@ -897,6 +925,11 @@ export default function AdapterRegistryPage() {
           rotationOwner: "Rotation owner",
           webhookStatus: "Webhook status",
           viewAudit: "查看 audit",
+          auditId: "Audit ID",
+          disabledReason: "停用原因",
+          refreshSource: "Refresh source",
+          refreshWindow: "Refresh window",
+          refreshCadence: "Refresh cadence",
         };
 
   const loadAdapters = useCallback(
@@ -985,10 +1018,7 @@ export default function AdapterRegistryPage() {
       if (healthFilter === "attention" && !adapterNeedsAttention(adapter)) {
         return false;
       }
-      if (
-        healthFilter === "paused" &&
-        !adapter.operationalPause?.ttlUntil
-      ) {
+      if (healthFilter === "paused" && !adapter.operationalPause?.ttlUntil) {
         return false;
       }
       if (
@@ -1106,6 +1136,7 @@ export default function AdapterRegistryPage() {
     setActionBusy(true);
     setLastReceipt(null);
     try {
+      const auditId = buildAuditId(descriptor.action, adapter?.id);
       if (
         adapter &&
         (descriptor.action === "enable_adapter" ||
@@ -1135,6 +1166,14 @@ export default function AdapterRegistryPage() {
             ).toISOString(),
             reason: actionReason.trim(),
           },
+        }));
+      } else if (
+        adapter &&
+        descriptor.action === "resume_operational_traffic"
+      ) {
+        applyAdapterMutation(adapter.id, (current: AdapterRegistryRecord) => ({
+          ...current,
+          operationalPause: null,
         }));
       } else if (adapter && descriptor.action === "retry_failed_callback") {
         applyAdapterMutation(adapter.id, (current) => ({
@@ -1171,6 +1210,7 @@ export default function AdapterRegistryPage() {
           locale === "en"
             ? `Audit receipt is ready. ${descriptor.action === "rotate_credentials" ? "Secret material remains one-time only." : "This surface keeps authority split between Platform Admin and Ops."}`
             : `已產生 audit receipt。${descriptor.action === "rotate_credentials" ? "secret material 仍維持一次性顯示。" : "此頁維持 Platform Admin 與 Ops 的權限拆分。"} `,
+        auditId,
         auditHref: adapter ? buildAuditLink(adapter) : "/audit",
       });
       setPendingAction(null);
@@ -1383,6 +1423,14 @@ export default function AdapterRegistryPage() {
     (descriptor: ResourceActionDescriptor) =>
       authorityGroup(descriptor.action) === "ops",
   );
+  const selectedPlatformDisabledActions = selectedDisabledActions.filter(
+    (descriptor: ResourceActionDescriptor) =>
+      authorityGroup(descriptor.action) === "platform",
+  );
+  const selectedOpsDisabledActions = selectedDisabledActions.filter(
+    (descriptor: ResourceActionDescriptor) =>
+      authorityGroup(descriptor.action) === "ops",
+  );
   const emptyReasonLabels: Record<EmptyReason, string> = {
     no_data: copy.noData,
     not_provisioned: copy.notProvisioned,
@@ -1475,7 +1523,17 @@ export default function AdapterRegistryPage() {
               tone={lastReceipt.tone}
               icon={lastReceipt.tone === "danger" ? "warn" : "ok"}
               title={lastReceipt.title}
-              body={lastReceipt.body}
+              body={
+                <div style={titleCellStyle}>
+                  <div>{lastReceipt.body}</div>
+                  {lastReceipt.auditId ? (
+                    <div style={inlineMetaStyle}>
+                      <span style={metricNoteStyle}>{copy.auditId}</span>
+                      <span style={codeStyle}>{lastReceipt.auditId}</span>
+                    </div>
+                  ) : null}
+                </div>
+              }
               actions={
                 lastReceipt.auditHref ? (
                   <Link href={lastReceipt.auditHref} style={externalLinkStyle}>
@@ -1665,7 +1723,18 @@ export default function AdapterRegistryPage() {
                   theme={theme}
                   tone={emptyState.tone}
                   title={emptyState.title}
-                  body={emptyState.body}
+                  body={
+                    <div style={titleCellStyle}>
+                      <div>{emptyState.body}</div>
+                      {activeEmptyReason ? (
+                        <div style={inlineMetaStyle}>
+                          <CanvasPill theme={theme} tone={emptyState.tone}>
+                            {activeEmptyReason}
+                          </CanvasPill>
+                        </div>
+                      ) : null}
+                    </div>
+                  }
                 />
                 {emptyState.nextAction ? (
                   <CanvasBtn
@@ -1718,6 +1787,13 @@ export default function AdapterRegistryPage() {
                         value: selectedAdapter.adapterType,
                       },
                       {
+                        label: copy.supportedActions,
+                        value:
+                          selectedAdapter.supportedActions
+                            .map((item) => item.name)
+                            .join(", ") || "—",
+                      },
+                      {
                         label: locale === "en" ? "Display name" : "顯示名稱",
                         value: selectedAdapter.name,
                       },
@@ -1750,10 +1826,7 @@ export default function AdapterRegistryPage() {
                         ),
                       },
                       {
-                        label:
-                          locale === "en"
-                            ? "Credential posture"
-                            : "Credential posture",
+                        label: copy.credentialSummary,
                         value: (
                           <div style={titleCellStyle}>
                             <CanvasPill
@@ -1764,10 +1837,26 @@ export default function AdapterRegistryPage() {
                             >
                               {selectedAdapter.credentialStatus}
                             </CanvasPill>
-                            <span style={metricNoteStyle}>
-                              {selectedAdapter.credentialMeta?.rotationOwner ??
-                                "—"}
-                            </span>
+                            <div style={inlineMetaStyle}>
+                              <span style={metricNoteStyle}>
+                                {selectedAdapter.credentialMeta?.configured
+                                  ? locale === "en"
+                                    ? "configured"
+                                    : "已設定"
+                                  : locale === "en"
+                                    ? "missing"
+                                    : "缺少"}
+                              </span>
+                              {selectedAdapter.credentialMeta?.expiring ? (
+                                <CanvasPill theme={theme} tone="warn">
+                                  {locale === "en" ? "expiring" : "即將到期"}
+                                </CanvasPill>
+                              ) : null}
+                              <span style={metricNoteStyle}>
+                                {selectedAdapter.credentialMeta
+                                  ?.rotationOwner ?? "—"}
+                              </span>
+                            </div>
                           </div>
                         ),
                       },
@@ -1825,6 +1914,10 @@ export default function AdapterRegistryPage() {
                     theme={theme}
                     cols={2}
                     items={[
+                      {
+                        label: copy.adapterType,
+                        value: selectedAdapter.adapterType,
+                      },
                       {
                         label:
                           locale === "en"
@@ -1973,6 +2066,14 @@ export default function AdapterRegistryPage() {
                         label: copy.webhookStatus,
                         value: selectedAdapter.webhookStatus?.lastStatus ?? "—",
                       },
+                      {
+                        label: copy.refreshSource,
+                        value: refreshMeta.source,
+                      },
+                      {
+                        label: copy.refreshCadence,
+                        value: `${Math.round(refreshMeta.staleAfterMs / 1000)}s`,
+                      },
                     ]}
                   />
                 ) : (
@@ -2020,6 +2121,18 @@ export default function AdapterRegistryPage() {
                             </CanvasBtn>
                           ),
                         )}
+                        {selectedPlatformDisabledActions.map(
+                          (descriptor: ResourceActionDescriptor) => (
+                            <CanvasBtn
+                              key={`${selectedAdapter.id}-${descriptor.action}`}
+                              theme={theme}
+                              variant="secondary"
+                              disabled
+                            >
+                              {toActionLabel(locale, descriptor.action)}
+                            </CanvasBtn>
+                          ),
+                        )}
                       </div>
                     </div>
                     <div style={titleCellStyle}>
@@ -2042,6 +2155,18 @@ export default function AdapterRegistryPage() {
                             </CanvasBtn>
                           ),
                         )}
+                        {selectedOpsDisabledActions.map(
+                          (descriptor: ResourceActionDescriptor) => (
+                            <CanvasBtn
+                              key={`${selectedAdapter.id}-${descriptor.action}`}
+                              theme={theme}
+                              variant="secondary"
+                              disabled
+                            >
+                              {toActionLabel(locale, descriptor.action)}
+                            </CanvasBtn>
+                          ),
+                        )}
                       </div>
                     </div>
                     {selectedDisabledActions.length > 0 ? (
@@ -2055,11 +2180,18 @@ export default function AdapterRegistryPage() {
                           items={selectedDisabledActions.map(
                             (descriptor: ResourceActionDescriptor) => ({
                               label: toActionLabel(locale, descriptor.action),
-                              value:
-                                descriptor.disabledReasonCode ??
-                                (locale === "en"
-                                  ? "Unavailable"
-                                  : "目前不可用"),
+                              value: descriptor.disabledReasonCode ? (
+                                <div style={titleCellStyle}>
+                                  <span>{descriptor.disabledReasonCode}</span>
+                                  <span style={metricNoteStyle}>
+                                    {copy.disabledReason}
+                                  </span>
+                                </div>
+                              ) : locale === "en" ? (
+                                "Unavailable"
+                              ) : (
+                                "目前不可用"
+                              ),
                             }),
                           )}
                         />
