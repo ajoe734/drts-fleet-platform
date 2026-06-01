@@ -5274,7 +5274,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: UpdateTenantSlaProfileCommand,
     actorId?: string,
     requestId?: string,
-  ) {
+  ): ActionReceipt {
     const currentProfile = this.getOrCreateSlaProfile(tenantId);
     const slaProfile: TenantSlaProfile = {
       tenantId,
@@ -5314,7 +5314,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
 
     return {
-      status: "updated",
+      actionId: randomUUID(),
+      auditId: requestId ?? randomUUID(),
+      resourceType: "tenant_sla",
+      resourceId: tenantId,
+      status: "completed",
+      message: "SLA profile updated.",
     };
   }
 

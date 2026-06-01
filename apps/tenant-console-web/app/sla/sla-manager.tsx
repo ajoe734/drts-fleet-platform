@@ -269,10 +269,8 @@ function disabledReasonLabel(reason: string | undefined) {
 function actionLabel(action: string) {
   switch (action) {
     case "update_sla_profile":
-    case "save":
       return "儲存設定";
     case "recalculate_sla_bookings":
-    case "recalculate":
       return "重算既有訂單";
     default:
       return action.replaceAll("_", " ");
@@ -293,6 +291,16 @@ function buildFeedback(payload: {
         message: payload.message,
       };
 }
+
+const REFRESH_TIER_CODE: Record<RefreshTier, string> = {
+  urgent: "T0",
+  fast: "T1",
+  dispatch: "T2",
+  medium: "T3",
+  medium_slow: "T4",
+  slow: "T5",
+  manual: "T6",
+};
 
 const REFRESH_TIER_LABEL: Record<RefreshTier, string> = {
   urgent: "即時推播 · 5s 後援輪詢",
@@ -440,7 +448,10 @@ export function SlaManager({
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <CanvasPill theme={th} tone="accent">
-              refresh tier · T5 / {refreshTier ?? "—"}
+              refresh tier ·{" "}
+              {refreshTier
+                ? `${REFRESH_TIER_CODE[refreshTier]} / ${refreshTier}`
+                : "—"}
             </CanvasPill>
             {refreshMetadataAvailable ? (
               <CanvasPill
@@ -500,7 +511,7 @@ export function SlaManager({
           <CanvasBanner
             theme={th}
             tone="info"
-            title={`Refresh cadence · ${REFRESH_TIER_LABEL[refreshTier!]}`}
+            title={`Refresh cadence · ${REFRESH_TIER_CODE[refreshTier!]} · ${REFRESH_TIER_LABEL[refreshTier!]}`}
             body={`metadata source=${refreshMetadata!.source} · generatedAt=${formatDateTime(
               refreshMetadata!.generatedAt,
             )} · staleAfterMs=${refreshMetadata!.staleAfterMs}`}
