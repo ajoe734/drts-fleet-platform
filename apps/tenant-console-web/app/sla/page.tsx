@@ -1,8 +1,4 @@
-import type {
-  EmptyReason,
-  TenantSlaProfileView,
-  UiRefreshMetadata,
-} from "@drts/contracts";
+import type { EmptyReason, TenantSlaProfileView } from "@drts/contracts";
 import { CanvasBanner, buildCanvasTheme } from "@drts/ui-web";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
 import { SlaManager } from "./sla-manager";
@@ -44,37 +40,6 @@ function parseEmptyReason(value: string | undefined): EmptyReason | null {
     : null;
 }
 
-function buildRefreshMetadata(): UiRefreshMetadata {
-  return {
-    generatedAt: new Date().toISOString(),
-    staleAfterMs: 30_000,
-    dataFreshness: "fresh",
-    source: "static",
-  };
-}
-
-function applyEmptyReasonOverride(
-  view: TenantSlaProfileView | null,
-  emptyReasonOverride: EmptyReason | null,
-): TenantSlaProfileView | null {
-  if (!emptyReasonOverride) {
-    return view;
-  }
-
-  return {
-    profile: null,
-    emptyState: {
-      reason: emptyReasonOverride,
-      messageCode: `preview.${emptyReasonOverride}`,
-    },
-    availableActions: view?.availableActions ?? [],
-    refreshTier: view?.refreshTier ?? "slow",
-    refreshMetadata: view?.refreshMetadata ?? buildRefreshMetadata(),
-    updatedBy: view?.updatedBy ?? null,
-    lastRecalculationAt: null,
-  };
-}
-
 async function loadSlaPageData(): Promise<{
   view: TenantSlaProfileView | null;
   errorMessage: string | null;
@@ -98,7 +63,6 @@ export default async function SlaPage({ searchParams }: SlaPageProps) {
     resolvedSearchParams?.emptyReason,
   );
   const data = await loadSlaPageData();
-  const view = applyEmptyReasonOverride(data.view, emptyReasonOverride);
 
   return (
     <div>
@@ -114,8 +78,9 @@ export default async function SlaPage({ searchParams }: SlaPageProps) {
       ) : null}
 
       <SlaManager
-        view={view}
+        view={data.view}
         loadErrorMessage={data.errorMessage}
+        previewEmptyReason={emptyReasonOverride}
         links={[
           { href: "/integration-governance", label: "查看整合就緒度" },
           { href: "/audit", label: "查看 SLA 稽核紀錄" },

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
   ActionReceipt,
+  EmptyReason,
   EmptyStateEnvelope,
   RefreshTier,
   ResourceActionDescriptor,
@@ -54,6 +55,7 @@ type TenantSlaEmptyReason = Exclude<
 type SlaManagerProps = {
   view: TenantSlaProfileView | null;
   loadErrorMessage: string | null;
+  previewEmptyReason: EmptyReason | null;
   links: LinkItem[];
   crossAppLinks: CrossAppLinkItem[];
 };
@@ -416,9 +418,13 @@ function formatUpdatedByLine(
 }
 
 function getActiveEmptyState(
+  previewEmptyReason: TenantSlaEmptyReason | null,
   emptyState: EmptyStateEnvelope | null,
   loadErrorMessage: string | null,
 ) {
+  if (previewEmptyReason) {
+    return EMPTY_STATE_CONFIG[previewEmptyReason];
+  }
   if (emptyState?.reason && emptyState.reason in EMPTY_STATE_CONFIG) {
     return EMPTY_STATE_CONFIG[emptyState.reason as TenantSlaEmptyReason];
   }
@@ -426,6 +432,16 @@ function getActiveEmptyState(
     return EMPTY_STATE_CONFIG.fetch_failed;
   }
   return null;
+}
+
+function getTenantSlaEmptyReason(
+  reason: EmptyReason | null | undefined,
+): TenantSlaEmptyReason | null {
+  if (!reason || reason === "driver_not_eligible") {
+    return null;
+  }
+
+  return reason;
 }
 
 function getRefreshTone(metadata: UiRefreshMetadata | null) {
@@ -517,6 +533,7 @@ function buildActionPrompt(action: ResourceActionDescriptor | null) {
 export function SlaManager({
   view,
   loadErrorMessage,
+  previewEmptyReason,
   links,
   crossAppLinks,
 }: SlaManagerProps) {
@@ -548,11 +565,18 @@ export function SlaManager({
   const updateAction = getAction(availableActions, "update_sla_profile");
   const recalcAction = getAction(availableActions, "recalculate_sla_bookings");
   const nextAction = emptyState?.nextAction ?? null;
-  const activeEmptyState = getActiveEmptyState(emptyState, loadErrorMessage);
+  const effectiveEmptyReason = getTenantSlaEmptyReason(
+    previewEmptyReason ?? emptyState?.reason,
+  );
+  const activeEmptyState = getActiveEmptyState(
+    effectiveEmptyReason,
+    emptyState,
+    loadErrorMessage,
+  );
   const showEditor =
     Boolean(profile) ||
-    ((emptyState?.reason === "not_provisioned" ||
-      emptyState?.reason === "no_data") &&
+    ((effectiveEmptyReason === "not_provisioned" ||
+      effectiveEmptyReason === "no_data") &&
       Boolean(updateAction));
   const refreshMetadataAvailable = Boolean(
     refreshTier && refreshMetadata?.generatedAt,
@@ -765,9 +789,12 @@ export function SlaManager({
           </div>
         </div>
         <div style={noteStyle}>
-          messageCode · {emptyState?.messageCode ?? "—"}
+          messageCode ·{" "}
+          {previewEmptyReason
+            ? `preview.${previewEmptyReason}`
+            : (emptyState?.messageCode ?? "—")}
         </div>
-        {nextAction ? (
+        {!previewEmptyReason && nextAction ? (
           <div style={emptyActionStyle}>
             <div style={summaryLabelStyle}>recommended action</div>
             <div style={summaryValueStyle}>
