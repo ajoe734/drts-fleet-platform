@@ -46,6 +46,12 @@ type ApiKeyState = "active" | "expiring" | "expired" | "revoked";
 type ApiKeyStatusFilter = "all" | ApiKeyState;
 type EditorMode = "issue" | "rotate";
 type ApiKeyRow = TenantApiKeyRecord & Record<string, unknown>;
+type EmptyStateConfig = {
+  title: string;
+  body: string;
+  tone: CanvasTone;
+  badge: string;
+};
 
 const th = buildCanvasTheme({
   surface: "tenant",
@@ -540,38 +546,50 @@ function toSearchableRow(row: TenantApiKeyRecord) {
     .toLowerCase();
 }
 
-function buildEmptyStateCopy(reason: EmptyReason | null) {
+function buildEmptyStateCopy(reason: EmptyReason | null): EmptyStateConfig {
   switch (reason) {
     case "filtered_empty":
       return {
         title: "目前篩選條件沒有符合的金鑰",
         body: "請清除搜尋字詞或切回其他狀態篩選，revoked 與 expired 仍會保留在清單中供稽核檢視。",
+        tone: "neutral",
+        badge: "Filtered",
       };
     case "fetch_failed":
       return {
         title: "API 金鑰清單暫時無法讀取",
         body: "畫面沒有收到 key inventory。請重新整理，若持續失敗再檢查 tenant API 與審核紀錄。",
+        tone: "warn",
+        badge: "Fetch failed",
       };
     case "permission_denied":
       return {
         title: "目前身分沒有管理 API 金鑰的權限",
         body: "此租戶會話不是 `tc_admin` 或 `tc_integration_mgr`。你仍可透過其他模組追蹤整合狀態，但建立、輪替、撤銷都會保持停用。",
+        tone: "danger",
+        badge: "Access",
       };
     case "external_unavailable":
       return {
         title: "治理策略暫時不可用",
         body: "Integration governance package 沒有成功載入，因此無法安全判斷 scope catalogue 與期限策略。",
+        tone: "warn",
+        badge: "Degraded",
       };
     case "not_provisioned":
       return {
         title: "此租戶尚未完成 API key onboarding",
         body: "沒有既有金鑰，而且治理摘要仍顯示 API key readiness 未完成。請先完成第一組整合憑證與相依模組設定。",
+        tone: "info",
+        badge: "Setup",
       };
     case "no_data":
     default:
       return {
         title: "目前沒有任何租戶 API 金鑰",
         body: "清單保持空白直到第一組憑證發出。建立後只會在當下顯示完整明文，後續僅保留 prefix 與 masked suffix。",
+        tone: "info",
+        badge: "Empty",
       };
   }
 }
@@ -833,6 +851,9 @@ export function ApiKeyManager({
     return (
       <div style={emptyStateStyle}>
         <div style={emptyStateBodyStyle}>
+          <CanvasPill theme={th} tone={copy.tone}>
+            {copy.badge}
+          </CanvasPill>
           <strong style={{ color: th.text }}>{copy.title}</strong>
           <span>{copy.body}</span>
           <div style={inlineActionRowStyle}>
@@ -868,14 +889,19 @@ export function ApiKeyManager({
               </CanvasBtn>
             ) : null}
             {effectiveEmptyReason === "permission_denied" ? (
-              <Link href="/settings" style={textLinkStyle}>
-                檢查治理與角色
+              <Link href="/users" style={textLinkStyle}>
+                檢查角色與租戶權限
               </Link>
             ) : null}
             {effectiveEmptyReason === "not_provisioned" ? (
-              <Link href="/webhooks" style={textLinkStyle}>
-                前往 /webhooks
-              </Link>
+              <>
+                <Link href="/integration-governance" style={textLinkStyle}>
+                  前往 /integration-governance
+                </Link>
+                <Link href="/webhooks" style={textLinkStyle}>
+                  前往 /webhooks
+                </Link>
+              </>
             ) : null}
             <Link href="/audit" style={textLinkStyle}>
               查看稽核紀錄
@@ -978,6 +1004,12 @@ export function ApiKeyManager({
       r: (row) => formatDateTime(row.expiresAt),
     },
     {
+      h: "REVOKED",
+      w: 142,
+      mono: true,
+      r: (row) => formatDateTime(row.revokedAt),
+    },
+    {
       h: "STATE",
       w: 108,
       r: (row) => {
@@ -996,11 +1028,14 @@ export function ApiKeyManager({
       <CanvasPageHeader
         theme={th}
         title="API 金鑰"
-        subtitle="plaintext-once issuance · least privilege scopes · T5 refresh tier"
+        subtitle="Live / sandbox · scope · last seen · 撤銷後永久不可復原"
         tabs={["Inventory", "Issue / Rotate", "Governance"]}
         activeTab="Inventory"
         actions={
           <>
+            <CanvasBtn theme={th} icon="ext" size="sm">
+              API 文件
+            </CanvasBtn>
             <CanvasBtn theme={th} size="sm" onClick={() => router.refresh()}>
               Refresh T5
             </CanvasBtn>
@@ -1385,18 +1420,19 @@ export function ApiKeyManager({
           <CanvasCard
             theme={th}
             title="Deep links"
-            subtitle="依 packet 導向整合相依模組；audit handoff 會在 receipt 可用時接續到 owning lane。"
+            subtitle="依 packet 從 API key surface 連到治理、通知、SLA、報表與稽核模組。"
           >
             <div style={deepLinkListStyle}>
               <div style={deepLinkItemStyle}>
                 <div style={deepLinkMetaStyle}>
                   <strong>Integration governance</strong>
                   <div style={formNoteStyle}>
-                    對照 readiness、published scope 與 onboarding checklist。
+                    對照 aggregated readiness、published scope 與 onboarding
+                    checklist。
                   </div>
                 </div>
-                <Link href="/settings" style={textLinkStyle}>
-                  /settings
+                <Link href="/integration-governance" style={textLinkStyle}>
+                  /integration-governance
                 </Link>
               </div>
               <div style={deepLinkItemStyle}>
@@ -1417,8 +1453,8 @@ export function ApiKeyManager({
                     確認 delivery failure 與 onboarding 通知是否已開通。
                   </div>
                 </div>
-                <Link href="/settings" style={textLinkStyle}>
-                  /settings
+                <Link href="/notifications" style={textLinkStyle}>
+                  /notifications
                 </Link>
               </div>
               <div style={deepLinkItemStyle}>
@@ -1428,8 +1464,20 @@ export function ApiKeyManager({
                     檢視整合異常的通知節點與租戶回應時限。
                   </div>
                 </div>
-                <Link href="/settings" style={textLinkStyle}>
-                  /settings
+                <Link href="/sla" style={textLinkStyle}>
+                  /sla
+                </Link>
+              </div>
+              <div style={deepLinkItemStyle}>
+                <div style={deepLinkMetaStyle}>
+                  <strong>報表工作台</strong>
+                  <div style={formNoteStyle}>
+                    檢查 API key
+                    對應的報表工作是否已具備可執行與可下載的就緒度。
+                  </div>
+                </div>
+                <Link href="/reports" style={textLinkStyle}>
+                  /reports
                 </Link>
               </div>
               <div style={deepLinkItemStyle}>
