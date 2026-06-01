@@ -499,17 +499,93 @@ function formatWindow(
   return `${start ? formatDateTime(start) : "—"} -> ${end ? formatDateTime(end) : "—"}`;
 }
 
+function normalizeOrigin(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return "";
+  }
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return "";
+  }
+}
+
+function inferCrossAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const current = new URL(window.location.origin);
+  if (targetApp === "platform-admin") {
+    return current.origin;
+  }
+
+  if (current.hostname === "localhost") {
+    const portMap: Record<CrossAppResourceLink["targetApp"], string> = {
+      "platform-admin": "3002",
+      "ops-console": "3003",
+      "tenant-console": "3004",
+    };
+    current.port = portMap[targetApp];
+    return current.origin;
+  }
+
+  if (current.hostname.includes("platform-admin")) {
+    const hostMap: Record<CrossAppResourceLink["targetApp"], string> = {
+      "platform-admin": "platform-admin",
+      "ops-console": "ops-console",
+      "tenant-console": "tenant-console",
+    };
+    current.hostname = current.hostname.replace(
+      "platform-admin",
+      hostMap[targetApp],
+    );
+    return current.origin;
+  }
+
+  return "";
+}
+
 function getCrossAppHref(link: CrossAppResourceLink): string {
-  const baseMap: Record<CrossAppResourceLink["targetApp"], string> = {
-    "ops-console": process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "",
-    "platform-admin": process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "",
-    "tenant-console": process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "",
-  };
-  const base = baseMap[link.targetApp];
+  const baseMap: Record<CrossAppResourceLink["targetApp"], string | undefined> =
+    {
+      "ops-console":
+        process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN ??
+        process.env.NEXT_PUBLIC_OPS_CONSOLE_URL,
+      "platform-admin":
+        process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN ??
+        process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL,
+      "tenant-console":
+        process.env.NEXT_PUBLIC_TENANT_CONSOLE_ORIGIN ??
+        process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL,
+    };
+  const base =
+    normalizeOrigin(baseMap[link.targetApp]) ||
+    inferCrossAppOrigin(link.targetApp);
   if (!base) {
-    return link.route;
+    return "";
   }
   return `${base.replace(/\/$/, "")}${link.route.startsWith("/") ? "" : "/"}${link.route}`;
+}
+
+function isNoticeReasonRequired(severity: PlatformNoticeSeverity) {
+  return severity === "critical" || severity === "maintenance";
+}
+
+function canSubmitNoticeForm(input: {
+  title: string;
+  body: string;
+  severity: PlatformNoticeSeverity;
+  reason: string;
+}) {
+  if (!input.title.trim() || !input.body.trim()) {
+    return false;
+  }
+  if (isNoticeReasonRequired(input.severity) && !input.reason.trim()) {
+    return false;
+  }
+  return true;
 }
 
 function getActionLabel(
@@ -945,10 +1021,7 @@ export default function NoticesPage() {
 
   async function handleCreateNotice(event: React.FormEvent) {
     event.preventDefault();
-    if (
-      (formSeverity === "critical" || formSeverity === "maintenance") &&
-      !formReason.trim()
-    ) {
+    if (isNoticeReasonRequired(formSeverity) && !formReason.trim()) {
       setError(copy.reasonRequired);
       return;
     }
@@ -1030,19 +1103,36 @@ export default function NoticesPage() {
     }
     return (
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {links.map((link) => (
-          <a
-            key={`${link.targetApp}-${link.route}`}
-            href={getCrossAppHref(link)}
-            target={link.openMode === "new_tab" ? "_blank" : "_self"}
-            rel="noreferrer"
-            className="admin-btn admin-btn--secondary admin-btn--sm"
-            style={{ textDecoration: "none" }}
-          >
-            {copy.openLink} {link.label}
-            {link.openMode === "new_tab" ? ` · ${copy.newTab}` : ""}
-          </a>
-        ))}
+        {links.map((link) => {
+          const href = getCrossAppHref(link);
+          if (!href) {
+            return (
+              <span
+                key={`${link.targetApp}-${link.route}`}
+                className="admin-btn admin-btn--secondary admin-btn--sm"
+                style={{ opacity: 0.56, cursor: "not-allowed" }}
+                title={copy.actionUnavailable}
+              >
+                {copy.openLink} {link.label}
+                {link.openMode === "new_tab" ? ` · ${copy.newTab}` : ""}
+              </span>
+            );
+          }
+
+          return (
+            <a
+              key={`${link.targetApp}-${link.route}`}
+              href={href}
+              target={link.openMode === "new_tab" ? "_blank" : "_self"}
+              rel="noreferrer"
+              className="admin-btn admin-btn--secondary admin-btn--sm"
+              style={{ textDecoration: "none" }}
+            >
+              {copy.openLink} {link.label}
+              {link.openMode === "new_tab" ? ` · ${copy.newTab}` : ""}
+            </a>
+          );
+        })}
       </div>
     );
   }
@@ -2093,13 +2183,22 @@ export default function NoticesPage() {
                   onChange={(event) => setFormReason(event.target.value)}
                   style={fieldStyle}
                   placeholder={copy.reasonField}
+                  required={isNoticeReasonRequired(formSeverity)}
                 />
               </label>
             </div>
             <button
               type="submit"
               className="admin-btn admin-btn--primary"
-              disabled={creating || !formTitle.trim() || !formBody.trim()}
+              disabled={
+                creating ||
+                !canSubmitNoticeForm({
+                  title: formTitle,
+                  body: formBody,
+                  severity: formSeverity,
+                  reason: formReason,
+                })
+              }
             >
               {creating ? copy.publishing : copy.publish}
             </button>
@@ -2138,6 +2237,17 @@ export default function NoticesPage() {
                 marginTop: 12,
               }}
             >
+              {isNoticeReasonRequired(formSeverity) ? (
+                <span
+                  className="admin-badge"
+                  style={{
+                    background: "rgba(255,255,255,0.16)",
+                    color: "#fff",
+                  }}
+                >
+                  {copy.reasonRequired}
+                </span>
+              ) : null}
               <span
                 className="admin-badge"
                 style={{ background: "rgba(255,255,255,0.16)", color: "#fff" }}
