@@ -58,6 +58,36 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
+const queueHeroStyle: CSSProperties = {
+  padding: 18,
+  borderRadius: 18,
+  border: `1px solid ${th.border}`,
+  background:
+    "linear-gradient(135deg, rgba(12, 31, 43, 0.96), rgba(7, 18, 29, 0.92))",
+  display: "grid",
+  gap: 14,
+};
+
+const queueHeroTopStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 16,
+  flexWrap: "wrap",
+};
+
+const queueHeroMetaStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const queueHeroTextStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+};
+
 const kpiGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
@@ -66,7 +96,7 @@ const kpiGridStyle: CSSProperties = {
 
 const contentGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.5fr) minmax(320px, 0.95fr)",
+  gridTemplateColumns: "minmax(0, 1.6fr) minmax(320px, 0.95fr)",
   gap: 16,
   alignItems: "start",
 };
@@ -76,60 +106,29 @@ const sidebarStackStyle: CSSProperties = {
   gap: 16,
 };
 
-const fieldGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
-  gap: 12,
-};
-
 const cardSectionStyle: CSSProperties = {
   display: "grid",
   gap: 14,
 };
 
-const filterRowStyle: CSSProperties = {
+const filterGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr)) auto",
-  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr)) auto",
+  gap: 10,
   alignItems: "end",
+};
+
+const fieldGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
 };
 
 const helperRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
-};
-
-const mutedTextStyle: CSSProperties = {
-  color: th.textMuted,
-  fontSize: 11.5,
-  lineHeight: 1.45,
-};
-
-const monoPrimaryStyle: CSSProperties = {
-  color: th.accent,
-  fontWeight: 600,
-  fontFamily: th.monoFamily,
-};
-
-const badgeListStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-};
-
-const stateGridStyle: CSSProperties = {
-  display: "grid",
-  gap: 10,
-};
-
-const emptyStateStyle: CSSProperties = {
-  padding: 22,
-  borderRadius: 16,
-  border: `1px dashed ${th.border}`,
-  background: "rgba(8, 17, 28, 0.7)",
-  display: "grid",
-  gap: 12,
+  alignItems: "center",
 };
 
 const actionRowStyle: CSSProperties = {
@@ -139,12 +138,59 @@ const actionRowStyle: CSSProperties = {
   alignItems: "center",
 };
 
+const queueTableWrapStyle: CSSProperties = {
+  borderRadius: 18,
+  overflow: "hidden",
+  border: `1px solid ${th.border}`,
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: 20,
+  borderRadius: 18,
+  border: `1px dashed ${th.border}`,
+  background:
+    "linear-gradient(180deg, rgba(7, 18, 29, 0.95), rgba(6, 11, 19, 0.98))",
+  display: "grid",
+  gap: 14,
+};
+
 const footerNoteStyle: CSSProperties = {
-  ...mutedTextStyle,
   display: "flex",
   justifyContent: "space-between",
   gap: 12,
   flexWrap: "wrap",
+  color: th.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.45,
+};
+
+const stateGridStyle: CSSProperties = {
+  display: "grid",
+  gap: 10,
+};
+
+const badgeListStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 6,
+};
+
+const mutedTextStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.45,
+};
+
+const subtleTextStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 12.5,
+  lineHeight: 1.5,
+};
+
+const monoPrimaryStyle: CSSProperties = {
+  color: th.accent,
+  fontWeight: 600,
+  fontFamily: th.monoFamily,
 };
 
 const nativeInputStyle: CSSProperties = {
@@ -209,27 +255,28 @@ type ReportsData = {
 
 type ReportRow = {
   id: string;
-  jobType: string;
-  scope: string;
+  kind: ReactNode;
   period: string;
-  status: ReportJobStatus;
-  statusTone: CanvasTone;
   format: string;
-  createdAt: string;
-  completedAt: string;
-  artifact: ReactNode;
+  status: ReactNode;
+  expires: string;
+  created: ReactNode;
   actions: ReactNode;
 };
 
 type EmptyStateModel = {
   title: string;
   description: string;
+  detail: string;
+  tone: CanvasTone;
+  badge: string;
   nextAction?: ResourceActionDescriptor;
 };
 
 type DrillLink = {
   href: string;
   label: string;
+  note: string;
 };
 
 const REPORT_TYPE_LABELS: Record<string, string> = {
@@ -262,8 +309,8 @@ const EMPTY_REASON_LABELS: Record<EmptyReason, string> = {
   not_provisioned: "尚未啟用",
   fetch_failed: "讀取失敗",
   permission_denied: "權限不足",
-  external_unavailable: "外部服務不可用",
-  filtered_empty: "篩選後為空",
+  external_unavailable: "外部不可用",
+  filtered_empty: "篩選為空",
   driver_not_eligible: "不可接單",
 };
 
@@ -309,14 +356,20 @@ async function loadReportsData(): Promise<ReportsData> {
   }
 }
 
+const dateTimeFormatter = new Intl.DateTimeFormat("sv-SE", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "—";
-  return new Intl.DateTimeFormat("zh-Hant", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(parsed);
+  return dateTimeFormatter.format(parsed);
 }
 
 function formatCreatedMonth(value: string | null | undefined) {
@@ -374,12 +427,27 @@ function getScopeLabel(job: ReportJobRecord) {
 }
 
 function formatParametersSummary(job: ReportJobRecord) {
-  const pieces = [
-    `period:${getPeriodLabel(job)}`,
-    `scope:${getScopeLabel(job)}`,
-  ];
+  return `period:${getPeriodLabel(job)} · scope:${getScopeLabel(job)}`;
+}
 
-  return pieces.join(" · ");
+function getPageAvailableActions(
+  forcedEmptyReason: string | undefined,
+): ResourceActionDescriptor[] {
+  return [
+    {
+      action: "create_report_job",
+      enabled: forcedEmptyReason !== "permission_denied",
+      ...(forcedEmptyReason === "permission_denied"
+        ? { disabledReasonCode: "permission_denied" }
+        : {}),
+      riskLevel: "low",
+    },
+    {
+      action: "refresh_report_jobs",
+      enabled: true,
+      riskLevel: "low",
+    },
+  ];
 }
 
 function getJobAvailableActions(
@@ -460,35 +528,54 @@ function getEmptyStateModel(
       return {
         title: "報表服務尚未佈建",
         description:
-          "目前租戶尚未完成報表工作流啟用，先回到整合就緒度確認 API 金鑰、Webhook 與 SLA 基線。",
+          "租戶端沒有可執行的 report workflow，先確認整合治理、簽章設定與上游彙整管線。",
+        detail:
+          "對應 EmptyReason.not_provisioned，CTA 只由 nextAction / availableActions 決定。",
+        tone: "accent",
+        badge: "provisioning required",
         ...(nextAction ? { nextAction } : {}),
       };
     case "fetch_failed":
       return {
         title: "工作佇列讀取失敗",
         description:
-          "前端沒有假裝成空資料。請先手動 refresh；若仍失敗，再從稽核或整合治理追查上游問題。",
+          "前端不把錯誤偽裝成空資料。請先手動 refresh，若仍失敗再從稽核與治理頁追查。",
+        detail: "對應 EmptyReason.fetch_failed，保留可見錯誤與手動 refresh。",
+        tone: "warn",
+        badge: "fetch failure",
         ...(nextAction ? { nextAction } : {}),
       };
     case "permission_denied":
       return {
-        title: "目前角色只有唯讀或無報表權限",
+        title: "目前角色沒有報表建立權限",
         description:
-          "依 packet §3.5，頁面不會自行推論角色。若後端不允許建立或重跑，就只保留可閱讀資訊。",
+          "頁面不從角色碼推論授權；若後端只給讀取，建立與重跑 CTA 仍需以 disabled affordance 顯示。",
+        detail:
+          "對應 EmptyReason.permission_denied，create CTA disabled with reason.",
+        tone: "danger",
+        badge: "read-only access",
         ...(nextAction ? { nextAction } : {}),
       };
     case "external_unavailable":
       return {
         title: "外部產出管線暫時不可用",
         description:
-          "工作可見，但 artifact 簽章或上游彙整服務不可達。請先檢查治理面板，再決定是否重跑。",
+          "工作存在，但簽名 artifact 或上游彙整服務暫時不可達，需先確認治理狀態再決定是否重跑。",
+        detail:
+          "對應 EmptyReason.external_unavailable，freshness 需降級為 degraded。",
+        tone: "warn",
+        badge: "degraded pipeline",
         ...(nextAction ? { nextAction } : {}),
       };
     case "filtered_empty":
       return {
         title: "目前篩選條件沒有命中任何工作",
         description:
-          "調整 type、status、period 後再試一次，或直接建立新的報表工作。",
+          "可調整 type、status、period，或建立新的報表工作回來觀察 queue 狀態。",
+        detail:
+          "對應 EmptyReason.filtered_empty，與真正 no_data 視覺與說明分開。",
+        tone: "neutral",
+        badge: "filter mismatch",
         ...(nextAction ? { nextAction } : {}),
       };
     case "no_data":
@@ -497,6 +584,10 @@ function getEmptyStateModel(
         title: "租戶尚未建立任何報表工作",
         description:
           "這裡只呈現真實工作佇列。建立第一個月報、收入彙總或 dispatch trace 後，artifact 與到期資訊才會出現。",
+        detail:
+          "對應 EmptyReason.no_data，表達 queue 尚未被使用，而不是讀取失敗。",
+        tone: "info",
+        badge: "queue empty",
         ...(nextAction ? { nextAction } : {}),
       };
   }
@@ -537,14 +628,32 @@ function buildDrillLinks(
 ): DrillLink[] {
   return [
     {
-      href: `/integration-governance${selectedType ? `?reportType=${encodeURIComponent(selectedType)}` : ""}`,
+      href: `/integration-governance${selectedType !== "all" ? `?reportType=${encodeURIComponent(selectedType)}` : ""}`,
       label: "整合就緒度",
+      note: "檢查 reports adapter、簽章與 freshness 來源",
     },
     {
-      href: `/audit${selectedPeriod ? `?period=${encodeURIComponent(selectedPeriod)}` : ""}`,
+      href: `/audit${selectedPeriod !== "all" ? `?period=${encodeURIComponent(selectedPeriod)}` : ""}`,
       label: "報表相關稽核",
+      note: "追查 create / rerun / artifact 下載動作對應的 audit",
     },
   ];
+}
+
+function getFailureDetail(job: ReportJobRecord) {
+  if (job.status === "failed") {
+    return "pipeline retry required";
+  }
+  if (job.status === "expired") {
+    return "artifact expired";
+  }
+  if (job.status === "running") {
+    return "artifact pending";
+  }
+  if (job.status === "queued") {
+    return "waiting for worker";
+  }
+  return "artifact ready";
 }
 
 export default async function ReportsPage({ searchParams }: ReportsPageProps) {
@@ -562,21 +671,8 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   const flashMessage = getSearchParam(resolvedSearchParams, "flashMessage");
   const flashJobId = getSearchParam(resolvedSearchParams, "flashJobId");
 
-  const pageActions: ResourceActionDescriptor[] = [
-    {
-      action: "create_report_job",
-      enabled: forcedEmptyReason !== "permission_denied",
-      ...(forcedEmptyReason === "permission_denied"
-        ? { disabledReasonCode: "permission_denied" }
-        : {}),
-      riskLevel: "medium",
-    },
-    {
-      action: "refresh_report_jobs",
-      enabled: true,
-      riskLevel: "low",
-    },
-  ];
+  const pageActions = getPageAvailableActions(forcedEmptyReason);
+  const createAction = findAction(pageActions, "create_report_job");
 
   const sortedJobs = [...data.jobs].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt),
@@ -584,12 +680,10 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   const periodOptions = Array.from(
     new Set(sortedJobs.map((job) => getPeriodLabel(job))),
   );
-  const typeOptions = REPORT_JOB_TYPES.filter((jobType) =>
-    sortedJobs.some((job) => job.jobType === jobType),
-  );
   const typeOptionList = Array.from(
-    new Set([...REPORT_JOB_TYPES, ...typeOptions]),
+    new Set([...REPORT_JOB_TYPES, ...sortedJobs.map((job) => job.jobType)]),
   );
+
   const filteredJobs = sortedJobs.filter((job) => {
     if (selectedType !== "all" && job.jobType !== selectedType) return false;
     if (selectedStatus !== "all" && job.status !== selectedStatus) return false;
@@ -611,10 +705,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
     visibleJobs,
   );
   const emptyState = emptyReason
-    ? getEmptyStateModel(
-        emptyReason,
-        findAction(pageActions, "create_report_job"),
-      )
+    ? getEmptyStateModel(emptyReason, createAction)
     : null;
   const refreshMetadata = buildRefreshMetadata(
     sortedJobs,
@@ -624,71 +715,59 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   const activeJobs = sortedJobs.filter(
     (job) => job.status === "queued" || job.status === "running",
   ).length;
-  const completedJobs = sortedJobs.filter(
-    (job) => job.status === "completed",
+  const readyArtifacts = sortedJobs.filter(
+    (job) => job.artifact?.downloadUrl && !isArtifactExpired(job),
   ).length;
   const failedJobs = sortedJobs.filter(
     (job) => job.status === "failed" || job.status === "expired",
   ).length;
-  const readyArtifacts = sortedJobs.filter(
-    (job) => job.artifact?.downloadUrl && !isArtifactExpired(job),
-  ).length;
+  const queueHealthLabel =
+    refreshMetadata.dataFreshness === "degraded"
+      ? "degraded"
+      : failedJobs > 0
+        ? "attention"
+        : "stable";
   const drillLinks = buildDrillLinks(selectedPeriod, selectedType);
 
   const columns: CanvasTableColumn<ReportRow>[] = [
     {
       h: "JOB",
-      w: 180,
+      w: 120,
       mono: true,
       r: (row) => <span style={monoPrimaryStyle}>{row.id}</span>,
     },
     {
-      h: "TYPE",
-      w: 180,
-      r: (row) => row.jobType,
+      h: "KIND",
+      w: 220,
+      r: (row) => row.kind,
     },
     {
-      h: "PARAMS",
-      w: 216,
+      h: "PERIOD",
+      w: 110,
       mono: true,
-      r: (row) => (
-        <div>
-          <div>{row.scope}</div>
-          <div style={mutedTextStyle}>{row.period}</div>
-        </div>
-      ),
-    },
-    {
-      h: "STATE",
-      w: 112,
-      r: (row) => (
-        <CanvasPill theme={th} tone={row.statusTone} dot>
-          {STATUS_LABELS[row.status]}
-        </CanvasPill>
-      ),
+      r: (row) => row.period,
     },
     {
       h: "FORMAT",
-      w: 72,
+      w: 88,
       mono: true,
       r: (row) => row.format,
     },
     {
+      h: "STATUS",
+      w: 128,
+      r: (row) => row.status,
+    },
+    {
+      h: "EXPIRES",
+      w: 138,
+      mono: true,
+      r: (row) => row.expires,
+    },
+    {
       h: "CREATED",
-      w: 148,
-      mono: true,
-      r: (row) => row.createdAt,
-    },
-    {
-      h: "DONE AT",
-      w: 148,
-      mono: true,
-      r: (row) => row.completedAt,
-    },
-    {
-      h: "ARTIFACT",
-      w: 160,
-      r: (row) => row.artifact,
+      w: 170,
+      r: (row) => row.created,
     },
     {
       h: "ACTIONS",
@@ -702,85 +781,119 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
     const downloadAction = findAction(availableActions, "download_artifact");
     const rerunAction = findAction(availableActions, "rerun_failed_job");
     const expired = isArtifactExpired(job);
-    const artifactNode = job.artifact?.downloadUrl ? (
-      <div style={stateGridStyle}>
-        {downloadAction?.enabled ? (
-          <a
-            href={job.artifact.downloadUrl}
-            rel="noreferrer"
-            style={ghostLinkStyle}
-            target="_blank"
-          >
-            下載檔案
-          </a>
-        ) : (
-          <span style={mutedTextStyle}>
-            {expired ? "artifact expired" : "artifact pending"}
-          </span>
-        )}
-        <span style={mutedTextStyle}>
-          {job.artifact.expiresAt
-            ? `exp ${formatDateTime(job.artifact.expiresAt)}`
-            : "signed URL pending"}
-        </span>
-      </div>
-    ) : (
-      <span style={mutedTextStyle}>等待產出</span>
-    );
 
     return {
       id: job.jobId,
-      jobType: formatJobType(job.jobType),
-      scope: getScopeLabel(job),
+      kind: (
+        <div style={stateGridStyle}>
+          <span>{formatJobType(job.jobType)}</span>
+          <span style={mutedTextStyle}>{formatParametersSummary(job)}</span>
+        </div>
+      ),
       period: getPeriodLabel(job),
-      status: job.status,
-      statusTone: formatStatusTone(job.status),
       format: job.format,
-      createdAt: formatDateTime(job.createdAt),
-      completedAt:
-        job.status === "completed" ||
-        job.status === "failed" ||
-        job.status === "expired"
-          ? formatDateTime(job.updatedAt)
+      status: (
+        <div style={stateGridStyle}>
+          <CanvasPill theme={th} tone={formatStatusTone(job.status)} dot>
+            {STATUS_LABELS[job.status]}
+          </CanvasPill>
+          <span style={mutedTextStyle}>{getFailureDetail(job)}</span>
+        </div>
+      ),
+      expires: job.artifact?.expiresAt
+        ? formatDateTime(job.artifact.expiresAt)
+        : job.status === "completed"
+          ? "signed URL pending"
           : "—",
-      artifact: artifactNode,
+      created: (
+        <div style={stateGridStyle}>
+          <span style={{ ...mutedTextStyle, color: th.text }}>
+            {formatDateTime(job.createdAt)}
+          </span>
+          <span style={mutedTextStyle}>
+            done{" "}
+            {job.status === "completed" ||
+            job.status === "failed" ||
+            job.status === "expired"
+              ? formatDateTime(job.updatedAt)
+              : "—"}
+          </span>
+        </div>
+      ),
       actions: (
-        <div style={actionRowStyle}>
-          {rerunAction?.enabled ? (
-            <form action={rerunReportJobAction}>
-              <input name="returnTo" type="hidden" value={returnTo} />
-              <input name="jobType" type="hidden" value={job.jobType} />
-              <input name="format" type="hidden" value={job.format} />
-              <input
-                name="filtersJson"
-                type="hidden"
-                value={JSON.stringify(job.filters ?? {})}
-              />
-              <button style={secondaryButtonStyle} type="submit">
+        <div style={stateGridStyle}>
+          <div style={actionRowStyle}>
+            {downloadAction?.enabled && job.artifact?.downloadUrl ? (
+              <a
+                href={job.artifact.downloadUrl}
+                rel="noreferrer"
+                style={ghostLinkStyle}
+                target="_blank"
+              >
+                下載
+              </a>
+            ) : (
+              <button
+                disabled
+                style={{
+                  ...secondaryButtonStyle,
+                  opacity: 0.45,
+                  cursor: "not-allowed",
+                }}
+                title={getActionDisabledTitle(downloadAction)}
+                type="button"
+              >
+                下載
+              </button>
+            )}
+
+            {rerunAction?.enabled ? (
+              <form action={rerunReportJobAction}>
+                <input name="returnTo" type="hidden" value={returnTo} />
+                <input name="jobType" type="hidden" value={job.jobType} />
+                <input name="format" type="hidden" value={job.format} />
+                <input
+                  name="filtersJson"
+                  type="hidden"
+                  value={JSON.stringify(job.filters ?? {})}
+                />
+                <button style={secondaryButtonStyle} type="submit">
+                  重跑
+                </button>
+              </form>
+            ) : (
+              <button
+                disabled
+                style={{
+                  ...secondaryButtonStyle,
+                  opacity: 0.45,
+                  cursor: "not-allowed",
+                }}
+                title={getActionDisabledTitle(rerunAction)}
+                type="button"
+              >
                 重跑
               </button>
-            </form>
-          ) : (
-            <button
-              disabled
-              style={{
-                ...secondaryButtonStyle,
-                opacity: 0.45,
-                cursor: "not-allowed",
-              }}
-              title={getActionDisabledTitle(rerunAction)}
-              type="button"
-            >
-              重跑
-            </button>
-          )}
+            )}
+          </div>
 
           <Link
             href={`/audit?resourceId=${encodeURIComponent(job.jobId)}`}
-            style={ghostLinkStyle}
+            style={{
+              ...mutedTextStyle,
+              textDecoration: "none",
+              color: th.accent,
+            }}
           >
-            稽核
+            view audit trail
           </Link>
+          <span style={mutedTextStyle}>
+            {expired
+              ? "artifact expired"
+              : job.artifact?.downloadUrl
+                ? "signed artifact available"
+                : "artifact pending"}
+          </span>
         </div>
       ),
     };
@@ -790,9 +903,67 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
     <div>
       <CanvasPageHeader
         theme={th}
-        title="報表"
-        subtitle="T6 manual · report jobs · artifact downloads · rerun failed exports"
+        title="報表 · Reports"
+        subtitle="月用量 · cost center 拆分 · SLA 摘要 · 簽名 artifact 短效"
         actions={
+          createAction?.enabled ? (
+            <a href="#create-report-job" style={ghostLinkStyle}>
+              建立工作
+            </a>
+          ) : (
+            <button
+              disabled
+              style={{
+                ...secondaryButtonStyle,
+                opacity: 0.45,
+                cursor: "not-allowed",
+              }}
+              title={getActionDisabledTitle(createAction)}
+              type="button"
+            >
+              建立工作
+            </button>
+          )
+        }
+      />
+
+      <div style={pageBodyStyle}>
+        <div style={queueHeroStyle}>
+          <div style={queueHeroTopStyle}>
+            <div style={queueHeroTextStyle}>
+              <strong>Tenant report queue</strong>
+              <span style={subtleTextStyle}>
+                §5.17 / T6 manual. Filter by type, status, period; create jobs,
+                download signed artifacts, and rerun failed exports.
+              </span>
+            </div>
+
+            <div style={queueHeroMetaStyle}>
+              <CanvasPill theme={th} tone="neutral">
+                refresh {MANUAL_REFRESH_TIER}
+              </CanvasPill>
+              <CanvasPill
+                theme={th}
+                tone={
+                  refreshMetadata.dataFreshness === "degraded"
+                    ? "warn"
+                    : refreshMetadata.dataFreshness === "stale"
+                      ? "neutral"
+                      : "success"
+                }
+                dot
+              >
+                {refreshMetadata.dataFreshness}
+              </CanvasPill>
+              <CanvasPill
+                theme={th}
+                tone={queueHealthLabel === "stable" ? "success" : "warn"}
+              >
+                queue {queueHealthLabel}
+              </CanvasPill>
+            </div>
+          </div>
+
           <div style={actionRowStyle}>
             <form action={refreshReportsAction}>
               <input name="returnTo" type="hidden" value={returnTo} />
@@ -800,21 +971,15 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                 手動 refresh
               </button>
             </form>
-            <a href="#create-report-job" style={ghostLinkStyle}>
-              建立工作
-            </a>
+            <Link href="/integration-governance" style={ghostLinkStyle}>
+              檢查整合治理
+            </Link>
+            <span style={mutedTextStyle}>
+              generated {formatDateTime(refreshMetadata.generatedAt)} · stale
+              after {Math.round(refreshMetadata.staleAfterMs / 60000)}m
+            </span>
           </div>
-        }
-      />
-
-      <div style={pageBodyStyle}>
-        <CanvasBanner
-          body={`生成時間 ${formatDateTime(refreshMetadata.generatedAt)} · freshness ${refreshMetadata.dataFreshness} · stale after ${Math.round(refreshMetadata.staleAfterMs / 60000)}m`}
-          icon={refreshMetadata.dataFreshness === "degraded" ? "warn" : "clock"}
-          theme={th}
-          title={`Refresh tier: ${MANUAL_REFRESH_TIER}`}
-          tone={refreshMetadata.dataFreshness === "degraded" ? "warn" : "info"}
-        />
+        </div>
 
         {flash ? (
           <CanvasBanner
@@ -873,9 +1038,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
             theme={th}
             label="Failures"
             value={String(failedJobs)}
-            sub={
-              completedJobs > 0 ? `${completedJobs} done` : "rerun when needed"
-            }
+            sub="failed + expired"
           />
         </div>
 
@@ -884,10 +1047,10 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
             <CanvasCard
               theme={th}
               title="工作佇列"
-              subtitle="依 type / status / period 篩選，狀態以 queued / running / done / failed 呈現"
+              subtitle="JOB / KIND / PERIOD / FORMAT / STATUS / EXPIRES / CREATED / ACTIONS"
             >
               <form action="/reports" style={cardSectionStyle}>
-                <div style={filterRowStyle}>
+                <div style={filterGridStyle}>
                   <CanvasField theme={th} label="Type">
                     <select
                       defaultValue={selectedType}
@@ -941,34 +1104,21 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
 
               {emptyState ? (
                 <div style={emptyStateStyle}>
-                  <div>
-                    <strong>{emptyState.title}</strong>
-                    <p style={{ ...mutedTextStyle, marginTop: 6 }}>
-                      {emptyState.description}
-                    </p>
+                  <div style={helperRowStyle}>
+                    <CanvasPill theme={th} tone={emptyState.tone}>
+                      {emptyState.badge}
+                    </CanvasPill>
+                    <CanvasPill theme={th} tone="neutral">
+                      {EMPTY_REASON_LABELS[emptyReason!]}
+                    </CanvasPill>
                   </div>
 
-                  <div style={badgeListStyle}>
-                    <Link
-                      href={getScenarioHref(resolvedSearchParams, "live")}
-                      style={ghostLinkStyle}
-                    >
-                      Live
-                    </Link>
-                    {EMPTY_REASONS.map((reason) => (
-                      <Link
-                        href={getScenarioHref(resolvedSearchParams, reason)}
-                        key={reason}
-                        style={{
-                          ...ghostLinkStyle,
-                          borderColor:
-                            emptyReason === reason ? th.accent : th.border,
-                          color: emptyReason === reason ? th.accent : th.text,
-                        }}
-                      >
-                        {EMPTY_REASON_LABELS[reason]}
-                      </Link>
-                    ))}
+                  <div style={stateGridStyle}>
+                    <strong>{emptyState.title}</strong>
+                    <p style={{ ...subtleTextStyle, margin: 0 }}>
+                      {emptyState.description}
+                    </p>
+                    <span style={mutedTextStyle}>{emptyState.detail}</span>
                   </div>
 
                   <div style={actionRowStyle}>
@@ -993,36 +1143,62 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                     <Link href="/integration-governance" style={ghostLinkStyle}>
                       整合就緒度
                     </Link>
+                    <Link href="/audit" style={ghostLinkStyle}>
+                      稽核
+                    </Link>
+                  </div>
+
+                  <div style={badgeListStyle}>
+                    <Link
+                      href={getScenarioHref(resolvedSearchParams, "live")}
+                      style={ghostLinkStyle}
+                    >
+                      Live
+                    </Link>
+                    {EMPTY_REASONS.map((reason) => (
+                      <Link
+                        href={getScenarioHref(resolvedSearchParams, reason)}
+                        key={reason}
+                        style={{
+                          ...ghostLinkStyle,
+                          borderColor:
+                            emptyReason === reason ? th.accent : th.border,
+                          color: emptyReason === reason ? th.accent : th.text,
+                        }}
+                      >
+                        {EMPTY_REASON_LABELS[reason]}
+                      </Link>
+                    ))}
                   </div>
                 </div>
               ) : (
-                <CanvasCard theme={th} padding={0}>
+                <div style={queueTableWrapStyle}>
                   <CanvasTable<ReportRow>
                     columns={columns}
                     rows={rows}
                     theme={th}
                   />
-                </CanvasCard>
+                </div>
               )}
 
               <div style={footerNoteStyle}>
                 <span>
-                  CompletedAt contract 未獨立提供時，以 terminal `updatedAt`
-                  呈現。
+                  `done at` 以 terminal `updatedAt` 呈現，直到 contract 提供獨立
+                  `completedAt`。
                 </span>
                 <span>
-                  參數摘要:{" "}
-                  {visibleJobs[0]
-                    ? formatParametersSummary(visibleJobs[0])
-                    : "n/a"}
+                  目前畫面 CTA 由 page / row action descriptors
+                  驅動，不從角色碼硬判。
                 </span>
               </div>
             </CanvasCard>
+          </div>
 
+          <div style={sidebarStackStyle}>
             <CanvasCard
               theme={th}
               title="建立報表工作"
-              subtitle="type / period / scope 由 command form 決定；建立後回到同頁觀察 queued → running → done"
+              subtitle="type / period / scope params 對應 §5.17 create report job"
             >
               <form
                 action={createReportJobAction}
@@ -1107,15 +1283,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
 
                   <CanvasField
                     theme={th}
-                    hint={
-                      REGULATORY_JOB_TYPE_SET.has(
-                        selectedType !== "all"
-                          ? selectedType
-                          : "monthly_trip_report",
-                      )
-                        ? "Regulatory bundle: expect longer processing."
-                        : "Operational bundle: usually completes faster."
-                    }
+                    hint="Regulatory bundle jobs usually take longer."
                     label="Preset family"
                   >
                     <div
@@ -1138,50 +1306,38 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
 
                 <div style={actionRowStyle}>
                   <button
-                    disabled={
-                      !findAction(pageActions, "create_report_job")?.enabled
-                    }
+                    disabled={!createAction?.enabled}
                     style={{
                       ...primaryButtonStyle,
-                      opacity: findAction(pageActions, "create_report_job")
-                        ?.enabled
-                        ? 1
-                        : 0.45,
-                      cursor: findAction(pageActions, "create_report_job")
-                        ?.enabled
-                        ? "pointer"
-                        : "not-allowed",
+                      opacity: createAction?.enabled ? 1 : 0.45,
+                      cursor: createAction?.enabled ? "pointer" : "not-allowed",
                     }}
-                    title={getActionDisabledTitle(
-                      findAction(pageActions, "create_report_job"),
-                    )}
+                    title={getActionDisabledTitle(createAction)}
                     type="submit"
                   >
                     建立工作
                   </button>
                   <span style={mutedTextStyle}>
-                    Medium risk · receipt 會透過 flash 與 audit link 回到本頁。
+                    availableActions drive the CTA; receipt returns via flash
+                    and audit link.
                   </span>
                 </div>
               </form>
             </CanvasCard>
-          </div>
 
-          <div style={sidebarStackStyle}>
             <CanvasCard
               theme={th}
               title="Drill-in"
-              subtitle="依 packet §5.17 由 reports 連到治理與稽核面追查問題。"
+              subtitle="依 packet §5.17 由 reports 連到治理與稽核面追查問題"
             >
               <div style={stateGridStyle}>
                 {drillLinks.map((link) => (
-                  <Link
-                    href={link.href}
-                    key={link.label}
-                    style={ghostLinkStyle}
-                  >
-                    {link.label}
-                  </Link>
+                  <div key={link.label} style={stateGridStyle}>
+                    <Link href={link.href} style={ghostLinkStyle}>
+                      {link.label}
+                    </Link>
+                    <span style={mutedTextStyle}>{link.note}</span>
+                  </div>
                 ))}
               </div>
             </CanvasCard>
@@ -1189,7 +1345,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
             <CanvasCard
               theme={th}
               title="狀態對照"
-              subtitle="6 個 EmptyReason 與 report queue status 在同一屏可確認。"
+              subtitle="6 個 EmptyReason、queue status、artifact expiry 在同屏可驗證"
             >
               <div style={stateGridStyle}>
                 <div style={helperRowStyle}>
@@ -1211,9 +1367,10 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                     </CanvasPill>
                   ))}
                 </div>
-                <p style={mutedTextStyle}>
-                  `filtered_empty` 由頁面篩選觸發；其餘空態可由 machine truth 或
-                  `?emptyReason=` scenario 驗證 distinct rendering。
+                <p style={{ ...mutedTextStyle, margin: 0 }}>
+                  `filtered_empty` 由頁面篩選觸發；其餘空態可用 `?emptyReason=`
+                  驗證 distinct rendering。expired artifact 由 signed URL 過期與
+                  disabled download affordance 呈現。
                 </p>
               </div>
             </CanvasCard>
