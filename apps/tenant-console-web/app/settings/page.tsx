@@ -38,6 +38,7 @@ import {
   SettingsNotificationTable,
   type SettingsNotificationRow,
 } from "./settings-notification-table";
+import { SettingsRefreshButton } from "./settings-refresh-button";
 
 export const dynamic = "force-dynamic";
 
@@ -310,9 +311,12 @@ type SettingsData = {
   errors: string[];
 };
 
+type ActionLinkKind = "link" | "refresh" | "unresolved";
+
 type ActionLink = {
   descriptor: ResourceActionDescriptor;
   label: string;
+  kind: ActionLinkKind;
   surfaceLabel?: string;
   href?: string;
   link?: CrossAppResourceLink;
@@ -596,6 +600,7 @@ function parseListSurface<T>(payload: unknown): RuntimeListSurface<T> {
 }
 
 type ActionLinkOverride = {
+  kind?: ActionLinkKind;
   surfaceLabel?: string;
   href?: string;
   link?: CrossAppResourceLink;
@@ -606,24 +611,62 @@ function formatActionLabel(action: string) {
   return action.replaceAll("_", " ");
 }
 
+function resolveSettingsActionOverride(
+  action: string,
+): ActionLinkOverride | undefined {
+  switch (action) {
+    case "refresh_snapshot":
+      return { kind: "refresh", note: "refresh-runtime" };
+    case "create_tenant_user":
+    case "update_tenant_role":
+      return { href: "/users" };
+    case "issue_api_key":
+    case "rotate_api_key":
+    case "revoke_api_key":
+      return { href: "/api-keys" };
+    case "create_webhook_endpoint":
+    case "update_webhook_endpoint":
+    case "delete_webhook_endpoint":
+    case "rotate_webhook_secret":
+    case "send_test_webhook":
+      return { href: "/webhooks" };
+    case "view_audit":
+    case "export_audit":
+    case "list_audit":
+      return { href: "/audit", note: "same-tab" };
+    case "update_tenant_billing_profile":
+    case "update_notification_preferences":
+    case "update_notification_subscription":
+    case "update_sla_profile":
+      return { note: "module-route-pending" };
+    default:
+      return undefined;
+  }
+}
+
 function buildActionLink(
   descriptor: ResourceActionDescriptor,
   overrides?: ActionLinkOverride,
 ): ActionLink {
-  const href = sanitizeLocalHref(overrides?.href);
-  const link = overrides?.link;
+  const resolved = resolveSettingsActionOverride(descriptor.action);
+  const merged = { ...resolved, ...overrides };
+  const href = sanitizeLocalHref(merged.href);
+  const link = merged.link;
+  const kind =
+    merged.kind ?? (href || link ? ("link" as const) : ("unresolved" as const));
   const note =
-    overrides?.note ??
-    (!href && overrides?.href && isTenantConsoleLocalRoute(overrides.href)
+    merged.note ??
+    (!href && merged.href && isTenantConsoleLocalRoute(merged.href)
       ? "route-pending"
       : undefined);
 
   const actionLink: ActionLink = {
     descriptor,
     label: formatActionLabel(descriptor.action),
+    kind,
   };
 
-  const surfaceLabel = overrides?.surfaceLabel;
+  const surfaceLabel = merged.surfaceLabel;
   if (surfaceLabel) {
     actionLink.surfaceLabel = surfaceLabel;
   }
@@ -658,7 +701,7 @@ function mapActionLinks(
 function dedupeActionLinks(actions: ActionLink[]) {
   const seen = new Set<string>();
   return actions.filter((action) => {
-    const key = `${action.descriptor.action}:${resolveActionHref(action) ?? action.label}`;
+    const key = `${action.descriptor.action}:${action.kind}:${resolveActionHref(action) ?? action.label}:${action.surfaceLabel ?? ""}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -670,26 +713,8 @@ function flattenActionLinks(
 ) {
   return dedupeActionLinks(
     sources.flatMap((source) => {
-      const defaultHref =
-        source?.label === "計費資料"
-          ? "/billing"
-          : source?.label === "通知偏好"
-            ? "/notifications"
-            : source?.label === "SLA 設定"
-              ? "/sla"
-              : source?.label === "人員與角色"
-                ? "/users"
-                : source?.label === "API 金鑰"
-                  ? "/api-keys"
-                  : source?.label === "Webhook"
-                    ? "/webhooks"
-                    : source?.label === "租戶稽核"
-                      ? "/audit"
-                      : undefined;
       const defaultOverride: ActionLinkOverride = {
         ...(source?.label ? { surfaceLabel: source.label } : {}),
-        ...(defaultHref ? { href: defaultHref } : {}),
-        ...(source?.label === "租戶稽核" ? { note: "same-tab" } : {}),
       };
 
       return mapActionLinks(source?.availableActions, defaultOverride).map(
@@ -793,6 +818,22 @@ function renderActionLink(action: ActionLink, key: string) {
     cursor: action.descriptor.enabled && href ? "pointer" : "not-allowed",
   };
 
+  if (action.kind === "refresh") {
+    return (
+      <SettingsRefreshButton
+        key={key}
+        label={action.label}
+        disabled={!action.descriptor.enabled}
+        style={{
+          ...sharedStyle,
+          cursor: action.descriptor.enabled ? "pointer" : "not-allowed",
+        }}
+        {...(action.surfaceLabel ? { surfaceLabel: action.surfaceLabel } : {})}
+        {...(tooltip ? { title: tooltip } : {})}
+      />
+    );
+  }
+
   if (!action.descriptor.enabled || !href) {
     return (
       <span key={key} title={tooltip ?? undefined} style={sharedStyle}>
@@ -832,8 +873,17 @@ function formatActionTooltip(action: ActionLink) {
   if (!action.descriptor.enabled) {
     return action.descriptor.disabledReasonCode ?? "disabled";
   }
+  if (action.note === "refresh-runtime") {
+    return "重新抓取目前 settings snapshot。";
+  }
+  if (action.note === "module-route-pending") {
+    return "此 module 仍由 settings posture 承接；尚未提供獨立 route。";
+  }
   if (action.note === "route-pending") {
     return "此 module route 尚未落地；目前不提供站內跳轉。";
+  }
+  if (action.kind === "unresolved") {
+    return "後端已提供此 action descriptor，但 settings 尚未定義 canonical 導向。";
   }
   return action.note ?? null;
 }
@@ -1333,6 +1383,9 @@ export default async function SettingsPage() {
           } satisfies RuntimeChip),
     ),
   ];
+  const hasRefreshAction = headerActions.some(
+    (action) => action.descriptor.action === "refresh_snapshot",
+  );
 
   const sitemapEntries: SettingsSitemapEntry[] = [
     {
@@ -1432,7 +1485,6 @@ export default async function SettingsPage() {
             : data.preferences.availableActions,
           {
             surfaceLabel: "通知偏好",
-            href: "/notifications",
           },
         ),
       ),
@@ -1449,7 +1501,6 @@ export default async function SettingsPage() {
             : data.users.availableActions,
           {
             surfaceLabel: "人員與角色",
-            href: "/users",
           },
         ),
       ),
@@ -1466,7 +1517,6 @@ export default async function SettingsPage() {
             : data.apiKeys.availableActions,
           {
             surfaceLabel: "API 金鑰",
-            href: "/api-keys",
           },
         ),
       ),
@@ -1483,7 +1533,6 @@ export default async function SettingsPage() {
             : data.webhooks.availableActions,
           {
             surfaceLabel: "Webhook",
-            href: "/webhooks",
           },
         ),
       ),
@@ -1500,8 +1549,6 @@ export default async function SettingsPage() {
             : data.auditLogs.availableActions,
           {
             surfaceLabel: "租戶稽核",
-            href: "/audit",
-            note: "same-tab",
           },
         ),
       ),
@@ -1580,6 +1627,27 @@ export default async function SettingsPage() {
         ) : null}
 
         <div style={runtimeStripStyle}>
+          {!hasRefreshAction ? (
+            <SettingsRefreshButton
+              label="Refresh snapshot"
+              title="重新抓取目前 settings snapshot。"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                minHeight: 32,
+                padding: "6px 10px",
+                borderRadius: 999,
+                border: `1px solid ${th.accent}`,
+                background: th.surface,
+                color: th.text,
+                fontSize: 11.5,
+                fontWeight: 600,
+                lineHeight: 1,
+                cursor: "pointer",
+              }}
+            />
+          ) : null}
           {runtimeChips.map((chip) => (
             <div key={chip.label} style={runtimeChipStyle}>
               <span style={runtimeLabelStyle}>{chip.label}</span>
@@ -1885,6 +1953,7 @@ export default async function SettingsPage() {
                       enabled: true,
                       riskLevel: "low",
                     },
+                    kind: "link",
                     link: item.link,
                     label: item.link.label,
                   });
