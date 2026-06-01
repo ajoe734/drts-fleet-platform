@@ -15,7 +15,19 @@ This closeout clears the umbrella blocker called out in machine truth on `2026-0
 
 ## Routes Shipped
 
-The following rebuild routes were added and wired into the tenant console shell:
+Q-TEN02 acceptance for the tenant-console rebuild requires 9 route surfaces to be present in the canonical app. This umbrella closeout confirms all 9 are now available in `apps/tenant-console-web`:
+
+1. `/bookings/new`
+2. `/addresses`
+3. `/notifications`
+4. `/sla`
+5. `/billing`
+6. `/invoices`
+7. `/integration-governance`
+8. `/reports`
+9. `/feature-flags`
+
+Routes added by this umbrella branch:
 
 1. `/addresses`
 2. `/notifications`
@@ -25,7 +37,12 @@ The following rebuild routes were added and wired into the tenant console shell:
 6. `/reports`
 7. `/feature-flags`
 
-Navigation was updated in `apps/tenant-console-web/lib/navigation.ts` so the new pages are reachable from the tenant shell, rather than existing only as direct URLs.
+Routes already present and explicitly counted toward the Q-TEN02 required 9-route inventory:
+
+1. `/bookings/new`
+2. `/invoices`
+
+Navigation was updated in `apps/tenant-console-web/lib/navigation.ts` so the new pages are reachable from the tenant shell, rather than existing only as direct URLs. The shell already exposes `/bookings/new` and `/invoices`, so the full required route set is navigable from the canonical tenant console.
 
 ## Implementation Notes
 
@@ -67,15 +84,17 @@ Results:
 - `test`: PASS (`1` file, `4` tests)
 - `git diff --check`: PASS
 
-Build output confirms the new route inventory is present:
+Route inventory in `apps/tenant-console-web/app/**/page.tsx` confirms the full required Q-TEN02 surface is present:
 
+- `/bookings/new`
 - `/addresses`
-- `/billing`
-- `/feature-flags`
-- `/integration-governance`
 - `/notifications`
-- `/reports`
 - `/sla`
+- `/billing`
+- `/invoices`
+- `/integration-governance`
+- `/reports`
+- `/feature-flags`
 
 ## Residual Notes
 
@@ -84,4 +103,4 @@ Build output confirms the new route inventory is present:
 
 ## Closeout Summary
 
-The umbrella route gap identified by machine truth is resolved in `apps/tenant-console-web`, the canonical closeout artifact now exists, and the tenant console rebuild can proceed to review on this branch.
+The umbrella route gap identified by machine truth is resolved in `apps/tenant-console-web`: all 9 Q-TEN02 required route surfaces are present, the 7 missing rebuild routes are added and navigable, and the canonical closeout artifact now matches the accepted route inventory for review.
