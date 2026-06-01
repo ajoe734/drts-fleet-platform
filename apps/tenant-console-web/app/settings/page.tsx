@@ -334,17 +334,6 @@ type RuntimeEnvelope<T> = {
   };
 };
 
-type FallbackActionConfig = Omit<ResourceActionDescriptor, "action">;
-
-type SettingsModuleKey =
-  | "billing"
-  | "notifications"
-  | "sla"
-  | "apiKeys"
-  | "webhooks"
-  | "users"
-  | "audit";
-
 type SearchParamRecord = Record<string, string | string[] | undefined>;
 
 function formatDate(value: string | null | undefined) {
@@ -504,294 +493,6 @@ function mergeRefreshMetadata(
     dataFreshness,
     source: freshest.source,
   };
-}
-
-function buildFallbackAction(
-  action: string,
-  config: FallbackActionConfig,
-): ResourceActionDescriptor {
-  return {
-    action,
-    enabled: config.enabled,
-    riskLevel: config.riskLevel,
-    ...(config.disabledReasonCode
-      ? { disabledReasonCode: config.disabledReasonCode }
-      : {}),
-    ...(config.requiresReason ? { requiresReason: true } : {}),
-  };
-}
-
-function hasRole(identity: IdentityContext | null, roleCode: string) {
-  return identity?.roles.includes(roleCode) ?? false;
-}
-
-function canManageBilling(identity: IdentityContext | null) {
-  return (
-    hasRole(identity, "tenant_admin") ||
-    hasRole(identity, "tenant_finance_admin")
-  );
-}
-
-function canManageTenantSettings(identity: IdentityContext | null) {
-  return hasRole(identity, "tenant_admin");
-}
-
-function getFallbackActionConfig(
-  identity: IdentityContext | null,
-  module: SettingsModuleKey,
-): Partial<Record<string, FallbackActionConfig>> {
-  const canManageGeneral = canManageTenantSettings(identity);
-  const canManageFinance = canManageBilling(identity);
-  const manageDisabledReason = "backend_runtime_actions_pending";
-  const tenantReadDisabledReason = "tenant_read_only";
-
-  switch (module) {
-    case "billing":
-      return {
-        update_tenant_billing_profile: canManageFinance
-          ? {
-              enabled: true,
-              riskLevel: "medium",
-            }
-          : {
-              enabled: false,
-              riskLevel: "medium",
-              disabledReasonCode: tenantReadDisabledReason,
-            },
-      };
-    case "notifications":
-      return {
-        update_notification_subscription: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "medium",
-            }
-          : {
-              enabled: false,
-              riskLevel: "medium",
-              disabledReasonCode: tenantReadDisabledReason,
-            },
-        update_notification_preferences: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "medium",
-            }
-          : {
-              enabled: false,
-              riskLevel: "medium",
-              disabledReasonCode: tenantReadDisabledReason,
-            },
-      };
-    case "sla":
-      return {
-        update_sla_profile: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "medium",
-            }
-          : {
-              enabled: false,
-              riskLevel: "medium",
-              disabledReasonCode: tenantReadDisabledReason,
-            },
-      };
-    case "apiKeys":
-      return {
-        issue_api_key: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "medium",
-            }
-          : {
-              enabled: false,
-              riskLevel: "medium",
-              disabledReasonCode: tenantReadDisabledReason,
-            },
-        rotate_api_key: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "high",
-              requiresReason: true,
-            }
-          : {
-              enabled: false,
-              riskLevel: "high",
-              disabledReasonCode: tenantReadDisabledReason,
-              requiresReason: true,
-            },
-        revoke_api_key: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "high",
-              requiresReason: true,
-            }
-          : {
-              enabled: false,
-              riskLevel: "high",
-              disabledReasonCode: tenantReadDisabledReason,
-              requiresReason: true,
-            },
-      };
-    case "webhooks":
-      return {
-        create_webhook_endpoint: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "medium",
-            }
-          : {
-              enabled: false,
-              riskLevel: "medium",
-              disabledReasonCode: tenantReadDisabledReason,
-            },
-        update_webhook_endpoint: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "medium",
-            }
-          : {
-              enabled: false,
-              riskLevel: "medium",
-              disabledReasonCode: tenantReadDisabledReason,
-            },
-        rotate_webhook_secret: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "high",
-              requiresReason: true,
-            }
-          : {
-              enabled: false,
-              riskLevel: "high",
-              disabledReasonCode: tenantReadDisabledReason,
-              requiresReason: true,
-            },
-        disable_webhook_endpoint: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "high",
-              requiresReason: true,
-            }
-          : {
-              enabled: false,
-              riskLevel: "high",
-              disabledReasonCode: tenantReadDisabledReason,
-              requiresReason: true,
-            },
-        activate_webhook_endpoint: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "medium",
-            }
-          : {
-              enabled: false,
-              riskLevel: "medium",
-              disabledReasonCode: tenantReadDisabledReason,
-            },
-        send_test_webhook: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "low",
-            }
-          : {
-              enabled: false,
-              riskLevel: "low",
-              disabledReasonCode: tenantReadDisabledReason,
-            },
-      };
-    case "users":
-      return {
-        create_tenant_user: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "medium",
-            }
-          : {
-              enabled: false,
-              riskLevel: "medium",
-              disabledReasonCode: tenantReadDisabledReason,
-            },
-        update_tenant_role: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "medium",
-            }
-          : {
-              enabled: false,
-              riskLevel: "medium",
-              disabledReasonCode: tenantReadDisabledReason,
-            },
-      };
-    case "audit":
-      return {
-        view_tenant_audit_evidence: canManageGeneral
-          ? {
-              enabled: true,
-              riskLevel: "low",
-            }
-          : {
-              enabled: true,
-              riskLevel: "low",
-              disabledReasonCode: manageDisabledReason,
-            },
-      };
-  }
-}
-
-function withFallbackActions<T extends ActionSource>(
-  resource: T | null,
-  fallbackActions: ResourceActionDescriptor[],
-): T | null {
-  if (!resource) return null;
-  if (resource.availableActions && resource.availableActions.length > 0) {
-    return resource;
-  }
-  return {
-    ...resource,
-    availableActions: fallbackActions,
-  };
-}
-
-function buildEmptyState(
-  reason: EmptyReason,
-  messageCode: string,
-  nextAction?: ResourceActionDescriptor,
-): EmptyStateEnvelope {
-  return {
-    reason,
-    messageCode,
-    ...(nextAction ? { nextAction } : {}),
-  };
-}
-
-function withFallbackListRuntime<T>(
-  resource: RuntimeListEnvelope<T> | null,
-  fallbackActions: ResourceActionDescriptor[],
-  emptyState: EmptyStateEnvelope | null,
-): RuntimeListEnvelope<T> | null {
-  if (!resource) return null;
-  const resolvedEmptyState =
-    resource.items.length === 0
-      ? (resource.emptyState ?? emptyState ?? undefined)
-      : resource.emptyState;
-
-  return {
-    ...resource,
-    availableActions:
-      resource.availableActions && resource.availableActions.length > 0
-        ? resource.availableActions
-        : fallbackActions,
-    ...(resolvedEmptyState ? { emptyState: resolvedEmptyState } : {}),
-  };
-}
-
-function createFallbackActionsForModule(
-  identity: IdentityContext | null,
-  module: SettingsModuleKey,
-) {
-  return Object.entries(getFallbackActionConfig(identity, module)).flatMap(
-    ([action, config]) => (config ? [buildFallbackAction(action, config)] : []),
-  );
 }
 
 function firstParam(value: string | string[] | undefined) {
@@ -1223,100 +924,17 @@ async function loadSettingsData(): Promise<SettingsData> {
     webhooks.status === "fulfilled" ? webhooks.value.data : null;
   const auditLogsValue =
     auditLogs.status === "fulfilled" ? auditLogs.value.data : null;
-  const fallbackBillingActions = createFallbackActionsForModule(
-    identityValue,
-    "billing",
-  );
-  const fallbackNotificationActions = createFallbackActionsForModule(
-    identityValue,
-    "notifications",
-  );
-  const fallbackSlaActions = createFallbackActionsForModule(
-    identityValue,
-    "sla",
-  );
-  const fallbackApiKeyActions = createFallbackActionsForModule(
-    identityValue,
-    "apiKeys",
-  );
-  const fallbackWebhookActions = createFallbackActionsForModule(
-    identityValue,
-    "webhooks",
-  );
-  const fallbackUserActions = createFallbackActionsForModule(
-    identityValue,
-    "users",
-  );
-  const fallbackAuditActions = createFallbackActionsForModule(
-    identityValue,
-    "audit",
-  );
-  const normalizedBillingValue = withFallbackActions(
-    billingValue,
-    fallbackBillingActions,
-  );
-  const normalizedPreferenceValue = withFallbackActions(
-    preferenceValue,
-    fallbackNotificationActions,
-  );
-  const normalizedSlaValue = withFallbackActions(slaValue, fallbackSlaActions);
-  const normalizedUsersValue = withFallbackListRuntime(
-    usersValue,
-    fallbackUserActions,
-    usersValue && usersValue.items.length === 0
-      ? buildEmptyState(
-          "no_data",
-          "tenant_users_empty",
-          fallbackUserActions.find(
-            (action) => action.action === "create_tenant_user",
-          ),
-        )
-      : null,
-  );
-  const normalizedApiKeysValue = withFallbackListRuntime(
-    apiKeysValue,
-    fallbackApiKeyActions,
-    apiKeysValue && apiKeysValue.items.length === 0
-      ? buildEmptyState(
-          "no_data",
-          "tenant_api_keys_empty",
-          fallbackApiKeyActions.find(
-            (action) => action.action === "issue_api_key",
-          ),
-        )
-      : null,
-  );
-  const normalizedWebhooksValue = withFallbackListRuntime(
-    webhooksValue,
-    fallbackWebhookActions,
-    webhooksValue && webhooksValue.items.length === 0
-      ? buildEmptyState(
-          "not_provisioned",
-          "tenant_webhooks_not_provisioned",
-          fallbackWebhookActions.find(
-            (action) => action.action === "create_webhook_endpoint",
-          ),
-        )
-      : null,
-  );
-  const normalizedAuditLogsValue = withFallbackListRuntime(
-    auditLogsValue,
-    fallbackAuditActions,
-    auditLogsValue && auditLogsValue.items.length === 0
-      ? buildEmptyState("no_data", "tenant_audit_empty")
-      : null,
-  );
   const availableActions = flattenAvailableActions(
     identityValue,
-    normalizedBillingValue,
-    normalizedPreferenceValue,
-    normalizedSlaValue,
+    billingValue,
+    preferenceValue,
+    slaValue,
     governanceValue,
     quotaValue,
-    normalizedUsersValue,
-    normalizedApiKeysValue,
-    normalizedWebhooksValue,
-    normalizedAuditLogsValue,
+    usersValue,
+    apiKeysValue,
+    webhooksValue,
+    auditLogsValue,
   );
   const supportedActions = new Set(Object.keys(SETTINGS_ACTION_REGISTRY));
   const unsupportedActions = availableActions.filter(
@@ -1370,15 +988,15 @@ async function loadSettingsData(): Promise<SettingsData> {
 
   return {
     identity: identityValue,
-    billingProfile: normalizedBillingValue,
-    preferences: normalizedPreferenceValue,
-    sla: normalizedSlaValue,
+    billingProfile: billingValue,
+    preferences: preferenceValue,
+    sla: slaValue,
     governance: governanceValue,
     quotaSummary: quotaValue,
-    users: normalizedUsersValue,
-    apiKeys: normalizedApiKeysValue,
-    webhooks: normalizedWebhooksValue,
-    auditLogs: normalizedAuditLogsValue,
+    users: usersValue,
+    apiKeys: apiKeysValue,
+    webhooks: webhooksValue,
+    auditLogs: auditLogsValue,
     availableActions,
     unsupportedActions,
     errors,
@@ -1605,7 +1223,7 @@ export default async function SettingsPage({
   const notProvisionedWebhookAction = mapActionLinks(
     data.webhooks?.emptyState?.nextAction
       ? [data.webhooks.emptyState.nextAction]
-      : (data.webhooks?.availableActions ?? data.availableActions),
+      : data.webhooks?.availableActions,
     tenantCode,
     {
       create_webhook_endpoint: {
@@ -1672,8 +1290,8 @@ export default async function SettingsPage({
     observedEmptyReasons.add("fetch_failed");
   }
   if (
-    pageActions.length > 0 &&
-    pageActions.every((action) => !action.descriptor.enabled)
+    data.availableActions.length > 0 &&
+    data.availableActions.every((action) => !action.enabled)
   ) {
     observedEmptyReasons.add("permission_denied");
   }
