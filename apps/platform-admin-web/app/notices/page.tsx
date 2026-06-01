@@ -1,6 +1,13 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
@@ -16,6 +23,22 @@ import type {
   PlatformNoticeSeverity,
   ResourceActionDescriptor,
 } from "@drts/contracts";
+import {
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasDL,
+  CanvasField,
+  CanvasKPI,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasShell,
+  CanvasTable,
+  buildCanvasTheme,
+  type CanvasShellNavItem,
+  type CanvasTableColumn,
+  type CanvasTheme,
+} from "@drts/ui-web";
 
 const REFRESH_INTERVAL_MS = 30_000;
 const TAB_PARAM_VALUES = ["notices", "maint", "history"] as const;
@@ -71,6 +94,170 @@ type MaintenanceResponse =
       item?: MaintenanceRecord;
       emptyState?: EmptyStateEnvelope;
     };
+
+type NoticeTableRow = NoticeRecord & Record<string, unknown>;
+
+const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+
+const shellStyle = {
+  margin: "-32px",
+  minHeight: "calc(100vh - 64px)",
+} satisfies CSSProperties;
+
+const pageStackStyle = {
+  display: "grid",
+  gap: 16,
+  padding: 24,
+} satisfies CSSProperties;
+
+const kpiGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+} satisfies CSSProperties;
+
+const splitGridStyle = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+} satisfies CSSProperties;
+
+const inputStyle = (th: CanvasTheme, mono = false): CSSProperties => ({
+  width: "100%",
+  boxSizing: "border-box",
+  borderRadius: 7,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  color: th.text,
+  fontFamily: mono ? th.monoFamily : th.fontFamily,
+  fontSize: 12.5,
+  padding: "8px 10px",
+  outline: "none",
+});
+
+const linkButtonStyle = (th: CanvasTheme, disabled = false): CSSProperties => ({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "5px 10px",
+  minHeight: 28,
+  borderRadius: 7,
+  border: `1px solid ${th.border}`,
+  background: th.surface,
+  color: th.text,
+  textDecoration: "none",
+  fontSize: 12,
+  fontWeight: 500,
+  cursor: disabled ? "not-allowed" : "pointer",
+  opacity: disabled ? 0.55 : 1,
+});
+
+function buildPlatformNav(locale: string): CanvasShellNavItem[] {
+  const labels =
+    locale === "en"
+      ? {
+          workspace: "Workspace",
+          home: "Governance Home",
+          health: "Platform Health",
+          tenantGroup: "Tenant Governance",
+          tenants: "Tenants",
+          partners: "Partner entry",
+          users: "Platform staff",
+          fleetGroup: "Fleet & Compliance",
+          fleet: "Fleet & compliance",
+          switchboard: "Public info & placards",
+          pricingGroup: "Pricing & Settlement",
+          pricing: "Pricing",
+          payments: "Settlement governance",
+          platformGroup: "Platform Layer",
+          notices: "Notices & maintenance",
+          audit: "Audit & evidence",
+          flags: "Feature flags",
+          adapters: "Adapter registry",
+        }
+      : {
+          workspace: "工作面",
+          home: "工作首頁",
+          health: "平台健康",
+          tenantGroup: "租戶治理",
+          tenants: "租戶",
+          partners: "合作夥伴 entry",
+          users: "平台人員",
+          fleetGroup: "車隊與法遵",
+          fleet: "車隊與合規",
+          switchboard: "法定資訊與牌貼",
+          pricingGroup: "計價與結算",
+          pricing: "計價",
+          payments: "結算治理",
+          platformGroup: "平台層",
+          notices: "公告與維護",
+          audit: "稽核與證據",
+          flags: "功能旗標",
+          adapters: "介接登錄",
+        };
+
+  return [
+    { divider: labels.workspace },
+    { key: "home", href: "/", icon: "home", label: labels.home },
+    { key: "health", href: "/health", icon: "health", label: labels.health },
+    { divider: labels.tenantGroup },
+    {
+      key: "tenants",
+      href: "/tenants",
+      icon: "tenants",
+      label: labels.tenants,
+    },
+    {
+      key: "partners",
+      href: "/partners",
+      icon: "partners",
+      label: labels.partners,
+    },
+    { key: "users", href: "/users", icon: "users", label: labels.users },
+    { divider: labels.fleetGroup },
+    { key: "fleet", href: "/fleet", icon: "fleet", label: labels.fleet },
+    {
+      key: "switchboard",
+      href: "/switchboard",
+      icon: "switchboard",
+      label: labels.switchboard,
+    },
+    { divider: labels.pricingGroup },
+    {
+      key: "pricing",
+      href: "/pricing",
+      icon: "pricing",
+      label: labels.pricing,
+    },
+    {
+      key: "payments",
+      href: "/payments",
+      icon: "payments",
+      label: labels.payments,
+    },
+    { divider: labels.platformGroup },
+    {
+      key: "notices",
+      href: "/notices",
+      icon: "notices",
+      label: labels.notices,
+    },
+    { key: "audit", href: "/audit", icon: "audit", label: labels.audit },
+    {
+      key: "flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: labels.flags,
+      matchPaths: ["/feature-flags"],
+    },
+    {
+      key: "adapters",
+      href: "/adapter-registry",
+      icon: "adapters",
+      label: labels.adapters,
+    },
+  ];
+}
 
 function getCopy(locale: string) {
   return locale === "zh"
@@ -456,16 +643,6 @@ function getNoticeActionIntent(action: string): NoticeActionIntent {
   return "unknown";
 }
 
-function getSeverityTone(severity: PlatformNoticeSeverity) {
-  if (severity === "critical" || severity === "maintenance") {
-    return "admin-badge--danger";
-  }
-  if (severity === "warning") {
-    return "admin-badge--warning";
-  }
-  return "admin-badge--info";
-}
-
 function getStatusTone(status: string) {
   if (status === "active" || status === "delivered" || status === "enabled") {
     return "admin-badge--success";
@@ -694,6 +871,10 @@ function collectUniqueActions(
   return Array.from(deduped.values());
 }
 
+function toNoticeTableRows(rows: NoticeRecord[]): NoticeTableRow[] {
+  return rows.map((row) => ({ ...row }));
+}
+
 function findActionByIntent(
   actions: ResourceActionDescriptor[],
   intent: NoticeActionIntent,
@@ -714,17 +895,7 @@ function MetricCard({
   tone: string;
 }) {
   return (
-    <div
-      className="admin-card"
-      style={{
-        marginBottom: 0,
-        background: `linear-gradient(180deg, ${tone}, rgba(255,255,255,0.96))`,
-        borderColor: "rgba(15, 23, 42, 0.07)",
-      }}
-    >
-      <div style={metaLabelStyle}>{label}</div>
-      <div style={{ fontSize: 32, fontWeight: 800, marginTop: 8 }}>{value}</div>
-    </div>
+    <CanvasKPI theme={theme} label={label} value={value} sub={tone} hint="T4" />
   );
 }
 
@@ -737,23 +908,30 @@ function ActionMeta({
   action: ResourceActionDescriptor;
   label?: string;
 }) {
+  const tone =
+    getRiskTone(action.riskLevel) === "admin-badge--danger"
+      ? "danger"
+      : getRiskTone(action.riskLevel) === "admin-badge--warning"
+        ? "warn"
+        : "info";
+
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-      <span className={`admin-badge ${getRiskTone(action.riskLevel)}`}>
+      <CanvasPill theme={theme} tone={tone}>
         {label ?? getActionLabel(locale, action.action)}
-      </span>
-      <span className="admin-badge admin-badge--neutral">
+      </CanvasPill>
+      <CanvasPill theme={theme} tone="neutral">
         {formatPlatformCodeLabel(locale, action.riskLevel)}
-      </span>
+      </CanvasPill>
       {action.requiresReason ? (
-        <span className="admin-badge admin-badge--neutral">
+        <CanvasPill theme={theme} tone="neutral">
           {locale === "zh" ? "需填原因" : "Reason required"}
-        </span>
+        </CanvasPill>
       ) : null}
       {!action.enabled && action.disabledReasonCode ? (
-        <span className="admin-badge admin-badge--neutral">
+        <CanvasPill theme={theme} tone="neutral">
           {formatPlatformCodeLabel(locale, action.disabledReasonCode)}
-        </span>
+        </CanvasPill>
       ) : null}
     </div>
   );
@@ -817,10 +995,9 @@ function EmptyStateCard({
   };
 
   return (
-    <div
-      className="admin-card"
+    <CanvasCard
+      theme={theme}
       style={{
-        marginBottom: 0,
         padding: 0,
         overflow: "hidden",
         borderColor: style.glow,
@@ -853,19 +1030,10 @@ function EmptyStateCard({
           {style.glyph}
         </div>
         <div>
-          <div
-            style={{
-              display: "inline-flex",
-              padding: "5px 10px",
-              borderRadius: 999,
-              background: style.glow,
-              color: style.accent,
-              fontSize: 12,
-              fontWeight: 700,
-              marginBottom: 12,
-            }}
-          >
-            {reason}
+          <div style={{ marginBottom: 12 }}>
+            <CanvasPill theme={theme} tone="accent">
+              {reason}
+            </CanvasPill>
           </div>
           <h3 style={{ margin: "0 0 8px", fontSize: 22 }}>{title}</h3>
           <p style={{ margin: "0 0 10px", color: "#475569", lineHeight: 1.7 }}>
@@ -882,9 +1050,8 @@ function EmptyStateCard({
               {onNextAction && nextAction.enabled ? (
                 <button
                   type="button"
-                  className="admin-btn admin-btn--primary"
+                  style={linkButtonStyle(theme)}
                   onClick={onNextAction}
-                  style={{ width: "fit-content" }}
                 >
                   {getActionLabel(locale, nextAction.action)}
                 </button>
@@ -893,7 +1060,7 @@ function EmptyStateCard({
           ) : null}
         </div>
       </div>
-    </div>
+    </CanvasCard>
   );
 }
 
@@ -904,6 +1071,7 @@ export default function NoticesPage() {
   const searchParams = useSearchParams();
   const { locale } = useTranslation();
   const copy = getCopy(locale);
+  const navItems = useMemo(() => buildPlatformNav(locale), [locale]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1171,7 +1339,7 @@ export default function NoticesPage() {
 
   function renderLinkSet(links?: CrossAppResourceLink[]) {
     if (!links?.length) {
-      return <span style={{ color: "#64748b" }}>{copy.noLinks}</span>;
+      return <span style={{ color: theme.textMuted }}>{copy.noLinks}</span>;
     }
     return (
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1181,8 +1349,7 @@ export default function NoticesPage() {
             return (
               <span
                 key={`${link.targetApp}-${link.route}`}
-                className="admin-btn admin-btn--secondary admin-btn--sm"
-                style={{ opacity: 0.56, cursor: "not-allowed" }}
+                style={linkButtonStyle(theme, true)}
                 title={copy.actionUnavailable}
               >
                 {copy.openLink} {link.label}
@@ -1197,8 +1364,7 @@ export default function NoticesPage() {
               href={href}
               target={link.openMode === "new_tab" ? "_blank" : "_self"}
               rel="noreferrer"
-              className="admin-btn admin-btn--secondary admin-btn--sm"
-              style={{ textDecoration: "none" }}
+              style={linkButtonStyle(theme)}
             >
               {copy.openLink} {link.label}
               {link.openMode === "new_tab" ? ` · ${copy.newTab}` : ""}
@@ -1249,28 +1415,25 @@ export default function NoticesPage() {
           const intent = getNoticeActionIntent(action.action);
           if (intent === "resolve_notice" && action.enabled) {
             return (
-              <button
+              <CanvasBtn
                 key={action.action}
-                type="button"
-                className="admin-btn admin-btn--secondary admin-btn--sm"
+                theme={theme}
                 disabled={!action.enabled}
-                title={action.disabledReasonCode ?? copy.actionUnavailable}
                 onClick={() => void handleResolveNotice(notice.noticeId)}
               >
                 {getActionLabel(locale, action.action)}
-              </button>
+              </CanvasBtn>
             );
           }
           if (intent === "view_broadcast_history" && action.enabled) {
             return (
-              <button
+              <CanvasBtn
                 key={action.action}
-                type="button"
-                className="admin-btn admin-btn--secondary admin-btn--sm"
+                theme={theme}
                 onClick={() => updateTab("history")}
               >
                 {getActionLabel(locale, action.action)}
-              </button>
+              </CanvasBtn>
             );
           }
           return (
@@ -1282,6 +1445,91 @@ export default function NoticesPage() {
   }
 
   function renderNoticesTab() {
+    const noticeColumns: CanvasTableColumn<NoticeTableRow>[] = [
+      { h: copy.noticeId, k: "noticeId", mono: true, w: 130 },
+      {
+        h: copy.noticeTitle,
+        w: 250,
+        r: (notice) => (
+          <div style={{ display: "grid", gap: 4, whiteSpace: "normal" }}>
+            <div style={{ fontWeight: 700 }}>{notice.title}</div>
+            {notice.changeReason ? (
+              <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
+                {copy.changeReason}: {notice.changeReason}
+              </div>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        h: copy.noticeBody,
+        w: 280,
+        r: (notice) => (
+          <div style={{ display: "grid", gap: 6, whiteSpace: "normal" }}>
+            <div style={clampedBodyStyle}>{notice.body}</div>
+            <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
+              {copy.createdAt}: {formatDateTime(notice.createdAt)}
+            </div>
+          </div>
+        ),
+      },
+      {
+        h: copy.severity,
+        w: 120,
+        r: (notice) => (
+          <CanvasPill
+            theme={theme}
+            tone={
+              notice.severity === "critical" ||
+              notice.severity === "maintenance"
+                ? "danger"
+                : notice.severity === "warning"
+                  ? "warn"
+                  : "info"
+            }
+          >
+            {formatPlatformCodeLabel(locale, notice.severity)}
+          </CanvasPill>
+        ),
+      },
+      {
+        h: copy.audience,
+        w: 120,
+        r: (notice) => (
+          <CanvasPill theme={theme} tone="neutral">
+            {copy.audienceLabel[notice.targetAudience as Audience]}
+          </CanvasPill>
+        ),
+      },
+      {
+        h: copy.status,
+        w: 140,
+        r: (notice) => (
+          <div style={{ display: "grid", gap: 6 }}>
+            <CanvasPill theme={theme} tone="neutral">
+              {formatPlatformCodeLabel(locale, notice.status)}
+            </CanvasPill>
+            {notice.deliverySummary?.state ? (
+              <CanvasPill theme={theme} tone="info">
+                {getDeliveryLabel(copy, notice.deliverySummary.state)}
+              </CanvasPill>
+            ) : null}
+          </div>
+        ),
+      },
+      {
+        h: copy.updated,
+        w: 170,
+        r: (notice) => formatDateTime(notice.updatedAt),
+      },
+      {
+        h: copy.links,
+        w: 220,
+        r: (notice) => renderLinkSet(notice.crossAppLinks),
+      },
+      { h: copy.actions, w: 220, r: (notice) => renderNoticeActions(notice) },
+    ];
+
     if (requestedEmptyReason) {
       return renderEmptyState(requestedEmptyReason);
     }
@@ -1297,103 +1545,40 @@ export default function NoticesPage() {
     }
 
     return (
-      <div
-        className="admin-card"
-        style={{ marginBottom: 0, overflowX: "auto" }}
+      <CanvasCard
+        theme={theme}
+        title={copy.noticesTableTitle}
+        subtitle={copy.noticesTableHint}
+        style={{ overflowX: "auto" }}
       >
-        <div style={sectionHeaderStyle}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 800 }}>
-              {copy.noticesTableTitle}
-            </div>
-            <p style={sectionHintStyle}>{copy.noticesTableHint}</p>
-          </div>
-          <label style={{ ...fieldGroupStyle, minWidth: 180 }}>
-            <span style={fieldLabelStyle}>{copy.statusFilter}</span>
+        <div
+          style={{
+            ...splitGridStyle,
+            gridTemplateColumns: "minmax(0, 220px) minmax(0, 1fr)",
+          }}
+        >
+          <CanvasField theme={theme} label={copy.statusFilter}>
             <select
               value={noticeFilter}
               onChange={(event) =>
                 setNoticeFilter(event.target.value as NoticeFilter)
               }
-              style={fieldStyle}
+              style={inputStyle(theme)}
             >
               <option value="all">{copy.allFilter}</option>
               <option value="active">active</option>
               <option value="scheduled">scheduled</option>
               <option value="resolved">resolved</option>
             </select>
-          </label>
+          </CanvasField>
+          <div />
         </div>
-        <table className="admin-table" style={{ minWidth: 1180 }}>
-          <thead>
-            <tr>
-              <th>{copy.noticeId}</th>
-              <th>{copy.noticeTitle}</th>
-              <th>{copy.noticeBody}</th>
-              <th>{copy.severity}</th>
-              <th>{copy.audience}</th>
-              <th>{copy.status}</th>
-              <th>{copy.updated}</th>
-              <th>{copy.links}</th>
-              <th>{copy.actions}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {activeNotices.map((notice) => (
-              <tr key={notice.noticeId}>
-                <td style={monoTextStyle}>{notice.noticeId}</td>
-                <td>
-                  <div style={{ fontWeight: 700 }}>{notice.title}</div>
-                  {notice.changeReason ? (
-                    <div style={{ color: "#64748b", marginTop: 4 }}>
-                      {copy.changeReason}: {notice.changeReason}
-                    </div>
-                  ) : null}
-                </td>
-                <td style={{ maxWidth: 280 }}>
-                  <div style={clampedBodyStyle}>{notice.body}</div>
-                  <div style={{ color: "#64748b", marginTop: 6 }}>
-                    {copy.createdAt}: {formatDateTime(notice.createdAt)}
-                  </div>
-                </td>
-                <td>
-                  <span
-                    className={`admin-badge ${getSeverityTone(notice.severity)}`}
-                  >
-                    {formatPlatformCodeLabel(locale, notice.severity)}
-                  </span>
-                </td>
-                <td>
-                  <span className="admin-badge admin-badge--neutral">
-                    {copy.audienceLabel[notice.targetAudience as Audience]}
-                  </span>
-                </td>
-                <td>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <span
-                      className={`admin-badge ${getStatusTone(notice.status)}`}
-                    >
-                      {formatPlatformCodeLabel(locale, notice.status)}
-                    </span>
-                    {notice.deliverySummary?.state ? (
-                      <span
-                        className={`admin-badge ${getStatusTone(notice.deliverySummary.state)}`}
-                      >
-                        {getDeliveryLabel(copy, notice.deliverySummary.state)}
-                      </span>
-                    ) : null}
-                  </div>
-                </td>
-                <td style={monoTextStyle}>
-                  {formatDateTime(notice.updatedAt)}
-                </td>
-                <td>{renderLinkSet(notice.crossAppLinks)}</td>
-                <td>{renderNoticeActions(notice)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+        <CanvasTable
+          theme={theme}
+          columns={noticeColumns}
+          rows={toNoticeTableRows(activeNotices)}
+        />
+      </CanvasCard>
     );
   }
 
@@ -1725,6 +1910,82 @@ export default function NoticesPage() {
   }
 
   function renderHistoryTab() {
+    const historyColumns: CanvasTableColumn<NoticeTableRow>[] = [
+      { h: copy.noticeId, k: "noticeId", mono: true, w: 130 },
+      {
+        h: copy.noticeTitle,
+        w: 280,
+        r: (notice) => (
+          <div style={{ display: "grid", gap: 4, whiteSpace: "normal" }}>
+            <div style={{ fontWeight: 700 }}>{notice.title}</div>
+            <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
+              {notice.body}
+            </div>
+          </div>
+        ),
+      },
+      {
+        h: copy.severity,
+        w: 120,
+        r: (notice) => (
+          <CanvasPill
+            theme={theme}
+            tone={
+              notice.severity === "critical" ||
+              notice.severity === "maintenance"
+                ? "danger"
+                : notice.severity === "warning"
+                  ? "warn"
+                  : "info"
+            }
+          >
+            {formatPlatformCodeLabel(locale, notice.severity)}
+          </CanvasPill>
+        ),
+      },
+      {
+        h: copy.targets,
+        w: 220,
+        r: (notice) => (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {(notice.deliverySummary?.targets ?? []).map((target: string) => (
+              <CanvasPill key={target} theme={theme} tone="neutral">
+                {target}
+              </CanvasPill>
+            ))}
+          </div>
+        ),
+      },
+      {
+        h: copy.delivery,
+        w: 160,
+        r: (notice) => (
+          <div style={{ display: "grid", gap: 6 }}>
+            <CanvasPill theme={theme} tone="info">
+              {getDeliveryLabel(copy, notice.deliverySummary?.state)}
+            </CanvasPill>
+            <span style={{ color: theme.textMuted }}>
+              {notice.deliverySummary?.deliveredCount ?? 0} /{" "}
+              {notice.deliverySummary?.totalCount ?? 0}
+            </span>
+          </div>
+        ),
+      },
+      {
+        h: copy.broadcastAt,
+        w: 170,
+        r: (notice) =>
+          formatDateTime(
+            notice.deliverySummary?.broadcastAt ?? notice.updatedAt,
+          ),
+      },
+      {
+        h: copy.links,
+        w: 220,
+        r: (notice) => renderLinkSet(notice.crossAppLinks),
+      },
+    ];
+
     if (requestedEmptyReason) {
       return renderEmptyState(requestedEmptyReason);
     }
@@ -1746,106 +2007,43 @@ export default function NoticesPage() {
     }
 
     return (
-      <div
-        className="admin-card"
-        style={{ marginBottom: 0, overflowX: "auto" }}
+      <CanvasCard
+        theme={theme}
+        title={copy.historyTableTitle}
+        subtitle={copy.historyTableHint}
+        style={{ overflowX: "auto" }}
       >
-        <div style={sectionHeaderStyle}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 800 }}>
-              {copy.historyTableTitle}
-            </div>
-            <p style={sectionHintStyle}>{copy.historyTableHint}</p>
-            <p style={{ ...sectionHintStyle, marginTop: 8 }}>
-              {copy.readOnlyHistory}
-            </p>
-          </div>
-          <label style={{ ...fieldGroupStyle, minWidth: 180 }}>
-            <span style={fieldLabelStyle}>{copy.historyFilter}</span>
+        <p style={{ ...sectionHintStyle, marginTop: 0, marginBottom: 12 }}>
+          {copy.readOnlyHistory}
+        </p>
+        <div
+          style={{
+            ...splitGridStyle,
+            gridTemplateColumns: "minmax(0, 220px) minmax(0, 1fr)",
+          }}
+        >
+          <CanvasField theme={theme} label={copy.historyFilter}>
             <select
               value={historyFilter}
               onChange={(event) =>
                 setHistoryFilter(event.target.value as HistoryFilter)
               }
-              style={fieldStyle}
+              style={inputStyle(theme)}
             >
               <option value="all">{copy.allFilter}</option>
               <option value="delivered">delivered</option>
               <option value="delivering">delivering</option>
               <option value="pending">pending</option>
             </select>
-          </label>
+          </CanvasField>
+          <div />
         </div>
-        <table className="admin-table" style={{ minWidth: 1120 }}>
-          <thead>
-            <tr>
-              <th>{copy.noticeId}</th>
-              <th>{copy.noticeTitle}</th>
-              <th>{copy.severity}</th>
-              <th>{copy.targets}</th>
-              <th>{copy.delivery}</th>
-              <th>{copy.broadcastAt}</th>
-              <th>{copy.links}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredHistoryRows.map((notice) => (
-              <tr key={`${notice.noticeId}-history`}>
-                <td style={monoTextStyle}>{notice.noticeId}</td>
-                <td>
-                  <div style={{ fontWeight: 700 }}>{notice.title}</div>
-                  <div style={{ color: "#64748b", marginTop: 4 }}>
-                    {notice.body}
-                  </div>
-                </td>
-                <td>
-                  <span
-                    className={`admin-badge ${getSeverityTone(notice.severity)}`}
-                  >
-                    {formatPlatformCodeLabel(locale, notice.severity)}
-                  </span>
-                </td>
-                <td>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {(notice.deliverySummary?.targets ?? []).map(
-                      (target: string) => (
-                        <span
-                          key={target}
-                          className="admin-badge admin-badge--neutral"
-                          style={{ textTransform: "none" }}
-                        >
-                          {target}
-                        </span>
-                      ),
-                    )}
-                  </div>
-                </td>
-                <td>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <span
-                      className={`admin-badge ${getStatusTone(
-                        notice.deliverySummary?.state ?? "pending",
-                      )}`}
-                    >
-                      {getDeliveryLabel(copy, notice.deliverySummary?.state)}
-                    </span>
-                    <span style={{ color: "#64748b" }}>
-                      {notice.deliverySummary?.deliveredCount ?? 0} /{" "}
-                      {notice.deliverySummary?.totalCount ?? 0}
-                    </span>
-                  </div>
-                </td>
-                <td style={monoTextStyle}>
-                  {formatDateTime(
-                    notice.deliverySummary?.broadcastAt ?? notice.updatedAt,
-                  )}
-                </td>
-                <td>{renderLinkSet(notice.crossAppLinks)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+        <CanvasTable
+          theme={theme}
+          columns={historyColumns}
+          rows={toNoticeTableRows(filteredHistoryRows)}
+        />
+      </CanvasCard>
     );
   }
 
@@ -1854,556 +2052,442 @@ export default function NoticesPage() {
   }
 
   return (
-    <div style={{ display: "grid", gap: 18 }}>
-      <div
-        className="admin-card"
-        style={{
-          marginBottom: 0,
-          padding: 0,
-          overflow: "hidden",
-          borderColor: "rgba(79,70,229,0.16)",
-          background:
-            "linear-gradient(140deg, rgba(15,23,42,0.98), rgba(30,41,59,0.95) 46%, rgba(99,102,241,0.86))",
-          color: "#fff",
-        }}
-      >
-        <div style={{ padding: 28 }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 16,
-              flexWrap: "wrap",
-            }}
-          >
-            <div className="admin-page-header" style={{ marginBottom: 0 }}>
-              <h1 style={{ color: "#fff" }}>{copy.title}</h1>
-              <p style={{ color: "rgba(255,255,255,0.78)", maxWidth: 780 }}>
-                {copy.subtitle}
-              </p>
-            </div>
-            <div style={{ display: "grid", gap: 8 }}>
-              <span
-                className="admin-badge"
-                style={{ background: "rgba(255,255,255,0.12)", color: "#fff" }}
+    <CanvasShell
+      theme={theme}
+      nav={navItems}
+      active="notices"
+      currentPath="/notices"
+      breadcrumb={[locale === "zh" ? "平台層" : "Platform Layer", copy.title]}
+      searchPlaceholder={
+        locale === "zh"
+          ? "搜尋公告、租戶、route…"
+          : "Search notices, tenants, routes…"
+      }
+      avatarLabel="PA"
+      style={shellStyle}
+    >
+      <CanvasPageHeader
+        theme={theme}
+        title={copy.title}
+        subtitle={copy.subtitle}
+        sticky={false}
+        actions={
+          <>
+            {activeTab === "notices" && createNoticeAction ? (
+              <CanvasBtn
+                theme={theme}
+                variant={showCreate ? "secondary" : "primary"}
+                icon={showCreate ? "x" : "plus"}
+                disabled={!createNoticeAction.enabled}
+                onClick={() => setShowCreate((current) => !current)}
               >
-                {copy.refreshTier}
-              </span>
-              <span
-                className="admin-badge"
-                style={{ background: "rgba(255,255,255,0.12)", color: "#fff" }}
+                {showCreate ? copy.closeComposer : copy.createNotice}
+              </CanvasBtn>
+            ) : null}
+            {activeTab === "maint" && maintenanceAction ? (
+              <CanvasBtn
+                theme={theme}
+                variant="primary"
+                danger={maintenanceAction.action === "clear_maintenance_mode"}
+                disabled={savingMaintenance || !maintenanceAction.enabled}
+                onClick={() => void handleSaveMaintenance()}
               >
-                {copy.lastRefresh}:{" "}
-                {lastRefreshAt ? formatDateTime(lastRefreshAt) : "—"}
-              </span>
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1.6fr) minmax(260px, 0.9fr)",
-              gap: 16,
-              alignItems: "end",
-              marginTop: 22,
-            }}
-          >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: 14,
-              }}
+                {savingMaintenance
+                  ? copy.savingMaintenance
+                  : maintenanceAction.action === "clear_maintenance_mode"
+                    ? copy.clearAction
+                    : copy.saveMaintenance}
+              </CanvasBtn>
+            ) : null}
+            <CanvasBtn
+              theme={theme}
+              icon="refresh"
+              onClick={() => void loadData()}
             >
-              <MetricCard
-                label={copy.activeNoticeCount}
-                value={activeNoticeCount}
-                tone="rgba(15,118,110,0.12)"
-              />
-              <MetricCard
-                label={copy.scheduledNoticeCount}
-                value={scheduledNoticeCount}
-                tone="rgba(245,158,11,0.12)"
-              />
-              <MetricCard
-                label={copy.inflightBroadcastCount}
-                value={inflightBroadcastCount}
-                tone="rgba(30,64,175,0.12)"
-              />
-            </div>
-            <div
-              style={{
-                borderRadius: 18,
-                padding: 18,
-                background: "rgba(255,255,255,0.08)",
-                backdropFilter: "blur(10px)",
-                display: "grid",
-                gap: 8,
-              }}
-            >
-              <div
-                style={{ fontSize: 12, letterSpacing: "0.08em", opacity: 0.72 }}
-              >
-                {copy.currentPolicy}
-              </div>
-              <div style={{ fontSize: 20, fontWeight: 800, marginTop: 8 }}>
-                {maintenance?.enabled
-                  ? copy.maintenanceOn
-                  : copy.maintenanceOff}
-              </div>
-              <div style={{ marginTop: 8, color: "rgba(255,255,255,0.78)" }}>
-                {copy.refreshDetail}
-              </div>
-              <div style={{ marginTop: 4 }}>
-                <ActionMeta
-                  locale={locale}
-                  action={
-                    maintenanceAction ?? {
-                      action: "set_maintenance_mode",
-                      enabled: true,
-                      requiresReason: true,
-                      riskLevel: "high",
-                    }
-                  }
-                  label={
-                    maintenanceAction?.action === "clear_maintenance_mode"
-                      ? copy.clearAction
-                      : copy.setAction
-                  }
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+              {copy.refresh}
+            </CanvasBtn>
+          </>
+        }
+      />
 
-      {error ? (
-        <div
-          className="admin-card"
-          style={{
-            marginBottom: 0,
-            borderColor: "rgba(239,68,68,0.28)",
-            background: "rgba(254,242,242,0.96)",
-          }}
-        >
-          <p style={{ margin: 0, color: "#991b1b" }}>{error}</p>
+      <div style={pageStackStyle}>
+        <div style={kpiGridStyle}>
+          <MetricCard
+            label={copy.activeNoticeCount}
+            value={activeNoticeCount}
+            tone={locale === "zh" ? "進行中" : "Active"}
+          />
+          <MetricCard
+            label={copy.scheduledNoticeCount}
+            value={scheduledNoticeCount}
+            tone={locale === "zh" ? "待發布" : "Scheduled"}
+          />
+          <MetricCard
+            label={copy.inflightBroadcastCount}
+            value={inflightBroadcastCount}
+            tone={locale === "zh" ? "傳播中" : "In flight"}
+          />
         </div>
-      ) : null}
 
-      {maintenance?.enabled ? (
-        <div
-          className="admin-card"
-          style={{
-            marginBottom: 0,
-            borderColor: "rgba(127,29,29,0.14)",
-            background:
-              "linear-gradient(135deg, rgba(127,29,29,0.96), rgba(220,38,38,0.84))",
-            color: "#fff",
-          }}
-        >
+        <div style={splitGridStyle}>
+          <CanvasCard
+            theme={theme}
+            title={copy.routeMapTitle}
+            subtitle={copy.routeMapBody}
+          >
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {TAB_PARAM_VALUES.map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => updateTab(tab)}
+                  style={{
+                    border: `1px solid ${activeTab === tab ? theme.accentBorder : theme.border}`,
+                    background:
+                      activeTab === tab ? theme.accentBg : theme.surface,
+                    color: activeTab === tab ? theme.accent : theme.text,
+                    borderRadius: 8,
+                    padding: "10px 12px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    minWidth: 180,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: theme.textMuted,
+                      marginBottom: 6,
+                    }}
+                  >
+                    /notices
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ fontWeight: 700 }}>{copy.tabs[tab]}</div>
+                    <CanvasPill theme={theme} tone="neutral">
+                      {getTabBadge(tab)}
+                    </CanvasPill>
+                  </div>
+                  <div
+                    style={{
+                      color: theme.textMuted,
+                      fontSize: 11.5,
+                      marginTop: 6,
+                    }}
+                  >
+                    {tab === "notices"
+                      ? copy.noticesTableHint
+                      : tab === "maint"
+                        ? copy.maintenanceHint
+                        : copy.historyTableHint}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </CanvasCard>
+
+          <CanvasCard
+            theme={theme}
+            title={copy.downstreamTitle}
+            subtitle={copy.downstreamBody}
+          >
+            <CanvasDL
+              theme={theme}
+              cols={1}
+              items={[
+                { label: copy.refreshTier, value: copy.refreshDetail },
+                {
+                  label: copy.lastRefresh,
+                  value: lastRefreshAt ? formatDateTime(lastRefreshAt) : "—",
+                  mono: true,
+                },
+                {
+                  label: copy.currentPolicy,
+                  value: maintenance?.enabled
+                    ? copy.maintenanceOn
+                    : copy.maintenanceOff,
+                },
+              ]}
+            />
+            <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+              <div>
+                <div style={metaLabelStyle}>{copy.noticeSummary}</div>
+                <div style={{ marginTop: 8 }}>{renderLinkSet(noticeLinks)}</div>
+              </div>
+              <div>
+                <div style={metaLabelStyle}>{copy.historyTableTitle}</div>
+                <div style={{ marginTop: 8 }}>
+                  {renderLinkSet(historyLinks)}
+                </div>
+              </div>
+            </div>
+          </CanvasCard>
+        </div>
+
+        {error ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            title={locale === "zh" ? "讀取失敗" : "Load failed"}
+            body={error}
+          />
+        ) : null}
+
+        {maintenance?.enabled ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            title={copy.activeBanner}
+            body={`${maintenance.reason || copy.maintenanceOn} · ${formatWindow(
+              maintenance.scheduledStart,
+              maintenance.scheduledEnd,
+              copy.noWindow,
+            )}`}
+          />
+        ) : null}
+
+        <CanvasCard theme={theme} padding={14}>
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              gap: 16,
+              gap: 12,
               flexWrap: "wrap",
             }}
           >
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                flexWrap: "wrap",
-              }}
-            >
-              <span
-                className="admin-badge"
-                style={{ background: "rgba(255,255,255,0.16)", color: "#fff" }}
-              >
-                {copy.activeBanner}
-              </span>
-              <span>{maintenance.reason || copy.maintenanceOn}</span>
-            </div>
-            <span style={{ color: "rgba(255,255,255,0.82)" }}>
-              {formatWindow(
-                maintenance.scheduledStart,
-                maintenance.scheduledEnd,
-                copy.noWindow,
-              )}
-            </span>
-          </div>
-        </div>
-      ) : null}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1.1fr) minmax(320px, 0.9fr)",
-          gap: 16,
-        }}
-      >
-        <div className="admin-card" style={{ marginBottom: 0 }}>
-          <div style={sectionHeaderStyle}>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>
-                {copy.routeMapTitle}
-              </div>
-              <p style={sectionHintStyle}>{copy.routeMapBody}</p>
-            </div>
-            <span className="admin-badge admin-badge--neutral">/notices</span>
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-              gap: 12,
-            }}
-          >
-            {TAB_PARAM_VALUES.map((tab, index) => (
-              <div
-                key={tab}
-                role="button"
-                tabIndex={0}
-                onClick={() => updateTab(tab)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    updateTab(tab);
-                  }
-                }}
-                style={{
-                  borderRadius: 16,
-                  border: "1px solid rgba(148,163,184,0.22)",
-                  padding: 16,
-                  background:
-                    activeTab === tab
-                      ? "linear-gradient(180deg, rgba(15,23,42,0.06), rgba(255,255,255,0.96))"
-                      : "rgba(255,255,255,0.82)",
-                  cursor: "pointer",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    alignItems: "center",
-                  }}
-                >
-                  <div style={metaLabelStyle}>{`0${index + 1}`}</div>
-                  <span className="admin-badge admin-badge--neutral">
-                    {getTabBadge(tab)}
-                  </span>
-                </div>
-                <div style={{ marginTop: 8, fontWeight: 800 }}>
-                  {copy.tabs[tab]}
-                </div>
-                <div
-                  style={{ marginTop: 6, color: "#64748b", lineHeight: 1.6 }}
-                >
-                  {tab === "notices"
-                    ? copy.noticesTableHint
-                    : tab === "maint"
-                      ? copy.maintenanceHint
-                      : copy.historyTableHint}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="admin-card" style={{ marginBottom: 0 }}>
-          <div style={{ fontSize: 18, fontWeight: 800 }}>
-            {copy.downstreamTitle}
-          </div>
-          <p style={{ ...sectionHintStyle, marginTop: 6 }}>
-            {copy.downstreamBody}
-          </p>
-          <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
-            <div style={fieldBoxStyle}>
-              <div style={metaLabelStyle}>{copy.noticeSummary}</div>
-              <div style={{ marginTop: 8 }}>{renderLinkSet(noticeLinks)}</div>
-            </div>
-            <div style={fieldBoxStyle}>
-              <div style={metaLabelStyle}>{copy.historyTableTitle}</div>
-              <div style={{ marginTop: 8 }}>{renderLinkSet(historyLinks)}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div
-        className="admin-card"
-        style={{
-          marginBottom: 0,
-          padding: 14,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <div
-          style={{
-            display: "inline-flex",
-            gap: 8,
-            flexWrap: "wrap",
-            background: "rgba(15,23,42,0.04)",
-            borderRadius: 999,
-            padding: 6,
-          }}
-        >
-          {TAB_PARAM_VALUES.map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              className="admin-btn"
-              onClick={() => updateTab(tab)}
-              style={{
-                background:
-                  activeTab === tab
-                    ? "linear-gradient(135deg, #0f172a, #334155)"
-                    : "transparent",
-                color: activeTab === tab ? "#fff" : "#0f172a",
-                borderRadius: 999,
-                padding: "9px 16px",
-              }}
-            >
-              {copy.tabs[tab]}
-              {tab === "notices" ? ` (${notices.length})` : ""}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {activeTab === "notices" && createNoticeAction ? (
-            <button
-              type="button"
-              className="admin-btn admin-btn--primary"
-              disabled={!createNoticeAction.enabled}
-              title={
-                createNoticeAction.disabledReasonCode ?? copy.actionUnavailable
-              }
-              onClick={() => setShowCreate((current) => !current)}
-            >
-              {showCreate ? copy.closeComposer : copy.createNotice}
-            </button>
-          ) : null}
-          {activeTab === "maint" && maintenanceAction ? (
-            <button
-              type="button"
-              className="admin-btn admin-btn--primary"
-              disabled={savingMaintenance || !maintenanceAction.enabled}
-              title={maintenanceAction.disabledReasonCode ?? undefined}
-              onClick={() => void handleSaveMaintenance()}
-            >
-              {savingMaintenance
-                ? copy.savingMaintenance
-                : maintenanceAction.action === "clear_maintenance_mode"
-                  ? copy.clearAction
-                  : copy.saveMaintenance}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="admin-btn admin-btn--secondary"
-            onClick={() => void loadData()}
-          >
-            {copy.refresh}
-          </button>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {currentTabActions.length > 0 ? (
-          currentTabActions.map((action) => (
-            <ActionMeta
-              key={`${activeTab}-${action.action}`}
-              locale={locale}
-              action={action}
-              {...(activeTab === "maint"
-                ? {
-                    label:
-                      action.action === "clear_maintenance_mode"
-                        ? copy.clearAction
-                        : copy.setAction,
-                  }
-                : {})}
-            />
-          ))
-        ) : (
-          <span className="admin-badge admin-badge--neutral">
-            {copy.readOnly}
-          </span>
-        )}
-      </div>
-
-      {activeTab === "notices" && showCreate && createNoticeAction ? (
-        <div
-          className="admin-card"
-          style={{
-            marginBottom: 0,
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px, 0.9fr)",
-            gap: 18,
-            background:
-              "linear-gradient(180deg, rgba(15,118,110,0.08), rgba(255,255,255,0.96) 48%)",
-          }}
-        >
-          <form onSubmit={handleCreateNotice}>
-            <h3 style={{ margin: "0 0 10px", fontSize: 22 }}>
-              {copy.createPanelTitle}
-            </h3>
-            <p
-              style={{ margin: "0 0 18px", color: "#64748b", lineHeight: 1.6 }}
-            >
-              {copy.createPanelHint}
-            </p>
-            <div style={formGridStyle}>
-              <label style={fieldGroupStyle}>
-                <span style={fieldLabelStyle}>{copy.titleField}</span>
-                <input
-                  value={formTitle}
-                  onChange={(event) => setFormTitle(event.target.value)}
-                  style={fieldStyle}
-                  placeholder={copy.titleField}
-                  required
-                />
-              </label>
-              <label style={fieldGroupStyle}>
-                <span style={fieldLabelStyle}>{copy.audienceField}</span>
-                <select
-                  value={formAudience}
-                  onChange={(event) =>
-                    setFormAudience(event.target.value as Audience)
-                  }
-                  style={fieldStyle}
-                >
-                  <option value="all">{copy.audienceLabel.all}</option>
-                  <option value="tenants">{copy.audienceLabel.tenants}</option>
-                  <option value="ops">{copy.audienceLabel.ops}</option>
-                  <option value="drivers">{copy.audienceLabel.drivers}</option>
-                </select>
-              </label>
-              <label style={{ ...fieldGroupStyle, gridColumn: "1 / -1" }}>
-                <span style={fieldLabelStyle}>{copy.bodyField}</span>
-                <textarea
-                  value={formBody}
-                  onChange={(event) => setFormBody(event.target.value)}
-                  style={{ ...fieldStyle, minHeight: 120, resize: "vertical" }}
-                  placeholder={copy.bodyField}
-                  required
-                />
-              </label>
-              <label style={fieldGroupStyle}>
-                <span style={fieldLabelStyle}>{copy.severityField}</span>
-                <select
-                  value={formSeverity}
-                  onChange={(event) =>
-                    setFormSeverity(
-                      event.target.value as PlatformNoticeSeverity,
-                    )
-                  }
-                  style={fieldStyle}
-                >
-                  {NOTICE_FORM_SEVERITIES.map((severity) => (
-                    <option key={severity} value={severity}>
-                      {formatPlatformCodeLabel(locale, severity)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={fieldGroupStyle}>
-                <span style={fieldLabelStyle}>{copy.scheduleStartField}</span>
-                <input
-                  value={formScheduledAt}
-                  onChange={(event) => setFormScheduledAt(event.target.value)}
-                  style={fieldStyle}
-                  placeholder="2026-05-27T02:00:00Z"
-                />
-              </label>
-              <label style={{ ...fieldGroupStyle, gridColumn: "1 / -1" }}>
-                <span style={fieldLabelStyle}>{copy.reasonField}</span>
-                <input
-                  value={formReason}
-                  onChange={(event) => setFormReason(event.target.value)}
-                  style={fieldStyle}
-                  placeholder={copy.reasonField}
-                  required={isNoticeReasonRequired(formSeverity)}
-                />
-              </label>
-            </div>
-            <button
-              type="submit"
-              className="admin-btn admin-btn--primary"
-              disabled={
-                creating ||
-                !canSubmitNoticeForm({
-                  title: formTitle,
-                  body: formBody,
-                  severity: formSeverity,
-                  reason: formReason,
-                })
-              }
-            >
-              {creating ? copy.publishing : copy.publish}
-            </button>
-          </form>
-
-          <div
-            style={{
-              borderRadius: 22,
-              padding: 22,
-              background:
-                formSeverity === "critical" || formSeverity === "maintenance"
-                  ? "linear-gradient(155deg, rgba(127,29,29,0.98), rgba(239,68,68,0.84))"
-                  : "linear-gradient(155deg, rgba(15,23,42,0.96), rgba(51,65,85,0.86))",
-              color: "#fff",
-            }}
-          >
-            <span
-              className="admin-badge"
-              style={{ background: "rgba(255,255,255,0.16)", color: "#fff" }}
-            >
-              {formatPlatformCodeLabel(locale, formSeverity)}
-            </span>
-            <div
-              style={{ fontSize: 26, fontWeight: 800, margin: "14px 0 8px" }}
-            >
-              {formTitle || copy.createNotice}
-            </div>
-            <p style={{ color: "rgba(255,255,255,0.86)", lineHeight: 1.7 }}>
-              {formBody || copy.maintenancePreviewBody}
-            </p>
-            <div
-              style={{
-                display: "flex",
+                display: "inline-flex",
                 gap: 8,
                 flexWrap: "wrap",
-                marginTop: 12,
+                background: theme.surfaceLo,
+                borderRadius: 999,
+                padding: 6,
               }}
             >
-              {isNoticeReasonRequired(formSeverity) ? (
-                <span
-                  className="admin-badge"
-                  style={{
-                    background: "rgba(255,255,255,0.16)",
-                    color: "#fff",
-                  }}
+              {TAB_PARAM_VALUES.map((tab) => (
+                <CanvasBtn
+                  key={tab}
+                  theme={theme}
+                  variant={activeTab === tab ? "primary" : "ghost"}
+                  onClick={() => updateTab(tab)}
                 >
-                  {copy.reasonRequired}
-                </span>
-              ) : null}
+                  {copy.tabs[tab]} ({getTabBadge(tab)})
+                </CanvasBtn>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <CanvasPill theme={theme} tone="neutral">
+                {copy.refreshTier}
+              </CanvasPill>
+              <CanvasPill theme={theme} tone="neutral">
+                {copy.lastRefresh}:{" "}
+                {lastRefreshAt ? formatDateTime(lastRefreshAt) : "—"}
+              </CanvasPill>
+            </div>
+          </div>
+        </CanvasCard>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {currentTabActions.length > 0 ? (
+            currentTabActions.map((action) => (
+              <ActionMeta
+                key={`${activeTab}-${action.action}`}
+                locale={locale}
+                action={action}
+                {...(activeTab === "maint"
+                  ? {
+                      label:
+                        action.action === "clear_maintenance_mode"
+                          ? copy.clearAction
+                          : copy.setAction,
+                    }
+                  : {})}
+              />
+            ))
+          ) : (
+            <span className="admin-badge admin-badge--neutral">
+              {copy.readOnly}
+            </span>
+          )}
+        </div>
+
+        {activeTab === "notices" && showCreate && createNoticeAction ? (
+          <div
+            className="admin-card"
+            style={{
+              marginBottom: 0,
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1.1fr) minmax(280px, 0.9fr)",
+              gap: 18,
+              background:
+                "linear-gradient(180deg, rgba(15,118,110,0.08), rgba(255,255,255,0.96) 48%)",
+            }}
+          >
+            <form onSubmit={handleCreateNotice}>
+              <h3 style={{ margin: "0 0 10px", fontSize: 22 }}>
+                {copy.createPanelTitle}
+              </h3>
+              <p
+                style={{
+                  margin: "0 0 18px",
+                  color: "#64748b",
+                  lineHeight: 1.6,
+                }}
+              >
+                {copy.createPanelHint}
+              </p>
+              <div style={formGridStyle}>
+                <label style={fieldGroupStyle}>
+                  <span style={fieldLabelStyle}>{copy.titleField}</span>
+                  <input
+                    value={formTitle}
+                    onChange={(event) => setFormTitle(event.target.value)}
+                    style={fieldStyle}
+                    placeholder={copy.titleField}
+                    required
+                  />
+                </label>
+                <label style={fieldGroupStyle}>
+                  <span style={fieldLabelStyle}>{copy.audienceField}</span>
+                  <select
+                    value={formAudience}
+                    onChange={(event) =>
+                      setFormAudience(event.target.value as Audience)
+                    }
+                    style={fieldStyle}
+                  >
+                    <option value="all">{copy.audienceLabel.all}</option>
+                    <option value="tenants">
+                      {copy.audienceLabel.tenants}
+                    </option>
+                    <option value="ops">{copy.audienceLabel.ops}</option>
+                    <option value="drivers">
+                      {copy.audienceLabel.drivers}
+                    </option>
+                  </select>
+                </label>
+                <label style={{ ...fieldGroupStyle, gridColumn: "1 / -1" }}>
+                  <span style={fieldLabelStyle}>{copy.bodyField}</span>
+                  <textarea
+                    value={formBody}
+                    onChange={(event) => setFormBody(event.target.value)}
+                    style={{
+                      ...fieldStyle,
+                      minHeight: 120,
+                      resize: "vertical",
+                    }}
+                    placeholder={copy.bodyField}
+                    required
+                  />
+                </label>
+                <label style={fieldGroupStyle}>
+                  <span style={fieldLabelStyle}>{copy.severityField}</span>
+                  <select
+                    value={formSeverity}
+                    onChange={(event) =>
+                      setFormSeverity(
+                        event.target.value as PlatformNoticeSeverity,
+                      )
+                    }
+                    style={fieldStyle}
+                  >
+                    {NOTICE_FORM_SEVERITIES.map((severity) => (
+                      <option key={severity} value={severity}>
+                        {formatPlatformCodeLabel(locale, severity)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label style={fieldGroupStyle}>
+                  <span style={fieldLabelStyle}>{copy.scheduleStartField}</span>
+                  <input
+                    value={formScheduledAt}
+                    onChange={(event) => setFormScheduledAt(event.target.value)}
+                    style={fieldStyle}
+                    placeholder="2026-05-27T02:00:00Z"
+                  />
+                </label>
+                <label style={{ ...fieldGroupStyle, gridColumn: "1 / -1" }}>
+                  <span style={fieldLabelStyle}>{copy.reasonField}</span>
+                  <input
+                    value={formReason}
+                    onChange={(event) => setFormReason(event.target.value)}
+                    style={fieldStyle}
+                    placeholder={copy.reasonField}
+                    required={isNoticeReasonRequired(formSeverity)}
+                  />
+                </label>
+              </div>
+              <button
+                type="submit"
+                className="admin-btn admin-btn--primary"
+                disabled={
+                  creating ||
+                  !canSubmitNoticeForm({
+                    title: formTitle,
+                    body: formBody,
+                    severity: formSeverity,
+                    reason: formReason,
+                  })
+                }
+              >
+                {creating ? copy.publishing : copy.publish}
+              </button>
+            </form>
+
+            <div
+              style={{
+                borderRadius: 22,
+                padding: 22,
+                background:
+                  formSeverity === "critical" || formSeverity === "maintenance"
+                    ? "linear-gradient(155deg, rgba(127,29,29,0.98), rgba(239,68,68,0.84))"
+                    : "linear-gradient(155deg, rgba(15,23,42,0.96), rgba(51,65,85,0.86))",
+                color: "#fff",
+              }}
+            >
               <span
                 className="admin-badge"
                 style={{ background: "rgba(255,255,255,0.16)", color: "#fff" }}
               >
-                {copy.audienceField}: {copy.audienceLabel[formAudience]}
+                {formatPlatformCodeLabel(locale, formSeverity)}
               </span>
-              {formScheduledAt ? (
+              <div
+                style={{ fontSize: 26, fontWeight: 800, margin: "14px 0 8px" }}
+              >
+                {formTitle || copy.createNotice}
+              </div>
+              <p style={{ color: "rgba(255,255,255,0.86)", lineHeight: 1.7 }}>
+                {formBody || copy.maintenancePreviewBody}
+              </p>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  marginTop: 12,
+                }}
+              >
+                {isNoticeReasonRequired(formSeverity) ? (
+                  <span
+                    className="admin-badge"
+                    style={{
+                      background: "rgba(255,255,255,0.16)",
+                      color: "#fff",
+                    }}
+                  >
+                    {copy.reasonRequired}
+                  </span>
+                ) : null}
                 <span
                   className="admin-badge"
                   style={{
@@ -2411,18 +2495,29 @@ export default function NoticesPage() {
                     color: "#fff",
                   }}
                 >
-                  {copy.scheduleStartField}: {formScheduledAt}
+                  {copy.audienceField}: {copy.audienceLabel[formAudience]}
                 </span>
-              ) : null}
+                {formScheduledAt ? (
+                  <span
+                    className="admin-badge"
+                    style={{
+                      background: "rgba(255,255,255,0.16)",
+                      color: "#fff",
+                    }}
+                  >
+                    {copy.scheduleStartField}: {formScheduledAt}
+                  </span>
+                ) : null}
+              </div>
             </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {activeTab === "notices" ? renderNoticesTab() : null}
-      {activeTab === "maint" ? renderMaintenanceTab() : null}
-      {activeTab === "history" ? renderHistoryTab() : null}
-    </div>
+        {activeTab === "notices" ? renderNoticesTab() : null}
+        {activeTab === "maint" ? renderMaintenanceTab() : null}
+        {activeTab === "history" ? renderHistoryTab() : null}
+      </div>
+    </CanvasShell>
   );
 }
 
@@ -2470,11 +2565,6 @@ const metaLabelStyle: React.CSSProperties = {
   letterSpacing: "0.08em",
   textTransform: "uppercase",
   color: "#64748b",
-};
-
-const monoTextStyle: React.CSSProperties = {
-  fontFamily: '"JetBrains Mono", "SFMono-Regular", monospace',
-  fontSize: 12,
 };
 
 const sectionHeaderStyle: React.CSSProperties = {
