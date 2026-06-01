@@ -49,6 +49,11 @@ type EmptyStateConfig = {
   tone: "neutral" | "warn" | "danger" | "info";
 };
 
+type TenantSlaEmptyReason = Exclude<
+  EmptyStateEnvelope["reason"],
+  "driver_not_eligible"
+>;
+
 type SlaManagerProps = {
   profile: SlaSnapshot | null;
   updatedBy: string;
@@ -170,10 +175,18 @@ const summaryValueStyle: CSSProperties = {
   color: th.text,
 };
 
-const EMPTY_STATE_CONFIG: Record<
-  Exclude<EmptyStateEnvelope["reason"], "driver_not_eligible">,
-  EmptyStateConfig
-> = {
+const emptyActionStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  padding: "12px 14px",
+  borderRadius: 10,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  maxWidth: 420,
+};
+
+const EMPTY_STATE_CONFIG: Record<TenantSlaEmptyReason, EmptyStateConfig> = {
   no_data: {
     reason: "no_data",
     title: "尚無 SLA 資料",
@@ -229,23 +242,8 @@ function formatDateTime(value: string | null | undefined) {
     .replace(",", "");
 }
 
-function getAction(
-  actions: ResourceActionDescriptor[],
-  matcher: string[],
-  fallback: ResourceActionDescriptor,
-) {
-  const matched = actions.find((action) => matcher.includes(action.action));
-  return matched ?? fallback;
-}
-
-function buildUnavailableAction(action: string): ResourceActionDescriptor {
-  return {
-    action,
-    enabled: false,
-    disabledReasonCode: "backend_action_unavailable",
-    riskLevel: "high",
-    requiresReason: true,
-  };
+function getAction(actions: ResourceActionDescriptor[], matcher: string[]) {
+  return actions.find((action) => matcher.includes(action.action)) ?? null;
 }
 
 function disabledReasonLabel(reason: string | undefined) {
@@ -302,17 +300,14 @@ export function SlaManager({
   } | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const updateAction = getAction(
-    availableActions,
-    ["update_sla_profile", "save"],
-    buildUnavailableAction("update_sla_profile"),
-  );
-  const recalcAction = getAction(
-    availableActions,
-    ["recalculate_sla_bookings", "recalculate"],
-    buildUnavailableAction("recalculate_sla_bookings"),
-  );
-
+  const updateAction = getAction(availableActions, [
+    "update_sla_profile",
+    "save",
+  ]);
+  const recalcAction = getAction(availableActions, [
+    "recalculate_sla_bookings",
+    "recalculate",
+  ]);
   const activeEmptyState =
     emptyState && emptyState.reason !== "driver_not_eligible"
       ? EMPTY_STATE_CONFIG[emptyState.reason]
@@ -435,6 +430,21 @@ export function SlaManager({
               <div style={noteStyle}>
                 messageCode · {emptyState?.messageCode ?? "—"}
               </div>
+              {emptyState?.nextAction ? (
+                <div style={emptyActionStyle}>
+                  <div style={summaryLabelStyle}>recommended action</div>
+                  <div style={summaryValueStyle}>
+                    {emptyState.nextAction.action}
+                  </div>
+                  <div style={noteStyle}>
+                    {emptyState.nextAction.enabled
+                      ? "此動作由 API 明確允許，可直接在本頁執行。"
+                      : `目前不可執行：${disabledReasonLabel(
+                          emptyState.nextAction.disabledReasonCode,
+                        )}`}
+                  </div>
+                </div>
+              ) : null}
               <div style={linkRowStyle}>
                 {links.map((link) => (
                   <Link key={link.href} href={link.href} style={linkStyle}>
@@ -484,7 +494,7 @@ export function SlaManager({
                     inputMode="numeric"
                     style={nativeInputStyle}
                     aria-label="waitThresholdMin"
-                    disabled={isPending || !updateAction.enabled}
+                    disabled={isPending || !updateAction?.enabled}
                   />
                 </CanvasField>
                 <CanvasField
@@ -500,7 +510,7 @@ export function SlaManager({
                     inputMode="numeric"
                     style={nativeInputStyle}
                     aria-label="arrivalThresholdMin"
-                    disabled={isPending || !updateAction.enabled}
+                    disabled={isPending || !updateAction?.enabled}
                   />
                 </CanvasField>
                 <CanvasField
@@ -516,7 +526,7 @@ export function SlaManager({
                     inputMode="numeric"
                     style={nativeInputStyle}
                     aria-label="completionThresholdMin"
-                    disabled={isPending || !updateAction.enabled}
+                    disabled={isPending || !updateAction?.enabled}
                   />
                 </CanvasField>
               </div>
@@ -531,7 +541,7 @@ export function SlaManager({
                     value={reason}
                     onChange={(event) => setReason(event.target.value)}
                     style={nativeTextAreaStyle}
-                    disabled={isPending}
+                    disabled={isPending || (!updateAction && !recalcAction)}
                     aria-label="reason"
                   />
                 </CanvasField>
@@ -539,26 +549,38 @@ export function SlaManager({
 
               <div style={footerStyle}>
                 <div style={noteStyle}>
-                  {updateAction.enabled
-                    ? "availableActions 決定 CTA 顯示；高風險變更需要 reason，送出後會刷新本頁與 settings。"
-                    : `目前不可更新：${disabledReasonLabel(updateAction.disabledReasonCode)}`}
+                  {updateAction || recalcAction
+                    ? "availableActions 決定 CTA 顯示；高風險變更需要 reason，送出後會刷新本頁與相關 deep links。"
+                    : "目前 API 沒有回傳可操作的 SLA 動作。"}
                 </div>
                 <div style={actionRowStyle}>
-                  <CanvasBtn
-                    theme={th}
-                    onClick={handleRecalculate}
-                    disabled={isPending || !recalcAction.enabled}
-                  >
-                    重算既有訂單
-                  </CanvasBtn>
-                  <CanvasBtn
-                    theme={th}
-                    variant="primary"
-                    onClick={handleUpdate}
-                    disabled={isPending || !updateAction.enabled}
-                  >
-                    儲存設定
-                  </CanvasBtn>
+                  {recalcAction ? (
+                    <CanvasBtn
+                      theme={th}
+                      onClick={handleRecalculate}
+                      disabled={isPending || !recalcAction.enabled}
+                    >
+                      {recalcAction.enabled
+                        ? "重算既有訂單"
+                        : `重算既有訂單 · ${disabledReasonLabel(
+                            recalcAction.disabledReasonCode,
+                          )}`}
+                    </CanvasBtn>
+                  ) : null}
+                  {updateAction ? (
+                    <CanvasBtn
+                      theme={th}
+                      variant="primary"
+                      onClick={handleUpdate}
+                      disabled={isPending || !updateAction.enabled}
+                    >
+                      {updateAction.enabled
+                        ? "儲存設定"
+                        : `儲存設定 · ${disabledReasonLabel(
+                            updateAction.disabledReasonCode,
+                          )}`}
+                    </CanvasBtn>
+                  ) : null}
                 </div>
               </div>
             </CanvasCard>

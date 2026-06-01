@@ -32,7 +32,6 @@ const EMPTY_REASON_SET = new Set<EmptyReason>([
   "permission_denied",
   "external_unavailable",
   "filtered_empty",
-  "driver_not_eligible",
 ]);
 
 function parseEmptyReason(value: string | undefined): EmptyReason | null {
@@ -63,9 +62,6 @@ function classifyFetchFailure(error: unknown): EmptyReason {
 function buildPreviewEmptyState(
   reason: EmptyReason,
 ): EmptyStateEnvelope | null {
-  if (reason === "driver_not_eligible") {
-    return null;
-  }
   return {
     reason,
     messageCode: `tenant.sla.preview.${reason}`,
@@ -147,7 +143,7 @@ export default async function SlaPage({ searchParams }: PageProps) {
         links={[
           { href: "/integration-governance", label: "查看整合就緒度" },
           { href: "/audit", label: "查看 SLA 稽核紀錄" },
-          { href: "/notifications", label: "檢查通知設定" },
+          { href: "/settings", label: "返回租戶設定總覽" },
         ]}
         crossAppLinks={[
           {
