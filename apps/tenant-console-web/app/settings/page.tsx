@@ -53,6 +53,13 @@ const APP_BASE_URLS: Record<CrossAppResourceLink["targetApp"], string> = {
   "platform-admin": "http://localhost:3002",
   "tenant-console": "http://localhost:3004",
 };
+const LOCAL_TENANT_ROUTES = new Set([
+  "/settings",
+  "/users",
+  "/audit",
+  "/api-keys",
+  "/webhooks",
+]);
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -608,20 +615,23 @@ const SETTINGS_ACTION_REGISTRY: Record<string, ActionRegistryEntry> = {
   },
   update_tenant_billing_profile: {
     label: "計費資料",
-    href: "/billing",
-    note: "module-owned",
+    href: "#general-overview",
+    note: "summary-only",
   },
   update_notification_subscription: {
     label: "通知偏好",
-    href: "/notifications",
+    href: "#notification-subscriptions",
+    note: "summary-only",
   },
   update_notification_preferences: {
     label: "通知偏好",
-    href: "/notifications",
+    href: "#notification-subscriptions",
+    note: "summary-only",
   },
   update_sla_profile: {
     label: "SLA 設定",
-    href: "/sla",
+    href: "#sla-governance-posture",
+    note: "summary-only",
   },
   issue_api_key: {
     label: "API 金鑰",
@@ -692,9 +702,13 @@ function buildActionLink(
     return null;
   }
 
-  const href = overrides?.href ?? resolvedHref;
+  const href = sanitizeLocalHref(overrides?.href ?? resolvedHref);
   const link = overrides?.link ?? resolved?.link;
-  const note = overrides?.note ?? resolved?.note;
+  const note =
+    overrides?.note ??
+    (!href && resolvedHref && isTenantConsoleLocalRoute(resolvedHref)
+      ? "route-pending"
+      : resolved?.note);
 
   const actionLink: ActionLink = {
     descriptor,
@@ -748,6 +762,16 @@ function resolveActionHref(action: ActionLink) {
     : `${base}${action.link.route}`;
 }
 
+function isTenantConsoleLocalRoute(href: string) {
+  return href.startsWith("/") && !href.startsWith("//");
+}
+
+function sanitizeLocalHref(href: string | undefined) {
+  if (!href || href.startsWith("#")) return href;
+  if (!isTenantConsoleLocalRoute(href)) return href;
+  return LOCAL_TENANT_ROUTES.has(href) ? href : undefined;
+}
+
 function getActionVariant(descriptor: ResourceActionDescriptor) {
   if (descriptor.riskLevel === "high") {
     return {
@@ -775,9 +799,7 @@ function getActionVariant(descriptor: ResourceActionDescriptor) {
 function renderActionLink(action: ActionLink, key: string) {
   const href = resolveActionHref(action);
   const variant = getActionVariant(action.descriptor);
-  const tooltip = !action.descriptor.enabled
-    ? (action.descriptor.disabledReasonCode ?? "disabled")
-    : (action.note ?? null);
+  const tooltip = formatActionTooltip(action);
   const content = (
     <>
       <span>{action.label}</span>
@@ -849,6 +871,19 @@ function getFreshnessTone(refresh: UiRefreshMetadata): CanvasTone {
 
 function formatRefreshChipValue(refresh: UiRefreshMetadata) {
   return `${refresh.dataFreshness} · ${refresh.source}`;
+}
+
+function formatActionTooltip(action: ActionLink) {
+  if (!action.descriptor.enabled) {
+    return action.descriptor.disabledReasonCode ?? "disabled";
+  }
+  if (action.note === "summary-only") {
+    return "此動作目前回到本頁摘要區塊，避免導向未落地 route。";
+  }
+  if (action.note === "route-pending") {
+    return "此 module route 尚未落地；目前不提供站內跳轉。";
+  }
+  return action.note ?? null;
 }
 
 function getEmptyReasonTone(reason: EmptyReason): CanvasTone {
@@ -1199,7 +1234,13 @@ export default async function SettingsPage() {
     "/api-keys",
     "/webhooks",
   ];
-  const deferredModuleRoutes = ["/notifications", "/sla", "/feature-flags"];
+  const deferredModuleRoutes = [
+    "/billing",
+    "/notifications",
+    "/sla",
+    "/integration-governance",
+    "/feature-flags",
+  ];
   const localModuleCount = settingsModuleRoutes.length;
   const moduleCatalogCount =
     settingsModuleRoutes.length + deferredModuleRoutes.length;
@@ -1349,8 +1390,9 @@ export default async function SettingsPage() {
   const sitemapEntries: SettingsSitemapEntry[] = [
     {
       title: "一般資料",
-      route: "/settings",
-      detail: "租戶代碼、計費資料、身分與預設 posture 留在此頁總覽。",
+      route: "/settings · /billing (deferred)",
+      detail:
+        "租戶代碼、計費資料、身分與預設 posture 留在此頁總覽；計費細節 route 尚未落地前，以本頁摘要承接。",
       actions: generalActions,
     },
     {
@@ -1362,7 +1404,8 @@ export default async function SettingsPage() {
     },
     {
       title: "整合預設",
-      route: "/api-keys · /webhooks · platform-admin /audit",
+      route:
+        "/integration-governance (deferred) · /api-keys · /webhooks · platform-admin /audit",
       detail:
         "API key / webhook 治理留在 tenant app；feature rollout 與 platform-owned 變更從 cross-app trace 解釋。",
       actions: integrationActions,
@@ -1373,6 +1416,13 @@ export default async function SettingsPage() {
       detail:
         "權限、隱私同意與 platform-owned 設定變更用 cross-app audit trace 串起來。",
       actions: peopleActions,
+    },
+    {
+      title: "功能可見性",
+      route: "/feature-flags (platform trace)",
+      detail:
+        "feature visibility 是 read-scoped、platform-owned surface；settings 只保留治理脈絡與 new-tab trace。",
+      actions: [],
     },
   ];
 
@@ -1610,28 +1660,30 @@ export default async function SettingsPage() {
         </div>
 
         <div style={topCanvasGridStyle}>
-          <CanvasCard theme={th} title="一般" style={generalCardStyle}>
-            <div style={generalGridStyle}>
-              <CanvasField theme={th} label="租戶代碼 · tenant_code">
-                <CanvasInput theme={th} value={tenantCode} mono />
-              </CanvasField>
-              <CanvasField theme={th} label="顯示名稱 · display_name">
-                <CanvasInput theme={th} value={displayName} />
-              </CanvasField>
-              <CanvasField theme={th} label="統一編號 · tax_id">
-                <CanvasInput theme={th} value={taxId} mono />
-              </CanvasField>
-              <CanvasField theme={th} label="計費聯絡人">
-                <CanvasInput theme={th} value={billingContact} />
-              </CanvasField>
-              <CanvasField theme={th} label="預設語系 · default_locale">
-                <CanvasSelect theme={th} value="zh-Hant" />
-              </CanvasField>
-              <CanvasField theme={th} label="預設時區 · timezone">
-                <CanvasSelect theme={th} value="Asia/Taipei" />
-              </CanvasField>
-            </div>
-          </CanvasCard>
+          <div id="general-overview">
+            <CanvasCard theme={th} title="一般" style={generalCardStyle}>
+              <div style={generalGridStyle}>
+                <CanvasField theme={th} label="租戶代碼 · tenant_code">
+                  <CanvasInput theme={th} value={tenantCode} mono />
+                </CanvasField>
+                <CanvasField theme={th} label="顯示名稱 · display_name">
+                  <CanvasInput theme={th} value={displayName} />
+                </CanvasField>
+                <CanvasField theme={th} label="統一編號 · tax_id">
+                  <CanvasInput theme={th} value={taxId} mono />
+                </CanvasField>
+                <CanvasField theme={th} label="計費聯絡人">
+                  <CanvasInput theme={th} value={billingContact} />
+                </CanvasField>
+                <CanvasField theme={th} label="預設語系 · default_locale">
+                  <CanvasSelect theme={th} value="zh-Hant" />
+                </CanvasField>
+                <CanvasField theme={th} label="預設時區 · timezone">
+                  <CanvasSelect theme={th} value="Asia/Taipei" />
+                </CanvasField>
+              </div>
+            </CanvasCard>
+          </div>
 
           <CanvasCard theme={th} title="當期狀態" style={statusCardStyle}>
             <CanvasDL
@@ -1669,7 +1721,7 @@ export default async function SettingsPage() {
           <CanvasCard
             theme={th}
             title="設定 sitemap"
-            subtitle="`/settings` 保留總覽；可變更的設定折回各 module route。"
+            subtitle="`/settings` 保留總覽；未落地 module 先回到本頁 posture 或 cross-app trace。"
           >
             <div style={sitemapListStyle}>
               {sitemapEntries.map((entry) => (
@@ -1768,110 +1820,114 @@ export default async function SettingsPage() {
         </div>
 
         <div style={settingsLaneStyle}>
-          <CanvasCard
-            theme={th}
-            title="通知訂閱"
-            subtitle="事件代碼 · 路由 · 狀態"
-            padding={0}
-          >
-            {notificationRows.length > 0 ? (
-              <SettingsNotificationTable rows={notificationRows} />
-            ) : notificationEmptyStateSurface ? (
-              <div style={{ padding: "14px" }}>
-                {renderEmptyStateSurface(notificationEmptyStateSurface)}
-              </div>
-            ) : (
-              <div style={emptyStateStyle}>尚未訂閱任何事件通知</div>
-            )}
-            <div style={{ ...mutedFootnoteStyle, padding: "10px 14px 14px" }}>
-              {notificationFootnote}
-            </div>
-          </CanvasCard>
-
-          <div style={splitGridStyle}>
+          <div id="notification-subscriptions">
             <CanvasCard
               theme={th}
-              title="SLA 與整合姿態"
-              subtitle="等待 / 抵達 / 完成門檻 · 月配額姿態 · 治理預設"
+              title="通知訂閱"
+              subtitle="事件代碼 · 路由 · 狀態"
+              padding={0}
             >
-              <div style={kpiGridStyle}>
-                <CanvasKPI
-                  theme={th}
-                  label="等候"
-                  value={
-                    data.sla.item ? `${data.sla.item.waitThresholdMin}m` : "—"
-                  }
-                  sub="等候門檻"
-                />
-                <CanvasKPI
-                  theme={th}
-                  label="抵達"
-                  value={
-                    data.sla.item
-                      ? `${data.sla.item.arrivalThresholdMin}m`
-                      : "—"
-                  }
-                  sub="抵達門檻"
-                />
-                <CanvasKPI
-                  theme={th}
-                  label="完成"
-                  value={
-                    data.sla.item
-                      ? `${data.sla.item.completionThresholdMin}m`
-                      : "—"
-                  }
-                  sub="完成門檻"
-                />
-                <CanvasKPI
-                  theme={th}
-                  label="剩餘配額"
-                  value={formatRemainingPercent(quotaSummary)}
-                  sub={formatQuotaRemaining(quotaSummary)}
-                />
+              {notificationRows.length > 0 ? (
+                <SettingsNotificationTable rows={notificationRows} />
+              ) : notificationEmptyStateSurface ? (
+                <div style={{ padding: "14px" }}>
+                  {renderEmptyStateSurface(notificationEmptyStateSurface)}
+                </div>
+              ) : (
+                <div style={emptyStateStyle}>尚未訂閱任何事件通知</div>
+              )}
+              <div style={{ ...mutedFootnoteStyle, padding: "10px 14px 14px" }}>
+                {notificationFootnote}
               </div>
-
-              <CanvasDL
-                theme={th}
-                cols={2}
-                items={[
-                  {
-                    k: "API key 壽命",
-                    v: apiKeyLifetime,
-                    mono: true,
-                  },
-                  {
-                    k: "webhook 重送",
-                    v: webhookRetry,
-                    mono: true,
-                  },
-                  {
-                    k: "Webhook 基線",
-                    v: `${baselineEvents.length} 項`,
-                    mono: true,
-                  },
-                  {
-                    k: "強制模式",
-                    v: quotaSummary?.limit.enforcementMode ?? "—",
-                    mono: true,
-                  },
-                  {
-                    k: "已確認趟次",
-                    v: quotaSummary
-                      ? formatCount(quotaSummary.usage.confirmedBookingCount)
-                      : "—",
-                    mono: true,
-                  },
-                  {
-                    k: "更新時間",
-                    v: formatUpdated(
-                      quotaSummary?.refreshedAt ?? data.sla.item?.updatedAt,
-                    ),
-                    mono: true,
-                  },
-                ]}
-              />
             </CanvasCard>
+          </div>
+
+          <div style={splitGridStyle}>
+            <div id="sla-governance-posture">
+              <CanvasCard
+                theme={th}
+                title="SLA 與整合姿態"
+                subtitle="等待 / 抵達 / 完成門檻 · 月配額姿態 · 治理預設"
+              >
+                <div style={kpiGridStyle}>
+                  <CanvasKPI
+                    theme={th}
+                    label="等候"
+                    value={
+                      data.sla.item ? `${data.sla.item.waitThresholdMin}m` : "—"
+                    }
+                    sub="等候門檻"
+                  />
+                  <CanvasKPI
+                    theme={th}
+                    label="抵達"
+                    value={
+                      data.sla.item
+                        ? `${data.sla.item.arrivalThresholdMin}m`
+                        : "—"
+                    }
+                    sub="抵達門檻"
+                  />
+                  <CanvasKPI
+                    theme={th}
+                    label="完成"
+                    value={
+                      data.sla.item
+                        ? `${data.sla.item.completionThresholdMin}m`
+                        : "—"
+                    }
+                    sub="完成門檻"
+                  />
+                  <CanvasKPI
+                    theme={th}
+                    label="剩餘配額"
+                    value={formatRemainingPercent(quotaSummary)}
+                    sub={formatQuotaRemaining(quotaSummary)}
+                  />
+                </div>
+
+                <CanvasDL
+                  theme={th}
+                  cols={2}
+                  items={[
+                    {
+                      k: "API key 壽命",
+                      v: apiKeyLifetime,
+                      mono: true,
+                    },
+                    {
+                      k: "webhook 重送",
+                      v: webhookRetry,
+                      mono: true,
+                    },
+                    {
+                      k: "Webhook 基線",
+                      v: `${baselineEvents.length} 項`,
+                      mono: true,
+                    },
+                    {
+                      k: "強制模式",
+                      v: quotaSummary?.limit.enforcementMode ?? "—",
+                      mono: true,
+                    },
+                    {
+                      k: "已確認趟次",
+                      v: quotaSummary
+                        ? formatCount(quotaSummary.usage.confirmedBookingCount)
+                        : "—",
+                      mono: true,
+                    },
+                    {
+                      k: "更新時間",
+                      v: formatUpdated(
+                        quotaSummary?.refreshedAt ?? data.sla.item?.updatedAt,
+                      ),
+                      mono: true,
+                    },
+                  ]}
+                />
+              </CanvasCard>
+            </div>
 
             <CanvasCard
               theme={th}
