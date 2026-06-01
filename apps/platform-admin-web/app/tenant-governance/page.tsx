@@ -59,6 +59,17 @@ type GovernanceAction = {
   link: CrossAppResourceLink | null;
   hint: string;
 };
+type ActionLinkTarget = {
+  actionKey: string;
+  actionLabel: string;
+  target: CrossAppResourceLink;
+  href: string;
+};
+type ResolvedGovernanceAction = {
+  action: GovernanceAction;
+  href: string | null;
+  runnable: boolean;
+};
 type EmptyStateAction = {
   label: string;
   href?: string;
@@ -461,6 +472,48 @@ function resolveTenantActions(
   });
 }
 
+function resolveActionLinkTargets(
+  actions: GovernanceAction[],
+): ActionLinkTarget[] {
+  const deduped = new Map<string, ActionLinkTarget>();
+
+  for (const action of actions) {
+    if (!action.link) {
+      continue;
+    }
+
+    const href = resolveCrossAppHref(action.link);
+    if (!href) {
+      continue;
+    }
+
+    deduped.set(`${action.link.targetApp}:${action.link.route}`, {
+      actionKey: action.key,
+      actionLabel: action.label,
+      target: action.link,
+      href,
+    });
+  }
+
+  return [...deduped.values()];
+}
+
+function resolveActionHref(action: GovernanceAction): string | null {
+  return resolveCrossAppHref(action.link);
+}
+
+function resolveGovernanceAction(
+  action: GovernanceAction,
+): ResolvedGovernanceAction {
+  const href = resolveActionHref(action);
+
+  return {
+    action,
+    href,
+    runnable: action.descriptor.enabled && Boolean(href),
+  };
+}
+
 function findActionLink(
   descriptor: ResourceActionDescriptor,
   drillTargets: CrossAppResourceLink[],
@@ -511,45 +564,11 @@ function findActionLink(
   }
 }
 
-function resolveDrillTargets(
-  row: PlatformTenantGovernanceSummaryRow,
-): CrossAppResourceLink[] {
-  const deduped = new Map<string, CrossAppResourceLink>();
-  for (const target of row.drillTargets) {
-    deduped.set(`${target.targetApp}:${target.route}`, target);
-  }
-  return [...deduped.values()];
-}
-
 function renderActionControl(
   action: GovernanceAction,
-  locale: string,
-  href: string | null,
+  href: string,
   tone: "primary" | "secondary" = "secondary",
 ) {
-  const disabledTitle =
-    action.descriptor.enabled && href
-      ? undefined
-      : action.descriptor.enabled
-        ? locale === "en"
-          ? "Route unavailable"
-          : "目前沒有對應路由"
-        : disabledReasonLabel(locale, action.descriptor.disabledReasonCode);
-
-  if (!action.descriptor.enabled || !href) {
-    return (
-      <button
-        key={action.key}
-        type="button"
-        disabled
-        title={disabledTitle}
-        style={actionButtonStyle(true, tone)}
-      >
-        {action.label}
-      </button>
-    );
-  }
-
   const link = action.link;
 
   return (
@@ -803,9 +822,13 @@ export default function TenantGovernancePage() {
             "Select a tenant to inspect route targets, source modules, and the descriptor-driven action rail.",
           selectedSummary: "Selected tenant summary",
           selectedActions: "Available actions",
-          selectedDrill: "Drill targets",
+          selectedDrill: "Action-linked drill targets",
           internal: "in-app",
           external: "new tab",
+          readOnly: "Read-only",
+          readOnlyHint:
+            "This tenant has no actionable governance CTA in the current snapshot.",
+          disabledActionsOnly: "No enabled action is currently available.",
           previous: "Previous",
           next: "Next",
           staleBannerTitle: "Tenant governance snapshot is stale",
@@ -879,9 +902,12 @@ export default function TenantGovernancePage() {
             "選一個 tenant 之後，這裡會顯示 route target、來源模組與 descriptor-driven action rail。",
           selectedSummary: "選定租戶摘要",
           selectedActions: "可用動作",
-          selectedDrill: "Drill targets",
+          selectedDrill: "由動作帶出的 drill targets",
           internal: "站內",
           external: "新分頁",
+          readOnly: "唯讀",
+          readOnlyHint: "目前快照下，這個 tenant 沒有可執行的治理 CTA。",
+          disabledActionsOnly: "目前沒有可啟用的動作。",
           previous: "上一頁",
           next: "下一頁",
           staleBannerTitle: "Tenant governance 快照已過期",
@@ -994,20 +1020,9 @@ export default function TenantGovernancePage() {
         : ([] as GovernanceAction[]),
     [locale, selectedTenant],
   );
-  const selectedDrillTargets = useMemo(
-    () =>
-      selectedTenant
-        ? resolveDrillTargets(selectedTenant)
-        : ([] as CrossAppResourceLink[]),
-    [selectedTenant],
-  );
-  const selectedDrillTargetHrefs = useMemo(
-    () =>
-      selectedDrillTargets.map((target) => ({
-        target,
-        href: resolveCrossAppHref(target) ?? target.route,
-      })),
-    [selectedDrillTargets],
+  const selectedActionLinks = useMemo(
+    () => resolveActionLinkTargets(selectedActions),
+    [selectedActions],
   );
 
   const metrics = useMemo(() => {
@@ -1222,25 +1237,44 @@ export default function TenantGovernancePage() {
         h: copy.columns.actions,
         w: 210,
         r: (row) => {
-          const actions = resolveTenantActions(locale, row);
-          const primaryActions = actions.slice(0, 2);
+          const actions = resolveTenantActions(locale, row).map(
+            resolveGovernanceAction,
+          );
+          const primaryActions = actions.filter((action) => action.runnable);
+          const primaryVisibleActions = primaryActions.slice(0, 2);
           return (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                style={actionButtonStyle(false)}
-                onClick={() => setSelectedTenantId(row.tenantId)}
-              >
-                {copy.selected}
-              </button>
-              {primaryActions.map((action, index) =>
-                renderActionControl(
-                  action,
-                  locale,
-                  resolveCrossAppHref(action.link),
-                  index === 0 ? "primary" : "secondary",
-                ),
-              )}
+            <div style={{ display: "grid", gap: 6 }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  style={actionButtonStyle(false)}
+                  onClick={() => setSelectedTenantId(row.tenantId)}
+                >
+                  {copy.selected}
+                </button>
+                {primaryVisibleActions.map(({ action, href }, index) =>
+                  renderActionControl(
+                    action,
+                    href!,
+                    index === 0 ? "primary" : "secondary",
+                  ),
+                )}
+                {!primaryVisibleActions.length ? (
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.readOnly}
+                  </CanvasPill>
+                ) : null}
+              </div>
+              {!primaryVisibleActions.length ? (
+                <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+                  {copy.readOnlyHint}
+                </span>
+              ) : null}
+              {primaryVisibleActions.length < primaryActions.length ? (
+                <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+                  +{primaryActions.length - primaryVisibleActions.length}
+                </span>
+              ) : null}
             </div>
           );
         },
@@ -1741,93 +1775,145 @@ export default function TenantGovernancePage() {
                   <strong style={{ fontSize: 13.5 }}>
                     {copy.selectedActions}
                   </strong>
-                  {selectedActions.map((action, index) => (
-                    <div key={`action-${action.key}`} style={actionCardStyle}>
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          gap: 10,
-                          alignItems: "center",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <strong>{action.label}</strong>
-                        <div style={actionMetaStyle}>
-                          <CanvasPill theme={theme} tone="neutral">
-                            {action.descriptor.riskLevel}
-                          </CanvasPill>
-                          <CanvasPill
-                            theme={theme}
-                            tone={
-                              action.link?.openMode === "new_tab"
-                                ? "accent"
-                                : "neutral"
-                            }
+                  {selectedActions.length > 0 ? (
+                    selectedActions.map((action, index) => {
+                      const resolvedAction = resolveGovernanceAction(action);
+                      const unavailableReason = action.descriptor.enabled
+                        ? locale === "en"
+                          ? "Route unavailable"
+                          : "目前沒有對應路由"
+                        : disabledReasonLabel(
+                            locale,
+                            action.descriptor.disabledReasonCode,
+                          );
+
+                      return (
+                        <div
+                          key={`action-${action.key}`}
+                          style={actionCardStyle}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 10,
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                            }}
                           >
-                            {action.link?.openMode === "new_tab"
-                              ? copy.external
-                              : copy.internal}
-                          </CanvasPill>
-                        </div>
-                      </div>
-                      <span style={{ color: theme.textMuted, lineHeight: 1.5 }}>
-                        {action.hint}
-                      </span>
-                      <div
-                        style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                      >
-                        {renderActionControl(
-                          action,
-                          locale,
-                          resolveCrossAppHref(action.link),
-                          index === 0 ? "primary" : "secondary",
-                        )}
-                        {!action.descriptor.enabled ? (
+                            <strong>{action.label}</strong>
+                            <div style={actionMetaStyle}>
+                              <CanvasPill theme={theme} tone="neutral">
+                                {action.descriptor.riskLevel}
+                              </CanvasPill>
+                              <CanvasPill
+                                theme={theme}
+                                tone={
+                                  action.link?.openMode === "new_tab"
+                                    ? "accent"
+                                    : "neutral"
+                                }
+                              >
+                                {action.link?.openMode === "new_tab"
+                                  ? copy.external
+                                  : copy.internal}
+                              </CanvasPill>
+                            </div>
+                          </div>
                           <span
-                            style={{ color: theme.textMuted, fontSize: 11.5 }}
+                            style={{ color: theme.textMuted, lineHeight: 1.5 }}
                           >
-                            {disabledReasonLabel(
-                              locale,
-                              action.descriptor.disabledReasonCode,
-                            )}
+                            {action.hint}
                           </span>
-                        ) : null}
-                      </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            {resolvedAction.runnable ? (
+                              renderActionControl(
+                                action,
+                                resolvedAction.href!,
+                                index === 0 ? "primary" : "secondary",
+                              )
+                            ) : (
+                              <CanvasPill
+                                theme={theme}
+                                tone={
+                                  action.descriptor.enabled ? "warn" : "neutral"
+                                }
+                              >
+                                {copy.readOnly}
+                              </CanvasPill>
+                            )}
+                            {!resolvedAction.runnable ? (
+                              <span
+                                style={{
+                                  color: theme.textMuted,
+                                  fontSize: 11.5,
+                                }}
+                              >
+                                {unavailableReason}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div style={actionCardStyle}>
+                      <strong>{copy.readOnly}</strong>
+                      <span style={{ color: theme.textMuted, lineHeight: 1.5 }}>
+                        {copy.readOnlyHint}
+                      </span>
                     </div>
-                  ))}
+                  )}
                 </div>
 
                 <div style={actionGridStyle}>
                   <strong style={{ fontSize: 13.5 }}>
                     {copy.selectedDrill}
                   </strong>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {selectedDrillTargetHrefs.map(({ target, href }) => (
-                      <a
-                        key={`${target.targetApp}:${target.route}`}
-                        href={href}
-                        target={
-                          target.openMode === "new_tab" ? "_blank" : undefined
-                        }
-                        rel={
-                          target.openMode === "new_tab"
-                            ? "noreferrer"
-                            : undefined
-                        }
-                        style={{ textDecoration: "none" }}
-                      >
-                        <CanvasPill
-                          theme={theme}
-                          tone={
-                            target.openMode === "new_tab" ? "accent" : "neutral"
-                          }
-                        >
-                          {target.label}
-                        </CanvasPill>
-                      </a>
-                    ))}
-                  </div>
+                  {selectedActionLinks.length > 0 ? (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {selectedActionLinks.map(
+                        ({ actionKey, actionLabel, target, href }) => (
+                          <a
+                            key={actionKey}
+                            href={href}
+                            target={
+                              target.openMode === "new_tab"
+                                ? "_blank"
+                                : undefined
+                            }
+                            rel={
+                              target.openMode === "new_tab"
+                                ? "noreferrer"
+                                : undefined
+                            }
+                            style={{ textDecoration: "none" }}
+                          >
+                            <CanvasPill
+                              theme={theme}
+                              tone={
+                                target.openMode === "new_tab"
+                                  ? "accent"
+                                  : "neutral"
+                              }
+                            >
+                              {target.label || actionLabel}
+                            </CanvasPill>
+                          </a>
+                        ),
+                      )}
+                    </div>
+                  ) : (
+                    <span style={{ color: theme.textMuted, lineHeight: 1.5 }}>
+                      {copy.disabledActionsOnly}
+                    </span>
+                  )}
                 </div>
               </div>
             ) : (
