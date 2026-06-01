@@ -3,7 +3,9 @@ import type { CSSProperties } from "react";
 import { notFound } from "next/navigation";
 import type {
   BookingRecord,
+  EmptyReason,
   OwnedOrderStatus,
+  ResourceActionDescriptor,
   TenantInvoiceRecord,
 } from "@drts/contracts";
 import {
@@ -28,9 +30,23 @@ import type {
   TimelineItem,
 } from "@drts/ui-web";
 import { BookingCommandPanel } from "@/components/booking-command-panel";
+import { BookingRefreshTier } from "@/components/booking-refresh-tier";
 import { getTenantClient } from "@/lib/api-client";
 import { formatDateTime, formatMoney } from "@/lib/formatters";
 import { getBookingSourceVisibility } from "@/lib/source-domain";
+import {
+  BOOKING_DETAIL_REFRESH_TIER,
+  BOOKING_EMPTY_REASONS,
+  buildBookingActions,
+  crossAppHref,
+  describeReadOnlyReason,
+  getBookingEmptyPresentation,
+  getEditableUntil,
+  getReadOnlyReasonCode,
+  opsComplaintsLink,
+  opsDispatchLink,
+  parseBookingEmptyReason,
+} from "@/lib/booking-presentation";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +71,7 @@ const pillRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
+  alignItems: "center",
 };
 
 const metaCopyStyle: CSSProperties = {
@@ -94,6 +111,36 @@ const emptyStateStyle: CSSProperties = {
   fontSize: 12.5,
 };
 
+const emptyPanelStyle: CSSProperties = {
+  display: "grid",
+  gap: 8,
+  justifyItems: "start",
+  padding: "18px 20px",
+};
+
+const emptyPanelTitleStyle: CSSProperties = {
+  fontSize: 13.5,
+  fontWeight: 600,
+  color: th.text,
+};
+
+const emptyPanelBodyStyle: CSSProperties = {
+  fontSize: 12.5,
+  lineHeight: 1.5,
+  color: th.textMuted,
+  maxWidth: 560,
+};
+
+const editableEmphasisStyle: CSSProperties = {
+  color: th.accent,
+  fontFamily: th.monoFamily,
+};
+
+const editableStaleStyle: CSSProperties = {
+  color: th.textDim,
+  fontFamily: th.monoFamily,
+};
+
 const invoicePrimaryStyle: CSSProperties = {
   color: th.accent,
   fontWeight: 600,
@@ -130,6 +177,23 @@ const readOnlyBlockStyle: CSSProperties = {
 const bannerBodyStyle: CSSProperties = {
   display: "grid",
   gap: 4,
+};
+
+const inspectorStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+  fontSize: 11,
+  color: th.textDim,
+};
+
+const inspectorLinkStyle: CSSProperties = {
+  textDecoration: "none",
+  color: th.textMuted,
+  border: `1px solid ${th.border}`,
+  borderRadius: 6,
+  padding: "2px 8px",
 };
 
 type InvoiceRow = TenantInvoiceRecord &
@@ -199,6 +263,23 @@ function sourcePillTone(booking: BookingRecord): CanvasTone {
   }
 
   return "success";
+}
+
+function approvalPillTone(state: BookingRecord["approvalState"]): CanvasTone {
+  switch (state) {
+    case "approved":
+      return "success";
+    case "pending":
+      return "info";
+    case "rejected":
+    case "blocked":
+      return "danger";
+    case "cancelled_by_re_evaluation":
+      return "warn";
+    case "not_required":
+    default:
+      return "neutral";
+  }
 }
 
 function invoiceStatusTone(status: TenantInvoiceRecord["status"]): CanvasTone {
@@ -349,7 +430,7 @@ function buildTimelineItems(booking: BookingRecord): TimelineItem[] {
   return [
     {
       id: "created",
-      eyebrow: "booking",
+      eyebrow: "booking · tenant",
       title: "建立預約",
       timestamp: displayDateTime(booking.createdAt),
       tone: "accent",
@@ -377,7 +458,7 @@ function buildTimelineItems(booking: BookingRecord): TimelineItem[] {
     {
       id: "modify-cutoff",
       eyebrow: "tenant policy",
-      title: "可修改截止",
+      title: "可修改截止 (editableUntil)",
       timestamp: displayDateTime(booking.modifiableUntil),
       tone: "neutral",
       detail: booking.modifiableUntil
@@ -387,7 +468,7 @@ function buildTimelineItems(booking: BookingRecord): TimelineItem[] {
     {
       id: "cancel-cutoff",
       eyebrow: "tenant policy",
-      title: "可取消截止",
+      title: "可取消截止 (cancelableUntil)",
       timestamp: displayDateTime(booking.cancelableUntil),
       tone: "neutral",
       detail: booking.cancelableUntil
@@ -396,11 +477,11 @@ function buildTimelineItems(booking: BookingRecord): TimelineItem[] {
     },
     {
       id: "current-state",
-      eyebrow: "dispatch state",
+      eyebrow: "dispatch state · ops",
       title: "目前工作流狀態",
       timestamp: displayDateTime(booking.updatedAt),
       tone: status.workflowTone,
-      detail: `目前訂單狀態為 ${booking.orderStatus}。`,
+      detail: `目前訂單狀態為 ${booking.orderStatus}（由 ops / dispatch 上游推進）。`,
       meta: `booking status: ${booking.status}`,
     },
   ];
@@ -419,12 +500,51 @@ function toInvoicePeriod(value: string | null | undefined) {
   return value ? value.slice(0, 7) : "—";
 }
 
+// EmptyReason panel (Q-X15) — each of the 6 tenant reasons renders with a
+// distinct tone, code label, title, and copy.
+function BookingEmptyPanel({ reason }: { reason: EmptyReason }) {
+  const presentation = getBookingEmptyPresentation(reason);
+  return (
+    <CanvasCard
+      theme={th}
+      title="狀態"
+      subtitle="EmptyReason (Q-X15)"
+      padding={0}
+    >
+      <div style={emptyPanelStyle}>
+        <div style={pillRowStyle}>
+          <CanvasPill theme={th} tone={presentation.tone} dot>
+            {reason}
+          </CanvasPill>
+        </div>
+        <div style={emptyPanelTitleStyle}>{presentation.title}</div>
+        <div style={emptyPanelBodyStyle}>{presentation.body}</div>
+      </div>
+    </CanvasCard>
+  );
+}
+
+type BookingDetailSearchParams = {
+  emptyReason?: string;
+  command?: string;
+  commandId?: string;
+};
+
 export default async function BookingDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ bookingId: string }>;
+  searchParams?: Promise<BookingDetailSearchParams>;
 }) {
   const { bookingId } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const emptyReasonOverride = parseBookingEmptyReason(
+    resolvedSearchParams.emptyReason,
+  );
+  const acceptedPending = resolvedSearchParams.command === "accepted";
+  const commandId = resolvedSearchParams.commandId ?? null;
+
   const client = getTenantClient();
   const [bookingResult, invoicesResult] = await Promise.allSettled([
     client.getTenantBooking(bookingId) as Promise<BookingRecord>,
@@ -440,6 +560,15 @@ export default async function BookingDetailPage({
   const status = describeOrderStatus(booking.orderStatus);
   const workflowItems = buildWorkflowItems(booking);
   const timelineItems = buildTimelineItems(booking);
+
+  // Q-TEN05 / Q-X13 — single source of truth for editability + CTAs.
+  const editableUntil = getEditableUntil(booking);
+  const readOnlyReasonCode = getReadOnlyReasonCode(booking);
+  const readOnlyReason = describeReadOnlyReason(readOnlyReasonCode);
+  const availableActions: ResourceActionDescriptor[] =
+    buildBookingActions(booking);
+  const editable = readOnlyReasonCode === null;
+
   const relatedInvoices =
     invoicesResult.status === "fulfilled"
       ? findRelatedInvoices(invoicesResult.value, booking.orderId)
@@ -457,6 +586,12 @@ export default async function BookingDetailPage({
   const assignedDriverProjection = ASSIGNED_ORDER_STATUSES.has(
     booking.orderStatus,
   );
+  const externallyFulfilled = source.domain !== "owned";
+
+  const headerStatePill = acceptedPending
+    ? { tone: "warn" as CanvasTone, label: "accepted_pending" }
+    : { tone: status.pillTone, label: booking.orderStatus };
+
   const invoiceRows: InvoiceRow[] = relatedInvoices.map((invoice) => ({
     ...invoice,
     orderLineCount: invoice.lines.filter(
@@ -502,6 +637,9 @@ export default async function BookingDetailPage({
     },
   ];
 
+  const dispatchLink = opsDispatchLink(booking.orderId);
+  const complaintsLink = opsComplaintsLink(booking.orderId);
+
   return (
     <div>
       <CanvasPageHeader
@@ -515,6 +653,11 @@ export default async function BookingDetailPage({
             <Link href="/bookings" style={linkStyle}>
               <CanvasBtn theme={th} icon="arrow" size="sm">
                 返回叫車
+              </CanvasBtn>
+            </Link>
+            <Link href="/bookings/new" style={linkStyle}>
+              <CanvasBtn theme={th} icon="copy" size="sm">
+                複製為新預約
               </CanvasBtn>
             </Link>
             {relatedInvoices.length > 0 ? (
@@ -536,8 +679,8 @@ export default async function BookingDetailPage({
       <div style={pageBodyStyle}>
         <div style={summaryStackStyle}>
           <div style={pillRowStyle}>
-            <CanvasPill theme={th} tone={status.pillTone} dot>
-              {booking.orderStatus}
+            <CanvasPill theme={th} tone={headerStatePill.tone} dot>
+              {headerStatePill.label}
             </CanvasPill>
             <CanvasPill theme={th} tone="neutral">
               booking {booking.status}
@@ -545,17 +688,63 @@ export default async function BookingDetailPage({
             <CanvasPill theme={th} tone={sourcePillTone(booking)}>
               {source.badge}
             </CanvasPill>
-            <CanvasPill theme={th} tone="neutral">
+            <CanvasPill
+              theme={th}
+              tone={approvalPillTone(booking.approvalState)}
+            >
               approval {booking.approvalState}
+            </CanvasPill>
+            <CanvasPill theme={th} tone={editable ? "success" : "neutral"}>
+              {editable ? "editable" : "read-only"}
             </CanvasPill>
           </div>
           <div style={metaCopyStyle}>
             Order {booking.orderId} | 建立 {displayDateTime(booking.createdAt)}{" "}
             | 更新 {displayDateTime(booking.updatedAt)}
           </div>
+          <BookingRefreshTier
+            tier={BOOKING_DETAIL_REFRESH_TIER}
+            generatedAt={booking.updatedAt}
+          />
         </div>
 
-        {source.domain !== "owned" ? (
+        {acceptedPending ? (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="clock"
+            title={`command 已受理 · 等候外部確認${
+              commandId ? ` · commandId · ${commandId}` : ""
+            }`}
+            body="Q-TEN04 同步 command 模式：command 已受理，外部 dispatch 引擎正在配對 / 確認，預計數十秒內回覆 confirmed。畫面會在下一次輪詢時更新為最新狀態。"
+          />
+        ) : null}
+
+        {readOnlyReason ? (
+          <CanvasBanner
+            theme={th}
+            tone={readOnlyReasonCode === "approval_blocked" ? "danger" : "warn"}
+            icon="warn"
+            title={`${readOnlyReason.title}（readOnlyReasonCode: ${readOnlyReasonCode}）`}
+            body={readOnlyReason.body}
+          />
+        ) : null}
+
+        {booking.approvalState === "pending" ? (
+          <CanvasBanner
+            theme={th}
+            tone="info"
+            icon="clock"
+            title="審批進行中"
+            body={`此訂單套用了租戶審批規則，目前處於 pending；審批請求 ${
+              booking.approvalRequestIds.length > 0
+                ? booking.approvalRequestIds.join(", ")
+                : "（無）"
+            }。`}
+          />
+        ) : null}
+
+        {externallyFulfilled ? (
           <CanvasBanner
             theme={th}
             tone={source.domain === "forwarded_authority" ? "warn" : "info"}
@@ -568,7 +757,23 @@ export default async function BookingDetailPage({
                 <span>{source.escalationHint}</span>
               </div>
             }
+            actions={
+              <a
+                href={crossAppHref(dispatchLink)}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={linkStyle}
+              >
+                <CanvasBtn theme={th} icon="ext" size="sm">
+                  {dispatchLink.label}
+                </CanvasBtn>
+              </a>
+            }
           />
+        ) : null}
+
+        {emptyReasonOverride ? (
+          <BookingEmptyPanel reason={emptyReasonOverride} />
         ) : null}
 
         <div style={mainGridStyle}>
@@ -615,6 +820,27 @@ export default async function BookingDetailPage({
                     mono: true,
                   },
                   { k: "PAYMENT", v: paymentSummary },
+                  {
+                    k: "editableUntil",
+                    v: (
+                      <span
+                        style={
+                          editable ? editableEmphasisStyle : editableStaleStyle
+                        }
+                      >
+                        {editable
+                          ? editableUntil
+                            ? displayDateTime(editableUntil)
+                            : "無截止 · 可編輯"
+                          : `已過時 · ${editableUntil ? displayDateTime(editableUntil) : "null"}`}
+                      </span>
+                    ),
+                  },
+                  {
+                    k: "readOnlyReasonCode",
+                    v: readOnlyReasonCode ?? "—",
+                    mono: true,
+                  },
                 ]}
               />
             </CanvasCard>
@@ -633,10 +859,14 @@ export default async function BookingDetailPage({
 
             <CanvasCard
               theme={th}
-              title="活動"
-              subtitle="tenant-visible booking checkpoints"
+              title="活動 · cross-actor"
+              subtitle="tenant-visible booking checkpoints (audit subset)"
             >
               <Timeline items={timelineItems} density="compact" />
+              <div style={mutedNoteStyle}>
+                ops / 平台對此訂單的動作會出現在此 audit
+                subset；如需完整跨應用稽核， 可深連回 Ops Console（新分頁）。
+              </div>
             </CanvasCard>
           </div>
 
@@ -646,30 +876,32 @@ export default async function BookingDetailPage({
               title="駕駛"
               subtitle="tenant-safe published view"
             >
-              <CanvasDL
-                theme={th}
-                cols={1}
-                items={[
-                  {
-                    k: "DRIVER",
-                    v: assignedDriverProjection
-                      ? "未發布 / tenant read model 尚未投影"
-                      : "尚未指派",
-                  },
-                  {
-                    k: "VEHICLE",
-                    v: assignedDriverProjection ? "未發布" : "待派遣",
-                  },
-                  {
-                    k: "DISPATCH",
-                    v: `${source.badge} / ${booking.orderStatus}`,
-                  },
-                  {
-                    k: "CONTACT",
-                    v: "已遮罩 / 透過平台轉接",
-                  },
-                ]}
-              />
+              {assignedDriverProjection ? (
+                <CanvasDL
+                  theme={th}
+                  cols={1}
+                  items={[
+                    {
+                      k: "DRIVER",
+                      v: "未發布 / tenant read model 尚未投影",
+                    },
+                    { k: "VEHICLE", v: "未發布" },
+                    {
+                      k: "DISPATCH",
+                      v: `${source.badge} / ${booking.orderStatus}`,
+                    },
+                    {
+                      k: "ETA",
+                      v: booking.orderStatus === "on_trip" ? "行程進行中" : "—",
+                    },
+                    { k: "CONTACT", v: "已遮罩 / 透過平台轉接" },
+                  ]}
+                />
+              ) : (
+                <div style={emptyStateStyle}>
+                  尚未指派駕駛（no_data）。配對完成後司機投影會出現在此。
+                </div>
+              )}
               <div style={mutedNoteStyle}>
                 司機身份、車牌、即時 ETA 與候選供給狀態目前不會投影到 tenant
                 surface。
@@ -724,23 +956,87 @@ export default async function BookingDetailPage({
 
             <CanvasCard
               theme={th}
+              title="關聯與深連"
+              subtitle="passenger / address / cross-app"
+            >
+              <CanvasDL
+                theme={th}
+                cols={1}
+                items={[
+                  {
+                    k: "PASSENGER",
+                    v: (
+                      <Link
+                        href={`/passengers?q=${encodeURIComponent(
+                          booking.passenger.name,
+                        )}`}
+                        style={{ ...linkStyle, color: th.accent }}
+                      >
+                        {booking.passenger.name} →
+                      </Link>
+                    ),
+                  },
+                  {
+                    k: "PICKUP",
+                    v: (
+                      <Link
+                        href={`/addresses?q=${encodeURIComponent(
+                          booking.pickup.address,
+                        )}`}
+                        style={{ ...linkStyle, color: th.accent }}
+                      >
+                        {booking.pickup.address} →
+                      </Link>
+                    ),
+                  },
+                ]}
+              />
+              <div style={{ ...pillRowStyle, marginTop: 12 }}>
+                <a
+                  href={crossAppHref(dispatchLink)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={linkStyle}
+                >
+                  <CanvasBtn theme={th} icon="ext" size="sm">
+                    {dispatchLink.label}
+                  </CanvasBtn>
+                </a>
+                <a
+                  href={crossAppHref(complaintsLink)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={linkStyle}
+                >
+                  <CanvasBtn theme={th} icon="ext" size="sm">
+                    {complaintsLink.label}
+                  </CanvasBtn>
+                </a>
+              </div>
+              <div style={mutedNoteStyle}>
+                跨應用深連為唯讀視角，於新分頁開啟 (Q-X03)。
+              </div>
+            </CanvasCard>
+
+            <CanvasCard
+              theme={th}
               title="關聯對帳單"
               subtitle="invoice rows already published for this order"
               padding={0}
             >
               {invoiceWarning ? (
-                <div style={{ padding: 14 }}>
-                  <CanvasBanner
-                    theme={th}
-                    tone="warn"
-                    icon="warn"
-                    title="對帳單內容暫時無法完整載入"
-                    body={invoiceWarning}
-                  />
+                <div style={emptyPanelStyle}>
+                  <div style={pillRowStyle}>
+                    <CanvasPill theme={th} tone="warn" dot>
+                      fetch_failed
+                    </CanvasPill>
+                  </div>
+                  <div style={emptyPanelTitleStyle}>
+                    對帳單內容暫時無法完整載入
+                  </div>
+                  <div style={emptyPanelBodyStyle}>{invoiceWarning}</div>
                 </div>
-              ) : null}
-
-              {invoiceRows.length > 0 ? (
+              ) : invoiceRows.length > 0 ? (
                 <CanvasTable<InvoiceRow>
                   theme={th}
                   columns={invoiceColumns}
@@ -748,7 +1044,7 @@ export default async function BookingDetailPage({
                 />
               ) : (
                 <div style={emptyStateStyle}>
-                  目前沒有與此 order 關聯的 tenant invoice line。
+                  目前沒有與此 order 關聯的 tenant invoice line（no_data）。
                 </div>
               )}
             </CanvasCard>
@@ -844,10 +1140,32 @@ export default async function BookingDetailPage({
         <CanvasCard
           theme={th}
           title="租戶操作"
-          subtitle="僅保留 tenant-safe commands"
+          subtitle="availableActions drives CTAs (Q-X13 / Q-TEN05)"
         >
-          <BookingCommandPanel booking={booking} />
+          <BookingCommandPanel booking={booking} actions={availableActions} />
         </CanvasCard>
+
+        <div style={inspectorStyle}>
+          <span>State inspector ·</span>
+          <Link href={`/bookings/${bookingId}`} style={inspectorLinkStyle}>
+            live
+          </Link>
+          <Link
+            href={`/bookings/${bookingId}?command=accepted&commandId=cmd_demo`}
+            style={inspectorLinkStyle}
+          >
+            accepted_pending
+          </Link>
+          {BOOKING_EMPTY_REASONS.map((reason) => (
+            <Link
+              key={reason}
+              href={`/bookings/${bookingId}?emptyReason=${reason}`}
+              style={inspectorLinkStyle}
+            >
+              {reason}
+            </Link>
+          ))}
+        </div>
       </div>
     </div>
   );

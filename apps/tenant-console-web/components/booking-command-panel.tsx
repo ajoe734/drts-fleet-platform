@@ -1,17 +1,49 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import type {
   BookingRecord,
+  ResourceActionDescriptor,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
-import { formatDateTime, isFutureIso } from "@/lib/formatters";
+import { findBookingAction } from "@/lib/booking-presentation";
 
 type Mode = "update" | "cancel" | null;
 
-export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
+// Human copy for the disabledReasonCode an action descriptor carries. Driven by
+// availableActions (Q-X13) — the panel never recomputes editability from status.
+const DISABLED_REASON_COPY: Record<string, string> = {
+  terminal_completed: "訂單已完成，無法再更新或取消。",
+  terminal_cancelled: "訂單已取消，無法再更新或取消。",
+  terminal_state: "訂單已進入終態，無法執行此動作。",
+  on_trip_locked: "行程進行中，租戶端已鎖定編輯。",
+  approval_blocked: "審批未通過 (blocked / rejected)，請先重新送出審批。",
+  past_editable_until: "已超過可編輯時間 (editableUntil)。",
+  past_cancelable_until: "已超過可取消時間 (cancelableUntil)。",
+};
+
+function disabledReasonCopy(
+  descriptor: ResourceActionDescriptor | null,
+): string | null {
+  if (!descriptor || descriptor.enabled || !descriptor.disabledReasonCode) {
+    return null;
+  }
+  return (
+    DISABLED_REASON_COPY[descriptor.disabledReasonCode] ??
+    descriptor.disabledReasonCode
+  );
+}
+
+export function BookingCommandPanel({
+  booking,
+  actions,
+}: {
+  booking: BookingRecord;
+  actions: ResourceActionDescriptor[];
+}) {
   const router = useRouter();
+  const pathname = usePathname();
   const [mode, setMode] = useState<Mode>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,54 +56,45 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
   );
   const [cancelReason, setCancelReason] = useState("");
 
-  const commandState = useMemo(() => {
-    const isTerminal =
-      booking.orderStatus === "completed" ||
-      booking.orderStatus === "cancelled";
-    const isOnTrip = booking.orderStatus === "on_trip";
-    const withinUpdateWindow =
-      booking.modifiableUntil == null || isFutureIso(booking.modifiableUntil);
-    const withinCancelWindow =
-      booking.cancelableUntil == null || isFutureIso(booking.cancelableUntil);
+  const updateAction = findBookingAction(actions, "update");
+  const cancelAction = findBookingAction(actions, "cancel");
+  const resubmitAction = findBookingAction(actions, "resubmit_approval");
 
+  const canUpdate = updateAction?.enabled ?? false;
+  const canCancel = cancelAction?.enabled ?? false;
+  const canResubmit = resubmitAction?.enabled ?? false;
+  const cancelRequiresReason = cancelAction?.requiresReason ?? true;
+
+  // Q-TEN04 — represent the synchronous-command "accepted, awaiting external
+  // confirmation" moment by navigating to the accepted+pending banner state.
+  function enterAcceptedPending() {
+    const commandId = `cmd_${Date.now().toString(36)}`;
+    router.replace(`${pathname}?command=accepted&commandId=${commandId}`);
+    router.refresh();
+  }
+
+  function buildUpdatePayload(): UpdateTenantBookingCommand {
     return {
-      canUpdate: !isTerminal && !isOnTrip && withinUpdateWindow,
-      canCancel: !isTerminal && withinCancelWindow,
-      updateReason: isTerminal
-        ? "Completed and cancelled bookings are read-only."
-        : isOnTrip
-          ? "On-trip bookings can no longer be edited from tenant control."
-          : withinUpdateWindow
-            ? null
-            : `Update window closed at ${formatDateTime(booking.modifiableUntil)}.`,
-      cancelReason: isTerminal
-        ? "Completed and cancelled bookings cannot be cancelled again."
-        : withinCancelWindow
-          ? null
-          : `Cancellation window closed at ${formatDateTime(booking.cancelableUntil)}.`,
+      pickup: { ...booking.pickup, address: pickupAddress },
+      dropoff: { ...booking.dropoff, address: dropoffAddress },
+      notes: notes.trim() ? notes.trim() : null,
+      costCenter: costCenter.trim() ? costCenter.trim() : null,
+      vehiclePreference: vehiclePreference.trim()
+        ? vehiclePreference.trim()
+        : null,
     };
-  }, [booking]);
+  }
 
   async function submitUpdate() {
     setLoading(true);
     setError(null);
     try {
-      const payload: UpdateTenantBookingCommand = {
-        pickup: { ...booking.pickup, address: pickupAddress },
-        dropoff: { ...booking.dropoff, address: dropoffAddress },
-        notes: notes.trim() ? notes.trim() : null,
-        costCenter: costCenter.trim() ? costCenter.trim() : null,
-        vehiclePreference: vehiclePreference.trim()
-          ? vehiclePreference.trim()
-          : null,
-      };
-
       const response = await fetch(
         `/api/bookings/${booking.bookingId}/update`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(buildUpdatePayload()),
         },
       );
       if (!response.ok) {
@@ -79,7 +102,7 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
       }
 
       setMode(null);
-      router.refresh();
+      enterAcceptedPending();
     } catch (submissionError) {
       setError(
         submissionError instanceof Error
@@ -91,7 +114,40 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
     }
   }
 
+  async function submitResubmitApproval() {
+    setLoading(true);
+    setError(null);
+    try {
+      // Re-issue the update command with current values to re-run the tenant
+      // policy / approval gates (Q-TEN12). No field change required.
+      const response = await fetch(
+        `/api/bookings/${booking.bookingId}/update`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildUpdatePayload()),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      enterAcceptedPending();
+    } catch (submissionError) {
+      setError(
+        submissionError instanceof Error
+          ? submissionError.message
+          : "Unknown resubmit failure.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function submitCancel() {
+    if (cancelRequiresReason && cancelReason.trim().length === 0) {
+      setError("Cancellation requires a reason.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -110,7 +166,7 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
       }
 
       setMode(null);
-      router.refresh();
+      enterAcceptedPending();
     } catch (submissionError) {
       setError(
         submissionError instanceof Error
@@ -122,21 +178,26 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
     }
   }
 
+  const updateReason = disabledReasonCopy(updateAction);
+  const cancelReasonNote = disabledReasonCopy(cancelAction);
+
   return (
     <div className="action-panel">
       <div className="action-stack">
         <div className="action-copy">
           <strong>Allowed tenant actions</strong>
           <p>
-            Tenant users can only call supported booking commands. They cannot
-            override dispatch state, fare authority, or fulfillment ownership.
+            CTAs render from this booking&apos;s <code>availableActions</code>{" "}
+            (Q-X13) — never hard-coded by role. Tenant users cannot override
+            dispatch state, fare authority, or fulfillment ownership.
           </p>
         </div>
         <div className="action-row">
           <button
             className="action-button action-button-secondary"
-            disabled={!commandState.canUpdate}
+            disabled={!canUpdate}
             type="button"
+            title={updateReason ?? undefined}
             onClick={() => {
               setError(null);
               setMode("update");
@@ -146,8 +207,9 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
           </button>
           <button
             className="action-button action-button-danger"
-            disabled={!commandState.canCancel}
+            disabled={!canCancel}
             type="button"
+            title={cancelReasonNote ?? undefined}
             onClick={() => {
               setError(null);
               setMode("cancel");
@@ -155,13 +217,23 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
           >
             Cancel booking
           </button>
+          {resubmitAction ? (
+            <button
+              className="action-button action-button-secondary"
+              disabled={!canResubmit || loading}
+              type="button"
+              title={disabledReasonCopy(resubmitAction) ?? undefined}
+              onClick={() => void submitResubmitApproval()}
+            >
+              {loading ? "Resubmitting..." : "Resubmit approval"}
+            </button>
+          ) : null}
         </div>
-        {commandState.updateReason ? (
-          <p className="action-note">{commandState.updateReason}</p>
+        {updateReason ? <p className="action-note">{updateReason}</p> : null}
+        {cancelReasonNote ? (
+          <p className="action-note">{cancelReasonNote}</p>
         ) : null}
-        {commandState.cancelReason ? (
-          <p className="action-note">{commandState.cancelReason}</p>
-        ) : null}
+        {error && !mode ? <p className="action-note">{error}</p> : null}
       </div>
 
       {mode ? (
@@ -250,7 +322,10 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
             ) : (
               <div className="form-stack">
                 <label className="field-stack">
-                  <span>Cancellation reason</span>
+                  <span>
+                    Cancellation reason
+                    {cancelRequiresReason ? " (required)" : ""}
+                  </span>
                   <textarea
                     rows={4}
                     value={cancelReason}
@@ -260,7 +335,10 @@ export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
                 <div className="action-row">
                   <button
                     className="action-button action-button-danger"
-                    disabled={loading}
+                    disabled={
+                      loading ||
+                      (cancelRequiresReason && cancelReason.trim().length === 0)
+                    }
                     type="button"
                     onClick={() => void submitCancel()}
                   >
