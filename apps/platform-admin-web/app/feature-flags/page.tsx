@@ -148,8 +148,6 @@ type EmptyReasonMeta = {
 };
 
 const REFRESH_TIER: RefreshTier = "medium_slow";
-const REFRESH_TIER_CODE = REFRESH_TIER === "medium_slow" ? "T4" : REFRESH_TIER;
-const REFRESH_INTERVAL_MS = 30_000;
 const OPS_CONSOLE_BASE_URL =
   process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003";
 
@@ -283,6 +281,12 @@ const bottomGridStyle = {
   gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
 } satisfies CSSProperties;
 
+const overviewGridStyle = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+} satisfies CSSProperties;
+
 const fieldGridStyle = {
   display: "grid",
   gap: 14,
@@ -403,6 +407,34 @@ const noteListStyle = {
   color: theme.textMuted,
   fontSize: 12,
   lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const sitemapListStyle = {
+  display: "grid",
+  gap: 10,
+} satisfies CSSProperties;
+
+const sitemapRowStyle = {
+  display: "grid",
+  gap: 4,
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+} satisfies CSSProperties;
+
+const actionInventoryStyle = {
+  display: "grid",
+  gap: 10,
+} satisfies CSSProperties;
+
+const actionInventoryRowStyle = {
+  display: "grid",
+  gap: 6,
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
 } satisfies CSSProperties;
 
 const modalBackdropStyle = {
@@ -632,6 +664,34 @@ function effectiveRefreshTier(summary: RuntimeFeatureFlagSummary | null) {
 
 function refreshTierCode(tier: RefreshTier) {
   return tier === "medium_slow" ? "T4" : tier;
+}
+
+function refreshIntervalForTier(tier: RefreshTier) {
+  switch (tier) {
+    case "urgent":
+      return 5_000;
+    case "fast":
+      return 3_000;
+    case "dispatch":
+      return 5_000;
+    case "medium":
+      return 15_000;
+    case "medium_slow":
+    case "slow":
+      return 30_000;
+    case "manual":
+    default:
+      return 0;
+  }
+}
+
+function refreshIntervalLabel(locale: string, tier: RefreshTier) {
+  const intervalMs = refreshIntervalForTier(tier);
+  if (intervalMs <= 0) {
+    return locale === "en" ? "Manual" : "手動";
+  }
+  const seconds = Math.floor(intervalMs / 1000);
+  return locale === "en" ? `${seconds}s` : `${seconds} 秒`;
 }
 
 function classifyErrorReason(message: string | null): EmptyReason {
@@ -958,29 +1018,32 @@ function rolloutLabel(locale: string, state: RolloutState) {
 
 function refreshMeta(
   locale: string,
+  tier: RefreshTier,
   freshness: "fresh" | "stale" | "degraded" | "unknown",
 ) {
+  const tierCode = refreshTierCode(tier);
+  const cadence = refreshIntervalLabel(locale, tier);
   if (locale === "en") {
     switch (freshness) {
       case "fresh":
         return {
-          label: `${REFRESH_TIER_CODE} · 30s · fresh`,
+          label: `${tierCode} · ${cadence} · fresh`,
           tone: "success" as const,
         };
       case "stale":
         return {
-          label: `${REFRESH_TIER_CODE} · 30s · stale`,
+          label: `${tierCode} · ${cadence} · stale`,
           tone: "warn" as const,
         };
       case "degraded":
         return {
-          label: `${REFRESH_TIER_CODE} · 30s · degraded`,
+          label: `${tierCode} · ${cadence} · degraded`,
           tone: "danger" as const,
         };
       case "unknown":
       default:
         return {
-          label: `${REFRESH_TIER_CODE} · 30s · unknown`,
+          label: `${tierCode} · ${cadence} · unknown`,
           tone: "neutral" as const,
         };
     }
@@ -989,26 +1052,54 @@ function refreshMeta(
   switch (freshness) {
     case "fresh":
       return {
-        label: `${REFRESH_TIER_CODE} · 30s · 即時`,
+        label: `${tierCode} · ${cadence} · 即時`,
         tone: "success" as const,
       };
     case "stale":
       return {
-        label: `${REFRESH_TIER_CODE} · 30s · 過時`,
+        label: `${tierCode} · ${cadence} · 過時`,
         tone: "warn" as const,
       };
     case "degraded":
       return {
-        label: `${REFRESH_TIER_CODE} · 30s · 降級`,
+        label: `${tierCode} · ${cadence} · 降級`,
         tone: "danger" as const,
       };
     case "unknown":
     default:
       return {
-        label: `${REFRESH_TIER_CODE} · 30s · 未知`,
+        label: `${tierCode} · ${cadence} · 未知`,
         tone: "neutral" as const,
       };
   }
+}
+
+function describeDisabledReason(locale: string, code: string | undefined) {
+  if (!code) {
+    return locale === "en" ? "Currently unavailable." : "目前不可執行。";
+  }
+
+  const map: Record<string, { zh: string; en: string }> = {
+    select_tenant_scope_first: {
+      zh: "先選 tenant scope，才可寫入 tenant override。",
+      en: "Select a tenant scope before writing an override.",
+    },
+    no_override_for_selected_scope: {
+      zh: "目前 tenant scope 尚未存在 override，無法移除。",
+      en: "The selected tenant scope has no override to remove.",
+    },
+    global_default_missing: {
+      zh: "此 key 尚未建立平台預設值，因此不能切換全域預設。",
+      en: "This key has no platform default yet, so the global toggle stays disabled.",
+    },
+  };
+
+  const copy = map[code];
+  if (copy) {
+    return locale === "en" ? copy.en : copy.zh;
+  }
+
+  return locale === "en" ? `Blocked: ${code}` : `目前不可執行：${code}`;
 }
 
 function timeSinceMs(ms: number, locale: string) {
@@ -1190,6 +1281,82 @@ function EmptyStateCard({
   );
 }
 
+function ActionInventory({
+  locale,
+  actions,
+}: {
+  locale: string;
+  actions: ResourceActionDescriptor[];
+}) {
+  if (!actions.length) {
+    return null;
+  }
+
+  return (
+    <div style={actionInventoryStyle}>
+      {actions.map((descriptor) => {
+        const meta = ACTION_META[descriptor.action] ?? {
+          labelZh: descriptor.action,
+          labelEn: descriptor.action,
+          icon: "more",
+        };
+
+        return (
+          <div
+            key={`${descriptor.action}-${descriptor.disabledReasonCode ?? "active"}`}
+            style={actionInventoryRowStyle}
+          >
+            <div style={pillRowStyle}>
+              <CanvasIcon name={meta.icon} size={14} />
+              <strong style={{ fontSize: 12.5, color: theme.text }}>
+                {locale === "en" ? meta.labelEn : meta.labelZh}
+              </strong>
+              <CanvasPill
+                theme={theme}
+                tone={descriptor.enabled ? "success" : "neutral"}
+              >
+                {descriptor.enabled
+                  ? locale === "en"
+                    ? "Enabled"
+                    : "可執行"
+                  : locale === "en"
+                    ? "Disabled"
+                    : "停用"}
+              </CanvasPill>
+              <CanvasPill
+                theme={theme}
+                tone={
+                  descriptor.riskLevel === "high"
+                    ? "danger"
+                    : descriptor.riskLevel === "medium"
+                      ? "warn"
+                      : "info"
+                }
+              >
+                {descriptor.riskLevel}
+              </CanvasPill>
+            </div>
+            <div style={secondaryTextStyle}>
+              {descriptor.requiresReason
+                ? locale === "en"
+                  ? "Reason required and audit-visible."
+                  : "需要填寫原因，並會進入 audit。"
+                : locale === "en"
+                  ? "Direct receipt or history action."
+                  : "直接收據或歷史查閱動作。"}
+            </div>
+            {!descriptor.enabled ? (
+              <div style={secondaryMonoStyle}>
+                {describeDisabledReason(locale, descriptor.disabledReasonCode)}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function FeatureFlagsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -1237,9 +1404,15 @@ export default function FeatureFlagsPage() {
           summaryTitle: "Governance scope",
           summarySubtitle:
             "T4 refresh, reason-required writes, and cross-app ops context all live in this surface.",
+          sitemapTitle: "Platform sitemap",
+          sitemapSubtitle:
+            "Feature flags sits inside the platform layer and is the only write-authority surface.",
           selectedTitle: "Selected flag",
           selectedSubtitle:
             "Use availableActions instead of role hard-coding. High-risk writes always require a reason.",
+          actionInventoryTitle: "availableActions inventory",
+          actionInventorySubtitle:
+            "Descriptors returned by the backend decide which CTAs are shown, disabled, or reason-gated.",
           notesTitle: "Contract notes",
           notesSubtitle:
             "Current API still exposes the legacy feature-flag summary shape; this page wraps it into governance UI state.",
@@ -1288,6 +1461,7 @@ export default function FeatureFlagsPage() {
           refreshTier: "Refresh tier",
           selectedTenantScope: "Selected tenant scope",
           openAudit: "Open audit",
+          adjacentLinks: "Cross-app exits",
           removeUnsupported:
             "Remove override returns the selected tenant to platform default while keeping the global flag unchanged.",
           toggleConfirmTitle: "Confirm global default change",
@@ -1334,9 +1508,15 @@ export default function FeatureFlagsPage() {
           summaryTitle: "治理範圍",
           summarySubtitle:
             "這個頁面同時承接 T4 refresh、需原因的高風險寫入，以及 cross-app ops context。",
+          sitemapTitle: "Platform sitemap",
+          sitemapSubtitle:
+            "Feature flags 位在平台層，且是唯一具 write authority 的治理頁面。",
           selectedTitle: "選取中的旗標",
           selectedSubtitle:
             "所有 CTA 由 availableActions 決定，不用角色硬編碼；高風險寫入一律需填原因。",
+          actionInventoryTitle: "availableActions inventory",
+          actionInventorySubtitle:
+            "由後端回傳的 descriptor 決定 CTA 顯示、停用原因與是否需要填原因。",
           notesTitle: "Contract 備註",
           notesSubtitle:
             "目前 API 仍是 legacy feature-flag summary shape；頁面層將它包成治理用 UI 狀態。",
@@ -1385,6 +1565,7 @@ export default function FeatureFlagsPage() {
           refreshTier: "Refresh tier",
           selectedTenantScope: "目前 tenant scope",
           openAudit: "開啟稽核",
+          adjacentLinks: "Cross-app 出口",
           removeUnsupported:
             "移除 override 會讓所選 tenant 回退到平台預設值，不會改動全域旗標。",
           toggleConfirmTitle: "確認切換全域預設值",
@@ -1490,18 +1671,26 @@ export default function FeatureFlagsPage() {
   }, [loadData]);
 
   useEffect(() => {
-    const refreshId = window.setInterval(() => {
-      void loadData("poll");
-    }, REFRESH_INTERVAL_MS);
     const clockId = window.setInterval(() => {
       setClockNow(Date.now());
     }, 5_000);
 
+    const refreshTier = effectiveRefreshTier(globalSummary);
+    const refreshIntervalMs = refreshIntervalForTier(refreshTier);
+    const refreshId =
+      refreshIntervalMs > 0
+        ? window.setInterval(() => {
+            void loadData("poll");
+          }, refreshIntervalMs)
+        : null;
+
     return () => {
-      window.clearInterval(refreshId);
+      if (refreshId !== null) {
+        window.clearInterval(refreshId);
+      }
       window.clearInterval(clockId);
     };
-  }, [loadData]);
+  }, [globalSummary, loadData]);
 
   useEffect(() => {
     if (!selectedTenantId && scopeFilter === "selected_tenant") {
@@ -1568,15 +1757,19 @@ export default function FeatureFlagsPage() {
     if (!lastLoadedAt) {
       return "unknown";
     }
-    if (clockNow - lastLoadedAt > REFRESH_INTERVAL_MS * 2) {
+    if (
+      clockNow - lastLoadedAt >
+      Math.max(refreshIntervalForTier(effectiveRefreshTier(globalSummary)), 1) *
+        2
+    ) {
       return "stale";
     }
     return "fresh";
-  }, [clockNow, error, lastLoadedAt, snapshotIssues.length]);
+  }, [clockNow, error, globalSummary, lastLoadedAt, snapshotIssues.length]);
 
-  const refreshChip = refreshMeta(locale, dataFreshness);
   const resolvedRefreshTier = effectiveRefreshTier(globalSummary);
   const resolvedRefreshTierCode = refreshTierCode(resolvedRefreshTier);
+  const refreshChip = refreshMeta(locale, resolvedRefreshTier, dataFreshness);
 
   const activeEmptyReason = useMemo(() => {
     if (filteredRows.length > 0) {
@@ -1645,6 +1838,42 @@ export default function FeatureFlagsPage() {
     { value: "selected_tenant", label: copy.selectedScopeOnly },
     { value: "mid_rollout", label: copy.midRolloutOnly },
     { value: "deprecated", label: copy.deprecatedOnly },
+  ];
+
+  const sitemapItems = [
+    {
+      href: "/notices",
+      label: locale === "en" ? "Notices & maintenance" : "公告與維護",
+      note:
+        locale === "en"
+          ? "Platform layer producer for broad governance messaging."
+          : "平台層治理訊息的發布入口。",
+    },
+    {
+      href: "/audit",
+      label: locale === "en" ? "Audit & evidence" : "稽核與證據",
+      note:
+        locale === "en"
+          ? "Exit target after every write receipt and history review."
+          : "每次寫入收據與歷史查閱的落點。",
+    },
+    {
+      href: "/feature-flags",
+      label: copy.pageTitle,
+      note:
+        locale === "en"
+          ? "Only write-authority page for feature flags per Q-X16."
+          : "依 Q-X16，唯一能改寫 feature flag 的頁面。",
+      active: true,
+    },
+    {
+      href: "/adapter-registry",
+      label: locale === "en" ? "Adapter registry" : "介接登錄",
+      note:
+        locale === "en"
+          ? "Adjacent platform-layer config surface with its own split authority."
+          : "同層相鄰的設定治理頁面，權限切分不同。",
+    },
   ];
 
   const emptyActionNode =
@@ -2142,7 +2371,7 @@ export default function FeatureFlagsPage() {
               />
             </div>
 
-            <div style={topGridStyle}>
+            <div style={overviewGridStyle}>
               <CanvasCard
                 theme={theme}
                 title={copy.summaryTitle}
@@ -2217,7 +2446,10 @@ export default function FeatureFlagsPage() {
                       },
                       {
                         label: copy.refreshTier,
-                        value: `${resolvedRefreshTierCode} · 30s`,
+                        value: `${resolvedRefreshTierCode} · ${refreshIntervalLabel(
+                          locale,
+                          resolvedRefreshTier,
+                        )}`,
                       },
                       {
                         label: copy.scopeLabel,
@@ -2231,6 +2463,49 @@ export default function FeatureFlagsPage() {
                 </div>
               </CanvasCard>
 
+              <CanvasCard
+                theme={theme}
+                title={copy.sitemapTitle}
+                subtitle={copy.sitemapSubtitle}
+              >
+                <div style={sitemapListStyle}>
+                  {sitemapItems.map((item) => (
+                    <a
+                      key={item.href}
+                      href={item.href}
+                      style={{
+                        ...sitemapRowStyle,
+                        textDecoration: "none",
+                        color: theme.text,
+                        borderColor: item.active ? theme.accent : theme.border,
+                        background: item.active
+                          ? theme.accentBg
+                          : theme.surfaceLo,
+                      }}
+                    >
+                      <div style={pillRowStyle}>
+                        <CanvasPill
+                          theme={theme}
+                          tone={item.active ? "accent" : "neutral"}
+                        >
+                          {item.active
+                            ? locale === "en"
+                              ? "Current"
+                              : "目前頁面"
+                            : locale === "en"
+                              ? "Adjacent"
+                              : "相鄰頁面"}
+                        </CanvasPill>
+                        <strong style={{ fontSize: 12.5 }}>{item.label}</strong>
+                      </div>
+                      <div style={secondaryTextStyle}>{item.note}</div>
+                    </a>
+                  ))}
+                </div>
+              </CanvasCard>
+            </div>
+
+            <div style={topGridStyle}>
               <CanvasCard
                 theme={theme}
                 title={copy.selectedTitle}
@@ -2407,6 +2682,31 @@ export default function FeatureFlagsPage() {
                     reason="no_data"
                     compact
                     messageOverride={copy.selectPrompt}
+                  />
+                )}
+              </CanvasCard>
+
+              <CanvasCard
+                theme={theme}
+                title={copy.actionInventoryTitle}
+                subtitle={copy.actionInventorySubtitle}
+              >
+                {selectedRowActions.length > 0 ? (
+                  <ActionInventory
+                    locale={locale}
+                    actions={selectedRowActions}
+                  />
+                ) : (
+                  <EmptyStateCard
+                    theme={theme}
+                    locale={locale}
+                    reason="permission_denied"
+                    compact
+                    messageOverride={
+                      locale === "en"
+                        ? "No availableActions are exposed for the selected flag."
+                        : "目前選取的旗標沒有回傳 availableActions。"
+                    }
                   />
                 )}
               </CanvasCard>
@@ -2592,7 +2892,10 @@ export default function FeatureFlagsPage() {
                   },
                   {
                     label: copy.refreshTier,
-                    value: `${resolvedRefreshTierCode} · 30s`,
+                    value: `${resolvedRefreshTierCode} · ${refreshIntervalLabel(
+                      locale,
+                      resolvedRefreshTier,
+                    )}`,
                   },
                   {
                     label: copy.selectedTenantScope,
