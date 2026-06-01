@@ -46,7 +46,7 @@ const SOS_SITUATIONS = driverIncidentSituations;
 
 type SosSituationId = (typeof SOS_SITUATIONS)[number]["id"];
 
-const SOS_LONG_PRESS_DELAY_MS = 800;
+const SOS_LONG_PRESS_DELAY_MS = 2000;
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -595,7 +595,7 @@ export default function IncidentScreen() {
             subtitle="SOS 不會因為單次點擊而直接送出。"
           >
             <Text style={styles.confirmationBody}>
-              長按底部按鈕約 0.8
+              長按底部按鈕約 2
               秒後，系統仍會再要求一次確認；若情況已排除，可按取消返回行程。
             </Text>
             <View style={styles.confirmationChipRow}>
@@ -610,7 +610,7 @@ export default function IncidentScreen() {
         style={styles.actionBar}
         notice={
           longPressHintVisible
-            ? "請長按右側按鈕約 0.8 秒，接著再於確認視窗送出 SOS。"
+            ? "請長按右側按鈕約 2 秒，接著再於確認視窗送出 SOS。"
             : "SOS 送出前仍會再確認一次，避免誤觸。"
         }
       >
@@ -638,7 +638,7 @@ export default function IncidentScreen() {
             <ActivityIndicator color={Tokens.colors.textInverse} size="small" />
           ) : (
             <>
-              <Text style={styles.longPressActionEyebrow}>需長按 0.8 秒</Text>
+              <Text style={styles.longPressActionEyebrow}>需長按 2 秒</Text>
               <Text style={styles.longPressActionLabel}>
                 {driverStrings.incident.confirmAction}
               </Text>
