@@ -10,7 +10,6 @@ import type {
 import {
   CanvasBanner,
   CanvasCard,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   type CanvasTone,
@@ -29,6 +28,10 @@ const th = buildCanvasTheme({
 const PLATFORM_ADMIN_URL = process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL;
 const OPS_CONSOLE_URL = process.env.NEXT_PUBLIC_OPS_CONSOLE_URL;
 
+const monoStyle: CSSProperties = {
+  fontFamily: th.monoFamily,
+};
+
 const pageBodyStyle: CSSProperties = {
   padding: 24,
   display: "flex",
@@ -36,38 +39,22 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const summaryGridStyle: CSSProperties = {
+const boardStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: 12,
-};
-
-const panelGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr)",
-  gap: 16,
-};
-
-const readinessGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
   gap: 12,
 };
 
 const secondaryGridStyle: CSSProperties = {
   display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
   gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
 };
 
 const emptyGalleryStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: 12,
-};
-
-const monoStyle: CSSProperties = {
-  fontFamily: th.monoFamily,
 };
 
 const mutedCopyStyle: CSSProperties = {
@@ -77,18 +64,31 @@ const mutedCopyStyle: CSSProperties = {
   lineHeight: 1.55,
 };
 
-const chipWrapStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
+const subtleCopyStyle: CSSProperties = {
+  color: th.textDim,
+  fontSize: 10.5,
+  lineHeight: 1.5,
 };
 
-const cardFooterStyle: CSSProperties = {
+const actionStripStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+};
+
+const tileHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: 10,
+};
+
+const tileFooterStyle: CSSProperties = {
   marginTop: 10,
   display: "flex",
   justifyContent: "space-between",
-  gap: 10,
   alignItems: "center",
+  gap: 10,
   flexWrap: "wrap",
 };
 
@@ -123,63 +123,56 @@ const subSystemMeta: Record<
     label: string;
     code: string;
     href: string;
-    description: string;
-    signals: string[];
+    fallbackDetail: string;
     emptyReason?: EmptyReason;
+    emptyBody?: string;
   }
 > = {
   api_keys: {
     label: "API keys",
     code: "api_keys",
     href: "/api-keys",
-    description: "Active keys, expiring keys, and missing scope coverage.",
-    signals: ["active keys", "expiring", "missing scopes"],
+    fallbackDetail: "Active keys, expiring keys, and missing scope coverage.",
   },
   webhooks: {
     label: "Webhooks",
     code: "webhooks",
     href: "/webhooks",
-    description:
+    fallbackDetail:
       "Endpoint count, delivery failure rate, and engine availability.",
-    signals: ["active endpoints", "failure rate", "engine availability"],
   },
   notifications: {
     label: "Notifications routing",
     code: "notifications",
     href: "/settings#notifications",
-    description: "Configured channels for inbox, email, and webhook routing.",
-    signals: ["ops console", "email", "webhook"],
+    fallbackDetail: "Configured channels across inbox, email, and webhook.",
   },
   sla: {
     label: "SLA profile",
-    code: "sla",
+    code: "sla_profile",
     href: "/settings#sla",
-    description:
-      "Wait, arrival, and completion thresholds published to the tenant.",
-    signals: ["wait threshold", "arrival threshold", "completion threshold"],
+    fallbackDetail: "Wait, arrival, and completion thresholds are evaluated.",
   },
   reports: {
     label: "Reports availability",
     code: "reports",
     href: "/reports",
-    description: "Runnable jobs and report artifact availability.",
-    signals: ["jobs runnable", "artifacts available", "manual refresh"],
+    fallbackDetail: "Runnable jobs and report artifact availability.",
   },
   modules: {
     label: "Module enablement",
     code: "modules",
     href: "/settings",
-    description: "Feature posture and module visibility for this tenant.",
-    signals: ["tenant flags", "module visibility", "enablement posture"],
+    fallbackDetail: "Tenant-facing module posture and visibility state.",
   },
   partner_entries: {
     label: "Partner entries",
     code: "partner_entries",
     href: "/partner",
-    description:
-      "Partner-facing ingress posture when tenant-linked entries exist.",
-    signals: ["tenant-linked entries", "partner ingress", "handoff required"],
+    fallbackDetail: "Partner-linked ingress posture when entries exist.",
     emptyReason: "not_provisioned",
+    emptyBody:
+      "This tenant has no partner entry yet, so the lane stays distinct.",
   },
 };
 
@@ -196,7 +189,7 @@ const emptyReasonMeta: Record<
 > = {
   no_data: {
     title: "No readiness data yet",
-    body: "The tenant exists, but no readiness evidence has been published for this view yet.",
+    body: "The tenant route is live, but no aggregated readiness snapshot has been published yet.",
     glyph: "00",
     tone: "neutral",
     href: "/api-keys",
@@ -204,15 +197,15 @@ const emptyReasonMeta: Record<
   },
   not_provisioned: {
     title: "First-time setup required",
-    body: "This tenant has not been provisioned for one or more integration lanes yet.",
+    body: "The tenant exists but one or more integration lanes still require first-time provisioning.",
     glyph: "NP",
     tone: "warn",
     href: "/webhooks",
-    actionLabel: "Set up first integration",
+    actionLabel: "Set up webhook",
   },
   fetch_failed: {
     title: "Snapshot fetch failed",
-    body: "The aggregated readiness endpoint did not return a usable snapshot for this request.",
+    body: "The aggregated readiness endpoint did not return a usable payload for this request.",
     glyph: "FF",
     tone: "danger",
     href: "/integration-governance",
@@ -220,7 +213,7 @@ const emptyReasonMeta: Record<
   },
   permission_denied: {
     title: "Access is read-restricted",
-    body: "The current actor can see the route shell but cannot read the readiness payload for this tenant.",
+    body: "The current actor can land on the route shell but cannot read the readiness summary.",
     glyph: "PD",
     tone: "danger",
     href: "/users",
@@ -228,7 +221,7 @@ const emptyReasonMeta: Record<
   },
   external_unavailable: {
     title: "External dependency unavailable",
-    body: "One or more upstream services that feed the aggregated summary are degraded or offline.",
+    body: "One or more upstream integrations that feed the aggregated view are degraded or offline.",
     glyph: "EX",
     tone: "warn",
     href: "/webhooks",
@@ -236,15 +229,15 @@ const emptyReasonMeta: Record<
   },
   filtered_empty: {
     title: "Current filter returns nothing",
-    body: "The view is healthy, but the active filter leaves no subsystem cards in the result set.",
+    body: "The route is healthy, but the current filter leaves no subsystem cards in the result set.",
     glyph: "FX",
     tone: "info",
     href: "/integration-governance",
     actionLabel: "Clear filters",
   },
   driver_not_eligible: {
-    title: "Driver-only reason not used here",
-    body: "This reason exists globally but should never drive tenant integration governance.",
+    title: "Driver-only empty reason",
+    body: "This global empty reason should never be used to drive tenant integration governance.",
     glyph: "DN",
     tone: "neutral",
     href: "/integration-governance",
@@ -273,16 +266,6 @@ function toErrorMessage(error: unknown) {
     : "Unknown integration readiness error.";
 }
 
-function getSubSystemMeta(
-  subSystem: TenantIntegrationReadinessItem["subSystem"],
-) {
-  return subSystemMeta[subSystem]!;
-}
-
-function getEmptyReasonMeta(reason: EmptyReason) {
-  return emptyReasonMeta[reason]!;
-}
-
 async function loadPageData(): Promise<PageData> {
   const client = getTenantClient();
 
@@ -300,28 +283,38 @@ async function loadPageData(): Promise<PageData> {
   }
 }
 
-function getStatusLabel(status: TenantIntegrationReadinessItem["status"]) {
-  return status.replace("_", " ");
+function getSubSystemMeta(
+  subSystem: TenantIntegrationReadinessItem["subSystem"],
+) {
+  return subSystemMeta[subSystem]!;
 }
 
-function getStatusAccent(status: TenantIntegrationReadinessItem["status"]) {
-  switch (status) {
-    case "ready":
-      return { background: th.successBg, color: th.success, glyph: "OK" };
-    case "partial":
-      return { background: th.warnBg, color: th.warn, glyph: "!" };
-    case "blocked":
-      return { background: th.dangerBg, color: th.danger, glyph: "X" };
-    case "not_provisioned":
-    default:
-      return { background: th.surfaceLo, color: th.textMuted, glyph: "?" };
-  }
+function getEmptyReasonMeta(reason: EmptyReason) {
+  return emptyReasonMeta[reason]!;
 }
 
 function getStatusTone(
   status: TenantIntegrationReadinessItem["status"],
 ): CanvasTone {
   return pillToneByStatus[status] ?? "neutral";
+}
+
+function getStatusLabel(status: TenantIntegrationReadinessItem["status"]) {
+  return status.replaceAll("_", " ");
+}
+
+function getStatusAccent(status: TenantIntegrationReadinessItem["status"]) {
+  switch (status) {
+    case "ready":
+      return { glyph: "OK", background: th.successBg, color: th.success };
+    case "partial":
+      return { glyph: "!", background: th.warnBg, color: th.warn };
+    case "blocked":
+      return { glyph: "X", background: th.dangerBg, color: th.danger };
+    case "not_provisioned":
+    default:
+      return { glyph: "?", background: th.surfaceLo, color: th.textMuted };
+  }
 }
 
 function getActionHref(action: string, fallbackHref: string) {
@@ -358,22 +351,31 @@ function getActionLabel(action: string) {
   }
 }
 
-function actionButtonStyle(enabled: boolean): CSSProperties {
+function actionButtonStyle(enabled: boolean, emphasis = false): CSSProperties {
   return {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: 26,
-    padding: "4px 10px",
+    minHeight: 30,
+    padding: "6px 12px",
     borderRadius: 999,
-    border: `1px solid ${enabled ? th.accent : th.border}`,
-    color: enabled ? "#ffffff" : th.textMuted,
-    background: enabled ? th.accent : th.surface,
+    border: `1px solid ${enabled ? (emphasis ? th.accentBorder : th.accent) : th.border}`,
+    background: enabled ? (emphasis ? th.accent : "transparent") : th.surface,
+    color: enabled ? (emphasis ? "#ffffff" : th.accentHi) : th.textMuted,
     textDecoration: "none",
     fontSize: 11.5,
     fontWeight: 600,
     pointerEvents: enabled ? "auto" : "none",
-    opacity: enabled ? 1 : 0.78,
+    opacity: enabled ? 1 : 0.72,
+  };
+}
+
+function linkStyle(emphasis = false): CSSProperties {
+  return {
+    color: emphasis ? th.accentHi : th.accent,
+    textDecoration: "none",
+    fontSize: emphasis ? 12.5 : 12,
+    fontWeight: emphasis ? 600 : 500,
   };
 }
 
@@ -381,32 +383,41 @@ function getActionAssistiveCopy(action: ResourceActionDescriptor) {
   if (!action.enabled && action.disabledReasonCode) {
     return `Unavailable: ${action.disabledReasonCode}`;
   }
-
   if (!action.enabled) {
     return "Unavailable";
   }
-
   return undefined;
 }
 
-function linkStyle(emphasis = false): CSSProperties {
-  return {
-    color: emphasis ? th.accentHi : th.accent,
-    textDecoration: "none",
-    fontSize: 12.5,
-    fontWeight: emphasis ? 600 : 500,
-  };
-}
+function renderActionLink(
+  action: ResourceActionDescriptor,
+  href: string,
+  children: ReactNode,
+  emphasis = false,
+) {
+  const assistiveCopy = getActionAssistiveCopy(action);
 
-function buildCrossAppHref(link: CrossAppResourceLink) {
-  const baseUrl =
-    link.targetApp === "platform-admin" ? PLATFORM_ADMIN_URL : OPS_CONSOLE_URL;
-
-  if (!baseUrl) {
-    return null;
+  if (!action.enabled) {
+    return (
+      <span
+        aria-disabled="true"
+        title={assistiveCopy}
+        style={actionButtonStyle(false, emphasis)}
+      >
+        {children}
+      </span>
+    );
   }
 
-  return `${baseUrl.replace(/\/$/, "")}${link.route}`;
+  return (
+    <Link
+      href={href}
+      aria-label={assistiveCopy}
+      style={actionButtonStyle(true, emphasis)}
+    >
+      {children}
+    </Link>
+  );
 }
 
 function formatDateTime(value: string) {
@@ -427,36 +438,6 @@ function formatDateTime(value: string) {
     .replace(",", "");
 }
 
-function dedupeActions(items: TenantIntegrationReadinessItem[]) {
-  const actions = new Map<string, QuickActionDisplay>();
-
-  for (const item of items) {
-    if (!item.nextAction) {
-      continue;
-    }
-
-    const meta = getSubSystemMeta(item.subSystem);
-    const existing = actions.get(item.nextAction.action);
-    const candidate = {
-      ...item.nextAction,
-      href: getActionHref(item.nextAction.action, meta.href),
-      source: meta.label,
-    };
-
-    if (!existing || (!existing.enabled && candidate.enabled)) {
-      actions.set(item.nextAction.action, candidate);
-    }
-  }
-
-  return [...actions.values()].sort((left, right) => {
-    if (left.enabled !== right.enabled) {
-      return left.enabled ? -1 : 1;
-    }
-
-    return left.action.localeCompare(right.action, "en");
-  });
-}
-
 function buildDisplayItems(items: TenantIntegrationReadinessItem[]) {
   const itemMap = new Map(items.map((item) => [item.subSystem, item]));
 
@@ -473,9 +454,39 @@ function buildDisplayItems(items: TenantIntegrationReadinessItem[]) {
         meta.emptyReason === "not_provisioned" ? "not_provisioned" : "blocked",
       detail:
         meta.emptyReason === "not_provisioned"
-          ? "No tenant-linked resource has been provisioned for this subsystem yet."
+          ? (meta.emptyBody ??
+            "This subsystem has not been provisioned for the tenant yet.")
           : "The aggregated payload did not return this subsystem. Verify upstream readiness evidence.",
     } satisfies TenantIntegrationReadinessItem;
+  });
+}
+
+function dedupeActions(items: TenantIntegrationReadinessItem[]) {
+  const actions = new Map<string, QuickActionDisplay>();
+
+  for (const item of items) {
+    if (!item.nextAction) {
+      continue;
+    }
+
+    const meta = getSubSystemMeta(item.subSystem);
+    const candidate = {
+      ...item.nextAction,
+      href: getActionHref(item.nextAction.action, meta.href),
+      source: meta.label,
+    };
+    const existing = actions.get(candidate.action);
+
+    if (!existing || (!existing.enabled && candidate.enabled)) {
+      actions.set(candidate.action, candidate);
+    }
+  }
+
+  return [...actions.values()].sort((left, right) => {
+    if (left.enabled !== right.enabled) {
+      return left.enabled ? -1 : 1;
+    }
+    return left.action.localeCompare(right.action, "en");
   });
 }
 
@@ -492,15 +503,24 @@ function getStateVariant(items: TenantIntegrationReadinessItem[]) {
     return {
       label: "First-time setup",
       tone: "warn" as CanvasTone,
-      body: "The tenant is present, but every tracked lane still requires first-time setup.",
+      body: "The tenant exists, but every tracked lane still requires first-time setup.",
     };
   }
 
   return {
     label: "Partial readiness",
     tone: "info" as CanvasTone,
-    body: "Some subsystems remain yellow or red, so follow-up actions stay visible.",
+    body: "Some subsystem lanes remain yellow or red, so follow-up actions stay visible.",
   };
+}
+
+function buildCrossAppHref(link: CrossAppResourceLink) {
+  const baseUrl =
+    link.targetApp === "platform-admin" ? PLATFORM_ADMIN_URL : OPS_CONSOLE_URL;
+  if (!baseUrl) {
+    return null;
+  }
+  return `${baseUrl.replace(/\/$/, "")}${link.route}`;
 }
 
 function buildCrossAppLinks(
@@ -547,12 +567,12 @@ function buildCrossAppLinks(
   return links;
 }
 
-function EmptyReasonCard({
+function EmptyReasonPreviewCard({
   reason,
-  selected = false,
+  selected,
 }: {
   reason: EmptyReason;
-  selected?: boolean;
+  selected: boolean;
 }) {
   const meta = getEmptyReasonMeta(reason);
 
@@ -560,18 +580,20 @@ function EmptyReasonCard({
     <CanvasCard
       theme={th}
       style={{
-        borderColor: selected ? th.accent : th.border,
-        background: selected ? "rgba(20, 184, 166, 0.08)" : th.surface,
+        borderColor: selected ? th.accentBorder : th.border,
+        background: selected ? "rgba(15, 118, 110, 0.12)" : th.surface,
       }}
     >
-      <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "grid", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div
             style={{
               width: 34,
               height: 34,
               borderRadius: 12,
-              border: `1px solid ${selected ? th.accentBorder : th.border}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
               background:
                 meta.tone === "danger"
                   ? th.dangerBg
@@ -588,21 +610,16 @@ function EmptyReasonCard({
                     : meta.tone === "info"
                       ? "#38bdf8"
                       : th.textMuted,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
               ...monoStyle,
-              fontWeight: 700,
               fontSize: 12,
+              fontWeight: 700,
             }}
           >
             {meta.glyph}
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>{meta.title}</div>
-            <div style={{ fontSize: 10.5, color: th.textDim, ...monoStyle }}>
-              {reason}
-            </div>
+            <div style={{ ...monoStyle, ...subtleCopyStyle }}>{reason}</div>
           </div>
         </div>
         <p style={mutedCopyStyle}>{meta.body}</p>
@@ -614,33 +631,82 @@ function EmptyReasonCard({
   );
 }
 
-function renderActionLink(
-  action: ResourceActionDescriptor,
-  href: string,
-  children: ReactNode,
-) {
-  const assistiveCopy = getActionAssistiveCopy(action);
-
-  if (!action.enabled) {
-    return (
-      <span
-        aria-disabled="true"
-        title={assistiveCopy}
-        style={actionButtonStyle(false)}
-      >
-        {children}
-      </span>
-    );
-  }
+function ReadinessTile({ item }: { item: TenantIntegrationReadinessItem }) {
+  const meta = getSubSystemMeta(item.subSystem);
+  const accent = getStatusAccent(item.status);
+  const action = item.nextAction;
+  const actionHref = action
+    ? getActionHref(action.action, meta.href)
+    : meta.href;
 
   return (
-    <Link
-      href={href}
-      aria-label={assistiveCopy}
-      style={actionButtonStyle(true)}
-    >
-      {children}
-    </Link>
+    <CanvasCard theme={th}>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={tileHeaderStyle}>
+          <div
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 13,
+              background: accent.background,
+              color: accent.color,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              ...monoStyle,
+              fontSize: 11,
+              fontWeight: 700,
+            }}
+          >
+            {accent.glyph}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{meta.label}</div>
+            <div style={{ ...monoStyle, ...subtleCopyStyle }}>{meta.code}</div>
+          </div>
+          <CanvasPill theme={th} tone={getStatusTone(item.status)} dot>
+            {getStatusLabel(item.status)}
+          </CanvasPill>
+        </div>
+
+        <p style={mutedCopyStyle}>{item.detail ?? meta.fallbackDetail}</p>
+
+        {!action && item.status === "not_provisioned" ? (
+          <div style={subtleCopyStyle}>
+            Distinct from `no_data`: this lane is intentionally present but not
+            provisioned yet.
+          </div>
+        ) : null}
+
+        {!action && item.subSystem === "partner_entries" ? (
+          <div style={subtleCopyStyle}>
+            Partner-linked investigations remain cross-app and hand off to
+            Platform Admin.
+          </div>
+        ) : null}
+
+        <div style={tileFooterStyle}>
+          <Link href={meta.href} style={linkStyle()}>
+            Open module
+          </Link>
+          {action ? (
+            renderActionLink(
+              action,
+              actionHref,
+              `${getActionLabel(action.action)} ->`,
+              true,
+            )
+          ) : (
+            <span style={actionButtonStyle(true, false)}>{"Inspect ->"}</span>
+          )}
+        </div>
+
+        {action && !action.enabled ? (
+          <div style={subtleCopyStyle}>{getActionAssistiveCopy(action)}</div>
+        ) : null}
+      </div>
+    </CanvasCard>
   );
 }
 
@@ -659,10 +725,11 @@ export default async function IntegrationGovernancePage({
   const data = previewEmptyReason
     ? { summary: null, errors: [] }
     : await loadPageData();
+
   const summary = data.summary;
+  const hasSnapshot = Boolean(summary && summary.items.length > 0);
   const items = buildDisplayItems(summary?.items ?? []);
   const readyCount = items.filter((item) => item.status === "ready").length;
-  const gapCount = items.filter((item) => item.status !== "ready").length;
   const quickActions = dedupeActions(items);
   const crossAppLinks = summary
     ? buildCrossAppLinks(summary.tenantId, items)
@@ -670,10 +737,10 @@ export default async function IntegrationGovernancePage({
   const stateVariant = getStateVariant(items);
   const selectedEmptyReason =
     previewEmptyReason ??
-    (summary || data.errors.length === 0 ? null : "fetch_failed");
-  const selectedEmptyMeta = getEmptyReasonMeta(
-    selectedEmptyReason ?? "fetch_failed",
-  );
+    (data.errors.length > 0 ? "fetch_failed" : hasSnapshot ? null : "no_data");
+  const selectedEmptyMeta = selectedEmptyReason
+    ? getEmptyReasonMeta(selectedEmptyReason)
+    : null;
 
   return (
     <div>
@@ -686,10 +753,14 @@ export default async function IntegrationGovernancePage({
             <CanvasPill theme={th} tone="success" dot>
               T5 slow
             </CanvasPill>
-            <CanvasPill theme={th} tone={summary ? "success" : "neutral"} dot>
-              {summary
+            <CanvasPill
+              theme={th}
+              tone={hasSnapshot ? stateVariant.tone : "neutral"}
+              dot={hasSnapshot}
+            >
+              {hasSnapshot
                 ? `${readyCount} of ${items.length} ready`
-                : "Waiting for snapshot"}
+                : "No snapshot"}
             </CanvasPill>
           </>
         }
@@ -699,66 +770,23 @@ export default async function IntegrationGovernancePage({
         <CanvasBanner
           theme={th}
           tone="info"
-          title="本頁只吃 1 個 aggregated endpoint"
-          body="可操作 CTA 來自 aggregated readiness payload，頁面不自行 orchestrate 6+ 無關查詢。Refresh tier 採 tenant slow cadence，並保留明確 snapshot 時間。"
+          title="本頁透過 1 個 aggregated endpoint 拉資料 · 不是 6+ 個並行查詢"
+          body="UI 不應 orchestrate 多個無關 query。可操作 CTA 來自 backend 回傳的 action descriptor，refresh tier 固定為 tenant slow (T5)。"
         />
 
-        <div style={summaryGridStyle}>
-          <CanvasKPI
-            theme={th}
-            label="Readiness"
-            value={`${readyCount}/${items.length}`}
-            delta={gapCount > 0 ? `${gapCount} gap` : "all green"}
-            deltaTone={gapCount > 0 ? "down" : "up"}
-            sub="Aggregated subsystem posture"
-          />
-          <CanvasKPI
-            theme={th}
-            label="Next actions"
-            value={quickActions.length}
-            delta={quickActions.length > 0 ? "availableActions" : "none"}
-            deltaTone={
-              quickActions.some((action) => action.enabled) ? "neutral" : "up"
-            }
-            sub="Authority-driven CTA inventory"
-          />
-          <CanvasKPI
-            theme={th}
-            label="Refresh"
-            value="T5"
-            delta={summary ? "tenant slow" : "manual retry"}
-            deltaTone="neutral"
-            sub={
-              summary
-                ? formatDateTime(summary.computedAt)
-                : "No snapshot loaded"
-            }
-          />
-          <CanvasKPI
-            theme={th}
-            label="Partner entries"
-            value={
-              items.find((item) => item.subSystem === "partner_entries")
-                ?.status === "not_provisioned"
-                ? "none"
-                : "tracked"
-            }
-            delta="cross-app aware"
-            deltaTone="neutral"
-            sub="Platform-admin handoff when needed"
-          />
-        </div>
-
-        {selectedEmptyReason ? (
-          <div style={panelGridStyle}>
+        {selectedEmptyReason && selectedEmptyMeta ? (
+          <>
             <CanvasCard theme={th}>
-              <div style={{ display: "grid", gap: 14 }}>
+              <div style={{ display: "grid", gap: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div
                     style={{
-                      width: 46,
-                      height: 46,
+                      width: 48,
+                      height: 48,
                       borderRadius: 16,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
                       background:
                         selectedEmptyMeta.tone === "danger"
                           ? th.dangerBg
@@ -775,9 +803,6 @@ export default async function IntegrationGovernancePage({
                             : selectedEmptyMeta.tone === "info"
                               ? "#38bdf8"
                               : th.textMuted,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
                       ...monoStyle,
                       fontWeight: 700,
                     }}
@@ -794,17 +819,10 @@ export default async function IntegrationGovernancePage({
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 10,
-                    alignItems: "center",
-                  }}
-                >
+                <div style={actionStripStyle}>
                   <Link
                     href={selectedEmptyMeta.href}
-                    style={actionButtonStyle(true)}
+                    style={actionButtonStyle(true, true)}
                   >
                     {selectedEmptyMeta.actionLabel}
                   </Link>
@@ -818,8 +836,8 @@ export default async function IntegrationGovernancePage({
                     style={{
                       padding: "12px 14px",
                       borderRadius: 12,
-                      background: th.surfaceLo,
                       border: `1px solid ${th.border}`,
+                      background: th.surfaceLo,
                       display: "grid",
                       gap: 6,
                     }}
@@ -827,7 +845,7 @@ export default async function IntegrationGovernancePage({
                     {data.errors.map((error) => (
                       <div
                         key={error}
-                        style={{ ...mutedCopyStyle, ...monoStyle }}
+                        style={{ ...monoStyle, ...mutedCopyStyle }}
                       >
                         {error}
                       </div>
@@ -844,215 +862,115 @@ export default async function IntegrationGovernancePage({
                     EmptyReason coverage
                   </div>
                   <p style={mutedCopyStyle}>
-                    This route can preview all six tenant-relevant empty reasons
-                    with
+                    Reviewer can preview all six tenant-relevant empty states
+                    from this route with
                     <span style={monoStyle}> ?emptyReason=&lt;reason&gt;</span>.
                   </p>
+                  <div style={{ ...monoStyle, ...subtleCopyStyle }}>
+                    supported · no_data / not_provisioned / fetch_failed /
+                    permission_denied / external_unavailable / filtered_empty
+                  </div>
                 </div>
               </CanvasCard>
-              <div style={emptyGalleryStyle}>
-                {(
-                  [
-                    "no_data",
-                    "not_provisioned",
-                    "fetch_failed",
-                    "permission_denied",
-                    "external_unavailable",
-                    "filtered_empty",
-                  ] as EmptyReason[]
-                ).map((reason) => (
-                  <EmptyReasonCard
-                    key={reason}
-                    reason={reason}
-                    selected={reason === selectedEmptyReason}
-                  />
-                ))}
-              </div>
+
+              <CanvasCard theme={th}>
+                <div style={{ display: "grid", gap: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>
+                    Refresh tier
+                  </div>
+                  <p style={mutedCopyStyle}>
+                    This screen remains on T5 tenant-slow cadence even when the
+                    current route is rendering an empty variant.
+                  </p>
+                  <div style={{ ...monoStyle, ...subtleCopyStyle }}>
+                    cadence · T5 / tenant slow
+                  </div>
+                </div>
+              </CanvasCard>
             </div>
-          </div>
+
+            <div style={emptyGalleryStyle}>
+              {(
+                [
+                  "no_data",
+                  "not_provisioned",
+                  "fetch_failed",
+                  "permission_denied",
+                  "external_unavailable",
+                  "filtered_empty",
+                ] as EmptyReason[]
+              ).map((reason) => (
+                <EmptyReasonPreviewCard
+                  key={reason}
+                  reason={reason}
+                  selected={reason === selectedEmptyReason}
+                />
+              ))}
+            </div>
+          </>
         ) : (
-          <div style={panelGridStyle}>
+          <>
             <CanvasCard theme={th}>
               <div style={{ display: "grid", gap: 14 }}>
                 <div
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
-                    gap: 16,
+                    gap: 12,
                     flexWrap: "wrap",
+                    alignItems: "flex-start",
                   }}
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>
-                      Readiness overview
+                      Aggregated readiness board
                     </div>
                     <p style={{ marginTop: 6, ...mutedCopyStyle }}>
-                      One aggregated payload renders all seven integration
-                      lanes. The UI does not invent role authority and only
-                      exposes follow-up CTAs when the backend returns an action
-                      descriptor.
-                    </p>
-                    <div
-                      style={{
-                        marginTop: 8,
-                        display: "flex",
-                        gap: 8,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <CanvasPill theme={th} tone={stateVariant.tone} dot>
-                        {stateVariant.label}
-                      </CanvasPill>
-                      <CanvasPill theme={th} tone="neutral">
-                        7 subsystem lanes
-                      </CanvasPill>
-                    </div>
-                    <p style={{ marginTop: 8, ...mutedCopyStyle }}>
-                      {stateVariant.body}
+                      Seven subsystem lanes render from one readiness payload.
+                      Drill targets stay module-specific, and quick CTAs only
+                      appear when the backend returns an action descriptor.
                     </p>
                   </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {quickActions.length > 0 ? (
-                      quickActions.slice(0, 4).map((action) => (
-                        <div
-                          key={action.action}
-                          style={{ display: "grid", gap: 4 }}
-                        >
-                          {renderActionLink(
-                            action,
-                            action.href,
-                            getActionLabel(action.action),
-                          )}
-                          <span style={{ fontSize: 10.5, color: th.textDim }}>
-                            {action.source}
-                          </span>
-                        </div>
-                      ))
-                    ) : (
-                      <CanvasPill theme={th} tone="success" dot>
-                        No follow-up action
-                      </CanvasPill>
-                    )}
+                  <div style={actionStripStyle}>
+                    <CanvasPill theme={th} tone={stateVariant.tone} dot>
+                      {stateVariant.label}
+                    </CanvasPill>
+                    <CanvasPill theme={th} tone="neutral">
+                      7 subsystem lanes
+                    </CanvasPill>
+                    <CanvasPill theme={th} tone="neutral">
+                      snapshot {formatDateTime(summary!.computedAt)}
+                    </CanvasPill>
                   </div>
                 </div>
 
-                <div style={readinessGridStyle}>
-                  {items.map((item) => {
-                    const meta = getSubSystemMeta(item.subSystem);
-                    const accent = getStatusAccent(item.status);
-                    const action = item.nextAction;
-                    const href = action
-                      ? getActionHref(action.action, meta.href)
-                      : meta.href;
+                <div style={actionStripStyle}>
+                  {quickActions.length > 0 ? (
+                    quickActions.map((action) => (
+                      <div
+                        key={action.action}
+                        style={{ display: "grid", gap: 4 }}
+                      >
+                        {renderActionLink(
+                          action,
+                          action.href,
+                          getActionLabel(action.action),
+                          true,
+                        )}
+                        <span style={subtleCopyStyle}>{action.source}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <CanvasPill theme={th} tone="success" dot>
+                      No follow-up action
+                    </CanvasPill>
+                  )}
+                </div>
 
-                    return (
-                      <CanvasCard theme={th} key={item.subSystem}>
-                        <div style={{ display: "grid", gap: 12 }}>
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "flex-start",
-                              gap: 10,
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: 28,
-                                height: 28,
-                                borderRadius: 999,
-                                background: accent.background,
-                                color: accent.color,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                fontSize: 11.5,
-                                fontWeight: 700,
-                                ...monoStyle,
-                                flexShrink: 0,
-                              }}
-                            >
-                              {accent.glyph}
-                            </div>
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <div style={{ fontSize: 13, fontWeight: 600 }}>
-                                {meta.label}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: 10.5,
-                                  color: th.textDim,
-                                  ...monoStyle,
-                                }}
-                              >
-                                {meta.code}
-                              </div>
-                            </div>
-                            <CanvasPill
-                              theme={th}
-                              tone={getStatusTone(item.status)}
-                              dot
-                            >
-                              {getStatusLabel(item.status)}
-                            </CanvasPill>
-                          </div>
-
-                          <p style={mutedCopyStyle}>
-                            {item.detail ?? meta.description}
-                          </p>
-
-                          <div style={{ display: "grid", gap: 6 }}>
-                            <div style={{ fontSize: 10.5, color: th.textDim }}>
-                              Must-show signals
-                            </div>
-                            <div style={chipWrapStyle}>
-                              {meta.signals.map((signal) => (
-                                <CanvasPill
-                                  key={signal}
-                                  theme={th}
-                                  tone="neutral"
-                                >
-                                  {signal}
-                                </CanvasPill>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div style={cardFooterStyle}>
-                            <Link href={meta.href} style={linkStyle()}>
-                              Open module
-                            </Link>
-                            {action
-                              ? renderActionLink(
-                                  action,
-                                  href,
-                                  `${getActionLabel(action.action)} ->`,
-                                )
-                              : null}
-                          </div>
-
-                          {!action?.enabled ? (
-                            <div style={{ fontSize: 10.5, color: th.textDim }}>
-                              {action ? getActionAssistiveCopy(action) : null}
-                            </div>
-                          ) : null}
-
-                          {summary && item.subSystem === "partner_entries" ? (
-                            <div style={{ fontSize: 10.5, color: th.textDim }}>
-                              Cross-app handoff remains in Platform Admin when
-                              partner ownership investigation is required.
-                            </div>
-                          ) : null}
-
-                          {summary && item.subSystem === "webhooks" ? (
-                            <div style={{ fontSize: 10.5, color: th.textDim }}>
-                              Delivery investigation can deep-link into Ops
-                              Console audit when webhook posture is not green.
-                            </div>
-                          ) : null}
-                        </div>
-                      </CanvasCard>
-                    );
-                  })}
+                <div style={boardStyle}>
+                  {items.map((item) => (
+                    <ReadinessTile key={item.subSystem} item={item} />
+                  ))}
                 </div>
               </div>
             </CanvasCard>
@@ -1064,17 +982,15 @@ export default async function IntegrationGovernancePage({
                     Refresh tier
                   </div>
                   <p style={mutedCopyStyle}>
-                    Tenant slow cadence applies here. The UI keeps the tier
-                    explicit instead of pretending state changes are instant.
+                    Packet §5.16 puts this route on T5. The page keeps that
+                    cadence explicit instead of pretending the summary is
+                    real-time.
                   </p>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <div style={{ ...mutedCopyStyle, ...monoStyle }}>
-                      cadence · T5 / tenant slow
-                    </div>
-                    <div style={{ ...mutedCopyStyle, ...monoStyle }}>
-                      snapshot ·{" "}
-                      {summary ? formatDateTime(summary.computedAt) : "—"}
-                    </div>
+                  <div style={{ ...monoStyle, ...subtleCopyStyle }}>
+                    cadence · T5 / tenant slow
+                  </div>
+                  <div style={{ ...monoStyle, ...subtleCopyStyle }}>
+                    computedAt · {formatDateTime(summary!.computedAt)}
                   </div>
                 </div>
               </CanvasCard>
@@ -1085,13 +1001,13 @@ export default async function IntegrationGovernancePage({
                     Cross-app drill targets
                   </div>
                   <p style={mutedCopyStyle}>
-                    Deep links leave tenant-console in a new tab when platform
-                    or ops context owns the next investigation step.
+                    When the next investigation step belongs to another app, the
+                    route deep-links out in a new tab instead of inventing a
+                    local mirror.
                   </p>
                   <div style={{ display: "grid", gap: 8 }}>
                     {crossAppLinks.map((link) => {
                       const href = buildCrossAppHref(link);
-
                       return href ? (
                         <a
                           key={`${link.targetApp}-${link.route}`}
@@ -1108,7 +1024,7 @@ export default async function IntegrationGovernancePage({
                           style={{ display: "grid", gap: 4 }}
                         >
                           <span style={linkStyle(true)}>{link.label}</span>
-                          <span style={{ fontSize: 10.5, color: th.textDim }}>
+                          <span style={subtleCopyStyle}>
                             Configure
                             <span style={monoStyle}>
                               {" "}
@@ -1130,11 +1046,11 @@ export default async function IntegrationGovernancePage({
               <CanvasCard theme={th}>
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    Empty-state QA
+                    QA variants
                   </div>
                   <p style={mutedCopyStyle}>
-                    Reviewer can verify the six tenant-relevant empty variants
-                    directly from this route.
+                    This route still exposes the six tenant-relevant
+                    `EmptyReason` previews for review coverage.
                   </p>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                     {(
@@ -1159,7 +1075,7 @@ export default async function IntegrationGovernancePage({
                 </div>
               </CanvasCard>
             </div>
-          </div>
+          </>
         )}
       </div>
     </div>
