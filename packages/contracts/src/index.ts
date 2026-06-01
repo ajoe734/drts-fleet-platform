@@ -4460,6 +4460,36 @@ export interface UpdateDriverSettingsCommand {
   preferredAreas?: string[];
 }
 
+// ---------------------------------------------------------------------------
+// Driver Ops Instructions (ops issues, driver receives + acknowledges)
+// ---------------------------------------------------------------------------
+
+export type DriverOpsInstructionSeverity = "info" | "warning" | "critical";
+
+export type DriverOpsInstructionStatus = "active" | "acknowledged" | "expired";
+
+export interface DriverOpsInstruction {
+  instructionId: string;
+  driverId: string;
+  title: string;
+  body: string;
+  severity: DriverOpsInstructionSeverity;
+  createdBy: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+  acknowledgedAt: string | null;
+  status: DriverOpsInstructionStatus;
+}
+
+export interface CreateDriverOpsInstructionCommand {
+  driverId: string;
+  title: string;
+  body: string;
+  severity?: DriverOpsInstructionSeverity;
+  createdBy?: string | null;
+  expiresAt?: string | null;
+}
+
 export interface DriverProfileEmergencyContact {
   name: string;
   phone: string;
