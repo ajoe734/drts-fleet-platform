@@ -7,6 +7,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
 import {
   formatPlatformCodeLabel,
@@ -17,16 +18,21 @@ import {
   RECONCILIATION_ISSUE_TYPES,
 } from "@drts/contracts";
 import type {
+  DriverStatementLineRecord,
   DriverStatementRecord,
+  InvoiceLineRecord,
   ReconciliationIssueRecord,
+  ReimbursementItemRecord,
   ReimbursementBatchRecord,
   SettlementMatrixRecord,
   TenantInvoiceRecord,
 } from "@drts/contracts";
 import type {
   CrossAppResourceLink,
+  EmptyStateEnvelope,
   EmptyReason,
   ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "@drts/contracts/ui-runtime";
 import {
   CanvasBanner,
@@ -107,6 +113,15 @@ type PaymentsTabId =
 type IssueActionRecord = ReconciliationIssueRecord & ActionAware;
 type InvoiceActionRecord = TenantInvoiceRecord & ActionAware;
 type StatementActionRecord = DriverStatementRecord & ActionAware;
+type PaymentCollectionState = {
+  emptyState: EmptyStateEnvelope | null;
+  refresh: UiRefreshMetadata | null;
+};
+type PaymentCollectionEnvelope<T> = {
+  items?: T[] | null;
+  emptyState?: EmptyStateEnvelope | null;
+  refresh?: UiRefreshMetadata | null;
+};
 
 const T4_REFRESH_INTERVAL_MS = 30_000;
 const T4_STALE_AFTER_MS = 45_000;
@@ -117,6 +132,14 @@ const APP_BASE_URLS = {
   "tenant-console":
     process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3002",
 } as const;
+
+function rewriteControlPlaneProxyPath(baseUrl: string, path: string) {
+  if (!baseUrl.startsWith("/control-plane-proxy")) {
+    return path;
+  }
+
+  return path.replace(/^\/api(?=\/|$)/, "") || "/";
+}
 
 function toDateInputValue(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -460,6 +483,46 @@ function buildCrossAppHref(link: CrossAppResourceLink) {
   return base ? `${base}${link.route}` : link.route;
 }
 
+async function fetchPaymentCollection<T>(path: string): Promise<{
+  items: T[];
+  emptyState: EmptyStateEnvelope | null;
+  refresh: UiRefreshMetadata | null;
+}> {
+  const apiBaseUrl = getRuntimeApiBaseUrl().replace(/\/$/, "");
+  const response = await fetch(
+    `${apiBaseUrl}${rewriteControlPlaneProxyPath(apiBaseUrl, path)}`,
+    {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`API error ${response.status}: ${errorText}`);
+  }
+
+  const envelope = (await response.json()) as {
+    data?: T[] | PaymentCollectionEnvelope<T> | null;
+  };
+  const data = envelope.data;
+
+  if (Array.isArray(data)) {
+    return {
+      items: data,
+      emptyState: null,
+      refresh: null,
+    };
+  }
+
+  return {
+    items: data?.items ?? [],
+    emptyState: data?.emptyState ?? null,
+    refresh: data?.refresh ?? null,
+  };
+}
+
 function formatFreshnessLabel(lastLoadedAt: string | null, locale: string) {
   if (!lastLoadedAt) {
     return locale === "en" ? "waiting for first refresh" : "等待首次刷新";
@@ -604,6 +667,15 @@ export default function PaymentsPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<PaymentsTabId>("reconciliation");
+  const [collectionState, setCollectionState] = useState<
+    Record<PaymentsTabId, PaymentCollectionState>
+  >({
+    reconciliation: { emptyState: null, refresh: null },
+    matrix: { emptyState: null, refresh: null },
+    invoices: { emptyState: null, refresh: null },
+    statements: { emptyState: null, refresh: null },
+    reimbursements: { emptyState: null, refresh: null },
+  });
   const [invoiceFilter, setInvoiceFilter] = useState<
     "all" | "paid" | "draft" | "issued"
   >("all");
@@ -676,24 +748,58 @@ export default function PaymentsPage() {
         issueRecords,
         settlementMatrixRecords,
       ] = await Promise.all([
-        client.listPlatformInvoices(),
-        client.listDriverStatements(),
-        client.listReimbursementBatches(),
-        client.listReconciliationIssues(),
-        client.listSettlementMatrix(),
+        fetchPaymentCollection<TenantInvoiceRecord>("/api/settlement/invoices"),
+        fetchPaymentCollection<DriverStatementRecord>("/api/driver-statements"),
+        fetchPaymentCollection<ReimbursementBatchRecord>("/api/reimbursements"),
+        fetchPaymentCollection<ReconciliationIssueRecord>(
+          "/api/settlement/reconciliation-issues",
+        ),
+        fetchPaymentCollection<SettlementMatrixRecord>(
+          "/api/settlement/matrix",
+        ),
       ]);
-      setInvoices(invoiceRecords ?? []);
-      setStatements(statementRecords ?? []);
-      setReimbursements(reimbursementRecords ?? []);
-      setReconciliationIssues(issueRecords ?? []);
-      setSettlementMatrix(settlementMatrixRecords ?? []);
-      setLastLoadedAt(new Date().toISOString());
+      setInvoices(invoiceRecords.items);
+      setStatements(statementRecords.items);
+      setReimbursements(reimbursementRecords.items);
+      setReconciliationIssues(issueRecords.items);
+      setSettlementMatrix(settlementMatrixRecords.items);
+      setCollectionState({
+        invoices: {
+          emptyState: invoiceRecords.emptyState,
+          refresh: invoiceRecords.refresh,
+        },
+        statements: {
+          emptyState: statementRecords.emptyState,
+          refresh: statementRecords.refresh,
+        },
+        reimbursements: {
+          emptyState: reimbursementRecords.emptyState,
+          refresh: reimbursementRecords.refresh,
+        },
+        reconciliation: {
+          emptyState: issueRecords.emptyState,
+          refresh: issueRecords.refresh,
+        },
+        matrix: {
+          emptyState: settlementMatrixRecords.emptyState,
+          refresh: settlementMatrixRecords.refresh,
+        },
+      });
+      setLastLoadedAt(
+        [
+          invoiceRecords.refresh?.generatedAt,
+          statementRecords.refresh?.generatedAt,
+          reimbursementRecords.refresh?.generatedAt,
+          issueRecords.refresh?.generatedAt,
+          settlementMatrixRecords.refresh?.generatedAt,
+        ].find(Boolean) ?? new Date().toISOString(),
+      );
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [client]);
+  }, []);
 
   const describeMatrixChannel = useCallback(
     (channelKey: string) => {
@@ -1099,13 +1205,13 @@ export default function PaymentsPage() {
 
   const describeInvoiceChannelMix = (invoice: TenantInvoiceRecord) =>
     summarizeChannelMix(
-      invoice.lines.map((line) => line.channelKey),
+      invoice.lines.map((line: InvoiceLineRecord) => line.channelKey),
       describeMatrixChannel,
     );
 
   const describeStatementChannelMix = (statement: DriverStatementRecord) =>
     summarizeChannelMix(
-      statement.lines.map((line) => line.channelKey),
+      statement.lines.map((line: DriverStatementLineRecord) => line.channelKey),
       describeMatrixChannel,
     );
 
@@ -1226,9 +1332,14 @@ export default function PaymentsPage() {
           loading: t("payments.loading"),
         };
 
+  const activeCollectionRefresh = collectionState[activeTab].refresh;
+  const staleAfterMs =
+    activeCollectionRefresh?.staleAfterMs ?? T4_STALE_AFTER_MS;
   const isStale =
-    lastLoadedAt != null &&
-    Date.now() - Date.parse(lastLoadedAt) > T4_STALE_AFTER_MS;
+    activeCollectionRefresh?.dataFreshness === "stale" ||
+    activeCollectionRefresh?.dataFreshness === "degraded" ||
+    (lastLoadedAt != null &&
+      Date.now() - Date.parse(lastLoadedAt) > staleAfterMs);
   const pageActionDescriptors = {
     createIssue: findActionDescriptor(
       sortedIssues.flatMap(
@@ -1263,25 +1374,36 @@ export default function PaymentsPage() {
     },
   } satisfies Record<string, ResourceActionDescriptor>;
 
-  const opsRevenueLink: CrossAppResourceLink = {
-    targetApp: "ops-console",
-    route: "/revenue?drawer=mismatch",
-    resourceType: "reconciliation_issue",
-    resourceId: sortedIssues[0]?.issueId ?? "payments",
-    openMode: "new_tab",
-    label:
-      locale === "en"
-        ? "Open ops revenue mismatch drawer"
-        : "開啟 ops revenue mismatch drawer",
-  };
-  const auditLink: CrossAppResourceLink = {
-    targetApp: "platform-admin",
-    route: "/audit?resourceType=reconciliation_issue",
-    resourceType: "audit",
-    resourceId: sortedIssues[0]?.issueId ?? "payments",
-    openMode: "same_tab",
-    label: locale === "en" ? "View related audit rows" : "查看相關 audit rows",
-  };
+  const issueLinks = sortedIssues.flatMap(
+    (issue) => (issue as IssueActionRecord).crossAppLinks ?? [],
+  );
+  const opsRevenueLink =
+    issueLinks.find((link) => link.targetApp === "ops-console") ??
+    ({
+      targetApp: "ops-console",
+      route: "/revenue?drawer=mismatch",
+      resourceType: "reconciliation_issue",
+      resourceId: sortedIssues[0]?.issueId ?? "payments",
+      openMode: "new_tab",
+      label:
+        locale === "en"
+          ? "Open ops revenue mismatch drawer"
+          : "開啟 ops revenue mismatch drawer",
+    } satisfies CrossAppResourceLink);
+  const auditLink =
+    issueLinks.find(
+      (link) =>
+        link.targetApp === "platform-admin" && link.route.startsWith("/audit"),
+    ) ??
+    ({
+      targetApp: "platform-admin",
+      route: "/audit?resourceType=reconciliation_issue",
+      resourceType: "audit",
+      resourceId: sortedIssues[0]?.issueId ?? "payments",
+      openMode: "same_tab",
+      label:
+        locale === "en" ? "View related audit rows" : "查看相關 audit rows",
+    } satisfies CrossAppResourceLink);
 
   const tabs = [
     t("payments.matrix.title"),
@@ -1320,6 +1442,23 @@ export default function PaymentsPage() {
       badgeTone: openReconciliationCount > 0 ? "warn" : "neutral",
     },
   ];
+  const headerActiveTab =
+    tabItems.find((tab) => tab.id === activeTab)?.label ??
+    tabs[4] ??
+    "Reconciliation";
+  const invoiceEmptyReason =
+    collectionState.invoices.emptyState?.reason ??
+    (invoiceFilter === "all" ? "no_data" : "filtered_empty");
+  const statementEmptyReason =
+    collectionState.statements.emptyState?.reason ?? "no_data";
+  const reimbursementEmptyReason =
+    collectionState.reimbursements.emptyState?.reason ?? "no_data";
+  const reconciliationEmptyReason =
+    collectionState.reconciliation.emptyState?.reason ??
+    (error ? "fetch_failed" : "no_data");
+  const matrixEmptyReason =
+    collectionState.matrix.emptyState?.reason ??
+    (error ? "fetch_failed" : "no_data");
 
   const shellNav: CanvasShellNavItem[] = [
     { key: "home", href: "/", label: navLabels.home, icon: "dashboard" },
@@ -2079,7 +2218,9 @@ export default function PaymentsPage() {
       w: 220,
       r: (batch) => (
         <div style={{ ...cellStackStyle(), maxWidth: 220 }}>
-          {batch.items.map((item) => item.orderId).join(", ")}
+          {batch.items
+            .map((item: ReimbursementItemRecord) => item.orderId)
+            .join(", ")}
         </div>
       ),
     },
@@ -2137,7 +2278,7 @@ export default function PaymentsPage() {
           title={copy.pageTitle}
           subtitle={copy.pageSubtitle}
           tabs={tabs}
-          activeTab={tabs[4]}
+          activeTab={headerActiveTab}
           actions={
             <>
               <CanvasBtn theme={theme} icon="reports" disabled>
@@ -2203,15 +2344,24 @@ export default function PaymentsPage() {
               <CanvasCard
                 theme={theme}
                 title="Refresh tier"
-                subtitle="T4 admin medium-slow · 30s polling + manual refresh"
+                subtitle={`T4 admin medium-slow · ${
+                  activeCollectionRefresh?.source ?? "live"
+                } source · 30s polling + manual refresh`}
                 actions={
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <CanvasPill
                       theme={theme}
-                      tone={isStale ? "warn" : "success"}
+                      tone={
+                        activeCollectionRefresh?.dataFreshness === "degraded"
+                          ? "warn"
+                          : isStale
+                            ? "warn"
+                            : "success"
+                      }
                       dot
                     >
-                      {isStale ? "stale" : "fresh"}
+                      {activeCollectionRefresh?.dataFreshness ??
+                        (isStale ? "stale" : "fresh")}
                     </CanvasPill>
                     <CanvasBtn
                       theme={theme}
@@ -2235,6 +2385,17 @@ export default function PaymentsPage() {
                   <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
                     {formatFreshnessLabel(lastLoadedAt, locale)}
                   </span>
+                  {activeCollectionRefresh?.generatedAt ? (
+                    <CanvasPill theme={theme} tone="neutral">
+                      {locale === "en"
+                        ? `snapshot ${formatDateTime(
+                            activeCollectionRefresh.generatedAt,
+                          )}`
+                        : `快照 ${formatDateTime(
+                            activeCollectionRefresh.generatedAt,
+                          )}`}
+                    </CanvasPill>
+                  ) : null}
                   <CanvasPill theme={theme} tone="neutral">
                     {locale === "en"
                       ? "ops revenue mismatch links open in new tab"
@@ -2357,7 +2518,7 @@ export default function PaymentsPage() {
                         renderEmptyState(
                           theme,
                           locale,
-                          error ? "fetch_failed" : "no_data",
+                          reconciliationEmptyReason,
                         )
                       )}
                     </CanvasCard>
@@ -2431,8 +2592,16 @@ export default function PaymentsPage() {
                         >
                           <a
                             href={buildCrossAppHref(opsRevenueLink)}
-                            target="_blank"
-                            rel="noreferrer"
+                            target={
+                              opsRevenueLink.openMode === "new_tab"
+                                ? "_blank"
+                                : undefined
+                            }
+                            rel={
+                              opsRevenueLink.openMode === "new_tab"
+                                ? "noreferrer"
+                                : undefined
+                            }
                             style={{
                               color: theme.accent,
                               textDecoration: "none",
@@ -2443,6 +2612,16 @@ export default function PaymentsPage() {
                           </a>
                           <a
                             href={buildCrossAppHref(auditLink)}
+                            target={
+                              auditLink.openMode === "new_tab"
+                                ? "_blank"
+                                : undefined
+                            }
+                            rel={
+                              auditLink.openMode === "new_tab"
+                                ? "noreferrer"
+                                : undefined
+                            }
                             style={{
                               color: theme.accent,
                               textDecoration: "none",
@@ -2878,11 +3057,7 @@ export default function PaymentsPage() {
                         rows={sortedIssues as IssueTableRow[]}
                       />
                     ) : (
-                      renderEmptyState(
-                        theme,
-                        locale,
-                        error ? "fetch_failed" : "no_data",
-                      )
+                      renderEmptyState(theme, locale, reconciliationEmptyReason)
                     )}
                   </CanvasCard>
                 </>
@@ -2902,11 +3077,7 @@ export default function PaymentsPage() {
                       rows={sortedMatrix as MatrixTableRow[]}
                     />
                   ) : (
-                    renderEmptyState(
-                      theme,
-                      locale,
-                      error ? "fetch_failed" : "no_data",
-                    )
+                    renderEmptyState(theme, locale, matrixEmptyReason)
                   )}
                 </CanvasCard>
               ) : null}
@@ -2947,7 +3118,7 @@ export default function PaymentsPage() {
                     renderEmptyState(
                       theme,
                       locale,
-                      invoiceFilter === "all" ? "no_data" : "filtered_empty",
+                      invoiceEmptyReason,
                       pageActionDescriptors.generateInvoices.enabled &&
                         invoiceFilter !== "all"
                         ? withActionHint(
@@ -2983,7 +3154,7 @@ export default function PaymentsPage() {
                     renderEmptyState(
                       theme,
                       locale,
-                      error ? "fetch_failed" : "no_data",
+                      statementEmptyReason,
                       pageActionDescriptors.generateStatements.enabled
                         ? withActionHint(
                             <CanvasBtn
@@ -3018,11 +3189,7 @@ export default function PaymentsPage() {
                         rows={reimbursements as ReimbursementTableRow[]}
                       />
                     ) : (
-                      renderEmptyState(
-                        theme,
-                        locale,
-                        error ? "fetch_failed" : "no_data",
-                      )
+                      renderEmptyState(theme, locale, reimbursementEmptyReason)
                     )}
                   </CanvasCard>
                   <CanvasCard
