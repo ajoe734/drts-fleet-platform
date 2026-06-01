@@ -221,7 +221,7 @@ export interface ActionReceipt {
  * (e.g. ops-console revenue mismatch → platform-admin reconciliation).
  */
 export interface CrossAppResourceLink {
-  targetApp: "ops-console" | "platform-admin" | "tenant-console";
+  targetApp: "ops-console" | "platform-admin" | "tenant-console" | "driver-app";
   route: string;
   resourceType: string;
   resourceId: string;

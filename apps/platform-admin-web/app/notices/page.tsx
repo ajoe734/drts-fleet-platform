@@ -1,12 +1,13 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type { Locale } from "@/lib/translations";
 import type {
+  ActionReceipt,
   CrossAppResourceLink,
   EmptyReason,
   EmptyStateEnvelope,
@@ -523,6 +524,7 @@ function inferCrossAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
 
   if (current.hostname === "localhost") {
     const portMap: Record<CrossAppResourceLink["targetApp"], string> = {
+      "driver-app": "8081",
       "platform-admin": "3002",
       "ops-console": "3003",
       "tenant-console": "3004",
@@ -533,6 +535,7 @@ function inferCrossAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
 
   if (current.hostname.includes("platform-admin")) {
     const hostMap: Record<CrossAppResourceLink["targetApp"], string> = {
+      "driver-app": "driver",
       "platform-admin": "platform-admin",
       "ops-console": "ops-console",
       "tenant-console": "tenant-console",
@@ -550,6 +553,9 @@ function inferCrossAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
 function getCrossAppHref(link: CrossAppResourceLink): string {
   const baseMap: Record<CrossAppResourceLink["targetApp"], string | undefined> =
     {
+      "driver-app":
+        process.env.NEXT_PUBLIC_DRIVER_APP_ORIGIN ??
+        process.env.NEXT_PUBLIC_DRIVER_APP_URL,
       "ops-console":
         process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN ??
         process.env.NEXT_PUBLIC_OPS_CONSOLE_URL,
@@ -903,6 +909,7 @@ export default function NoticesPage() {
   const [maintActionReason, setMaintActionReason] = useState("");
   const [maintScheduledStart, setMaintScheduledStart] = useState("");
   const [maintScheduledEnd, setMaintScheduledEnd] = useState("");
+  const maintenanceDraftDirtyRef = useRef(false);
 
   const requestedEmptyReason = getRequestedEmptyReason(
     searchParams.get("emptyReason"),
@@ -923,10 +930,12 @@ export default function NoticesPage() {
       setNoticesEmptyState(noticeData.emptyState ?? null);
       setMaintenance(maintenanceData.item);
       setMaintenanceEmptyState(maintenanceData.emptyState ?? null);
-      setMaintEnabled(Boolean(maintenanceData.item?.enabled));
-      setMaintActionReason("");
-      setMaintScheduledStart(maintenanceData.item?.scheduledStart ?? "");
-      setMaintScheduledEnd(maintenanceData.item?.scheduledEnd ?? "");
+      if (!maintenanceDraftDirtyRef.current) {
+        setMaintEnabled(Boolean(maintenanceData.item?.enabled));
+        setMaintActionReason("");
+        setMaintScheduledStart(maintenanceData.item?.scheduledStart ?? "");
+        setMaintScheduledEnd(maintenanceData.item?.scheduledEnd ?? "");
+      }
       setLastRefreshAt(new Date().toISOString());
     } catch (caughtError) {
       setError(
@@ -1079,12 +1088,16 @@ export default function NoticesPage() {
     setSavingMaintenance(true);
     setError(null);
     try {
-      await client.setMaintenanceMode({
+      const receipt: ActionReceipt = await client.setMaintenanceMode({
         enabled: maintEnabled,
         reason: maintActionReason.trim() || null,
         scheduledStart: maintScheduledStart || null,
         scheduledEnd: maintScheduledEnd || null,
       });
+      if (receipt.resourceType !== "platform_maintenance_mode") {
+        throw new Error("Unexpected maintenance action receipt resourceType.");
+      }
+      maintenanceDraftDirtyRef.current = false;
       await loadData();
     } catch (caughtError) {
       setError(
@@ -1395,7 +1408,10 @@ export default function NoticesPage() {
                   type="checkbox"
                   checked={maintEnabled}
                   disabled={!maintenanceAction?.enabled}
-                  onChange={(event) => setMaintEnabled(event.target.checked)}
+                  onChange={(event) => {
+                    setMaintEnabled(event.target.checked);
+                    maintenanceDraftDirtyRef.current = true;
+                  }}
                 />
                 <span className="admin-switch-slider" />
               </label>
@@ -1424,7 +1440,10 @@ export default function NoticesPage() {
               <input
                 value={maintActionReason}
                 disabled={!maintenanceAction?.enabled}
-                onChange={(event) => setMaintActionReason(event.target.value)}
+                onChange={(event) => {
+                  setMaintActionReason(event.target.value);
+                  maintenanceDraftDirtyRef.current = true;
+                }}
                 style={fieldStyle}
                 placeholder={copy.actionReasonField}
               />
@@ -1434,7 +1453,10 @@ export default function NoticesPage() {
               <input
                 value={maintScheduledStart}
                 disabled={!maintenanceAction?.enabled}
-                onChange={(event) => setMaintScheduledStart(event.target.value)}
+                onChange={(event) => {
+                  setMaintScheduledStart(event.target.value);
+                  maintenanceDraftDirtyRef.current = true;
+                }}
                 style={fieldStyle}
                 placeholder="2026-05-27T02:00:00Z"
               />
@@ -1444,7 +1466,10 @@ export default function NoticesPage() {
               <input
                 value={maintScheduledEnd}
                 disabled={!maintenanceAction?.enabled}
-                onChange={(event) => setMaintScheduledEnd(event.target.value)}
+                onChange={(event) => {
+                  setMaintScheduledEnd(event.target.value);
+                  maintenanceDraftDirtyRef.current = true;
+                }}
                 style={fieldStyle}
                 placeholder="2026-05-27T04:00:00Z"
               />

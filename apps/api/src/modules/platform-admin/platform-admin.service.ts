@@ -26,6 +26,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { type AuditedActionResult } from "../../common/action-receipt";
 import {
   DEFAULT_CONTROLLED_DOWNLOAD_HOST,
   DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
@@ -721,16 +722,18 @@ export class PlatformAdminService implements OnModuleInit {
     noticeId: string,
     audience: PlatformNoticeRecord["targetAudience"],
   ): CrossAppResourceLink[] {
-    const links: CrossAppResourceLink[] = [
-      {
+    const links: CrossAppResourceLink[] = [];
+
+    if (audience === "all" || audience === "ops") {
+      links.push({
         targetApp: "ops-console",
         route: `/audit?resourceType=platform_notice&resourceId=${noticeId}`,
         resourceType: "platform_notice",
         resourceId: noticeId,
         openMode: "new_tab",
         label: "Open ops audit view",
-      },
-    ];
+      });
+    }
 
     if (audience === "all" || audience === "tenants") {
       links.push({
@@ -740,6 +743,17 @@ export class PlatformAdminService implements OnModuleInit {
         resourceId: noticeId,
         openMode: "new_tab",
         label: "Open tenant banner preview",
+      });
+    }
+
+    if (audience === "all" || audience === "drivers") {
+      links.push({
+        targetApp: "driver-app",
+        route: "/",
+        resourceType: "platform_notice",
+        resourceId: noticeId,
+        openMode: "new_tab",
+        label: "Open driver notice preview",
       });
     }
 
@@ -808,6 +822,14 @@ export class PlatformAdminService implements OnModuleInit {
           resourceId: "global",
           openMode: "new_tab",
           label: "Open tenant banner inbox",
+        },
+        {
+          targetApp: "driver-app",
+          route: "/",
+          resourceType: "platform_maintenance_mode",
+          resourceId: "global",
+          openMode: "new_tab",
+          label: "Open driver banner inbox",
         },
       ],
     };
@@ -896,7 +918,7 @@ export class PlatformAdminService implements OnModuleInit {
   setMaintenanceMode(
     command: SetPlatformMaintenanceModeCommand,
     requestId?: string,
-  ): PlatformMaintenanceModeRecord {
+  ): AuditedActionResult<PlatformMaintenanceModeRecord> {
     const now = new Date().toISOString();
     this.assertNonBlank(command.reason ?? "", "reason");
     this.maintenanceMode = {
@@ -914,7 +936,7 @@ export class PlatformAdminService implements OnModuleInit {
           ? ["dispatch", "partner ingress", "webhook delivery"]
           : (this.maintenanceMode.affectedServices ?? []),
     };
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "platform_admin",
@@ -932,7 +954,10 @@ export class PlatformAdminService implements OnModuleInit {
       },
       requestId,
     );
-    return this.decorateMaintenanceMode();
+    return {
+      data: this.decorateMaintenanceMode(),
+      auditLog,
+    };
   }
 
   // ── Platform Pricing Rules ────────────────────────────────────────────────
@@ -1156,7 +1181,7 @@ export class PlatformAdminService implements OnModuleInit {
     if (requestId) {
       auditLogInput.requestId = requestId;
     }
-    this.auditNotificationService.recordAuditLog(auditLogInput);
+    return this.auditNotificationService.recordAuditLog(auditLogInput);
   }
 
   private clonePublicInfoVersion(

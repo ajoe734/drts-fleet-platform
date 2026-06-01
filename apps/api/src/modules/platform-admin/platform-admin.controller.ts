@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 
 import type {
+  ActionReceipt,
   CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
@@ -21,6 +22,7 @@ import type {
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
+import { toActionReceiptEnvelope } from "../../common/action-receipt";
 import {
   ApiRequestError,
   toApiSuccessEnvelope,
@@ -211,8 +213,20 @@ export class PlatformAdminController {
     @Body() command: SetPlatformMaintenanceModeCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.platformAdminService.setMaintenanceMode(command, requestId),
+    const result = this.platformAdminService.setMaintenanceMode(
+      command,
+      requestId,
+    );
+    const message: ActionReceipt["message"] = command.enabled
+      ? "Platform maintenance mode enabled."
+      : "Platform maintenance mode cleared.";
+    return toActionReceiptEnvelope(
+      {
+        auditLog: result.auditLog,
+        resourceType: "platform_maintenance_mode",
+        resourceId: "global",
+        message,
+      },
       requestId,
     );
   }

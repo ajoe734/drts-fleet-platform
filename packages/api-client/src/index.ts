@@ -6,6 +6,7 @@
  */
 
 import type {
+  ActionReceipt,
   AcknowledgeOpsApprovalRequestBreachCommand,
   AddComplaintCaseNoteCommand,
   AddReconciliationIssueCommentCommand,
@@ -2134,11 +2135,10 @@ export class ApiClient {
 
   async setMaintenanceMode(
     command: SetPlatformMaintenanceModeCommand,
-  ): Promise<PlatformMaintenanceModeRecord> {
-    return this.post<PlatformMaintenanceModeRecord>(
-      "/api/platform-admin/maintenance-mode",
-      { body: command },
-    );
+  ): Promise<ActionReceipt> {
+    return this.post<ActionReceipt>("/api/platform-admin/maintenance-mode", {
+      body: command,
+    });
   }
 
   async listPlatformPricingRules(): Promise<PlatformPricingRuleRecord[]> {
