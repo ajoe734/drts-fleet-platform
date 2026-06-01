@@ -175,6 +175,19 @@ const crossAppLinkStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+// Tenant-owned resource whose route is not built in this deployment yet:
+// shown but not navigable (narrow-to-disabled), with a tooltip.
+const disabledExitStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 3,
+  color: th.textMuted,
+  fontSize: 10.5,
+  fontWeight: 600,
+  whiteSpace: "nowrap",
+  cursor: "not-allowed",
+};
+
 const linkResetStyle: CSSProperties = {
   textDecoration: "none",
   display: "inline-flex",
@@ -277,45 +290,131 @@ function maskActor(log: AuditLogRecord): { display: string; masked: boolean } {
   return { display: log.actorId, masked: false };
 }
 
-// Cross-app deep link (§3.10 + §5.18): ops/platform-owned audit rows link back
-// to the owning app's read-scoped audit view in a new tab. Tenant/system/partner
-// rows resolve in-app, so no cross-app target.
-function crossAppLink(
-  log: AuditLogRecord,
-): { href: string; label: string } | null {
+// ── Resource exit (packet §5.18 Exit; Q-TEN13) ─────────────────────────────
+// The in-app-vs-cross-app decision is keyed on the RESOURCE, not the actor:
+// per Q-TEN13 the tenant sees actions on tenant-owned resources from EVERY
+// actor realm, and the spec exit is "resource detail in-app for tenant
+// resources, cross-app new tab for ops/platform-owned resources". So an
+// ops_user action on a tenant-owned booking still exits in-app to /bookings;
+// only genuinely ops/platform-owned resource types hop cross-app.
+//
+// Keys are the literal `resourceType` strings emitted by the backend audit
+// logger (apps/api/src/modules/audit-notification + tenant-governance seed).
+// Values are the canonical packet §4 sitemap routes — kept even when a module
+// route is not built in this deployment yet, so the link auto-resolves once
+// the sibling lane merges (availability is gated by EXISTING_TENANT_ROUTES).
+const TENANT_RESOURCE_ROUTE: Record<string, string> = {
+  booking: "/bookings",
+  tenant_passenger: "/passengers",
+  tenant_address: "/addresses",
+  tenant_api_key: "/api-keys",
+  webhook_endpoint: "/webhooks",
+  webhook_delivery: "/webhooks",
+  tenant_sla: "/sla",
+  tenant_user: "/users",
+  tenant_user_role: "/users",
+  tenant_cost_center: "/cost-centers",
+  tenant_cost_center_coverage_report: "/cost-centers",
+  tenant_invoice: "/invoices",
+  tenant_billing_profile: "/billing",
+  tenant_notifications: "/notifications",
+  tenant_approval_rule: "/rules",
+  tenant_approval_rule_set: "/rules",
+  tenant_approval_request: "/rules",
+  tenant_quota_policy: "/rules",
+  tenant_quota_ledger: "/rules",
+  tenant_quota_snapshot: "/rules",
+};
+
+// Routes actually built in THIS deployment (verified against the
+// `pnpm --filter @drts/tenant-console-web build` route table). A tenant-owned
+// resource whose canonical route is not yet built here (sibling lane unmerged)
+// is narrowed to a disabled affordance rather than a 404 link — the FE may
+// narrow display, never widen availability (ui-authority-actions-contract §6).
+// NOTE: /addresses, /sla, /billing, /notifications are canonical packet §4
+// routes that are NOT yet built/merged here, so they are intentionally absent
+// — their resourceType keys above stay mapped and auto-resolve once those
+// sibling routes land in this app's build.
+const EXISTING_TENANT_ROUTES: ReadonlySet<string> = new Set([
+  "/",
+  "/api-keys",
+  "/audit",
+  "/bookings",
+  "/cost-centers",
+  "/invoices",
+  "/passengers",
+  "/rules",
+  "/settings",
+  "/users",
+  "/webhooks",
+]);
+
+function isRouteAvailable(route: string): boolean {
+  const path = route.split("?")[0] ?? route;
+  const segments = path.split("/").filter(Boolean);
+  const top = segments.length > 0 ? `/${segments[0]}` : "/";
+  return EXISTING_TENANT_ROUTES.has(top);
+}
+
+// Where an audit row's resource exits to. Tenant-owned resources exit in-app
+// (same tab) to their owning route — disabled, not linked, when that route is
+// not built here. Ops/platform-owned resources exit cross-app (new tab) to the
+// owning app's read-scoped audit view. Everything else has no exit.
+type ResourceExit =
+  | { kind: "in_app"; href: string; available: boolean; route: string }
+  | { kind: "cross_app"; href: string; label: string }
+  | { kind: "none" };
+
+function resolveResourceExit(log: AuditLogRecord): ResourceExit {
+  const ownerRoute = TENANT_RESOURCE_ROUTE[log.resourceType];
+  if (ownerRoute) {
+    // Booking has a per-resource detail route; the rest land on their list
+    // route, carrying the resourceId so the target can focus it.
+    let href = ownerRoute;
+    if (log.resourceId) {
+      href =
+        log.resourceType === "booking"
+          ? `/bookings/${encodeURIComponent(log.resourceId)}`
+          : `${ownerRoute}?focus=${encodeURIComponent(log.resourceId)}`;
+    }
+    return {
+      kind: "in_app",
+      href,
+      available: isRouteAvailable(href),
+      route: ownerRoute,
+    };
+  }
   const auditQuery = `audit?auditId=${encodeURIComponent(log.auditId)}`;
   if (log.actorType === "ops_user") {
-    return { href: `${OPS_CONSOLE_URL}/${auditQuery}`, label: "ops-console" };
+    return {
+      kind: "cross_app",
+      href: `${OPS_CONSOLE_URL}/${auditQuery}`,
+      label: "ops-console",
+    };
   }
   if (log.actorType === "platform_admin") {
     return {
+      kind: "cross_app",
       href: `${PLATFORM_ADMIN_URL}/${auditQuery}`,
       label: "platform-admin",
     };
   }
-  return null;
+  return { kind: "none" };
 }
 
-// availableActions (Q-X13) — drives CTAs instead of role hard-coding. Export is
-// disabled (with a reason) when there is nothing in the current view to export.
-function buildAvailableActions(
-  visibleCount: number,
-): ResourceActionDescriptor[] {
-  const exportAction: ResourceActionDescriptor =
-    visibleCount > 0
-      ? { action: "export", enabled: true, riskLevel: "low" }
-      : {
-          action: "export",
-          enabled: false,
-          disabledReasonCode: "no_visible_rows",
-          riskLevel: "low",
-        };
-  return [
-    { action: "filter", enabled: true, riskLevel: "low" },
-    { action: "refresh", enabled: true, riskLevel: "low" },
-    exportAction,
-  ];
-}
+// availableActions (Q-X13 / packet §5.18 "Must-support actions": filter,
+// refresh, export — all low risk). The audit read model does not yet return an
+// `availableActions` envelope, so `loadAuditData` publishes these spec
+// descriptors as the single backend seam; the CTAs are driven by `findAction()`
+// against the loaded `availableActions` data, never by a role→action mapping
+// hard-coded in render. When the backend ships the envelope, only the loader
+// assignment changes. (Whether there are rows to export is a separate runtime
+// data condition applied at the call site — not a fabricated descriptor.)
+const ROUTE_ACTIONS: readonly ResourceActionDescriptor[] = [
+  { action: "filter", enabled: true, riskLevel: "low" },
+  { action: "refresh", enabled: true, riskLevel: "low" },
+  { action: "export", enabled: true, riskLevel: "low" },
+] as const;
 
 function findAction(
   actions: readonly ResourceActionDescriptor[],
@@ -346,6 +445,7 @@ type AuditPageData = {
   totalCount: number;
   fetchFailed: boolean;
   generatedAt: string;
+  availableActions: ResourceActionDescriptor[];
 };
 
 async function loadAuditData(): Promise<AuditPageData> {
@@ -360,6 +460,8 @@ async function loadAuditData(): Promise<AuditPageData> {
       totalCount: rows.length,
       fetchFailed: false,
       generatedAt: rows[0]?.createdAt ?? new Date().toISOString(),
+      // Single backend seam for screen-level CTAs — see ROUTE_ACTIONS note.
+      availableActions: [...ROUTE_ACTIONS],
     };
   } catch {
     return {
@@ -367,6 +469,7 @@ async function loadAuditData(): Promise<AuditPageData> {
       totalCount: 0,
       fetchFailed: true,
       generatedAt: new Date().toISOString(),
+      availableActions: [...ROUTE_ACTIONS],
     };
   }
 }
@@ -403,7 +506,8 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
     : undefined;
   const timeFilter = TIME_FILTERS.find((item) => item.value === sinceFilter);
 
-  const { rows, totalCount, fetchFailed, generatedAt } = await loadAuditData();
+  const { rows, totalCount, fetchFailed, generatedAt, availableActions } =
+    await loadAuditData();
 
   const moduleNames = Array.from(
     new Set(rows.map((row) => row.moduleName)),
@@ -428,10 +532,12 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
   });
 
   const hasActiveFilter = Boolean(validRealm || moduleFilter || timeFilter);
-  const availableActions = buildAvailableActions(filteredRows.length);
   const refreshAction = findAction(availableActions, "refresh");
   const exportAction = findAction(availableActions, "export");
   const filterAction = findAction(availableActions, "filter");
+  // Capability comes from the descriptor; "nothing in this view to export" is a
+  // runtime data condition layered on top (not a backend capability override).
+  const canExport = Boolean(exportAction?.enabled) && filteredRows.length > 0;
 
   // emptyReason: explicit override (state preview) wins, else inferred from the
   // real fetch/filter outcome. not_provisioned / permission_denied /
@@ -487,7 +593,7 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
         h: "RESOURCE",
         w: 220,
         r: (row) => {
-          const link = crossAppLink(row);
+          const exit = resolveResourceExit(row);
           const resource = row.resourceId ?? row.resourceType ?? "—";
           return (
             <div style={resourceStackStyle}>
@@ -504,14 +610,31 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
               >
                 {resource}
               </span>
-              {link ? (
+              {exit.kind === "in_app" ? (
+                exit.available ? (
+                  <Link
+                    style={crossAppLinkStyle}
+                    href={exit.href}
+                    title={`在租戶主控台開啟 ${exit.route}`}
+                  >
+                    → 開啟
+                  </Link>
+                ) : (
+                  <span
+                    style={disabledExitStyle}
+                    title="此資源所屬模組尚未在此版本佈建"
+                  >
+                    模組未佈建
+                  </span>
+                )
+              ) : exit.kind === "cross_app" ? (
                 <a
                   style={crossAppLinkStyle}
-                  href={link.href}
+                  href={exit.href}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  ↗ {link.label}
+                  ↗ {exit.label}
                 </a>
               ) : null}
             </div>
@@ -569,17 +692,22 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
                 手動刷新 · T6
               </Link>
             ) : null}
-            <span
-              title={
-                exportAction?.enabled
-                  ? undefined
-                  : (exportAction?.disabledReasonCode ?? "目前沒有可匯出的紀錄")
-              }
-            >
-              <CanvasBtn theme={th} size="sm" disabled={!exportAction?.enabled}>
-                匯出 (簽名 artifact)
-              </CanvasBtn>
-            </span>
+            {exportAction ? (
+              <span
+                title={
+                  !exportAction.enabled
+                    ? (exportAction.disabledReasonCode ??
+                      "目前無法匯出稽核紀錄")
+                    : filteredRows.length === 0
+                      ? "目前檢視沒有可匯出的紀錄"
+                      : undefined
+                }
+              >
+                <CanvasBtn theme={th} size="sm" disabled={!canExport}>
+                  匯出 (簽名 artifact)
+                </CanvasBtn>
+              </span>
+            ) : null}
           </div>
         }
       />
