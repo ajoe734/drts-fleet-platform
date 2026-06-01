@@ -6,6 +6,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
 } from "react";
@@ -1207,6 +1208,11 @@ export default function PartnerDetailPage() {
     useState<CredentialLifecycleFilter>("active");
   const [activeSection, setActiveSection] =
     useState<DetailSectionId>("overview");
+  const entryRef = useRef<PartnerDetailRecord | null>(null);
+
+  useEffect(() => {
+    entryRef.current = entry;
+  }, [entry]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1224,16 +1230,22 @@ export default function PartnerDetailPage() {
     async (options?: { preserveIssuedCredential?: boolean }) => {
       if (!entrySlug) {
         setEntry(null);
+        setEntryError(null);
+        setCredentialError(null);
+        setCredentials([]);
         setLoading(false);
         return;
       }
 
-      setLoading(true);
+      setLoading((current) => current || entryRef.current === null);
       setEntryError(null);
       setActionError(null);
 
       try {
         const selected = await client.getPlatformPartnerEntry(entrySlug);
+        if (!selected) {
+          throw new Error(`Partner entry ${entrySlug} not found.`);
+        }
         setEntry(selected);
         setEditForm(selected ? toPartnerFormState(selected) : EMPTY_ENTRY_FORM);
 
@@ -1256,11 +1268,15 @@ export default function PartnerDetailPage() {
         }
         setLastLoadedAt(new Date().toISOString());
       } catch (cause: unknown) {
-        setEntryError(cause instanceof Error ? cause.message : String(cause));
-        setEntry(null);
-        setEditForm(EMPTY_ENTRY_FORM);
-        setCredentials([]);
-        setCredentialError(null);
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setEntryError(message);
+
+        if (entryRef.current === null) {
+          setEntry(null);
+          setEditForm(EMPTY_ENTRY_FORM);
+          setCredentials([]);
+          setCredentialError(null);
+        }
       } finally {
         setLoading(false);
       }
@@ -1901,7 +1917,7 @@ export default function PartnerDetailPage() {
     [saveEntry],
   );
 
-  if (loading) {
+  if (loading && !entry) {
     return (
       <div
         style={{
@@ -2072,6 +2088,19 @@ export default function PartnerDetailPage() {
                   : "Partner entry 更新失敗"
               }
               body={actionError}
+            />
+          ) : null}
+
+          {entryError ? (
+            <Banner
+              theme={theme}
+              tone="danger"
+              title={
+                locale === "en"
+                  ? "Unable to refresh partner entry"
+                  : "Partner entry 重新整理失敗"
+              }
+              body={entryError}
             />
           ) : null}
 
