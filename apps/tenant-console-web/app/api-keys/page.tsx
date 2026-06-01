@@ -1,13 +1,17 @@
 import type {
+  ApiListData,
+  ApiSuccessEnvelope,
   EmptyReason,
   RefreshTier,
   TenantApiKeyRecord,
   TenantIntegrationGovernancePackage,
 } from "@drts/contracts";
-import { getTenantClient } from "@/lib/api-client";
+import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
 import { ApiKeyManager } from "./api-key-manager";
 
 export const dynamic = "force-dynamic";
+
+const API_KEYS_REFRESH_TIER: RefreshTier = "slow";
 
 type ApiKeyPageData = {
   apiKeys: TenantApiKeyRecord[];
@@ -15,22 +19,71 @@ type ApiKeyPageData = {
   errors: string[];
   refreshTier: RefreshTier;
   snapshotAt: string;
+  tenantId: string;
 };
 
+type ApiEnvelopeResult<T> = {
+  data: T;
+  timestamp: string;
+};
+
+async function fetchTenantEnvelope<T>(
+  path: string,
+): Promise<ApiEnvelopeResult<T>> {
+  const response = await fetch(`${API_URL}${path}`, {
+    headers: {
+      "Content-Type": "application/json",
+      "x-actor-type": "tenant_admin",
+      "x-actor-id": DEMO_ACTOR_ID,
+      "x-realm": "tenant",
+      "x-tenant-id": DEMO_TENANT_ID,
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: { message?: string; code?: string };
+    } | null;
+    throw new Error(
+      body?.error?.message ??
+        body?.error?.code ??
+        `Request failed: ${response.status}`,
+    );
+  }
+
+  const envelope = (await response.json()) as ApiSuccessEnvelope<T>;
+  return {
+    data: envelope.data,
+    timestamp: envelope.meta.timestamp,
+  };
+}
+
 async function loadApiKeyPageData(): Promise<ApiKeyPageData> {
-  const client = getTenantClient();
   const errors: string[] = [];
-  const snapshotAt = new Date().toISOString();
 
   const [apiKeysResult, governanceResult] = await Promise.allSettled([
-    client.listApiKeys() as Promise<TenantApiKeyRecord[]>,
-    client.getTenantIntegrationGovernancePackage() as Promise<TenantIntegrationGovernancePackage>,
+    fetchTenantEnvelope<ApiListData<TenantApiKeyRecord>>(
+      "/api/tenant/api-keys",
+    ),
+    fetchTenantEnvelope<TenantIntegrationGovernancePackage>(
+      "/api/tenant/integration-governance",
+    ),
   ]);
 
   const apiKeys =
-    apiKeysResult.status === "fulfilled" ? apiKeysResult.value : [];
+    apiKeysResult.status === "fulfilled" ? apiKeysResult.value.data.items : [];
   const governance =
-    governanceResult.status === "fulfilled" ? governanceResult.value : null;
+    governanceResult.status === "fulfilled"
+      ? governanceResult.value.data
+      : null;
+
+  const snapshotAtCandidates = [
+    apiKeysResult.status === "fulfilled" ? apiKeysResult.value.timestamp : null,
+    governanceResult.status === "fulfilled"
+      ? governanceResult.value.timestamp
+      : null,
+  ].filter((value): value is string => Boolean(value));
 
   if (apiKeysResult.status === "rejected") {
     errors.push(
@@ -52,8 +105,9 @@ async function loadApiKeyPageData(): Promise<ApiKeyPageData> {
     apiKeys,
     governance,
     errors,
-    refreshTier: "slow",
-    snapshotAt,
+    refreshTier: API_KEYS_REFRESH_TIER,
+    snapshotAt: snapshotAtCandidates.sort().at(-1) ?? new Date().toISOString(),
+    tenantId: governance?.tenantId ?? apiKeys[0]?.tenantId ?? DEMO_TENANT_ID,
   };
 }
 

@@ -37,6 +37,7 @@ type ApiKeyManagerProps = {
   errors: string[];
   refreshTier: RefreshTier;
   snapshotAt: string;
+  tenantId: string;
   emptyReasonOverride?: EmptyReason | null;
 };
 
@@ -152,7 +153,7 @@ const copyStyle: CSSProperties = {
 
 const statGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
   gap: 12,
 };
 
@@ -421,19 +422,6 @@ const checkboxRowStyle: CSSProperties = {
   color: th.text,
 };
 
-const externalLinks = [
-  {
-    href: "https://admin.drts.io/tenants/yamato/integration-governance",
-    label: "Platform Admin",
-    description: "governance package 與 break-glass 審批",
-  },
-  {
-    href: "https://ops.drts.io/audit?tenantId=yamato&module=tenant_api_key",
-    label: "Ops Console",
-    description: "跨 actor 稽核追溯",
-  },
-] as const;
-
 const inAppLinks = [
   {
     href: "/integration-governance",
@@ -461,6 +449,22 @@ const inAppLinks = [
     description: "manual exports 與 downstream readiness evidence",
   },
 ] as const;
+
+function buildExternalLinks(tenantId: string) {
+  const normalizedTenantId = encodeURIComponent(tenantId);
+  return [
+    {
+      href: `https://admin.drts.io/tenants/${normalizedTenantId}/integration-governance`,
+      label: "Platform Admin",
+      description: "governance package 與 break-glass 審批",
+    },
+    {
+      href: `https://ops.drts.io/audit?tenantId=${normalizedTenantId}&module=tenant_api_key`,
+      label: "Ops Console",
+      description: "跨 actor 稽核追溯",
+    },
+  ] as const;
+}
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) return "—";
@@ -649,6 +653,7 @@ function renderActionButton(
 
 function getEmptyStateCatalog(
   issueAction: ResourceActionDescriptor,
+  platformAdminHref: string,
 ): Record<SupportedEmptyReason, EmptyStateConfig> {
   return {
     no_data: {
@@ -663,7 +668,7 @@ function getEmptyStateCatalog(
       title: "租戶整合治理尚未開通",
       body: "還沒有可用的 API key policy，無法確認 scope 與效期上限，不能安全發鑰。",
       ctaLabel: "前往 Platform Admin",
-      ctaHref: externalLinks[0].href,
+      ctaHref: platformAdminHref,
     },
     fetch_failed: {
       tone: "danger" as CanvasTone,
@@ -739,6 +744,7 @@ export function ApiKeyManager({
   errors,
   refreshTier,
   snapshotAt,
+  tenantId,
   emptyReasonOverride = null,
 }: ApiKeyManagerProps) {
   const router = useRouter();
@@ -757,6 +763,7 @@ export function ApiKeyManager({
   const apiKeyResources = apiKeys as ApiKeyResource[];
   const governanceResource = governance as GovernanceResource | null;
   const allowedScopes = governanceResource?.apiKeyPolicy.allowedScopes ?? [];
+  const externalLinks = useMemo(() => buildExternalLinks(tenantId), [tenantId]);
   const compatibilityAliases = Object.entries(
     (governanceResource?.apiKeyPolicy.compatibilityAliases ?? {}) as Record<
       string,
@@ -818,6 +825,9 @@ export function ApiKeyManager({
       expiring: sortedKeys.filter(
         (item) => resolveApiKeyState(item) === "expiring",
       ).length,
+      expired: sortedKeys.filter(
+        (item) => resolveApiKeyState(item) === "expired",
+      ).length,
       revoked: sortedKeys.filter(
         (item) => resolveApiKeyState(item) === "revoked",
       ).length,
@@ -825,7 +835,7 @@ export function ApiKeyManager({
     [sortedKeys],
   );
 
-  const emptyCatalog = getEmptyStateCatalog(issueAction);
+  const emptyCatalog = getEmptyStateCatalog(issueAction, externalLinks[0].href);
   const effectiveEmptyReason = useMemo<SupportedEmptyReason | null>(() => {
     if (emptyReasonOverride) {
       return emptyReasonOverride as SupportedEmptyReason;
@@ -877,7 +887,7 @@ export function ApiKeyManager({
       action: issueAction,
       keyName: "",
       expiresAt: "",
-      scopes: [...allowedScopes],
+      scopes: [],
       reason: "",
     });
   }
@@ -1193,7 +1203,8 @@ export function ApiKeyManager({
             <p style={copyStyle}>
               scope 與 expiry 受 tenant integration governance package 約束。 UI
               會優先依 `availableActions` 顯示可執行 CTA；若後端尚未回傳，
-              才使用目前的安全 fallback。
+              才使用目前的安全 fallback。 issue modal 預設不代填 scopes，
+              避免違反 least-privilege。
             </p>
             <div style={{ height: 16 }} />
             <div style={statGridStyle}>
@@ -1206,6 +1217,11 @@ export function ApiKeyManager({
                 <span style={statLabelStyle}>expiring</span>
                 <span style={statValueStyle}>{stateCounts.expiring}</span>
                 <span style={statSubtleStyle}>7 天內到期</span>
+              </div>
+              <div style={statTileStyle}>
+                <span style={statLabelStyle}>expired</span>
+                <span style={statValueStyle}>{stateCounts.expired}</span>
+                <span style={statSubtleStyle}>需要重發或輪替</span>
               </div>
               <div style={statTileStyle}>
                 <span style={statLabelStyle}>revoked</span>
