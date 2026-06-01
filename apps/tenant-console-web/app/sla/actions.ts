@@ -14,8 +14,19 @@ type UpdateSlaPayload = {
 type ActionResult = {
   ok: boolean;
   message: string;
-  receipt?: ActionReceipt;
+  receipt?: ActionReceipt | undefined;
 };
+
+function isActionReceipt(value: unknown): value is ActionReceipt {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "actionId" in value &&
+    "auditId" in value &&
+    "resourceId" in value &&
+    "status" in value,
+  );
+}
 
 function normalizePositiveInteger(value: number, field: string) {
   if (!Number.isInteger(value) || value < 1) {
@@ -53,15 +64,22 @@ export async function updateTenantSlaProfileAction(
     reason: normalizeReason(payload.reason),
   });
 
+  const receipt = isActionReceipt(response) ? response : undefined;
+  const responseMessage =
+    response && typeof response === "object" && "message" in response
+      ? String(response.message)
+      : response && typeof response === "object" && "status" in response
+        ? `SLA profile ${String(response.status)}.`
+        : "SLA profile updated.";
+
   revalidatePath("/sla");
   revalidatePath("/settings");
+  revalidatePath("/audit");
 
   return {
     ok: true,
-    message:
-      response && typeof response === "object" && "status" in response
-        ? `SLA profile ${String(response.status)}.`
-        : "SLA profile updated.",
+    message: receipt?.message ?? responseMessage,
+    ...(receipt ? { receipt } : {}),
   };
 }
 

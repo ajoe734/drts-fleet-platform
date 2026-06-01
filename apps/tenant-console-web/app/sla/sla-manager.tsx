@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type {
   ActionReceipt,
+  EmptyReason,
   EmptyStateEnvelope,
   RefreshTier,
   ResourceActionDescriptor,
@@ -57,14 +58,12 @@ type TenantSlaEmptyReason = Exclude<
 
 type SlaManagerProps = {
   profile: SlaSnapshot | null;
-  updatedBy: string;
+  updatedBy: string | null;
   lastRecalculationAt: string | null;
   availableActions: ResourceActionDescriptor[];
   emptyState: EmptyStateEnvelope | null;
   refreshTier: RefreshTier;
   refreshMetadata: UiRefreshMetadata;
-  loadFailureReason: TenantSlaEmptyReason | null;
-  loadErrors: string[];
   links: LinkItem[];
   crossAppLinks: CrossAppLinkItem[];
 };
@@ -189,6 +188,13 @@ const emptyActionStyle: CSSProperties = {
   maxWidth: 420,
 };
 
+const actionHintStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  marginTop: 12,
+};
+
 const EMPTY_STATE_CONFIG: Record<TenantSlaEmptyReason, EmptyStateConfig> = {
   no_data: {
     reason: "no_data",
@@ -292,13 +298,20 @@ const REFRESH_TIER_LABEL: Record<RefreshTier, string> = {
   manual: "手動更新",
 };
 
-function describeGovernance(profile: SlaSnapshot | null) {
-  if (!profile) return "not_provisioned";
-  return profile.waitThresholdMin > 0 &&
-    profile.arrivalThresholdMin > 0 &&
-    profile.completionThresholdMin > 0
-    ? "ready"
-    : "partial";
+function toRenderableEmptyReason(
+  reason: EmptyReason | null | undefined,
+): TenantSlaEmptyReason | null {
+  if (!reason) return null;
+  return reason === "driver_not_eligible" ? "fetch_failed" : reason;
+}
+
+function formatActionCaption(action: ResourceActionDescriptor) {
+  if (action.enabled) return `${actionLabel(action.action)} 可直接執行`;
+  return `${actionLabel(action.action)} 目前不可執行：${disabledReasonLabel(action.disabledReasonCode)}`;
+}
+
+function buildAuditHref(receipt: ActionReceipt) {
+  return `/audit?auditId=${encodeURIComponent(receipt.auditId)}`;
 }
 
 export function SlaManager({
@@ -309,8 +322,6 @@ export function SlaManager({
   emptyState,
   refreshTier,
   refreshMetadata,
-  loadFailureReason,
-  loadErrors,
   links,
   crossAppLinks,
 }: SlaManagerProps) {
@@ -343,15 +354,10 @@ export function SlaManager({
     "recalculate_sla_bookings",
     "recalculate",
   ]);
-  const effectiveEmptyReason =
-    loadFailureReason ??
-    (emptyState && emptyState.reason !== "driver_not_eligible"
-      ? emptyState.reason
-      : null);
+  const effectiveEmptyReason = toRenderableEmptyReason(emptyState?.reason);
   const activeEmptyState = effectiveEmptyReason
     ? EMPTY_STATE_CONFIG[effectiveEmptyReason]
     : null;
-  const governanceStatus = describeGovernance(profile);
   const allowInlineProvisioning =
     activeEmptyState?.reason === "no_data" ||
     activeEmptyState?.reason === "not_provisioned";
@@ -440,9 +446,6 @@ export function SlaManager({
             <CanvasPill theme={th} tone="accent">
               refresh tier · T5 / {refreshTier}
             </CanvasPill>
-            <CanvasPill theme={th} tone="neutral">
-              governance · {governanceStatus}
-            </CanvasPill>
             {refreshMetadataAvailable ? (
               <CanvasPill
                 theme={th}
@@ -480,12 +483,7 @@ export function SlaManager({
               ]}
             />
             <div style={{ height: 12 }} />
-            <Link
-              href={`/audit?auditId=${encodeURIComponent(
-                feedback.receipt.auditId,
-              )}`}
-              style={linkStyle}
-            >
+            <Link href={buildAuditHref(feedback.receipt)} style={linkStyle}>
               查看對應 audit →
             </Link>
           </CanvasCard>
@@ -526,9 +524,6 @@ export function SlaManager({
               <div style={noteStyle}>
                 messageCode · {emptyState?.messageCode ?? "—"}
               </div>
-              {loadErrors.length > 0 ? (
-                <div style={noteStyle}>error · {loadErrors.join(" · ")}</div>
-              ) : null}
               {emptyState?.nextAction ? (
                 <div style={emptyActionStyle}>
                   <div style={summaryLabelStyle}>recommended action</div>
@@ -536,11 +531,7 @@ export function SlaManager({
                     {actionLabel(emptyState.nextAction.action)}
                   </div>
                   <div style={noteStyle}>
-                    {emptyState.nextAction.enabled
-                      ? "此動作由 API 明確允許，可直接在本頁執行。"
-                      : `目前不可執行：${disabledReasonLabel(
-                          emptyState.nextAction.disabledReasonCode,
-                        )}`}
+                    {formatActionCaption(emptyState.nextAction)}
                   </div>
                 </div>
               ) : null}
@@ -663,6 +654,15 @@ export function SlaManager({
                   {updateAction || recalcAction
                     ? "availableActions 決定 CTA 顯示；高風險變更需要 reason，送出後會刷新本頁與相關 deep links。"
                     : "目前 API 沒有回傳可操作的 SLA 動作。"}
+                  {emptyState?.nextAction ? (
+                    <div style={actionHintStyle}>
+                      <span>
+                        emptyState.nextAction ·{" "}
+                        {actionLabel(emptyState.nextAction.action)}
+                      </span>
+                      <span>{formatActionCaption(emptyState.nextAction)}</span>
+                    </div>
+                  ) : null}
                 </div>
                 <div style={actionRowStyle}>
                   {recalcAction ? (
@@ -706,7 +706,7 @@ export function SlaManager({
                 </div>
                 <div>
                   <div style={summaryLabelStyle}>updated by</div>
-                  <div style={summaryValueStyle}>{updatedBy}</div>
+                  <div style={summaryValueStyle}>{updatedBy ?? "—"}</div>
                 </div>
                 <div>
                   <div style={summaryLabelStyle}>recalculation</div>
