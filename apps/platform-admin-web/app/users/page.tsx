@@ -1071,8 +1071,7 @@ export default function UsersPage() {
     ) ?? defaultPageActions()[0];
   const emptyStateNextAction =
     effectiveEmptyState?.nextAction ??
-    (effectiveEmptyState?.reason === "no_data" ||
-    effectiveEmptyState?.reason === "not_provisioned"
+    (effectiveEmptyState?.reason === "no_data"
       ? primaryCreateAction
       : effectiveEmptyState?.reason === "fetch_failed" ||
           effectiveEmptyState?.reason === "external_unavailable"
@@ -1161,6 +1160,28 @@ export default function UsersPage() {
     setLastReceipt(null);
     setPendingAction({ kind: "create", descriptor: primaryCreateAction });
   }, [primaryCreateAction]);
+
+  const runPageAction = useCallback(
+    (action: ResourceActionDescriptor | null | undefined) => {
+      if (!action?.enabled) {
+        return;
+      }
+      if (["create_staff_user", "create", "invite"].includes(action.action)) {
+        openCreateModal();
+        return;
+      }
+      if (action.action === "refresh") {
+        void loadUsers();
+        return;
+      }
+      setError(
+        locale === "en"
+          ? `Unsupported page action: ${action.action}`
+          : `此頁目前不支援動作：${action.action}`,
+      );
+    },
+    [loadUsers, locale, openCreateModal],
+  );
 
   const openRowAction = useCallback(
     (user: UserRow, action: ResourceActionDescriptor) => {
@@ -1627,14 +1648,7 @@ export default function UsersPage() {
                     ? { nextAction: emptyStateNextAction }
                     : {})}
                   onNextAction={() => {
-                    if (
-                      effectiveEmptyState.reason === "no_data" ||
-                      effectiveEmptyState.reason === "not_provisioned"
-                    ) {
-                      openCreateModal();
-                      return;
-                    }
-                    void loadUsers();
+                    runPageAction(emptyStateNextAction ?? refreshAction);
                   }}
                 />
               ) : (
