@@ -6,7 +6,6 @@ import React, {
   useDeferredValue,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type CSSProperties,
 } from "react";
@@ -18,7 +17,11 @@ import {
   toggleTenantModule,
   type TenantFormState,
 } from "@/components/tenant-governance-shared";
-import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatDateTime,
+  truncate,
+  usePlatformAdminClient,
+} from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
@@ -29,23 +32,22 @@ import type {
   EmptyReason,
   EmptyStateEnvelope,
   PlatformAdminTenantRecord,
-  RefreshTier,
-  PlatformTenantLifecycleActionCommand,
-  PlatformTenantIntegrationMode,
-  PlatformTenantModule,
   PlatformAdminUserRecord,
+  PlatformTenantLifecycleActionCommand,
+  RefreshTier,
   ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "@drts/contracts";
 import {
   PLATFORM_TENANT_INTEGRATION_MODES,
   PLATFORM_TENANT_MODULES,
+  type PlatformTenantIntegrationMode,
+  type PlatformTenantModule,
 } from "@drts/contracts";
 import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
   CanvasField,
   CanvasIcon,
   CanvasPageHeader,
@@ -58,7 +60,7 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
-type TenantStageFilter = "all" | "sandbox" | "pilot" | "production";
+type TenantStageFilter = "all" | "sandbox" | "pilot" | "production" | "hold";
 type TenantStatusFilter = "all" | PlatformAdminTenantRecord["status"];
 
 type TenantListItem = PlatformAdminTenantRecord & {
@@ -86,360 +88,306 @@ type LoadState = {
   requestId?: string;
 };
 
-type EmptyStateDescriptor = {
-  reason: EmptyReason;
+type EmptyVisual = {
+  badge: string;
   title: string;
   body: string;
+  hint?: string;
   tone: CanvasTone;
-  icon: "health" | "warn" | "search" | "tenants";
+  icon: "tenants" | "search" | "warn" | "health";
 };
 
 const REFRESH_TIER: RefreshTier = "medium_slow";
-const REFRESH_INTERVAL_MS = 30_000;
+const REFRESH_INTERVALS: Record<RefreshTier, number> = {
+  urgent: 5_000,
+  fast: 3_000,
+  dispatch: 5_000,
+  medium: 15_000,
+  medium_slow: 30_000,
+  slow: 30_000,
+  manual: 0,
+};
+const REFRESH_INTERVAL_MS = REFRESH_INTERVALS[REFRESH_TIER];
 
-const th = buildCanvasTheme({
+const theme = buildCanvasTheme({
   surface: "platform",
-  dark: true,
   density: "compact",
 });
 
-const shellStyle: CSSProperties = {
-  height: "calc(100vh - 64px)",
+const shellStyle = {
+  margin: "-32px",
   minHeight: "calc(100vh - 64px)",
-  borderRadius: 24,
-  overflow: "hidden",
-  border: `1px solid ${th.border}`,
-  boxShadow: "0 24px 60px rgba(2, 6, 23, 0.28)",
-  gridTemplateColumns: "0 minmax(0, 1fr)",
-  gridTemplateRows: "46px minmax(0, 1fr)",
-};
+} satisfies CSSProperties;
 
-const pageBodyStyle: CSSProperties = {
-  padding: 24,
-  display: "flex",
-  flexDirection: "column",
+const pageStackStyle = {
+  display: "grid",
   gap: 16,
-};
+  padding: 24,
+} satisfies CSSProperties;
 
-const summaryRowStyle: CSSProperties = {
+const utilityRowStyle = {
   display: "flex",
-  flexWrap: "wrap",
   gap: 8,
   alignItems: "center",
-};
+  justifyContent: "space-between",
+  flexWrap: "wrap",
+} satisfies CSSProperties;
 
-const filterPanelStyle: CSSProperties = {
+const utilityClusterStyle = {
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const toolbarStyle = {
   display: "grid",
   gap: 12,
-  padding: 14,
+  padding: 16,
+  border: `1px solid ${theme.border}`,
   borderRadius: 10,
-  border: `1px solid ${th.border}`,
-  background: th.surface,
-};
+  background: theme.surface,
+} satisfies CSSProperties;
 
-const searchRowStyle: CSSProperties = {
+const searchRowStyle = {
   display: "flex",
-  flexWrap: "wrap",
   gap: 10,
   alignItems: "center",
-};
+  flexWrap: "wrap",
+} satisfies CSSProperties;
 
-const searchFieldWrapStyle: CSSProperties = {
+const searchWrapStyle = {
+  position: "relative",
   flex: "1 1 280px",
-  minWidth: 220,
-};
+  minWidth: 240,
+} satisfies CSSProperties;
 
-const searchInputStyle: CSSProperties = {
+const searchInputStyle = {
   width: "100%",
   boxSizing: "border-box",
-  padding: "9px 12px 9px 34px",
   borderRadius: 8,
-  border: `1px solid ${th.border}`,
-  background: th.bgRaised,
-  color: th.text,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  color: theme.text,
+  fontFamily: theme.fontFamily,
   fontSize: 12.5,
-  fontFamily: th.fontFamily,
-};
+  padding: "9px 12px 9px 34px",
+  outline: "none",
+} satisfies CSSProperties;
 
-const searchIconStyle: CSSProperties = {
+const searchIconStyle = {
   position: "absolute",
   left: 10,
   top: "50%",
   transform: "translateY(-50%)",
-  color: th.textDim,
-};
+  color: theme.textDim,
+} satisfies CSSProperties;
 
-const filterGroupStyle: CSSProperties = {
+const filterRowStyle = {
   display: "flex",
-  flexWrap: "wrap",
   gap: 8,
   alignItems: "center",
-};
+  flexWrap: "wrap",
+} satisfies CSSProperties;
 
-const filterButtonStyle: CSSProperties = {
-  border: 0,
-  padding: 0,
+const filterButtonStyle = {
+  border: "none",
   background: "transparent",
+  padding: 0,
   cursor: "pointer",
-};
+} satisfies CSSProperties;
 
-const metaRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-  alignItems: "center",
-  justifyContent: "space-between",
-};
-
-const metaClusterStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-  alignItems: "center",
-};
-
-const loadingStateStyle: CSSProperties = {
-  padding: 28,
-  color: th.textMuted,
-  fontFamily: th.fontFamily,
-  fontSize: 12.5,
-  textAlign: "center",
-};
-
-const emptyStateStyle: CSSProperties = {
-  display: "grid",
-  gap: 10,
-  justifyItems: "center",
-  padding: 32,
-  color: th.textMuted,
-  textAlign: "center",
-};
-
-const createPanelStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-  gap: 16,
-  alignItems: "start",
-};
-
-const createGridStyle: CSSProperties = {
-  display: "grid",
-  gap: 16,
-};
-
-const fieldGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-  gap: 14,
-};
-
-const quotaGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 14,
-};
-
-const moduleGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 10,
-};
-
-const sectionTitleStyle: CSSProperties = {
-  margin: 0,
-  color: th.text,
-  fontSize: 12.5,
-  fontWeight: 600,
-};
-
-const sectionHintStyle: CSSProperties = {
-  margin: "4px 0 0",
-  color: th.textMuted,
+const subtleLabelStyle = {
+  color: theme.textMuted,
   fontSize: 11.5,
-  lineHeight: 1.45,
-};
+  lineHeight: 1.4,
+} satisfies CSSProperties;
 
-const inputStyle: CSSProperties = {
+const monoStyle = {
+  color: theme.textDim,
+  fontSize: 11,
+  fontFamily: theme.monoFamily,
+} satisfies CSSProperties;
+
+const linkStackStyle = {
+  display: "grid",
+  gap: 4,
+  color: theme.text,
+  textDecoration: "none",
+} satisfies CSSProperties;
+
+const stackedCellStyle = {
+  display: "grid",
+  gap: 4,
+} satisfies CSSProperties;
+
+const actionWrapStyle = {
+  display: "grid",
+  gap: 6,
+} satisfies CSSProperties;
+
+const actionRowStyle = {
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const readOnlyHintStyle = {
+  display: "grid",
+  gap: 4,
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: `1px dashed ${theme.border}`,
+  background: theme.surfaceLo,
+} satisfies CSSProperties;
+
+const formGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "0 14px",
+} satisfies CSSProperties;
+
+const inputStyle = (mono = false): CSSProperties => ({
   width: "100%",
   boxSizing: "border-box",
-  padding: "8px 10px",
   borderRadius: 7,
-  border: `1px solid ${th.border}`,
-  background: th.bgRaised,
-  color: th.text,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  color: theme.text,
+  fontFamily: mono ? theme.monoFamily : theme.fontFamily,
   fontSize: 12.5,
-  fontFamily: th.fontFamily,
-};
-
-const monoInputStyle: CSSProperties = {
-  ...inputStyle,
-  fontFamily: th.monoFamily,
-};
-
-const createActionsStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: 10,
-  marginTop: 4,
-};
-
-const submitButtonStyle = (disabled: boolean): CSSProperties => ({
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minWidth: 132,
-  height: 28,
-  padding: "5px 10px",
-  borderRadius: 7,
-  border: `1px solid ${th.accent}`,
-  background: th.accent,
-  color: "#ffffff",
-  fontSize: 12,
-  fontWeight: 500,
-  lineHeight: 1,
-  cursor: disabled ? "not-allowed" : "pointer",
-  opacity: disabled ? 0.55 : 1,
+  padding: "8px 10px",
+  outline: "none",
 });
 
-const headerActionsStyle: CSSProperties = {
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-  justifyContent: "flex-end",
-};
-
-const tenantLinkStyle: CSSProperties = {
+const moduleGridStyle = {
   display: "grid",
-  gap: 3,
-  color: th.text,
-  textDecoration: "none",
-};
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 10,
+} satisfies CSSProperties;
 
-const tenantNameStyle: CSSProperties = {
-  fontWeight: 600,
-  color: th.text,
-};
-
-const tenantMetaStyle: CSSProperties = {
-  fontSize: 11,
-  color: th.textDim,
-  fontFamily: th.monoFamily,
-};
-
-const secondaryTextStyle: CSSProperties = {
-  fontSize: 11.5,
-  color: th.textMuted,
-  lineHeight: 1.4,
-};
-
-const monoMetaStyle: CSSProperties = {
-  fontSize: 11,
-  color: th.textMuted,
-  fontFamily: th.monoFamily,
-};
-
-const stackedCellStyle: CSSProperties = {
+const emptyStateStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-  gap: 12,
-};
+  justifyItems: "center",
+  gap: 10,
+  padding: "32px 24px",
+  textAlign: "center",
+  color: theme.textMuted,
+} satisfies CSSProperties;
 
-const ownerLinkStyle: CSSProperties = {
-  color: th.text,
-  textDecoration: "none",
-  fontWeight: 500,
-};
-
-const rowActionWrapStyle: CSSProperties = {
-  display: "grid",
-  gap: 6,
-};
-
-const rowActionStyle = (tone: CanvasTone, disabled: boolean): CSSProperties => {
-  const styles =
-    tone === "danger"
+function buildPlatformNav(locale: string): CanvasShellNavItem[] {
+  const labels =
+    locale === "en"
       ? {
-          fg: th.danger,
-          bg: th.dangerBg,
-          bd: th.dangerBorder,
+          workspace: "Workspace",
+          home: "Governance Home",
+          health: "Platform Health",
+          tenantGov: "Tenant Governance",
+          tenants: "Tenants",
+          tenantDashboard: "Cross-tenant governance",
+          partners: "Partner entry",
+          users: "Platform staff",
+          fleetGov: "Fleet & Compliance",
+          fleet: "Fleet & compliance",
+          switchboard: "Public info & placards",
+          pricingGov: "Pricing & Settlement",
+          pricing: "Pricing",
+          payments: "Settlement governance",
+          platformLayer: "Platform Layer",
+          notices: "Notices & maintenance",
+          audit: "Audit & evidence",
+          flags: "Feature flags",
         }
-      : tone === "warn"
-        ? {
-            fg: th.warn,
-            bg: th.warnBg,
-            bd: th.warnBorder,
-          }
-        : tone === "accent"
-          ? {
-              fg: th.accent,
-              bg: th.accentBg,
-              bd: th.accentBorder,
-            }
-          : {
-              fg: th.text,
-              bg: th.surfaceLo,
-              bd: th.border,
-            };
+      : {
+          workspace: "工作面",
+          home: "工作首頁",
+          health: "平台健康",
+          tenantGov: "租戶治理",
+          tenants: "租戶",
+          tenantDashboard: "跨租戶治理",
+          partners: "合作夥伴 entry",
+          users: "平台人員",
+          fleetGov: "車隊與法遵",
+          fleet: "車隊與合規",
+          switchboard: "法定資訊與牌貼",
+          pricingGov: "計價與結算",
+          pricing: "計價",
+          payments: "結算治理",
+          platformLayer: "平台層",
+          notices: "公告與維護",
+          audit: "稽核與證據",
+          flags: "功能旗標",
+        };
 
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "5px 8px",
-    borderRadius: 7,
-    border: `1px solid ${styles.bd}`,
-    background: styles.bg,
-    color: styles.fg,
-    fontSize: 11.5,
-    lineHeight: 1.2,
-    textDecoration: "none",
-    cursor: disabled ? "not-allowed" : "pointer",
-    opacity: disabled ? 0.45 : 1,
-  };
-};
-
-const deepLinkWrapStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-};
-
-function toneFromRiskLevel(
-  riskLevel: ResourceActionDescriptor["riskLevel"],
-): CanvasTone {
-  switch (riskLevel) {
-    case "high":
-      return "danger";
-    case "medium":
-      return "warn";
-    case "low":
-    default:
-      return "accent";
-  }
-}
-
-function toCanvasTone(tone: ReturnType<typeof tenantStageTone>): CanvasTone {
-  return tone === "warning" ? "warn" : tone;
-}
-
-function formatLocaleNumber(locale: string, value: number) {
-  return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
-}
-
-function getIntegrationEndpoint(tenant: PlatformAdminTenantRecord) {
-  return (
-    tenant.integrationPackage.productionBaseUrl ??
-    tenant.integrationPackage.sandboxBaseUrl ??
-    "—"
-  );
-}
-
-function toCsvCell(value: string | number) {
-  const text = String(value);
-  if (/[",\n]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`;
-  }
-  return text;
+  return [
+    { divider: labels.workspace },
+    { key: "home", href: "/", icon: "home", label: labels.home },
+    {
+      key: "health",
+      href: "/health",
+      icon: "health",
+      label: labels.health,
+      badge: "2",
+      badgeTone: "warn",
+    },
+    { divider: labels.tenantGov },
+    {
+      key: "tenants",
+      href: "/tenants",
+      icon: "tenants",
+      label: labels.tenants,
+    },
+    {
+      key: "tenant-governance",
+      href: "/tenant-governance",
+      icon: "governance",
+      label: labels.tenantDashboard,
+    },
+    {
+      key: "partners",
+      href: "/partners",
+      icon: "partners",
+      label: labels.partners,
+    },
+    { key: "users", href: "/users", icon: "users", label: labels.users },
+    { divider: labels.fleetGov },
+    { key: "fleet", href: "/fleet", icon: "fleet", label: labels.fleet },
+    {
+      key: "switchboard",
+      href: "/switchboard",
+      icon: "switchboard",
+      label: labels.switchboard,
+    },
+    { divider: labels.pricingGov },
+    {
+      key: "pricing",
+      href: "/pricing",
+      icon: "pricing",
+      label: labels.pricing,
+    },
+    {
+      key: "payments",
+      href: "/payments",
+      icon: "payments",
+      label: labels.payments,
+      badge: "3",
+      badgeTone: "warn",
+    },
+    { divider: labels.platformLayer },
+    {
+      key: "notices",
+      href: "/notices",
+      icon: "notices",
+      label: labels.notices,
+    },
+    { key: "audit", href: "/audit", icon: "audit", label: labels.audit },
+    {
+      key: "flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: labels.flags,
+    },
+  ];
 }
 
 function camelCaseKey(key: string) {
@@ -454,9 +402,10 @@ function deepCamelCase<T>(value: T): T {
   }
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(
-        ([key, nestedValue]) => [camelCaseKey(key), deepCamelCase(nestedValue)],
-      ),
+      Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
+        camelCaseKey(key),
+        deepCamelCase(nested),
+      ]),
     ) as T;
   }
   return value;
@@ -477,12 +426,12 @@ function isCrossAppLink(value: unknown): value is CrossAppResourceLink {
   return Boolean(
     value &&
     typeof value === "object" &&
-    typeof (value as CrossAppResourceLink).route === "string" &&
-    typeof (value as CrossAppResourceLink).targetApp === "string",
+    typeof (value as CrossAppResourceLink).targetApp === "string" &&
+    typeof (value as CrossAppResourceLink).route === "string",
   );
 }
 
-function isUiRefreshMetadata(value: unknown): value is UiRefreshMetadata {
+function isRefreshMetadata(value: unknown): value is UiRefreshMetadata {
   return Boolean(
     value &&
     typeof value === "object" &&
@@ -491,7 +440,7 @@ function isUiRefreshMetadata(value: unknown): value is UiRefreshMetadata {
   );
 }
 
-function isEmptyStateEnvelope(value: unknown): value is EmptyStateEnvelope {
+function isEmptyEnvelope(value: unknown): value is EmptyStateEnvelope {
   return Boolean(
     value &&
     typeof value === "object" &&
@@ -521,6 +470,7 @@ function normalizeTenantListEnvelope(payload: unknown): TenantListEnvelope {
       items: unknown[];
       availableActions?: unknown[];
       empty?: unknown;
+      emptyState?: unknown;
       refresh?: unknown;
     };
 
@@ -529,8 +479,12 @@ function normalizeTenantListEnvelope(payload: unknown): TenantListEnvelope {
       availableActions: Array.isArray(record.availableActions)
         ? record.availableActions.filter(isResourceActionDescriptor)
         : [],
-      empty: isEmptyStateEnvelope(record.empty) ? record.empty : null,
-      refresh: isUiRefreshMetadata(record.refresh) ? record.refresh : null,
+      empty: isEmptyEnvelope(record.emptyState)
+        ? record.emptyState
+        : isEmptyEnvelope(record.empty)
+          ? record.empty
+          : null,
+      refresh: isRefreshMetadata(record.refresh) ? record.refresh : null,
     };
   }
 
@@ -582,38 +536,47 @@ function statusTone(status: PlatformAdminTenantRecord["status"]): CanvasTone {
   }
 }
 
-function fallbackRowActions(
-  tenant: PlatformAdminTenantRecord,
-): ResourceActionDescriptor[] {
-  const primaryAction: ResourceActionDescriptor = {
-    action: tenant.status === "active" ? "suspend_tenant" : "activate_tenant",
-    enabled: tenant.status !== "rollback_hold",
-    riskLevel: "medium",
-  };
-
-  if (tenant.status === "rollback_hold") {
-    primaryAction.disabledReasonCode = "rollback_hold_active";
+function toCanvasTone(tone: ReturnType<typeof tenantStageTone>): CanvasTone {
+  if (tone === "warning") {
+    return "warn";
   }
-
-  const actions: ResourceActionDescriptor[] = [primaryAction];
-
-  if (tenant.status !== "rollback_hold") {
-    actions.push({
-      action: "enter_rollback_hold",
-      enabled: true,
-      requiresReason: true,
-      riskLevel: "high",
-    });
+  if (tone === "info") {
+    return "accent";
   }
-
-  return actions;
+  return tone;
 }
 
-function fallbackPageActions(): ResourceActionDescriptor[] {
-  return [
-    { action: "refresh", enabled: true, riskLevel: "low" },
-    { action: "create_tenant", enabled: true, riskLevel: "medium" },
-  ];
+function toneFromRiskLevel(
+  riskLevel: ResourceActionDescriptor["riskLevel"],
+): CanvasTone {
+  switch (riskLevel) {
+    case "high":
+      return "danger";
+    case "medium":
+      return "warn";
+    case "low":
+    default:
+      return "accent";
+  }
+}
+
+function actionMatches(action: string, ...candidates: string[]) {
+  return candidates.some((candidate) => candidate === action);
+}
+
+function isCreateTenantAction(action: ResourceActionDescriptor) {
+  return actionMatches(action.action, "create_tenant", "createPlatformTenant");
+}
+
+function isRefreshAction(action: ResourceActionDescriptor) {
+  return actionMatches(action.action, "refresh", "reload", "refetch");
+}
+
+function toLifecycleActionCommand(
+  reason: string | null,
+): PlatformTenantLifecycleActionCommand | undefined {
+  const normalized = reason?.trim();
+  return normalized ? { reason: normalized } : undefined;
 }
 
 function resolveTenantLinks(tenant: TenantListItem): CrossAppResourceLink[] {
@@ -628,7 +591,7 @@ function resolveTenantLinks(tenant: TenantListItem): CrossAppResourceLink[] {
       resourceType: "tenant",
       resourceId: tenant.id,
       openMode: "new_tab",
-      label: "ops.dispatch_board",
+      label: "open_ops_console",
     },
   ];
 }
@@ -655,110 +618,58 @@ function buildCrossAppHref(link: CrossAppResourceLink) {
   return base ? `${base}${route}` : route;
 }
 
-function actionMatches(action: string, ...candidates: string[]) {
-  return candidates.some((candidate) => action === candidate);
-}
-
-function isCreateTenantAction(action: ResourceActionDescriptor) {
-  return actionMatches(action.action, "create_tenant", "createPlatformTenant");
-}
-
-function isRefreshAction(action: ResourceActionDescriptor) {
-  return actionMatches(action.action, "refresh", "reload", "refetch");
-}
-
-function toLifecycleActionCommand(
-  reason: string | null,
-): PlatformTenantLifecycleActionCommand | undefined {
-  const normalized = reason?.trim();
-  return normalized ? { reason: normalized } : undefined;
-}
-
-function resolveActionLabel(
-  labels: Record<string, string>,
-  action: ResourceActionDescriptor,
-) {
-  return labels[action.action] ?? action.action;
-}
-
-function resolveCrossAppLabel(
-  locale: string,
-  labels: Record<string, string>,
-  link: CrossAppResourceLink,
-) {
-  if (labels[link.label]) {
-    return labels[link.label];
-  }
-
-  if (link.targetApp === "ops-console") {
-    return (
-      labels.open_ops_console ??
-      (locale === "en" ? "Open ops view" : "開啟 ops 視圖")
-    );
-  }
-
-  return locale === "en" ? `Open ${link.targetApp}` : `開啟 ${link.targetApp}`;
-}
-
-function describeRefreshTier(locale: string, tier: RefreshTier) {
-  if (tier === "medium_slow") {
-    return locale === "en"
-      ? "Refresh tier T4 · 30s"
-      : "Refresh tier T4 · 30 秒";
-  }
-
-  return locale === "en" ? `Refresh tier ${tier}` : `Refresh tier ${tier}`;
-}
-
 function lastActivityAt(tenant: TenantListItem) {
   return (
     tenant.lastActivityAt ?? tenant.rollout.lastPromotedAt ?? tenant.updatedAt
   );
 }
 
-function getFreshness(
-  refresh: UiRefreshMetadata | null,
-  loadedAt: string | null,
-): UiRefreshMetadata | null {
-  if (refresh) {
-    const generatedAt = new Date(refresh.generatedAt).getTime();
-    const staleAt = generatedAt + refresh.staleAfterMs;
-    return {
-      ...refresh,
-      dataFreshness:
-        Number.isFinite(generatedAt) && Date.now() > staleAt
-          ? "stale"
-          : refresh.dataFreshness,
-    };
-  }
+function describeRefreshTier(locale: string, tier: RefreshTier) {
+  const cadence =
+    REFRESH_INTERVALS[tier] > 0
+      ? `${Math.round(REFRESH_INTERVALS[tier] / 1000)}s`
+      : "manual";
+  return locale === "en"
+    ? `Refresh tier T4 · ${cadence}`
+    : `Refresh tier T4 · ${cadence === "manual" ? "手動" : cadence}`;
+}
 
-  if (!loadedAt) {
-    return null;
-  }
+function formatLocaleNumber(locale: string, value: number) {
+  return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
+}
 
-  const generatedAt = new Date(loadedAt).toISOString();
-  const staleAt = new Date(loadedAt).getTime() + REFRESH_INTERVAL_MS;
-  return {
-    generatedAt,
-    staleAfterMs: REFRESH_INTERVAL_MS,
-    dataFreshness: Date.now() > staleAt ? "stale" : "fresh",
-    source: "live",
-  };
+function toCsvCell(value: string | number) {
+  const text = String(value);
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function resolveOwnerName(
+  ownerMap: Map<string, string>,
+  userId: string | null,
+  emptyText: string,
+) {
+  if (!userId) {
+    return emptyText;
+  }
+  return ownerMap.get(userId) ?? userId;
 }
 
 export default function TenantsPage() {
-  const { t, locale } = useTranslation();
+  const { locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [loadState, setLoadState] = useState<LoadState | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [stageFilter, setStageFilter] = useState<TenantStageFilter>("all");
   const [statusFilter, setStatusFilter] = useState<TenantStatusFilter>("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] =
     useState<TenantFormState>(EMPTY_TENANT_FORM);
   const deferredSearchTerm = useDeferredValue(searchTerm);
@@ -768,86 +679,99 @@ export default function TenantsPage() {
       ? {
           title: "Tenants",
           subtitle:
-            "Lifecycle roster for sandbox, pilot, production, and rollback-governed tenants.",
-          refresh: "Refresh",
-          refreshing: "Refreshing...",
-          export: "Export CSV",
+            "Manage tenant lifecycle from bootstrap through pilot and production rollout.",
+          breadcrumb: ["Tenant governance", "Tenants"],
+          refreshTier: describeRefreshTier(locale, REFRESH_TIER),
+          searchPlaceholder: "Search tenant name or code",
+          searchSummary: (count: number) => `${count} visible tenants`,
+          requestId: "Request",
+          freshnessAt: "Snapshot",
+          loadErrorTitle: "Unable to refresh tenant roster",
+          loadErrorBody:
+            "The page keeps the last successful snapshot while a new fetch is retried.",
+          rollbackBannerTitle: "Rollback hold cluster",
+          rollbackBannerBody: (count: number) =>
+            `${count} tenants are in rollback hold and need governance attention before the next promotion.`,
+          readyGate: "Ready gate",
           createTitle: "Create tenant",
           createSubtitle:
-            "Bootstrap identity, quota, module footprint, and onboarding defaults before the first rollout.",
-          rollbackTitle: "Rollback hold cluster",
-          rollbackBanner: (count: number) =>
-            `${count} tenant(s) are currently in rollback hold. Review blockers before any new promotion.`,
-          loadErrorTitle: "Unable to load tenants",
-          loadErrorBody:
-            "The roster can still render the last successful snapshot while refresh is retried.",
-          searchPlaceholder: "Search tenant name or code",
-          filterTitleStage: "Rollout stage",
-          filterTitleStatus: "Tenant status",
-          refreshTier: describeRefreshTier(locale, REFRESH_TIER),
-          freshnessAt: "Snapshot",
-          readyGate: "Ready gate",
-          searchSummary: (count: number) => `${count} visible tenant(s)`,
-          requestLabel: "Request",
-          table: {
-            tenant: "TENANT",
-            rollout: "ROLLOUT",
-            gate: "GATE",
-            owners: "OWNERS",
-            modules: "MODULES",
-            integration: "INTEGRATION",
-            activity: "LAST ACTIVITY",
-            actions: "ACTIONS",
+            "Bootstrap the tenant identity, modules, quota envelope, and onboarding contact.",
+          clearFilters: "Clear filters",
+          export: "Export CSV",
+          freshness: {
+            fresh: "Fresh",
+            stale: "Stale",
+            degraded: "Degraded",
+            unknown: "Unknown",
           },
-          filters: {
-            stage: {
-              all: "All stages",
-              sandbox: "sandbox",
-              pilot: "pilot",
-              production: "production",
-            },
-            status: {
-              all: "All statuses",
-              draft: "draft",
-              active: "active",
-              paused: "paused",
-              rollback_hold: "rollback_hold",
-            },
+          source: {
+            live: "live",
+            cache: "cache",
+            sandbox: "sandbox",
+            static: "static",
           },
           empty: {
             no_data: {
+              badge: "Roster empty",
               title: "No tenants yet",
               body: "Create the first tenant to seed the platform-admin lifecycle roster.",
+              hint: "Create tenant appears only when the backend grants it for this actor.",
+              tone: "neutral" as CanvasTone,
+              icon: "tenants" as const,
             },
             not_provisioned: {
-              title: "Tenant governance not provisioned",
-              body: "This environment is missing tenant roster provisioning. Configure the source module first.",
+              badge: "Provisioning required",
+              title: "Tenant roster is not provisioned",
+              body: "The backing tenant-governance source has not been wired for this environment.",
+              hint: "Use the backend-provided next action to wire the source before expecting rows here.",
+              tone: "warn" as CanvasTone,
+              icon: "health" as const,
             },
             fetch_failed: {
-              title: "Snapshot refresh failed",
-              body: "The API request failed before a fresh roster could be loaded.",
+              badge: "Refresh failed",
+              title: "Roster refresh failed",
+              body: "The latest read attempt failed before new list data could be loaded.",
+              hint: "The last successful snapshot stays visible until a new refresh succeeds.",
+              tone: "warn" as CanvasTone,
+              icon: "warn" as const,
             },
             permission_denied: {
-              title: "No access to tenant roster",
-              body: "This role cannot read tenant lifecycle data on platform-admin.",
+              badge: "Read denied",
+              title: "No access to tenant lifecycle data",
+              body: "This platform-admin role cannot read the tenant roster.",
+              hint: "An empty list here is intentional: the current actor is authority-scoped out.",
+              tone: "danger" as CanvasTone,
+              icon: "warn" as const,
             },
             external_unavailable: {
+              badge: "Dependency degraded",
               title: "Upstream tenant source unavailable",
-              body: "A dependency for tenant lifecycle reads is degraded or offline.",
+              body: "An upstream dependency for tenant lifecycle reads is degraded or offline.",
+              hint: "Cross-app operational views may still have more context while this source recovers.",
+              tone: "warn" as CanvasTone,
+              icon: "health" as const,
             },
             filtered_empty: {
-              title: "No tenants match this filter",
-              body: "Adjust search, rollout stage, or status filters to widen the roster.",
+              badge: "No filter matches",
+              title: "No tenants match the current filters",
+              body: "Widen the search text, rollout stage, or tenant status filter to see more rows.",
+              hint: "The roster exists, but the current query narrows the visible set to zero rows.",
+              tone: "neutral" as CanvasTone,
+              icon: "search" as const,
             },
           },
-          owners: {
-            cutover: "Cutover owner",
-            rollback: "Rollback owner",
-            none: "Unassigned",
+          tabs: {
+            all: "All",
+            production: "Production",
+            pilot: "Pilot",
+            sandbox: "Sandbox",
+            hold: "Rollback hold",
           },
-          links: {
-            ops: "Open ops view",
-            detail: "Open detail",
+          filters: {
+            stage: "Rollout stage",
+            status: "Tenant status",
+            allStages: "All stages",
+            allStatuses: "All statuses",
           },
           actionLabels: {
             refresh: "Refresh",
@@ -856,17 +780,54 @@ export default function TenantsPage() {
             suspend_tenant: "Suspend",
             enter_rollback_hold: "Rollback hold",
             open_ops_console: "Open ops view",
+            open_tenant_console: "Open tenant console",
+            view_audit: "View audit",
           },
           actionMessages: {
             suspend_tenant: "Suspend this tenant lifecycle?",
             activate_tenant: "Restore this tenant to active state?",
             enter_rollback_hold:
-              "Enter rollback hold for this tenant. A reason is required and the rollout path will be blocked.",
+              "Enter rollback hold for this tenant. A reason is required.",
+          },
+          table: {
+            tenant: "TENANT",
+            stage: "STAGE",
+            gate: "GATE",
+            owners: "OWNERS",
+            modules: "MODULES",
+            integration: "INTEGRATION",
+            activity: "LAST ACTIVITY",
+            actions: "ACTIONS",
+          },
+          ownerLabels: {
+            cutover: "Cutover owner",
+            rollback: "Rollback owner",
+            none: "Unassigned",
           },
           moduleState: {
             enabled: "enabled",
             disabled: "optional",
           },
+        }
+      : {
+          title: "租戶",
+          subtitle: "管理 tenant 從建立到 production rollout 的完整生命週期。",
+          breadcrumb: ["租戶治理", "租戶"],
+          refreshTier: describeRefreshTier(locale, REFRESH_TIER),
+          searchPlaceholder: "搜尋租戶名稱或代碼",
+          searchSummary: (count: number) => `目前顯示 ${count} 筆租戶`,
+          requestId: "Request",
+          freshnessAt: "快照時間",
+          loadErrorTitle: "無法更新租戶名單",
+          loadErrorBody: "系統會保留最近一次成功快照，並持續重試新資料。",
+          rollbackBannerTitle: "Rollback hold 群組",
+          rollbackBannerBody: (count: number) =>
+            `${count} 個租戶目前處於 rollback hold，需要先完成治理判讀後才能再次推進。`,
+          readyGate: "Ready gate",
+          createTitle: "建立租戶",
+          createSubtitle: "補齊租戶身份、模組、配額與 onboarding 聯絡資訊。",
+          clearFilters: "清除篩選",
+          export: "匯出 CSV",
           freshness: {
             fresh: "Fresh",
             stale: "Stale",
@@ -879,89 +840,68 @@ export default function TenantsPage() {
             sandbox: "sandbox",
             static: "static",
           },
-        }
-      : {
-          title: "租戶",
-          subtitle:
-            "平台治理租戶名單，統一檢視 sandbox、pilot、production 與 rollback hold。",
-          refresh: "重新整理",
-          refreshing: "重新整理中...",
-          export: "匯出 CSV",
-          createTitle: "建立租戶",
-          createSubtitle:
-            "在第一次 rollout 前先補齊身份、配額、模組與 onboarding defaults。",
-          rollbackTitle: "Rollback hold 群組",
-          rollbackBanner: (count: number) =>
-            `${count} 個租戶目前處於 rollback hold。推進新的 promotion 前需先完成治理判讀。`,
-          loadErrorTitle: "無法載入租戶名單",
-          loadErrorBody: "系統會保留最近一次成功快照，並持續重試更新。",
-          searchPlaceholder: "搜尋租戶名稱或代碼",
-          filterTitleStage: "Rollout stage",
-          filterTitleStatus: "Tenant status",
-          refreshTier: describeRefreshTier(locale, REFRESH_TIER),
-          freshnessAt: "快照時間",
-          readyGate: "Ready gate",
-          searchSummary: (count: number) => `目前顯示 ${count} 筆租戶`,
-          requestLabel: "請求",
-          table: {
-            tenant: "TENANT",
-            rollout: "ROLLOUT",
-            gate: "GATE",
-            owners: "OWNERS",
-            modules: "MODULES",
-            integration: "INTEGRATION",
-            activity: "LAST ACTIVITY",
-            actions: "ACTIONS",
-          },
-          filters: {
-            stage: {
-              all: "全部 stage",
-              sandbox: "sandbox",
-              pilot: "pilot",
-              production: "production",
-            },
-            status: {
-              all: "全部狀態",
-              draft: "draft",
-              active: "active",
-              paused: "paused",
-              rollback_hold: "rollback_hold",
-            },
-          },
           empty: {
             no_data: {
+              badge: "Roster empty",
               title: "尚無租戶",
               body: "先建立第一個租戶，才能開始 tenant lifecycle roster。",
+              hint: "只有 backend 針對目前 actor 開放時，建立租戶 CTA 才會出現。",
+              tone: "neutral" as CanvasTone,
+              icon: "tenants" as const,
             },
             not_provisioned: {
-              title: "租戶治理尚未 provision",
-              body: "這個環境缺少租戶名單來源，需先完成上游設定。",
+              badge: "Provisioning required",
+              title: "租戶名單尚未 provision",
+              body: "這個環境還沒接上租戶治理資料來源。",
+              hint: "請依 backend 回傳的 next action 先完成資料源接線。",
+              tone: "warn" as CanvasTone,
+              icon: "health" as const,
             },
             fetch_failed: {
-              title: "快照更新失敗",
-              body: "API 讀取失敗，暫時無法取得新的租戶名單。",
+              badge: "Refresh failed",
+              title: "名單更新失敗",
+              body: "最近一次讀取失敗，暫時無法拿到新的列表資料。",
+              hint: "系統會保留最近一次成功快照，直到下一次刷新成功。",
+              tone: "warn" as CanvasTone,
+              icon: "warn" as const,
             },
             permission_denied: {
-              title: "目前角色無法讀取租戶名單",
-              body: "這個平台角色沒有 tenant lifecycle 讀取權限。",
+              badge: "Read denied",
+              title: "目前角色無法讀取租戶生命週期資料",
+              body: "這個 platform-admin 角色沒有租戶名單讀取權限。",
+              hint: "這裡的空列表代表權限邊界，而不是資料真的不存在。",
+              tone: "danger" as CanvasTone,
+              icon: "warn" as const,
             },
             external_unavailable: {
-              title: "上游租戶來源目前不可用",
-              body: "租戶 lifecycle 依賴的外部或上游服務目前降級或離線。",
+              badge: "Dependency degraded",
+              title: "上游租戶來源不可用",
+              body: "租戶 lifecycle 依賴的上游服務目前降級或離線。",
+              hint: "可先改走 cross-app operational view 取得更多上下文。",
+              tone: "warn" as CanvasTone,
+              icon: "health" as const,
             },
             filtered_empty: {
+              badge: "No filter matches",
               title: "目前篩選條件沒有結果",
-              body: "請放寬搜尋字詞、rollout stage 或 status 條件。",
+              body: "請放寬搜尋字詞、rollout stage 或 tenant status。",
+              hint: "名單仍存在，只是目前條件把可見結果縮到 0 筆。",
+              tone: "neutral" as CanvasTone,
+              icon: "search" as const,
             },
           },
-          owners: {
-            cutover: "Cutover owner",
-            rollback: "Rollback owner",
-            none: "未指定",
+          tabs: {
+            all: "全部",
+            production: "Production",
+            pilot: "Pilot",
+            sandbox: "Sandbox",
+            hold: "Rollback hold",
           },
-          links: {
-            ops: "開啟 ops 視圖",
-            detail: "開啟詳情",
+          filters: {
+            stage: "Rollout stage",
+            status: "Tenant status",
+            allStages: "全部 stage",
+            allStatuses: "全部狀態",
           },
           actionLabels: {
             refresh: "重新整理",
@@ -970,32 +910,38 @@ export default function TenantsPage() {
             suspend_tenant: "暫停",
             enter_rollback_hold: "Rollback hold",
             open_ops_console: "開啟 ops 視圖",
+            open_tenant_console: "開啟 tenant console",
+            view_audit: "查看稽核",
           },
           actionMessages: {
             suspend_tenant: "要暫停這個租戶生命週期嗎？",
             activate_tenant: "要把這個租戶恢復成 active 狀態嗎？",
             enter_rollback_hold:
-              "要把這個租戶切進 rollback hold。此動作需要理由，且會阻擋 rollout。",
+              "要把這個租戶切進 rollback hold。此動作需要理由。",
+          },
+          table: {
+            tenant: "TENANT",
+            stage: "STAGE",
+            gate: "GATE",
+            owners: "OWNERS",
+            modules: "MODULES",
+            integration: "INTEGRATION",
+            activity: "LAST ACTIVITY",
+            actions: "ACTIONS",
+          },
+          ownerLabels: {
+            cutover: "Cutover owner",
+            rollback: "Rollback owner",
+            none: "未指定",
           },
           moduleState: {
             enabled: "已啟用",
             disabled: "可選",
           },
-          freshness: {
-            fresh: "Fresh",
-            stale: "Stale",
-            degraded: "Degraded",
-            unknown: "Unknown",
-          },
-          source: {
-            live: "live",
-            cache: "cache",
-            sandbox: "sandbox",
-            static: "static",
-          },
         };
 
-  const moduleLabels = useMemo(() => createTenantModuleLabels(t), [t]);
+  const navItems = useMemo(() => buildPlatformNav(locale), [locale]);
+  const moduleLabels = useMemo(() => createTenantModuleLabels(() => ""), []);
 
   const loadTenants = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -1011,33 +957,27 @@ export default function TenantsPage() {
           `${apiBaseUrl}/api/platform-admin/tenants`,
           {
             method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
           },
         );
 
         if (!response.ok) {
-          const errorText = await response.text();
+          const message = await response.text();
           setErrorStatus(response.status);
-          throw new Error(`API error ${response.status}: ${errorText}`);
+          throw new Error(`API error ${response.status}: ${message}`);
         }
 
         const envelope = (await response.json()) as ApiSuccessEnvelope<unknown>;
         const normalized = normalizeTenantListEnvelope(envelope.data);
         const users = await client.listPlatformAdminUsers();
-        const loadedAt = envelope.meta?.timestamp ?? new Date().toISOString();
 
         setLoadState({
           tenants: normalized.items,
           users,
-          availableActions:
-            normalized.availableActions.length > 0
-              ? normalized.availableActions
-              : fallbackPageActions(),
+          availableActions: normalized.availableActions,
           empty: normalized.empty,
           refresh: normalized.refresh,
-          loadedAt,
+          loadedAt: envelope.meta?.timestamp ?? new Date().toISOString(),
           requestId: envelope.meta?.requestId,
         });
         setError(null);
@@ -1058,6 +998,11 @@ export default function TenantsPage() {
 
   useEffect(() => {
     void loadTenants();
+
+    if (REFRESH_INTERVAL_MS <= 0) {
+      return;
+    }
+
     const intervalId = window.setInterval(() => {
       void loadTenants({ silent: true });
     }, REFRESH_INTERVAL_MS);
@@ -1077,45 +1022,24 @@ export default function TenantsPage() {
   );
 
   const tenants = loadState?.tenants ?? [];
-  const freshness = getFreshness(
-    loadState?.refresh ?? null,
-    loadState?.loadedAt ?? null,
-  );
-
-  const filteredTenants = useMemo(() => {
-    const query = deferredSearchTerm.trim().toLowerCase();
-    const rows = tenants.filter((tenant) => {
-      const matchesQuery =
-        query.length === 0 ||
-        tenant.name.toLowerCase().includes(query) ||
-        tenant.code.toLowerCase().includes(query);
-      const matchesStage =
-        stageFilter === "all" || tenant.rollout.stage === stageFilter;
-      const matchesStatus =
-        statusFilter === "all" || tenant.status === statusFilter;
-
-      return matchesQuery && matchesStage && matchesStatus;
-    });
-
-    return [...rows].sort(
-      (left, right) =>
-        new Date(lastActivityAt(right)).getTime() -
-        new Date(lastActivityAt(left)).getTime(),
-    );
-  }, [deferredSearchTerm, stageFilter, statusFilter, tenants]);
+  const pageActions =
+    loadState?.availableActions.filter((action) => !isRefreshAction(action)) ??
+    [];
 
   const stageCounts = useMemo(
     () => ({
       all: tenants.length,
-      sandbox: tenants.filter((tenant) => tenant.rollout.stage === "sandbox")
-        .length,
-      pilot: tenants.filter((tenant) => tenant.rollout.stage === "pilot")
-        .length,
       production: tenants.filter(
         (tenant) =>
           tenant.rollout.stage === "production" &&
           tenant.status !== "rollback_hold",
       ).length,
+      pilot: tenants.filter((tenant) => tenant.rollout.stage === "pilot")
+        .length,
+      sandbox: tenants.filter((tenant) => tenant.rollout.stage === "sandbox")
+        .length,
+      hold: tenants.filter((tenant) => tenant.status === "rollback_hold")
+        .length,
     }),
     [tenants],
   );
@@ -1139,47 +1063,68 @@ export default function TenantsPage() {
     [tenants],
   );
 
-  const rollbackHoldTenants = useMemo(
-    () => tenants.filter((tenant) => tenant.status === "rollback_hold"),
-    [tenants],
-  );
+  const rollbackHoldCount = stageCounts.hold;
 
-  const exportVisibleTenants = useCallback(() => {
-    if (filteredTenants.length === 0) {
-      return;
+  const freshness = useMemo(() => {
+    if (loadState?.refresh) {
+      const generatedAt = new Date(loadState.refresh.generatedAt).getTime();
+      const staleAt = generatedAt + loadState.refresh.staleAfterMs;
+      return {
+        ...loadState.refresh,
+        dataFreshness:
+          Number.isFinite(generatedAt) && Date.now() > staleAt
+            ? ("stale" as const)
+            : loadState.refresh.dataFreshness,
+      };
     }
 
-    const header = [
-      copy.table.tenant,
-      copy.table.rollout,
-      copy.table.gate,
-      copy.table.modules,
-      copy.table.integration,
-      copy.table.activity,
-    ];
+    if (!loadState?.loadedAt) {
+      return null;
+    }
 
-    const rows = filteredTenants.map((tenant) => [
-      `${tenant.name} (${tenant.code})`,
-      tenant.rollout.stage,
-      currentGateStatus(tenant),
-      tenant.enabledModules.join(" | "),
-      tenant.integrationPackage.mode,
-      formatDateTime(lastActivityAt(tenant)),
-    ]);
+    return {
+      generatedAt: loadState.loadedAt,
+      staleAfterMs: REFRESH_INTERVAL_MS,
+      dataFreshness:
+        REFRESH_INTERVAL_MS > 0 &&
+        Date.now() >
+          new Date(loadState.loadedAt).getTime() + REFRESH_INTERVAL_MS
+          ? ("stale" as const)
+          : ("fresh" as const),
+      source: "live" as const,
+    };
+  }, [loadState?.loadedAt, loadState?.refresh]);
 
-    const csv = [header, ...rows]
-      .map((row) => row.map(toCsvCell).join(","))
-      .join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `platform-tenants-${stageFilter}-${statusFilter}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }, [copy.table, filteredTenants, stageFilter, statusFilter]);
+  const filteredTenants = useMemo(() => {
+    const query = deferredSearchTerm.trim().toLowerCase();
 
-  const inferEmptyState = useCallback((): EmptyReason => {
+    return [...tenants]
+      .filter((tenant) => {
+        const matchesQuery =
+          query.length === 0 ||
+          tenant.name.toLowerCase().includes(query) ||
+          tenant.code.toLowerCase().includes(query);
+        const matchesStage =
+          stageFilter === "all" ||
+          (stageFilter === "hold"
+            ? tenant.status === "rollback_hold"
+            : tenant.rollout.stage === stageFilter);
+        const matchesStatus =
+          statusFilter === "all" || tenant.status === statusFilter;
+
+        return matchesQuery && matchesStage && matchesStatus;
+      })
+      .sort(
+        (left, right) =>
+          new Date(lastActivityAt(right)).getTime() -
+          new Date(lastActivityAt(left)).getTime(),
+      );
+  }, [deferredSearchTerm, stageFilter, statusFilter, tenants]);
+
+  const inferEmptyReason = useCallback((): EmptyReason => {
+    if (tenants.length > 0 && filteredTenants.length === 0) {
+      return "filtered_empty";
+    }
     if (loadState?.empty?.reason) {
       return loadState.empty.reason;
     }
@@ -1198,9 +1143,6 @@ export default function TenantsPage() {
     if (error) {
       return "fetch_failed";
     }
-    if (tenants.length > 0 && filteredTenants.length === 0) {
-      return "filtered_empty";
-    }
     return "no_data";
   }, [
     error,
@@ -1210,40 +1152,24 @@ export default function TenantsPage() {
     tenants.length,
   ]);
 
-  const emptyDescriptor = useMemo<EmptyStateDescriptor>(() => {
-    const reason = inferEmptyState();
-    const source = copy.empty[reason as keyof typeof copy.empty];
-
-    switch (reason) {
-      case "permission_denied":
-        return { reason, ...source, tone: "danger", icon: "warn" };
-      case "external_unavailable":
-        return { reason, ...source, tone: "warn", icon: "warn" };
-      case "filtered_empty":
-        return { reason, ...source, tone: "neutral", icon: "search" };
-      case "not_provisioned":
-      case "fetch_failed":
-        return { reason, ...source, tone: "warn", icon: "health" };
-      case "no_data":
-      default:
-        return { reason, ...source, tone: "neutral", icon: "tenants" };
-    }
-  }, [copy.empty, inferEmptyState]);
-
-  const pageActions = loadState?.availableActions ?? fallbackPageActions();
+  const emptyReason = inferEmptyReason();
+  const emptyVisual: EmptyVisual =
+    copy.empty[emptyReason as keyof typeof copy.empty];
+  const emptyNextAction = loadState?.empty?.nextAction ?? null;
   const canCreateTenant = pageActions.some(
     (action) => isCreateTenantAction(action) && action.enabled,
   );
-  const emptyNextAction = loadState?.empty?.nextAction ?? null;
+
+  const resolveActionLabel = useCallback(
+    (action: ResourceActionDescriptor) =>
+      copy.actionLabels[action.action as keyof typeof copy.actionLabels] ??
+      action.action,
+    [copy.actionLabels],
+  );
 
   const handlePageAction = useCallback(
     async (action: ResourceActionDescriptor) => {
       if (!action.enabled) {
-        return;
-      }
-
-      if (isCreateTenantAction(action)) {
-        setShowCreate(true);
         return;
       }
 
@@ -1252,48 +1178,15 @@ export default function TenantsPage() {
         return;
       }
 
+      if (isCreateTenantAction(action)) {
+        setShowCreate((current) => !current);
+        return;
+      }
+
       setError(`Unsupported page action: ${action.action}`);
     },
     [loadTenants],
   );
-
-  const handleCreate = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setCreating(true);
-    setError(null);
-    try {
-      const command: CreatePlatformTenantCommand = {
-        name: createForm.name,
-        code: createForm.code,
-        status: createForm.status,
-        enabledModules: createForm.enabledModules,
-        quotas: {
-          activeDrivers: parseQuota(createForm.activeDrivers),
-          monthlyBookings: parseQuota(createForm.monthlyBookings),
-          monthlyApiCalls: parseQuota(createForm.monthlyApiCalls),
-        },
-        integrationMode: createForm.integrationMode,
-        ...(createForm.bootstrapAdminEmail.trim()
-          ? { bootstrapAdminEmail: createForm.bootstrapAdminEmail.trim() }
-          : {}),
-        ...(createForm.sandboxBaseUrl.trim()
-          ? { sandboxBaseUrl: createForm.sandboxBaseUrl.trim() }
-          : {}),
-      };
-      await client.createPlatformTenant(command);
-      setCreateForm(EMPTY_TENANT_FORM);
-      setShowCreate(false);
-      await loadTenants({ silent: true });
-    } catch (caughtError: unknown) {
-      setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : String(caughtError),
-      );
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const executeTenantAction = useCallback(
     async (tenant: TenantListItem, action: ResourceActionDescriptor) => {
@@ -1305,11 +1198,7 @@ export default function TenantsPage() {
         const confirmed = window.confirm(
           copy.actionMessages[
             action.action as keyof typeof copy.actionMessages
-          ] ??
-            copy.actionLabels[
-              action.action as keyof typeof copy.actionLabels
-            ] ??
-            action.action,
+          ] ?? resolveActionLabel(action),
         );
         if (!confirmed) {
           return;
@@ -1321,7 +1210,7 @@ export default function TenantsPage() {
         reason = window.prompt(
           copy.actionMessages[
             action.action as keyof typeof copy.actionMessages
-          ] ?? action.action,
+          ] ?? resolveActionLabel(action),
         );
         if (!reason?.trim()) {
           return;
@@ -1330,13 +1219,14 @@ export default function TenantsPage() {
 
       try {
         setRefreshing(true);
-        const lifecycleCommand = toLifecycleActionCommand(reason);
+        const command = toLifecycleActionCommand(reason);
+
         if (actionMatches(action.action, "activate_tenant", "activateTenant")) {
-          await client.activateTenant(tenant.id, lifecycleCommand);
+          await client.activateTenant(tenant.id, command);
         } else if (
           actionMatches(action.action, "suspend_tenant", "suspendTenant")
         ) {
-          await client.suspendTenant(tenant.id, lifecycleCommand);
+          await client.suspendTenant(tenant.id, command);
         } else if (
           actionMatches(
             action.action,
@@ -1345,10 +1235,12 @@ export default function TenantsPage() {
             "rollbackHoldTenant",
           )
         ) {
-          await client.rollbackHoldTenant(tenant.id, lifecycleCommand);
+          await client.rollbackHoldTenant(tenant.id, command);
         } else {
+          setError(`Unsupported tenant action: ${action.action}`);
           return;
         }
+
         await loadTenants({ silent: true });
       } catch (caughtError: unknown) {
         setError(
@@ -1360,66 +1252,121 @@ export default function TenantsPage() {
         setRefreshing(false);
       }
     },
-    [client, copy.actionLabels, copy.actionMessages, loadTenants],
+    [client, copy.actionMessages, loadTenants, resolveActionLabel],
   );
 
-  const renderOwner = useCallback(
-    (userId: string | null, label: string) => {
-      if (!userId) {
-        return (
-          <div style={stackedCellStyle}>
-            <span style={secondaryTextStyle}>{label}</span>
-            <span style={monoMetaStyle}>{copy.owners.none}</span>
-          </div>
+  const handleCreate = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      setCreating(true);
+      setError(null);
+
+      try {
+        const command: CreatePlatformTenantCommand = {
+          name: createForm.name.trim(),
+          code: createForm.code.trim(),
+          status: createForm.status,
+          enabledModules: createForm.enabledModules,
+          quotas: {
+            activeDrivers: parseQuota(createForm.activeDrivers),
+            monthlyBookings: parseQuota(createForm.monthlyBookings),
+            monthlyApiCalls: parseQuota(createForm.monthlyApiCalls),
+          },
+          integrationMode: createForm.integrationMode,
+          ...(createForm.bootstrapAdminEmail.trim()
+            ? { bootstrapAdminEmail: createForm.bootstrapAdminEmail.trim() }
+            : {}),
+          ...(createForm.sandboxBaseUrl.trim()
+            ? { sandboxBaseUrl: createForm.sandboxBaseUrl.trim() }
+            : {}),
+        };
+
+        await client.createPlatformTenant(command);
+        setCreateForm(EMPTY_TENANT_FORM);
+        setShowCreate(false);
+        await loadTenants({ silent: true });
+      } catch (caughtError: unknown) {
+        setError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : String(caughtError),
         );
+      } finally {
+        setCreating(false);
       }
-
-      return (
-        <div style={stackedCellStyle}>
-          <span style={secondaryTextStyle}>{label}</span>
-          <Link
-            href={`/users?userId=${encodeURIComponent(userId)}`}
-            style={ownerLinkStyle}
-          >
-            {ownerMap.get(userId) ?? userId}
-          </Link>
-          <span style={monoMetaStyle}>{userId}</span>
-        </div>
-      );
     },
-    [copy.owners.none, ownerMap],
+    [client, createForm, loadTenants],
   );
+
+  const exportVisibleRows = useCallback(() => {
+    if (filteredTenants.length === 0) {
+      return;
+    }
+
+    const rows = filteredTenants.map((tenant) => [
+      `${tenant.name} (${tenant.code})`,
+      tenant.rollout.stage,
+      currentGateStatus(tenant),
+      tenant.status,
+      tenant.enabledModules.join(" | "),
+      tenant.integrationPackage.mode,
+      lastActivityAt(tenant),
+    ]);
+
+    const csv = [
+      [
+        copy.table.tenant,
+        copy.table.stage,
+        copy.table.gate,
+        "STATUS",
+        copy.table.modules,
+        copy.table.integration,
+        copy.table.activity,
+      ],
+      ...rows,
+    ]
+      .map((row) => row.map(toCsvCell).join(","))
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `platform-tenants-${stageFilter}-${statusFilter}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, [copy.table, filteredTenants, stageFilter, statusFilter]);
 
   const columns = useMemo<CanvasTableColumn<TenantRow>[]>(
     () => [
       {
         h: copy.table.tenant,
-        w: 230,
+        w: 250,
         r: (tenant) => (
-          <Link href={`/tenants/${tenant.id}`} style={tenantLinkStyle}>
-            <span style={tenantNameStyle}>{tenant.name}</span>
-            <span style={tenantMetaStyle}>
-              {tenant.code} · {tenant.id}
+          <Link href={`/tenants/${tenant.id}`} style={linkStackStyle}>
+            <span style={{ fontWeight: 600 }}>{tenant.name}</span>
+            <span style={monoStyle}>
+              {tenant.code} · {truncate(tenant.id, 16)}
             </span>
-            <span style={secondaryTextStyle}>
+            <span style={subtleLabelStyle}>
               {formatPlatformCodeLabel(locale, tenant.status)}
             </span>
           </Link>
         ),
       },
       {
-        h: copy.table.rollout,
-        w: 160,
+        h: copy.table.stage,
+        w: 140,
         r: (tenant) => (
           <div style={stackedCellStyle}>
             <CanvasPill
-              theme={th}
+              theme={theme}
               tone={toCanvasTone(tenantStageTone(tenant.rollout.stage))}
               dot
             >
               {formatPlatformCodeLabel(locale, tenant.rollout.stage)}
             </CanvasPill>
-            <CanvasPill theme={th} tone={statusTone(tenant.status)}>
+            <CanvasPill theme={theme} tone={statusTone(tenant.status)}>
               {formatPlatformCodeLabel(locale, tenant.status)}
             </CanvasPill>
           </div>
@@ -1427,17 +1374,17 @@ export default function TenantsPage() {
       },
       {
         h: copy.table.gate,
-        w: 160,
+        w: 150,
         r: (tenant) => (
           <div style={stackedCellStyle}>
             <CanvasPill
-              theme={th}
+              theme={theme}
               tone={gateTone(currentGateStatus(tenant))}
               dot
             >
               {formatPlatformCodeLabel(locale, currentGateStatus(tenant))}
             </CanvasPill>
-            <span style={secondaryTextStyle}>
+            <span style={subtleLabelStyle}>
               {tenant.rollout.rollbackPrepared
                 ? locale === "en"
                   ? "rollback plan ready"
@@ -1454,24 +1401,39 @@ export default function TenantsPage() {
         w: 220,
         r: (tenant) => (
           <div style={stackedCellStyle}>
-            {renderOwner(tenant.rollout.cutoverOwner, copy.owners.cutover)}
-            {renderOwner(tenant.rollout.rollbackOwner, copy.owners.rollback)}
+            <span style={subtleLabelStyle}>
+              {copy.ownerLabels.cutover}:{" "}
+              {resolveOwnerName(
+                ownerMap,
+                tenant.rollout.cutoverOwner,
+                copy.ownerLabels.none,
+              )}
+            </span>
+            <span style={subtleLabelStyle}>
+              {copy.ownerLabels.rollback}:{" "}
+              {resolveOwnerName(
+                ownerMap,
+                tenant.rollout.rollbackOwner,
+                copy.ownerLabels.none,
+              )}
+            </span>
           </div>
         ),
       },
       {
         h: copy.table.modules,
-        w: 180,
+        w: 160,
         r: (tenant) => (
           <div style={stackedCellStyle}>
-            <span style={monoMetaStyle}>
+            <span style={monoStyle}>
               {tenant.enabledModules.length}/{PLATFORM_TENANT_MODULES.length}
             </span>
-            <span style={secondaryTextStyle}>
+            <span style={subtleLabelStyle}>
               {tenant.enabledModules
                 .map(
-                  (moduleCode: PlatformTenantModule) =>
-                    moduleLabels[moduleCode],
+                  (moduleCode) =>
+                    moduleLabels[moduleCode as PlatformTenantModule] ||
+                    moduleCode,
                 )
                 .join(" · ")}
             </span>
@@ -1480,14 +1442,19 @@ export default function TenantsPage() {
       },
       {
         h: copy.table.integration,
-        w: 190,
+        w: 170,
         r: (tenant) => (
           <div style={stackedCellStyle}>
             <span>
               {formatPlatformCodeLabel(locale, tenant.integrationPackage.mode)}
             </span>
-            <span style={monoMetaStyle}>
-              {truncate(getIntegrationEndpoint(tenant), 28)}
+            <span style={monoStyle}>
+              {truncate(
+                tenant.integrationPackage.productionBaseUrl ??
+                  tenant.integrationPackage.sandboxBaseUrl ??
+                  "—",
+                26,
+              )}
             </span>
           </div>
         ),
@@ -1499,8 +1466,11 @@ export default function TenantsPage() {
         r: (tenant) => (
           <div style={stackedCellStyle}>
             <span>{formatDateTime(lastActivityAt(tenant))}</span>
-            <Link href={`/tenants/${tenant.id}`} style={ownerLinkStyle}>
-              {copy.links.detail}
+            <Link
+              href={`/tenants/${tenant.id}`}
+              style={{ color: theme.accent }}
+            >
+              /tenants/{tenant.id}
             </Link>
           </div>
         ),
@@ -1509,42 +1479,83 @@ export default function TenantsPage() {
         h: copy.table.actions,
         w: 250,
         r: (tenant) => {
-          const actions =
-            tenant.availableActions && tenant.availableActions.length > 0
-              ? tenant.availableActions
-              : fallbackRowActions(tenant);
-          const resourceLinks = resolveTenantLinks(tenant);
+          const rowActions = tenant.availableActions ?? [];
+          const deepLinks = resolveTenantLinks(tenant);
 
           return (
-            <div style={rowActionWrapStyle}>
-              <div style={deepLinkWrapStyle}>
-                {resourceLinks.map((link) => (
+            <div style={actionWrapStyle}>
+              <div style={actionRowStyle}>
+                {deepLinks.map((link) => (
                   <Link
                     key={`${link.targetApp}:${link.resourceId}:${link.route}`}
                     href={buildCrossAppHref(link)}
                     target={link.openMode === "new_tab" ? "_blank" : undefined}
                     rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
-                    style={rowActionStyle("accent", false)}
+                    style={{
+                      color: theme.accent,
+                      textDecoration: "none",
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                    }}
                   >
-                    {resolveCrossAppLabel(locale, copy.actionLabels, link)}
+                    {copy.actionLabels[
+                      link.label as keyof typeof copy.actionLabels
+                    ] ?? link.label}
                   </Link>
                 ))}
               </div>
-              {actions.map((action: ResourceActionDescriptor) => (
-                <button
-                  key={action.action}
-                  type="button"
-                  onClick={() => void executeTenantAction(tenant, action)}
-                  disabled={!action.enabled}
-                  title={action.disabledReasonCode}
-                  style={rowActionStyle(
-                    toneFromRiskLevel(action.riskLevel),
-                    !action.enabled,
-                  )}
-                >
-                  {resolveActionLabel(copy.actionLabels, action)}
-                </button>
-              ))}
+              {rowActions.length > 0 ? (
+                <div style={actionRowStyle}>
+                  {rowActions.map((action) => (
+                    <button
+                      key={action.action}
+                      type="button"
+                      onClick={() => void executeTenantAction(tenant, action)}
+                      disabled={!action.enabled}
+                      title={action.disabledReasonCode}
+                      style={{
+                        borderRadius: 999,
+                        border: `1px solid ${
+                          toneFromRiskLevel(action.riskLevel) === "danger"
+                            ? theme.dangerBorder
+                            : toneFromRiskLevel(action.riskLevel) === "warn"
+                              ? theme.warnBorder
+                              : theme.accentBorder
+                        }`,
+                        background:
+                          toneFromRiskLevel(action.riskLevel) === "danger"
+                            ? theme.dangerBg
+                            : toneFromRiskLevel(action.riskLevel) === "warn"
+                              ? theme.warnBg
+                              : theme.accentBg,
+                        color:
+                          toneFromRiskLevel(action.riskLevel) === "danger"
+                            ? theme.danger
+                            : toneFromRiskLevel(action.riskLevel) === "warn"
+                              ? theme.warn
+                              : theme.accent,
+                        padding: "4px 8px",
+                        fontSize: 11.5,
+                        cursor: action.enabled ? "pointer" : "not-allowed",
+                        opacity: action.enabled ? 1 : 0.45,
+                      }}
+                    >
+                      {resolveActionLabel(action)}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div style={readOnlyHintStyle}>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {locale === "en" ? "Read-only" : "唯讀"}
+                  </CanvasPill>
+                  <span style={subtleLabelStyle}>
+                    {locale === "en"
+                      ? "No row actions were granted for this tenant."
+                      : "backend 沒有為此租戶提供可執行動作。"}
+                  </span>
+                </div>
+              )}
             </div>
           );
         },
@@ -1552,31 +1563,81 @@ export default function TenantsPage() {
     ],
     [
       copy.actionLabels,
-      copy.links.detail,
-      copy.owners.cutover,
-      copy.owners.rollback,
+      copy.ownerLabels.cutover,
+      copy.ownerLabels.none,
+      copy.ownerLabels.rollback,
       copy.table.actions,
       copy.table.activity,
       copy.table.gate,
       copy.table.integration,
       copy.table.modules,
       copy.table.owners,
-      copy.table.rollout,
+      copy.table.stage,
       copy.table.tenant,
       executeTenantAction,
       locale,
       moduleLabels,
-      renderOwner,
+      ownerMap,
+      resolveActionLabel,
     ],
   );
 
+  const tabNodes = useMemo(
+    () => [
+      <span key="all">
+        {copy.tabs.all} · {formatLocaleNumber(locale, stageCounts.all)}
+      </span>,
+      <span key="production">
+        {copy.tabs.production} ·{" "}
+        {formatLocaleNumber(locale, stageCounts.production)}
+      </span>,
+      <span key="pilot">
+        {copy.tabs.pilot} · {formatLocaleNumber(locale, stageCounts.pilot)}
+      </span>,
+      <span key="sandbox">
+        {copy.tabs.sandbox} · {formatLocaleNumber(locale, stageCounts.sandbox)}
+      </span>,
+      <span key="hold">
+        {copy.tabs.hold} · {formatLocaleNumber(locale, stageCounts.hold)}
+      </span>,
+    ],
+    [copy.tabs, locale, stageCounts],
+  );
+
+  const activeTabNode = useMemo(() => {
+    switch (stageFilter) {
+      case "production":
+        return tabNodes[1];
+      case "pilot":
+        return tabNodes[2];
+      case "sandbox":
+        return tabNodes[3];
+      case "hold":
+        return tabNodes[4];
+      case "all":
+      default:
+        return tabNodes[0];
+    }
+  }, [stageFilter, tabNodes]);
+
   if (loading && !loadState) {
-    return <div style={loadingStateStyle}>{t("tenants.loading")}</div>;
+    return (
+      <div
+        style={{
+          padding: 28,
+          color: theme.textMuted,
+          fontFamily: theme.fontFamily,
+          textAlign: "center",
+        }}
+      >
+        {locale === "en" ? "Loading tenants..." : "租戶載入中..."}
+      </div>
+    );
   }
 
   return (
     <CanvasShell
-      theme={th}
+      theme={theme}
       nav={navItems}
       active="tenants"
       currentPath="/tenants"
@@ -1589,121 +1650,65 @@ export default function TenantsPage() {
       style={shellStyle}
     >
       <CanvasPageHeader
-        theme={th}
+        theme={theme}
         title={copy.title}
         subtitle={copy.subtitle}
+        tabs={tabNodes}
+        activeTab={activeTabNode}
         actions={
-          <div style={headerActionsStyle}>
+          <>
             <CanvasBtn
-              theme={th}
+              theme={theme}
               variant="secondary"
               onClick={() => void loadTenants({ silent: true })}
+              disabled={refreshing}
             >
-              {refreshing ? copy.refreshing : copy.refresh}
+              {refreshing
+                ? locale === "en"
+                  ? "Refreshing..."
+                  : "重新整理中..."
+                : copy.actionLabels.refresh}
             </CanvasBtn>
             <CanvasBtn
-              theme={th}
+              theme={theme}
               variant="secondary"
-              icon="reports"
-              onClick={exportVisibleTenants}
+              icon="export"
+              onClick={exportVisibleRows}
               disabled={filteredTenants.length === 0}
             >
-              {copy.exportAction}
+              {copy.export}
             </CanvasBtn>
-            {canCreateTenant ? (
+            {pageActions.map((action) => (
               <CanvasBtn
-                theme={th}
-                variant="primary"
-                icon={showCreate ? "x" : "plus"}
-                onClick={() => setShowCreate((current) => !current)}
+                key={action.action}
+                theme={theme}
+                variant={isCreateTenantAction(action) ? "primary" : "secondary"}
+                onClick={() => void handlePageAction(action)}
+                disabled={!action.enabled}
               >
-                {showCreate
-                  ? t("common.cancel")
-                  : copy.actionLabels.create_tenant}
+                {resolveActionLabel(action)}
               </CanvasBtn>
-            ) : null}
+            ))}
           </>
         }
       />
 
-      <div style={pageBodyStyle}>
-        <div style={summaryRowStyle}>
-          {(
-            [
-              ["all", copy.filters.stage.all, stageCounts.all, "accent"],
-              [
-                "sandbox",
-                copy.filters.stage.sandbox,
-                stageCounts.sandbox,
-                "warn",
-              ],
-              ["pilot", copy.filters.stage.pilot, stageCounts.pilot, "neutral"],
-              [
-                "production",
-                copy.filters.stage.production,
-                stageCounts.production,
-                "success",
-              ],
-            ] as const
-          ).map(([value, label, count, tone]) => (
-            <button
-              key={`summary-stage-${value}`}
-              type="button"
-              onClick={() => setStageFilter(value)}
-              style={filterButtonStyle}
-            >
-              <CanvasPill
-                theme={th}
-                tone={stageFilter === value ? tone : "neutral"}
-                dot={value !== "all"}
-              >
-                {label} {formatLocaleNumber(locale, count)}
-              </CanvasPill>
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setStatusFilter("rollback_hold")}
-            style={filterButtonStyle}
-          >
-            <CanvasPill
-              theme={th}
-              tone={statusFilter === "rollback_hold" ? "danger" : "neutral"}
-              dot
-            >
-              {copy.filters.status.rollback_hold}{" "}
-              {formatLocaleNumber(locale, rollbackHoldTenants.length)}
+      <div style={pageStackStyle}>
+        <div style={utilityRowStyle}>
+          <div style={utilityClusterStyle}>
+            <CanvasPill theme={theme} tone="neutral">
+              {copy.refreshTier}
             </CanvasPill>
-          </button>
-          <span style={{ flex: 1 }} />
-          <CanvasPill theme={th} tone="neutral">
-            {copy.refreshTier}
-          </CanvasPill>
-          <CanvasPill
-            theme={th}
-            tone={readyGateCount > 0 ? "accent" : "neutral"}
-          >
-            {copy.readyGate} {formatLocaleNumber(locale, readyGateCount)}
-          </CanvasPill>
-        </div>
-
-        <div style={filterPanelStyle}>
-          <div style={searchRowStyle}>
-            <div style={searchFieldWrapStyle}>
-              <div style={{ position: "relative" }}>
-                <CanvasIcon name="search" size={14} style={searchIconStyle} />
-                <input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder={copy.searchPlaceholder}
-                  style={searchInputStyle}
-                />
-              </div>
-            </div>
+            <CanvasPill
+              theme={theme}
+              tone={readyGateCount > 0 ? "accent" : "neutral"}
+            >
+              {copy.readyGate} {formatLocaleNumber(locale, readyGateCount)}
+            </CanvasPill>
             {freshness ? (
               <CanvasPill
-                theme={th}
-                tone={freshness.dataFreshness === "stale" ? "warn" : "accent"}
+                theme={theme}
+                tone={freshness.dataFreshness === "stale" ? "warn" : "neutral"}
               >
                 {
                   copy.freshness[
@@ -1714,19 +1719,43 @@ export default function TenantsPage() {
               </CanvasPill>
             ) : null}
           </div>
+          {loadState?.requestId ? (
+            <span style={monoStyle}>
+              {copy.requestId}: {truncate(loadState.requestId, 18)}
+            </span>
+          ) : null}
+        </div>
 
-          <div style={filterGroupStyle}>
-            <span style={secondaryTextStyle}>{copy.filterTitleStage}</span>
+        <div style={toolbarStyle}>
+          <div style={searchRowStyle}>
+            <div style={searchWrapStyle}>
+              <CanvasIcon name="search" size={14} style={searchIconStyle} />
+              <input
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder={copy.searchPlaceholder}
+                style={searchInputStyle}
+              />
+            </div>
+            <CanvasPill theme={theme} tone="neutral">
+              {copy.searchSummary(filteredTenants.length)}
+            </CanvasPill>
+            {freshness ? (
+              <CanvasPill theme={theme} tone="neutral">
+                {copy.freshnessAt} · {formatDateTime(freshness.generatedAt)}
+              </CanvasPill>
+            ) : null}
+          </div>
+
+          <div style={filterRowStyle}>
+            <span style={subtleLabelStyle}>{copy.filters.stage}</span>
             {(
               [
-                ["all", copy.filters.stage.all, stageCounts.all],
-                ["sandbox", copy.filters.stage.sandbox, stageCounts.sandbox],
-                ["pilot", copy.filters.stage.pilot, stageCounts.pilot],
-                [
-                  "production",
-                  copy.filters.stage.production,
-                  stageCounts.production,
-                ],
+                ["all", copy.filters.allStages, stageCounts.all],
+                ["production", copy.tabs.production, stageCounts.production],
+                ["pilot", copy.tabs.pilot, stageCounts.pilot],
+                ["sandbox", copy.tabs.sandbox, stageCounts.sandbox],
+                ["hold", copy.tabs.hold, stageCounts.hold],
               ] as const
             ).map(([value, label, count]) => (
               <button
@@ -1736,7 +1765,7 @@ export default function TenantsPage() {
                 style={filterButtonStyle}
               >
                 <CanvasPill
-                  theme={th}
+                  theme={theme}
                   tone={stageFilter === value ? "accent" : "neutral"}
                   dot={value !== "all"}
                 >
@@ -1746,19 +1775,15 @@ export default function TenantsPage() {
             ))}
           </div>
 
-          <div style={filterGroupStyle}>
-            <span style={secondaryTextStyle}>{copy.filterTitleStatus}</span>
+          <div style={filterRowStyle}>
+            <span style={subtleLabelStyle}>{copy.filters.status}</span>
             {(
               [
-                ["all", copy.filters.status.all, statusCounts.all],
-                ["draft", copy.filters.status.draft, statusCounts.draft],
-                ["active", copy.filters.status.active, statusCounts.active],
-                ["paused", copy.filters.status.paused, statusCounts.paused],
-                [
-                  "rollback_hold",
-                  copy.filters.status.rollback_hold,
-                  statusCounts.rollback_hold,
-                ],
+                ["all", copy.filters.allStatuses, statusCounts.all],
+                ["draft", "draft", statusCounts.draft],
+                ["active", "active", statusCounts.active],
+                ["paused", "paused", statusCounts.paused],
+                ["rollback_hold", "rollback_hold", statusCounts.rollback_hold],
               ] as const
             ).map(([value, label, count]) => (
               <button
@@ -1768,10 +1793,12 @@ export default function TenantsPage() {
                 style={filterButtonStyle}
               >
                 <CanvasPill
-                  theme={th}
+                  theme={theme}
                   tone={
                     statusFilter === value
-                      ? statusTone(value === "all" ? "draft" : value)
+                      ? value === "all"
+                        ? "accent"
+                        : statusTone(value)
                       : "neutral"
                   }
                   dot={value !== "all"}
@@ -1781,29 +1808,11 @@ export default function TenantsPage() {
               </button>
             ))}
           </div>
-
-          <div style={metaRowStyle}>
-            <div style={metaClusterStyle}>
-              <CanvasPill theme={th} tone="neutral">
-                {copy.searchSummary(filteredTenants.length)}
-              </CanvasPill>
-              {freshness ? (
-                <CanvasPill theme={th} tone="neutral">
-                  {copy.freshnessAt} · {formatDateTime(freshness.generatedAt)}
-                </CanvasPill>
-              ) : null}
-            </div>
-            {loadState?.requestId ? (
-              <span style={monoMetaStyle}>
-                {copy.requestLabel}: {truncate(loadState.requestId, 18)}
-              </span>
-            ) : null}
-          </div>
         </div>
 
         {error ? (
           <CanvasBanner
-            theme={th}
+            theme={theme}
             tone="danger"
             icon="warn"
             title={copy.loadErrorTitle}
@@ -1811,35 +1820,26 @@ export default function TenantsPage() {
           />
         ) : null}
 
-        {rollbackHoldTenants.length > 0 ? (
+        {rollbackHoldCount > 0 ? (
           <CanvasBanner
-            theme={th}
+            theme={theme}
             tone="warn"
             icon="warn"
-            title={copy.rollbackTitle}
-            body={copy.rollbackBanner(rollbackHoldTenants.length)}
+            title={copy.rollbackBannerTitle}
+            body={copy.rollbackBannerBody(rollbackHoldCount)}
           />
         ) : null}
 
         {showCreate ? (
           <CanvasCard
-            theme={th}
+            theme={theme}
             title={copy.createTitle}
             subtitle={copy.createSubtitle}
           >
-            <form onSubmit={handleCreate}>
-              <div style={createGridStyle}>
-                <div>
-                  <h3 style={sectionTitleStyle}>{copy.createTitle}</h3>
-                  <p style={sectionHintStyle}>{copy.createSubtitle}</p>
-                </div>
-
-                <div style={fieldGridStyle}>
-                  <CanvasField
-                    theme={th}
-                    label={t("tenants.form.name")}
-                    required
-                  >
+            <form onSubmit={(event) => void handleCreate(event)}>
+              <div style={{ display: "grid", gap: 16 }}>
+                <div style={formGridStyle}>
+                  <CanvasField theme={theme} label="Name" required>
                     <input
                       value={createForm.name}
                       onChange={(event) =>
@@ -1850,14 +1850,10 @@ export default function TenantsPage() {
                       }
                       required
                       placeholder="Acme Mobility"
-                      style={inputStyle}
+                      style={inputStyle()}
                     />
                   </CanvasField>
-                  <CanvasField
-                    theme={th}
-                    label={t("tenants.form.code")}
-                    required
-                  >
+                  <CanvasField theme={theme} label="Code" required>
                     <input
                       value={createForm.code}
                       onChange={(event) =>
@@ -1868,10 +1864,10 @@ export default function TenantsPage() {
                       }
                       required
                       placeholder="acme_dispatch"
-                      style={monoInputStyle}
+                      style={inputStyle(true)}
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label={t("tenants.form.status")}>
+                  <CanvasField theme={theme} label="Status">
                     <select
                       value={createForm.status}
                       onChange={(event) =>
@@ -1880,494 +1876,216 @@ export default function TenantsPage() {
                           status: event.target.value as "active" | "inactive",
                         }))
                       }
-                      style={inputStyle}
+                      style={inputStyle()}
                     >
-                      <option value="active">{t("common.active")}</option>
-                      <option value="inactive">{t("common.inactive")}</option>
+                      <option value="active">active</option>
+                      <option value="inactive">inactive</option>
                     </select>
+                  </CanvasField>
+                  <CanvasField theme={theme} label="Integration mode">
+                    <select
+                      value={createForm.integrationMode}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          integrationMode: event.target
+                            .value as PlatformTenantIntegrationMode,
+                        }))
+                      }
+                      style={inputStyle()}
+                    >
+                      {PLATFORM_TENANT_INTEGRATION_MODES.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {formatPlatformCodeLabel(locale, mode)}
+                        </option>
+                      ))}
+                    </select>
+                  </CanvasField>
+                  <CanvasField theme={theme} label="Bootstrap admin email">
+                    <input
+                      value={createForm.bootstrapAdminEmail}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          bootstrapAdminEmail: event.target.value,
+                        }))
+                      }
+                      placeholder="admin@acme.example"
+                      style={inputStyle()}
+                    />
+                  </CanvasField>
+                  <CanvasField theme={theme} label="Sandbox base URL">
+                    <input
+                      value={createForm.sandboxBaseUrl}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          sandboxBaseUrl: event.target.value,
+                        }))
+                      }
+                      placeholder="https://sandbox.acme.example"
+                      style={inputStyle(true)}
+                    />
+                  </CanvasField>
+                  <CanvasField theme={theme} label="Active drivers">
+                    <input
+                      type="number"
+                      min={0}
+                      value={createForm.activeDrivers}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          activeDrivers: event.target.value,
+                        }))
+                      }
+                      style={inputStyle(true)}
+                    />
+                  </CanvasField>
+                  <CanvasField theme={theme} label="Monthly bookings">
+                    <input
+                      type="number"
+                      min={0}
+                      value={createForm.monthlyBookings}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          monthlyBookings: event.target.value,
+                        }))
+                      }
+                      style={inputStyle(true)}
+                    />
+                  </CanvasField>
+                  <CanvasField theme={theme} label="Monthly API calls">
+                    <input
+                      type="number"
+                      min={0}
+                      value={createForm.monthlyApiCalls}
+                      onChange={(event) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          monthlyApiCalls: event.target.value,
+                        }))
+                      }
+                      style={inputStyle(true)}
+                    />
                   </CanvasField>
                 </div>
 
-                <div>
-                  <h3 style={sectionTitleStyle}>
-                    {t("tenants.quotaAllocation")}
-                  </h3>
-                  <p style={sectionHintStyle}>
-                    {locale === "en"
-                      ? "Set the initial monthly quota envelope before enabling traffic."
-                      : "在正式啟用前先設定初始月配額範圍。"}
-                  </p>
-                  <div style={quotaGridStyle}>
-                    <CanvasField
-                      theme={th}
-                      label={t("tenants.form.activeDrivers")}
-                    >
-                      <input
-                        type="number"
-                        min={0}
-                        value={createForm.activeDrivers}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            activeDrivers: event.target.value,
-                          }))
-                        }
-                        style={monoInputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={th}
-                      label={t("tenants.form.monthlyBookings")}
-                    >
-                      <input
-                        type="number"
-                        min={0}
-                        value={createForm.monthlyBookings}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            monthlyBookings: event.target.value,
-                          }))
-                        }
-                        style={monoInputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={th}
-                      label={t("tenants.form.monthlyApiCalls")}
-                    >
-                      <input
-                        type="number"
-                        min={0}
-                        value={createForm.monthlyApiCalls}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            monthlyApiCalls: event.target.value,
-                          }))
-                        }
-                        style={monoInputStyle}
-                      />
-                    </CanvasField>
-                  </div>
-                </div>
-
-                <div>
-                  <h3 style={sectionTitleStyle}>{t("tenants.form.modules")}</h3>
-                  <p style={sectionHintStyle}>
-                    {locale === "en"
-                      ? "Keep the initial module footprint explicit."
-                      : "把首批啟用模組明確列出。"}
-                  </p>
+                <div style={{ display: "grid", gap: 10 }}>
+                  <span style={subtleLabelStyle}>Enabled modules</span>
                   <div style={moduleGridStyle}>
-                    {PLATFORM_TENANT_MODULES.map(
-                      (moduleCode: PlatformTenantModule) => {
-                        const active =
-                          createForm.enabledModules.includes(moduleCode);
+                    {PLATFORM_TENANT_MODULES.map((moduleCode) => {
+                      const enabled =
+                        createForm.enabledModules.includes(moduleCode);
 
-                        return (
-                          <button
-                            key={moduleCode}
-                            type="button"
-                            onClick={() =>
-                              setCreateForm((current) =>
-                                toggleTenantModule(current, moduleCode),
-                              )
-                            }
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              gap: 10,
-                              padding: "10px 12px",
-                              borderRadius: 8,
-                              border: `1px solid ${active ? th.accentBorder : th.border}`,
-                              background: active ? th.accentBg : th.surfaceLo,
-                              color: th.text,
-                              cursor: "pointer",
-                            }}
-                          >
-                            <CanvasPill
-                              theme={th}
-                              tone={active ? "accent" : "neutral"}
-                            >
-                              {moduleLabels[moduleCode]}
-                            </CanvasPill>
-                            <span style={secondaryTextStyle}>
-                              {active
-                                ? copy.moduleState.enabled
-                                : copy.moduleState.disabled}
-                            </span>
-                          </button>
-                        );
-                      },
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 style={sectionTitleStyle}>
-                    {t("tenants.section.onboarding")}
-                  </h3>
-                  <p style={sectionHintStyle}>
-                    {locale === "en"
-                      ? "Seed integration posture and bootstrap ownership from the platform side."
-                      : "由平台端預先補齊 integration posture 與 bootstrap owner。"}
-                  </p>
-                  <div style={fieldGridStyle}>
-                    <CanvasField
-                      theme={th}
-                      label={t("tenants.form.name")}
-                      required
-                    >
-                      <input
-                        value={createForm.name}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            name: event.target.value,
-                          }))
-                        }
-                        required
-                        placeholder="Acme Mobility"
-                        style={inputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={th}
-                      label={t("tenants.form.code")}
-                      required
-                    >
-                      <input
-                        value={createForm.code}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            code: event.target.value,
-                          }))
-                        }
-                        required
-                        placeholder="acme_dispatch"
-                        style={monoInputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField theme={th} label={t("tenants.form.status")}>
-                      <select
-                        value={createForm.status}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            status: event.target.value as "active" | "inactive",
-                          }))
-                        }
-                        style={inputStyle}
-                      >
-                        {PLATFORM_TENANT_INTEGRATION_MODES.map(
-                          (mode: PlatformTenantIntegrationMode) => (
-                            <option key={mode} value={mode}>
-                              {formatPlatformCodeLabel(locale, mode)}
-                            </option>
-                          ),
-                        )}
-                      </select>
-                    </CanvasField>
-                  </div>
-
-                  <div>
-                    <h3 style={sectionTitleStyle}>
-                      {t("tenants.quotaAllocation")}
-                    </h3>
-                    <p style={sectionHintStyle}>
-                      {locale === "en"
-                        ? "Set the initial monthly quota envelope before enabling traffic."
-                        : "在正式啟用前先設定初始月配額範圍。"}
-                    </p>
-                    <div style={quotaGridStyle}>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.activeDrivers")}
-                      >
-                        <input
-                          type="number"
-                          min={0}
-                          value={createForm.activeDrivers}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              activeDrivers: event.target.value,
-                            }))
+                      return (
+                        <button
+                          key={moduleCode}
+                          type="button"
+                          onClick={() =>
+                            setCreateForm((current) =>
+                              toggleTenantModule(current, moduleCode),
+                            )
                           }
-                          style={monoInputStyle}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.monthlyBookings")}
-                      >
-                        <input
-                          type="number"
-                          min={0}
-                          value={createForm.monthlyBookings}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              monthlyBookings: event.target.value,
-                            }))
-                          }
-                          style={monoInputStyle}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.monthlyApiCalls")}
-                      >
-                        <input
-                          type="number"
-                          min={0}
-                          value={createForm.monthlyApiCalls}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              monthlyApiCalls: event.target.value,
-                            }))
-                          }
-                          style={monoInputStyle}
-                        />
-                      </CanvasField>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 style={sectionTitleStyle}>
-                      {t("tenants.form.modules")}
-                    </h3>
-                    <p style={sectionHintStyle}>
-                      {locale === "en"
-                        ? "Keep the initial module footprint explicit."
-                        : "把首批啟用模組明確列出。"}
-                    </p>
-                    <div style={moduleGridStyle}>
-                      {PLATFORM_TENANT_MODULES.map((moduleCode) => {
-                        const active =
-                          createForm.enabledModules.includes(moduleCode);
-
-                        return (
-                          <button
-                            key={moduleCode}
-                            type="button"
-                            onClick={() =>
-                              setCreateForm((current) =>
-                                toggleTenantModule(current, moduleCode),
-                              )
-                            }
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              gap: 10,
-                              padding: "10px 12px",
-                              borderRadius: 8,
-                              border: `1px solid ${
-                                active ? th.accentBorder : th.border
-                              }`,
-                              background: active ? th.accentBg : th.surfaceLo,
-                              color: th.text,
-                              cursor: "pointer",
-                            }}
-                          >
-                            <CanvasPill
-                              theme={th}
-                              tone={active ? "accent" : "neutral"}
-                            >
-                              {moduleLabels[moduleCode]}
-                            </CanvasPill>
-                            <span
-                              style={{ fontSize: 11.5, color: th.textMuted }}
-                            >
-                              {active
-                                ? copy.moduleState.enabled
-                                : copy.moduleState.disabled}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 style={sectionTitleStyle}>
-                      {t("tenants.section.onboarding")}
-                    </h3>
-                    <p style={sectionHintStyle}>
-                      {locale === "en"
-                        ? "Seed integration posture and bootstrap ownership from the platform side."
-                        : "由平台端預先補齊 integration posture 與 bootstrap owner。"}
-                    </p>
-                    <div style={fieldGridStyle}>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.integrationMode")}
-                      >
-                        <select
-                          value={createForm.integrationMode}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              integrationMode: event.target
-                                .value as (typeof PLATFORM_TENANT_INTEGRATION_MODES)[number],
-                            }))
-                          }
-                          style={inputStyle}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 10,
+                            padding: "10px 12px",
+                            borderRadius: 8,
+                            border: `1px solid ${
+                              enabled ? theme.accentBorder : theme.border
+                            }`,
+                            background: enabled
+                              ? theme.accentBg
+                              : theme.surfaceLo,
+                            color: theme.text,
+                            cursor: "pointer",
+                          }}
                         >
-                          {PLATFORM_TENANT_INTEGRATION_MODES.map((mode) => (
-                            <option key={mode} value={mode}>
-                              {formatPlatformCodeLabel(locale, mode)}
-                            </option>
-                          ))}
-                        </select>
-                      </CanvasField>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.bootstrapAdminEmail")}
-                      >
-                        <input
-                          value={createForm.bootstrapAdminEmail}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              bootstrapAdminEmail: event.target.value,
-                            }))
-                          }
-                          placeholder="admin@acme.example"
-                          style={inputStyle}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.sandboxBaseUrl")}
-                      >
-                        <input
-                          value={createForm.sandboxBaseUrl}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              sandboxBaseUrl: event.target.value,
-                            }))
-                          }
-                          placeholder="https://sandbox.acme.example"
-                          style={monoInputStyle}
-                        />
-                      </CanvasField>
-                    </div>
-                  </div>
-
-                  <div style={createActionsStyle}>
-                    <button
-                      type="submit"
-                      disabled={createDisabled}
-                      style={submitButtonStyle(createDisabled)}
-                    >
-                      {creating
-                        ? t("common.creating")
-                        : t("tenants.createTenant")}
-                    </button>
+                          <CanvasPill
+                            theme={theme}
+                            tone={enabled ? "accent" : "neutral"}
+                          >
+                            {moduleLabels[moduleCode as PlatformTenantModule] ||
+                              moduleCode}
+                          </CanvasPill>
+                          <span style={subtleLabelStyle}>
+                            {enabled
+                              ? copy.moduleState.enabled
+                              : copy.moduleState.disabled}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
-              </form>
-            </CanvasCard>
 
-            <CanvasCard
-              theme={th}
-              title={copy.createSummaryTitle}
-              subtitle={copy.createSummarySubtitle}
-            >
-              <div style={createGridStyle}>
-                <div style={tenantSummaryStyle}>
-                  <CanvasKPI
-                    theme={th}
-                    label={copy.bootstrap.modules}
-                    value={`${createForm.enabledModules.length}/${PLATFORM_TENANT_MODULES.length}`}
-                    sub={locale === "en" ? "tenant modules" : "tenant modules"}
-                  />
-                  <CanvasKPI
-                    theme={th}
-                    label={copy.bootstrap.quota}
-                    value={createForm.monthlyBookings || "0"}
-                    sub={locale === "en" ? "bookings" : "bookings"}
-                  />
-                  <CanvasKPI
-                    theme={th}
-                    label={copy.bootstrap.api}
-                    value={createForm.monthlyApiCalls || "0"}
-                    sub="API"
-                  />
+                <div style={utilityClusterStyle}>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="secondary"
+                    onClick={() => setShowCreate(false)}
+                  >
+                    {locale === "en" ? "Cancel" : "取消"}
+                  </CanvasBtn>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    disabled={
+                      !createForm.name.trim() ||
+                      !createForm.code.trim() ||
+                      creating
+                    }
+                  >
+                    {creating
+                      ? locale === "en"
+                        ? "Creating..."
+                        : "建立中..."
+                      : copy.createTitle}
+                  </CanvasBtn>
                 </div>
-                <CanvasDL
-                  theme={th}
-                  cols={1}
-                  items={[
-                    {
-                      k: copy.bootstrap.status,
-                      v: formatPlatformCodeLabel(locale, createForm.status),
-                    },
-                    {
-                      k: copy.bootstrap.integration,
-                      v: formatPlatformCodeLabel(
-                        locale,
-                        createForm.integrationMode,
-                      ),
-                    },
-                    {
-                      k: copy.bootstrap.admin,
-                      v:
-                        createForm.bootstrapAdminEmail.trim() ||
-                        copy.bootstrap.empty,
-                      mono: true,
-                    },
-                    {
-                      k: copy.bootstrap.sandbox,
-                      v:
-                        createForm.sandboxBaseUrl.trim() ||
-                        copy.bootstrap.empty,
-                      mono: true,
-                    },
-                  ]}
-                />
               </div>
-            </CanvasCard>
-          </div>
+            </form>
+          </CanvasCard>
         ) : null}
 
-        <CanvasCard theme={th} padding={0}>
+        <CanvasCard theme={theme} padding={0}>
           {filteredTenants.length > 0 ? (
             <CanvasTable<TenantRow>
-              theme={th}
+              theme={theme}
               columns={columns}
               rows={filteredTenants as TenantRow[]}
             />
           ) : (
             <div style={emptyStateStyle}>
-              <CanvasIcon name={emptyDescriptor.icon} size={24} />
-              <CanvasPill theme={th} tone={emptyDescriptor.tone}>
-                {emptyDescriptor.reason}
+              <CanvasIcon name={emptyVisual.icon} size={24} />
+              <CanvasPill theme={theme} tone={emptyVisual.tone}>
+                {emptyVisual.badge}
               </CanvasPill>
-              <div style={{ color: th.text, fontWeight: 600 }}>
-                {emptyDescriptor.title}
+              <div style={{ color: theme.text, fontWeight: 600 }}>
+                {emptyVisual.title}
               </div>
-              <div style={{ maxWidth: 460 }}>{emptyDescriptor.body}</div>
+              <div style={{ maxWidth: 460 }}>{emptyVisual.body}</div>
+              {emptyVisual.hint ? (
+                <div style={{ maxWidth: 520, ...subtleLabelStyle }}>
+                  {emptyVisual.hint}
+                </div>
+              ) : null}
               {emptyNextAction ? (
                 <CanvasBtn
-                  theme={th}
+                  theme={theme}
                   variant={emptyNextAction.enabled ? "primary" : "secondary"}
                   onClick={() => void handlePageAction(emptyNextAction)}
                   disabled={!emptyNextAction.enabled}
                 >
-                  {resolveActionLabel(copy.actionLabels, emptyNextAction)}
+                  {resolveActionLabel(emptyNextAction)}
                 </CanvasBtn>
               ) : null}
-              {canCreateTenant && emptyDescriptor.reason === "no_data" ? (
+              {canCreateTenant && emptyReason === "no_data" ? (
                 <CanvasBtn
-                  theme={th}
+                  theme={theme}
                   variant="primary"
                   icon="plus"
                   onClick={() => setShowCreate(true)}
@@ -2375,9 +2093,9 @@ export default function TenantsPage() {
                   {copy.actionLabels.create_tenant}
                 </CanvasBtn>
               ) : null}
-              {emptyDescriptor.reason === "filtered_empty" ? (
+              {emptyReason === "filtered_empty" ? (
                 <CanvasBtn
-                  theme={th}
+                  theme={theme}
                   variant="secondary"
                   onClick={() => {
                     setSearchTerm("");
@@ -2385,7 +2103,7 @@ export default function TenantsPage() {
                     setStatusFilter("all");
                   }}
                 >
-                  {copy.refresh}
+                  {copy.clearFilters}
                 </CanvasBtn>
               ) : null}
             </div>
