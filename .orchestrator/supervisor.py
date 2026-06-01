@@ -2267,6 +2267,40 @@ def is_agent_dispatch_paused(
     return float(resume_at) > datetime.now(timezone.utc).timestamp()
 
 
+def _force_recovery_probe(config: dict[str, Any]) -> dict[str, Any] | None:
+    """Force a fresh provider capability probe, bypassing the cached
+    provider_capabilities.json (which is stale when
+    auto_refresh_provider_capabilities is False). Best-effort: returns None on
+    failure so a probe error never crashes the tick."""
+    try:
+        report = build_provider_capabilities(config)
+        write_provider_capabilities(config, report=report)
+        return report
+    except Exception as exc:  # noqa: BLE001 - recovery probe must never crash the tick
+        console_log(f"recovery probe failed: {exc}", quiet=SUPERVISOR_LOG_QUIET)
+        return None
+
+
+def _lane_probe_healthy(
+    config: dict[str, Any], report: dict[str, Any] | None, agent_id: str
+) -> bool | None:
+    """True only if a capability probe says the lane is installed AND auth-ready.
+    NOTE: verifies install + login, NOT quota — a chronic-quota lane can still
+    read healthy here, so callers must treat True as 'worth retrying', not
+    'guaranteed to dispatch'."""
+    if not report:
+        return None
+    info = provider_info_for_agent(config, report, agent_id)
+    if not info:
+        return None
+    if info.get("installed") is False:
+        return False
+    auth_ready = info.get("auth_ready")
+    if auth_ready is None:
+        return None
+    return bool(auth_ready)
+
+
 def expire_provider_pauses(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -2280,8 +2314,9 @@ def expire_provider_pauses(
         resume_at = entry.get("resume_at")
         if kind == "auth":
             # Auth failures from real worker runs are stronger evidence than a
-            # lightweight capability probe. Keep the lane paused until a human
-            # or explicit repair flow clears it.
+            # lightweight capability probe. Keep the lane paused until a human or
+            # explicit repair flow clears it. (break_full_deadlock may clear it as
+            # a last resort when the whole fleet is wedged.)
             continue
         if resume_at is not None and float(resume_at) <= now_ts:
             clear_provider_pause(state, agent_id)
@@ -8215,6 +8250,86 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
     return changed
 
 
+def _has_dispatchable_backlog(status: dict[str, Any]) -> bool:
+    dispatchable = {"backlog", "todo", "in_progress", "review", "review_approved"}
+    for task in (status.get("tasks") or []):
+        if isinstance(task, dict) and str(task.get("status") or "") in dispatchable:
+            return True
+    return False
+
+
+def break_full_deadlock(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    status: dict[str, Any],
+) -> bool:
+    """Last-resort recovery when the orchestrator is fully wedged: zero active
+    workers, an empty queue, the chairman review blocked for lack of a
+    dispatch-capable lane, yet dispatchable backlog remains. Forces a fresh
+    capability probe and clears any paused lane the probe now reports healthy
+    (auth OR an indefinite quota hold whose underlying probe has recovered). If
+    nothing recovers, raises a loud operator-attention escalation instead of
+    sitting silently at zero workers. Rate-limited by a cooldown so genuinely
+    dead lanes are not thrashed."""
+    settings = config.get("supervisor", {})
+    if not settings.get("deadlock_breaker_enabled", True):
+        return False
+    active_statuses = {str(v) for v in ready_dispatch_settings(config).get("active_worker_statuses", [])}
+    active_agents, _ = active_worker_indexes(state, active_statuses)
+    if active_agents:
+        return False
+    if state.get("queue", {}).get("events", {}):
+        return False
+    if not state.get("chair_review", {}).get("blocked"):
+        return False
+    if not _has_dispatchable_backlog(status):
+        return False
+    rec = state.setdefault("deadlock_recovery", {})
+    cooldown = float(settings.get("deadlock_breaker_cooldown_seconds", 1800))
+    last_attempt = _parse_iso_utc(rec.get("last_attempt_at"))
+    now = datetime.now(timezone.utc)
+    if last_attempt is not None and (now - last_attempt).total_seconds() < cooldown:
+        return False
+    rec["last_attempt_at"] = utc_now()
+    console_log(
+        "FULL DEADLOCK detected (0 active workers, queue empty, chair review "
+        "blocked, backlog pending) - forcing recovery probe",
+        quiet=False,
+    )
+    fresh_report = _force_recovery_probe(config)
+    paused = list(provider_pause_registry(state).keys())
+    recovered = [a for a in paused if _lane_probe_healthy(config, fresh_report, a) is True]
+    for agent_id in recovered:
+        clear_provider_pause(state, agent_id)
+    if recovered:
+        rec.pop("operator_attention", None)
+        console_log(f"deadlock breaker cleared lanes {recovered} via fresh healthy probe", quiet=False)
+        write_activity_log(config, {
+            "type": "deadlock_recovered",
+            "message": f"Full-deadlock recovery cleared paused lanes {recovered} after a healthy probe.",
+            "agents": recovered,
+        })
+        return True
+    prior = rec.get("operator_attention") or {}
+    rec["operator_attention"] = {
+        "since": prior.get("since") or utc_now(),
+        "reason": "All lanes paused and none auto-recoverable (probe unhealthy). "
+                  "Manual fix needed: re-login auth lanes and/or restore quota.",
+        "paused": paused,
+    }
+    console_log(
+        "OPERATOR ATTENTION REQUIRED: full orchestrator deadlock and no lane is "
+        f"auto-recoverable. Paused lanes: {paused}",
+        quiet=False,
+    )
+    write_activity_log(config, {
+        "type": "operator_attention_required",
+        "message": "Full orchestrator deadlock: 0 workers, all lanes paused, none auto-recoverable.",
+        "paused": paused,
+    })
+    return True
+
+
 def run_once(
     config: dict[str, Any],
     *,
@@ -8278,6 +8393,7 @@ def run_once(
         changed = ensure_planning_baton_dispatch(config, state, status) or changed
     else:
         changed = queue_chair_review(config, state, status, provider_report) or changed
+        changed = break_full_deadlock(config, state, status) or changed
         changed = dispatch_ready_tasks(config, state, provider_report) or changed
         changed = dispatch_underutilization_sidecars(config, state) or changed
         changed = dispatch_underutilization_main_tasks(config, state) or changed
