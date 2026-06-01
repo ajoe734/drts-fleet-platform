@@ -443,11 +443,13 @@ function ActionButton({
   return (
     <CanvasBtn
       theme={th}
-      icon={icon}
       variant={variant}
       size={size}
       disabled={!descriptor.enabled}
-      style={!descriptor.enabled ? { cursor: "not-allowed" } : undefined}
+      {...(icon ? { icon } : {})}
+      {...(!descriptor.enabled
+        ? { style: { cursor: "not-allowed" as const } }
+        : {})}
       {...(descriptor.enabled && onClick ? { onClick } : {})}
     >
       {label}
@@ -489,6 +491,15 @@ export function ReportsManager({
 
   const rows: ReportRow[] = jobs.map((job) => {
     const displayStatus = getDisplayStatus(job);
+    const downloadDisabledReasonCode =
+      displayStatus === "running" || displayStatus === "queued"
+        ? "still_running"
+        : displayStatus === "expired"
+          ? "artifact_expired"
+          : displayStatus === "failed"
+            ? "job_failed"
+            : null;
+
     return {
       id: job.jobId,
       type: job.jobType,
@@ -523,15 +534,10 @@ export function ReportsManager({
         action: "download_artifact",
         enabled:
           displayStatus === "completed" && Boolean(job.artifact?.downloadUrl),
-        disabledReasonCode:
-          displayStatus === "running" || displayStatus === "queued"
-            ? "still_running"
-            : displayStatus === "expired"
-              ? "artifact_expired"
-              : displayStatus === "failed"
-                ? "job_failed"
-                : undefined,
         riskLevel: "low",
+        ...(downloadDisabledReasonCode
+          ? { disabledReasonCode: downloadDisabledReasonCode }
+          : {}),
       },
       statusReason:
         displayStatus === "failed"
