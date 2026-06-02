@@ -24,10 +24,8 @@ import {
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
-  CanvasShell,
   CanvasTable,
   buildCanvasTheme,
-  type CanvasShellNavItem,
   type CanvasTableColumn,
   type CanvasTheme,
 } from "@drts/ui-web";
@@ -58,11 +56,6 @@ const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
 });
-
-const shellStyle = {
-  margin: "-32px",
-  minHeight: "calc(100vh - 64px)",
-} satisfies CSSProperties;
 
 const bodyStyle = {
   display: "grid",
@@ -207,113 +200,6 @@ const toggleKnobStyle = {
   boxShadow: "0 1px 2px rgba(15, 23, 42, 0.25)",
   flexShrink: 0,
 } satisfies CSSProperties;
-
-function buildPlatformNav(locale: string): CanvasShellNavItem[] {
-  const labels =
-    locale === "en"
-      ? {
-          workspace: "Workspace",
-          home: "Governance Home",
-          health: "Platform Health",
-          tenantGroup: "Tenant Governance",
-          tenants: "Tenants",
-          partners: "Partner entry",
-          users: "Platform staff",
-          fleetGroup: "Fleet & Compliance",
-          fleet: "Fleet & compliance",
-          switchboard: "Public info & placards",
-          pricingGroup: "Pricing & Settlement",
-          pricing: "Pricing",
-          payments: "Settlement governance",
-          platformGroup: "Platform Layer",
-          notices: "Notices & maintenance",
-          audit: "Audit & evidence",
-          flags: "Feature flags",
-          adapters: "Adapter registry",
-        }
-      : {
-          workspace: "工作面",
-          home: "工作首頁",
-          health: "平台健康",
-          tenantGroup: "租戶治理",
-          tenants: "租戶",
-          partners: "合作夥伴 entry",
-          users: "平台人員",
-          fleetGroup: "車隊與法遵",
-          fleet: "車隊與合規",
-          switchboard: "法定資訊與牌貼",
-          pricingGroup: "計價與結算",
-          pricing: "計價",
-          payments: "結算治理",
-          platformGroup: "平台層",
-          notices: "公告與維護",
-          audit: "稽核與證據",
-          flags: "功能旗標",
-          adapters: "介接登錄",
-        };
-
-  return [
-    { divider: labels.workspace },
-    { key: "home", href: "/", label: labels.home, icon: "dashboard" },
-    { key: "health", href: "/health", label: labels.health, icon: "health" },
-    { divider: labels.tenantGroup },
-    {
-      key: "tenants",
-      href: "/tenants",
-      label: labels.tenants,
-      icon: "tenants",
-    },
-    {
-      key: "partners",
-      href: "/partners",
-      label: labels.partners,
-      icon: "partners",
-    },
-    { key: "users", href: "/users", label: labels.users, icon: "users" },
-    { divider: labels.fleetGroup },
-    { key: "fleet", href: "/fleet", label: labels.fleet, icon: "fleet" },
-    {
-      key: "switchboard",
-      href: "/switchboard",
-      label: labels.switchboard,
-      icon: "switchboard",
-    },
-    { divider: labels.pricingGroup },
-    {
-      key: "pricing",
-      href: "/pricing",
-      label: labels.pricing,
-      icon: "pricing",
-    },
-    {
-      key: "payments",
-      href: "/payments",
-      label: labels.payments,
-      icon: "payments",
-    },
-    { divider: labels.platformGroup },
-    {
-      key: "notices",
-      href: "/notices",
-      label: labels.notices,
-      icon: "notices",
-    },
-    { key: "audit", href: "/audit", label: labels.audit, icon: "audit" },
-    {
-      key: "flags",
-      href: "/feature-flags",
-      label: labels.flags,
-      icon: "flags",
-      matchPaths: ["/feature-flags"],
-    },
-    {
-      key: "adapters",
-      href: "/adapter-registry",
-      label: labels.adapters,
-      icon: "adapters",
-    },
-  ];
-}
 
 function groupFeatureFlags(flags: FeatureFlag[]): GroupedFeatureFlag[] {
   const groups = new Map<string, GroupedFeatureFlag>();
@@ -676,23 +562,7 @@ export default function FeatureFlagsPage() {
   }
 
   return (
-    <CanvasShell
-      theme={theme}
-      nav={buildPlatformNav(locale)}
-      active="flags"
-      brandLabel={t("app.name")}
-      brandSubLabel={t("app.sub")}
-      breadcrumb={[copy.breadcrumbParent, copy.pageTitle]}
-      env="production"
-      versionLabel="canvas"
-      searchPlaceholder={
-        locale === "en"
-          ? "Search keys or tenant scope…"
-          : "搜尋 key 或 tenant scope…"
-      }
-      avatarLabel={locale === "en" ? "PA" : "平台"}
-      style={shellStyle}
-    >
+    <>
       <CanvasPageHeader
         theme={theme}
         title={copy.pageTitle}
@@ -893,6 +763,6 @@ export default function FeatureFlagsPage() {
           </>
         )}
       </div>
-    </CanvasShell>
+    </>
   );
 }
