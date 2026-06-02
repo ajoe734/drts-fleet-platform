@@ -22,7 +22,6 @@ const pageBodyStyle = {
 
 const adapterGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
   gap: 12,
 } satisfies CSSProperties;
 
@@ -34,9 +33,6 @@ const titleRowStyle = {
 } satisfies CSSProperties;
 
 const authorityCopyStyle = {
-  marginTop: 12,
-  paddingTop: 12,
-  borderTop: `1px solid ${theme.border}`,
   color: theme.textDim,
   fontSize: 11.5,
   lineHeight: 1.45,
@@ -51,6 +47,8 @@ const actionSectionStyle = {
 const actionLaneStyle = {
   display: "grid",
   gap: 8,
+  paddingTop: 12,
+  borderTop: `1px solid ${theme.border}`,
 } satisfies CSSProperties;
 
 const actionLaneHeaderStyle = {
@@ -72,6 +70,12 @@ const buttonRowStyle = {
   display: "flex",
   gap: 8,
   flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const laneSummaryStyle = {
+  color: theme.textDim,
+  fontSize: 11.5,
+  lineHeight: 1.45,
 } satisfies CSSProperties;
 
 const noop = () => {};
@@ -255,12 +259,12 @@ export default function AdapterRegistryPage() {
       ? {
           title: "External Platform Adapter Registry",
           subtitle:
-            "Config and credential writes stay in Platform Admin; operational pause and retry remain in Ops for Q-ADM17 split authority.",
+            "Config and credential governance stays in Platform Admin; operational pause and retry stay in Ops per Q-ADM17 split authority.",
           createAction: "Register adapter",
-          rotateAction: "Rotate token now",
-          dangerTitle: "mof-bgmt token renewal overdue",
+          rotateAction: "Rotate now",
+          dangerTitle: "mof-bgmt token expires in 6 days",
           dangerBody:
-            "The BGMT dispatch reporting token expired on May 31, 2026. Renew it here before completion reports resume upstream.",
+            "The BGMT dispatch reporting token must rotate before May 31, 2026 or completion reports for today cannot reach the upstream endpoint.",
           platformAuthority: "Platform Admin",
           opsAuthority: "Ops Console",
           platformScope: "Write authority",
@@ -278,12 +282,12 @@ export default function AdapterRegistryPage() {
       : {
           title: "External Platform Adapter Registry",
           subtitle:
-            "config / credential 寫入權留在 Platform Admin；operational pause / retry 依 Q-ADM17 留在 Ops。",
+            "config / credential 治理留在 Platform Admin；operational pause / retry 依 Q-ADM17 留在 Ops。",
           createAction: "註冊 adapter",
-          rotateAction: "立即輪替 token",
-          dangerTitle: "mof-bgmt token 續發逾期",
+          rotateAction: "立即輪替",
+          dangerTitle: "mof-bgmt token 距到期 6 天",
           dangerBody:
-            "BGMT 派遣回報 token 已於 2026 年 5 月 31 日到期。必須先在此續發，完成單回報才會恢復上游送達。",
+            "BGMT 派遣回報 token 必須在 2026 年 5 月 31 日前輪替，否則今日完成單將無法送達上游。",
           platformAuthority: "Platform Admin",
           opsAuthority: "Ops Console",
           platformScope: "Write authority",
@@ -313,6 +317,18 @@ export default function AdapterRegistryPage() {
       />
 
       <div style={pageBodyStyle}>
+        <style jsx>{`
+          .adapter-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          @media (max-width: 1080px) {
+            .adapter-grid {
+              grid-template-columns: minmax(0, 1fr);
+            }
+          }
+        `}</style>
+
         <CanvasBanner
           theme={theme}
           tone="danger"
@@ -331,7 +347,7 @@ export default function AdapterRegistryPage() {
           }
         />
 
-        <div style={adapterGridStyle}>
+        <div className="adapter-grid" style={adapterGridStyle}>
           {adapters.map((adapter) => {
             const statusLabel =
               adapter.status === "healthy"
@@ -387,10 +403,6 @@ export default function AdapterRegistryPage() {
                   ]}
                 />
 
-                <div style={authorityCopyStyle}>
-                  {adapter.authoritySummary} {adapter.opsSummary}
-                </div>
-
                 <div style={actionSectionStyle}>
                   <div style={actionLaneStyle}>
                     <div style={actionLaneHeaderStyle}>
@@ -400,6 +412,10 @@ export default function AdapterRegistryPage() {
                       <CanvasPill theme={theme} tone="accent">
                         {copy.platformScope}
                       </CanvasPill>
+                    </div>
+
+                    <div style={authorityCopyStyle}>
+                      {adapter.authoritySummary}
                     </div>
 
                     <div style={buttonRowStyle}>
@@ -425,6 +441,8 @@ export default function AdapterRegistryPage() {
                         {copy.opsScope}
                       </CanvasPill>
                     </div>
+
+                    <div style={laneSummaryStyle}>{adapter.opsSummary}</div>
 
                     <div style={buttonRowStyle}>
                       {opsActions.map((action) => (
