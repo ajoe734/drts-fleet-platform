@@ -40,7 +40,7 @@ const PAGE_SIZE = 12;
 const PLATFORM_ADMIN_ADAPTER_REGISTRY_ROUTE = "/adapter-registry";
 const theme = buildCanvasTheme({
   surface: "ops",
-  dark: false,
+  dark: true,
   density: "compact",
 });
 

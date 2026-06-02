@@ -20,7 +20,6 @@ import {
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasShell as Shell,
   CanvasTable as Table,
   buildCanvasTheme,
   type CanvasTableColumn,
@@ -227,94 +226,6 @@ function statusTone(status: MaintenanceStatus): CanvasTone {
 function matchesTab(status: MaintenanceStatus, tab: StatusTab) {
   if (tab === "all") return true;
   return status === tab;
-}
-
-function buildOpsNav(locale: Locale) {
-  return [
-    { divider: copy(locale, "Workspace", "工作面") },
-    {
-      key: "dashboard",
-      href: "/dashboard",
-      icon: "dashboard" as const,
-      label: copy(locale, "Dashboard", "營運總覽"),
-    },
-    { divider: copy(locale, "Dispatch", "即時派遣") },
-    {
-      key: "dispatch",
-      href: "/dispatch",
-      icon: "dispatch" as const,
-      label: copy(locale, "Dispatch", "派遣"),
-    },
-    {
-      key: "callcenter",
-      href: "/callcenter",
-      icon: "callcenter" as const,
-      label: copy(locale, "Callcenter", "客服中心"),
-    },
-    { divider: copy(locale, "Casework", "案件處理") },
-    {
-      key: "complaints",
-      href: "/complaints",
-      icon: "complaints" as const,
-      label: copy(locale, "Complaints", "客訴"),
-    },
-    {
-      key: "incidents",
-      href: "/incidents",
-      icon: "incidents" as const,
-      label: copy(locale, "Incidents", "事故"),
-    },
-    { divider: copy(locale, "Monitoring", "營運監控") },
-    {
-      key: "reports",
-      href: "/reports",
-      icon: "reports" as const,
-      label: copy(locale, "Reports", "報表"),
-    },
-    {
-      key: "revenue",
-      href: "/revenue",
-      icon: "revenue" as const,
-      label: copy(locale, "Revenue", "收益審視"),
-    },
-    {
-      key: "attendance",
-      href: "/attendance",
-      icon: "attendance" as const,
-      label: copy(locale, "Attendance", "班次出勤"),
-    },
-    {
-      key: "maintenance",
-      href: "/maintenance",
-      icon: "maintenance" as const,
-      label: copy(locale, "Maintenance", "車輛保修"),
-    },
-    { divider: copy(locale, "Registry", "主資料") },
-    {
-      key: "drivers",
-      href: "/drivers",
-      icon: "fleet" as const,
-      label: copy(locale, "Drivers", "司機"),
-    },
-    {
-      key: "vehicles",
-      href: "/vehicles",
-      icon: "vehicles" as const,
-      label: copy(locale, "Vehicles", "車輛"),
-    },
-    {
-      key: "contracts",
-      href: "/contracts",
-      icon: "contracts" as const,
-      label: copy(locale, "Contracts", "合約"),
-    },
-    {
-      key: "flags",
-      href: "/feature-flags",
-      icon: "flags" as const,
-      label: copy(locale, "Feature Flags", "功能旗標"),
-    },
-  ];
 }
 
 function resolvePlatformAdminOrigin(): string {
@@ -991,7 +902,6 @@ export default function MaintenancePage() {
     },
   ];
 
-  const nav = buildOpsNav(locale);
   const tabConfig: Array<{ key: StatusTab; label: string; tone?: CanvasTone }> =
     [
       { key: "all", label: copy(locale, "All", "全部") },
@@ -1033,27 +943,7 @@ export default function MaintenancePage() {
     tabNodes[0];
 
   return (
-    <Shell
-      theme={theme}
-      nav={nav}
-      active="maintenance"
-      currentPath="/maintenance"
-      breadcrumb={[
-        copy(locale, "Monitoring", "營運監控"),
-        copy(locale, "Maintenance", "維修保養"),
-      ]}
-      brandLabel="DRTS Fleet"
-      brandSubLabel={copy(locale, "Operations Console", "營運控制台")}
-      brandMark="OC"
-      env="production"
-      searchPlaceholder={copy(
-        locale,
-        "work order, vehicle, technician",
-        "工單、車輛、技師",
-      )}
-      avatarLabel="OC"
-      style={{ minHeight: "100vh" }}
-    >
+    <>
       <PageHeader
         theme={theme}
         title={copy(locale, "Maintenance", "車輛保修")}
@@ -1453,7 +1343,7 @@ export default function MaintenancePage() {
           </span>
         </div>
       ) : null}
-    </Shell>
+    </>
   );
 }
 

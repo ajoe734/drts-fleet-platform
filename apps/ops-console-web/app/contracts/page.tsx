@@ -1,76 +1,260 @@
-import type { ReactNode } from "react";
 import Link from "next/link";
+import type { CSSProperties, ReactNode } from "react";
 import type {
   CrossAppResourceLink,
   EmptyReason,
   EmptyStateEnvelope,
   PartnerChannelEntryRecord,
-  RefreshTier,
+  PartnerEligibilityReviewQueueItem,
   ResourceActionDescriptor,
+  UiHealthEnvelope,
   UiRefreshMetadata,
   VehicleContractRecord,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
-import { getServerLocale } from "@/lib/server-locale";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { t } from "@/lib/translations";
+import { getServerLocale } from "@/lib/server-locale";
+import type { Locale } from "@/lib/translations";
 import {
-  DataCellStack,
-  DataTable,
-  DataViewCard,
-  PageHeader,
-  StatCard,
-  StatusChip,
-  Td,
-  Tr,
+  CanvasBanner as Banner,
+  CanvasCard as Card,
+  CanvasIcon,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  CanvasTable as Table,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+  type CanvasTone,
 } from "@drts/ui-web";
 
 type ContractsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type RuntimeVehicleContractRecord = VehicleContractRecord & {
-  availableActions?: ResourceActionDescriptor[];
+type ContractListPayload = VehicleContractRecord[] | ContractListEnvelope;
+
+type ContractListEnvelope = {
+  items: ContractRuntimeRecord[];
+  refresh?: UiRefreshMetadata;
+  health?: UiHealthEnvelope;
+  emptyState?: EmptyStateEnvelope;
 };
 
-type RuntimePartnerChannelEntryRecord = PartnerChannelEntryRecord & {
+type ContractRuntimeRecord = VehicleContractRecord & {
   availableActions?: ResourceActionDescriptor[];
-  ownerLinks?: CrossAppResourceLink[];
+  crossAppLinks?: CrossAppResourceLink[];
+  partnerDisplayName?: string | null;
+  partnerEntrySlug?: string | null;
+  keyTerms?: string | null;
 };
 
-type ContractListView = RuntimeVehicleContractRecord & {
-  keyTerms: string;
+type ContractFilterTab = "all" | "expiring" | "partner";
+type ContractFilterStatus =
+  | "all"
+  | "active"
+  | "draft"
+  | "expiring"
+  | "terminated";
+type ContractFilterExpiring = "all" | "yes" | "no";
+
+type ContractFilters = {
+  tab: ContractFilterTab;
+  q: string;
+  status: ContractFilterStatus;
+  type: string;
+  expiring: ContractFilterExpiring;
+  emptyReason: EmptyReason | null;
+};
+
+type PartnerRelationRow = Record<string, unknown> & {
+  partnerId: string;
+  displayName: string;
+  entrySlug: string;
+  programId: string;
+  partnerTypeLabel: string;
+  eligibilityLabel: string;
+  authLabel: string;
+  statusLabel: string;
+  statusTone: CanvasTone;
+  governanceHref: string;
+};
+
+type LoadResult<T> = {
+  data: T | null;
+  error: string | null;
+};
+
+type HealthLoadResult = {
+  health: UiHealthEnvelope | null;
+  error: string | null;
+};
+
+type ContractRow = Record<string, unknown> & {
+  contractId: string;
+  serviceScope: string;
+  operatingAreaId: string | null;
+  kindKey: string;
   kindLabel: string;
-  counterparties: string;
+  partnerId: string;
+  partnerDisplayName: string;
+  partnerType: string;
+  partnerEntrySlug: string | null;
+  vehicleId: string;
+  statusKey: ContractFilterStatus;
+  statusLabel: string;
+  statusTone: CanvasTone;
+  lifecycleLabel: string;
+  startAt: string;
+  endAt: string;
+  termLabel: string;
+  effectiveFromLabel: string;
+  effectiveToLabel: string;
+  daysToExpiry: number | null;
   expiringSoon: boolean;
+  expired: boolean;
+  keyTermsLabel: string;
   availableActions: ResourceActionDescriptor[];
-  links: CrossAppResourceLink[];
+  crossAppLinks: CrossAppResourceLink[];
 };
 
-type PartnerRelationView = RuntimePartnerChannelEntryRecord & {
-  linkedContracts: number;
-  availableActions: ResourceActionDescriptor[];
-  links: CrossAppResourceLink[];
+const EXPIRING_SOON_DAYS = 45;
+
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
 };
 
-type SectionEmptyState = {
-  reason: ContractsEmptyReason;
-  nextAction?: ResourceActionDescriptor;
+const summaryGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 10,
 };
 
-type ActionRenderTarget = {
-  href?: string;
-  target?: "_blank";
+const summaryCardStyle: CSSProperties = {
+  padding: "14px 16px",
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+  display: "grid",
+  gap: 4,
 };
 
-type ContractsEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
-type ContractsEmptyStateEnvelope = Omit<EmptyStateEnvelope, "reason"> & {
-  reason: ContractsEmptyReason;
+const summaryLabelStyle: CSSProperties = {
+  fontSize: 11,
+  letterSpacing: 0.6,
+  textTransform: "uppercase",
+  color: theme.textMuted,
 };
 
-const REFRESH_TIER: RefreshTier = "medium";
-const REFRESH_TIER_MS = 15_000;
-const EMPTY_REASON_VALUES = new Set<ContractsEmptyReason>([
+const summaryValueStyle: CSSProperties = {
+  fontSize: 24,
+  fontWeight: 700,
+  lineHeight: 1.05,
+  color: theme.text,
+};
+
+const summaryFootStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: theme.textDim,
+};
+
+const filterGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(220px, 1.7fr) repeat(3, minmax(0, 1fr)) auto",
+  gap: 10,
+  alignItems: "end",
+};
+
+const fieldStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+};
+
+const fieldLabelStyle: CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 700,
+  letterSpacing: 0.5,
+  textTransform: "uppercase",
+  color: theme.textMuted,
+};
+
+const fieldStyle: CSSProperties = {
+  width: "100%",
+  height: 34,
+  padding: "0 10px",
+  borderRadius: 8,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  color: theme.text,
+  fontSize: 12.5,
+  fontFamily: theme.fontFamily,
+};
+
+const helperRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  marginTop: 10,
+};
+
+const helperTextStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: theme.textDim,
+};
+
+const monoTextStyle: CSSProperties = {
+  fontFamily: theme.monoFamily,
+};
+
+const stackStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  minWidth: 0,
+  whiteSpace: "normal",
+};
+
+const primaryTextStyle: CSSProperties = {
+  color: theme.text,
+  fontWeight: 600,
+  minWidth: 0,
+};
+
+const secondaryTextStyle: CSSProperties = {
+  color: theme.textDim,
+  fontSize: 11.5,
+  minWidth: 0,
+};
+
+const mutedTextStyle: CSSProperties = {
+  color: theme.textMuted,
+  fontSize: 11.5,
+  minWidth: 0,
+};
+
+const actionStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  minWidth: 0,
+  whiteSpace: "normal",
+};
+
+const emptyStateStyle: CSSProperties = {
+  display: "grid",
+  justifyItems: "center",
+  textAlign: "center",
+  gap: 10,
+  padding: "28px 20px",
+};
+
+const EMPTY_REASONS = new Set<EmptyReason>([
   "no_data",
   "not_provisioned",
   "fetch_failed",
@@ -79,563 +263,1027 @@ const EMPTY_REASON_VALUES = new Set<ContractsEmptyReason>([
   "filtered_empty",
 ]);
 
-function copyText(locale: "en" | "zh", en: string, zh: string) {
+const EMPTY_OVERRIDE_REASON_CODES: Record<EmptyReason, string> = {
+  no_data: "contract_registry_empty",
+  not_provisioned: "contract_registry_not_provisioned",
+  fetch_failed: "contract_registry_fetch_failed",
+  permission_denied: "contract_registry_permission_denied",
+  external_unavailable: "contract_registry_external_unavailable",
+  filtered_empty: "contract_registry_filtered_empty",
+  driver_not_eligible: "driver_not_eligible",
+};
+
+function copy(locale: Locale, en: string, zh: string) {
   return locale === "zh" ? zh : en;
 }
 
-function firstParam(value: string | string[] | undefined) {
+function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function buttonStyle({
-  disabled = false,
-  emphasis = "secondary",
-}: {
-  disabled?: boolean;
-  emphasis?: "primary" | "secondary" | "ghost";
-}) {
-  const styles =
-    emphasis === "primary"
-      ? {
-          border: "1px solid #dc2626",
-          background: disabled ? "#fecaca" : "#dc2626",
-          color: "#ffffff",
-        }
-      : emphasis === "ghost"
-        ? {
-            border: "1px solid transparent",
-            background: "transparent",
-            color: disabled ? "#94a3b8" : "#475569",
-          }
-        : {
-            border: "1px solid #fecaca",
-            background: disabled ? "#fff1f2" : "#fff7f7",
-            color: disabled ? "#94a3b8" : "#b91c1c",
-          };
-
-  return {
-    ...styles,
-    borderRadius: "999px",
-    padding: "7px 12px",
-    fontSize: "12px",
-    fontWeight: 600,
-    lineHeight: 1.2,
-    textDecoration: "none",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    whiteSpace: "nowrap" as const,
-    opacity: disabled ? 0.75 : 1,
-  };
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function cardSurfaceStyle(tone: "neutral" | "warn" | "danger" | "info") {
-  switch (tone) {
-    case "warn":
-      return {
-        background: "#fff7ed",
-        border: "1px solid #fdba74",
-        color: "#9a3412",
-      };
-    case "danger":
-      return {
-        background: "#fef2f2",
-        border: "1px solid #fca5a5",
-        color: "#b91c1c",
-      };
-    case "info":
-      return {
-        background: "#eff6ff",
-        border: "1px solid #93c5fd",
-        color: "#1d4ed8",
-      };
-    default:
-      return {
-        background: "#f8fafc",
-        border: "1px solid #cbd5e1",
-        color: "#334155",
-      };
-  }
-}
-
-function contractStatusTone(status: string) {
-  if (status === "active") return "success" as const;
-  if (status === "terminated") return "danger" as const;
-  if (status === "draft") return "warning" as const;
-  return "neutral" as const;
-}
-
-function formatDate(value: string | null, locale: "en" | "zh") {
-  if (!value) return t("common.dash", locale);
-  return new Date(value).toLocaleDateString(
-    locale === "zh" ? "zh-TW" : "en-US",
-    {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      timeZone: "UTC",
-    },
+function isEmptyReason(value: string | null | undefined): value is EmptyReason {
+  return (
+    value !== null &&
+    value !== undefined &&
+    EMPTY_REASONS.has(value as EmptyReason)
   );
 }
 
-function formatDateTime(value: string | null, locale: "en" | "zh") {
-  if (!value) return t("common.dash", locale);
-  return new Date(value).toLocaleString(locale === "zh" ? "zh-TW" : "en-US", {
+function resolveFilters(
+  searchParams: Record<string, string | string[] | undefined>,
+): ContractFilters {
+  const tabParam = firstParam(searchParams.tab);
+  const statusParam = firstParam(searchParams.status);
+  const expiringParam = firstParam(searchParams.expiring);
+  const emptyReasonParam = firstParam(searchParams.emptyReason);
+
+  return {
+    tab: tabParam === "expiring" || tabParam === "partner" ? tabParam : "all",
+    q: firstParam(searchParams.q)?.trim() ?? "",
+    status:
+      statusParam === "active" ||
+      statusParam === "draft" ||
+      statusParam === "expiring" ||
+      statusParam === "terminated"
+        ? statusParam
+        : "all",
+    type: firstParam(searchParams.type)?.trim() ?? "all",
+    expiring:
+      expiringParam === "yes" || expiringParam === "no" ? expiringParam : "all",
+    emptyReason: isEmptyReason(emptyReasonParam) ? emptyReasonParam : null,
+  };
+}
+
+function buildHref(
+  filters: ContractFilters,
+  overrides: Partial<ContractFilters>,
+) {
+  const next = { ...filters, ...overrides };
+  const params = new URLSearchParams();
+  if (next.tab !== "all") params.set("tab", next.tab);
+  if (next.q) params.set("q", next.q);
+  if (next.status !== "all") params.set("status", next.status);
+  if (next.type !== "all") params.set("type", next.type);
+  if (next.expiring !== "all") params.set("expiring", next.expiring);
+  if (next.emptyReason) params.set("emptyReason", next.emptyReason);
+  const query = params.toString();
+  return query ? `/contracts?${query}` : "/contracts";
+}
+
+function hasActiveFilters(filters: ContractFilters) {
+  return (
+    filters.tab !== "all" ||
+    filters.q.length > 0 ||
+    filters.status !== "all" ||
+    filters.type !== "all" ||
+    filters.expiring !== "all"
+  );
+}
+
+function buttonStyle(
+  variant: "primary" | "secondary" | "ghost" = "secondary",
+): CSSProperties {
+  const styles =
+    variant === "primary"
+      ? {
+          background: theme.accent,
+          color: "#ffffff",
+          borderColor: theme.accent,
+        }
+      : variant === "ghost"
+        ? {
+            background: "transparent",
+            color: theme.textMuted,
+            borderColor: "transparent",
+          }
+        : {
+            background: theme.surface,
+            color: theme.text,
+            borderColor: theme.border,
+          };
+
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    height: 34,
+    padding: "0 12px",
+    borderRadius: 8,
+    border: `1px solid ${styles.borderColor}`,
+    background: styles.background,
+    color: styles.color,
+    fontSize: 12.5,
+    fontWeight: 600,
+    textDecoration: "none",
+    cursor: "pointer",
+    fontFamily: theme.fontFamily,
+  };
+}
+
+function linkButtonStyle(
+  tone: CanvasTone = "neutral",
+  disabled = false,
+): CSSProperties {
+  const palette: Record<CanvasTone, { bg: string; fg: string; bd: string }> = {
+    success: {
+      bg: theme.successBg,
+      fg: theme.success,
+      bd: theme.successBorder,
+    },
+    warn: { bg: theme.warnBg, fg: theme.warn, bd: theme.warnBorder },
+    danger: {
+      bg: theme.dangerBg,
+      fg: theme.danger,
+      bd: theme.dangerBorder,
+    },
+    info: { bg: theme.infoBg, fg: theme.info, bd: theme.infoBorder },
+    accent: {
+      bg: theme.accentBg,
+      fg: theme.accent,
+      bd: theme.accentBorder,
+    },
+    neutral: {
+      bg: theme.surfaceLo,
+      fg: theme.textMuted,
+      bd: theme.border,
+    },
+  };
+
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    minHeight: 26,
+    padding: "4px 9px",
+    borderRadius: 7,
+    border: `1px solid ${palette[tone].bd}`,
+    background: palette[tone].bg,
+    color: palette[tone].fg,
+    textDecoration: "none",
+    fontSize: 11.5,
+    fontWeight: 600,
+    opacity: disabled ? 0.48 : 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    pointerEvents: disabled ? "none" : "auto",
+  };
+}
+
+function tinyMetaStyle(tone: CanvasTone = "neutral"): CSSProperties {
+  const colors: Record<CanvasTone, string> = {
+    success: theme.success,
+    warn: theme.warn,
+    danger: theme.danger,
+    info: theme.info,
+    accent: theme.accent,
+    neutral: theme.textMuted,
+  };
+
+  return {
+    fontSize: 10.5,
+    color: colors[tone],
+    letterSpacing: 0.2,
+  };
+}
+
+function toneColor(tone: CanvasTone) {
+  const colors: Record<CanvasTone, string> = {
+    success: theme.success,
+    warn: theme.warn,
+    danger: theme.danger,
+    info: theme.info,
+    accent: theme.accent,
+    neutral: theme.textMuted,
+  };
+
+  return colors[tone];
+}
+
+function formatDate(locale: Locale, value: string | null | undefined) {
+  if (!value) {
+    return copy(locale, "open-ended", "未設定");
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(/,/g, "");
+}
+
+function formatLongDateTime(locale: Locale, value: string | null | undefined) {
+  if (!value) {
+    return copy(locale, "unknown", "未知");
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
     timeZone: "UTC",
-  });
+  })
+    .format(new Date(value))
+    .replace(",", "");
 }
 
-function daysUntil(value: string) {
-  const diff = new Date(value).getTime() - Date.now();
-  return Math.ceil(diff / (24 * 60 * 60 * 1000));
-}
-
-function classifyLoadError(message: string): ContractsEmptyReason {
-  const normalized = message.toLowerCase();
-  if (
-    normalized.includes("403") ||
-    normalized.includes("forbidden") ||
-    normalized.includes("permission")
-  ) {
-    return "permission_denied";
+function deriveKind(contract: ContractRuntimeRecord): {
+  key: string;
+  label: (locale: Locale) => string;
+} {
+  const raw = `${contract.contractType} ${contract.partnerType}`.toLowerCase();
+  if (raw.includes("partner") || raw.includes("program")) {
+    return {
+      key: "partner",
+      label: (locale) => copy(locale, "Partner program", "夥伴方案"),
+    };
   }
-  if (
-    normalized.includes("404") ||
-    normalized.includes("not provisioned") ||
-    normalized.includes("not enabled")
-  ) {
-    return "not_provisioned";
+  if (raw.includes("forward")) {
+    return {
+      key: "forwarder",
+      label: (locale) => copy(locale, "Forwarder", "轉派合作"),
+    };
   }
-  if (
-    normalized.includes("adapter") ||
-    normalized.includes("upstream") ||
-    normalized.includes("external")
-  ) {
-    return "external_unavailable";
+  if (raw.includes("driver")) {
+    return {
+      key: "driver",
+      label: (locale) => copy(locale, "Driver", "司機合約"),
+    };
   }
-  return "fetch_failed";
+  return {
+    key: "vehicle",
+    label: (locale) => copy(locale, "Vehicle / fleet", "車輛 / 車隊"),
+  };
 }
 
-function parseEmptyReason(
-  value: string | undefined,
-): ContractsEmptyReason | null {
-  return value && EMPTY_REASON_VALUES.has(value as ContractsEmptyReason)
-    ? (value as ContractsEmptyReason)
-    : null;
+function daysBetween(fromIso: string, toIso: string | null): number | null {
+  if (!toIso) {
+    return null;
+  }
+  const to = new Date(toIso).getTime();
+  const from = new Date(fromIso).getTime();
+  if (Number.isNaN(to) || Number.isNaN(from)) {
+    return null;
+  }
+  return Math.round((to - from) / (1000 * 60 * 60 * 24));
 }
 
-function buildCrossAppUrl(link: CrossAppResourceLink) {
-  const baseByApp = {
-    "platform-admin":
-      process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? "http://localhost:3001",
-    "tenant-console":
-      process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL ?? "http://localhost:3002",
-    "ops-console":
-      process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? "http://localhost:3003",
-  } as const;
-
-  const appKey = link.targetApp as keyof typeof baseByApp;
-  return `${baseByApp[appKey]}${link.route}`;
+function deriveContractStatus(
+  contract: ContractRuntimeRecord,
+  expiringSoon: boolean,
+  expired: boolean,
+  locale: Locale,
+): { key: ContractFilterStatus; label: string; tone: CanvasTone } {
+  if (contract.status === "terminated") {
+    return {
+      key: "terminated",
+      label: copy(locale, "Terminated", "已終止"),
+      tone: "neutral",
+    };
+  }
+  if (expired || contract.lifecycleStatus === "expired") {
+    return {
+      key: "terminated",
+      label: copy(locale, "Expired", "已到期"),
+      tone: "danger",
+    };
+  }
+  if (contract.status === "draft") {
+    return {
+      key: "draft",
+      label: copy(locale, "Draft", "草稿"),
+      tone: "warn",
+    };
+  }
+  if (expiringSoon) {
+    return {
+      key: "expiring",
+      label: copy(locale, "Expiring soon", "即將到期"),
+      tone: "warn",
+    };
+  }
+  return {
+    key: "active",
+    label: copy(locale, "Active", "生效中"),
+    tone: "success",
+  };
 }
 
-function buildRefreshMetadata(updatedAt: string | null): UiRefreshMetadata {
-  const generatedAt = updatedAt ?? new Date().toISOString();
-  const ageMs = Date.now() - new Date(generatedAt).getTime();
+function deriveKeyTerms(
+  contract: ContractRuntimeRecord,
+  partnerEntry: PartnerChannelEntryRecord | undefined,
+  locale: Locale,
+): string {
+  if (contract.keyTerms && contract.keyTerms.trim().length > 0) {
+    return contract.keyTerms;
+  }
+
+  const parts: string[] = [];
+  parts.push(
+    `${copy(locale, "Scope", "服務範圍")}: ${contract.serviceScope || formatOpsCodeLabel(locale, contract.contractType)}`,
+  );
+  if (contract.operatingAreaId) {
+    parts.push(
+      `${copy(locale, "Area", "營運區")}: ${contract.operatingAreaId}`,
+    );
+  }
+  if (partnerEntry) {
+    parts.push(
+      `${copy(locale, "Eligibility", "資格模式")}: ${formatOpsCodeLabel(locale, partnerEntry.eligibilityMode)}`,
+    );
+  }
+  return parts.join(" · ");
+}
+
+function resolveAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
+  const envCandidates =
+    targetApp === "platform-admin"
+      ? [
+          process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN,
+          process.env.PLATFORM_ADMIN_ORIGIN,
+          process.env.DEV_PLATFORM_ADMIN_ORIGIN,
+          process.env.STAGING_PLATFORM_ADMIN_ORIGIN,
+          process.env.PROD_PLATFORM_ADMIN_ORIGIN,
+        ]
+      : targetApp === "tenant-console"
+        ? [
+            process.env.NEXT_PUBLIC_TENANT_CONSOLE_ORIGIN,
+            process.env.TENANT_CONSOLE_ORIGIN,
+          ]
+        : [
+            process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN,
+            process.env.OPS_CONSOLE_ORIGIN,
+            process.env.DEV_OPS_CONSOLE_ORIGIN,
+            process.env.STAGING_OPS_CONSOLE_ORIGIN,
+            process.env.PROD_OPS_CONSOLE_ORIGIN,
+          ];
+  const resolved = envCandidates.find(
+    (candidate) => typeof candidate === "string" && candidate.trim().length > 0,
+  );
+
+  if (resolved) {
+    return resolved.replace(/\/$/, "");
+  }
+
+  if (targetApp === "platform-admin") return "http://localhost:3002";
+  if (targetApp === "tenant-console") return "http://localhost:3004";
+  return "http://localhost:3003";
+}
+
+function buildCrossAppHref(link: CrossAppResourceLink) {
+  if (link.route.startsWith("http://") || link.route.startsWith("https://")) {
+    return link.route;
+  }
+
+  return `${resolveAppOrigin(link.targetApp)}${link.route.startsWith("/") ? link.route : `/${link.route}`}`;
+}
+
+function synthesizeCrossAppLinks(
+  contract: ContractRuntimeRecord,
+  kindKey: string,
+  locale: Locale,
+): CrossAppResourceLink[] {
+  if (contract.crossAppLinks && contract.crossAppLinks.length > 0) {
+    return contract.crossAppLinks;
+  }
+
+  if (kindKey === "partner" || kindKey === "forwarder") {
+    return [
+      {
+        targetApp: "platform-admin",
+        route: `/partners?partnerId=${encodeURIComponent(contract.partnerId)}`,
+        resourceType: "partner_program",
+        resourceId: contract.partnerId,
+        openMode: "new_tab",
+        label: copy(locale, "Partner governance", "夥伴治理"),
+      },
+    ];
+  }
+
+  return [
+    {
+      targetApp: "platform-admin",
+      route: `/fleet?vehicleId=${encodeURIComponent(contract.vehicleId)}`,
+      resourceType: "vehicle_contract",
+      resourceId: contract.contractId,
+      openMode: "new_tab",
+      label: copy(locale, "Fleet governance", "車隊治理"),
+    },
+  ];
+}
+
+function actionTone(action: ResourceActionDescriptor): CanvasTone {
+  if (!action.enabled) {
+    return "neutral";
+  }
+  if (action.riskLevel === "high") return "danger";
+  if (action.riskLevel === "medium") return "warn";
+  return "accent";
+}
+
+function actionLabel(action: ResourceActionDescriptor, locale: Locale) {
+  switch (action.action) {
+    case "open_contract_detail":
+      return copy(locale, "Contract detail", "合約詳情");
+    case "open_partner_governance":
+      return copy(locale, "Partner governance", "夥伴治理");
+    case "open_fleet_governance":
+      return copy(locale, "Fleet governance", "車隊治理");
+    default:
+      return formatOpsCodeLabel(locale, action.action);
+  }
+}
+
+function actionReason(action: ResourceActionDescriptor, locale: Locale) {
+  if (!action.disabledReasonCode) {
+    return null;
+  }
+
+  if (action.disabledReasonCode === "contract_detail_pending") {
+    return copy(
+      locale,
+      "Read-only detail route ships in a follow-up ops leaf (Q-OPS03).",
+      "唯讀詳情路由將由後續 ops 子任務交付（Q-OPS03）。",
+    );
+  }
+
+  return formatOpsCodeLabel(locale, action.disabledReasonCode);
+}
+
+function synthesizeAvailableActions(
+  contract: ContractRuntimeRecord,
+  seed: {
+    kindKey: string;
+    crossAppLinks: CrossAppResourceLink[];
+  },
+): ResourceActionDescriptor[] {
+  const actions: ResourceActionDescriptor[] = [
+    {
+      action: "open_contract_detail",
+      enabled: false,
+      disabledReasonCode: "contract_detail_pending",
+      riskLevel: "low",
+    },
+  ];
+
+  if (seed.crossAppLinks.length > 0) {
+    actions.push({
+      action:
+        seed.kindKey === "partner" || seed.kindKey === "forwarder"
+          ? "open_partner_governance"
+          : "open_fleet_governance",
+      enabled: true,
+      riskLevel: "medium",
+    });
+  }
+
+  return actions;
+}
+
+function buildActionHref(
+  action: ResourceActionDescriptor,
+  row: ContractRow,
+): string | null {
+  switch (action.action) {
+    case "open_contract_detail":
+      return `/contracts/${encodeURIComponent(row.contractId)}`;
+    case "open_partner_governance":
+    case "open_fleet_governance":
+      return row.crossAppLinks[0]
+        ? buildCrossAppHref(row.crossAppLinks[0])
+        : null;
+    default:
+      return null;
+  }
+}
+
+function isActionNewTab(action: ResourceActionDescriptor, row: ContractRow) {
+  if (
+    action.action === "open_partner_governance" ||
+    action.action === "open_fleet_governance"
+  ) {
+    return row.crossAppLinks[0]?.openMode === "new_tab";
+  }
+
+  return false;
+}
+
+function refreshBadgeLabel(refresh: UiRefreshMetadata, locale: Locale) {
+  const freshness = copy(
+    locale,
+    refresh.dataFreshness.toUpperCase(),
+    formatOpsCodeLabel(locale, refresh.dataFreshness),
+  );
+
+  return `${freshness} · T3 · 15s`;
+}
+
+function refreshBody(refresh: UiRefreshMetadata, locale: Locale) {
+  return copy(
+    locale,
+    `Snapshot ${formatLongDateTime(locale, refresh.generatedAt)} UTC from ${refresh.source}.`,
+    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} UTC 產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
+  );
+}
+
+function synthesizeRefreshMetadata(
+  generatedAt: string,
+  freshness: UiRefreshMetadata["dataFreshness"] = "fresh",
+): UiRefreshMetadata {
   return {
     generatedAt,
-    staleAfterMs: REFRESH_TIER_MS,
-    dataFreshness: updatedAt
-      ? ageMs > REFRESH_TIER_MS
-        ? "stale"
-        : "fresh"
-      : "unknown",
+    staleAfterMs: 15_000,
+    dataFreshness: freshness,
     source: "live",
   };
 }
 
-function describeFreshness(metadata: UiRefreshMetadata, locale: "en" | "zh") {
-  if (metadata.dataFreshness === "fresh") {
-    return copyText(
-      locale,
-      "Live snapshot within T3 cadence (15s).",
-      "目前為 T3（15 秒）即時快照。",
-    );
+function normalizeContractPayload(
+  payload: ContractListPayload | null,
+  fallbackGeneratedAt: string,
+): ContractListEnvelope {
+  if (!payload) {
+    return {
+      items: [],
+      refresh: synthesizeRefreshMetadata(fallbackGeneratedAt, "unknown"),
+    };
   }
-  if (metadata.dataFreshness === "stale") {
-    return copyText(
-      locale,
-      "Snapshot is stale. Refresh before making dispatch or billing decisions.",
-      "資料已過舊，請先重新整理再做派遣或結算判斷。",
-    );
-  }
-  if (metadata.dataFreshness === "degraded") {
-    return copyText(
-      locale,
-      "Source is degraded. Cross-check with platform-admin before acting.",
-      "來源已降級，操作前請先到 Platform Admin 交叉確認。",
-    );
-  }
-  return copyText(
-    locale,
-    "Freshness could not be confirmed.",
-    "無法確認這份資料的新鮮度。",
-  );
-}
 
-function renderActionDescriptor(
-  action: ResourceActionDescriptor,
-  locale: "en" | "zh",
-  href?: string,
-  target?: "_blank",
-) {
-  const labelMap: Record<string, string> = {
-    search: copyText(locale, "Search", "查找"),
-    clear_filters: copyText(locale, "Clear filters", "清除篩選"),
-    open_contract_detail: copyText(locale, "Open detail", "開啟詳情"),
-    open_platform_admin: copyText(locale, "Platform Admin", "Platform Admin"),
-    open_tenant_console: copyText(locale, "Tenant Console", "Tenant Console"),
+  if (Array.isArray(payload)) {
+    return {
+      items: payload,
+      refresh: synthesizeRefreshMetadata(fallbackGeneratedAt, "fresh"),
+    };
+  }
+
+  const normalized: ContractListEnvelope = {
+    items: payload.items ?? [],
+    refresh:
+      payload.refresh ??
+      synthesizeRefreshMetadata(fallbackGeneratedAt, "fresh"),
   };
-  const label = labelMap[action.action] ?? action.action;
-  const title =
-    action.enabled || !action.disabledReasonCode
-      ? undefined
-      : formatOpsCodeLabel(locale, action.disabledReasonCode);
 
-  if (href && action.enabled) {
-    return (
-      <a
-        href={href}
-        target={target}
-        rel={target === "_blank" ? "noreferrer" : undefined}
-        style={buttonStyle({
-          emphasis: action.action === "search" ? "primary" : "secondary",
-        })}
-        title={title}
-      >
-        {label}
-        {target === "_blank" ? (
-          <span style={{ marginLeft: "6px", fontSize: "11px", opacity: 0.8 }}>
-            {copyText(locale, "new tab", "新分頁")}
-          </span>
-        ) : null}
-      </a>
-    );
+  if (payload.health) {
+    normalized.health = payload.health;
+  }
+  if (payload.emptyState) {
+    normalized.emptyState = payload.emptyState;
   }
 
-  return (
-    <span
-      style={buttonStyle({
-        disabled: !action.enabled,
-        emphasis: action.action === "search" ? "primary" : "secondary",
-      })}
-      title={title}
-    >
-      {label}
-    </span>
-  );
+  return normalized;
 }
 
-function buildContractDetailHref(contractId: string) {
-  return `/contracts/${encodeURIComponent(contractId)}`;
+async function loadWithError<T>(
+  loader: () => Promise<T>,
+): Promise<LoadResult<T>> {
+  try {
+    return { data: await loader(), error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
-function buildActionRenderTarget(
-  link: CrossAppResourceLink,
-): ActionRenderTarget {
-  return link.openMode === "new_tab"
-    ? { href: buildCrossAppUrl(link), target: "_blank" }
-    : { href: buildCrossAppUrl(link) };
+function normalizeLegacyHealthStatus(status: string | undefined) {
+  if (status === "healthy" || status === "ok") return "healthy";
+  if (status === "down" || status === "unhealthy") return "down";
+  if (status === "degraded") return "degraded";
+  return "degraded";
 }
 
-function resolveContractActionTarget(
-  action: ResourceActionDescriptor,
-  contract: ContractListView,
-): ActionRenderTarget {
-  if (action.action === "open_contract_detail") {
-    return { href: buildContractDetailHref(contract.contractId) };
+function normalizeHealthPayload(payload: unknown): UiHealthEnvelope | null {
+  const unwrapped =
+    isRecord(payload) && "data" in payload ? payload.data : payload;
+
+  if (!isRecord(unwrapped)) {
+    return null;
   }
 
-  if (action.action === "open_platform_admin") {
-    const link = contract.links.find(
-      (current) => current.targetApp === "platform-admin",
-    );
-    return link ? buildActionRenderTarget(link) : {};
+  if (
+    typeof unwrapped.status === "string" &&
+    Array.isArray(unwrapped.degradedServices) &&
+    typeof unwrapped.lastCheckedAt === "string"
+  ) {
+    return {
+      status:
+        unwrapped.status === "healthy" ||
+        unwrapped.status === "degraded" ||
+        unwrapped.status === "down"
+          ? unwrapped.status
+          : "degraded",
+      degradedServices: unwrapped.degradedServices
+        .filter(isRecord)
+        .map((entry) => ({
+          service: String(entry.service ?? "service"),
+          impact: String(entry.impact ?? "degraded"),
+          severity: entry.severity === "critical" ? "critical" : "warning",
+        })),
+      lastCheckedAt: unwrapped.lastCheckedAt,
+    };
   }
 
-  if (action.action === "open_tenant_console") {
-    const link = contract.links.find(
-      (current) => current.targetApp === "tenant-console",
-    );
-    return link ? buildActionRenderTarget(link) : {};
+  if (typeof unwrapped.status === "string") {
+    const timestamp =
+      typeof unwrapped.timestamp === "string"
+        ? unwrapped.timestamp
+        : new Date().toISOString();
+    const service =
+      typeof unwrapped.service === "string" ? unwrapped.service : "api";
+    const normalizedStatus = normalizeLegacyHealthStatus(unwrapped.status);
+
+    return {
+      status: normalizedStatus,
+      degradedServices:
+        normalizedStatus === "healthy"
+          ? []
+          : [
+              {
+                service,
+                impact: `health=${unwrapped.status}`,
+                severity: normalizedStatus === "down" ? "critical" : "warning",
+              },
+            ],
+      lastCheckedAt: timestamp,
+    };
   }
 
-  return {};
+  return null;
 }
 
-function resolveRelationActionTarget(
-  action: ResourceActionDescriptor,
-  entry: PartnerRelationView,
-): ActionRenderTarget {
-  if (action.action === "open_platform_admin") {
-    const link =
-      entry.links.find(
-        (current: CrossAppResourceLink) =>
-          current.targetApp === "platform-admin",
-      ) ?? entry.links[0];
-    return link ? buildActionRenderTarget(link) : {};
-  }
+async function loadHealthEnvelope(): Promise<HealthLoadResult> {
+  const apiBaseUrl = process.env.DRTS_API_URL ?? "http://localhost:3001";
 
-  if (action.action === "open_tenant_console") {
-    const link = entry.links.find(
-      (current: CrossAppResourceLink) => current.targetApp === "tenant-console",
-    );
-    return link ? buildActionRenderTarget(link) : {};
-  }
+  try {
+    const response = await fetch(new URL("/api/health", apiBaseUrl), {
+      cache: "no-store",
+    });
 
-  return {};
-}
-
-function renderActionList<T>({
-  actions,
-  locale,
-  resolveTarget,
-  fallback,
-  keyPrefix,
-}: {
-  actions: ResourceActionDescriptor[];
-  locale: "en" | "zh";
-  resolveTarget: (
-    action: ResourceActionDescriptor,
-    record: T,
-  ) => ActionRenderTarget;
-  fallback: T;
-  keyPrefix: string;
-}) {
-  return actions.map((action) => {
-    const { href, target } = resolveTarget(action, fallback);
-    return (
-      <div key={`${keyPrefix}-${action.action}`}>
-        {renderActionDescriptor(action, locale, href, target)}
-      </div>
-    );
-  });
-}
-
-function renderEmptyState({
-  reason,
-  locale,
-  query,
-  nextAction,
-}: {
-  reason: ContractsEmptyReason;
-  locale: "en" | "zh";
-  query: string;
-  nextAction?: ResourceActionDescriptor | undefined;
-}) {
-  const config: Record<
-    Exclude<EmptyReason, "driver_not_eligible">,
-    {
-      tone: "neutral" | "warn" | "danger" | "info";
-      title: string;
-      body: string;
-      action?: ReactNode;
+    if (!response.ok) {
+      return {
+        health: {
+          status: "down",
+          degradedServices: [
+            {
+              service: "api",
+              impact: `status=${response.status}`,
+              severity: "critical",
+            },
+          ],
+          lastCheckedAt: new Date().toISOString(),
+        },
+        error: `health status ${response.status}`,
+      };
     }
-  > = {
-    no_data: {
-      tone: "neutral",
-      title: copyText(locale, "No contracts yet", "目前沒有合約資料"),
-      body: copyText(
-        locale,
-        "No contracts or partner relations are registered for the current scope.",
-        "目前範圍內尚未建立任何合約或合作夥伴關聯。",
-      ),
-    },
-    not_provisioned: {
-      tone: "warn",
-      title: copyText(
-        locale,
-        "Contracts module not provisioned",
-        "合約模組尚未開通",
-      ),
-      body: copyText(
-        locale,
-        "This tenant or partner stack is not provisioned for contract visibility in ops.",
-        "此 tenant 或 partner 堆疊尚未開通 ops 合約檢視。",
-      ),
-      action: (
-        <a
-          href={buildCrossAppUrl({
-            targetApp: "platform-admin",
-            route: "/partners",
-            resourceType: "partner_entry",
-            resourceId: "contracts",
-            openMode: "new_tab",
-            label: "Platform Admin",
-          })}
-          target="_blank"
-          rel="noreferrer"
-          style={buttonStyle({ emphasis: "secondary" })}
-        >
-          {copyText(locale, "Open Platform Admin", "到 Platform Admin 查看")}
-        </a>
-      ),
-    },
-    fetch_failed: {
-      tone: "danger",
-      title: copyText(locale, "Contracts load failed", "合約資料載入失敗"),
-      body: copyText(
-        locale,
-        "The registry endpoint did not return a usable payload. Retry before relying on this workspace.",
-        "合約註冊表端點沒有回傳可用資料，請先重試再依賴此工作面。",
-      ),
-      action: (
-        <a href="/contracts" style={buttonStyle({ emphasis: "primary" })}>
-          {copyText(locale, "Refresh", "重新整理")}
-        </a>
-      ),
-    },
-    permission_denied: {
-      tone: "danger",
-      title: copyText(locale, "Permission denied", "沒有檢視權限"),
-      body: copyText(
-        locale,
-        "The current ops role can see the shell but cannot read contract records.",
-        "目前 ops 角色可進入此頁，但沒有讀取合約記錄的權限。",
-      ),
-    },
-    external_unavailable: {
-      tone: "warn",
-      title: copyText(
-        locale,
-        "Partner dependency unavailable",
-        "合作夥伴依賴目前不可用",
-      ),
-      body: copyText(
-        locale,
-        "An external partner or adapter dependency is down, so relation details may be incomplete.",
-        "外部合作夥伴或 adapter 依賴異常，關聯資訊可能不完整。",
-      ),
-      action: (
-        <a
-          href={buildCrossAppUrl({
-            targetApp: "platform-admin",
-            route: "/adapter-registry",
-            resourceType: "adapter",
-            resourceId: "partner-dependency",
-            openMode: "new_tab",
-            label: "Adapter Registry",
-          })}
-          target="_blank"
-          rel="noreferrer"
-          style={buttonStyle({ emphasis: "secondary" })}
-        >
-          {copyText(locale, "Open adapter registry", "查看 adapter registry")}
-        </a>
-      ),
-    },
-    filtered_empty: {
-      tone: "info",
-      title: copyText(
-        locale,
-        "No match for current filters",
-        "目前條件查不到合約",
-      ),
-      body: query
-        ? copyText(
-            locale,
-            `No contract or partner relation matched “${query}”.`,
-            `沒有任何合約或合作夥伴關聯符合「${query}」。`,
-          )
-        : copyText(
-            locale,
-            "Current filters removed every result.",
-            "目前篩選條件把所有結果都排除了。",
-          ),
-      action:
-        nextAction?.action === "clear_filters" ? (
-          renderActionDescriptor(nextAction, locale, "/contracts")
-        ) : (
-          <a href="/contracts" style={buttonStyle({ emphasis: "secondary" })}>
-            {copyText(locale, "Clear filters", "清除篩選")}
-          </a>
-        ),
-    },
-  };
 
-  const state = config[reason]!;
-  const toneStyle = cardSurfaceStyle(state.tone);
-
-  return (
-    <div
-      style={{
-        ...toneStyle,
-        borderRadius: "16px",
-        padding: "20px",
-        display: "grid",
-        gap: "10px",
-      }}
-    >
-      <strong style={{ fontSize: "16px" }}>{state.title}</strong>
-      <div style={{ fontSize: "13px", lineHeight: 1.6 }}>{state.body}</div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-          flexWrap: "wrap",
-        }}
-      >
-        <span
-          style={{
-            fontSize: "12px",
-            textTransform: "uppercase",
-            letterSpacing: "0.08em",
-            opacity: 0.75,
-          }}
-        >
-          {reason}
-        </span>
-        {state.action}
-      </div>
-    </div>
-  );
+    const payload = await response.json();
+    return {
+      health: normalizeHealthPayload(payload),
+      error: null,
+    };
+  } catch (error) {
+    return {
+      health: {
+        status: "down",
+        degradedServices: [
+          {
+            service: "api",
+            impact:
+              error instanceof Error ? error.message : "health fetch failed",
+            severity: "critical",
+          },
+        ],
+        lastCheckedAt: new Date().toISOString(),
+      },
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
-function renderSectionNotice({
-  title,
-  body,
-  tone,
-  action,
-}: {
-  title: string;
-  body: string;
-  tone: "neutral" | "warn" | "danger" | "info";
-  action?: ReactNode;
-}) {
+function mergeHealthSignals(
+  baseHealth: UiHealthEnvelope | null,
+  supplementalServices: UiHealthEnvelope["degradedServices"],
+): UiHealthEnvelope | null {
+  if (!baseHealth && supplementalServices.length === 0) {
+    return null;
+  }
+
+  const degradedServices = [
+    ...(baseHealth?.degradedServices ?? []),
+    ...supplementalServices,
+  ];
+
+  if (degradedServices.length === 0 && baseHealth?.status === "healthy") {
+    return baseHealth;
+  }
+
+  const status =
+    baseHealth?.status === "down" ||
+    degradedServices.some((service) => service.severity === "critical")
+      ? "down"
+      : degradedServices.length > 0
+        ? "degraded"
+        : "healthy";
+
+  return {
+    status,
+    degradedServices,
+    lastCheckedAt: baseHealth?.lastCheckedAt ?? new Date().toISOString(),
+  };
+}
+
+function buildEmptyStateViewModel(
+  reason: EmptyReason,
+  locale: Locale,
+  filters: ContractFilters,
+  rawMessage: string | null,
+) {
+  switch (reason) {
+    case "not_provisioned":
+      return {
+        tone: "info" as const,
+        icon: "partners" as const,
+        title: copy(
+          locale,
+          "Contract registry not provisioned",
+          "合約主檔尚未開通",
+        ),
+        description: copy(
+          locale,
+          "Partner and fleet contracts are still bootstrapped from Platform Admin governance for this environment.",
+          "本環境的夥伴與車隊合約仍由 Platform Admin 治理面建立。",
+        ),
+        actionLabel: copy(locale, "Open partner governance", "開啟夥伴治理"),
+        actionHref: `${resolveAppOrigin("platform-admin")}/partners`,
+        actionNewTab: true,
+      };
+    case "fetch_failed":
+      return {
+        tone: "danger" as const,
+        icon: "warn" as const,
+        title: copy(locale, "Contract snapshot failed", "合約快照讀取失敗"),
+        description:
+          rawMessage ??
+          copy(
+            locale,
+            "The registry endpoint did not return a usable payload.",
+            "登記資料端點未回傳可用內容。",
+          ),
+        actionLabel: copy(locale, "Retry", "重新整理"),
+        actionHref: buildHref(filters, {}),
+        actionNewTab: false,
+      };
+    case "permission_denied":
+      return {
+        tone: "warn" as const,
+        icon: "users" as const,
+        title: copy(locale, "Contract scope denied", "無法存取合約範圍"),
+        description: copy(
+          locale,
+          "This actor can enter the shell but lacks contract registry read scope.",
+          "目前帳號可進入殼層，但沒有合約登記讀取權限。",
+        ),
+        actionLabel: copy(locale, "Open ops dashboard", "返回儀表板"),
+        actionHref: "/dashboard",
+        actionNewTab: false,
+      };
+    case "external_unavailable":
+      return {
+        tone: "warn" as const,
+        icon: "health" as const,
+        title: copy(locale, "Partner directory unavailable", "夥伴目錄不可用"),
+        description: copy(
+          locale,
+          "Partner-entry augmentation is degraded. Counterparty names may be missing; use partner governance for the latest relationship state.",
+          "夥伴渠道補充資料降級，交易對手名稱可能缺漏；請改用夥伴治理確認最新關係狀態。",
+        ),
+        actionLabel: copy(locale, "Open platform admin", "開啟 Platform Admin"),
+        actionHref: `${resolveAppOrigin("platform-admin")}/partners`,
+        actionNewTab: true,
+      };
+    case "filtered_empty":
+      return {
+        tone: "accent" as const,
+        icon: "filter" as const,
+        title: copy(
+          locale,
+          "No contracts match this slice",
+          "目前條件沒有符合的合約",
+        ),
+        description: copy(
+          locale,
+          "Widen status, kind, or expiring filters to restore results.",
+          "放寬狀態、類型或即將到期條件即可恢復結果。",
+        ),
+        actionLabel: copy(locale, "Clear filters", "清除條件"),
+        actionHref: "/contracts",
+        actionNewTab: false,
+      };
+    case "no_data":
+    default:
+      return {
+        tone: "neutral" as const,
+        icon: "contracts" as const,
+        title: copy(locale, "No contracts registered", "尚未登記合約"),
+        description: copy(
+          locale,
+          "The registry is healthy but there are no contract records in this environment yet.",
+          "登記資料健康，但此環境目前還沒有任何合約紀錄。",
+        ),
+        actionLabel: copy(locale, "Open revenue review", "前往收益審視"),
+        actionHref: "/revenue",
+        actionNewTab: false,
+      };
+  }
+}
+
+function renderAction(
+  action: ResourceActionDescriptor,
+  row: ContractRow,
+  locale: Locale,
+  key: string,
+): ReactNode {
+  const label = actionLabel(action, locale);
+  const href = action.enabled ? buildActionHref(action, row) : null;
+  const reason = actionReason(action, locale);
+
   return (
-    <div
-      style={{
-        ...cardSurfaceStyle(tone),
-        borderRadius: "14px",
-        padding: "16px",
-        display: "grid",
-        gap: "8px",
-      }}
-    >
-      <strong style={{ fontSize: "14px" }}>{title}</strong>
-      <div style={{ fontSize: "13px", lineHeight: 1.55 }}>{body}</div>
-      {action ? (
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          {action}
-        </div>
+    <div key={key} style={{ display: "grid", gap: 4 }}>
+      {href ? (
+        <Link
+          href={href}
+          target={isActionNewTab(action, row) ? "_blank" : undefined}
+          rel={isActionNewTab(action, row) ? "noreferrer" : undefined}
+          style={linkButtonStyle(actionTone(action))}
+        >
+          {label}
+          {isActionNewTab(action, row) ? (
+            <CanvasIcon name="ext" size={11} />
+          ) : null}
+        </Link>
+      ) : (
+        <span
+          style={linkButtonStyle(actionTone(action), !action.enabled)}
+          title={reason ?? undefined}
+        >
+          {label}
+        </span>
+      )}
+      <span style={tinyMetaStyle(actionTone(action))}>
+        {copy(locale, `risk:${action.riskLevel}`, `風險:${action.riskLevel}`)}
+        {action.requiresReason
+          ? copy(locale, " · reason required", " · 需填原因")
+          : ""}
+      </span>
+      {!action.enabled && reason ? (
+        <span style={mutedTextStyle}>{reason}</span>
       ) : null}
     </div>
   );
+}
+
+function buildColumns(locale: Locale): CanvasTableColumn<ContractRow>[] {
+  return [
+    {
+      h: copy(locale, "CONTRACT", "合約"),
+      w: 200,
+      r: (row) => (
+        <div style={stackStyle}>
+          <span style={{ ...primaryTextStyle, ...monoTextStyle }}>
+            {row.contractId}
+          </span>
+          <span style={secondaryTextStyle}>{row.serviceScope}</span>
+          <span style={{ ...mutedTextStyle, ...monoTextStyle }}>
+            {row.operatingAreaId ?? copy(locale, "no area", "無營運區")}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: copy(locale, "KIND", "類型"),
+      w: 130,
+      r: (row) => (
+        <div style={stackStyle}>
+          <span style={primaryTextStyle}>{row.kindLabel}</span>
+          <span style={{ ...secondaryTextStyle, ...monoTextStyle }}>
+            {row.vehicleId}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: copy(locale, "COUNTERPARTY", "交易對手"),
+      w: 220,
+      r: (row) => (
+        <div style={stackStyle}>
+          <span style={primaryTextStyle}>{row.partnerDisplayName}</span>
+          <span style={{ ...secondaryTextStyle, ...monoTextStyle }}>
+            {row.partnerId} · {formatOpsCodeLabel(locale, row.partnerType)}
+          </span>
+          {row.partnerEntrySlug ? (
+            <span style={mutedTextStyle}>{row.partnerEntrySlug}</span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      h: copy(locale, "TERM", "合約期間"),
+      w: 210,
+      r: (row) => (
+        <div style={stackStyle}>
+          <span style={{ ...primaryTextStyle, ...monoTextStyle }}>
+            {row.termLabel}
+          </span>
+          <span
+            style={{
+              ...secondaryTextStyle,
+              color: row.expiringSoon
+                ? theme.warn
+                : row.expired
+                  ? theme.danger
+                  : theme.textDim,
+            }}
+          >
+            {row.expired
+              ? copy(locale, "Expired", "已到期")
+              : row.daysToExpiry === null
+                ? copy(locale, "Open-ended", "無到期日")
+                : row.expiringSoon
+                  ? copy(
+                      locale,
+                      `Expires in ${row.daysToExpiry}d`,
+                      `${row.daysToExpiry} 天後到期`,
+                    )
+                  : copy(
+                      locale,
+                      `${row.daysToExpiry}d remaining`,
+                      `剩 ${row.daysToExpiry} 天`,
+                    )}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: copy(locale, "STATUS / TERMS", "狀態 / 條款"),
+      w: 230,
+      r: (row) => (
+        <div style={stackStyle}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <Pill theme={theme} tone={row.statusTone} dot>
+              {row.statusLabel}
+            </Pill>
+            <Pill theme={theme} tone="neutral">
+              {row.lifecycleLabel}
+            </Pill>
+          </div>
+          <span style={secondaryTextStyle}>{row.keyTermsLabel}</span>
+        </div>
+      ),
+    },
+    {
+      h: copy(locale, "ACTIONS", "操作"),
+      w: 220,
+      r: (row) => (
+        <div style={actionStackStyle}>
+          {row.availableActions
+            .slice(0, 2)
+            .map((action, index) =>
+              renderAction(
+                action,
+                row,
+                locale,
+                `${row.contractId}-${action.action}-${index}`,
+              ),
+            )}
+          {row.crossAppLinks.slice(0, 1).map((link) => (
+            <Link
+              key={`${row.contractId}-${link.label}`}
+              href={buildCrossAppHref(link)}
+              target={link.openMode === "new_tab" ? "_blank" : undefined}
+              rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
+              style={linkButtonStyle("info")}
+            >
+              {link.label}
+              {link.openMode === "new_tab" ? (
+                <CanvasIcon name="ext" size={11} />
+              ) : null}
+            </Link>
+          ))}
+        </div>
+      ),
+    },
+  ];
 }
 
 export default async function ContractsPage({
@@ -643,880 +1291,801 @@ export default async function ContractsPage({
 }: ContractsPageProps) {
   const resolvedSearchParams = await (searchParams ??
     Promise.resolve({} as Record<string, string | string[] | undefined>));
-  const query = firstParam(resolvedSearchParams.q)?.trim() ?? "";
-  const emptyReasonOverride = parseEmptyReason(
-    firstParam(resolvedSearchParams.emptyReason),
-  );
+  const filters = resolveFilters(resolvedSearchParams);
   const [client, locale] = await Promise.all([
     getServerOpsClient(),
     getServerLocale(),
   ]);
+  const requestStartedAt = new Date().toISOString();
 
-  const [contractsResult, partnerEntriesResult] = await Promise.allSettled([
-    client.listContracts(),
-    client.listPartnerEntries(),
-  ] as const);
-  const contractsError =
-    contractsResult.status === "rejected"
-      ? contractsResult.reason instanceof Error
-        ? contractsResult.reason.message
-        : t("common.unknown", locale)
-      : null;
-  const partnerEntriesError =
-    partnerEntriesResult.status === "rejected"
-      ? partnerEntriesResult.reason instanceof Error
-        ? partnerEntriesResult.reason.message
-        : t("common.unknown", locale)
-      : null;
+  const [
+    contractsResult,
+    partnerEntriesResult,
+    reviewQueueResult,
+    healthResult,
+  ] = await Promise.all([
+    loadWithError(() =>
+      client.get<ContractListPayload>("/api/regulatory-registry/contracts"),
+    ),
+    loadWithError(() => client.listPartnerEntries()),
+    loadWithError(() => client.listPartnerEligibilityReviewQueue()),
+    loadHealthEnvelope(),
+  ]);
 
-  const contracts =
-    contractsResult.status === "fulfilled"
-      ? (contractsResult.value as RuntimeVehicleContractRecord[])
-      : [];
+  const contractPayload = normalizeContractPayload(
+    contractsResult.data,
+    requestStartedAt,
+  );
   const partnerEntries =
-    partnerEntriesResult.status === "fulfilled"
-      ? (partnerEntriesResult.value as RuntimePartnerChannelEntryRecord[])
-      : [];
+    partnerEntriesResult.data ?? ([] as PartnerChannelEntryRecord[]);
+  const reviewQueue =
+    reviewQueueResult.data ?? ([] as PartnerEligibilityReviewQueueItem[]);
 
-  const partnerEntriesByPartnerId = new Map<
-    string,
-    RuntimePartnerChannelEntryRecord[]
-  >();
-  for (const entry of partnerEntries) {
-    const bucket = partnerEntriesByPartnerId.get(entry.partnerId) ?? [];
-    bucket.push(entry);
-    partnerEntriesByPartnerId.set(entry.partnerId, bucket);
+  const degradedServices: UiHealthEnvelope["degradedServices"] = [];
+  if (contractsResult.error) {
+    degradedServices.push({
+      service: "contract_registry",
+      impact: contractsResult.error,
+      severity: "critical",
+    });
+  }
+  if (partnerEntriesResult.error) {
+    degradedServices.push({
+      service: "partner_directory",
+      impact: partnerEntriesResult.error,
+      severity: "warning",
+    });
+  }
+  if (reviewQueueResult.error) {
+    degradedServices.push({
+      service: "partner_eligibility_review",
+      impact: reviewQueueResult.error,
+      severity: "warning",
+    });
+  }
+  if (healthResult.error) {
+    degradedServices.push({
+      service: "api",
+      impact: healthResult.error,
+      severity: "critical",
+    });
   }
 
-  const contractViews: ContractListView[] = contracts.map((contract) => {
-    const linkedEntries =
-      partnerEntriesByPartnerId.get(contract.partnerId) ?? [];
-    const linkedEntry = linkedEntries[0];
-    const platformLink: CrossAppResourceLink | null = linkedEntry
-      ? {
-          targetApp: "platform-admin",
-          route: `/partners/${encodeURIComponent(linkedEntry.entrySlug)}`,
-          resourceType: "partner_entry",
-          resourceId: linkedEntry.entrySlug,
-          openMode: "new_tab",
-          label: copyText(locale, "Partner relation", "合作夥伴關聯"),
-        }
-      : null;
-    const tenantLink: CrossAppResourceLink | null =
-      linkedEntry && linkedEntry.tenantId
-        ? {
-            targetApp: "tenant-console",
-            route: `/tenants/${encodeURIComponent(linkedEntry.tenantId)}`,
-            resourceType: "tenant",
-            resourceId: linkedEntry.tenantId,
-            openMode: "new_tab",
-            label: copyText(
-              locale,
-              "Tenant contract context",
-              "Tenant 合約上下文",
-            ),
-          }
-        : null;
+  const health = mergeHealthSignals(
+    contractPayload.health ?? healthResult.health,
+    degradedServices,
+  );
+
+  const partnerEntryById = new Map<string, PartnerChannelEntryRecord>();
+  const partnerEntryBySlug = new Map<string, PartnerChannelEntryRecord>();
+  for (const entry of partnerEntries) {
+    partnerEntryById.set(entry.partnerId, entry);
+    partnerEntryBySlug.set(entry.entrySlug, entry);
+  }
+
+  const manualReviewCount = reviewQueue.filter(
+    (item) => item.verificationStatus === "manual_review",
+  ).length;
+
+  const rows: ContractRow[] = contractPayload.items.map((contract) => {
+    const kind = deriveKind(contract);
+    const partnerEntry =
+      partnerEntryById.get(contract.partnerId) ??
+      (contract.partnerEntrySlug
+        ? partnerEntryBySlug.get(contract.partnerEntrySlug)
+        : undefined);
+    const daysToExpiry = daysBetween(requestStartedAt, contract.endAt);
+    const expired =
+      daysToExpiry !== null &&
+      daysToExpiry < 0 &&
+      contract.status !== "terminated";
     const expiringSoon =
-      contract.status === "active" &&
-      daysUntil(contract.endAt) <= 45 &&
-      daysUntil(contract.endAt) >= 0;
-    return {
-      ...contract,
-      kindLabel: formatOpsCodeLabel(locale, contract.contractType),
-      counterparties: linkedEntry
-        ? `${contract.partnerId} · ${linkedEntry.displayName}`
-        : contract.partnerId,
-      keyTerms: [
-        contract.serviceScope,
-        linkedEntry
-          ? `${linkedEntry.programId} · ${formatOpsCodeLabel(
-              locale,
-              linkedEntry.eligibilityMode,
-            )}`
-          : formatOpsCodeLabel(locale, contract.partnerType),
-      ].join(" · "),
+      !expired &&
+      daysToExpiry !== null &&
+      daysToExpiry >= 0 &&
+      daysToExpiry <= EXPIRING_SOON_DAYS &&
+      contract.status === "active";
+    const status = deriveContractStatus(
+      contract,
       expiringSoon,
+      expired,
+      locale,
+    );
+    const crossAppLinks = synthesizeCrossAppLinks(contract, kind.key, locale);
+
+    const provisionalRow = {
+      contractId: contract.contractId,
+      serviceScope:
+        contract.serviceScope ||
+        formatOpsCodeLabel(locale, contract.contractType),
+      operatingAreaId: contract.operatingAreaId,
+      kindKey: kind.key,
+      kindLabel: kind.label(locale),
+      partnerId: contract.partnerId,
+      partnerDisplayName:
+        contract.partnerDisplayName ??
+        partnerEntry?.displayName ??
+        contract.partnerId,
+      partnerType: contract.partnerType,
+      partnerEntrySlug:
+        contract.partnerEntrySlug ?? partnerEntry?.entrySlug ?? null,
+      vehicleId: contract.vehicleId,
+      statusKey: status.key,
+      statusLabel: status.label,
+      statusTone: status.tone,
+      lifecycleLabel: formatOpsCodeLabel(locale, contract.lifecycleStatus),
+      startAt: contract.startAt,
+      endAt: contract.endAt,
+      termLabel: `${formatDate(locale, contract.startAt)} → ${formatDate(locale, contract.endAt)}`,
+      effectiveFromLabel: formatDate(locale, contract.startAt),
+      effectiveToLabel: formatDate(locale, contract.endAt),
+      daysToExpiry,
+      expiringSoon,
+      expired,
+      keyTermsLabel: deriveKeyTerms(contract, partnerEntry, locale),
+      crossAppLinks,
+    };
+
+    const nextRow: ContractRow = {
+      ...provisionalRow,
       availableActions:
         contract.availableActions && contract.availableActions.length > 0
           ? contract.availableActions
-          : [
-              {
-                action: "open_contract_detail",
-                enabled: true,
-                riskLevel: "low",
-              },
-            ],
-      links: [platformLink, tenantLink].filter(
-        (link): link is CrossAppResourceLink => link !== null,
-      ),
+          : synthesizeAvailableActions(contract, {
+              kindKey: kind.key,
+              crossAppLinks,
+            }),
     };
+
+    return nextRow;
   });
 
-  const partnerRelationViews: PartnerRelationView[] = partnerEntries.map(
-    (entry) => {
-      const linkedContracts = contractViews.filter(
-        (contract) => contract.partnerId === entry.partnerId,
-      ).length;
-      const platformLink: CrossAppResourceLink = {
-        targetApp: "platform-admin",
-        route: `/partners/${encodeURIComponent(entry.entrySlug)}`,
-        resourceType: "partner_entry",
-        resourceId: entry.entrySlug,
-        openMode: "new_tab",
-        label: copyText(locale, "Partner relation", "合作夥伴關聯"),
-      };
-      const tenantLink: CrossAppResourceLink = {
-        targetApp: "tenant-console",
-        route: `/tenants/${encodeURIComponent(entry.tenantId)}`,
-        resourceType: "tenant",
-        resourceId: entry.tenantId,
-        openMode: "new_tab",
-        label: copyText(locale, "Tenant SLA", "Tenant SLA"),
-      };
-      const fallbackActions: ResourceActionDescriptor[] = [
-        {
-          action: "open_platform_admin",
-          enabled: true,
-          riskLevel: "low",
-        },
-        ...(entry.tenantId
-          ? [
-              {
-                action: "open_tenant_console",
-                enabled: true,
-                riskLevel: "low",
-              } satisfies ResourceActionDescriptor,
-            ]
-          : [
-              {
-                action: "open_tenant_console",
-                enabled: false,
-                disabledReasonCode: "tenant_missing",
-                riskLevel: "low",
-              } satisfies ResourceActionDescriptor,
-            ]),
-      ];
-
-      return {
-        ...entry,
-        linkedContracts,
-        availableActions:
-          entry.availableActions && entry.availableActions.length > 0
-            ? entry.availableActions
-            : fallbackActions,
-        links:
-          entry.ownerLinks && entry.ownerLinks.length > 0
-            ? entry.ownerLinks
-            : [platformLink, tenantLink],
-      };
-    },
+  const typeOptions = Array.from(new Set(rows.map((row) => row.kindKey))).sort(
+    (left, right) => left.localeCompare(right),
   );
 
-  const normalizedQuery = query.toLowerCase();
-  const filteredContracts = contractViews.filter((contract) => {
-    if (!normalizedQuery) return true;
-    return [
-      contract.contractId,
-      contract.vehicleId,
-      contract.partnerId,
-      contract.serviceScope,
-      contract.counterparties,
-      contract.kindLabel,
-      contract.keyTerms,
-      contract.operatingAreaId ?? "",
+  const filteredRows = rows.filter((row) => {
+    if (filters.tab === "expiring" && !(row.expiringSoon || row.expired)) {
+      return false;
+    }
+    if (
+      filters.tab === "partner" &&
+      row.kindKey !== "partner" &&
+      row.kindKey !== "forwarder"
+    ) {
+      return false;
+    }
+    if (filters.status !== "all" && row.statusKey !== filters.status) {
+      return false;
+    }
+    if (filters.type !== "all" && row.kindKey !== filters.type) {
+      return false;
+    }
+    if (filters.expiring === "yes" && !(row.expiringSoon || row.expired)) {
+      return false;
+    }
+    if (filters.expiring === "no" && (row.expiringSoon || row.expired)) {
+      return false;
+    }
+
+    if (!filters.q) {
+      return true;
+    }
+
+    const haystack = [
+      row.contractId,
+      row.serviceScope,
+      row.partnerId,
+      row.partnerDisplayName,
+      row.partnerEntrySlug ?? "",
+      row.vehicleId,
+      row.kindLabel,
+      row.statusLabel,
     ]
       .join(" ")
-      .toLowerCase()
-      .includes(normalizedQuery);
-  });
-  const filteredRelations = partnerRelationViews.filter((entry) => {
-    if (!normalizedQuery) return true;
-    return [
-      entry.entrySlug,
-      entry.displayName,
-      entry.programId,
-      entry.tenantId,
-      entry.partnerId,
-      entry.status,
-      entry.eligibilityMode,
-    ]
-      .join(" ")
-      .toLowerCase()
-      .includes(normalizedQuery);
+      .toLowerCase();
+
+    return haystack.includes(filters.q.toLowerCase());
   });
 
-  const effectiveUpdatedAt =
-    [
-      ...contractViews.map((contract) => contract.updatedAt),
-      ...partnerRelationViews.map((entry) => entry.updatedAt),
-    ].sort((left, right) => right.localeCompare(left))[0] ?? null;
-  const refreshMetadata = buildRefreshMetadata(effectiveUpdatedAt);
-  if (contractsError || partnerEntriesError) {
-    refreshMetadata.dataFreshness = "degraded";
+  const tabCounts = {
+    all: rows.length,
+    expiring: rows.filter((row) => row.expiringSoon || row.expired).length,
+    partner: rows.filter(
+      (row) => row.kindKey === "partner" || row.kindKey === "forwarder",
+    ).length,
+  };
+
+  const activeCount = rows.filter((row) => row.statusKey === "active").length;
+  const expiringCount = rows.filter((row) => row.expiringSoon).length;
+
+  let emptyReason = filters.emptyReason;
+  if (!emptyReason && filteredRows.length === 0) {
+    if (contractsResult.error) {
+      emptyReason = "fetch_failed";
+    } else if (
+      contractPayload.emptyState?.reason &&
+      isEmptyReason(contractPayload.emptyState.reason)
+    ) {
+      emptyReason = contractPayload.emptyState.reason;
+    } else if (hasActiveFilters(filters)) {
+      emptyReason = "filtered_empty";
+    } else if (
+      health &&
+      health.status !== "healthy" &&
+      health.degradedServices.some(
+        (service: UiHealthEnvelope["degradedServices"][number]) =>
+          service.service === "partner_directory",
+      )
+    ) {
+      emptyReason = "external_unavailable";
+    } else {
+      emptyReason = "no_data";
+    }
   }
-  const contractsSectionEmptyState: SectionEmptyState | null =
-    contractsError ||
-    (contracts.length === 0 && partnerRelationViews.length > 0)
-      ? {
-          reason: contractsError
-            ? classifyLoadError(contractsError)
-            : "no_data",
-        }
-      : query && filteredContracts.length === 0
-        ? {
-            reason: "filtered_empty",
-            nextAction: {
-              action: "clear_filters",
-              enabled: true,
-              riskLevel: "low",
-            },
-          }
-        : null;
-  const partnerRelationsSectionEmptyState: SectionEmptyState | null =
-    partnerEntriesError ||
-    (partnerRelationViews.length === 0 && contracts.length > 0)
-      ? {
-          reason: partnerEntriesError
-            ? classifyLoadError(partnerEntriesError)
-            : "no_data",
-        }
-      : query && filteredRelations.length === 0
-        ? {
-            reason: "filtered_empty",
-            nextAction: {
-              action: "clear_filters",
-              enabled: true,
-              riskLevel: "low",
-            },
-          }
-        : null;
-  const resolvedEmptyReason: ContractsEmptyReason | null =
-    emptyReasonOverride ??
-    (contractsError && partnerEntriesError
-      ? classifyLoadError(contractsError)
-      : filteredContracts.length === 0 && filteredRelations.length === 0
-        ? query
-          ? "filtered_empty"
-          : "no_data"
-        : null);
-  const emptyState: ContractsEmptyStateEnvelope | null = resolvedEmptyReason
-    ? resolvedEmptyReason === "filtered_empty"
-      ? {
-          reason: resolvedEmptyReason,
-          messageCode: `contracts.${resolvedEmptyReason}`,
-          nextAction: {
-            action: "clear_filters",
-            enabled: true,
-            riskLevel: "low",
-          },
-        }
-      : {
-          reason: resolvedEmptyReason,
-          messageCode: `contracts.${resolvedEmptyReason}`,
-        }
+
+  if (filters.emptyReason && filteredRows.length > 0) {
+    emptyReason = filters.emptyReason;
+  }
+
+  const displayedRows = emptyReason ? [] : filteredRows;
+  const emptyView = emptyReason
+    ? buildEmptyStateViewModel(
+        emptyReason,
+        locale,
+        filters,
+        contractsResult.error ??
+          (contractPayload.emptyState?.messageCode
+            ? formatOpsCodeLabel(locale, contractPayload.emptyState.messageCode)
+            : null),
+      )
     : null;
 
-  const searchAction: ResourceActionDescriptor = {
-    action: "search",
-    enabled: true,
-    riskLevel: "low",
-  };
-  const expiringSoonCount = contractViews.filter(
-    (contract) => contract.expiringSoon,
-  ).length;
-  const activeContracts = contractViews.filter(
-    (contract) => contract.status === "active",
-  ).length;
+  const refresh =
+    contractPayload.refresh ?? synthesizeRefreshMetadata(requestStartedAt);
+  const refreshHref = buildHref(filters, {});
 
-  const staleTone =
-    refreshMetadata.dataFreshness === "degraded"
-      ? "danger"
-      : refreshMetadata.dataFreshness === "stale"
-        ? "warn"
-        : "info";
+  const tabs = [
+    {
+      key: "all" as const,
+      node: (
+        <Link
+          href={buildHref(filters, { tab: "all" })}
+          style={{
+            color: theme.text,
+            textDecoration: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          {copy(locale, "All", "全部")}
+          <span style={tinyMetaStyle()}>{tabCounts.all}</span>
+        </Link>
+      ),
+    },
+    {
+      key: "expiring" as const,
+      node: (
+        <Link
+          href={buildHref(filters, { tab: "expiring" })}
+          style={{
+            color: theme.text,
+            textDecoration: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          {copy(locale, "Expiring", "即將到期")}
+          <span style={tinyMetaStyle("warn")}>{tabCounts.expiring}</span>
+        </Link>
+      ),
+    },
+    {
+      key: "partner" as const,
+      node: (
+        <Link
+          href={buildHref(filters, { tab: "partner" })}
+          style={{
+            color: theme.text,
+            textDecoration: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          {copy(locale, "Partner programs", "夥伴方案")}
+          <span style={tinyMetaStyle("info")}>{tabCounts.partner}</span>
+        </Link>
+      ),
+    },
+  ];
+  const defaultTab = tabs[0]!;
+  const activeTab = (tabs.find((tab) => tab.key === filters.tab) ?? defaultTab)
+    .node;
+
+  const columns = buildColumns(locale);
+
+  const partnerRelationRows: PartnerRelationRow[] = partnerEntries
+    .slice(0, 8)
+    .map((entry) => ({
+      partnerId: entry.partnerId,
+      displayName: entry.displayName,
+      entrySlug: entry.entrySlug,
+      programId: entry.programId,
+      partnerTypeLabel: formatOpsCodeLabel(locale, entry.partnerType),
+      eligibilityLabel: formatOpsCodeLabel(locale, entry.eligibilityMode),
+      authLabel: formatOpsCodeLabel(locale, entry.authMode),
+      statusLabel: formatOpsCodeLabel(locale, entry.status),
+      statusTone:
+        entry.status === "active" && entry.activeFlag
+          ? ("success" as CanvasTone)
+          : entry.status === "revoked"
+            ? ("danger" as CanvasTone)
+            : ("warn" as CanvasTone),
+      governanceHref: `${resolveAppOrigin("platform-admin")}/partners?partnerId=${encodeURIComponent(entry.partnerId)}`,
+    }));
 
   return (
     <>
       <PageHeader
-        eyebrow={copyText(locale, "Registry", "主資料")}
-        title={copyText(locale, "Contracts", "合約")}
-        subtitle={copyText(
+        theme={theme}
+        title={copy(locale, "Contracts", "合約")}
+        subtitle={copy(
           locale,
-          "Ops read-only workspace for dispatch and billing contract context.",
-          "ops 唯讀工作面，用來確認派遣與結算的合約上下文。",
+          "ops read-only · mutation runs via Platform Admin / Tenant governance",
+          "ops 只讀；mutation 走 Platform Admin / Tenant Governance",
         )}
+        tabs={tabs.map((tab) => tab.node)}
+        activeTab={activeTab}
         actions={
-          <form
-            action="/contracts"
-            method="get"
-            style={{
-              display: "flex",
-              gap: "8px",
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
-            <input
-              type="search"
-              name="q"
-              defaultValue={query}
-              placeholder={copyText(
-                locale,
-                "Search contract, partner, tenant…",
-                "查找合約、合作夥伴、tenant…",
-              )}
-              style={{
-                minWidth: "260px",
-                borderRadius: "999px",
-                border: "1px solid #fda4af",
-                background: "#ffffff",
-                padding: "9px 14px",
-                fontSize: "13px",
-              }}
-            />
-            <button type="submit" style={buttonStyle({ emphasis: "primary" })}>
-              {copyText(locale, "Search", "查找")}
-            </button>
-            {query ? (
-              <a href="/contracts" style={buttonStyle({ emphasis: "ghost" })}>
-                {copyText(locale, "Clear", "清除")}
-              </a>
-            ) : null}
-          </form>
+          <>
+            <Pill
+              theme={theme}
+              tone={refresh.dataFreshness === "fresh" ? "success" : "warn"}
+            >
+              {refreshBadgeLabel(refresh, locale)}
+            </Pill>
+            <a href={refreshHref} style={buttonStyle("secondary")}>
+              <CanvasIcon name="arrow" size={12} />
+              {copy(locale, "Refresh", "重新整理")}
+            </a>
+          </>
         }
       />
 
-      <div
-        style={{
-          ...cardSurfaceStyle(staleTone),
-          borderRadius: "16px",
-          padding: "16px 18px",
-          marginBottom: "18px",
-          display: "grid",
-          gap: "6px",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: "16px",
-            flexWrap: "wrap",
-          }}
-        >
-          <strong>
-            {copyText(
+      <div style={pageBodyStyle}>
+        {health && health.status !== "healthy" ? (
+          <Banner
+            theme={theme}
+            tone={health.status === "down" ? "danger" : "warn"}
+            icon={health.status === "down" ? "warn" : "health"}
+            title={copy(
               locale,
-              `Refresh tier ${REFRESH_TIER.toUpperCase()} · 15s`,
-              `Refresh tier ${REFRESH_TIER.toUpperCase()} · 15 秒`,
+              "Contracts page is running degraded",
+              "合約頁面目前為降級模式",
             )}
-          </strong>
-          <div style={{ fontSize: "12.5px" }}>
-            {copyText(locale, "Generated at", "生成時間")}{" "}
-            {formatDateTime(refreshMetadata.generatedAt, locale)}
-          </div>
-        </div>
-        <div style={{ fontSize: "13px", lineHeight: 1.55 }}>
-          {describeFreshness(refreshMetadata, locale)}
-        </div>
-      </div>
-
-      {contractsError || partnerEntriesError ? (
-        <div
-          style={{
-            ...cardSurfaceStyle("danger"),
-            borderRadius: "14px",
-            padding: "14px 16px",
-            marginBottom: "18px",
-            display: "grid",
-            gap: "6px",
-            fontSize: "13px",
-            lineHeight: 1.6,
-          }}
-        >
-          <strong>
-            {copyText(
+            body={copy(
               locale,
-              "Partial contract context is degraded",
-              "部分合約上下文目前降級",
+              `${
+                health.degradedServices
+                  .map(
+                    (service: UiHealthEnvelope["degradedServices"][number]) =>
+                      `${service.service}: ${service.impact}`,
+                  )
+                  .join(" · ") || "health unknown"
+              } · checked ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
+              `${
+                health.degradedServices
+                  .map(
+                    (service: UiHealthEnvelope["degradedServices"][number]) =>
+                      `${service.service}: ${service.impact}`,
+                  )
+                  .join(" · ") || "health unknown"
+              } · 檢查時間 ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
             )}
-          </strong>
-          {contractsError ? (
-            <div>
-              {copyText(locale, "Contracts source:", "合約來源：")}{" "}
-              {contractsError}
-            </div>
-          ) : null}
-          {partnerEntriesError ? (
-            <div>
-              {copyText(locale, "Partner relations source:", "合作關聯來源：")}{" "}
-              {partnerEntriesError}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+          />
+        ) : null}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-          gap: "12px",
-          marginBottom: "18px",
-        }}
-      >
-        <StatCard
-          label={copyText(locale, "Active contracts", "生效中合約")}
-          value={activeContracts}
-          sub={copyText(
-            locale,
-            "Current billing/dispatch baseline",
-            "目前派遣與結算基準",
-          )}
-          accent="#dc2626"
-        />
-        <StatCard
-          label={copyText(locale, "Expiring soon", "即將到期")}
-          value={expiringSoonCount}
-          sub={copyText(locale, "Within 45 days", "45 天內到期")}
-          accent="#ea580c"
-        />
-        <StatCard
-          label={copyText(locale, "Partner relations", "合作關聯")}
-          value={partnerRelationViews.length}
-          sub={copyText(
-            locale,
-            "Entry slug + program visibility",
-            "含 entry slug 與 program 視圖",
-          )}
-          accent="#2563eb"
-        />
-        <StatCard
-          label={copyText(locale, "Contracts visible", "可見合約")}
-          value={filteredContracts.length}
-          sub={copyText(
-            locale,
-            "After current search and filters",
-            "套用目前搜尋與篩選後",
-          )}
-          accent="#b45309"
-        />
-      </div>
-
-      {emptyState ? (
-        renderEmptyState(
-          emptyState.nextAction
-            ? {
-                reason: emptyState.reason,
-                locale,
-                query,
-                nextAction: emptyState.nextAction,
-              }
-            : {
-                reason: emptyState.reason,
-                locale,
-                query,
-              },
-        )
-      ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1.65fr) minmax(320px, 0.95fr)",
-            gap: "18px",
-            alignItems: "start",
-          }}
-        >
-          <DataViewCard
-            title={copyText(locale, "Contracts registry", "合約清單")}
-            subtitle={copyText(
+        {refresh.dataFreshness !== "fresh" ? (
+          <Banner
+            theme={theme}
+            tone={refresh.dataFreshness === "degraded" ? "warn" : "info"}
+            icon={refresh.dataFreshness === "degraded" ? "warn" : "clock"}
+            title={copy(
               locale,
-              `${filteredContracts.length} visible contract(s) · list view follows availableActions and T3 refresh.`,
-              `目前可見 ${filteredContracts.length} 份合約 · 以 availableActions 與 T3 refresh 為準。`,
+              "Snapshot is not fresh",
+              "目前顯示的快照非最新",
             )}
-            tone="info"
-            density="compact"
-            summary={copyText(
+            body={refreshBody(refresh, locale)}
+          />
+        ) : null}
+
+        {expiringCount > 0 ? (
+          <Banner
+            theme={theme}
+            tone="warn"
+            icon="clock"
+            title={copy(
               locale,
-              "Must-show: id, type, parties, effective window, status, key terms summary. Expiring contracts stay visually urgent.",
-              "必備欄位：id、類型、雙方、效期、狀態、關鍵條款摘要；即將到期要保留明顯提醒。",
+              "Contracts approaching expiry",
+              "有合約即將到期",
+            )}
+            body={copy(
+              locale,
+              `${expiringCount} contract(s) expire within ${EXPIRING_SOON_DAYS} days. Confirm renewal terms with Platform Admin before dispatch / billing impact.`,
+              `${expiringCount} 份合約將於 ${EXPIRING_SOON_DAYS} 天內到期；請於影響派車 / 帳務前，向 Platform Admin 確認續約條款。`,
             )}
             actions={
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  flexWrap: "wrap",
-                }}
+              <Link
+                href={buildHref(filters, { tab: "expiring" })}
+                style={linkButtonStyle("warn")}
               >
-                <span
-                  style={{
-                    borderRadius: "999px",
-                    border: "1px solid #fecaca",
-                    background: "#fff7f7",
-                    color: "#b91c1c",
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    letterSpacing: "0.08em",
-                    padding: "6px 10px",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {copyText(locale, "ops read-only", "ops 唯讀")}
-                </span>
-                {renderActionDescriptor(
-                  searchAction,
-                  locale,
-                  query
-                    ? `/contracts?q=${encodeURIComponent(query)}`
-                    : "/contracts",
-                )}
-              </div>
+                {copy(locale, "View expiring", "檢視即將到期")}
+              </Link>
             }
-            footer={copyText(
-              locale,
-              "Open detail stays in ops. Owner-app navigation continues through cross-app new-tab links exposed by each record.",
-              "開啟詳情仍留在 ops；各筆記錄若有 owner app 導航，會透過跨 app 新分頁 deep link 呈現。",
-            )}
-          >
-            {contractsSectionEmptyState ? (
-              contractsSectionEmptyState.nextAction ? (
-                renderEmptyState({
-                  reason: contractsSectionEmptyState.reason,
-                  locale,
-                  query,
-                  nextAction: contractsSectionEmptyState.nextAction,
-                })
-              ) : (
-                renderEmptyState({
-                  reason: contractsSectionEmptyState.reason,
-                  locale,
-                  query,
-                })
-              )
-            ) : (
-              <DataTable
-                density="compact"
-                tone="info"
-                columns={[
-                  {
-                    label: copyText(locale, "Contract", "合約"),
-                    width: "160px",
-                  },
-                  {
-                    label: copyText(locale, "Counterparty", "合作對象"),
-                    width: "260px",
-                  },
-                  { label: copyText(locale, "Type", "類型"), width: "150px" },
-                  {
-                    label: copyText(locale, "Term", "效期"),
-                    width: "210px",
-                  },
-                  {
-                    label: copyText(locale, "Key terms", "關鍵條款"),
-                    width: "260px",
-                  },
-                  { label: copyText(locale, "Status", "狀態"), width: "150px" },
-                  {
-                    label: copyText(locale, "Actions", "動作"),
-                    width: "170px",
-                  },
-                ]}
-                empty={copyText(locale, "No contracts found.", "查無合約。")}
-              >
-                {filteredContracts.map((contract) => (
-                  <Tr key={contract.contractId}>
-                    <Td density="compact">
-                      <DataCellStack
-                        primary={
-                          <Link
-                            href={buildContractDetailHref(contract.contractId)}
-                            style={{
-                              color: "#0f172a",
-                              fontWeight: 700,
-                              textDecoration: "none",
-                            }}
-                          >
-                            {contract.contractId}
-                          </Link>
-                        }
-                        secondary={contract.vehicleId}
-                        tertiary={
-                          contract.operatingAreaId ?? t("common.dash", locale)
-                        }
-                      />
-                    </Td>
-                    <Td density="compact">
-                      <DataCellStack
-                        primary={contract.counterparties}
-                        secondary={formatOpsCodeLabel(
-                          locale,
-                          contract.partnerType,
-                        )}
-                        tertiary={
-                          contract.expiringSoon
-                            ? copyText(locale, "Expiring soon", "即將到期")
-                            : undefined
-                        }
-                      />
-                    </Td>
-                    <Td density="compact">
-                      <DataCellStack
-                        primary={formatOpsCodeLabel(
-                          locale,
-                          contract.partnerType,
-                        )}
-                        secondary={contract.kindLabel}
-                        tertiary={formatOpsCodeLabel(
-                          locale,
-                          contract.lifecycleStatus,
-                        )}
-                      />
-                    </Td>
-                    <Td density="compact">
-                      <DataCellStack
-                        primary={`${formatDate(contract.startAt, locale)} → ${formatDate(contract.endAt, locale)}`}
-                        secondary={copyText(
-                          locale,
-                          `Updated ${formatDateTime(contract.updatedAt, locale)}`,
-                          `更新於 ${formatDateTime(contract.updatedAt, locale)}`,
-                        )}
-                      />
-                    </Td>
-                    <Td density="compact" muted>
-                      {contract.keyTerms}
-                    </Td>
-                    <Td density="compact">
-                      <div style={{ display: "grid", gap: "6px" }}>
-                        <StatusChip
-                          tone={
-                            contract.expiringSoon
-                              ? "warning"
-                              : contractStatusTone(contract.status)
-                          }
-                          authorityLabel={copyText(locale, "state", "狀態")}
-                          label={
-                            contract.expiringSoon
-                              ? copyText(locale, "expiring soon", "即將到期")
-                              : formatOpsCodeLabel(locale, contract.status)
-                          }
-                        />
-                        <span style={{ fontSize: "12px", color: "#64748b" }}>
-                          {formatOpsCodeLabel(locale, contract.status)}
-                        </span>
-                      </div>
-                    </Td>
-                    <Td density="compact">
-                      <div style={{ display: "grid", gap: "8px" }}>
-                        {renderActionList({
-                          actions: contract.availableActions,
-                          locale,
-                          resolveTarget: resolveContractActionTarget,
-                          fallback: contract,
-                          keyPrefix: contract.contractId,
-                        })}
-                      </div>
-                    </Td>
-                  </Tr>
-                ))}
-              </DataTable>
-            )}
-          </DataViewCard>
+          />
+        ) : null}
 
-          <div style={{ display: "grid", gap: "18px" }}>
-            <DataViewCard
-              title={copyText(
-                locale,
-                "Partner relations panel",
-                "合作夥伴關聯面板",
-              )}
-              subtitle={copyText(
-                locale,
-                "Partner entry slug, program, relation status, and owner-app deep links.",
-                "顯示 partner entry slug、program、關聯狀態，以及 owner app deep link。",
-              )}
-              tone="warning"
-              density="compact"
-              summary={copyText(
-                locale,
-                "Cross-app navigation opens a new tab by default. Mutation remains outside ops.",
-                "跨 app 導航預設開新分頁；mutation 不在 ops 內進行。",
-              )}
+        <div style={summaryGridStyle}>
+          <div style={summaryCardStyle}>
+            <span style={summaryLabelStyle}>
+              {copy(locale, "Registered", "已登記")}
+            </span>
+            <span style={summaryValueStyle}>{rows.length}</span>
+            <span style={summaryFootStyle}>
+              {copy(locale, "contract master rows", "合約主檔筆數")}
+            </span>
+          </div>
+          <div style={summaryCardStyle}>
+            <span style={summaryLabelStyle}>
+              {copy(locale, "Active", "生效中")}
+            </span>
+            <span style={{ ...summaryValueStyle, color: theme.success }}>
+              {activeCount}
+            </span>
+            <span style={summaryFootStyle}>
+              {copy(locale, "currently effective", "目前有效")}
+            </span>
+          </div>
+          <div style={summaryCardStyle}>
+            <span style={summaryLabelStyle}>
+              {copy(locale, "Expiring soon", "即將到期")}
+            </span>
+            <span
+              style={{
+                ...summaryValueStyle,
+                color: expiringCount > 0 ? theme.warn : theme.text,
+              }}
             >
-              {partnerRelationsSectionEmptyState ? (
-                partnerRelationsSectionEmptyState.nextAction ? (
-                  renderEmptyState({
-                    reason: partnerRelationsSectionEmptyState.reason,
-                    locale,
-                    query,
-                    nextAction: partnerRelationsSectionEmptyState.nextAction,
-                  })
-                ) : (
-                  renderEmptyState({
-                    reason: partnerRelationsSectionEmptyState.reason,
-                    locale,
-                    query,
-                  })
-                )
-              ) : (
-                <DataTable
-                  density="compact"
-                  tone="warning"
-                  columns={[
-                    {
-                      label: copyText(locale, "Entry", "入口"),
-                      width: "200px",
-                    },
-                    {
-                      label: copyText(locale, "Program", "方案"),
-                      width: "180px",
-                    },
-                    {
-                      label: copyText(locale, "Status", "狀態"),
-                      width: "150px",
-                    },
-                    { label: copyText(locale, "Links", "連結") },
-                  ]}
-                  empty={copyText(
-                    locale,
-                    "No partner relations found.",
-                    "查無合作夥伴關聯。",
-                  )}
-                >
-                  {filteredRelations.map((entry) => (
-                    <Tr key={entry.entrySlug}>
-                      <Td density="compact">
-                        <DataCellStack
-                          primary={<strong>{entry.displayName}</strong>}
-                          secondary={entry.entrySlug}
-                          tertiary={`${entry.partnerId} · ${entry.tenantId}`}
-                        />
-                      </Td>
-                      <Td density="compact">
-                        <DataCellStack
-                          primary={entry.programId}
-                          secondary={formatOpsCodeLabel(
-                            locale,
-                            entry.businessDispatchSubtype,
-                          )}
-                          tertiary={`${copyText(locale, "Linked contracts", "關聯合約")} · ${entry.linkedContracts}`}
-                        />
-                      </Td>
-                      <Td density="compact">
-                        <div style={{ display: "grid", gap: "6px" }}>
-                          <StatusChip
-                            tone={entry.activeFlag ? "success" : "warning"}
-                            authorityLabel={copyText(
-                              locale,
-                              "relation",
-                              "關聯",
-                            )}
-                            label={formatOpsCodeLabel(locale, entry.status)}
-                          />
-                          <span style={{ fontSize: "12px", color: "#64748b" }}>
-                            {formatOpsCodeLabel(locale, entry.eligibilityMode)}
-                          </span>
-                        </div>
-                      </Td>
-                      <Td density="compact">
-                        <div
-                          style={{
-                            display: "grid",
-                            gap: "8px",
-                          }}
-                        >
-                          {renderActionList({
-                            actions: entry.availableActions,
-                            locale,
-                            resolveTarget: resolveRelationActionTarget,
-                            fallback: entry,
-                            keyPrefix: entry.entrySlug,
-                          })}
-                        </div>
-                      </Td>
-                    </Tr>
-                  ))}
-                </DataTable>
+              {expiringCount}
+            </span>
+            <span style={summaryFootStyle}>
+              {copy(
+                locale,
+                `within ${EXPIRING_SOON_DAYS} days`,
+                `${EXPIRING_SOON_DAYS} 天內`,
               )}
-            </DataViewCard>
-
-            {renderSectionNotice({
-              title: copyText(
-                locale,
-                "Operational read scope",
-                "營運端可讀範圍",
-              ),
-              body: copyText(
-                locale,
-                "This workspace is for dispatch and billing confirmation only. Contract mutation, version upgrades, and partner governance stay in Platform Admin or Tenant Console.",
-                "這個工作面只用來確認派遣與結算上下文。合約異動、版本升級、partner governance 仍在 Platform Admin 或 Tenant Console 執行。",
-              ),
-              tone: "neutral",
-              action: (
-                <>
-                  <a
-                    href={buildCrossAppUrl({
-                      targetApp: "platform-admin",
-                      route: "/partners",
-                      resourceType: "partner_entry",
-                      resourceId: "contracts",
-                      openMode: "new_tab",
-                      label: "Platform Admin",
-                    })}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={buttonStyle({ emphasis: "secondary" })}
-                  >
-                    {copyText(
-                      locale,
-                      "Open Platform Admin",
-                      "前往 Platform Admin",
-                    )}
-                    <span
-                      style={{
-                        marginLeft: "6px",
-                        fontSize: "11px",
-                        opacity: 0.8,
-                      }}
-                    >
-                      {copyText(locale, "new tab", "新分頁")}
-                    </span>
-                  </a>
-                  <a
-                    href={buildCrossAppUrl({
-                      targetApp: "tenant-console",
-                      route: "/slas",
-                      resourceType: "tenant",
-                      resourceId: "contract-ops-scope",
-                      openMode: "new_tab",
-                      label: "Tenant Console",
-                    })}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={buttonStyle({ emphasis: "ghost" })}
-                  >
-                    {copyText(
-                      locale,
-                      "Open Tenant Console",
-                      "前往 Tenant Console",
-                    )}
-                    <span
-                      style={{
-                        marginLeft: "6px",
-                        fontSize: "11px",
-                        opacity: 0.8,
-                      }}
-                    >
-                      {copyText(locale, "new tab", "新分頁")}
-                    </span>
-                  </a>
-                </>
-              ),
-            })}
+            </span>
+          </div>
+          <div style={summaryCardStyle}>
+            <span style={summaryLabelStyle}>
+              {copy(locale, "Partner entries", "夥伴渠道")}
+            </span>
+            <span style={{ ...summaryValueStyle, color: theme.info }}>
+              {partnerEntries.length}
+            </span>
+            <span style={summaryFootStyle}>
+              {manualReviewCount > 0
+                ? copy(
+                    locale,
+                    `${manualReviewCount} manual review pending`,
+                    `${manualReviewCount} 筆待人工審核`,
+                  )
+                : copy(locale, "no review backlog", "無審核積壓")}
+            </span>
           </div>
         </div>
-      )}
+
+        <Card
+          theme={theme}
+          title={copy(locale, "Filters", "篩選")}
+          subtitle={copy(
+            locale,
+            "Status, kind, and expiring views run on the same snapshot.",
+            "狀態、類型與即將到期條件都套用同一份快照。",
+          )}
+        >
+          <form method="get" style={{ display: "grid", gap: 0 }}>
+            <input type="hidden" name="tab" value={filters.tab} />
+            {filters.emptyReason ? (
+              <input
+                type="hidden"
+                name="emptyReason"
+                value={filters.emptyReason}
+              />
+            ) : null}
+            <div style={filterGridStyle}>
+              <label style={fieldStackStyle}>
+                <span style={fieldLabelStyle}>
+                  {copy(locale, "Search", "搜尋")}
+                </span>
+                <input
+                  name="q"
+                  defaultValue={filters.q}
+                  placeholder={copy(
+                    locale,
+                    "contract id, partner, vehicle",
+                    "合約編號、夥伴、車輛",
+                  )}
+                  style={fieldStyle}
+                />
+              </label>
+
+              <label style={fieldStackStyle}>
+                <span style={fieldLabelStyle}>
+                  {copy(locale, "Status", "狀態")}
+                </span>
+                <select
+                  name="status"
+                  defaultValue={filters.status}
+                  style={fieldStyle}
+                >
+                  <option value="all">{copy(locale, "All", "全部")}</option>
+                  <option value="active">
+                    {copy(locale, "Active", "生效中")}
+                  </option>
+                  <option value="draft">{copy(locale, "Draft", "草稿")}</option>
+                  <option value="expiring">
+                    {copy(locale, "Expiring soon", "即將到期")}
+                  </option>
+                  <option value="terminated">
+                    {copy(locale, "Terminated / expired", "終止 / 到期")}
+                  </option>
+                </select>
+              </label>
+
+              <label style={fieldStackStyle}>
+                <span style={fieldLabelStyle}>
+                  {copy(locale, "Kind", "類型")}
+                </span>
+                <select
+                  name="type"
+                  defaultValue={filters.type}
+                  style={fieldStyle}
+                >
+                  <option value="all">{copy(locale, "All", "全部")}</option>
+                  {typeOptions.map((value) => (
+                    <option key={value} value={value}>
+                      {formatOpsCodeLabel(locale, value)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={fieldStackStyle}>
+                <span style={fieldLabelStyle}>
+                  {copy(locale, "Expiring", "即將到期")}
+                </span>
+                <select
+                  name="expiring"
+                  defaultValue={filters.expiring}
+                  style={fieldStyle}
+                >
+                  <option value="all">{copy(locale, "All", "全部")}</option>
+                  <option value="yes">{copy(locale, "Yes", "是")}</option>
+                  <option value="no">{copy(locale, "No", "否")}</option>
+                </select>
+              </label>
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="submit" style={buttonStyle("primary")}>
+                  <CanvasIcon name="search" size={12} />
+                  {copy(locale, "Apply", "套用")}
+                </button>
+                <Link href="/contracts" style={buttonStyle("ghost")}>
+                  {copy(locale, "Reset", "重設")}
+                </Link>
+              </div>
+            </div>
+          </form>
+
+          <div style={helperRowStyle}>
+            <span style={helperTextStyle}>
+              {copy(
+                locale,
+                `${displayedRows.length} visible / ${rows.length} total`,
+                `目前顯示 ${displayedRows.length} / 總數 ${rows.length}`,
+              )}
+            </span>
+            <span style={{ ...helperTextStyle, ...monoTextStyle }}>
+              {copy(locale, "generated", "生成時間")} ·{" "}
+              {formatLongDateTime(locale, refresh.generatedAt)} UTC
+            </span>
+            <span style={helperTextStyle}>
+              {copy(
+                locale,
+                "supporting actions come from availableActions",
+                "畫面 CTA 以 availableActions 為準",
+              )}
+            </span>
+          </div>
+        </Card>
+
+        <Card
+          theme={theme}
+          title={copy(locale, "Contract registry", "合約登記清單")}
+          subtitle={copy(
+            locale,
+            "Counterparty, kind, term, and key operating terms feeding dispatch and billing — read-only at ops scope.",
+            "在同一張表整合交易對手、類型、合約期間與關鍵營運條款，提供派車與帳務參考；ops 端僅可讀。",
+          )}
+        >
+          {emptyView ? (
+            <div style={emptyStateStyle}>
+              <CanvasIcon
+                name={emptyView.icon}
+                size={26}
+                style={{ color: toneColor(emptyView.tone) }}
+              />
+              <strong style={{ color: theme.text, fontSize: 15 }}>
+                {emptyView.title}
+              </strong>
+              <span
+                style={{
+                  color: theme.textMuted,
+                  maxWidth: 520,
+                  fontSize: 12.5,
+                  lineHeight: 1.5,
+                }}
+              >
+                {emptyView.description}
+              </span>
+              <Link
+                href={emptyView.actionHref}
+                target={emptyView.actionNewTab ? "_blank" : undefined}
+                rel={emptyView.actionNewTab ? "noreferrer" : undefined}
+                style={linkButtonStyle(emptyView.tone)}
+              >
+                {emptyView.actionLabel}
+                {emptyView.actionNewTab ? (
+                  <CanvasIcon name="ext" size={11} />
+                ) : null}
+              </Link>
+              <span style={tinyMetaStyle(emptyView.tone)}>
+                {copy(locale, "emptyReason", "空狀態")} ·{" "}
+                {EMPTY_OVERRIDE_REASON_CODES[emptyReason ?? "no_data"]}
+              </span>
+            </div>
+          ) : (
+            <Table theme={theme} columns={columns} rows={displayedRows} />
+          )}
+        </Card>
+
+        <Card
+          theme={theme}
+          title={copy(locale, "Partner relations", "夥伴關係")}
+          subtitle={copy(
+            locale,
+            "Partner entry slug, program id, status, and eligibility mode behind partner contracts.",
+            "夥伴合約背後的渠道 slug、方案 id、狀態與資格模式。",
+          )}
+        >
+          {partnerRelationRows.length === 0 ? (
+            <div style={emptyStateStyle}>
+              <CanvasIcon
+                name="partners"
+                size={24}
+                style={{ color: theme.textMuted }}
+              />
+              <strong style={{ color: theme.text, fontSize: 14 }}>
+                {copy(
+                  locale,
+                  "No partner entries in scope",
+                  "範圍內沒有夥伴渠道",
+                )}
+              </strong>
+              <span
+                style={{
+                  color: theme.textMuted,
+                  maxWidth: 460,
+                  fontSize: 12.5,
+                }}
+              >
+                {partnerEntriesResult.error
+                  ? copy(
+                      locale,
+                      "Partner directory is degraded; relationship context is temporarily unavailable.",
+                      "夥伴目錄降級，關係內容暫時不可用。",
+                    )
+                  : copy(
+                      locale,
+                      "Partner programs are provisioned from Platform Admin governance.",
+                      "夥伴方案由 Platform Admin 治理面建立。",
+                    )}
+              </span>
+            </div>
+          ) : (
+            <Table
+              theme={theme}
+              columns={
+                [
+                  {
+                    h: copy(locale, "PARTNER ENTRY", "夥伴渠道"),
+                    w: 240,
+                    r: (row) => (
+                      <div style={stackStyle}>
+                        <span style={primaryTextStyle}>{row.displayName}</span>
+                        <span
+                          style={{ ...secondaryTextStyle, ...monoTextStyle }}
+                        >
+                          {row.entrySlug}
+                        </span>
+                      </div>
+                    ),
+                  },
+                  {
+                    h: copy(locale, "PROGRAM", "方案"),
+                    w: 180,
+                    r: (row) => (
+                      <div style={stackStyle}>
+                        <span style={{ ...primaryTextStyle, ...monoTextStyle }}>
+                          {row.programId}
+                        </span>
+                        <span style={secondaryTextStyle}>
+                          {row.partnerTypeLabel}
+                        </span>
+                      </div>
+                    ),
+                  },
+                  {
+                    h: copy(locale, "ELIGIBILITY", "資格模式"),
+                    w: 180,
+                    r: (row) => (
+                      <div style={stackStyle}>
+                        <span style={primaryTextStyle}>
+                          {row.eligibilityLabel}
+                        </span>
+                        <span
+                          style={{ ...secondaryTextStyle, ...monoTextStyle }}
+                        >
+                          {row.authLabel}
+                        </span>
+                      </div>
+                    ),
+                  },
+                  {
+                    h: copy(locale, "STATUS", "狀態"),
+                    w: 130,
+                    r: (row) => (
+                      <Pill theme={theme} tone={row.statusTone} dot>
+                        {row.statusLabel}
+                      </Pill>
+                    ),
+                  },
+                  {
+                    h: copy(locale, "GOVERNANCE", "治理"),
+                    w: 160,
+                    r: (row) => (
+                      <Link
+                        href={row.governanceHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={linkButtonStyle("info")}
+                      >
+                        {copy(locale, "Partner admin", "夥伴管理")}
+                        <CanvasIcon name="ext" size={11} />
+                      </Link>
+                    ),
+                  },
+                ] satisfies CanvasTableColumn<PartnerRelationRow>[]
+              }
+              rows={partnerRelationRows}
+            />
+          )}
+        </Card>
+      </div>
     </>
   );
 }
