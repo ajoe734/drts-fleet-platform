@@ -364,8 +364,8 @@ export interface RouteMatch {
 }
 
 function toSegments(path: string): string[] {
-  const [withoutQuery] = path.split("?");
-  const [clean] = (withoutQuery ?? "").split("#");
+  const withoutQuery = path.split("?")[0] ?? "";
+  const clean = withoutQuery.split("#")[0] ?? "";
   return clean.split("/").filter((segment) => segment.length > 0);
 }
 
