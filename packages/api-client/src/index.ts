@@ -55,9 +55,11 @@ import type {
   CreateReconciliationIssueCommand,
   CompleteVehicleDebrandingCommand,
   CreateMaintenanceRecordCommand,
+  CrossAppResourceLink,
   DispatchExclusivityRecord,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
+  DeleteTenantWebhookEndpointCommand,
   DispatchCandidate,
   DispatchJobRecord,
   DispatchTraceLogRecord,
@@ -77,6 +79,7 @@ import type {
   DriverStatementRecord,
   DriverTaskRecord,
   UnifiedDriverTaskView,
+  EmptyStateEnvelope,
   ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
   EvidenceGovernanceCatalog,
@@ -137,6 +140,7 @@ import type {
   RejectExclusivityCommand,
   ReimbursementBatchRecord,
   ReconciliationIssueRecord,
+  ResourceActionDescriptor,
   RevokePartnerIngressCredentialCommand,
   RegisterDriverDeviceCommand,
   ReopenComplaintCaseCommand,
@@ -185,13 +189,19 @@ import type {
   TenantCostCenterCoverageReport,
   TenantCostCenterRecord,
   TenantCostCenterQuotaSummary,
+  TenantFeatureFlagRecord,
+  TenantFeatureFlagVisibilityList,
   TenantIntegrationGovernancePackage,
+  TenantIntegrationReadinessSummary,
+  TenantInvoiceListData,
   TenantInvoiceRecord,
+  TenantNotificationPreferences,
   TenantPassengerRecord,
   TenantQuotaLedgerEntry,
   TenantQuotaPolicyRecord,
   TenantQuotaSummary,
   TenantRoleCatalogRecord,
+  TenantSlaProfileView,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
   TransferCallToComplaintCommand,
@@ -211,9 +221,11 @@ import type {
   UpdatePlatformTenantSettingsCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
+  RecalculateTenantSlaBookingsCommand,
   UpdateTenantSlaProfileCommand,
   UpdateTenantWebhookEndpointCommand,
   UpdateVehicleComplianceCommand,
+  UiRefreshMetadata,
   UpsertTenantAddressCommand,
   UpsertTenantApprovalRuleCommand,
   UpsertTenantCostCenterCommand,
@@ -252,6 +264,22 @@ export interface RequestOptions {
 
 interface ListEnvelope<T> {
   items: T[];
+}
+
+interface TenantUsersListEnvelope extends ListEnvelope<TenantUserRoleRecord> {
+  availableActions?: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope;
+  refreshMetadata?: UiRefreshMetadata;
+  crossAppLinks?: CrossAppResourceLink[];
+}
+
+interface TenantFeatureFlagListEnvelope {
+  flags: TenantFeatureFlagRecord[];
+  generatedAt: string;
+  refreshTier: TenantFeatureFlagVisibilityList["refreshTier"];
+  availableActions: ResourceActionDescriptor[];
+  emptyState?: EmptyStateEnvelope;
+  notes: string[];
 }
 
 function snakeToCamelCase(key: string): string {
@@ -449,6 +477,27 @@ export class ApiClient {
     const qs = searchParams.toString();
     const path = qs ? `/api/admin/flags?${qs}` : "/api/admin/flags";
     return this.get<FeatureFlagSummary>(path);
+  }
+
+  async getTenantFeatureFlags(): Promise<TenantFeatureFlagVisibilityList> {
+    return this.get<TenantFeatureFlagVisibilityList>(
+      "/api/tenant/feature-flags",
+    );
+  }
+
+  async listTenantFeatureFlags(): Promise<TenantFeatureFlagListEnvelope> {
+    const response = await this.getTenantFeatureFlags();
+    return {
+      flags: response.items.map((flag) => ({
+        ...flag,
+        rolloutStatus: flag.rolloutState,
+      })),
+      generatedAt: response.refresh.generatedAt,
+      refreshTier: response.refreshTier,
+      availableActions: response.availableActions,
+      notes: response.notes,
+      ...(response.emptyState ? { emptyState: response.emptyState } : {}),
+    };
   }
 
   async getFeatureFlag(key: string): Promise<FeatureFlag> {
@@ -1124,6 +1173,10 @@ export class ApiClient {
     return this.getList<TenantInvoiceRecord>("/api/tenant/invoices");
   }
 
+  async listInvoicesRuntime(): Promise<TenantInvoiceListData> {
+    return this.get<TenantInvoiceListData>("/api/tenant/invoices");
+  }
+
   async generateInvoice(command: GenerateTenantInvoiceCommand) {
     return this.post("/api/tenant/invoices/generate", { body: command });
   }
@@ -1667,8 +1720,31 @@ export class ApiClient {
     });
   }
 
-  async deleteWebhookEndpoint(webhookId: string) {
-    return this.delete(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`);
+  async disableWebhookEndpoint(
+    webhookId: string,
+    command?: {
+      reason?: string;
+    },
+  ): Promise<TenantWebhookEndpoint> {
+    const body: UpdateTenantWebhookEndpointCommand = {
+      status: "disabled",
+      ...(command?.reason ? { disableReason: command.reason } : {}),
+    };
+    return this.post(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`, {
+      body,
+    });
+  }
+
+  async deleteWebhookEndpoint(
+    webhookId: string,
+    command: DeleteTenantWebhookEndpointCommand,
+  ) {
+    return this.delete(
+      `/api/tenant/webhooks/${encodeURIComponent(webhookId)}`,
+      {
+        body: command,
+      },
+    );
   }
 
   async listWebhookDeliveries(
@@ -1676,6 +1752,15 @@ export class ApiClient {
   ): Promise<WebhookDeliveryRecord[]> {
     return this.getList<WebhookDeliveryRecord>(
       `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/deliveries`,
+    );
+  }
+
+  async retryWebhookDelivery(
+    webhookId: string,
+    deliveryId: string,
+  ): Promise<WebhookDeliveryRecord> {
+    return this.post<WebhookDeliveryRecord>(
+      `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/deliveries/${encodeURIComponent(deliveryId)}/retry`,
     );
   }
 
@@ -1699,8 +1784,18 @@ export class ApiClient {
     );
   }
 
-  async getNotificationPreferences() {
-    return this.get("/api/tenant/notifications");
+  async getTenantIntegrationReadiness(): Promise<TenantIntegrationReadinessSummary> {
+    return this.get<TenantIntegrationReadinessSummary>(
+      "/api/tenant/integration-governance/readiness",
+    );
+  }
+
+  async getTenantIntegrationReadinessSummary(): Promise<TenantIntegrationReadinessSummary> {
+    return this.getTenantIntegrationReadiness();
+  }
+
+  async getNotificationPreferences(): Promise<TenantNotificationPreferences> {
+    return this.get<TenantNotificationPreferences>("/api/tenant/notifications");
   }
 
   async updateNotifications(command: UpdateTenantNotificationsCommand) {
@@ -1711,12 +1806,24 @@ export class ApiClient {
     return this.get("/api/tenant/sla");
   }
 
+  async getSlaProfileView(): Promise<TenantSlaProfileView> {
+    return this.get<TenantSlaProfileView>("/api/tenant/sla/view");
+  }
+
   async updateSlaProfile(command: UpdateTenantSlaProfileCommand) {
     return this.post("/api/tenant/sla", { body: command });
   }
 
-  async listTenantUsers(): Promise<TenantUserRoleRecord[]> {
-    return this.getList<TenantUserRoleRecord>("/api/tenant/users");
+  async recalculateSlaBookings(command: RecalculateTenantSlaBookingsCommand) {
+    return this.post("/api/tenant/sla/recalculate", { body: command });
+  }
+
+  async listTenantUsers(): Promise<
+    TenantUsersListEnvelope | TenantUserRoleRecord[]
+  > {
+    return this.get<TenantUsersListEnvelope | TenantUserRoleRecord[]>(
+      "/api/tenant/users",
+    );
   }
 
   async listTenantRoles(): Promise<TenantRoleCatalogRecord[]> {
