@@ -44,14 +44,14 @@ export default async function RootLayout({
             identity={assistantIdentity}
             initialHealth={assistantHealth}
           >
-          <OpsShell
-            nav={nav}
-            brandLabel={t("app.name", locale)}
-            brandSubLabel={t("app.sub", locale)}
-            searchPlaceholder={t("common.search", locale)}
-          >
-            {children}
-          </OpsShell>
+            <OpsShell
+              nav={nav}
+              brandLabel={t("app.name", locale)}
+              brandSubLabel={t("app.sub", locale)}
+              searchPlaceholder={t("common.search", locale)}
+            >
+              {children}
+            </OpsShell>
             <OpsAssistantWidget />
           </OpsAssistantContextProvider>
         </LanguageProvider>
