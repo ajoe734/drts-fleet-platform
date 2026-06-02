@@ -2228,6 +2228,23 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
 
 
 class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._clear_reconcile_registry()
+
+    def tearDown(self) -> None:
+        self._clear_reconcile_registry()
+
+    def _clear_reconcile_registry(self) -> None:
+        for entry in supervisor._RECONCILE_PROCS.values():
+            for handle_key in ("stdout_fh", "stderr_fh"):
+                handle = entry.get(handle_key)
+                if handle is not None:
+                    try:
+                        handle.close()
+                    except OSError:
+                        pass
+        supervisor._RECONCILE_PROCS.clear()
+
     def _config(self, root: Path, *, interval: float | None = None) -> dict[str, object]:
         supervisor_cfg: dict[str, object] = {}
         if interval is not None:
@@ -2238,7 +2255,13 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
         }
         return config
 
-    def test_first_call_runs_and_stamps_timestamp(self) -> None:
+    def _fake_popen(self) -> mock.MagicMock:
+        proc = mock.MagicMock()
+        proc.poll.return_value = None
+        proc.returncode = None
+        return proc
+
+    def test_first_call_spawns_and_stamps_timestamp(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "ai-status.json").write_text("{}", encoding="utf-8")
@@ -2247,11 +2270,10 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
             script.write_text("# placeholder\n", encoding="utf-8")
             config = self._config(root)
             state: dict[str, object] = {"supervisor": {}}
-            fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="reconcile-from-git: no drift found against origin/dev\n", stderr="")
-            with mock.patch.object(supervisor.subprocess, "run", return_value=fake_result) as run_mock:
+            with mock.patch.object(supervisor.subprocess, "Popen", return_value=self._fake_popen()) as popen_mock:
                 ran = supervisor.reconcile_status_from_git(config, state)
-            self.assertTrue(ran)
-            run_mock.assert_called_once()
+            self.assertFalse(ran)
+            popen_mock.assert_called_once()
             self.assertIn("last_git_reconcile_at", state["supervisor"])  # type: ignore[index]
 
     def test_second_call_within_window_skips_subprocess(self) -> None:
@@ -2270,10 +2292,10 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
                     .replace("+00:00", "Z"),
                 }
             }
-            with mock.patch.object(supervisor.subprocess, "run") as run_mock:
+            with mock.patch.object(supervisor.subprocess, "Popen") as popen_mock:
                 ran = supervisor.reconcile_status_from_git(config, state)
             self.assertFalse(ran)
-            run_mock.assert_not_called()
+            popen_mock.assert_not_called()
 
     def test_second_call_after_window_runs_subprocess(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2291,21 +2313,20 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
                     .replace("+00:00", "Z"),
                 }
             }
-            fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="reconcile-from-git: no drift found against origin/dev\n", stderr="")
-            with mock.patch.object(supervisor.subprocess, "run", return_value=fake_result) as run_mock:
+            with mock.patch.object(supervisor.subprocess, "Popen", return_value=self._fake_popen()) as popen_mock:
                 ran = supervisor.reconcile_status_from_git(config, state)
-            self.assertTrue(ran)
-            run_mock.assert_called_once()
+            self.assertFalse(ran)
+            popen_mock.assert_called_once()
 
     def test_skips_when_status_file_path_missing(self) -> None:
         # OPS-STATE-RECONCILE-002 guard: don't raise KeyError when config
         # omits paths.status_file (e.g. minimal test config).
         config: dict[str, object] = {"paths": {}, "supervisor": {}}
         state: dict[str, object] = {"supervisor": {}}
-        with mock.patch.object(supervisor.subprocess, "run") as run_mock:
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen_mock:
             ran = supervisor.reconcile_status_from_git(config, state)
         self.assertFalse(ran)
-        run_mock.assert_not_called()
+        popen_mock.assert_not_called()
 
 
 class UnderutilizationSidecarDispatchTests(unittest.TestCase):
@@ -7054,11 +7075,22 @@ class ReconcileStatusFromGitAsyncTests(unittest.TestCase):
             "supervisor": {"git_reconcile_interval_seconds": 60},
         }
         # ensure the registry is empty across tests
-        supervisor._RECONCILE_PROCS.clear()
+        self._clear_reconcile_registry()
 
     def tearDown(self) -> None:
-        supervisor._RECONCILE_PROCS.clear()
+        self._clear_reconcile_registry()
         self._tmp.cleanup()
+
+    def _clear_reconcile_registry(self) -> None:
+        for entry in supervisor._RECONCILE_PROCS.values():
+            for handle_key in ("stdout_fh", "stderr_fh"):
+                handle = entry.get(handle_key)
+                if handle is not None:
+                    try:
+                        handle.close()
+                    except OSError:
+                        pass
+        supervisor._RECONCILE_PROCS.clear()
 
     def _fake_popen(self, *, alive: bool, returncode: int = 0,
                      stdout: str = "", stderr: str = "") -> mock.MagicMock:

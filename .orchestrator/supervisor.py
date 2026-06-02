@@ -3100,6 +3100,13 @@ def reconcile_status_from_git(config: dict[str, Any], state: dict[str, Any]) -> 
         rc = proc.returncode
         stdout_path = in_flight["stdout_path"]
         stderr_path = in_flight["stderr_path"]
+        for handle_key in ("stdout_fh", "stderr_fh"):
+            handle = in_flight.get(handle_key)
+            if handle is not None:
+                try:
+                    handle.close()
+                except OSError:
+                    pass
         try:
             stdout = stdout_path.read_text() if stdout_path.exists() else ""
         except OSError:
@@ -3169,6 +3176,11 @@ def reconcile_status_from_git(config: dict[str, Any], state: dict[str, Any]) -> 
             stderr=stderr_fh,
         )
     except OSError as exc:
+        for handle in (stdout_fh, stderr_fh):
+            try:
+                handle.close()
+            except OSError:
+                pass
         write_activity_log(
             config,
             {

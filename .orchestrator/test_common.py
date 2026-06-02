@@ -23,7 +23,7 @@ class CommandExistsTests(unittest.TestCase):
             local_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             local_cli.chmod(0o755)
 
-            with mock.patch.object(common, "ROOT", root):
+            with mock.patch.object(common, "ROOT", root), mock.patch.dict("os.environ", {"PATH": ""}):
                 self.assertEqual(common.command_exists("gemini"), str(local_cli))
 
     def test_finds_cli_from_additional_search_root(self) -> None:
