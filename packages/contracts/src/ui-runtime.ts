@@ -30,6 +30,8 @@
  * consuming UI, so the contract change and its sole consumer move together.
  */
 
+import type { ApiPageInfo, TenantInvoiceRecord } from "./index";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared primitives
 // ─────────────────────────────────────────────────────────────────────────────
@@ -230,6 +232,51 @@ export interface CrossAppResourceLink {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Q-X16 — Tenant Feature Visibility
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Scope behind the value the tenant currently sees for a given flag.
+ */
+export type TenantFeatureFlagScope = "global_default" | "tenant_override";
+
+/**
+ * Tenant-facing read model for a single feature flag. Platform remains the
+ * write authority; tenant console only receives the effective value plus the
+ * minimum governance context needed to explain rollout behavior.
+ */
+export interface TenantFeatureFlagVisibilityRecord {
+  key: string;
+  enabled: boolean;
+  description: string;
+  scope: TenantFeatureFlagScope;
+  rolloutState: "steady" | "rolling_out";
+  updatedAt: string;
+  updatedBy: string | null;
+  historyLink?: CrossAppResourceLink | null;
+  availableActions: ResourceActionDescriptor[];
+}
+
+export type TenantFeatureFlagRecord = Omit<
+  TenantFeatureFlagVisibilityRecord,
+  "rolloutState"
+> & {
+  rolloutStatus: TenantFeatureFlagVisibilityRecord["rolloutState"];
+};
+
+/**
+ * Read-scoped list envelope consumed by `/feature-flags` in tenant-console.
+ */
+export interface TenantFeatureFlagVisibilityList {
+  items: TenantFeatureFlagVisibilityRecord[];
+  availableActions: ResourceActionDescriptor[];
+  refresh: UiRefreshMetadata;
+  refreshTier: RefreshTier;
+  emptyState?: EmptyStateEnvelope;
+  notes: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Q-X05 / Q-X06 — UserNotificationRecord
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -381,6 +428,22 @@ export interface TenantIntegrationReadinessSummary {
   tenantId: string;
   items: TenantIntegrationReadinessItem[];
   computedAt: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Q-TEN02 / Q-X01 / Q-X03 / Q-X13 / Q-X15 — TenantInvoice runtime list
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TenantInvoiceRuntimeRecord extends TenantInvoiceRecord {
+  availableActions: ResourceActionDescriptor[];
+  deepLinks: CrossAppResourceLink[];
+}
+
+export interface TenantInvoiceListData {
+  items: TenantInvoiceRuntimeRecord[];
+  pageInfo: ApiPageInfo;
+  refresh: UiRefreshMetadata;
+  emptyState?: EmptyStateEnvelope;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

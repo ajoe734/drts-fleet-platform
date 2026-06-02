@@ -1036,7 +1036,9 @@ async function deleteWebhook(formData: FormData) {
       throw new Error("Webhook ID is required.");
     }
 
-    await client.deleteWebhookEndpoint(webhookId);
+    await client.deleteWebhookEndpoint(webhookId, {
+      reason: "tenant_portal_delete_webhook",
+    });
     revalidatePath("/webhooks");
     destination = `/webhooks?success=${encodeURIComponent("Webhook endpoint deleted successfully.")}`;
   } catch (error) {

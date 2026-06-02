@@ -11,6 +11,10 @@ const DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 });
 
+const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", {
+  numeric: "auto",
+});
+
 export function formatDateTime(value: string | null | undefined) {
   if (!value) {
     return "Not available";
@@ -48,4 +52,28 @@ export function isFutureIso(value: string | null | undefined) {
   }
 
   return new Date(value).getTime() > Date.now();
+}
+
+export function formatRelativeTime(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const diffMs = new Date(value).getTime() - Date.now();
+  if (Number.isNaN(diffMs)) {
+    return null;
+  }
+
+  const diffMinutes = Math.round(diffMs / 60000);
+  if (Math.abs(diffMinutes) < 60) {
+    return RELATIVE_TIME_FORMATTER.format(diffMinutes, "minute");
+  }
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (Math.abs(diffHours) < 48) {
+    return RELATIVE_TIME_FORMATTER.format(diffHours, "hour");
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+  return RELATIVE_TIME_FORMATTER.format(diffDays, "day");
 }

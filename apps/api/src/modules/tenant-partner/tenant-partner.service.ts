@@ -17,6 +17,7 @@ import {
 
 import type {
   AcknowledgeOpsApprovalRequestBreachCommand,
+  ActionReceipt,
   AuditLogRecord,
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
@@ -26,6 +27,8 @@ import type {
   EscalateTenantBookingApprovalRequestCommand,
   IdentityContext,
   CreateTenantWebhookEndpointCommand,
+  DeleteTenantWebhookEndpointCommand,
+  EmptyStateEnvelope,
   IssueTenantApiKeyCommand,
   IssuePartnerIngressCredentialCommand,
   PartnerEligibilityAdapterAttemptRecord,
@@ -67,6 +70,7 @@ import type {
   TenantApiKeyGovernancePolicy,
   TenantApiKeyIssued,
   OwnedOrderRecord,
+  RecalculateTenantSlaBookingsCommand,
   ReorderTenantApprovalRulesCommand,
   TenantBookingQuotaImpactPreview,
   TenantBookingQuotaImpactQuery,
@@ -86,6 +90,7 @@ import type {
   TenantQuotaSummary,
   TenantRoleCatalogRecord,
   TenantSlaProfile,
+  TenantSlaProfileView,
   TenantUserRoleRecord,
   TenantWebhookDisableReason,
   TenantWebhookEndpoint,
@@ -107,6 +112,7 @@ import type {
   WebhookEventPayload,
   WebhookDeliveryRecord,
   WebhookRetryPolicyRecord,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -1050,10 +1056,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   getIntegrationGovernancePackage(
     tenantId: string,
+    identity?: IdentityContext | null,
   ): TenantIntegrationGovernancePackage {
     return {
       tenantId,
       generatedAt: new Date().toISOString(),
+      availableActions: this.buildWebhookManagementActions(identity),
       apiKeyPolicy: this.buildTenantApiKeyGovernancePolicy(),
       webhookPolicy: this.buildTenantWebhookGovernancePolicy(),
       baselineWebhookEvents: [...DEFAULT_TENANT_WEBHOOK_EVENTS],
@@ -4368,10 +4376,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  listWebhookEndpoints(tenantId: string) {
+  listWebhookEndpoints(tenantId: string, identity?: IdentityContext | null) {
     return this.webhookEndpoints
       .filter((endpoint) => endpoint.tenantId === tenantId)
-      .map((endpoint) => this.toWebhookResponse(endpoint));
+      .map((endpoint) => this.toWebhookResponse(endpoint, identity));
   }
 
   summarizeWebhookDeliveryHealth(referenceDate = new Date()) {
@@ -4415,6 +4423,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   deleteWebhookEndpoint(
     tenantId: string,
     webhookId: string,
+    command?: DeleteTenantWebhookEndpointCommand,
     requestId?: string,
   ) {
     const removed = this.webhookEndpoints.find(
@@ -4453,7 +4462,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         resourceType: "webhook_endpoint",
         resourceId: removed.webhookId,
         oldValuesSummary: this.toWebhookResponse(removed),
-        newValuesSummary: { deleted: true },
+        newValuesSummary: {
+          deleted: true,
+          reason: command?.reason?.trim() || null,
+        },
       },
       requestId,
     );
@@ -4492,6 +4504,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         lastSignaturePreview: null,
         disabledAt: null,
         disableReason: null,
+        disableReasonNote: null,
         retryPolicy: { ...DEFAULT_WEBHOOK_RETRY_POLICY },
         secretRotation: {
           currentVersion: 1,
@@ -4600,9 +4613,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     const now = new Date().toISOString();
     if (requestedStatus === "disabled") {
+      const disableReasonNote = command.disableReason?.trim();
+      if (!disableReasonNote) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "WEBHOOK_DISABLE_REASON_REQUIRED",
+          "disableReason is required when disabling a webhook endpoint.",
+          {
+            webhookId,
+          },
+        );
+      }
       endpoint.status = "disabled";
       endpoint.runtimeMetadata.disabledAt = now;
       endpoint.runtimeMetadata.disableReason = "manual_disable";
+      endpoint.runtimeMetadata.disableReasonNote = disableReasonNote;
       endpoint.updatedAt = now;
     } else if (requiresRevalidation || requestedStatus === "test_pending") {
       this.markWebhookValidationPending(endpoint, now);
@@ -4613,6 +4638,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         endpoint.status = "active";
         endpoint.runtimeMetadata.disabledAt = null;
         endpoint.runtimeMetadata.disableReason = null;
+        endpoint.runtimeMetadata.disableReasonNote = null;
         endpoint.updatedAt = now;
       }
     } else {
@@ -4904,6 +4930,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       lastSignaturePreview: result.signature.slice(0, 16),
       disabledAt: endpoint.runtimeMetadata.disabledAt,
       disableReason: endpoint.runtimeMetadata.disableReason,
+      disableReasonNote: endpoint.runtimeMetadata.disableReasonNote ?? null,
       secretRotation: {
         currentVersion: endpoint.secretVersion,
         rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
@@ -4954,6 +4981,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       endpoint.runtimeMetadata.lastValidatedAt = result.attemptedAt;
       endpoint.runtimeMetadata.disabledAt = null;
       endpoint.runtimeMetadata.disableReason = null;
+      endpoint.runtimeMetadata.disableReasonNote = null;
 
       this.recordTenantAudit({
         actorId: null,
@@ -4977,6 +5005,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       endpoint.updatedAt = result.attemptedAt;
       endpoint.runtimeMetadata.disabledAt = result.attemptedAt;
       endpoint.runtimeMetadata.disableReason = "delivery_failed";
+      endpoint.runtimeMetadata.disableReasonNote = null;
 
       this.auditNotificationService.recordNotification({
         tenantId: endpoint.tenantId,
@@ -5015,6 +5044,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     endpoint.updatedAt = updatedAt;
     endpoint.runtimeMetadata.disabledAt = null;
     endpoint.runtimeMetadata.disableReason = null;
+    endpoint.runtimeMetadata.disableReasonNote = null;
     endpoint.runtimeMetadata.nextAttemptAt = null;
   }
 
@@ -5049,7 +5079,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const delayMs = Math.max(0, new Date(nextAttemptAt).getTime() - Date.now());
     const timer = setTimeout(() => {
       this.retryTimers.delete(deliveryId);
-      void this.retryWebhookDelivery(webhookId, deliveryId);
+      void this.retryQueuedWebhookDelivery(webhookId, deliveryId);
     }, delayMs);
 
     this.retryTimers.set(deliveryId, timer);
@@ -5065,7 +5095,99 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.retryTimers.delete(deliveryId);
   }
 
-  private async retryWebhookDelivery(webhookId: string, deliveryId: string) {
+  retryWebhookDelivery(
+    tenantId: string,
+    webhookId: string,
+    deliveryId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
+    this.assertNonBlank(tenantId, "tenantId");
+
+    if (!this.canManageWebhook(identity)) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_ROLE_MISSING",
+        "Webhook retry requires tc_admin or tc_integration_mgr role.",
+      );
+    }
+
+    const endpoint = this.webhookEndpoints.find(
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.webhookId === webhookId,
+    );
+    if (!endpoint) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "WEBHOOK_ENDPOINT_NOT_FOUND",
+        `Webhook endpoint ${webhookId} was not found for tenant ${tenantId}.`,
+      );
+    }
+
+    const delivery = this.webhookDeliveries.find(
+      (candidate) =>
+        candidate.tenantId === tenantId &&
+        candidate.webhookId === webhookId &&
+        candidate.deliveryId === deliveryId,
+    );
+    if (!delivery) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "WEBHOOK_DELIVERY_NOT_FOUND",
+        `Webhook delivery ${deliveryId} was not found for endpoint ${webhookId}.`,
+      );
+    }
+    if (delivery.status !== "delivery_failed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "WEBHOOK_DELIVERY_NOT_RETRYABLE",
+        "Only failed webhook deliveries can be retried manually.",
+      );
+    }
+
+    this.clearWebhookRetry(delivery.deliveryId);
+    delivery.status = "queued";
+    delivery.nextAttemptAt = null;
+
+    const now = new Date().toISOString();
+    const previousEndpointValues = this.toWebhookResponse(endpoint, identity);
+    if (endpoint.status === "disabled") {
+      this.markWebhookValidationPending(endpoint, now);
+      this.recordTenantAudit(
+        {
+          actorId: identity?.actorId ?? null,
+          actorType:
+            (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+            "system",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "prepare_webhook_retry",
+          resourceType: "webhook_endpoint",
+          resourceId: endpoint.webhookId,
+          oldValuesSummary: previousEndpointValues as Record<string, unknown>,
+          newValuesSummary: this.toWebhookResponse(
+            endpoint,
+            identity,
+          ) as Record<string, unknown>,
+        },
+        requestId,
+      );
+    }
+
+    return this.retryQueuedWebhookDelivery(
+      webhookId,
+      deliveryId,
+      requestId,
+      identity,
+    );
+  }
+
+  private async retryQueuedWebhookDelivery(
+    webhookId: string,
+    deliveryId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
     const endpoint = this.webhookEndpoints.find(
       (candidate) => candidate.webhookId === webhookId,
     );
@@ -5075,10 +5197,38 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     if (!endpoint || !delivery || delivery.status !== "queued") {
       this.clearWebhookRetry(deliveryId);
-      return;
+      if (!endpoint || !delivery) {
+        return undefined;
+      }
+      return this.toDeliveryResponse(delivery, identity);
     }
 
     await this.dispatchWebhookAttempt(endpoint, delivery, delivery.rawBody);
+
+    this.recordTenantAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: endpoint.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "retry_webhook_delivery",
+        resourceType: "webhook_delivery",
+        resourceId: delivery.deliveryId,
+        newValuesSummary: {
+          webhookId: endpoint.webhookId,
+          eventType: delivery.eventType,
+          status: delivery.status,
+          attempt: delivery.attempt,
+          httpStatus: delivery.httpStatus,
+          nextAttemptAt: delivery.nextAttemptAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.toDeliveryResponse(delivery, identity);
   }
 
   listWebhookDeliveries(
@@ -5093,7 +5243,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     });
     const items = this.webhookDeliveries
       .filter((delivery) => delivery.tenantId === tenantId)
-      .map((delivery) => this.toDeliveryResponse(delivery));
+      .map((delivery) => this.toDeliveryResponse(delivery, identity));
     this.recordTenantAudit(
       {
         actorId: identity?.actorId ?? null,
@@ -5130,7 +5280,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         (delivery) =>
           delivery.tenantId === tenantId && delivery.webhookId === webhookId,
       )
-      .map((delivery) => this.toDeliveryResponse(delivery));
+      .map((delivery) => this.toDeliveryResponse(delivery, identity));
     this.recordTenantAudit(
       {
         actorId: identity?.actorId ?? null,
@@ -5227,11 +5377,82 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return { ...this.getOrCreateSlaProfile(tenantId) };
   }
 
+  getSlaProfileView(tenantId: string): TenantSlaProfileView {
+    const profile = this.slaProfiles.get(tenantId);
+    const availableActions = this.buildTenantSlaAvailableActions(profile);
+    const refreshMetadata: UiRefreshMetadata = {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: 30_000,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+    const tenantAuditLogs = this.auditNotificationService
+      .listAuditLogs()
+      .filter((auditLog) => auditLog.tenantId === tenantId);
+
+    return {
+      profile: profile ? this.cloneSlaProfile(profile) : null,
+      emptyState: profile
+        ? null
+        : availableActions[0]
+          ? ({
+              reason: "not_provisioned",
+              messageCode: "tenant.sla.not_provisioned",
+              nextAction: availableActions[0],
+            } satisfies EmptyStateEnvelope)
+          : ({
+              reason: "not_provisioned",
+              messageCode: "tenant.sla.not_provisioned",
+            } satisfies EmptyStateEnvelope),
+      availableActions,
+      refreshTier: "slow",
+      refreshMetadata,
+      resourceLinks: [
+        {
+          targetApp: "tenant-console",
+          route: "/integration-governance",
+          resourceType: "tenant_integration_governance",
+          resourceId: tenantId,
+          openMode: "same_tab",
+          label: "查看整合就緒度",
+        },
+        {
+          targetApp: "tenant-console",
+          route: "/audit?resourceType=tenant_sla",
+          resourceType: "tenant_sla_audit",
+          resourceId: tenantId,
+          openMode: "same_tab",
+          label: "查看 SLA 稽核軌跡",
+        },
+        {
+          targetApp: "tenant-console",
+          route: "/settings",
+          resourceType: "tenant_settings",
+          resourceId: tenantId,
+          openMode: "same_tab",
+          label: "返回租戶設定總覽",
+        },
+        {
+          targetApp: "ops-console",
+          route: `/complaints?tenantId=${encodeURIComponent(tenantId)}&slaBreached=true`,
+          resourceType: "complaint",
+          resourceId: tenantId,
+          openMode: "new_tab",
+          label: "前往 Ops Console 檢視 SLA 違規客訴",
+        },
+      ],
+      updatedBy: this.pickTenantSlaUpdatedBy(tenantAuditLogs),
+      lastRecalculationAt:
+        this.pickTenantSlaLastRecalculationAt(tenantAuditLogs),
+    };
+  }
+
   updateSlaProfile(
     tenantId: string,
     command: UpdateTenantSlaProfileCommand,
+    actorId?: string,
     requestId?: string,
-  ) {
+  ): ActionReceipt {
     const currentProfile = this.getOrCreateSlaProfile(tenantId);
     const slaProfile: TenantSlaProfile = {
       tenantId,
@@ -5253,7 +5474,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     this.recordTenantAudit(
       {
-        actorId: null,
+        actorId: actorId ?? null,
         actorType: "tenant_admin",
         tenantId,
         moduleName: "tenant-partner",
@@ -5264,13 +5485,62 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           waitThresholdMin: slaProfile.waitThresholdMin,
           arrivalThresholdMin: slaProfile.arrivalThresholdMin,
           completionThresholdMin: slaProfile.completionThresholdMin,
+          reason: command.reason ?? null,
         },
       },
       requestId,
     );
 
     return {
-      status: "updated",
+      actionId: randomUUID(),
+      auditId: requestId ?? randomUUID(),
+      resourceType: "tenant_sla",
+      resourceId: tenantId,
+      status: "completed",
+      message: "SLA profile updated.",
+    };
+  }
+
+  recalculateSlaBookings(
+    tenantId: string,
+    command: RecalculateTenantSlaBookingsCommand,
+    actorId?: string,
+    requestId?: string,
+  ): ActionReceipt {
+    const normalizedReason = command.reason?.trim();
+    if (!normalizedReason) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "SLA_RECALCULATE_REASON_REQUIRED",
+        "A non-empty reason is required to recalculate existing bookings.",
+      );
+    }
+
+    this.recordTenantAudit(
+      {
+        actorId: actorId ?? null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "recalculate_sla_bookings",
+        resourceType: "tenant_sla",
+        resourceId: tenantId,
+        newValuesSummary: {
+          reason: normalizedReason,
+          requestedAt: new Date().toISOString(),
+        },
+      },
+      requestId,
+    );
+
+    return {
+      actionId: randomUUID(),
+      auditId: requestId ?? randomUUID(),
+      resourceType: "tenant_sla",
+      resourceId: tenantId,
+      status: "accepted",
+      message:
+        "SLA recalculation was accepted. Existing bookings will be recomputed asynchronously.",
     };
   }
 
@@ -5488,7 +5758,116 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return new Date(parsed).toISOString();
   }
 
-  private toWebhookResponse(endpoint: StoredWebhookEndpoint) {
+  private canManageWebhook(identity?: IdentityContext | null) {
+    if (!identity) {
+      return true;
+    }
+    if (identity.actorType === "tenant_admin") {
+      return true;
+    }
+    return identity.roles.some(
+      (role) => role === "tc_admin" || role === "tc_integration_mgr",
+    );
+  }
+
+  private buildWebhookManagementActions(
+    identity?: IdentityContext | null,
+  ): ResourceActionDescriptor[] {
+    const canManage = this.canManageWebhook(identity);
+    return [
+      {
+        action: "payload_schema",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "createWebhookEndpoint",
+        enabled: canManage,
+        riskLevel: "medium",
+        ...(canManage ? {} : { disabledReasonCode: "tenant_role_missing" }),
+      },
+    ];
+  }
+
+  private buildWebhookEndpointActions(
+    endpoint: StoredWebhookEndpoint,
+    identity?: IdentityContext | null,
+  ): ResourceActionDescriptor[] {
+    const canManage = this.canManageWebhook(identity);
+    return [
+      {
+        action: "updateWebhookEndpoint",
+        enabled: canManage,
+        riskLevel: "medium",
+        ...(canManage ? {} : { disabledReasonCode: "tenant_role_missing" }),
+      },
+      {
+        action: "disableWebhookEndpoint",
+        enabled: canManage && endpoint.status !== "disabled",
+        requiresReason: true,
+        riskLevel: "high",
+        ...(endpoint.status === "disabled"
+          ? { disabledReasonCode: "already_disabled" }
+          : canManage
+            ? {}
+            : { disabledReasonCode: "tenant_role_missing" }),
+      },
+      {
+        action: "deleteWebhookEndpoint",
+        enabled: canManage,
+        requiresReason: true,
+        riskLevel: "high",
+        ...(canManage ? {} : { disabledReasonCode: "tenant_role_missing" }),
+      },
+      {
+        action: "rotateWebhookSecret",
+        enabled: canManage,
+        requiresReason: true,
+        riskLevel: "high",
+        ...(canManage ? {} : { disabledReasonCode: "tenant_role_missing" }),
+      },
+      {
+        action: "viewDeliveryLog",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "retryFailedDelivery",
+        enabled: false,
+        disabledReasonCode: "backend_retry_endpoint_pending",
+        riskLevel: "medium",
+      },
+    ];
+  }
+
+  private buildWebhookDeliveryActions(
+    delivery: StoredWebhookDelivery,
+    identity?: IdentityContext | null,
+  ): ResourceActionDescriptor[] {
+    const canManage = this.canManageWebhook(identity);
+    return [
+      {
+        action: "viewDeliveryLog",
+        enabled: true,
+        riskLevel: "low",
+      },
+      {
+        action: "retryFailedDelivery",
+        enabled: delivery.status === "delivery_failed" && canManage,
+        riskLevel: "medium",
+        ...(delivery.status === "delivery_failed"
+          ? canManage
+            ? {}
+            : { disabledReasonCode: "tenant_role_missing" }
+          : { disabledReasonCode: "delivery_not_failed" }),
+      },
+    ];
+  }
+
+  private toWebhookResponse(
+    endpoint: StoredWebhookEndpoint,
+    identity?: IdentityContext | null,
+  ) {
     return {
       webhookId: endpoint.webhookId,
       tenantId: endpoint.tenantId,
@@ -5499,6 +5878,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       secretPreview: endpoint.secretPreview,
       createdAt: endpoint.createdAt,
       updatedAt: endpoint.updatedAt,
+      availableActions: this.buildWebhookEndpointActions(endpoint, identity),
       retryPolicy: { ...endpoint.retryPolicy },
       runtimeMetadata: {
         ...endpoint.runtimeMetadata,
@@ -5517,7 +5897,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private toDeliveryResponse(delivery: StoredWebhookDelivery) {
+  private toDeliveryResponse(
+    delivery: StoredWebhookDelivery,
+    identity?: IdentityContext | null,
+  ) {
     return {
       deliveryId: delivery.deliveryId,
       webhookId: delivery.webhookId,
@@ -5528,6 +5911,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       httpStatus: delivery.httpStatus,
       signature: previewOpaqueValue(delivery.signature, 20) ?? "",
       createdAt: delivery.createdAt,
+      availableActions: this.buildWebhookDeliveryActions(delivery, identity),
       attemptedAt: delivery.attemptedAt,
       nextAttemptAt: delivery.nextAttemptAt,
       signatureVersion: delivery.signatureVersion,
@@ -5630,6 +6014,52 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private cloneSlaProfile(profile: TenantSlaProfile): TenantSlaProfile {
     return { ...profile };
+  }
+
+  private buildTenantSlaAvailableActions(
+    profile: TenantSlaProfile | undefined,
+  ): ResourceActionDescriptor[] {
+    return [
+      {
+        action: "update_sla_profile",
+        enabled: true,
+        riskLevel: "high",
+        requiresReason: true,
+      },
+      {
+        action: "recalculate_sla_bookings",
+        enabled: Boolean(profile),
+        riskLevel: "high",
+        requiresReason: true,
+        ...(profile ? {} : { disabledReasonCode: "sla_not_provisioned" }),
+      },
+    ];
+  }
+
+  private pickTenantSlaUpdatedBy(
+    auditLogs: readonly AuditLogRecord[],
+  ): string | null {
+    const auditLog = [...auditLogs]
+      .filter((entry) => entry.actionName === "update_sla_profile")
+      .sort(
+        (left, right) =>
+          Date.parse(right.createdAt) - Date.parse(left.createdAt),
+      )[0];
+
+    return auditLog?.actorId ?? auditLog?.actorType ?? null;
+  }
+
+  private pickTenantSlaLastRecalculationAt(
+    auditLogs: readonly AuditLogRecord[],
+  ): string | null {
+    const auditLog = [...auditLogs]
+      .filter((entry) => entry.actionName === "recalculate_sla_bookings")
+      .sort(
+        (left, right) =>
+          Date.parse(right.createdAt) - Date.parse(left.createdAt),
+      )[0];
+
+    return auditLog?.createdAt ?? null;
   }
 
   private clonePassenger(
@@ -6737,14 +7167,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private async recordOpsApprovalDecision(input: {
     approvalRequestId: string;
     actorId: string;
-    actorType: Extract<AuditLogRecord["actorType"], "ops_user" | "platform_admin">;
+    actorType: Extract<
+      AuditLogRecord["actorType"],
+      "ops_user" | "platform_admin"
+    >;
     actorRoleCode: string | null;
     decision: "approve" | "reject";
     reasonCode: string | null;
     reasonNote: string | null;
     requestId?: string;
   }) {
-    const request = this.requirePendingApprovalRequestById(input.approvalRequestId);
+    const request = this.requirePendingApprovalRequestById(
+      input.approvalRequestId,
+    );
     const decidedAt = new Date().toISOString();
     const decision: TenantBookingApprovalDecisionRecord = {
       decisionId: `approval-decision-${randomUUID()}`,

@@ -5,6 +5,7 @@ import {
   formatDateTimeLocalInputValue,
   getDefaultDateTimeLocalValue,
   getBlockingTenantBookingDraftErrors,
+  getTenantBookingFieldErrors,
   isMissingRequiredBookingFields,
   isReadyForTenantBookingPolicyPreview,
   type TenantBookingDraftValues,
@@ -104,6 +105,30 @@ describe("tenant booking create form utils", () => {
     );
     expect(errors).toContain(
       "Luggage count must be a whole number of 0 or more.",
+    );
+  });
+
+  it("maps field-level errors for inline validation", () => {
+    const fieldErrors = getTenantBookingFieldErrors(
+      {
+        ...baseDraft,
+        passengerPhone: "",
+        costCenter: "",
+        bookedByEmail: "",
+      },
+      {
+        includeRequired: true,
+        requireCostCenter: true,
+      },
+    );
+
+    expect(fieldErrors.passengerPhone).toBe("Passenger phone is required.");
+    expect(fieldErrors.costCenter).toBe("Cost center is required.");
+    expect(fieldErrors.bookedByName).toBe(
+      "Provide both booked-by name and email, or leave both blank.",
+    );
+    expect(fieldErrors.bookedByEmail).toBe(
+      "Provide both booked-by name and email, or leave both blank.",
     );
   });
 
