@@ -58,8 +58,6 @@ type CredentialRow = Record<string, unknown> & {
   kind: string;
   masked: string;
   rotatedAt: string;
-  lastUsedAt: string;
-  revokedAt: string | null;
 };
 
 type AuditRow = Record<string, unknown> & {
@@ -668,9 +666,6 @@ export default function PartnerDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [issuingCredential, setIssuingCredential] = useState(false);
-  const [revokingCredentialId, setRevokingCredentialId] = useState<
-    string | null
-  >(null);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [credentialActionMode, setCredentialActionMode] = useState<
@@ -698,7 +693,6 @@ export default function PartnerDetailPage() {
           notFoundBody: "The requested partner entry could not be found.",
           updateErrorTitle: "Unable to update partner entry",
           issueErrorTitle: "Unable to issue credential",
-          revokeErrorTitle: "Unable to revoke credential",
           tabs: {
             overview: "Overview",
             branding: "Branding",
@@ -746,11 +740,6 @@ export default function PartnerDetailPage() {
             "No eligibility contract snapshot is currently linked to this entry.",
           authBannerTitle: "Credential posture",
           eligibilityBannerTitle: "Contract posture",
-          revokeCredential: "Revoke",
-          revoked: "revoked",
-          active: "active",
-          lastUsed: "Last used",
-          neverUsed: "No usage telemetry yet",
           secretModal: {
             title: "Ingress credential generated · only shown once",
             warningTitle:
@@ -791,7 +780,6 @@ export default function PartnerDetailPage() {
           notFoundBody: "找不到指定的 partner entry。",
           updateErrorTitle: "Partner entry 更新失敗",
           issueErrorTitle: "Credential 發行失敗",
-          revokeErrorTitle: "Credential 撤銷失敗",
           tabs: {
             overview: "Overview",
             branding: "Branding",
@@ -837,11 +825,6 @@ export default function PartnerDetailPage() {
           contractEmpty: "此 entry 尚未綁定 eligibility contract snapshot。",
           authBannerTitle: "Credential posture",
           eligibilityBannerTitle: "Contract posture",
-          revokeCredential: "撤銷",
-          revoked: "revoked",
-          active: "active",
-          lastUsed: "最後使用",
-          neverUsed: "尚無使用 telemetry",
           secretModal: {
             title: "Ingress credential 已產生 · only shown once",
             warningTitle: "關閉此視窗後將永久隱藏完整 secret",
@@ -983,35 +966,6 @@ export default function PartnerDetailPage() {
       setIssuingCredential(false);
     }
   }, [client, credentialActionMode, credentialActionReason, entry, loadEntry]);
-
-  const revokeCredential = useCallback(
-    async (keyId: string) => {
-      if (!entry) {
-        return;
-      }
-
-      setRevokingCredentialId(keyId);
-      setError(null);
-
-      try {
-        await client.revokePlatformPartnerIngressCredential(
-          entry.entrySlug,
-          keyId,
-          {
-            revokeReason: "platform_admin_partner_detail_revoke",
-          },
-        );
-        await loadEntry({ preserveIssuedCredential: true });
-      } catch (nextError: unknown) {
-        setError(
-          nextError instanceof Error ? nextError.message : String(nextError),
-        );
-      } finally {
-        setRevokingCredentialId(null);
-      }
-    },
-    [client, entry, loadEntry],
-  );
 
   const updateFormField = <Key extends keyof EntryFormState>(
     key: Key,
@@ -1246,27 +1200,19 @@ export default function PartnerDetailPage() {
   const credentialRows = useMemo<CredentialRow[]>(
     () =>
       [...credentials]
-        .sort((left, right) => {
-          if (Boolean(left.revokedAt) !== Boolean(right.revokedAt)) {
-            return left.revokedAt ? 1 : -1;
-          }
-
-          return (
+        .filter((credential) => !credential.revokedAt)
+        .sort(
+          (left, right) =>
             new Date(right.createdAt).getTime() -
-            new Date(left.createdAt).getTime()
-          );
-        })
+            new Date(left.createdAt).getTime(),
+        )
         .map((credential) => ({
           keyId: credential.keyId,
           kind: credential.source,
           masked: `${credential.keyPrefix}${credential.maskedSuffix}`,
           rotatedAt: formatDateTime(credential.createdAt),
-          lastUsedAt: credential.lastUsedAt
-            ? formatDateTime(credential.lastUsedAt)
-            : copy.neverUsed,
-          revokedAt: credential.revokedAt,
         })),
-    [copy.neverUsed, credentials],
+    [credentials],
   );
 
   const credentialColumns = useMemo<CanvasTableColumn<CredentialRow>[]>(
@@ -1289,45 +1235,8 @@ export default function PartnerDetailPage() {
         mono: true,
         w: 160,
       },
-      {
-        h: "status",
-        w: 120,
-        r: (row) => (
-          <Pill
-            theme={theme}
-            tone={row.revokedAt ? "danger" : "success"}
-            dot={!row.revokedAt}
-          >
-            {row.revokedAt ? copy.revoked : copy.active}
-          </Pill>
-        ),
-      },
-      {
-        h: "actions",
-        w: 112,
-        r: (row) =>
-          row.revokedAt ? (
-            <span style={mutedTextStyle}>—</span>
-          ) : (
-            <Btn
-              theme={theme}
-              variant="secondary"
-              size="xs"
-              disabled={revokingCredentialId === row.keyId}
-              onClick={() => void revokeCredential(row.keyId)}
-            >
-              {copy.revokeCredential}
-            </Btn>
-          ),
-      },
     ],
-    [
-      copy.active,
-      copy.revokeCredential,
-      copy.revoked,
-      revokeCredential,
-      revokingCredentialId,
-    ],
+    [],
   );
 
   const auditRows = useMemo<AuditRow[]>(() => {
@@ -1540,9 +1449,7 @@ export default function PartnerDetailPage() {
             title={
               activeTab === "credentials"
                 ? copy.issueErrorTitle
-                : activeTab === "audit"
-                  ? copy.revokeErrorTitle
-                  : copy.updateErrorTitle
+                : copy.updateErrorTitle
             }
             body={error}
           />
