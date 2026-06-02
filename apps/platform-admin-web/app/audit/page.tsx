@@ -142,7 +142,7 @@ function actorTone(actorType: AuditLogRecord["actorType"]): CanvasTone {
 }
 
 export default function AuditPage() {
-  const { t, locale } = useTranslation();
+  const { locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [records, setRecords] = useState<AuditLogRecord[]>([]);
   const [policies, setPolicies] = useState<EvidenceRetentionPolicyRecord[]>([]);
