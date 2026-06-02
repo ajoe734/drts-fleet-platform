@@ -253,9 +253,9 @@ export default function UsersPage() {
           roleField: "Role",
           suspendTitle: "Suspend platform staff",
           suspendSubtitle:
-            "High-risk change. A reason is required and is attached to the audit receipt before the user loses access.",
+            "High-risk change. A confirmation reason is required before the user loses platform access. The status change is recorded to the audit trail.",
           reasonField: "Reason",
-          reasonHint: "Required for the high-risk audit receipt.",
+          reasonHint: "Required to confirm this high-risk suspension.",
           reasonPlaceholder: "e.g. Offboarding / suspected credential leak",
           activateTitle: "Reactivate platform staff",
           activateSubtitle:
@@ -290,9 +290,9 @@ export default function UsersPage() {
           roleField: "角色",
           suspendTitle: "停用平台人員",
           suspendSubtitle:
-            "高風險變更，需填寫原因並附加於稽核憑證，使用者隨即失去存取權限。",
+            "高風險變更，需填寫原因確認後才停用，使用者隨即失去平台存取權限；狀態變更會寫入稽核軌跡。",
           reasonField: "原因",
-          reasonHint: "高風險稽核憑證必填。",
+          reasonHint: "高風險停用確認必填。",
           reasonPlaceholder: "例如：離職 / 疑似憑證外洩",
           activateTitle: "重新啟用平台人員",
           activateSubtitle: "恢復此使用者的平台存取權限，變更寫入稽核軌跡。",
@@ -380,6 +380,14 @@ export default function UsersPage() {
     if (kind === "role") {
       await applyUpdate(user.userId, pendingAction.roleCode, user.status);
     } else if (kind === "suspend") {
+      // The canvas descriptor marks `suspend` as requiresReason: true, so the
+      // operator must type a reason as a confirmation gate before this
+      // high-risk status transition. The reason is intentionally NOT sent to
+      // the backend: UpdatePlatformAdminUserRoleCommand only carries
+      // { roleCode, status } (packages/contracts/src/index.ts) and widening
+      // that contract is outside this page-scoped task. The copy above
+      // therefore claims only that the status change is audited, not that the
+      // free-text reason is persisted.
       await applyUpdate(user.userId, user.roleCode, "suspended");
     } else {
       await applyUpdate(user.userId, user.roleCode, "active");
