@@ -21,6 +21,8 @@ const CONTRACT_PATH =
 const TOPOLOGY_PATH =
   "docs/02-architecture/cross-app-navigation-and-shell-topology-20260524.md";
 
+const CANVAS_PATH = "docs/05-ui/drts-design-canvas/Platform Admin.html";
+
 const FIXTURE_DOCS: KnowledgeSourceDocument[] = [
   {
     sourcePath: PLAN_PATH,
@@ -39,6 +41,19 @@ const FIXTURE_DOCS: KnowledgeSourceDocument[] = [
       "## 7.3 Uncertainty handling",
       "If no approved source supports the question the assistant returns an",
       "uncertainty or help-search response instead of fabricating an answer.",
+    ].join("\n"),
+  },
+  {
+    // Mirrors the real design-canvas corpus, which is authored in zh-TW.
+    sourcePath: CANVAS_PATH,
+    content: [
+      "# 平台治理控制平面",
+      "",
+      "## 02 · 租戶治理",
+      "租戶治理頁面保留 /tenants 與 /tenant-governance 兩個 route。",
+      "",
+      "## 03 · 合作夥伴 + 平台人員",
+      "合作夥伴清單顯示 readiness 與 credentials。",
     ].join("\n"),
   },
   {
@@ -202,6 +217,37 @@ describe("uncertainty / help-search (acceptance: no fabrication)", () => {
     const service = buildService();
     expect(service.answer({ question: "" }).kind).toBe("uncertain");
     expect(service.answer({ question: "the a of to" }).kind).toBe("uncertain");
+  });
+});
+
+describe("Chinese-language retrieval (acceptance: zh corpus is searchable)", () => {
+  it("grounds a Traditional Chinese question in the matching zh section", () => {
+    const service = buildService();
+    const result = service.answer({
+      question: "租戶治理頁面保留哪些 route？",
+    });
+
+    expect(result.kind).toBe("grounded");
+    const grounded = result as GroundedRetrieval;
+    expect(grounded.hits[0].chunk.sourcePath).toBe(CANVAS_PATH);
+    expect(grounded.hits[0].chunk.section).toBe("02 · 租戶治理");
+    expect(grounded.citations[0].sourcePath).toBe(CANVAS_PATH);
+  });
+
+  it("matches a multi-character zh term embedded among Latin/markup", () => {
+    const service = buildService();
+    const result = service.answer({
+      question: "合作夥伴",
+    }) as GroundedRetrieval;
+
+    expect(result.kind).toBe("grounded");
+    expect(result.hits[0].chunk.section).toBe("03 · 合作夥伴 + 平台人員");
+  });
+
+  it("still returns uncertainty for an unrelated zh question (no fabrication)", () => {
+    const service = buildService();
+    const result = service.answer({ question: "量子傳送延遲預算是多少？" });
+    expect(result.kind).toBe("uncertain");
   });
 });
 

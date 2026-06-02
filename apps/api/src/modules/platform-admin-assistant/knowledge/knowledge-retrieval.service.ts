@@ -66,12 +66,43 @@ const STOP_WORDS = new Set([
   "about",
 ]);
 
+// CJK / Japanese / Korean scripts have no whitespace word boundaries, so an
+// ASCII-only tokenizer dropped them entirely and any Chinese question or doc
+// text scored zero (every zh query fell into `uncertain`). We keep Latin/digit
+// words as-is and segment CJK runs into character bigrams — the standard
+// segmenter-free IR technique: it needs no dictionary, and because both the
+// query and the indexed text pass through the same bigram split, a zh term like
+// "租戶治理" matches the same bigrams ("租戶", "戶治", "治理") in the corpus.
+const CJK_RANGES =
+  "\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff\\u3040-\\u30ff\\uac00-\\ud7af";
+const TOKEN_PATTERN = new RegExp(
+  `[a-z0-9]+(?:-[a-z0-9]+)*|[${CJK_RANGES}]+`,
+  "g",
+);
+
 function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, " ")
-    .split(/\s+/)
-    .filter((token) => token.length >= 2 && !STOP_WORDS.has(token));
+  const tokens: string[] = [];
+  for (const match of text.toLowerCase().matchAll(TOKEN_PATTERN)) {
+    const run = match[0];
+    if (/^[a-z0-9]/.test(run)) {
+      // Latin / digit word run — preserve prior behaviour (min length, stopwords).
+      if (run.length >= 2 && !STOP_WORDS.has(run)) {
+        tokens.push(run);
+      }
+      continue;
+    }
+    // CJK run → overlapping character bigrams; a lone character falls back to a
+    // unigram so a single-character run is still retrievable.
+    const chars = [...run];
+    if (chars.length === 1) {
+      tokens.push(chars[0]!);
+      continue;
+    }
+    for (let i = 0; i < chars.length - 1; i += 1) {
+      tokens.push(`${chars[i]}${chars[i + 1]}`);
+    }
+  }
+  return tokens;
 }
 
 /**
