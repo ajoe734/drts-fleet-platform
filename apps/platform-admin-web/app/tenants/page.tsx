@@ -66,17 +66,16 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const filterRowStyle: CSSProperties = {
-  display: "flex",
-  gap: 8,
+const stageTabButtonStyle: CSSProperties = {
+  display: "inline-flex",
   alignItems: "center",
-  flexWrap: "wrap",
-};
-
-const filterButtonStyle: CSSProperties = {
+  gap: 8,
   border: 0,
   padding: 0,
+  margin: 0,
   background: "transparent",
+  color: "inherit",
+  font: "inherit",
   cursor: "pointer",
 };
 
@@ -223,16 +222,6 @@ function formatLocaleNumber(locale: string, value: number) {
   return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
 }
 
-function getFilterTone(value: TenantFilter, active: boolean): CanvasTone {
-  if (active) {
-    return "accent";
-  }
-  if (value === "rollback_hold") {
-    return "danger";
-  }
-  return "neutral";
-}
-
 function getTenantStageValue(
   tenant: PlatformAdminTenantRecord,
 ): TenantStageValue {
@@ -246,6 +235,28 @@ function getStageTone(stage: TenantStageValue): CanvasTone {
     return "danger";
   }
   return toCanvasTone(tenantStageTone(stage));
+}
+
+type TenantGateValue = "ready" | "pending" | "blocked";
+
+function getGateValue(stage: TenantStageValue): TenantGateValue {
+  if (stage === "production") {
+    return "ready";
+  }
+  if (stage === "rollback_hold") {
+    return "blocked";
+  }
+  return "pending";
+}
+
+function getGateTone(gate: TenantGateValue): CanvasTone {
+  if (gate === "ready") {
+    return "success";
+  }
+  if (gate === "blocked") {
+    return "danger";
+  }
+  return "warn";
 }
 
 function formatQuotaSummary(locale: string, tenant: PlatformAdminTenantRecord) {
@@ -290,7 +301,7 @@ function toCsvCell(value: string | number) {
 export default function TenantsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
-  const filterRowRef = useRef<HTMLDivElement | null>(null);
+  const tableRef = useRef<HTMLDivElement | null>(null);
   const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -319,17 +330,23 @@ export default function TenantsPage() {
           columns: {
             tenant: "TENANT",
             stage: "STAGE",
+            gate: "GATE",
             modules: "MODULES",
             quotas: "配額 / 月",
             integration: "介接",
             updated: "更新",
           },
+          gate: {
+            ready: "ready",
+            pending: "pending",
+            blocked: "blocked",
+          },
           filters: {
             all: "All",
-            sandbox: "sandbox",
-            pilot: "pilot",
-            production: "production",
-            rollback_hold: "rollback_hold",
+            production: "Production",
+            pilot: "Pilot",
+            sandbox: "Sandbox",
+            rollback_hold: "Rollback hold",
           },
           moduleState: {
             enabled: "enabled",
@@ -384,17 +401,23 @@ export default function TenantsPage() {
           columns: {
             tenant: "TENANT",
             stage: "STAGE",
+            gate: "GATE",
             modules: "MODULES",
             quotas: "配額 / 月",
             integration: "介接",
             updated: "更新",
           },
+          gate: {
+            ready: "ready",
+            pending: "pending",
+            blocked: "blocked",
+          },
           filters: {
             all: "全部",
-            sandbox: "sandbox",
-            pilot: "pilot",
-            production: "production",
-            rollback_hold: "rollback_hold",
+            production: "Production",
+            pilot: "Pilot",
+            sandbox: "Sandbox",
+            rollback_hold: "Rollback hold",
           },
           moduleState: {
             enabled: "已啟用",
@@ -499,6 +522,7 @@ export default function TenantsPage() {
     const header = [
       copy.columns.tenant,
       copy.columns.stage,
+      copy.columns.gate,
       copy.columns.modules,
       copy.columns.quotas,
       copy.columns.integration,
@@ -508,6 +532,7 @@ export default function TenantsPage() {
     const rows = visibleTenants.map((tenant) => [
       `${tenant.name} (${tenant.code})`,
       getTenantStageValue(tenant),
+      copy.gate[getGateValue(getTenantStageValue(tenant))],
       `${tenant.enabledModules.length}/${PLATFORM_TENANT_MODULES.length}`,
       formatQuotaSummary(locale, tenant),
       getIntegrationSummary(tenant),
@@ -525,7 +550,7 @@ export default function TenantsPage() {
     anchor.download = `platform-tenants-${filter}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [copy.columns, filter, locale, visibleTenants]);
+  }, [copy.columns, copy.gate, filter, locale, visibleTenants]);
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -577,13 +602,26 @@ export default function TenantsPage() {
       },
       {
         h: copy.columns.stage,
-        w: 140,
+        w: 130,
         r: (tenant) => {
           const stage = getTenantStageValue(tenant);
 
           return (
             <CanvasPill theme={th} tone={getStageTone(stage)} dot>
               {stage}
+            </CanvasPill>
+          );
+        },
+      },
+      {
+        h: copy.columns.gate,
+        w: 130,
+        r: (tenant) => {
+          const gate = getGateValue(getTenantStageValue(tenant));
+
+          return (
+            <CanvasPill theme={th} tone={getGateTone(gate)}>
+              {copy.gate[gate]}
             </CanvasPill>
           );
         },
@@ -631,28 +669,64 @@ export default function TenantsPage() {
         r: (tenant) => formatShortDate(tenant.updatedAt),
       },
     ],
-    [copy.columns, locale, moduleLabels],
+    [copy.columns, copy.gate, locale, moduleLabels],
   );
 
-  const filterOptions = [
-    { value: "all" as const, label: copy.filters.all, count: counts.all },
+  const filterOptions: {
+    value: TenantFilter;
+    label: string;
+    count: number;
+    tone: CanvasTone;
+  }[] = [
     {
-      value: "sandbox" as const,
-      label: copy.filters.sandbox,
-      count: counts.sandbox,
+      value: "all",
+      label: copy.filters.all,
+      count: counts.all,
+      tone: "neutral",
     },
-    { value: "pilot" as const, label: copy.filters.pilot, count: counts.pilot },
     {
-      value: "production" as const,
+      value: "production",
       label: copy.filters.production,
       count: counts.production,
+      tone: "accent",
     },
     {
-      value: "rollback_hold" as const,
+      value: "pilot",
+      label: copy.filters.pilot,
+      count: counts.pilot,
+      tone: "neutral",
+    },
+    {
+      value: "sandbox",
+      label: copy.filters.sandbox,
+      count: counts.sandbox,
+      tone: "neutral",
+    },
+    {
+      value: "rollback_hold",
       label: copy.filters.rollback_hold,
       count: counts.rollback_hold,
+      tone: "danger",
     },
   ];
+
+  const stageTabs = filterOptions.map((option) => (
+    <button
+      key={option.value}
+      type="button"
+      style={stageTabButtonStyle}
+      onClick={() => setFilter(option.value)}
+      aria-pressed={filter === option.value}
+    >
+      <span>{option.label}</span>
+      <CanvasPill theme={th} tone={option.tone}>
+        {formatLocaleNumber(locale, option.count)}
+      </CanvasPill>
+    </button>
+  ));
+
+  const activeStageTab =
+    stageTabs[filterOptions.findIndex((option) => option.value === filter)];
 
   const createDisabled =
     creating || !createForm.name.trim() || !createForm.code.trim();
@@ -663,6 +737,8 @@ export default function TenantsPage() {
         theme={th}
         title={copy.title}
         subtitle={copy.subtitle}
+        tabs={stageTabs}
+        activeTab={activeStageTab}
         actions={
           <div style={headerActionsStyle}>
             <CanvasBtn
@@ -670,7 +746,7 @@ export default function TenantsPage() {
               variant="secondary"
               icon="filter"
               onClick={() =>
-                filterRowRef.current?.scrollIntoView({
+                tableRef.current?.scrollIntoView({
                   behavior: "smooth",
                   block: "nearest",
                 })
@@ -700,30 +776,6 @@ export default function TenantsPage() {
       />
 
       <div style={pageBodyStyle}>
-        <div ref={filterRowRef} style={filterRowStyle}>
-          {filterOptions.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              style={filterButtonStyle}
-              onClick={() => setFilter(option.value)}
-              aria-pressed={filter === option.value}
-            >
-              <CanvasPill
-                theme={th}
-                tone={getFilterTone(option.value, filter === option.value)}
-                dot
-              >
-                {option.label} {formatLocaleNumber(locale, option.count)}
-              </CanvasPill>
-            </button>
-          ))}
-          <span style={{ flex: 1 }} />
-          <CanvasPill theme={th} tone="neutral">
-            {copy.filterPill}
-          </CanvasPill>
-        </div>
-
         {error ? (
           <CanvasBanner
             theme={th}
@@ -1062,19 +1114,21 @@ export default function TenantsPage() {
           </div>
         ) : null}
 
-        <CanvasCard theme={th} padding={0}>
-          {loading ? (
-            <div style={loadingStateStyle}>{t("tenants.loading")}</div>
-          ) : visibleTenants.length > 0 ? (
-            <CanvasTable<TenantRow>
-              theme={th}
-              columns={columns}
-              rows={visibleTenants as TenantRow[]}
-            />
-          ) : (
-            <div style={emptyStateStyle}>{t("tenants.empty")}</div>
-          )}
-        </CanvasCard>
+        <div ref={tableRef}>
+          <CanvasCard theme={th} padding={0}>
+            {loading ? (
+              <div style={loadingStateStyle}>{t("tenants.loading")}</div>
+            ) : visibleTenants.length > 0 ? (
+              <CanvasTable<TenantRow>
+                theme={th}
+                columns={columns}
+                rows={visibleTenants as TenantRow[]}
+              />
+            ) : (
+              <div style={emptyStateStyle}>{t("tenants.empty")}</div>
+            )}
+          </CanvasCard>
+        </div>
       </div>
     </>
   );
