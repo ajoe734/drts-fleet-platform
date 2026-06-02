@@ -53,6 +53,26 @@ resolve_real_codex() {
     printf '%s' "$CODEX_REAL_BIN"
     return 0
   fi
+  if [[ -n "${HOME:-}" ]]; then
+    local home_candidate resolved
+    home_candidate="$HOME/.local/bin/codex"
+    if [[ -x "$home_candidate" ]]; then
+      resolved="$(readlink -f "$home_candidate" 2>/dev/null || printf '%s' "$home_candidate")"
+      if [[ "$resolved" != "$self_real" ]]; then
+        printf '%s' "$home_candidate"
+        return 0
+      fi
+    fi
+    local vscode_candidate
+    for vscode_candidate in "$HOME"/.vscode-server/extensions/openai.chatgpt-*/bin/linux-x86_64/codex; do
+      [[ -x "$vscode_candidate" ]] || continue
+      resolved="$(readlink -f "$vscode_candidate" 2>/dev/null || printf '%s' "$vscode_candidate")"
+      if [[ "$resolved" != "$self_real" ]]; then
+        printf '%s' "$vscode_candidate"
+        return 0
+      fi
+    done
+  fi
   local IFS=:
   local candidate
   for d in $PATH; do

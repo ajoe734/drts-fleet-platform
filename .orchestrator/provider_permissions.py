@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ GEMINI_OAUTH_CREDS_PATH = Path.home() / ".gemini" / "oauth_creds.json"
 QWEN_SETTINGS_PATH = Path.home() / ".qwen" / "settings.json"
 CODEX_CONFIG_PATH = Path.home() / ".codex" / "config.toml"
 EXTENSIONS_DIR = Path.home() / ".vscode-server" / "extensions"
+_CLAUDE_AUTH_STATUS_TIMEOUT_SECONDS = 10.0
 
 
 def _find_extension(prefix: str) -> tuple[Path | None, str | None]:
@@ -181,8 +183,13 @@ def _gh_version(binary: str | None) -> tuple[int, int, int] | None:
     return tuple(int(part) for part in match.groups())
 
 
-def _json_command(command: list[str], *, env: dict[str, str] | None = None) -> dict[str, Any]:
-    result = run_command(command, env=env)
+def _json_command(
+    command: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    result = run_command(command, env=env, timeout=timeout)
     if result.returncode != 0 or not result.stdout:
         return {}
     try:
@@ -194,7 +201,14 @@ def _json_command(command: list[str], *, env: dict[str, str] | None = None) -> d
 def _claude_auth_ready(binary: str | None, *, env: dict[str, str] | None = None) -> bool:
     if not binary:
         return False
-    payload = _json_command([binary, "auth", "status"], env=env)
+    try:
+        payload = _json_command(
+            [binary, "auth", "status"],
+            env=env,
+            timeout=_CLAUDE_AUTH_STATUS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return False
     return bool(payload.get("loggedIn"))
 
 

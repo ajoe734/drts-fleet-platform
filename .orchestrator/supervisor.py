@@ -7385,6 +7385,7 @@ def chair_provider_pause_reason_is_actionable(kind: str, reason: str) -> bool:
     if kind != "auth":
         return True
     lowered = reason.lower()
+    stripped = lowered.lstrip("\"'` ")
     non_actionable_markers = (
         "investigate",
         "verify ",
@@ -7395,8 +7396,11 @@ def chair_provider_pause_reason_is_actionable(kind: str, reason: str) -> bool:
         "not a real",
         "mentioned",
         "citing",
+        "fastest path",
+        "reviewer=",
+        "owner=",
     )
-    if any(marker in lowered for marker in non_actionable_markers):
+    if stripped.startswith("restore ") or any(marker in lowered for marker in non_actionable_markers):
         return False
     concrete_auth_markers = (
         "failed to authenticate",

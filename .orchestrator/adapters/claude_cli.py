@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import os
 import json
+import os
+import subprocess
+import time
 from pathlib import Path
 
 from adapters.base import DeliveryCapability, DeliveryRequest, DeliveryResult
@@ -19,6 +21,10 @@ from common import (
     run_command,
     runtime_env_overrides,
 )
+
+_CLAUDE_AUTH_STATUS_TIMEOUT_SECONDS = 10.0
+_CLAUDE_AUTH_STATUS_TTL_SECONDS = 30.0
+_CLAUDE_AUTH_READY_CACHE: dict[tuple[str, str, str, str], tuple[float, bool]] = {}
 
 
 def _claude_provider_for_agent(config: dict, agent_id: str) -> tuple[str, dict]:
@@ -43,17 +49,48 @@ def _claude_cli_path(config: dict, runtime: dict) -> str | None:
     return command_exists(runtime.get("cli") or "claude", search_roots=[workspace_root])
 
 
+def _claude_auth_cache_key(cli: str, env: dict[str, str] | None) -> tuple[str, str, str, str]:
+    source = env or {}
+    return (
+        cli,
+        source.get("HOME", ""),
+        source.get("CLAUDE_CONFIG_DIR", ""),
+        source.get("PATH", ""),
+    )
+
+
 def _claude_auth_ready(cli: str | None, env: dict[str, str] | None = None) -> bool:
     if not cli:
         return False
-    status = run_command([cli, "auth", "status"], env=env)
+
+    cache_key = _claude_auth_cache_key(cli, env)
+    now = time.monotonic()
+    cached = _CLAUDE_AUTH_READY_CACHE.get(cache_key)
+    if cached and now - cached[0] < _CLAUDE_AUTH_STATUS_TTL_SECONDS:
+        return cached[1]
+
+    try:
+        status = run_command(
+            [cli, "auth", "status"],
+            env=env,
+            timeout=_CLAUDE_AUTH_STATUS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        _CLAUDE_AUTH_READY_CACHE[cache_key] = (now, False)
+        return False
+
     if status.returncode != 0 or not status.stdout:
+        _CLAUDE_AUTH_READY_CACHE[cache_key] = (now, False)
         return False
     try:
         payload = json.loads(status.stdout)
     except json.JSONDecodeError:
+        _CLAUDE_AUTH_READY_CACHE[cache_key] = (now, False)
         return False
-    return bool(payload.get("loggedIn"))
+
+    ready = bool(payload.get("loggedIn"))
+    _CLAUDE_AUTH_READY_CACHE[cache_key] = (now, ready)
+    return ready
 
 
 class ClaudeCLIAdapter(ClaudeCodeAdapter):
@@ -61,10 +98,12 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
 
     def capability(self, agent_id: str) -> DeliveryCapability:
         provider_key, provider = _claude_provider_for_agent(self.config, agent_id)
+        provider_info = (self.provider_capabilities or {}).get("providers", {}).get(provider_key, {})
         runtime = provider.get("runtime", {})
         cli = _claude_cli_path(self.config, runtime)
         auth_env = _claude_runtime_env(runtime)
-        if cli and _claude_auth_ready(cli, env=auth_env):
+        auth_ready = bool(provider_info.get("auth_ready")) or _claude_auth_ready(cli, env=auth_env)
+        if cli and auth_ready:
             notes = "Uses non-interactive Claude CLI sessions with the local approval broker hooks."
             if runtime.get("config_home"):
                 notes = f"{notes} Auth is isolated by provider runtime.config_home."
@@ -95,10 +134,11 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
 
     def deliver(self, request: DeliveryRequest) -> DeliveryResult:
         provider_key, provider = _claude_provider_for_agent(self.config, request.agent_id)
+        provider_info = (self.provider_capabilities or {}).get("providers", {}).get(provider_key, {})
         runtime = provider.get("runtime", {})
         cli = _claude_cli_path(self.config, runtime)
         env = _claude_runtime_env(runtime, ensure_dirs=True)
-        auth_ready = _claude_auth_ready(cli, env=env)
+        auth_ready = bool(provider_info.get("auth_ready")) or _claude_auth_ready(cli, env=env)
         if not cli or not auth_ready:
             result = super().deliver(request)
             result.adapter = self.name
@@ -122,7 +162,6 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
         if runtime.get("include_hook_events", True):
             command.append("--include-hook-events")
 
-        provider_info = (self.provider_capabilities or {}).get("providers", {}).get(provider_key, {})
         if runtime.get("enable_auto_mode_if_supported", True) and provider_info.get("supports_auto_approve"):
             command.extend(["--permission-mode", runtime.get("auto_permission_mode", "auto")])
         else:

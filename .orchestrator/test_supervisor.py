@@ -455,6 +455,14 @@ class DetectWorkerFailureTests(unittest.TestCase):
             )
         )
 
+    def test_rejects_restore_plan_text_as_chair_auth_pause_reason(self) -> None:
+        self.assertFalse(
+            supervisor.chair_provider_pause_reason_is_actionable(
+                "auth",
+                '"Restore claude2 auth (401 Invalid authentication credentials) - fastest path to a SECOND healthy lane; this alone unblocks reviewer reassignment for UI-FE-TEN-SLA/BILL/IG (reviewer=Claude2) and unblocks owner reassignment of UI-FE-OPS-FF (owner=Claude2)."',
+            )
+        )
+
     def test_allows_concrete_chair_auth_pause_reason(self) -> None:
         self.assertTrue(
             supervisor.chair_provider_pause_reason_is_actionable(
