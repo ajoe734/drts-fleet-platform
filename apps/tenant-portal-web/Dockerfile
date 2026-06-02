@@ -30,6 +30,7 @@ COPY apps/tenant-portal-web/ apps/tenant-portal-web/
 COPY tsconfig.base.json .
 
 RUN pnpm --filter @drts/contracts build && \
+    pnpm --filter @drts/ui-tokens build && \
     pnpm --filter @drts/tenant-portal-web build
 
 FROM node:${NODE_VERSION} AS runtime
