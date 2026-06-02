@@ -23,8 +23,11 @@ export async function getUsers(): Promise<{
 }> {
   const client = await getTenantClient();
   try {
-    const users = await client.listTenantUsers();
-    return { users, error: null };
+    const result = await client.listTenantUsers();
+    return {
+      users: Array.isArray(result) ? result : result.items,
+      error: null,
+    };
   } catch (e) {
     return {
       users: [],
