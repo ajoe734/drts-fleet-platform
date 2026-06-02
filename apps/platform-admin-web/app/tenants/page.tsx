@@ -66,18 +66,27 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const filterRowStyle: CSSProperties = {
-  display: "flex",
-  gap: 8,
+const tabNodeStyle: CSSProperties = {
+  display: "inline-flex",
   alignItems: "center",
-  flexWrap: "wrap",
+  gap: 6,
+  cursor: "pointer",
 };
 
-const filterButtonStyle: CSSProperties = {
-  border: 0,
-  padding: 0,
-  background: "transparent",
-  cursor: "pointer",
+const modalOverlayStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(2, 6, 16, 0.62)",
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "center",
+  padding: "56px 24px",
+  overflowY: "auto",
+  zIndex: 60,
+};
+
+const modalPanelStyle: CSSProperties = {
+  width: "min(1000px, 100%)",
 };
 
 const loadingStateStyle: CSSProperties = {
@@ -248,6 +257,28 @@ function getStageTone(stage: TenantStageValue): CanvasTone {
   return toCanvasTone(tenantStageTone(stage));
 }
 
+function getGateTone(stage: TenantStageValue): CanvasTone {
+  if (stage === "production") {
+    return "success";
+  }
+  if (stage === "rollback_hold") {
+    return "danger";
+  }
+  return "warn";
+}
+
+function getGateLabel(
+  stage: TenantStageValue,
+): "ready" | "blocked" | "pending" {
+  if (stage === "production") {
+    return "ready";
+  }
+  if (stage === "rollback_hold") {
+    return "blocked";
+  }
+  return "pending";
+}
+
 function formatQuotaSummary(locale: string, tenant: PlatformAdminTenantRecord) {
   return `${formatLocaleNumber(locale, tenant.quotas.monthlyBookings)}/mo`;
 }
@@ -290,7 +321,7 @@ function toCsvCell(value: string | number) {
 export default function TenantsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
-  const filterRowRef = useRef<HTMLDivElement | null>(null);
+  const tableSectionRef = useRef<HTMLDivElement | null>(null);
   const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -319,17 +350,18 @@ export default function TenantsPage() {
           columns: {
             tenant: "TENANT",
             stage: "STAGE",
+            gate: "GATE",
             modules: "MODULES",
-            quotas: "配額 / 月",
+            quotas: "配額/月",
             integration: "介接",
             updated: "更新",
           },
           filters: {
             all: "All",
-            sandbox: "sandbox",
-            pilot: "pilot",
-            production: "production",
-            rollback_hold: "rollback_hold",
+            production: "Production",
+            pilot: "Pilot",
+            sandbox: "Sandbox",
+            rollback_hold: "Rollback hold",
           },
           moduleState: {
             enabled: "enabled",
@@ -384,17 +416,18 @@ export default function TenantsPage() {
           columns: {
             tenant: "TENANT",
             stage: "STAGE",
+            gate: "GATE",
             modules: "MODULES",
-            quotas: "配額 / 月",
+            quotas: "配額/月",
             integration: "介接",
             updated: "更新",
           },
           filters: {
             all: "全部",
-            sandbox: "sandbox",
-            pilot: "pilot",
-            production: "production",
-            rollback_hold: "rollback_hold",
+            production: "Production",
+            pilot: "Pilot",
+            sandbox: "Sandbox",
+            rollback_hold: "Rollback hold",
           },
           moduleState: {
             enabled: "已啟用",
@@ -499,6 +532,7 @@ export default function TenantsPage() {
     const header = [
       copy.columns.tenant,
       copy.columns.stage,
+      copy.columns.gate,
       copy.columns.modules,
       copy.columns.quotas,
       copy.columns.integration,
@@ -508,6 +542,7 @@ export default function TenantsPage() {
     const rows = visibleTenants.map((tenant) => [
       `${tenant.name} (${tenant.code})`,
       getTenantStageValue(tenant),
+      getGateLabel(getTenantStageValue(tenant)),
       `${tenant.enabledModules.length}/${PLATFORM_TENANT_MODULES.length}`,
       formatQuotaSummary(locale, tenant),
       getIntegrationSummary(tenant),
@@ -565,7 +600,7 @@ export default function TenantsPage() {
     () => [
       {
         h: copy.columns.tenant,
-        w: 280,
+        w: 240,
         r: (tenant) => (
           <Link href={`/tenants/${tenant.id}`} style={tenantLinkStyle}>
             <span style={tenantNameStyle}>{tenant.name}</span>
@@ -577,7 +612,7 @@ export default function TenantsPage() {
       },
       {
         h: copy.columns.stage,
-        w: 140,
+        w: 130,
         r: (tenant) => {
           const stage = getTenantStageValue(tenant);
 
@@ -589,8 +624,21 @@ export default function TenantsPage() {
         },
       },
       {
+        h: copy.columns.gate,
+        w: 130,
+        r: (tenant) => {
+          const stage = getTenantStageValue(tenant);
+
+          return (
+            <CanvasPill theme={th} tone={getGateTone(stage)}>
+              {getGateLabel(stage)}
+            </CanvasPill>
+          );
+        },
+      },
+      {
         h: copy.columns.modules,
-        w: 108,
+        w: 100,
         mono: true,
         r: (tenant) => (
           <span
@@ -604,7 +652,7 @@ export default function TenantsPage() {
       },
       {
         h: copy.columns.quotas,
-        w: 132,
+        w: 120,
         mono: true,
         r: (tenant) => (
           <span
@@ -616,7 +664,7 @@ export default function TenantsPage() {
       },
       {
         h: copy.columns.integration,
-        w: 152,
+        w: 160,
         mono: true,
         r: (tenant) => (
           <span title={tenant.integrationPackage.sandboxBaseUrl ?? ""}>
@@ -626,7 +674,7 @@ export default function TenantsPage() {
       },
       {
         h: copy.columns.updated,
-        w: 124,
+        w: 120,
         mono: true,
         r: (tenant) => formatShortDate(tenant.updatedAt),
       },
@@ -637,15 +685,15 @@ export default function TenantsPage() {
   const filterOptions = [
     { value: "all" as const, label: copy.filters.all, count: counts.all },
     {
-      value: "sandbox" as const,
-      label: copy.filters.sandbox,
-      count: counts.sandbox,
-    },
-    { value: "pilot" as const, label: copy.filters.pilot, count: counts.pilot },
-    {
       value: "production" as const,
       label: copy.filters.production,
       count: counts.production,
+    },
+    { value: "pilot" as const, label: copy.filters.pilot, count: counts.pilot },
+    {
+      value: "sandbox" as const,
+      label: copy.filters.sandbox,
+      count: counts.sandbox,
     },
     {
       value: "rollback_hold" as const,
@@ -653,6 +701,34 @@ export default function TenantsPage() {
       count: counts.rollback_hold,
     },
   ];
+
+  const tabNodes = filterOptions.map((option) => {
+    const active = filter === option.value;
+    return (
+      <span
+        key={option.value}
+        role="button"
+        tabIndex={0}
+        aria-pressed={active}
+        style={tabNodeStyle}
+        onClick={() => setFilter(option.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setFilter(option.value);
+          }
+        }}
+      >
+        {option.label}
+        <CanvasPill theme={th} tone={getFilterTone(option.value, active)}>
+          {formatLocaleNumber(locale, option.count)}
+        </CanvasPill>
+      </span>
+    );
+  });
+  const activeTabNode =
+    tabNodes[filterOptions.findIndex((option) => option.value === filter)] ??
+    tabNodes[0];
 
   const createDisabled =
     creating || !createForm.name.trim() || !createForm.code.trim();
@@ -663,6 +739,8 @@ export default function TenantsPage() {
         theme={th}
         title={copy.title}
         subtitle={copy.subtitle}
+        tabs={tabNodes}
+        activeTab={activeTabNode}
         actions={
           <div style={headerActionsStyle}>
             <CanvasBtn
@@ -670,7 +748,7 @@ export default function TenantsPage() {
               variant="secondary"
               icon="filter"
               onClick={() =>
-                filterRowRef.current?.scrollIntoView({
+                tableSectionRef.current?.scrollIntoView({
                   behavior: "smooth",
                   block: "nearest",
                 })
@@ -700,30 +778,6 @@ export default function TenantsPage() {
       />
 
       <div style={pageBodyStyle}>
-        <div ref={filterRowRef} style={filterRowStyle}>
-          {filterOptions.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              style={filterButtonStyle}
-              onClick={() => setFilter(option.value)}
-              aria-pressed={filter === option.value}
-            >
-              <CanvasPill
-                theme={th}
-                tone={getFilterTone(option.value, filter === option.value)}
-                dot
-              >
-                {option.label} {formatLocaleNumber(locale, option.count)}
-              </CanvasPill>
-            </button>
-          ))}
-          <span style={{ flex: 1 }} />
-          <CanvasPill theme={th} tone="neutral">
-            {copy.filterPill}
-          </CanvasPill>
-        </div>
-
         {error ? (
           <CanvasBanner
             theme={th}
@@ -735,346 +789,382 @@ export default function TenantsPage() {
         ) : null}
 
         {showCreate ? (
-          <div style={createPanelStyle}>
-            <CanvasCard
-              theme={th}
-              title={copy.createTitle}
-              subtitle={copy.createSubtitle}
+          <div
+            style={modalOverlayStyle}
+            role="dialog"
+            aria-modal="true"
+            aria-label={copy.createTitle}
+            onClick={() => setShowCreate(false)}
+          >
+            <div
+              style={modalPanelStyle}
+              onClick={(event) => event.stopPropagation()}
             >
-              <form onSubmit={handleCreate}>
-                <div style={createGridStyle}>
-                  <div style={fieldGridStyle}>
-                    <CanvasField
-                      theme={th}
-                      label={t("tenants.form.name")}
-                      required
-                    >
-                      <input
-                        value={createForm.name}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            name: event.target.value,
-                          }))
-                        }
-                        required
-                        placeholder="Acme Mobility"
-                        style={inputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={th}
-                      label={t("tenants.form.code")}
-                      required
-                    >
-                      <input
-                        value={createForm.code}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            code: event.target.value,
-                          }))
-                        }
-                        required
-                        placeholder="acme_dispatch"
-                        style={monoInputStyle}
-                      />
-                    </CanvasField>
-                    <CanvasField theme={th} label={t("tenants.form.status")}>
-                      <select
-                        value={createForm.status}
-                        onChange={(event) =>
-                          setCreateForm((current) => ({
-                            ...current,
-                            status: event.target.value as "active" | "inactive",
-                          }))
-                        }
-                        style={inputStyle}
-                      >
-                        <option value="active">{t("common.active")}</option>
-                        <option value="inactive">{t("common.inactive")}</option>
-                      </select>
-                    </CanvasField>
-                  </div>
-
-                  <div>
-                    <h3 style={sectionTitleStyle}>
-                      {t("tenants.quotaAllocation")}
-                    </h3>
-                    <p style={sectionHintStyle}>
-                      {locale === "en"
-                        ? "Set the initial monthly quota envelope before enabling traffic."
-                        : "在正式啟用前先設定初始月配額範圍。"}
-                    </p>
-                    <div style={quotaGridStyle}>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.activeDrivers")}
-                      >
-                        <input
-                          type="number"
-                          min={0}
-                          value={createForm.activeDrivers}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              activeDrivers: event.target.value,
-                            }))
-                          }
-                          style={monoInputStyle}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.monthlyBookings")}
-                      >
-                        <input
-                          type="number"
-                          min={0}
-                          value={createForm.monthlyBookings}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              monthlyBookings: event.target.value,
-                            }))
-                          }
-                          style={monoInputStyle}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.monthlyApiCalls")}
-                      >
-                        <input
-                          type="number"
-                          min={0}
-                          value={createForm.monthlyApiCalls}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              monthlyApiCalls: event.target.value,
-                            }))
-                          }
-                          style={monoInputStyle}
-                        />
-                      </CanvasField>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 style={sectionTitleStyle}>
-                      {t("tenants.form.modules")}
-                    </h3>
-                    <p style={sectionHintStyle}>
-                      {locale === "en"
-                        ? "Keep the initial module footprint explicit."
-                        : "把首批啟用模組明確列出。"}
-                    </p>
-                    <div style={moduleGridStyle}>
-                      {PLATFORM_TENANT_MODULES.map((moduleCode) => {
-                        const active =
-                          createForm.enabledModules.includes(moduleCode);
-
-                        return (
-                          <button
-                            key={moduleCode}
-                            type="button"
-                            onClick={() =>
-                              setCreateForm((current) =>
-                                toggleTenantModule(current, moduleCode),
-                              )
-                            }
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              gap: 10,
-                              padding: "10px 12px",
-                              borderRadius: 8,
-                              border: `1px solid ${
-                                active ? th.accentBorder : th.border
-                              }`,
-                              background: active ? th.accentBg : th.surfaceLo,
-                              color: th.text,
-                              cursor: "pointer",
-                            }}
-                          >
-                            <CanvasPill
-                              theme={th}
-                              tone={active ? "accent" : "neutral"}
-                            >
-                              {moduleLabels[moduleCode]}
-                            </CanvasPill>
-                            <span
-                              style={{ fontSize: 11.5, color: th.textMuted }}
-                            >
-                              {active
-                                ? copy.moduleState.enabled
-                                : copy.moduleState.disabled}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div>
-                    <h3 style={sectionTitleStyle}>
-                      {t("tenants.section.onboarding")}
-                    </h3>
-                    <p style={sectionHintStyle}>
-                      {locale === "en"
-                        ? "Seed integration posture and bootstrap ownership from the platform side."
-                        : "由平台端預先補齊 integration posture 與 bootstrap owner。"}
-                    </p>
-                    <div style={fieldGridStyle}>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.integrationMode")}
-                      >
-                        <select
-                          value={createForm.integrationMode}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              integrationMode: event.target
-                                .value as (typeof PLATFORM_TENANT_INTEGRATION_MODES)[number],
-                            }))
-                          }
-                          style={inputStyle}
-                        >
-                          {PLATFORM_TENANT_INTEGRATION_MODES.map((mode) => (
-                            <option key={mode} value={mode}>
-                              {formatPlatformCodeLabel(locale, mode)}
-                            </option>
-                          ))}
-                        </select>
-                      </CanvasField>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.bootstrapAdminEmail")}
-                      >
-                        <input
-                          value={createForm.bootstrapAdminEmail}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              bootstrapAdminEmail: event.target.value,
-                            }))
-                          }
-                          placeholder="admin@acme.example"
-                          style={inputStyle}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={th}
-                        label={t("tenants.form.sandboxBaseUrl")}
-                      >
-                        <input
-                          value={createForm.sandboxBaseUrl}
-                          onChange={(event) =>
-                            setCreateForm((current) => ({
-                              ...current,
-                              sandboxBaseUrl: event.target.value,
-                            }))
-                          }
-                          placeholder="https://sandbox.acme.example"
-                          style={monoInputStyle}
-                        />
-                      </CanvasField>
-                    </div>
-                  </div>
-
-                  <div style={createActionsStyle}>
-                    <button
-                      type="submit"
-                      disabled={createDisabled}
-                      style={submitButtonStyle(createDisabled)}
-                    >
-                      {creating
-                        ? t("common.creating")
-                        : t("tenants.createTenant")}
-                    </button>
-                  </div>
-                </div>
-              </form>
-            </CanvasCard>
-
-            <CanvasCard
-              theme={th}
-              title={copy.createSummaryTitle}
-              subtitle={copy.createSummarySubtitle}
-            >
-              <div style={createGridStyle}>
-                <div style={tenantSummaryStyle}>
-                  <CanvasKPI
-                    theme={th}
-                    label={copy.bootstrap.modules}
-                    value={`${createForm.enabledModules.length}/${PLATFORM_TENANT_MODULES.length}`}
-                    sub={locale === "en" ? "tenant modules" : "tenant modules"}
-                  />
-                  <CanvasKPI
-                    theme={th}
-                    label={copy.bootstrap.quota}
-                    value={createForm.monthlyBookings || "0"}
-                    sub={locale === "en" ? "bookings" : "bookings"}
-                  />
-                  <CanvasKPI
-                    theme={th}
-                    label={copy.bootstrap.api}
-                    value={createForm.monthlyApiCalls || "0"}
-                    sub="API"
-                  />
-                </div>
-                <CanvasDL
+              <div style={createPanelStyle}>
+                <CanvasCard
                   theme={th}
-                  cols={1}
-                  items={[
-                    {
-                      k: copy.bootstrap.status,
-                      v: formatPlatformCodeLabel(locale, createForm.status),
-                    },
-                    {
-                      k: copy.bootstrap.integration,
-                      v: formatPlatformCodeLabel(
-                        locale,
-                        createForm.integrationMode,
-                      ),
-                    },
-                    {
-                      k: copy.bootstrap.admin,
-                      v:
-                        createForm.bootstrapAdminEmail.trim() ||
-                        copy.bootstrap.empty,
-                      mono: true,
-                    },
-                    {
-                      k: copy.bootstrap.sandbox,
-                      v:
-                        createForm.sandboxBaseUrl.trim() ||
-                        copy.bootstrap.empty,
-                      mono: true,
-                    },
-                  ]}
-                />
+                  title={copy.createTitle}
+                  subtitle={copy.createSubtitle}
+                >
+                  <form onSubmit={handleCreate}>
+                    <div style={createGridStyle}>
+                      <div style={fieldGridStyle}>
+                        <CanvasField
+                          theme={th}
+                          label={t("tenants.form.name")}
+                          required
+                        >
+                          <input
+                            value={createForm.name}
+                            onChange={(event) =>
+                              setCreateForm((current) => ({
+                                ...current,
+                                name: event.target.value,
+                              }))
+                            }
+                            required
+                            placeholder="Acme Mobility"
+                            style={inputStyle}
+                          />
+                        </CanvasField>
+                        <CanvasField
+                          theme={th}
+                          label={t("tenants.form.code")}
+                          required
+                        >
+                          <input
+                            value={createForm.code}
+                            onChange={(event) =>
+                              setCreateForm((current) => ({
+                                ...current,
+                                code: event.target.value,
+                              }))
+                            }
+                            required
+                            placeholder="acme_dispatch"
+                            style={monoInputStyle}
+                          />
+                        </CanvasField>
+                        <CanvasField
+                          theme={th}
+                          label={t("tenants.form.status")}
+                        >
+                          <select
+                            value={createForm.status}
+                            onChange={(event) =>
+                              setCreateForm((current) => ({
+                                ...current,
+                                status: event.target.value as
+                                  | "active"
+                                  | "inactive",
+                              }))
+                            }
+                            style={inputStyle}
+                          >
+                            <option value="active">{t("common.active")}</option>
+                            <option value="inactive">
+                              {t("common.inactive")}
+                            </option>
+                          </select>
+                        </CanvasField>
+                      </div>
+
+                      <div>
+                        <h3 style={sectionTitleStyle}>
+                          {t("tenants.quotaAllocation")}
+                        </h3>
+                        <p style={sectionHintStyle}>
+                          {locale === "en"
+                            ? "Set the initial monthly quota envelope before enabling traffic."
+                            : "在正式啟用前先設定初始月配額範圍。"}
+                        </p>
+                        <div style={quotaGridStyle}>
+                          <CanvasField
+                            theme={th}
+                            label={t("tenants.form.activeDrivers")}
+                          >
+                            <input
+                              type="number"
+                              min={0}
+                              value={createForm.activeDrivers}
+                              onChange={(event) =>
+                                setCreateForm((current) => ({
+                                  ...current,
+                                  activeDrivers: event.target.value,
+                                }))
+                              }
+                              style={monoInputStyle}
+                            />
+                          </CanvasField>
+                          <CanvasField
+                            theme={th}
+                            label={t("tenants.form.monthlyBookings")}
+                          >
+                            <input
+                              type="number"
+                              min={0}
+                              value={createForm.monthlyBookings}
+                              onChange={(event) =>
+                                setCreateForm((current) => ({
+                                  ...current,
+                                  monthlyBookings: event.target.value,
+                                }))
+                              }
+                              style={monoInputStyle}
+                            />
+                          </CanvasField>
+                          <CanvasField
+                            theme={th}
+                            label={t("tenants.form.monthlyApiCalls")}
+                          >
+                            <input
+                              type="number"
+                              min={0}
+                              value={createForm.monthlyApiCalls}
+                              onChange={(event) =>
+                                setCreateForm((current) => ({
+                                  ...current,
+                                  monthlyApiCalls: event.target.value,
+                                }))
+                              }
+                              style={monoInputStyle}
+                            />
+                          </CanvasField>
+                        </div>
+                      </div>
+
+                      <div>
+                        <h3 style={sectionTitleStyle}>
+                          {t("tenants.form.modules")}
+                        </h3>
+                        <p style={sectionHintStyle}>
+                          {locale === "en"
+                            ? "Keep the initial module footprint explicit."
+                            : "把首批啟用模組明確列出。"}
+                        </p>
+                        <div style={moduleGridStyle}>
+                          {PLATFORM_TENANT_MODULES.map((moduleCode) => {
+                            const active =
+                              createForm.enabledModules.includes(moduleCode);
+
+                            return (
+                              <button
+                                key={moduleCode}
+                                type="button"
+                                onClick={() =>
+                                  setCreateForm((current) =>
+                                    toggleTenantModule(current, moduleCode),
+                                  )
+                                }
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: 10,
+                                  padding: "10px 12px",
+                                  borderRadius: 8,
+                                  border: `1px solid ${
+                                    active ? th.accentBorder : th.border
+                                  }`,
+                                  background: active
+                                    ? th.accentBg
+                                    : th.surfaceLo,
+                                  color: th.text,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <CanvasPill
+                                  theme={th}
+                                  tone={active ? "accent" : "neutral"}
+                                >
+                                  {moduleLabels[moduleCode]}
+                                </CanvasPill>
+                                <span
+                                  style={{
+                                    fontSize: 11.5,
+                                    color: th.textMuted,
+                                  }}
+                                >
+                                  {active
+                                    ? copy.moduleState.enabled
+                                    : copy.moduleState.disabled}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h3 style={sectionTitleStyle}>
+                          {t("tenants.section.onboarding")}
+                        </h3>
+                        <p style={sectionHintStyle}>
+                          {locale === "en"
+                            ? "Seed integration posture and bootstrap ownership from the platform side."
+                            : "由平台端預先補齊 integration posture 與 bootstrap owner。"}
+                        </p>
+                        <div style={fieldGridStyle}>
+                          <CanvasField
+                            theme={th}
+                            label={t("tenants.form.integrationMode")}
+                          >
+                            <select
+                              value={createForm.integrationMode}
+                              onChange={(event) =>
+                                setCreateForm((current) => ({
+                                  ...current,
+                                  integrationMode: event.target
+                                    .value as (typeof PLATFORM_TENANT_INTEGRATION_MODES)[number],
+                                }))
+                              }
+                              style={inputStyle}
+                            >
+                              {PLATFORM_TENANT_INTEGRATION_MODES.map((mode) => (
+                                <option key={mode} value={mode}>
+                                  {formatPlatformCodeLabel(locale, mode)}
+                                </option>
+                              ))}
+                            </select>
+                          </CanvasField>
+                          <CanvasField
+                            theme={th}
+                            label={t("tenants.form.bootstrapAdminEmail")}
+                          >
+                            <input
+                              value={createForm.bootstrapAdminEmail}
+                              onChange={(event) =>
+                                setCreateForm((current) => ({
+                                  ...current,
+                                  bootstrapAdminEmail: event.target.value,
+                                }))
+                              }
+                              placeholder="admin@acme.example"
+                              style={inputStyle}
+                            />
+                          </CanvasField>
+                          <CanvasField
+                            theme={th}
+                            label={t("tenants.form.sandboxBaseUrl")}
+                          >
+                            <input
+                              value={createForm.sandboxBaseUrl}
+                              onChange={(event) =>
+                                setCreateForm((current) => ({
+                                  ...current,
+                                  sandboxBaseUrl: event.target.value,
+                                }))
+                              }
+                              placeholder="https://sandbox.acme.example"
+                              style={monoInputStyle}
+                            />
+                          </CanvasField>
+                        </div>
+                      </div>
+
+                      <div style={createActionsStyle}>
+                        <CanvasBtn
+                          theme={th}
+                          variant="secondary"
+                          onClick={() => setShowCreate(false)}
+                        >
+                          {t("common.cancel")}
+                        </CanvasBtn>
+                        <button
+                          type="submit"
+                          disabled={createDisabled}
+                          style={submitButtonStyle(createDisabled)}
+                        >
+                          {creating
+                            ? t("common.creating")
+                            : t("tenants.createTenant")}
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </CanvasCard>
+
+                <CanvasCard
+                  theme={th}
+                  title={copy.createSummaryTitle}
+                  subtitle={copy.createSummarySubtitle}
+                >
+                  <div style={createGridStyle}>
+                    <div style={tenantSummaryStyle}>
+                      <CanvasKPI
+                        theme={th}
+                        label={copy.bootstrap.modules}
+                        value={`${createForm.enabledModules.length}/${PLATFORM_TENANT_MODULES.length}`}
+                        sub={
+                          locale === "en" ? "tenant modules" : "tenant modules"
+                        }
+                      />
+                      <CanvasKPI
+                        theme={th}
+                        label={copy.bootstrap.quota}
+                        value={createForm.monthlyBookings || "0"}
+                        sub={locale === "en" ? "bookings" : "bookings"}
+                      />
+                      <CanvasKPI
+                        theme={th}
+                        label={copy.bootstrap.api}
+                        value={createForm.monthlyApiCalls || "0"}
+                        sub="API"
+                      />
+                    </div>
+                    <CanvasDL
+                      theme={th}
+                      cols={1}
+                      items={[
+                        {
+                          k: copy.bootstrap.status,
+                          v: formatPlatformCodeLabel(locale, createForm.status),
+                        },
+                        {
+                          k: copy.bootstrap.integration,
+                          v: formatPlatformCodeLabel(
+                            locale,
+                            createForm.integrationMode,
+                          ),
+                        },
+                        {
+                          k: copy.bootstrap.admin,
+                          v:
+                            createForm.bootstrapAdminEmail.trim() ||
+                            copy.bootstrap.empty,
+                          mono: true,
+                        },
+                        {
+                          k: copy.bootstrap.sandbox,
+                          v:
+                            createForm.sandboxBaseUrl.trim() ||
+                            copy.bootstrap.empty,
+                          mono: true,
+                        },
+                      ]}
+                    />
+                  </div>
+                </CanvasCard>
               </div>
-            </CanvasCard>
+            </div>
           </div>
         ) : null}
 
-        <CanvasCard theme={th} padding={0}>
-          {loading ? (
-            <div style={loadingStateStyle}>{t("tenants.loading")}</div>
-          ) : visibleTenants.length > 0 ? (
-            <CanvasTable<TenantRow>
-              theme={th}
-              columns={columns}
-              rows={visibleTenants as TenantRow[]}
-            />
-          ) : (
-            <div style={emptyStateStyle}>{t("tenants.empty")}</div>
-          )}
-        </CanvasCard>
+        <div ref={tableSectionRef}>
+          <CanvasCard theme={th} padding={0}>
+            {loading ? (
+              <div style={loadingStateStyle}>{t("tenants.loading")}</div>
+            ) : visibleTenants.length > 0 ? (
+              <CanvasTable<TenantRow>
+                theme={th}
+                columns={columns}
+                rows={visibleTenants as TenantRow[]}
+              />
+            ) : (
+              <div style={emptyStateStyle}>{t("tenants.empty")}</div>
+            )}
+          </CanvasCard>
+        </div>
       </div>
     </>
   );
