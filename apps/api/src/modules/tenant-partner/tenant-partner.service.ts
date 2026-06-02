@@ -61,6 +61,7 @@ import type {
   TenantAddressGeocodeSource,
   TenantAddressQualityIssue,
   TenantAddressRecord,
+  TenantAuditListView,
   TenantBookingApprovalDecisionRecord,
   TenantBookingApprovalRequestRecord,
   TenantApprovalEvaluationResult,
@@ -94,6 +95,7 @@ import type {
   TenantWebhookGovernancePolicy,
   TenantWebhookRuntimeMetadata,
   TenantWebhookSecretRotationRecord,
+  UiRefreshMetadata,
   UpdatePartnerChannelEntryCommand,
   UpdateTenantWebhookEndpointCommand,
   UpdateTenantNotificationsCommand,
@@ -109,6 +111,8 @@ import type {
   WebhookDeliveryRecord,
   WebhookRetryPolicyRecord,
   TenantAuditExportScope,
+  EmptyStateEnvelope,
+  ResourceActionDescriptor,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -5246,17 +5250,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   listTenantAudit(
     tenantId: string,
+    command: ExportTenantAuditCommand = {},
     requestId?: string,
     identity?: IdentityContext | null,
-  ) {
+  ): TenantAuditListView {
     const policy = assertEvidenceAccess({
       family: "audit_log",
       identity,
       tenantId,
     });
-    const items = this.auditNotificationService
+    const allItems = this.auditNotificationService
       .listAuditLogs(identity, requestId)
       .filter((auditLog) => auditLog.tenantId === tenantId);
+    const items = this.filterTenantAuditItems(allItems, command);
+
     this.recordTenantAudit(
       {
         actorId: identity?.actorId ?? null,
@@ -5270,11 +5277,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         resourceId: null,
         newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
           itemCount: items.length,
+          filters: this.normalizeTenantAuditExportFilters(command),
         }),
       },
       requestId,
     );
-    return items;
+
+    return {
+      items,
+      pageInfo: {
+        page: 1,
+        pageSize: items.length > 0 ? items.length : 20,
+        totalItems: items.length,
+        totalPages: items.length > 0 ? 1 : 0,
+      },
+      refreshTier: "manual",
+      refreshMetadata: this.buildTenantAuditRefreshMetadata(),
+      availableActions: this.buildTenantAuditAvailableActions(items.length),
+      emptyState: this.buildTenantAuditEmptyState(
+        command,
+        allItems.length,
+        items.length,
+      ),
+    };
   }
 
   exportTenantAudit(
@@ -5379,6 +5404,66 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
       return true;
     });
+  }
+
+  private buildTenantAuditRefreshMetadata(): UiRefreshMetadata {
+    return {
+      generatedAt: new Date().toISOString(),
+      staleAfterMs: 30_000,
+      dataFreshness: "fresh",
+      source: "live",
+    };
+  }
+
+  private buildTenantAuditAvailableActions(
+    itemCount: number,
+  ): ResourceActionDescriptor[] {
+    return [
+      { action: "filter", enabled: true, riskLevel: "low" },
+      { action: "refresh", enabled: true, riskLevel: "low" },
+      itemCount > 0
+        ? { action: "export", enabled: true, riskLevel: "low" }
+        : {
+            action: "export",
+            enabled: false,
+            riskLevel: "low",
+            disabledReasonCode: "NO_VISIBLE_AUDIT_ROWS",
+          },
+    ];
+  }
+
+  private buildTenantAuditEmptyState(
+    command: ExportTenantAuditCommand,
+    totalItemCount: number,
+    filteredItemCount: number,
+  ): EmptyStateEnvelope | null {
+    if (filteredItemCount > 0) {
+      return null;
+    }
+
+    return {
+      reason:
+        totalItemCount > 0 && this.hasTenantAuditFilters(command)
+          ? "filtered_empty"
+          : "no_data",
+      messageCode:
+        totalItemCount > 0 && this.hasTenantAuditFilters(command)
+          ? "tenant_audit.filtered_empty"
+          : "tenant_audit.no_data",
+    };
+  }
+
+  private hasTenantAuditFilters(command: ExportTenantAuditCommand) {
+    const filters = this.normalizeTenantAuditExportFilters(command);
+
+    return Boolean(
+      filters.actorScope ||
+      filters.moduleName ||
+      filters.actionName ||
+      filters.from ||
+      filters.to ||
+      filters.auditId,
+    );
   }
 
   private normalizeTenantAuditExportFilters(command: ExportTenantAuditCommand) {

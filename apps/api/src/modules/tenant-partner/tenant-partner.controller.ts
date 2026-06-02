@@ -43,6 +43,7 @@ import type {
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
+  TenantAuditListView,
   TenantBookingApprovalRequestRecord,
   TenantAddressExportViewRecord,
   TenantCostCenterRecord,
@@ -1196,14 +1197,16 @@ export class TenantPartnerController {
   listTenantAudit(
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
+    @Query() query?: ExportTenantAuditCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = this.tenantPartnerService.listTenantAudit(
+    const view = this.tenantPartnerService.listTenantAudit(
       this.requireTenantId(tenantId),
+      query,
       requestId,
       identity,
     );
-    return toApiSuccessEnvelope(toApiListData(items), requestId);
+    return toApiSuccessEnvelope<TenantAuditListView>(view, requestId);
   }
 
   @Post("tenant/audit/export")
