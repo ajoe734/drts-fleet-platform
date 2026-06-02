@@ -4,6 +4,7 @@ import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import {
   CurrentIdentity,
   FeatureGated,
+  RequireRealms,
   type BootstrapRequestIdentity,
 } from "../../common/auth";
 import { OPS_ASSISTANT_FLAG_KEY } from "./assistant.constants";
@@ -31,10 +32,14 @@ export class AssistantController {
   }
 
   /**
-   * Backend assistant entrypoint. Gated by the same flag so the assistant
-   * backend is only reachable where ops.assistant.enabled is on for the realm;
-   * the FeatureGateGuard returns 403 FEATURE_FLAG_DISABLED otherwise.
+   * Backend assistant entrypoint. Requires an authenticated ops (or system)
+   * bootstrap identity — without it the route is NOT public: BootstrapAuthGuard
+   * returns 401 AUTH_REQUIRED for anonymous callers and 403 AUTH_REALM_DENIED
+   * for other realms. Layered on top, the same flag gates availability so the
+   * assistant backend is only reachable where ops.assistant.enabled is on for
+   * the realm; the FeatureGateGuard returns 403 FEATURE_FLAG_DISABLED otherwise.
    */
+  @RequireRealms("system", "ops")
   @FeatureGated(OPS_ASSISTANT_FLAG_KEY)
   @Get("session")
   async getSession(

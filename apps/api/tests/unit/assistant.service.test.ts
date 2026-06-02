@@ -4,11 +4,26 @@ import { Module } from "@nestjs/common";
 import { APP_GUARD, NestFactory } from "@nestjs/core";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { FeatureGateGuard } from "../../src/common/auth";
+import { BootstrapAuthGuard, FeatureGateGuard } from "../../src/common/auth";
 import { OPS_ASSISTANT_FLAG_KEY } from "../../src/modules/assistant/assistant.constants";
 import { AssistantController } from "../../src/modules/assistant/assistant.controller";
 import { AssistantService } from "../../src/modules/assistant/assistant.service";
 import { FeatureFlagsService } from "../../src/modules/feature-flags/feature-flags.service";
+
+// Bootstrap-header identities used to exercise BootstrapAuthGuard. An ops_user
+// resolves to the "ops" realm (allowed); a driver_user resolves to "driver"
+// (denied for the assistant session route).
+const OPS_HEADERS = {
+  "x-actor-type": "ops_user",
+  "x-actor-id": "ops-tester",
+  "x-realm": "ops",
+} as const;
+
+const DRIVER_HEADERS = {
+  "x-actor-type": "driver_user",
+  "x-actor-id": "driver-tester",
+  "x-realm": "driver",
+} as const;
 
 describe("AssistantService", () => {
   let featureFlags: FeatureFlagsService;
@@ -70,6 +85,13 @@ async function createAssistantTestApp(featureFlags: FeatureFlagsService) {
         provide: FeatureFlagsService,
         useValue: featureFlags,
       },
+      // Mirror the real app guard order (app.module.ts): bootstrap auth runs
+      // before the feature gate, so 401 AUTH_REQUIRED / 403 AUTH_REALM_DENIED
+      // take precedence over the feature-flag 403.
+      {
+        provide: APP_GUARD,
+        useClass: BootstrapAuthGuard,
+      },
       {
         provide: APP_GUARD,
         useClass: FeatureGateGuard,
@@ -110,12 +132,51 @@ describe("AssistantController (http pipeline)", () => {
     }
   });
 
-  it("blocks the gated assistant session with 403 when the flag is off", async () => {
+  it("rejects an anonymous session with 401 even when the flag is on", async () => {
+    // The flag is NOT an auth bypass: an ungated /assistant/session would let
+    // anonymous callers in once the flag flips on. BootstrapAuthGuard must run
+    // first and demand a bootstrap identity.
     const featureFlags = new FeatureFlagsService();
+    await featureFlags.updateFlag(OPS_ASSISTANT_FLAG_KEY, true);
     const { app, baseUrl } = await createAssistantTestApp(featureFlags);
 
     try {
       const response = await fetch(`${baseUrl}/assistant/session`);
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "AUTH_REQUIRED" },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects a non-ops realm with 403 AUTH_REALM_DENIED when the flag is on", async () => {
+    const featureFlags = new FeatureFlagsService();
+    await featureFlags.updateFlag(OPS_ASSISTANT_FLAG_KEY, true);
+    const { app, baseUrl } = await createAssistantTestApp(featureFlags);
+
+    try {
+      const response = await fetch(`${baseUrl}/assistant/session`, {
+        headers: DRIVER_HEADERS,
+      });
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "AUTH_REALM_DENIED" },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("blocks an authed ops session with 403 FEATURE_FLAG_DISABLED when the flag is off", async () => {
+    const featureFlags = new FeatureFlagsService();
+    const { app, baseUrl } = await createAssistantTestApp(featureFlags);
+
+    try {
+      const response = await fetch(`${baseUrl}/assistant/session`, {
+        headers: OPS_HEADERS,
+      });
       expect(response.status).toBe(403);
       await expect(response.json()).resolves.toMatchObject({
         error: {
@@ -128,12 +189,13 @@ describe("AssistantController (http pipeline)", () => {
     }
   });
 
-  it("serves availability=true and the gated session once the flag is on", async () => {
+  it("serves availability=true and the gated session to an authed ops caller once the flag is on", async () => {
     const featureFlags = new FeatureFlagsService();
     await featureFlags.updateFlag(OPS_ASSISTANT_FLAG_KEY, true);
     const { app, baseUrl } = await createAssistantTestApp(featureFlags);
 
     try {
+      // Availability stays ungated so the widget can probe it anonymously.
       const availability = await fetch(`${baseUrl}/assistant/availability`);
       expect(availability.status).toBe(200);
       const availabilityBody = (await availability.json()) as {
@@ -141,7 +203,9 @@ describe("AssistantController (http pipeline)", () => {
       };
       expect(availabilityBody.data.enabled).toBe(true);
 
-      const session = await fetch(`${baseUrl}/assistant/session`);
+      const session = await fetch(`${baseUrl}/assistant/session`, {
+        headers: OPS_HEADERS,
+      });
       expect(session.status).toBe(200);
       const sessionBody = (await session.json()) as {
         data: { flagKey: string; status: string };
