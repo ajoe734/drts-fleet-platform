@@ -2310,6 +2310,19 @@ export interface OwnedOrderRecord {
   updatedAt: string;
 }
 
+/**
+ * SLA urgency projection for a tenant booking (packet §3.1 SLA threshold
+ * types + §5.2 `slaStatus`). Backend-computed when an SLA profile applies;
+ * the tenant list renders it as a distinct urgency affordance. Optional and
+ * additive — absent when no SLA is configured for the booking.
+ */
+export interface BookingSlaStatus {
+  state: "on_track" | "at_risk" | "breached" | "unknown";
+  thresholdType?: "wait" | "arrival" | "completion";
+  dueAt?: string | null;
+  label?: string;
+}
+
 export interface BookingRecord {
   bookingId: string;
   orderId: string;
@@ -2355,6 +2368,18 @@ export interface BookingRecord {
   approvalRequestIds: string[];
   complianceGates?: ComplianceGateRecord[];
   orderStatus: OwnedOrderStatus;
+  /**
+   * UI-runtime read-model fields (packet §3.5 / §5.2). Optional and additive:
+   * the tenant booking read model populates these so the console renders
+   * `availableActions`-driven CTAs, the editability window, and SLA urgency
+   * without recomputing editability from status (Q-TEN05). Producers that
+   * have not been upgraded omit them; consumers must treat them as
+   * best-effort (`availableActions ?? []`, `editableUntil ?? null`).
+   */
+  editableUntil?: string | null;
+  readOnlyReasonCode?: string | null;
+  availableActions?: ResourceActionDescriptor[];
+  slaStatus?: BookingSlaStatus | null;
   createdAt: string;
   updatedAt: string;
 }
