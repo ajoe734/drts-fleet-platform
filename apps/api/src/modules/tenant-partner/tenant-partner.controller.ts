@@ -1167,6 +1167,27 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
+  @Post("tenant/webhooks/:webhookId/deliveries/:deliveryId/retry")
+  @RequireRealms("tenant", "platform", "ops")
+  retryWebhookDelivery(
+    @Param("webhookId") webhookId: string,
+    @Param("deliveryId") deliveryId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.retryWebhookDelivery(
+        this.requireTenantId(tenantId),
+        webhookId,
+        deliveryId,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
   @Get("tenant/sla")
   getSlaProfile(
     @Headers("x-tenant-id") tenantId?: string,

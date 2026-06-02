@@ -1632,6 +1632,15 @@ export class ApiClient {
     );
   }
 
+  async retryWebhookDelivery(
+    webhookId: string,
+    deliveryId: string,
+  ): Promise<WebhookDeliveryRecord> {
+    return this.post<WebhookDeliveryRecord>(
+      `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/deliveries/${encodeURIComponent(deliveryId)}/retry`,
+    );
+  }
+
   async revokeApiKey(keyId: string) {
     return this.post(
       `/api/tenant/api-keys/${encodeURIComponent(keyId)}/revoke`,

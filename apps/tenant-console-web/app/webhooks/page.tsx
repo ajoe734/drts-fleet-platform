@@ -313,6 +313,9 @@ type ActionDescriptor = {
   disabledReasonCode?: string;
   tone?: CanvasTone;
   href?: string;
+  formAction?: "retryFailedDelivery";
+  webhookId?: string | undefined;
+  deliveryId?: string | undefined;
 };
 
 type EndpointRow = Record<string, unknown> & {
@@ -872,9 +875,21 @@ function decorateDeliveryActions(
   return descriptors.flatMap((descriptor) => {
     const tone = getActionTone(descriptor.action);
     const href = getDeliveryActionHref(descriptor.action, options);
-    if (!href) {
+    const supportsRetryForm =
+      descriptor.action === "retryFailedDelivery" &&
+      Boolean(options?.webhookId) &&
+      Boolean(options?.deliveryId);
+    if (!href && !supportsRetryForm) {
       return [];
     }
+    const retryFields =
+      supportsRetryForm && options?.webhookId && options?.deliveryId
+        ? {
+            formAction: "retryFailedDelivery" as const,
+            webhookId: options.webhookId,
+            deliveryId: options.deliveryId,
+          }
+        : undefined;
 
     return [
       {
@@ -889,7 +904,8 @@ function decorateDeliveryActions(
           ? { disabledReasonCode: descriptor.disabledReasonCode }
           : {}),
         ...(tone ? { tone } : {}),
-        href,
+        ...(href ? { href } : {}),
+        ...(retryFields ?? {}),
       },
     ];
   });
@@ -951,6 +967,33 @@ function renderAction(
   small = true,
 ): ReactNode {
   const size = small ? "sm" : "md";
+  if (
+    descriptor.enabled &&
+    descriptor.formAction === "retryFailedDelivery" &&
+    descriptor.webhookId &&
+    descriptor.deliveryId
+  ) {
+    return (
+      <form key={key} action={retryFailedDeliveryAction}>
+        <input type="hidden" name="webhookId" value={descriptor.webhookId} />
+        <input type="hidden" name="deliveryId" value={descriptor.deliveryId} />
+        <button
+          type="submit"
+          style={{
+            ...getLinkButtonStyle({
+              primary: descriptor.tone === "accent",
+              danger: descriptor.tone === "danger",
+              size,
+            }),
+            cursor: "pointer",
+          }}
+        >
+          {descriptor.label}
+        </button>
+      </form>
+    );
+  }
+
   if (descriptor.enabled && descriptor.href) {
     return (
       <Link
@@ -1391,6 +1434,34 @@ async function rotateWebhookSecretAction(formData: FormData) {
   } catch (error) {
     redirect(
       `/webhooks?mode=rotate&webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
+        toErrorMessage(error),
+      )}`,
+    );
+  }
+}
+
+async function retryFailedDeliveryAction(formData: FormData) {
+  "use server";
+
+  const client = getTenantClient();
+  const webhookId = String(formData.get("webhookId") ?? "").trim();
+  const deliveryId = String(formData.get("deliveryId") ?? "").trim();
+
+  try {
+    if (!webhookId || !deliveryId) {
+      throw new Error("缺少 webhookId 或 deliveryId。");
+    }
+
+    await client.retryWebhookDelivery(webhookId, deliveryId);
+    revalidatePath("/webhooks");
+    redirect(
+      `/webhooks?webhookId=${encodeURIComponent(webhookId)}&deliveryId=${encodeURIComponent(deliveryId)}&success=${encodeURIComponent(
+        "Failed delivery retry 已送出。",
+      )}`,
+    );
+  } catch (error) {
+    redirect(
+      `/webhooks?webhookId=${encodeURIComponent(webhookId)}&deliveryId=${encodeURIComponent(deliveryId)}&error=${encodeURIComponent(
         toErrorMessage(error),
       )}`,
     );
@@ -2478,7 +2549,8 @@ export default async function WebhooksPage({
                     </li>
                     <li>
                       Delivery row 會直接反映 `retryFailedDelivery` 的
-                      enabled/disabled 狀態。
+                      enabled/disabled 狀態，並在 enabled 時直接提交 manual
+                      retry。
                     </li>
                   </ul>
                 </div>
@@ -2582,8 +2654,8 @@ export default async function WebhooksPage({
                     </div>
                     <p style={mutedStyle}>
                       Retry CTA 直接跟著 delivery read model 的
-                      `availableActions`；若 backend 尚未提供 retry
-                      endpoint，畫面會保留 disabled reason。
+                      `availableActions`；enabled 時會呼叫
+                      `/api/tenant/webhooks/:webhookId/deliveries/:deliveryId/retry`。
                     </p>
                     {selectedDelivery.availableActions === undefined ? (
                       <p style={mutedStyle}>
@@ -2623,9 +2695,9 @@ export default async function WebhooksPage({
                     Replay notes
                   </div>
                   <p style={mutedStyle}>
-                    本頁的 replay 只顯示 backend 已公開的 retry posture。若
+                    本頁的 replay 只執行 backend 已公開的 retry posture。若
                     `retryFailedDelivery` 尚未啟用，畫面會保留 disabled
-                    reason，而不是假造可重送流程。
+                    reason，而不會補出未授權的 replay CTA。
                   </p>
                   <p style={mutedStyle}>
                     需要跨系統排查時，請使用頁面底部的 deep links 前往 ops

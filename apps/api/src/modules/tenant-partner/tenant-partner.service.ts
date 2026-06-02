@@ -5011,7 +5011,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const delayMs = Math.max(0, new Date(nextAttemptAt).getTime() - Date.now());
     const timer = setTimeout(() => {
       this.retryTimers.delete(deliveryId);
-      void this.retryWebhookDelivery(webhookId, deliveryId);
+      void this.retryQueuedWebhookDelivery(webhookId, deliveryId);
     }, delayMs);
 
     this.retryTimers.set(deliveryId, timer);
@@ -5027,7 +5027,99 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.retryTimers.delete(deliveryId);
   }
 
-  private async retryWebhookDelivery(webhookId: string, deliveryId: string) {
+  retryWebhookDelivery(
+    tenantId: string,
+    webhookId: string,
+    deliveryId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
+    this.assertNonBlank(tenantId, "tenantId");
+
+    if (!this.canManageWebhook(identity)) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "TENANT_ROLE_MISSING",
+        "Webhook retry requires tc_admin or tc_integration_mgr role.",
+      );
+    }
+
+    const endpoint = this.webhookEndpoints.find(
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.webhookId === webhookId,
+    );
+    if (!endpoint) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "WEBHOOK_ENDPOINT_NOT_FOUND",
+        `Webhook endpoint ${webhookId} was not found for tenant ${tenantId}.`,
+      );
+    }
+
+    const delivery = this.webhookDeliveries.find(
+      (candidate) =>
+        candidate.tenantId === tenantId &&
+        candidate.webhookId === webhookId &&
+        candidate.deliveryId === deliveryId,
+    );
+    if (!delivery) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "WEBHOOK_DELIVERY_NOT_FOUND",
+        `Webhook delivery ${deliveryId} was not found for endpoint ${webhookId}.`,
+      );
+    }
+    if (delivery.status !== "delivery_failed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "WEBHOOK_DELIVERY_NOT_RETRYABLE",
+        "Only failed webhook deliveries can be retried manually.",
+      );
+    }
+
+    this.clearWebhookRetry(delivery.deliveryId);
+    delivery.status = "queued";
+    delivery.nextAttemptAt = null;
+
+    const now = new Date().toISOString();
+    const previousEndpointValues = this.toWebhookResponse(endpoint, identity);
+    if (endpoint.status === "disabled") {
+      this.markWebhookValidationPending(endpoint, now);
+      this.recordTenantAudit(
+        {
+          actorId: identity?.actorId ?? null,
+          actorType:
+            (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+            "system",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "prepare_webhook_retry",
+          resourceType: "webhook_endpoint",
+          resourceId: endpoint.webhookId,
+          oldValuesSummary: previousEndpointValues as Record<string, unknown>,
+          newValuesSummary: this.toWebhookResponse(
+            endpoint,
+            identity,
+          ) as Record<string, unknown>,
+        },
+        requestId,
+      );
+    }
+
+    return this.retryQueuedWebhookDelivery(
+      webhookId,
+      deliveryId,
+      requestId,
+      identity,
+    );
+  }
+
+  private async retryQueuedWebhookDelivery(
+    webhookId: string,
+    deliveryId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
     const endpoint = this.webhookEndpoints.find(
       (candidate) => candidate.webhookId === webhookId,
     );
@@ -5037,10 +5129,38 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     if (!endpoint || !delivery || delivery.status !== "queued") {
       this.clearWebhookRetry(deliveryId);
-      return;
+      if (!endpoint || !delivery) {
+        return undefined;
+      }
+      return this.toDeliveryResponse(delivery, identity);
     }
 
     await this.dispatchWebhookAttempt(endpoint, delivery, delivery.rawBody);
+
+    this.recordTenantAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: endpoint.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "retry_webhook_delivery",
+        resourceType: "webhook_delivery",
+        resourceId: delivery.deliveryId,
+        newValuesSummary: {
+          webhookId: endpoint.webhookId,
+          eventType: delivery.eventType,
+          status: delivery.status,
+          attempt: delivery.attempt,
+          httpStatus: delivery.httpStatus,
+          nextAttemptAt: delivery.nextAttemptAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.toDeliveryResponse(delivery, identity);
   }
 
   listWebhookDeliveries(
@@ -5546,11 +5666,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       },
       {
         action: "retryFailedDelivery",
-        enabled: false,
+        enabled: delivery.status === "delivery_failed" && canManage,
         disabledReasonCode:
           delivery.status === "delivery_failed"
             ? canManage
-              ? "backend_retry_endpoint_pending"
+              ? undefined
               : "tenant_role_missing"
             : "delivery_not_failed",
         riskLevel: "medium",
