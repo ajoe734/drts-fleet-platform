@@ -11,7 +11,10 @@ import {
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import { formatPlatformCodeLabel, getPlatformLabel } from "@/lib/localized-labels";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   PlatformAdminUserRecord,
   PlatformAdminUserRole,
@@ -58,7 +61,11 @@ type UserRow = PlatformAdminUserRecord & Record<string, unknown>;
 // rows; we keep that affordance but pair it with a reactivate action so the
 // backend status transition stays reachable instead of becoming a dead button.
 type PendingAction =
-  | { kind: "role"; user: PlatformAdminUserRecord; roleCode: PlatformAdminUserRole }
+  | {
+      kind: "role";
+      user: PlatformAdminUserRecord;
+      roleCode: PlatformAdminUserRole;
+    }
   | { kind: "suspend"; user: PlatformAdminUserRecord; reason: string }
   | { kind: "activate"; user: PlatformAdminUserRecord };
 
@@ -223,7 +230,9 @@ export default function UsersPage() {
   const [formRoleCode, setFormRoleCode] =
     useState<PlatformAdminUserRole>("operator");
   const [creating, setCreating] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(
+    null,
+  );
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
   const copy =
@@ -253,13 +262,13 @@ export default function UsersPage() {
           roleField: "Role",
           suspendTitle: "Suspend platform staff",
           suspendSubtitle:
-            "High-risk change. A confirmation reason is required before the user loses platform access. The status change is recorded to the audit trail.",
+            "High-risk change. A confirmation reason is required before the user loses platform access. Access is revoked immediately on confirm.",
           reasonField: "Reason",
           reasonHint: "Required to confirm this high-risk suspension.",
           reasonPlaceholder: "e.g. Offboarding / suspected credential leak",
           activateTitle: "Reactivate platform staff",
           activateSubtitle:
-            "Restore platform access for this user. The change is recorded to the audit trail.",
+            "Restore platform access for this user. Access is granted immediately on confirm.",
           confirmSuspend: "Confirm suspend",
           confirmActivate: "Confirm activate",
           save: "Save",
@@ -290,12 +299,12 @@ export default function UsersPage() {
           roleField: "角色",
           suspendTitle: "停用平台人員",
           suspendSubtitle:
-            "高風險變更，需填寫原因確認後才停用，使用者隨即失去平台存取權限；狀態變更會寫入稽核軌跡。",
+            "高風險變更，需填寫原因確認後才停用；確認後使用者隨即失去平台存取權限。",
           reasonField: "原因",
           reasonHint: "高風險停用確認必填。",
           reasonPlaceholder: "例如：離職 / 疑似憑證外洩",
           activateTitle: "重新啟用平台人員",
-          activateSubtitle: "恢復此使用者的平台存取權限，變更寫入稽核軌跡。",
+          activateSubtitle: "恢復此使用者的平台存取權限；確認後立即生效。",
           confirmSuspend: "確認停用",
           confirmActivate: "確認啟用",
           save: "儲存",
@@ -385,9 +394,11 @@ export default function UsersPage() {
       // high-risk status transition. The reason is intentionally NOT sent to
       // the backend: UpdatePlatformAdminUserRoleCommand only carries
       // { roleCode, status } (packages/contracts/src/index.ts) and widening
-      // that contract is outside this page-scoped task. The copy above
-      // therefore claims only that the status change is audited, not that the
-      // free-text reason is persisted.
+      // that contract is outside this page-scoped task. The backend audit
+      // record for this action captures only roleCode, not the status value
+      // (platform-admin.service.ts update_platform_admin_user_role), so the
+      // copy above frames suspend/activate as a confirmation gate that changes
+      // access on confirm — it does NOT claim the status change is audited.
       await applyUpdate(user.userId, user.roleCode, "suspended");
     } else {
       await applyUpdate(user.userId, user.roleCode, "active");
@@ -468,12 +479,7 @@ export default function UsersPage() {
               </CanvasBtn>
             ) : row.status === "suspended" ? (
               <>
-                <CanvasBtn
-                  theme={theme}
-                  size="xs"
-                  variant="secondary"
-                  disabled
-                >
+                <CanvasBtn theme={theme} size="xs" variant="secondary" disabled>
                   {copy.actionSuspend}
                 </CanvasBtn>
                 <span style={disabledReasonStyle}>{copy.alreadySuspended}</span>
@@ -495,7 +501,9 @@ export default function UsersPage() {
                 size="xs"
                 variant="secondary"
                 disabled={busy}
-                onClick={() => setPendingAction({ kind: "activate", user: row })}
+                onClick={() =>
+                  setPendingAction({ kind: "activate", user: row })
+                }
               >
                 {copy.actionActivate}
               </CanvasBtn>
@@ -513,7 +521,9 @@ export default function UsersPage() {
   function renderModal(): ReactNode {
     if (showInvite) {
       const canSubmit =
-        Boolean(formEmail.trim()) && Boolean(formDisplayName.trim()) && !creating;
+        Boolean(formEmail.trim()) &&
+        Boolean(formDisplayName.trim()) &&
+        !creating;
       return (
         <div style={overlayStyle} role="dialog" aria-modal="true">
           <div style={modalStyle}>
@@ -523,7 +533,11 @@ export default function UsersPage() {
             </div>
             <form onSubmit={handleCreate}>
               <div style={modalBodyStyle}>
-                <CanvasField theme={theme} label={t("users.form.email")} required>
+                <CanvasField
+                  theme={theme}
+                  label={t("users.form.email")}
+                  required
+                >
                   <input
                     type="email"
                     value={formEmail}
@@ -550,7 +564,9 @@ export default function UsersPage() {
                   <select
                     value={formRoleCode}
                     onChange={(event) =>
-                      setFormRoleCode(event.target.value as PlatformAdminUserRole)
+                      setFormRoleCode(
+                        event.target.value as PlatformAdminUserRole,
+                      )
                     }
                     style={controlStyle(theme)}
                   >
