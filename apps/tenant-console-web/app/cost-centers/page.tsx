@@ -56,11 +56,102 @@ const kpiGridStyle: CSSProperties = {
   gap: 12,
 };
 
+const summaryGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.4fr) minmax(300px, 0.8fr)",
+  gap: 16,
+};
+
+const cardStackStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+};
+
+const summaryHeadlineStyle: CSSProperties = {
+  margin: 0,
+  color: th.text,
+  fontSize: 17,
+  fontWeight: 700,
+  lineHeight: 1.35,
+};
+
+const summaryBodyStyle: CSSProperties = {
+  margin: 0,
+  color: th.textMuted,
+  fontSize: 12.5,
+  lineHeight: 1.6,
+};
+
+const summaryStripStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 10,
+};
+
+const summaryMetricStyle: CSSProperties = {
+  border: `1px solid ${th.border}`,
+  borderRadius: 14,
+  background: th.surfaceLo,
+  padding: "12px 14px",
+  display: "grid",
+  gap: 4,
+};
+
+const summaryMetricLabelStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 10.5,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+};
+
+const summaryMetricValueStyle: CSSProperties = {
+  color: th.text,
+  fontSize: 16,
+  fontWeight: 700,
+};
+
+const linkRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+  alignItems: "center",
+};
+
+const filterPanelStyle: CSSProperties = {
+  display: "grid",
+  gap: 12,
+};
+
 const filterRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
   alignItems: "center",
+};
+
+const filterFormStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(180px, 1.3fr) minmax(160px, 0.9fr) auto auto",
+  gap: 10,
+  alignItems: "center",
+};
+
+const fieldStyle: CSSProperties = {
+  width: "100%",
+  borderRadius: 12,
+  border: `1px solid ${th.border}`,
+  background: th.surfaceLo,
+  color: th.text,
+  fontSize: 12.5,
+  padding: "10px 12px",
+  outline: "none",
+};
+
+const fieldLabelStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  color: th.textMuted,
+  fontSize: 11,
 };
 
 const tableCellStackStyle: CSSProperties = {
@@ -90,7 +181,7 @@ const actionRowStyle: CSSProperties = {
 
 const quotaMeterTrackStyle: CSSProperties = {
   flex: 1,
-  minWidth: 72,
+  minWidth: 84,
   height: 6,
   borderRadius: 999,
   overflow: "hidden",
@@ -98,11 +189,11 @@ const quotaMeterTrackStyle: CSSProperties = {
   border: `1px solid ${th.border}`,
 };
 
-const linkRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 10,
-  alignItems: "center",
+const inlineLinkStyle: CSSProperties = {
+  color: th.accent,
+  textDecoration: "none",
+  fontSize: 12,
+  fontWeight: 600,
 };
 
 const panelGridStyle: CSSProperties = {
@@ -127,11 +218,10 @@ const emptyStateStyle: CSSProperties = {
   gap: 12,
 };
 
-const inlineLinkStyle: CSSProperties = {
-  color: th.accent,
-  textDecoration: "none",
-  fontSize: 12,
-  fontWeight: 600,
+const helperTextStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.5,
 };
 
 const numberFormatter = new Intl.NumberFormat("en-US");
@@ -139,6 +229,8 @@ const numberFormatter = new Intl.NumberFormat("en-US");
 type ViewFilter = "all" | "active" | "disabled" | "over_quota";
 type FreshnessOverride = UiRefreshMetadata["dataFreshness"] | "auto";
 type SupportedEmptyReason = Exclude<EmptyReason, "driver_not_eligible">;
+
+type SearchParamValue = string | string[] | undefined;
 
 type CostCenterRow = Record<string, unknown> & {
   code: string;
@@ -149,12 +241,16 @@ type CostCenterRow = Record<string, unknown> & {
   ownerUserId: string | null;
   activeFlag: boolean;
   quotaLabel: string;
+  quotaDetail: string;
   usageLabel: string;
   remainingLabel: string;
   approvalLabel: string;
+  approvalDetail: string;
   reportLabel: string;
+  reportDetail: string;
   overQuota: boolean;
   usagePercent: number | null;
+  disabledReason: string | null;
   actions: ResourceActionDescriptor[];
 };
 
@@ -167,13 +263,22 @@ type CostCentersPageData = {
   quotaSummariesByCode: Partial<Record<string, TenantCostCenterQuotaSummary>>;
   approvalRules: TenantApprovalRuleRecord[];
   coverageReport: TenantCostCenterCoverageReport | null;
+  users: TenantUserRoleRecord[];
   usersById: Map<string, TenantUserRoleRecord>;
   refreshMetadata: UiRefreshMetadata;
   errors: string[];
 };
 
 type CostCentersPageProps = {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+  searchParams?: Promise<Record<string, SearchParamValue>>;
+};
+
+type CostCenterQuery = {
+  emptyReason: SupportedEmptyReason | null;
+  view: ViewFilter;
+  freshnessOverride: FreshnessOverride;
+  search: string;
+  ownerUserId: string;
 };
 
 const EMPTY_REASON_LABELS: Record<SupportedEmptyReason, string> = {
@@ -211,6 +316,10 @@ const VIEW_FILTERS: { value: ViewFilter; label: string }[] = [
 
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "未知錯誤";
+}
+
+function getFirstParamValue(value: SearchParamValue) {
+  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
 }
 
 function getConditionValues(condition: TenantApprovalRuleCondition) {
@@ -289,10 +398,21 @@ function deriveRefreshMetadata(
 }
 
 async function loadCostCentersData(
-  freshnessOverride: FreshnessOverride,
+  query: CostCenterQuery,
 ): Promise<CostCentersPageData> {
   const client = getTenantClient();
   const errors: string[] = [];
+  const costCenterOptions: {
+    search?: string;
+    ownerUserId?: string;
+  } = {};
+
+  if (query.search) {
+    costCenterOptions.search = query.search;
+  }
+  if (query.ownerUserId) {
+    costCenterOptions.ownerUserId = query.ownerUserId;
+  }
 
   const [
     costCentersResult,
@@ -300,7 +420,9 @@ async function loadCostCentersData(
     coverageReportResult,
     usersResult,
   ] = await Promise.allSettled([
-    client.listCostCenters() as Promise<TenantCostCenterRecord[]>,
+    client.listCostCenters(costCenterOptions) as Promise<
+      TenantCostCenterRecord[]
+    >,
     client.listApprovalRules() as Promise<TenantApprovalRuleRecord[]>,
     client.getTenantCostCenterCoverageReport() as Promise<TenantCostCenterCoverageReport>,
     client.listTenantUsers() as Promise<TenantUserRoleRecord[]>,
@@ -373,7 +495,7 @@ async function loadCostCentersData(
         (summary) => summary?.refreshedAt,
       ),
     ],
-    freshnessOverride,
+    query.freshnessOverride,
   );
 
   return {
@@ -381,6 +503,7 @@ async function loadCostCentersData(
     quotaSummariesByCode,
     approvalRules,
     coverageReport,
+    users,
     usersById: new Map(users.map((user) => [user.userId, user])),
     refreshMetadata,
     errors,
@@ -587,6 +710,12 @@ function buildCostCenterRows(
       quotaSummary?.usage.bookingCountRemaining === null
         ? "無上限"
         : `${numberFormatter.format(quotaSummary?.usage.bookingCountRemaining ?? 0)} 趟剩餘`;
+    const approvalLabel = getApprovalLabel(costCenter.code, approvalRules);
+    const quotaDetail = !quotaSummary
+      ? "Quota service snapshot unavailable"
+      : quotaSummary.limit.amountMinorLimit === null
+        ? "No hard amount ceiling"
+        : `Budget ${numberFormatter.format(quotaSummary.limit.amountMinorLimit)} minor`;
 
     return {
       code: costCenter.code,
@@ -602,21 +731,26 @@ function buildCostCenterRows(
         quotaSummary?.limit.bookingCountLimit === null
           ? "∞"
           : formatRideCount(quotaSummary?.limit.bookingCountLimit),
+      quotaDetail,
       usageLabel: formatRideCount(usageCount),
       remainingLabel,
-      approvalLabel: getApprovalLabel(costCenter.code, approvalRules),
+      approvalLabel,
+      approvalDetail:
+        approvalLabel === "未直接綁定；沿用租戶規則"
+          ? "需去 `/rules` 看 tenant-level precedence"
+          : "可從 `/rules` 驗證條件與 approver",
       reportLabel: unresolvedCoverage
         ? `仍有 ${numberFormatter.format(unresolvedCoverage.occurrences)} 筆 legacy 值待歸因`
         : "已納入月報與稽核彙整",
+      reportDetail: unresolvedCoverage
+        ? `raw value: ${unresolvedCoverage.rawCostCenter}`
+        : "月報與 audit attribution 已可用",
       overQuota: isOverQuota(quotaSummary),
       usagePercent: getUsagePercent(quotaSummary),
+      disabledReason: costCenter.disabledReason,
       actions: buildRowActions(costCenter, usersById),
     };
   });
-}
-
-function getFilterHref(filter: ViewFilter) {
-  return `/cost-centers${filter === "all" ? "" : `?view=${filter}`}`;
 }
 
 function getDataFreshnessTone(
@@ -626,7 +760,6 @@ function getDataFreshnessTone(
     case "fresh":
       return "success";
     case "stale":
-      return "warn";
     case "degraded":
       return "warn";
     case "unknown":
@@ -711,6 +844,27 @@ function resolveCrossAppHref(link: CrossAppResourceLink) {
   return baseUrl ? `${baseUrl}${link.route}` : link.route;
 }
 
+function buildCrossAppLinks(): CrossAppResourceLink[] {
+  return [
+    {
+      targetApp: "platform-admin",
+      route: `/tenant-governance?tenantId=${encodeURIComponent(DEMO_TENANT_ID)}`,
+      resourceType: "tenant_governance",
+      resourceId: DEMO_TENANT_ID,
+      openMode: "new_tab",
+      label: "在 platform-admin 檢視 tenant governance",
+    },
+    {
+      targetApp: "ops-console",
+      route: `/audit?tenantId=${encodeURIComponent(DEMO_TENANT_ID)}`,
+      resourceType: "audit",
+      resourceId: DEMO_TENANT_ID,
+      openMode: "new_tab",
+      label: "在 ops-console 追查跨 actor 稽核",
+    },
+  ];
+}
+
 function CrossAppAnchor({ link }: { link: CrossAppResourceLink }) {
   return (
     <a
@@ -722,6 +876,39 @@ function CrossAppAnchor({ link }: { link: CrossAppResourceLink }) {
       {link.label}
     </a>
   );
+}
+
+function getBaseQueryParams(query: CostCenterQuery) {
+  return {
+    view: query.view === "all" ? "" : query.view,
+    q: query.search,
+    owner: query.ownerUserId,
+    freshness:
+      query.freshnessOverride === "auto" ? "" : query.freshnessOverride,
+  };
+}
+
+function buildCostCenterHref(
+  query: CostCenterQuery,
+  patch: Partial<
+    Record<"view" | "q" | "owner" | "freshness" | "emptyReason", string>
+  >,
+) {
+  const params = new URLSearchParams();
+  const next = {
+    ...getBaseQueryParams(query),
+    emptyReason: "",
+    ...patch,
+  };
+
+  Object.entries(next).forEach(([key, value]) => {
+    if (value) {
+      params.set(key, value);
+    }
+  });
+
+  const queryString = params.toString();
+  return `/cost-centers${queryString ? `?${queryString}` : ""}`;
 }
 
 function EmptyStateCard({
@@ -752,7 +939,7 @@ function EmptyStateCard({
     external_unavailable:
       "Quota summary 或 approval linkage 依賴未返回，頁面不能用假資料補洞。",
     filtered_empty:
-      "試著切換成全部或啟用中的成本中心，或清除 owner / search 條件。",
+      "試著切換成全部或啟用中的成本中心，或清除搜尋 / owner 篩選。",
   };
 
   return (
@@ -782,40 +969,14 @@ function EmptyStateCard({
   );
 }
 
-function buildCrossAppLinks(): CrossAppResourceLink[] {
-  return [
-    {
-      targetApp: "platform-admin",
-      route: `/tenant-governance?tenantId=${encodeURIComponent(DEMO_TENANT_ID)}`,
-      resourceType: "tenant_governance",
-      resourceId: DEMO_TENANT_ID,
-      openMode: "new_tab",
-      label: "在 platform-admin 檢視 tenant governance",
-    },
-    {
-      targetApp: "ops-console",
-      route: `/audit?tenantId=${encodeURIComponent(DEMO_TENANT_ID)}`,
-      resourceType: "audit",
-      resourceId: DEMO_TENANT_ID,
-      openMode: "new_tab",
-      label: "在 ops-console 追查跨 actor 稽核",
-    },
-  ];
-}
-
-export default async function CostCentersPage({
-  searchParams,
-}: CostCentersPageProps) {
-  const resolvedSearchParams = (await searchParams) ?? {};
-  const emptyReasonParam = Array.isArray(resolvedSearchParams.emptyReason)
-    ? resolvedSearchParams.emptyReason[0]
-    : resolvedSearchParams.emptyReason;
-  const viewParam = Array.isArray(resolvedSearchParams.view)
-    ? resolvedSearchParams.view[0]
-    : resolvedSearchParams.view;
-  const freshnessParam = Array.isArray(resolvedSearchParams.freshness)
-    ? resolvedSearchParams.freshness[0]
-    : resolvedSearchParams.freshness;
+function resolveQuery(
+  searchParams: Record<string, SearchParamValue>,
+): CostCenterQuery {
+  const emptyReasonParam = getFirstParamValue(searchParams.emptyReason);
+  const viewParam = getFirstParamValue(searchParams.view);
+  const freshnessParam = getFirstParamValue(searchParams.freshness);
+  const search = getFirstParamValue(searchParams.q).trim();
+  const ownerUserId = getFirstParamValue(searchParams.owner).trim();
 
   const emptyReason =
     emptyReasonParam &&
@@ -845,15 +1006,29 @@ export default async function CostCentersPage({
       ? freshnessParam
       : "auto";
 
+  return {
+    emptyReason,
+    view,
+    freshnessOverride,
+    search,
+    ownerUserId,
+  };
+}
+
+export default async function CostCentersPage({
+  searchParams,
+}: CostCentersPageProps) {
+  const query = resolveQuery((await searchParams) ?? {});
   const {
     costCenters,
     quotaSummariesByCode,
     approvalRules,
     coverageReport,
+    users,
     usersById,
     refreshMetadata,
     errors,
-  } = await loadCostCentersData(freshnessOverride);
+  } = await loadCostCentersData(query);
 
   const allRows = buildCostCenterRows(
     costCenters,
@@ -864,20 +1039,20 @@ export default async function CostCentersPage({
   );
 
   const filteredRows = allRows.filter((row) => {
-    if (view === "active") {
+    if (query.view === "active") {
       return row.activeFlag;
     }
-    if (view === "disabled") {
+    if (query.view === "disabled") {
       return !row.activeFlag;
     }
-    if (view === "over_quota") {
+    if (query.view === "over_quota") {
       return row.overQuota;
     }
     return true;
   });
 
   const resolvedEmptyReason: SupportedEmptyReason | null =
-    emptyReason ??
+    query.emptyReason ??
     (errors.length > 0 && allRows.length === 0
       ? "fetch_failed"
       : filteredRows.length === 0 && allRows.length > 0
@@ -895,11 +1070,14 @@ export default async function CostCentersPage({
     (row) => row.approvalLabel !== "未直接綁定；沿用租戶規則",
   ).length;
   const unresolvedCoverageCount = coverageReport?.unresolvedCount ?? 0;
+  const owners = users
+    .slice()
+    .sort((left, right) => left.displayName.localeCompare(right.displayName));
 
   const columns: CanvasTableColumn<CostCenterRow>[] = [
     {
       h: "CODE",
-      w: 130,
+      w: 136,
       mono: true,
       r: (row) => (
         <span style={{ color: row.activeFlag ? th.accent : th.textMuted }}>
@@ -909,7 +1087,7 @@ export default async function CostCentersPage({
     },
     {
       h: "NAME",
-      w: 240,
+      w: 228,
       r: (row) => (
         <div style={tableCellStackStyle}>
           <div style={filterRowStyle}>
@@ -928,12 +1106,17 @@ export default async function CostCentersPage({
           <span style={tableMutedTextStyle}>
             {row.description ?? "未填寫補充說明"}
           </span>
+          {!row.activeFlag && row.disabledReason ? (
+            <span style={tableMutedTextStyle}>
+              停用原因: {row.disabledReason}
+            </span>
+          ) : null}
         </div>
       ),
     },
     {
       h: "OWNER",
-      w: 170,
+      w: 176,
       r: (row) => (
         <div style={tableCellStackStyle}>
           <span style={tablePrimaryTextStyle}>{row.ownerName ?? "未指派"}</span>
@@ -943,20 +1126,25 @@ export default async function CostCentersPage({
     },
     {
       h: "月配額",
-      w: 150,
+      w: 156,
       mono: true,
       align: "right",
-      r: (row) => row.quotaLabel,
+      r: (row) => (
+        <div style={tableCellStackStyle}>
+          <span style={tablePrimaryTextStyle}>{row.quotaLabel}</span>
+          <span style={tableMutedTextStyle}>{row.quotaDetail}</span>
+        </div>
+      ),
     },
     {
       h: "本月使用",
-      w: 220,
+      w: 228,
       r: (row) => (
         <div style={tableCellStackStyle}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span
               style={{
-                minWidth: 70,
+                minWidth: 72,
                 fontFamily: th.monoFamily,
                 fontSize: 11.5,
                 color: row.overQuota ? th.danger : th.text,
@@ -984,29 +1172,17 @@ export default async function CostCentersPage({
     },
     {
       h: "審批",
-      w: 170,
+      w: 188,
       r: (row) => (
         <div style={tableCellStackStyle}>
           <span style={tablePrimaryTextStyle}>{row.approvalLabel}</span>
-          <span style={tableMutedTextStyle}>連到 `/rules` 檢查 precedence</span>
-        </div>
-      ),
-    },
-    {
-      h: "報表歸因",
-      w: 220,
-      r: (row) => (
-        <div style={tableCellStackStyle}>
-          <span style={tablePrimaryTextStyle}>{row.reportLabel}</span>
-          <span style={tableMutedTextStyle}>
-            連到 `/reports` 檢查歸因與 legacy mapping
-          </span>
+          <span style={tableMutedTextStyle}>{row.approvalDetail}</span>
         </div>
       ),
     },
     {
       h: "ACTIONS",
-      w: 210,
+      w: 216,
       r: (row) => (
         <div style={actionRowStyle}>
           {row.actions.map((descriptor, index) =>
@@ -1095,25 +1271,165 @@ export default async function CostCentersPage({
           />
         </div>
 
+        <div style={summaryGridStyle}>
+          <CanvasCard theme={th}>
+            <div style={cardStackStyle}>
+              <p style={summaryHeadlineStyle}>
+                維護成本中心目錄，同時看清楚 quota posture、approval linkage 與
+                reporting attribution。
+              </p>
+              <p style={summaryBodyStyle}>
+                Q-TEN11 的決策點不是單純增刪資料，而是判斷該新建一個成本中心，
+                還是擴充既有配額；若超額或沿用 tenant-level 規則，應立即檢查
+                `/rules` 與 `/reports` 的下游影響。
+              </p>
+              <div style={summaryStripStyle}>
+                <div style={summaryMetricStyle}>
+                  <span style={summaryMetricLabelStyle}>Quota posture</span>
+                  <span style={summaryMetricValueStyle}>
+                    {overQuotaCount > 0
+                      ? `${numberFormatter.format(overQuotaCount)} flagged`
+                      : "Within range"}
+                  </span>
+                </div>
+                <div style={summaryMetricStyle}>
+                  <span style={summaryMetricLabelStyle}>Rule coverage</span>
+                  <span style={summaryMetricValueStyle}>
+                    {numberFormatter.format(directRuleCount)} linked
+                  </span>
+                </div>
+                <div style={summaryMetricStyle}>
+                  <span style={summaryMetricLabelStyle}>Reporting gaps</span>
+                  <span style={summaryMetricValueStyle}>
+                    {unresolvedCoverageCount > 0
+                      ? `${numberFormatter.format(unresolvedCoverageCount)} unresolved`
+                      : "Coverage clean"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </CanvasCard>
+
+          <CanvasCard
+            theme={th}
+            title="Exit Links"
+            subtitle="Cross-slice follow-up"
+          >
+            <div style={cardStackStyle}>
+              <div style={tableCellStackStyle}>
+                <span style={tablePrimaryTextStyle}>Approval linkage</span>
+                <span style={tableMutedTextStyle}>
+                  檢查 cost center 是否命中 rule precedence、owner-based
+                  approver、或 quota-aware blocking。
+                </span>
+              </div>
+              <div style={linkRowStyle}>
+                <Link href="/rules" style={inlineLinkStyle}>
+                  前往 `/rules`
+                </Link>
+                {crossAppLinks[0] ? (
+                  <CrossAppAnchor link={crossAppLinks[0]} />
+                ) : null}
+              </div>
+              <div style={tableCellStackStyle}>
+                <span style={tablePrimaryTextStyle}>Reporting attribution</span>
+                <span style={tableMutedTextStyle}>
+                  驗證 legacy cost center 值的報表歸因與 audit trail 追查。
+                </span>
+              </div>
+              <div style={linkRowStyle}>
+                <Link href="/reports" style={inlineLinkStyle}>
+                  前往 `/reports`
+                </Link>
+                {crossAppLinks[1] ? (
+                  <CrossAppAnchor link={crossAppLinks[1]} />
+                ) : null}
+              </div>
+            </div>
+          </CanvasCard>
+        </div>
+
         <CanvasCard theme={th}>
-          <div style={filterRowStyle}>
-            {VIEW_FILTERS.map((filter) => (
-              <Link
-                key={filter.value}
-                href={getFilterHref(filter.value)}
-                style={{ textDecoration: "none" }}
-              >
-                <CanvasPill
-                  theme={th}
-                  tone={getViewPillTone(view === filter.value)}
+          <div style={filterPanelStyle}>
+            <div style={filterRowStyle}>
+              {VIEW_FILTERS.map((filter) => (
+                <Link
+                  key={filter.value}
+                  href={buildCostCenterHref(query, { view: filter.value })}
+                  style={{ textDecoration: "none" }}
                 >
-                  {filter.label}
-                </CanvasPill>
+                  <CanvasPill
+                    theme={th}
+                    tone={getViewPillTone(query.view === filter.value)}
+                  >
+                    {filter.label}
+                  </CanvasPill>
+                </Link>
+              ))}
+              <span style={helperTextStyle}>
+                Disabled rows 維持可見；6 EmptyReason 可用 `?emptyReason=`
+                切換驗證。
+              </span>
+            </div>
+
+            <form action="/cost-centers" method="get" style={filterFormStyle}>
+              <label style={fieldLabelStyle}>
+                搜尋 code / name
+                <input
+                  type="search"
+                  name="q"
+                  defaultValue={query.search}
+                  placeholder="例如 CC-FIN-04 / 財務處"
+                  style={fieldStyle}
+                />
+              </label>
+
+              <label style={fieldLabelStyle}>
+                Owner
+                <select
+                  name="owner"
+                  defaultValue={query.ownerUserId}
+                  style={fieldStyle}
+                >
+                  <option value="">全部 owner</option>
+                  {owners.map((user) => (
+                    <option key={user.userId} value={user.userId}>
+                      {user.displayName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <input
+                type="hidden"
+                name="view"
+                value={query.view === "all" ? "" : query.view}
+              />
+              {query.freshnessOverride !== "auto" ? (
+                <input
+                  type="hidden"
+                  name="freshness"
+                  value={query.freshnessOverride}
+                />
+              ) : null}
+
+              <div style={{ display: "flex", gap: 8, alignSelf: "end" }}>
+                <button type="submit" style={fieldStyle}>
+                  套用篩選
+                </button>
+              </div>
+
+              <Link
+                href="/cost-centers"
+                style={{
+                  ...inlineLinkStyle,
+                  alignSelf: "end",
+                  paddingBottom: 10,
+                }}
+              >
+                清除條件
               </Link>
-            ))}
-            <span style={tableMutedTextStyle}>
-              6 EmptyReason 可用 `?emptyReason=` 切換驗證。
-            </span>
+            </form>
           </div>
         </CanvasCard>
 
@@ -1141,14 +1457,14 @@ export default async function CostCentersPage({
                   <strong>{row.code}</strong> · {row.approvalLabel}
                 </li>
               ))}
+              {filteredRows.length === 0 ? (
+                <li>目前沒有可列出的成本中心。</li>
+              ) : null}
             </ul>
             <div style={linkRowStyle}>
               <Link href="/rules" style={inlineLinkStyle}>
-                前往 `/rules`
+                在 tenant console 檢查 `/rules`
               </Link>
-              {crossAppLinks[0] ? (
-                <CrossAppAnchor link={crossAppLinks[0]} />
-              ) : null}
             </div>
           </CanvasCard>
 
@@ -1188,11 +1504,8 @@ export default async function CostCentersPage({
             </div>
             <div style={linkRowStyle}>
               <Link href="/reports" style={inlineLinkStyle}>
-                前往 `/reports`
+                在 tenant console 檢查 `/reports`
               </Link>
-              {crossAppLinks[1] ? (
-                <CrossAppAnchor link={crossAppLinks[1]} />
-              ) : null}
             </div>
           </CanvasCard>
         </div>
@@ -1215,13 +1528,13 @@ export default async function CostCentersPage({
             ).map((reason) => (
               <Link
                 key={reason}
-                href={`/cost-centers?emptyReason=${reason}`}
+                href={buildCostCenterHref(query, { emptyReason: reason })}
                 style={{ textDecoration: "none" }}
               >
                 <CanvasPill
                   theme={th}
                   tone={
-                    emptyReason === reason
+                    query.emptyReason === reason
                       ? "accent"
                       : getEmptyStateTone(reason)
                   }
