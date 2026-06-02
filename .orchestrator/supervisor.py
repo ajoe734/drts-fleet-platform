@@ -150,6 +150,7 @@ CHAIR_REVIEW_OUTPUT_KEYS = {
     "recommended_focus",
 }
 CLOSEOUT_SKILL_PATH = THIS_DIR / "skills" / "task-closeout-finalization.md"
+INTEGRATION_CLOSEOUT_SKILL_PATH = THIS_DIR / "skills" / "integration-closeout.md"
 CHAIRMAN_SKILL_PATH = THIS_DIR / "skills" / "chairman-operational-review.md"
 
 
@@ -1375,6 +1376,10 @@ def build_request(config: dict[str, Any], event: dict[str, Any]) -> DeliveryRequ
             )
         ]
     if request_reason := str(event.get("reason") or ""):
+        if request_reason in EXECUTION_DISPATCH_REASONS and INTEGRATION_CLOSEOUT_SKILL_PATH.exists():
+            integration_path = relpath(INTEGRATION_CLOSEOUT_SKILL_PATH)
+            if integration_path not in context_files:
+                context_files.append(integration_path)
         if request_reason == "owned_finalize_dispatch" and CLOSEOUT_SKILL_PATH.exists():
             closeout_path = relpath(CLOSEOUT_SKILL_PATH)
             if closeout_path not in context_files:

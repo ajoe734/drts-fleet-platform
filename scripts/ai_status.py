@@ -381,6 +381,65 @@ def git_commit_exists(commit_hash: str) -> bool:
     return result.returncode == 0
 
 
+INTEGRATION_STATUS_VALUES = {
+    "not_applicable",
+    "branch_pushed",
+    "pr_open",
+    "ci_pending",
+    "ci_failed",
+    "merged_to_dev",
+    "deploy_blocked",
+    "dev_deployed",
+}
+
+
+def integration_metadata_from_env(commit_required: bool, timestamp: str) -> dict[str, Any]:
+    integration_status = os.environ.get("INTEGRATION_STATUS", "").strip().lower()
+    if not integration_status:
+        integration_status = "branch_pushed" if commit_required else "not_applicable"
+    if integration_status not in INTEGRATION_STATUS_VALUES:
+        allowed = ", ".join(sorted(INTEGRATION_STATUS_VALUES))
+        raise SystemExit(f"INTEGRATION_STATUS must be one of: {allowed}")
+
+    pr_url = os.environ.get("PR_URL", "").strip()
+    ci_status = os.environ.get("CI_STATUS", "").strip()
+    ci_run_url = os.environ.get("CI_RUN_URL", "").strip()
+    merged_ref = os.environ.get("MERGED_REF", "").strip()
+    merge_commit = os.environ.get("MERGE_COMMIT", "").strip()
+    dev_deploy_run_url = os.environ.get("DEV_DEPLOY_RUN_URL", "").strip()
+    dev_deploy_sha = os.environ.get("DEV_DEPLOY_SHA", "").strip()
+    dev_deploy_source_ref = os.environ.get("DEV_DEPLOY_SOURCE_REF", "").strip()
+
+    if integration_status == "merged_to_dev" and not (merged_ref or merge_commit):
+        raise SystemExit("INTEGRATION_STATUS=merged_to_dev requires MERGED_REF or MERGE_COMMIT")
+    if integration_status == "dev_deployed":
+        if not (merged_ref or merge_commit):
+            raise SystemExit("INTEGRATION_STATUS=dev_deployed requires MERGED_REF or MERGE_COMMIT")
+        if not dev_deploy_run_url or not dev_deploy_sha:
+            raise SystemExit("INTEGRATION_STATUS=dev_deployed requires DEV_DEPLOY_RUN_URL and DEV_DEPLOY_SHA")
+    if integration_status == "ci_failed" and not (ci_status or ci_run_url):
+        raise SystemExit("INTEGRATION_STATUS=ci_failed requires CI_STATUS or CI_RUN_URL")
+    if integration_status == "deploy_blocked" and not (dev_deploy_run_url or dev_deploy_source_ref or merged_ref):
+        raise SystemExit("INTEGRATION_STATUS=deploy_blocked requires deploy or merge evidence")
+
+    metadata: dict[str, Any] = {
+        "integration_status": integration_status,
+        "integration_recorded_at": timestamp,
+    }
+    optional_fields = {
+        "pr_url": pr_url,
+        "ci_status": ci_status,
+        "ci_run_url": ci_run_url,
+        "merged_ref": merged_ref,
+        "merge_commit": merge_commit,
+        "dev_deploy_run_url": dev_deploy_run_url,
+        "dev_deploy_sha": dev_deploy_sha,
+        "dev_deploy_source_ref": dev_deploy_source_ref,
+    }
+    metadata.update({key: value for key, value in optional_fields.items() if value})
+    return metadata
+
+
 def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, Any]:
     commit_required = task_requires_commit(task)
     no_commit_required = os.environ.get("NO_COMMIT_REQUIRED", "").strip().lower() in {"1", "true", "yes"}
@@ -393,6 +452,7 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
     push_commit = os.environ.get("PUSH_COMMIT", "").strip() or commit_hash
     reviewer = canonical_agent_name(task.get("reviewer"))
     timestamp = iso_now()
+    integration_metadata = integration_metadata_from_env(commit_required, timestamp)
 
     if commit_required:
         if no_commit_required:
@@ -420,6 +480,7 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
             "push_ref": push_ref or f"{push_remote}/{push_branch}",
             "push_commit": push_commit,
             "push_recorded_at": timestamp,
+            **integration_metadata,
         }
 
     if no_commit_required:
@@ -429,8 +490,9 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
             "commit_agent": canonical_agent_name(commit_agent),
             "commit_reviewer": reviewer,
             "commit_recorded_at": timestamp,
+            **integration_metadata,
         }
-    return {}
+    return integration_metadata
 
 
 def iso_now() -> str:

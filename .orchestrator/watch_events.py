@@ -337,6 +337,8 @@ def render_wakeup_message(
             "- commit 後必須做 scoped normal non-force push，例如 `git push` 或 `git push -u origin HEAD:<branch>`。\n"
             "- `git push --force`、`--mirror`、`--delete`、`--all`、`--tags` 一律禁止。\n"
             "- push 成功後才能用 `COMMIT_HASH`、`COMMIT_SUBJECT`、`PUSH_REMOTE`、`PUSH_BRANCH` 呼叫 `scripts/ai-status.sh done`。\n"
+            "- `done` 必須帶 `INTEGRATION_STATUS`：branch-only 用 `branch_pushed`，已 merge 用 `merged_to_dev`，已部署 dev 才能用 `dev_deployed`。\n"
+            "- 沒有 `dev_deployed` + deploy run evidence，不要把任務描述成已 publish 到 dev 測試機。\n"
             "- 如果不能安全 push，請改用 blocker/progress 說清楚原因，不要標 `done`。\n"
         )
     lane = str(agent.get("id") or target_agent or "").strip()
@@ -359,7 +361,8 @@ def render_wakeup_message(
             "不能把 diff 只留在 working tree；在 yield / 換 task / 結束 session 前，"
             "先做 task-scoped anchor commit 或正式 closeout commit。\n"
             "工作樹已有不相關修改不是跳過 commit 的理由；只 stage 你 own 的檔案，必要時切到乾淨 branch/worktree 再繼續。\n"
-            "若安全 commit 或普通 non-force push 做不到，必須明確回報 `progress` / `blocker` 與原因，不能把工作描述成已完成。"
+            "若安全 commit 或普通 non-force push 做不到，必須明確回報 `progress` / `blocker` 與原因，不能把工作描述成已完成。\n"
+            "branch closeout 不等於 integration closeout；PR/CI/merge/dev deploy 必須用 `INTEGRATION_STATUS` 與 evidence 另外記錄。"
         )
     variables = {
         "shared_files": shared_files,

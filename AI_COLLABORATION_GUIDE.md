@@ -254,7 +254,26 @@ For canonical implementation tasks:
   - `Reviewer: <reviewer>`
 - after committing, the owner must push the task-scoped commit with a normal non-force push
 - the owner must provide `PUSH_REMOTE` and `PUSH_BRANCH` when finalizing the task
+- the owner must record `INTEGRATION_STATUS` so branch-only completion is not confused with merge/deploy completion
 - if a safe normal push is not possible, record a blocker/progress note and do not mark `done`
+
+### Integration closeout rule
+
+Branch closeout is not the whole development loop. A canonical task is only
+published to the dev test environment after PR/CI, merge to `dev`, publish
+snapshot, and a successful `Deploy - Dev` run have evidence in machine truth.
+
+Use `INTEGRATION_STATUS` on `done`:
+
+- `branch_pushed`: task branch committed and pushed, not merged
+- `pr_open`, `ci_pending`, or `ci_failed`: PR/CI exists but integration is not closed
+- `merged_to_dev`: delivered commit is reachable from `origin/dev`
+- `deploy_blocked`: merged but dev deploy is blocked or failed
+- `dev_deployed`: successful `Deploy - Dev` run includes the change
+- `not_applicable`: support-only sidecar/no-op closeout
+
+Do not say "development complete", "ready on dev", or "published to dev" unless
+the status is `dev_deployed` and the deploy run URL/SHA are recorded.
 
 For sidecar or explicit non-canonical closeout tasks:
 
@@ -286,6 +305,6 @@ AI_NAME=Codex ./scripts/ai-status.sh start <task-id> "Started implementation"
 AI_NAME=Codex ./scripts/ai-status.sh progress <task-id> "Updated progress"
 AI_NAME=Codex ./scripts/ai-status.sh handoff <task-id> Claude "Ready for review"
 AI_NAME=Claude REVIEW_NOTES_ZH="審查通過||回到 owner 收尾" ./scripts/ai-status.sh approve <task-id> "Review approved and returned to the owner for finalization"
-AI_NAME=Codex COMMIT_HASH=<sha> COMMIT_SUBJECT="feat(w8-001a): close rollout blockers" PUSH_REMOTE=origin PUSH_BRANCH=<branch> ./scripts/ai-status.sh done <task-id> "Owner finalized approved task, committed, pushed, and closed it"
+AI_NAME=Codex COMMIT_HASH=<sha> COMMIT_SUBJECT="feat(w8-001a): close rollout blockers" PUSH_REMOTE=origin PUSH_BRANCH=<branch> INTEGRATION_STATUS=branch_pushed ./scripts/ai-status.sh done <task-id> "Owner finalized approved task, committed, pushed, and recorded integration status"
 ./scripts/sync-state.sh
 ```

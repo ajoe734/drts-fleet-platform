@@ -354,7 +354,31 @@ git push -u origin <lane>/<topic>
 gh pr create --base dev --title "<TASK-ID>: <summary>" ...
 ```
 
-### 11.6 Trigger checklist (before each significant save)
+### 11.6 Branch closeout is not development closeout
+
+The worker state `done` records a task lifecycle event. It does not, by itself,
+prove that the branch has passed PR CI, merged into `dev`, or reached the dev
+test machine.
+
+After branch closeout, implementation and umbrella owners must continue or hand
+off the integration closeout:
+
+- PR to `dev` exists and includes task evidence.
+- CI is green before merge; failing CI creates a blocker/progress note.
+- Delivered commit is reachable from `origin/dev`.
+- Dev publish/deploy is verified when the acceptance target is the shared dev environment.
+
+Workers record the layer reached with `INTEGRATION_STATUS`:
+
+- `branch_pushed`, `pr_open`, `ci_pending`, `ci_failed`
+- `merged_to_dev`
+- `deploy_blocked`, `dev_deployed`
+- `not_applicable` for sidecar/support-only work
+
+Only `dev_deployed` plus deploy run evidence may be described as "published to
+dev" or "ready on the dev test machine".
+
+### 11.7 Trigger checklist (before each significant save)
 
 Worker prompts (wakeup + closeout skill) carry this checklist; it is reproduced here for human reference:
 
@@ -369,9 +393,10 @@ If **any** answer is yes and the current branch is not `<lane>/<task-id-kebab>`,
 git switch -c <lane>/<task-id-kebab> origin/dev
 ```
 
-### 11.7 Related artifacts
+### 11.8 Related artifacts
 
 - [`.orchestrator/skills/worker-anchor-commit.md`](../../.orchestrator/skills/worker-anchor-commit.md) — worker-facing operational skill for anchor commits (companion to closeout skill)
+- [`.orchestrator/skills/integration-closeout.md`](../../.orchestrator/skills/integration-closeout.md) — worker-facing protocol for PR / CI / merge / dev deploy evidence
 - [`.orchestrator/templates/wakeup.txt`](../../.orchestrator/templates/wakeup.txt) — supervisor wakeup template that injects branch context (target of OPS-GIT-WORKFLOW-005)
 - [`.orchestrator/worker_tree_guard.py`](../../.orchestrator/worker_tree_guard.py) — shared tree-guard primitives (extracted by OPS-GIT-WORKFLOW-007). Backs both surfaces:
   - `check_worker_tree_guard` — supervisor dispatch guard, gated by `branch_strategy.worker_tree_guard.enabled` (OPS-GIT-WORKFLOW-006, opt-in)
