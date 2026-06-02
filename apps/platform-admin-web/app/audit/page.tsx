@@ -1,15 +1,25 @@
 /**
- * Audit Trail Page
- * Platform audit log with filtering and record inspection.
+ * Audit & Evidence Governance
+ *
+ * Platform Admin canvas body parity (PA_Audit, Q-ADM16). Append-only audit log
+ * with actor-type pills, inline HOLD / EXEMPT resource badges, filter pill row
+ * with counts, retention policies, and legal hold / deletion exception summary
+ * cards. Refresh tier is T6 manual, surfaced as an explicit refresh action.
  */
 
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
 import {
-  usePlatformAdminClient,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
   formatDateTime,
   truncate,
+  usePlatformAdminClient,
 } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -22,8 +32,114 @@ import type {
   EvidenceLegalHoldRecord,
   EvidenceRetentionPolicyRecord,
 } from "@drts/contracts";
+import {
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasDL,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasTable,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+  type CanvasTone,
+} from "@drts/ui-web";
 
-type TFn = (key: string, params?: Record<string, string | number>) => string;
+type AuditTabId = "log" | "policy" | "hold" | "except";
+
+type AuditTableRow = AuditLogRecord & {
+  hold: EvidenceLegalHoldRecord | undefined;
+  exempt: EvidenceDeletionExceptionRecord | undefined;
+} & Record<string, unknown>;
+
+const theme = buildCanvasTheme({
+  surface: "platform",
+  density: "compact",
+});
+
+const bodyStyle = {
+  display: "grid",
+  gap: 16,
+  padding: 24,
+} satisfies CSSProperties;
+
+const pillRowStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+} satisfies CSSProperties;
+
+const summaryGridStyle = {
+  display: "grid",
+  gap: 16,
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+} satisfies CSSProperties;
+
+const tabButtonStyle = {
+  appearance: "none",
+  background: "transparent",
+  border: "none",
+  padding: 0,
+  margin: 0,
+  font: "inherit",
+  color: "inherit",
+  cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+} satisfies CSSProperties;
+
+const pillButtonStyle = {
+  appearance: "none",
+  background: "transparent",
+  border: "none",
+  padding: 0,
+  margin: 0,
+  cursor: "pointer",
+  display: "inline-flex",
+} satisfies CSSProperties;
+
+const resourceCellStyle = {
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: 6,
+} satisfies CSSProperties;
+
+const monoCellStyle = {
+  fontFamily: theme.monoFamily,
+  fontSize: 11.5,
+  color: theme.text,
+} satisfies CSSProperties;
+
+const actionCellStyle = {
+  fontFamily: theme.monoFamily,
+  fontSize: 11,
+  color: theme.accent,
+} satisfies CSSProperties;
+
+const stateStyle = {
+  color: theme.textMuted,
+  fontSize: 12.5,
+  padding: "32px 16px",
+  textAlign: "center",
+} satisfies CSSProperties;
+
+function actorTone(actorType: AuditLogRecord["actorType"]): CanvasTone {
+  switch (actorType) {
+    case "platform_admin":
+      return "accent";
+    case "tenant_admin":
+      return "info";
+    case "ops_user":
+      return "success";
+    case "partner_api_key":
+      return "warn";
+    default:
+      return "neutral";
+  }
+}
 
 export default function AuditPage() {
   const { t, locale } = useTranslation();
@@ -36,9 +152,8 @@ export default function AuditPage() {
   >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<AuditTabId>("log");
   const [filterModule, setFilterModule] = useState<string>("");
-  const [filterActorType, setFilterActorType] = useState<string>("");
-  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -70,473 +185,604 @@ export default function AuditPage() {
       setPolicies(policyList);
       setLegalHolds(holdList);
       setDeletionExceptions(deletionExceptionList);
-    } catch (e: any) {
-      setError(e?.message || String(e));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   }, [client]);
 
   useEffect(() => {
-    loadRecords();
+    void loadRecords();
   }, [loadRecords]);
 
-  const filtered = records.filter((r) => {
-    if (filterModule && r.moduleName !== filterModule) return false;
-    if (filterActorType && r.actorType !== filterActorType) return false;
-    return true;
-  });
+  const activeLegalHolds = useMemo(
+    () => legalHolds.filter((hold) => hold.status === "active"),
+    [legalHolds],
+  );
+  const activeDeletionExceptions = useMemo(
+    () => deletionExceptions.filter((exception) => exception.status === "active"),
+    [deletionExceptions],
+  );
 
-  const modules = [
-    ...new Set(records.map((r) => r.moduleName).filter(Boolean)),
+  // Resource-keyed lookups so a HOLD / EXEMPT badge can be rendered inline in
+  // the audit table resource cell (canvas Q-ADM16 badge-in-resource-cell).
+  const holdByResource = useMemo(() => {
+    const map = new Map<string, EvidenceLegalHoldRecord>();
+    for (const hold of activeLegalHolds) {
+      if (hold.subjectId) map.set(hold.subjectId, hold);
+    }
+    return map;
+  }, [activeLegalHolds]);
+
+  const exemptByResource = useMemo(() => {
+    const map = new Map<string, EvidenceDeletionExceptionRecord>();
+    for (const exception of activeDeletionExceptions) {
+      if (exception.subjectId) map.set(exception.subjectId, exception);
+      if (exception.sourceResourceId)
+        map.set(exception.sourceResourceId, exception);
+    }
+    return map;
+  }, [activeDeletionExceptions]);
+
+  const moduleCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const record of records) {
+      if (!record.moduleName) continue;
+      counts.set(record.moduleName, (counts.get(record.moduleName) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [records]);
+
+  const filtered = useMemo(
+    () =>
+      records.filter((r) => !filterModule || r.moduleName === filterModule),
+    [records, filterModule],
+  );
+
+  const rows = useMemo<AuditTableRow[]>(
+    () =>
+      filtered.map((record) => ({
+        ...record,
+        hold: record.resourceId
+          ? holdByResource.get(record.resourceId)
+          : undefined,
+        exempt: record.resourceId
+          ? exemptByResource.get(record.resourceId)
+          : undefined,
+      })),
+    [filtered, holdByResource, exemptByResource],
+  );
+
+  const copy =
+    locale === "en"
+      ? {
+          title: "Audit & Evidence Governance",
+          subtitle:
+            "Append-only · legal hold + deletion exception shown via badge (Q-ADM16)",
+          refresh: "Refresh (T6 manual)",
+          refreshing: "Refreshing…",
+          exportCsv: "Export CSV",
+          tabLog: "Audit log",
+          tabPolicy: "Retention policies",
+          tabHold: "Active legal holds",
+          tabExcept: "Deletion exceptions",
+          all: "All",
+          showing: "Showing",
+          legalHoldTip: "legal hold",
+          deletionExceptionTip: "deletion exception",
+          expires: "expires",
+          case: "case",
+          owner: "owner",
+          reason: "reason",
+          loading: "Loading audit log…",
+          emptyLog: "No audit records match the current filter.",
+          emptyPolicy: "No retention policies configured.",
+          emptyHold: "No active legal holds.",
+          emptyExcept: "No active deletion exceptions.",
+          holdsTitle: "Active legal holds",
+          exceptTitle: "Deletion exceptions",
+          colWhen: "WHEN",
+          colActorType: "ACTOR TYPE",
+          colActor: "ACTOR",
+          colModule: "MODULE",
+          colAction: "ACTION",
+          colResource: "RESOURCE",
+          colRequest: "REQUEST",
+          polFamily: "FAMILY",
+          polAuthority: "AUTHORITY",
+          polRetention: "RETENTION",
+          polDownload: "DOWNLOAD",
+          polHold: "LEGAL HOLD",
+          holdResource: "RESOURCE",
+          holdCase: "CASE",
+          holdReason: "REASON",
+          holdPlacedBy: "PLACED BY",
+          holdPlacedAt: "PLACED AT",
+          exReason: "REASON",
+          exExpires: "EXPIRES",
+          signedTtl: (m: number) => `signed url · ${m}m ttl`,
+          noDownload: "no download",
+          holdEnabled: "supported",
+          holdDisabled: "not supported",
+          holdSupported: "Legal hold supported",
+        }
+      : {
+          title: "Audit & Evidence Governance",
+          subtitle:
+            "append-only · legal hold + deletion exception 透過 badge 顯示 (Q-ADM16)",
+          refresh: "重新整理 (T6 手動)",
+          refreshing: "重新整理中…",
+          exportCsv: "匯出 csv",
+          tabLog: "Audit log",
+          tabPolicy: "Retention policies",
+          tabHold: "Active legal holds",
+          tabExcept: "Deletion exceptions",
+          all: "全部",
+          showing: "顯示",
+          legalHoldTip: "legal hold",
+          deletionExceptionTip: "deletion exception",
+          expires: "到期",
+          case: "案號",
+          owner: "負責人",
+          reason: "原因",
+          loading: "載入稽核紀錄中…",
+          emptyLog: "沒有符合目前篩選的稽核紀錄。",
+          emptyPolicy: "尚未設定保留政策。",
+          emptyHold: "目前沒有作用中的法定保留。",
+          emptyExcept: "目前沒有作用中的刪除例外。",
+          holdsTitle: "Active legal holds",
+          exceptTitle: "Deletion exceptions",
+          colWhen: "WHEN",
+          colActorType: "ACTOR TYPE",
+          colActor: "ACTOR",
+          colModule: "MODULE",
+          colAction: "ACTION",
+          colResource: "RESOURCE",
+          colRequest: "REQUEST",
+          polFamily: "FAMILY",
+          polAuthority: "AUTHORITY",
+          polRetention: "RETENTION",
+          polDownload: "DOWNLOAD",
+          polHold: "LEGAL HOLD",
+          holdResource: "RESOURCE",
+          holdCase: "CASE",
+          holdReason: "REASON",
+          holdPlacedBy: "PLACED BY",
+          holdPlacedAt: "PLACED AT",
+          exReason: "REASON",
+          exExpires: "EXPIRES",
+          signedTtl: (m: number) => `signed url · ${m}m ttl`,
+          noDownload: "no download",
+          holdEnabled: "supported",
+          holdDisabled: "not supported",
+          holdSupported: "支援法定保留",
+        };
+
+  const tabDefs: { id: AuditTabId; label: string; badge?: number }[] = [
+    { id: "log", label: copy.tabLog },
+    { id: "policy", label: copy.tabPolicy },
+    { id: "hold", label: copy.tabHold, badge: activeLegalHolds.length },
+    { id: "except", label: copy.tabExcept, badge: activeDeletionExceptions.length },
   ];
-  const actorTypes = [
-    ...new Set(records.map((r) => r.actorType).filter(Boolean)),
-  ];
-  const activeLegalHolds = legalHolds.filter(
-    (hold) => hold.status === "active",
-  );
-  const activeDeletionExceptions = deletionExceptions.filter(
-    (exception) => exception.status === "active",
-  );
-  const signedDownloadFamilies = policies.filter(
-    (policy) => policy.downloadControl?.mode === "signed_url",
-  );
 
-  if (loading) return <div className="admin-empty">{t("audit.loading")}</div>;
-
-  return (
-    <div>
-      <div className="admin-page-header">
-        <h1>{t("audit.title")}</h1>
-        <p>{t("audit.subtitle", { count: records.length })}</p>
-      </div>
-
-      {error && (
-        <div
-          className="admin-card"
-          style={{ borderColor: "rgba(239,68,68,0.3)" }}
-        >
-          <p style={{ color: "#dc2626", margin: 0 }}>
-            {getPlatformLabel(locale, "error")}: {error}
-          </p>
-        </div>
-      )}
-
-      <div className="admin-toolbar" style={{ flexWrap: "wrap", gap: 12 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <label
-            htmlFor="filter-module"
-            style={{ fontSize: 13, fontWeight: 500 }}
-          >
-            {t("audit.moduleLabel")}
-          </label>
-          <select
-            id="filter-module"
-            value={filterModule}
-            onChange={(e) => setFilterModule(e.target.value)}
-            style={{
-              padding: "6px 10px",
-              border: "1px solid #d1d5db",
-              borderRadius: 8,
-              fontSize: 13,
-            }}
-          >
-            <option value="">{t("common.all")}</option>
-            {modules.map((m) => (
-              <option key={m} value={m}>
-                {formatPlatformCodeLabel(locale, m)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <label
-            htmlFor="filter-actor"
-            style={{ fontSize: 13, fontWeight: 500 }}
-          >
-            {t("audit.actorLabel")}
-          </label>
-          <select
-            id="filter-actor"
-            value={filterActorType}
-            onChange={(e) => setFilterActorType(e.target.value)}
-            style={{
-              padding: "6px 10px",
-              border: "1px solid #d1d5db",
-              borderRadius: 8,
-              fontSize: 13,
-            }}
-          >
-            <option value="">{t("common.all")}</option>
-            {actorTypes.map((a) => (
-              <option key={a} value={a}>
-                {formatPlatformCodeLabel(locale, a)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button
-          className="admin-btn admin-btn--secondary"
-          onClick={loadRecords}
-        >
-          {t("common.refresh")}
-        </button>
-      </div>
-
-      <div className="admin-card" style={{ marginBottom: 12 }}>
-        <span style={{ fontSize: 13, color: "#6b7280" }}>
-          {t("audit.showingOf", {
-            shown: filtered.length,
-            total: records.length,
-          })}
-        </span>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 12,
-          marginBottom: 12,
-        }}
-      >
-        <AuditMetricCard
-          label={t("audit.metrics.policyFamilies")}
-          value={String(policies.length)}
-        />
-        <AuditMetricCard
-          label={t("audit.metrics.signedDownload")}
-          value={String(signedDownloadFamilies.length)}
-        />
-        <AuditMetricCard
-          label={t("audit.metrics.activeHolds")}
-          value={String(activeLegalHolds.length)}
-        />
-        <AuditMetricCard
-          label={t("audit.metrics.activeExceptions")}
-          value={String(activeDeletionExceptions.length)}
-        />
-      </div>
-
-      <div className="admin-card" style={{ marginBottom: 12 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "baseline",
-            gap: 12,
-            marginBottom: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>
-              {t("audit.policies.title")}
-            </h2>
-            <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 13 }}>
-              {t("audit.policies.subtitle")}
-            </p>
-          </div>
-        </div>
-        <div style={{ overflowX: "auto" }}>
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>{t("audit.policies.family")}</th>
-                <th>{t("audit.policies.authority")}</th>
-                <th>{t("audit.policies.retention")}</th>
-                <th>{t("audit.policies.download")}</th>
-                <th>{t("audit.policies.legalHold")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {policies.map((policy) => (
-                <tr key={policy.family}>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>
-                      {formatPlatformCodeLabel(locale, policy.family)}
-                    </div>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>
-                      {policy.description}
-                    </div>
-                  </td>
-                  <td>
-                    {formatPlatformCodeLabel(locale, policy.authorityModule)}
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {policy.hotRetentionDays}d /{" "}
-                    {policy.archiveRetentionDays
-                      ? `${policy.archiveRetentionDays}d`
-                      : "—"}
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {policy.downloadControl?.mode === "signed_url"
-                      ? t("audit.policies.signedDownloadTtl", {
-                          minutes: policy.downloadControl.ttlMinutes ?? 0,
-                        })
-                      : t("audit.policies.noDownload")}
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {policy.legalHold.supported
-                      ? t("audit.policies.holdEnabled")
-                      : t("audit.policies.holdDisabled")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: 12,
-          marginBottom: 12,
-        }}
-      >
-        <GovernanceTableCard
-          title={t("audit.holds.title")}
-          emptyLabel={t("audit.holds.empty")}
-          columns={[
-            t("audit.holds.family"),
-            t("audit.holds.subject"),
-            t("audit.holds.case"),
-            t("audit.holds.status"),
-          ]}
-          rows={activeLegalHolds.map((hold) => [
-            formatPlatformCodeLabel(locale, hold.family),
-            hold.subjectId,
-            hold.caseNumber,
-            formatPlatformCodeLabel(locale, hold.status),
-          ])}
-        />
-        <GovernanceTableCard
-          title={t("audit.exceptions.title")}
-          emptyLabel={t("audit.exceptions.empty")}
-          columns={[
-            t("audit.exceptions.family"),
-            t("audit.exceptions.subject"),
-            t("audit.exceptions.reason"),
-            t("audit.exceptions.expiresAt"),
-          ]}
-          rows={activeDeletionExceptions.map((exception) => [
-            formatPlatformCodeLabel(locale, exception.family),
-            exception.subjectId,
-            formatPlatformCodeLabel(locale, exception.reasonCode),
-            formatDateTime(exception.expiresAt),
-          ])}
-        />
-      </div>
-
-      {filtered.length === 0 ? (
-        <div className="admin-card admin-empty">
-          <p>{t("audit.empty")}</p>
-        </div>
-      ) : (
-        <div className="admin-card" style={{ overflowX: "auto" }}>
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>{getPlatformLabel(locale, "id")}</th>
-                <th>{t("audit.col.actor")}</th>
-                <th>{t("audit.col.module")}</th>
-                <th>{t("audit.col.action")}</th>
-                <th>{t("audit.col.resource")}</th>
-                <th>{t("audit.col.tenant")}</th>
-                <th>{t("audit.col.timestamp")}</th>
-                <th>{t("audit.col.details")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <React.Fragment key={r.auditId}>
-                  <tr>
-                    <td style={{ fontFamily: "monospace", fontSize: 11 }}>
-                      {truncate(r.auditId, 12)}
-                    </td>
-                    <td>
-                      <div style={{ fontSize: 12 }}>
-                        <div>
-                          {truncate(
-                            r.actorId ||
-                              formatPlatformCodeLabel(locale, "system"),
-                            16,
-                          )}
-                        </div>
-                        <span
-                          className="admin-badge admin-badge--neutral"
-                          style={{ fontSize: 10 }}
-                        >
-                          {formatPlatformCodeLabel(locale, r.actorType)}
-                        </span>
-                      </div>
-                    </td>
-                    <td>{formatPlatformCodeLabel(locale, r.moduleName)}</td>
-                    <td>
-                      <span className="admin-badge admin-badge--info">
-                        {formatPlatformCodeLabel(locale, r.actionName)}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      {formatPlatformCodeLabel(locale, r.resourceType)}
-                      {r.resourceId ? `:${truncate(r.resourceId, 8)}` : ""}
-                    </td>
-                    <td style={{ fontFamily: "monospace", fontSize: 11 }}>
-                      {r.tenantId || "—"}
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      {formatDateTime(r.createdAt)}
-                    </td>
-                    <td>
-                      {r.oldValuesSummary || r.newValuesSummary ? (
-                        <button
-                          className="admin-btn admin-btn--secondary admin-btn--sm"
-                          type="button"
-                          onClick={() =>
-                            setExpandedAuditId((current) =>
-                              current === r.auditId ? null : r.auditId,
-                            )
-                          }
-                        >
-                          {expandedAuditId === r.auditId
-                            ? t("audit.collapse")
-                            : t("audit.expand")}
-                        </button>
-                      ) : (
-                        <span style={{ fontSize: 12, color: "#9ca3af" }}>
-                          —
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                  {expandedAuditId === r.auditId && (
-                    <tr>
-                      <td colSpan={8} style={{ background: "#fafafa" }}>
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns:
-                              "repeat(auto-fit, minmax(240px, 1fr))",
-                            gap: 12,
-                          }}
-                        >
-                          <AuditValueCard
-                            title={t("audit.oldValues")}
-                            payload={r.oldValuesSummary}
-                            t={t}
-                          />
-                          <AuditValueCard
-                            title={t("audit.newValues")}
-                            payload={r.newValuesSummary}
-                            t={t}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AuditMetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="admin-card">
-      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 24, fontWeight: 700 }}>{value}</div>
-    </div>
-  );
-}
-
-function GovernanceTableCard({
-  title,
-  columns,
-  rows,
-  emptyLabel,
-}: {
-  title: string;
-  columns: string[];
-  rows: string[][];
-  emptyLabel: string;
-}) {
-  return (
-    <div className="admin-card">
-      <h2 style={{ marginTop: 0, marginBottom: 12, fontSize: 18 }}>{title}</h2>
-      {rows.length === 0 ? (
-        <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-          {emptyLabel}
-        </p>
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table className="admin-table">
-            <thead>
-              <tr>
-                {columns.map((column) => (
-                  <th key={column}>{column}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => (
-                <tr key={`${title}-${index}`}>
-                  {row.map((cell, cellIndex) => (
-                    <td key={`${title}-${index}-${cellIndex}`}>{cell}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AuditValueCard({
-  title,
-  payload,
-  t,
-}: {
-  title: string;
-  payload: Record<string, unknown> | undefined;
-  t: TFn;
-}) {
-  return (
-    <div
-      style={{
-        border: "1px solid #e5e7eb",
-        borderRadius: 10,
-        padding: 12,
-        background: "#fff",
-      }}
+  const tabNodes = tabDefs.map((def) => (
+    <button
+      key={def.id}
+      type="button"
+      onClick={() => setActiveTab(def.id)}
+      style={tabButtonStyle}
     >
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>{title}</div>
-      {payload ? (
-        <pre
-          style={{
-            margin: 0,
-            fontSize: 12,
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          }}
-        >
-          {JSON.stringify(payload, null, 2)}
-        </pre>
-      ) : (
-        <span style={{ fontSize: 12, color: "#9ca3af" }}>
-          {t("common.noValues")}
+      <span>{def.label}</span>
+      {def.badge ? (
+        <CanvasPill theme={theme} tone="warn">
+          {def.badge}
+        </CanvasPill>
+      ) : null}
+    </button>
+  ));
+  const activeTabNode =
+    tabNodes[tabDefs.findIndex((def) => def.id === activeTab)] ?? tabNodes[0];
+
+  const auditColumns: CanvasTableColumn<AuditTableRow>[] = [
+    {
+      h: copy.colWhen,
+      w: 170,
+      mono: true,
+      r: (row) => formatDateTime(row.createdAt),
+    },
+    {
+      h: copy.colActorType,
+      w: 140,
+      r: (row) => (
+        <CanvasPill theme={theme} tone={actorTone(row.actorType)} dot>
+          {formatPlatformCodeLabel(locale, row.actorType)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: copy.colActor,
+      w: 220,
+      r: (row) =>
+        truncate(
+          row.actorId || formatPlatformCodeLabel(locale, "system"),
+          28,
+        ),
+    },
+    {
+      h: copy.colModule,
+      w: 140,
+      r: (row) => (
+        <span style={monoCellStyle}>
+          {formatPlatformCodeLabel(locale, row.moduleName)}
         </span>
-      )}
-    </div>
+      ),
+    },
+    {
+      h: copy.colAction,
+      w: 200,
+      r: (row) => <span style={actionCellStyle}>{row.actionName}</span>,
+    },
+    {
+      h: copy.colResource,
+      w: 240,
+      r: (row) => (
+        <div style={resourceCellStyle}>
+          <span style={monoCellStyle}>
+            {row.resourceType}
+            {row.resourceId ? `:${truncate(row.resourceId, 10)}` : ""}
+          </span>
+          {row.hold ? (
+            <span
+              title={`${copy.legalHoldTip} · ${copy.case} ${row.hold.caseNumber} · ${copy.owner} ${row.hold.placedByActorId}`}
+            >
+              <CanvasPill theme={theme} tone="danger">
+                HOLD
+              </CanvasPill>
+            </span>
+          ) : null}
+          {row.exempt ? (
+            <span
+              title={`${copy.deletionExceptionTip} · ${formatPlatformCodeLabel(
+                locale,
+                row.exempt.reasonCode,
+              )} · ${copy.expires} ${formatDateTime(row.exempt.expiresAt)}`}
+            >
+              <CanvasPill theme={theme} tone="warn">
+                EXEMPT
+              </CanvasPill>
+            </span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      h: copy.colRequest,
+      mono: true,
+      r: (row) => row.requestId || "—",
+    },
+  ];
+
+  const policyColumns: CanvasTableColumn<
+    EvidenceRetentionPolicyRecord & Record<string, unknown>
+  >[] = [
+    {
+      h: copy.polFamily,
+      w: 240,
+      r: (policy) => (
+        <div style={{ display: "grid", gap: 3 }}>
+          <span style={{ fontWeight: 600, color: theme.text, fontSize: 12.5 }}>
+            {formatPlatformCodeLabel(locale, policy.family)}
+          </span>
+          <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
+            {policy.description}
+          </span>
+        </div>
+      ),
+    },
+    {
+      h: copy.polAuthority,
+      w: 160,
+      r: (policy) => formatPlatformCodeLabel(locale, policy.authorityModule),
+    },
+    {
+      h: copy.polRetention,
+      w: 140,
+      mono: true,
+      r: (policy) =>
+        `${policy.hotRetentionDays}d / ${
+          policy.archiveRetentionDays ? `${policy.archiveRetentionDays}d` : "—"
+        }`,
+    },
+    {
+      h: copy.polDownload,
+      w: 170,
+      r: (policy) =>
+        policy.downloadControl?.mode === "signed_url"
+          ? copy.signedTtl(policy.downloadControl.ttlMinutes ?? 0)
+          : copy.noDownload,
+    },
+    {
+      h: copy.polHold,
+      r: (policy) => (
+        <CanvasPill
+          theme={theme}
+          tone={policy.legalHold.supported ? "success" : "neutral"}
+          dot
+        >
+          {policy.legalHold.supported ? copy.holdEnabled : copy.holdDisabled}
+        </CanvasPill>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <CanvasPageHeader
+        theme={theme}
+        title={copy.title}
+        subtitle={copy.subtitle}
+        tabs={tabNodes}
+        activeTab={activeTabNode}
+        actions={
+          <>
+            <CanvasBtn theme={theme} variant="secondary" icon="filter">
+              {copy.exportCsv}
+            </CanvasBtn>
+            <CanvasBtn
+              theme={theme}
+              variant="secondary"
+              icon="arrow"
+              onClick={() => void loadRecords()}
+            >
+              {loading && records.length > 0 ? copy.refreshing : copy.refresh}
+            </CanvasBtn>
+          </>
+        }
+      />
+
+      <div style={bodyStyle}>
+        {error ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            title={`${getPlatformLabel(locale, "error")}: ${error}`}
+          />
+        ) : null}
+
+        {loading && records.length === 0 ? (
+          <CanvasCard theme={theme} title={copy.title} subtitle={copy.loading}>
+            <div style={stateStyle}>{copy.loading}</div>
+          </CanvasCard>
+        ) : activeTab === "log" ? (
+          <>
+            <div style={pillRowStyle}>
+              <button
+                type="button"
+                style={pillButtonStyle}
+                onClick={() => setFilterModule("")}
+              >
+                <CanvasPill
+                  theme={theme}
+                  tone={filterModule ? "neutral" : "accent"}
+                  dot
+                >
+                  {copy.all} {records.length.toLocaleString()}
+                </CanvasPill>
+              </button>
+              {moduleCounts.map(([moduleName, count]) => (
+                <button
+                  key={moduleName}
+                  type="button"
+                  style={pillButtonStyle}
+                  onClick={() =>
+                    setFilterModule((current) =>
+                      current === moduleName ? "" : moduleName,
+                    )
+                  }
+                >
+                  <CanvasPill
+                    theme={theme}
+                    tone={filterModule === moduleName ? "accent" : "neutral"}
+                    dot
+                  >
+                    {formatPlatformCodeLabel(locale, moduleName)} {count}
+                  </CanvasPill>
+                </button>
+              ))}
+            </div>
+
+            <CanvasCard theme={theme} padding={0} style={{ overflow: "hidden" }}>
+              {rows.length === 0 ? (
+                <div style={stateStyle}>{copy.emptyLog}</div>
+              ) : (
+                <CanvasTable<AuditTableRow>
+                  theme={theme}
+                  columns={auditColumns}
+                  rows={rows}
+                />
+              )}
+            </CanvasCard>
+
+            <div style={summaryGridStyle}>
+              <CanvasCard
+                theme={theme}
+                title={`${copy.holdsTitle} · ${activeLegalHolds.length}`}
+              >
+                {activeLegalHolds.length === 0 ? (
+                  <div style={stateStyle}>{copy.emptyHold}</div>
+                ) : (
+                  <CanvasDL
+                    theme={theme}
+                    cols={1}
+                    items={(() => {
+                      const hold = activeLegalHolds[0]!;
+                      return [
+                        {
+                          k: copy.holdResource,
+                          v: `${formatPlatformCodeLabel(locale, hold.family)} · ${hold.subjectId}`,
+                          mono: true,
+                        },
+                        { k: copy.holdCase, v: hold.caseNumber, mono: true },
+                        {
+                          k: copy.holdPlacedBy,
+                          v: hold.placedByActorId,
+                        },
+                        {
+                          k: copy.holdPlacedAt,
+                          v: formatDateTime(hold.placedAt),
+                          mono: true,
+                        },
+                        {
+                          k: copy.holdReason,
+                          v:
+                            hold.reasonNote ||
+                            formatPlatformCodeLabel(locale, hold.reasonCode),
+                        },
+                      ];
+                    })()}
+                  />
+                )}
+              </CanvasCard>
+
+              <CanvasCard
+                theme={theme}
+                title={`${copy.exceptTitle} · ${activeDeletionExceptions.length}`}
+              >
+                {activeDeletionExceptions.length === 0 ? (
+                  <div style={stateStyle}>{copy.emptyExcept}</div>
+                ) : (
+                  <CanvasDL
+                    theme={theme}
+                    cols={1}
+                    items={(() => {
+                      const exception = activeDeletionExceptions[0]!;
+                      return [
+                        {
+                          k: copy.holdResource,
+                          v: `${exception.sourceResourceType} · ${exception.sourceResourceId}`,
+                          mono: true,
+                        },
+                        {
+                          k: copy.exExpires,
+                          v: formatDateTime(exception.expiresAt),
+                          mono: true,
+                        },
+                        {
+                          k: copy.exReason,
+                          v:
+                            exception.reasonNote ||
+                            formatPlatformCodeLabel(
+                              locale,
+                              exception.reasonCode,
+                            ),
+                        },
+                        {
+                          k: "REASON CODE",
+                          v: exception.reasonCode,
+                          mono: true,
+                        },
+                      ];
+                    })()}
+                  />
+                )}
+              </CanvasCard>
+            </div>
+          </>
+        ) : activeTab === "policy" ? (
+          <CanvasCard theme={theme} padding={0} style={{ overflow: "hidden" }}>
+            {policies.length === 0 ? (
+              <div style={stateStyle}>{copy.emptyPolicy}</div>
+            ) : (
+              <CanvasTable
+                theme={theme}
+                columns={policyColumns}
+                rows={
+                  policies as (EvidenceRetentionPolicyRecord &
+                    Record<string, unknown>)[]
+                }
+              />
+            )}
+          </CanvasCard>
+        ) : activeTab === "hold" ? (
+          <div style={summaryGridStyle}>
+            {activeLegalHolds.length === 0 ? (
+              <CanvasCard theme={theme} title={copy.holdsTitle}>
+                <div style={stateStyle}>{copy.emptyHold}</div>
+              </CanvasCard>
+            ) : (
+              activeLegalHolds.map((hold) => (
+                <CanvasCard
+                  key={hold.holdId}
+                  theme={theme}
+                  title={hold.caseNumber}
+                  subtitle={formatPlatformCodeLabel(locale, hold.family)}
+                >
+                  <CanvasDL
+                    theme={theme}
+                    cols={1}
+                    items={[
+                      { k: copy.holdResource, v: hold.subjectId, mono: true },
+                      { k: copy.holdPlacedBy, v: hold.placedByActorId },
+                      {
+                        k: copy.holdPlacedAt,
+                        v: formatDateTime(hold.placedAt),
+                        mono: true,
+                      },
+                      {
+                        k: copy.holdReason,
+                        v:
+                          hold.reasonNote ||
+                          formatPlatformCodeLabel(locale, hold.reasonCode),
+                      },
+                    ]}
+                  />
+                </CanvasCard>
+              ))
+            )}
+          </div>
+        ) : (
+          <div style={summaryGridStyle}>
+            {activeDeletionExceptions.length === 0 ? (
+              <CanvasCard theme={theme} title={copy.exceptTitle}>
+                <div style={stateStyle}>{copy.emptyExcept}</div>
+              </CanvasCard>
+            ) : (
+              activeDeletionExceptions.map((exception) => (
+                <CanvasCard
+                  key={exception.exceptionId}
+                  theme={theme}
+                  title={`${exception.sourceResourceType} · ${exception.sourceResourceId}`}
+                  subtitle={formatPlatformCodeLabel(locale, exception.family)}
+                >
+                  <CanvasDL
+                    theme={theme}
+                    cols={1}
+                    items={[
+                      {
+                        k: copy.exExpires,
+                        v: formatDateTime(exception.expiresAt),
+                        mono: true,
+                      },
+                      {
+                        k: copy.exReason,
+                        v:
+                          exception.reasonNote ||
+                          formatPlatformCodeLabel(locale, exception.reasonCode),
+                      },
+                      {
+                        k: "REASON CODE",
+                        v: exception.reasonCode,
+                        mono: true,
+                      },
+                    ]}
+                  />
+                </CanvasCard>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </>
   );
 }
