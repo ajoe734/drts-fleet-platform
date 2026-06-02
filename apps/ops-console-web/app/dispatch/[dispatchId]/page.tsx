@@ -1,13 +1,20 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type {
+  AdapterHealthRecord,
+  CrossAppResourceLink,
   DispatchCandidate,
   DispatchJobRecord,
   DispatchTraceLogRecord,
   DriverRegistryRecord,
   DriverTaskRecord,
+  EmptyReason,
+  ForwardedOrderRecord,
+  ForwarderReconciliationIssue,
   OwnedOrderRecord,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
@@ -15,14 +22,17 @@ import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import {
+  CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasDL as DL,
+  CanvasIcon,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
   buildCanvasTheme,
   type CanvasTableColumn,
+  type CanvasTone,
 } from "@drts/ui-web";
 import { getCandidateLocationState } from "../location-state";
 
@@ -61,6 +71,10 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
+// Refresh tier T2 (Dispatch): 5s cadence per packet §3.2 / §5.3.
+const REFRESH_TIER_LABEL = "T2 · 5s";
+const REFRESH_STALE_AFTER_MS = 5_000;
+
 const WORKFLOW_STEPS = [
   "建立",
   "queued",
@@ -82,6 +96,22 @@ const DRIVER_TASK_PRIORITY: Record<string, number> = {
   rejected: 8,
 };
 
+type LoadResult<T> = {
+  data: T;
+  failed: boolean;
+};
+
+async function load<T>(
+  loader: () => Promise<T>,
+  fallback: T,
+): Promise<LoadResult<T>> {
+  try {
+    return { data: await loader(), failed: false };
+  } catch {
+    return { data: fallback, failed: true };
+  }
+}
+
 async function resolveOrFallback<T>(
   loader: () => Promise<T>,
   fallback: T,
@@ -91,6 +121,76 @@ async function resolveOrFallback<T>(
   } catch {
     return fallback;
   }
+}
+
+function copy(locale: Locale, en: string, zh: string) {
+  return locale === "zh" ? zh : en;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function getNestedValue(
+  record: Record<string, unknown>,
+  path: string,
+): unknown {
+  return path.split(".").reduce<unknown>((current, segment) => {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    return current[segment];
+  }, record);
+}
+
+function readSummaryText(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const candidates = [
+    value.addressName,
+    value.address,
+    value.label,
+    value.name,
+    value.summary,
+    value.title,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+}
+
+function readForwardedValue(
+  order: ForwardedOrderRecord,
+  keys: string[],
+): string | null {
+  const sources = [order.authoritativeSnapshot, order.payload];
+  for (const source of sources) {
+    if (!isRecord(source)) {
+      continue;
+    }
+
+    for (const key of keys) {
+      const direct = key.includes(".")
+        ? getNestedValue(source, key)
+        : source[key];
+      const text = readSummaryText(direct);
+      if (text) {
+        return text;
+      }
+    }
+  }
+
+  return null;
 }
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
@@ -110,12 +210,53 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
     .replace(",", "");
 }
 
+function formatLongDateTime(locale: Locale, value: string | null | undefined) {
+  if (!value) {
+    return copy(locale, "unknown", "未知");
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(",", "");
+}
+
 function formatWindow(order: OwnedOrderRecord, locale: Locale) {
   if (!order.reservationWindowStart || !order.reservationWindowEnd) {
     return locale === "zh" ? "即時" : "realtime";
   }
 
   return `${formatDateTime(locale, order.reservationWindowStart)} → ${formatDateTime(locale, order.reservationWindowEnd)}`;
+}
+
+function formatForwardedWindow(order: ForwardedOrderRecord, locale: Locale) {
+  const start = readForwardedValue(order, [
+    "reservationWindowStart",
+    "scheduledPickupAt",
+    "pickupAt",
+    "windowStart",
+  ]);
+  const end = readForwardedValue(order, [
+    "reservationWindowEnd",
+    "scheduledDropoffAt",
+    "windowEnd",
+  ]);
+
+  if (start && !Number.isNaN(Date.parse(start))) {
+    if (end && !Number.isNaN(Date.parse(end))) {
+      return `${formatDateTime(locale, start)} → ${formatDateTime(locale, end)}`;
+    }
+    return formatDateTime(locale, start);
+  }
+
+  return locale === "zh" ? "即時" : "realtime";
 }
 
 function getAddressLabel(
@@ -177,6 +318,50 @@ function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
   return order.status;
 }
 
+const OWNED_TERMINAL_STATUSES = new Set([
+  "completed",
+  "cancelled",
+  "closed",
+  "settled",
+]);
+
+function isOwnedTerminal(
+  order: OwnedOrderRecord,
+  task: DriverTaskRecord | null,
+) {
+  return OWNED_TERMINAL_STATUSES.has(order.status) || task?.completedAt != null;
+}
+
+function isForwardedTerminal(order: ForwardedOrderRecord) {
+  return (
+    order.status === "confirmed_by_platform" ||
+    order.status === "completed_synced" ||
+    order.status === "lost_race" ||
+    order.status === "cancelled_by_platform"
+  );
+}
+
+function getForwardedStateTone(
+  status: ForwardedOrderRecord["status"],
+): CanvasTone {
+  switch (status) {
+    case "sync_failed":
+      return "danger";
+    case "accept_pending":
+      return "warn";
+    case "broadcasted":
+    case "received":
+      return "info";
+    case "confirmed_by_platform":
+    case "completed_synced":
+      return "success";
+    case "lost_race":
+    case "cancelled_by_platform":
+    default:
+      return "neutral";
+  }
+}
+
 function pickCurrentTask(tasks: DriverTaskRecord[]) {
   return (
     [...tasks].sort((left, right) => {
@@ -216,7 +401,7 @@ function getCandidateGate(
 
   if (driver && !driver.licensesValid) {
     return {
-      label: locale === "zh" ? "license_invalid" : "license_invalid",
+      label: "license_invalid",
       tone: "danger" as const,
     };
   }
@@ -235,21 +420,21 @@ function getCandidateGate(
 
   if (!candidate.serviceBuckets.includes(order.serviceBucket)) {
     return {
-      label: locale === "zh" ? "service bucket gap" : "service bucket gap",
+      label: "service bucket gap",
       tone: "warn" as const,
     };
   }
 
   if (locationState === "no_location") {
     return {
-      label: locale === "zh" ? "no location" : "no location",
+      label: "no location",
       tone: "warn" as const,
     };
   }
 
   if (locationState === "stale") {
     return {
-      label: locale === "zh" ? "location stale" : "location stale",
+      label: "location stale",
       tone: "warn" as const,
     };
   }
@@ -338,6 +523,25 @@ function getWorkflowStepIndex(
   return 0;
 }
 
+function getForwardedStepIndex(order: ForwardedOrderRecord) {
+  switch (order.status) {
+    case "completed_synced":
+      return 5;
+    case "confirmed_by_platform":
+      return 3;
+    case "broadcasted":
+    case "accept_pending":
+    case "sync_failed":
+      return 2;
+    case "received":
+      return 1;
+    case "lost_race":
+    case "cancelled_by_platform":
+    default:
+      return 1;
+  }
+}
+
 function getTimelineTone(value: string) {
   const normalized = value.toLowerCase();
 
@@ -356,12 +560,17 @@ function getTimelineTone(value: string) {
     normalized.includes("warn") ||
     normalized.includes("hold") ||
     normalized.includes("no_supply") ||
-    normalized.includes("no-supply")
+    normalized.includes("no-supply") ||
+    normalized.includes("fallback")
   ) {
     return "warn" as const;
   }
 
-  if (normalized.includes("assigned") || normalized.includes("accepted")) {
+  if (
+    normalized.includes("assigned") ||
+    normalized.includes("accepted") ||
+    normalized.includes("confirmed")
+  ) {
     return "info" as const;
   }
 
@@ -623,6 +832,83 @@ function buildTimelineEntries(
     );
 }
 
+function buildForwardedTimeline(
+  locale: Locale,
+  order: ForwardedOrderRecord,
+): TimelineEntry[] {
+  const entries: TimelineEntry[] = [
+    {
+      id: `${order.mirrorOrderId}:received`,
+      title: copy(locale, "Mirror received", "鏡像建立"),
+      body: copy(
+        locale,
+        `Forwarded mirror ${order.mirrorOrderId} created for ${order.platformCode} order ${order.externalOrderId}.`,
+        `為 ${formatOpsCodeLabel(locale, order.platformCode)} 訂單 ${order.externalOrderId} 建立 forwarded 鏡像 ${order.mirrorOrderId}。`,
+      ),
+      at: order.createdAt,
+      tone: "accent",
+      actor: order.platformCode,
+    },
+    {
+      id: `${order.mirrorOrderId}:status`,
+      title: copy(locale, "Status sync", "狀態同步"),
+      body: copy(
+        locale,
+        `Local mirror status is ${formatOpsCodeLabel(locale, order.status)}; last native status ${order.lastNativeStatus ?? "unknown"}.`,
+        `本地鏡像狀態為 ${formatOpsCodeLabel(locale, order.status)}；最後外部狀態 ${order.lastNativeStatus ?? "未知"}。`,
+      ),
+      at: order.updatedAt,
+      tone: getTimelineTone(order.status),
+      actor: "forwarder.sync",
+    },
+  ];
+
+  if (order.lastSyncError) {
+    entries.push({
+      id: `${order.mirrorOrderId}:sync-error`,
+      title: copy(locale, "Sync failure", "同步失敗"),
+      body: `${formatOpsCodeLabel(locale, order.lastSyncError.code)} · ${order.lastSyncError.message}`,
+      at: order.lastSyncError.failedAt,
+      tone: "danger",
+      actor: "forwarder.adapter",
+    });
+  }
+
+  if (order.manualFallback.required) {
+    entries.push({
+      id: `${order.mirrorOrderId}:fallback`,
+      title: copy(locale, "Manual fallback engaged", "啟動人工 fallback"),
+      body:
+        order.manualFallback.reason ??
+        copy(locale, "Manual fallback required.", "需要人工 fallback。"),
+      at: order.manualFallback.requestedAt ?? order.updatedAt,
+      tone: "warn",
+      actor: order.manualFallback.requestedBy ?? "ops",
+    });
+  }
+
+  if (order.reconciliationJob) {
+    entries.push({
+      id: order.reconciliationJob.reconciliationJobId,
+      title: copy(locale, "Reconciliation", "對帳"),
+      body: copy(
+        locale,
+        `Reconciliation ${order.reconciliationJob.status} · ${order.reconciliationJob.mismatchCount} mismatch · reason ${order.reconciliationJob.reason}.`,
+        `對帳 ${formatOpsCodeLabel(locale, order.reconciliationJob.status)} · ${order.reconciliationJob.mismatchCount} 筆不符 · 原因 ${formatOpsCodeLabel(locale, order.reconciliationJob.reason)}。`,
+      ),
+      at:
+        order.reconciliationJob.completedAt ??
+        order.reconciliationJob.createdAt,
+      tone: order.reconciliationJob.status === "completed" ? "info" : "warn",
+      actor: "reconciliation.engine",
+    });
+  }
+
+  return entries.sort(
+    (left, right) => new Date(right.at).getTime() - new Date(left.at).getTime(),
+  );
+}
+
 function buildOverrideSummary(locale: Locale, order: OwnedOrderRecord) {
   const request = order.exceptionHold?.overrideRequest;
   if (request) {
@@ -632,13 +918,9 @@ function buildOverrideSummary(locale: Locale, order: OwnedOrderRecord) {
       request.requestedBy.actorId;
     const decisionStatus =
       request.approval !== undefined
-        ? locale === "zh"
-          ? "approved"
-          : "approved"
+        ? "approved"
         : request.rejection !== undefined
-          ? locale === "zh"
-            ? "rejected"
-            : "rejected"
+          ? "rejected"
           : request.expiredAt
             ? "expired"
             : request.status;
@@ -687,22 +969,11 @@ function buildOverrideSummary(locale: Locale, order: OwnedOrderRecord) {
   };
 }
 
-function renderWorkflowSteps(
+function renderStepper(
   locale: Locale,
-  order: OwnedOrderRecord,
-  job: DispatchJobRecord | undefined,
-  task: DriverTaskRecord | null,
+  currentIndex: number,
+  timestampByStep: (string | null)[],
 ) {
-  const currentIndex = getWorkflowStepIndex(order, job, task);
-  const timestampByStep = [
-    order.createdAt,
-    order.createdAt,
-    job?.status === "matching" ? job.updatedAt : null,
-    task?.acceptedAt ?? job?.updatedAt ?? null,
-    task?.startedAt ?? null,
-    task?.completedAt ?? null,
-  ];
-
   return (
     <div style={{ overflowX: "auto" }}>
       <div
@@ -940,6 +1211,714 @@ function renderTimeline(locale: Locale, entries: TimelineEntry[]) {
   );
 }
 
+// ── availableActions → CTA (§3.5 authority boundaries, §3.4 confirmation) ──
+
+type ActionVisual = {
+  icon: Parameters<typeof Btn>[0]["icon"];
+  label: string;
+  variant: "primary" | "secondary";
+  danger: boolean;
+};
+
+function actionVisual(
+  action: ResourceActionDescriptor,
+  locale: Locale,
+): ActionVisual {
+  const danger = action.riskLevel === "high";
+  const variant: "primary" | "secondary" =
+    action.riskLevel === "medium" ? "primary" : "secondary";
+
+  switch (action.action) {
+    case "contact_passenger":
+      return {
+        icon: "phone",
+        label: copy(locale, "Contact rider", "聯絡乘客"),
+        variant: "secondary",
+        danger: false,
+      };
+    case "assign_candidate":
+      return {
+        icon: "check",
+        label: copy(locale, "Assign #1", "指派候選 #1"),
+        variant: "primary",
+        danger: false,
+      };
+    case "release_driver":
+      return {
+        icon: "switchboard",
+        label: copy(locale, "Release driver", "釋放司機"),
+        variant,
+        danger,
+      };
+    case "cancel_order":
+      return {
+        icon: "x",
+        label: copy(locale, "Cancel order", "取消訂單"),
+        variant,
+        danger,
+      };
+    case "fare_override":
+      return {
+        icon: "warn",
+        label: copy(locale, "Fare override", "車資覆寫"),
+        variant,
+        danger: true,
+      };
+    case "redispatch":
+      return {
+        icon: "dispatch",
+        label: copy(locale, "Redispatch", "重新派遣"),
+        variant,
+        danger,
+      };
+    case "resolve_no_supply":
+      return {
+        icon: "health",
+        label: copy(locale, "Resolve no-supply", "處理無供給"),
+        variant,
+        danger,
+      };
+    case "escalate_incident":
+      return {
+        icon: "incidents",
+        label: copy(locale, "Escalate to incident", "升級事故"),
+        variant,
+        danger: true,
+      };
+    case "complete_reconciliation":
+      return {
+        icon: "check",
+        label: copy(locale, "Complete reconciliation", "完成對帳"),
+        variant: "primary",
+        danger: false,
+      };
+    case "engage_manual_fallback":
+      return {
+        icon: "switchboard",
+        label: copy(locale, "Manual fallback", "人工 fallback"),
+        variant,
+        danger,
+      };
+    case "force_refresh":
+      return {
+        icon: "clock",
+        label: copy(locale, "Force refresh", "強制刷新"),
+        variant: "secondary",
+        danger: false,
+      };
+    case "broadcast_eligible":
+      return {
+        icon: "dispatch",
+        label: copy(locale, "Broadcast", "廣播候選"),
+        variant,
+        danger,
+      };
+    case "report_sync_failure":
+      return {
+        icon: "warn",
+        label: copy(locale, "Report sync failure", "回報同步失敗"),
+        variant,
+        danger: true,
+      };
+    default:
+      return {
+        icon: "more",
+        label: formatOpsCodeLabel(locale, action.action),
+        variant,
+        danger,
+      };
+  }
+}
+
+function actionHint(action: ResourceActionDescriptor, locale: Locale) {
+  if (!action.enabled) {
+    return action.disabledReasonCode
+      ? formatOpsCodeLabel(locale, action.disabledReasonCode)
+      : copy(locale, "unavailable", "目前不可用");
+  }
+
+  const risk = copy(
+    locale,
+    `risk:${action.riskLevel}`,
+    `風險:${action.riskLevel}`,
+  );
+  return action.requiresReason
+    ? `${risk} · ${copy(locale, "reason required", "需填原因")}`
+    : risk;
+}
+
+function renderHeaderActions(
+  actions: ResourceActionDescriptor[],
+  locale: Locale,
+) {
+  if (actions.length === 0) {
+    return (
+      <Pill theme={theme} tone="neutral">
+        {copy(locale, "read-only · terminal", "唯讀 · 終態")}
+      </Pill>
+    );
+  }
+
+  return (
+    <>
+      {actions.map((action) => {
+        const visual = actionVisual(action, locale);
+        return (
+          <span
+            key={action.action}
+            title={actionHint(action, locale)}
+            style={{ display: "inline-flex" }}
+          >
+            <Btn
+              theme={theme}
+              variant={visual.variant}
+              danger={visual.danger}
+              disabled={!action.enabled}
+              icon={visual.icon}
+            >
+              {visual.label}
+            </Btn>
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+function synthesizeOwnedActions(
+  order: OwnedOrderRecord,
+  job: DispatchJobRecord | undefined,
+  task: DriverTaskRecord | null,
+  candidateCount: number,
+): ResourceActionDescriptor[] {
+  if (isOwnedTerminal(order, task)) {
+    // Terminal state — read-only, no dead CTAs (§5.3 state variants).
+    return [];
+  }
+
+  const hasActiveDriver =
+    task != null &&
+    (task.acceptedAt != null || task.startedAt != null) &&
+    task.completedAt == null;
+  const blockedByHold = Boolean(
+    order.exceptionHold && !order.exceptionHold.resolution,
+  );
+
+  const actions: ResourceActionDescriptor[] = [
+    { action: "contact_passenger", enabled: true, riskLevel: "low" },
+  ];
+
+  actions.push({
+    action: "assign_candidate",
+    enabled: candidateCount > 0 && !hasActiveDriver && !blockedByHold,
+    ...(candidateCount === 0
+      ? { disabledReasonCode: "no_eligible_candidate" }
+      : hasActiveDriver
+        ? { disabledReasonCode: "driver_already_assigned" }
+        : blockedByHold
+          ? { disabledReasonCode: "exception_hold_active" }
+          : {}),
+    riskLevel: "medium",
+  });
+
+  if (hasActiveDriver) {
+    actions.push({
+      action: "release_driver",
+      enabled: true,
+      riskLevel: "medium",
+    });
+  }
+
+  if (order.noSupplyEscalation && !order.noSupplyEscalation.resolvedAt) {
+    actions.push({
+      action: "resolve_no_supply",
+      enabled: true,
+      riskLevel: "medium",
+    });
+  }
+
+  if (job && job.status !== "assigned") {
+    actions.push({ action: "redispatch", enabled: true, riskLevel: "medium" });
+  }
+
+  actions.push({
+    action: "fare_override",
+    enabled: true,
+    requiresReason: true,
+    riskLevel: "high",
+  });
+
+  actions.push({
+    action: "escalate_incident",
+    enabled: true,
+    requiresReason: true,
+    riskLevel: "high",
+  });
+
+  return actions;
+}
+
+function synthesizeForwardedActions(
+  order: ForwardedOrderRecord,
+  adapterDegraded: boolean,
+): ResourceActionDescriptor[] {
+  if (isForwardedTerminal(order)) {
+    return [{ action: "force_refresh", enabled: true, riskLevel: "low" }];
+  }
+
+  const actions: ResourceActionDescriptor[] = [
+    { action: "force_refresh", enabled: true, riskLevel: "low" },
+  ];
+
+  actions.push({
+    action: "complete_reconciliation",
+    enabled: order.reconciliationJob?.status === "queued",
+    ...(order.reconciliationJob?.status === "queued"
+      ? {}
+      : { disabledReasonCode: "no_open_reconciliation" }),
+    riskLevel: "medium",
+  });
+
+  actions.push({
+    action: "engage_manual_fallback",
+    enabled: order.status === "sync_failed" || order.manualFallback.required,
+    ...(order.status === "sync_failed" || order.manualFallback.required
+      ? {}
+      : { disabledReasonCode: "sync_healthy" }),
+    riskLevel: "medium",
+  });
+
+  actions.push({
+    action: "broadcast_eligible",
+    enabled:
+      !adapterDegraded &&
+      (order.status === "received" || order.status === "broadcasted"),
+    ...(adapterDegraded
+      ? { disabledReasonCode: "adapter_degraded" }
+      : order.status === "received" || order.status === "broadcasted"
+        ? {}
+        : { disabledReasonCode: "broadcast_window_closed" }),
+    riskLevel: "medium",
+  });
+
+  actions.push({
+    action: "report_sync_failure",
+    enabled: order.lastSyncError != null || order.status === "sync_failed",
+    ...(order.lastSyncError != null || order.status === "sync_failed"
+      ? {}
+      : { disabledReasonCode: "no_sync_error" }),
+    requiresReason: true,
+    riskLevel: "high",
+  });
+
+  return actions;
+}
+
+// ── Empty / not-ready states (§3.6) — six distinct EmptyReason treatments ──
+
+const CANDIDATE_EMPTY_REASON_CODES: Record<EmptyReason, string> = {
+  no_data: "dispatch_no_candidate",
+  not_provisioned: "dispatch_job_not_started",
+  fetch_failed: "candidate_fetch_failed",
+  permission_denied: "candidate_scope_denied",
+  external_unavailable: "supply_source_degraded",
+  filtered_empty: "candidate_filtered_empty",
+  driver_not_eligible: "candidate_not_eligible",
+};
+
+type EmptyStateView = {
+  tone: CanvasTone;
+  icon: Parameters<typeof CanvasIcon>[0]["name"];
+  title: string;
+  description: string;
+  actionLabel: string;
+  actionHref: string;
+  actionNewTab: boolean;
+};
+
+function resolveCandidateEmptyReason(input: {
+  candidatesFailed: boolean;
+  hasJob: boolean;
+  noSupply: boolean;
+  permissionDenied: boolean;
+}): EmptyReason {
+  if (input.permissionDenied) {
+    return "permission_denied";
+  }
+  if (input.candidatesFailed) {
+    return "fetch_failed";
+  }
+  if (!input.hasJob) {
+    return "not_provisioned";
+  }
+  if (input.noSupply) {
+    return "external_unavailable";
+  }
+  return "no_data";
+}
+
+function buildCandidateEmptyState(
+  reason: EmptyReason,
+  locale: Locale,
+  orderId: string,
+): EmptyStateView {
+  const platformAdminFleet = `${resolveAppOrigin("platform-admin")}/fleet`;
+  switch (reason) {
+    case "not_provisioned":
+      return {
+        tone: "info",
+        icon: "dispatch",
+        title: copy(locale, "Dispatch job not started", "派遣工作尚未啟動"),
+        description: copy(
+          locale,
+          "No dispatch job exists for this order yet. Candidate scoring begins once it enters matching.",
+          "此訂單尚未建立派遣工作，進入 matching 後才會開始評分候選。",
+        ),
+        actionLabel: copy(locale, "Open dispatch board", "回派車看板"),
+        actionHref: "/dispatch?board=ready",
+        actionNewTab: false,
+      };
+    case "fetch_failed":
+      return {
+        tone: "danger",
+        icon: "warn",
+        title: copy(locale, "Candidate snapshot failed", "候選快照讀取失敗"),
+        description: copy(
+          locale,
+          "The candidate endpoint did not return a usable payload. Retry the snapshot.",
+          "候選端點未回傳可用內容，請重新整理快照。",
+        ),
+        actionLabel: copy(locale, "Retry", "重新整理"),
+        actionHref: `/dispatch/${encodeURIComponent(orderId)}`,
+        actionNewTab: false,
+      };
+    case "permission_denied":
+      return {
+        tone: "warn",
+        icon: "users",
+        title: copy(locale, "Candidate scope denied", "無候選讀取權限"),
+        description: copy(
+          locale,
+          "This actor can open the workspace but lacks supply read scope for candidate scoring.",
+          "目前帳號可進入工作區，但缺少候選評分的供給讀取權限。",
+        ),
+        actionLabel: copy(locale, "Open ops dashboard", "返回儀表板"),
+        actionHref: "/dashboard",
+        actionNewTab: false,
+      };
+    case "external_unavailable":
+      return {
+        tone: "warn",
+        icon: "health",
+        title: copy(locale, "No eligible supply", "目前無可用供給"),
+        description: copy(
+          locale,
+          "Supply is exhausted or the no-supply lane is active. Hand off via the no-supply / governance lane.",
+          "供給耗盡或 no-supply 流程啟動中，請改由 no-supply / 治理流程接手。",
+        ),
+        actionLabel: copy(locale, "No-supply board", "無供給看板"),
+        actionHref: "/dispatch?board=no_supply",
+        actionNewTab: false,
+      };
+    case "filtered_empty":
+      return {
+        tone: "accent",
+        icon: "filter",
+        title: copy(
+          locale,
+          "No candidates match the gate filter",
+          "目前篩選沒有候選",
+        ),
+        description: copy(
+          locale,
+          "Every scored candidate is filtered out by the current gate slice. Widen the gate view.",
+          "目前 gate 篩選把所有評分候選都排除了，請放寬 gate 檢視。",
+        ),
+        actionLabel: copy(locale, "Clear gate filter", "清除 gate 篩選"),
+        actionHref: `/dispatch/${encodeURIComponent(orderId)}`,
+        actionNewTab: false,
+      };
+    case "driver_not_eligible":
+      return {
+        tone: "warn",
+        icon: "users",
+        title: copy(
+          locale,
+          "Candidates blocked by eligibility",
+          "候選因資格被擋",
+        ),
+        description: copy(
+          locale,
+          "All nearby drivers failed an eligibility or license gate. Resolve compliance before assignment.",
+          "附近司機皆未通過資格或證照 gate，指派前請先處理法遵。",
+        ),
+        actionLabel: copy(locale, "Open fleet governance", "開啟車隊治理"),
+        actionHref: platformAdminFleet,
+        actionNewTab: true,
+      };
+    case "no_data":
+    default:
+      return {
+        tone: "neutral",
+        icon: "dispatch",
+        title: copy(locale, "No candidates yet", "目前沒有候選"),
+        description: copy(
+          locale,
+          "Matching is healthy but no candidate has surfaced for this work item yet.",
+          "matching 正常，但此工作項目目前還沒有評分出候選。",
+        ),
+        actionLabel: copy(locale, "Back to dispatch board", "回派車看板"),
+        actionHref: "/dispatch?board=ready",
+        actionNewTab: false,
+      };
+  }
+}
+
+function renderCandidateEmptyState(
+  reason: EmptyReason,
+  locale: Locale,
+  orderId: string,
+) {
+  const view = buildCandidateEmptyState(reason, locale, orderId);
+  return (
+    <div
+      style={{
+        display: "grid",
+        justifyItems: "center",
+        textAlign: "center",
+        gap: 10,
+        padding: "26px 20px",
+      }}
+    >
+      <CanvasIcon
+        name={view.icon}
+        size={24}
+        style={{ color: toneColor(view.tone) }}
+      />
+      <strong style={{ color: theme.text, fontSize: 14 }}>{view.title}</strong>
+      <span
+        style={{
+          color: theme.textMuted,
+          maxWidth: 460,
+          fontSize: 12.5,
+          lineHeight: 1.5,
+        }}
+      >
+        {view.description}
+      </span>
+      <Link
+        href={view.actionHref}
+        target={view.actionNewTab ? "_blank" : undefined}
+        rel={view.actionNewTab ? "noreferrer" : undefined}
+        style={linkButtonStyle(view.tone)}
+      >
+        {view.actionLabel}
+        {view.actionNewTab ? <CanvasIcon name="ext" size={11} /> : null}
+      </Link>
+      <span style={tinyMetaStyle(view.tone)}>
+        {copy(locale, "emptyReason", "空狀態")} ·{" "}
+        {CANDIDATE_EMPTY_REASON_CODES[reason]}
+      </span>
+    </div>
+  );
+}
+
+// ── Cross-app navigation (§3.10) ──
+
+function resolveAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
+  const envCandidates =
+    targetApp === "platform-admin"
+      ? [
+          process.env.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN,
+          process.env.PLATFORM_ADMIN_ORIGIN,
+          process.env.DEV_PLATFORM_ADMIN_ORIGIN,
+          process.env.STAGING_PLATFORM_ADMIN_ORIGIN,
+          process.env.PROD_PLATFORM_ADMIN_ORIGIN,
+        ]
+      : targetApp === "tenant-console"
+        ? [
+            process.env.NEXT_PUBLIC_TENANT_CONSOLE_ORIGIN,
+            process.env.TENANT_CONSOLE_ORIGIN,
+          ]
+        : [
+            process.env.NEXT_PUBLIC_OPS_CONSOLE_ORIGIN,
+            process.env.OPS_CONSOLE_ORIGIN,
+            process.env.DEV_OPS_CONSOLE_ORIGIN,
+            process.env.STAGING_OPS_CONSOLE_ORIGIN,
+            process.env.PROD_OPS_CONSOLE_ORIGIN,
+          ];
+  const resolved = envCandidates.find(
+    (candidate) => typeof candidate === "string" && candidate.trim().length > 0,
+  );
+
+  if (resolved) {
+    return resolved.replace(/\/$/, "");
+  }
+
+  if (targetApp === "platform-admin") return "http://localhost:3002";
+  if (targetApp === "tenant-console") return "http://localhost:3004";
+  return "http://localhost:3003";
+}
+
+function buildCrossAppHref(link: CrossAppResourceLink) {
+  if (link.route.startsWith("http://") || link.route.startsWith("https://")) {
+    return link.route;
+  }
+
+  return `${resolveAppOrigin(link.targetApp)}${link.route.startsWith("/") ? link.route : `/${link.route}`}`;
+}
+
+function renderCrossAppLink(link: CrossAppResourceLink) {
+  return (
+    <Link
+      key={`${link.resourceType}:${link.resourceId}`}
+      href={buildCrossAppHref(link)}
+      target={link.openMode === "new_tab" ? "_blank" : undefined}
+      rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
+      style={linkButtonStyle("info")}
+    >
+      {link.label}
+      {link.openMode === "new_tab" ? <CanvasIcon name="ext" size={11} /> : null}
+    </Link>
+  );
+}
+
+// ── Refresh affordance (§3.2 — T2 dispatch tier) ──
+
+function synthesizeRefreshMetadata(
+  generatedAt: string,
+  freshness: UiRefreshMetadata["dataFreshness"],
+): UiRefreshMetadata {
+  return {
+    generatedAt,
+    staleAfterMs: REFRESH_STALE_AFTER_MS,
+    dataFreshness: freshness,
+    source: "live",
+  };
+}
+
+function refreshBody(refresh: UiRefreshMetadata, locale: Locale) {
+  return copy(
+    locale,
+    `Snapshot ${formatLongDateTime(locale, refresh.generatedAt)} UTC from ${refresh.source}.`,
+    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} UTC 產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
+  );
+}
+
+function renderRefreshRow(
+  refresh: UiRefreshMetadata,
+  locale: Locale,
+  extra?: string,
+) {
+  const freshnessLabel = copy(
+    locale,
+    refresh.dataFreshness.toUpperCase(),
+    formatOpsCodeLabel(locale, refresh.dataFreshness),
+  );
+  return (
+    <div style={helperRowStyle}>
+      <Pill
+        theme={theme}
+        tone={refresh.dataFreshness === "fresh" ? "success" : "warn"}
+        dot
+      >
+        {freshnessLabel} · {REFRESH_TIER_LABEL}
+      </Pill>
+      <span style={{ ...helperTextStyle, ...monoTextStyle }}>
+        {copy(locale, "generated", "生成時間")} ·{" "}
+        {formatLongDateTime(locale, refresh.generatedAt)} UTC
+      </span>
+      <span style={helperTextStyle}>
+        {copy(
+          locale,
+          "CTAs come from availableActions",
+          "畫面 CTA 以 availableActions 為準",
+        )}
+      </span>
+      {extra ? <span style={helperTextStyle}>{extra}</span> : null}
+    </div>
+  );
+}
+
+// ── shared style helpers ──
+
+const helperRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 10,
+  padding: "12px 24px 0",
+};
+
+const helperTextStyle: CSSProperties = {
+  fontSize: 11.5,
+  color: theme.textDim,
+};
+
+const monoTextStyle: CSSProperties = {
+  fontFamily: theme.monoFamily,
+};
+
+function linkButtonStyle(
+  tone: CanvasTone = "neutral",
+  disabled = false,
+): CSSProperties {
+  const palette: Record<CanvasTone, { bg: string; fg: string; bd: string }> = {
+    success: {
+      bg: theme.successBg,
+      fg: theme.success,
+      bd: theme.successBorder,
+    },
+    warn: { bg: theme.warnBg, fg: theme.warn, bd: theme.warnBorder },
+    danger: { bg: theme.dangerBg, fg: theme.danger, bd: theme.dangerBorder },
+    info: { bg: theme.infoBg, fg: theme.info, bd: theme.infoBorder },
+    accent: { bg: theme.accentBg, fg: theme.accent, bd: theme.accentBorder },
+    neutral: { bg: theme.surfaceLo, fg: theme.textMuted, bd: theme.border },
+  };
+
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    minHeight: 26,
+    padding: "4px 9px",
+    borderRadius: 7,
+    border: `1px solid ${palette[tone].bd}`,
+    background: palette[tone].bg,
+    color: palette[tone].fg,
+    textDecoration: "none",
+    fontSize: 11.5,
+    fontWeight: 600,
+    opacity: disabled ? 0.48 : 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    pointerEvents: disabled ? "none" : "auto",
+  };
+}
+
+function tinyMetaStyle(tone: CanvasTone = "neutral"): CSSProperties {
+  return {
+    fontSize: 10.5,
+    color: toneColor(tone),
+    letterSpacing: 0.2,
+  };
+}
+
+function toneColor(tone: CanvasTone) {
+  const colors: Record<CanvasTone, string> = {
+    success: theme.success,
+    warn: theme.warn,
+    danger: theme.danger,
+    info: theme.info,
+    accent: theme.accent,
+    neutral: theme.textMuted,
+  };
+
+  return colors[tone];
+}
+
+// ── page ──
+
 export default async function DispatchDetailPage({
   params,
 }: DispatchDetailPageProps) {
@@ -948,19 +1927,15 @@ export default async function DispatchDetailPage({
     getServerOpsClient(),
     getServerLocale(),
   ]);
+  const generatedAt = new Date().toISOString();
 
-  const [orders, dispatchJobs, driverTasks, drivers] = await Promise.all([
-    resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
-    resolveOrFallback(
-      () => client.listDispatchJobs(),
-      [] as DispatchJobRecord[],
-    ),
-    resolveOrFallback(() => client.listDriverTasks(), [] as DriverTaskRecord[]),
-    resolveOrFallback(() => client.listDrivers(), [] as DriverRegistryRecord[]),
-  ]);
+  const ordersResult = await load(
+    () => client.listOrders(),
+    [] as OwnedOrderRecord[],
+  );
 
   const matchedOrder =
-    orders.find(
+    ordersResult.data.find(
       (candidate) =>
         candidate.orderId === dispatchId || candidate.orderNo === dispatchId,
     ) ??
@@ -969,33 +1944,106 @@ export default async function DispatchDetailPage({
       null as OwnedOrderRecord | null,
     ));
 
-  if (!matchedOrder) {
+  if (matchedOrder) {
+    return renderOwnedWorkspace({
+      order: matchedOrder,
+      locale,
+      generatedAt,
+      ordersFailed: ordersResult.failed,
+      client,
+    });
+  }
+
+  // Not an owned order — try the forwarded mirror domain (one route, domain flag).
+  const forwardedResult = await load(
+    () => client.listForwarderOrders(),
+    [] as ForwardedOrderRecord[],
+  );
+  const forwardedOrder = forwardedResult.data.find(
+    (record) =>
+      record.mirrorOrderId === dispatchId ||
+      record.externalOrderId === dispatchId,
+  );
+
+  if (!forwardedOrder) {
     notFound();
   }
 
-  const order = matchedOrder;
-  const dispatchJob = dispatchJobs.find((job) => job.orderId === order.orderId);
-  const orderTasks = driverTasks.filter(
+  const [adapterHealthResponse, reconciliationIssues] = await Promise.all([
+    resolveOrFallback(
+      () =>
+        client.get<{ items: AdapterHealthRecord[] }>(
+          "/api/forwarder/adapters/health",
+        ),
+      { items: [] as AdapterHealthRecord[] },
+    ),
+    resolveOrFallback(
+      () => client.listForwarderReconciliationIssues(),
+      [] as ForwarderReconciliationIssue[],
+    ),
+  ]);
+
+  const adapterHealth =
+    (adapterHealthResponse.items ?? []).find(
+      (record) => record.platformCode === forwardedOrder.platformCode,
+    ) ?? null;
+  const reconciliationIssue =
+    reconciliationIssues.find(
+      (issue) => issue.mirrorOrderId === forwardedOrder.mirrorOrderId,
+    ) ?? null;
+
+  return renderForwardedWorkspace({
+    order: forwardedOrder,
+    locale,
+    generatedAt,
+    adapterHealth,
+    reconciliationIssue,
+  });
+}
+
+async function renderOwnedWorkspace({
+  order,
+  locale,
+  generatedAt,
+  ordersFailed,
+  client,
+}: {
+  order: OwnedOrderRecord;
+  locale: Locale;
+  generatedAt: string;
+  ordersFailed: boolean;
+  client: Awaited<ReturnType<typeof getServerOpsClient>>;
+}) {
+  const [dispatchJobsResult, driverTasksResult, driversResult] =
+    await Promise.all([
+      load(() => client.listDispatchJobs(), [] as DispatchJobRecord[]),
+      load(() => client.listDriverTasks(), [] as DriverTaskRecord[]),
+      load(() => client.listDrivers(), [] as DriverRegistryRecord[]),
+    ]);
+
+  const dispatchJob = dispatchJobsResult.data.find(
+    (job) => job.orderId === order.orderId,
+  );
+  const orderTasks = driverTasksResult.data.filter(
     (task) => task.orderId === order.orderId,
   );
   const currentTask = pickCurrentTask(orderTasks);
   const driverById = new Map(
-    drivers.map((driver) => [driver.driverId, driver]),
+    driversResult.data.map((driver) => [driver.driverId, driver]),
   );
-  const [candidates, dispatchTrace] = await Promise.all([
-    dispatchJob
-      ? resolveOrFallback(
-          () => client.listDispatchCandidates(dispatchJob.dispatchJobId),
-          [] as DispatchCandidate[],
-        )
-      : Promise.resolve([] as DispatchCandidate[]),
-    resolveOrFallback(
-      () => client.getOrderDispatchTrace(order.orderId),
-      [] as DispatchTraceLogRecord[],
-    ),
-  ]);
 
-  const sortedCandidates = [...candidates].sort(
+  const candidatesResult = dispatchJob
+    ? await load(
+        () => client.listDispatchCandidates(dispatchJob.dispatchJobId),
+        [] as DispatchCandidate[],
+      )
+    : { data: [] as DispatchCandidate[], failed: false };
+  const dispatchTrace = await resolveOrFallback(
+    () => client.getOrderDispatchTrace(order.orderId),
+    [] as DispatchTraceLogRecord[],
+  );
+
+  const sortedCandidates = [...candidatesResult.data].sort(
     (left, right) => left.etaMinutes - right.etaMinutes,
   );
   const candidateRows: CandidateRow[] = sortedCandidates.map(
@@ -1078,70 +2126,114 @@ export default async function DispatchDetailPage({
   );
   const overrideSummary = buildOverrideSummary(locale, order);
 
+  const noSupply =
+    order.status === "no_supply" ||
+    order.status === "delayed_queue" ||
+    (order.noSupplyEscalation != null &&
+      order.noSupplyEscalation.resolvedAt == null);
+  const candidateEmptyReason = resolveCandidateEmptyReason({
+    candidatesFailed: candidatesResult.failed,
+    hasJob: dispatchJob != null,
+    noSupply,
+    permissionDenied: false,
+  });
+
+  const loadFailed =
+    ordersFailed ||
+    dispatchJobsResult.failed ||
+    driverTasksResult.failed ||
+    candidatesResult.failed;
+  const refresh = synthesizeRefreshMetadata(
+    generatedAt,
+    loadFailed ? "degraded" : "fresh",
+  );
+
+  const availableActions = synthesizeOwnedActions(
+    order,
+    dispatchJob,
+    currentTask,
+    candidateRows.length,
+  );
+  const terminal = isOwnedTerminal(order, currentTask);
+
   const candidateColumns: CanvasTableColumn<CandidateRow>[] = [
-    {
-      h: "RANK",
-      k: "rankCell",
-      w: 52,
-    },
-    {
-      h: "DRIVER",
-      k: "driverCell",
-      w: 180,
-    },
-    {
-      h: "VEHICLE",
-      k: "vehicle",
-      w: 132,
-      mono: true,
-    },
-    {
-      h: "ETA",
-      k: "etaCell",
-      w: 84,
-    },
-    {
-      h: "GATE",
-      k: "gateCell",
-      w: 164,
-    },
-    {
-      h: "SCORE",
-      k: "score",
-      w: 68,
-      mono: true,
-    },
+    { h: "RANK", k: "rankCell", w: 52 },
+    { h: "DRIVER", k: "driverCell", w: 180 },
+    { h: "VEHICLE", k: "vehicle", w: 132, mono: true },
+    { h: "ETA", k: "etaCell", w: 84 },
+    { h: "GATE", k: "gateCell", w: 164 },
+    { h: "SCORE", k: "score", w: 68, mono: true },
+  ];
+
+  const stepperTimestamps: (string | null)[] = [
+    order.createdAt,
+    order.createdAt,
+    dispatchJob?.status === "matching" ? dispatchJob.updatedAt : null,
+    currentTask?.acceptedAt ?? dispatchJob?.updatedAt ?? null,
+    currentTask?.startedAt ?? null,
+    currentTask?.completedAt ?? null,
   ];
 
   return (
     <>
       <PageHeader
         theme={theme}
-        title={`${order.orderNo} · ${getTenantLabel(order)}`}
-        subtitle={`${getAddressLabel(order.pickup)}  →  ${getAddressLabel(order.dropoff)}  ·  ${formatWindow(order, locale)}`}
-        actions={
-          <>
-            <Btn theme={theme} icon="phone">
-              聯絡乘客
-            </Btn>
-            <Btn theme={theme} icon="warn">
-              request override
-            </Btn>
-            <Btn
-              theme={theme}
-              variant="primary"
-              icon="check"
-              disabled={candidateRows.length === 0}
-            >
-              指派候選 #1
-            </Btn>
-          </>
+        title={
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
+          >
+            <span>{`${order.orderNo} · ${getTenantLabel(order)}`}</span>
+            <Pill theme={theme} tone="accent">
+              OWNED
+            </Pill>
+          </span>
         }
+        subtitle={`${getAddressLabel(order.pickup)}  →  ${getAddressLabel(order.dropoff)}  ·  ${formatWindow(order, locale)}`}
+        actions={renderHeaderActions(availableActions, locale)}
       />
+
+      {renderRefreshRow(
+        refresh,
+        locale,
+        `${candidateRows.length} ${copy(locale, "candidates", "候選")}`,
+      )}
+
+      <div style={{ padding: "12px 24px 0", display: "grid", gap: 12 }}>
+        {loadFailed ? (
+          <Banner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            title={copy(
+              locale,
+              "Some dispatch data is degraded",
+              "部分派遣資料降級",
+            )}
+            body={refreshBody(refresh, locale)}
+          />
+        ) : null}
+        {terminal ? (
+          <Banner
+            theme={theme}
+            tone="info"
+            icon="check"
+            title={copy(
+              locale,
+              "Work item is in a terminal state — read-only",
+              "工作項目已進入終態 · 唯讀",
+            )}
+            body={copy(
+              locale,
+              "No dispatch CTAs are offered; review the timeline and compliance record below.",
+              "不提供派遣 CTA；可檢視下方時間軸與法遵紀錄。",
+            )}
+          />
+        ) : null}
+      </div>
 
       <div
         style={{
-          padding: "24px",
+          padding: "12px 24px 24px",
           display: "grid",
           gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
           gap: "16px",
@@ -1151,8 +2243,8 @@ export default async function DispatchDetailPage({
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card
             theme={theme}
-            title={`候選 driver (${candidateRows.length})`}
-            padding={0}
+            title={`${copy(locale, "Candidates · ranked", "候選 driver · ranked")} (${candidateRows.length})`}
+            {...(candidateRows.length > 0 ? { padding: 0 } : {})}
           >
             {candidateRows.length > 0 ? (
               <Table
@@ -1161,21 +2253,18 @@ export default async function DispatchDetailPage({
                 rows={candidateRows}
               />
             ) : (
-              <div
-                style={{
-                  padding: "16px",
-                  color: theme.textMuted,
-                  fontSize: "12.5px",
-                }}
-              >
-                {locale === "zh"
-                  ? "目前沒有候選供給，請改由 no-supply / governance lane 處理。"
-                  : "No candidates yet. Handle through no-supply or governance lane."}
-              </div>
+              renderCandidateEmptyState(
+                candidateEmptyReason,
+                locale,
+                order.orderId,
+              )
             )}
           </Card>
 
-          <Card theme={theme} title="Compliance gates">
+          <Card
+            theme={theme}
+            title={copy(locale, "Compliance gates", "Compliance gates")}
+          >
             <DL
               theme={theme}
               cols={2}
@@ -1236,11 +2325,355 @@ export default async function DispatchDetailPage({
         </div>
 
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
-          <Card theme={theme} title="訂單狀態">
-            {renderWorkflowSteps(locale, order, dispatchJob, currentTask)}
+          <Card theme={theme} title={copy(locale, "State machine", "訂單狀態")}>
+            {renderStepper(
+              locale,
+              getWorkflowStepIndex(order, dispatchJob, currentTask),
+              stepperTimestamps,
+            )}
           </Card>
 
-          <Card theme={theme} title="活動">
+          <Card
+            theme={theme}
+            title={copy(locale, "Activity · Timeline", "活動")}
+          >
+            {renderTimeline(locale, timelineEntries)}
+          </Card>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function renderForwardedWorkspace({
+  order,
+  locale,
+  generatedAt,
+  adapterHealth,
+  reconciliationIssue,
+}: {
+  order: ForwardedOrderRecord;
+  locale: Locale;
+  generatedAt: string;
+  adapterHealth: AdapterHealthRecord | null;
+  reconciliationIssue: ForwarderReconciliationIssue | null;
+}) {
+  const adapterDegraded =
+    adapterHealth != null && adapterHealth.status !== "healthy";
+  const refresh = synthesizeRefreshMetadata(
+    generatedAt,
+    order.status === "sync_failed" || adapterDegraded ? "degraded" : "fresh",
+  );
+  const availableActions = synthesizeForwardedActions(order, adapterDegraded);
+
+  const pickup =
+    readForwardedValue(order, [
+      "pickupSummary",
+      "pickupAddress",
+      "pickup.addressName",
+      "pickup.address",
+      "pickup",
+    ]) ?? "—";
+  const dropoff =
+    readForwardedValue(order, [
+      "dropoffSummary",
+      "dropoffAddress",
+      "dropoff.addressName",
+      "dropoff.address",
+      "dropoff",
+    ]) ?? "—";
+  const waypointCount = (() => {
+    for (const source of [order.authoritativeSnapshot, order.payload]) {
+      if (isRecord(source) && Array.isArray(source.waypoints)) {
+        return source.waypoints.length;
+      }
+    }
+    return 0;
+  })();
+
+  const mismatchCount =
+    reconciliationIssue?.reconciliationJob.mismatchCount ??
+    order.reconciliationJob?.mismatchCount ??
+    0;
+  const stateTone = getForwardedStateTone(order.status);
+  const timelineEntries = buildForwardedTimeline(locale, order);
+  const terminal = isForwardedTerminal(order);
+
+  const adapterLink: CrossAppResourceLink = {
+    targetApp: "platform-admin",
+    route: `/adapter-registry?platformCode=${encodeURIComponent(order.platformCode)}`,
+    resourceType: "adapter",
+    resourceId: order.platformCode,
+    openMode: "new_tab",
+    label: copy(locale, "Inspect adapter", "檢視 adapter"),
+  };
+  const reconciliationLink: CrossAppResourceLink | null = reconciliationIssue
+    ? {
+        targetApp: "platform-admin",
+        route: `/payments/reconciliation/${encodeURIComponent(reconciliationIssue.reconciliationJob.reconciliationJobId)}`,
+        resourceType: "reconciliation",
+        resourceId: reconciliationIssue.reconciliationJob.reconciliationJobId,
+        openMode: "new_tab",
+        label: copy(locale, "Open reconciliation", "開啟對帳"),
+      }
+    : null;
+
+  const candidateDriverRows = order.candidateDriverIds.map(
+    (driverId, index) => ({
+      driverId,
+      rankCell: (
+        <span
+          style={{
+            color: theme.accent,
+            fontWeight: 700,
+            fontFamily: theme.monoFamily,
+          }}
+        >
+          #{index + 1}
+        </span>
+      ),
+      driverCell: (
+        <Link
+          href={`/drivers/${encodeURIComponent(driverId)}`}
+          style={{
+            color: theme.text,
+            textDecoration: "none",
+            fontFamily: theme.monoFamily,
+            fontWeight: 600,
+          }}
+        >
+          {driverId}
+        </Link>
+      ),
+      stateCell:
+        order.acceptedDriverId === driverId ? (
+          <Pill theme={theme} tone="success" dot>
+            {copy(locale, "accepted", "已接受")}
+          </Pill>
+        ) : (
+          <Pill theme={theme} tone="info">
+            {copy(locale, "broadcast", "廣播中")}
+          </Pill>
+        ),
+    }),
+  );
+
+  const candidateDriverColumns: CanvasTableColumn<
+    (typeof candidateDriverRows)[number]
+  >[] = [
+    { h: "#", k: "rankCell", w: 44 },
+    { h: copy(locale, "DRIVER", "司機"), k: "driverCell", w: 200 },
+    { h: copy(locale, "PLATFORM STATE", "平台狀態"), k: "stateCell", w: 160 },
+  ];
+
+  return (
+    <>
+      <PageHeader
+        theme={theme}
+        title={
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
+          >
+            <span>{order.mirrorOrderId}</span>
+            <Pill theme={theme} tone="info">
+              FORWARDED
+            </Pill>
+            <Pill theme={theme} tone={stateTone} dot>
+              {formatOpsCodeLabel(locale, order.status)}
+            </Pill>
+          </span>
+        }
+        subtitle={`${formatOpsCodeLabel(locale, order.platformCode)} · ${order.externalOrderId}  ·  ${pickup}  →  ${dropoff}  ·  ${formatForwardedWindow(order, locale)}`}
+        actions={renderHeaderActions(availableActions, locale)}
+      />
+
+      {renderRefreshRow(
+        refresh,
+        locale,
+        adapterHealth
+          ? `${copy(locale, "adapter", "轉接器")} ${formatOpsCodeLabel(locale, adapterHealth.status)}`
+          : undefined,
+      )}
+
+      <div style={{ padding: "12px 24px 0", display: "grid", gap: 12 }}>
+        <Banner
+          theme={theme}
+          tone="info"
+          icon="adapters"
+          title={copy(
+            locale,
+            "Forwarded mirror — do not treat as owned",
+            "此訂單為 forwarded mirror · 不可假裝為 owned",
+          )}
+          body={copy(
+            locale,
+            "No owned assignment exists. Every mutation must flow through a reconciliation issue to the platform finance owner; locally we only sync external state.",
+            "本地沒有 owned 指派。所有 mutation 必須透過 reconciliation issue 走平台 finance owner，本地僅同步外部狀態。",
+          )}
+          actions={
+            <>
+              {renderCrossAppLink(adapterLink)}
+              {reconciliationLink
+                ? renderCrossAppLink(reconciliationLink)
+                : null}
+            </>
+          }
+        />
+        {adapterDegraded ? (
+          <Banner
+            theme={theme}
+            tone={adapterHealth?.status === "down" ? "danger" : "warn"}
+            icon="health"
+            title={copy(
+              locale,
+              "Adapter dependency is degraded",
+              "轉接器相依降級",
+            )}
+            body={copy(
+              locale,
+              `${order.platformCode} adapter is ${adapterHealth?.status ?? "degraded"}${adapterHealth?.lastError ? ` · ${adapterHealth.lastError}` : ""}. Broadcast and live sync may be unavailable.`,
+              `${order.platformCode} 轉接器為 ${adapterHealth?.status ?? "degraded"}${adapterHealth?.lastError ? ` · ${adapterHealth.lastError}` : ""}；廣播與即時同步可能不可用。`,
+            )}
+          />
+        ) : null}
+        {terminal ? (
+          <Banner
+            theme={theme}
+            tone="info"
+            icon="check"
+            title={copy(
+              locale,
+              "Mirror reached a terminal state — read-only",
+              "鏡像已進入終態 · 唯讀",
+            )}
+            body={copy(
+              locale,
+              "Only force refresh is offered; reconciliation and finance settle at the owner platform.",
+              "僅提供強制刷新；對帳與金流於來源平台結算。",
+            )}
+          />
+        ) : null}
+      </div>
+
+      <div
+        style={{
+          padding: "12px 24px 24px",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
+          gap: "16px",
+          alignItems: "start",
+        }}
+      >
+        <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
+          <Card
+            theme={theme}
+            title={`${copy(locale, "Broadcast candidates", "廣播候選")} (${candidateDriverRows.length})`}
+            {...(candidateDriverRows.length > 0 ? { padding: 0 } : {})}
+          >
+            {candidateDriverRows.length > 0 ? (
+              <Table
+                theme={theme}
+                columns={candidateDriverColumns}
+                rows={candidateDriverRows}
+              />
+            ) : (
+              renderCandidateEmptyState(
+                adapterDegraded ? "external_unavailable" : "no_data",
+                locale,
+                order.mirrorOrderId,
+              )
+            )}
+          </Card>
+
+          <Card
+            theme={theme}
+            title={copy(
+              locale,
+              "Authority chain · finance",
+              "Compliance gates · authority chain",
+            )}
+          >
+            <DL
+              theme={theme}
+              cols={2}
+              items={[
+                {
+                  k: "domain",
+                  v: `forwarded · ${order.dispatchSemantics}`,
+                  mono: true,
+                },
+                {
+                  k: "source platform",
+                  v: `${formatOpsCodeLabel(locale, order.platformCode)} · ${order.externalOrderId}`,
+                  mono: true,
+                },
+                {
+                  k: "route locked",
+                  v: `${copy(locale, "yes", "是")} · ${waypointCount} ${copy(locale, "waypoints", "途經點")}`,
+                  mono: true,
+                },
+                {
+                  k: "fare authority",
+                  v: formatOpsCodeLabel(
+                    locale,
+                    order.financeContext.fareAuthority,
+                  ),
+                  mono: true,
+                },
+                {
+                  k: "settlement",
+                  v: `${formatOpsCodeLabel(locale, order.financeContext.settlementAuthority)} · ${formatOpsCodeLabel(locale, order.financeContext.localLedgerMode)}`,
+                  mono: true,
+                },
+                {
+                  k: "sync state",
+                  v: order.lastSyncError
+                    ? `${formatOpsCodeLabel(locale, order.lastSyncError.code)}`
+                    : `${order.lastNativeStatus ?? formatOpsCodeLabel(locale, order.status)}`,
+                  mono: true,
+                },
+                {
+                  k: "last callback",
+                  v: formatDateTime(
+                    locale,
+                    order.lastSyncError?.failedAt ?? order.updatedAt,
+                  ),
+                  mono: true,
+                },
+                {
+                  k: "reconciliation",
+                  v: order.reconciliationJob
+                    ? `${formatOpsCodeLabel(locale, order.reconciliationJob.status)} · ${mismatchCount} mismatch`
+                    : order.manualFallback.required
+                      ? copy(locale, "manual fallback", "人工 fallback")
+                      : "—",
+                  mono: true,
+                },
+              ]}
+            />
+          </Card>
+        </div>
+
+        <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
+          <Card theme={theme} title={copy(locale, "State machine", "訂單狀態")}>
+            {renderStepper(locale, getForwardedStepIndex(order), [
+              order.createdAt,
+              order.createdAt,
+              order.status === "broadcasted" ||
+              order.status === "accept_pending" ||
+              order.status === "sync_failed"
+                ? order.updatedAt
+                : null,
+              order.status === "confirmed_by_platform" ? order.updatedAt : null,
+              null,
+              order.status === "completed_synced" ? order.updatedAt : null,
+            ])}
+          </Card>
+
+          <Card
+            theme={theme}
+            title={copy(locale, "Activity · Timeline", "活動")}
+          >
             {renderTimeline(locale, timelineEntries)}
           </Card>
         </div>
