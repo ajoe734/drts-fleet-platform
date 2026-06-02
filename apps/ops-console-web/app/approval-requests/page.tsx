@@ -6,6 +6,7 @@ import type {
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
+import { ApprovalActions } from "./approval-actions";
 import {
   CanvasBanner as Banner,
   CanvasCard as Card,
@@ -200,20 +201,25 @@ export default async function ApprovalRequestsPage({
         ),
     },
     {
-      h: copy(locale, "AVAILABLE ACTIONS", "可用操作"),
-      w: 200,
-      r: (row) =>
-        row.actions.length > 0 ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-            {row.actions.map((action) => (
-              <Pill key={action} theme={theme} tone="neutral">
-                {action}
-              </Pill>
-            ))}
-          </div>
-        ) : (
-          "—"
-        ),
+      h: copy(locale, "ACTIONS", "操作"),
+      w: 240,
+      r: (row) => {
+        const canApprove = row.actions.includes("approve");
+        const canNudge = row.status === "pending";
+        const canAcknowledge = row.slaBreached;
+        if (!canApprove && !canNudge && !canAcknowledge) {
+          return "—";
+        }
+        return (
+          <ApprovalActions
+            requestId={row.request}
+            canApprove={canApprove}
+            canNudge={canNudge}
+            canAcknowledge={canAcknowledge}
+            locale={locale}
+          />
+        );
+      },
     },
   ];
 
@@ -248,8 +254,8 @@ export default async function ApprovalRequestsPage({
         )}
         subtitle={copy(
           locale,
-          "Visible only to ops_approval_triage / ops_manager / ops_compliance (read-only view).",
-          "僅 ops_approval_triage / ops_manager / ops_compliance 可見（唯讀檢視）。",
+          "Visible only to ops_approval_triage / ops_manager / ops_compliance. Approve, nudge, or acknowledge SLA breach per row.",
+          "僅 ops_approval_triage / ops_manager / ops_compliance 可見。可逐筆核准、提醒或確認 SLA 違規。",
         )}
         tabs={tabNodes}
         activeTab={activeTabNode}
