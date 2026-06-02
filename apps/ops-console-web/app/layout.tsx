@@ -6,6 +6,11 @@ import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import { buildOpsShellNav } from "@/lib/ops-shell-nav";
 import { OpsShell } from "@/components/ops-shell";
+import { OpsAssistantContextProvider } from "@/components/ops-assistant";
+import {
+  resolveOpsAssistantIdentity,
+  seedOpsAssistantHealth,
+} from "@/lib/ops-assistant-context.server";
 
 import "./globals.css";
 
@@ -24,20 +29,27 @@ export default async function RootLayout({
 }) {
   const locale = await getServerLocale();
   const nav = buildOpsShellNav(locale);
+  const assistantIdentity = await resolveOpsAssistantIdentity();
+  const assistantHealth = seedOpsAssistantHealth();
 
   return (
     <html lang={locale}>
       <body style={{ margin: 0 }}>
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
-          <OpsShell
-            nav={nav}
-            brandLabel={t("app.name", locale)}
-            brandSubLabel={t("app.sub", locale)}
-            searchPlaceholder={t("common.search", locale)}
+          <OpsAssistantContextProvider
+            identity={assistantIdentity}
+            initialHealth={assistantHealth}
           >
-            {children}
-          </OpsShell>
+            <OpsShell
+              nav={nav}
+              brandLabel={t("app.name", locale)}
+              brandSubLabel={t("app.sub", locale)}
+              searchPlaceholder={t("common.search", locale)}
+            >
+              {children}
+            </OpsShell>
+          </OpsAssistantContextProvider>
         </LanguageProvider>
       </body>
     </html>
