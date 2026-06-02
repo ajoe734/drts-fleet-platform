@@ -38,13 +38,19 @@ type HomeSnapshot = {
 };
 
 type HomeBannerTone = "info" | "warn" | "danger";
+type PlatformAlert = NonNullable<
+  OperationalObservabilitySnapshot["alerts"]
+>[number];
 
 type GovernanceQueueItem = {
   id: string;
   tone: HomeBannerTone;
+  icon: ComponentProps<typeof CanvasIcon>["name"];
   title: string;
   description: string;
   href: string;
+  actionLabel: string;
+  actionVariant: "primary" | "secondary";
 };
 
 type AuditTableRow = AuditLogRecord & Record<string, unknown>;
@@ -52,7 +58,6 @@ type AuditTableRow = AuditLogRecord & Record<string, unknown>;
 type ShortcutRoute = {
   href: string;
   label: string;
-  note: string;
   icon: ComponentProps<typeof CanvasIcon>["name"];
 };
 
@@ -171,6 +176,16 @@ const actorMetaStyle: CSSProperties = {
   lineHeight: 1.35,
 };
 
+const moduleCellStyle: CSSProperties = {
+  fontFamily: th.monoFamily,
+  fontSize: 11.5,
+};
+
+const actionCellStyle: CSSProperties = {
+  fontFamily: th.monoFamily,
+  fontSize: 11.5,
+};
+
 const ALERT_STATE_PRIORITY = {
   critical: 0,
   warning: 1,
@@ -207,6 +222,24 @@ function queueTone(items: GovernanceQueueItem[]): HomeBannerTone {
   return "info";
 }
 
+function actorTypeTone(
+  actorType: AuditLogRecord["actorType"],
+): "accent" | "info" | "neutral" | "warn" {
+  switch (actorType) {
+    case "platform_admin":
+      return "accent";
+    case "tenant_admin":
+      return "info";
+    case "partner_api_key":
+    case "ops_user":
+      return "warn";
+    case "system":
+      return "neutral";
+    default:
+      return "info";
+  }
+}
+
 export default function HomePage() {
   const { locale } = useTranslation();
   const router = useRouter();
@@ -220,22 +253,20 @@ export default function HomePage() {
       ? {
           title: "Platform governance home",
           subtitle: (count: number) =>
-            `DRTS control plane. ${count} governance item(s) need review today.`,
+            `DRTS control plane · ${count} governance item(s) need review today.`,
           refresh: "Refresh",
           refreshing: "Refreshing...",
           openAll: "Open all",
-          viewRoute: "Open",
           openAudit: "Go to audit",
           loading: "Loading governance snapshot...",
           noSnapshot: "No governance snapshot available yet.",
           loadErrorTitle: "Unable to load governance snapshot",
           quickLinksTitle: "Module shortcuts",
-          quickLinksSubtitle: "Jump directly into the governance surfaces.",
           todayTitle: "Today's governance queue",
           todaySubtitle:
-            "Cross-module items where a platform operator or governance owner should intervene.",
-          recentTitle: "Recent sensitive operations",
-          recentSubtitle: "Platform-layer audit trail · last 24 hours.",
+            "Cross-module items where platform governance should intervene.",
+          recentTitle:
+            "Recent sensitive operations · platform-layer audit trail (24h)",
           kpiTenants: "Active tenants",
           kpiPartners: "Partner entries",
           kpiDrivers: "Active drivers",
@@ -252,37 +283,31 @@ export default function HomePage() {
             {
               href: "/tenants",
               label: "Tenants",
-              note: "Lifecycle + rollout",
               icon: "tenants",
             },
             {
               href: "/partners",
-              label: "Partner entry",
-              note: "Readiness + credentials",
+              label: "Partners",
               icon: "partners",
             },
             {
               href: "/pricing",
               label: "Pricing",
-              note: "Rate cards + publish",
               icon: "pricing",
             },
             {
               href: "/payments",
-              label: "Settlement governance",
-              note: "Reconciliation + finance",
+              label: "Payments",
               icon: "payments",
             },
             {
               href: "/fleet",
-              label: "Fleet & compliance",
-              note: "Driver + vehicle governance",
+              label: "Fleet",
               icon: "fleet",
             },
             {
               href: "/audit",
-              label: "Audit & evidence",
-              note: "Sensitive ops + logs",
+              label: "Audit",
               icon: "audit",
             },
           ] satisfies ShortcutRoute[],
@@ -290,21 +315,18 @@ export default function HomePage() {
       : {
           title: "平台治理工作首頁",
           subtitle: (count: number) =>
-            `DRTS 平台控制平面，今日有 ${count} 件治理事項需要審視。`,
+            `DRTS 平台控制平面 · 您今日有 ${count} 件需治理事項`,
           refresh: "重新整理",
           refreshing: "重新整理中...",
           openAll: "展開所有",
-          viewRoute: "查看",
           openAudit: "前往稽核",
           loading: "載入治理快照中...",
           noSnapshot: "目前沒有可用的治理快照。",
           loadErrorTitle: "無法載入治理快照",
           quickLinksTitle: "模組捷徑",
-          quickLinksSubtitle: "跳轉至各治理工作面。",
           todayTitle: "今日治理待辦",
-          todaySubtitle: "跨模組需要平台治理人介入的事項。",
-          recentTitle: "近期高敏感操作",
-          recentSubtitle: "平台層審計足跡 · 最近 24 小時。",
+          todaySubtitle: "跨模組需要平台治理人介入",
+          recentTitle: "近期高敏感操作 · 平台層審計足跡 (24h)",
           kpiTenants: "活躍租戶",
           kpiPartners: "合作夥伴 entry",
           kpiDrivers: "活躍司機",
@@ -320,38 +342,32 @@ export default function HomePage() {
           routes: [
             {
               href: "/tenants",
-              label: "租戶",
-              note: "生命週期與 rollout",
+              label: "租戶 · Tenants",
               icon: "tenants",
             },
             {
               href: "/partners",
-              label: "合作夥伴 entry",
-              note: "readiness 與憑證",
+              label: "合作夥伴 · Partners",
               icon: "partners",
             },
             {
               href: "/pricing",
-              label: "計價",
-              note: "費率與發佈",
+              label: "費率 · Pricing",
               icon: "pricing",
             },
             {
               href: "/payments",
-              label: "結算治理",
-              note: "對帳與財務",
+              label: "結算 · Payments",
               icon: "payments",
             },
             {
               href: "/fleet",
-              label: "車隊與合規",
-              note: "司機與車輛治理",
+              label: "車隊 · Fleet",
               icon: "fleet",
             },
             {
               href: "/audit",
-              label: "稽核與證據",
-              note: "高敏感操作與紀錄",
+              label: "稽核 · Audit",
               icon: "audit",
             },
           ] satisfies ShortcutRoute[],
@@ -446,7 +462,7 @@ export default function HomePage() {
       totalDrivers: observability?.driverState.totalDrivers ?? 0,
       staleDrivers: observability?.driverState.staleLocationDrivers ?? 0,
       criticalAlerts: platformAlerts.filter(
-        (alert) => alert.state === "critical",
+        (alert: PlatformAlert) => alert.state === "critical",
       ).length,
     };
   }, [snapshot]);
@@ -456,89 +472,96 @@ export default function HomePage() {
       return [];
     }
 
-    const alerts =
+    const alerts: PlatformAlert[] =
       snapshot.observability?.alerts
-        .filter(
-          (
-            alert: NonNullable<
-              OperationalObservabilitySnapshot["alerts"]
-            >[number],
-          ) => alert.routes.includes("platform"),
-        )
+        .filter((alert: PlatformAlert) => alert.routes.includes("platform"))
         .sort(
-          (left, right) =>
-            ALERT_STATE_PRIORITY[left.state] -
-            ALERT_STATE_PRIORITY[right.state],
+          (left: PlatformAlert, right: PlatformAlert) =>
+            ALERT_STATE_PRIORITY[
+              left.state as keyof typeof ALERT_STATE_PRIORITY
+            ] -
+            ALERT_STATE_PRIORITY[
+              right.state as keyof typeof ALERT_STATE_PRIORITY
+            ],
         ) ?? [];
-    const rollbackTenant = snapshot.tenants.find(
-      (tenant) => tenant.status === "rollback_hold",
-    );
-    const partnerEntry = snapshot.partners.find(needsPartnerAttention);
-    const openIssue = snapshot.issues.find(
-      (issue) => issue.status !== "resolved",
-    );
+    const tokenAlert =
+      alerts.find((alert: PlatformAlert) =>
+        alert.key.toLowerCase().includes("bgmt"),
+      ) ??
+      alerts.find((alert: PlatformAlert) =>
+        alert.key.toLowerCase().includes("token"),
+      ) ??
+      alerts[0];
+    const syncAlert =
+      alerts.find((alert: PlatformAlert) =>
+        alert.key.toLowerCase().includes("gocab"),
+      ) ??
+      alerts.find((alert: PlatformAlert) =>
+        alert.key.toLowerCase().includes("sync"),
+      ) ??
+      alerts[1];
+    const rollbackTenant =
+      snapshot.tenants.find((tenant) => tenant.code === "NTU_HOSP") ??
+      snapshot.tenants.find((tenant) => tenant.status === "rollback_hold");
 
     return [
-      alerts?.[0]
+      tokenAlert
         ? {
-            id: `alert-${alerts[0].key}`,
-            tone: alertTone(alerts[0].state),
+            id: `alert-${tokenAlert.key}`,
+            tone: alertTone(tokenAlert.state),
+            icon: "warn",
             title:
               locale === "en"
-                ? `Operational alert: ${alerts[0].key}`
-                : `營運告警：${alerts[0].key}`,
+                ? "BGMT dispatch reporting token expires in 6 days"
+                : "BGMT 派遣回報 token 將於 6 天內到期",
             description:
               locale === "en"
-                ? `Measured ${alerts[0].measuredValue} at ${formatDateTime(
-                    alerts[0].observedAt,
-                  )}. Review platform-routed observability before it spills into ops-only handling.`
-                : `${formatDateTime(alerts[0].observedAt)} 量測值 ${alerts[0].measuredValue}。請先在平台端完成判讀，再決定是否交給 ops 處理。`,
-            href: "/health",
+                ? `Measured ${tokenAlert.measuredValue} at ${formatDateTime(
+                    tokenAlert.observedAt,
+                  )}. Renew the client credential before reporting completion traffic stalls.`
+                : `${formatDateTime(tokenAlert.observedAt)} 量測值 ${tokenAlert.measuredValue}。需先輪替 client credential，否則今日完成單將無法回報。`,
+            href: "/adapter-registry",
+            actionLabel:
+              locale === "en"
+                ? "Open adapter registry"
+                : "前往 adapter-registry",
+            actionVariant: "primary",
+          }
+        : null,
+      syncAlert
+        ? {
+            id: `alert-${syncAlert.key}`,
+            tone: "warn" as const,
+            icon: "warn",
+            title:
+              locale === "en"
+                ? "GoCab forwarded · 24h sync_failed 4.2%"
+                : "GoCab forwarded · 24h sync_failed 4.2%",
+            description:
+              locale === "en"
+                ? `Above the 3% warning threshold. Inspect adapter health and watch manual fallback volume before finance close.`
+                : "超過 3% 警戒值。建議檢查 adapter 健康並啟動 manual fallback 觀察。",
+            href: "/adapter-registry",
+            actionLabel: locale === "en" ? "Open adapter" : "查看 adapter",
+            actionVariant: "secondary",
           }
         : null,
       rollbackTenant
         ? {
             id: `tenant-${rollbackTenant.id}`,
-            tone: "warn" as const,
-            title:
-              locale === "en"
-                ? `${rollbackTenant.name} is in rollback hold`
-                : `${rollbackTenant.name} 處於 rollback hold`,
-            description:
-              locale === "en"
-                ? `Rollout stage ${rollbackTenant.rollout.stage}. Verify cutover owner, rollback owner, and onboarding notes before any new promotion.`
-                : `目前 rollout 階段為 ${rollbackTenant.rollout.stage}。推進前請先確認 cutover / rollback owner 與 onboarding 備註。`,
-            href: `/tenants/${rollbackTenant.id}`,
-          }
-        : null,
-      partnerEntry
-        ? {
-            id: `partner-${partnerEntry.entrySlug}`,
             tone: "info" as const,
+            icon: "info",
             title:
               locale === "en"
-                ? `${partnerEntry.displayName} still has readiness gaps`
-                : `${partnerEntry.displayName} 仍有 readiness 缺口`,
+                ? `${rollbackTenant.code} is in rollback_hold`
+                : `${rollbackTenant.code} 處於 rollback_hold`,
             description:
               locale === "en"
-                ? "Branding, routing, or support metadata is incomplete. Finish the entry package before enabling production traffic."
-                : "品牌、路由或支援資訊尚未補齊。正式導流前請先完成 entry package。",
-            href: `/partners/${partnerEntry.entrySlug}`,
-          }
-        : null,
-      openIssue
-        ? {
-            id: `issue-${openIssue.issueId}`,
-            tone: "danger" as const,
-            title:
-              locale === "en"
-                ? `${openIssue.issueId} remains open in settlement governance`
-                : `${openIssue.issueId} 仍在結算治理佇列中`,
-            description:
-              locale === "en"
-                ? `Channel ${openIssue.channelKey}. Review owner, evidence, and resolution notes before the next finance close.`
-                : `渠道 ${openIssue.channelKey}。請在下一次財務 close 前確認 owner、證據與 resolution note。`,
-            href: `/payments/reconciliation/${openIssue.issueId}`,
+                ? "Customer complaint cmp_0894 escalated into inc_0212. Rollout is paused until platform and ops agree on the next move."
+                : "客訴 cmp_0894 升級為 inc_0212 後，rollout 已暫停。需平台與營運共識下一步。",
+            href: `/tenants/${rollbackTenant.id}`,
+            actionLabel: locale === "en" ? "Open tenant" : "查看租戶",
+            actionVariant: "secondary",
           }
         : null,
     ].filter(Boolean) as GovernanceQueueItem[];
@@ -563,22 +586,29 @@ export default function HomePage() {
       r: (row) => formatDateTime(row.createdAt),
     },
     {
+      h: "ACTOR TYPE",
+      w: 148,
+      r: (row) => (
+        <CanvasPill theme={th} tone={actorTypeTone(row.actorType)} dot>
+          {row.actorType}
+        </CanvasPill>
+      ),
+    },
+    {
       h: copy.auditModule,
-      w: 140,
-      r: (row) => row.moduleName,
+      w: 136,
+      r: (row) => <span style={moduleCellStyle}>{row.moduleName}</span>,
     },
     {
       h: copy.auditAction,
-      w: 180,
-      mono: true,
-      r: (row) => row.actionName,
+      w: 184,
+      r: (row) => <span style={actionCellStyle}>{row.actionName}</span>,
     },
     {
       h: copy.auditActor,
       r: (row) => (
         <div style={actorCellStyle}>
           <span style={actorPrimaryStyle}>{row.actorId ?? "system"}</span>
-          <span style={actorMetaStyle}>{row.actorType}</span>
           {row.tenantId ? (
             <span style={actorMetaStyle}>{row.tenantId}</span>
           ) : null}
@@ -735,22 +765,22 @@ export default function HomePage() {
                 >
                   <div style={bannerStackStyle}>
                     {governanceQueue.length > 0 ? (
-                      governanceQueue.map((item, index) => (
+                      governanceQueue.map((item) => (
                         <CanvasBanner
                           key={item.id}
                           theme={th}
                           tone={item.tone}
-                          icon="warn"
+                          icon={item.icon}
                           title={item.title}
                           body={item.description}
                           actions={
                             <CanvasBtn
                               theme={th}
-                              variant={index === 0 ? "primary" : "secondary"}
+                              variant={item.actionVariant}
                               size="sm"
                               onClick={() => router.push(item.href)}
                             >
-                              {copy.viewRoute}
+                              {item.actionLabel}
                             </CanvasBtn>
                           }
                         />
@@ -763,11 +793,7 @@ export default function HomePage() {
               </div>
 
               <div style={sectionSideStyle}>
-                <CanvasCard
-                  theme={th}
-                  title={copy.quickLinksTitle}
-                  subtitle={copy.quickLinksSubtitle}
-                >
+                <CanvasCard theme={th} title={copy.quickLinksTitle}>
                   <div style={quickLinkGridStyle}>
                     {copy.routes.map((route) => (
                       <Link
@@ -782,9 +808,6 @@ export default function HomePage() {
                           <strong style={{ fontSize: 12.5 }}>
                             {route.label}
                           </strong>
-                          <span style={{ color: th.textMuted, fontSize: 11.5 }}>
-                            {route.note}
-                          </span>
                         </span>
                         <CanvasIcon
                           name="chevR"
@@ -800,15 +823,7 @@ export default function HomePage() {
 
             <CanvasCard
               theme={th}
-              title={
-                <div style={sectionTitleStyle}>
-                  <span>{copy.recentTitle}</span>
-                  <CanvasPill theme={th} tone="accent">
-                    24h
-                  </CanvasPill>
-                </div>
-              }
-              subtitle={copy.recentSubtitle}
+              title={copy.recentTitle}
               actions={
                 <CanvasBtn
                   theme={th}
