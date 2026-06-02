@@ -133,6 +133,7 @@ jobs:
             "${SECRET_PREFIX}-api-key-salt"
             "${SECRET_PREFIX}-jwt-secret"
             "${SECRET_PREFIX}-controlled-download-signing-secret"
+            "${SECRET_PREFIX}-anthropic-api-key"
           )
 
           missing=()
@@ -471,7 +472,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          secret_args="DATABASE_URL=${SECRET_PREFIX}-db-url:latest,API_KEY_SALT=${SECRET_PREFIX}-api-key-salt:latest,JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest,CONTROLLED_DOWNLOAD_SIGNING_SECRET=${SECRET_PREFIX}-controlled-download-signing-secret:latest"
+          secret_args="DATABASE_URL=${SECRET_PREFIX}-db-url:latest,API_KEY_SALT=${SECRET_PREFIX}-api-key-salt:latest,JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest,CONTROLLED_DOWNLOAD_SIGNING_SECRET=${SECRET_PREFIX}-controlled-download-signing-secret:latest,ANTHROPIC_API_KEY=${SECRET_PREFIX}-anthropic-api-key:latest"
 
           if gcloud secrets describe "${SECRET_PREFIX}-internal-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
             secret_args="${secret_args},DRTS_INTERNAL_KEY=${SECRET_PREFIX}-internal-key:latest"

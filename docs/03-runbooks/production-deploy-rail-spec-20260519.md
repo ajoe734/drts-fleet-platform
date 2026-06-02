@@ -111,6 +111,7 @@ project:
 - `${PROD_SECRET_PREFIX}-api-key-salt` -> `API_KEY_SALT`
 - `${PROD_SECRET_PREFIX}-jwt-secret` -> `JWT_SECRET`
 - `${PROD_SECRET_PREFIX}-controlled-download-signing-secret` -> `CONTROLLED_DOWNLOAD_SIGNING_SECRET`
+- `${PROD_SECRET_PREFIX}-anthropic-api-key` -> `ANTHROPIC_API_KEY`
 
 Optional mapping:
 

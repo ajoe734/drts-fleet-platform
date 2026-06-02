@@ -68,6 +68,7 @@ project:
 - `drts-dev-api-key-salt`
 - `drts-dev-jwt-secret`
 - `drts-dev-controlled-download-signing-secret`
+- `drts-dev-anthropic-api-key`
 - `drts-dev-internal-key` (optional)
 
 Set `DEV_SECRET_PREFIX` if your secret names differ.

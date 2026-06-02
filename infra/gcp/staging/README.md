@@ -81,6 +81,7 @@ GCP project:
 - `drts-staging-api-key-salt`
 - `drts-staging-jwt-secret`
 - `drts-staging-controlled-download-signing-secret`
+- `drts-staging-anthropic-api-key`
 - `drts-staging-internal-key` (optional)
 
 Set `STAGING_SECRET_PREFIX` if your secret names differ.

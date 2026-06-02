@@ -98,6 +98,7 @@ project:
 - `${PROD_SECRET_PREFIX}-api-key-salt`
 - `${PROD_SECRET_PREFIX}-jwt-secret`
 - `${PROD_SECRET_PREFIX}-controlled-download-signing-secret`
+- `${PROD_SECRET_PREFIX}-anthropic-api-key`
 
 Optional:
 

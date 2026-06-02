@@ -371,6 +371,13 @@ jobs:
           fi
           secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${controlled_download_secret}:latest"
 
+          anthropic_secret="${secret_prefix}-anthropic-api-key"
+          if ! gcloud secrets describe "$anthropic_secret" --project "$project_id" >/dev/null 2>&1; then
+            echo "::error::Required secret ${anthropic_secret} not found in project ${project_id}."
+            exit 1
+          fi
+          secret_args="${secret_args},ANTHROPIC_API_KEY=${anthropic_secret}:latest"
+
           if gcloud secrets describe "${secret_prefix}-internal-key" --project "$project_id" >/dev/null 2>&1; then
             secret_args="${secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
           fi

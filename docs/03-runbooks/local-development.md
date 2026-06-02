@@ -94,6 +94,9 @@ the intended operator surface is a project VM:
 
 1. Use Node.js 22 and pnpm 10.
 2. Copy `.env.example` to `.env` if repo-local overrides are needed.
+   For the ops-console LLM assistant path, set `ANTHROPIC_API_KEY` there so the
+   API-side gateway can boot in dev without pushing the credential into any web
+   bundle or checked-in config.
 3. Run `python3 scripts/ensure-local-node-modules.py repair`.
    This wraps the canonical-root install path so `node_modules` stays linked to
    the local `.pnpm` virtual store instead of inheriting symlinks from an
