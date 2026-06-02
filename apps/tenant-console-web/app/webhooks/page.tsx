@@ -875,21 +875,19 @@ function decorateDeliveryActions(
   return descriptors.flatMap((descriptor) => {
     const tone = getActionTone(descriptor.action);
     const href = getDeliveryActionHref(descriptor.action, options);
-    const supportsRetryForm =
+    const formFields =
       descriptor.action === "retryFailedDelivery" &&
-      Boolean(options?.webhookId) &&
-      Boolean(options?.deliveryId);
-    if (!href && !supportsRetryForm) {
-      return [];
-    }
-    const retryFields =
-      supportsRetryForm && options?.webhookId && options?.deliveryId
+      options?.webhookId &&
+      options?.deliveryId
         ? {
             formAction: "retryFailedDelivery" as const,
             webhookId: options.webhookId,
             deliveryId: options.deliveryId,
           }
         : undefined;
+    if (!href && !formFields) {
+      return [];
+    }
 
     return [
       {
@@ -905,7 +903,7 @@ function decorateDeliveryActions(
           : {}),
         ...(tone ? { tone } : {}),
         ...(href ? { href } : {}),
-        ...(retryFields ?? {}),
+        ...(formFields ?? {}),
       },
     ];
   });
@@ -967,12 +965,13 @@ function renderAction(
   small = true,
 ): ReactNode {
   const size = small ? "sm" : "md";
-  if (
+  const submitActionReady =
     descriptor.enabled &&
     descriptor.formAction === "retryFailedDelivery" &&
     descriptor.webhookId &&
-    descriptor.deliveryId
-  ) {
+    descriptor.deliveryId;
+
+  if (submitActionReady) {
     return (
       <form key={key} action={retryFailedDeliveryAction}>
         <input type="hidden" name="webhookId" value={descriptor.webhookId} />
