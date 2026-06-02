@@ -166,6 +166,14 @@ const routes: NavRoute[] = [
     en: "Payments",
   },
   {
+    key: "reimbursements",
+    href: "/payments/reimbursements",
+    icon: DollarSign,
+    section: "commerce",
+    zh: "代墊批次",
+    en: "Reimbursements",
+  },
+  {
     key: "adapter-registry",
     href: "/adapter-registry",
     icon: ShieldCheck,
@@ -220,9 +228,13 @@ function pathMatchesRoute(route: NavRoute, pathname: string) {
 }
 
 function getActiveRoute(pathname: string): NavRoute {
-  const activeRoute = routes.find((route) => pathMatchesRoute(route, pathname));
-  if (activeRoute) {
-    return activeRoute;
+  const matchingRoutes = routes.filter((route) =>
+    pathMatchesRoute(route, pathname),
+  );
+  if (matchingRoutes.length > 0) {
+    return matchingRoutes.reduce((best, route) =>
+      route.href.length > best.href.length ? route : best,
+    );
   }
 
   const [homeRoute] = routes;
