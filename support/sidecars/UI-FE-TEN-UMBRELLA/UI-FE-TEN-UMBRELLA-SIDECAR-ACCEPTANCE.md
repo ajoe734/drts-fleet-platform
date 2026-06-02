@@ -57,24 +57,28 @@ Live workflow fields such as `status`, `next`, and `last_update` remain authorit
 
 Machine-truth snapshot observed during this dispatch:
 
-- owner=`Codex2`
-- reviewer=`Codex`
-- status=`review`
-- acceptance:
-  - all currently recorded tenant-console dependency tasks done
-  - closeout doc present
-  - 20-route IA including the 9 required NEW routes ships
-  - smoke test clean
-  - Q-TEN01 cutover plan referenced
-- next=`Owner finalized approved umbrella closeout at 3d8350cd, reran scoped smoke verification
+- `scripts/ai-status.sh show UI-FE-TEN-UMBRELLA` currently returns `Task not found`
+- `archived_task_ids` still includes `UI-FE-TEN-UMBRELLA`
+- the latest retained umbrella handoff from `Codex2` to `Codex` says:
+  `Owner finalized approved umbrella closeout at 3d8350cd, reran scoped smoke verification
   (contracts build, ui-tokens build, tenant-console-web build, typecheck, test, git diff --check),
   and pushed the formal closeout commit for final reviewer acknowledgment.`
+- the owner closeout branch tip remains `origin/codex2/ui-fe-ten-umbrella@3d8350cd`
+- the parent closeout document at
+  `docs/05-ui/tenant-console-rebuild-closeout-20260601.md` records:
+  - owner=`Codex2`
+  - reviewer=`Codex`
+  - 14 currently recorded tenant-console dependency tasks `done`
+  - 20-route IA present
+  - Q-TEN01 cutover posture referenced
 
 Interpretation:
 
-- The umbrella owner has already prepared formal closeout evidence.
+- The umbrella owner closeout evidence exists and is internally consistent on the owner branch tip.
+- The parent task body is no longer present in active `tasks[]`, so this packet must not claim a live
+  parent `status` value that is no longer queryable from machine truth.
 - This sidecar exists to reduce reviewer lookup time by collapsing the dependency map and
-  acceptance gates into one packet.
+  acceptance gates into one packet while explicitly calling out the current archive-state caveat.
 
 ---
 
@@ -136,12 +140,14 @@ Legend: `[REQUIRED]` = direct umbrella acceptance or recorded dependency evidenc
 
 ### C. Umbrella closeout evidence presence `[REQUIRED]`
 
-- [x] The parent umbrella task is already in `review`, not `backlog` or `in_progress`.
-- [x] The parent `next` note records a formal closeout anchor `3d8350cd`.
-- [x] The parent `next` note records rerun verification for contracts build, ui-tokens build,
-      tenant-console-web build, typecheck, test, and `git diff --check`.
-- [x] The parent acceptance still requires reviewer confirmation of the closeout doc, smoke gate,
-      and Q-TEN01 cutover-plan reference.
+- [x] The owner closeout branch tip is `origin/codex2/ui-fe-ten-umbrella@3d8350cd`.
+- [x] The latest retained umbrella handoff records rerun verification for contracts build,
+      ui-tokens build, tenant-console-web build, typecheck, test, and `git diff --check`.
+- [x] The parent closeout document records the closeout doc, smoke gate, 20-route IA, and
+      Q-TEN01 cutover-plan reference evidence expected by the umbrella acceptance.
+- [x] This packet explicitly notes that the parent task body is currently archived / not queryable
+      via `ai-status.sh show`, so reviewer follow-up should not rely on a stale parent `status`
+      claim from this packet.
 
 ### D. Sidecar packet readiness `[SIDECAR]`
 
@@ -155,11 +161,12 @@ Legend: `[REQUIRED]` = direct umbrella acceptance or recorded dependency evidenc
 
 For `Codex2` when reviewing this packet and the parent umbrella closeout:
 
-1. Reconfirm the umbrella task still shows `status=review` and reviewer=`Codex` in machine truth.
-2. Reconfirm the umbrella closeout packet referenced by the parent still matches the recorded `next`
-   note anchored at `3d8350cd`.
-3. Reconfirm the smoke verification named in the parent `next` note remains the latest recorded
-   evidence:
+1. Reconfirm this sidecar file exists on `codex/ui-fe-ten-umbrella-sidecar-acceptance` and is the
+   branch tip artifact under `support/sidecars/UI-FE-TEN-UMBRELLA/`.
+2. Reconfirm the owner closeout packet on `origin/codex2/ui-fe-ten-umbrella@3d8350cd` still
+   matches the retained umbrella handoff evidence and closeout document.
+3. Reconfirm the smoke verification named in the retained umbrella handoff remains the latest
+   recorded evidence:
    - contracts build
    - ui-tokens build
    - tenant-console-web build
@@ -168,7 +175,9 @@ For `Codex2` when reviewing this packet and the parent umbrella closeout:
    - `git diff --check`
 4. Use this packet as the dependency checklist only; do not treat it as a replacement for the
    parent umbrella closeout artifact.
-5. If any dependency task reopens after this packet is handed off, refresh §3 and §4 before
+5. If lifecycle action is still required on the parent umbrella, route that as a machine-truth
+   repair because the parent task body is currently archived / absent from active `tasks[]`.
+6. If any dependency task reopens after this packet is handed off, refresh §3 and §4 before
    approving the sidecar.
 
 ---
@@ -192,9 +201,11 @@ Machine-truth evidence used to assemble this packet:
 - `UI-FE-TEN-AUD` closeout evidence slice
 - `UI-FE-TEN-FF` closeout evidence slice
 - `UI-FE-TEN-SET` closeout evidence slice
-- parent `UI-FE-TEN-UMBRELLA` review-state snapshot observed during dispatch
+- retained umbrella handoff / archive-state snapshot observed during dispatch
 
 Known limits:
 
 - This packet intentionally does not restate the full contents of the parent closeout document.
 - This packet intentionally does not mutate machine truth to reconcile any future lifecycle drift.
+- This packet cannot assert a live parent `status` value because `UI-FE-TEN-UMBRELLA` is currently
+  absent from active `tasks[]`.
