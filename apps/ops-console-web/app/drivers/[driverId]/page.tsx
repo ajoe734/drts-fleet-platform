@@ -1517,13 +1517,12 @@ export default async function DriverDetailPage({
               flexWrap: "wrap",
             }}
           >
-            <span>{driver.name}</span>
             <span
               style={{
                 ...monoStyle,
-                fontSize: "12px",
-                color: theme.textMuted,
-                fontWeight: 500,
+                fontSize: "16px",
+                color: theme.text,
+                fontWeight: 700,
               }}
             >
               {driver.driverId}

@@ -1605,7 +1605,16 @@ export default async function VehicleDetailPage({
               flexWrap: "wrap",
             }}
           >
-            <span>{vehicle.plateNo}</span>
+            <span
+              style={{
+                ...monoStyle,
+                fontSize: "16px",
+                color: theme.text,
+                fontWeight: 700,
+              }}
+            >
+              {vehicle.vehicleId}
+            </span>
             <Pill theme={theme} tone={getVehicleStatusTone(vehicle)} dot>
               {formatOpsCodeLabel(locale, getPrimaryVehicleStatusCode(vehicle))}
             </Pill>
@@ -1628,10 +1637,7 @@ export default async function VehicleDetailPage({
             ) : null}
           </span>
         }
-        subtitle={`${vehicle.vehicleId} · ${getVehicleTypeLabel(
-          locale,
-          vehicle,
-        )} · ${vehicle.operatingArea}`}
+        subtitle={`${vehicle.plateNo} · ${getVehicleTypeLabel(locale, vehicle)} · ${vehicle.operatingArea}`}
         actions={
           <div style={actionRowStyle}>
             {pageActions.map((action) => renderVehicleAction(action))}

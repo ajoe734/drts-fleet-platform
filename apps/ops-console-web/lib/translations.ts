@@ -1595,16 +1595,16 @@ const zh: Record<keyof typeof en, string> = {
   "app.lang.toggle": "English",
 
   // ── Navigation ──
-  "nav.dashboard": "儀表板",
+  "nav.dashboard": "營運總覽",
   "nav.dispatch": "派車調度",
-  "nav.complaints": "客訴管理",
+  "nav.complaints": "客訴中心",
   "nav.callcenter": "客服中心",
   "nav.reports": "報表",
   "nav.revenue": "收益",
   "nav.attendance": "出勤",
   "nav.approvalRequests": "審批佇列",
-  "nav.incidents": "事故管理",
-  "nav.maintenance": "維修保養",
+  "nav.incidents": "事故中心",
+  "nav.maintenance": "車輛保修",
   "nav.vehicles": "車輛",
   "nav.drivers": "司機",
   "nav.contracts": "合約",
@@ -1651,7 +1651,7 @@ const zh: Record<keyof typeof en, string> = {
   "common.dash": "—",
 
   // ── Dashboard ──
-  "dashboard.title": "儀表板",
+  "dashboard.title": "營運總覽",
   "dashboard.subtitle": "營運概覽 — 派車健康狀態、收益脈搏與例外積壓",
   "dashboard.todayRevenue": "今日收益",
   "dashboard.todayRevenueSub": "{trips} 趟已完成",
@@ -1744,7 +1744,7 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.platformOps.signal.lastError": "最後錯誤",
 
   // ── Vehicles ──
-  "vehicles.title": "車輛登記",
+  "vehicles.title": "車輛",
   "vehicles.subtitle": "已登記 {count} 輛車輛",
   "vehicles.col.vehicleId": "車輛編號",
   "vehicles.col.plate": "車牌",
@@ -1768,7 +1768,7 @@ const zh: Record<keyof typeof en, string> = {
   "vehicles.empty": "尚未登記車輛。",
 
   // ── Drivers ──
-  "drivers.title": "司機登記",
+  "drivers.title": "司機",
   "drivers.subtitle": "已登記 {count} 位司機",
   "drivers.col.driverId": "司機編號",
   "drivers.col.name": "姓名",
@@ -1862,7 +1862,7 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.detail.actionError": "操作失敗",
 
   // ── Contracts ──
-  "contracts.title": "合約管理",
+  "contracts.title": "合約",
   "contracts.subtitle": "{count} 份合約",
   "contracts.col.contractId": "合約編號",
   "contracts.col.vehicle": "車輛",
@@ -2266,7 +2266,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.forwarded.status.sync_failed": "同步失敗",
 
   // ── Maintenance ──
-  "maintenance.title": "維修保養",
+  "maintenance.title": "車輛保修",
   "maintenance.subtitle": "工單管理 — 追蹤逾期保養並連結車輛作業",
   "maintenance.activeOrders": "活躍工單",
   "maintenance.activeOrdersSub": "已排程或進行中的保養",
@@ -2337,7 +2337,7 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.emptyStatements": "未找到帳單。",
 
   // ── Incidents ──
-  "incidents.title": "事故管理",
+  "incidents.title": "事故中心",
   "incidents.subtitle": "事故協調 — 追蹤、更新並解決作業中的事故",
   "incidents.activeCount": "活躍事故",
   "incidents.activeSub": "未解決且需跟進",
@@ -2418,7 +2418,7 @@ const zh: Record<keyof typeof en, string> = {
   "incidents.fromDispatchException": "從派遣異常建立",
 
   // ── Complaints ──
-  "complaints.title": "客訴管理",
+  "complaints.title": "客訴中心",
   "complaints.subtitle": "乘客客訴受理、分配與解決流程",
   "complaints.openCount": "待處理案件",
   "complaints.openSub": "需跟進的未解決客訴",
@@ -2651,7 +2651,7 @@ const zh: Record<keyof typeof en, string> = {
   "callcenter.backToHomeSub": "返回營運控制台概覽。",
 
   // ── Reports ──
-  "reports.title": "報表中心",
+  "reports.title": "報表",
   "reports.subtitle": "法規申報、營運分析與收益報告",
   "reports.createTitle": "產生報表",
   "reports.col.reportId": "報表編號",
