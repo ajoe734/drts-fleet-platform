@@ -16,6 +16,7 @@
 "use client";
 
 import React, {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -23,6 +24,7 @@ import React, {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   buildCanvasTheme,
   CanvasBanner,
@@ -387,8 +389,20 @@ function sleep(milliseconds: number) {
 // ── page ─────────────────────────────────────────────────────────────────────
 
 export default function FleetPage() {
+  // useSearchParams() requires a Suspense boundary during prerender (Next 16).
+  return (
+    <Suspense fallback={null}>
+      <FleetPageBody />
+    </Suspense>
+  );
+}
+
+function FleetPageBody() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const [vehicles, setVehicles] = useState<VehicleRegistryRecord[]>([]);
   const [drivers, setDrivers] = useState<DriverRegistryRecord[]>([]);
@@ -398,7 +412,22 @@ export default function FleetPage() {
   >({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<FleetTab>("vehicles");
+  // The active tab is sourced from the URL so canvas deep links such as
+  // /fleet?tab=vehicles are preserved and shareable.
+  const tabParam = searchParams.get("tab");
+  const activeTab: FleetTab = FLEET_TABS.some(
+    (tabDef) => tabDef.id === tabParam,
+  )
+    ? (tabParam as FleetTab)
+    : "vehicles";
+  const selectTab = useCallback(
+    (next: FleetTab) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("tab", next);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
   const [complianceOnly, setComplianceOnly] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{ title: string; at: string } | null>(
@@ -737,7 +766,7 @@ export default function FleetPage() {
       <button
         key={tabDef.id}
         type="button"
-        onClick={() => setActiveTab(tabDef.id)}
+        onClick={() => selectTab(tabDef.id)}
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -783,25 +812,48 @@ export default function FleetPage() {
             : "篩選"}
       </CanvasBtn>
       {activeTab === "drivers" ? (
-        <CanvasBtn
-          theme={TH}
-          icon="plus"
+        <ActionButton
+          descriptor={{ action: "create", enabled: true, riskLevel: "medium" }}
+          locale={locale}
           variant="primary"
-          onClick={() => setCreateDriverOpen(true)}
-        >
-          {locale === "en" ? "New driver" : "新增司機"}
-        </CanvasBtn>
+          size="sm"
+          icon="plus"
+          confirmTitle={
+            locale === "en" ? "Create a new driver master" : "新增司機主檔"
+          }
+          label={locale === "en" ? "New driver" : "新增司機"}
+          onRun={() => setCreateDriverOpen(true)}
+        />
       ) : null}
       {activeTab === "offboard" ? (
-        <CanvasBtn
-          theme={TH}
-          icon="plus"
+        <ActionButton
+          descriptor={{
+            action: "initiate",
+            enabled: vehicles.length > 0,
+            disabledReasonCode: "no_vehicles",
+            riskLevel: "high",
+            requiresReason: true,
+          }}
+          locale={locale}
           variant="primary"
-          disabled={vehicles.length === 0}
-          onClick={() => setOffboardOpen(true)}
-        >
-          {locale === "en" ? "Start offboarding" : "啟動 offboarding"}
-        </CanvasBtn>
+          size="sm"
+          icon="plus"
+          confirmTitle={
+            locale === "en"
+              ? "Start vehicle offboarding"
+              : "啟動車輛 offboarding"
+          }
+          label={locale === "en" ? "Start offboarding" : "啟動 offboarding"}
+          onRun={(reason) => {
+            // The header high-risk confirm captures the offboarding reason;
+            // prefill it into the modal so the operator does not re-type it.
+            setOffboardForm((current) => ({
+              ...current,
+              reason: reason ?? current.reason,
+            }));
+            setOffboardOpen(true);
+          }}
+        />
       ) : null}
     </>
   );
