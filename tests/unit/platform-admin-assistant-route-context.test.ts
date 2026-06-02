@@ -75,12 +75,17 @@ describe("matchRoute specificity", () => {
 
 describe("buildRouteContext — every route resolves", () => {
   it("produces a context with a valid refresh tier for all 18 routes", () => {
+    // Canonical Q-X02 tiers from @drts/contracts ui-runtime.ts. Platform Admin
+    // only uses the web-poll subset, but the assertion accepts the full union so
+    // it stays in lockstep with the contract.
     const validTiers = new Set([
+      "urgent",
       "fast",
+      "dispatch",
       "medium",
+      "medium_slow",
       "slow",
       "manual",
-      "push_interrupt",
     ]);
     for (const descriptor of PLATFORM_ADMIN_ROUTES) {
       // Build a concrete path from the template (fill dynamic params).

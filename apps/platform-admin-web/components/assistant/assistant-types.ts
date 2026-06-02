@@ -19,11 +19,15 @@
  */
 
 /**
- * Canonical refresh tiers from the realtime data model (§2). Web apps poll /
- * refresh manually; `push_interrupt` is Driver-App only and never used here, but
- * is included so the union matches the platform-wide contract.
+ * Canonical refresh tiers. Re-exported verbatim from the platform-wide contract
+ * (`@drts/contracts` → `ui-runtime.ts`, Q-X02 fixed cadence tiers) so this layer
+ * never drifts from the source of truth. The full union is
+ * `urgent | fast | dispatch | medium | medium_slow | slow | manual`; Platform
+ * Admin routes only use the slower web-poll tiers (`slow`/`medium`/`manual`),
+ * but the type stays canonical so any future tier resolves without a local edit.
  */
-export type RefreshTier = "fast" | "medium" | "slow" | "manual" | "push_interrupt";
+import type { RefreshTier } from "@drts/contracts";
+export type { RefreshTier };
 
 /** Stable key for each of the 18 Platform Admin canvas routes. */
 export type PlatformAdminRouteKey =
