@@ -807,6 +807,17 @@ def dependency_is_satisfied(task_map: dict[str, dict[str, Any]], dep_id: str) ->
     return dependency.get("status") in DEPENDENCY_DONE_STATUSES
 
 
+def task_is_external_blocked(task: dict[str, Any]) -> bool:
+    if str(task.get("status") or "").lower() != "blocked":
+        return False
+    blocked_kind = str(task.get("blocked_kind") or "").strip().lower()
+    return bool(task.get("external_blocked")) or blocked_kind in {
+        "external",
+        "external_hold",
+        "blocked_external",
+    }
+
+
 def ensure_review_finalize_handoff(
     state: dict[str, Any],
     task: dict[str, Any],
@@ -1173,7 +1184,12 @@ def recompute_agents(state: dict[str, Any]) -> None:
     for name in KNOWN_AGENTS:
         agent = get_agent(state, name)
         owned = by_owner.get(name, [])
-        active = [task for task in owned if task["status"] in {"in_progress", "review", "blocked"}]
+        active = [
+            task
+            for task in owned
+            if task["status"] in {"in_progress", "review"}
+            or (task["status"] == "blocked" and not task_is_external_blocked(task))
+        ]
         approved = [task for task in owned if task["status"] == "review_approved"]
         queued = [task for task in owned if task["status"] in {"todo", "backlog"}]
         ready = [
@@ -1345,7 +1361,9 @@ def recompute_workload(state: dict[str, Any]) -> None:
         bucket = summary[owner]
         bucket["total"] += 1
         bucket[task["status"] if task["status"] in bucket else "todo"] += 1
-        if task["status"] in {"in_progress", "review", "blocked"}:
+        if task["status"] in {"in_progress", "review"} or (
+            task["status"] == "blocked" and not task_is_external_blocked(task)
+        ):
             bucket["active"] += 1
 
     state["workload"] = {name: KNOWN_AGENTS[name]["target_workload"] for name in KNOWN_AGENTS}
@@ -1422,7 +1440,12 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     discussion_artifacts = (
         state.get("discussion_artifacts", {}) if isinstance(state.get("discussion_artifacts"), dict) else {}
     )
-    active_tasks = [task for task in state["tasks"] if task.get("status") != "done"]
+    external_hold_tasks = [task for task in state["tasks"] if task_is_external_blocked(task)]
+    active_tasks = [
+        task
+        for task in state["tasks"]
+        if task.get("status") != "done" and not task_is_external_blocked(task)
+    ]
     primary_tasks = [task for task in active_tasks if task_delivery_layer(task) == "primary"]
     external_tasks = [task for task in active_tasks if task_delivery_layer(task) == "external"]
     current_sprint_lines = [
@@ -1507,9 +1530,14 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     )
     append_layer_table(lines, external_tasks)
 
+    lines.extend(["", "### External Holds", ""])
+    append_layer_table(lines, external_hold_tasks)
+
     lines.extend(["", "## Task Board (active only)", "", "| ID | Phase | Task | Owner | Status | Depends On |", "|---|---|---|---|---|---|"])
 
-    active_board_tasks = [t for t in state["tasks"] if t.get("status") != "done"]
+    active_board_tasks = [
+        t for t in state["tasks"] if t.get("status") != "done" and not task_is_external_blocked(t)
+    ]
     for task in active_board_tasks:
         depends = ", ".join(f"`{item}`" for item in task.get("depends_on", [])) or "-"
         lines.append(
