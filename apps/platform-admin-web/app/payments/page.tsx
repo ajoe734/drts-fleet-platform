@@ -6,6 +6,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -81,36 +82,22 @@ type IssueTableRow = ReconciliationIssueRecord & Record<string, unknown>;
 type MatrixTableRow = SettlementMatrixRecord & Record<string, unknown>;
 type InvoiceTableRow = TenantInvoiceRecord & Record<string, unknown>;
 type StatementTableRow = DriverStatementRecord & Record<string, unknown>;
-type ReimbursementTableRow = ReimbursementBatchRecord & Record<string, unknown>;
 
-function toDateInputValue(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
+// /payments stays focused on settlement + reconciliation. The reimbursement
+// batch queue/detail live behind a dedicated route per the canvas Q-ADM12
+// split; the "Reimbursements →" tab navigates there instead of embedding it.
+const REIMBURSEMENTS_ROUTE = "/payments/reimbursements";
 
-function getPreviousMonthDefaults() {
-  const now = new Date();
-  const firstDay = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1),
-  );
-  const lastDay = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0),
-  );
-  return {
-    periodStart: toDateInputValue(firstDay),
-    periodEnd: toDateInputValue(lastDay),
-    periodMonth: `${firstDay.getUTCFullYear()}-${String(
-      firstDay.getUTCMonth() + 1,
-    ).padStart(2, "0")}`,
-  };
-}
+type PaymentsTabId = "matrix" | "invoices" | "statements" | "recon";
 
-function toPeriodStartIso(value: string) {
-  return `${value}T00:00:00.000Z`;
-}
-
-function toPeriodEndIso(value: string) {
-  return `${value}T23:59:59.000Z`;
-}
+// Reconciliation mutations (create / assign / resolve / reopen) are surfaced as
+// canvas action buttons that open a modal confirm, replacing the old always-on
+// inline forms. resolve/reopen are high-risk and require a reason.
+type ActiveModal =
+  | { kind: "create" }
+  | { kind: "assign"; issueId: string }
+  | { kind: "resolve"; issueId: string }
+  | { kind: "reopen"; issueId: string };
 
 function formatMoney(
   amount?: { amountMinor: number; currency: string } | null,
@@ -121,17 +108,6 @@ function formatMoney(
 
 function formatMinorMoney(amountMinor: number, currency: string) {
   return `${amountMinor.toLocaleString()} ${currency}`;
-}
-
-function reimbursementWorkflow(
-  batch: ReimbursementBatchRecord,
-  awaitingApproval: string,
-  paid: string,
-  approved: string,
-) {
-  if (batch.status === "paid") return paid;
-  if (batch.approvedAt) return approved;
-  return awaitingApproval;
 }
 
 function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
@@ -227,19 +203,6 @@ function invoiceStatusTone(status: TenantInvoiceRecord["status"]): CanvasTone {
     case "draft":
       return "neutral";
     case "issued":
-    default:
-      return "warn";
-  }
-}
-
-function reimbursementStatusTone(
-  status: ReimbursementBatchRecord["status"],
-): CanvasTone {
-  switch (status) {
-    case "paid":
-      return "success";
-    case "pending":
-      return "info";
     default:
       return "warn";
   }
@@ -364,15 +327,6 @@ function nativeSubmitStyle(
   };
 }
 
-function sectionGridStyle(columns: string): React.CSSProperties {
-  return {
-    display: "grid",
-    gridTemplateColumns: columns,
-    gap: 16,
-    alignItems: "start",
-  };
-}
-
 function emptyStateStyle(theme: CanvasTheme): React.CSSProperties {
   return {
     padding: 18,
@@ -398,8 +352,10 @@ function cellStackStyle(options?: {
 export default function PaymentsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
-  const defaults = getPreviousMonthDefaults();
+  const router = useRouter();
   const theme = PLATFORM_THEME;
+  const [activeTab, setActiveTab] = useState<PaymentsTabId>("recon");
+  const [activeModal, setActiveModal] = useState<ActiveModal | null>(null);
   const [financeActorId, setFinanceActorId] = useState(
     DEFAULT_FINANCE_ACTOR_ID,
   );
@@ -419,31 +375,14 @@ export default function PaymentsPage() {
   const [invoiceFilter, setInvoiceFilter] = useState<
     "all" | "paid" | "draft" | "issued"
   >("all");
-  const [invoiceTenantId, setInvoiceTenantId] = useState(DEMO_TENANT_ID);
-  const [invoicePeriodStart, setInvoicePeriodStart] = useState(
-    defaults.periodStart,
-  );
-  const [invoicePeriodEnd, setInvoicePeriodEnd] = useState(defaults.periodEnd);
-  const [statementPeriodMonth, setStatementPeriodMonth] = useState(
-    defaults.periodMonth,
-  );
-  const [invoicePending, setInvoicePending] = useState(false);
-  const [statementPending, setStatementPending] = useState(false);
-  const [batchActionId, setBatchActionId] = useState<string | null>(null);
   const [issueActionId, setIssueActionId] = useState<string | null>(null);
   const [issueDraftPending, setIssueDraftPending] = useState(false);
-  const [remittanceProofs, setRemittanceProofs] = useState<
-    Record<string, string>
-  >({});
   const [issueAssignments, setIssueAssignments] = useState<
     Record<string, string>
   >({});
   const [issueComments, setIssueComments] = useState<Record<string, string>>(
     {},
   );
-  const [issueCommentArtifactIds, setIssueCommentArtifactIds] = useState<
-    Record<string, string>
-  >({});
   const [issueResolutionSummaries, setIssueResolutionSummaries] = useState<
     Record<string, string>
   >({});
@@ -541,46 +480,6 @@ export default function PaymentsPage() {
     void loadFinance();
   }, [loadFinance]);
 
-  async function handleGenerateInvoice(event: React.FormEvent) {
-    event.preventDefault();
-    setInvoicePending(true);
-    setError(null);
-    try {
-      const tenantId = invoiceTenantId.trim() || DEMO_TENANT_ID;
-      await client.post("/api/tenant/invoices/generate", {
-        headers: {
-          "x-tenant-id": tenantId,
-        },
-        body: {
-          tenantId,
-          periodStart: toPeriodStartIso(invoicePeriodStart),
-          periodEnd: toPeriodEndIso(invoicePeriodEnd),
-        },
-      });
-      await loadFinance();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setInvoicePending(false);
-    }
-  }
-
-  async function handleGenerateStatements(event: React.FormEvent) {
-    event.preventDefault();
-    setStatementPending(true);
-    setError(null);
-    try {
-      await client.generateDriverStatements({
-        periodMonth: statementPeriodMonth.trim(),
-      });
-      await loadFinance();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setStatementPending(false);
-    }
-  }
-
   async function handleCreateReconciliationIssue(event: React.FormEvent) {
     event.preventDefault();
     setIssueDraftPending(true);
@@ -618,6 +517,7 @@ export default function PaymentsPage() {
         comment: "",
         artifactIds: "",
       }));
+      setActiveModal(null);
       await loadFinance();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -642,37 +542,8 @@ export default function PaymentsPage() {
         actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
         note: issueComments[issue.issueId]?.trim() || null,
       });
-      await loadFinance();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIssueActionId(null);
-    }
-  }
-
-  async function handleCommentIssue(issue: ReconciliationIssueRecord) {
-    const message = issueComments[issue.issueId]?.trim() || "";
-    if (!message) {
-      setError(t("payments.reconciliation.commentRequired"));
-      return;
-    }
-    const artifactIds = parseArtifactIds(
-      issueCommentArtifactIds[issue.issueId] ?? "",
-    );
-
-    setIssueActionId(issue.issueId);
-    setError(null);
-    try {
-      await client.addReconciliationIssueComment(issue.issueId, {
-        actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
-        message,
-        artifactIds,
-      });
       setIssueComments((current) => ({ ...current, [issue.issueId]: "" }));
-      setIssueCommentArtifactIds((current) => ({
-        ...current,
-        [issue.issueId]: "",
-      }));
+      setActiveModal(null);
       await loadFinance();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -716,6 +587,7 @@ export default function PaymentsPage() {
         ...current,
         [issue.issueId]: "",
       }));
+      setActiveModal(null);
       await loadFinance();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -750,6 +622,7 @@ export default function PaymentsPage() {
         ...current,
         [issue.issueId]: "",
       }));
+      setActiveModal(null);
       await loadFinance();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -758,71 +631,16 @@ export default function PaymentsPage() {
     }
   }
 
-  async function handleApproveBatch(batch: ReimbursementBatchRecord) {
-    setBatchActionId(batch.batchId);
-    setError(null);
-    try {
-      await client.approveReimbursementBatch(batch.batchId, {
-        statementId: batch.statementId,
-      });
-      await loadFinance();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBatchActionId(null);
-    }
-  }
-
-  async function handleMarkPaid(batch: ReimbursementBatchRecord) {
-    setBatchActionId(batch.batchId);
-    setError(null);
-    try {
-      const proofId =
-        remittanceProofs[batch.batchId]?.trim() ||
-        `remit-${batch.batchId.slice(-8)}`;
-      await client.markReimbursementPaid(batch.batchId, {
-        remittanceProofId: proofId,
-        paidAt: new Date().toISOString(),
-      });
-      setRemittanceProofs((current) => ({
-        ...current,
-        [batch.batchId]: proofId,
-      }));
-      await loadFinance();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBatchActionId(null);
-    }
-  }
-
   const filteredInvoices =
     invoiceFilter === "all"
       ? invoices
       : invoices.filter((invoice) => invoice.status === invoiceFilter);
-  const totalInvoiceAmountMinor = filteredInvoices.reduce(
-    (sum, invoice) => sum + (invoice.amount?.amountMinor ?? 0),
-    0,
-  );
-  const totalStatementNetMinor = statements.reduce(
-    (sum, statement) => sum + statement.netAmount.amountMinor,
-    0,
-  );
-  const pendingReimbursementMinor = reimbursements
-    .filter((batch) => batch.status !== "paid")
-    .reduce((sum, batch) => sum + batch.totalAmount.amountMinor, 0);
-  const paidReimbursementMinor = reimbursements
-    .filter((batch) => batch.status === "paid")
-    .reduce((sum, batch) => sum + batch.totalAmount.amountMinor, 0);
   const openIssues = reconciliationIssues.filter(
     (issue) => issue.status !== "resolved",
   );
   const openReconciliationCount = openIssues.length;
   const sortedIssues = sortReconciliationIssues(reconciliationIssues);
   const sortedMatrix = sortSettlementMatrix(settlementMatrix);
-  const pendingReimbursements = reimbursements.filter(
-    (batch) => batch.status !== "paid",
-  );
   const recentIssues = reconciliationIssues.filter((issue) =>
     withinDays(issue.updatedAt || issue.createdAt, 30),
   );
@@ -848,22 +666,11 @@ export default function PaymentsPage() {
     openIssues.map((issue) => issue.channelKey),
     describeMatrixChannel,
   );
-  const shadowIssueCount = reconciliationIssues.filter(
-    (issue) =>
-      issue.channelKey === "forwarded_shadow" ||
-      issue.forwardedFinanceContext != null,
-  ).length;
   const partnerIssueCount = openIssues.filter(
     (issue) => issue.channelKey === "partner_airport",
   ).length;
   const forwardedIssueCount = openIssues.filter(
     (issue) => issue.channelKey === "forwarded_shadow",
-  ).length;
-  const tenantIssueCount = openIssues.filter(
-    (issue) => issue.channelKey === "tenant_enterprise",
-  ).length;
-  const phoneIssueCount = openIssues.filter(
-    (issue) => issue.channelKey === "phone_dispatch",
   ).length;
 
   const invoicesById = new Map(
@@ -989,14 +796,6 @@ export default function PaymentsPage() {
           loading: t("payments.loading"),
         };
 
-  const tabs = [
-    t("payments.matrix.title"),
-    t("payments.invoicesTitle"),
-    t("payments.statementsTitle"),
-    t("payments.tab.reimbursements"),
-    t("payments.reconciliation.title"),
-  ];
-
   const issueColumns: CanvasTableColumn<IssueTableRow>[] = [
     {
       h: "Issue",
@@ -1082,211 +881,52 @@ export default function PaymentsPage() {
       mono: true,
       r: (issue) => formatDateTime(issue.updatedAt),
     },
-  ];
-
-  const actionColumns: CanvasTableColumn<IssueTableRow>[] = [
-    {
-      h: "Issue",
-      w: 150,
-      r: (issue) => (
-        <div style={cellStackStyle()}>
-          <CanvasPill theme={theme} tone={issueStatusTone(issue.status)} dot>
-            {issue.issueId}
-          </CanvasPill>
-          <span style={{ color: theme.textMuted, fontSize: 11 }}>
-            {issue.summary}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: "Assignment",
-      w: 220,
-      r: (issue) =>
-        issue.status === "resolved" ? (
-          <div style={cellStackStyle()}>
-            <span>{issue.ownerId ?? "—"}</span>
-            <span style={{ color: theme.textMuted, fontSize: 11 }}>
-              {formatDateTime(issue.updatedAt)}
-            </span>
-          </div>
-        ) : (
-          <input
-            value={issueAssignments[issue.issueId] ?? issue.ownerId ?? ""}
-            onChange={(event) =>
-              setIssueAssignments((current) => ({
-                ...current,
-                [issue.issueId]: event.target.value,
-              }))
-            }
-            placeholder={t("payments.reconciliation.assignee")}
-            style={nativeControlStyle(theme)}
-          />
-        ),
-    },
-    {
-      h: "Evidence note",
-      w: 320,
-      r: (issue) =>
-        issue.status === "resolved" ? (
-          <div style={cellStackStyle()}>
-            <span>
-              {issue.resolutionSummary ?? issue.comments.at(-1)?.message ?? "—"}
-            </span>
-            <span style={{ color: theme.textMuted, fontSize: 11 }}>
-              {t("payments.reconciliation.commentCount", {
-                count: String(issue.comments.length),
-              })}
-            </span>
-          </div>
-        ) : (
-          <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
-            <input
-              value={issueComments[issue.issueId] ?? ""}
-              onChange={(event) =>
-                setIssueComments((current) => ({
-                  ...current,
-                  [issue.issueId]: event.target.value,
-                }))
-              }
-              placeholder={t("payments.reconciliation.comment")}
-              style={nativeControlStyle(theme)}
-            />
-            <input
-              value={issueCommentArtifactIds[issue.issueId] ?? ""}
-              onChange={(event) =>
-                setIssueCommentArtifactIds((current) => ({
-                  ...current,
-                  [issue.issueId]: event.target.value,
-                }))
-              }
-              placeholder={t("payments.reconciliation.artifactIds")}
-              style={nativeControlStyle(theme)}
-            />
-          </div>
-        ),
-    },
-    {
-      h: "Resolution / reopen",
-      w: 360,
-      r: (issue) =>
-        issue.status === "resolved" ? (
-          <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
-            <input
-              value={issueReopenReasons[issue.issueId] ?? ""}
-              onChange={(event) =>
-                setIssueReopenReasons((current) => ({
-                  ...current,
-                  [issue.issueId]: event.target.value,
-                }))
-              }
-              placeholder={t("payments.reconciliation.reopenReason")}
-              style={nativeControlStyle(theme)}
-            />
-            <input
-              value={issueReopenArtifactIds[issue.issueId] ?? ""}
-              onChange={(event) =>
-                setIssueReopenArtifactIds((current) => ({
-                  ...current,
-                  [issue.issueId]: event.target.value,
-                }))
-              }
-              placeholder={t("payments.reconciliation.artifactIds")}
-              style={nativeControlStyle(theme)}
-            />
-          </div>
-        ) : (
-          <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
-            <select
-              value={issueResolutionCodes[issue.issueId] ?? ""}
-              onChange={(event) =>
-                setIssueResolutionCodes((current) => ({
-                  ...current,
-                  [issue.issueId]: event.target
-                    .value as ReconciliationIssueRecord["resolutionCode"],
-                }))
-              }
-              style={nativeControlStyle(theme)}
-            >
-              <option value="">
-                {t("payments.reconciliation.resolveCode")}
-              </option>
-              {RECONCILIATION_RESOLUTION_OPTIONS.map((code) => (
-                <option key={code} value={code}>
-                  {formatPlatformCodeLabel(locale, code)}
-                </option>
-              ))}
-            </select>
-            <input
-              value={issueResolutionSummaries[issue.issueId] ?? ""}
-              onChange={(event) =>
-                setIssueResolutionSummaries((current) => ({
-                  ...current,
-                  [issue.issueId]: event.target.value,
-                }))
-              }
-              placeholder={t("payments.reconciliation.resolveSummary")}
-              style={nativeControlStyle(theme)}
-            />
-            <input
-              value={issueResolutionArtifactIds[issue.issueId] ?? ""}
-              onChange={(event) =>
-                setIssueResolutionArtifactIds((current) => ({
-                  ...current,
-                  [issue.issueId]: event.target.value,
-                }))
-              }
-              placeholder={t("payments.reconciliation.artifactIds")}
-              style={nativeControlStyle(theme)}
-            />
-          </div>
-        ),
-    },
     {
       h: "Actions",
-      w: 206,
+      w: 184,
       r: (issue) => (
-        <div style={{ display: "grid", gap: 8, minWidth: 180 }}>
-          {issue.status !== "resolved" ? (
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {issue.status === "resolved" ? (
+            <CanvasBtn
+              theme={theme}
+              size="xs"
+              variant="secondary"
+              icon="arrow"
+              disabled={issueActionId === issue.issueId}
+              onClick={() =>
+                setActiveModal({ kind: "reopen", issueId: issue.issueId })
+              }
+            >
+              {t("payments.reconciliation.reopen")}
+            </CanvasBtn>
+          ) : (
             <>
               <CanvasBtn
                 theme={theme}
+                size="xs"
                 variant="secondary"
                 icon="copy"
                 disabled={issueActionId === issue.issueId}
-                onClick={() => void handleAssignIssue(issue)}
+                onClick={() =>
+                  setActiveModal({ kind: "assign", issueId: issue.issueId })
+                }
               >
                 {t("payments.reconciliation.assign")}
               </CanvasBtn>
               <CanvasBtn
                 theme={theme}
-                variant="secondary"
-                icon="plus"
-                disabled={issueActionId === issue.issueId}
-                onClick={() => void handleCommentIssue(issue)}
-              >
-                {t("payments.reconciliation.addComment")}
-              </CanvasBtn>
-              <CanvasBtn
-                theme={theme}
+                size="xs"
                 variant="primary"
+                danger
                 icon="check"
                 disabled={issueActionId === issue.issueId}
-                onClick={() => void handleResolveIssue(issue)}
+                onClick={() =>
+                  setActiveModal({ kind: "resolve", issueId: issue.issueId })
+                }
               >
                 {t("payments.reconciliation.resolve")}
               </CanvasBtn>
             </>
-          ) : (
-            <CanvasBtn
-              theme={theme}
-              variant="secondary"
-              icon="arrow"
-              disabled={issueActionId === issue.issueId}
-              onClick={() => void handleReopenIssue(issue)}
-            >
-              {t("payments.reconciliation.reopen")}
-            </CanvasBtn>
           )}
         </div>
       ),
@@ -1538,125 +1178,183 @@ export default function PaymentsPage() {
     },
   ];
 
-  const reimbursementColumns: CanvasTableColumn<ReimbursementTableRow>[] = [
-    {
-      h: t("payments.col.batch"),
-      w: 152,
-      mono: true,
-      r: (batch) => (
-        <div style={cellStackStyle({ mono: true })}>
-          <span>{batch.batchId}</span>
-          <span style={{ color: theme.textMuted, fontSize: 11 }}>
-            {batch.periodMonth}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: t("payments.col.driver"),
-      w: 128,
-      mono: true,
-      r: (batch) => batch.driverId,
-    },
-    {
-      h: getPlatformLabel(locale, "statement"),
-      w: 160,
-      mono: true,
-      r: (batch) => batch.statementId,
-    },
-    {
-      h: getPlatformLabel(locale, "total"),
-      w: 128,
-      mono: true,
-      r: (batch) => formatMoney(batch.totalAmount),
-    },
-    {
-      h: getPlatformLabel(locale, "workflow"),
-      w: 168,
-      r: (batch) => (
-        <div style={cellStackStyle()}>
-          <CanvasPill
-            theme={theme}
-            tone={reimbursementStatusTone(batch.status)}
-            dot
-          >
-            {reimbursementWorkflow(
-              batch,
-              t("payments.awaitingApproval"),
-              formatPlatformCodeLabel(locale, "paid"),
-              t("payments.col.approved"),
-            )}
-          </CanvasPill>
-          <span style={{ color: theme.textMuted, fontSize: 11 }}>
-            {batch.approvedAt
-              ? formatDateTime(batch.approvedAt)
-              : t("payments.awaitingApproval")}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: getPlatformLabel(locale, "remittance"),
-      w: 220,
-      r: (batch) => (
-        <input
-          value={
-            remittanceProofs[batch.batchId] ?? batch.remittanceProofId ?? ""
-          }
-          onChange={(event) =>
-            setRemittanceProofs((current) => ({
-              ...current,
-              [batch.batchId]: event.target.value,
-            }))
-          }
-          placeholder={getPlatformLabel(locale, "remittanceProofExample")}
-          style={nativeControlStyle(theme)}
-          disabled={batch.status === "paid"}
-        />
-      ),
-    },
-    {
-      h: getPlatformLabel(locale, "items"),
-      w: 220,
-      r: (batch) => (
-        <div style={{ ...cellStackStyle(), maxWidth: 220 }}>
-          {batch.items.map((item) => item.orderId).join(", ")}
-        </div>
-      ),
-    },
-    {
-      h: t("common.actions"),
-      w: 160,
-      r: (batch) => (
-        <div style={{ display: "grid", gap: 8, minWidth: 140 }}>
-          {!batch.approvedAt ? (
-            <CanvasBtn
-              theme={theme}
-              variant="secondary"
-              icon="check"
-              disabled={batchActionId === batch.batchId}
-              onClick={() => void handleApproveBatch(batch)}
-            >
-              {t("payments.approve")}
-            </CanvasBtn>
-          ) : null}
-          {batch.status !== "paid" ? (
-            <CanvasBtn
-              theme={theme}
-              variant="primary"
-              icon="billing"
-              disabled={batchActionId === batch.batchId}
-              onClick={() => void handleMarkPaid(batch)}
-            >
-              {batchActionId === batch.batchId
-                ? t("payments.saving")
-                : t("payments.markPaid")}
-            </CanvasBtn>
-          ) : null}
-        </div>
-      ),
-    },
+  const modalIssue =
+    activeModal && "issueId" in activeModal
+      ? (reconciliationIssues.find(
+          (issue) => issue.issueId === activeModal.issueId,
+        ) ?? null)
+      : null;
+
+  // The canvas tab strip is non-interactive by default, so we render clickable
+  // tab nodes and feed back the exact active node reference for the accent
+  // underline. The Reimbursements tab navigates to its dedicated route rather
+  // than swapping local body content.
+  const tabStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    cursor: "pointer",
+  };
+  let activeTabNode: React.ReactNode = null;
+  const registerTab = (id: PaymentsTabId, label: React.ReactNode) => {
+    const node = (
+      <span
+        key={id}
+        role="tab"
+        aria-selected={activeTab === id}
+        onClick={() => setActiveTab(id)}
+        style={tabStyle}
+      >
+        {label}
+      </span>
+    );
+    if (activeTab === id) {
+      activeTabNode = node;
+    }
+    return node;
+  };
+
+  const tabs: React.ReactNode[] = [
+    registerTab("matrix", t("payments.matrix.title")),
+    registerTab("invoices", t("payments.invoicesTitle")),
+    registerTab("statements", t("payments.statementsTitle")),
+    <span
+      key="reimburse"
+      role="tab"
+      aria-selected={false}
+      onClick={() => router.push(REIMBURSEMENTS_ROUTE)}
+      style={tabStyle}
+    >
+      {`${t("payments.tab.reimbursements")} →`}
+      <CanvasPill theme={theme} tone="accent">
+        {String(reimbursements.length)}
+      </CanvasPill>
+    </span>,
+    registerTab(
+      "recon",
+      <>
+        {t("payments.reconciliation.title")}
+        <CanvasPill theme={theme} tone="warn">
+          {String(openReconciliationCount)}
+        </CanvasPill>
+      </>,
+    ),
   ];
+
+  const emptyCopy = {
+    matrix:
+      locale === "en"
+        ? "Settlement matrix is empty for the current scope."
+        : "目前範圍沒有結算矩陣資料。",
+    invoices:
+      locale === "en"
+        ? "No tenant invoices match this filter."
+        : "沒有符合篩選條件的租戶 invoice。",
+    statements:
+      locale === "en"
+        ? "No driver statements generated yet."
+        : "尚未產生司機結算單。",
+    recon:
+      locale === "en"
+        ? "No reconciliation issues — the queue is clear."
+        : "目前沒有 reconciliation issue，佇列已清空。",
+  };
+
+  const invoiceFilters: Array<{
+    value: "all" | "issued" | "paid" | "draft";
+    label: string;
+  }> = [
+    { value: "all", label: locale === "en" ? "All" : "全部" },
+    { value: "issued", label: formatPlatformCodeLabel(locale, "issued") },
+    { value: "paid", label: formatPlatformCodeLabel(locale, "paid") },
+    { value: "draft", label: formatPlatformCodeLabel(locale, "draft") },
+  ];
+
+  let activeTable: React.ReactNode;
+  if (activeTab === "matrix") {
+    activeTable =
+      sortedMatrix.length > 0 ? (
+        <CanvasTable
+          theme={theme}
+          columns={settlementColumns}
+          rows={sortedMatrix as MatrixTableRow[]}
+        />
+      ) : (
+        <div style={emptyStateStyle(theme)}>{emptyCopy.matrix}</div>
+      );
+  } else if (activeTab === "invoices") {
+    activeTable = (
+      <div>
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            padding: "10px 12px",
+            flexWrap: "wrap",
+            borderBottom: `1px solid ${theme.border}`,
+          }}
+        >
+          {invoiceFilters.map((filter) => (
+            <CanvasBtn
+              key={filter.value}
+              theme={theme}
+              size="xs"
+              variant={
+                invoiceFilter === filter.value ? "primary" : "secondary"
+              }
+              onClick={() => setInvoiceFilter(filter.value)}
+            >
+              {filter.label}
+            </CanvasBtn>
+          ))}
+        </div>
+        {filteredInvoices.length > 0 ? (
+          <CanvasTable
+            theme={theme}
+            columns={invoiceColumns}
+            rows={filteredInvoices as InvoiceTableRow[]}
+          />
+        ) : (
+          <div style={emptyStateStyle(theme)}>{emptyCopy.invoices}</div>
+        )}
+      </div>
+    );
+  } else if (activeTab === "statements") {
+    activeTable =
+      statements.length > 0 ? (
+        <CanvasTable
+          theme={theme}
+          columns={statementColumns}
+          rows={statements as StatementTableRow[]}
+        />
+      ) : (
+        <div style={emptyStateStyle(theme)}>{emptyCopy.statements}</div>
+      );
+  } else {
+    activeTable =
+      sortedIssues.length > 0 ? (
+        <CanvasTable
+          theme={theme}
+          columns={issueColumns}
+          rows={sortedIssues as IssueTableRow[]}
+        />
+      ) : (
+        <div style={emptyStateStyle(theme)}>{emptyCopy.recon}</div>
+      );
+  }
+
+  const closeModalButton = (
+    <CanvasBtn
+      theme={theme}
+      size="xs"
+      variant="ghost"
+      icon="x"
+      onClick={() => setActiveModal(null)}
+    >
+      {locale === "en" ? "Close" : "關閉"}
+    </CanvasBtn>
+  );
+  const cancelLabel = locale === "en" ? "Cancel" : "取消";
 
   return (
     <div style={viewportStyle(theme)}>
@@ -1665,7 +1363,7 @@ export default function PaymentsPage() {
         title={copy.pageTitle}
         subtitle={copy.pageSubtitle}
         tabs={tabs}
-        activeTab={tabs[4]}
+        activeTab={activeTabNode}
         actions={
           <>
             <CanvasBtn theme={theme} icon="reports" disabled>
@@ -1675,11 +1373,7 @@ export default function PaymentsPage() {
               theme={theme}
               variant="primary"
               icon="plus"
-              onClick={() =>
-                document
-                  .getElementById("payments-create-issue")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
-              }
+              onClick={() => setActiveModal({ kind: "create" })}
             >
               {copy.openIssue}
             </CanvasBtn>
@@ -1778,91 +1472,50 @@ export default function PaymentsPage() {
                   reopenRateWarning ? copy.reopenDeltaWarn : copy.reopenDeltaOk
                 }
                 deltaTone={reopenRateWarning ? "down" : "up"}
-                sub={`${copy.queueWindow} · ${issueWindow.length}`}
+                sub={copy.queueWindow}
               />
             </div>
 
-            <div
-              style={sectionGridStyle("minmax(0, 2.1fr) minmax(280px, 1fr)")}
-            >
+            <CanvasCard theme={theme} padding={0}>
+              {activeTable}
+            </CanvasCard>
+          </>
+        )}
+      </div>
+
+      {activeModal ? (
+        <div
+          onClick={() => setActiveModal(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(3, 7, 14, 0.62)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            padding: "64px 16px",
+            zIndex: 60,
+            overflowY: "auto",
+          }}
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            style={{ width: "100%", maxWidth: 560 }}
+          >
+            {activeModal.kind === "create" ? (
               <CanvasCard
                 theme={theme}
-                title={t("payments.reconciliation.title")}
-                subtitle={copy.queueSubtitle}
-                padding={0}
-                actions={
-                  <CanvasBtn
-                    theme={theme}
-                    variant="secondary"
-                    icon="arrow"
-                    onClick={() => void loadFinance()}
-                  >
-                    {t("common.refresh")}
-                  </CanvasBtn>
-                }
+                title={copy.createIssueTitle}
+                subtitle={copy.createIssueSubtitle}
+                actions={closeModalButton}
               >
-                {sortedIssues.length > 0 ? (
-                  <CanvasTable
-                    theme={theme}
-                    columns={issueColumns}
-                    rows={sortedIssues as IssueTableRow[]}
-                  />
-                ) : (
-                  <div style={emptyStateStyle(theme)}>
-                    {t("payments.reconciliation.empty")}
-                  </div>
-                )}
-              </CanvasCard>
-
-              <CanvasCard
-                theme={theme}
-                title={copy.queueProfileTitle}
-                subtitle={copy.queueProfileSubtitle}
-              >
-                <CanvasDL
-                  theme={theme}
-                  cols={1}
-                  items={[
-                    {
-                      k: t("payments.reconciliation.openCount"),
-                      v: String(openReconciliationCount),
-                      mono: true,
-                    },
-                    {
-                      k: copy.shadowIssues,
-                      v: String(shadowIssueCount),
-                      mono: true,
-                    },
-                    {
-                      k: copy.queueWindow,
-                      v: `${issueWindow.length} / ${reopenedWindowCount}`,
-                      mono: true,
-                    },
-                    {
-                      k: copy.linkedExposure,
-                      v: formatMinorMoney(exposureMinor, exposureCurrency),
-                      mono: true,
-                    },
-                    {
-                      k: copy.openMix,
-                      v:
-                        openIssueMix !== "—"
-                          ? openIssueMix
-                          : `${partnerIssueCount} partner · ${tenantIssueCount} tenant · ${phoneIssueCount} phone · ${forwardedIssueCount} forwarded`,
-                    },
-                    {
-                      k: t("payments.pendingReimbursements"),
-                      v: `${pendingReimbursements.length} / ${formatMinorMoney(
-                        pendingReimbursementMinor,
-                        exposureCurrency,
-                      )}`,
-                      mono: true,
-                    },
-                  ]}
-                />
-
-                <div style={{ marginTop: 14 }}>
-                  <CanvasField theme={theme} label={copy.actorLabel}>
+                <form
+                  onSubmit={(event) =>
+                    void handleCreateReconciliationIssue(event)
+                  }
+                  style={{ display: "grid", gap: 2 }}
+                >
+                  <CanvasField theme={theme} label={copy.actorLabel} required>
                     <input
                       value={financeActorId}
                       onChange={(event) =>
@@ -1871,560 +1524,447 @@ export default function PaymentsPage() {
                       style={nativeControlStyle(theme, { mono: true })}
                     />
                   </CanvasField>
-                </div>
-              </CanvasCard>
-            </div>
-
-            <div
-              style={sectionGridStyle("minmax(0, 1.7fr) minmax(320px, 1fr)")}
-            >
-              <div id="payments-create-issue">
-                <CanvasCard
-                  theme={theme}
-                  title={copy.createIssueTitle}
-                  subtitle={copy.createIssueSubtitle}
-                >
-                  <form onSubmit={handleCreateReconciliationIssue}>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns:
-                          "repeat(auto-fit, minmax(180px, 1fr))",
-                        gap: 12,
-                      }}
+                  <CanvasField
+                    theme={theme}
+                    label={t("payments.reconciliation.issueType")}
+                    required
+                  >
+                    <select
+                      value={newIssue.issueType}
+                      onChange={(event) =>
+                        setNewIssue((current) => ({
+                          ...current,
+                          issueType: event.target
+                            .value as ReconciliationIssueRecord["issueType"],
+                        }))
+                      }
+                      style={nativeControlStyle(theme)}
                     >
-                      <CanvasField
-                        theme={theme}
-                        label={t("payments.reconciliation.issueType")}
-                        required
-                      >
-                        <select
-                          value={newIssue.issueType}
-                          onChange={(event) =>
-                            setNewIssue((current) => ({
-                              ...current,
-                              issueType: event.target
-                                .value as ReconciliationIssueRecord["issueType"],
-                              channelKey:
-                                event.target.value ===
-                                "forwarder_status_mismatch"
-                                  ? "forwarded_shadow"
-                                  : "partner_airport",
-                            }))
-                          }
-                          style={nativeControlStyle(theme)}
-                        >
-                          {RECONCILIATION_ISSUE_TYPE_OPTIONS.map(
-                            (issueType) => (
-                              <option key={issueType} value={issueType}>
-                                {formatPlatformCodeLabel(locale, issueType)}
-                              </option>
-                            ),
-                          )}
-                        </select>
-                      </CanvasField>
-                      <CanvasField
-                        theme={theme}
-                        label={t("payments.reconciliation.channel")}
-                        required
-                      >
-                        <select
-                          value={newIssue.channelKey}
-                          onChange={(event) =>
-                            setNewIssue((current) => ({
-                              ...current,
-                              channelKey: event.target.value,
-                            }))
-                          }
-                          style={nativeControlStyle(theme)}
-                        >
-                          {RECONCILIATION_CHANNEL_OPTIONS.map((channelKey) => (
-                            <option key={channelKey} value={channelKey}>
-                              {describeMatrixChannel(channelKey)}
-                            </option>
-                          ))}
-                        </select>
-                      </CanvasField>
-                      <CanvasField
-                        theme={theme}
-                        label={t("payments.reconciliation.assignee")}
-                      >
-                        <input
-                          value={newIssue.assigneeId}
-                          onChange={(event) =>
-                            setNewIssue((current) => ({
-                              ...current,
-                              assigneeId: event.target.value,
-                            }))
-                          }
-                          style={nativeControlStyle(theme)}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={theme}
-                        label={t("payments.reconciliation.orderId")}
-                      >
-                        <input
-                          value={newIssue.orderId}
-                          onChange={(event) =>
-                            setNewIssue((current) => ({
-                              ...current,
-                              orderId: event.target.value,
-                            }))
-                          }
-                          style={nativeControlStyle(theme, { mono: true })}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={theme}
-                        label={t("payments.reconciliation.partnerId")}
-                      >
-                        <input
-                          value={newIssue.partnerId}
-                          onChange={(event) =>
-                            setNewIssue((current) => ({
-                              ...current,
-                              partnerId: event.target.value,
-                            }))
-                          }
-                          style={nativeControlStyle(theme, { mono: true })}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={theme}
-                        label={t("payments.reconciliation.partnerProgramId")}
-                      >
-                        <input
-                          value={newIssue.partnerProgramId}
-                          onChange={(event) =>
-                            setNewIssue((current) => ({
-                              ...current,
-                              partnerProgramId: event.target.value,
-                            }))
-                          }
-                          style={nativeControlStyle(theme, { mono: true })}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={theme}
-                        label={t("payments.reconciliation.sponsorReference")}
-                      >
-                        <input
-                          value={newIssue.sponsorReference}
-                          onChange={(event) =>
-                            setNewIssue((current) => ({
-                              ...current,
-                              sponsorReference: event.target.value,
-                            }))
-                          }
-                          style={nativeControlStyle(theme, { mono: true })}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={theme}
-                        label={t("payments.reconciliation.mirrorOrderId")}
-                      >
-                        <input
-                          value={newIssue.mirrorOrderId}
-                          onChange={(event) =>
-                            setNewIssue((current) => ({
-                              ...current,
-                              mirrorOrderId: event.target.value,
-                            }))
-                          }
-                          style={nativeControlStyle(theme, { mono: true })}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={theme}
-                        label={t("payments.reconciliation.externalOrderId")}
-                      >
-                        <input
-                          value={newIssue.externalOrderId}
-                          onChange={(event) =>
-                            setNewIssue((current) => ({
-                              ...current,
-                              externalOrderId: event.target.value,
-                            }))
-                          }
-                          style={nativeControlStyle(theme, { mono: true })}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={theme}
-                        label={t("payments.reconciliation.linkedJobId")}
-                      >
-                        <input
-                          value={newIssue.linkedReconciliationJobId}
-                          onChange={(event) =>
-                            setNewIssue((current) => ({
-                              ...current,
-                              linkedReconciliationJobId: event.target.value,
-                            }))
-                          }
-                          style={nativeControlStyle(theme, { mono: true })}
-                        />
-                      </CanvasField>
-                      <CanvasField
-                        theme={theme}
-                        label={t("payments.form.tenantId")}
-                      >
-                        <input
-                          value={newIssue.tenantId}
-                          onChange={(event) =>
-                            setNewIssue((current) => ({
-                              ...current,
-                              tenantId: event.target.value,
-                            }))
-                          }
-                          style={nativeControlStyle(theme, { mono: true })}
-                        />
-                      </CanvasField>
-                      <div style={{ gridColumn: "1 / -1" }}>
-                        <CanvasField
-                          theme={theme}
-                          label={t("payments.reconciliation.summary")}
-                          required
-                        >
-                          <textarea
-                            value={newIssue.summary}
-                            onChange={(event) =>
-                              setNewIssue((current) => ({
-                                ...current,
-                                summary: event.target.value,
-                              }))
-                            }
-                            style={nativeTextAreaStyle(theme)}
-                          />
-                        </CanvasField>
-                      </div>
-                      <div style={{ gridColumn: "1 / -1" }}>
-                        <CanvasField
-                          theme={theme}
-                          label={t("payments.reconciliation.comment")}
-                        >
-                          <textarea
-                            value={newIssue.comment}
-                            onChange={(event) =>
-                              setNewIssue((current) => ({
-                                ...current,
-                                comment: event.target.value,
-                              }))
-                            }
-                            style={nativeTextAreaStyle(theme)}
-                          />
-                        </CanvasField>
-                      </div>
-                      <div style={{ gridColumn: "1 / -1" }}>
-                        <CanvasField
-                          theme={theme}
-                          label={t("payments.reconciliation.artifactIds")}
-                          hint={t(
-                            "payments.reconciliation.artifactPlaceholder",
-                          )}
-                        >
-                          <input
-                            value={newIssue.artifactIds}
-                            onChange={(event) =>
-                              setNewIssue((current) => ({
-                                ...current,
-                                artifactIds: event.target.value,
-                              }))
-                            }
-                            style={nativeControlStyle(theme, { mono: true })}
-                          />
-                        </CanvasField>
-                      </div>
-                    </div>
-
+                      {RECONCILIATION_ISSUE_TYPE_OPTIONS.map((type) => (
+                        <option key={type} value={type}>
+                          {formatPlatformCodeLabel(locale, type)}
+                        </option>
+                      ))}
+                    </select>
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={t("payments.matrix.col.channel")}
+                  >
+                    <select
+                      value={newIssue.channelKey}
+                      onChange={(event) =>
+                        setNewIssue((current) => ({
+                          ...current,
+                          channelKey: event.target.value,
+                        }))
+                      }
+                      style={nativeControlStyle(theme)}
+                    >
+                      {RECONCILIATION_CHANNEL_OPTIONS.map((channel) => (
+                        <option key={channel} value={channel}>
+                          {describeMatrixChannel(channel)}
+                        </option>
+                      ))}
+                    </select>
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={t("payments.reconciliation.summary")}
+                    required
+                  >
+                    <textarea
+                      value={newIssue.summary}
+                      onChange={(event) =>
+                        setNewIssue((current) => ({
+                          ...current,
+                          summary: event.target.value,
+                        }))
+                      }
+                      style={nativeTextAreaStyle(theme)}
+                    />
+                  </CanvasField>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 12,
+                    }}
+                  >
+                    <CanvasField theme={theme} label={t("payments.col.tenant")}>
+                      <input
+                        value={newIssue.tenantId}
+                        onChange={(event) =>
+                          setNewIssue((current) => ({
+                            ...current,
+                            tenantId: event.target.value,
+                          }))
+                        }
+                        style={nativeControlStyle(theme, { mono: true })}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={locale === "en" ? "External order" : "外部訂單"}
+                    >
+                      <input
+                        value={newIssue.externalOrderId}
+                        onChange={(event) =>
+                          setNewIssue((current) => ({
+                            ...current,
+                            externalOrderId: event.target.value,
+                          }))
+                        }
+                        style={nativeControlStyle(theme, { mono: true })}
+                      />
+                    </CanvasField>
+                  </div>
+                  <CanvasField
+                    theme={theme}
+                    label={t("payments.reconciliation.artifactIds")}
+                  >
+                    <input
+                      value={newIssue.artifactIds}
+                      onChange={(event) =>
+                        setNewIssue((current) => ({
+                          ...current,
+                          artifactIds: event.target.value,
+                        }))
+                      }
+                      style={nativeControlStyle(theme, { mono: true })}
+                    />
+                  </CanvasField>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 8,
+                      marginTop: 6,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal(null)}
+                      style={nativeSubmitStyle(theme)}
+                    >
+                      {cancelLabel}
+                    </button>
                     <button
                       type="submit"
-                      disabled={issueDraftPending || !newIssue.summary.trim()}
+                      disabled={issueDraftPending}
                       style={nativeSubmitStyle(theme, {
                         primary: true,
-                        disabled: issueDraftPending || !newIssue.summary.trim(),
+                        disabled: issueDraftPending,
                       })}
                     >
-                      {issueDraftPending
-                        ? t("payments.reconciliation.opening")
-                        : t("payments.reconciliation.open")}
+                      {issueDraftPending ? t("payments.saving") : copy.openIssue}
                     </button>
-                  </form>
-                </CanvasCard>
-              </div>
+                  </div>
+                </form>
+              </CanvasCard>
+            ) : null}
 
+            {modalIssue && activeModal.kind === "assign" ? (
               <CanvasCard
                 theme={theme}
-                title={copy.releaseControlsTitle}
-                subtitle={copy.releaseControlsSubtitle}
+                title={t("payments.reconciliation.assign")}
+                subtitle={modalIssue.issueId}
+                actions={closeModalButton}
               >
-                <form onSubmit={handleGenerateInvoice}>
-                  <CanvasField
-                    theme={theme}
-                    label={t("payments.form.tenantId")}
-                  >
-                    <input
-                      value={invoiceTenantId}
-                      onChange={(event) =>
-                        setInvoiceTenantId(event.target.value)
-                      }
-                      style={nativeControlStyle(theme, { mono: true })}
-                    />
-                  </CanvasField>
-                  <CanvasField
-                    theme={theme}
-                    label={t("payments.form.periodStart")}
-                  >
-                    <input
-                      type="date"
-                      value={invoicePeriodStart}
-                      onChange={(event) =>
-                        setInvoicePeriodStart(event.target.value)
-                      }
-                      style={nativeControlStyle(theme)}
-                    />
-                  </CanvasField>
-                  <CanvasField
-                    theme={theme}
-                    label={t("payments.form.periodEnd")}
-                  >
-                    <input
-                      type="date"
-                      value={invoicePeriodEnd}
-                      onChange={(event) =>
-                        setInvoicePeriodEnd(event.target.value)
-                      }
-                      style={nativeControlStyle(theme)}
-                    />
-                  </CanvasField>
-                  <button
-                    type="submit"
-                    disabled={invoicePending}
-                    style={nativeSubmitStyle(theme, {
-                      primary: true,
-                      disabled: invoicePending,
-                    })}
-                  >
-                    {invoicePending
-                      ? t("payments.generating")
-                      : t("payments.generateInvoice")}
-                  </button>
-                </form>
-
-                <div
-                  style={{
-                    height: 1,
-                    background: theme.border,
-                    margin: "16px 0",
+                <CanvasDL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    { k: "ISSUE", v: modalIssue.issueId, mono: true },
+                    {
+                      k: "STATUS",
+                      v: formatPlatformCodeLabel(locale, modalIssue.status),
+                    },
+                    { k: "OWNER", v: modalIssue.ownerId ?? "—" },
+                    { k: "SUMMARY", v: modalIssue.summary },
+                  ]}
+                />
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void handleAssignIssue(modalIssue);
                   }}
-                />
-
-                <form onSubmit={handleGenerateStatements}>
+                  style={{ display: "grid", gap: 2, marginTop: 14 }}
+                >
                   <CanvasField
                     theme={theme}
-                    label={t("payments.form.periodMonth")}
+                    label={t("payments.reconciliation.assignee")}
+                    required
                   >
                     <input
-                      value={statementPeriodMonth}
-                      onChange={(event) =>
-                        setStatementPeriodMonth(event.target.value)
+                      value={
+                        issueAssignments[modalIssue.issueId] ??
+                        modalIssue.ownerId ??
+                        ""
                       }
-                      placeholder="2026-03"
+                      onChange={(event) =>
+                        setIssueAssignments((current) => ({
+                          ...current,
+                          [modalIssue.issueId]: event.target.value,
+                        }))
+                      }
                       style={nativeControlStyle(theme, { mono: true })}
                     />
                   </CanvasField>
-                  <button
-                    type="submit"
-                    disabled={statementPending}
-                    style={nativeSubmitStyle(theme, {
-                      primary: true,
-                      disabled: statementPending,
-                    })}
+                  <CanvasField
+                    theme={theme}
+                    label={t("payments.reconciliation.comment")}
                   >
-                    {statementPending
-                      ? t("payments.generating")
-                      : t("payments.generateStatements")}
-                  </button>
+                    <input
+                      value={issueComments[modalIssue.issueId] ?? ""}
+                      onChange={(event) =>
+                        setIssueComments((current) => ({
+                          ...current,
+                          [modalIssue.issueId]: event.target.value,
+                        }))
+                      }
+                      style={nativeControlStyle(theme)}
+                    />
+                  </CanvasField>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 8,
+                      marginTop: 6,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal(null)}
+                      style={nativeSubmitStyle(theme)}
+                    >
+                      {cancelLabel}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={issueActionId === modalIssue.issueId}
+                      style={nativeSubmitStyle(theme, {
+                        primary: true,
+                        disabled: issueActionId === modalIssue.issueId,
+                      })}
+                    >
+                      {t("payments.reconciliation.assign")}
+                    </button>
+                  </div>
                 </form>
               </CanvasCard>
-            </div>
+            ) : null}
 
-            <CanvasCard
-              theme={theme}
-              title={copy.issueActionsTitle}
-              subtitle={copy.issueActionsSubtitle}
-              padding={0}
-            >
-              {sortedIssues.length > 0 ? (
-                <CanvasTable
-                  theme={theme}
-                  columns={actionColumns}
-                  rows={sortedIssues as IssueTableRow[]}
-                />
-              ) : (
-                <div style={emptyStateStyle(theme)}>
-                  {t("payments.reconciliation.empty")}
-                </div>
-              )}
-            </CanvasCard>
-
-            <CanvasCard
-              theme={theme}
-              title={t("payments.matrix.title")}
-              subtitle={t("payments.matrix.subtitle")}
-              padding={0}
-            >
-              {sortedMatrix.length > 0 ? (
-                <CanvasTable
-                  theme={theme}
-                  columns={settlementColumns}
-                  rows={sortedMatrix as MatrixTableRow[]}
-                />
-              ) : (
-                <div style={emptyStateStyle(theme)}>
-                  {t("payments.matrix.empty")}
-                </div>
-              )}
-            </CanvasCard>
-
-            <CanvasCard
-              theme={theme}
-              title={t("payments.invoicesTitle")}
-              subtitle={`${filteredInvoices.length} / ${invoices.length}`}
-              padding={0}
-              actions={
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {(["all", "paid", "issued", "draft"] as const).map(
-                    (value) => (
-                      <CanvasBtn
-                        key={value}
-                        theme={theme}
-                        size="xs"
-                        variant={
-                          invoiceFilter === value ? "primary" : "secondary"
-                        }
-                        onClick={() => setInvoiceFilter(value)}
-                      >
-                        {formatPlatformCodeLabel(locale, value)}
-                      </CanvasBtn>
-                    ),
-                  )}
-                </div>
-              }
-            >
-              {filteredInvoices.length > 0 ? (
-                <CanvasTable
-                  theme={theme}
-                  columns={invoiceColumns}
-                  rows={filteredInvoices as InvoiceTableRow[]}
-                />
-              ) : (
-                <div style={emptyStateStyle(theme)}>
-                  {t("payments.noInvoices")}
-                </div>
-              )}
-            </CanvasCard>
-
-            <CanvasCard
-              theme={theme}
-              title={t("payments.statementsTitle")}
-              subtitle={`${statements.length}`}
-              padding={0}
-            >
-              {statements.length > 0 ? (
-                <CanvasTable
-                  theme={theme}
-                  columns={statementColumns}
-                  rows={statements as StatementTableRow[]}
-                />
-              ) : (
-                <div style={emptyStateStyle(theme)}>
-                  {t("payments.noStatements")}
-                </div>
-              )}
-            </CanvasCard>
-
-            <CanvasCard
-              theme={theme}
-              title={t("payments.reimbursementsTitle")}
-              subtitle={`${pendingReimbursements.length} pending · ${paidReimbursementMinor.toLocaleString()} settled`}
-              padding={0}
-            >
-              {reimbursements.length > 0 ? (
-                <CanvasTable
-                  theme={theme}
-                  columns={reimbursementColumns}
-                  rows={reimbursements as ReimbursementTableRow[]}
-                />
-              ) : (
-                <div style={emptyStateStyle(theme)}>
-                  {t("payments.noReimbursements")}
-                </div>
-              )}
-            </CanvasCard>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                gap: 12,
-              }}
-            >
-              <CanvasCard theme={theme} title={t("payments.invoiceTotal")}>
-                <CanvasDL
-                  theme={theme}
-                  cols={1}
-                  items={[
-                    {
-                      k: t("payments.invoiceTotal"),
-                      v: formatMinorMoney(
-                        totalInvoiceAmountMinor,
-                        exposureCurrency,
-                      ),
-                      mono: true,
-                    },
-                    {
-                      k: t("payments.statementNet"),
-                      v: formatMinorMoney(
-                        totalStatementNetMinor,
-                        exposureCurrency,
-                      ),
-                      mono: true,
-                    },
-                  ]}
-                />
-              </CanvasCard>
+            {modalIssue && activeModal.kind === "resolve" ? (
               <CanvasCard
                 theme={theme}
-                title={t("payments.pendingReimbursements")}
+                title={t("payments.reconciliation.resolve")}
+                subtitle={modalIssue.issueId}
+                actions={closeModalButton}
               >
                 <CanvasDL
                   theme={theme}
-                  cols={1}
+                  cols={2}
                   items={[
+                    { k: "ISSUE", v: modalIssue.issueId, mono: true },
                     {
-                      k: t("payments.pendingReimbursements"),
-                      v: formatMinorMoney(
-                        pendingReimbursementMinor,
-                        exposureCurrency,
-                      ),
-                      mono: true,
+                      k: "STATUS",
+                      v: formatPlatformCodeLabel(locale, modalIssue.status),
+                    },
+                    { k: "SUMMARY", v: modalIssue.summary },
+                  ]}
+                />
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void handleResolveIssue(modalIssue);
+                  }}
+                  style={{ display: "grid", gap: 2, marginTop: 14 }}
+                >
+                  <CanvasField
+                    theme={theme}
+                    label={t("payments.reconciliation.resolveCode")}
+                    required
+                  >
+                    <select
+                      value={issueResolutionCodes[modalIssue.issueId] ?? ""}
+                      onChange={(event) =>
+                        setIssueResolutionCodes((current) => ({
+                          ...current,
+                          [modalIssue.issueId]: event.target
+                            .value as ReconciliationIssueRecord["resolutionCode"],
+                        }))
+                      }
+                      style={nativeControlStyle(theme)}
+                    >
+                      <option value="">
+                        {t("payments.reconciliation.resolveCode")}
+                      </option>
+                      {RECONCILIATION_RESOLUTION_OPTIONS.map((code) => (
+                        <option key={code} value={code}>
+                          {formatPlatformCodeLabel(locale, code)}
+                        </option>
+                      ))}
+                    </select>
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={t("payments.reconciliation.resolveSummary")}
+                    required
+                  >
+                    <textarea
+                      value={
+                        issueResolutionSummaries[modalIssue.issueId] ?? ""
+                      }
+                      onChange={(event) =>
+                        setIssueResolutionSummaries((current) => ({
+                          ...current,
+                          [modalIssue.issueId]: event.target.value,
+                        }))
+                      }
+                      style={nativeTextAreaStyle(theme)}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={t("payments.reconciliation.artifactIds")}
+                  >
+                    <input
+                      value={
+                        issueResolutionArtifactIds[modalIssue.issueId] ?? ""
+                      }
+                      onChange={(event) =>
+                        setIssueResolutionArtifactIds((current) => ({
+                          ...current,
+                          [modalIssue.issueId]: event.target.value,
+                        }))
+                      }
+                      style={nativeControlStyle(theme, { mono: true })}
+                    />
+                  </CanvasField>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 8,
+                      marginTop: 6,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal(null)}
+                      style={nativeSubmitStyle(theme)}
+                    >
+                      {cancelLabel}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={issueActionId === modalIssue.issueId}
+                      style={nativeSubmitStyle(theme, {
+                        primary: true,
+                        disabled: issueActionId === modalIssue.issueId,
+                      })}
+                    >
+                      {t("payments.reconciliation.resolve")}
+                    </button>
+                  </div>
+                </form>
+              </CanvasCard>
+            ) : null}
+
+            {modalIssue && activeModal.kind === "reopen" ? (
+              <CanvasCard
+                theme={theme}
+                title={t("payments.reconciliation.reopen")}
+                subtitle={modalIssue.issueId}
+                actions={closeModalButton}
+              >
+                <CanvasDL
+                  theme={theme}
+                  cols={2}
+                  items={[
+                    { k: "ISSUE", v: modalIssue.issueId, mono: true },
+                    {
+                      k: "STATUS",
+                      v: formatPlatformCodeLabel(locale, modalIssue.status),
                     },
                     {
-                      k: t("payments.paidReimbursements"),
-                      v: formatMinorMoney(
-                        paidReimbursementMinor,
-                        exposureCurrency,
-                      ),
-                      mono: true,
+                      k: "RESOLUTION",
+                      v: modalIssue.resolutionSummary ?? "—",
                     },
                   ]}
                 />
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void handleReopenIssue(modalIssue);
+                  }}
+                  style={{ display: "grid", gap: 2, marginTop: 14 }}
+                >
+                  <CanvasField
+                    theme={theme}
+                    label={t("payments.reconciliation.reopenReason")}
+                    required
+                  >
+                    <textarea
+                      value={issueReopenReasons[modalIssue.issueId] ?? ""}
+                      onChange={(event) =>
+                        setIssueReopenReasons((current) => ({
+                          ...current,
+                          [modalIssue.issueId]: event.target.value,
+                        }))
+                      }
+                      style={nativeTextAreaStyle(theme)}
+                    />
+                  </CanvasField>
+                  <CanvasField
+                    theme={theme}
+                    label={t("payments.reconciliation.artifactIds")}
+                  >
+                    <input
+                      value={issueReopenArtifactIds[modalIssue.issueId] ?? ""}
+                      onChange={(event) =>
+                        setIssueReopenArtifactIds((current) => ({
+                          ...current,
+                          [modalIssue.issueId]: event.target.value,
+                        }))
+                      }
+                      style={nativeControlStyle(theme, { mono: true })}
+                    />
+                  </CanvasField>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 8,
+                      marginTop: 6,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal(null)}
+                      style={nativeSubmitStyle(theme)}
+                    >
+                      {cancelLabel}
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={issueActionId === modalIssue.issueId}
+                      style={nativeSubmitStyle(theme, {
+                        primary: true,
+                        disabled: issueActionId === modalIssue.issueId,
+                      })}
+                    >
+                      {t("payments.reconciliation.reopen")}
+                    </button>
+                  </div>
+                </form>
               </CanvasCard>
-            </div>
-          </>
-        )}
-      </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
