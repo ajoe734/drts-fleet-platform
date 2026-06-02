@@ -10,10 +10,12 @@ Branch: `codex2/ui-fe-ten-umbrella`
 
 This document is the formal umbrella closeout for the 2026-06-01 owner pass.
 
-As of 2026-06-01 UTC:
+Final reconciliation update: 2026-06-02 UTC.
+
+As of 2026-06-02 UTC:
 
 - the umbrella route surface is present in `apps/tenant-console-web`
-- the active tenant-console rebuild tasks still tracked in machine truth are `done`, with `UI-FE-TEN-UMBRELLA` now in owner closeout
+- the 14 tenant-console dependency tasks currently recorded in machine truth are all `done`, with `UI-FE-TEN-UMBRELLA` remaining as the owner closeout task
 - app-level smoke verification is green in this worktree after repairing the remaining umbrella integration regressions
 
 This branch is therefore eligible for owner `handoff` to reviewer once the closeout commit is recorded and pushed.
@@ -68,7 +70,7 @@ This branch currently ships all nine routes from that answered set.
 
 ## Verification
 
-Executed in this worktree on 2026-06-01 UTC:
+Executed in this worktree on 2026-06-02 UTC:
 
 - `pnpm --filter @drts/contracts build`
 - `pnpm --filter @drts/ui-tokens build`
@@ -121,12 +123,32 @@ To restore a clean smoke baseline on the umbrella branch, this closeout fixed th
 
 Umbrella acceptance still requires:
 
-- all 20 dependency tasks done
+- all currently recorded tenant-console dependency tasks done
 - closeout doc
+- 20-route IA, including the 9 required NEW routes, shipped in `apps/tenant-console-web`
 - smoke test clean
 - Q-TEN01 cutover plan referenced
 
-The active canonical task board on 2026-06-01 no longer uses the older 20-task assignment snapshot as an in-flight gate. The tenant-console sub-tasks still present in active machine truth are all recorded `done`, and the umbrella task is the remaining active owner task for this wave.
+The active canonical task board on 2026-06-02 records 14 tenant-console dependency tasks:
+
+- `UI-FE-TEN-USR`
+- `UI-FE-TEN-NTF`
+- `UI-FE-TEN-SLA`
+- `UI-FE-TEN-WH`
+- `UI-FE-TEN-APIK`
+- `UI-FE-TEN-BILL`
+- `UI-FE-TEN-INV`
+- `UI-FE-TEN-CC`
+- `UI-FE-TEN-RUL`
+- `UI-FE-TEN-IG`
+- `UI-FE-TEN-RPT`
+- `UI-FE-TEN-AUD`
+- `UI-FE-TEN-FF`
+- `UI-FE-TEN-SET`
+
+All 14 are recorded `done`.
+
+The older 20-task assignment snapshot referenced six additional core route IDs (`UI-FE-TEN-HOME`, `UI-FE-TEN-BKG`, `UI-FE-TEN-BKGNEW`, `UI-FE-TEN-BKGID`, `UI-FE-TEN-PSG`, `UI-FE-TEN-ADR`) that are not standalone tasks in the current canonical task board. Their shipped scope is instead evidenced at the umbrella level by the verified route inventory and `next build` output for `/`, `/bookings`, `/bookings/new`, `/bookings/[bookingId]`, `/passengers`, and `/addresses`.
 
 This closeout therefore satisfies the remaining document, smoke, and cutover-reference evidence needed for owner handoff.
 
