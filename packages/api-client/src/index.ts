@@ -58,6 +58,7 @@ import type {
   DispatchExclusivityRecord,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
+  DeleteTenantWebhookEndpointCommand,
   DispatchCandidate,
   DispatchJobRecord,
   DispatchTraceLogRecord,
@@ -1611,8 +1612,16 @@ export class ApiClient {
     });
   }
 
-  async deleteWebhookEndpoint(webhookId: string) {
-    return this.delete(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`);
+  async deleteWebhookEndpoint(
+    webhookId: string,
+    command: DeleteTenantWebhookEndpointCommand,
+  ) {
+    return this.delete(
+      `/api/tenant/webhooks/${encodeURIComponent(webhookId)}`,
+      {
+        body: command,
+      },
+    );
   }
 
   async listWebhookDeliveries(

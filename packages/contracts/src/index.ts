@@ -901,6 +901,10 @@ export interface UpdateTenantWebhookEndpointCommand {
   disableReason?: string;
 }
 
+export interface DeleteTenantWebhookEndpointCommand {
+  reason: string;
+}
+
 export interface SendTestWebhookCommand {
   webhookId: string;
 }

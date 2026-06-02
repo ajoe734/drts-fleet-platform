@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import type { CSSProperties, ReactNode } from "react";
 import type {
   CreateTenantWebhookEndpointCommand,
+  DeleteTenantWebhookEndpointCommand,
   IdentityContext,
   NotificationRecord,
   ResourceActionDescriptor,
@@ -1325,7 +1326,10 @@ async function deleteWebhookAction(formData: FormData) {
     if (!deleteReason) {
       throw new Error("刪除 endpoint 時必須填寫 reason。");
     }
-    await client.deleteWebhookEndpoint(webhookId);
+    const command: DeleteTenantWebhookEndpointCommand = {
+      reason: deleteReason,
+    };
+    await client.deleteWebhookEndpoint(webhookId, command);
     revalidatePath("/webhooks");
     redirect(`/webhooks?success=${encodeURIComponent("Endpoint 已刪除。")}`);
   } catch (error) {
