@@ -19,6 +19,7 @@ import { SnakeCaseInterceptor } from "./common/snake-case.interceptor";
 import { BootstrapThrottlerGuard } from "./common/throttling/bootstrap-throttler.guard";
 import { GLOBAL_RATE_LIMIT } from "./common/throttling/rate-limit.constants";
 import { HealthModule } from "./health/health.module";
+import { AssistantModule } from "./modules/assistant/assistant.module";
 import { AuditNotificationModule } from "./modules/audit-notification/audit-notification.module";
 import { BillingSettlementModule } from "./modules/billing-settlement/billing-settlement.module";
 import { CallcenterModule } from "./modules/callcenter/callcenter.module";
@@ -65,6 +66,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     ReportingFilingModule,
     ForwarderModule,
     FeatureFlagsModule,
+    AssistantModule,
     IncidentModule,
     MaintenanceModule,
     ShiftAttendanceModule,

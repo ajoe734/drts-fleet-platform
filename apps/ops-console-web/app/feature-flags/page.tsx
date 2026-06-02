@@ -343,6 +343,7 @@ function featureFlagDescription(locale: Locale, flag: FeatureFlagRecordLike) {
     "driver-app.incidents": "啟用司機 App 事故回報",
     "driver-app.shift": "啟用司機 App 班次與出勤追蹤",
     "driver-app.tasks": "啟用司機 App 任務生命週期",
+    "ops.assistant.enabled": "啟用營運後台 LLM 助理介面與後端可用性（per-realm 開關，非憑證）",
     "ops-console.callcenter": "啟用營運後台客服中心工作階段檢視",
     "ops-console.complaint": "啟用營運後台客訴案件管理",
     "ops-console.dispatch": "啟用營運後台派車調度板",

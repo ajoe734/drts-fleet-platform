@@ -97,6 +97,12 @@ export class FeatureFlagsService {
         enabled: true,
         description: "Enable Phase 1 smoke test endpoints",
       },
+      {
+        key: "ops.assistant.enabled",
+        enabled: false,
+        description:
+          "Enable ops console LLM assistant widget + backend availability (per-realm toggle, not a credential)",
+      },
     ];
 
     for (const flag of defaultFlags) {
