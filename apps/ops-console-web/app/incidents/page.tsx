@@ -19,7 +19,6 @@ import {
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasShell as Shell,
   CanvasTable as Table,
   buildCanvasTheme,
   type CanvasTableColumn,
@@ -203,96 +202,6 @@ function emptyStateStyle(themeToken: CanvasTheme): CSSProperties {
     color: themeToken.textMuted,
     fontSize: 12.5,
   };
-}
-
-function buildOpsNav(locale: "en" | "zh") {
-  return [
-    { divider: locale === "en" ? "Workspace" : "工作面" },
-    {
-      key: "dashboard",
-      href: "/dashboard",
-      icon: "dashboard" as const,
-      label: locale === "en" ? "Dashboard" : "營運總覽",
-    },
-    { divider: locale === "en" ? "Dispatch" : "即時派遣" },
-    {
-      key: "dispatch",
-      href: "/dispatch",
-      icon: "dispatch" as const,
-      label: locale === "en" ? "Dispatch" : "派遣",
-    },
-    {
-      key: "callcenter",
-      href: "/callcenter",
-      icon: "callcenter" as const,
-      label: locale === "en" ? "Callcenter" : "客服中心",
-    },
-    { divider: locale === "en" ? "Casework" : "案件處理" },
-    {
-      key: "complaints",
-      href: "/complaints",
-      icon: "complaints" as const,
-      label: locale === "en" ? "Complaints" : "客訴",
-    },
-    {
-      key: "incidents",
-      href: "/incidents",
-      icon: "incidents" as const,
-      label: locale === "en" ? "Incidents" : "事故",
-      badge: "1",
-      badgeTone: "danger" as const,
-    },
-    { divider: locale === "en" ? "Monitoring" : "營運監控" },
-    {
-      key: "reports",
-      href: "/reports",
-      icon: "reports" as const,
-      label: locale === "en" ? "Reports" : "報表",
-    },
-    {
-      key: "revenue",
-      href: "/revenue",
-      icon: "revenue" as const,
-      label: locale === "en" ? "Revenue" : "收益審視",
-    },
-    {
-      key: "attendance",
-      href: "/attendance",
-      icon: "attendance" as const,
-      label: locale === "en" ? "Attendance" : "班次出勤",
-    },
-    {
-      key: "maintenance",
-      href: "/maintenance",
-      icon: "maintenance" as const,
-      label: locale === "en" ? "Maintenance" : "車輛保修",
-    },
-    { divider: locale === "en" ? "Registry" : "主資料" },
-    {
-      key: "drivers",
-      href: "/drivers",
-      icon: "fleet" as const,
-      label: locale === "en" ? "Drivers" : "司機",
-    },
-    {
-      key: "vehicles",
-      href: "/vehicles",
-      icon: "vehicles" as const,
-      label: locale === "en" ? "Vehicles" : "車輛",
-    },
-    {
-      key: "contracts",
-      href: "/contracts",
-      icon: "contracts" as const,
-      label: locale === "en" ? "Contracts" : "合約",
-    },
-    {
-      key: "flags",
-      href: "/feature-flags",
-      icon: "flags" as const,
-      label: locale === "en" ? "Feature Flags" : "功能旗標",
-    },
-  ];
 }
 
 function matchesIncidentTab(status: IncidentStatus, tab: IncidentTab) {
@@ -695,7 +604,6 @@ export default function IncidentsPage() {
     },
   ];
 
-  const nav = buildOpsNav(locale);
   const tabConfig: Array<{ key: IncidentTab; label: string }> = [
     { key: "active", label: `Active ${activeCount}` },
     { key: "resolved", label: "Resolved" },
@@ -723,19 +631,7 @@ export default function IncidentsPage() {
     tabNodes[0];
 
   return (
-    <Shell
-      theme={theme}
-      nav={nav}
-      active="incidents"
-      currentPath="/incidents"
-      breadcrumb={[locale === "en" ? "Incidents" : "事故"]}
-      brandLabel="DRTS Fleet"
-      brandSubLabel={locale === "en" ? "Operations Console" : "營運控制台"}
-      brandMark="OC"
-      searchPlaceholder={t("incidents.search")}
-      avatarLabel="OC"
-      style={{ minHeight: "100vh" }}
-    >
+    <>
       <PageHeader
         theme={theme}
         title={locale === "en" ? "Incident Center" : "事故中心"}
@@ -1355,7 +1251,7 @@ export default function IncidentsPage() {
           </div>
         ) : null}
       </div>
-    </Shell>
+    </>
   );
 }
 
