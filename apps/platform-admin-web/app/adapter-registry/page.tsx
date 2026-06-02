@@ -22,7 +22,7 @@ const pageBodyStyle = {
 
 const adapterGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
   gap: 12,
 } satisfies CSSProperties;
 
@@ -33,6 +33,13 @@ const titleRowStyle = {
   flexWrap: "wrap",
 } satisfies CSSProperties;
 
+const capabilityRowStyle = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  marginTop: 12,
+} satisfies CSSProperties;
+
 const authorityStackStyle = {
   display: "grid",
   gap: 10,
@@ -41,7 +48,7 @@ const authorityStackStyle = {
   borderTop: `1px solid ${theme.border}`,
 } satisfies CSSProperties;
 
-const authorityCardStyle = {
+const authorityLaneStyle = {
   display: "grid",
   gap: 8,
   padding: 12,
@@ -52,7 +59,7 @@ const authorityCardStyle = {
 
 const authorityHeaderStyle = {
   display: "flex",
-  alignItems: "center",
+  alignItems: "flex-start",
   justifyContent: "space-between",
   gap: 12,
   flexWrap: "wrap",
@@ -83,17 +90,23 @@ const buttonRowStyle = {
   flexWrap: "wrap",
 } satisfies CSSProperties;
 
-const footerLegendStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  flexWrap: "wrap",
+const helperTextStyle = {
+  color: theme.textDim,
+  fontSize: 11.5,
+  lineHeight: 1.45,
 } satisfies CSSProperties;
 
 const noop = () => {};
 
-type AdapterStatus = "healthy" | "degraded" | "pending_renewal";
+type AdapterStatus = "healthy" | "degraded" | "renewal_overdue";
 type AdapterKind = "forwarder" | "auth" | "filing";
+
+type AdapterAction = {
+  label: string;
+  icon?: "plus" | "apiKeys" | "arrow";
+  danger?: boolean;
+  disabled?: boolean;
+};
 
 type AdapterRecord = {
   id: string;
@@ -102,9 +115,14 @@ type AdapterRecord = {
   status: AdapterStatus;
   latency: string;
   last: string;
-  orders24h: string | number;
+  orders24h: string;
+  capabilityFlags: string[];
   platformAuthority: string;
   opsAuthority: string;
+  platformActions: AdapterAction[];
+  opsActions: AdapterAction[];
+  platformNote?: string;
+  opsNote?: string;
 };
 
 const adapters: AdapterRecord[] = [
@@ -115,9 +133,21 @@ const adapters: AdapterRecord[] = [
     status: "healthy",
     latency: "142ms",
     last: "2s ago",
-    orders24h: 1421,
-    platformAuthority: "config, credential, disable",
-    opsAuthority: "pause / retry deliveries",
+    orders24h: "1,421",
+    capabilityFlags: [
+      "dispatch forwarding",
+      "credential write",
+      "hard disable",
+    ],
+    platformAuthority:
+      "Config, credential, and disable authority remains here.",
+    opsAuthority: "Pause and retry stay in Ops once traffic is flowing.",
+    platformActions: [
+      { label: "Edit credential", icon: "apiKeys" },
+      { label: "Rotate", icon: "arrow" },
+      { label: "Disable", danger: true },
+    ],
+    opsActions: [{ label: "Ops pause (TTL)" }, { label: "Retry backlog" }],
   },
   {
     id: "gocab-v1",
@@ -126,9 +156,23 @@ const adapters: AdapterRecord[] = [
     status: "degraded",
     latency: "780ms",
     last: "8s ago",
-    orders24h: 220,
-    platformAuthority: "credential rotate before cutover",
-    opsAuthority: "pause route, inspect backlog",
+    orders24h: "220",
+    capabilityFlags: ["dispatch forwarding", "degraded", "backlog inspection"],
+    platformAuthority:
+      "Credential cutover and health escalation belong to Platform Admin.",
+    opsAuthority: "Ops owns backlog triage while latency remains degraded.",
+    platformActions: [
+      { label: "Edit credential", icon: "apiKeys" },
+      { label: "Rotate", icon: "arrow" },
+      { label: "Disable", danger: true },
+    ],
+    opsActions: [
+      { label: "Ops pause (TTL)" },
+      { label: "Retry backlog" },
+      { label: "View handoff" },
+    ],
+    opsNote:
+      "GoCab is degraded, so the ops lane stays visible even though write authority does not move here.",
   },
   {
     id: "ctbc-oauth",
@@ -137,9 +181,18 @@ const adapters: AdapterRecord[] = [
     status: "healthy",
     latency: "88ms",
     last: "1s ago",
-    orders24h: "–",
-    platformAuthority: "client secret, redirect policy",
-    opsAuthority: "incident routing only",
+    orders24h: "N/A",
+    capabilityFlags: ["oauth", "secret rotation", "redirect policy"],
+    platformAuthority:
+      "Client secret and redirect allowlist governance stays here.",
+    opsAuthority:
+      "Ops only receives the incident handoff context for auth faults.",
+    platformActions: [
+      { label: "Edit credential", icon: "apiKeys" },
+      { label: "Rotate", icon: "arrow" },
+      { label: "Disable", danger: true },
+    ],
+    opsActions: [{ label: "View handoff" }],
   },
   {
     id: "cathay-magic",
@@ -148,9 +201,18 @@ const adapters: AdapterRecord[] = [
     status: "healthy",
     latency: "110ms",
     last: "3s ago",
-    orders24h: "–",
-    platformAuthority: "credential + allowlist governance",
-    opsAuthority: "handoff only",
+    orders24h: "N/A",
+    capabilityFlags: ["oauth", "allowlist", "campaign auth"],
+    platformAuthority:
+      "Platform Admin governs credentials and approved callback policy.",
+    opsAuthority:
+      "Ops can view the handoff packet but cannot mutate auth settings.",
+    platformActions: [
+      { label: "Edit credential", icon: "apiKeys" },
+      { label: "Rotate", icon: "arrow" },
+      { label: "Disable", danger: true },
+    ],
+    opsActions: [{ label: "View handoff" }],
   },
   {
     id: "mof-einv",
@@ -159,20 +221,48 @@ const adapters: AdapterRecord[] = [
     status: "healthy",
     latency: "320ms",
     last: "12m ago",
-    orders24h: "–",
-    platformAuthority: "mapping, filing credential",
-    opsAuthority: "observe reconciliation incidents",
+    orders24h: "N/A",
+    capabilityFlags: ["filing", "mapping policy", "reconciliation watch"],
+    platformAuthority:
+      "Filing credential and mapping changes require platform governance.",
+    opsAuthority:
+      "Ops can only observe reconciliation impact from this console handoff.",
+    platformActions: [
+      { label: "Edit credential", icon: "apiKeys" },
+      { label: "Rotate", icon: "arrow" },
+      { label: "Disable", danger: true },
+    ],
+    opsActions: [{ label: "Observe only", disabled: true }],
+    opsNote:
+      "Filing adapters do not support direct operational pause or retry in Platform Admin.",
   },
   {
     id: "mof-bgmt",
     source: "BGMT 派遣回報",
     kind: "filing",
-    status: "pending_renewal",
-    latency: "–",
+    status: "renewal_overdue",
+    latency: "N/A",
     last: "4h ago",
-    orders24h: "–",
-    platformAuthority: "token renewal and disable",
-    opsAuthority: "monitor missed completion reports",
+    orders24h: "N/A",
+    capabilityFlags: [
+      "filing",
+      "token renewal overdue",
+      "completion reporting",
+    ],
+    platformAuthority:
+      "Token renewal and hard disable remain in Platform Admin with audited reason capture.",
+    opsAuthority:
+      "Ops monitors missed completion reports and follows the incident handoff only.",
+    platformActions: [
+      { label: "Edit credential", icon: "apiKeys" },
+      { label: "Rotate", icon: "arrow" },
+      { label: "Disable", danger: true },
+    ],
+    opsActions: [{ label: "Observe only", disabled: true }],
+    platformNote:
+      "The previous BGMT token expired on May 31, 2026. Renew here before reopening completion-report delivery.",
+    opsNote:
+      "Ops can see impact and escalation context here, but cannot renew the token from this route.",
   },
 ];
 
@@ -194,10 +284,18 @@ function getStatusTone(status: AdapterStatus) {
       return "success";
     case "degraded":
       return "warn";
-    case "pending_renewal":
+    case "renewal_overdue":
     default:
       return "danger";
   }
+}
+
+function getActionProps(action: AdapterAction) {
+  return {
+    ...(action.icon ? { icon: action.icon } : {}),
+    ...(action.danger ? { danger: true } : {}),
+    ...(action.disabled ? { disabled: true } : {}),
+  };
 }
 
 export default function AdapterRegistryPage() {
@@ -207,56 +305,50 @@ export default function AdapterRegistryPage() {
       ? {
           title: "External Platform Adapter Registry",
           subtitle:
-            "config / credential governance lives in platform-admin; operational pause / retry belongs in ops (Q-ADM17 split)",
-          createAction: "Create",
-          rotateAction: "Rotate now",
-          metaPill: "Split authority",
-          dangerTitle: "mof-bgmt token expires in 6 days",
+            "Config and credential writes live in Platform Admin; operational pause and retry remain in Ops for Q-ADM17 split authority.",
+          createAction: "Register adapter",
+          rotateAction: "Renew token",
+          metaPill: "Write authority",
+          opsPill: "Ops scope",
+          dangerTitle: "mof-bgmt renewal overdue",
           dangerBody:
-            "Renew the BGMT dispatch reporting token before 2026-05-31 or today's completed trips will stop reporting upstream.",
+            "The previous BGMT dispatch reporting token expired on May 31, 2026. Renew it here before completion reports resume upstream.",
           platformAuthority: "Platform Admin",
-          platformBody:
-            "Manage config, credentials, and hard disable actions with audited reason capture.",
           opsAuthority: "Ops Console",
-          opsBody:
-            "Operational pause, retry, and incident response stay outside this console.",
-          editCredential: "Edit credential",
-          rotate: "Rotate",
-          disable: "Disable",
-          pause: "Ops pause (TTL)",
-          retry: "Retry backlog",
-          handoff: "View handoff",
-          observe: "Observe only",
           latency: "LATENCY",
           lastEvent: "LAST EVENT",
           orders24h: "ORDERS 24H",
+          capabilities: "CAPABILITY FLAGS",
+          healthy: "healthy",
+          degraded: "degraded",
+          renewalOverdue: "renewal overdue",
+          forwarder: "forwarder",
+          auth: "auth",
+          filing: "filing",
         }
       : {
           title: "External Platform Adapter Registry",
           subtitle:
-            "config / credential 治理在 platform-admin；operational pause / retry 在 ops（Q-ADM17 split）",
+            "config / credential 寫入權在 Platform Admin；operational pause / retry 依 Q-ADM17 留在 Ops。",
           createAction: "註冊 adapter",
-          rotateAction: "立即輪替",
-          metaPill: "Split authority",
-          dangerTitle: "mof-bgmt · token 距到期 6 天",
+          rotateAction: "續發 token",
+          metaPill: "Write authority",
+          opsPill: "Ops scope",
+          dangerTitle: "mof-bgmt 續發逾期",
           dangerBody:
-            "BGMT 派遣回報 token 必須於 2026-05-31 前輪替；否則無法回報今日完成單。",
+            "上一把 BGMT 派遣回報 token 已於 2026 年 5 月 31 日到期。必須先在此續發，完成單回報才會恢復上游送達。",
           platformAuthority: "Platform Admin",
-          platformBody:
-            "這裡只處理 config、credential 與 hard disable，所有高風險操作都要留下原因與審計痕跡。",
           opsAuthority: "Ops Console",
-          opsBody:
-            "operational pause、retry 與 incident response 仍由 ops console 執行。",
-          editCredential: "編輯 credential",
-          rotate: "輪替",
-          disable: "停用",
-          pause: "ops pause (TTL)",
-          retry: "重送 backlog",
-          handoff: "查看 handoff",
-          observe: "僅觀察",
           latency: "LATENCY",
           lastEvent: "LAST EVENT",
           orders24h: "ORDERS 24H",
+          capabilities: "CAPABILITY FLAGS",
+          healthy: "healthy",
+          degraded: "degraded",
+          renewalOverdue: "renewal overdue",
+          forwarder: "forwarder",
+          auth: "auth",
+          filing: "filing",
         };
 
   return (
@@ -292,158 +384,139 @@ export default function AdapterRegistryPage() {
         />
 
         <div style={adapterGridStyle}>
-          {adapters.map((adapter) => (
-            <CanvasCard
-              key={adapter.id}
-              theme={theme}
-              title={
-                <span style={titleRowStyle}>
-                  <span>{adapter.source}</span>
-                  <CanvasPill theme={theme} tone={getKindTone(adapter.kind)}>
-                    {adapter.kind}
-                  </CanvasPill>
-                </span>
-              }
-              subtitle={adapter.id}
-              actions={
-                <CanvasPill
-                  theme={theme}
-                  tone={getStatusTone(adapter.status)}
-                  dot
-                >
-                  {adapter.status}
-                </CanvasPill>
-              }
-            >
-              <CanvasDL
+          {adapters.map((adapter) => {
+            const statusLabel =
+              adapter.status === "healthy"
+                ? copy.healthy
+                : adapter.status === "degraded"
+                  ? copy.degraded
+                  : copy.renewalOverdue;
+
+            const kindLabel =
+              adapter.kind === "forwarder"
+                ? copy.forwarder
+                : adapter.kind === "auth"
+                  ? copy.auth
+                  : copy.filing;
+
+            return (
+              <CanvasCard
+                key={adapter.id}
                 theme={theme}
-                cols={3}
-                items={[
-                  { k: copy.latency, v: adapter.latency, mono: true },
-                  { k: copy.lastEvent, v: adapter.last, mono: true },
-                  {
-                    k: copy.orders24h,
-                    v: String(adapter.orders24h),
-                    mono: true,
-                  },
-                ]}
-              />
-
-              <div style={authorityStackStyle}>
-                <div style={authorityCardStyle}>
-                  <div style={authorityHeaderStyle}>
-                    <div style={authorityCopyStyle}>
-                      <div style={authorityTitleStyle}>
-                        {copy.platformAuthority}
-                      </div>
-                      <div style={authorityBodyStyle}>
-                        {copy.platformBody} {adapter.platformAuthority}.
-                      </div>
-                    </div>
-                    <CanvasPill theme={theme} tone="accent">
-                      {copy.metaPill}
+                title={
+                  <span style={titleRowStyle}>
+                    <span>{adapter.source}</span>
+                    <CanvasPill theme={theme} tone={getKindTone(adapter.kind)}>
+                      {kindLabel}
                     </CanvasPill>
-                  </div>
+                  </span>
+                }
+                subtitle={adapter.id}
+                actions={
+                  <CanvasPill
+                    theme={theme}
+                    tone={getStatusTone(adapter.status)}
+                    dot
+                  >
+                    {statusLabel}
+                  </CanvasPill>
+                }
+              >
+                <CanvasDL
+                  theme={theme}
+                  cols={3}
+                  items={[
+                    { k: copy.latency, v: adapter.latency, mono: true },
+                    { k: copy.lastEvent, v: adapter.last, mono: true },
+                    { k: copy.orders24h, v: adapter.orders24h, mono: true },
+                  ]}
+                />
 
-                  <div style={buttonRowStyle}>
-                    <CanvasBtn
-                      theme={theme}
-                      variant="secondary"
-                      size="sm"
-                      icon="apiKeys"
-                      onClick={noop}
-                    >
-                      {copy.editCredential}
-                    </CanvasBtn>
-                    <CanvasBtn
-                      theme={theme}
-                      variant="secondary"
-                      size="sm"
-                      icon="arrow"
-                      onClick={noop}
-                    >
-                      {copy.rotate}
-                    </CanvasBtn>
-                    <CanvasBtn
-                      theme={theme}
-                      variant="secondary"
-                      size="sm"
-                      onClick={noop}
-                    >
-                      {copy.disable}
-                    </CanvasBtn>
-                  </div>
+                <div style={capabilityRowStyle}>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.capabilities}
+                  </CanvasPill>
+                  {adapter.capabilityFlags.map((flag) => (
+                    <CanvasPill key={flag} theme={theme} tone="info">
+                      {flag}
+                    </CanvasPill>
+                  ))}
                 </div>
 
-                <div style={authorityCardStyle}>
-                  <div style={authorityHeaderStyle}>
-                    <div style={authorityCopyStyle}>
-                      <div style={authorityTitleStyle}>{copy.opsAuthority}</div>
-                      <div style={authorityBodyStyle}>
-                        {copy.opsBody} {adapter.opsAuthority}.
+                <div style={authorityStackStyle}>
+                  <div style={authorityLaneStyle}>
+                    <div style={authorityHeaderStyle}>
+                      <div style={authorityCopyStyle}>
+                        <div style={authorityTitleStyle}>
+                          {copy.platformAuthority}
+                        </div>
+                        <div style={authorityBodyStyle}>
+                          {adapter.platformAuthority}
+                        </div>
                       </div>
+                      <CanvasPill theme={theme} tone="accent">
+                        {copy.metaPill}
+                      </CanvasPill>
                     </div>
-                    <CanvasPill theme={theme} tone="info">
-                      ops
-                    </CanvasPill>
-                  </div>
 
-                  <div style={buttonRowStyle}>
-                    {adapter.kind === "forwarder" ? (
-                      <>
+                    <div style={buttonRowStyle}>
+                      {adapter.platformActions.map((action) => (
                         <CanvasBtn
+                          key={action.label}
                           theme={theme}
                           variant="secondary"
                           size="sm"
                           onClick={noop}
+                          {...getActionProps(action)}
                         >
-                          {copy.pause}
+                          {action.label}
                         </CanvasBtn>
+                      ))}
+                    </div>
+
+                    {adapter.platformNote ? (
+                      <div style={helperTextStyle}>{adapter.platformNote}</div>
+                    ) : null}
+                  </div>
+
+                  <div style={authorityLaneStyle}>
+                    <div style={authorityHeaderStyle}>
+                      <div style={authorityCopyStyle}>
+                        <div style={authorityTitleStyle}>
+                          {copy.opsAuthority}
+                        </div>
+                        <div style={authorityBodyStyle}>
+                          {adapter.opsAuthority}
+                        </div>
+                      </div>
+                      <CanvasPill theme={theme} tone="info">
+                        {copy.opsPill}
+                      </CanvasPill>
+                    </div>
+
+                    <div style={buttonRowStyle}>
+                      {adapter.opsActions.map((action) => (
                         <CanvasBtn
+                          key={action.label}
                           theme={theme}
                           variant="secondary"
                           size="sm"
                           onClick={noop}
+                          {...getActionProps(action)}
                         >
-                          {copy.retry}
+                          {action.label}
                         </CanvasBtn>
-                      </>
-                    ) : adapter.kind === "auth" ? (
-                      <CanvasBtn
-                        theme={theme}
-                        variant="secondary"
-                        size="sm"
-                        onClick={noop}
-                      >
-                        {copy.handoff}
-                      </CanvasBtn>
-                    ) : (
-                      <CanvasBtn
-                        theme={theme}
-                        variant="secondary"
-                        size="sm"
-                        onClick={noop}
-                      >
-                        {copy.observe}
-                      </CanvasBtn>
-                    )}
+                      ))}
+                    </div>
+
+                    {adapter.opsNote ? (
+                      <div style={helperTextStyle}>{adapter.opsNote}</div>
+                    ) : null}
                   </div>
                 </div>
-              </div>
-            </CanvasCard>
-          ))}
-        </div>
-
-        <div style={footerLegendStyle}>
-          <CanvasPill theme={theme} tone="danger" dot>
-            mof-bgmt renewal required
-          </CanvasPill>
-          <CanvasPill theme={theme} tone="warn" dot>
-            GoCab degraded
-          </CanvasPill>
-          <CanvasPill theme={theme} tone="neutral">
-            platform-admin does not execute ops pause / retry
-          </CanvasPill>
+              </CanvasCard>
+            );
+          })}
         </div>
       </div>
     </>
