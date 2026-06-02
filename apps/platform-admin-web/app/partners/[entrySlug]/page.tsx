@@ -102,6 +102,73 @@ const sectionAnchorStyle = {
   scrollMarginTop: 92,
 } satisfies React.CSSProperties;
 
+const modalBackdropStyle = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.52)",
+  display: "grid",
+  placeItems: "center",
+  padding: 24,
+  zIndex: 30,
+} satisfies React.CSSProperties;
+
+const modalCardStyle = {
+  width: "min(100%, 560px)",
+  maxHeight: "min(100%, 720px)",
+  overflowY: "auto",
+  borderRadius: 16,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+  boxShadow: "0 24px 80px rgba(15, 23, 42, 0.28)",
+} satisfies React.CSSProperties;
+
+const modalHeaderStyle = {
+  display: "grid",
+  gap: 6,
+  padding: "18px 20px 14px",
+  borderBottom: `1px solid ${theme.border}`,
+} satisfies React.CSSProperties;
+
+const modalBodyStyle = {
+  display: "grid",
+  gap: 14,
+  padding: 20,
+} satisfies React.CSSProperties;
+
+const modalFooterStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  flexWrap: "wrap",
+  padding: "14px 20px 20px",
+  borderTop: `1px solid ${theme.border}`,
+} satisfies React.CSSProperties;
+
+const secretBoxStyle = {
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  padding: "12px 14px",
+  fontFamily: theme.monoFamily,
+  fontSize: 12,
+  lineHeight: 1.6,
+  overflowWrap: "anywhere",
+} satisfies React.CSSProperties;
+
+const miniListStyle = {
+  display: "grid",
+  gap: 10,
+} satisfies React.CSSProperties;
+
+const miniListRowStyle = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 12,
+  fontSize: 12.5,
+} satisfies React.CSSProperties;
+
 function heroGridStyle(isCompact: boolean) {
   return {
     display: "grid",
@@ -303,12 +370,85 @@ function SelectField({
 
 type CredentialRow = Record<string, unknown> & {
   keyId: string;
+  kind: string;
   masked: string;
-  source: string;
-  createdAt: string;
+  rotatedAt: string;
   lastUsedAt: string;
   revokedAt: string | null;
 };
+
+type CredentialActionMode = "issue" | "rotate";
+
+type PendingCredentialAction = {
+  mode: CredentialActionMode;
+  title: string;
+  body: string;
+};
+
+function ModalShell({
+  title,
+  subtitle,
+  children,
+  footer,
+  onClose,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  footer: React.ReactNode;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      style={modalBackdropStyle}
+      onClick={onClose}
+      role="presentation"
+      aria-hidden={false}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        style={modalCardStyle}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div style={modalHeaderStyle}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              gap: 16,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 16,
+                  fontWeight: 700,
+                  color: theme.text,
+                  lineHeight: 1.25,
+                }}
+              >
+                {title}
+              </div>
+              {subtitle ? (
+                <div style={{ ...mutedTextStyle, marginTop: 4 }}>
+                  {subtitle}
+                </div>
+              ) : null}
+            </div>
+            <Btn theme={theme} variant="ghost" onClick={onClose}>
+              Close
+            </Btn>
+          </div>
+        </div>
+        <div style={modalBodyStyle}>{children}</div>
+        <div style={modalFooterStyle}>{footer}</div>
+      </div>
+    </div>
+  );
+}
 
 export default function PartnerDetailPage() {
   const params = useParams<{ entrySlug: string }>();
@@ -332,6 +472,15 @@ export default function PartnerDetailPage() {
   const [revokingCredentialId, setRevokingCredentialId] = useState<
     string | null
   >(null);
+  const [pendingCredentialAction, setPendingCredentialAction] =
+    useState<PendingCredentialAction | null>(null);
+  const [credentialActionReason, setCredentialActionReason] = useState("");
+  const [revokeReason, setRevokeReason] = useState("");
+  const [revokeCandidate, setRevokeCandidate] = useState<CredentialRow | null>(
+    null,
+  );
+  const [secretAcknowledged, setSecretAcknowledged] = useState(false);
+  const [secretCopied, setSecretCopied] = useState(false);
   const [isCompactViewport, setIsCompactViewport] = useState(false);
 
   useEffect(() => {
@@ -405,6 +554,41 @@ export default function PartnerDetailPage() {
           accentHint: "Brand accent delivered to the entry skin",
           authBannerTitle: "Credential posture",
           eligibilityBannerTitle: "Contract posture",
+          issueCredentialTitle: "Issue credential",
+          rotateCredentialTitle: "Rotate credential",
+          credentialActionHint:
+            "High-risk action. A rotation reason is required and the plaintext key will only be shown once.",
+          credentialActionReasonLabel: "Rotation reason",
+          credentialActionReasonPlaceholder:
+            "Explain why this credential is being issued or rotated.",
+          revokeCredentialTitle: "Revoke credential",
+          revokeCredentialHint:
+            "High-risk action. This entry secret will stop working immediately after revocation.",
+          revokeCredentialReasonLabel: "Revocation reason",
+          revokeCredentialReasonPlaceholder:
+            "Explain why this credential must be revoked.",
+          cancel: "Cancel",
+          confirmIssue: "Issue",
+          confirmRotate: "Rotate",
+          confirmRevoke: "Revoke",
+          oneTimeSecretTitle: "Ingress credential · plaintext-once reveal",
+          oneTimeSecretHint:
+            "Store this secret now. After you acknowledge, the plaintext will be cleared from the page state.",
+          oneTimeSecretAck:
+            "I stored this key and understand it will not be shown again.",
+          copySecret: "Copy secret",
+          copied: "Copied",
+          downloadSecret: "Download .txt",
+          dismissSecret: "Acknowledge",
+          secretLabel: "Plaintext key",
+          secretScopeLabel: "Scope",
+          secretExpiryLabel: "Expiry",
+          secretIssuedLabel: "Issued",
+          secretUnavailableExpiry: "Not exposed by current contract",
+          credentialTableTitle: "Active credentials · masked only",
+          credentialKindLabel: "kind",
+          credentialMaskedLabel: "masked",
+          credentialRotatedLabel: "rotated",
         }
       : {
           back: "返回 partner entries",
@@ -461,6 +645,38 @@ export default function PartnerDetailPage() {
           accentHint: "交付到 entry skin 的品牌 accent",
           authBannerTitle: "憑證姿態",
           eligibilityBannerTitle: "契約姿態",
+          issueCredentialTitle: "發行 credential",
+          rotateCredentialTitle: "輪替 credential",
+          credentialActionHint:
+            "高風險操作。必須填寫原因，且明文憑證只會顯示一次。",
+          credentialActionReasonLabel: "輪替原因",
+          credentialActionReasonPlaceholder:
+            "說明為何要發行或輪替這筆 credential。",
+          revokeCredentialTitle: "撤銷 credential",
+          revokeCredentialHint: "高風險操作。撤銷後這筆 secret 會立即失效。",
+          revokeCredentialReasonLabel: "撤銷原因",
+          revokeCredentialReasonPlaceholder: "說明為何要撤銷這筆 credential。",
+          cancel: "取消",
+          confirmIssue: "發行",
+          confirmRotate: "輪替",
+          confirmRevoke: "撤銷",
+          oneTimeSecretTitle: "Ingress credential · 明文一次性顯示",
+          oneTimeSecretHint:
+            "請立即保存此 secret。確認後頁面 state 內的明文會被清除。",
+          oneTimeSecretAck: "我已妥善保存此 key，且理解之後不會再顯示。",
+          copySecret: "複製 secret",
+          copied: "已複製",
+          downloadSecret: "下載 .txt",
+          dismissSecret: "確認並關閉",
+          secretLabel: "明文 key",
+          secretScopeLabel: "權限範圍",
+          secretExpiryLabel: "到期",
+          secretIssuedLabel: "發行時間",
+          secretUnavailableExpiry: "目前 contract 未提供",
+          credentialTableTitle: "Active credentials · 僅顯示遮罩",
+          credentialKindLabel: "kind",
+          credentialMaskedLabel: "masked",
+          credentialRotatedLabel: "rotated",
         };
 
   const loadEntry = useCallback(
@@ -577,19 +793,25 @@ export default function PartnerDetailPage() {
     try {
       const issued = await client.issuePlatformPartnerIngressCredential(
         entry.entrySlug,
-        {},
+        {
+          rotationReason: credentialActionReason.trim() || null,
+        },
       );
       setIssuedCredential(issued);
+      setPendingCredentialAction(null);
+      setCredentialActionReason("");
+      setSecretAcknowledged(false);
+      setSecretCopied(false);
       await loadEntry({ preserveIssuedCredential: true });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setIssuingCredential(false);
     }
-  }, [client, entry, loadEntry]);
+  }, [client, credentialActionReason, entry, loadEntry]);
 
   const revokeCredential = useCallback(
-    async (keyId: string) => {
+    async (keyId: string, reason?: string) => {
       if (!entry) {
         return;
       }
@@ -601,8 +823,12 @@ export default function PartnerDetailPage() {
         await client.revokePlatformPartnerIngressCredential(
           entry.entrySlug,
           keyId,
-          {},
+          {
+            revokeReason: reason?.trim() || null,
+          },
         );
+        setRevokeCandidate(null);
+        setRevokeReason("");
         await loadEntry();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
@@ -841,9 +1067,12 @@ export default function PartnerDetailPage() {
         })
         .map((credential) => ({
           keyId: credential.keyId,
+          kind:
+            credential.source === "env_bootstrap"
+              ? "bootstrap"
+              : "platform_admin",
           masked: `${credential.keyPrefix}${credential.maskedSuffix}`,
-          source: credential.source,
-          createdAt: formatDateTime(credential.createdAt),
+          rotatedAt: formatDateTime(credential.createdAt),
           lastUsedAt: credential.lastUsedAt
             ? formatDateTime(credential.lastUsedAt)
             : "—",
@@ -855,20 +1084,20 @@ export default function PartnerDetailPage() {
   const credentialColumns = useMemo<CanvasTableColumn<CredentialRow>[]>(
     () => [
       {
-        h: locale === "en" ? "masked" : "憑證",
+        h: copy.credentialKindLabel,
+        k: "kind",
+        mono: true,
+        w: 150,
+      },
+      {
+        h: copy.credentialMaskedLabel,
         k: "masked",
         mono: true,
         w: 180,
       },
       {
-        h: locale === "en" ? "source" : "來源",
-        k: "source",
-        mono: true,
-        w: 160,
-      },
-      {
-        h: locale === "en" ? "created" : "建立",
-        k: "createdAt",
+        h: copy.credentialRotatedLabel,
+        k: "rotatedAt",
         mono: true,
         w: 160,
       },
@@ -905,7 +1134,7 @@ export default function PartnerDetailPage() {
               variant="secondary"
               size="xs"
               disabled={revokingCredentialId === row.keyId}
-              onClick={() => void revokeCredential(row.keyId)}
+              onClick={() => setRevokeCandidate(row)}
             >
               {revokingCredentialId === row.keyId
                 ? t("partners.revokingCredential")
@@ -914,8 +1143,20 @@ export default function PartnerDetailPage() {
           ),
       },
     ],
-    [locale, revokeCredential, revokingCredentialId, t],
+    [copy, revokingCredentialId, t],
   );
+
+  const secretScope = useMemo(() => {
+    if (!entry) {
+      return "—";
+    }
+
+    const scopes = ["partner.ingress:write"];
+    if (entry.eligibilityMode !== "none") {
+      scopes.push("cardholder.eligibility:verify");
+    }
+    return scopes.join(" · ");
+  }, [entry]);
 
   if (loading) {
     return <div style={emptyStateStyle}>{t("partners.loading")}</div>;
@@ -975,14 +1216,71 @@ export default function PartnerDetailPage() {
         ? "success"
         : "warn";
 
+  const openCredentialAction = (mode: CredentialActionMode) => {
+    setPendingCredentialAction({
+      mode,
+      title:
+        mode === "issue"
+          ? copy.issueCredentialTitle
+          : copy.rotateCredentialTitle,
+      body:
+        mode === "issue"
+          ? copy.credentialActionHint
+          : copy.credentialActionHint,
+    });
+    setCredentialActionReason("");
+  };
+
+  const copyIssuedSecret = async () => {
+    if (!issuedCredential?.plaintextKey || typeof navigator === "undefined") {
+      return;
+    }
+
+    await navigator.clipboard.writeText(issuedCredential.plaintextKey);
+    setSecretCopied(true);
+  };
+
+  const downloadIssuedSecret = () => {
+    if (!issuedCredential?.plaintextKey || typeof window === "undefined") {
+      return;
+    }
+
+    const content = [
+      `${entry.displayName} / ${entry.entrySlug}`,
+      `issued_at=${formatDateTime(issuedCredential.credential.createdAt)}`,
+      `scope=${secretScope}`,
+      `key=${issuedCredential.plaintextKey}`,
+    ].join("\n");
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const anchor = window.document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${entry.entrySlug}-ingress-credential.txt`;
+    anchor.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
     <div style={pageShellStyle}>
       <PageHeader
         theme={theme}
-        title={`${entry.displayName}`}
+        title={
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
+          >
+            {entry.bankCode ?? entry.displayName} · {entry.programId}
+            <Pill
+              theme={theme}
+              tone={statusTone}
+              dot={entry.status === "active"}
+            >
+              {formatPlatformCodeLabel(locale, entry.status)}
+            </Pill>
+          </span>
+        }
         subtitle={`/${entry.entrySlug} · ${entry.partnerCode} · ${entry.programId}`}
         tabs={copy.tabs}
-        activeTab={copy.tabs[0]}
+        activeTab={copy.tabs[4]}
         actions={
           <div
             style={{
@@ -992,16 +1290,6 @@ export default function PartnerDetailPage() {
               justifyContent: "flex-end",
             }}
           >
-            <Link href="/partners" style={linkButtonStyle()}>
-              {copy.back}
-            </Link>
-            <Btn
-              theme={theme}
-              variant="secondary"
-              onClick={() => void loadEntry()}
-            >
-              {copy.refresh}
-            </Btn>
             {previewUrl ? (
               <a
                 href={previewUrl}
@@ -1012,7 +1300,25 @@ export default function PartnerDetailPage() {
                 {copy.preview}
               </a>
             ) : null}
-            {lifecycleAction}
+            <Btn
+              theme={theme}
+              variant="secondary"
+              disabled={issuingCredential || entry.status === "revoked"}
+              onClick={() => openCredentialAction("issue")}
+            >
+              {copy.issueCredentialTitle}
+            </Btn>
+            <Btn
+              theme={theme}
+              variant="secondary"
+              disabled={issuingCredential || entry.status === "revoked"}
+              onClick={() => openCredentialAction("rotate")}
+            >
+              {copy.rotateCredentialTitle}
+            </Btn>
+            <Btn theme={theme} variant="ghost" onClick={() => void loadEntry()}>
+              {copy.refresh}
+            </Btn>
           </div>
         }
       />
@@ -1198,31 +1504,11 @@ export default function PartnerDetailPage() {
               <div id="credentials" style={sectionAnchorStyle}>
                 <Card
                   theme={theme}
-                  title={copy.credentialsTitle}
+                  title={copy.credentialTableTitle}
                   subtitle={copy.credentialsSubtitle}
-                  actions={
-                    <Btn
-                      theme={theme}
-                      variant="secondary"
-                      disabled={issuingCredential || entry.status === "revoked"}
-                      onClick={() => void issueCredential()}
-                    >
-                      {issuingCredential
-                        ? t("partners.rotatingCredential")
-                        : t("partners.rotateCredential")}
-                    </Btn>
-                  }
+                  actions={lifecycleAction}
                 >
                   <div style={{ display: "grid", gap: 12 }}>
-                    {issuedCredential ? (
-                      <Banner
-                        theme={theme}
-                        tone="info"
-                        title={t("partners.plaintextCredential")}
-                        body={issuedCredential.plaintextKey}
-                      />
-                    ) : null}
-
                     {credentialRows.length > 0 ? (
                       <Table<CredentialRow>
                         theme={theme}
@@ -1542,6 +1828,202 @@ export default function PartnerDetailPage() {
           </Card>
         </div>
       </div>
+
+      {pendingCredentialAction ? (
+        <ModalShell
+          title={pendingCredentialAction.title}
+          subtitle={entry.displayName}
+          onClose={() => {
+            if (!issuingCredential) {
+              setPendingCredentialAction(null);
+              setCredentialActionReason("");
+            }
+          }}
+          footer={
+            <>
+              <div style={mutedTextStyle}>{pendingCredentialAction.body}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn
+                  theme={theme}
+                  variant="ghost"
+                  disabled={issuingCredential}
+                  onClick={() => {
+                    setPendingCredentialAction(null);
+                    setCredentialActionReason("");
+                  }}
+                >
+                  {copy.cancel}
+                </Btn>
+                <Btn
+                  theme={theme}
+                  variant="primary"
+                  disabled={issuingCredential || !credentialActionReason.trim()}
+                  onClick={() => void issueCredential()}
+                >
+                  {issuingCredential
+                    ? t("partners.rotatingCredential")
+                    : pendingCredentialAction.mode === "issue"
+                      ? copy.confirmIssue
+                      : copy.confirmRotate}
+                </Btn>
+              </div>
+            </>
+          }
+        >
+          <Banner
+            theme={theme}
+            tone="warn"
+            title={pendingCredentialAction.title}
+            body={copy.credentialActionHint}
+          />
+          <TextField
+            label={copy.credentialActionReasonLabel}
+            value={credentialActionReason}
+            onChange={setCredentialActionReason}
+            placeholder={copy.credentialActionReasonPlaceholder}
+          />
+        </ModalShell>
+      ) : null}
+
+      {revokeCandidate ? (
+        <ModalShell
+          title={copy.revokeCredentialTitle}
+          subtitle={`${entry.displayName} · ${revokeCandidate.masked}`}
+          onClose={() => {
+            if (!revokingCredentialId) {
+              setRevokeCandidate(null);
+              setRevokeReason("");
+            }
+          }}
+          footer={
+            <>
+              <div style={mutedTextStyle}>{copy.revokeCredentialHint}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn
+                  theme={theme}
+                  variant="ghost"
+                  disabled={Boolean(revokingCredentialId)}
+                  onClick={() => {
+                    setRevokeCandidate(null);
+                    setRevokeReason("");
+                  }}
+                >
+                  {copy.cancel}
+                </Btn>
+                <Btn
+                  theme={theme}
+                  danger
+                  disabled={
+                    Boolean(revokingCredentialId) || !revokeReason.trim()
+                  }
+                  onClick={() =>
+                    void revokeCredential(revokeCandidate.keyId, revokeReason)
+                  }
+                >
+                  {copy.confirmRevoke}
+                </Btn>
+              </div>
+            </>
+          }
+        >
+          <TextField
+            label={copy.revokeCredentialReasonLabel}
+            value={revokeReason}
+            onChange={setRevokeReason}
+            placeholder={copy.revokeCredentialReasonPlaceholder}
+          />
+        </ModalShell>
+      ) : null}
+
+      {issuedCredential ? (
+        <ModalShell
+          title={copy.oneTimeSecretTitle}
+          subtitle={`${entry.displayName} · ${entry.entrySlug}`}
+          onClose={() => {
+            if (secretAcknowledged) {
+              setIssuedCredential(null);
+              setSecretAcknowledged(false);
+              setSecretCopied(false);
+            }
+          }}
+          footer={
+            <>
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                  fontSize: 12.5,
+                  color: theme.text,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={secretAcknowledged}
+                  onChange={(event) =>
+                    setSecretAcknowledged(event.target.checked)
+                  }
+                />
+                <span>{copy.oneTimeSecretAck}</span>
+              </label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Btn
+                  theme={theme}
+                  variant="secondary"
+                  onClick={() => void copyIssuedSecret()}
+                >
+                  {secretCopied ? copy.copied : copy.copySecret}
+                </Btn>
+                <Btn
+                  theme={theme}
+                  variant="secondary"
+                  onClick={downloadIssuedSecret}
+                >
+                  {copy.downloadSecret}
+                </Btn>
+                <Btn
+                  theme={theme}
+                  variant="primary"
+                  disabled={!secretAcknowledged}
+                  onClick={() => {
+                    setIssuedCredential(null);
+                    setSecretAcknowledged(false);
+                    setSecretCopied(false);
+                  }}
+                >
+                  {copy.dismissSecret}
+                </Btn>
+              </div>
+            </>
+          }
+        >
+          <Banner
+            theme={theme}
+            tone="warn"
+            title={copy.oneTimeSecretTitle}
+            body={copy.oneTimeSecretHint}
+          />
+          <div style={miniListStyle}>
+            <div style={miniListRowStyle}>
+              <strong>{copy.secretIssuedLabel}</strong>
+              <span style={mutedTextStyle}>
+                {formatDateTime(issuedCredential.credential.createdAt)}
+              </span>
+            </div>
+            <div style={miniListRowStyle}>
+              <strong>{copy.secretScopeLabel}</strong>
+              <span style={mutedTextStyle}>{secretScope}</span>
+            </div>
+            <div style={miniListRowStyle}>
+              <strong>{copy.secretExpiryLabel}</strong>
+              <span style={mutedTextStyle}>{copy.secretUnavailableExpiry}</span>
+            </div>
+          </div>
+          <Field theme={theme} label={copy.secretLabel}>
+            <div style={secretBoxStyle}>{issuedCredential.plaintextKey}</div>
+          </Field>
+        </ModalShell>
+      ) : null}
     </div>
   );
 }
