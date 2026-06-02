@@ -37,10 +37,8 @@ import {
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
-  CanvasShell,
   CanvasTable,
   buildCanvasTheme,
-  type CanvasShellNavItem,
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -60,17 +58,6 @@ const th = buildCanvasTheme({
   dark: true,
   density: "compact",
 });
-
-const shellStyle: CSSProperties = {
-  height: "calc(100vh - 64px)",
-  minHeight: "calc(100vh - 64px)",
-  borderRadius: 24,
-  overflow: "hidden",
-  border: `1px solid ${th.border}`,
-  boxShadow: "0 24px 60px rgba(2, 6, 23, 0.28)",
-  gridTemplateColumns: "0 minmax(0, 1fr)",
-  gridTemplateRows: "46px minmax(0, 1fr)",
-};
 
 const pageBodyStyle: CSSProperties = {
   padding: 24,
@@ -449,90 +436,6 @@ export default function TenantsPage() {
 
   const moduleLabels = useMemo(() => createTenantModuleLabels(t), [t]);
 
-  const navItems = useMemo<CanvasShellNavItem[]>(
-    () => [
-      { divider: copy.nav.workspace },
-      { key: "home", href: "/", icon: "home", label: copy.nav.home },
-      {
-        key: "health",
-        href: "/health",
-        icon: "health",
-        label: copy.nav.health,
-      },
-      { divider: copy.nav.governance },
-      {
-        key: "tenants",
-        href: "/tenants",
-        icon: "tenants",
-        label: copy.nav.tenants,
-      },
-      {
-        key: "partners",
-        href: "/partners",
-        icon: "partners",
-        label: copy.nav.partners,
-      },
-      {
-        key: "users",
-        href: "/users",
-        icon: "users",
-        label: copy.nav.users,
-      },
-      { divider: copy.nav.fleet },
-      {
-        key: "fleet",
-        href: "/fleet",
-        icon: "fleet",
-        label: copy.nav.fleetPage,
-      },
-      {
-        key: "switchboard",
-        href: "/switchboard",
-        icon: "switchboard",
-        label: copy.nav.switchboard,
-      },
-      { divider: copy.nav.pricing },
-      {
-        key: "pricing",
-        href: "/pricing",
-        icon: "pricing",
-        label: copy.nav.pricingPage,
-      },
-      {
-        key: "payments",
-        href: "/payments",
-        icon: "payments",
-        label: copy.nav.payments,
-      },
-      { divider: copy.nav.platform },
-      {
-        key: "notices",
-        href: "/notices",
-        icon: "notices",
-        label: copy.nav.notices,
-      },
-      {
-        key: "audit",
-        href: "/audit",
-        icon: "audit",
-        label: copy.nav.audit,
-      },
-      {
-        key: "flags",
-        href: "/feature-flags",
-        icon: "flags",
-        label: copy.nav.flags,
-      },
-      {
-        key: "adapters",
-        href: "/adapter-registry",
-        icon: "adapters",
-        label: copy.nav.adapters,
-      },
-    ],
-    [copy.nav],
-  );
-
   const loadTenants = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -755,19 +658,7 @@ export default function TenantsPage() {
     creating || !createForm.name.trim() || !createForm.code.trim();
 
   return (
-    <CanvasShell
-      theme={th}
-      nav={navItems}
-      active="tenants"
-      currentPath="/tenants"
-      breadcrumb={copy.breadcrumb}
-      brandLabel="DRTS Fleet"
-      brandSubLabel="Platform Admin"
-      brandMark="PA"
-      avatarLabel="PA"
-      searchPlaceholder={copy.searchPlaceholder}
-      style={shellStyle}
-    >
+    <>
       <CanvasPageHeader
         theme={th}
         title={copy.title}
@@ -1185,6 +1076,6 @@ export default function TenantsPage() {
           )}
         </CanvasCard>
       </div>
-    </CanvasShell>
+    </>
   );
 }
