@@ -162,11 +162,12 @@ export class PlatformAdminAssistantKnowledgeService {
     const terms = [...new Set(tokenize(query.question))];
     const hits = this.retrieve(query);
 
-    if (hits.length === 0) {
+    const topHit = hits[0];
+    if (!topHit) {
       return this.uncertain("no_match", terms, 0);
     }
 
-    const confidence = this.confidenceOf(hits[0], terms);
+    const confidence = this.confidenceOf(topHit, terms);
     if (confidence < this.minConfidence) {
       return this.uncertain("below_confidence", terms, confidence);
     }

@@ -44,10 +44,10 @@ function splitIntoSections(content: string): RawSection[] {
     const html = md ? null : HTML_HEADING.exec(line);
     if (md) {
       pushCurrent();
-      current = { section: md[2].trim(), lines: [] };
+      current = { section: (md[2] ?? "").trim() || null, lines: [] };
     } else if (html) {
       pushCurrent();
-      current = { section: stripHtml(html[1]).trim() || null, lines: [] };
+      current = { section: stripHtml(html[1] ?? "").trim() || null, lines: [] };
     } else {
       current.lines.push(line);
     }
