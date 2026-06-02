@@ -32,6 +32,7 @@ import {
   CanvasPill,
   CanvasTable,
   buildCanvasTheme,
+  type CanvasBtnProps,
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -40,6 +41,7 @@ import type {
   GeneratePlacardVersionCommand,
   PlacardVersionRecord,
   PublicInfoVersionRecord,
+  ResourceActionDescriptor,
 } from "@drts/contracts";
 import { getPlacardVersionCodePrecheckMessage } from "./placard-version-code";
 import {
@@ -98,6 +100,103 @@ function publicInfoStatusTone(
     return "warn";
   }
   return "neutral";
+}
+
+// ── availableActions-driven CTA descriptors (packets §3.5) ──────────────────
+// PublicInfoVersionRecord / PlacardVersionRecord do not yet carry a backend
+// `availableActions[]`, so this route synthesises ResourceActionDescriptor[]
+// from record state. Every CTA renders from a descriptor (never hard-coded) so
+// disabledReasonCode / riskLevel / requiresReason stay contract-shaped per the
+// parity audit (§6 "canvas-critical action patterns").
+const ACTION_CREATE_PUBLIC_INFO = "create_public_info_draft";
+const ACTION_PUBLISH_PUBLIC_INFO = "publish_public_info_version";
+const ACTION_GENERATE_PLACARD = "generate_placard_version";
+const ACTION_PUBLISH_PLACARD = "publish_placard_version";
+
+function buildDescriptor(
+  action: string,
+  enabled: boolean,
+  riskLevel: ResourceActionDescriptor["riskLevel"],
+  opts?: { disabledReasonCode?: string | undefined; requiresReason?: boolean },
+): ResourceActionDescriptor {
+  return {
+    action,
+    enabled,
+    riskLevel,
+    ...(!enabled && opts?.disabledReasonCode
+      ? { disabledReasonCode: opts.disabledReasonCode }
+      : {}),
+    ...(opts?.requiresReason ? { requiresReason: true } : {}),
+  };
+}
+
+function findAction(
+  actions: ResourceActionDescriptor[],
+  action: string,
+): ResourceActionDescriptor | undefined {
+  return actions.find((descriptor) => descriptor.action === action);
+}
+
+// A published placard is immutable; an unpublished one can still be published.
+function buildPlacardActions(
+  placard: PlacardVersionRecord,
+): ResourceActionDescriptor[] {
+  return [
+    buildDescriptor(
+      ACTION_PUBLISH_PLACARD,
+      placard.publishedAt == null,
+      "medium",
+      { disabledReasonCode: "already_published" },
+    ),
+  ];
+}
+
+// Renders one CTA from its descriptor. A disabled descriptor surfaces its
+// disabledReasonCode copy beneath the affordance instead of a dead button.
+function DescriptorButton({
+  descriptor,
+  label,
+  busy = false,
+  busyLabel,
+  icon,
+  variant = "primary",
+  size = "sm",
+  danger,
+  reasonText,
+  onClick,
+}: {
+  descriptor: ResourceActionDescriptor;
+  label: string;
+  busy?: boolean;
+  busyLabel?: string;
+  icon?: CanvasBtnProps["icon"];
+  variant?: "primary" | "secondary" | "ghost";
+  size?: "xs" | "sm" | "md";
+  danger?: boolean;
+  reasonText?: string | undefined;
+  onClick: () => void;
+}) {
+  const disabled = !descriptor.enabled || busy;
+  const isDanger = danger ?? descriptor.riskLevel === "high";
+  const reason = !descriptor.enabled ? reasonText : undefined;
+  return (
+    <div style={{ display: "grid", gap: 4, justifyItems: "start" }}>
+      <CanvasBtn
+        theme={th}
+        variant={variant}
+        size={size}
+        danger={isDanger}
+        disabled={disabled}
+        onClick={onClick}
+        {...(icon ? { icon } : {})}
+      >
+        {busy && busyLabel ? busyLabel : label}
+      </CanvasBtn>
+      {reason ? (
+        <span style={{ color: th.textMuted, fontSize: 11 }}>{reason}</span>
+      ) : null}
+    </div>
+  );
 }
 
 const pageBodyStyle: CSSProperties = {
@@ -240,7 +339,13 @@ function ModalShell({
               <div style={{ ...subcopyStyle, marginTop: 3 }}>{subtitle}</div>
             ) : null}
           </div>
-          <CanvasBtn theme={th} variant="ghost" size="xs" icon="x" onClick={onClose}>
+          <CanvasBtn
+            theme={th}
+            variant="ghost"
+            size="xs"
+            icon="x"
+            onClick={onClose}
+          >
             {""}
           </CanvasBtn>
         </header>
@@ -364,6 +469,18 @@ export default function SwitchboardPage() {
             `Audit receipt: placard ${code} generated.`,
           receiptPublishPlacard: (code: string) =>
             `Audit receipt: placard ${code} published.`,
+          disabledReason: {
+            no_draft_versions: "No draft versions to publish.",
+            no_draft_selected: "Select a draft version to publish.",
+            reason_required: "A reason is required to publish.",
+            title_required: "A title is required.",
+            no_source_version: "Select a source public info version.",
+            source_retired: "The selected source version is retired.",
+            version_code_conflict: "This version code is already in use.",
+            already_published: "Already published (immutable).",
+            no_public_info_version:
+              "Create a public info version before generating placards.",
+          } as Record<string, string>,
         }
       : {
           title: "Public Info & Placards",
@@ -444,6 +561,17 @@ export default function SwitchboardPage() {
           receiptGenerate: (code: string) => `稽核憑據：已產生牌貼 ${code}。`,
           receiptPublishPlacard: (code: string) =>
             `稽核憑據：已發佈牌貼 ${code}。`,
+          disabledReason: {
+            no_draft_versions: "目前沒有可發佈的草稿版本。",
+            no_draft_selected: "請選擇要發佈的草稿版本。",
+            reason_required: "發佈需填寫原因。",
+            title_required: "需填寫標題。",
+            no_source_version: "請選擇來源公開資訊版本。",
+            source_retired: "所選來源版本已停用。",
+            version_code_conflict: "此版本代碼已被使用。",
+            already_published: "已發佈（不可變）。",
+            no_public_info_version: "請先建立公開資訊版本再產生牌貼。",
+          } as Record<string, string>,
         };
 
   const loadData = useCallback(async () => {
@@ -632,6 +760,66 @@ export default function SwitchboardPage() {
     }
   }
 
+  const reasonText = (code: string | null | undefined): string | undefined =>
+    code ? (copy.disabledReason[code] ?? code) : undefined;
+
+  const createHeaderDescriptor = buildDescriptor(
+    ACTION_CREATE_PUBLIC_INFO,
+    true,
+    "medium",
+  );
+  const publishHeaderDescriptor = buildDescriptor(
+    ACTION_PUBLISH_PUBLIC_INFO,
+    draftVersions.length > 0,
+    "high",
+    { disabledReasonCode: "no_draft_versions", requiresReason: true },
+  );
+  const generateOpenDescriptor = buildDescriptor(
+    ACTION_GENERATE_PLACARD,
+    publicInfo.length > 0,
+    "medium",
+    { disabledReasonCode: "no_public_info_version" },
+  );
+
+  const createConfirmReasonCode =
+    publicInfoForm.title.trim() === "" ? "title_required" : undefined;
+  const createConfirmDescriptor = buildDescriptor(
+    ACTION_CREATE_PUBLIC_INFO,
+    createConfirmReasonCode === undefined,
+    "medium",
+    { disabledReasonCode: createConfirmReasonCode },
+  );
+
+  const publishConfirmReasonCode =
+    draftVersions.length === 0
+      ? "no_draft_versions"
+      : publishTargetId === ""
+        ? "no_draft_selected"
+        : publishReason.trim() === ""
+          ? "reason_required"
+          : undefined;
+  const publishConfirmDescriptor = buildDescriptor(
+    ACTION_PUBLISH_PUBLIC_INFO,
+    publishConfirmReasonCode === undefined,
+    "high",
+    { disabledReasonCode: publishConfirmReasonCode, requiresReason: true },
+  );
+
+  const generateConfirmReasonCode =
+    placardForm.publicInfoVersionId.trim() === ""
+      ? "no_source_version"
+      : placardSourceBlocked
+        ? "source_retired"
+        : versionCodePrecheckMessage !== null
+          ? "version_code_conflict"
+          : undefined;
+  const generateConfirmDescriptor = buildDescriptor(
+    ACTION_GENERATE_PLACARD,
+    generateConfirmReasonCode === undefined,
+    "medium",
+    { disabledReasonCode: generateConfirmReasonCode },
+  );
+
   const versionColumns: CanvasTableColumn<PublicInfoRow>[] = [
     {
       h: copy.colVersion,
@@ -741,23 +929,31 @@ export default function SwitchboardPage() {
     {
       h: copy.colActions,
       w: 120,
-      r: (row) =>
-        row.publishedAt ? (
-          <span style={subcopyStyle}>{copy.immutable}</span>
-        ) : (
-          <CanvasBtn
-            theme={th}
+      r: (row) => {
+        const publishAction = findAction(
+          buildPlacardActions(row),
+          ACTION_PUBLISH_PLACARD,
+        );
+        if (!publishAction) {
+          return null;
+        }
+        return publishAction.enabled ? (
+          <DescriptorButton
+            descriptor={publishAction}
+            label={copy.publish}
+            busyLabel={copy.publishing}
+            busy={publishingPlacardId === row.placardVersionId}
+            icon="check"
             variant="primary"
             size="xs"
-            icon="check"
-            disabled={publishingPlacardId === row.placardVersionId}
             onClick={() => void handlePublishPlacard(row)}
-          >
-            {publishingPlacardId === row.placardVersionId
-              ? copy.publishing
-              : copy.publish}
-          </CanvasBtn>
-        ),
+          />
+        ) : (
+          <span style={subcopyStyle}>
+            {reasonText(publishAction.disabledReasonCode) ?? copy.immutable}
+          </span>
+        );
+      },
     },
   ];
 
@@ -772,7 +968,12 @@ export default function SwitchboardPage() {
         </div>
       ),
     },
-    { h: copy.colFrom, w: 130, mono: true, r: (row) => row.effectiveFrom ?? "—" },
+    {
+      h: copy.colFrom,
+      w: 130,
+      mono: true,
+      r: (row) => row.effectiveFrom ?? "—",
+    },
     { h: copy.colTo, w: 130, mono: true, r: (row) => row.effectiveTo ?? "—" },
     {
       h: copy.colStatus,
@@ -848,31 +1049,32 @@ export default function SwitchboardPage() {
         activeTab={tabNodes[activeTabIndex]}
         actions={
           <>
-            <CanvasBtn
-              theme={th}
-              variant="secondary"
-              size="sm"
+            <DescriptorButton
+              descriptor={createHeaderDescriptor}
+              label={copy.createDraft}
               icon="plus"
+              variant="secondary"
+              danger={false}
               onClick={() => {
                 setPublicInfoForm(EMPTY_PUBLIC_INFO_FORM);
                 setModal("create");
               }}
-            >
-              {copy.createDraft}
-            </CanvasBtn>
-            <CanvasBtn
-              theme={th}
-              variant="primary"
-              size="sm"
+            />
+            <DescriptorButton
+              descriptor={publishHeaderDescriptor}
+              label={copy.publishVersion}
               icon="check"
+              variant="primary"
+              danger={false}
+              reasonText={reasonText(
+                publishHeaderDescriptor.disabledReasonCode,
+              )}
               onClick={() => {
                 setPublishTargetId(draftVersions[0]?.versionId ?? "");
                 setPublishReason("");
                 setModal("publish");
               }}
-            >
-              {copy.publishVersion}
-            </CanvasBtn>
+            />
           </>
         }
       />
@@ -1006,19 +1208,26 @@ export default function SwitchboardPage() {
                         </CanvasBtn>
                       </a>
                     ) : (
-                      <CanvasBtn theme={th} variant="secondary" size="sm" disabled>
+                      <CanvasBtn
+                        theme={th}
+                        variant="secondary"
+                        size="sm"
+                        disabled
+                      >
                         {copy.downloadPdf}
                       </CanvasBtn>
                     )}
-                    <CanvasBtn
-                      theme={th}
-                      variant="primary"
-                      size="sm"
+                    <DescriptorButton
+                      descriptor={generateOpenDescriptor}
+                      label={copy.generatePlacard}
                       icon="plus"
+                      variant="primary"
+                      danger={false}
+                      reasonText={reasonText(
+                        generateOpenDescriptor.disabledReasonCode,
+                      )}
                       onClick={() => setModal("placard")}
-                    >
-                      {copy.generatePlacard}
-                    </CanvasBtn>
+                    />
                   </div>
                 </>
               ) : (
@@ -1026,16 +1235,17 @@ export default function SwitchboardPage() {
                   <div style={{ marginBottom: 12 }}>
                     {copy.placardPreviewEmpty}
                   </div>
-                  <CanvasBtn
-                    theme={th}
-                    variant="primary"
-                    size="sm"
+                  <DescriptorButton
+                    descriptor={generateOpenDescriptor}
+                    label={copy.generatePlacard}
                     icon="plus"
-                    disabled={publicInfo.length === 0}
+                    variant="primary"
+                    danger={false}
+                    reasonText={reasonText(
+                      generateOpenDescriptor.disabledReasonCode,
+                    )}
                     onClick={() => setModal("placard")}
-                  >
-                    {copy.generatePlacard}
-                  </CanvasBtn>
+                  />
                 </div>
               )}
             </CanvasCard>
@@ -1047,16 +1257,17 @@ export default function SwitchboardPage() {
             subtitle={copy.placardListSubtitle}
             padding={0}
             actions={
-              <CanvasBtn
-                theme={th}
-                variant="primary"
-                size="sm"
+              <DescriptorButton
+                descriptor={generateOpenDescriptor}
+                label={copy.generatePlacard}
                 icon="plus"
-                disabled={publicInfo.length === 0}
+                variant="primary"
+                danger={false}
+                reasonText={reasonText(
+                  generateOpenDescriptor.disabledReasonCode,
+                )}
                 onClick={() => setModal("placard")}
-              >
-                {copy.generatePlacard}
-              </CanvasBtn>
+              />
             }
           >
             {placards.length > 0 ? (
@@ -1114,25 +1325,31 @@ export default function SwitchboardPage() {
           onClose={closeModal}
           footer={
             <>
-              <CanvasBtn theme={th} variant="secondary" size="sm" onClick={closeModal}>
-                {copy.cancel}
-              </CanvasBtn>
               <CanvasBtn
                 theme={th}
-                variant="primary"
+                variant="secondary"
                 size="sm"
+                onClick={closeModal}
+              >
+                {copy.cancel}
+              </CanvasBtn>
+              <DescriptorButton
+                descriptor={createConfirmDescriptor}
+                label={copy.createDraft}
+                busyLabel={copy.generating}
+                busy={creatingPublicInfo}
                 icon="plus"
-                disabled={
-                  creatingPublicInfo || publicInfoForm.title.trim() === ""
-                }
+                variant="primary"
+                danger={false}
+                reasonText={reasonText(
+                  createConfirmDescriptor.disabledReasonCode,
+                )}
                 onClick={() =>
                   void handleCreatePublicInfo({
                     preventDefault: () => undefined,
                   } as React.FormEvent)
                 }
-              >
-                {creatingPublicInfo ? copy.generating : copy.createDraft}
-              </CanvasBtn>
+              />
             </>
           }
         >
@@ -1253,28 +1470,31 @@ export default function SwitchboardPage() {
           onClose={closeModal}
           footer={
             <>
-              <CanvasBtn theme={th} variant="secondary" size="sm" onClick={closeModal}>
-                {copy.cancel}
-              </CanvasBtn>
               <CanvasBtn
                 theme={th}
-                variant="primary"
+                variant="secondary"
                 size="sm"
-                icon="check"
-                disabled={
-                  draftVersions.length === 0 ||
-                  publishTargetId === "" ||
-                  publishReason.trim() === "" ||
+                onClick={closeModal}
+              >
+                {copy.cancel}
+              </CanvasBtn>
+              <DescriptorButton
+                descriptor={publishConfirmDescriptor}
+                label={copy.confirmPublish}
+                busyLabel={copy.publishing}
+                busy={
+                  publishTargetId !== "" &&
                   publishingVersionId === publishTargetId
                 }
+                icon="check"
+                variant="primary"
+                reasonText={reasonText(
+                  publishConfirmDescriptor.disabledReasonCode,
+                )}
                 onClick={() =>
                   void handlePublish(publishTargetId, publishReason.trim())
                 }
-              >
-                {publishingVersionId === publishTargetId
-                  ? copy.publishing
-                  : copy.confirmPublish}
-              </CanvasBtn>
+              />
             </>
           }
         >
@@ -1300,7 +1520,11 @@ export default function SwitchboardPage() {
               <label style={{ display: "block", marginTop: 12 }}>
                 <span style={fieldLabelStyle}>{copy.publishReasonLabel}</span>
                 <textarea
-                  style={{ ...fieldInputStyle, minHeight: 72, resize: "vertical" }}
+                  style={{
+                    ...fieldInputStyle,
+                    minHeight: 72,
+                    resize: "vertical",
+                  }}
                   value={publishReason}
                   placeholder={copy.publishReasonPh}
                   onChange={(event) => setPublishReason(event.target.value)}
@@ -1335,28 +1559,31 @@ export default function SwitchboardPage() {
           onClose={closeModal}
           footer={
             <>
-              <CanvasBtn theme={th} variant="secondary" size="sm" onClick={closeModal}>
-                {copy.cancel}
-              </CanvasBtn>
               <CanvasBtn
                 theme={th}
-                variant="primary"
+                variant="secondary"
                 size="sm"
+                onClick={closeModal}
+              >
+                {copy.cancel}
+              </CanvasBtn>
+              <DescriptorButton
+                descriptor={generateConfirmDescriptor}
+                label={copy.confirmGenerate}
+                busyLabel={copy.generating}
+                busy={creatingPlacard}
                 icon="plus"
-                disabled={
-                  creatingPlacard ||
-                  placardForm.publicInfoVersionId.trim() === "" ||
-                  placardSourceBlocked ||
-                  versionCodePrecheckMessage !== null
-                }
+                variant="primary"
+                danger={false}
+                reasonText={reasonText(
+                  generateConfirmDescriptor.disabledReasonCode,
+                )}
                 onClick={() =>
                   void handleGeneratePlacard({
                     preventDefault: () => undefined,
                   } as React.FormEvent)
                 }
-              >
-                {creatingPlacard ? copy.generating : copy.confirmGenerate}
-              </CanvasBtn>
+              />
             </>
           }
         >
@@ -1431,12 +1658,26 @@ export default function SwitchboardPage() {
             {getPlacardSourceSelectionHint(selectedPlacardSource, locale)}
           </p>
           {placardSourceBlocked ? (
-            <p style={{ marginTop: 8, marginBottom: 0, color: th.warn, fontSize: 11.5 }}>
+            <p
+              style={{
+                marginTop: 8,
+                marginBottom: 0,
+                color: th.warn,
+                fontSize: 11.5,
+              }}
+            >
               {getPlacardRetiredSourceAuditNote(locale)}
             </p>
           ) : null}
           {versionCodePrecheckMessage ? (
-            <p style={{ marginTop: 8, marginBottom: 0, color: th.danger, fontSize: 11.5 }}>
+            <p
+              style={{
+                marginTop: 8,
+                marginBottom: 0,
+                color: th.danger,
+                fontSize: 11.5,
+              }}
+            >
               {versionCodePrecheckMessage}
             </p>
           ) : null}
