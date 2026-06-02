@@ -6,15 +6,17 @@ import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type { PlatformAdapter } from "@drts/contracts";
 import {
-  CanvasBanner,
-  CanvasBtn,
-  CanvasCard,
-  CanvasDL,
-  CanvasPageHeader,
-  CanvasPill,
+  Banner as CanvasBanner,
+  Btn as CanvasBtn,
+  Card as CanvasCard,
+  DL as CanvasDL,
+  PageHeader as CanvasPageHeader,
+  Pill as CanvasPill,
+} from "../../../../packages/ui-web/src/canvas-primitives";
+import {
   buildCanvasTheme,
   type CanvasTone,
-} from "@drts/ui-web";
+} from "../../../../packages/ui-web/src/canvas-tokens";
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -28,7 +30,7 @@ const pageBodyStyle = {
 const gridStyle = {
   display: "grid",
   gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
 } satisfies CSSProperties;
 
 const cardTitleStyle = {
@@ -38,12 +40,12 @@ const cardTitleStyle = {
   flexWrap: "wrap",
 } satisfies CSSProperties;
 
-const cardFooterStyle = {
+const actionBlockStyle = {
   marginTop: 12,
   paddingTop: 12,
   borderTop: `1px solid ${theme.border}`,
   display: "grid",
-  gap: 10,
+  gap: 8,
 } satisfies CSSProperties;
 
 const actionRowStyle = {
@@ -52,11 +54,12 @@ const actionRowStyle = {
   gap: 6,
 } satisfies CSSProperties;
 
-const inlineRowStyle = {
+const helperRowStyle = {
   display: "flex",
   flexWrap: "wrap",
-  alignItems: "center",
   gap: 6,
+  alignItems: "center",
+  marginTop: 12,
 } satisfies CSSProperties;
 
 const sectionLabelStyle = {
@@ -127,23 +130,30 @@ type Copy = {
   title: string;
   subtitle: string;
   registerAction: string;
-  refreshAction: string;
+  registerInfo: string;
   loading: string;
   empty: string;
-  registerInfo: string;
+  unavailable: string;
   bannerTitle: (adapter: PlatformAdapter) => string;
   bannerBody: (adapter: PlatformAdapter) => string;
   rotateNow: string;
-  cardSubtitle: string;
-  metricHealth: string;
-  metricWebhook: string;
-  metricUpdated: string;
-  configLabel: string;
+  sourceLabel: string;
+  kindForwarder: string;
+  statusHealthy: string;
+  statusDegraded: string;
+  statusUnhealthy: string;
+  metricLatency: string;
+  metricLastEvent: string;
+  metricOrders: string;
+  metricOrdersPending: string;
+  latencyValue: (adapter: PlatformAdapter) => string;
+  sourceValue: (adapter: PlatformAdapter) => string;
+  kindValue: (adapter: PlatformAdapter) => string;
+  configEnabled: string;
+  configDisabled: string;
   credentialLabel: string;
-  rolloutLabel: string;
   financeLabel: string;
-  scopeLabel: string;
-  capabilitiesLabel: string;
+  rolloutLabel: string;
   platformAdminAuthority: string;
   opsAuthority: string;
   opsHelper: string;
@@ -154,14 +164,11 @@ type Copy = {
   disableAdapter: string;
   pauseTraffic: string;
   retryCallback: string;
-  queuedAction: (label: string, adapter: PlatformAdapter) => string;
+  queueGoverned: (label: string, adapter: PlatformAdapter) => string;
+  queueOps: (label: string, adapter: PlatformAdapter) => string;
   toggleSuccess: (adapter: PlatformAdapter, enabled: boolean) => string;
   toggleError: string;
-  forwarded: string;
-  owned: string;
   notConfigured: string;
-  statusEnabled: string;
-  statusDisabled: string;
 };
 
 function healthTone(
@@ -249,10 +256,32 @@ function hasSupportedAction(adapter: PlatformAdapter, actionName: string) {
   );
 }
 
-function buildCapabilityFlags(adapter: PlatformAdapter) {
-  return Object.entries(adapter.featureFlags)
-    .filter(([, enabled]) => enabled)
-    .map(([flag]) => flag);
+function formatHealthLabel(
+  copy: Copy,
+  status: PlatformAdapter["healthStatus"]["status"],
+) {
+  switch (status) {
+    case "HEALTHY":
+      return copy.statusHealthy;
+    case "DEGRADED":
+      return copy.statusDegraded;
+    default:
+      return copy.statusUnhealthy;
+  }
+}
+
+function formatLastEvent(copy: Copy, adapter: PlatformAdapter) {
+  if (adapter.webhookStatus?.lastEventTimestamp) {
+    return formatDateTime(adapter.webhookStatus.lastEventTimestamp);
+  }
+  if (adapter.healthStatus.lastCheckTimestamp) {
+    return formatDateTime(adapter.healthStatus.lastCheckTimestamp);
+  }
+  return copy.notConfigured;
+}
+
+function normalizeRegistryError(message: string, unavailable: string) {
+  return /\b404\b/.test(message) ? unavailable : message;
 }
 
 export default function AdapterRegistryPage() {
@@ -270,32 +299,44 @@ export default function AdapterRegistryPage() {
         ? {
             title: "External Platform Adapter Registry",
             subtitle:
-              "config / credential governance stays in platform-admin while operational pause / retry remains in ops per Q-ADM17 split authority.",
+              "config / credential governance stays in platform-admin while operational pause / retry stays in ops (Q-ADM17 split authority).",
             registerAction: "Register adapter",
-            refreshAction: "Refresh",
-            loading: "Loading adapter registry...",
-            empty: "No adapters are registered yet.",
             registerInfo:
               "Adapter registration remains a governed high-risk flow and is not opened inline on this route.",
+            loading: "Loading adapter registry...",
+            empty: "No adapters are registered yet.",
+            unavailable:
+              "Adapter registry data is temporarily unavailable. Check the platform-admin adapter API.",
             bannerTitle: (adapter) =>
-              `${adapter.platformCode.toLowerCase()} needs credential rotation or health review`,
+              `${adapter.platformCode.toLowerCase()} requires credential or health review`,
             bannerBody: (adapter) =>
               `${adapter.name} is ${formatPlatformCodeLabel(locale, adapter.credentialStatus).toLowerCase()} with ${adapter.healthStatus.status.toLowerCase()} health. Rotate or review before production impact expands.`,
             rotateNow: "Rotate now",
-            cardSubtitle: "adapter",
-            metricHealth: "LAST CHECK",
-            metricWebhook: "LAST EVENT",
-            metricUpdated: "UPDATED",
-            configLabel: "config",
+            sourceLabel: "source",
+            kindForwarder: "forwarder",
+            statusHealthy: "healthy",
+            statusDegraded: "degraded",
+            statusUnhealthy: "unhealthy",
+            metricLatency: "LATENCY",
+            metricLastEvent: "LAST EVENT",
+            metricOrders: "ORDERS 24H",
+            metricOrdersPending: "telemetry pending",
+            latencyValue: (adapter) =>
+              `${adapter.policies.acceptTimeoutSeconds}s accept SLA`,
+            sourceValue: (adapter) => adapter.name,
+            kindValue: (adapter) =>
+              adapter.isForwarded
+                ? "forwarder"
+                : formatPlatformCodeLabel(locale, adapter.adapterType),
+            configEnabled: "config enabled",
+            configDisabled: "config disabled",
             credentialLabel: "credential",
-            rolloutLabel: "rollout",
             financeLabel: "finance",
-            scopeLabel: "scope",
-            capabilitiesLabel: "capabilities",
+            rolloutLabel: "rollout",
             platformAdminAuthority: "Platform Admin authority",
             opsAuthority: "Ops authority",
             opsHelper:
-              "Operational pause and callback retry stay in ops-console until the route is wired to the ops write API.",
+              "Operational pause TTL and callback retry remain in ops until the route is wired to the ops write API.",
             editConfig: "Edit config",
             editCredential: "Edit credential",
             rotateCredential: "Rotate",
@@ -303,46 +344,56 @@ export default function AdapterRegistryPage() {
             disableAdapter: "Disable",
             pauseTraffic: "Ops pause (TTL)",
             retryCallback: "Retry callback",
-            queuedAction: (label, adapter) =>
+            queueGoverned: (label, adapter) =>
               `${label} for ${adapter.name} stays in the governed Platform Admin flow. Plaintext-once secret material is not shown again here.`,
+            queueOps: (label, adapter) =>
+              `${label} for ${adapter.name} remains an ops-authority action on the ops console.`,
             toggleSuccess: (adapter, enabled) =>
               `${adapter.name} ${enabled ? "enabled" : "disabled"} successfully.`,
             toggleError: "Failed to update adapter state.",
-            forwarded: "forwarded",
-            owned: "owned",
             notConfigured: "not configured",
-            statusEnabled: "enabled",
-            statusDisabled: "disabled",
           }
         : {
             title: "External Platform Adapter Registry",
             subtitle:
-              "config / credential 治理留在 platform-admin；operational pause / retry 依 Q-ADM17 仍屬 ops split authority。",
+              "config / credential 治理留在 platform-admin；operational pause / retry 留在 ops（Q-ADM17 split authority）。",
             registerAction: "註冊 adapter",
-            refreshAction: "重新整理",
-            loading: "載入 adapter registry 中...",
-            empty: "目前尚未註冊任何 adapter。",
             registerInfo:
               "註冊 adapter 仍屬高風險治理流程，這個 route 不直接展開 inline 建立。",
+            loading: "載入 adapter registry 中...",
+            empty: "目前尚未註冊任何 adapter。",
+            unavailable:
+              "Adapter registry 資料暫時不可用，請檢查 platform-admin adapter API。",
             bannerTitle: (adapter) =>
-              `${adapter.platformCode.toLowerCase()} 需處理 credential 輪替或健康檢查`,
+              `${adapter.platformCode.toLowerCase()} 需要 credential 或健康檢查`,
             bannerBody: (adapter) =>
               `${adapter.name} 目前 credential 為 ${formatPlatformCodeLabel(locale, adapter.credentialStatus)}，健康狀態為 ${adapter.healthStatus.status.toLowerCase()}。請在 production 受影響前完成輪替或治理檢查。`,
             rotateNow: "立即輪替",
-            cardSubtitle: "adapter",
-            metricHealth: "LAST CHECK",
-            metricWebhook: "LAST EVENT",
-            metricUpdated: "UPDATED",
-            configLabel: "config",
+            sourceLabel: "source",
+            kindForwarder: "forwarder",
+            statusHealthy: "healthy",
+            statusDegraded: "degraded",
+            statusUnhealthy: "unhealthy",
+            metricLatency: "LATENCY",
+            metricLastEvent: "LAST EVENT",
+            metricOrders: "ORDERS 24H",
+            metricOrdersPending: "telemetry pending",
+            latencyValue: (adapter) =>
+              `${adapter.policies.acceptTimeoutSeconds}s accept SLA`,
+            sourceValue: (adapter) => adapter.name,
+            kindValue: (adapter) =>
+              adapter.isForwarded
+                ? "forwarder"
+                : formatPlatformCodeLabel(locale, adapter.adapterType),
+            configEnabled: "config 啟用",
+            configDisabled: "config 停用",
             credentialLabel: "credential",
-            rolloutLabel: "rollout",
             financeLabel: "finance",
-            scopeLabel: "scope",
-            capabilitiesLabel: "capabilities",
+            rolloutLabel: "rollout",
             platformAdminAuthority: "Platform Admin authority",
             opsAuthority: "Ops authority",
             opsHelper:
-              "Operational pause 與 callback retry 仍留在 ops-console，待對接 ops write API 後再移入。",
+              "Operational pause TTL 與 callback retry 仍留在 ops-console，待對接 ops write API 後再移入。",
             editConfig: "編輯設定",
             editCredential: "編輯 credential",
             rotateCredential: "輪替",
@@ -350,16 +401,14 @@ export default function AdapterRegistryPage() {
             disableAdapter: "停用",
             pauseTraffic: "ops pause (TTL)",
             retryCallback: "retry callback",
-            queuedAction: (label, adapter) =>
+            queueGoverned: (label, adapter) =>
               `${adapter.name} 的「${label}」仍需走 Platform Admin 治理流程；plaintext-once secret 不會在這裡再次顯示。`,
+            queueOps: (label, adapter) =>
+              `${adapter.name} 的「${label}」仍屬 ops authority，請在 ops console 執行。`,
             toggleSuccess: (adapter, enabled) =>
               `${adapter.name} 已${enabled ? "啟用" : "停用"}。`,
             toggleError: "更新 adapter 狀態失敗。",
-            forwarded: "forwarded",
-            owned: "owned",
             notConfigured: "未設定",
-            statusEnabled: "enabled",
-            statusDisabled: "disabled",
           },
     [locale],
   );
@@ -377,7 +426,9 @@ export default function AdapterRegistryPage() {
         }
       } catch (caught) {
         if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : String(caught));
+          const message =
+            caught instanceof Error ? caught.message : String(caught);
+          setError(normalizeRegistryError(message, copy.unavailable));
         }
       } finally {
         if (!cancelled) {
@@ -391,7 +442,7 @@ export default function AdapterRegistryPage() {
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, copy.unavailable]);
 
   const attentionAdapter = useMemo(
     () => findAttentionAdapter(adapters),
@@ -410,19 +461,6 @@ export default function AdapterRegistryPage() {
       }),
     [adapters, attentionAdapter],
   );
-
-  async function refreshAdapters() {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await client.listPlatformAdapters();
-      setAdapters(response);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setLoading(false);
-    }
-  }
 
   async function toggleEnabled(adapter: PlatformAdapter) {
     const nextEnabled = !adapter.config.isEnabled;
@@ -456,7 +494,11 @@ export default function AdapterRegistryPage() {
   }
 
   function queueGovernedAction(label: string, adapter: PlatformAdapter) {
-    setFlash({ tone: "info", message: copy.queuedAction(label, adapter) });
+    setFlash({ tone: "info", message: copy.queueGoverned(label, adapter) });
+  }
+
+  function queueOpsAction(label: string, adapter: PlatformAdapter) {
+    setFlash({ tone: "info", message: copy.queueOps(label, adapter) });
   }
 
   return (
@@ -467,28 +509,19 @@ export default function AdapterRegistryPage() {
         subtitle={copy.subtitle}
         sticky={false}
         actions={
-          <>
-            <CanvasBtn
-              theme={theme}
-              icon="refresh"
-              onClick={() => void refreshAdapters()}
-            >
-              {copy.refreshAction}
-            </CanvasBtn>
-            <CanvasBtn
-              theme={theme}
-              variant="primary"
-              icon="plus"
-              onClick={() =>
-                setFlash({
-                  tone: "info",
-                  message: copy.registerInfo,
-                })
-              }
-            >
-              {copy.registerAction}
-            </CanvasBtn>
-          </>
+          <CanvasBtn
+            theme={theme}
+            variant="primary"
+            icon="plus"
+            onClick={() =>
+              setFlash({
+                tone: "info",
+                message: copy.registerInfo,
+              })
+            }
+          >
+            {copy.registerAction}
+          </CanvasBtn>
         }
       />
 
@@ -531,203 +564,172 @@ export default function AdapterRegistryPage() {
           </CanvasCard>
         ) : (
           <div style={gridStyle}>
-            {sortedAdapters.map((adapter) => {
-              const capabilities = buildCapabilityFlags(adapter);
-
-              return (
-                <CanvasCard
-                  key={adapter.id}
-                  theme={theme}
-                  title={
-                    <span style={cardTitleStyle}>
-                      {adapter.platformCode.toLowerCase()}
-                      <CanvasPill theme={theme} tone={adapterKindTone(adapter)}>
-                        {adapter.isForwarded
-                          ? "forwarder"
-                          : formatPlatformCodeLabel(
-                              locale,
-                              adapter.adapterType,
-                            )}
-                      </CanvasPill>
-                    </span>
-                  }
-                  subtitle={`${copy.cardSubtitle} · ${adapter.id}`}
-                  actions={
-                    <CanvasPill
-                      theme={theme}
-                      tone={healthTone(adapter.healthStatus.status)}
-                      dot
-                    >
-                      {adapter.healthStatus.status.toLowerCase()}
+            {sortedAdapters.map((adapter) => (
+              <CanvasCard
+                key={adapter.id}
+                theme={theme}
+                title={
+                  <span style={cardTitleStyle}>
+                    {copy.sourceValue(adapter)}
+                    <CanvasPill theme={theme} tone={adapterKindTone(adapter)}>
+                      {copy.kindValue(adapter)}
                     </CanvasPill>
-                  }
-                >
-                  <CanvasDL
+                  </span>
+                }
+                subtitle={`${adapter.platformCode.toLowerCase()} · ${adapter.id}`}
+                actions={
+                  <CanvasPill
                     theme={theme}
-                    cols={3}
-                    items={[
-                      {
-                        k: copy.metricHealth,
-                        v: adapter.healthStatus.lastCheckTimestamp
-                          ? formatDateTime(
-                              adapter.healthStatus.lastCheckTimestamp,
-                            )
-                          : copy.notConfigured,
-                        mono: true,
-                      },
-                      {
-                        k: copy.metricWebhook,
-                        v: adapter.webhookStatus?.lastEventTimestamp
-                          ? formatDateTime(
-                              adapter.webhookStatus.lastEventTimestamp,
-                            )
-                          : copy.notConfigured,
-                        mono: true,
-                      },
-                      {
-                        k: copy.metricUpdated,
-                        v: formatDateTime(adapter.updatedAt),
-                        mono: true,
-                      },
-                    ]}
-                  />
+                    tone={healthTone(adapter.healthStatus.status)}
+                    dot
+                  >
+                    {formatHealthLabel(copy, adapter.healthStatus.status)}
+                  </CanvasPill>
+                }
+              >
+                <CanvasDL
+                  theme={theme}
+                  cols={3}
+                  items={[
+                    {
+                      k: copy.metricLatency,
+                      v: copy.latencyValue(adapter),
+                      mono: true,
+                    },
+                    {
+                      k: copy.metricLastEvent,
+                      v: formatLastEvent(copy, adapter),
+                      mono: true,
+                    },
+                    {
+                      k: copy.metricOrders,
+                      v: copy.metricOrdersPending,
+                      mono: true,
+                    },
+                  ]}
+                />
 
-                  <p style={cardDescriptionStyle}>{adapter.description}</p>
+                <p style={cardDescriptionStyle}>{adapter.description}</p>
 
-                  <div style={inlineRowStyle}>
-                    <CanvasPill
-                      theme={theme}
-                      tone={adapter.config.isEnabled ? "success" : "neutral"}
-                    >
-                      {copy.configLabel} ·{" "}
-                      {adapter.config.isEnabled
-                        ? copy.statusEnabled
-                        : copy.statusDisabled}
-                    </CanvasPill>
-                    <CanvasPill
-                      theme={theme}
-                      tone={credentialTone(adapter.credentialStatus)}
-                    >
-                      {copy.credentialLabel} ·{" "}
-                      {formatPlatformCodeLabel(
-                        locale,
-                        adapter.credentialStatus,
-                      )}
-                    </CanvasPill>
-                    <CanvasPill
-                      theme={theme}
-                      tone={rolloutTone(adapter.rolloutStatus)}
-                    >
-                      {copy.rolloutLabel} ·{" "}
-                      {formatPlatformCodeLabel(locale, adapter.rolloutStatus)}
-                    </CanvasPill>
-                    <CanvasPill
-                      theme={theme}
-                      tone={financeTone(adapter.policies.financeAuthorityMode)}
-                    >
-                      {copy.financeLabel} ·{" "}
-                      {formatPlatformCodeLabel(
-                        locale,
-                        adapter.policies.financeAuthorityMode,
-                      )}
-                    </CanvasPill>
-                    <CanvasPill theme={theme} tone="neutral">
-                      {copy.scopeLabel} ·{" "}
-                      {adapter.isForwarded ? copy.forwarded : copy.owned}
-                    </CanvasPill>
-                  </div>
-
-                  <div style={inlineRowStyle}>
-                    {capabilities.length > 0 ? (
-                      capabilities.map((flag) => (
-                        <CanvasPill key={flag} theme={theme} tone="neutral">
-                          {copy.capabilitiesLabel} · {flag}
-                        </CanvasPill>
-                      ))
-                    ) : (
-                      <CanvasPill theme={theme} tone="neutral">
-                        {copy.capabilitiesLabel} · -
-                      </CanvasPill>
+                <div style={helperRowStyle}>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.sourceLabel} · {adapter.platformCode.toLowerCase()}
+                  </CanvasPill>
+                  <CanvasPill
+                    theme={theme}
+                    tone={adapter.config.isEnabled ? "success" : "neutral"}
+                  >
+                    {adapter.config.isEnabled
+                      ? copy.configEnabled
+                      : copy.configDisabled}
+                  </CanvasPill>
+                  <CanvasPill
+                    theme={theme}
+                    tone={credentialTone(adapter.credentialStatus)}
+                  >
+                    {copy.credentialLabel} ·{" "}
+                    {formatPlatformCodeLabel(locale, adapter.credentialStatus)}
+                  </CanvasPill>
+                  <CanvasPill
+                    theme={theme}
+                    tone={financeTone(adapter.policies.financeAuthorityMode)}
+                  >
+                    {copy.financeLabel} ·{" "}
+                    {formatPlatformCodeLabel(
+                      locale,
+                      adapter.policies.financeAuthorityMode,
                     )}
-                  </div>
+                  </CanvasPill>
+                  <CanvasPill
+                    theme={theme}
+                    tone={rolloutTone(adapter.rolloutStatus)}
+                  >
+                    {copy.rolloutLabel} ·{" "}
+                    {formatPlatformCodeLabel(locale, adapter.rolloutStatus)}
+                  </CanvasPill>
+                  {adapter.isForwarded ? (
+                    <CanvasPill theme={theme} tone="info">
+                      {copy.kindForwarder}
+                    </CanvasPill>
+                  ) : null}
+                </div>
 
-                  <div style={cardFooterStyle}>
-                    <p style={sectionLabelStyle}>
-                      {copy.platformAdminAuthority}
-                    </p>
-                    <div style={actionRowStyle}>
-                      <CanvasBtn
-                        theme={theme}
-                        size="xs"
-                        icon="more"
-                        onClick={() =>
-                          queueGovernedAction(copy.editConfig, adapter)
-                        }
-                      >
-                        {copy.editConfig}
-                      </CanvasBtn>
-                      <CanvasBtn
-                        theme={theme}
-                        size="xs"
-                        icon="copy"
-                        onClick={() =>
-                          queueGovernedAction(copy.editCredential, adapter)
-                        }
-                      >
-                        {copy.editCredential}
-                      </CanvasBtn>
-                      <CanvasBtn
-                        theme={theme}
-                        size="xs"
-                        icon="refresh"
-                        onClick={() =>
-                          queueGovernedAction(copy.rotateCredential, adapter)
-                        }
-                      >
-                        {copy.rotateCredential}
-                      </CanvasBtn>
-                      <CanvasBtn
-                        theme={theme}
-                        size="xs"
-                        danger={adapter.config.isEnabled}
-                        disabled={pendingId === adapter.id}
-                        onClick={() => void toggleEnabled(adapter)}
-                      >
-                        {adapter.config.isEnabled
-                          ? copy.disableAdapter
-                          : copy.enableAdapter}
-                      </CanvasBtn>
-                    </div>
+                <div style={actionBlockStyle}>
+                  <p style={sectionLabelStyle}>{copy.platformAdminAuthority}</p>
+                  <div style={actionRowStyle}>
+                    <CanvasBtn
+                      theme={theme}
+                      size="xs"
+                      icon="more"
+                      onClick={() =>
+                        queueGovernedAction(copy.editConfig, adapter)
+                      }
+                    >
+                      {copy.editConfig}
+                    </CanvasBtn>
+                    <CanvasBtn
+                      theme={theme}
+                      size="xs"
+                      icon="apiKeys"
+                      onClick={() =>
+                        queueGovernedAction(copy.editCredential, adapter)
+                      }
+                    >
+                      {copy.editCredential}
+                    </CanvasBtn>
+                    <CanvasBtn
+                      theme={theme}
+                      size="xs"
+                      icon="refresh"
+                      onClick={() =>
+                        queueGovernedAction(copy.rotateCredential, adapter)
+                      }
+                    >
+                      {copy.rotateCredential}
+                    </CanvasBtn>
+                    <CanvasBtn
+                      theme={theme}
+                      size="xs"
+                      danger={adapter.config.isEnabled}
+                      disabled={pendingId === adapter.id}
+                      onClick={() => void toggleEnabled(adapter)}
+                    >
+                      {adapter.config.isEnabled
+                        ? copy.disableAdapter
+                        : copy.enableAdapter}
+                    </CanvasBtn>
                   </div>
+                </div>
 
-                  <div style={cardFooterStyle}>
-                    <div style={inlineRowStyle}>
-                      <p style={sectionLabelStyle}>{copy.opsAuthority}</p>
-                    </div>
-                    <p style={helperTextStyle}>{copy.opsHelper}</p>
-                    <div style={actionRowStyle}>
-                      <CanvasBtn
-                        theme={theme}
-                        size="xs"
-                        disabled={
-                          !adapter.isForwarded ||
-                          !hasSupportedAction(adapter, "accept")
-                        }
-                      >
-                        {copy.pauseTraffic}
-                      </CanvasBtn>
-                      <CanvasBtn
-                        theme={theme}
-                        size="xs"
-                        disabled={!hasSupportedAction(adapter, "reject")}
-                      >
-                        {copy.retryCallback}
-                      </CanvasBtn>
-                    </div>
+                <div style={actionBlockStyle}>
+                  <p style={sectionLabelStyle}>{copy.opsAuthority}</p>
+                  <p style={helperTextStyle}>{copy.opsHelper}</p>
+                  <div style={actionRowStyle}>
+                    <CanvasBtn
+                      theme={theme}
+                      size="xs"
+                      disabled={
+                        !adapter.isForwarded ||
+                        !hasSupportedAction(adapter, "accept")
+                      }
+                      onClick={() => queueOpsAction(copy.pauseTraffic, adapter)}
+                    >
+                      {copy.pauseTraffic}
+                    </CanvasBtn>
+                    <CanvasBtn
+                      theme={theme}
+                      size="xs"
+                      disabled={!hasSupportedAction(adapter, "reject")}
+                      onClick={() =>
+                        queueOpsAction(copy.retryCallback, adapter)
+                      }
+                    >
+                      {copy.retryCallback}
+                    </CanvasBtn>
                   </div>
-                </CanvasCard>
-              );
-            })}
+                </div>
+              </CanvasCard>
+            ))}
           </div>
         )}
       </div>
