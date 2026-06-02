@@ -58,6 +58,8 @@ type CredentialRow = Record<string, unknown> & {
   kind: string;
   masked: string;
   rotatedAt: string;
+  lastUsedAt: string;
+  status: string;
 };
 
 type AuditRow = Record<string, unknown> & {
@@ -66,6 +68,8 @@ type AuditRow = Record<string, unknown> & {
   detail: string;
   at: string;
 };
+
+type EntryActionMode = "activate" | "deactivate" | "revoke";
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -267,6 +271,34 @@ const checkboxRowStyle = {
   padding: "10px 12px",
   borderRadius: 8,
   background: theme.surfaceLo,
+} satisfies CSSProperties;
+
+const actionClusterStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+} satisfies CSSProperties;
+
+const linkCardStyle = {
+  display: "grid",
+  gap: 10,
+} satisfies CSSProperties;
+
+const linkRowStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  padding: "10px 12px",
+  borderRadius: 8,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+} satisfies CSSProperties;
+
+const monoValueStyle = {
+  fontFamily: theme.monoFamily,
+  fontSize: 11.5,
+  color: theme.textMuted,
 } satisfies CSSProperties;
 
 function toCanvasTone(
@@ -647,6 +679,110 @@ function CredentialActionModal({
   );
 }
 
+function GovernanceActionModal({
+  mode,
+  reason,
+  busy,
+  onReasonChange,
+  onClose,
+  onConfirm,
+  copy,
+}: {
+  mode: EntryActionMode | "revoke_credential";
+  reason: string;
+  busy: boolean;
+  onReasonChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+  copy: {
+    activateTitle: string;
+    deactivateTitle: string;
+    revokeTitle: string;
+    revokeCredentialTitle: string;
+    mediumSubtitle: string;
+    highSubtitle: string;
+    activateBody: string;
+    deactivateBody: string;
+    revokeBody: string;
+    revokeCredentialBody: string;
+    fieldLabel: string;
+    fieldHint: string;
+    fieldPlaceholder: string;
+    cancel: string;
+    activateConfirm: string;
+    deactivateConfirm: string;
+    revokeConfirm: string;
+    revokeCredentialConfirm: string;
+  };
+}) {
+  const requiresReason = mode === "revoke" || mode === "revoke_credential";
+  const title =
+    mode === "activate"
+      ? copy.activateTitle
+      : mode === "deactivate"
+        ? copy.deactivateTitle
+        : mode === "revoke"
+          ? copy.revokeTitle
+          : copy.revokeCredentialTitle;
+  const body =
+    mode === "activate"
+      ? copy.activateBody
+      : mode === "deactivate"
+        ? copy.deactivateBody
+        : mode === "revoke"
+          ? copy.revokeBody
+          : copy.revokeCredentialBody;
+  const confirmLabel =
+    mode === "activate"
+      ? copy.activateConfirm
+      : mode === "deactivate"
+        ? copy.deactivateConfirm
+        : mode === "revoke"
+          ? copy.revokeConfirm
+          : copy.revokeCredentialConfirm;
+
+  return (
+    <ModalFrame
+      title={title}
+      subtitle={requiresReason ? copy.highSubtitle : copy.mediumSubtitle}
+      onClose={onClose}
+      footer={
+        <>
+          <Btn theme={theme} variant="secondary" onClick={onClose}>
+            {copy.cancel}
+          </Btn>
+          <Btn
+            theme={theme}
+            variant={requiresReason ? "secondary" : "primary"}
+            danger={requiresReason}
+            disabled={busy || (requiresReason && !reason.trim())}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </Btn>
+        </>
+      }
+    >
+      <Banner
+        theme={theme}
+        tone={requiresReason ? "danger" : "warn"}
+        title={title}
+        body={body}
+      />
+      {requiresReason ? (
+        <TextAreaField
+          label={copy.fieldLabel}
+          hint={copy.fieldHint}
+          value={reason}
+          onChange={onReasonChange}
+          required
+          placeholder={copy.fieldPlaceholder}
+        />
+      ) : null}
+    </ModalFrame>
+  );
+}
+
 export default function PartnerDetailPage() {
   const params = useParams<{ entrySlug: string }>();
   const entrySlug = Array.isArray(params?.entrySlug)
@@ -672,6 +808,12 @@ export default function PartnerDetailPage() {
     "issue" | "rotate" | null
   >(null);
   const [credentialActionReason, setCredentialActionReason] = useState("");
+  const [entryActionMode, setEntryActionMode] =
+    useState<EntryActionMode | null>(null);
+  const [credentialToRevoke, setCredentialToRevoke] =
+    useState<CredentialRow | null>(null);
+  const [governanceReason, setGovernanceReason] = useState("");
+  const [governanceBusy, setGovernanceBusy] = useState(false);
   const [secretAcknowledged, setSecretAcknowledged] = useState(false);
 
   useEffect(() => {
@@ -774,6 +916,32 @@ export default function PartnerDetailPage() {
             issueConfirm: "Issue credential",
             rotateConfirm: "Rotate credential",
           },
+          governanceActionModal: {
+            activateTitle: "Activate partner entry",
+            deactivateTitle: "Deactivate partner entry",
+            revokeTitle: "Revoke partner entry",
+            revokeCredentialTitle: "Revoke ingress credential",
+            mediumSubtitle: "MEDIUM-RISK ACTION · audit receipt",
+            highSubtitle: "HIGH-RISK ACTION · audit reason required",
+            activateBody:
+              "Activation makes this entry eligible for governed traffic once readiness gates are satisfied.",
+            deactivateBody:
+              "Deactivation keeps the entry in the registry but blocks new governed traffic.",
+            revokeBody:
+              "Revocation is irreversible at the entry level and should only be used for contract termination or security withdrawal.",
+            revokeCredentialBody:
+              "Revoking this credential removes it from future ingress use. Rotate first if traffic continuity is required.",
+            fieldLabel: "Audit reason",
+            fieldHint:
+              "Provide a concrete operator reason. This action is recorded in Platform Admin audit history.",
+            fieldPlaceholder:
+              "Example: revoke after partner contract termination / security investigation",
+            cancel: "Cancel",
+            activateConfirm: "Activate",
+            deactivateConfirm: "Deactivate",
+            revokeConfirm: "Revoke entry",
+            revokeCredentialConfirm: "Revoke credential",
+          },
         }
       : {
           notFoundTitle: "Partner entry 目前不可用",
@@ -855,6 +1023,31 @@ export default function PartnerDetailPage() {
             cancel: "取消",
             issueConfirm: "發行 credential",
             rotateConfirm: "輪替 credential",
+          },
+          governanceActionModal: {
+            activateTitle: "啟用 partner entry",
+            deactivateTitle: "停用 partner entry",
+            revokeTitle: "撤銷 partner entry",
+            revokeCredentialTitle: "撤銷 ingress credential",
+            mediumSubtitle: "MEDIUM-RISK ACTION · 產出 audit receipt",
+            highSubtitle: "HIGH-RISK ACTION · 必填 audit reason",
+            activateBody:
+              "啟用後，此 entry 會在 readiness 條件滿足時可承接平台治理流量。",
+            deactivateBody:
+              "停用會保留 registry 紀錄，但封鎖新的平台治理流量。",
+            revokeBody:
+              "entry 層級撤銷不可逆，僅適用於合約終止或安全撤出等情境。",
+            revokeCredentialBody:
+              "撤銷後此 credential 不可再用於 ingress。若需要不中斷流量，應先輪替再撤銷。",
+            fieldLabel: "Audit 原因",
+            fieldHint:
+              "請具體說明操作原因。此動作會寫入 Platform Admin audit 歷史。",
+            fieldPlaceholder: "例如：合作終止 / 安全事件調查後撤銷",
+            cancel: "取消",
+            activateConfirm: "啟用",
+            deactivateConfirm: "停用",
+            revokeConfirm: "撤銷 entry",
+            revokeCredentialConfirm: "撤銷 credential",
           },
         };
 
@@ -966,6 +1159,49 @@ export default function PartnerDetailPage() {
       setIssuingCredential(false);
     }
   }, [client, credentialActionMode, credentialActionReason, entry, loadEntry]);
+
+  const runGovernanceAction = useCallback(async () => {
+    if (!entry) {
+      return;
+    }
+
+    setGovernanceBusy(true);
+    setError(null);
+
+    try {
+      if (entryActionMode === "activate") {
+        await client.activatePlatformPartnerEntry(entry.entrySlug);
+      } else if (entryActionMode === "deactivate") {
+        await client.deactivatePlatformPartnerEntry(entry.entrySlug);
+      } else if (entryActionMode === "revoke") {
+        await client.revokePlatformPartnerEntry(entry.entrySlug);
+      } else if (credentialToRevoke) {
+        await client.revokePlatformPartnerIngressCredential(
+          entry.entrySlug,
+          credentialToRevoke.keyId,
+          { revokeReason: governanceReason.trim() || null },
+        );
+      }
+
+      setEntryActionMode(null);
+      setCredentialToRevoke(null);
+      setGovernanceReason("");
+      await loadEntry({ preserveIssuedCredential: true });
+    } catch (nextError: unknown) {
+      setError(
+        nextError instanceof Error ? nextError.message : String(nextError),
+      );
+    } finally {
+      setGovernanceBusy(false);
+    }
+  }, [
+    client,
+    credentialToRevoke,
+    entry,
+    entryActionMode,
+    governanceReason,
+    loadEntry,
+  ]);
 
   const updateFormField = <Key extends keyof EntryFormState>(
     key: Key,
@@ -1211,6 +1447,10 @@ export default function PartnerDetailPage() {
           kind: credential.source,
           masked: `${credential.keyPrefix}${credential.maskedSuffix}`,
           rotatedAt: formatDateTime(credential.createdAt),
+          lastUsedAt: credential.lastUsedAt
+            ? formatDateTime(credential.lastUsedAt)
+            : "—",
+          status: credential.revokedAt ? "revoked" : "active",
         })),
     [credentials],
   );
@@ -1234,6 +1474,30 @@ export default function PartnerDetailPage() {
         k: "rotatedAt",
         mono: true,
         w: 160,
+      },
+      {
+        h: "last_used",
+        k: "lastUsedAt",
+        mono: true,
+        w: 160,
+      },
+      {
+        h: "actions",
+        w: 120,
+        r: (row) => (
+          <Btn
+            theme={theme}
+            variant="secondary"
+            danger
+            size="xs"
+            onClick={() => {
+              setCredentialToRevoke(row);
+              setGovernanceReason("");
+            }}
+          >
+            Revoke
+          </Btn>
+        ),
       },
     ],
     [],
@@ -1388,6 +1652,22 @@ export default function PartnerDetailPage() {
       ) : null}
       <Btn
         theme={theme}
+        variant={entry.activeFlag ? "ghost" : "secondary"}
+        onClick={() => {
+          setEntryActionMode(entry.activeFlag ? "deactivate" : "activate");
+          setGovernanceReason("");
+        }}
+      >
+        {entry.activeFlag
+          ? locale === "en"
+            ? "Deactivate"
+            : "停用 entry"
+          : locale === "en"
+            ? "Activate"
+            : "啟用 entry"}
+      </Btn>
+      <Btn
+        theme={theme}
         variant="secondary"
         onClick={() => {
           setCredentialActionMode("issue");
@@ -1405,6 +1685,17 @@ export default function PartnerDetailPage() {
         }}
       >
         {copy.rotateCredential}
+      </Btn>
+      <Btn
+        theme={theme}
+        variant="secondary"
+        danger
+        onClick={() => {
+          setEntryActionMode("revoke");
+          setGovernanceReason("");
+        }}
+      >
+        {locale === "en" ? "Revoke entry" : "撤銷 entry"}
       </Btn>
     </>
   );
@@ -1601,6 +1892,72 @@ export default function PartnerDetailPage() {
                   />
                 )}
               </Card>
+
+              <Card
+                theme={theme}
+                title={locale === "en" ? "Governance actions" : "治理動作"}
+                subtitle={
+                  locale === "en"
+                    ? "State transitions and high-risk lifecycle controls."
+                    : "集中執行狀態切換與高風險 lifecycle 控制。"
+                }
+              >
+                <div style={{ display: "grid", gap: 12 }}>
+                  <DL
+                    theme={theme}
+                    cols={1}
+                    items={[
+                      {
+                        k: locale === "en" ? "Status" : "狀態",
+                        v: formatPlatformCodeLabel(locale, entry.status),
+                      },
+                      {
+                        k: locale === "en" ? "Traffic posture" : "流量姿態",
+                        v: entry.activeFlag
+                          ? locale === "en"
+                            ? "Entry can accept governed traffic"
+                            : "可承接平台治理流量"
+                          : locale === "en"
+                            ? "Entry remains blocked"
+                            : "仍維持封鎖",
+                      },
+                    ]}
+                  />
+                  <div style={actionClusterStyle}>
+                    <Btn
+                      theme={theme}
+                      variant={entry.activeFlag ? "ghost" : "secondary"}
+                      size="xs"
+                      onClick={() => {
+                        setEntryActionMode(
+                          entry.activeFlag ? "deactivate" : "activate",
+                        );
+                        setGovernanceReason("");
+                      }}
+                    >
+                      {entry.activeFlag
+                        ? locale === "en"
+                          ? "Deactivate"
+                          : "停用"
+                        : locale === "en"
+                          ? "Activate"
+                          : "啟用"}
+                    </Btn>
+                    <Btn
+                      theme={theme}
+                      variant="secondary"
+                      danger
+                      size="xs"
+                      onClick={() => {
+                        setEntryActionMode("revoke");
+                        setGovernanceReason("");
+                      }}
+                    >
+                      {locale === "en" ? "Revoke entry" : "撤銷 entry"}
+                    </Btn>
+                  </div>
+                </div>
+              </Card>
             </div>
           </div>
         ) : null}
@@ -1696,6 +2053,57 @@ export default function PartnerDetailPage() {
                       : "This entry does not require partner-managed ingress credentials."
                   }
                 />
+                <Card
+                  theme={theme}
+                  title={
+                    locale === "en" ? "Webhook linkage" : "Webhook linkage"
+                  }
+                  subtitle={
+                    locale === "en"
+                      ? "Operational delivery remains masked here; only the governance binding is shown."
+                      : "此處只顯示治理綁定，不展開 operational delivery 細節。"
+                  }
+                >
+                  <div style={linkCardStyle}>
+                    <div style={linkRowStyle}>
+                      <div>
+                        <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+                          {locale === "en"
+                            ? "Request lineage"
+                            : "Request lineage"}
+                        </div>
+                        <div style={monoValueStyle}>
+                          {entry.auditMetadata.requestId ?? "—"}
+                        </div>
+                      </div>
+                      <Pill
+                        theme={theme}
+                        tone={entry.auditMetadata.source ? "success" : "warn"}
+                      >
+                        {entry.auditMetadata.source
+                          ? locale === "en"
+                            ? "bound"
+                            : "已綁定"
+                          : locale === "en"
+                            ? "gap"
+                            : "缺口"}
+                      </Pill>
+                    </div>
+                    <div style={linkRowStyle}>
+                      <div>
+                        <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+                          {locale === "en" ? "Audit source" : "Audit 來源"}
+                        </div>
+                        <div style={monoValueStyle}>
+                          {entry.auditMetadata.source ?? "—"}
+                        </div>
+                      </div>
+                      <Pill theme={theme} tone="info">
+                        {locale === "en" ? "platform-owned" : "平台治理"}
+                      </Pill>
+                    </div>
+                  </div>
+                </Card>
                 <div style={formGrid}>
                   <TextField
                     label={t("partners.form.tenantId")}
@@ -1831,6 +2239,71 @@ export default function PartnerDetailPage() {
                 ) : null}
               </div>
             </Card>
+            <Card
+              theme={theme}
+              title={locale === "en" ? "Adapter linkage" : "Adapter linkage"}
+              subtitle={
+                locale === "en"
+                  ? "Cross-link the contract snapshot to the platform adapter registry."
+                  : "將 contract snapshot 與平台 adapter registry 對照。"
+              }
+            >
+              <div style={linkCardStyle}>
+                <div style={linkRowStyle}>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+                      {locale === "en" ? "Linked adapter" : "Linked adapter"}
+                    </div>
+                    <div style={monoValueStyle}>
+                      {entry.eligibilityContract
+                        ? `${entry.eligibilityContract.adapterCode} · ${entry.eligibilityContract.adapterVersion}`
+                        : "—"}
+                    </div>
+                  </div>
+                  <Link
+                    href="/adapter-registry"
+                    style={{
+                      color: theme.text,
+                      textDecoration: "none",
+                      fontSize: 12,
+                    }}
+                  >
+                    /adapter-registry
+                  </Link>
+                </div>
+                <div style={linkRowStyle}>
+                  <div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600 }}>
+                      {locale === "en" ? "Manual fallback" : "Manual fallback"}
+                    </div>
+                    <div style={monoValueStyle}>
+                      {entry.eligibilityContract?.manualFallbackPolicy
+                        ?.requiredOnTimeout
+                        ? locale === "en"
+                          ? "ops_console required on timeout"
+                          : "timeout 時需進 ops_console"
+                        : locale === "en"
+                          ? "no timeout fallback"
+                          : "無 timeout fallback"}
+                    </div>
+                  </div>
+                  <Pill
+                    theme={theme}
+                    tone={
+                      entry.eligibilityContract?.contractId ? "accent" : "warn"
+                    }
+                  >
+                    {entry.eligibilityContract?.contractId
+                      ? locale === "en"
+                        ? "snapshot linked"
+                        : "snapshot 已綁定"
+                      : locale === "en"
+                        ? "missing snapshot"
+                        : "缺少 snapshot"}
+                  </Pill>
+                </div>
+              </div>
+            </Card>
             {renderEditableFooter}
           </div>
         ) : null}
@@ -1960,6 +2433,25 @@ export default function PartnerDetailPage() {
           }}
           onConfirm={() => void issueCredential()}
           copy={copy.credentialActionModal}
+        />
+      ) : null}
+
+      {entryActionMode || credentialToRevoke ? (
+        <GovernanceActionModal
+          mode={credentialToRevoke ? "revoke_credential" : entryActionMode!}
+          reason={governanceReason}
+          busy={governanceBusy}
+          onReasonChange={setGovernanceReason}
+          onClose={() => {
+            if (governanceBusy) {
+              return;
+            }
+            setEntryActionMode(null);
+            setCredentialToRevoke(null);
+            setGovernanceReason("");
+          }}
+          onConfirm={() => void runGovernanceAction()}
+          copy={copy.governanceActionModal}
         />
       ) : null}
 
