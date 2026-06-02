@@ -82,21 +82,18 @@ const kpiGridStyle: CSSProperties = {
   gap: 12,
 };
 
-const sectionSplitStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
+const sectionGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
   gap: 16,
-  alignItems: "start",
 };
 
 const sectionMainStyle: CSSProperties = {
-  flex: "1.6 1 520px",
   minWidth: 0,
 };
 
 const sectionSideStyle: CSSProperties = {
-  flex: "1 1 320px",
-  minWidth: 280,
+  minWidth: 0,
 };
 
 const bannerStackStyle: CSSProperties = {
@@ -238,8 +235,6 @@ export default function HomePage() {
           title: "Platform governance home",
           subtitle: (count: number) =>
             `DRTS control plane · ${count} governance item(s) need review today.`,
-          refresh: "Refresh",
-          refreshing: "Refreshing...",
           openAll: "Open all",
           openAudit: "Go to audit",
           loading: "Loading governance snapshot...",
@@ -307,8 +302,6 @@ export default function HomePage() {
           title: "平台治理工作首頁",
           subtitle: (count: number) =>
             `DRTS 平台控制平面 · 您今日有 ${count} 件需治理事項`,
-          refresh: "重新整理",
-          refreshing: "重新整理中...",
           openAll: "展開所有",
           openAudit: "前往稽核",
           loading: "載入治理快照中...",
@@ -626,16 +619,6 @@ export default function HomePage() {
         sticky={false}
         title={copy.title}
         subtitle={copy.subtitle(governanceItemCount)}
-        actions={
-          <CanvasBtn
-            theme={th}
-            variant="secondary"
-            size="sm"
-            onClick={() => void loadSnapshot()}
-          >
-            {loading && snapshot ? copy.refreshing : copy.refresh}
-          </CanvasBtn>
-        }
       />
 
       <div style={pageBodyStyle}>
@@ -724,7 +707,7 @@ export default function HomePage() {
               />
             </div>
 
-            <div style={sectionSplitStyle}>
+            <div style={sectionGridStyle}>
               <div style={sectionMainStyle}>
                 <CanvasCard
                   theme={th}
