@@ -107,7 +107,7 @@ const bannerStackStyle: CSSProperties = {
 
 const quickLinkGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   gap: 8,
 };
 
@@ -142,12 +142,6 @@ const quickLinkTextStyle: CSSProperties = {
   gap: 2,
   minWidth: 0,
   flex: 1,
-};
-
-const sectionTitleStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 8,
 };
 
 const emptyStateStyle: CSSProperties = {
@@ -212,16 +206,6 @@ function alertTone(
   }
 }
 
-function queueTone(items: GovernanceQueueItem[]): HomeBannerTone {
-  if (items.some((item) => item.tone === "danger")) {
-    return "danger";
-  }
-  if (items.some((item) => item.tone === "warn")) {
-    return "warn";
-  }
-  return "info";
-}
-
 function actorTypeTone(
   actorType: AuditLogRecord["actorType"],
 ): "accent" | "info" | "neutral" | "warn" {
@@ -271,6 +255,13 @@ export default function HomePage() {
           kpiPartners: "Partner entries",
           kpiDrivers: "Active drivers",
           kpiRecon: "Pending reconciliation",
+          partnerReadiness: (count: number) => `${count} pending readiness`,
+          driverDelta: (count: number) => `${count} stale in dispatch feed`,
+          driverSub: (eligible: number, total: number) =>
+            `${eligible} dispatch-eligible · ${total} total`,
+          reconDelta: (partner: number, forwarded: number) =>
+            `${partner} partner · ${forwarded} forwarded`,
+          reconSub: (count: number) => `${count} critical platform alert(s)`,
           noAudit: "No audit records found.",
           noTodos: "No platform-routed governance blockers at the moment.",
           auditTime: "Time",
@@ -331,6 +322,13 @@ export default function HomePage() {
           kpiPartners: "合作夥伴 entry",
           kpiDrivers: "活躍司機",
           kpiRecon: "待結算對帳",
+          partnerReadiness: (count: number) => `${count} 待 readiness`,
+          driverDelta: (count: number) => `${count} 筆 stale`,
+          driverSub: (eligible: number, total: number) =>
+            `${eligible} 可派 · ${total} 總數`,
+          reconDelta: (partner: number, forwarded: number) =>
+            `${partner} partner · ${forwarded} forwarded`,
+          reconSub: (count: number) => `${count} 筆重大平台告警`,
           noAudit: "目前沒有稽核紀錄。",
           noTodos: "目前沒有路由到平台端的治理阻塞。",
           auditTime: "時間",
@@ -576,8 +574,6 @@ export default function HomePage() {
       .join(", ") || undefined;
   const governanceItemCount = governanceQueue.length;
   const showLoadingState = loading && !snapshot;
-  const queueBadgeTone = queueTone(governanceQueue);
-
   const auditColumns: CanvasTableColumn<AuditTableRow>[] = [
     {
       h: copy.auditTime,
@@ -687,27 +683,20 @@ export default function HomePage() {
                     ? `${metrics.bankPartners} bank · ${metrics.hotelPartners + metrics.enterprisePartners} hotel / enterprise`
                     : `${metrics.bankPartners} 銀行 · ${metrics.hotelPartners + metrics.enterprisePartners} 飯店 / 企業`
                 }
-                delta={
-                  locale === "en"
-                    ? `${metrics.partnerAttention} pending follow-up`
-                    : `${metrics.partnerAttention} 筆待補`
-                }
+                delta={copy.partnerReadiness(metrics.partnerAttention)}
                 deltaTone={metrics.partnerAttention > 0 ? "neutral" : "up"}
               />
               <CanvasKPI
                 theme={th}
                 label={copy.kpiDrivers}
                 value={metrics.activeDrivers}
-                sub={
-                  locale === "en"
-                    ? `${metrics.driverEligible} dispatch-eligible · ${metrics.totalDrivers} total`
-                    : `${metrics.driverEligible} 可派 · ${metrics.totalDrivers} 總數`
-                }
+                sub={copy.driverSub(
+                  metrics.driverEligible,
+                  metrics.totalDrivers,
+                )}
                 delta={
                   metrics.staleDrivers > 0
-                    ? locale === "en"
-                      ? `${metrics.staleDrivers} stale`
-                      : `${metrics.staleDrivers} 筆 stale`
+                    ? copy.driverDelta(metrics.staleDrivers)
                     : locale === "en"
                       ? "healthy"
                       : "穩定"
@@ -720,17 +709,14 @@ export default function HomePage() {
                 value={metrics.openIssues}
                 delta={
                   metrics.openIssues > 0
-                    ? locale === "en"
-                      ? `${metrics.partnerIssues} partner · ${metrics.forwardedIssues} forwarded`
-                      : `${metrics.partnerIssues} partner · ${metrics.forwardedIssues} forwarded`
+                    ? copy.reconDelta(
+                        metrics.partnerIssues,
+                        metrics.forwardedIssues,
+                      )
                     : undefined
                 }
                 deltaTone={metrics.openIssues > 0 ? "neutral" : "up"}
-                sub={
-                  locale === "en"
-                    ? `${metrics.criticalAlerts} critical platform alert(s)`
-                    : `${metrics.criticalAlerts} 筆重大平台告警`
-                }
+                sub={copy.reconSub(metrics.criticalAlerts)}
                 hint={
                   unresolvedIssueHint ??
                   (locale === "en" ? "no open issue ids" : "目前無待處理 issue")
@@ -742,14 +728,7 @@ export default function HomePage() {
               <div style={sectionMainStyle}>
                 <CanvasCard
                   theme={th}
-                  title={
-                    <div style={sectionTitleStyle}>
-                      <span>{copy.todayTitle}</span>
-                      <CanvasPill theme={th} tone={queueBadgeTone}>
-                        {copy.queueCount(governanceQueue.length)}
-                      </CanvasPill>
-                    </div>
-                  }
+                  title={copy.todayTitle}
                   subtitle={copy.todaySubtitle}
                   actions={
                     <CanvasBtn
