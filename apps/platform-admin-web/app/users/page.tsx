@@ -1,29 +1,43 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import { formatPlatformCodeLabel, getPlatformLabel } from "@/lib/localized-labels";
 import type {
   PlatformAdminUserRecord,
   PlatformAdminUserRole,
   PlatformAdminUserStatus,
 } from "@drts/contracts";
 import {
-  CalloutBanner,
-  DataCellStack,
-  DataFilterBar,
-  DataTable,
-  DataViewCard,
-  KpiCard,
-  KpiRow,
-  PageHeader,
-  StatusChip,
-  Td,
-  Tr,
-  WorkflowPanel,
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasField,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasTable,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+  type CanvasTheme,
+  type CanvasTone,
 } from "@drts/ui-web";
+
+// Platform Admin canvas body parity: PA_Users (docs/05-ui/drts-design-canvas/
+// platform-screens-1.jsx). Table-first canvas layout — header invite action +
+// a single Card/Table with NAME / EMAIL / ROLE / STATUS / 更新 / ACTIONS. The
+// legacy KPI row, the embedded create panel, and the userId/created columns
+// from the old generic management body are intentionally removed; the invite
+// form now lives in a drawer behind the header action. See
+// docs/05-ui/platform-admin-body-parity-audit-20260602.md §7.7.
 
 const ROLE_CODES: PlatformAdminUserRole[] = [
   "superadmin",
@@ -32,7 +46,170 @@ const ROLE_CODES: PlatformAdminUserRole[] = [
   "viewer",
 ];
 
-type UserFilter = "all" | PlatformAdminUserStatus;
+const theme = buildCanvasTheme({
+  surface: "platform",
+  density: "compact",
+});
+
+type UserRow = PlatformAdminUserRecord & Record<string, unknown>;
+
+// Medium-risk role edit vs high-risk suspend. The canvas descriptor renders a
+// disabled `suspend` (disabledReasonCode: already_suspended) for non-active
+// rows; we keep that affordance but pair it with a reactivate action so the
+// backend status transition stays reachable instead of becoming a dead button.
+type PendingAction =
+  | { kind: "role"; user: PlatformAdminUserRecord; roleCode: PlatformAdminUserRole }
+  | { kind: "suspend"; user: PlatformAdminUserRecord; reason: string }
+  | { kind: "activate"; user: PlatformAdminUserRecord };
+
+const bodyStyle = {
+  display: "grid",
+  gap: 16,
+  padding: 24,
+} satisfies CSSProperties;
+
+const loadingStateStyle = {
+  color: theme.textMuted,
+  fontSize: 12.5,
+  padding: "32px 16px",
+  textAlign: "center",
+} satisfies CSSProperties;
+
+const emptyStateStyle = {
+  color: theme.textMuted,
+  fontSize: 12.5,
+  textAlign: "center",
+  padding: "32px 16px",
+} satisfies CSSProperties;
+
+const nameCellStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  minWidth: 0,
+} satisfies CSSProperties;
+
+const avatarStyle = {
+  width: 24,
+  height: 24,
+  borderRadius: 12,
+  background: theme.accentBg,
+  color: theme.accent,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: 10,
+  fontWeight: 700,
+  flexShrink: 0,
+  textTransform: "uppercase",
+} satisfies CSSProperties;
+
+const nameTextStyle = {
+  fontWeight: 500,
+  color: theme.text,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+} satisfies CSSProperties;
+
+const rowActionsStyle = {
+  display: "flex",
+  gap: 4,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const disabledReasonStyle = {
+  fontSize: 10.5,
+  color: theme.textDim,
+  alignSelf: "center",
+} satisfies CSSProperties;
+
+const overlayStyle = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(2, 6, 23, 0.62)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 24,
+  zIndex: 60,
+} satisfies CSSProperties;
+
+const modalStyle = {
+  width: "min(520px, 100%)",
+  maxHeight: "calc(100vh - 48px)",
+  overflowY: "auto",
+  background: theme.bg,
+  border: `1px solid ${theme.border}`,
+  borderRadius: 12,
+  boxShadow: "0 24px 64px rgba(2, 6, 23, 0.45)",
+} satisfies CSSProperties;
+
+const modalHeaderStyle = {
+  padding: "16px 20px",
+  borderBottom: `1px solid ${theme.border}`,
+} satisfies CSSProperties;
+
+const modalTitleStyle = {
+  margin: 0,
+  fontSize: 14.5,
+  fontWeight: 700,
+  color: theme.text,
+} satisfies CSSProperties;
+
+const modalSubtitleStyle = {
+  margin: "4px 0 0",
+  fontSize: 12,
+  color: theme.textMuted,
+  lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const modalBodyStyle = {
+  padding: 20,
+} satisfies CSSProperties;
+
+const modalFooterStyle = {
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 8,
+  padding: "14px 20px",
+  borderTop: `1px solid ${theme.border}`,
+} satisfies CSSProperties;
+
+function controlStyle(th: CanvasTheme): CSSProperties {
+  return {
+    width: "100%",
+    boxSizing: "border-box",
+    borderRadius: 7,
+    border: `1px solid ${th.border}`,
+    background: th.bgRaised,
+    color: th.text,
+    fontFamily: th.fontFamily,
+    fontSize: 12.5,
+    padding: "8px 10px",
+    outline: "none",
+  };
+}
+
+function roleTone(role: PlatformAdminUserRole): CanvasTone {
+  if (role === "superadmin" || role === "admin") {
+    return "info";
+  }
+  if (role === "operator") {
+    return "accent";
+  }
+  return "neutral";
+}
+
+function statusTone(status: PlatformAdminUserStatus): CanvasTone {
+  if (status === "active") {
+    return "success";
+  }
+  if (status === "invited") {
+    return "warn";
+  }
+  return "danger";
+}
 
 export default function UsersPage() {
   const { t, locale } = useTranslation();
@@ -40,37 +217,90 @@ export default function UsersPage() {
   const [users, setUsers] = useState<PlatformAdminUserRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
-  const [filter, setFilter] = useState<UserFilter>("all");
+  const [showInvite, setShowInvite] = useState(false);
   const [formEmail, setFormEmail] = useState("");
   const [formDisplayName, setFormDisplayName] = useState("");
   const [formRoleCode, setFormRoleCode] =
     useState<PlatformAdminUserRole>("operator");
   const [creating, setCreating] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
   const copy =
     locale === "en"
       ? {
           title: "Platform staff",
-          subtitle:
-            "Govern internal roles, invite state, and platform-only access from a single desk.",
-          refresh: "Refresh",
-          add: "Invite staff user",
-          createTitle: "Invite platform staff",
-          createSubtitle:
-            "Create a new internal user record and assign the initial role before the user enters any tenant or ops workflow.",
-          filtersLabel: "Filter staff users",
+          subtitle: "6 roles · RBAC gatekeeping stays backend-authoritative",
+          refresh: t("common.refresh"),
+          refreshing: "Refreshing…",
+          invite: "Invite",
+          inviteTitle: "Invite platform staff",
+          inviteSubtitle:
+            "Create an internal user record and assign the initial role before the user enters any tenant or ops workflow.",
+          colName: "NAME",
+          colEmail: "EMAIL",
+          colRole: "ROLE",
+          colStatus: "STATUS",
+          colUpdated: "UPDATED",
+          colActions: "ACTIONS",
+          actionRole: "Role",
+          actionSuspend: "Suspend",
+          actionActivate: "Activate",
+          alreadySuspended: "already suspended",
+          roleTitle: "Update role",
+          roleSubtitle:
+            "Medium-risk change. The new role takes effect immediately and is recorded to the audit trail.",
+          roleField: "Role",
+          suspendTitle: "Suspend platform staff",
+          suspendSubtitle:
+            "High-risk change. A reason is required and is attached to the audit receipt before the user loses access.",
+          reasonField: "Reason",
+          reasonHint: "Required for the high-risk audit receipt.",
+          reasonPlaceholder: "e.g. Offboarding / suspected credential leak",
+          activateTitle: "Reactivate platform staff",
+          activateSubtitle:
+            "Restore platform access for this user. The change is recorded to the audit trail.",
+          confirmSuspend: "Confirm suspend",
+          confirmActivate: "Confirm activate",
+          save: "Save",
+          empty: t("users.empty"),
+          loading: t("users.loading"),
         }
       : {
           title: "平台人員",
-          subtitle: "統一治理平台內部角色、邀請狀態與平台專屬權限。",
-          refresh: "重新整理",
-          add: "邀請平台人員",
-          createTitle: "邀請平台人員",
-          createSubtitle:
+          subtitle: "6 個角色 · RBAC 守門以後端為準",
+          refresh: t("common.refresh"),
+          refreshing: "重新整理中…",
+          invite: "邀請",
+          inviteTitle: "邀請平台人員",
+          inviteSubtitle:
             "先建立內部使用者主檔與初始角色，再讓該使用者進入 tenant 或 ops workflow。",
-          filtersLabel: "篩選平台人員",
+          colName: "NAME",
+          colEmail: "EMAIL",
+          colRole: "ROLE",
+          colStatus: "STATUS",
+          colUpdated: "更新",
+          colActions: "ACTIONS",
+          actionRole: "更新角色",
+          actionSuspend: "停用",
+          actionActivate: "啟用",
+          alreadySuspended: "已停用",
+          roleTitle: "更新角色",
+          roleSubtitle: "中風險變更，套用後立即生效並寫入稽核軌跡。",
+          roleField: "角色",
+          suspendTitle: "停用平台人員",
+          suspendSubtitle:
+            "高風險變更，需填寫原因並附加於稽核憑證，使用者隨即失去存取權限。",
+          reasonField: "原因",
+          reasonHint: "高風險稽核憑證必填。",
+          reasonPlaceholder: "例如：離職 / 疑似憑證外洩",
+          activateTitle: "重新啟用平台人員",
+          activateSubtitle: "恢復此使用者的平台存取權限，變更寫入稽核軌跡。",
+          confirmSuspend: "確認停用",
+          confirmActivate: "確認啟用",
+          save: "儲存",
+          empty: t("users.empty"),
+          loading: t("users.loading"),
         };
 
   const loadUsers = useCallback(async () => {
@@ -90,41 +320,29 @@ export default function UsersPage() {
     void loadUsers();
   }, [loadUsers]);
 
-  const counts = useMemo(
-    () => ({
-      all: users.length,
-      active: users.filter((user) => user.status === "active").length,
-      invited: users.filter((user) => user.status === "invited").length,
-      suspended: users.filter((user) => user.status === "suspended").length,
-      admins: users.filter(
-        (user) => user.roleCode === "superadmin" || user.roleCode === "admin",
-      ).length,
-      operators: users.filter((user) => user.roleCode === "operator").length,
-    }),
+  const rows = useMemo<UserRow[]>(
+    () => users.map((user) => ({ ...user })),
     [users],
   );
 
-  const visibleUsers = useMemo(() => {
-    if (filter === "all") {
-      return users;
-    }
-    return users.filter((user) => user.status === filter);
-  }, [filter, users]);
+  const resetInvite = useCallback(() => {
+    setShowInvite(false);
+    setFormEmail("");
+    setFormDisplayName("");
+    setFormRoleCode("operator");
+  }, []);
 
-  const handleCreate = async (event: React.FormEvent) => {
+  const handleCreate = async (event: FormEvent) => {
     event.preventDefault();
     setCreating(true);
     setError(null);
     try {
       await client.createPlatformAdminUser({
-        email: formEmail,
-        displayName: formDisplayName,
+        email: formEmail.trim(),
+        displayName: formDisplayName.trim(),
         roleCode: formRoleCode,
       });
-      setShowCreate(false);
-      setFormEmail("");
-      setFormDisplayName("");
-      setFormRoleCode("operator");
+      resetInvite();
       await loadUsers();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : t("common.unknown"));
@@ -133,18 +351,17 @@ export default function UsersPage() {
     }
   };
 
-  const handleUpdate = useCallback(
+  const applyUpdate = useCallback(
     async (
       userId: string,
-      command: {
-        roleCode: PlatformAdminUserRole;
-        status?: PlatformAdminUserStatus;
-      },
+      roleCode: PlatformAdminUserRole,
+      status: PlatformAdminUserStatus,
     ) => {
       setUpdatingUserId(userId);
       setError(null);
       try {
-        await client.updatePlatformAdminUserRole(userId, command);
+        await client.updatePlatformAdminUserRole(userId, { roleCode, status });
+        setPendingAction(null);
         await loadUsers();
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : t("common.unknown"));
@@ -155,143 +372,294 @@ export default function UsersPage() {
     [client, loadUsers, t],
   );
 
-  if (loading) {
-    return <div style={emptyStateStyle}>{t("users.loading")}</div>;
-  }
+  const handleConfirm = async () => {
+    if (!pendingAction) {
+      return;
+    }
+    const { kind, user } = pendingAction;
+    if (kind === "role") {
+      await applyUpdate(user.userId, pendingAction.roleCode, user.status);
+    } else if (kind === "suspend") {
+      await applyUpdate(user.userId, user.roleCode, "suspended");
+    } else {
+      await applyUpdate(user.userId, user.roleCode, "active");
+    }
+  };
 
-  return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <PageHeader
-        eyebrow={locale === "en" ? "Identity Governance" : "身分治理"}
-        title={copy.title}
-        subtitle={copy.subtitle}
-        actions={
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              style={actionButtonStyle({ tone: "secondary" })}
-              onClick={() => void loadUsers()}
+  const columns: CanvasTableColumn<UserRow>[] = [
+    {
+      h: copy.colName,
+      w: 200,
+      r: (row) => (
+        <div style={nameCellStyle}>
+          <span style={avatarStyle}>{row.displayName.slice(0, 2)}</span>
+          <span style={nameTextStyle}>{row.displayName}</span>
+        </div>
+      ),
+    },
+    { h: copy.colEmail, k: "email", w: 240, mono: true },
+    {
+      h: copy.colRole,
+      w: 200,
+      r: (row) => (
+        <CanvasPill theme={theme} tone={roleTone(row.roleCode)}>
+          {formatPlatformCodeLabel(locale, row.roleCode)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: copy.colStatus,
+      w: 120,
+      r: (row) => (
+        <CanvasPill theme={theme} tone={statusTone(row.status)} dot>
+          {formatPlatformCodeLabel(locale, row.status)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: copy.colUpdated,
+      w: 170,
+      mono: true,
+      r: (row) => formatDateTime(row.updatedAt),
+    },
+    {
+      h: copy.colActions,
+      w: 220,
+      r: (row) => {
+        const busy = updatingUserId === row.userId;
+        const isActive = row.status === "active";
+        return (
+          <div style={rowActionsStyle}>
+            <CanvasBtn
+              theme={theme}
+              size="xs"
+              variant="secondary"
+              disabled={busy}
+              onClick={() =>
+                setPendingAction({
+                  kind: "role",
+                  user: row,
+                  roleCode: row.roleCode,
+                })
+              }
             >
-              {copy.refresh}
-            </button>
-            <button
-              type="button"
-              style={actionButtonStyle({ tone: "primary" })}
-              onClick={() => setShowCreate((current) => !current)}
-            >
-              {showCreate ? t("common.cancel") : copy.add}
-            </button>
+              {copy.actionRole}
+            </CanvasBtn>
+            {isActive ? (
+              <CanvasBtn
+                theme={theme}
+                size="xs"
+                variant="secondary"
+                danger
+                disabled={busy}
+                onClick={() =>
+                  setPendingAction({ kind: "suspend", user: row, reason: "" })
+                }
+              >
+                {copy.actionSuspend}
+              </CanvasBtn>
+            ) : row.status === "suspended" ? (
+              <>
+                <CanvasBtn
+                  theme={theme}
+                  size="xs"
+                  variant="secondary"
+                  disabled
+                >
+                  {copy.actionSuspend}
+                </CanvasBtn>
+                <span style={disabledReasonStyle}>{copy.alreadySuspended}</span>
+                <CanvasBtn
+                  theme={theme}
+                  size="xs"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() =>
+                    setPendingAction({ kind: "activate", user: row })
+                  }
+                >
+                  {copy.actionActivate}
+                </CanvasBtn>
+              </>
+            ) : (
+              <CanvasBtn
+                theme={theme}
+                size="xs"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => setPendingAction({ kind: "activate", user: row })}
+              >
+                {copy.actionActivate}
+              </CanvasBtn>
+            )}
           </div>
-        }
-      />
+        );
+      },
+    },
+  ];
 
-      {error ? (
-        <CalloutBanner
-          tone="danger"
-          title={
-            locale === "en"
-              ? "Unable to load platform users"
-              : "無法載入平台人員資料"
-          }
-          description={error}
-        />
-      ) : null}
+  const pendingBusy = pendingAction
+    ? updatingUserId === pendingAction.user.userId
+    : false;
 
-      <KpiRow minWidth="220px">
-        <KpiCard
-          label={locale === "en" ? "Active staff" : "啟用中人員"}
-          value={counts.active}
-          detail={`${counts.invited} invited · ${counts.suspended} suspended`}
-          tone="success"
-        />
-        <KpiCard
-          label={locale === "en" ? "Admin coverage" : "管理角色覆蓋"}
-          value={counts.admins}
-          detail={locale === "en" ? "superadmin + admin" : "superadmin + admin"}
-          tone="info"
-        />
-        <KpiCard
-          label={locale === "en" ? "Operators" : "Operator 角色"}
-          value={counts.operators}
-          detail={
-            locale === "en"
-              ? "Frontline platform operators"
-              : "前線平台營運人員"
-          }
-          tone="accent"
-        />
-      </KpiRow>
+  function renderModal(): ReactNode {
+    if (showInvite) {
+      const canSubmit =
+        Boolean(formEmail.trim()) && Boolean(formDisplayName.trim()) && !creating;
+      return (
+        <div style={overlayStyle} role="dialog" aria-modal="true">
+          <div style={modalStyle}>
+            <div style={modalHeaderStyle}>
+              <h2 style={modalTitleStyle}>{copy.inviteTitle}</h2>
+              <p style={modalSubtitleStyle}>{copy.inviteSubtitle}</p>
+            </div>
+            <form onSubmit={handleCreate}>
+              <div style={modalBodyStyle}>
+                <CanvasField theme={theme} label={t("users.form.email")} required>
+                  <input
+                    type="email"
+                    value={formEmail}
+                    onChange={(event) => setFormEmail(event.target.value)}
+                    required
+                    placeholder="staff@platform.drts"
+                    style={controlStyle(theme)}
+                  />
+                </CanvasField>
+                <CanvasField
+                  theme={theme}
+                  label={t("users.form.displayName")}
+                  required
+                >
+                  <input
+                    type="text"
+                    value={formDisplayName}
+                    onChange={(event) => setFormDisplayName(event.target.value)}
+                    required
+                    style={controlStyle(theme)}
+                  />
+                </CanvasField>
+                <CanvasField theme={theme} label={t("users.form.role")}>
+                  <select
+                    value={formRoleCode}
+                    onChange={(event) =>
+                      setFormRoleCode(event.target.value as PlatformAdminUserRole)
+                    }
+                    style={controlStyle(theme)}
+                  >
+                    {ROLE_CODES.map((roleCode) => (
+                      <option key={roleCode} value={roleCode}>
+                        {formatPlatformCodeLabel(locale, roleCode)}
+                      </option>
+                    ))}
+                  </select>
+                </CanvasField>
+              </div>
+              <div style={modalFooterStyle}>
+                <CanvasBtn
+                  theme={theme}
+                  variant="secondary"
+                  onClick={resetInvite}
+                >
+                  {t("common.cancel")}
+                </CanvasBtn>
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    padding: 0,
+                    cursor: canSubmit ? "pointer" : "not-allowed",
+                  }}
+                >
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    icon="plus"
+                    disabled={!canSubmit}
+                  >
+                    {creating ? t("common.adding") : copy.invite}
+                  </CanvasBtn>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      );
+    }
 
-      {showCreate ? (
-        <WorkflowPanel
-          title={copy.createTitle}
-          description={copy.createSubtitle}
-          tone="info"
-        >
-          <form onSubmit={handleCreate} style={{ display: "grid", gap: 16 }}>
+    if (!pendingAction) {
+      return null;
+    }
+
+    const { kind, user } = pendingAction;
+    const modalTitle =
+      kind === "role"
+        ? copy.roleTitle
+        : kind === "suspend"
+          ? copy.suspendTitle
+          : copy.activateTitle;
+    const modalSubtitle =
+      kind === "role"
+        ? copy.roleSubtitle
+        : kind === "suspend"
+          ? copy.suspendSubtitle
+          : copy.activateSubtitle;
+    const confirmLabel =
+      kind === "role"
+        ? copy.save
+        : kind === "suspend"
+          ? copy.confirmSuspend
+          : copy.confirmActivate;
+    const canConfirm =
+      !pendingBusy &&
+      (kind !== "suspend" || pendingAction.reason.trim().length > 0);
+
+    return (
+      <div style={overlayStyle} role="dialog" aria-modal="true">
+        <div style={modalStyle}>
+          <div style={modalHeaderStyle}>
+            <h2 style={modalTitleStyle}>{modalTitle}</h2>
+            <p style={modalSubtitleStyle}>{modalSubtitle}</p>
+          </div>
+          <div style={modalBodyStyle}>
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 16,
               }}
             >
-              <label>
-                <div
-                  style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}
-                >
-                  {t("users.form.email")}
+              <span style={avatarStyle}>{user.displayName.slice(0, 2)}</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, color: theme.text }}>
+                  {user.displayName}
                 </div>
-                <input
-                  type="email"
-                  value={formEmail}
-                  onChange={(event) => setFormEmail(event.target.value)}
-                  required
+                <div
                   style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    border: "1px solid #cbd5e1",
+                    fontSize: 11.5,
+                    color: theme.textMuted,
+                    fontFamily: theme.monoFamily,
                   }}
-                  placeholder="staff@platform.drts"
-                />
-              </label>
-              <label>
-                <div
-                  style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}
                 >
-                  {t("users.form.displayName")}
+                  {user.email}
                 </div>
-                <input
-                  type="text"
-                  value={formDisplayName}
-                  onChange={(event) => setFormDisplayName(event.target.value)}
-                  required
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    border: "1px solid #cbd5e1",
-                  }}
-                />
-              </label>
-              <label>
-                <div
-                  style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}
-                >
-                  {t("users.form.role")}
-                </div>
+              </div>
+            </div>
+
+            {kind === "role" ? (
+              <CanvasField theme={theme} label={copy.roleField}>
                 <select
-                  value={formRoleCode}
+                  value={pendingAction.roleCode}
                   onChange={(event) =>
-                    setFormRoleCode(event.target.value as PlatformAdminUserRole)
+                    setPendingAction({
+                      kind: "role",
+                      user,
+                      roleCode: event.target.value as PlatformAdminUserRole,
+                    })
                   }
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    border: "1px solid #cbd5e1",
-                  }}
+                  style={controlStyle(theme)}
                 >
                   {ROLE_CODES.map((roleCode) => (
                     <option key={roleCode} value={roleCode}>
@@ -299,179 +667,106 @@ export default function UsersPage() {
                     </option>
                   ))}
                 </select>
-              </label>
-            </div>
-            <button
-              type="submit"
-              style={actionButtonStyle({ tone: "primary" })}
-              disabled={
-                creating || !formEmail.trim() || !formDisplayName.trim()
-              }
-            >
-              {creating ? t("common.adding") : copy.add}
-            </button>
-          </form>
-        </WorkflowPanel>
-      ) : null}
+              </CanvasField>
+            ) : null}
 
-      <DataViewCard
+            {kind === "suspend" ? (
+              <CanvasField
+                theme={theme}
+                label={copy.reasonField}
+                hint={copy.reasonHint}
+                required
+              >
+                <textarea
+                  value={pendingAction.reason}
+                  onChange={(event) =>
+                    setPendingAction({
+                      kind: "suspend",
+                      user,
+                      reason: event.target.value,
+                    })
+                  }
+                  rows={3}
+                  placeholder={copy.reasonPlaceholder}
+                  style={{ ...controlStyle(theme), resize: "vertical" }}
+                />
+              </CanvasField>
+            ) : null}
+          </div>
+          <div style={modalFooterStyle}>
+            <CanvasBtn
+              theme={theme}
+              variant="secondary"
+              disabled={pendingBusy}
+              onClick={() => setPendingAction(null)}
+            >
+              {t("common.cancel")}
+            </CanvasBtn>
+            <CanvasBtn
+              theme={theme}
+              variant="primary"
+              danger={kind === "suspend"}
+              disabled={!canConfirm}
+              onClick={() => void handleConfirm()}
+            >
+              {pendingBusy ? t("common.updating") : confirmLabel}
+            </CanvasBtn>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <CanvasPageHeader
+        theme={theme}
         title={copy.title}
         subtitle={copy.subtitle}
-        filters={
-          <DataFilterBar
-            value={filter}
-            onChange={setFilter}
-            ariaLabel={copy.filtersLabel}
-            filters={[
-              {
-                value: "all",
-                label: locale === "en" ? "All" : "全部",
-                count: counts.all,
-                tone: "neutral",
-              },
-              {
-                value: "active",
-                label: "active",
-                count: counts.active,
-                tone: "success",
-              },
-              {
-                value: "invited",
-                label: "invited",
-                count: counts.invited,
-                tone: "info",
-              },
-              {
-                value: "suspended",
-                label: "suspended",
-                count: counts.suspended,
-                tone: "danger",
-              },
-            ]}
-          />
+        actions={
+          <>
+            <CanvasBtn
+              theme={theme}
+              variant="secondary"
+              icon="arrow"
+              onClick={() => void loadUsers()}
+            >
+              {loading && users.length > 0 ? copy.refreshing : copy.refresh}
+            </CanvasBtn>
+            <CanvasBtn
+              theme={theme}
+              variant="primary"
+              icon="plus"
+              onClick={() => setShowInvite(true)}
+            >
+              {copy.invite}
+            </CanvasBtn>
+          </>
         }
-      >
-        <DataTable
-          columns={[
-            { label: t("users.col.user"), width: "260px" },
-            { label: t("users.col.role"), width: "180px" },
-            { label: t("common.status"), width: "140px" },
-            { label: locale === "en" ? "Created" : "建立時間", width: "180px" },
-            { label: locale === "en" ? "Updated" : "更新時間", width: "180px" },
-            { label: t("common.actions"), width: "260px" },
-          ]}
-          empty={t("users.empty")}
-        >
-          {visibleUsers.map((user) => (
-            <Tr key={user.userId}>
-              <Td>
-                <DataCellStack
-                  primary={<strong>{user.displayName}</strong>}
-                  secondary={user.email}
-                  tertiary={user.userId}
-                />
-              </Td>
-              <Td>
-                <StatusChip
-                  label={formatPlatformCodeLabel(locale, user.roleCode)}
-                  tone={
-                    user.roleCode === "superadmin" || user.roleCode === "admin"
-                      ? "info"
-                      : user.roleCode === "operator"
-                        ? "accent"
-                        : "neutral"
-                  }
-                />
-              </Td>
-              <Td>
-                <StatusChip
-                  label={formatPlatformCodeLabel(locale, user.status)}
-                  tone={
-                    user.status === "active"
-                      ? "success"
-                      : user.status === "invited"
-                        ? "warning"
-                        : "danger"
-                  }
-                />
-              </Td>
-              <Td>{formatDateTime(user.createdAt)}</Td>
-              <Td>{formatDateTime(user.updatedAt)}</Td>
-              <Td>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    style={actionButtonStyle({ tone: "secondary", size: "sm" })}
-                    disabled={
-                      updatingUserId === user.userId ||
-                      user.roleCode === "admin"
-                    }
-                    onClick={() =>
-                      void handleUpdate(user.userId, {
-                        roleCode: "admin",
-                        status: user.status,
-                      })
-                    }
-                  >
-                    {formatPlatformCodeLabel(locale, "admin")}
-                  </button>
-                  <button
-                    type="button"
-                    style={actionButtonStyle({ tone: "secondary", size: "sm" })}
-                    disabled={
-                      updatingUserId === user.userId ||
-                      user.roleCode === "viewer"
-                    }
-                    onClick={() =>
-                      void handleUpdate(user.userId, {
-                        roleCode: "viewer",
-                        status: user.status,
-                      })
-                    }
-                  >
-                    {formatPlatformCodeLabel(locale, "viewer")}
-                  </button>
-                  {user.status === "suspended" ? (
-                    <button
-                      type="button"
-                      style={actionButtonStyle({
-                        tone: "secondary",
-                        size: "sm",
-                      })}
-                      disabled={updatingUserId === user.userId}
-                      onClick={() =>
-                        void handleUpdate(user.userId, {
-                          roleCode: user.roleCode,
-                          status: "active",
-                        })
-                      }
-                    >
-                      {locale === "en" ? "Activate" : "啟用"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      style={actionButtonStyle({
-                        tone: "secondary",
-                        size: "sm",
-                      })}
-                      disabled={updatingUserId === user.userId}
-                      onClick={() =>
-                        void handleUpdate(user.userId, {
-                          roleCode: user.roleCode,
-                          status: "suspended",
-                        })
-                      }
-                    >
-                      {locale === "en" ? "Suspend" : "停用"}
-                    </button>
-                  )}
-                </div>
-              </Td>
-            </Tr>
-          ))}
-        </DataTable>
-      </DataViewCard>
-    </div>
+      />
+
+      <div style={bodyStyle}>
+        {error ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={`${getPlatformLabel(locale, "error")}: ${error}`}
+          />
+        ) : null}
+
+        <CanvasCard theme={theme} padding={0} style={{ overflow: "hidden" }}>
+          {loading && users.length === 0 ? (
+            <div style={loadingStateStyle}>{copy.loading}</div>
+          ) : rows.length === 0 ? (
+            <div style={emptyStateStyle}>{copy.empty}</div>
+          ) : (
+            <CanvasTable<UserRow> theme={theme} columns={columns} rows={rows} />
+          )}
+        </CanvasCard>
+      </div>
+
+      {renderModal()}
+    </>
   );
 }
