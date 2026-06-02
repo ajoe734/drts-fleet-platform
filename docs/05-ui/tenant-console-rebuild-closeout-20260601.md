@@ -18,7 +18,9 @@ As of 2026-06-02 UTC:
 - the 14 tenant-console dependency tasks currently recorded in machine truth are all `done`, with `UI-FE-TEN-UMBRELLA` remaining as the owner closeout task
 - app-level smoke verification is green in this worktree after repairing the remaining umbrella integration regressions
 
-This branch is therefore eligible for owner `handoff` to reviewer once the closeout commit is recorded and pushed.
+Reviewer approval was recorded on 2026-06-02 UTC against `origin/codex2/ui-fe-ten-umbrella` commit `638aa780`.
+
+This branch is therefore in owner finalization: record the formal closeout verification trailer commit, push it normally, and then mark the task `done`.
 
 ## Scope Confirmed
 
@@ -168,10 +170,11 @@ Confirmed posture:
 - external `tenant-commute-hub` remains the live production owner until a separate cutover task records rollout / rollback evidence
 - this document is therefore a ship-readiness checkpoint, not a topology-switch record
 
-## Next Action
+## Finalization Note
 
-Owner action after this document update:
+Owner closeout on 2026-06-02 UTC requires only the formal finish steps:
 
-- create the task-scoped closeout commit
-- push `codex2/ui-fe-ten-umbrella` with the closeout evidence
-- hand off `UI-FE-TEN-UMBRELLA` to reviewer `Codex`
+- rerun scoped verification for the approved umbrella slice
+- record a task-scoped closeout commit with `Verification:` trailer
+- push `codex2/ui-fe-ten-umbrella` with a normal non-force push
+- mark `UI-FE-TEN-UMBRELLA` `done` in machine truth with commit and push metadata
