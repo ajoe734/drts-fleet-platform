@@ -1585,6 +1585,23 @@ const en = {
   "driverEarnings.revenueBeforeFees": "Revenue before fees and subsidy",
   "driverEarnings.platformFee": "Platform fee retained from gross",
   "driverEarnings.supportPrograms": "Support programs credited to driver",
+
+  // ── Ops Assistant ──
+  "assistant.title": "Ops Assistant",
+  "assistant.subtitle": "Mocked streaming preview",
+  "assistant.open": "Open operations assistant",
+  "assistant.close": "Close assistant",
+  "assistant.minimize": "Minimize assistant",
+  "assistant.restore": "Restore assistant",
+  "assistant.dock": "Dock to side",
+  "assistant.undock": "Float window",
+  "assistant.move": "Move assistant window (use arrow keys)",
+  "assistant.resize": "Resize assistant window (use arrow keys)",
+  "assistant.inputPlaceholder": "Ask the ops assistant…",
+  "assistant.send": "Send message",
+  "assistant.messageLog": "Assistant conversation",
+  "assistant.greeting":
+    "Hi — I'm the operations assistant shell. Responses are mocked for now; the real model and final visual language are owned by the design and platform teams.",
 };
 
 const zh: Record<keyof typeof en, string> = {
@@ -3087,6 +3104,23 @@ const zh: Record<keyof typeof en, string> = {
   "driverEarnings.revenueBeforeFees": "扣除費用與補助前的收益",
   "driverEarnings.platformFee": "從總收入保留的平台費用",
   "driverEarnings.supportPrograms": "計入司機的支持計畫",
+
+  // ── Ops Assistant ──
+  "assistant.title": "營運助理",
+  "assistant.subtitle": "模擬串流預覽",
+  "assistant.open": "開啟營運助理",
+  "assistant.close": "關閉助理",
+  "assistant.minimize": "縮小助理",
+  "assistant.restore": "還原助理",
+  "assistant.dock": "停靠側邊",
+  "assistant.undock": "浮動視窗",
+  "assistant.move": "移動助理視窗（可用方向鍵）",
+  "assistant.resize": "調整助理視窗大小（可用方向鍵）",
+  "assistant.inputPlaceholder": "詢問營運助理…",
+  "assistant.send": "送出訊息",
+  "assistant.messageLog": "助理對話",
+  "assistant.greeting":
+    "嗨，我是營運助理的外框介面。目前回覆皆為模擬；真正的模型與最終視覺語言由設計與平台團隊負責。",
 };
 
 export const translations: Record<Locale, Record<string, string>> = { en, zh };
