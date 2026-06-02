@@ -27,7 +27,7 @@ import {
   type CanvasTheme,
 } from "@drts/ui-web";
 
-type ActionIntent = "toggle" | "override";
+type ActionIntent = "toggle" | "override" | "removeOverride";
 
 type ActionDescriptor = {
   intent: ActionIntent | "history";
@@ -53,7 +53,16 @@ type OverrideDraft = {
   enabled: boolean;
 };
 
-type PendingAction = ToggleDraft | OverrideDraft;
+type RemoveOverrideDraft = {
+  intent: "removeOverride";
+  key: string;
+  tenantId: string;
+  description: string;
+  enabled: boolean;
+  scopeLabel: string;
+};
+
+type PendingAction = ToggleDraft | OverrideDraft | RemoveOverrideDraft;
 
 type AuditReceipt = {
   id: string;
@@ -90,6 +99,11 @@ const actionDescriptors: Record<ActionDescriptor["intent"], ActionDescriptor> =
     },
     override: {
       intent: "override",
+      riskLevel: "high",
+      requiresReason: true,
+    },
+    removeOverride: {
+      intent: "removeOverride",
       riskLevel: "high",
       requiresReason: true,
     },
@@ -139,6 +153,11 @@ const fieldHintStyle = {
   color: theme.textMuted,
   fontSize: 11.5,
   lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const secondaryPanelStyle = {
+  display: "grid",
+  gap: 16,
 } satisfies CSSProperties;
 
 const selectStyle = (th: CanvasTheme): CSSProperties => ({
@@ -215,11 +234,6 @@ const actionRowStyle = {
   flexWrap: "wrap",
   gap: 8,
   alignItems: "center",
-} satisfies CSSProperties;
-
-const detailSectionsStyle = {
-  display: "grid",
-  gap: 12,
 } satisfies CSSProperties;
 
 const detailsStyle = {
@@ -326,6 +340,7 @@ export default function FeatureFlagsPage() {
   const [notes, setNotes] = useState<string[]>([]);
   const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const [tenantLoading, setTenantLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -380,6 +395,14 @@ export default function FeatureFlagsPage() {
     () => [...flags].sort(sortFlags).map(toFlagTableRow),
     [flags],
   );
+  const filteredRows = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    if (!query) {
+      return rows;
+    }
+
+    return rows.filter((row) => row.key.toLowerCase().includes(query));
+  }, [rows, searchTerm]);
   const selectedTenant =
     tenants.find((tenant) => tenant.id === selectedTenantId) ?? null;
   const overrideCount = rows.filter((row) => row.tenantId).length;
@@ -412,6 +435,8 @@ export default function FeatureFlagsPage() {
           riskBody:
             "Toggle and tenant override changes stay in this write lane and record a local audit receipt after confirmation.",
           scopeField: "Inspect scope",
+          searchField: "Search key",
+          searchPlaceholder: "Search by flag key",
           scopeHint:
             "Switch to a tenant to inspect its effective override rows. Default view stays on platform records.",
           scopeDefault: "Platform defaults",
@@ -419,7 +444,7 @@ export default function FeatureFlagsPage() {
           currentScope: selectedTenant
             ? `${selectedTenant.name} (${selectedTenant.code})`
             : "Platform defaults",
-          visibleRows: `${rows.length} visible row(s)`,
+          visibleRows: `${filteredRows.length} visible row(s)`,
           overrideVisible: `${overrideCount} tenant override row(s)`,
           tableTitle: "Feature flag registry",
           tableSubtitle:
@@ -433,6 +458,7 @@ export default function FeatureFlagsPage() {
           noDescription: "No description provided",
           updatedByValue: "Contract not exposed",
           toggle: "Toggle",
+          removeOverride: "Remove override",
           history: "History",
           confirmToggleTitle: "Confirm feature flag toggle",
           confirmToggleBody:
@@ -440,6 +466,9 @@ export default function FeatureFlagsPage() {
           confirmOverrideTitle: "Create tenant override",
           confirmOverrideBody:
             "This writes a tenant-specific override for the selected key and leaves other scopes unchanged.",
+          confirmRemoveOverrideTitle: "Remove tenant override",
+          confirmRemoveOverrideBody:
+            "This removes the tenant-specific override and reverts the tenant back to the platform default.",
           reasonLabel: "High-risk reason",
           reasonPlaceholder:
             "Describe the rollout reason, expected blast radius, and validation plan.",
@@ -458,6 +487,7 @@ export default function FeatureFlagsPage() {
           confirmEnable: "Enable",
           confirmDisable: "Disable",
           confirmCreate: "Create override",
+          confirmRemove: "Remove override",
           noFlags: t("flags.empty"),
           loading: t("flags.loading"),
           notesTitle: "Extended notes",
@@ -471,6 +501,9 @@ export default function FeatureFlagsPage() {
           historyFocusAll:
             "Showing all receipts recorded in this browser session.",
           historyFocusKey: `Focused on ${historyKey ?? "all keys"}`,
+          secondaryPanelTitle: "Extended governance details",
+          secondaryPanelSubtitle:
+            "Non-default details stay collapsed below the default table-first body.",
           actionApplied: "Audit receipt recorded",
         }
       : {
@@ -485,6 +518,8 @@ export default function FeatureFlagsPage() {
           riskBody:
             "toggle 與 tenant override 都維持在這條 write lane，確認後會留下本地 audit receipt。",
           scopeField: "檢視範圍",
+          searchField: "搜尋 key",
+          searchPlaceholder: "依 flag key 搜尋",
           scopeHint:
             "切到 tenant 可檢視該 tenant 的有效 override 列；預設仍以平台資料為主。",
           scopeDefault: "平台預設",
@@ -492,7 +527,7 @@ export default function FeatureFlagsPage() {
           currentScope: selectedTenant
             ? `${selectedTenant.name} (${selectedTenant.code})`
             : "平台預設",
-          visibleRows: `可見 ${rows.length} 列`,
+          visibleRows: `可見 ${filteredRows.length} 列`,
           overrideVisible: `tenant override ${overrideCount} 列`,
           tableTitle: "Feature flag registry",
           tableSubtitle:
@@ -506,12 +541,16 @@ export default function FeatureFlagsPage() {
           noDescription: "尚未提供描述",
           updatedByValue: "目前 contract 未提供",
           toggle: "切換",
+          removeOverride: "移除 override",
           history: "歷史",
           confirmToggleTitle: "確認切換 feature flag",
           confirmToggleBody: "這會變更目前檢視範圍中的有效 feature flag 狀態。",
           confirmOverrideTitle: "建立 tenant override",
           confirmOverrideBody:
             "這會為所選 key 建立 tenant 專屬 override，不影響其他範圍。",
+          confirmRemoveOverrideTitle: "移除 tenant override",
+          confirmRemoveOverrideBody:
+            "這會移除 tenant 專屬 override，讓該 tenant 回到平台預設。",
           reasonLabel: "高風險原因",
           reasonPlaceholder:
             "說明 rollout 原因、預期 blast radius 與驗證計畫。",
@@ -528,6 +567,7 @@ export default function FeatureFlagsPage() {
           confirmEnable: "啟用",
           confirmDisable: "停用",
           confirmCreate: "建立 override",
+          confirmRemove: "移除 override",
           noFlags: t("flags.empty"),
           loading: t("flags.loading"),
           notesTitle: "延伸備註",
@@ -537,6 +577,8 @@ export default function FeatureFlagsPage() {
           historyHint: "可用 History 列操作聚焦特定 key 的 receipt。",
           historyFocusAll: "目前顯示此瀏覽 session 的所有 receipts。",
           historyFocusKey: `目前聚焦 ${historyKey ?? "全部 key"}`,
+          secondaryPanelTitle: "延伸治理細節",
+          secondaryPanelSubtitle: "非預設資訊收在表格主體下方的次要區塊。",
           actionApplied: "已記錄 audit receipt",
         };
 
@@ -650,6 +692,32 @@ export default function FeatureFlagsPage() {
           >
             {copy.history}
           </CanvasBtn>
+          {row.tenantId ? (
+            <CanvasBtn
+              theme={theme}
+              size="xs"
+              variant="ghost"
+              onClick={() => {
+                const tenantId = row.tenantId;
+                if (!tenantId) {
+                  return;
+                }
+                setActionError(null);
+                setActionReason("");
+                setPendingAction({
+                  intent: "removeOverride",
+                  key: row.key,
+                  tenantId,
+                  description: row.description === "—" ? "" : row.description,
+                  enabled: row.enabled,
+                  scopeLabel: row.scopeLabel,
+                });
+              }}
+              disabled={updating === row.key}
+            >
+              {copy.removeOverride}
+            </CanvasBtn>
+          ) : null}
         </div>
       ),
     },
@@ -667,7 +735,11 @@ export default function FeatureFlagsPage() {
       return;
     }
 
-    if (pendingAction.intent === "override" && !pendingAction.tenantId) {
+    if (
+      (pendingAction.intent === "override" ||
+        pendingAction.intent === "removeOverride") &&
+      !pendingAction.tenantId
+    ) {
       setActionError(copy.overrideTenantField);
       return;
     }
@@ -698,7 +770,7 @@ export default function FeatureFlagsPage() {
             pendingAction.nextEnabled,
           );
         }
-      } else {
+      } else if (pendingAction.intent === "override") {
         await client.post<FeatureFlag>(
           `/api/admin/flags/${encodeURIComponent(
             pendingAction.key,
@@ -712,6 +784,14 @@ export default function FeatureFlagsPage() {
             },
           },
         );
+      } else {
+        await client.delete<FeatureFlag>(
+          `/api/admin/flags/${encodeURIComponent(
+            pendingAction.key,
+          )}/tenant-overrides?tenantId=${encodeURIComponent(
+            pendingAction.tenantId,
+          )}`,
+        );
       }
 
       const requestedAt = new Date().toISOString();
@@ -722,7 +802,9 @@ export default function FeatureFlagsPage() {
       const summary =
         pendingAction.intent === "toggle"
           ? `${pendingAction.nextEnabled ? copy.confirmEnable : copy.confirmDisable} ${pendingAction.key}`
-          : `${copy.confirmCreate} ${pendingAction.key}`;
+          : pendingAction.intent === "override"
+            ? `${copy.confirmCreate} ${pendingAction.key}`
+            : `${copy.confirmRemove} ${pendingAction.key}`;
 
       setAuditReceipts((previous) => [
         {
@@ -739,7 +821,7 @@ export default function FeatureFlagsPage() {
       setHistoryKey(pendingAction.key);
 
       const nextTenantId =
-        pendingAction.intent === "override" ? pendingAction.tenantId : null;
+        pendingAction.intent === "toggle" ? null : pendingAction.tenantId;
       setPendingAction(null);
       setActionReason("");
 
@@ -836,12 +918,16 @@ export default function FeatureFlagsPage() {
                 title={
                   pendingAction.intent === "toggle"
                     ? copy.confirmToggleTitle
-                    : copy.confirmOverrideTitle
+                    : pendingAction.intent === "override"
+                      ? copy.confirmOverrideTitle
+                      : copy.confirmRemoveOverrideTitle
                 }
                 subtitle={
                   pendingAction.intent === "toggle"
                     ? copy.confirmToggleBody
-                    : copy.confirmOverrideBody
+                    : pendingAction.intent === "override"
+                      ? copy.confirmOverrideBody
+                      : copy.confirmRemoveOverrideBody
                 }
               >
                 <div style={{ display: "grid", gap: 14 }}>
@@ -937,6 +1023,11 @@ export default function FeatureFlagsPage() {
                         {copy.overrideDescriptionHint}
                       </div>
                     </>
+                  ) : pendingAction.intent === "removeOverride" ? (
+                    <div style={secondaryTextStyle}>
+                      <strong>{pendingAction.key}</strong> ·{" "}
+                      {pendingAction.scopeLabel} · {copy.confirmRemove}
+                    </div>
                   ) : (
                     <div style={secondaryTextStyle}>
                       <strong>{pendingAction.key}</strong> ·{" "}
@@ -987,7 +1078,9 @@ export default function FeatureFlagsPage() {
                           ? pendingAction.nextEnabled
                             ? copy.confirmEnable
                             : copy.confirmDisable
-                          : copy.confirmCreate}
+                          : pendingAction.intent === "override"
+                            ? copy.confirmCreate
+                            : copy.confirmRemove}
                     </CanvasBtn>
                   </div>
                 </div>
@@ -1018,43 +1111,52 @@ export default function FeatureFlagsPage() {
                     ))}
                   </select>
                 </CanvasField>
-                <div style={toolbarMetaStyle}>
-                  <CanvasPill theme={theme} tone="neutral">
-                    {copy.currentScope}
-                  </CanvasPill>
-                  <CanvasPill theme={theme} tone="neutral">
-                    {copy.visibleRows}
-                  </CanvasPill>
-                  <CanvasPill
-                    theme={theme}
-                    tone={overrideCount > 0 ? "accent" : "neutral"}
-                  >
-                    {copy.overrideVisible}
-                  </CanvasPill>
-                </div>
+                <CanvasField theme={theme} label={copy.searchField}>
+                  <input
+                    type="search"
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder={copy.searchPlaceholder}
+                    style={selectStyle(theme)}
+                  />
+                </CanvasField>
+              </div>
+              <div style={toolbarMetaStyle}>
+                <CanvasPill theme={theme} tone="neutral">
+                  {copy.currentScope}
+                </CanvasPill>
+                <CanvasPill theme={theme} tone="neutral">
+                  {copy.visibleRows}
+                </CanvasPill>
+                <CanvasPill
+                  theme={theme}
+                  tone={overrideCount > 0 ? "accent" : "neutral"}
+                >
+                  {copy.overrideVisible}
+                </CanvasPill>
               </div>
 
               <div style={fieldHintStyle}>
                 {tenantLoading ? copy.scopeLoading : copy.scopeHint}
               </div>
 
-              {rows.length === 0 ? (
+              {filteredRows.length === 0 ? (
                 <div style={emptyStateStyle}>{copy.noFlags}</div>
               ) : (
                 <CanvasTable<FlagTableRow>
                   theme={theme}
                   columns={columns}
-                  rows={rows}
+                  rows={filteredRows}
                 />
               )}
             </CanvasCard>
 
             <CanvasCard
               theme={theme}
-              title={copy.notesTitle}
-              subtitle={copy.riskTitle}
+              title={copy.secondaryPanelTitle}
+              subtitle={copy.secondaryPanelSubtitle}
             >
-              <div style={detailSectionsStyle}>
+              <div style={secondaryPanelStyle}>
                 <details style={detailsStyle}>
                   <summary style={detailSummaryStyle}>
                     {copy.notesTitle}
