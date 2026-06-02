@@ -84,8 +84,9 @@ const kpiGridStyle: CSSProperties = {
 
 const sectionGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  gridTemplateColumns: "minmax(0, 1.6fr) minmax(320px, 1fr)",
   gap: 16,
+  alignItems: "start",
 };
 
 const sectionMainStyle: CSSProperties = {
@@ -119,6 +120,12 @@ const quickLinkStyle: CSSProperties = {
   color: th.text,
   textDecoration: "none",
   minWidth: 0,
+};
+
+const quickLinkLabelStyle: CSSProperties = {
+  fontSize: 12.5,
+  fontWeight: 500,
+  lineHeight: 1.35,
 };
 
 const quickLinkIconStyle: CSSProperties = {
@@ -201,6 +208,10 @@ function alertTone(
     default:
       return "info";
   }
+}
+
+function formatCount(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function actorTypeTone(
@@ -558,7 +569,15 @@ export default function HomePage() {
     ].filter(Boolean) as GovernanceQueueItem[];
   }, [locale, snapshot]);
 
-  const recentAudit = snapshot?.audit.slice(0, 5) ?? [];
+  const recentAudit =
+    snapshot?.audit
+      .slice()
+      .sort(
+        (left, right) =>
+          new Date(right.createdAt).getTime() -
+          new Date(left.createdAt).getTime(),
+      )
+      .slice(0, 5) ?? [];
   const unresolvedIssueHint =
     snapshot?.issues
       .filter((issue) => issue.status !== "resolved")
@@ -642,17 +661,17 @@ export default function HomePage() {
               <CanvasKPI
                 theme={th}
                 label={copy.kpiTenants}
-                value={metrics.activeTenants}
+                value={formatCount(metrics.activeTenants)}
                 sub={
                   locale === "en"
-                    ? `${metrics.pilotTenants} in pilot · ${metrics.sandboxTenants} in sandbox`
-                    : `${metrics.pilotTenants} 在 pilot · ${metrics.sandboxTenants} 在 sandbox`
+                    ? `${formatCount(metrics.pilotTenants)} pilot · ${formatCount(metrics.sandboxTenants)} sandbox`
+                    : `${formatCount(metrics.pilotTenants)} pilot · ${formatCount(metrics.sandboxTenants)} sandbox`
                 }
                 delta={
                   metrics.rollbackTenants > 0
                     ? locale === "en"
-                      ? `${metrics.rollbackTenants} hold`
-                      : `${metrics.rollbackTenants} hold`
+                      ? `${formatCount(metrics.rollbackTenants)} rollback_hold`
+                      : `${formatCount(metrics.rollbackTenants)} rollback_hold`
                     : undefined
                 }
                 deltaTone={metrics.rollbackTenants > 0 ? "down" : "neutral"}
@@ -660,11 +679,11 @@ export default function HomePage() {
               <CanvasKPI
                 theme={th}
                 label={copy.kpiPartners}
-                value={metrics.partnerEntries}
+                value={formatCount(metrics.partnerEntries)}
                 sub={
                   locale === "en"
-                    ? `${metrics.bankPartners} bank · ${metrics.hotelPartners + metrics.enterprisePartners} hotel / enterprise`
-                    : `${metrics.bankPartners} 銀行 · ${metrics.hotelPartners + metrics.enterprisePartners} 飯店 / 企業`
+                    ? `${formatCount(metrics.bankPartners)} bank · ${formatCount(metrics.hotelPartners + metrics.enterprisePartners)} hotel / enterprise`
+                    : `${formatCount(metrics.bankPartners)} 銀行 · ${formatCount(metrics.hotelPartners + metrics.enterprisePartners)} 飯店 / 企業`
                 }
                 delta={copy.partnerReadiness(metrics.partnerAttention)}
                 deltaTone={metrics.partnerAttention > 0 ? "neutral" : "up"}
@@ -672,7 +691,7 @@ export default function HomePage() {
               <CanvasKPI
                 theme={th}
                 label={copy.kpiDrivers}
-                value={metrics.activeDrivers}
+                value={formatCount(metrics.activeDrivers)}
                 sub={copy.driverSub(
                   metrics.driverEligible,
                   metrics.totalDrivers,
@@ -689,7 +708,7 @@ export default function HomePage() {
               <CanvasKPI
                 theme={th}
                 label={copy.kpiRecon}
-                value={metrics.openIssues}
+                value={formatCount(metrics.openIssues)}
                 delta={
                   metrics.openIssues > 0
                     ? copy.reconDelta(
@@ -767,7 +786,7 @@ export default function HomePage() {
                           <CanvasIcon name={route.icon} size={14} />
                         </span>
                         <span style={quickLinkTextStyle}>
-                          <strong style={{ fontSize: 12.5 }}>
+                          <strong style={quickLinkLabelStyle}>
                             {route.label}
                           </strong>
                         </span>
