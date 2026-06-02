@@ -9,7 +9,6 @@ import {
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import { getPlatformLabel } from "@/lib/localized-labels";
 import type {
   FeatureFlag,
   FeatureFlagSummary,
@@ -19,9 +18,7 @@ import {
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
-  CanvasDL,
   CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -30,25 +27,52 @@ import {
   type CanvasTheme,
 } from "@drts/ui-web";
 
-type GroupedFeatureFlag = {
-  key: string;
-  global: FeatureFlag | null;
-  overrides: FeatureFlag[];
-  all: FeatureFlag[];
+type ActionIntent = "toggle" | "override";
+
+type ActionDescriptor = {
+  intent: ActionIntent | "history";
+  riskLevel: "low" | "high";
+  requiresReason: boolean;
 };
 
-type PendingToggle = {
+type ToggleDraft = {
+  intent: "toggle";
   key: string;
+  tenantId: string | null;
+  description: string;
+  currentEnabled: boolean;
   nextEnabled: boolean;
+  scopeLabel: string;
+};
+
+type OverrideDraft = {
+  intent: "override";
+  key: string;
+  tenantId: string;
+  description: string;
+  enabled: boolean;
+};
+
+type PendingAction = ToggleDraft | OverrideDraft;
+
+type AuditReceipt = {
+  id: string;
+  intent: ActionIntent;
+  key: string;
+  scopeLabel: string;
+  reason: string;
+  requestedAt: string;
+  summary: string;
 };
 
 type FlagTableRow = {
   key: string;
   description: string;
-  globalEnabled: boolean | null;
-  overrideCount: number;
-  overrideTenantIds: string[];
-  latestUpdatedAt: string;
+  enabled: boolean;
+  tenantId: string | null;
+  scopeLabel: string;
+  scopeTone: "accent" | "neutral";
+  updatedAt: string;
   updatedBy: string;
 } & Record<string, unknown>;
 
@@ -57,22 +81,45 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
+const actionDescriptors: Record<ActionDescriptor["intent"], ActionDescriptor> =
+  {
+    toggle: {
+      intent: "toggle",
+      riskLevel: "high",
+      requiresReason: true,
+    },
+    override: {
+      intent: "override",
+      riskLevel: "high",
+      requiresReason: true,
+    },
+    history: {
+      intent: "history",
+      riskLevel: "low",
+      requiresReason: false,
+    },
+  };
+
 const bodyStyle = {
   display: "grid",
   gap: 16,
   padding: 24,
 } satisfies CSSProperties;
 
-const kpiGridStyle = {
+const toolbarStyle = {
   display: "grid",
   gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gridTemplateColumns: "minmax(220px, 320px) minmax(0, 1fr)",
+  alignItems: "end",
+  marginBottom: 16,
 } satisfies CSSProperties;
 
-const topGridStyle = {
-  display: "grid",
-  gap: 16,
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+const toolbarMetaStyle = {
+  display: "flex",
+  justifyContent: "flex-end",
+  alignItems: "center",
+  gap: 8,
+  minHeight: 38,
 } satisfies CSSProperties;
 
 const loadingStateStyle = {
@@ -107,6 +154,22 @@ const selectStyle = (th: CanvasTheme): CSSProperties => ({
   outline: "none",
 });
 
+const textareaStyle = (th: CanvasTheme): CSSProperties => ({
+  width: "100%",
+  minHeight: 108,
+  boxSizing: "border-box",
+  borderRadius: 10,
+  border: `1px solid ${th.border}`,
+  background: th.bgRaised,
+  color: th.text,
+  fontFamily: th.fontFamily,
+  fontSize: 12.5,
+  lineHeight: 1.5,
+  padding: "10px 12px",
+  resize: "vertical",
+  outline: "none",
+});
+
 const keyCellStyle = {
   display: "grid",
   gap: 4,
@@ -132,13 +195,6 @@ const secondaryTextStyle = {
   whiteSpace: "normal",
 } satisfies CSSProperties;
 
-const monoMutedStyle = {
-  color: theme.textDim,
-  fontFamily: theme.monoFamily,
-  fontSize: 11,
-  whiteSpace: "normal",
-} satisfies CSSProperties;
-
 const inlinePillRowStyle = {
   display: "flex",
   flexWrap: "wrap",
@@ -154,20 +210,56 @@ const stateCellStyle = {
   minWidth: 0,
 } satisfies CSSProperties;
 
-const stateMetaStyle = {
+const actionRowStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
+} satisfies CSSProperties;
+
+const detailSectionsStyle = {
   display: "grid",
-  gap: 4,
-  minWidth: 0,
+  gap: 12,
+} satisfies CSSProperties;
+
+const detailsStyle = {
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  padding: "10px 12px",
+} satisfies CSSProperties;
+
+const detailSummaryStyle = {
+  cursor: "pointer",
+  color: theme.text,
+  fontSize: 12.5,
+  fontWeight: 600,
+  listStyle: "none",
 } satisfies CSSProperties;
 
 const noteListStyle = {
-  margin: 0,
+  margin: "10px 0 0",
   paddingInlineStart: 18,
   display: "grid",
   gap: 6,
   color: theme.textMuted,
   fontSize: 12,
   lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const receiptListStyle = {
+  display: "grid",
+  gap: 10,
+  marginTop: 10,
+} satisfies CSSProperties;
+
+const receiptCardStyle = {
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  padding: "10px 12px",
+  display: "grid",
+  gap: 6,
 } satisfies CSSProperties;
 
 function toggleButtonStyle(
@@ -201,53 +293,30 @@ const toggleKnobStyle = {
   flexShrink: 0,
 } satisfies CSSProperties;
 
-function groupFeatureFlags(flags: FeatureFlag[]): GroupedFeatureFlag[] {
-  const groups = new Map<string, GroupedFeatureFlag>();
-
-  for (const flag of flags) {
-    const group: GroupedFeatureFlag = groups.get(flag.key) ?? {
-      key: flag.key,
-      global: null,
-      overrides: [],
-      all: [],
-    };
-
-    group.all.push(flag);
-    if (flag.tenantId) {
-      group.overrides.push(flag);
-    } else {
-      group.global = flag;
-    }
-
-    groups.set(flag.key, group);
-  }
-
-  return [...groups.values()].sort((left, right) =>
-    left.key.localeCompare(right.key),
-  );
-}
-
-function getLatestUpdatedAt(group: GroupedFeatureFlag) {
-  return [...group.all].sort((left, right) =>
-    right.updatedAt.localeCompare(left.updatedAt),
-  )[0]?.updatedAt;
-}
-
-function toFlagTableRow(group: GroupedFeatureFlag): FlagTableRow {
-  const effectiveRecord = group.global ?? group.overrides[0] ?? null;
+function toFlagTableRow(flag: FeatureFlag): FlagTableRow {
+  const isTenantOverride = Boolean(flag.tenantId);
 
   return {
-    key: group.key,
-    description: effectiveRecord?.description || "—",
-    globalEnabled: group.global?.enabled ?? null,
-    overrideCount: group.overrides.length,
-    overrideTenantIds: group.overrides
-      .map((flag) => flag.tenantId)
-      .filter((value): value is string => Boolean(value)),
-    latestUpdatedAt:
-      getLatestUpdatedAt(group) ?? effectiveRecord?.updatedAt ?? "",
+    key: flag.key,
+    description: flag.description || "—",
+    enabled: flag.enabled,
+    tenantId: flag.tenantId ?? null,
+    scopeLabel: isTenantOverride
+      ? `Tenant override · ${flag.tenantId}`
+      : "Platform default",
+    scopeTone: isTenantOverride ? "accent" : "neutral",
+    updatedAt: flag.updatedAt,
     updatedBy: "Contract not exposed",
   };
+}
+
+function sortFlags(left: FeatureFlag, right: FeatureFlag) {
+  const keyOrder = left.key.localeCompare(right.key);
+  if (keyOrder !== 0) {
+    return keyOrder;
+  }
+
+  return (left.tenantId ?? "").localeCompare(right.tenantId ?? "");
 }
 
 export default function FeatureFlagsPage() {
@@ -260,10 +329,14 @@ export default function FeatureFlagsPage() {
   const [loading, setLoading] = useState(true);
   const [tenantLoading, setTenantLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [pendingToggle, setPendingToggle] = useState<PendingToggle | null>(
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(
     null,
   );
+  const [actionReason, setActionReason] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
+  const [auditReceipts, setAuditReceipts] = useState<AuditReceipt[]>([]);
+  const [historyKey, setHistoryKey] = useState<string | null>(null);
 
   const loadFlags = useCallback(async () => {
     setLoading(true);
@@ -303,138 +376,174 @@ export default function FeatureFlagsPage() {
     void loadTenants();
   }, [loadTenants]);
 
-  const groupedFlags = useMemo(() => groupFeatureFlags(flags), [flags]);
-  const rows = useMemo(() => groupedFlags.map(toFlagTableRow), [groupedFlags]);
+  const rows = useMemo(
+    () => [...flags].sort(sortFlags).map(toFlagTableRow),
+    [flags],
+  );
   const selectedTenant =
     tenants.find((tenant) => tenant.id === selectedTenantId) ?? null;
-
-  const enabledGlobalCount = groupedFlags.filter(
-    (group) => group.global?.enabled,
-  ).length;
-  const disabledGlobalCount = groupedFlags.filter(
-    (group) => group.global && !group.global.enabled,
-  ).length;
-  const overrideGroupCount = groupedFlags.filter(
-    (group) => group.overrides.length > 0,
-  ).length;
-  const missingGlobalCount = groupedFlags.filter(
-    (group) => !group.global,
-  ).length;
+  const overrideCount = rows.filter((row) => row.tenantId).length;
+  const sortedFlagKeys = useMemo(
+    () =>
+      Array.from(new Set(flags.map((flag) => flag.key))).sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    [flags],
+  );
+  const visibleAuditReceipts = useMemo(
+    () =>
+      historyKey
+        ? auditReceipts.filter((receipt) => receipt.key === historyKey)
+        : auditReceipts,
+    [auditReceipts, historyKey],
+  );
 
   const copy =
     locale === "en"
       ? {
-          pageTitle: t("flags.title"),
-          pageSubtitle: t("flags.subtitle", {
-            total: groupedFlags.length,
-            enabled: enabledGlobalCount,
-          }),
-          breadcrumbParent: "Platform Layer",
+          pageTitle: "Feature Flags · WRITE authority",
+          pageSubtitle:
+            "Writable only here. Ops, tenant, and driver surfaces stay on read-only GET feature flag views.",
+          metaPill: "writable only here",
           refresh: t("common.refresh"),
-          refreshing: "Refreshing…",
-          guardrailTitle:
-            "Only the platform default is mutable in this surface.",
-          guardrailBody:
-            "Tenant override rows stay visible for blast-radius review, but changes here only affect the global default toggle.",
-          scopeCardTitle: "Flag scope",
-          scopeCardSubtitle:
-            "The canvas handoff stays focused on key, scope, state, updater, and recency.",
-          scopeField: "Tenant scope",
+          refreshing: "Refreshing...",
+          addOverride: "Add tenant override",
+          riskTitle: "High-risk actions require an explicit reason.",
+          riskBody:
+            "Toggle and tenant override changes stay in this write lane and record a local audit receipt after confirmation.",
+          scopeField: "Inspect scope",
           scopeHint:
-            "Choose a tenant to inspect its override rows beside the platform default record.",
-          scopeLoading: "Loading tenant list…",
-          scopeDefault: "Platform defaults only",
-          scopeSummary: "Current scope",
-          scopeSummaryValue: selectedTenant
+            "Switch to a tenant to inspect its effective override rows. Default view stays on platform records.",
+          scopeDefault: "Platform defaults",
+          scopeLoading: "Loading tenant list...",
+          currentScope: selectedTenant
             ? `${selectedTenant.name} (${selectedTenant.code})`
-            : "Platform defaults only",
-          notesTitle: "Contract notes",
-          notesFallback:
-            "Current API notes remain visible here without changing the underlying fetch contract.",
-          notesValue: `${notes.length} note(s)`,
-          updatedByLabel: "Updated by",
-          updatedByValue: "Contract not exposed",
-          stateLabel: "Mutable state",
-          stateValue: "Global default only",
-          noGlobal: "No global record",
-          noGlobalBody:
-            "This key currently exists only through tenant overrides, so the platform default cannot be toggled here.",
-          confirmTitle: "Confirm platform default toggle",
-          confirmBody:
-            "This changes the platform-issued default for the selected key. Existing tenant overrides remain intact.",
-          stageEnable: "Stage enable",
-          stageDisable: "Stage disable",
+            : "Platform defaults",
+          visibleRows: `${rows.length} visible row(s)`,
+          overrideVisible: `${overrideCount} tenant override row(s)`,
           tableTitle: "Feature flag registry",
           tableSubtitle:
-            "KEY, SCOPE, STATE, UPDATED BY, and AT align to the PA_Flags handoff while preserving current data sources.",
-          colScope: "Scope",
-          colUpdatedBy: "Updated by",
-          platformDefault: "Platform default",
-          overridesLabel: "override(s)",
+            "KEY, SCOPE, STATE TOGGLE, UPDATED BY, AT, and ACTIONS match the canvas handoff.",
+          keyHeader: "Key",
+          scopeHeader: "Scope",
+          stateHeader: "State toggle",
+          updatedByHeader: "Updated by",
+          updatedAtHeader: "At",
+          actionsHeader: "Actions",
           noDescription: "No description provided",
-          overrideVisible: "Override visibility retained",
-          globalOnly: "Platform default only",
-          empty: t("flags.empty"),
+          updatedByValue: "Contract not exposed",
+          toggle: "Toggle",
+          history: "History",
+          confirmToggleTitle: "Confirm feature flag toggle",
+          confirmToggleBody:
+            "This will change the effective feature flag state shown in the current scope.",
+          confirmOverrideTitle: "Create tenant override",
+          confirmOverrideBody:
+            "This writes a tenant-specific override for the selected key and leaves other scopes unchanged.",
+          reasonLabel: "High-risk reason",
+          reasonPlaceholder:
+            "Describe the rollout reason, expected blast radius, and validation plan.",
+          reasonRequired:
+            "A high-risk reason is required before this action can run.",
+          overrideTenantField: "Tenant",
+          overrideKeyField: "Flag key",
+          overrideStateField: "Override state",
+          overrideDescriptionField: "Override description",
+          overrideDescriptionHint:
+            "Optional. Leave blank to keep the existing flag description.",
+          enabled: t("common.enabled"),
+          disabled: t("common.disabled"),
+          cancel: t("common.cancel"),
+          confirming: t("common.updating"),
+          confirmEnable: "Enable",
+          confirmDisable: "Disable",
+          confirmCreate: "Create override",
+          noFlags: t("flags.empty"),
           loading: t("flags.loading"),
+          notesTitle: "Extended notes",
+          notesEmpty:
+            "No additional contract notes are exposed for the current scope.",
+          historyTitle: "Local audit receipts",
+          historyEmpty:
+            "No local receipts have been recorded in this session yet.",
+          historyHint:
+            "Use the History row action to focus receipts for a specific key.",
+          historyFocusAll:
+            "Showing all receipts recorded in this browser session.",
+          historyFocusKey: `Focused on ${historyKey ?? "all keys"}`,
+          actionApplied: "Audit receipt recorded",
         }
       : {
-          pageTitle: t("flags.title"),
-          pageSubtitle: t("flags.subtitle", {
-            total: groupedFlags.length,
-            enabled: enabledGlobalCount,
-          }),
-          breadcrumbParent: "平台層",
+          pageTitle: "Feature Flags · WRITE authority",
+          pageSubtitle:
+            "只有這裡可寫入。ops、tenant、driver 其他頁面維持 GET feature flag 唯讀檢視。",
+          metaPill: "writable only here",
           refresh: t("common.refresh"),
-          refreshing: "重新整理中…",
-          guardrailTitle: "這個頁面只允許變更平台預設值。",
-          guardrailBody:
-            "Tenant override 只保留可見性，方便先看清 blast radius；這裡的切換只會影響全域預設 toggle。",
-          scopeCardTitle: "旗標範圍",
-          scopeCardSubtitle:
-            "畫布 handoff 聚焦在 key、scope、state、updated by 與時間，不改動既有資料來源。",
-          scopeField: "Tenant scope",
+          refreshing: "重新整理中...",
+          addOverride: "新增 tenant override",
+          riskTitle: "高風險操作必須填寫原因。",
+          riskBody:
+            "toggle 與 tenant override 都維持在這條 write lane，確認後會留下本地 audit receipt。",
+          scopeField: "檢視範圍",
           scopeHint:
-            "選擇 tenant 後，會把該 tenant 的 override 與平台預設一起載入。",
-          scopeLoading: "載入 tenant 清單中…",
-          scopeDefault: "只看平台預設",
-          scopeSummary: "目前檢視範圍",
-          scopeSummaryValue: selectedTenant
+            "切到 tenant 可檢視該 tenant 的有效 override 列；預設仍以平台資料為主。",
+          scopeDefault: "平台預設",
+          scopeLoading: "載入 tenant 清單中...",
+          currentScope: selectedTenant
             ? `${selectedTenant.name} (${selectedTenant.code})`
-            : "只看平台預設",
-          notesTitle: "Contract 備註",
-          notesFallback:
-            "保留目前 API notes，可檢視但不變更既有 fetch contract。",
-          notesValue: `${notes.length} 筆`,
-          updatedByLabel: "Updated by",
-          updatedByValue: "目前 contract 未提供",
-          stateLabel: "可變更狀態",
-          stateValue: "僅限平台預設",
-          noGlobal: "沒有 global record",
-          noGlobalBody:
-            "這個 key 目前只透過 tenant override 出現，所以這裡不能切換平台預設狀態。",
-          confirmTitle: "確認切換平台預設狀態",
-          confirmBody:
-            "這會變更所選 key 的平台預設值；既有 tenant override 會保留不變。",
-          stageEnable: "準備啟用",
-          stageDisable: "準備停用",
+            : "平台預設",
+          visibleRows: `可見 ${rows.length} 列`,
+          overrideVisible: `tenant override ${overrideCount} 列`,
           tableTitle: "Feature flag registry",
           tableSubtitle:
-            "依 PA_Flags handoff 對齊 KEY、SCOPE、STATE、UPDATED BY、AT，同時保留現有資料 contract。",
-          colScope: "範圍",
-          colUpdatedBy: "Updated by",
-          platformDefault: "平台預設",
-          overridesLabel: "筆 override",
+            "依畫布 handoff 對齊 KEY、SCOPE、STATE TOGGLE、UPDATED BY、AT、ACTIONS。",
+          keyHeader: "Key",
+          scopeHeader: "Scope",
+          stateHeader: "State toggle",
+          updatedByHeader: "Updated by",
+          updatedAtHeader: "At",
+          actionsHeader: "Actions",
           noDescription: "尚未提供描述",
-          overrideVisible: "保留 override 可見性",
-          globalOnly: "僅平台預設",
-          empty: t("flags.empty"),
+          updatedByValue: "目前 contract 未提供",
+          toggle: "切換",
+          history: "歷史",
+          confirmToggleTitle: "確認切換 feature flag",
+          confirmToggleBody: "這會變更目前檢視範圍中的有效 feature flag 狀態。",
+          confirmOverrideTitle: "建立 tenant override",
+          confirmOverrideBody:
+            "這會為所選 key 建立 tenant 專屬 override，不影響其他範圍。",
+          reasonLabel: "高風險原因",
+          reasonPlaceholder:
+            "說明 rollout 原因、預期 blast radius 與驗證計畫。",
+          reasonRequired: "執行這個高風險操作前必須填寫原因。",
+          overrideTenantField: "Tenant",
+          overrideKeyField: "Flag key",
+          overrideStateField: "Override 狀態",
+          overrideDescriptionField: "Override 描述",
+          overrideDescriptionHint: "可留白，沿用既有 flag 描述。",
+          enabled: t("common.enabled"),
+          disabled: t("common.disabled"),
+          cancel: t("common.cancel"),
+          confirming: t("common.updating"),
+          confirmEnable: "啟用",
+          confirmDisable: "停用",
+          confirmCreate: "建立 override",
+          noFlags: t("flags.empty"),
           loading: t("flags.loading"),
+          notesTitle: "延伸備註",
+          notesEmpty: "目前範圍沒有額外 contract 備註。",
+          historyTitle: "本地 audit receipts",
+          historyEmpty: "這個瀏覽 session 尚未記錄任何 receipt。",
+          historyHint: "可用 History 列操作聚焦特定 key 的 receipt。",
+          historyFocusAll: "目前顯示此瀏覽 session 的所有 receipts。",
+          historyFocusKey: `目前聚焦 ${historyKey ?? "全部 key"}`,
+          actionApplied: "已記錄 audit receipt",
         };
 
   const columns: CanvasTableColumn<FlagTableRow>[] = [
     {
-      h: t("flags.col.flag"),
-      w: 280,
+      h: copy.keyHeader,
+      w: 300,
       r: (row) => (
         <div style={keyCellStyle}>
           <code style={codeStyle}>{row.key}</code>
@@ -445,120 +554,217 @@ export default function FeatureFlagsPage() {
       ),
     },
     {
-      h: copy.colScope,
+      h: copy.scopeHeader,
       w: 220,
       r: (row) => (
         <div style={keyCellStyle}>
           <div style={inlinePillRowStyle}>
-            <CanvasPill theme={theme} tone="neutral">
-              {copy.platformDefault}
+            <CanvasPill theme={theme} tone={row.scopeTone}>
+              {row.scopeLabel}
             </CanvasPill>
-            {row.overrideCount > 0 ? (
-              <CanvasPill theme={theme} tone="warn">
-                {row.overrideCount} {copy.overridesLabel}
-              </CanvasPill>
-            ) : null}
           </div>
           <div style={secondaryTextStyle}>
-            {row.overrideCount > 0
-              ? row.overrideTenantIds.join(", ")
-              : copy.globalOnly}
+            {row.tenantId ? row.tenantId : copy.currentScope}
           </div>
         </div>
       ),
     },
     {
-      h: t("flags.col.status"),
-      w: 230,
+      h: copy.stateHeader,
+      w: 200,
       r: (row) => (
         <div style={stateCellStyle}>
-          <div style={stateMetaStyle}>
-            {row.globalEnabled === null ? (
-              <>
-                <CanvasPill theme={theme} tone="warn">
-                  {copy.noGlobal}
-                </CanvasPill>
-                <span style={secondaryTextStyle}>{copy.noGlobalBody}</span>
-              </>
-            ) : (
-              <>
-                <CanvasPill
-                  theme={theme}
-                  tone={row.globalEnabled ? "success" : "neutral"}
-                  dot
-                >
-                  {row.globalEnabled
-                    ? t("common.enabled")
-                    : t("common.disabled")}
-                </CanvasPill>
-                <span style={secondaryTextStyle}>
-                  {row.globalEnabled ? copy.stageDisable : copy.stageEnable}
-                </span>
-              </>
-            )}
-          </div>
-          {row.globalEnabled !== null ? (
-            <button
-              type="button"
-              aria-label={`${row.globalEnabled ? copy.stageDisable : copy.stageEnable} ${row.key}`}
-              onClick={() =>
-                setPendingToggle({
-                  key: row.key,
-                  nextEnabled: !row.globalEnabled,
-                })
-              }
-              disabled={updating === row.key}
-              style={toggleButtonStyle(
-                theme,
-                row.globalEnabled,
-                updating === row.key,
-              )}
-            >
-              <span style={toggleKnobStyle} />
-            </button>
-          ) : null}
+          <CanvasPill
+            theme={theme}
+            tone={row.enabled ? "success" : "neutral"}
+            dot
+          >
+            {row.enabled ? copy.enabled : copy.disabled}
+          </CanvasPill>
+          <button
+            type="button"
+            aria-label={`${copy.toggle} ${row.key}`}
+            onClick={() => {
+              setActionError(null);
+              setActionReason("");
+              setPendingAction({
+                intent: "toggle",
+                key: row.key,
+                tenantId: row.tenantId,
+                description: row.description === "—" ? "" : row.description,
+                currentEnabled: row.enabled,
+                nextEnabled: !row.enabled,
+                scopeLabel: row.scopeLabel,
+              });
+            }}
+            disabled={updating === row.key}
+            style={toggleButtonStyle(theme, row.enabled, updating === row.key)}
+          >
+            <span style={toggleKnobStyle} />
+          </button>
         </div>
       ),
     },
     {
-      h: copy.colUpdatedBy,
-      w: 170,
-      r: (row) => (
-        <div style={keyCellStyle}>
-          <span style={secondaryTextStyle}>
-            {locale === "en" ? row.updatedBy : copy.updatedByValue}
-          </span>
-          <span style={monoMutedStyle}>
-            {row.overrideCount > 0 ? copy.overrideVisible : copy.globalOnly}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: t("flags.col.updated"),
+      h: copy.updatedByHeader,
       w: 160,
+      r: () => <span style={secondaryTextStyle}>{copy.updatedByValue}</span>,
+    },
+    {
+      h: copy.updatedAtHeader,
+      w: 170,
       mono: true,
-      r: (row) => formatDateTime(row.latestUpdatedAt),
+      r: (row) => formatDateTime(row.updatedAt),
+    },
+    {
+      h: copy.actionsHeader,
+      w: 190,
+      r: (row) => (
+        <div style={actionRowStyle}>
+          <CanvasBtn
+            theme={theme}
+            size="xs"
+            variant="secondary"
+            onClick={() => {
+              setActionError(null);
+              setActionReason("");
+              setPendingAction({
+                intent: "toggle",
+                key: row.key,
+                tenantId: row.tenantId,
+                description: row.description === "—" ? "" : row.description,
+                currentEnabled: row.enabled,
+                nextEnabled: !row.enabled,
+                scopeLabel: row.scopeLabel,
+              });
+            }}
+            disabled={updating === row.key}
+          >
+            {copy.toggle}
+          </CanvasBtn>
+          <CanvasBtn
+            theme={theme}
+            size="xs"
+            variant="ghost"
+            onClick={() => setHistoryKey(row.key)}
+          >
+            {copy.history}
+          </CanvasBtn>
+        </div>
+      ),
     },
   ];
 
-  async function handleConfirmToggle() {
-    if (!pendingToggle) return;
+  async function handleConfirmAction() {
+    if (!pendingAction) {
+      return;
+    }
 
-    setUpdating(pendingToggle.key);
+    const descriptor = actionDescriptors[pendingAction.intent];
+    const reason = actionReason.trim();
+    if (descriptor.requiresReason && !reason) {
+      setActionError(copy.reasonRequired);
+      return;
+    }
+
+    if (pendingAction.intent === "override" && !pendingAction.tenantId) {
+      setActionError(copy.overrideTenantField);
+      return;
+    }
+
+    setUpdating(pendingAction.key);
     setError(null);
+    setActionError(null);
+
     try {
-      await client.updateFeatureFlag(
-        pendingToggle.key,
-        pendingToggle.nextEnabled,
-      );
-      setPendingToggle(null);
-      await loadFlags();
+      if (pendingAction.intent === "toggle") {
+        if (pendingAction.tenantId) {
+          await client.post<FeatureFlag>(
+            `/api/admin/flags/${encodeURIComponent(
+              pendingAction.key,
+            )}/tenant-overrides?tenantId=${encodeURIComponent(
+              pendingAction.tenantId,
+            )}`,
+            {
+              body: {
+                enabled: pendingAction.nextEnabled,
+                description: pendingAction.description || undefined,
+              },
+            },
+          );
+        } else {
+          await client.updateFeatureFlag(
+            pendingAction.key,
+            pendingAction.nextEnabled,
+          );
+        }
+      } else {
+        await client.post<FeatureFlag>(
+          `/api/admin/flags/${encodeURIComponent(
+            pendingAction.key,
+          )}/tenant-overrides?tenantId=${encodeURIComponent(
+            pendingAction.tenantId,
+          )}`,
+          {
+            body: {
+              enabled: pendingAction.enabled,
+              description: pendingAction.description.trim() || undefined,
+            },
+          },
+        );
+      }
+
+      const requestedAt = new Date().toISOString();
+      const scopeLabel =
+        pendingAction.intent === "toggle"
+          ? pendingAction.scopeLabel
+          : `Tenant override · ${pendingAction.tenantId}`;
+      const summary =
+        pendingAction.intent === "toggle"
+          ? `${pendingAction.nextEnabled ? copy.confirmEnable : copy.confirmDisable} ${pendingAction.key}`
+          : `${copy.confirmCreate} ${pendingAction.key}`;
+
+      setAuditReceipts((previous) => [
+        {
+          id: `${pendingAction.intent}-${pendingAction.key}-${requestedAt}`,
+          intent: pendingAction.intent,
+          key: pendingAction.key,
+          scopeLabel,
+          reason,
+          requestedAt,
+          summary,
+        },
+        ...previous,
+      ]);
+      setHistoryKey(pendingAction.key);
+
+      const nextTenantId =
+        pendingAction.intent === "override" ? pendingAction.tenantId : null;
+      setPendingAction(null);
+      setActionReason("");
+
+      if (nextTenantId && nextTenantId !== selectedTenantId) {
+        setSelectedTenantId(nextTenantId);
+      } else {
+        await loadFlags();
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setUpdating(null);
     }
+  }
+
+  function openOverrideComposer() {
+    setActionError(null);
+    setActionReason("");
+    setPendingAction({
+      intent: "override",
+      key: sortedFlagKeys[0] ?? "",
+      tenantId: selectedTenantId,
+      description: "",
+      enabled: true,
+    });
   }
 
   return (
@@ -568,14 +774,28 @@ export default function FeatureFlagsPage() {
         title={copy.pageTitle}
         subtitle={copy.pageSubtitle}
         actions={
-          <CanvasBtn
-            theme={theme}
-            variant="secondary"
-            icon="arrow"
-            onClick={() => void loadFlags()}
-          >
-            {loading && flags.length > 0 ? copy.refreshing : copy.refresh}
-          </CanvasBtn>
+          <>
+            <CanvasPill theme={theme} tone="accent" dot>
+              {copy.metaPill}
+            </CanvasPill>
+            <CanvasBtn
+              theme={theme}
+              variant="secondary"
+              icon="arrow"
+              onClick={() => void loadFlags()}
+            >
+              {loading && flags.length > 0 ? copy.refreshing : copy.refresh}
+            </CanvasBtn>
+            <CanvasBtn
+              theme={theme}
+              variant="primary"
+              icon="plus"
+              onClick={openOverrideComposer}
+              disabled={sortedFlagKeys.length === 0 || tenantLoading}
+            >
+              {copy.addOverride}
+            </CanvasBtn>
+          </>
         }
       />
 
@@ -594,93 +814,193 @@ export default function FeatureFlagsPage() {
               <CanvasBanner
                 theme={theme}
                 tone="danger"
-                title={`${getPlatformLabel(locale, "error")}: ${error}`}
-                body={copy.guardrailBody}
+                title={error}
+                body={copy.riskBody}
               />
             ) : null}
 
-            <CanvasBanner
-              theme={theme}
-              tone="warn"
-              icon="flags"
-              title={copy.guardrailTitle}
-              body={copy.guardrailBody}
-            />
-
-            {pendingToggle ? (
+            {auditReceipts.length > 0 ? (
               <CanvasBanner
                 theme={theme}
-                tone={pendingToggle.nextEnabled ? "warn" : "danger"}
-                icon="warn"
-                title={copy.confirmTitle}
-                body={`${copy.confirmBody} ${pendingToggle.key}`}
-                actions={
-                  <>
+                tone="success"
+                title={copy.actionApplied}
+                body={`${auditReceipts[0]?.summary} · ${auditReceipts[0]?.scopeLabel} · ${formatDateTime(
+                  auditReceipts[0]?.requestedAt ?? "",
+                )}`}
+              />
+            ) : null}
+
+            {pendingAction ? (
+              <CanvasCard
+                theme={theme}
+                title={
+                  pendingAction.intent === "toggle"
+                    ? copy.confirmToggleTitle
+                    : copy.confirmOverrideTitle
+                }
+                subtitle={
+                  pendingAction.intent === "toggle"
+                    ? copy.confirmToggleBody
+                    : copy.confirmOverrideBody
+                }
+              >
+                <div style={{ display: "grid", gap: 14 }}>
+                  {pendingAction.intent === "override" ? (
+                    <>
+                      <CanvasField
+                        theme={theme}
+                        label={copy.overrideTenantField}
+                      >
+                        <select
+                          value={pendingAction.tenantId}
+                          onChange={(event) =>
+                            setPendingAction((current) =>
+                              current && current.intent === "override"
+                                ? { ...current, tenantId: event.target.value }
+                                : current,
+                            )
+                          }
+                          style={selectStyle(theme)}
+                        >
+                          <option value="">{copy.scopeDefault}</option>
+                          {tenants.map((tenant) => (
+                            <option key={tenant.id} value={tenant.id}>
+                              {tenant.name} ({tenant.code})
+                            </option>
+                          ))}
+                        </select>
+                      </CanvasField>
+
+                      <CanvasField theme={theme} label={copy.overrideKeyField}>
+                        <select
+                          value={pendingAction.key}
+                          onChange={(event) =>
+                            setPendingAction((current) =>
+                              current && current.intent === "override"
+                                ? { ...current, key: event.target.value }
+                                : current,
+                            )
+                          }
+                          style={selectStyle(theme)}
+                        >
+                          {sortedFlagKeys.map((key) => (
+                            <option key={key} value={key}>
+                              {key}
+                            </option>
+                          ))}
+                        </select>
+                      </CanvasField>
+
+                      <CanvasField
+                        theme={theme}
+                        label={copy.overrideStateField}
+                      >
+                        <select
+                          value={pendingAction.enabled ? "enabled" : "disabled"}
+                          onChange={(event) =>
+                            setPendingAction((current) =>
+                              current && current.intent === "override"
+                                ? {
+                                    ...current,
+                                    enabled: event.target.value === "enabled",
+                                  }
+                                : current,
+                            )
+                          }
+                          style={selectStyle(theme)}
+                        >
+                          <option value="enabled">{copy.enabled}</option>
+                          <option value="disabled">{copy.disabled}</option>
+                        </select>
+                      </CanvasField>
+
+                      <CanvasField
+                        theme={theme}
+                        label={copy.overrideDescriptionField}
+                      >
+                        <textarea
+                          value={pendingAction.description}
+                          onChange={(event) =>
+                            setPendingAction((current) =>
+                              current && current.intent === "override"
+                                ? {
+                                    ...current,
+                                    description: event.target.value,
+                                  }
+                                : current,
+                            )
+                          }
+                          style={textareaStyle(theme)}
+                        />
+                      </CanvasField>
+                      <div style={fieldHintStyle}>
+                        {copy.overrideDescriptionHint}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={secondaryTextStyle}>
+                      <strong>{pendingAction.key}</strong> ·{" "}
+                      {pendingAction.scopeLabel} ·{" "}
+                      {pendingAction.currentEnabled
+                        ? copy.confirmDisable
+                        : copy.confirmEnable}
+                    </div>
+                  )}
+
+                  <CanvasField theme={theme} label={copy.reasonLabel}>
+                    <textarea
+                      value={actionReason}
+                      onChange={(event) => setActionReason(event.target.value)}
+                      placeholder={copy.reasonPlaceholder}
+                      style={textareaStyle(theme)}
+                    />
+                  </CanvasField>
+
+                  {actionError ? (
+                    <div style={{ ...secondaryTextStyle, color: theme.danger }}>
+                      {actionError}
+                    </div>
+                  ) : null}
+
+                  <div style={actionRowStyle}>
                     <CanvasBtn
                       theme={theme}
                       variant="secondary"
-                      onClick={() => setPendingToggle(null)}
-                      disabled={updating === pendingToggle.key}
+                      onClick={() => {
+                        setPendingAction(null);
+                        setActionReason("");
+                        setActionError(null);
+                      }}
+                      disabled={Boolean(updating)}
                     >
-                      {t("common.cancel")}
+                      {copy.cancel}
                     </CanvasBtn>
                     <CanvasBtn
                       theme={theme}
                       variant="primary"
-                      onClick={() => void handleConfirmToggle()}
-                      disabled={updating === pendingToggle.key}
+                      onClick={() => void handleConfirmAction()}
+                      disabled={Boolean(updating)}
                     >
-                      {updating === pendingToggle.key
-                        ? t("common.updating")
-                        : pendingToggle.nextEnabled
-                          ? copy.stageEnable
-                          : copy.stageDisable}
+                      {updating
+                        ? copy.confirming
+                        : pendingAction.intent === "toggle"
+                          ? pendingAction.nextEnabled
+                            ? copy.confirmEnable
+                            : copy.confirmDisable
+                          : copy.confirmCreate}
                     </CanvasBtn>
-                  </>
-                }
-              />
+                  </div>
+                </div>
+              </CanvasCard>
             ) : null}
 
-            <div style={kpiGridStyle}>
-              <CanvasKPI
-                theme={theme}
-                label={locale === "en" ? "Flag keys" : "Flag keys"}
-                value={groupedFlags.length}
-                sub={copy.platformDefault}
-              />
-              <CanvasKPI
-                theme={theme}
-                label={t("common.enabled")}
-                value={enabledGlobalCount}
-                delta={`${disabledGlobalCount} ${locale === "en" ? "disabled" : "停用"}`}
-                deltaTone={enabledGlobalCount > 0 ? "up" : "neutral"}
-                sub={copy.stateValue}
-              />
-              <CanvasKPI
-                theme={theme}
-                label={
-                  locale === "en" ? "Keys with overrides" : "含 override 的 key"
-                }
-                value={overrideGroupCount}
-                delta={`${missingGlobalCount} ${locale === "en" ? "override-only" : "僅 override"}`}
-                deltaTone={overrideGroupCount > 0 ? "neutral" : "up"}
-                sub={copy.guardrailTitle}
-              />
-              <CanvasKPI
-                theme={theme}
-                label={copy.notesTitle}
-                value={notes.length}
-                sub={selectedTenant?.code ?? copy.scopeDefault}
-                hint={copy.updatedByValue}
-              />
-            </div>
-
-            <div style={topGridStyle}>
-              <CanvasCard
-                theme={theme}
-                title={copy.scopeCardTitle}
-                subtitle={copy.scopeCardSubtitle}
-              >
+            <CanvasCard
+              theme={theme}
+              title={copy.tableTitle}
+              subtitle={copy.tableSubtitle}
+              style={{ overflow: "hidden" }}
+            >
+              <div style={toolbarStyle}>
                 <CanvasField theme={theme} label={copy.scopeField}>
                   <select
                     value={selectedTenantId}
@@ -698,60 +1018,28 @@ export default function FeatureFlagsPage() {
                     ))}
                   </select>
                 </CanvasField>
-                <div style={fieldHintStyle}>
-                  {tenantLoading ? copy.scopeLoading : copy.scopeHint}
-                </div>
-                <div style={{ marginTop: 16 }}>
-                  <CanvasDL
+                <div style={toolbarMetaStyle}>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.currentScope}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.visibleRows}
+                  </CanvasPill>
+                  <CanvasPill
                     theme={theme}
-                    cols={2}
-                    items={[
-                      {
-                        label: copy.scopeSummary,
-                        value: copy.scopeSummaryValue,
-                      },
-                      {
-                        label: copy.stateLabel,
-                        value: copy.stateValue,
-                      },
-                      {
-                        label: copy.updatedByLabel,
-                        value: copy.updatedByValue,
-                      },
-                      {
-                        label: copy.notesTitle,
-                        value: copy.notesValue,
-                      },
-                    ]}
-                  />
+                    tone={overrideCount > 0 ? "accent" : "neutral"}
+                  >
+                    {copy.overrideVisible}
+                  </CanvasPill>
                 </div>
-              </CanvasCard>
+              </div>
 
-              <CanvasCard
-                theme={theme}
-                title={copy.notesTitle}
-                subtitle={copy.guardrailTitle}
-              >
-                {notes.length > 0 ? (
-                  <ul style={noteListStyle}>
-                    {notes.map((note, index) => (
-                      <li key={`${note}-${index}`}>{note}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div style={secondaryTextStyle}>{copy.notesFallback}</div>
-                )}
-              </CanvasCard>
-            </div>
+              <div style={fieldHintStyle}>
+                {tenantLoading ? copy.scopeLoading : copy.scopeHint}
+              </div>
 
-            <CanvasCard
-              theme={theme}
-              title={copy.tableTitle}
-              subtitle={copy.tableSubtitle}
-              style={{ overflow: "hidden" }}
-            >
               {rows.length === 0 ? (
-                <div style={emptyStateStyle}>{copy.empty}</div>
+                <div style={emptyStateStyle}>{copy.noFlags}</div>
               ) : (
                 <CanvasTable<FlagTableRow>
                   theme={theme}
@@ -759,6 +1047,74 @@ export default function FeatureFlagsPage() {
                   rows={rows}
                 />
               )}
+            </CanvasCard>
+
+            <CanvasCard
+              theme={theme}
+              title={copy.notesTitle}
+              subtitle={copy.riskTitle}
+            >
+              <div style={detailSectionsStyle}>
+                <details style={detailsStyle}>
+                  <summary style={detailSummaryStyle}>
+                    {copy.notesTitle}
+                  </summary>
+                  {notes.length > 0 ? (
+                    <ul style={noteListStyle}>
+                      {notes.map((note, index) => (
+                        <li key={`${note}-${index}`}>{note}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div style={{ ...secondaryTextStyle, marginTop: 10 }}>
+                      {copy.notesEmpty}
+                    </div>
+                  )}
+                </details>
+
+                <details style={detailsStyle} open={Boolean(historyKey)}>
+                  <summary style={detailSummaryStyle}>
+                    {copy.historyTitle}
+                  </summary>
+                  <div style={{ ...secondaryTextStyle, marginTop: 10 }}>
+                    {historyKey ? copy.historyFocusKey : copy.historyFocusAll}
+                  </div>
+                  <div style={{ ...secondaryTextStyle, marginTop: 6 }}>
+                    {copy.historyHint}
+                  </div>
+                  {visibleAuditReceipts.length > 0 ? (
+                    <div style={receiptListStyle}>
+                      {visibleAuditReceipts.map((receipt) => (
+                        <div key={receipt.id} style={receiptCardStyle}>
+                          <div style={inlinePillRowStyle}>
+                            <CanvasPill
+                              theme={theme}
+                              tone={
+                                receipt.intent === "override"
+                                  ? "accent"
+                                  : "success"
+                              }
+                            >
+                              {receipt.summary}
+                            </CanvasPill>
+                            <CanvasPill theme={theme} tone="neutral">
+                              {receipt.scopeLabel}
+                            </CanvasPill>
+                          </div>
+                          <div style={secondaryTextStyle}>{receipt.reason}</div>
+                          <div style={secondaryTextStyle}>
+                            {formatDateTime(receipt.requestedAt)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ ...secondaryTextStyle, marginTop: 10 }}>
+                      {copy.historyEmpty}
+                    </div>
+                  )}
+                </details>
+              </div>
             </CanvasCard>
           </>
         )}
