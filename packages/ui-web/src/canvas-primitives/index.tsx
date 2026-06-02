@@ -2,6 +2,13 @@
 
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
+import type {
+  EmptyReason,
+  ResourceActionDescriptor,
+  UiHealthDegradedService,
+  UiHealthEnvelope,
+  UiRefreshMetadata,
+} from "../../../contracts/src/ui-runtime";
 import {
   buildCanvasTheme,
   type CanvasTheme,
@@ -1404,5 +1411,948 @@ export function WindowChrome({
         </div>
       </div>
     </div>
+  );
+}
+
+export interface BiLabelProps {
+  theme?: CanvasTheme;
+  zh: ReactNode;
+  en?: ReactNode;
+  mono?: boolean;
+  size?: number;
+  opacity?: number;
+  gap?: number;
+  style?: CSSProperties;
+}
+
+export function BiLabel({
+  theme: providedTheme,
+  zh,
+  en,
+  mono = false,
+  size = 12,
+  opacity = 0.55,
+  gap = 6,
+  style,
+}: BiLabelProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "baseline",
+        gap,
+        fontSize: size,
+        lineHeight: 1.3,
+        ...style,
+      }}
+    >
+      <span style={{ color: theme.text, fontWeight: 500 }}>{zh}</span>
+      {en ? (
+        <span
+          style={{
+            opacity,
+            color: theme.textMuted,
+            fontFamily: mono ? theme.monoFamily : theme.fontFamily,
+            fontSize: Math.max(size - 1, 9),
+          }}
+        >
+          · {en}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+const EMPTY_REASON_COPY: Record<
+  EmptyReason,
+  { label: string; hint: string; icon: CanvasIconName; tone: CanvasTone }
+> = {
+  no_data: {
+    label: "目前沒有資料",
+    hint: "尚未產生任何記錄，或目前條件下沒有可顯示的內容。",
+    icon: "check",
+    tone: "neutral",
+  },
+  not_provisioned: {
+    label: "尚未完成設定",
+    hint: "需要先完成 provisioning 或啟用整合，才能在此顯示資料。",
+    icon: "health",
+    tone: "info",
+  },
+  fetch_failed: {
+    label: "資料讀取失敗",
+    hint: "後端回應失敗或逾時，請稍後重試或檢查相依服務。",
+    icon: "warn",
+    tone: "danger",
+  },
+  permission_denied: {
+    label: "目前無法存取",
+    hint: "你的權限不足以讀取這組資料，請向管理員確認存取範圍。",
+    icon: "warn",
+    tone: "warn",
+  },
+  external_unavailable: {
+    label: "外部相依服務暫時不可用",
+    hint: "外部系統目前降級或無法連線，資料可能延遲或暫停同步。",
+    icon: "warn",
+    tone: "warn",
+  },
+  driver_not_eligible: {
+    label: "目前不符合接單條件",
+    hint: "狀態或綁定條件未滿足，因此暫時不會有可接收的工作。",
+    icon: "warn",
+    tone: "warn",
+  },
+  filtered_empty: {
+    label: "篩選後沒有結果",
+    hint: "目前篩選條件下沒有符合的資料，請調整搜尋或篩選條件。",
+    icon: "filter",
+    tone: "neutral",
+  },
+};
+
+function emptyReasonToneStyles(theme: CanvasTheme, reason: EmptyReason) {
+  const copy = EMPTY_REASON_COPY[reason];
+  return toneStyles(theme, copy?.tone ?? "neutral");
+}
+
+export interface CanvasActionButtonProps {
+  theme?: CanvasTheme;
+  descriptor?: ResourceActionDescriptor | null;
+  label?: ReactNode;
+  en?: ReactNode;
+  icon?: CanvasIconName | ReactNode;
+  size?: "xs" | "sm" | "md";
+  children?: ReactNode;
+  style?: CSSProperties;
+}
+
+export function ActionButton({
+  theme: providedTheme,
+  descriptor,
+  label,
+  en,
+  icon,
+  size = "sm",
+  children,
+  style,
+}: CanvasActionButtonProps) {
+  const theme = resolveTheme(providedTheme);
+
+  if (!descriptor) {
+    return null;
+  }
+
+  const tooltip = !descriptor.enabled
+    ? [
+        descriptor.disabledReasonCode,
+        descriptor.requiresReason ? "需填寫原因" : undefined,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : descriptor.requiresReason
+      ? "需填寫原因"
+      : undefined;
+
+  return (
+    <Btn
+      theme={theme}
+      size={size}
+      variant={descriptor.riskLevel === "medium" ? "primary" : "secondary"}
+      danger={descriptor.riskLevel === "high"}
+      disabled={!descriptor.enabled}
+      {...(style !== undefined ? { style } : {})}
+    >
+      <>
+        {renderIcon(icon, size === "xs" ? 12 : size === "md" ? 14 : 13)}
+        {children ?? (
+          <span
+            title={tooltip}
+            style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}
+          >
+            <span>{label ?? descriptor.action}</span>
+            {en ? (
+              <span
+                style={{
+                  fontSize: 10,
+                  opacity: 0.7,
+                  fontFamily: theme.monoFamily,
+                }}
+              >
+                · {en}
+              </span>
+            ) : null}
+            {descriptor.requiresReason && descriptor.enabled ? (
+              <span
+                title="需原因"
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: 3,
+                  background: "currentColor",
+                  opacity: 0.6,
+                  marginLeft: 2,
+                }}
+              />
+            ) : null}
+          </span>
+        )}
+      </>
+    </Btn>
+  );
+}
+
+export interface EmptyStateProps {
+  theme?: CanvasTheme;
+  reason?: EmptyReason;
+  messageOverride?: ReactNode;
+  nextAction?: ReactNode;
+  compact?: boolean;
+  style?: CSSProperties;
+}
+
+export type CanvasEmptyReason = EmptyReason;
+
+export function EmptyState({
+  theme: providedTheme,
+  reason = "no_data",
+  messageOverride,
+  nextAction,
+  compact = false,
+  style,
+}: EmptyStateProps) {
+  const theme = resolveTheme(providedTheme);
+  const copy = EMPTY_REASON_COPY[reason] ?? EMPTY_REASON_COPY.no_data!;
+  const tones = emptyReasonToneStyles(theme, reason);
+  const sizing = compact
+    ? { padY: 16, icon: 24, gap: 10, body: 12, title: 13 }
+    : { padY: 36, icon: 36, gap: 14, body: 13, title: 15 };
+
+  return (
+    <div
+      style={{
+        padding: `${sizing.padY}px 16px`,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: sizing.gap,
+        textAlign: "center",
+        background: tones.bg,
+        border: `1px dashed ${tones.bd}`,
+        borderRadius: 10,
+        ...style,
+      }}
+    >
+      <div
+        style={{
+          width: sizing.icon + 16,
+          height: sizing.icon + 16,
+          borderRadius: "50%",
+          background: theme.surface,
+          color: tones.fg,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          border: `1px solid ${tones.bd}`,
+        }}
+      >
+        <CanvasIcon name={copy.icon} size={sizing.icon} stroke={1.4} />
+      </div>
+      <div>
+        <div
+          style={{
+            fontSize: sizing.title,
+            fontWeight: 600,
+            color: theme.text,
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "center",
+            gap: 6,
+            flexWrap: "wrap",
+          }}
+        >
+          <span>{copy.label}</span>
+          <span
+            style={{
+              fontFamily: theme.monoFamily,
+              fontSize: Math.max(sizing.title - 3, 10),
+              color: theme.textDim,
+              fontWeight: 500,
+            }}
+          >
+            · {reason}
+          </span>
+        </div>
+        <div
+          style={{
+            fontSize: sizing.body,
+            color: theme.textMuted,
+            marginTop: 4,
+            maxWidth: 420,
+            lineHeight: 1.5,
+          }}
+        >
+          {messageOverride ?? copy.hint}
+        </div>
+      </div>
+      {nextAction ? <div>{nextAction}</div> : null}
+    </div>
+  );
+}
+
+export interface StaleBannerProps {
+  theme?: CanvasTheme;
+  refreshMetadata?: UiRefreshMetadata;
+  dataFreshness?: UiRefreshMetadata["dataFreshness"];
+  generatedAt?: ReactNode;
+  tier?:
+    | "urgent"
+    | "fast"
+    | "dispatch"
+    | "medium"
+    | "medium_slow"
+    | "slow"
+    | "manual";
+  actions?: ReactNode;
+}
+
+export function StaleBanner({
+  theme: providedTheme,
+  refreshMetadata,
+  dataFreshness,
+  generatedAt,
+  tier = "medium_slow",
+  actions,
+}: StaleBannerProps) {
+  const theme = resolveTheme(providedTheme);
+  const freshness = dataFreshness ?? refreshMetadata?.dataFreshness ?? "stale";
+  const generated =
+    generatedAt ?? refreshMetadata?.generatedAt ?? "unknown generatedAt";
+  const label =
+    freshness === "degraded"
+      ? "資料來源降級"
+      : freshness === "unknown"
+        ? "資料新鮮度未知"
+        : "資料已過時";
+
+  if (freshness === "fresh") {
+    return null;
+  }
+
+  return (
+    <Banner
+      theme={theme}
+      tone={freshness === "degraded" ? "danger" : "warn"}
+      icon="clock"
+      title={
+        <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span>{label}</span>
+          <span
+            style={{
+              fontFamily: theme.monoFamily,
+              fontSize: 10.5,
+              opacity: 0.7,
+            }}
+          >
+            · dataFreshness={freshness}
+          </span>
+        </span>
+      }
+      body={
+        <>
+          目前顯示內容於 {generated} 產生；refresh tier {tier}
+          {refreshMetadata?.source ? ` · source=${refreshMetadata.source}` : ""}
+          。請手動 refresh 或等候下次自動 poll。
+        </>
+      }
+      actions={actions}
+    />
+  );
+}
+
+export interface HealthBannerProps {
+  theme?: CanvasTheme;
+  health?: UiHealthEnvelope;
+  status?: UiHealthEnvelope["status"];
+  degradedServices?: UiHealthDegradedService[];
+  lastCheckedAt?: ReactNode;
+}
+
+export function HealthBanner({
+  theme: providedTheme,
+  health,
+  status,
+  degradedServices,
+  lastCheckedAt,
+}: HealthBannerProps) {
+  const theme = resolveTheme(providedTheme);
+  const resolvedStatus = status ?? health?.status ?? "healthy";
+  const services = degradedServices ?? health?.degradedServices ?? [];
+  const checkedAt = lastCheckedAt ?? health?.lastCheckedAt;
+
+  if (resolvedStatus === "healthy") {
+    return null;
+  }
+
+  return (
+    <Banner
+      theme={theme}
+      tone={resolvedStatus === "down" ? "danger" : "warn"}
+      icon="warn"
+      title={
+        <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span>
+            {resolvedStatus === "down"
+              ? "頁面依賴 service 不可用"
+              : "頁面依賴 service 降級中"}
+          </span>
+          <span
+            style={{
+              fontFamily: theme.monoFamily,
+              fontSize: 10.5,
+              opacity: 0.7,
+            }}
+          >
+            · UiHealthEnvelope.status={resolvedStatus}
+          </span>
+        </span>
+      }
+      body={
+        <>
+          {services.length > 0
+            ? services
+                .map(
+                  (service: UiHealthDegradedService) =>
+                    `${service.service} (${service.impact})`,
+                )
+                .join(" · ")
+            : "部分顯示資料可能不完整；下方仍可瀏覽，但 mutation 可能失敗。"}
+          {checkedAt ? ` · lastCheckedAt=${checkedAt}` : ""}
+        </>
+      }
+    />
+  );
+}
+
+export type CanvasStepState = "complete" | "current" | "upcoming" | "blocked";
+export type CanvasStepperOrientation = "vertical" | "horizontal";
+
+export interface CanvasStepperItem {
+  id: string;
+  title: ReactNode;
+  description?: ReactNode;
+  meta?: ReactNode;
+  state: CanvasStepState;
+  stateLabel?: ReactNode;
+  eyebrow?: string;
+  timestamp?: ReactNode;
+  supportingContent?: ReactNode;
+  actions?: ReactNode;
+  indicator?: ReactNode;
+}
+
+export interface CanvasStepperProps {
+  theme?: CanvasTheme;
+  items: CanvasStepperItem[];
+  emptyState?: ReactNode;
+  orientation?: CanvasStepperOrientation;
+}
+
+function stepAccent(theme: CanvasTheme, state: CanvasStepState) {
+  switch (state) {
+    case "complete":
+      return theme.success;
+    case "current":
+      return theme.accent;
+    case "blocked":
+      return theme.danger;
+    case "upcoming":
+    default:
+      return theme.textDim;
+  }
+}
+
+function stepTone(theme: CanvasTheme, state: CanvasStepState) {
+  switch (state) {
+    case "complete":
+      return toneStyles(theme, "success");
+    case "current":
+      return toneStyles(theme, "accent");
+    case "blocked":
+      return toneStyles(theme, "danger");
+    case "upcoming":
+    default:
+      return toneStyles(theme, "neutral");
+  }
+}
+
+export function Stepper({
+  theme: providedTheme,
+  items,
+  emptyState,
+  orientation = "vertical",
+}: CanvasStepperProps) {
+  const theme = resolveTheme(providedTheme);
+
+  if (items.length === 0) {
+    return emptyState ?? null;
+  }
+
+  const isHorizontal = orientation === "horizontal";
+
+  return (
+    <ol
+      style={
+        isHorizontal
+          ? {
+              listStyle: "none",
+              display: "grid",
+              gridAutoFlow: "column",
+              gridAutoColumns: "minmax(0, 1fr)",
+              gap: 12,
+              margin: 0,
+              padding: 0,
+              alignItems: "start",
+            }
+          : {
+              listStyle: "none",
+              display: "grid",
+              gap: 12,
+              margin: 0,
+              padding: 0,
+            }
+      }
+    >
+      {items.map((item, index) => {
+        const accent = stepAccent(theme, item.state);
+        const toneSet = stepTone(theme, item.state);
+        const isCurrent = item.state === "current";
+        const isComplete = item.state === "complete";
+        const isLast = index === items.length - 1;
+        const indicatorSize = 28;
+
+        if (isHorizontal) {
+          return (
+            <li
+              key={item.id}
+              aria-current={isCurrent ? "step" : undefined}
+              style={{
+                display: "grid",
+                gridTemplateRows: "auto minmax(0, 1fr)",
+                gap: 10,
+                minWidth: 0,
+              }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: `${indicatorSize}px minmax(0, 1fr)`,
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span
+                  style={{
+                    width: indicatorSize,
+                    height: indicatorSize,
+                    borderRadius: "999px",
+                    border: `2px solid ${accent}`,
+                    background: isComplete || isCurrent ? accent : "#ffffff",
+                    color: isComplete || isCurrent ? "#ffffff" : accent,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    boxShadow: isCurrent
+                      ? `0 0 0 4px ${toneSet.bg}`
+                      : undefined,
+                  }}
+                >
+                  {item.indicator ?? index + 1}
+                </span>
+                {!isLast ? (
+                  <span
+                    aria-hidden
+                    style={{ height: 2, width: "100%", background: accent }}
+                  />
+                ) : null}
+              </div>
+              <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
+                {item.eyebrow ? (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: toneSet.fg,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                    }}
+                  >
+                    {item.eyebrow}
+                  </span>
+                ) : null}
+                <strong style={{ color: theme.text, fontSize: 13.5 }}>
+                  {item.title}
+                </strong>
+                {item.description ? (
+                  <span
+                    style={{
+                      color: theme.textMuted,
+                      fontSize: 12.5,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {item.description}
+                  </span>
+                ) : null}
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <Pill theme={theme} tone={copyToneForStepState(item.state)}>
+                    {item.stateLabel ?? item.state}
+                  </Pill>
+                  {item.timestamp ? (
+                    <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                      {item.timestamp}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </li>
+          );
+        }
+
+        return (
+          <li
+            key={item.id}
+            aria-current={isCurrent ? "step" : undefined}
+            style={{
+              display: "grid",
+              gridTemplateColumns: `${indicatorSize}px minmax(0, 1fr)`,
+              gap: 12,
+              alignItems: "start",
+            }}
+          >
+            <div style={{ display: "grid", justifyItems: "center", gap: 6 }}>
+              <span
+                style={{
+                  width: indicatorSize,
+                  height: indicatorSize,
+                  borderRadius: "999px",
+                  border: `2px solid ${accent}`,
+                  background: isComplete || isCurrent ? accent : "#ffffff",
+                  color: isComplete || isCurrent ? "#ffffff" : accent,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  boxShadow: isCurrent ? `0 0 0 4px ${toneSet.bg}` : undefined,
+                }}
+              >
+                {item.indicator ?? index + 1}
+              </span>
+              {!isLast ? (
+                <span
+                  aria-hidden
+                  style={{
+                    width: 2,
+                    minHeight: 40,
+                    background: accent,
+                  }}
+                />
+              ) : null}
+            </div>
+            <div style={{ padding: "2px 0 12px", display: "grid", gap: 8 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "flex-start",
+                }}
+              >
+                <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
+                  {item.eyebrow ? (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: toneSet.fg,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      {item.eyebrow}
+                    </span>
+                  ) : null}
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <strong style={{ color: theme.text, fontSize: 14 }}>
+                      {item.title}
+                    </strong>
+                    <Pill theme={theme} tone={copyToneForStepState(item.state)}>
+                      {item.stateLabel ?? item.state}
+                    </Pill>
+                  </div>
+                </div>
+                {item.timestamp ? (
+                  <span
+                    style={{
+                      color: theme.textMuted,
+                      fontSize: 12,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {item.timestamp}
+                  </span>
+                ) : null}
+              </div>
+              {item.meta ? (
+                <div
+                  style={{
+                    color: theme.textMuted,
+                    fontSize: 12,
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  {item.meta}
+                </div>
+              ) : null}
+              {item.description ? (
+                <div
+                  style={{
+                    color: theme.textMuted,
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {item.description}
+                </div>
+              ) : null}
+              {item.supportingContent ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {item.supportingContent}
+                </div>
+              ) : null}
+              {item.actions ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {item.actions}
+                </div>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function copyToneForStepState(state: CanvasStepState): CanvasTone {
+  switch (state) {
+    case "complete":
+      return "success";
+    case "current":
+      return "accent";
+    case "blocked":
+      return "danger";
+    case "upcoming":
+    default:
+      return "neutral";
+  }
+}
+
+export interface CanvasTimelineItem {
+  id: string;
+  title: ReactNode;
+  detail?: ReactNode;
+  timestamp?: ReactNode;
+  tone?: CanvasTone;
+  eyebrow?: string;
+  meta?: ReactNode;
+  actions?: ReactNode;
+  supportingContent?: ReactNode;
+  marker?: ReactNode;
+}
+
+export interface CanvasTimelineProps {
+  theme?: CanvasTheme;
+  items: CanvasTimelineItem[];
+  emptyState?: ReactNode;
+}
+
+export function Timeline({
+  theme: providedTheme,
+  items,
+  emptyState,
+}: CanvasTimelineProps) {
+  const theme = resolveTheme(providedTheme);
+
+  if (items.length === 0) {
+    return emptyState ?? null;
+  }
+
+  return (
+    <ol
+      style={{
+        listStyle: "none",
+        margin: 0,
+        padding: 0,
+        display: "grid",
+        gap: 14,
+      }}
+    >
+      {items.map((item, index) => {
+        const tone = toneStyles(theme, item.tone ?? "neutral");
+        const markerContent = item.marker ?? (
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+            {index + 1}
+          </span>
+        );
+
+        return (
+          <li
+            key={item.id}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "20px minmax(0, 1fr)",
+              gap: 12,
+              alignItems: "start",
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                justifyItems: "center",
+                gap: 8,
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: "999px",
+                  background: tone.fg,
+                  color: "#ffffff",
+                  boxShadow: `0 0 0 4px ${tone.bg}`,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              >
+                {markerContent}
+              </span>
+              {index < items.length - 1 ? (
+                <span
+                  aria-hidden
+                  style={{ width: 2, minHeight: 52, background: tone.fg }}
+                />
+              ) : null}
+            </div>
+            <div
+              style={{
+                paddingBottom: 12,
+                display: "grid",
+                gap: 6,
+                minWidth: 0,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
+                  {item.eyebrow ? (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: tone.fg,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em",
+                      }}
+                    >
+                      {item.eyebrow}
+                    </span>
+                  ) : null}
+                  <strong style={{ color: theme.text, fontSize: 14 }}>
+                    {item.title}
+                  </strong>
+                </div>
+                {item.timestamp ? (
+                  <span
+                    style={{
+                      color: theme.textMuted,
+                      fontSize: 12,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {item.timestamp}
+                  </span>
+                ) : null}
+              </div>
+              {item.meta ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    color: theme.textMuted,
+                    fontSize: 12,
+                  }}
+                >
+                  {item.meta}
+                </div>
+              ) : null}
+              {item.detail ? (
+                <div
+                  style={{
+                    color: theme.textMuted,
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {item.detail}
+                </div>
+              ) : null}
+              {item.supportingContent ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {item.supportingContent}
+                </div>
+              ) : null}
+              {item.actions ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {item.actions}
+                </div>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
