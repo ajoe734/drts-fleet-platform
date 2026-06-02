@@ -25,6 +25,7 @@ import {
   CanvasBtn,
   CanvasCard,
   CanvasField,
+  CanvasIcon,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -182,6 +183,28 @@ const modalFooterStyle = {
   padding: "14px 20px",
   borderTop: `1px solid ${theme.border}`,
 } satisfies CSSProperties;
+
+// Route-local primary submit button styled to match the canvas primary CanvasBtn.
+// Rendered as a single real <button type="submit"> so the invite form has a valid
+// (non-nested) submit control and supports implicit Enter submission, matching the
+// native submit pattern used by the sibling platform-admin composer forms.
+const submitButtonStyle = (disabled: boolean): CSSProperties => ({
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+  padding: "8px 14px",
+  minHeight: 34,
+  fontSize: 13,
+  fontWeight: 600,
+  background: theme.accent,
+  color: "#fff",
+  border: `1px solid ${theme.accent}`,
+  borderRadius: 7,
+  cursor: disabled ? "not-allowed" : "pointer",
+  opacity: disabled ? 0.55 : 1,
+  fontFamily: theme.fontFamily,
+});
 
 function controlStyle(th: CanvasTheme): CSSProperties {
   return {
@@ -589,21 +612,10 @@ export default function UsersPage() {
                 <button
                   type="submit"
                   disabled={!canSubmit}
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    padding: 0,
-                    cursor: canSubmit ? "pointer" : "not-allowed",
-                  }}
+                  style={submitButtonStyle(!canSubmit)}
                 >
-                  <CanvasBtn
-                    theme={theme}
-                    variant="primary"
-                    icon="plus"
-                    disabled={!canSubmit}
-                  >
-                    {creating ? t("common.adding") : copy.invite}
-                  </CanvasBtn>
+                  <CanvasIcon name="plus" size={13} />
+                  {creating ? t("common.adding") : copy.invite}
                 </button>
               </div>
             </form>
