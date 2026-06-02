@@ -297,9 +297,7 @@ function withinDays(value: string, days: number) {
 
 function viewportStyle(theme: CanvasTheme): React.CSSProperties {
   return {
-    position: "fixed",
-    inset: 0,
-    zIndex: 10,
+    minHeight: "100%",
     background: theme.bg,
   };
 }
