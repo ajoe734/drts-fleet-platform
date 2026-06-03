@@ -114,31 +114,33 @@ export class AnthropicLlmGatewayProvider implements LlmGatewayProvider {
       buffer = frames.pop() ?? "";
 
       for (const frame of frames) {
-        const payload = this.parseSseFrame(frame);
-        if (!payload) {
-          continue;
+        for (const event of this.parseStreamFrame(frame, {
+          text,
+          usage,
+          stopReason,
+        })) {
+          text = event.text;
+          usage = event.usage;
+          stopReason = event.stopReason;
+          if (event.streamEvent) {
+            yield event.streamEvent;
+          }
         }
+      }
+    }
 
-        usage = this.mergeUsage(usage, payload.usage);
-
-        if (payload.type === "message_start" && payload.message?.usage) {
-          usage = this.mergeUsage(usage, payload.message.usage);
-        }
-
-        if (payload.type === "content_block_delta" && payload.delta?.text) {
-          text += payload.delta.text;
-          yield {
-            type: "text-delta",
-            textDelta: payload.delta.text,
-          };
-        }
-
-        if (payload.delta?.stop_reason) {
-          stopReason = this.mapStopReason(payload.delta.stop_reason);
-        }
-
-        if (payload.type === "message_delta" && payload.usage) {
-          usage = this.mergeUsage(usage, payload.usage);
+    buffer += decoder.decode();
+    if (buffer.trim().length > 0) {
+      for (const event of this.parseStreamFrame(buffer, {
+        text,
+        usage,
+        stopReason,
+      })) {
+        text = event.text;
+        usage = event.usage;
+        stopReason = event.stopReason;
+        if (event.streamEvent) {
+          yield event.streamEvent;
         }
       }
     }
@@ -378,6 +380,56 @@ export class AnthropicLlmGatewayProvider implements LlmGatewayProvider {
       );
       return null;
     }
+  }
+
+  private *parseStreamFrame(
+    frame: string,
+    state: {
+      text: string;
+      usage: LlmGatewayUsage;
+      stopReason: LlmGatewayResponse["stopReason"];
+    },
+  ): Iterable<{
+    text: string;
+    usage: LlmGatewayUsage;
+    stopReason: LlmGatewayResponse["stopReason"];
+    streamEvent?: LlmGatewayStreamEvent;
+  }> {
+    const payload = this.parseSseFrame(frame);
+    if (!payload) {
+      return;
+    }
+
+    let text = state.text;
+    let usage = this.mergeUsage(state.usage, payload.usage);
+    usage = this.mergeUsage(usage, payload.message?.usage);
+
+    let stopReason = state.stopReason;
+    if (payload.delta?.stop_reason) {
+      stopReason = this.mapStopReason(payload.delta.stop_reason);
+    } else if (payload.message?.stop_reason) {
+      stopReason = this.mapStopReason(payload.message.stop_reason);
+    }
+
+    if (payload.type === "content_block_delta" && payload.delta?.text) {
+      text += payload.delta.text;
+      yield {
+        text,
+        usage,
+        stopReason,
+        streamEvent: {
+          type: "text-delta",
+          textDelta: payload.delta.text,
+        },
+      };
+      return;
+    }
+
+    yield {
+      text,
+      usage,
+      stopReason,
+    };
   }
 
   private mergeUsage(

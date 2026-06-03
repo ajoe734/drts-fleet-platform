@@ -164,4 +164,42 @@ describe("AnthropicLlmGatewayProvider", () => {
       },
     ]);
   });
+
+  it("flushes the final SSE frame at EOF so streamed usage and stop reason are not dropped", async () => {
+    const fetchImpl = vi.fn(async () =>
+      createSseResponse([
+        "event: message_start\n",
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":11}}}\n\n',
+        "event: content_block_delta\n",
+        'data: {"type":"content_block_delta","delta":{"text":"hel"}}\n\n',
+        "event: message_stop\n",
+        'data: {"type":"message_stop","message":{"stop_reason":"max_tokens","usage":{"output_tokens":5,"cache_read_input_tokens":3}}}',
+      ]),
+    );
+    const provider = new AnthropicLlmGatewayProvider(createConfig(), fetchImpl);
+
+    const events = [];
+    for await (const event of provider.stream(createResolvedRequest())) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        type: "text-delta",
+        textDelta: "hel",
+      },
+      {
+        type: "response",
+        response: expect.objectContaining({
+          text: "hel",
+          usage: {
+            inputTokens: 11,
+            outputTokens: 5,
+            cacheReadInputTokens: 3,
+          },
+          stopReason: "max_tokens",
+        }),
+      },
+    ]);
+  });
 });
