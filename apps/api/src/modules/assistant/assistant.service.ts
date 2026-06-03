@@ -9,6 +9,7 @@ import {
   AssistantRepository,
   type PersistAssistantChanges,
 } from "./assistant.repository";
+import { AssistantReadToolRegistry } from "./tools/assistant-read-tool.registry";
 import type {
   AssistantEventSink,
   AssistantGatewayEvent,
@@ -29,6 +30,8 @@ export class AssistantService implements OnModuleInit {
 
   constructor(
     private readonly assistantLlmGatewayService: AssistantLlmGatewayService,
+    @Optional()
+    private readonly assistantReadToolRegistry?: AssistantReadToolRegistry,
     @Optional() private readonly assistantRepository?: AssistantRepository,
   ) {}
 
@@ -132,7 +135,9 @@ export class AssistantService implements OnModuleInit {
       {
         conversation: { ...conversation },
         history: fullHistory.map((message) => this.cloneMessage(message)),
+        identity: scopedIdentity,
         prompt,
+        availableTools: this.assistantReadToolRegistry?.listDefinitions() ?? [],
       },
     )) {
       const envelope = this.materializeGatewayEvent(
@@ -246,7 +251,7 @@ export class AssistantService implements OnModuleInit {
   private materializeGatewayEvent(
     conversationId: string,
     gatewayEvent: AssistantGatewayEvent,
-  ): AssistantStreamEnvelope<Record<string, unknown>> {
+  ): AssistantStreamEnvelope<unknown> {
     const base = {
       eventId: `evt_${randomUUID()}`,
       conversationId,

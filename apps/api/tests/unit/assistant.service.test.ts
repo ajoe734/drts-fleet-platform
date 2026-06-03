@@ -2,6 +2,7 @@ import type { BootstrapRequestIdentity } from "../../src/common/auth";
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { AssistantLlmGatewayService } from "../../src/modules/assistant/assistant-llm-gateway.service";
 import { AssistantService } from "../../src/modules/assistant/assistant.service";
+import { AssistantReadToolRegistry } from "../../src/modules/assistant/tools/assistant-read-tool.registry";
 import type {
   AssistantEventSink,
   AssistantGatewayContext,
@@ -87,6 +88,7 @@ describe("AssistantService", () => {
           content: "Final assistant reply",
         },
       ]),
+      undefined,
       assistantRepository as never,
     );
     const identity = createIdentity();
@@ -144,6 +146,7 @@ describe("AssistantService", () => {
           content: "Scoped reply",
         },
       ]),
+      undefined,
     );
     const ownerIdentity = createIdentity();
     const otherTenantIdentity = createIdentity({
@@ -166,5 +169,57 @@ describe("AssistantService", () => {
         createSink().sink,
       ),
     ).rejects.toBeInstanceOf(ApiRequestError);
+  });
+
+  it("registers read tools into the conversation loop context", async () => {
+    const streamReply = vi.fn(async function* (
+      context: AssistantGatewayContext,
+    ): AsyncGenerator<AssistantGatewayEvent> {
+      expect(context.availableTools.map((tool) => tool.name)).toContain(
+        "get_order",
+      );
+      expect(context.identity.tenantId).toBe("tenant-a");
+
+      yield {
+        type: "final",
+        content: "Scoped reply",
+      };
+    });
+    const gateway = {
+      streamReply,
+    } as AssistantLlmGatewayService;
+    const registry = {
+      listDefinitions: vi.fn(() => [
+        {
+          name: "get_order",
+          description: "Read an order",
+          inputSchema: {
+            type: "object" as const,
+            properties: {
+              orderId: {
+                type: "string",
+              },
+            },
+            required: ["orderId"],
+            additionalProperties: false,
+          },
+        },
+      ]),
+    } as unknown as AssistantReadToolRegistry;
+    const service = new AssistantService(gateway, registry);
+    const identity = createIdentity();
+    const conversation = service.createConversation({}, identity).conversation;
+
+    await service.streamConversationMessage(
+      conversation.conversationId,
+      {
+        content: "show order-tenant-001",
+      },
+      identity,
+      createSink().sink,
+    );
+
+    expect(streamReply).toHaveBeenCalledTimes(1);
+    expect(registry.listDefinitions).toHaveBeenCalledTimes(1);
   });
 });
