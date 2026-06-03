@@ -25,7 +25,19 @@
     "stall_after_seconds": 300,
     "max_worker_history": 200,
     "auto_refresh_provider_capabilities": false,
-    "git_reconcile_interval_seconds": 600
+    "git_reconcile_interval_seconds": 600,
+    "disk_guard": {
+      "enabled": true,
+      "path": ".",
+      "warn_usage_percent": 80,
+      "cleanup_usage_percent": 85,
+      "block_dispatch_usage_percent": 85,
+      "min_free_gb": 5,
+      "cleanup_interval_seconds": 3600,
+      "worktree_retention_days": 3,
+      "max_worktrees_removed_per_tick": 200,
+      "remove_dirty_worktrees": false
+    }
   },
   "worker_retry": {
     "enabled": true,
@@ -484,8 +496,8 @@
       "require_owner_higher_priority_load": true
     },
     "max_tasks_per_agent_by_lane": {
-      "claude": 5,
-      "claude2": 3,
+      "claude": 3,
+      "claude2": 2,
       "codex": 4,
       "codex2": 4,
       "gemini": 2,
