@@ -32,6 +32,7 @@ import {
 } from "@drts/ui-web";
 import type { ManagementTone, TimelineItem } from "@drts/ui-web";
 import { IncidentRefreshTier } from "./refresh-tier";
+import { PublishAssistantSelection } from "@/components/ops-assistant";
 import { IncidentDetailActionPanel } from "./incident-detail-action-panel";
 
 type IncidentDetailPageProps = {
@@ -1083,6 +1084,7 @@ export default async function IncidentDetailPage({
 
   return (
     <>
+      <PublishAssistantSelection kind="incident" id={incident.incidentId} />
       <PageHeader
         theme={theme}
         title={titlePills}

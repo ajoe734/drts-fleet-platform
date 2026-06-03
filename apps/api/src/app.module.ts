@@ -21,6 +21,7 @@ import { BootstrapThrottlerGuard } from "./common/throttling/bootstrap-throttler
 import { GLOBAL_RATE_LIMIT } from "./common/throttling/rate-limit.constants";
 import { HealthModule } from "./health/health.module";
 import { AuditNotificationModule } from "./modules/audit-notification/audit-notification.module";
+import { AssistantModule } from "./modules/assistant/assistant.module";
 import { BillingSettlementModule } from "./modules/billing-settlement/billing-settlement.module";
 import { CallcenterModule } from "./modules/callcenter/callcenter.module";
 import { ComplaintModule } from "./modules/complaint/complaint.module";
@@ -51,6 +52,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     ThrottlerModule.forRoot([...GLOBAL_RATE_LIMIT]),
     LlmGatewayModule,
     AuthModule,
+    AssistantModule,
     HealthModule,
     FoundationModule,
     IdentityModule,

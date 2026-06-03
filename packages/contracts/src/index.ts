@@ -4960,6 +4960,24 @@ export interface SetTenantStatusCommand {
   reason?: string;
 }
 
+export interface ProposeActionToolInput {
+  resourceKind: string;
+  resourceId: string;
+  action: string;
+  args?: Record<string, unknown>;
+}
+
+export interface ActionIntent {
+  type: "action_intent";
+  tool: string;
+  resourceKind: string;
+  resourceId: string;
+  action: string;
+  args: Record<string, unknown>;
+  confirmationRequired: boolean;
+  mutates: boolean;
+}
+
 export * from "./platform-codes";
 export * from "./platform-adapter-registry";
 export * from "./ui-runtime";

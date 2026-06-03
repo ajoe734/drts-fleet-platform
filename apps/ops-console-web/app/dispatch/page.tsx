@@ -15,6 +15,7 @@ import type {
   UiRefreshMetadata,
 } from "@drts/contracts";
 import { DispatchAutoRefresh } from "@/components/dispatch-auto-refresh";
+import { PublishAssistantScope } from "@/components/ops-assistant";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatCompactNumber } from "@/lib/ops-analytics";
@@ -2316,6 +2317,14 @@ export default async function DispatchPage({
 
   return (
     <>
+      <PublishAssistantScope
+        board={board}
+        visibleFilters={{
+          service: selectedService,
+          facet: selectedFacet,
+          ...(focusWorkItemId ? { workItemId: focusWorkItemId } : {}),
+        }}
+      />
       <DispatchAutoRefresh
         intervalMs={Math.max(currentRefresh.staleAfterMs || 5000, 5000)}
       />
