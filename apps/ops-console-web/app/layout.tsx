@@ -6,6 +6,7 @@ import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import { buildOpsShellNav } from "@/lib/ops-shell-nav";
 import { OpsShell } from "@/components/ops-shell";
+import { OpsAssistantWidget } from "@/components/ops-assistant";
 
 import "./globals.css";
 
@@ -30,14 +31,17 @@ export default async function RootLayout({
       <body style={{ margin: 0 }}>
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
-          <OpsShell
-            nav={nav}
-            brandLabel={t("app.name", locale)}
-            brandSubLabel={t("app.sub", locale)}
-            searchPlaceholder={t("common.search", locale)}
-          >
-            {children}
-          </OpsShell>
+          <>
+            <OpsShell
+              nav={nav}
+              brandLabel={t("app.name", locale)}
+              brandSubLabel={t("app.sub", locale)}
+              searchPlaceholder={t("common.search", locale)}
+            >
+              {children}
+            </OpsShell>
+            <OpsAssistantWidget />
+          </>
         </LanguageProvider>
       </body>
     </html>
