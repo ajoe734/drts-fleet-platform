@@ -66,6 +66,7 @@ export const PLATFORM_ADMIN_ROUTE_REGISTRY = {
   switchboard: { href: "/switchboard" },
   pricing: { href: "/pricing" },
   payments: { href: "/payments" },
+  reimbursements: { href: "/payments/reimbursements" },
   "adapter-registry": { href: "/adapter-registry" },
   health: { href: "/health" },
   notices: { href: "/notices" },

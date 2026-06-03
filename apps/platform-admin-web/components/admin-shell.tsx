@@ -158,6 +158,13 @@ const routes: NavRoute[] = [
     en: "Payments",
   },
   {
+    key: "reimbursements",
+    icon: CreditCard,
+    section: "commerce",
+    zh: "代墊批次",
+    en: "Reimbursements",
+  },
+  {
     key: "adapter-registry",
     icon: ShieldCheck,
     section: "commerce",
