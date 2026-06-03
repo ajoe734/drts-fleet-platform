@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "next build",
+    "build": "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && next build",
     "dev": "next dev --hostname 0.0.0.0 --port 3003",
     "lint": "eslint . --max-warnings=0",
     "start": "next start --port 3003",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && tsc --noEmit"
   },
   "dependencies": {
     "@drts/api-client": "workspace:*",

@@ -9,7 +9,6 @@ import {
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type {
-  IncidentCategory,
   IncidentEscalationTarget,
   IncidentSeverity,
   IncidentStatus,
@@ -18,7 +17,6 @@ import type {
   UpdateIncidentCommand,
 } from "@drts/contracts";
 import {
-  INCIDENT_CATEGORIES,
   INCIDENT_ESCALATION_TARGETS,
   INCIDENT_SEVERITIES,
   INCIDENT_STATUSES,
@@ -58,7 +56,6 @@ type IncidentDetailActionPanelProps = {
   availableActions: ResourceActionDescriptor[];
   initialIntent: string | null;
   initialStatus: IncidentStatus;
-  initialCategory: IncidentCategory;
   initialSeverity: IncidentSeverity;
   initialAssignedTo: string | null;
   initialEscalationTarget: IncidentEscalationTarget | null;
@@ -124,8 +121,8 @@ function actionSummary(intent: string, locale: Locale) {
   switch (intent) {
     case "update":
       return locale === "en"
-        ? "Adjust category, severity, owner, escalation target, status, and resolution note."
-        : "調整分類、嚴重程度、負責人、升級對象、狀態與結案備註。";
+        ? "Adjust severity, owner, escalation target, status, and resolution note."
+        : "調整嚴重程度、負責人、升級對象、狀態與結案備註。";
     case "resolve":
       return locale === "en"
         ? "Mark the incident resolved after recovery is complete."
@@ -246,7 +243,6 @@ export function IncidentDetailActionPanel({
   availableActions,
   initialIntent,
   initialStatus,
-  initialCategory,
   initialSeverity,
   initialAssignedTo,
   initialEscalationTarget,
@@ -256,7 +252,6 @@ export function IncidentDetailActionPanel({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<IncidentStatus>(initialStatus);
-  const [category, setCategory] = useState<IncidentCategory>(initialCategory);
   const [severity, setSeverity] = useState<IncidentSeverity>(initialSeverity);
   const [assignedTo, setAssignedTo] = useState(initialAssignedTo ?? "");
   const [escalationTarget, setEscalationTarget] = useState<
@@ -295,7 +290,6 @@ export function IncidentDetailActionPanel({
 
   useEffect(() => {
     setStatus(initialStatus);
-    setCategory(initialCategory);
     setSeverity(initialSeverity);
     setAssignedTo(initialAssignedTo ?? "");
     setEscalationTarget(initialEscalationTarget ?? "");
@@ -306,7 +300,6 @@ export function IncidentDetailActionPanel({
     setError(null);
   }, [
     initialAssignedTo,
-    initialCategory,
     initialEscalationTarget,
     initialResolutionNote,
     initialSeverity,
@@ -413,7 +406,6 @@ export function IncidentDetailActionPanel({
           currentIntent === "update"
             ? {
                 status,
-                category,
                 severity,
                 escalationTarget: escalationTarget || null,
                 ...withOptionalString(assignedTo, (trimmed) => ({
@@ -632,24 +624,6 @@ export function IncidentDetailActionPanel({
                   style={inputStyle}
                 >
                   {INCIDENT_SEVERITIES.map((value) => (
-                    <option key={value} value={value}>
-                      {formatOpsCodeLabel(locale, value)}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field
-                theme={theme}
-                label={locale === "en" ? "Category" : "分類"}
-              >
-                <select
-                  value={category}
-                  onChange={(event) =>
-                    setCategory(event.target.value as IncidentCategory)
-                  }
-                  style={inputStyle}
-                >
-                  {INCIDENT_CATEGORIES.map((value) => (
                     <option key={value} value={value}>
                       {formatOpsCodeLabel(locale, value)}
                     </option>

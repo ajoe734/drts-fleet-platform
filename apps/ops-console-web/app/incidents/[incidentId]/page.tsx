@@ -453,7 +453,7 @@ function getSeverityTone(severity: IncidentRecord["severity"]): CanvasTone {
   return "info";
 }
 
-function getEventTone(action: string): CanvasTone {
+function getEventTone(action: string): NonNullable<TimelineItem["tone"]> {
   if (action === "incident_closed" || action === "incident_resolved") {
     return "success";
   }
@@ -465,7 +465,7 @@ function getEventTone(action: string): CanvasTone {
     return "danger";
   }
   if (action === "escalation_target_set" || action === "complaint_linked") {
-    return "warn";
+    return "warning";
   }
   if (action === "service_recovery_action") {
     return "info";
@@ -1333,7 +1333,6 @@ export default async function IncidentDetailPage({
               availableActions={availableActions}
               initialIntent={initialIntent}
               initialStatus={incident.status}
-              initialCategory={incident.category}
               initialSeverity={incident.severity}
               initialAssignedTo={incident.assignedTo}
               initialEscalationTarget={incident.escalationTarget}
