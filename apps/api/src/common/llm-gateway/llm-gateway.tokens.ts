@@ -1,0 +1,2 @@
+export const LLM_GATEWAY_PROVIDER = Symbol("LLM_GATEWAY_PROVIDER");
+export const LLM_GATEWAY_FETCH = Symbol("LLM_GATEWAY_FETCH");

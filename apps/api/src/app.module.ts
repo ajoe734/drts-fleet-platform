@@ -18,6 +18,7 @@ import { SnakeCaseExceptionFilter } from "./common/snake-case.exception-filter";
 import { SnakeCaseInterceptor } from "./common/snake-case.interceptor";
 import { BootstrapThrottlerGuard } from "./common/throttling/bootstrap-throttler.guard";
 import { GLOBAL_RATE_LIMIT } from "./common/throttling/rate-limit.constants";
+import { LlmGatewayModule } from "./common/llm-gateway";
 import { HealthModule } from "./health/health.module";
 import { AuditNotificationModule } from "./modules/audit-notification/audit-notification.module";
 import { BillingSettlementModule } from "./modules/billing-settlement/billing-settlement.module";
@@ -47,6 +48,7 @@ import { AuthModule } from "./modules/auth/auth.module";
   imports: [
     EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([...GLOBAL_RATE_LIMIT]),
+    LlmGatewayModule,
     AuthModule,
     HealthModule,
     FoundationModule,
