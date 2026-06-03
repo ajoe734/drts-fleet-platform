@@ -166,6 +166,14 @@ const routes: NavRoute[] = [
     en: "Payments",
   },
   {
+    key: "reimbursements",
+    href: "/payments/reimbursements",
+    icon: CreditCard,
+    section: "commerce",
+    zh: "代墊批次",
+    en: "Reimbursements",
+  },
+  {
     key: "adapter-registry",
     href: "/adapter-registry",
     icon: ShieldCheck,
@@ -220,9 +228,13 @@ function pathMatchesRoute(route: NavRoute, pathname: string) {
 }
 
 function getActiveRoute(pathname: string): NavRoute {
-  const activeRoute = routes.find((route) => pathMatchesRoute(route, pathname));
-  if (activeRoute) {
-    return activeRoute;
+  const matchedRoutes = routes.filter((route) =>
+    pathMatchesRoute(route, pathname),
+  );
+  if (matchedRoutes.length > 0) {
+    return matchedRoutes.reduce((best, route) =>
+      route.href.length > best.href.length ? route : best,
+    );
   }
 
   const [homeRoute] = routes;
