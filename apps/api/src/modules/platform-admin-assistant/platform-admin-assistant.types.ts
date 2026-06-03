@@ -30,6 +30,11 @@ export interface CreatePlatformAdminAssistantMessageCommand {
   message: string;
 }
 
+export interface ExecutePlatformAdminAssistantReadToolCommand {
+  toolName: string;
+  input?: Record<string, unknown>;
+}
+
 export type PlatformAdminAssistantActionToolName =
   | "action.create_platform_notice"
   | "action.set_maintenance_mode";
