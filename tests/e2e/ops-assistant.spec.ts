@@ -9,6 +9,7 @@ import {
 const ENABLED_PROJECT = "ops-assistant-on";
 const DISABLED_PROJECT = "ops-assistant-off";
 const CASE_NO = "CMP-001";
+const FORCE_DISABLED_KEY = "ops-console.assistant.force-disabled";
 
 function buildEnvelope<T>(data: T) {
   return {
@@ -79,6 +80,28 @@ function isDisabledProject(testInfo: TestInfo) {
   return testInfo.project.name === DISABLED_PROJECT;
 }
 
+async function primeProjectState(page: Page, testInfo: TestInfo) {
+  await page.addInitScript(
+    ({
+      forceDisabledKey,
+      disabled,
+    }: {
+      forceDisabledKey: string;
+      disabled: boolean;
+    }) => {
+      if (disabled) {
+        window.localStorage.setItem(forceDisabledKey, "true");
+      } else {
+        window.localStorage.removeItem(forceDisabledKey);
+      }
+    },
+    {
+      forceDisabledKey: FORCE_DISABLED_KEY,
+      disabled: isDisabledProject(testInfo),
+    },
+  );
+}
+
 async function fulfillJson(route: Route, data: unknown) {
   await route.fulfill({
     status: 200,
@@ -89,6 +112,12 @@ async function fulfillJson(route: Route, data: unknown) {
 
 async function registerComplaintMocks(page: Page) {
   await page.route("**/complaints**", async (route) => {
+    const resourceType = route.request().resourceType();
+    if (resourceType !== "fetch" && resourceType !== "xhr") {
+      await route.fallback();
+      return;
+    }
+
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
@@ -164,12 +193,18 @@ async function gotoComplaints(page: Page) {
 async function openAssistant(page: Page) {
   const launcher = page.getByTestId("ops-assistant-launcher");
   const panel = page.getByTestId("ops-assistant-panel");
-  await launcher.click();
+  if ((await panel.count()) === 0) {
+    await launcher.click();
+  }
   await expect(panel).toBeVisible();
   return { launcher, panel };
 }
 
 test.describe("ops assistant verification", () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    await primeProjectState(page, testInfo);
+  });
+
   test("kill switch off hides assistant launcher", async ({
     page,
   }, testInfo) => {

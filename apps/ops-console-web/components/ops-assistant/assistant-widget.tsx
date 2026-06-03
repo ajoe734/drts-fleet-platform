@@ -75,6 +75,7 @@ const RESIZE_STEP = 24;
 const STREAM_TICK_MS = 42;
 const STREAM_PAUSE_MS = 1500;
 const FORCE_DEGRADED_KEY = "ops-console.assistant.force-degraded";
+const FORCE_DISABLED_KEY = "ops-console.assistant.force-disabled";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -199,7 +200,13 @@ function writeStoredState(state: WidgetState) {
 }
 
 function isAssistantEnabled() {
-  return process.env.NEXT_PUBLIC_OPS_ASSISTANT_ENABLED !== "false";
+  if (process.env.NEXT_PUBLIC_OPS_ASSISTANT_ENABLED === "false") {
+    return false;
+  }
+  if (typeof window === "undefined") {
+    return true;
+  }
+  return window.localStorage.getItem(FORCE_DISABLED_KEY) !== "true";
 }
 
 function isForcedDegraded() {
