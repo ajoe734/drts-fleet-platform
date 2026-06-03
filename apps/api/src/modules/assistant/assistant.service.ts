@@ -256,12 +256,28 @@ export class AssistantService implements OnModuleInit {
         continue;
       }
 
-      if (gatewayEvent.type === "action_intent") {
-        this.auditSuggestedAction(scopedIdentity, gatewayEvent.intent);
+      if (gatewayEvent.type === "token") {
         sink.emit(
           this.materializeGatewayEvent(
             conversation.conversationId,
-            gatewayEvent,
+            {
+              ...gatewayEvent,
+              delta: this.assistantGuardrailService.screenAssistantText(
+                gatewayEvent.delta,
+              ).content,
+            },
+          ),
+        );
+        continue;
+      }
+
+      if (gatewayEvent.type === "action_intent") {
+        const sanitizedEvent = this.sanitizeActionIntentEvent(gatewayEvent);
+        this.auditSuggestedAction(scopedIdentity, sanitizedEvent.intent);
+        sink.emit(
+          this.materializeGatewayEvent(
+            conversation.conversationId,
+            sanitizedEvent,
           ),
         );
         continue;
@@ -439,6 +455,20 @@ export class AssistantService implements OnModuleInit {
           },
         };
     }
+  }
+
+  private sanitizeActionIntentEvent(
+    gatewayEvent: Extract<AssistantGatewayEvent, { type: "action_intent" }>,
+  ): Extract<AssistantGatewayEvent, { type: "action_intent" }> {
+    return {
+      ...gatewayEvent,
+      intent:
+        typeof gatewayEvent.intent === "string"
+          ? gatewayEvent.intent
+          : this.assistantGuardrailService.sanitizeActionIntent(
+              gatewayEvent.intent,
+            ),
+    };
   }
 
   private requireIdentity(identity: BootstrapRequestIdentity | null) {
