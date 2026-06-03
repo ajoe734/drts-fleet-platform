@@ -9,7 +9,7 @@ Last updated: 2026-06-03
 
 - **All 12 PA-AI implementation + QA dependencies are `done`** and archived in machine truth, each with a recorded commit on a pushed per-lane branch.
 - **All three deploy-independent technical guardrails are statically verified** against branch code (feature-flag-gated launcher, no provider secret in frontend runtime, mock/degraded provider path). File:line evidence below.
-- **The release is NOT merged to `dev` and NOT deployed.** Every dependency lives only on its own per-lane branch; none is an ancestor of `origin/dev`. Cross-branch integration → CI → Cloud Run staging deploy → Secret Manager provisioning → live smoke is the remaining work and requires the integration/deploy layer (merge authority + GCP deploy credentials) **not available to an isolated worker worktree** (no `node_modules`, no `gh`, no GCP deploy authority).
+- **The release is NOT merged to `dev` and NOT deployed.** Every dependency lives only on its own per-lane branch; none is an ancestor of `origin/dev`. Cross-branch integration → CI → Cloud Run staging deploy → Secret Manager provisioning → live smoke is the remaining work. It requires the integration/deploy layer — reviewer-approved merge authority into `dev` with green CI **on the merged result**, GCP Secret Manager + IAM provisioning, and Cloud Run deploy credentials — none of which a single owner worker performs. (This worktree also has no `node_modules`, so local `pnpm typecheck`/`vitest`/`playwright` cannot be run; those suites run in CI on merge.)
 - Honest integration level: **`branch_pushed`** for the implementation set + this closeout doc. The merge-to-dev and dev-deploy acceptance items are **recorded as a blocker with the exact external dependency** (see §5).
 
 ## 1. Dependency census (machine truth)
@@ -136,10 +136,12 @@ Acceptance item 2 ("CI passes; changes merged to dev; dev deploy succeeds or dep
 with exact external dependency") and the live-environment half of item 3 are **NOT MET** and cannot be
 completed by this worker. Exact remaining dependencies:
 
-1. **Merge authority + CI** — merge the §3 branch set into `dev` via PR(s), resolving the §3.1 conflicts,
-   with CI (typecheck + unit + e2e) green. This worker worktree has **no `node_modules`** (cannot run
-   `pnpm typecheck`/`vitest`/`playwright`) and **no `gh`** (cannot open/inspect PRs). Merge-to-`dev`
-   requires the integration layer (reviewer-approved PR merge), not a single worker.
+1. **Merge authority + green CI** — merge the §3 branch set into `dev` via PR(s), resolving the §3.1
+   conflicts, with CI (typecheck + unit + e2e) green **on the merged result**. This is an
+   integration-layer action (reviewer-approved PR merge into `dev`), not something a single owner
+   worker performs. Local pre-merge gate execution is additionally blocked in this worktree by a
+   missing `node_modules` install (no `pnpm typecheck`/`vitest`/`playwright`); those suites run in CI
+   on merge.
 2. **Secret Manager provisioning** — create `drts-staging-llm-gateway-api-key` (and dev/prod equivalents)
    and grant `roles/secretmanager.secretAccessor` to the **API** Cloud Run service account only
    (design plan §7–§8). Requires GCP project IAM authority.
