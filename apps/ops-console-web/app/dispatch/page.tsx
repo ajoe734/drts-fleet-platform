@@ -25,10 +25,10 @@ import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
+  CanvasEmptyState,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
-  WorkflowEmptyState,
   buildCanvasTheme,
   type CanvasTableColumn,
 } from "@drts/ui-web";
@@ -1153,7 +1153,7 @@ function renderEmptyState(
     content.tone === "danger"
       ? "danger"
       : content.tone === "warn"
-        ? "warning"
+        ? "warn"
         : content.tone;
   const nextAction = emptyState.nextAction
     ? buildEmptyStateActionContext(
@@ -1165,7 +1165,8 @@ function renderEmptyState(
       )
     : null;
   return (
-    <WorkflowEmptyState
+    <CanvasEmptyState
+      theme={theme}
       tone={tone}
       density="compact"
       title={content.title}
@@ -1176,7 +1177,7 @@ function renderEmptyState(
             : "Check adapter health and the reconciliation queue."
           : ""
       }`.trim()}
-      icon={<span style={{ fontSize: 22 }}>{content.icon}</span>}
+      icon={<span style={{ fontSize: 18 }}>{content.icon}</span>}
       actions={
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {nextAction ? renderActionButton(nextAction, locale) : null}
@@ -1454,7 +1455,8 @@ function renderBoardSignalBanner({
 function renderActionList(actions: BoardActionContext[], locale: Locale) {
   if (actions.length === 0) {
     return (
-      <WorkflowEmptyState
+      <CanvasEmptyState
+        theme={theme}
         density="compact"
         title={locale === "zh" ? "目前沒有可用動作" : "No available actions"}
         description={
@@ -2629,7 +2631,8 @@ export default async function DispatchPage({
                       {renderActionList(selectedActions, locale)}
                     </>
                   ) : (
-                    <WorkflowEmptyState
+                    <CanvasEmptyState
+                      theme={theme}
                       density="compact"
                       title={zh ? "沒有焦點 work item" : "No focused work item"}
                       description={

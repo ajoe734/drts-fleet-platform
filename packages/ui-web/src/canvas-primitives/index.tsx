@@ -1041,6 +1041,87 @@ export function Banner({
   );
 }
 
+export interface EmptyStateProps {
+  theme?: CanvasTheme;
+  tone?: CanvasTone;
+  icon?: CanvasIconName | ReactNode;
+  title: ReactNode;
+  description?: ReactNode;
+  actions?: ReactNode;
+  density?: "compact" | "comfortable";
+}
+
+export function EmptyState({
+  theme: providedTheme,
+  tone = "neutral",
+  icon = "search",
+  title,
+  description,
+  actions,
+  density = "comfortable",
+}: EmptyStateProps) {
+  const theme = resolveTheme(providedTheme);
+  const toneSet = toneStyles(theme, tone);
+  const compact = density === "compact";
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        justifyItems: "start",
+        gap: compact ? 8 : 10,
+        padding: compact ? "14px 16px" : "18px 20px",
+        borderRadius: 10,
+        border: `1px dashed ${toneSet.bd}`,
+        background: toneSet.bg,
+        color: theme.text,
+      }}
+    >
+      <div
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: compact ? 30 : 34,
+          height: compact ? 30 : 34,
+          borderRadius: 999,
+          background: theme.surface,
+          color: toneSet.fg,
+          border: `1px solid ${toneSet.bd}`,
+        }}
+      >
+        {renderIcon(icon, compact ? 15 : 16)}
+      </div>
+      <div style={{ display: "grid", gap: description ? 4 : 0 }}>
+        <strong
+          style={{
+            fontSize: compact ? 13 : 14,
+            lineHeight: 1.3,
+          }}
+        >
+          {title}
+        </strong>
+        {description ? (
+          <div
+            style={{
+              fontSize: compact ? 12 : 12.5,
+              color: theme.textMuted,
+              lineHeight: 1.5,
+            }}
+          >
+            {description}
+          </div>
+        ) : null}
+      </div>
+      {actions ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {actions}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export interface KPIProps {
   theme?: CanvasTheme;
   label: ReactNode;

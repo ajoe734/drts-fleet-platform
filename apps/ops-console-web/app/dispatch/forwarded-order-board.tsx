@@ -20,7 +20,14 @@ import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { Badge, Card, CardBody, CardHeader } from "@drts/ui-web";
+import {
+  Badge,
+  CanvasEmptyState,
+  Card,
+  CardBody,
+  CardHeader,
+  buildCanvasTheme,
+} from "@drts/ui-web";
 
 type ForwardedFilter =
   | "all"
@@ -80,6 +87,10 @@ const COMMON_NATIVE_STATUS_OPTIONS = [
   "taken",
   "cancelled",
 ];
+const emptyStateTheme = buildCanvasTheme({
+  surface: "tenant",
+  density: "compact",
+});
 
 function sortOrders(orders: ForwardedOrderRecord[]) {
   return [...orders].sort((left, right) =>
@@ -1214,15 +1225,12 @@ export function ForwardedOrderBoard({
                   })
                 ) : (
                   <tr>
-                    <td
-                      colSpan={8}
-                      style={{
-                        padding: "24px 16px",
-                        textAlign: "center",
-                        color: "#64748b",
-                      }}
-                    >
-                      {t("dispatch.forwarded.empty")}
+                    <td colSpan={8} style={{ padding: "16px" }}>
+                      <CanvasEmptyState
+                        theme={emptyStateTheme}
+                        density="compact"
+                        title={t("dispatch.forwarded.empty")}
+                      />
                     </td>
                   </tr>
                 )}
@@ -1839,15 +1847,12 @@ export function ForwardedOrderBoard({
                   ))
                 ) : (
                   <tr>
-                    <td
-                      colSpan={4}
-                      style={{
-                        padding: "20px 16px",
-                        textAlign: "center",
-                        color: "#64748b",
-                      }}
-                    >
-                      {t("dispatch.forwarded.health.empty")}
+                    <td colSpan={4} style={{ padding: "16px" }}>
+                      <CanvasEmptyState
+                        theme={emptyStateTheme}
+                        density="compact"
+                        title={t("dispatch.forwarded.health.empty")}
+                      />
                     </td>
                   </tr>
                 )}
@@ -1952,15 +1957,12 @@ export function ForwardedOrderBoard({
                   ))
                 ) : (
                   <tr>
-                    <td
-                      colSpan={4}
-                      style={{
-                        padding: "20px 16px",
-                        textAlign: "center",
-                        color: "#64748b",
-                      }}
-                    >
-                      {t("dispatch.forwarded.reconciliation.empty")}
+                    <td colSpan={4} style={{ padding: "16px" }}>
+                      <CanvasEmptyState
+                        theme={emptyStateTheme}
+                        density="compact"
+                        title={t("dispatch.forwarded.reconciliation.empty")}
+                      />
                     </td>
                   </tr>
                 )}
