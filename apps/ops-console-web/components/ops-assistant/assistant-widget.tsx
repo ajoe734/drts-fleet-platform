@@ -13,13 +13,20 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
+import type { ActionIntent, ResourceActionDescriptor } from "@drts/contracts";
 import { buildCanvasTheme, CanvasIcon } from "@drts/ui-web";
-import { useOpsAssistantContext } from "./assistant-context-provider";
+import { getOpsClient } from "@/lib/api-client";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
+import {
+  useOpsAssistantActionBridge,
+  useOpsAssistantContext,
+} from "./assistant-context-provider";
 import {
   buildAssistantActions,
   resolveAssistantActionHref,
   type AssistantAction,
 } from "./assistant-actions";
+import type { AssistantActionReceipt } from "./context-envelope";
 
 type DockSide = "free" | "left" | "right";
 
@@ -43,6 +50,15 @@ type Rect = {
 type StreamState = {
   activeIndex: number;
   visibleChars: number;
+};
+
+type ConversationEntry = {
+  id: string;
+  author: "assistant" | "operator" | "system";
+  tone: "neutral" | "accent" | "success" | "danger";
+  message: string;
+  meta?: string;
+  auditHref?: string | null;
 };
 
 const STORAGE_KEY = "ops-console.assistant-widget.v1";
@@ -223,6 +239,7 @@ function ActionButton({
 export function OpsAssistantWidget() {
   const router = useRouter();
   const context = useOpsAssistantContext();
+  const actionBridge = useOpsAssistantActionBridge();
   const titleId = useId();
   const instructionsId = useId();
   const liveRegionId = useId();
@@ -242,9 +259,17 @@ export function OpsAssistantWidget() {
     activeIndex: 0,
     visibleChars: 0,
   });
+  const [conversation, setConversation] = useState<ConversationEntry[]>([]);
+  const [pendingIntent, setPendingIntent] = useState<ActionIntent | null>(null);
+  const [isProposing, setIsProposing] = useState(false);
+  const [isExecutingIntent, setIsExecutingIntent] = useState(false);
   const actions = useMemo(() => buildAssistantActions(context), [context]);
 
   const activeMessage = STREAM_MESSAGES[stream.activeIndex] ?? "";
+
+  const appendConversation = useEffectEvent((entry: ConversationEntry) => {
+    setConversation((current) => [...current.slice(-9), entry]);
+  });
 
   useEffect(() => {
     const node = document.createElement("div");
@@ -536,6 +561,141 @@ export function OpsAssistantWidget() {
     router.push(href);
   };
 
+  const describeIntent = (intent: ActionIntent) =>
+    `${intent.resourceKind}:${intent.resourceId} · ${intent.action}`;
+
+  const buildAlternatives = (descriptors: ResourceActionDescriptor[]) => {
+    const alternatives = descriptors
+      .filter((descriptor) => descriptor.enabled)
+      .map((descriptor) => descriptor.action)
+      .slice(0, 3);
+    return alternatives.length > 0
+      ? `Available: ${alternatives.join(", ")}`
+      : "No enabled alternatives.";
+  };
+
+  async function handleProposeAction(action: ResourceActionDescriptor) {
+    if (!actionBridge || isProposing) {
+      return;
+    }
+
+    setIsProposing(true);
+    try {
+      const intent = await getOpsClient().post<ActionIntent>(
+        "/api/assistant/tools/propose-action",
+        {
+          body: {
+            resourceKind: actionBridge.resourceKind,
+            resourceId: actionBridge.resourceId,
+            action: action.action,
+          },
+        },
+      );
+      setPendingIntent(intent);
+      appendConversation({
+        id: `${Date.now()}-${intent.action}`,
+        author: "assistant",
+        tone: "accent",
+        message: `Proposed ${intent.action} for ${intent.resourceKind} ${intent.resourceId}.`,
+        meta: describeIntent(intent),
+      });
+    } catch (error) {
+      appendConversation({
+        id: `${Date.now()}-propose-error`,
+        author: "system",
+        tone: "danger",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Assistant action proposal failed.",
+      });
+    } finally {
+      setIsProposing(false);
+    }
+  }
+
+  async function handleExecuteIntent() {
+    if (!actionBridge || !pendingIntent || isExecutingIntent) {
+      return;
+    }
+
+    const descriptor = actionBridge.resolveDescriptor(pendingIntent);
+    if (!descriptor) {
+      appendConversation({
+        id: `${Date.now()}-unavailable`,
+        author: "assistant",
+        tone: "danger",
+        message: `Unavailable action: ${pendingIntent.action}.`,
+        meta: buildAlternatives(actionBridge.availableActions),
+      });
+      setPendingIntent(null);
+      return;
+    }
+
+    if (!descriptor.enabled) {
+      appendConversation({
+        id: `${Date.now()}-disabled`,
+        author: "assistant",
+        tone: "danger",
+        message: `Action blocked: ${descriptor.action}.`,
+        meta: descriptor.disabledReasonCode
+          ? `${descriptor.disabledReasonCode} · ${buildAlternatives(actionBridge.availableActions)}`
+          : buildAlternatives(actionBridge.availableActions),
+      });
+      setPendingIntent(null);
+      return;
+    }
+
+    setIsExecutingIntent(true);
+    appendConversation({
+      id: `${Date.now()}-execute`,
+      author: "operator",
+      tone: "neutral",
+      message:
+        descriptor.riskLevel === "low"
+          ? `Executing ${descriptor.action}.`
+          : `Opening ${descriptor.riskLevel}-risk confirmation for ${descriptor.action}.`,
+      meta:
+        descriptor.requiresReason || descriptor.riskLevel === "high"
+          ? "Reason may be required by the existing page confirmation UI."
+          : undefined,
+    });
+
+    try {
+      const receipt = await actionBridge.invoke(pendingIntent, descriptor);
+      appendReceipt(receipt, descriptor.action);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Assistant action failed.";
+      appendConversation({
+        id: `${Date.now()}-execute-error`,
+        author: "system",
+        tone:
+          message === "ASSISTANT_ACTION_CANCELLED" ? "neutral" : "danger",
+        message:
+          message === "ASSISTANT_ACTION_CANCELLED"
+            ? "Action cancelled."
+            : message,
+      });
+    } finally {
+      setPendingIntent(null);
+      setIsExecutingIntent(false);
+    }
+  }
+
+  const appendReceipt = useEffectEvent(
+    (receipt: AssistantActionReceipt, action: string) => {
+      appendConversation({
+        id: `${Date.now()}-${receipt.actionId}`,
+        author: "assistant",
+        tone: "success",
+        message: receipt.message || `${action} completed.`,
+        meta: `actionId ${receipt.actionId} · auditId ${receipt.auditId}`,
+        auditHref: receipt.auditHref ?? `/audit?auditId=${encodeURIComponent(receipt.auditId)}`,
+      });
+    },
+  );
+
   if (!portalNode) {
     return null;
   }
@@ -756,6 +916,134 @@ export function OpsAssistantWidget() {
                 }}
               >
                 <div style={{ fontSize: 11, color: theme.textDim }}>
+                  Action bridge
+                </div>
+                {actionBridge ? (
+                  <>
+                    <div style={{ fontSize: 11.5, color: theme.textMuted }}>
+                      {`${actionBridge.resourceKind}:${actionBridge.resourceId}`}
+                    </div>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {actionBridge.availableActions.map((action) => (
+                        <button
+                          key={`assistant-action:${action.action}`}
+                          type="button"
+                          disabled={isProposing || isExecutingIntent}
+                          onClick={() => void handleProposeAction(action)}
+                          style={actionButtonStyle}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              gap: 12,
+                              alignItems: "center",
+                            }}
+                          >
+                            <span style={{ fontSize: 12.5, fontWeight: 700 }}>
+                              {action.action}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 10.5,
+                                color: theme.textDim,
+                              }}
+                            >
+                              {formatOpsCodeLabel(context?.locale ?? "en", action.riskLevel)}
+                            </span>
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: theme.textMuted,
+                              textAlign: "left",
+                              lineHeight: 1.45,
+                            }}
+                          >
+                            {action.enabled
+                              ? action.requiresReason
+                                ? "Existing confirmation flow requires a reason."
+                                : "Resolve via availableActions, then reuse the existing page action flow."
+                              : `Disabled: ${action.disabledReasonCode ?? "unavailable"}`}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    {pendingIntent ? (
+                      <div
+                        style={{
+                          borderRadius: 10,
+                          border: `1px solid ${theme.accentBorder}`,
+                          background: theme.accentBg,
+                          padding: 10,
+                          display: "grid",
+                          gap: 8,
+                        }}
+                      >
+                        <span style={{ fontSize: 12.5, color: theme.text }}>
+                          {`Pending intent · ${pendingIntent.action}`}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: theme.textMuted,
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          {describeIntent(pendingIntent)}
+                        </span>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            disabled={isExecutingIntent}
+                            onClick={() => void handleExecuteIntent()}
+                            style={primaryAssistButtonStyle}
+                          >
+                            {isExecutingIntent
+                              ? "Working..."
+                              : "Open confirmation"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isExecutingIntent}
+                            onClick={() => setPendingIntent(null)}
+                            style={secondaryAssistButtonStyle}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div
+                    style={{
+                      borderRadius: 10,
+                      border: `1px solid ${theme.border}`,
+                      padding: "10px 12px",
+                      background: theme.surfaceLo,
+                      fontSize: 12,
+                      color: theme.textMuted,
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    Focus a supported detail view to let the assistant resolve
+                    `ActionIntent` against that resource&apos;s available actions.
+                  </div>
+                )}
+              </div>
+
+              <div
+                style={{
+                  borderRadius: 12,
+                  border: `1px solid ${theme.border}`,
+                  background: theme.surface,
+                  padding: 12,
+                  display: "grid",
+                  gap: 8,
+                }}
+              >
+                <div style={{ fontSize: 11, color: theme.textDim }}>
                   Assistant actions
                 </div>
                 <div
@@ -814,6 +1102,56 @@ export function OpsAssistantWidget() {
                     >
                       Open a board or detail page to let the assistant emit
                       route-aware actions and deep links.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  borderRadius: 12,
+                  border: `1px solid ${theme.border}`,
+                  background: theme.surface,
+                  padding: 12,
+                  display: "grid",
+                  gap: 8,
+                }}
+              >
+                <div style={{ fontSize: 11, color: theme.textDim }}>
+                  Conversation
+                </div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {conversation.length > 0 ? (
+                    conversation.map((entry) => (
+                      <MessageBubble
+                        key={entry.id}
+                        tone={entry.tone}
+                        author={
+                          entry.author === "assistant"
+                            ? "Assistant"
+                            : entry.author === "operator"
+                              ? "Operator"
+                              : "System"
+                        }
+                        message={entry.message}
+                        meta={entry.meta}
+                        auditHref={entry.auditHref}
+                      />
+                    ))
+                  ) : (
+                    <div
+                      style={{
+                        borderRadius: 10,
+                        border: `1px solid ${theme.border}`,
+                        padding: "10px 12px",
+                        background: theme.surfaceLo,
+                        fontSize: 12,
+                        color: theme.textMuted,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      Proposed actions, disabled refusals, and action receipts
+                      will be written back here.
                     </div>
                   )}
                 </div>
@@ -944,21 +1282,50 @@ function MessageBubble({
   author,
   message,
   tone,
+  meta,
+  auditHref,
   liveRegionId,
 }: {
   author: string;
   message: string;
-  tone: "neutral" | "accent";
+  tone: "neutral" | "accent" | "success" | "danger";
+  meta?: string;
+  auditHref?: string | null;
   liveRegionId?: string;
 }) {
-  const isAccent = tone === "accent";
+  const bubbleTheme =
+    tone === "accent"
+      ? {
+          background: theme.accentBg,
+          border: theme.accentBorder,
+          text: theme.accentHi,
+        }
+      : tone === "success"
+        ? {
+            background: theme.successBg,
+            border: theme.successBorder,
+            text: theme.success,
+          }
+        : tone === "danger"
+          ? {
+              background: theme.dangerBg,
+              border: theme.dangerBorder,
+              text: theme.danger,
+            }
+          : {
+              background: theme.surfaceLo,
+              border: theme.border,
+              text: theme.textDim,
+            };
   return (
     <div
       style={{
         borderRadius: 12,
         padding: "10px 12px",
-        background: isAccent ? theme.accentBg : theme.surfaceLo,
-        border: `1px solid ${isAccent ? theme.accentBorder : theme.border}`,
+        background: bubbleTheme.background,
+        border: `1px solid ${bubbleTheme.border}`,
+        display: "grid",
+        gap: 4,
       }}
     >
       <div
@@ -967,7 +1334,7 @@ function MessageBubble({
           fontWeight: 700,
           textTransform: "uppercase",
           letterSpacing: 0.5,
-          color: isAccent ? theme.accentHi : theme.textDim,
+          color: bubbleTheme.text,
           marginBottom: 4,
         }}
       >
@@ -985,6 +1352,31 @@ function MessageBubble({
       >
         {message || " "}
       </div>
+      {meta ? (
+        <div
+          style={{
+            fontSize: 10.5,
+            color: theme.textMuted,
+            fontFamily: theme.monoFamily,
+          }}
+        >
+          {meta}
+        </div>
+      ) : null}
+      {auditHref ? (
+        <a
+          href={auditHref}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            color: theme.accentHi,
+            fontSize: 11,
+            textDecoration: "none",
+          }}
+        >
+          View audit
+        </a>
+      ) : null}
     </div>
   );
 }
@@ -1010,6 +1402,25 @@ const actionButtonStyle: CSSProperties = {
   gap: 6,
   textAlign: "left",
   cursor: "pointer",
+};
+
+const primaryAssistButtonStyle: CSSProperties = {
+  height: 30,
+  padding: "0 12px",
+  borderRadius: 8,
+  border: `1px solid ${theme.accentBorder}`,
+  background: theme.accentBg,
+  color: theme.text,
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const secondaryAssistButtonStyle: CSSProperties = {
+  ...primaryAssistButtonStyle,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+  fontWeight: 600,
 };
 
 const contextValueStyle: CSSProperties = {

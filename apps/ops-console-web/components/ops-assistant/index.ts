@@ -7,6 +7,8 @@
  */
 
 export type {
+  AssistantActionBridge,
+  AssistantActionReceipt,
   AssistantEntityKind,
   AssistantScope,
   AssistantSelection,
@@ -17,7 +19,9 @@ export type {
 export {
   OpsAssistantContextProvider,
   useOpsAssistantContext,
+  useOpsAssistantActionBridge,
   useOpsAssistantContextActions,
+  useAssistantActionBridgeRegistration,
   useAssistantSelection,
   type OpsAssistantContextActions,
   type OpsAssistantContextProviderProps,

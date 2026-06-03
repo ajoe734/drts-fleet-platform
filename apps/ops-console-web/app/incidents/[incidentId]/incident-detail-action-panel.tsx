@@ -1,8 +1,10 @@
 "use client";
 
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type {
+  ActionIntent,
+  ActionReceipt,
   IncidentCategory,
   IncidentEscalationTarget,
   IncidentSeverity,
@@ -17,6 +19,7 @@ import {
   INCIDENT_SEVERITIES,
   INCIDENT_STATUSES,
 } from "@drts/contracts";
+import { useAssistantActionBridgeRegistration } from "@/components/ops-assistant";
 import { getOpsClient } from "@/lib/api-client";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { t, type Locale } from "@/lib/translations";
@@ -165,6 +168,20 @@ function withOptionalString<T extends object>(
   return trimmed ? apply(trimmed) : {};
 }
 
+function parseAuditIdFromHref(auditHref: string | null) {
+  if (!auditHref) {
+    return null;
+  }
+
+  try {
+    const url = new URL(auditHref, "https://ops-console.local");
+    const auditId = url.searchParams.get("auditId");
+    return auditId && auditId.trim().length > 0 ? auditId : null;
+  } catch {
+    return null;
+  }
+}
+
 export function IncidentDetailActionPanel({
   incidentId,
   locale,
@@ -200,6 +217,11 @@ export function IncidentDetailActionPanel({
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptState | null>(null);
+  const assistantBridgePromiseRef = useRef<{
+    resolve: (receipt: ActionReceipt & { auditHref?: string | null }) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
+  const searchParamsKey = searchParams.toString();
   const currentIntent =
     normalizeIntent(searchParams.get("intent")) ?? initialIntent;
 
@@ -231,6 +253,42 @@ export function IncidentDetailActionPanel({
     initialStatus,
     currentIntent,
   ]);
+
+  const assistantActionBridge = useMemo(
+    () => ({
+      resourceKind: "incident" as const,
+      resourceId: incidentId,
+      availableActions,
+      resolveDescriptor: (intent: ActionIntent) =>
+        availableActions.find((action) => {
+          const normalizedIntent = normalizeIntent(intent.action);
+          return (
+            action.action.toLowerCase() === intent.action.toLowerCase() ||
+            actionIntent(action.action) === normalizedIntent
+          );
+        }) ?? null,
+      invoke: async (
+        _intent: ActionIntent,
+        descriptor: ResourceActionDescriptor,
+      ) => {
+        const nextIntent = actionIntent(descriptor.action);
+        setError(null);
+        return new Promise<ActionReceipt & { auditHref?: string | null }>(
+          (resolve, reject) => {
+            assistantBridgePromiseRef.current = { resolve, reject };
+            const nextParams = new URLSearchParams(searchParamsKey);
+            nextParams.set("intent", nextIntent);
+            router.replace(
+              `/incidents/${encodeURIComponent(incidentId)}?${nextParams.toString()}`,
+            );
+          },
+        );
+      },
+    }),
+    [availableActions, incidentId, router, searchParamsKey],
+  );
+
+  useAssistantActionBridgeRegistration(assistantActionBridge);
 
   if (!currentIntent && !receipt) {
     return null;
@@ -389,11 +447,32 @@ export function IncidentDetailActionPanel({
           auditHref: latestAuditHref,
         },
       );
+      assistantBridgePromiseRef.current?.resolve({
+        actionId:
+          nextReceipt?.actionId ??
+          `incident-${incidentId}-${selectedAction.action}-${Date.now()}`,
+        auditId:
+          nextReceipt?.auditId ??
+          parseAuditIdFromHref(nextReceipt?.auditHref ?? latestAuditHref) ??
+          `audit-pending-${incidentId}`,
+        resourceType: "incident",
+        resourceId: incidentId,
+        status: "completed",
+        message: receiptBody,
+        auditHref: nextReceipt?.auditHref ?? latestAuditHref,
+      });
+      assistantBridgePromiseRef.current = null;
       startTransition(() => {
         router.replace(basePath);
         router.refresh();
       });
     } catch (submitError) {
+      assistantBridgePromiseRef.current?.reject(
+        submitError instanceof Error
+          ? submitError
+          : new Error("Unknown incident action failure."),
+      );
+      assistantBridgePromiseRef.current = null;
       setError(
         submitError instanceof Error
           ? submitError.message
@@ -727,6 +806,10 @@ export function IncidentDetailActionPanel({
               icon="arrow"
               onClick={() => {
                 setReceipt(null);
+                assistantBridgePromiseRef.current?.reject(
+                  new Error("ASSISTANT_ACTION_CANCELLED"),
+                );
+                assistantBridgePromiseRef.current = null;
                 router.replace(basePath);
               }}
             >

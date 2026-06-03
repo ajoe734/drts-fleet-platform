@@ -19,6 +19,7 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -27,6 +28,7 @@ import { usePathname } from "next/navigation";
 import type { UiHealthEnvelope } from "@drts/contracts";
 import { useTranslation } from "@/lib/i18n";
 import type {
+  AssistantActionBridge,
   AssistantScope,
   AssistantSelection,
   OpsAssistantContext,
@@ -43,6 +45,11 @@ export interface OpsAssistantContextActions {
   setAssistantHealth: (health: UiHealthEnvelope) => void;
 }
 
+interface AssistantActionBridgeActions {
+  setAssistantActionBridge: (bridge: AssistantActionBridge | null) => void;
+  clearAssistantActionBridge: () => void;
+}
+
 const NOOP_ACTIONS: OpsAssistantContextActions = {
   setAssistantSelection: () => {},
   clearAssistantSelection: () => {},
@@ -51,8 +58,17 @@ const NOOP_ACTIONS: OpsAssistantContextActions = {
   setAssistantHealth: () => {},
 };
 
+const NOOP_BRIDGE_ACTIONS: AssistantActionBridgeActions = {
+  setAssistantActionBridge: () => {},
+  clearAssistantActionBridge: () => {},
+};
+
 const ActionsContext = createContext<OpsAssistantContextActions>(NOOP_ACTIONS);
 const EnvelopeContext = createContext<OpsAssistantContext | null>(null);
+const AssistantActionBridgeContext =
+  createContext<AssistantActionBridge | null>(null);
+const AssistantActionBridgeActionsContext =
+  createContext<AssistantActionBridgeActions>(NOOP_BRIDGE_ACTIONS);
 
 export interface OpsAssistantContextProviderProps {
   /** Operator identity + environment, resolved on the server once per session. */
@@ -73,6 +89,9 @@ export function OpsAssistantContextProvider({
   const [selection, setSelection] = useState<AssistantSelection | null>(null);
   const [scope, setScope] = useState<AssistantScope>({});
   const [health, setHealth] = useState<UiHealthEnvelope>(initialHealth);
+  const [actionBridge, setActionBridge] = useState<AssistantActionBridge | null>(
+    null,
+  );
 
   const actions = useMemo<OpsAssistantContextActions>(
     () => ({
@@ -101,9 +120,18 @@ export function OpsAssistantContextProvider({
 
   return (
     <ActionsContext.Provider value={actions}>
-      <EnvelopeContext.Provider value={envelope}>
-        {children}
-      </EnvelopeContext.Provider>
+      <AssistantActionBridgeActionsContext.Provider
+        value={{
+          setAssistantActionBridge: (bridge) => setActionBridge(bridge),
+          clearAssistantActionBridge: () => setActionBridge(null),
+        }}
+      >
+        <AssistantActionBridgeContext.Provider value={actionBridge}>
+          <EnvelopeContext.Provider value={envelope}>
+            {children}
+          </EnvelopeContext.Provider>
+        </AssistantActionBridgeContext.Provider>
+      </AssistantActionBridgeActionsContext.Provider>
     </ActionsContext.Provider>
   );
 }
@@ -122,6 +150,23 @@ export function useOpsAssistantContext(): OpsAssistantContext | null {
  */
 export function useOpsAssistantContextActions(): OpsAssistantContextActions {
   return useContext(ActionsContext);
+}
+
+export function useOpsAssistantActionBridge(): AssistantActionBridge | null {
+  return useContext(AssistantActionBridgeContext);
+}
+
+export function useAssistantActionBridgeRegistration(
+  bridge: AssistantActionBridge | null,
+) {
+  const { setAssistantActionBridge, clearAssistantActionBridge } = useContext(
+    AssistantActionBridgeActionsContext,
+  );
+
+  useEffect(() => {
+    setAssistantActionBridge(bridge);
+    return () => clearAssistantActionBridge();
+  }, [bridge, setAssistantActionBridge, clearAssistantActionBridge]);
 }
 
 /**
