@@ -209,6 +209,11 @@ export function PlatformAssistantOverlay() {
       return;
     }
 
+    const target = event.target;
+    if (target instanceof Element && target.closest("button")) {
+      return;
+    }
+
     dragRef.current = {
       pointerId: event.pointerId,
       startPointerX: event.clientX,
@@ -217,8 +222,8 @@ export function PlatformAssistantOverlay() {
       startY: position.y,
     };
 
-    const target = event.currentTarget;
-    target.setPointerCapture(event.pointerId);
+    const dragTarget = event.currentTarget;
+    dragTarget.setPointerCapture(event.pointerId);
   }
 
   function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -252,6 +257,7 @@ export function PlatformAssistantOverlay() {
           type="button"
           onClick={() => setIsOpen(true)}
           aria-label={copy.launcher}
+          data-testid="platform-assistant-launcher"
           style={launcherStyle}
         >
           <div style={launcherIconWrapStyle}>
@@ -266,6 +272,7 @@ export function PlatformAssistantOverlay() {
       {isOpen ? (
         <section
           aria-labelledby={titleId}
+          data-testid="platform-assistant-panel"
           style={{ ...panelBaseStyle, ...panelStyle }}
         >
           <div
@@ -273,6 +280,7 @@ export function PlatformAssistantOverlay() {
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerEnd}
             onPointerCancel={handlePointerEnd}
+            data-testid="platform-assistant-drag-handle"
             style={{
               ...panelHeaderStyle,
               cursor: isMobile ? "default" : "grab",
