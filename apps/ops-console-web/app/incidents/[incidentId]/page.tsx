@@ -8,6 +8,7 @@ import type {
   DriverRegistryRecord,
   EmptyReason,
   IncidentRecord,
+  IncidentTimelineEntry,
   OwnedOrderRecord,
   RefreshTier,
   ResourceActionDescriptor,
@@ -81,14 +82,6 @@ type RuntimeSectionLoadResult<T> = {
   error: Error | null;
   refresh: UiRefreshMetadata | null;
   emptyState: RuntimeEmptyState | null;
-};
-
-type IncidentEventRecord = {
-  entryId: string;
-  action: string;
-  note?: string | null;
-  createdAt: string;
-  actor: string;
 };
 
 const theme = buildCanvasTheme({
@@ -700,6 +693,27 @@ function actionTarget(
   );
 }
 
+function renderDescriptorAction(
+  incident: IncidentRuntimeRecord,
+  action: ResourceActionDescriptor | null | undefined,
+  locale: Locale,
+) {
+  if (!action) {
+    return undefined;
+  }
+
+  return (
+    <CanvasActionButton
+      href={actionTarget(incident, action)}
+      action={action}
+      locale={locale}
+      icon={getActionIcon(action.action)}
+    >
+      {getActionCopy(action.action, locale)}
+    </CanvasActionButton>
+  );
+}
+
 function EmptyStateBlock({
   reason,
   locale,
@@ -843,7 +857,7 @@ export default async function IncidentDetailPage({
     resolveRuntimeSection(
       () =>
         client.getIncidentTimeline(incidentId) as Promise<
-          RuntimeListEnvelope<IncidentEventRecord>
+          RuntimeListEnvelope<IncidentTimelineEntry>
         >,
     ),
     resolveRuntimeSection(() => client.getServiceRecoveryActions(incidentId)),
@@ -1398,15 +1412,10 @@ export default async function IncidentDetailPage({
                     : {})}
                   {...(timelineEmptyAction
                     ? {
-                        nextAction: (
-                          <CanvasActionButton
-                            href={actionTarget(incident, timelineEmptyAction)}
-                            action={timelineEmptyAction}
-                            locale={locale}
-                            icon={getActionIcon(timelineEmptyAction.action)}
-                          >
-                            {getActionCopy(timelineEmptyAction.action, locale)}
-                          </CanvasActionButton>
+                        nextAction: renderDescriptorAction(
+                          incident,
+                          timelineEmptyAction,
+                          locale,
                         ),
                       }
                     : {})}
@@ -1461,15 +1470,10 @@ export default async function IncidentDetailPage({
                   {...(() => {
                     if (recoveryEmptyAction) {
                       return {
-                        nextAction: (
-                          <CanvasActionButton
-                            href={actionTarget(incident, recoveryEmptyAction)}
-                            action={recoveryEmptyAction}
-                            locale={locale}
-                            icon={getActionIcon(recoveryEmptyAction.action)}
-                          >
-                            {getActionCopy(recoveryEmptyAction.action, locale)}
-                          </CanvasActionButton>
+                        nextAction: renderDescriptorAction(
+                          incident,
+                          recoveryEmptyAction,
+                          locale,
                         ),
                       };
                     }
