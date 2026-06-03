@@ -29,9 +29,9 @@ import {
   CanvasIcon,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasStepper as Stepper,
+  CanvasStepper as CanvasRail,
   CanvasTable as Table,
-  CanvasTimeline as Timeline,
+  CanvasTimeline as CanvasFeed,
   buildCanvasTheme,
   type CanvasTableColumn,
   type CanvasTone,
@@ -977,7 +977,7 @@ function renderStateRail(
   timestampByStep: (string | null)[],
 ) {
   return (
-    <Stepper
+    <CanvasRail
       theme={theme}
       items={WORKFLOW_STEPS.map((step, index) => ({
         key: step,
@@ -1001,7 +1001,7 @@ function renderStateRail(
 
 function renderActivityFeed(locale: Locale, entries: ActivityEntry[]) {
   return (
-    <Timeline
+    <CanvasFeed
       theme={theme}
       empty={
         locale === "zh"
