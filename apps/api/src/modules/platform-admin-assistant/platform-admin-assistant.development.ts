@@ -2,7 +2,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { randomUUID } from "node:crypto";
+import { HttpStatus } from "@nestjs/common";
 
+import { ApiRequestError } from "../../common/api-envelope";
 import type {
   PlatformAdminAssistantCitation,
   PlatformAdminAssistantDevelopmentArtifactCommand,
@@ -13,6 +15,8 @@ import type {
 
 const DEFAULT_PLANNING_REF =
   "docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md";
+const TASK_BRIEF_DIRECTORY = ".orchestrator/task-briefs";
+const TASK_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 export async function createPlatformAdminAssistantDevelopmentArtifacts(input: {
   actorId: string;
@@ -43,12 +47,9 @@ export async function createPlatformAdminAssistantDevelopmentArtifacts(input: {
       title: `${command.requestTitle} system design`,
       path: sdPath,
     },
-    ...command.tasks.map((task) => ({
-      kind: "task_brief" as const,
-      title: task.title,
-      path: `.orchestrator/task-briefs/${task.taskId}.md`,
-      taskId: task.taskId,
-    })),
+    ...command.tasks.map((task) =>
+      buildTaskBriefArtifactFile(task.taskId, task.title),
+    ),
   ];
 
   await writeArtifact(
@@ -63,10 +64,12 @@ export async function createPlatformAdminAssistantDevelopmentArtifacts(input: {
   );
 
   for (const task of command.tasks) {
+    const taskBriefPath = buildTaskBriefRelativePath(task.taskId);
     await writeArtifact(
       repositoryRoot,
-      `.orchestrator/task-briefs/${task.taskId}.md`,
+      taskBriefPath,
       buildTaskBriefMarkdown(task, command, createdAt),
+      TASK_BRIEF_DIRECTORY,
     );
   }
 
@@ -94,8 +97,13 @@ async function writeArtifact(
   repositoryRoot: string,
   relativePath: string,
   content: string,
+  approvedDirectory?: string,
 ) {
-  const targetPath = path.join(repositoryRoot, relativePath);
+  const targetPath = resolveArtifactTarget(
+    repositoryRoot,
+    relativePath,
+    approvedDirectory,
+  );
   await mkdir(path.dirname(targetPath), { recursive: true });
   await writeFile(targetPath, content, "utf8");
 }
@@ -103,10 +111,7 @@ async function writeArtifact(
 function normalizeCommand(
   command: PlatformAdminAssistantDevelopmentArtifactCommand,
 ): Required<
-  Omit<
-    PlatformAdminAssistantDevelopmentArtifactCommand,
-    "citations" | "tasks"
-  >
+  Omit<PlatformAdminAssistantDevelopmentArtifactCommand, "citations" | "tasks">
 > & {
   citations: PlatformAdminAssistantCitation[];
   tasks: PlatformAdminAssistantDevelopmentTaskCommand[];
@@ -139,13 +144,16 @@ function normalizeCommand(
 function normalizeTask(
   task: PlatformAdminAssistantDevelopmentTaskCommand,
 ): PlatformAdminAssistantDevelopmentTaskCommand {
+  const taskId = requireTaskField(task?.taskId, "taskId");
+  validateTaskId(taskId);
+
   return {
-    taskId: task.taskId.trim(),
-    title: task.title.trim(),
-    summary: task.summary.trim(),
+    taskId,
+    title: requireTaskField(task?.title, "title"),
+    summary: requireTaskField(task?.summary, "summary"),
     ...(task.summaryZh?.trim() ? { summaryZh: task.summaryZh.trim() } : {}),
-    owner: task.owner.trim(),
-    reviewer: task.reviewer.trim(),
+    owner: requireTaskField(task?.owner, "owner"),
+    reviewer: requireTaskField(task?.reviewer, "reviewer"),
     dependsOn: normalizeList(task.dependsOn),
     artifacts: normalizeList(task.artifacts),
     acceptance: normalizeList(task.acceptance),
@@ -166,6 +174,80 @@ function normalizeSlug(value: string) {
     .replace(/^-+|-+$/g, "");
 
   return slug || "platform-admin-assistant";
+}
+
+function requireTaskField(value: string | undefined, field: string) {
+  if (!value?.trim()) {
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "ASSISTANT_DEV_TASK_FIELD_REQUIRED",
+      `Development artifact task requires a non-empty ${field}.`,
+      { field },
+    );
+  }
+
+  return value.trim();
+}
+
+function validateTaskId(taskId: string) {
+  if (
+    !TASK_ID_PATTERN.test(taskId) ||
+    taskId.includes("..") ||
+    taskId.includes("/") ||
+    taskId.includes("\\")
+  ) {
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "ASSISTANT_DEV_TASK_ID_INVALID",
+      "Development artifact taskId must use only letters, numbers, dot, underscore, or hyphen and must not contain path traversal segments.",
+      { taskId },
+    );
+  }
+}
+
+function buildTaskBriefArtifactFile(
+  taskId: string,
+  title: string,
+): PlatformAdminAssistantDevelopmentArtifactFile {
+  return {
+    kind: "task_brief",
+    title,
+    path: buildTaskBriefRelativePath(taskId),
+    taskId,
+  };
+}
+
+function buildTaskBriefRelativePath(taskId: string) {
+  return `${TASK_BRIEF_DIRECTORY}/${taskId}.md`;
+}
+
+function resolveArtifactTarget(
+  repositoryRoot: string,
+  relativePath: string,
+  approvedDirectory?: string,
+) {
+  const targetPath = path.resolve(repositoryRoot, relativePath);
+
+  if (!approvedDirectory) {
+    return targetPath;
+  }
+
+  const approvedRoot = path.resolve(repositoryRoot, approvedDirectory);
+  const relativeToApprovedRoot = path.relative(approvedRoot, targetPath);
+
+  if (
+    relativeToApprovedRoot.startsWith("..") ||
+    path.isAbsolute(relativeToApprovedRoot)
+  ) {
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "ASSISTANT_DEV_TASK_ID_INVALID",
+      "Development artifact taskId resolved outside the approved task brief directory.",
+      { relativePath, approvedDirectory },
+    );
+  }
+
+  return targetPath;
 }
 
 function buildSystemAnalysisMarkdown(
@@ -194,52 +276,52 @@ ${command.requestedChange}
 ## Current System Context
 
 ${renderBulletList(
-    command.currentContext,
-    "No additional runtime context was supplied with this request.",
-  )}
+  command.currentContext,
+  "No additional runtime context was supplied with this request.",
+)}
 
 ## Affected Artifacts
 
 ${renderBulletList(
-    command.affectedArtifacts,
-    "Artifact scope still needs confirmation from the requesting operator.",
-  )}
+  command.affectedArtifacts,
+  "Artifact scope still needs confirmation from the requesting operator.",
+)}
 
 ## Dependencies
 
 ${renderBulletList(
-    command.dependencies,
-    "No upstream dependencies were declared in the request bundle.",
-  )}
+  command.dependencies,
+  "No upstream dependencies were declared in the request bundle.",
+)}
 
 ## Acceptance
 
 ${renderBulletList(
-    command.acceptance,
-    "Archive SA, SD, and task briefs under controlled repository paths.",
-  )}
+  command.acceptance,
+  "Archive SA, SD, and task briefs under controlled repository paths.",
+)}
 
 ## Guardrails
 
 ${renderBulletList(
-    command.guardrails,
-    "Use approved scripts for status/progress changes and keep orchestrator writes behind the control plane.",
-  )}
+  command.guardrails,
+  "Use approved scripts for status/progress changes and keep orchestrator writes behind the control plane.",
+)}
 
 ## Proposed Task Slicing
 
 ${command.tasks
-    .map(
-      (task) =>
-        `### ${task.taskId} · ${task.title}
+  .map(
+    (task) =>
+      `### ${task.taskId} · ${task.title}
 
 - Owner: ${task.owner}
 - Reviewer: ${task.reviewer}
 - Summary: ${task.summary}
 - Dependencies: ${task.dependsOn && task.dependsOn.length > 0 ? task.dependsOn.join(", ") : "none"}
 `,
-    )
-    .join("\n")}
+  )
+  .join("\n")}
 
 ## Sources
 
@@ -278,13 +360,13 @@ Convert the request into repository-archived SA/SD/task brief artifacts without 
 ## Artifact Archive Targets
 
 ${renderBulletList(
-    [
-      "docs/02-architecture/ for generated system analysis",
-      "docs/05-ui/ for generated system design",
-      ".orchestrator/task-briefs/ for supervisor-ready task briefs",
-    ],
-    "",
-  )}
+  [
+    "docs/02-architecture/ for generated system analysis",
+    "docs/05-ui/ for generated system design",
+    ".orchestrator/task-briefs/ for supervisor-ready task briefs",
+  ],
+  "",
+)}
 
 ## Validation Rules
 
@@ -296,20 +378,20 @@ ${renderBulletList(
 ## Testing Strategy
 
 ${renderBulletList(
-    [
-      "Unit-test service generation and session ownership behavior.",
-      "Unit-test controller envelope shape for the new development endpoints.",
-      "Unit-test artifact writer output paths and task brief markdown content.",
-    ],
-    "",
-  )}
+  [
+    "Unit-test service generation and session ownership behavior.",
+    "Unit-test controller envelope shape for the new development endpoints.",
+    "Unit-test artifact writer output paths and task brief markdown content.",
+  ],
+  "",
+)}
 
 ## Rollout Notes
 
 ${renderBulletList(
-    command.guardrails,
-    "Keep this path behind the existing Platform Admin assistant feature flag until the UI integrates it.",
-  )}
+  command.guardrails,
+  "Keep this path behind the existing Platform Admin assistant feature flag until the UI integrates it.",
+)}
 
 ## Sources
 
@@ -342,41 +424,41 @@ ${task.summary}
 
 ## Dependencies
 
-${renderBulletList(task.dependsOn, "- none")}
+${renderBulletList(task.dependsOn ?? [], "- none")}
 
 ## Acceptance
 
 ${renderBulletList(
-    task.acceptance && task.acceptance.length > 0
-      ? task.acceptance
-      : command.acceptance,
-    "See task brief acceptance checklist",
-  )}
+  task.acceptance && task.acceptance.length > 0
+    ? task.acceptance
+    : command.acceptance,
+  "See task brief acceptance checklist",
+)}
 
 ## Artifacts
 
 ${renderBulletList(
-    task.artifacts && task.artifacts.length > 0
-      ? task.artifacts
-      : command.affectedArtifacts,
-    "Artifact scope pending clarification",
-  )}
+  task.artifacts && task.artifacts.length > 0
+    ? task.artifacts
+    : command.affectedArtifacts,
+  "Artifact scope pending clarification",
+)}
 
 ## Guardrails
 
 ${renderBulletList(
-    task.guardrails && task.guardrails.length > 0
-      ? task.guardrails
-      : command.guardrails,
-    "Use approved status scripts and preserve orchestrator machine truth.",
-  )}
+  task.guardrails && task.guardrails.length > 0
+    ? task.guardrails
+    : command.guardrails,
+  "Use approved status scripts and preserve orchestrator machine truth.",
+)}
 
 ## Verification
 
 ${renderBulletList(
-    task.verification,
-    "Verification commands still need to be supplied by the implementing owner.",
-  )}
+  task.verification ?? [],
+  "Verification commands still need to be supplied by the implementing owner.",
+)}
 `;
 }
 

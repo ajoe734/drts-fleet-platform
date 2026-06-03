@@ -541,4 +541,89 @@ describe("PlatformAdminAssistantService", () => {
       }),
     );
   });
+
+  it("rejects development artifact generation when a task id attempts path traversal", async () => {
+    const tempRoot = await mkdtemp(
+      path.join(tmpdir(), "pa-assistant-dev-artifacts-"),
+    );
+    const previousRoot = process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT;
+    process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT = tempRoot;
+
+    try {
+      const auditNotificationService = new AuditNotificationService();
+      const service = new PlatformAdminAssistantService(
+        new MockPlatformAdminAssistantProvider(),
+        new PlatformAdminService(auditNotificationService),
+        auditNotificationService,
+      );
+      const identity = platformIdentity();
+      const session = service.createSession(identity, {});
+
+      await expect(
+        service.generateDevelopmentArtifacts(session.sessionId, identity, {
+          requestTitle: "Traversal attempt",
+          requestedChange: "Try to escape task brief directory.",
+          tasks: [
+            {
+              taskId: "../../.github/workflows/deploy",
+              title: "Escape repo root",
+              summary: "Attempt traversal via taskId.",
+              owner: "Codex",
+              reviewer: "Claude",
+            },
+          ],
+        }),
+      ).rejects.toThrow(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "ASSISTANT_DEV_TASK_ID_INVALID",
+            }),
+          }),
+        }),
+      );
+    } finally {
+      if (previousRoot === undefined) {
+        delete process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT;
+      } else {
+        process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT = previousRoot;
+      }
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects development artifact generation when a task field is missing", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new PlatformAdminAssistantService(
+      new MockPlatformAdminAssistantProvider(),
+      new PlatformAdminService(auditNotificationService),
+      auditNotificationService,
+    );
+    const identity = platformIdentity();
+    const session = service.createSession(identity, {});
+
+    await expect(
+      service.generateDevelopmentArtifacts(session.sessionId, identity, {
+        requestTitle: "Missing task field",
+        requestedChange: "Submit a task without an owner.",
+        tasks: [
+          {
+            taskId: "PA-AI-DEV-102",
+            title: "Incomplete task",
+            summary: "This task omits owner.",
+            owner: "   ",
+            reviewer: "Claude",
+          },
+        ],
+      }),
+    ).rejects.toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_DEV_TASK_FIELD_REQUIRED",
+          }),
+        }),
+      }),
+    );
+  });
 });
