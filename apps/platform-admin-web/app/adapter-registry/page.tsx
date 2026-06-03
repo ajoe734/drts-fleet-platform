@@ -38,9 +38,43 @@ const authorityCopyStyle = {
   lineHeight: 1.45,
 } satisfies CSSProperties;
 
+const authoritySummaryCardStyle = {
+  display: "grid",
+  gap: 12,
+  padding: 14,
+  borderRadius: 12,
+  border: `1px solid ${theme.border}`,
+  background: theme.surface,
+} satisfies CSSProperties;
+
+const authoritySummaryGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+} satisfies CSSProperties;
+
+const authoritySummaryBlockStyle = {
+  display: "grid",
+  gap: 8,
+} satisfies CSSProperties;
+
+const authoritySummaryLabelStyle = {
+  color: theme.text,
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+} satisfies CSSProperties;
+
+const authoritySummaryBodyStyle = {
+  color: theme.textDim,
+  fontSize: 12,
+  lineHeight: 1.5,
+} satisfies CSSProperties;
+
 const actionSectionStyle = {
   display: "grid",
-  gap: 10,
+  gap: 12,
   marginTop: 12,
 } satisfies CSSProperties;
 
@@ -49,6 +83,11 @@ const actionLaneStyle = {
   gap: 8,
   paddingTop: 12,
   borderTop: `1px solid ${theme.border}`,
+} satisfies CSSProperties;
+
+const actionLaneRowsStyle = {
+  display: "grid",
+  gap: 10,
 } satisfies CSSProperties;
 
 const actionLaneHeaderStyle = {
@@ -76,6 +115,13 @@ const laneSummaryStyle = {
   color: theme.textDim,
   fontSize: 11.5,
   lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const monoCaptionStyle = {
+  color: theme.textMuted,
+  fontFamily: theme.monoFamily,
+  fontSize: 11,
+  lineHeight: 1.4,
 } satisfies CSSProperties;
 
 const noop = () => {};
@@ -118,10 +164,10 @@ const adapters: AdapterRecord[] = [
       "Platform Admin owns credential writes, rotation, and hard disable.",
     opsSummary: "Ops can issue a temporary pause while traffic keeps flowing.",
     actions: [
-      { label: "Edit credential", scope: "platform", icon: "apiKeys" },
-      { label: "Rotate", scope: "platform", icon: "arrow" },
-      { label: "Disable", scope: "platform", danger: true },
-      { label: "Ops pause (TTL)", scope: "ops" },
+      { label: "編輯 credential", scope: "platform", icon: "apiKeys" },
+      { label: "輪替", scope: "platform", icon: "arrow" },
+      { label: "停用", scope: "platform", danger: true },
+      { label: "ops pause (TTL)", scope: "ops" },
     ],
   },
   {
@@ -137,11 +183,11 @@ const adapters: AdapterRecord[] = [
     opsSummary:
       "Ops owns temporary pause and retry handling while backlog drains.",
     actions: [
-      { label: "Edit credential", scope: "platform", icon: "apiKeys" },
-      { label: "Rotate", scope: "platform", icon: "arrow" },
-      { label: "Disable", scope: "platform", danger: true },
-      { label: "Ops pause (TTL)", scope: "ops" },
-      { label: "Retry backlog", scope: "ops" },
+      { label: "編輯 credential", scope: "platform", icon: "apiKeys" },
+      { label: "輪替", scope: "platform", icon: "arrow" },
+      { label: "停用", scope: "platform", danger: true },
+      { label: "ops pause (TTL)", scope: "ops" },
+      { label: "retry backlog", scope: "ops" },
     ],
   },
   {
@@ -156,10 +202,10 @@ const adapters: AdapterRecord[] = [
       "Platform Admin governs client secret rotation and redirect policy.",
     opsSummary: "Ops receives incident handoff only; no auth writes here.",
     actions: [
-      { label: "Edit credential", scope: "platform", icon: "apiKeys" },
-      { label: "Rotate", scope: "platform", icon: "arrow" },
-      { label: "Disable", scope: "platform", danger: true },
-      { label: "View handoff", scope: "ops" },
+      { label: "編輯 credential", scope: "platform", icon: "apiKeys" },
+      { label: "輪替", scope: "platform", icon: "arrow" },
+      { label: "停用", scope: "platform", danger: true },
+      { label: "view handoff", scope: "ops" },
     ],
   },
   {
@@ -174,10 +220,10 @@ const adapters: AdapterRecord[] = [
       "Platform Admin owns callback allowlist and approved secret rotation.",
     opsSummary: "Ops can inspect incident handoff context only.",
     actions: [
-      { label: "Edit credential", scope: "platform", icon: "apiKeys" },
-      { label: "Rotate", scope: "platform", icon: "arrow" },
-      { label: "Disable", scope: "platform", danger: true },
-      { label: "View handoff", scope: "ops" },
+      { label: "編輯 credential", scope: "platform", icon: "apiKeys" },
+      { label: "輪替", scope: "platform", icon: "arrow" },
+      { label: "停用", scope: "platform", danger: true },
+      { label: "view handoff", scope: "ops" },
     ],
   },
   {
@@ -193,10 +239,10 @@ const adapters: AdapterRecord[] = [
     opsSummary:
       "Ops observes reconciliation impact only; no pause or retry from this route.",
     actions: [
-      { label: "Edit credential", scope: "platform", icon: "apiKeys" },
-      { label: "Rotate", scope: "platform", icon: "arrow" },
-      { label: "Disable", scope: "platform", danger: true },
-      { label: "Observe only", scope: "ops", disabled: true },
+      { label: "編輯 credential", scope: "platform", icon: "apiKeys" },
+      { label: "輪替", scope: "platform", icon: "arrow" },
+      { label: "停用", scope: "platform", danger: true },
+      { label: "observe only", scope: "ops", disabled: true },
     ],
   },
   {
@@ -212,10 +258,10 @@ const adapters: AdapterRecord[] = [
     opsSummary:
       "Ops tracks missed completion reports but cannot renew this token here.",
     actions: [
-      { label: "Edit credential", scope: "platform", icon: "apiKeys" },
-      { label: "Rotate", scope: "platform", icon: "arrow" },
-      { label: "Disable", scope: "platform", danger: true },
-      { label: "View handoff", scope: "ops" },
+      { label: "編輯 credential", scope: "platform", icon: "apiKeys" },
+      { label: "輪替", scope: "platform", icon: "arrow" },
+      { label: "停用", scope: "platform", danger: true },
+      { label: "view handoff", scope: "ops" },
     ],
   },
 ];
@@ -262,9 +308,14 @@ export default function AdapterRegistryPage() {
             "Config and credential governance stays in Platform Admin; operational pause and retry stay in Ops per Q-ADM17 split authority.",
           createAction: "Register adapter",
           rotateAction: "Rotate now",
-          dangerTitle: "mof-bgmt token expires in 6 days",
+          dangerTitle: "mof-bgmt · token expires in 6 days",
           dangerBody:
-            "The BGMT dispatch reporting token must rotate before May 31, 2026 or completion reports for today cannot reach the upstream endpoint.",
+            "The BGMT dispatch reporting token must rotate before May 31, 2026 or today's completion reports cannot reach the upstream endpoint.",
+          authorityTitle: "Q-ADM17 split authority",
+          authorityPlatform:
+            "Platform Admin keeps credential writes, rotation, and hard disable.",
+          authorityOps:
+            "Ops receives pause and retry controls only for runtime traffic handling.",
           platformAuthority: "Platform Admin",
           opsAuthority: "Ops Console",
           platformScope: "Write authority",
@@ -282,12 +333,17 @@ export default function AdapterRegistryPage() {
       : {
           title: "External Platform Adapter Registry",
           subtitle:
-            "config / credential 治理留在 Platform Admin；operational pause / retry 依 Q-ADM17 留在 Ops。",
+            "config / credential 治理在 platform-admin · operational pause / retry 在 ops (Q-ADM17 split)",
           createAction: "註冊 adapter",
           rotateAction: "立即輪替",
-          dangerTitle: "mof-bgmt token 距到期 6 天",
+          dangerTitle: "mof-bgmt · token 距到期 6 天",
           dangerBody:
-            "BGMT 派遣回報 token 必須在 2026 年 5 月 31 日前輪替，否則今日完成單將無法送達上游。",
+            "BGMT 派遣回報 token 必須於 2026-05-31 前輪替；否則無法回報今日完成單。",
+          authorityTitle: "Q-ADM17 權限切分",
+          authorityPlatform:
+            "Platform Admin 保留 credential 編輯、輪替與 hard disable。",
+          authorityOps:
+            "Ops 只接 pause / retry 類執行面控制，不在此頁寫入 credential。",
           platformAuthority: "Platform Admin",
           opsAuthority: "Ops Console",
           platformScope: "Write authority",
@@ -346,6 +402,32 @@ export default function AdapterRegistryPage() {
             </CanvasBtn>
           }
         />
+
+        <div style={authoritySummaryCardStyle}>
+          <div style={actionLaneHeaderStyle}>
+            <div style={actionLabelStyle}>{copy.authorityTitle}</div>
+            <CanvasPill theme={theme} tone="accent">
+              {copy.platformScope}
+            </CanvasPill>
+            <CanvasPill theme={theme} tone="info">
+              {copy.opsScope}
+            </CanvasPill>
+          </div>
+          <div style={authoritySummaryGridStyle}>
+            <div style={authoritySummaryBlockStyle}>
+              <div style={authoritySummaryLabelStyle}>
+                {copy.platformAuthority}
+              </div>
+              <div style={authoritySummaryBodyStyle}>
+                {copy.authorityPlatform}
+              </div>
+            </div>
+            <div style={authoritySummaryBlockStyle}>
+              <div style={authoritySummaryLabelStyle}>{copy.opsAuthority}</div>
+              <div style={authoritySummaryBodyStyle}>{copy.authorityOps}</div>
+            </div>
+          </div>
+        </div>
 
         <div className="adapter-grid" style={adapterGridStyle}>
           {adapters.map((adapter) => {
@@ -418,19 +500,22 @@ export default function AdapterRegistryPage() {
                       {adapter.authoritySummary}
                     </div>
 
-                    <div style={buttonRowStyle}>
-                      {platformActions.map((action) => (
-                        <CanvasBtn
-                          key={`${adapter.id}-${action.label}`}
-                          theme={theme}
-                          variant="secondary"
-                          size="sm"
-                          onClick={noop}
-                          {...getActionProps(action)}
-                        >
-                          {action.label}
-                        </CanvasBtn>
-                      ))}
+                    <div style={actionLaneRowsStyle}>
+                      <div style={buttonRowStyle}>
+                        {platformActions.map((action) => (
+                          <CanvasBtn
+                            key={`${adapter.id}-${action.label}`}
+                            theme={theme}
+                            variant="secondary"
+                            size="xs"
+                            onClick={noop}
+                            {...getActionProps(action)}
+                          >
+                            {action.label}
+                          </CanvasBtn>
+                        ))}
+                      </div>
+                      <div style={monoCaptionStyle}>{adapter.id}</div>
                     </div>
                   </div>
 
@@ -450,7 +535,7 @@ export default function AdapterRegistryPage() {
                           key={`${adapter.id}-${action.label}`}
                           theme={theme}
                           variant="secondary"
-                          size="sm"
+                          size="xs"
                           onClick={noop}
                           {...getActionProps(action)}
                         >
