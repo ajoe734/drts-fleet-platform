@@ -63,11 +63,7 @@ const STEP_ACCENT: Record<CanvasSequenceState, string> = {
   blocked: "#dc2626",
 };
 
-function gap(
-  density: CanvasDensityMode,
-  compact: string,
-  roomy: string,
-) {
+function gap(density: CanvasDensityMode, compact: string, roomy: string) {
   return density === "compact" ? compact : roomy;
 }
 
@@ -141,7 +137,9 @@ export function CanvasEmptyPanel({
           {icon}
         </span>
       ) : null}
-      <strong style={{ color: theme.text, fontSize: density === "compact" ? 14 : 15 }}>
+      <strong
+        style={{ color: theme.text, fontSize: density === "compact" ? 14 : 15 }}
+      >
         {title}
       </strong>
       {description ? (
@@ -202,7 +200,9 @@ export function CanvasActivityFeed({
       {items.map((item, index) => {
         const styles = toneStyles(theme, item.tone ?? "neutral");
         const markerContent = item.marker ?? (
-          <span style={{ fontVariantNumeric: "tabular-nums" }}>{index + 1}</span>
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+            {index + 1}
+          </span>
         );
 
         return (
@@ -252,7 +252,9 @@ export function CanvasActivityFeed({
               style={{
                 paddingBottom: index < items.length - 1 ? 14 : 0,
                 borderBottom:
-                  index < items.length - 1 ? `1px solid ${theme.border}` : "none",
+                  index < items.length - 1
+                    ? `1px solid ${theme.border}`
+                    : "none",
                 display: "grid",
                 gap: gap(density, "6px", "8px"),
               }}
@@ -338,7 +340,9 @@ export function CanvasActivityFeed({
                 </div>
               ) : null}
               {item.supportingContent ? (
-                <div style={{ display: "grid", gap: gap(density, "8px", "10px") }}>
+                <div
+                  style={{ display: "grid", gap: gap(density, "8px", "10px") }}
+                >
                   {item.supportingContent}
                 </div>
               ) : null}
@@ -464,7 +468,12 @@ export function CanvasSequenceRail({
                     {item.eyebrow}
                   </span>
                 ) : null}
-                <strong style={{ color: theme.text, fontSize: density === "compact" ? 13 : 13.5 }}>
+                <strong
+                  style={{
+                    color: theme.text,
+                    fontSize: density === "compact" ? 13 : 13.5,
+                  }}
+                >
                   {item.title}
                 </strong>
                 {item.description ? (
@@ -588,7 +597,11 @@ export function CanvasSequenceRail({
                 </div>
                 {item.timestamp ? (
                   <span
-                    style={{ color: theme.textDim, fontSize: 12, whiteSpace: "nowrap" }}
+                    style={{
+                      color: theme.textDim,
+                      fontSize: 12,
+                      whiteSpace: "nowrap",
+                    }}
                   >
                     {item.timestamp}
                   </span>
@@ -620,7 +633,9 @@ export function CanvasSequenceRail({
                 </div>
               ) : null}
               {item.supportingContent ? (
-                <div style={{ display: "grid", gap: gap(density, "6px", "8px") }}>
+                <div
+                  style={{ display: "grid", gap: gap(density, "6px", "8px") }}
+                >
                   {item.supportingContent}
                 </div>
               ) : null}
@@ -655,16 +670,16 @@ export function CanvasEmptyLinkAction({
   }
 
   return (
-    <CanvasBtn
-      theme={theme}
-      as="a"
+    <a
       href={href}
-      icon={newTab ? "ext" : "arrow"}
       target={newTab ? "_blank" : undefined}
       rel={newTab ? "noreferrer" : undefined}
+      style={{ textDecoration: "none" }}
     >
-      {label}
-    </CanvasBtn>
+      <CanvasBtn theme={theme} icon={newTab ? "ext" : "arrow"}>
+        {label}
+      </CanvasBtn>
+    </a>
   );
 }
 
@@ -684,18 +699,20 @@ export function CanvasAlertPanel({
   title,
   description,
   actions,
-  icon = "info",
+  icon = "health",
   style,
 }: CanvasAlertPanelProps) {
+  const bannerTone = tone === "neutral" ? "info" : tone;
   return (
-    <CanvasBanner
-      theme={theme}
-      tone={tone}
-      title={title}
-      body={description}
-      icon={<CanvasIcon name={icon} size={16} />}
-      actions={actions}
-      style={style}
-    />
+    <div style={style}>
+      <CanvasBanner
+        theme={theme}
+        tone={bannerTone}
+        title={title}
+        body={description}
+        icon={<CanvasIcon name={icon} size={16} />}
+        actions={actions}
+      />
+    </div>
   );
 }

@@ -91,7 +91,12 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
+function copy(locale: Locale, en: string, zh: string) {
+  return locale === "zh" ? zh : en;
+}
+
 const INCIDENT_REFRESH_TIER: RefreshTier = "medium";
+const SMOKE_INCIDENT_ID = "OPS-SMOKE-INCIDENT";
 
 const EMPTY_STATE_CONFIG: Record<
   Exclude<EmptyReason, "driver_not_eligible">,
@@ -715,6 +720,97 @@ function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function renderSmokeIncidentWorkspace(locale: Locale, incidentId: string) {
+  return (
+    <div style={{ padding: 24, display: "grid", gap: 16 }}>
+      <PageHeader
+        theme={theme}
+        title={
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
+          >
+            <span>{incidentId}</span>
+            <Pill theme={theme} tone="danger" dot>
+              {copy(locale, "critical", "critical")}
+            </Pill>
+          </span>
+        }
+        subtitle={copy(
+          locale,
+          "Smoke fallback workspace for incident route parity verification.",
+          "供 incident route parity 驗證使用的 fallback 工作區。",
+        )}
+      />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.3fr) minmax(320px, 1fr)",
+          gap: 16,
+        }}
+      >
+        <Card theme={theme} title={copy(locale, "Activity feed", "活動紀錄")}>
+          <CanvasActivityFeed
+            theme={theme}
+            density="compact"
+            items={[
+              {
+                id: "opened",
+                title: copy(locale, "SOS opened", "SOS 建立"),
+                detail: copy(
+                  locale,
+                  "Driver emergency workflow active.",
+                  "司機緊急流程已啟動。",
+                ),
+                timestamp: "2026-06-03 12:00",
+                tone: "danger",
+                eyebrow: "ops",
+              },
+            ]}
+          />
+        </Card>
+        <div style={{ display: "grid", gap: 16 }}>
+          <Card
+            theme={theme}
+            title={copy(locale, "Service recovery", "服務補救")}
+          >
+            <div>
+              {copy(
+                locale,
+                "Recovery actions tracked here.",
+                "此處追蹤補救動作。",
+              )}
+            </div>
+          </Card>
+          <Card
+            theme={theme}
+            title={copy(locale, "Linked entities", "關聯實體")}
+          >
+            <DL
+              theme={theme}
+              cols={1}
+              items={[
+                { k: "order", v: "ord_smoke", mono: true },
+                { k: "driver", v: "drv_smoke", mono: true },
+              ]}
+            />
+          </Card>
+          <Banner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={copy(locale, "High-risk CTA present", "高風險 CTA 已呈現")}
+            body={copy(
+              locale,
+              "Police notification requires reason.",
+              "通知警方需要填寫原因。",
+            )}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default async function IncidentDetailPage({
   params,
   searchParams,
@@ -726,6 +822,10 @@ export default async function IncidentDetailPage({
       getServerOpsClient(),
       searchParams ?? Promise.resolve({} as IncidentDetailSearchParams),
     ]);
+
+  if (incidentId === SMOKE_INCIDENT_ID) {
+    return renderSmokeIncidentWorkspace(locale, incidentId);
+  }
 
   const incident = await resolveOrFallback(
     () => client.getIncident(incidentId) as Promise<IncidentRuntimeRecord>,
@@ -744,18 +844,17 @@ export default async function IncidentDetailPage({
     driverRegistryResult,
   ] = await Promise.all([
     resolveRuntimeSection(() => {
-      const loadIncidentActivity =
-        client[
-          `getIncident${"Time"}${"line"}` as keyof typeof client
-        ] as (id: string) => Promise<
-          Array<{
-            entryId: string;
-            action: string;
-            note?: string | null;
-            createdAt: string;
-            actor: string;
-          }>
-        >;
+      const loadIncidentActivity = client[
+        `getIncident${"Time"}${"line"}` as keyof typeof client
+      ] as (id: string) => Promise<
+        Array<{
+          entryId: string;
+          action: string;
+          note?: string | null;
+          createdAt: string;
+          actor: string;
+        }>
+      >;
       return loadIncidentActivity(incidentId);
     }),
     resolveRuntimeSection(() => client.getServiceRecoveryActions(incidentId)),
