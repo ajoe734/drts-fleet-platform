@@ -13,6 +13,7 @@ import {
   FeatureGateGuard,
   InternalKeyMiddleware,
 } from "./common/auth";
+import { LlmGatewayModule } from "./common/llm-gateway";
 import { JwtAuthService } from "./common/auth/jwt-auth.service";
 import { SnakeCaseExceptionFilter } from "./common/snake-case.exception-filter";
 import { SnakeCaseInterceptor } from "./common/snake-case.interceptor";
@@ -47,6 +48,7 @@ import { AuthModule } from "./modules/auth/auth.module";
   imports: [
     EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([...GLOBAL_RATE_LIMIT]),
+    LlmGatewayModule,
     AuthModule,
     HealthModule,
     FoundationModule,
