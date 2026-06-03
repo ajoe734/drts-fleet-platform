@@ -12,7 +12,11 @@ import {
 } from "@drts/ui-web/canvas-primitives";
 import { buildCanvasTheme } from "@drts/ui-web/canvas-tokens";
 
-const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
+const theme = buildCanvasTheme({
+  surface: "platform",
+  dark: true,
+  density: "compact",
+});
 
 const pageBodyStyle = {
   display: "grid",
@@ -44,30 +48,23 @@ const authorityCopyStyle = {
 
 const actionSectionStyle = {
   display: "grid",
-  gap: 12,
+  gap: 10,
   marginTop: 12,
+  paddingTop: 12,
+  borderTop: `1px solid ${theme.border}`,
 } satisfies CSSProperties;
 
-const authorityGridStyle = {
-  display: "grid",
-  gap: 12,
-} satisfies CSSProperties;
-
-const actionLaneStyle = {
-  display: "grid",
-  gap: 8,
-  padding: 12,
-  border: `1px solid ${theme.border}`,
-  borderRadius: 14,
-  background: theme.surfaceLo,
-} satisfies CSSProperties;
-
-const actionLaneRowsStyle = {
+const authorityStackStyle = {
   display: "grid",
   gap: 10,
 } satisfies CSSProperties;
 
-const actionLaneHeaderStyle = {
+const authorityRowStyle = {
+  display: "grid",
+  gap: 6,
+} satisfies CSSProperties;
+
+const authorityHeaderStyle = {
   display: "flex",
   alignItems: "center",
   gap: 8,
@@ -80,12 +77,6 @@ const actionLabelStyle = {
   fontWeight: 700,
   letterSpacing: "0.08em",
   textTransform: "uppercase",
-} satisfies CSSProperties;
-
-const buttonRowStyle = {
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
 } satisfies CSSProperties;
 
 const laneEyebrowStyle = {
@@ -101,6 +92,13 @@ const laneSummaryStyle = {
   color: theme.textDim,
   fontSize: 11.5,
   lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const authorityButtonRowStyle = {
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap",
+  alignItems: "center",
 } satisfies CSSProperties;
 
 const disabledReasonStyle = {
@@ -315,7 +313,7 @@ export default function AdapterRegistryPage() {
           rotateAction: "Rotate now",
           dangerTitle: "mof-bgmt · token expires in 6 days",
           dangerBody:
-            "The BGMT dispatch reporting token must rotate before May 31, 2026 or today's completion reports cannot reach the upstream endpoint.",
+            "The BGMT dispatch reporting token must rotate within the next 6 days or completion reports cannot reach the upstream endpoint.",
           platformAuthority: "Platform Admin",
           opsAuthority: "Ops Console",
           platformScope: "Write authority",
@@ -340,7 +338,7 @@ export default function AdapterRegistryPage() {
           rotateAction: "立即輪替",
           dangerTitle: "mof-bgmt · token 距到期 6 天",
           dangerBody:
-            "BGMT 派遣回報 token 必須於 2026-05-31 前輪替；否則無法回報今日完成單。",
+            "BGMT 派遣回報 token 必須在未來 6 天內輪替；否則完成單回報將無法送達上游端點。",
           platformAuthority: "Platform Admin",
           opsAuthority: "Ops Console",
           platformScope: "Write authority",
@@ -384,18 +382,8 @@ export default function AdapterRegistryPage() {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
-          .authority-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-          }
-
           @media (max-width: 1080px) {
             .adapter-grid {
-              grid-template-columns: minmax(0, 1fr);
-            }
-          }
-
-          @media (max-width: 720px) {
-            .authority-grid {
               grid-template-columns: minmax(0, 1fr);
             }
           }
@@ -480,9 +468,9 @@ export default function AdapterRegistryPage() {
                 <div style={actionSectionStyle}>
                   <div style={laneEyebrowStyle}>{copy.authorityModel}</div>
 
-                  <div className="authority-grid" style={authorityGridStyle}>
-                    <div style={actionLaneStyle}>
-                      <div style={actionLaneHeaderStyle}>
+                  <div style={authorityStackStyle}>
+                    <div style={authorityRowStyle}>
+                      <div style={authorityHeaderStyle}>
                         <div style={actionLabelStyle}>
                           {copy.platformAuthority}
                         </div>
@@ -495,27 +483,25 @@ export default function AdapterRegistryPage() {
                         {adapter.authoritySummary}
                       </div>
 
-                      <div style={actionLaneRowsStyle}>
-                        <div style={buttonRowStyle}>
-                          {platformActions.map((action) => (
-                            <CanvasBtn
-                              key={`${adapter.id}-${action.label}`}
-                              theme={theme}
-                              variant="secondary"
-                              size="xs"
-                              onClick={noop}
-                              {...getActionProps(action)}
-                            >
-                              {action.label}
-                            </CanvasBtn>
-                          ))}
-                        </div>
-                        <div style={monoCaptionStyle}>{adapter.id}</div>
+                      <div style={authorityButtonRowStyle}>
+                        {platformActions.map((action) => (
+                          <CanvasBtn
+                            key={`${adapter.id}-${action.label}`}
+                            theme={theme}
+                            variant="secondary"
+                            size="xs"
+                            onClick={noop}
+                            {...getActionProps(action)}
+                          >
+                            {action.label}
+                          </CanvasBtn>
+                        ))}
+                        <span style={monoCaptionStyle}>{adapter.id}</span>
                       </div>
                     </div>
 
-                    <div style={actionLaneStyle}>
-                      <div style={actionLaneHeaderStyle}>
+                    <div style={authorityRowStyle}>
+                      <div style={authorityHeaderStyle}>
                         <div style={actionLabelStyle}>{copy.opsAuthority}</div>
                         <CanvasPill theme={theme} tone="info">
                           {copy.opsScope}
@@ -524,7 +510,7 @@ export default function AdapterRegistryPage() {
 
                       <div style={laneSummaryStyle}>{adapter.opsSummary}</div>
 
-                      <div style={buttonRowStyle}>
+                      <div style={authorityButtonRowStyle}>
                         {opsActions.map((action) => (
                           <CanvasBtn
                             key={`${adapter.id}-${action.label}`}
