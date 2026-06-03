@@ -20,6 +20,7 @@ import type {
   ReportJobStatus,
   ReportJobType,
   ReportOutputFormat,
+  ResourceActionDescriptor,
 } from "@drts/contracts";
 import {
   FILING_PACKAGE_TYPES,
@@ -117,6 +118,59 @@ const formNoteStyle: CSSProperties = {
   fontSize: 11,
   lineHeight: 1.45,
   color: th.textMuted,
+};
+
+const actionListStyle: CSSProperties = {
+  display: "grid",
+  gap: 6,
+  minWidth: 0,
+};
+
+const actionDetailListStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+  marginTop: 14,
+};
+
+const actionItemStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
+  minWidth: 0,
+};
+
+const actionReasonStyle: CSSProperties = {
+  color: th.textMuted,
+  fontSize: 10.5,
+  lineHeight: 1.35,
+};
+
+const expiresValueStyle: CSSProperties = {
+  display: "grid",
+  gap: 3,
+};
+
+const expiredMetaStyle: CSSProperties = {
+  color: th.danger,
+  fontSize: 10.5,
+  fontWeight: 600,
+  lineHeight: 1.35,
+};
+
+const modalBackdropStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 80,
+  background: "rgba(8, 12, 18, 0.68)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 24,
+};
+
+const modalShellStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: 860,
 };
 
 const nativeInputStyle: CSSProperties = {
@@ -295,6 +349,90 @@ function expiresSoon(value: string | null | undefined, hours = 12) {
   const expiresAt = new Date(value).getTime();
   if (Number.isNaN(expiresAt)) return false;
   return expiresAt - Date.now() <= hours * 60 * 60 * 1000;
+}
+
+function isTimestampExpired(value: string | null | undefined) {
+  if (!value) return false;
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return false;
+  return timestamp <= Date.now();
+}
+
+function isJobArtifactExpired(
+  job: Pick<ReportJobRecord, "status" | "artifact">,
+) {
+  return (
+    job.status === "expired" || isTimestampExpired(job.artifact?.expiresAt)
+  );
+}
+
+function buildJobActionDescriptors(
+  job: Pick<ReportJobRecord, "status" | "artifact">,
+): ResourceActionDescriptor[] {
+  const artifactExpired = isJobArtifactExpired(job);
+  const artifactReady =
+    job.status === "completed" && Boolean(job.artifact) && !artifactExpired;
+
+  const actions: ResourceActionDescriptor[] = [
+    {
+      action: "download_report_artifact",
+      enabled: artifactReady,
+      ...(artifactReady
+        ? {}
+        : {
+            disabledReasonCode: artifactExpired ? "expired" : "still_running",
+          }),
+      riskLevel: "low",
+    },
+  ];
+
+  if (job.status === "failed") {
+    actions.push({
+      action: "retry_report_job",
+      enabled: true,
+      riskLevel: "medium",
+    });
+  }
+
+  return actions;
+}
+
+function reportActionLabel(
+  locale: "en" | "zh",
+  descriptor: ResourceActionDescriptor,
+) {
+  switch (descriptor.action) {
+    case "download_report_artifact":
+      return copyText(locale, "Download artifact", "下載產物");
+    case "retry_report_job":
+      return copyText(locale, "Retry export", "重試匯出");
+    default:
+      return formatOpsCodeLabel(locale, descriptor.action);
+  }
+}
+
+function reportActionReason(
+  locale: "en" | "zh",
+  descriptor: ResourceActionDescriptor,
+) {
+  switch (descriptor.disabledReasonCode) {
+    case "still_running":
+      return copyText(
+        locale,
+        "The signed artifact is not ready yet.",
+        "簽名產物尚未完成，暫時不能下載。",
+      );
+    case "expired":
+      return copyText(
+        locale,
+        "The signed URL expired. Re-run the export to generate a fresh artifact.",
+        "簽名網址已過期，請重新執行匯出以產生新產物。",
+      );
+    default:
+      return descriptor.disabledReasonCode
+        ? formatOpsCodeLabel(locale, descriptor.disabledReasonCode)
+        : null;
+  }
 }
 
 function readFilterString(
@@ -483,6 +621,26 @@ export default function ReportsPage() {
     });
   }
 
+  function retryReportJob(job: Pick<JobRow, "jobType" | "format" | "filters">) {
+    startTransition(() => {
+      void (async () => {
+        try {
+          const accepted = await getOpsClient().createReportJob({
+            jobType: job.jobType,
+            format: job.format,
+            ...(Object.keys(job.filters).length > 0
+              ? { filters: job.filters }
+              : {}),
+          });
+          await loadData();
+          await inspectReportJob(accepted.jobId);
+        } catch (e) {
+          setError(e instanceof Error ? e.message : t("common.unknown"));
+        }
+      })();
+    });
+  }
+
   function submitFilingPackage() {
     startTransition(() => {
       void (async () => {
@@ -607,12 +765,52 @@ export default function ReportsPage() {
       h: "EXPIRES",
       w: 132,
       mono: true,
-      r: (row) => formatDateTime(locale, row.artifact?.expiresAt),
+      r: (row) => (
+        <div style={expiresValueStyle}>
+          <span>{formatDateTime(locale, row.artifact?.expiresAt)}</span>
+          {isJobArtifactExpired(row) ? (
+            <span style={expiredMetaStyle}>
+              {copyText(locale, "Expired artifact", "產物已過期")}
+            </span>
+          ) : expiresSoon(row.artifact?.expiresAt) ? (
+            <span style={rowMetaStyle}>
+              {copyText(locale, "Expires soon", "即將過期")}
+            </span>
+          ) : null}
+        </div>
+      ),
     },
     {
       h: "CREATED",
       mono: true,
       r: (row) => formatDateTime(locale, row.createdAt),
+    },
+    {
+      h: "ACTIONS",
+      w: 220,
+      r: (row) => (
+        <div style={actionListStyle}>
+          {buildJobActionDescriptors(row).map((descriptor) => (
+            <CanvasActionButton
+              key={`${row.jobId}:${descriptor.action}`}
+              theme={th}
+              locale={locale}
+              descriptor={descriptor}
+              busy={pending}
+              href={
+                descriptor.action === "download_report_artifact"
+                  ? (row.artifact?.downloadUrl ?? null)
+                  : null
+              }
+              onClick={() => {
+                if (descriptor.action === "retry_report_job") {
+                  retryReportJob(row);
+                }
+              }}
+            />
+          ))}
+        </div>
+      ),
     },
   ];
 
@@ -740,7 +938,7 @@ export default function ReportsPage() {
               variant="primary"
               icon="plus"
               size="sm"
-              onClick={() => setShowJobComposer((value) => !value)}
+              onClick={() => setShowJobComposer(true)}
             >
               {t("reports.form.createJob")}
             </CanvasBtn>
@@ -767,138 +965,6 @@ export default function ReportsPage() {
             title={getOpsLabel(locale, "error")}
             body={error}
           />
-        ) : null}
-
-        {showJobComposer && activeTab === "jobs" ? (
-          <CanvasCard
-            theme={th}
-            title={t("reports.backgroundExport")}
-            subtitle={t("reports.createReportEyebrow")}
-            actions={
-              <CanvasPill theme={th} tone="info">
-                {t(`reports.category.${jobCategory(jobType).toLowerCase()}`)}
-              </CanvasPill>
-            }
-          >
-            <CanvasBanner
-              theme={th}
-              tone="info"
-              icon="reports"
-              title={t("reports.form.createJob")}
-              body={copyText(
-                locale,
-                "Jobs run in the background and expose signed artifact downloads after completion.",
-                "工作會在背景執行，完成後提供簽名產物下載。",
-              )}
-            />
-            <div style={{ height: 14 }} />
-            <div style={formGridStyle}>
-              <CanvasField
-                theme={th}
-                label={t("reports.form.type")}
-                hint={`${t(`reports.type.${jobType}.desc`)} ${t(
-                  "reports.categoryLabel",
-                  {
-                    value: t(
-                      `reports.category.${jobCategory(jobType).toLowerCase()}`,
-                    ),
-                  },
-                )}`}
-              >
-                <select
-                  value={jobType}
-                  onChange={(event) =>
-                    setJobType(event.target.value as ReportJobType)
-                  }
-                  style={nativeSelectStyle}
-                >
-                  {REPORT_JOB_TYPES.map((value) => (
-                    <option key={value} value={value}>
-                      {t(`reports.type.${value}`)}
-                    </option>
-                  ))}
-                </select>
-              </CanvasField>
-
-              <CanvasField theme={th} label={t("reports.form.format")}>
-                <select
-                  value={format}
-                  onChange={(event) =>
-                    setFormat(event.target.value as ReportOutputFormat)
-                  }
-                  style={nativeSelectStyle}
-                >
-                  {REPORT_OUTPUT_FORMATS.map((value) => (
-                    <option key={value} value={value}>
-                      {value.toUpperCase()}
-                    </option>
-                  ))}
-                </select>
-              </CanvasField>
-
-              <CanvasField
-                theme={th}
-                label={t("reports.form.periodTag")}
-                hint={getOpsLabel(locale, "reportsPeriodExample")}
-              >
-                <input
-                  value={periodLabel}
-                  onChange={(event) => setPeriodLabel(event.target.value)}
-                  placeholder={getOpsLabel(locale, "reportsPeriodExample")}
-                  style={nativeMonoInputStyle}
-                />
-              </CanvasField>
-
-              <CanvasField
-                theme={th}
-                label={t("reports.form.vehicleId")}
-                hint={copyText(
-                  locale,
-                  "Optional filter for vehicle-scoped output.",
-                  "可選，用於限定單一車輛的輸出。",
-                )}
-              >
-                <input
-                  value={vehicleId}
-                  onChange={(event) => setVehicleId(event.target.value)}
-                  placeholder={t("reports.form.vehicleId")}
-                  style={nativeMonoInputStyle}
-                />
-              </CanvasField>
-            </div>
-
-            <div style={formFooterStyle}>
-              <div style={formNoteStyle}>
-                {copyText(
-                  locale,
-                  "Existing report-job contract and i18n keys are preserved; this only changes the surface layout.",
-                  "保留既有 report-job contract 與 i18n key；這次僅調整畫面結構。",
-                )}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <CanvasBtn
-                  theme={th}
-                  size="sm"
-                  onClick={() => setShowJobComposer(false)}
-                  disabled={pending}
-                >
-                  {copyText(locale, "Cancel", "取消")}
-                </CanvasBtn>
-                <CanvasBtn
-                  theme={th}
-                  variant="primary"
-                  icon="plus"
-                  size="sm"
-                  onClick={submitReportJob}
-                  disabled={pending}
-                >
-                  {pending
-                    ? t("reports.form.submitting")
-                    : t("reports.form.createJob")}
-                </CanvasBtn>
-              </div>
-            </div>
-          </CanvasCard>
         ) : null}
 
         {showPackageComposer && activeTab === "packages" ? (
@@ -1154,13 +1220,56 @@ export default function ReportsPage() {
                     ]}
                   />
 
-                  {jobDetail.artifact ? (
-                    <div style={{ marginTop: 14 }}>
+                  {isJobArtifactExpired(jobDetail) ? (
+                    <>
+                      <div style={{ height: 14 }} />
+                      <CanvasBanner
+                        theme={th}
+                        tone="danger"
+                        icon="warn"
+                        title={copyText(
+                          locale,
+                          "Signed artifact expired",
+                          "簽名產物已過期",
+                        )}
+                        body={copyText(
+                          locale,
+                          "The previous signed URL is no longer usable. Retry the export to issue a new artifact.",
+                          "先前簽名網址已失效；請重試匯出以取得新的產物。",
+                        )}
+                      />
+                    </>
+                  ) : null}
+
+                  <div style={actionDetailListStyle}>
+                    {buildJobActionDescriptors(jobDetail).map((descriptor) => (
+                      <CanvasActionButton
+                        key={`${jobDetail.jobId}:${descriptor.action}`}
+                        theme={th}
+                        locale={locale}
+                        descriptor={descriptor}
+                        busy={pending}
+                        href={
+                          descriptor.action === "download_report_artifact"
+                            ? (jobDetail.artifact?.downloadMetadata
+                                .downloadUrl ?? null)
+                            : null
+                        }
+                        onClick={() => {
+                          if (descriptor.action === "retry_report_job") {
+                            retryReportJob(jobDetail);
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
+                  {jobDetail.artifact && !isJobArtifactExpired(jobDetail) ? (
+                    <div style={{ marginTop: 6 }}>
                       <a
                         href={jobDetail.artifact.downloadMetadata.downloadUrl}
                         rel="noreferrer"
                         target="_blank"
-                        style={actionLinkStyle}
+                        style={mutedLinkStyle}
                       >
                         {t("reports.detail.openSignedArtifact")}
                       </a>
@@ -1645,6 +1754,210 @@ export default function ReportsPage() {
           </>
         ) : null}
       </div>
+
+      {showJobComposer && activeTab === "jobs" ? (
+        <div
+          style={modalBackdropStyle}
+          onClick={() => {
+            if (!pending) {
+              setShowJobComposer(false);
+            }
+          }}
+        >
+          <div
+            style={modalShellStyle}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <CanvasCard
+              theme={th}
+              title={t("reports.backgroundExport")}
+              subtitle={t("reports.createReportEyebrow")}
+              actions={
+                <CanvasPill theme={th} tone="info">
+                  {t(`reports.category.${jobCategory(jobType).toLowerCase()}`)}
+                </CanvasPill>
+              }
+            >
+              <CanvasBanner
+                theme={th}
+                tone="info"
+                icon="reports"
+                title={t("reports.form.createJob")}
+                body={copyText(
+                  locale,
+                  "Jobs run in the background and expose signed artifact downloads after completion.",
+                  "工作會在背景執行，完成後提供簽名產物下載。",
+                )}
+              />
+              <div style={{ height: 14 }} />
+              <div style={formGridStyle}>
+                <CanvasField
+                  theme={th}
+                  label={t("reports.form.type")}
+                  hint={`${t(`reports.type.${jobType}.desc`)} ${t(
+                    "reports.categoryLabel",
+                    {
+                      value: t(
+                        `reports.category.${jobCategory(jobType).toLowerCase()}`,
+                      ),
+                    },
+                  )}`}
+                >
+                  <select
+                    value={jobType}
+                    onChange={(event) =>
+                      setJobType(event.target.value as ReportJobType)
+                    }
+                    style={nativeSelectStyle}
+                  >
+                    {REPORT_JOB_TYPES.map((value) => (
+                      <option key={value} value={value}>
+                        {t(`reports.type.${value}`)}
+                      </option>
+                    ))}
+                  </select>
+                </CanvasField>
+
+                <CanvasField theme={th} label={t("reports.form.format")}>
+                  <select
+                    value={format}
+                    onChange={(event) =>
+                      setFormat(event.target.value as ReportOutputFormat)
+                    }
+                    style={nativeSelectStyle}
+                  >
+                    {REPORT_OUTPUT_FORMATS.map((value) => (
+                      <option key={value} value={value}>
+                        {value.toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
+                </CanvasField>
+
+                <CanvasField
+                  theme={th}
+                  label={t("reports.form.periodTag")}
+                  hint={getOpsLabel(locale, "reportsPeriodExample")}
+                >
+                  <input
+                    value={periodLabel}
+                    onChange={(event) => setPeriodLabel(event.target.value)}
+                    placeholder={getOpsLabel(locale, "reportsPeriodExample")}
+                    style={nativeMonoInputStyle}
+                  />
+                </CanvasField>
+
+                <CanvasField
+                  theme={th}
+                  label={t("reports.form.vehicleId")}
+                  hint={copyText(
+                    locale,
+                    "Optional filter for vehicle-scoped output.",
+                    "可選，用於限定單一車輛的輸出。",
+                  )}
+                >
+                  <input
+                    value={vehicleId}
+                    onChange={(event) => setVehicleId(event.target.value)}
+                    placeholder={t("reports.form.vehicleId")}
+                    style={nativeMonoInputStyle}
+                  />
+                </CanvasField>
+              </div>
+
+              <div style={formFooterStyle}>
+                <div style={formNoteStyle}>
+                  {copyText(
+                    locale,
+                    "Existing report-job contract and i18n keys are preserved; this only changes the surface layout.",
+                    "保留既有 report-job contract 與 i18n key；這次僅調整畫面結構。",
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <CanvasBtn
+                    theme={th}
+                    size="sm"
+                    onClick={() => setShowJobComposer(false)}
+                    disabled={pending}
+                  >
+                    {copyText(locale, "Cancel", "取消")}
+                  </CanvasBtn>
+                  <CanvasBtn
+                    theme={th}
+                    variant="primary"
+                    icon="plus"
+                    size="sm"
+                    onClick={submitReportJob}
+                    disabled={pending}
+                  >
+                    {pending
+                      ? t("reports.form.submitting")
+                      : t("reports.form.createJob")}
+                  </CanvasBtn>
+                </div>
+              </div>
+            </CanvasCard>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CanvasActionButton({
+  theme,
+  locale,
+  descriptor,
+  busy,
+  href,
+  onClick,
+}: {
+  theme: typeof th;
+  locale: "en" | "zh";
+  descriptor: ResourceActionDescriptor;
+  busy: boolean;
+  href: string | null;
+  onClick: () => void;
+}) {
+  const tone: CanvasTone = !descriptor.enabled
+    ? "neutral"
+    : descriptor.riskLevel === "high"
+      ? "danger"
+      : descriptor.riskLevel === "medium"
+        ? "warn"
+        : "accent";
+  const button = (
+    <CanvasBtn
+      theme={theme}
+      size="sm"
+      variant={tone === "accent" ? "secondary" : "ghost"}
+      danger={tone === "danger"}
+      disabled={!descriptor.enabled || busy}
+      {...(href || !descriptor.enabled ? {} : { onClick })}
+    >
+      {reportActionLabel(locale, descriptor)}
+    </CanvasBtn>
+  );
+
+  return (
+    <div style={actionItemStyle}>
+      {href && descriptor.enabled ? (
+        <a
+          href={href}
+          rel="noreferrer"
+          target="_blank"
+          style={{ textDecoration: "none" }}
+        >
+          {button}
+        </a>
+      ) : (
+        button
+      )}
+      {!descriptor.enabled && reportActionReason(locale, descriptor) ? (
+        <span style={actionReasonStyle}>
+          {reportActionReason(locale, descriptor)}
+        </span>
+      ) : null}
     </div>
   );
 }
