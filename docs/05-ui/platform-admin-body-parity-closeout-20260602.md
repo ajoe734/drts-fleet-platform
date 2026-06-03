@@ -1,14 +1,14 @@
 # Platform Admin Body Parity — Supervisor Closeout
 
 - Task: `UI-FE-ADM-PARITY-CLOSEOUT-20260602`
-- Owner: `Claude2` (availability-first reassignment from `Claude`) · Reviewer: `Codex`
+- Owner: `Codex` (continued from `Claude2` executed batch integration) · Reviewer: `Claude2`
 - Date: 2026-06-03
 - Closeout type: supervisor QA + **executed batch integration** for the whole
   Platform Admin body-parity batch (`platform-admin-body-parity-20260602`).
 - Base machine truth: `origin/dev @ 12f918d2277ee10091560defabb7731138c20643`
   (`12f918d2 INT-CLOSEOUT-FLEET-20260603`).
-- Integration commit (this closeout branch): `8ae1f732`
-  on `claude2/ui-fe-adm-parity-closeout-20260602`.
+- Integration commit (this closeout branch): `7ea9bdcb`
+  on `codex/ui-fe-adm-parity-closeout-20260602`.
 - Authority: `docs/05-ui/drts-design-canvas/Platform Admin.html`,
   `docs/05-ui/platform-admin-body-parity-audit-20260602.md`,
   and the branch-of-record manifest in
@@ -21,16 +21,16 @@ branch; the remaining gap is purely the dev merge + deploy + remote smoke.**
 
 At dispatch, only `/fleet` (1/18) was integrated to `dev`; the other 17 route
 bodies, the nav update, and the 3 P0 "missing route" pages lived on scattered task
-branches. This closeout owner (Claude2) had a build-capable worktree (unlike the
-prior dead-lane closeout attempt, which had no `node_modules`), so the integration
-was **executed, not just planned**:
+branches. `Claude2` executed the surgical integration batch; this `Codex` closeout
+continuation re-applied that batch onto the task-owned branch, rebuilt the required
+workspace package outputs, and re-ran the app gates on the current worktree:
 
 - Every route was applied **surgically** — route-scoped checkout of the recorded
   canonical `commit_hash` from the history-repair manifest — onto current `dev`.
-- Gates run green: `typecheck` (pass), `lint --max-warnings=0` (pass),
-  `next build` (pass; all 18 routes compile, including the 3 previously-404 P0
-  routes).
-- Result lives as commit `8ae1f732` on `claude2/ui-fe-adm-parity-closeout-20260602`.
+- Gates run green on this branch after building `@drts/contracts` and
+  `@drts/ui-tokens`: `lint --max-warnings=0` (pass), `next build` (pass; all 18
+  routes compile, including the 3 previously-404 P0 routes).
+- Result lives as commit `7ea9bdcb` on `codex/ui-fe-adm-parity-closeout-20260602`.
 
 **What is still NOT done (and why this is reported as a blocker, not `done`):**
 
@@ -58,46 +58,46 @@ So integration took **only each route's own file(s)** from its canonical commit
 touches exactly the 17 route bodies + `components/admin-shell.tsx`; `fleet/page.tsx`
 and `api-client` are untouched (guard-checked).
 
-## 2. Integration census (route → closeout branch `8ae1f732`)
+## 2. Integration census (route → closeout branch `7ea9bdcb`)
 
 Canonical `commit_hash` per route is from the history-repair branch-of-record
 manifest (which supersedes the earlier census's `wip` picks for adapters / flags /
 nav / notices).
 
-| Route | Canonical source `commit_hash` | Owner | On `8ae1f732` | Note |
-| --- | --- | --- | --- | --- |
-| `/` (home) | `6f478c23` | Codex | yes | |
-| `/tenants` | `32f68b68` | Claude2 | yes | file-scoped (sibling `[tenantId]` is a different commit) |
-| `/tenants/[tenantId]` (P0) | `012c5f87` | Codex | **yes (new)** | was 404 on dev |
-| `/tenant-governance` | `ff374bd7` | Codex | yes | |
-| `/partners` | `f471a825` | Claude | yes | |
-| `/partners/[entrySlug]` | `055cbb34` | Codex | yes | |
-| `/users` | `d0b71bcf` | Claude | yes | |
-| `/fleet` | `eb2e11b0` → `12f918d2` | Claude2 | already on dev | skipped |
-| `/switchboard` | `ce1fa317` | Claude | yes | |
-| `/pricing` | `c7332c28` | Codex | yes | |
-| `/adapter-registry` | `709875c3` | Codex2 | yes | finalized codex2 tip (not census `wip`) |
-| `/payments` | `39c7743a` | Claude | yes | recorded pushed tip |
-| `/payments/reimbursements` (P0) | `cfac8e31` | Codex2 | **yes (new)** | was 404 on dev |
-| `/payments/reimbursements/[batchId]` (P0) | `6e5bcf46` | Codex2 | **yes (new)** | was 404 on dev |
-| `/health` | `09ed0f35` | Codex | yes | + drift fix (§4) |
-| `/notices` | `810696c7` | Codex2 | yes | finalized & pushed codex2 tip |
-| `/audit` | `e210ec68` | Claude | yes | |
-| `/feature-flags` | `05ca7efc` | Codex2 | yes | finalized codex2 tip |
-| nav (`components/admin-shell.tsx`) | `ca20e3ce` | Codex2 | yes | adds Reimbursements item; `/payments` → `/payments/reimbursements` |
+| Route                                     | Canonical source `commit_hash` | Owner   | On `7ea9bdcb`  | Note                                                               |
+| ----------------------------------------- | ------------------------------ | ------- | -------------- | ------------------------------------------------------------------ |
+| `/` (home)                                | `6f478c23`                     | Codex   | yes            |                                                                    |
+| `/tenants`                                | `32f68b68`                     | Claude2 | yes            | file-scoped (sibling `[tenantId]` is a different commit)           |
+| `/tenants/[tenantId]` (P0)                | `012c5f87`                     | Codex   | **yes (new)**  | was 404 on dev                                                     |
+| `/tenant-governance`                      | `ff374bd7`                     | Codex   | yes            |                                                                    |
+| `/partners`                               | `f471a825`                     | Claude  | yes            |                                                                    |
+| `/partners/[entrySlug]`                   | `055cbb34`                     | Codex   | yes            |                                                                    |
+| `/users`                                  | `d0b71bcf`                     | Claude  | yes            |                                                                    |
+| `/fleet`                                  | `eb2e11b0` → `12f918d2`        | Claude2 | already on dev | skipped                                                            |
+| `/switchboard`                            | `ce1fa317`                     | Claude  | yes            |                                                                    |
+| `/pricing`                                | `c7332c28`                     | Codex   | yes            |                                                                    |
+| `/adapter-registry`                       | `709875c3`                     | Codex2  | yes            | finalized codex2 tip (not census `wip`)                            |
+| `/payments`                               | `39c7743a`                     | Claude  | yes            | recorded pushed tip                                                |
+| `/payments/reimbursements` (P0)           | `cfac8e31`                     | Codex2  | **yes (new)**  | was 404 on dev                                                     |
+| `/payments/reimbursements/[batchId]` (P0) | `6e5bcf46`                     | Codex2  | **yes (new)**  | was 404 on dev                                                     |
+| `/health`                                 | `09ed0f35`                     | Codex   | yes            | + drift fix (§4)                                                   |
+| `/notices`                                | `810696c7`                     | Codex2  | yes            | finalized & pushed codex2 tip                                      |
+| `/audit`                                  | `e210ec68`                     | Claude  | yes            |                                                                    |
+| `/feature-flags`                          | `05ca7efc`                     | Codex2  | yes            | finalized codex2 tip                                               |
+| nav (`components/admin-shell.tsx`)        | `ca20e3ce`                     | Codex2  | yes            | adds Reimbursements item; `/payments` → `/payments/reimbursements` |
 
 ## 3. Acceptance scorecard
 
-| Acceptance criterion | On closeout branch `8ae1f732` | On `origin/dev` | Evidence |
-| --- | --- | --- | --- |
-| All 18 routes compile / would return 200 | **PASS (build)** | partial (1/18) | `next build` lists all 18 routes incl. 3 P0; HTTP-200-on-dev pending merge+deploy |
-| One shell only, sidebar 224px | **PASS** | n/a | `admin-shell.tsx` `gridTemplateColumns: "224px minmax(0,1fr)"`, single shell |
-| Each route body matches `Platform Admin.html` | **PASS (canonical blobs)** | 1/18 | each body is the reviewer-approved canonical commit per §2 |
-| No converted (rendered) body uses legacy `admin-*` CSS | **PASS** w/ 1 dead-code caveat | FAIL (5 files) | only orphaned `adapter-registry/components/AdapterList.tsx` retains `admin-*`, and it is not imported/rendered (§5) |
-| Remote Playwright smoke + screenshots (18 routes) | **NOT RUN** | NOT RUN | no smoke suite in repo; no live dev URL from worker |
-| PRs merged to dev | **NO** | 1/18 | needs PR → CI → human merge (the `/fleet`/#493 vehicle) |
-| Dev deploy succeeds | **NO** | NO | no `Deploy - Dev` access from worker |
-| Closeout doc links commits/PRs/CI/deploy/screenshots | this doc | — | commits captured; PR/CI/deploy/screenshot links pending |
+| Acceptance criterion                                   | On closeout branch `7ea9bdcb`  | On `origin/dev` | Evidence                                                                                                            |
+| ------------------------------------------------------ | ------------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| All 18 routes compile / would return 200               | **PASS (build)**               | partial (1/18)  | `next build` lists all 18 routes incl. 3 P0; HTTP-200-on-dev pending merge+deploy                                   |
+| One shell only, sidebar 224px                          | **PASS**                       | n/a             | `admin-shell.tsx` `gridTemplateColumns: "224px minmax(0,1fr)"`, single shell                                        |
+| Each route body matches `Platform Admin.html`          | **PASS (canonical blobs)**     | 1/18            | each body is the reviewer-approved canonical commit per §2                                                          |
+| No converted (rendered) body uses legacy `admin-*` CSS | **PASS** w/ 1 dead-code caveat | FAIL (5 files)  | only orphaned `adapter-registry/components/AdapterList.tsx` retains `admin-*`, and it is not imported/rendered (§5) |
+| Remote Playwright smoke + screenshots (18 routes)      | **NOT RUN**                    | NOT RUN         | no smoke suite in repo; no live dev URL from worker                                                                 |
+| PRs merged to dev                                      | **NO**                         | 1/18            | needs PR → CI → human merge (the `/fleet`/#493 vehicle)                                                             |
+| Dev deploy succeeds                                    | **NO**                         | NO              | no `Deploy - Dev` access from worker                                                                                |
+| Closeout doc links commits/PRs/CI/deploy/screenshots   | this doc                       | —               | commits captured; PR/CI/deploy/screenshot links pending                                                             |
 
 ## 4. Integration-drift remediation
 
@@ -116,7 +116,7 @@ nav / notices).
    `adapter-registry/page.tsx` no longer imports `AdapterList`, so no rendered body
    uses legacy classes. Recommend a small follow-up cleanup task to delete the dead
    components (out of scope for body-parity integration).
-2. **`app/globals.css`** still *defines* `admin-*` classes (stylesheet definitions,
+2. **`app/globals.css`** still _defines_ `admin-*` classes (stylesheet definitions,
    not body usage). Harmless; separate cleanup.
 3. **No build of the rest of the monorepo** was run; only `@drts/platform-admin-web`
    and its upstream deps were gated. The change is route-page + shell only, so
@@ -138,19 +138,26 @@ nav / notices).
 ## 7. Integration status
 
 - **Current `INTEGRATION_STATUS` for the batch: `branch_pushed`.** The full 18-route
-  + nav integration is committed (`8ae1f732`) and pushed on the closeout branch,
-  gate-green (typecheck + lint + build), ready for PR/CI/merge. `/fleet` alone is at
-  `merged_to_dev`.
+  - nav integration is committed (`7ea9bdcb`) and pushed on the closeout branch,
+    gate-green for the app-level acceptance checks (`lint` + `next build`), ready for
+    PR/CI/merge. `/fleet` alone is at `merged_to_dev`.
 - **Not `dev_deployed`.** No deploy run or remote smoke/screenshot evidence exists.
 
 ## 8. Evidence index
 
 - Dev base: `origin/dev @ 12f918d2`.
-- Integration commit: `8ae1f732` (this branch); `git show --stat 8ae1f732`.
-- Gates (this worktree, deps built via `turbo run build --filter=@drts/platform-admin-web^...`):
-  - `pnpm --filter @drts/platform-admin-web typecheck` → exit 0
+- Integration commit: `7ea9bdcb` (this branch); `git show --stat 7ea9bdcb`.
+- Gates (this worktree):
+  - `pnpm install --frozen-lockfile` → success
+  - `pnpm --filter @drts/contracts build` → exit 0
+  - `pnpm --filter @drts/ui-tokens build` → exit 0
   - `pnpm --filter @drts/platform-admin-web lint` (`eslint . --max-warnings=0`) → exit 0
   - `pnpm --filter @drts/platform-admin-web build` (`next build`) → exit 0, 18 routes
+- Direct `pnpm --filter @drts/platform-admin-web typecheck` is not used as closeout
+  evidence on the current `origin/dev` baseline because workspace-strict checks fail
+  inside pre-existing shared packages (for example `packages/ui-web`) unrelated to
+  this route-body integration; Next's build-integrated TypeScript pass is green for
+  the delivered app routes.
 - Branch-of-record manifest: history-repair doc cited in the header.
 - Prior census (superseded by §2 here): dead-lane branch
   `origin/claude/ui-fe-adm-parity-closeout-20260602 @ a4c8c81d`.
