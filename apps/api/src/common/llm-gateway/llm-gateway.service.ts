@@ -1,12 +1,11 @@
-import { Inject, Injectable, Optional } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 
+import { ApiRequestError } from "../api-envelope";
 import {
   type LlmGatewayConfig,
   type LlmGatewayProvider,
   resolveLlmGatewayConfig,
 } from "./llm-gateway-config";
-
-export const LLM_GATEWAY_FETCH = Symbol("LLM_GATEWAY_FETCH");
 
 export type LlmGatewayFetch = (
   input: string,
@@ -53,18 +52,70 @@ export class LlmGatewayError extends Error {
   }
 }
 
+export interface LlmGatewayUsageSnapshot {
+  requestsInCurrentMinute: number;
+  inputTokensInCurrentMinute: number;
+  outputTokensInCurrentMinute: number;
+  estimatedDailySpendUsd: number;
+}
+
+export interface ReserveLlmGatewayRequestInput {
+  actorKey: string;
+  requestText: string;
+}
+
+export interface ReserveLlmGatewayRequestReservation {
+  actorKey: string;
+  reservedAt: number;
+  estimatedInputTokens: number;
+  estimatedInputCostUsd: number;
+}
+
+export interface CompleteLlmGatewayRequestInput {
+  reservation: ReserveLlmGatewayRequestReservation;
+  responseText: string;
+}
+
+export interface LlmGatewayServiceOptions {
+  env?: NodeJS.ProcessEnv;
+  now?: () => number;
+  fetchImpl?: LlmGatewayFetch;
+}
+
+interface LlmGatewayActorUsage {
+  requestHits: number[];
+  inputTokenEvents: Array<{ timestamp: number; tokens: number }>;
+  outputTokenEvents: Array<{ timestamp: number; tokens: number }>;
+  dailySpendByDay: Map<string, number>;
+}
+
+const MINUTE_MS = 60_000;
+const INPUT_COST_USD_PER_1K_TOKENS = 0.002;
+const OUTPUT_COST_USD_PER_1K_TOKENS = 0.008;
+
+function resolveConstructorOptions(
+  arg?: LlmGatewayFetch | LlmGatewayServiceOptions,
+): LlmGatewayServiceOptions {
+  if (typeof arg === "function") {
+    return { fetchImpl: arg };
+  }
+
+  return arg ?? {};
+}
+
 @Injectable()
 export class LlmGatewayService {
   private readonly config: LlmGatewayConfig;
+  private readonly now: () => number;
+  private readonly fetchImpl: LlmGatewayFetch;
+  private readonly usageByActor = new Map<string, LlmGatewayActorUsage>();
 
-  constructor(
-    @Optional()
-    @Inject(LLM_GATEWAY_FETCH)
-    private readonly fetchImpl: LlmGatewayFetch = globalThis.fetch.bind(
-      globalThis,
-    ),
-  ) {
-    this.config = resolveLlmGatewayConfig();
+  constructor(arg?: LlmGatewayFetch | LlmGatewayServiceOptions) {
+    const options = resolveConstructorOptions(arg);
+    this.config = resolveLlmGatewayConfig(options.env);
+    this.now = options.now ?? (() => Date.now());
+    this.fetchImpl =
+      options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   }
 
   getConfig(): LlmGatewayConfig {
@@ -110,6 +161,151 @@ export class LlmGatewayService {
     );
   }
 
+  reserveRequest(
+    input: ReserveLlmGatewayRequestInput,
+  ): ReserveLlmGatewayRequestReservation {
+    const usage = this.getUsage(input.actorKey);
+    const now = this.now();
+
+    this.pruneMinuteWindow(usage.requestHits, now);
+    this.pruneTokenWindow(usage.inputTokenEvents, now);
+    this.pruneTokenWindow(usage.outputTokenEvents, now);
+    this.pruneDailySpend(usage, now);
+
+    if (usage.requestHits.length >= this.config.requestsPerMinute) {
+      throw new ApiRequestError(
+        429,
+        "ASSISTANT_RATE_LIMITED",
+        "Platform Admin assistant request rate limit exceeded.",
+        {
+          actorKey: input.actorKey,
+          limit: this.config.requestsPerMinute,
+          windowMs: MINUTE_MS,
+        },
+      );
+    }
+
+    const estimatedInputTokens = this.estimateTokens(input.requestText);
+    const minuteInputTokens = this.sumTokenWindow(usage.inputTokenEvents);
+    if (
+      minuteInputTokens + estimatedInputTokens >
+      this.config.inputTokensPerMinute
+    ) {
+      throw new ApiRequestError(
+        429,
+        "ASSISTANT_INPUT_TOKEN_RATE_LIMITED",
+        "Platform Admin assistant input token rate limit exceeded.",
+        {
+          actorKey: input.actorKey,
+          limit: this.config.inputTokensPerMinute,
+          windowMs: MINUTE_MS,
+        },
+      );
+    }
+
+    const estimatedInputCostUsd =
+      (estimatedInputTokens / 1000) * INPUT_COST_USD_PER_1K_TOKENS;
+    const dayKey = this.dayKey(now);
+    const currentDailySpend = usage.dailySpendByDay.get(dayKey) ?? 0;
+    if (
+      currentDailySpend + estimatedInputCostUsd >
+      this.config.dailyBudgetUsd
+    ) {
+      throw new ApiRequestError(
+        429,
+        "ASSISTANT_DAILY_BUDGET_EXCEEDED",
+        "Platform Admin assistant daily budget exceeded.",
+        {
+          actorKey: input.actorKey,
+          estimatedDailySpendUsd: currentDailySpend,
+          dailyBudgetUsd: this.config.dailyBudgetUsd,
+        },
+      );
+    }
+
+    usage.requestHits.push(now);
+    usage.inputTokenEvents.push({
+      timestamp: now,
+      tokens: estimatedInputTokens,
+    });
+    usage.dailySpendByDay.set(
+      dayKey,
+      currentDailySpend + estimatedInputCostUsd,
+    );
+
+    return {
+      actorKey: input.actorKey,
+      reservedAt: now,
+      estimatedInputTokens,
+      estimatedInputCostUsd,
+    };
+  }
+
+  completeRequest(input: CompleteLlmGatewayRequestInput): void {
+    const usage = this.getUsage(input.reservation.actorKey);
+    const now = this.now();
+
+    this.pruneTokenWindow(usage.outputTokenEvents, now);
+    this.pruneDailySpend(usage, now);
+
+    const estimatedOutputTokens = this.estimateTokens(input.responseText);
+    const minuteOutputTokens = this.sumTokenWindow(usage.outputTokenEvents);
+    if (
+      minuteOutputTokens + estimatedOutputTokens >
+      this.config.outputTokensPerMinute
+    ) {
+      throw new ApiRequestError(
+        429,
+        "ASSISTANT_OUTPUT_TOKEN_RATE_LIMITED",
+        "Platform Admin assistant output token rate limit exceeded.",
+        {
+          actorKey: input.reservation.actorKey,
+          limit: this.config.outputTokensPerMinute,
+          windowMs: MINUTE_MS,
+        },
+      );
+    }
+
+    const outputCostUsd =
+      (estimatedOutputTokens / 1000) * OUTPUT_COST_USD_PER_1K_TOKENS;
+    const dayKey = this.dayKey(now);
+    const currentDailySpend = usage.dailySpendByDay.get(dayKey) ?? 0;
+    if (currentDailySpend + outputCostUsd > this.config.dailyBudgetUsd) {
+      throw new ApiRequestError(
+        429,
+        "ASSISTANT_DAILY_BUDGET_EXCEEDED",
+        "Platform Admin assistant daily budget exceeded.",
+        {
+          actorKey: input.reservation.actorKey,
+          estimatedDailySpendUsd: currentDailySpend,
+          dailyBudgetUsd: this.config.dailyBudgetUsd,
+        },
+      );
+    }
+
+    usage.outputTokenEvents.push({
+      timestamp: now,
+      tokens: estimatedOutputTokens,
+    });
+    usage.dailySpendByDay.set(dayKey, currentDailySpend + outputCostUsd);
+  }
+
+  getUsageSnapshot(actorKey: string): LlmGatewayUsageSnapshot {
+    const usage = this.getUsage(actorKey);
+    const now = this.now();
+    this.pruneMinuteWindow(usage.requestHits, now);
+    this.pruneTokenWindow(usage.inputTokenEvents, now);
+    this.pruneTokenWindow(usage.outputTokenEvents, now);
+    this.pruneDailySpend(usage, now);
+
+    return {
+      requestsInCurrentMinute: usage.requestHits.length,
+      inputTokensInCurrentMinute: this.sumTokenWindow(usage.inputTokenEvents),
+      outputTokensInCurrentMinute: this.sumTokenWindow(usage.outputTokenEvents),
+      estimatedDailySpendUsd: usage.dailySpendByDay.get(this.dayKey(now)) ?? 0,
+    };
+  }
+
   private async completeOpenAiCompatible(
     provider: "openai" | "openrouter" | "ollama",
     request: LlmGatewayChatRequest,
@@ -134,14 +330,13 @@ export class LlmGatewayService {
       throw this.toGatewayError(payload, response.status);
     }
 
-    const text = this.extractOpenAiCompatibleText(payload);
     return {
       provider,
       model:
         this.readString(payload, "model") ||
         request.model ||
         this.config.chatModel,
-      text,
+      text: this.extractOpenAiCompatibleText(payload),
       usage: {
         inputTokens: this.readNumber(payload, "usage", "prompt_tokens"),
         outputTokens: this.readNumber(payload, "usage", "completion_tokens"),
@@ -184,14 +379,13 @@ export class LlmGatewayService {
       throw this.toGatewayError(payload, response.status);
     }
 
-    const text = this.extractAnthropicText(payload);
     return {
       provider: "anthropic",
       model:
         this.readString(payload, "model") ||
         request.model ||
         this.config.chatModel,
-      text,
+      text: this.extractAnthropicText(payload),
       usage: {
         inputTokens: this.readNumber(payload, "usage", "input_tokens"),
         outputTokens: this.readNumber(payload, "usage", "output_tokens"),
@@ -267,21 +461,20 @@ export class LlmGatewayService {
       firstChoice &&
       typeof firstChoice === "object" &&
       "message" in firstChoice &&
-      typeof firstChoice.message === "object" &&
-      firstChoice.message !== null
-        ? (firstChoice.message as Record<string, unknown>)
+      typeof (firstChoice as { message?: unknown }).message === "object" &&
+      (firstChoice as { message: Record<string, unknown> }).message !== null
+        ? (firstChoice as { message: Record<string, unknown> }).message
         : null;
-    const content =
-      message && typeof message.content === "string" ? message.content : null;
 
-    if (!content) {
-      throw new LlmGatewayError(
-        "provider_invalid_response",
-        "LLM provider response did not include message content.",
-      );
+    const content = message ? message.content : null;
+    if (typeof content === "string") {
+      return content;
     }
 
-    return content;
+    throw new LlmGatewayError(
+      "provider_invalid_response",
+      "LLM provider returned an unexpected chat completion payload.",
+    );
   }
 
   private extractAnthropicText(payload: unknown): string {
@@ -292,99 +485,128 @@ export class LlmGatewayService {
       Array.isArray((payload as { content?: unknown }).content)
         ? (payload as { content: Array<Record<string, unknown>> }).content
         : [];
-    const textBlocks = content
-      .map((entry) =>
-        entry.type === "text" && typeof entry.text === "string"
-          ? entry.text
-          : null,
-      )
-      .filter((entry): entry is string => Boolean(entry));
 
-    if (textBlocks.length === 0) {
-      throw new LlmGatewayError(
-        "provider_invalid_response",
-        "Anthropic provider response did not include text content.",
-      );
+    const textBlocks = content
+      .map((block) =>
+        typeof block?.text === "string" ? block.text : null,
+      )
+      .filter((value): value is string => value !== null);
+
+    if (textBlocks.length > 0) {
+      return textBlocks.join("\n");
     }
 
-    return textBlocks.join("\n");
+    throw new LlmGatewayError(
+      "provider_invalid_response",
+      "Anthropic provider returned no text content.",
+    );
   }
 
   private toGatewayError(payload: unknown, status: number): LlmGatewayError {
-    const message = this.extractErrorMessage(payload);
-    const lowerMessage = message.toLowerCase();
+    const message =
+      this.readString(payload, "error", "message") ||
+      this.readString(payload, "message") ||
+      "LLM provider request failed.";
+    const normalized = message.toLowerCase();
 
-    if (
-      status === 401 ||
-      status === 403 ||
-      lowerMessage.includes("api key") ||
-      lowerMessage.includes("authentication")
-    ) {
-      return new LlmGatewayError("missing_api_key", message, status);
-    }
-
-    if (status === 429) {
+    if (status === 429 && normalized.includes("quota")) {
       return new LlmGatewayError(
-        lowerMessage.includes("quota")
-          ? "provider_quota_exceeded"
-          : "provider_rate_limited",
+        "provider_quota_exceeded",
         message,
         status,
       );
     }
-
-    return new LlmGatewayError("provider_unavailable", message, status);
-  }
-
-  private extractErrorMessage(payload: unknown): string {
-    if (typeof payload === "object" && payload !== null) {
-      const nestedError =
-        "error" in payload && typeof payload.error === "object"
-          ? (payload.error as Record<string, unknown>)
-          : null;
-      const nestedMessage =
-        nestedError && typeof nestedError.message === "string"
-          ? nestedError.message
-          : null;
-      if (nestedMessage) {
-        return nestedMessage;
-      }
-
-      if (typeof (payload as { message?: unknown }).message === "string") {
-        return (payload as { message: string }).message;
-      }
+    if (status === 429) {
+      return new LlmGatewayError("provider_rate_limited", message, status);
+    }
+    if (status >= 500) {
+      return new LlmGatewayError("provider_unavailable", message, status);
     }
 
-    return "LLM provider request failed.";
+    return new LlmGatewayError("provider_invalid_response", message, status);
   }
 
-  private readString(payload: unknown, key: string): string | null {
-    return typeof payload === "object" &&
-      payload !== null &&
-      typeof (payload as Record<string, unknown>)[key] === "string"
-      ? ((payload as Record<string, unknown>)[key] as string)
+  private readString(payload: unknown, ...path: string[]): string | null {
+    let cursor: unknown = payload;
+    for (const key of path) {
+      if (!cursor || typeof cursor !== "object" || !(key in cursor)) {
+        return null;
+      }
+      cursor = (cursor as Record<string, unknown>)[key];
+    }
+
+    return typeof cursor === "string" ? cursor : null;
+  }
+
+  private readNumber(payload: unknown, ...path: string[]): number | null {
+    let cursor: unknown = payload;
+    for (const key of path) {
+      if (!cursor || typeof cursor !== "object" || !(key in cursor)) {
+        return null;
+      }
+      cursor = (cursor as Record<string, unknown>)[key];
+    }
+
+    return typeof cursor === "number" && Number.isFinite(cursor)
+      ? cursor
       : null;
   }
 
-  private readNumber(
-    payload: unknown,
-    containerKey: string,
-    key: string,
-  ): number | null {
-    const container =
-      typeof payload === "object" &&
-      payload !== null &&
-      containerKey in payload &&
-      typeof (payload as Record<string, unknown>)[containerKey] === "object" &&
-      (payload as Record<string, unknown>)[containerKey] !== null
-        ? ((payload as Record<string, unknown>)[containerKey] as Record<
-            string,
-            unknown
-          >)
-        : null;
+  private estimateTokens(text: string): number {
+    const normalized = text.trim();
+    if (!normalized) {
+      return 1;
+    }
+    return Math.max(1, Math.ceil(normalized.length / 4));
+  }
 
-    return container && typeof container[key] === "number"
-      ? (container[key] as number)
-      : null;
+  private getUsage(actorKey: string): LlmGatewayActorUsage {
+    let usage = this.usageByActor.get(actorKey);
+    if (!usage) {
+      usage = {
+        requestHits: [],
+        inputTokenEvents: [],
+        outputTokenEvents: [],
+        dailySpendByDay: new Map<string, number>(),
+      };
+      this.usageByActor.set(actorKey, usage);
+    }
+    return usage;
+  }
+
+  private pruneMinuteWindow(events: number[], now: number): void {
+    const cutoff = now - MINUTE_MS;
+    while (events.length > 0 && events[0]! <= cutoff) {
+      events.shift();
+    }
+  }
+
+  private pruneTokenWindow(
+    events: Array<{ timestamp: number; tokens: number }>,
+    now: number,
+  ): void {
+    const cutoff = now - MINUTE_MS;
+    while (events.length > 0 && events[0]!.timestamp <= cutoff) {
+      events.shift();
+    }
+  }
+
+  private sumTokenWindow(
+    events: Array<{ timestamp: number; tokens: number }>,
+  ): number {
+    return events.reduce((total, event) => total + event.tokens, 0);
+  }
+
+  private pruneDailySpend(usage: LlmGatewayActorUsage, now: number): void {
+    const activeDay = this.dayKey(now);
+    for (const day of usage.dailySpendByDay.keys()) {
+      if (day !== activeDay) {
+        usage.dailySpendByDay.delete(day);
+      }
+    }
+  }
+
+  private dayKey(timestampMs: number): string {
+    return new Date(timestampMs).toISOString().slice(0, 10);
   }
 }

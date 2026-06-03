@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveLlmGatewayConfig } from "../../src/common/llm-gateway";
+import {
+  LlmGatewayService,
+  resolveLlmGatewayConfig,
+} from "../../src/common/llm-gateway";
 
 describe("resolveLlmGatewayConfig", () => {
   it("defaults to a mock provider with conservative limits", () => {
@@ -96,6 +99,130 @@ describe("resolveLlmGatewayConfig", () => {
       }),
     ).toThrow(
       "LLM_GATEWAY_PROVIDER must be one of: mock, openai, anthropic, openrouter, ollama",
+    );
+  });
+});
+
+describe("LlmGatewayService usage enforcement", () => {
+  it("tracks per-actor request and token usage", () => {
+    const now = Date.parse("2026-06-03T00:00:00.000Z");
+    const service = new LlmGatewayService({
+      env: {
+        LLM_GATEWAY_REQUESTS_PER_MINUTE: "3",
+        LLM_GATEWAY_INPUT_TOKENS_PER_MINUTE: "1000",
+        LLM_GATEWAY_OUTPUT_TOKENS_PER_MINUTE: "1000",
+      },
+      now: () => now,
+    });
+
+    const reservation = service.reserveRequest({
+      actorKey: "pa-admin-1",
+      requestText: "hello world",
+    });
+    service.completeRequest({
+      reservation,
+      responseText: "reply text",
+    });
+
+    expect(service.getUsageSnapshot("pa-admin-1")).toMatchObject({
+      requestsInCurrentMinute: 1,
+    });
+    expect(
+      service.getUsageSnapshot("pa-admin-1").inputTokensInCurrentMinute,
+    ).toBeGreaterThan(0);
+    expect(
+      service.getUsageSnapshot("pa-admin-1").outputTokensInCurrentMinute,
+    ).toBeGreaterThan(0);
+  });
+
+  it("rejects requests once the configured daily budget is exhausted", () => {
+    const service = new LlmGatewayService({
+      env: {
+        LLM_GATEWAY_DAILY_BUDGET_USD: "0.000001",
+      },
+      now: () => Date.parse("2026-06-03T00:00:00.000Z"),
+    });
+
+    expect(() =>
+      service.reserveRequest({
+        actorKey: "pa-admin-2",
+        requestText:
+          "This request is intentionally long enough to exceed the tiny budget.",
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_DAILY_BUDGET_EXCEEDED",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("rejects responses once the configured output token rate limit is exhausted", () => {
+    const service = new LlmGatewayService({
+      env: {
+        LLM_GATEWAY_OUTPUT_TOKENS_PER_MINUTE: "2",
+      },
+      now: () => Date.parse("2026-06-03T00:00:00.000Z"),
+    });
+
+    const reservation = service.reserveRequest({
+      actorKey: "pa-admin-3",
+      requestText: "ok",
+    });
+
+    expect(() =>
+      service.completeRequest({
+        reservation,
+        responseText: "this response is too long",
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_OUTPUT_TOKEN_RATE_LIMITED",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("rejects responses that would push spend past the configured daily budget", () => {
+    const service = new LlmGatewayService({
+      env: {
+        LLM_GATEWAY_DAILY_BUDGET_USD: "0.00001",
+      },
+      now: () => Date.parse("2026-06-03T00:00:00.000Z"),
+    });
+
+    const reservation = service.reserveRequest({
+      actorKey: "pa-admin-4",
+      requestText: "ok",
+    });
+
+    expect(() =>
+      service.completeRequest({
+        reservation,
+        responseText:
+          "This response is intentionally long enough to exceed the remaining daily budget.",
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_DAILY_BUDGET_EXCEEDED",
+          }),
+        }),
+      }),
+    );
+
+    expect(service.getUsageSnapshot("pa-admin-4")).toMatchObject({
+      outputTokensInCurrentMinute: 0,
+    });
+    expect(service.getUsageSnapshot("pa-admin-4").estimatedDailySpendUsd).toBe(
+      reservation.estimatedInputCostUsd,
     );
   });
 });

@@ -1,13 +1,21 @@
 import { randomUUID } from "node:crypto";
 
-import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { HttpStatus, Inject, Injectable, Optional } from "@nestjs/common";
 
 import { toActionReceipt } from "../../common/action-receipt";
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { LlmGatewayService } from "../../common/llm-gateway";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import type { PlatformAdminAssistantToolResult } from "../platform-admin/platform-admin-assistant.policy";
+import { authorizePlatformAdminAssistantToolCall } from "../platform-admin/platform-admin-assistant.policy";
 import { PlatformAdminService } from "../platform-admin/platform-admin.service";
+import { detectInjectionSignals } from "./knowledge/prompt-injection";
+import { PlatformAdminAssistantAuditRecorder } from "./platform-admin-assistant.audit";
+import {
+  findResidualSecrets,
+  redactText,
+} from "./platform-admin-assistant.redaction";
 import type { RetrievalResult } from "./knowledge";
 import {
   getApprovedSource,
@@ -64,6 +72,10 @@ export class PlatformAdminAssistantService {
     private readonly platformAdminService: PlatformAdminService,
     private readonly auditNotificationService: AuditNotificationService,
     private readonly knowledgeService: PlatformAdminAssistantKnowledgeService,
+    @Optional()
+    private readonly llmGatewayService: LlmGatewayService = new LlmGatewayService(),
+    @Optional()
+    private readonly assistantAuditRecorder: PlatformAdminAssistantAuditRecorder = new PlatformAdminAssistantAuditRecorder(),
   ) {}
 
   listSessions(identity: BootstrapRequestIdentity | null) {
@@ -147,11 +159,12 @@ export class PlatformAdminAssistantService {
     }
 
     const sessionMessages = this.messages.get(sessionId) ?? [];
+    const redactedUserMessage = redactText(trimmedMessage);
     const userMessage: PlatformAdminAssistantMessageRecord = {
       messageId: `paas_msg_${randomUUID()}`,
       sessionId,
       role: "user",
-      content: trimmedMessage,
+      content: redactedUserMessage.text,
       answer: "",
       citations: [],
       suggestedPrompts: [],
@@ -160,26 +173,52 @@ export class PlatformAdminAssistantService {
     };
     sessionMessages.push(userMessage);
 
+    this.assertSafeTranscriptRecord(userMessage);
+    this.assistantAuditRecorder.recordMessage({
+      actorId: session.actor.actorId,
+      sessionId,
+      route: this.assistantSessionRoute(sessionId),
+      redactionApplied: redactedUserMessage.redacted,
+      metadata: {
+        role: "user",
+        provider: session.provider,
+        requestId: session.actor.requestId,
+        content: userMessage.content,
+      },
+    });
+
+    const reservation = this.llmGatewayService.reserveRequest({
+      actorKey: session.actor.actorId,
+      requestText: this.buildProviderUsageText(sessionMessages),
+    });
+
     const providerResponse = await this.generateProviderResponse(
       session,
       trimmedMessage,
       sessionMessages,
     );
+    this.llmGatewayService.completeRequest({
+      reservation,
+      responseText: providerResponse.answer,
+    });
+
+    const safeProviderResponse =
+      this.sanitizeProviderResponse(providerResponse);
 
     const assistantMessage: PlatformAdminAssistantMessageRecord = {
       messageId: `paas_msg_${randomUUID()}`,
       sessionId,
       role: "assistant",
-      content: providerResponse.answer,
-      answer: providerResponse.answer,
-      citations: providerResponse.citations.map((citation) => ({
+      content: safeProviderResponse.answer,
+      answer: safeProviderResponse.answer,
+      citations: safeProviderResponse.citations.map((citation) => ({
         ...citation,
       })),
-      suggestedPrompts: [...providerResponse.suggestedPrompts],
-      actionPlan: providerResponse.actionPlan
+      suggestedPrompts: [...safeProviderResponse.suggestedPrompts],
+      actionPlan: safeProviderResponse.actionPlan
         ? {
-            ...providerResponse.actionPlan,
-            steps: providerResponse.actionPlan.steps.map((step) => ({
+            ...safeProviderResponse.actionPlan,
+            steps: safeProviderResponse.actionPlan.steps.map((step) => ({
               ...step,
             })),
           }
@@ -187,7 +226,21 @@ export class PlatformAdminAssistantService {
       createdAt: new Date().toISOString(),
     };
     sessionMessages.push(assistantMessage);
+    this.assertSafeTranscriptRecord(assistantMessage);
     this.messages.set(sessionId, sessionMessages);
+
+    this.assistantAuditRecorder.recordMessage({
+      actorId: session.actor.actorId,
+      sessionId,
+      route: this.assistantSessionRoute(sessionId),
+      metadata: {
+        role: "assistant",
+        requestId: session.actor.requestId,
+        content: assistantMessage.answer,
+        suggestions: assistantMessage.suggestedPrompts,
+        citations: assistantMessage.citations,
+      },
+    });
 
     if (assistantMessage.actionPlan) {
       const planRecord: PlatformAdminAssistantPlanRecord = {
@@ -200,6 +253,18 @@ export class PlatformAdminAssistantService {
         ...(this.plans.get(sessionId) ?? []),
         planRecord,
       ]);
+      this.assertSafeTranscriptRecord(planRecord);
+      this.assistantAuditRecorder.recordPlanCreated({
+        actorId: session.actor.actorId,
+        sessionId,
+        route: this.assistantSessionRoute(sessionId),
+        actionId: assistantMessage.actionPlan.planId,
+        metadata: {
+          title: assistantMessage.actionPlan.title,
+          summary: assistantMessage.actionPlan.summary,
+          stepCount: assistantMessage.actionPlan.steps.length,
+        },
+      });
     }
 
     const nextTitle =
@@ -291,6 +356,7 @@ export class PlatformAdminAssistantService {
     command: PlatformAdminAssistantActionCommand,
   ): PlatformAdminAssistantActionPreview {
     this.requireOwnedSession(sessionId, identity);
+    this.authorizeActionTool(command, identity);
     const resolvedAction = this.requireResolvedAction(command);
 
     return {
@@ -321,9 +387,21 @@ export class PlatformAdminAssistantService {
   ): PlatformAdminAssistantActionExecutionResult {
     const actor = this.requirePlatformAdminIdentity(identity);
     this.requireOwnedSession(sessionId, identity);
+    this.authorizeActionTool(command, identity);
     const resolvedAction = this.requireResolvedAction(command);
 
     if (!resolvedAction.descriptor.enabled) {
+      this.assistantAuditRecorder.recordActionBlocked({
+        actorId: actor.actorId,
+        sessionId,
+        route: this.assistantActionRoute(sessionId, resolvedAction.toolName),
+        actionId: resolvedAction.toolName,
+        metadata: {
+          reasonCode: "descriptor_disabled",
+          disabledReasonCode:
+            resolvedAction.descriptor.disabledReasonCode ?? null,
+        },
+      });
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "ASSISTANT_ACTION_DISABLED",
@@ -338,6 +416,15 @@ export class PlatformAdminAssistantService {
 
     const normalizedReason = command.reason?.trim() ?? "";
     if (resolvedAction.descriptor.riskLevel === "high" && !normalizedReason) {
+      this.assistantAuditRecorder.recordActionBlocked({
+        actorId: actor.actorId,
+        sessionId,
+        route: this.assistantActionRoute(sessionId, resolvedAction.toolName),
+        actionId: resolvedAction.toolName,
+        metadata: {
+          reasonCode: "reason_required",
+        },
+      });
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "ASSISTANT_ACTION_REASON_REQUIRED",
@@ -347,6 +434,17 @@ export class PlatformAdminAssistantService {
         },
       );
     }
+
+    this.assistantAuditRecorder.recordActionConfirmed({
+      actorId: actor.actorId,
+      sessionId,
+      route: this.assistantActionRoute(sessionId, resolvedAction.toolName),
+      actionId: resolvedAction.toolName,
+      metadata: {
+        riskLevel: resolvedAction.descriptor.riskLevel,
+        reason: normalizedReason || null,
+      },
+    });
 
     const domainResult = resolvedAction.execute(
       this.platformAdminService,
@@ -373,6 +471,22 @@ export class PlatformAdminAssistantService {
         domainAuditId: receipt.auditId,
       },
       ...(requestId ? { requestId } : {}),
+    });
+
+    this.assistantAuditRecorder.recordActionExecuted({
+      actorId: actor.actorId,
+      sessionId,
+      route: this.assistantActionRoute(sessionId, resolvedAction.toolName),
+      actionId: resolvedAction.toolName,
+      resourceType: receipt.resourceType,
+      resourceId: receipt.resourceId,
+      domainAuditId: receipt.auditId,
+      metadata: {
+        assistantAuditId: assistantAudit.auditId,
+        riskLevel: resolvedAction.descriptor.riskLevel,
+        reason: normalizedReason || null,
+        receipt,
+      },
     });
 
     return {
@@ -479,7 +593,7 @@ export class PlatformAdminAssistantService {
     try {
       return await this.assistantProvider.generate({
         session,
-        message,
+        message: redactText(message).text,
         history: history.map((entry) => this.cloneMessage(entry)),
         retrieval,
       });
@@ -588,6 +702,92 @@ export class PlatformAdminAssistantService {
 
   private deriveSessionTitle(message: string) {
     return message.length > 48 ? `${message.slice(0, 45)}...` : message;
+  }
+
+  private sanitizeProviderResponse(
+    response: PlatformAdminAssistantProviderResponse,
+  ): PlatformAdminAssistantProviderResponse {
+    const redactedAnswer = redactText(response.answer);
+    const injectionScan = detectInjectionSignals(redactedAnswer.text);
+    const safeAnswer = injectionScan.hasInjectionRisk
+      ? "Assistant response withheld because provider output contained prompt-injection-like content."
+      : redactedAnswer.text;
+
+    return {
+      answer: safeAnswer,
+      citations: response.citations.map((citation) => ({
+        title: redactText(citation.title).text,
+        ...(citation.section
+          ? { section: redactText(citation.section).text }
+          : {}),
+        ...(citation.href ? { href: citation.href } : {}),
+      })),
+      suggestedPrompts: response.suggestedPrompts.map(
+        (prompt) => redactText(prompt).text,
+      ),
+      actionPlan: response.actionPlan
+        ? {
+            ...response.actionPlan,
+            title: redactText(response.actionPlan.title).text,
+            summary: redactText(response.actionPlan.summary).text,
+            steps: response.actionPlan.steps.map((step) => ({
+              ...step,
+              title: redactText(step.title).text,
+            })),
+          }
+        : null,
+    };
+  }
+
+  private authorizeActionTool(
+    command: PlatformAdminAssistantActionCommand,
+    identity: BootstrapRequestIdentity | null,
+  ): void {
+    const decision = authorizePlatformAdminAssistantToolCall(
+      {
+        toolName: command.toolName,
+      },
+      identity,
+    );
+
+    if (!decision.allowed) {
+      throw new ApiRequestError(
+        decision.reasonCode === "missing_identity"
+          ? HttpStatus.UNAUTHORIZED
+          : HttpStatus.FORBIDDEN,
+        "ASSISTANT_TOOL_POLICY_REJECTED",
+        decision.reason,
+        {
+          toolName: command.toolName,
+          reasonCode: decision.reasonCode,
+        },
+      );
+    }
+  }
+
+  private assistantSessionRoute(sessionId: string): string {
+    return `/platform-admin/assistant/sessions/${sessionId}`;
+  }
+
+  private assistantActionRoute(sessionId: string, toolName: string): string {
+    return `${this.assistantSessionRoute(sessionId)}/actions/${toolName}`;
+  }
+
+  private buildProviderUsageText(
+    history: PlatformAdminAssistantMessageRecord[],
+  ): string {
+    return history.map((entry) => `${entry.role}:${entry.content}`).join("\n");
+  }
+
+  private assertSafeTranscriptRecord(record: unknown): void {
+    const residualSecrets = findResidualSecrets(record).filter(
+      (path) => !path.endsWith(".href") && !path.endsWith(".sourcePath"),
+    );
+    if (residualSecrets.length > 0) {
+      throw new Error(
+        `Assistant transcript redaction failed for: ${residualSecrets.join(", ")}`,
+      );
+    }
   }
 
   private cloneActor(actor: PlatformAdminAssistantControlPlaneIdentity) {
