@@ -152,6 +152,34 @@ export interface ResourceActionDescriptor {
   riskLevel: ActionRiskLevel;
 }
 
+/**
+ * Tool input the model uses when it wants to suggest, but not execute, a
+ * state-changing action. The frontend resolves the matching
+ * `ResourceActionDescriptor` and still requires human confirmation before any
+ * write API call.
+ */
+export interface ProposeActionToolInput {
+  resourceKind: string;
+  resourceId: string;
+  action: string;
+  args?: Record<string, unknown>;
+}
+
+/**
+ * Non-mutating assistant output that describes a proposed action. This is an
+ * intent only: it never performs the mutation itself.
+ */
+export interface ActionIntent {
+  type: "action_intent";
+  tool: "proposeAction";
+  resourceKind: string;
+  resourceId: string;
+  action: string;
+  args: Record<string, unknown>;
+  confirmationRequired: true;
+  mutates: false;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Q-X15 — EmptyStateEnvelope
 // ─────────────────────────────────────────────────────────────────────────────
