@@ -14,6 +14,7 @@ import {
   InternalKeyMiddleware,
 } from "./common/auth";
 import { JwtAuthService } from "./common/auth/jwt-auth.service";
+import { LlmGatewayModule } from "./common/llm-gateway";
 import { SnakeCaseExceptionFilter } from "./common/snake-case.exception-filter";
 import { SnakeCaseInterceptor } from "./common/snake-case.interceptor";
 import { BootstrapThrottlerGuard } from "./common/throttling/bootstrap-throttler.guard";
@@ -34,6 +35,7 @@ import { MaintenanceModule } from "./modules/maintenance/maintenance.module";
 import { OwnedMobilityModule } from "./modules/owned-mobility/owned-mobility.module";
 import { OperationalObservabilityModule } from "./modules/operational-observability/operational-observability.module";
 import { PlatformAdminModule } from "./modules/platform-admin/platform-admin.module";
+import { PlatformAdminAssistantModule } from "./modules/platform-admin-assistant/platform-admin-assistant.module";
 import { PlatformPresenceModule } from "./modules/platform-presence/platform-presence.module";
 import { PlatformEarningsModule } from "./modules/platform-earnings/platform-earnings.module";
 import { ProductRuleModule } from "./modules/product-rule/product-rule.module";
@@ -47,6 +49,7 @@ import { AuthModule } from "./modules/auth/auth.module";
   imports: [
     EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([...GLOBAL_RATE_LIMIT]),
+    LlmGatewayModule,
     AuthModule,
     HealthModule,
     FoundationModule,
@@ -61,6 +64,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     OwnedMobilityModule,
     OperationalObservabilityModule,
     PlatformAdminModule,
+    PlatformAdminAssistantModule,
     BillingSettlementModule,
     ReportingFilingModule,
     ForwarderModule,
