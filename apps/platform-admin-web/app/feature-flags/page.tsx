@@ -81,6 +81,8 @@ type FlagTableRow = {
   tenantId: string | null;
   scopeLabel: string;
   scopeTone: "accent" | "neutral";
+  rolloutLabel: "mid_rollout" | "rolled_out" | "deprecated";
+  rolloutTone: "warn" | "success" | "danger";
   updatedAt: string;
   updatedBy: string;
 } & Record<string, unknown>;
@@ -138,16 +140,13 @@ const toolbarStyle = {
   gap: 12,
   gridTemplateColumns: "minmax(220px, 320px) minmax(0, 1fr)",
   alignItems: "end",
-  marginBottom: 16,
 } satisfies CSSProperties;
 
-const toolbarMetaStyle = {
+const utilityBarStyle = {
   display: "flex",
   flexWrap: "wrap",
-  justifyContent: "space-between",
   alignItems: "center",
   gap: 8,
-  minHeight: 32,
 } satisfies CSSProperties;
 
 const filterRowStyle = {
@@ -157,6 +156,12 @@ const filterRowStyle = {
   gap: 8,
 } satisfies CSSProperties;
 
+const tableHeaderStackStyle = {
+  display: "grid",
+  gap: 12,
+  marginBottom: 16,
+} satisfies CSSProperties;
+
 const filterButtonStyle = {
   appearance: "none",
   border: 0,
@@ -164,24 +169,6 @@ const filterButtonStyle = {
   margin: 0,
   background: "transparent",
   cursor: "pointer",
-} satisfies CSSProperties;
-
-const summaryGridStyle = {
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-} satisfies CSSProperties;
-
-const summaryCardBodyStyle = {
-  display: "grid",
-  gap: 6,
-} satisfies CSSProperties;
-
-const summaryValueStyle = {
-  color: theme.text,
-  fontSize: 24,
-  fontWeight: 700,
-  lineHeight: 1,
 } satisfies CSSProperties;
 
 const loadingStateStyle = {
@@ -204,6 +191,11 @@ const fieldHintStyle = {
 } satisfies CSSProperties;
 
 const secondaryPanelStyle = {
+  display: "grid",
+  gap: 12,
+} satisfies CSSProperties;
+
+const sectionStackStyle = {
   display: "grid",
   gap: 16,
 } satisfies CSSProperties;
@@ -327,13 +319,16 @@ const receiptCardStyle = {
 const composerSummaryStyle = {
   display: "grid",
   gap: 6,
-  marginTop: 10,
+} satisfies CSSProperties;
+
+const composerLeadStyle = {
+  display: "grid",
+  gap: 4,
 } satisfies CSSProperties;
 
 const secondarySectionStyle = {
   display: "grid",
   gap: 12,
-  marginTop: 12,
 } satisfies CSSProperties;
 
 function toggleButtonStyle(
@@ -369,6 +364,14 @@ const toggleKnobStyle = {
 
 function toFlagTableRow(flag: FeatureFlag): FlagTableRow {
   const isTenantOverride = Boolean(flag.tenantId);
+  const deprecated = isDeprecatedFlag(flag);
+  const rolloutLabel = deprecated
+    ? "deprecated"
+    : isTenantOverride
+      ? "mid_rollout"
+      : flag.enabled
+        ? "rolled_out"
+        : "mid_rollout";
 
   return {
     key: flag.key,
@@ -379,6 +382,13 @@ function toFlagTableRow(flag: FeatureFlag): FlagTableRow {
       ? `Tenant override · ${flag.tenantId}`
       : "Platform default",
     scopeTone: isTenantOverride ? "accent" : "neutral",
+    rolloutLabel,
+    rolloutTone:
+      rolloutLabel === "deprecated"
+        ? "danger"
+        : rolloutLabel === "rolled_out"
+          ? "success"
+          : "warn",
     updatedAt: flag.updatedAt,
     updatedBy: "Contract not exposed",
   };
@@ -610,23 +620,17 @@ export default function FeatureFlagsPage() {
             : "Platform defaults",
           summaryPlatformDefault: "Platform defaults",
           summaryTenantOverride: "Tenant overrides",
-          summaryEnabled: "Enabled in view",
-          summaryDisabled: "Disabled in view",
-          visibleRows: `${filteredRows.length} visible row(s)`,
-          overrideVisible: `${overrideCount} tenant override row(s)`,
           tableTitle: "Feature flag registry",
           tableSubtitle:
-            "KEY, SCOPE, STATE TOGGLE, UPDATED BY, AT, and ACTIONS match the canvas handoff.",
-          summaryTitle: "Current write lane",
-          summaryVisible: "Visible rows",
-          summaryScope: "Active scope",
-          summaryMode: "Change lane",
-          summaryModeValue: "WRITE authority",
+            "KEY, SCOPE, STATE TOGGLE, UPDATED BY, AT, and ACTIONS stay in the assigned table-first body.",
           filterLabel: "Rollout state",
           filterPill: "table-first layout",
+          rolloutMid: "Mid-rollout",
+          rolloutFull: "Rolled out",
+          rolloutDeprecated: "Deprecated",
           keyHeader: "Key",
           scopeHeader: "Scope",
-          stateHeader: "State toggle",
+          stateHeader: "State",
           updatedByHeader: "Updated by",
           updatedAtHeader: "At",
           actionsHeader: "Actions",
@@ -665,6 +669,11 @@ export default function FeatureFlagsPage() {
           confirmRemove: "Remove override",
           noFlags: t("flags.empty"),
           loading: t("flags.loading"),
+          scopeMeta: "Inspect scope",
+          resultMeta: `${filteredRows.length} visible row(s)`,
+          enabledMeta: `${enabledCount} enabled`,
+          disabledMeta: `${disabledCount} disabled`,
+          overrideMeta: `${overrideCount} tenant override row(s)`,
           notesTitle: "Extended notes",
           notesEmpty:
             "No additional contract notes are exposed for the current scope.",
@@ -685,6 +694,10 @@ export default function FeatureFlagsPage() {
           actionApplied: "Audit receipt recorded",
           noFlagsInFilter:
             "No feature flags match the current rollout filter and search query.",
+          laneMeta: "Writable only here",
+          notesMeta: "Extended notes stay outside the default body.",
+          receiptsMeta: `${auditReceipts.length} local receipt(s)`,
+          showAllReceipts: "Show all receipts",
         }
       : {
           pageTitle: "Feature Flags · WRITE authority",
@@ -710,23 +723,17 @@ export default function FeatureFlagsPage() {
             : "平台預設",
           summaryPlatformDefault: "平台預設",
           summaryTenantOverride: "Tenant overrides",
-          summaryEnabled: "目前檢視啟用",
-          summaryDisabled: "目前檢視停用",
-          visibleRows: `可見 ${filteredRows.length} 列`,
-          overrideVisible: `tenant override ${overrideCount} 列`,
           tableTitle: "Feature flag registry",
           tableSubtitle:
-            "依畫布 handoff 對齊 KEY、SCOPE、STATE TOGGLE、UPDATED BY、AT、ACTIONS。",
-          summaryTitle: "目前 write lane",
-          summaryVisible: "可見列數",
-          summaryScope: "目前 scope",
-          summaryMode: "變更權限",
-          summaryModeValue: "WRITE authority",
+            "依畫布 handoff 對齊 KEY、SCOPE、STATE TOGGLE、UPDATED BY、AT、ACTIONS 的 table-first 主體。",
           filterLabel: "Rollout 狀態",
           filterPill: "table-first layout",
+          rolloutMid: "進行中 rollout",
+          rolloutFull: "已全面 rollout",
+          rolloutDeprecated: "Deprecated",
           keyHeader: "Key",
           scopeHeader: "Scope",
-          stateHeader: "State toggle",
+          stateHeader: "State",
           updatedByHeader: "Updated by",
           updatedAtHeader: "At",
           actionsHeader: "Actions",
@@ -762,6 +769,11 @@ export default function FeatureFlagsPage() {
           confirmRemove: "移除 override",
           noFlags: t("flags.empty"),
           loading: t("flags.loading"),
+          scopeMeta: "目前 scope",
+          resultMeta: `可見 ${filteredRows.length} 列`,
+          enabledMeta: `啟用 ${enabledCount} 列`,
+          disabledMeta: `停用 ${disabledCount} 列`,
+          overrideMeta: `tenant override ${overrideCount} 列`,
           notesTitle: "延伸備註",
           notesEmpty: "目前範圍沒有額外 contract 備註。",
           historyTitle: "本地 audit receipts",
@@ -777,6 +789,10 @@ export default function FeatureFlagsPage() {
           actionApplied: "已記錄 audit receipt",
           noFlagsInFilter:
             "目前 rollout 篩選與搜尋條件沒有符合的 feature flags。",
+          laneMeta: "僅此處可寫入",
+          notesMeta: "延伸備註收在預設主體之外。",
+          receiptsMeta: `本地 receipt ${auditReceipts.length} 筆`,
+          showAllReceipts: "顯示全部 receipts",
         };
 
   const columns: CanvasTableColumn<FlagTableRow>[] = [
@@ -786,6 +802,15 @@ export default function FeatureFlagsPage() {
       r: (row) => (
         <div style={keyCellStyle}>
           <code style={codeStyle}>{row.key}</code>
+          <div style={inlinePillRowStyle}>
+            <CanvasPill theme={theme} tone={row.rolloutTone}>
+              {row.rolloutLabel === "deprecated"
+                ? copy.rolloutDeprecated
+                : row.rolloutLabel === "rolled_out"
+                  ? copy.rolloutFull
+                  : copy.rolloutMid}
+            </CanvasPill>
+          </div>
           <div style={secondaryTextStyle}>
             {row.description === "—" ? copy.noDescription : row.description}
           </div>
@@ -803,7 +828,7 @@ export default function FeatureFlagsPage() {
             </CanvasPill>
           </div>
           <div style={secondaryTextStyle}>
-            {row.tenantId ? row.tenantId : copy.currentScope}
+            {row.tenantId ? row.tenantId : copy.scopeDefault}
           </div>
         </div>
       ),
@@ -1118,356 +1143,339 @@ export default function FeatureFlagsPage() {
               />
             ) : null}
 
-            <div style={summaryGridStyle}>
+            <div style={sectionStackStyle}>
               <CanvasCard
                 theme={theme}
-                title={copy.summaryVisible}
-                subtitle={copy.visibleRows}
+                title={copy.tableTitle}
+                subtitle={copy.tableSubtitle}
+                style={{ overflow: "hidden" }}
               >
-                <div style={summaryCardBodyStyle}>
-                  <div style={summaryValueStyle}>{filteredRows.length}</div>
-                  <CanvasPill theme={theme} tone="neutral">
-                    {copy.summaryEnabled}: {enabledCount}
-                  </CanvasPill>
-                </div>
-              </CanvasCard>
-              <CanvasCard
-                theme={theme}
-                title={copy.summaryPlatformDefault}
-                subtitle={copy.overrideVisible}
-              >
-                <div style={summaryCardBodyStyle}>
-                  <div style={summaryValueStyle}>{platformDefaultCount}</div>
-                  <CanvasPill
-                    theme={theme}
-                    tone={overrideCount > 0 ? "accent" : "neutral"}
-                  >
-                    {copy.summaryTenantOverride}: {overrideCount}
-                  </CanvasPill>
-                </div>
-              </CanvasCard>
-              <CanvasCard
-                theme={theme}
-                title={copy.summaryScope}
-                subtitle={copy.scopeHint}
-              >
-                <div style={summaryCardBodyStyle}>
-                  <div style={summaryValueStyle}>
-                    {selectedTenant ? "Tenant" : "Platform"}
+                <div style={tableHeaderStackStyle}>
+                  <div style={toolbarStyle}>
+                    <CanvasField theme={theme} label={copy.scopeField}>
+                      <select
+                        value={selectedTenantId}
+                        onChange={(event) =>
+                          setSelectedTenantId(event.target.value)
+                        }
+                        disabled={tenantLoading}
+                        style={selectStyle(theme)}
+                      >
+                        <option value="">{copy.scopeDefault}</option>
+                        {tenants.map((tenant) => (
+                          <option key={tenant.id} value={tenant.id}>
+                            {tenant.name} ({tenant.code})
+                          </option>
+                        ))}
+                      </select>
+                    </CanvasField>
+                    <CanvasField theme={theme} label={copy.searchField}>
+                      <input
+                        type="search"
+                        value={searchTerm}
+                        onChange={(event) => setSearchTerm(event.target.value)}
+                        placeholder={copy.searchPlaceholder}
+                        style={selectStyle(theme)}
+                      />
+                    </CanvasField>
                   </div>
-                  <CanvasPill theme={theme} tone="neutral">
-                    {copy.currentScope}
-                  </CanvasPill>
-                </div>
-              </CanvasCard>
-              <CanvasCard
-                theme={theme}
-                title={copy.summaryMode}
-                subtitle={copy.riskTitle}
-              >
-                <div style={summaryCardBodyStyle}>
-                  <div style={summaryValueStyle}>{auditReceipts.length}</div>
-                  <CanvasPill theme={theme} tone="accent" dot>
-                    {copy.summaryModeValue}
-                  </CanvasPill>
-                </div>
-              </CanvasCard>
-            </div>
-
-            <CanvasCard
-              theme={theme}
-              title={copy.tableTitle}
-              subtitle={copy.tableSubtitle}
-              style={{ overflow: "hidden" }}
-            >
-              <div style={toolbarStyle}>
-                <CanvasField theme={theme} label={copy.scopeField}>
-                  <select
-                    value={selectedTenantId}
-                    onChange={(event) =>
-                      setSelectedTenantId(event.target.value)
-                    }
-                    disabled={tenantLoading}
-                    style={selectStyle(theme)}
-                  >
-                    <option value="">{copy.scopeDefault}</option>
-                    {tenants.map((tenant) => (
-                      <option key={tenant.id} value={tenant.id}>
-                        {tenant.name} ({tenant.code})
-                      </option>
+                  <div style={filterRowStyle}>
+                    {filterOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        style={filterButtonStyle}
+                        onClick={() => setRolloutFilter(option.value)}
+                        aria-pressed={rolloutFilter === option.value}
+                      >
+                        <CanvasPill
+                          theme={theme}
+                          tone={
+                            rolloutFilter === option.value
+                              ? "accent"
+                              : "neutral"
+                          }
+                          dot={rolloutFilter === option.value}
+                        >
+                          {option.label}: {option.count}
+                        </CanvasPill>
+                      </button>
                     ))}
-                  </select>
-                </CanvasField>
-                <CanvasField theme={theme} label={copy.searchField}>
-                  <input
-                    type="search"
-                    value={searchTerm}
-                    onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder={copy.searchPlaceholder}
-                    style={selectStyle(theme)}
-                  />
-                </CanvasField>
-              </div>
-              <div style={filterRowStyle}>
-                {filterOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    style={filterButtonStyle}
-                    onClick={() => setRolloutFilter(option.value)}
-                    aria-pressed={rolloutFilter === option.value}
-                  >
+                  </div>
+                  <div style={utilityBarStyle}>
+                    <CanvasPill theme={theme} tone="accent" dot>
+                      {copy.laneMeta}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="neutral">
+                      {copy.scopeMeta}: {copy.currentScope}
+                    </CanvasPill>
                     <CanvasPill
                       theme={theme}
-                      tone={
-                        rolloutFilter === option.value ? "accent" : "neutral"
-                      }
-                      dot={rolloutFilter === option.value}
+                      tone={enabledCount > 0 ? "success" : "neutral"}
                     >
-                      {option.label}: {option.count}
+                      {copy.enabledMeta}
                     </CanvasPill>
-                  </button>
-                ))}
-                <span style={{ flex: 1 }} />
-                <CanvasPill theme={theme} tone="neutral">
-                  {copy.filterPill}
-                </CanvasPill>
-              </div>
-              <div style={toolbarMetaStyle}>
-                <CanvasPill
-                  theme={theme}
-                  tone={enabledCount > 0 ? "success" : "neutral"}
-                >
-                  {copy.summaryEnabled}: {enabledCount}
-                </CanvasPill>
-                <CanvasPill theme={theme} tone="neutral">
-                  {copy.summaryDisabled}: {disabledCount}
-                </CanvasPill>
-                <CanvasPill theme={theme} tone="neutral">
-                  {copy.currentScope}
-                </CanvasPill>
-              </div>
-
-              <div style={fieldHintStyle}>
-                {tenantLoading ? copy.scopeLoading : copy.scopeHint} ·{" "}
-                {copy.overrideVisible}
-              </div>
-
-              {filteredRows.length === 0 ? (
-                <div style={emptyStateStyle}>
-                  {searchTerm || rolloutFilter !== "all"
-                    ? copy.noFlagsInFilter
-                    : copy.noFlags}
+                    <CanvasPill theme={theme} tone="neutral">
+                      {copy.disabledMeta}
+                    </CanvasPill>
+                    <CanvasPill
+                      theme={theme}
+                      tone={overrideCount > 0 ? "accent" : "neutral"}
+                    >
+                      {copy.overrideMeta}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="neutral">
+                      {copy.resultMeta}
+                    </CanvasPill>
+                    <span style={{ flex: 1 }} />
+                    <CanvasPill theme={theme} tone="neutral">
+                      {copy.filterPill}
+                    </CanvasPill>
+                  </div>
                 </div>
-              ) : (
-                <CanvasTable<FlagTableRow>
-                  theme={theme}
-                  columns={columns}
-                  rows={filteredRows}
-                />
-              )}
-            </CanvasCard>
 
-            <details
-              style={detailsStyle}
-              open={Boolean(pendingAction || actionError || historyKey)}
-            >
-              <summary style={detailSummaryStyle}>
-                {copy.secondaryPanelTitle}
-              </summary>
+                <div style={fieldHintStyle}>
+                  {tenantLoading ? copy.scopeLoading : copy.scopeHint}
+                </div>
+
+                {filteredRows.length === 0 ? (
+                  <div style={emptyStateStyle}>
+                    {searchTerm || rolloutFilter !== "all"
+                      ? copy.noFlagsInFilter
+                      : copy.noFlags}
+                  </div>
+                ) : (
+                  <CanvasTable<FlagTableRow>
+                    theme={theme}
+                    columns={columns}
+                    rows={filteredRows}
+                  />
+                )}
+              </CanvasCard>
+
               <div style={secondarySectionStyle}>
-                <CanvasBanner
-                  theme={theme}
-                  tone="warn"
-                  title={copy.riskTitle}
-                  body={copy.riskBody}
-                />
-                <div style={secondaryTextStyle}>
-                  {copy.secondaryPanelSubtitle}
+                <div style={utilityBarStyle}>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.summaryPlatformDefault}: {platformDefaultCount}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.summaryTenantOverride}: {overrideCount}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.notesMeta}
+                  </CanvasPill>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.receiptsMeta}
+                  </CanvasPill>
                 </div>
-                <details
-                  style={detailsStyle}
-                  open={Boolean(pendingAction || actionError)}
-                >
-                  <summary style={detailSummaryStyle}>
-                    {copy.actionComposerTitle}
-                  </summary>
-                  {pendingAction ? (
+
+                <div style={secondaryPanelStyle}>
+                  <details
+                    style={detailsStyle}
+                    open={Boolean(pendingAction || actionError)}
+                  >
+                    <summary style={detailSummaryStyle}>
+                      {copy.actionComposerTitle}
+                    </summary>
                     <div style={composerSummaryStyle}>
-                      {pendingAction.intent === "override" ? (
+                      <CanvasBanner
+                        theme={theme}
+                        tone="warn"
+                        title={copy.riskTitle}
+                        body={copy.riskBody}
+                      />
+                      <div style={composerLeadStyle}>
+                        <div style={secondaryTextStyle}>
+                          {copy.secondaryPanelSubtitle}
+                        </div>
+                      </div>
+                      {pendingAction ? (
                         <>
-                          <CanvasField
-                            theme={theme}
-                            label={copy.overrideTenantField}
-                          >
-                            <select
-                              value={pendingAction.tenantId}
-                              onChange={(event) =>
-                                setPendingAction((current) =>
-                                  current && current.intent === "override"
-                                    ? {
-                                        ...current,
-                                        tenantId: event.target.value,
-                                      }
-                                    : current,
-                                )
-                              }
-                              style={selectStyle(theme)}
-                            >
-                              <option value="">{copy.scopeDefault}</option>
-                              {tenants.map((tenant) => (
-                                <option key={tenant.id} value={tenant.id}>
-                                  {tenant.name} ({tenant.code})
-                                </option>
-                              ))}
-                            </select>
-                          </CanvasField>
+                          {pendingAction.intent === "override" ? (
+                            <>
+                              <CanvasField
+                                theme={theme}
+                                label={copy.overrideTenantField}
+                              >
+                                <select
+                                  value={pendingAction.tenantId}
+                                  onChange={(event) =>
+                                    setPendingAction((current) =>
+                                      current && current.intent === "override"
+                                        ? {
+                                            ...current,
+                                            tenantId: event.target.value,
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  style={selectStyle(theme)}
+                                >
+                                  <option value="">{copy.scopeDefault}</option>
+                                  {tenants.map((tenant) => (
+                                    <option key={tenant.id} value={tenant.id}>
+                                      {tenant.name} ({tenant.code})
+                                    </option>
+                                  ))}
+                                </select>
+                              </CanvasField>
+                              <CanvasField
+                                theme={theme}
+                                label={copy.overrideKeyField}
+                              >
+                                <select
+                                  value={pendingAction.key}
+                                  onChange={(event) =>
+                                    setPendingAction((current) =>
+                                      current && current.intent === "override"
+                                        ? {
+                                            ...current,
+                                            key: event.target.value,
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  style={selectStyle(theme)}
+                                >
+                                  {sortedFlagKeys.map((key) => (
+                                    <option key={key} value={key}>
+                                      {key}
+                                    </option>
+                                  ))}
+                                </select>
+                              </CanvasField>
 
-                          <CanvasField
-                            theme={theme}
-                            label={copy.overrideKeyField}
-                          >
-                            <select
-                              value={pendingAction.key}
-                              onChange={(event) =>
-                                setPendingAction((current) =>
-                                  current && current.intent === "override"
-                                    ? { ...current, key: event.target.value }
-                                    : current,
-                                )
-                              }
-                              style={selectStyle(theme)}
-                            >
-                              {sortedFlagKeys.map((key) => (
-                                <option key={key} value={key}>
-                                  {key}
-                                </option>
-                              ))}
-                            </select>
-                          </CanvasField>
+                              <CanvasField
+                                theme={theme}
+                                label={copy.overrideStateField}
+                              >
+                                <select
+                                  value={
+                                    pendingAction.enabled
+                                      ? "enabled"
+                                      : "disabled"
+                                  }
+                                  onChange={(event) =>
+                                    setPendingAction((current) =>
+                                      current && current.intent === "override"
+                                        ? {
+                                            ...current,
+                                            enabled:
+                                              event.target.value === "enabled",
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  style={selectStyle(theme)}
+                                >
+                                  <option value="enabled">
+                                    {copy.enabled}
+                                  </option>
+                                  <option value="disabled">
+                                    {copy.disabled}
+                                  </option>
+                                </select>
+                              </CanvasField>
 
-                          <CanvasField
-                            theme={theme}
-                            label={copy.overrideStateField}
-                          >
-                            <select
-                              value={
-                                pendingAction.enabled ? "enabled" : "disabled"
-                              }
-                              onChange={(event) =>
-                                setPendingAction((current) =>
-                                  current && current.intent === "override"
-                                    ? {
-                                        ...current,
-                                        enabled:
-                                          event.target.value === "enabled",
-                                      }
-                                    : current,
-                                )
-                              }
-                              style={selectStyle(theme)}
-                            >
-                              <option value="enabled">{copy.enabled}</option>
-                              <option value="disabled">{copy.disabled}</option>
-                            </select>
-                          </CanvasField>
+                              <CanvasField
+                                theme={theme}
+                                label={copy.overrideDescriptionField}
+                              >
+                                <textarea
+                                  value={pendingAction.description}
+                                  onChange={(event) =>
+                                    setPendingAction((current) =>
+                                      current && current.intent === "override"
+                                        ? {
+                                            ...current,
+                                            description: event.target.value,
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                  style={textareaStyle(theme)}
+                                />
+                              </CanvasField>
+                              <div style={fieldHintStyle}>
+                                {copy.overrideDescriptionHint}
+                              </div>
+                            </>
+                          ) : pendingAction.intent === "removeOverride" ? (
+                            <div style={secondaryTextStyle}>
+                              <strong>{pendingAction.key}</strong> ·{" "}
+                              {pendingAction.scopeLabel} · {copy.confirmRemove}
+                            </div>
+                          ) : (
+                            <div style={secondaryTextStyle}>
+                              <strong>{pendingAction.key}</strong> ·{" "}
+                              {pendingAction.scopeLabel} ·{" "}
+                              {pendingAction.currentEnabled
+                                ? copy.confirmDisable
+                                : copy.confirmEnable}
+                            </div>
+                          )}
 
-                          <CanvasField
-                            theme={theme}
-                            label={copy.overrideDescriptionField}
-                          >
+                          <CanvasField theme={theme} label={copy.reasonLabel}>
                             <textarea
-                              value={pendingAction.description}
+                              value={actionReason}
                               onChange={(event) =>
-                                setPendingAction((current) =>
-                                  current && current.intent === "override"
-                                    ? {
-                                        ...current,
-                                        description: event.target.value,
-                                      }
-                                    : current,
-                                )
+                                setActionReason(event.target.value)
                               }
+                              placeholder={copy.reasonPlaceholder}
                               style={textareaStyle(theme)}
                             />
                           </CanvasField>
-                          <div style={fieldHintStyle}>
-                            {copy.overrideDescriptionHint}
+
+                          {actionError ? (
+                            <div
+                              style={{
+                                ...secondaryTextStyle,
+                                color: theme.danger,
+                              }}
+                            >
+                              {actionError}
+                            </div>
+                          ) : null}
+
+                          <div style={actionRowStyle}>
+                            <CanvasBtn
+                              theme={theme}
+                              variant="secondary"
+                              onClick={() => {
+                                setPendingAction(null);
+                                setActionReason("");
+                                setActionError(null);
+                              }}
+                              disabled={Boolean(updating)}
+                            >
+                              {copy.cancel}
+                            </CanvasBtn>
+                            <CanvasBtn
+                              theme={theme}
+                              variant="primary"
+                              onClick={() => void handleConfirmAction()}
+                              disabled={Boolean(updating)}
+                            >
+                              {updating
+                                ? copy.confirming
+                                : pendingAction.intent === "toggle"
+                                  ? pendingAction.nextEnabled
+                                    ? copy.confirmEnable
+                                    : copy.confirmDisable
+                                  : pendingAction.intent === "override"
+                                    ? copy.confirmCreate
+                                    : copy.confirmRemove}
+                            </CanvasBtn>
                           </div>
                         </>
-                      ) : pendingAction.intent === "removeOverride" ? (
-                        <div style={secondaryTextStyle}>
-                          <strong>{pendingAction.key}</strong> ·{" "}
-                          {pendingAction.scopeLabel} · {copy.confirmRemove}
-                        </div>
                       ) : (
                         <div style={secondaryTextStyle}>
-                          <strong>{pendingAction.key}</strong> ·{" "}
-                          {pendingAction.scopeLabel} ·{" "}
-                          {pendingAction.currentEnabled
-                            ? copy.confirmDisable
-                            : copy.confirmEnable}
+                          {actionError ?? copy.actionComposerIdle}
                         </div>
                       )}
-
-                      <CanvasField theme={theme} label={copy.reasonLabel}>
-                        <textarea
-                          value={actionReason}
-                          onChange={(event) =>
-                            setActionReason(event.target.value)
-                          }
-                          placeholder={copy.reasonPlaceholder}
-                          style={textareaStyle(theme)}
-                        />
-                      </CanvasField>
-
-                      {actionError ? (
-                        <div
-                          style={{ ...secondaryTextStyle, color: theme.danger }}
-                        >
-                          {actionError}
-                        </div>
-                      ) : null}
-
-                      <div style={actionRowStyle}>
-                        <CanvasBtn
-                          theme={theme}
-                          variant="secondary"
-                          onClick={() => {
-                            setPendingAction(null);
-                            setActionReason("");
-                            setActionError(null);
-                          }}
-                          disabled={Boolean(updating)}
-                        >
-                          {copy.cancel}
-                        </CanvasBtn>
-                        <CanvasBtn
-                          theme={theme}
-                          variant="primary"
-                          onClick={() => void handleConfirmAction()}
-                          disabled={Boolean(updating)}
-                        >
-                          {updating
-                            ? copy.confirming
-                            : pendingAction.intent === "toggle"
-                              ? pendingAction.nextEnabled
-                                ? copy.confirmEnable
-                                : copy.confirmDisable
-                              : pendingAction.intent === "override"
-                                ? copy.confirmCreate
-                                : copy.confirmRemove}
-                        </CanvasBtn>
-                      </div>
                     </div>
-                  ) : (
-                    <div style={{ ...secondaryTextStyle, marginTop: 10 }}>
-                      {actionError ?? copy.actionComposerIdle}
-                    </div>
-                  )}
-                </details>
+                  </details>
 
-                <div style={secondaryPanelStyle}>
                   <details style={detailsStyle}>
                     <summary style={detailSummaryStyle}>
                       {copy.notesTitle}
@@ -1536,16 +1544,14 @@ export default function FeatureFlagsPage() {
                           size="xs"
                           onClick={() => setHistoryKey(null)}
                         >
-                          {locale === "en"
-                            ? "Show all receipts"
-                            : "顯示全部 receipts"}
+                          {copy.showAllReceipts}
                         </CanvasBtn>
                       </div>
                     ) : null}
                   </details>
                 </div>
               </div>
-            </details>
+            </div>
           </>
         )}
       </div>
