@@ -1,3 +1,9 @@
+import type { BootstrapRequestIdentity } from "../../common/auth";
+import type {
+  AssistantReadToolDefinition,
+  AssistantReadToolName,
+} from "./tools/assistant-read-tool.types";
+
 export const ASSISTANT_STREAM_EVENT_TYPES = [
   "token",
   "tool_call",
@@ -51,7 +57,9 @@ export interface CreateAssistantMessageCommand {
 export interface AssistantGatewayContext {
   conversation: UserAssistantSession;
   history: AssistantMessageRecord[];
+  identity: BootstrapRequestIdentity;
   prompt: string;
+  availableTools: AssistantReadToolDefinition[];
 }
 
 export type AssistantGatewayEvent =
@@ -62,14 +70,14 @@ export type AssistantGatewayEvent =
   | {
       type: "tool_call";
       toolCallId: string;
-      toolName: string;
+      toolName: AssistantReadToolName;
       arguments: Record<string, unknown>;
     }
   | {
       type: "tool_result";
       toolCallId: string;
-      toolName: string;
-      result: Record<string, unknown>;
+      toolName: AssistantReadToolName;
+      result: unknown;
     }
   | {
       type: "action_intent";
@@ -82,7 +90,7 @@ export type AssistantGatewayEvent =
       content: string;
     };
 
-export interface AssistantStreamEnvelope<T = Record<string, unknown>> {
+export interface AssistantStreamEnvelope<T = unknown> {
   eventId: string;
   conversationId: string;
   messageId: string | null;

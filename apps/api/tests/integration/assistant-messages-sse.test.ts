@@ -8,6 +8,7 @@ import { BootstrapAuthGuard } from "../../src/common/auth";
 import { AssistantController } from "../../src/modules/assistant/assistant.controller";
 import { AssistantLlmGatewayService } from "../../src/modules/assistant/assistant-llm-gateway.service";
 import { AssistantService } from "../../src/modules/assistant/assistant.service";
+import { AssistantReadToolRegistry } from "../../src/modules/assistant/tools/assistant-read-tool.registry";
 
 function parseSsePayload(payload: string) {
   return payload
@@ -58,6 +59,32 @@ class TestBootstrapController {
   providers: [
     AssistantLlmGatewayService,
     AssistantService,
+    {
+      provide: AssistantReadToolRegistry,
+      useValue: {
+        listDefinitions: () => [
+          {
+            name: "list_dispatch_jobs",
+            description: "List dispatch jobs visible to the caller scope.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              additionalProperties: false,
+            },
+          },
+        ],
+        execute: () => ({
+          toolName: "list_dispatch_jobs",
+          output: [
+            {
+              dispatchJobId: "job-001",
+              orderId: "order-sse-001",
+              status: "pending",
+            },
+          ],
+        }),
+      },
+    },
     {
       provide: APP_GUARD,
       useFactory: (reflector: Reflector) => new BootstrapAuthGuard(reflector),
