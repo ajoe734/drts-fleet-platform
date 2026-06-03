@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PlatformAdminAssistantProvider } from "@/components/assistant/route-context";
 import { AdminShell } from "@/components/admin-shell";
 import { LanguageProvider } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/server-locale";
@@ -19,7 +20,9 @@ export default async function RootLayout({
       <body style={{ margin: 0, minHeight: "100vh", overflow: "hidden" }}>
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
-          <AdminShell>{children}</AdminShell>
+          <PlatformAdminAssistantProvider>
+            <AdminShell>{children}</AdminShell>
+          </PlatformAdminAssistantProvider>
         </LanguageProvider>
       </body>
     </html>

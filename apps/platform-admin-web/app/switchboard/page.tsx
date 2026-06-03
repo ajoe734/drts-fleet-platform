@@ -6,6 +6,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import {
   actionButtonStyle,
@@ -216,6 +217,110 @@ export default function SwitchboardPage() {
   const placardSourceBlocked = isPlacardSourceSelectionBlocked(
     selectedPublicInfoVersion,
   );
+
+  const assistantBridge = useMemo(
+    () => ({
+      pageId: "switchboard",
+      filters: {
+        workspace_tab: {
+          apply(value: unknown) {
+            if (value !== "public-info" && value !== "placards") {
+              return {
+                ok: false,
+                code: "invalid_filter_value",
+                message:
+                  "Switchboard tab filter accepts only public-info or placards.",
+              } as const;
+            }
+            setActiveTab(value);
+            return {
+              ok: true,
+              code: "filter_applied",
+              message: `Applied switchboard tab ${value}.`,
+              payload: { filterId: "workspace_tab", value },
+            } as const;
+          },
+        },
+      },
+      drafts: {
+        public_info_version: {
+          fill(values: Record<string, unknown>) {
+            setShowPublicInfoForm(true);
+            setPublicInfoForm((current) => ({
+              ...current,
+              title:
+                typeof values.title === "string" ? values.title : current.title,
+              callPhone:
+                typeof values.callPhone === "string"
+                  ? values.callPhone
+                  : current.callPhone,
+              complaintPhone:
+                typeof values.complaintPhone === "string"
+                  ? values.complaintPhone
+                  : current.complaintPhone,
+              callRateText:
+                typeof values.callRateText === "string"
+                  ? values.callRateText
+                  : current.callRateText,
+              fareText:
+                typeof values.fareText === "string"
+                  ? values.fareText
+                  : current.fareText,
+              paymentMethodText:
+                typeof values.paymentMethodText === "string"
+                  ? values.paymentMethodText
+                  : current.paymentMethodText,
+              effectiveFrom:
+                typeof values.effectiveFrom === "string"
+                  ? values.effectiveFrom
+                  : current.effectiveFrom,
+              effectiveTo:
+                typeof values.effectiveTo === "string"
+                  ? values.effectiveTo
+                  : current.effectiveTo,
+            }));
+            return {
+              ok: true,
+              code: "draft_filled",
+              message: "Filled public info draft without submitting.",
+            } as const;
+          },
+        },
+        placard_version: {
+          fill(values: Record<string, unknown>) {
+            setShowPlacardForm(true);
+            setPlacardForm((current) => ({
+              ...current,
+              versionCode:
+                typeof values.versionCode === "string"
+                  ? values.versionCode
+                  : current.versionCode,
+              publicInfoVersionId:
+                typeof values.publicInfoVersionId === "string"
+                  ? values.publicInfoVersionId
+                  : current.publicInfoVersionId,
+              templateName:
+                typeof values.templateName === "string"
+                  ? values.templateName
+                  : current.templateName,
+              artifactFileId:
+                typeof values.artifactFileId === "string"
+                  ? values.artifactFileId
+                  : current.artifactFileId,
+            }));
+            return {
+              ok: true,
+              code: "draft_filled",
+              message: "Filled placard draft without submitting.",
+            } as const;
+          },
+        },
+      },
+    }),
+    [],
+  );
+
+  usePlatformAdminAssistantPage(assistantBridge);
 
   async function handleCreatePublicInfo(event: React.FormEvent) {
     event.preventDefault();
