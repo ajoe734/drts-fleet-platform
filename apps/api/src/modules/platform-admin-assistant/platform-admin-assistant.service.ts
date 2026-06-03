@@ -233,7 +233,8 @@ export class PlatformAdminAssistantService {
         "Assistant action is currently disabled by its ResourceActionDescriptor.",
         {
           toolName: resolvedAction.toolName,
-          disabledReasonCode: resolvedAction.descriptor.disabledReasonCode ?? null,
+          disabledReasonCode:
+            resolvedAction.descriptor.disabledReasonCode ?? null,
         },
       );
     }
@@ -274,7 +275,7 @@ export class PlatformAdminAssistantService {
         reason: normalizedReason || null,
         domainAuditId: receipt.auditId,
       },
-      requestId,
+      ...(requestId ? { requestId } : {}),
     });
 
     return {
@@ -351,9 +352,7 @@ export class PlatformAdminAssistantService {
     };
   }
 
-  private requireResolvedAction(
-    command: PlatformAdminAssistantActionCommand,
-  ) {
+  private requireResolvedAction(command: PlatformAdminAssistantActionCommand) {
     const resolvedAction = resolvePlatformAdminAssistantAction(
       this.platformAdminService,
       command,
