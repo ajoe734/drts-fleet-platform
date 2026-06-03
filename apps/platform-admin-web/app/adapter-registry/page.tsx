@@ -311,9 +311,9 @@ export default function AdapterRegistryPage() {
           createAction: "Register adapter",
           createHint: "High-risk action · reason + audit receipt",
           rotateAction: "Rotate now",
-          dangerTitle: "mof-bgmt · token expires in 6 days",
+          dangerTitle: "mof-bgmt · token expired on 2026-05-31",
           dangerBody:
-            "The BGMT dispatch reporting token must rotate within the next 6 days or completion reports cannot reach the upstream endpoint.",
+            "The BGMT dispatch reporting token expired on 2026-05-31. Rotate it before resuming completion-report delivery to the upstream endpoint.",
           platformAuthority: "Platform Admin",
           opsAuthority: "Ops Console",
           platformScope: "Write authority",
@@ -336,9 +336,9 @@ export default function AdapterRegistryPage() {
           createAction: "註冊 adapter",
           createHint: "高風險動作 · 必填 reason + audit receipt",
           rotateAction: "立即輪替",
-          dangerTitle: "mof-bgmt · token 距到期 6 天",
+          dangerTitle: "mof-bgmt · token 已於 2026-05-31 到期",
           dangerBody:
-            "BGMT 派遣回報 token 必須在未來 6 天內輪替；否則完成單回報將無法送達上游端點。",
+            "BGMT 派遣回報 token 已於 2026-05-31 到期；恢復完成單回報送達上游端點前，必須先完成輪替。",
           platformAuthority: "Platform Admin",
           opsAuthority: "Ops Console",
           platformScope: "Write authority",
