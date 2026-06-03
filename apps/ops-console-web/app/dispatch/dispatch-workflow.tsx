@@ -21,6 +21,7 @@ import type {
   OwnedOrderRecord,
 } from "@drts/contracts";
 import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
+import { useOpsAssistantContextActions } from "@/components/ops-assistant";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
@@ -606,6 +607,12 @@ export function DispatchWorkflow({
   focusOrderId = "",
 }: DispatchWorkflowProps) {
   const { t, locale } = useTranslation();
+  const {
+    setAssistantSelection,
+    clearAssistantSelection,
+    setAssistantScope,
+    clearAssistantScope,
+  } = useOpsAssistantContextActions();
   const client = getOpsClient();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -646,6 +653,25 @@ export function DispatchWorkflow({
   const reloadTimerRef = useRef<number | null>(null);
   const autoLoadedCandidateJobsRef = useRef<Set<string>>(new Set());
   const lastSyncedFocusOrderIdRef = useRef<string>("");
+
+  // Publish the focused order + active board/filter to the assistant Context
+  // Envelope (§5) so "this order" deixis and board-scoped answers resolve.
+  useEffect(() => {
+    if (selectedOrderId) {
+      setAssistantSelection({ kind: "order", id: selectedOrderId });
+    } else {
+      clearAssistantSelection();
+    }
+    return () => clearAssistantSelection();
+  }, [selectedOrderId, setAssistantSelection, clearAssistantSelection]);
+
+  useEffect(() => {
+    setAssistantScope({
+      board: "dispatch",
+      visibleFilters: { filter: filterMode },
+    });
+    return () => clearAssistantScope();
+  }, [filterMode, setAssistantScope, clearAssistantScope]);
 
   useEffect(() => {
     setLiveOrders(orders);

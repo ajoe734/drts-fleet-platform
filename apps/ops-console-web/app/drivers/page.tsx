@@ -15,6 +15,7 @@ import type {
   UiRefreshMetadata,
 } from "@drts/contracts";
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
+import { PublishAssistantScope } from "@/components/ops-assistant";
 import { RefreshOnInterval } from "@/components/refresh-on-interval";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
@@ -1297,6 +1298,15 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
 
   return (
     <>
+      <PublishAssistantScope
+        activeTab={filters.view}
+        visibleFilters={{
+          ...(filters.query ? { q: filters.query } : {}),
+          shift: filters.shift,
+          platform: filters.platform,
+          eligibility: filters.eligibility,
+        }}
+      />
       <RefreshOnInterval intervalMs={DRIVERS_REFRESH_INTERVAL_MS} />
 
       <PageHeader
