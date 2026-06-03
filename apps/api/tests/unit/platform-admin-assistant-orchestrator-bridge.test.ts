@@ -134,7 +134,10 @@ function stableJson(value: unknown): string {
       ([left], [right]) => left.localeCompare(right),
     );
     return `{${entries
-      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableJson(entryValue)}`)
+      .map(
+        ([key, entryValue]) =>
+          `${JSON.stringify(key)}:${stableJson(entryValue)}`,
+      )
       .join(",")}}`;
   }
   return JSON.stringify(value);
@@ -187,7 +190,16 @@ describe("PlatformAdminAssistantOrchestratorBridgeService", () => {
           },
         },
       }),
-    ).toThrow(/signature/i);
+    ).toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_DISPATCH_SIGNATURE_INVALID",
+            message: "Dispatch packet signature verification failed.",
+          }),
+        }),
+      }),
+    );
   });
 
   it("rejects unsafe artifact paths", () => {
@@ -205,7 +217,17 @@ describe("PlatformAdminAssistantOrchestratorBridgeService", () => {
         dryRun: true,
         packet: signPacket(payload),
       }),
-    ).toThrow(/inside the repository root/i);
+    ).toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_DISPATCH_PATH_UNSAFE",
+            message:
+              "Dispatch packet artifacts must stay inside the repository root.",
+          }),
+        }),
+      }),
+    );
   });
 
   it("builds a dry-run queue preview without mutating the queue", () => {
