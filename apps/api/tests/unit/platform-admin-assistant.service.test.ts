@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { BootstrapRequestIdentity } from "../../src/common/auth";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { PlatformAdminAssistantOrchestratorBridgeService } from "../../src/modules/platform-admin-assistant/platform-admin-assistant.orchestrator-bridge";
 import { PlatformAdminAssistantService } from "../../src/modules/platform-admin-assistant/platform-admin-assistant.service";
 import { MockPlatformAdminAssistantProvider } from "../../src/modules/platform-admin-assistant/platform-admin-assistant.provider";
 import type {
@@ -52,12 +53,24 @@ class ThrowingProvider implements PlatformAdminAssistantProvider {
   }
 }
 
+function stubBridgeService(): PlatformAdminAssistantOrchestratorBridgeService {
+  return {
+    submitDispatchPacket: () => {
+      throw new Error("unused in this test");
+    },
+    getTaskStatus: () => {
+      throw new Error("unused in this test");
+    },
+  } as unknown as PlatformAdminAssistantOrchestratorBridgeService;
+}
+
 describe("PlatformAdminAssistantService", () => {
   it("binds assistant sessions to the current platform control-plane identity", () => {
     const service = new PlatformAdminAssistantService(
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(new AuditNotificationService()),
       new AuditNotificationService(),
+      stubBridgeService(),
     );
 
     const session = service.createSession(platformIdentity("pa-admin-777"), {
@@ -83,6 +96,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(new AuditNotificationService()),
       new AuditNotificationService(),
+      stubBridgeService(),
     );
     const session = service.createSession(platformIdentity("pa-admin-777"), {});
 
@@ -104,6 +118,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(new AuditNotificationService()),
       new AuditNotificationService(),
+      stubBridgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -138,6 +153,7 @@ describe("PlatformAdminAssistantService", () => {
       }),
       new PlatformAdminService(new AuditNotificationService()),
       new AuditNotificationService(),
+      stubBridgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -176,6 +192,7 @@ describe("PlatformAdminAssistantService", () => {
         new ThrowingProvider(error),
         new PlatformAdminService(new AuditNotificationService()),
         new AuditNotificationService(),
+        stubBridgeService(),
       );
       const identity = platformIdentity();
       const session = service.createSession(identity, {});
@@ -200,6 +217,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      stubBridgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -232,6 +250,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      stubBridgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -260,6 +279,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      stubBridgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -294,6 +314,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       platformAdminService,
       auditNotificationService,
+      stubBridgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -330,6 +351,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      stubBridgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -365,6 +387,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      stubBridgeService(),
     );
 
     expect(() => service.createSession(nonPlatformIdentity(), {})).toThrowError(
@@ -384,6 +407,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      stubBridgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});

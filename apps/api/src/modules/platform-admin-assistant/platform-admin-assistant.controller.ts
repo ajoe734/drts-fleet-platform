@@ -9,6 +9,7 @@ import type {
   ExecutePlatformAdminAssistantActionCommand,
   PlatformAdminAssistantActionCommand,
   CreatePlatformAdminAssistantSessionCommand,
+  PlatformAdminAssistantSubmitDispatchPacketCommand,
 } from "./platform-admin-assistant.types";
 
 @Controller("platform-admin/assistant")
@@ -123,6 +124,40 @@ export class PlatformAdminAssistantController {
         identity,
         command,
         requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("sessions/:sessionId/dev/dispatch-packets")
+  submitDispatchPacket(
+    @Param("sessionId") sessionId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: PlatformAdminAssistantSubmitDispatchPacketCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminAssistantService.submitDispatchPacket(
+        sessionId,
+        identity,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("sessions/:sessionId/dev/tasks/:taskId/status")
+  getTaskRuntimeStatus(
+    @Param("sessionId") sessionId: string,
+    @Param("taskId") taskId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminAssistantService.getTaskRuntimeStatus(
+        sessionId,
+        identity,
+        taskId,
       ),
       requestId,
     );

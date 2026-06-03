@@ -8,6 +8,7 @@ import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { PlatformAdminService } from "../platform-admin/platform-admin.service";
 import { resolvePlatformAdminAssistantAction } from "./platform-admin-assistant.actions";
+import { PlatformAdminAssistantOrchestratorBridgeService } from "./platform-admin-assistant.orchestrator-bridge";
 import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.types";
 import type {
   CreatePlatformAdminAssistantMessageCommand,
@@ -22,6 +23,8 @@ import type {
   PlatformAdminAssistantProvider,
   PlatformAdminAssistantProviderResponse,
   PlatformAdminAssistantSessionRecord,
+  PlatformAdminAssistantSubmitDispatchPacketCommand,
+  PlatformAdminAssistantTaskRuntimeStatus,
 } from "./platform-admin-assistant.types";
 
 @Injectable()
@@ -46,6 +49,7 @@ export class PlatformAdminAssistantService {
     private readonly assistantProvider: PlatformAdminAssistantProvider,
     private readonly platformAdminService: PlatformAdminService,
     private readonly auditNotificationService: AuditNotificationService,
+    private readonly orchestratorBridgeService: PlatformAdminAssistantOrchestratorBridgeService,
   ) {}
 
   listSessions(identity: BootstrapRequestIdentity | null) {
@@ -282,6 +286,38 @@ export class PlatformAdminAssistantService {
       receipt,
       assistantAuditId: assistantAudit.auditId,
     };
+  }
+
+  submitDispatchPacket(
+    sessionId: string,
+    identity: BootstrapRequestIdentity | null,
+    command: PlatformAdminAssistantSubmitDispatchPacketCommand,
+  ) {
+    const actor = this.requirePlatformAdminIdentity(identity);
+    this.requireOwnedSession(sessionId, identity);
+
+    if (command.packet.payload.assistantSessionId !== sessionId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ASSISTANT_DISPATCH_SESSION_MISMATCH",
+        "Dispatch packet assistantSessionId must match the current session.",
+        {
+          sessionId,
+          packetSessionId: command.packet.payload.assistantSessionId,
+        },
+      );
+    }
+
+    return this.orchestratorBridgeService.submitDispatchPacket(actor, command);
+  }
+
+  getTaskRuntimeStatus(
+    sessionId: string,
+    identity: BootstrapRequestIdentity | null,
+    taskId: string,
+  ): PlatformAdminAssistantTaskRuntimeStatus {
+    this.requireOwnedSession(sessionId, identity);
+    return this.orchestratorBridgeService.getTaskStatus(taskId);
   }
 
   private requireOwnedSession(

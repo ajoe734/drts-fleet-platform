@@ -158,4 +158,114 @@ describe("PlatformAdminAssistantController", () => {
       },
     });
   });
+
+  it("wraps dispatch packet submissions and runtime status reads in the standard envelope", () => {
+    const platformAdminAssistantService = {
+      submitDispatchPacket: vi.fn(() => ({
+        accepted: true,
+        dryRun: true,
+        taskId: "PA-AI-ORCH-001",
+        taskBriefPath: ".orchestrator/task-briefs/PA-AI-ORCH-001.md",
+        baseBranch: "dev",
+        track: "frontend",
+        treeGuard: {
+          blocked: false,
+          dirtyPaths: [],
+          matchedGlobs: [],
+        },
+        queued: false,
+        queueEvent: null,
+        warnings: [],
+      })),
+      getTaskRuntimeStatus: vi.fn(() => ({
+        task: {
+          id: "PA-AI-ORCH-001",
+          status: "backlog",
+          owner: "Codex2",
+          reviewer: "Claude",
+          title: "Bridge",
+          next: "Assignment created",
+          artifacts: [],
+          dependsOn: [],
+          lastUpdate: "2026-06-03T12:55:30Z",
+        },
+        supervisor: {
+          lifecycle: "running",
+          startedAt: null,
+          lastHeartbeatAt: null,
+        },
+        queue: {
+          events: [],
+          workers: [],
+        },
+        integration: null,
+      })),
+    };
+    const controller = new PlatformAdminAssistantController(
+      platformAdminAssistantService as never,
+    );
+
+    const dispatchResponse = controller.submitDispatchPacket(
+      "session-001",
+      platformIdentity(),
+      {
+        dryRun: true,
+        packet: {
+          payload: {
+            schema: "assistant_dispatch_packet.v1",
+            source: "platform-admin-assistant",
+            assistantSessionId: "session-001",
+            actorId: "pa-admin-001",
+            taskId: "PA-AI-ORCH-001",
+            title: "Bridge",
+            summary: "Bridge",
+            owner: "Codex2",
+            reviewer: "Claude",
+            dependencies: [],
+            artifacts: [],
+            acceptance: [],
+            risk: "medium",
+            createdAt: "2026-06-03T12:55:30Z",
+            humanConfirmedAt: "2026-06-03T12:55:31Z",
+          },
+          signature: {
+            algorithm: "hmac-sha256",
+            keyId: "dispatch-key",
+            signedAt: "2026-06-03T12:55:31Z",
+            value: "signature",
+          },
+        },
+      },
+      "req-dispatch-001",
+    );
+
+    const statusResponse = controller.getTaskRuntimeStatus(
+      "session-001",
+      "PA-AI-ORCH-001",
+      platformIdentity(),
+      "req-status-001",
+    );
+
+    expect(dispatchResponse).toEqual({
+      data: expect.objectContaining({
+        accepted: true,
+        taskId: "PA-AI-ORCH-001",
+      }),
+      meta: {
+        requestId: "req-dispatch-001",
+        timestamp: expect.any(String),
+      },
+    });
+    expect(statusResponse).toEqual({
+      data: expect.objectContaining({
+        task: expect.objectContaining({
+          id: "PA-AI-ORCH-001",
+        }),
+      }),
+      meta: {
+        requestId: "req-status-001",
+        timestamp: expect.any(String),
+      },
+    });
+  });
 });
