@@ -22,6 +22,7 @@ import type {
   AssistantReadToolDefinition,
   AssistantReadToolExecutionRequest,
   AssistantReadToolExecutionResult,
+  AssistantReadToolName,
 } from "./assistant-read-tool.types";
 
 const REDACTED_TEXT = "[redacted]";
@@ -167,8 +168,12 @@ export class AssistantReadToolRegistry {
           ),
         };
       default:
-        return this.assertNever(request.toolName);
+        return this.handleUnknownTool(request.toolName);
     }
+  }
+
+  hasTool(toolName: string): toolName is AssistantReadToolName {
+    return TOOL_DEFINITIONS.some((definition) => definition.name === toolName);
   }
 
   private listDispatchJobs(identity: BootstrapRequestIdentity) {
@@ -395,7 +400,7 @@ export class AssistantReadToolRegistry {
     }
   }
 
-  private assertNever(toolName: never): never {
+  private handleUnknownTool(toolName: string): never {
     throw new ApiRequestError(
       400,
       "ASSISTANT_TOOL_NOT_REGISTERED",

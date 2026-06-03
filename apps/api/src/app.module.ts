@@ -57,7 +57,6 @@ import { AuthModule } from "./modules/auth/auth.module";
     RegulatoryRegistryModule,
     ProductRuleModule,
     AuditNotificationModule,
-    AssistantModule,
     CallcenterModule,
     ComplaintModule,
     DriverProfileModule,

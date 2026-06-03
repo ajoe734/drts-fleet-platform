@@ -1,8 +1,7 @@
+import type { ActionIntent } from "@drts/contracts";
+
 import type { BootstrapRequestIdentity } from "../../common/auth";
-import type {
-  AssistantReadToolDefinition,
-  AssistantReadToolName,
-} from "./tools/assistant-read-tool.types";
+import type { AssistantToolDefinition } from "./assistant.instructions";
 
 export const ASSISTANT_STREAM_EVENT_TYPES = [
   "token",
@@ -59,7 +58,7 @@ export interface AssistantGatewayContext {
   history: AssistantMessageRecord[];
   identity: BootstrapRequestIdentity;
   prompt: string;
-  availableTools: AssistantReadToolDefinition[];
+  availableTools: AssistantToolDefinition[];
 }
 
 export type AssistantGatewayEvent =
@@ -70,18 +69,18 @@ export type AssistantGatewayEvent =
   | {
       type: "tool_call";
       toolCallId: string;
-      toolName: AssistantReadToolName;
+      toolName: string;
       arguments: Record<string, unknown>;
     }
   | {
       type: "tool_result";
       toolCallId: string;
-      toolName: AssistantReadToolName;
+      toolName: string;
       result: unknown;
     }
   | {
       type: "action_intent";
-      intent: string;
+      intent: string | ActionIntent;
       label: string;
       confidence: number;
     }
