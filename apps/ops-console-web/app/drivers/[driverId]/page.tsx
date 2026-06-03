@@ -29,18 +29,15 @@ import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
+  CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasIcon,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
-  Timeline,
-  WorkflowEmptyState,
   buildCanvasTheme,
   type CanvasTableColumn,
   type CanvasTone,
-  type ManagementTone,
-  type TimelineItem,
 } from "@drts/ui-web";
 
 type DriverDetailPageProps = {
@@ -127,6 +124,19 @@ type ShiftRow = Record<string, unknown> & {
 
 type IncidentRow = Record<string, unknown> & {
   incident: IncidentRecord;
+};
+
+type CanvasEventTone = "accent" | "danger" | "success" | "warn";
+
+type CanvasEvent = {
+  id: string;
+  tone: CanvasEventTone;
+  label: string;
+  timestamp: string;
+  actor?: string;
+  actorTone?: CanvasTone;
+  body?: string;
+  action?: DriverAction;
 };
 
 const theme = buildCanvasTheme({
@@ -264,14 +274,14 @@ function classifyErrorReason(error: string): EmptyReason {
   return "fetch_failed";
 }
 
-function emptyTone(reason: EmptyReason): ManagementTone {
+function emptyTone(reason: EmptyReason): CanvasTone {
   if (reason === "fetch_failed") return "danger";
   if (
     reason === "permission_denied" ||
     reason === "external_unavailable" ||
     reason === "not_provisioned"
   ) {
-    return "warning";
+    return "warn";
   }
   return "neutral";
 }
@@ -355,17 +365,166 @@ function defaultEmptyDescription(locale: Locale, reason: EmptyReason) {
   }
 }
 
-function renderEmptyState(
-  locale: Locale,
-  reason: EmptyReason,
-  messageOverride?: string,
-  action?: DriverAction,
-) {
+function CanvasActionButton({
+  action,
+  locale,
+  size = "sm",
+}: {
+  action: DriverAction;
+  locale: Locale;
+  size?: "xs" | "sm" | "md";
+}) {
+  const disabled = !action.descriptor.enabled;
+  const title = actionTitle(locale, action);
+  const children = (
+    <>
+      {action.icon ? <CanvasIcon name={action.icon} size={13} /> : null}
+      <span>{action.label}</span>
+      {action.descriptor.requiresReason && action.descriptor.enabled ? (
+        <span aria-hidden style={{ fontSize: "11px", opacity: 0.7 }}>
+          •
+        </span>
+      ) : null}
+    </>
+  );
+
+  if (action.href && !disabled) {
+    const content = (
+      <Btn
+        theme={theme}
+        size={size}
+        variant={
+          action.descriptor.riskLevel === "low" ? "secondary" : "primary"
+        }
+        danger={action.descriptor.riskLevel === "high"}
+        {...(action.variant === "ghost"
+          ? {
+              style: {
+                background: "transparent",
+                borderColor: "transparent",
+                color: theme.textMuted,
+              } satisfies CSSProperties,
+            }
+          : {})}
+      >
+        {children}
+      </Btn>
+    );
+
+    return (
+      <Link
+        key={action.descriptor.action}
+        href={action.href}
+        prefetch={false}
+        target={action.openInNewTab ? "_blank" : undefined}
+        rel={action.openInNewTab ? "noreferrer" : undefined}
+        title={title}
+        style={{ textDecoration: "none" }}
+      >
+        {content}
+      </Link>
+    );
+  }
+
   return (
-    <WorkflowEmptyState
-      title={
+    <Btn
+      theme={theme}
+      size={size}
+      variant={action.descriptor.riskLevel === "low" ? "secondary" : "primary"}
+      danger={action.descriptor.riskLevel === "high"}
+      disabled={disabled}
+      {...(action.variant === "ghost"
+        ? {
+            style: {
+              background: "transparent",
+              borderColor: "transparent",
+              color: theme.textMuted,
+            } satisfies CSSProperties,
+          }
+        : {})}
+    >
+      {children}
+    </Btn>
+  );
+}
+
+function CanvasEmptyState({
+  locale,
+  reason,
+  messageOverride,
+  action,
+}: {
+  locale: Locale;
+  reason: EmptyReason;
+  messageOverride?: string;
+  action?: DriverAction;
+}) {
+  const tone = emptyTone(reason);
+  const toneBorder =
+    tone === "danger"
+      ? theme.dangerBorder
+      : tone === "warn"
+        ? theme.warnBorder
+        : tone === "info"
+          ? theme.infoBorder
+          : theme.border;
+  const toneBg =
+    tone === "danger"
+      ? theme.dangerBg
+      : tone === "warn"
+        ? theme.warnBg
+        : tone === "info"
+          ? theme.infoBg
+          : theme.surfaceLo;
+
+  return (
+    <div
+      style={{
+        padding: "16px",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "10px",
+        textAlign: "center",
+        border: `1px dashed ${toneBorder}`,
+        borderRadius: "10px",
+        background: toneBg,
+      }}
+    >
+      <div
+        style={{
+          width: "40px",
+          height: "40px",
+          borderRadius: "999px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: theme.surface,
+          border: `1px solid ${toneBorder}`,
+          color:
+            tone === "danger"
+              ? theme.danger
+              : tone === "warn"
+                ? theme.warn
+                : tone === "info"
+                  ? theme.info
+                  : theme.textMuted,
+        }}
+      >
+        <CanvasIcon name={emptyIcon(reason)} size={22} />
+      </div>
+      <div>
         <span
-          style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}
+          style={{
+            display: "inline-flex",
+            gap: "6px",
+            alignItems: "center",
+            justifyContent: "center",
+            flexWrap: "wrap",
+            fontSize: "13px",
+            fontWeight: 600,
+            color: theme.text,
+          }}
         >
           <span>{emptyTitle(locale, reason)}</span>
           <span
@@ -374,12 +533,35 @@ function renderEmptyState(
             {reason}
           </span>
         </span>
-      }
-      description={messageOverride ?? defaultEmptyDescription(locale, reason)}
-      tone={emptyTone(reason)}
-      density="compact"
-      icon={<CanvasIcon name={emptyIcon(reason)} size={22} />}
-      actions={action ? <div>{renderDriverAction(action)}</div> : undefined}
+        <div
+          style={{
+            marginTop: "4px",
+            maxWidth: "420px",
+            fontSize: "12px",
+            lineHeight: 1.5,
+            color: theme.textMuted,
+          }}
+        >
+          {messageOverride ?? defaultEmptyDescription(locale, reason)}
+        </div>
+      </div>
+      {action ? <CanvasActionButton action={action} locale={locale} /> : null}
+    </div>
+  );
+}
+
+function renderEmptyState(
+  locale: Locale,
+  reason: EmptyReason,
+  messageOverride?: string,
+  action?: DriverAction,
+) {
+  return (
+    <CanvasEmptyState
+      locale={locale}
+      reason={reason}
+      {...(messageOverride ? { messageOverride } : {})}
+      {...(action ? { action } : {})}
     />
   );
 }
@@ -404,59 +586,6 @@ function makeDescriptor(
   };
 }
 
-function actionStyle(
-  descriptor: ResourceActionDescriptor,
-  variant: "primary" | "secondary" | "ghost",
-  disabled: boolean,
-): CSSProperties {
-  const base: CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "6px",
-    padding: "5px 10px",
-    height: "28px",
-    borderRadius: "7px",
-    fontSize: "12px",
-    fontWeight: 500,
-    lineHeight: 1,
-    textDecoration: "none",
-    cursor: disabled ? "not-allowed" : "pointer",
-    opacity: disabled ? 0.55 : 1,
-    fontFamily: theme.fontFamily,
-  };
-
-  if (descriptor.riskLevel === "high") {
-    return {
-      ...base,
-      border: `1px solid ${theme.danger}`,
-      background: theme.danger,
-      color: "#fff",
-    };
-  }
-  if (variant === "primary") {
-    return {
-      ...base,
-      border: `1px solid ${theme.accent}`,
-      background: theme.accent,
-      color: "#fff",
-    };
-  }
-  if (variant === "ghost") {
-    return {
-      ...base,
-      border: "1px solid transparent",
-      background: "transparent",
-      color: theme.textMuted,
-    };
-  }
-  return {
-    ...base,
-    border: `1px solid ${theme.border}`,
-    background: theme.surface,
-    color: theme.text,
-  };
-}
-
 function actionTitle(locale: Locale, action: DriverAction) {
   const { descriptor } = action;
   if (!descriptor.enabled) {
@@ -475,63 +604,164 @@ function actionTitle(locale: Locale, action: DriverAction) {
 }
 
 function renderDriverAction(action: DriverAction, locale: Locale = "en") {
-  const disabled = !action.descriptor.enabled;
-  const style = actionStyle(
-    action.descriptor,
-    action.variant ?? "secondary",
-    disabled,
-  );
-  const title = actionTitle(locale, action);
-  const content = (
-    <>
-      {action.icon ? <CanvasIcon name={action.icon} size={13} /> : null}
-      <span>{action.label}</span>
-      {action.descriptor.requiresReason && !disabled ? (
-        <span aria-hidden style={{ fontSize: "11px", opacity: 0.85 }}>
-          ✎
-        </span>
-      ) : null}
-    </>
-  );
+  return <CanvasActionButton action={action} locale={locale} />;
+}
 
-  if (!disabled && action.href) {
-    if (action.openInNewTab) {
-      return (
-        <a
-          key={action.descriptor.action}
-          href={action.href}
-          target="_blank"
-          rel="noreferrer"
-          title={title}
-          style={style}
-        >
-          {content}
-        </a>
-      );
-    }
-    return (
-      <Link
-        key={action.descriptor.action}
-        href={action.href}
-        prefetch={false}
-        title={title}
-        style={style}
-      >
-        {content}
-      </Link>
-    );
+function CanvasActivityFeed({
+  events,
+  emptyState,
+  locale,
+}: {
+  events: CanvasEvent[];
+  emptyState: ReactNode;
+  locale: Locale;
+}) {
+  if (events.length === 0) {
+    return emptyState;
   }
 
   return (
-    <button
-      key={action.descriptor.action}
-      type="button"
-      disabled={disabled}
-      title={title}
-      style={style}
+    <ol
+      style={{
+        listStyle: "none",
+        padding: 0,
+        margin: 0,
+        display: "flex",
+        flexDirection: "column",
+      }}
     >
-      {content}
-    </button>
+      {events.map((event, index) => {
+        const dotColor =
+          event.tone === "danger"
+            ? theme.danger
+            : event.tone === "warn"
+              ? theme.warn
+              : event.tone === "success"
+                ? theme.success
+                : theme.accent;
+        const dotBg =
+          event.tone === "danger"
+            ? theme.dangerBg
+            : event.tone === "warn"
+              ? theme.warnBg
+              : event.tone === "success"
+                ? theme.successBg
+                : theme.accentBg;
+
+        return (
+          <li
+            key={event.id}
+            style={{
+              display: "flex",
+              gap: "10px",
+              position: "relative",
+              padding: "6px 0",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <span
+                style={{
+                  width: "9px",
+                  height: "9px",
+                  borderRadius: "999px",
+                  marginTop: "4px",
+                  background: dotColor,
+                  boxShadow: `0 0 0 3px ${dotBg}`,
+                }}
+              />
+              {index < events.length - 1 ? (
+                <span
+                  style={{
+                    flex: 1,
+                    width: "1px",
+                    background: theme.border,
+                    margin: "4px 0",
+                  }}
+                />
+              ) : null}
+            </div>
+            <div style={{ flex: 1, minWidth: 0, paddingBottom: "8px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  justifyContent: "space-between",
+                  gap: "8px",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: "12.5px",
+                    fontWeight: 600,
+                    color: theme.text,
+                  }}
+                >
+                  {event.label}
+                </span>
+                <span
+                  style={{
+                    ...monoStyle,
+                    fontSize: "10.5px",
+                    color: theme.textDim,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {event.timestamp}
+                </span>
+              </div>
+              {event.actor ? (
+                <div
+                  style={{
+                    marginTop: "2px",
+                    display: "flex",
+                    gap: "6px",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    fontSize: "11px",
+                    color: theme.textMuted,
+                  }}
+                >
+                  {event.actorTone ? (
+                    <Pill theme={theme} tone={event.actorTone}>
+                      {event.actorTone}
+                    </Pill>
+                  ) : null}
+                  <span>{event.actor}</span>
+                </div>
+              ) : null}
+              {event.body ? (
+                <div
+                  style={{
+                    marginTop: "4px",
+                    fontSize: "12px",
+                    lineHeight: 1.45,
+                    color: theme.text,
+                  }}
+                >
+                  {event.body}
+                </div>
+              ) : null}
+              {event.action ? (
+                <div style={{ marginTop: "8px" }}>
+                  <CanvasActionButton
+                    action={event.action}
+                    locale={locale}
+                    size="xs"
+                  />
+                </div>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -1131,65 +1361,77 @@ export default async function DriverDetailPage({
     .slice(0, 6)
     .map((incident) => ({ incident }));
 
-  // ── Manual override / suppression timeline ──
-  const timelineItems: TimelineItem[] = [];
+  // ── Manual override / suppression activity feed ──
+  const overrideEvents: CanvasEvent[] = [];
   if (activeSuppression) {
-    timelineItems.push({
+    overrideEvents.push({
       id: "suppression",
-      tone: "warning",
-      eyebrow: copy(locale, "Matching suppression", "派遣抑制"),
-      title: formatOpsCodeLabel(locale, activeSuppression.reasonCode),
+      tone: "warn",
+      label: copy(locale, "Matching suppression", "派遣抑制"),
       timestamp: copy(
         locale,
         `TTL until ${formatDateTime(locale, activeSuppression.expiresAt)}`,
         `TTL 至 ${formatDateTime(locale, activeSuppression.expiresAt)}`,
       ),
-      detail: copy(
+      actor: `${copy(locale, "reason", "原因")}: ${formatOpsCodeLabel(
+        locale,
+        activeSuppression.reasonCode,
+      )}`,
+      actorTone: "warn",
+      body: copy(
         locale,
         "Driver is held out of matching; ops_manager can extend the TTL.",
         "司機已被排除於派遣媒合之外；ops_manager 可延長 TTL。",
       ),
       ...(suppressionIncidentHref
         ? {
-            actions: (
-              <Link
-                href={suppressionIncidentHref}
-                prefetch={false}
-                style={{ color: theme.accent, fontSize: "12px" }}
-              >
-                {copy(locale, "Open source incident", "前往來源事故")}
-              </Link>
-            ),
+            action: {
+              descriptor: {
+                action: "open_source_incident",
+                enabled: true,
+                riskLevel: "low",
+              },
+              label: copy(locale, "Open source incident", "前往來源事故"),
+              icon: "ext",
+              href: suppressionIncidentHref,
+              variant: "ghost",
+            } satisfies DriverAction,
           }
         : {}),
     });
   }
   for (const incident of openDriverIncidents.slice(0, 5)) {
-    timelineItems.push({
+    overrideEvents.push({
       id: incident.incidentId,
       tone:
         incident.severity === "critical" || incident.severity === "high"
           ? "danger"
-          : "warning",
-      eyebrow: `${formatOpsCodeLabel(
-        locale,
-        incident.category,
-      )} · ${formatOpsCodeLabel(locale, incident.severity)}`,
-      title: incident.title,
+          : "warn",
+      label: incident.title,
       timestamp: formatDateTime(
         locale,
         incident.occurredAt ?? incident.createdAt,
       ),
-      detail: incident.description,
-      actions: (
-        <Link
-          href={`/incidents/${encodeURIComponent(incident.incidentId)}`}
-          prefetch={false}
-          style={{ color: theme.accent, fontSize: "12px" }}
-        >
-          {copy(locale, "Open incident", "前往事故")}
-        </Link>
-      ),
+      actor: `${formatOpsCodeLabel(
+        locale,
+        incident.category,
+      )} · ${formatOpsCodeLabel(locale, incident.severity)}`,
+      actorTone:
+        incident.severity === "critical" || incident.severity === "high"
+          ? "danger"
+          : "warn",
+      body: incident.description,
+      action: {
+        descriptor: {
+          action: "open_incident",
+          enabled: true,
+          riskLevel: "low",
+        },
+        label: copy(locale, "Open incident", "前往事故"),
+        icon: "ext",
+        href: `/incidents/${encodeURIComponent(incident.incidentId)}`,
+        variant: "ghost",
+      },
     });
   }
 
@@ -1504,10 +1746,25 @@ export default async function DriverDetailPage({
     },
   ];
 
+  const chromeHeaderStyle: CSSProperties | undefined = sosActive
+    ? {
+        background: theme.dangerBg,
+        borderBottom: `1px solid ${theme.dangerBorder}`,
+        boxShadow: `inset 0 -1px 0 ${theme.dangerBorder}`,
+      }
+    : undefined;
+  const chromeBodyStyle: CSSProperties = {
+    ...pageBodyStyle,
+    background: sosActive
+      ? `linear-gradient(180deg, ${theme.dangerBg} 0%, ${theme.bg} 160px)`
+      : theme.bg,
+  };
+
   return (
     <>
       <PageHeader
         theme={theme}
+        {...(chromeHeaderStyle ? { style: chromeHeaderStyle } : {})}
         title={
           <span
             style={{
@@ -1562,7 +1819,7 @@ export default async function DriverDetailPage({
         }
       />
 
-      <div style={pageBodyStyle}>
+      <div style={chromeBodyStyle}>
         <Banner
           theme={theme}
           tone={
@@ -1837,9 +2094,9 @@ export default async function DriverDetailPage({
                   "人工介入與抑制紀錄",
                 )}
               >
-                <Timeline
-                  density="compact"
-                  items={timelineItems}
+                <CanvasActivityFeed
+                  locale={locale}
+                  events={overrideEvents}
                   emptyState={renderEmptyState(
                     locale,
                     "no_data",
