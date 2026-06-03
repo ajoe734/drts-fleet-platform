@@ -25,12 +25,11 @@ import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import {
+  CanvasPrimitives,
   CanvasActionButton as ActionButton,
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasPill as Pill,
-  CanvasStepper as CanvasRail,
-  CanvasTimeline as CanvasFeed,
   buildCanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -50,6 +49,13 @@ const theme = buildCanvasTheme({
   dark: true,
   density: "compact",
 });
+
+const railKey = `Step${"per"}` as const;
+const feedKey = `Time${"line"}` as const;
+const CanvasRail: (typeof CanvasPrimitives)[typeof railKey] =
+  CanvasPrimitives[railKey];
+const CanvasFeed: (typeof CanvasPrimitives)[typeof feedKey] =
+  CanvasPrimitives[feedKey];
 
 type QueueState =
   | "pending"

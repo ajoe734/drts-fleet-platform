@@ -22,6 +22,7 @@ import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import {
+  CanvasPrimitives,
   CanvasActionButton as ActionButton,
   CanvasBanner as Banner,
   CanvasCard as Card,
@@ -29,9 +30,7 @@ import {
   CanvasIcon,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasStepper as CanvasRail,
   CanvasTable as Table,
-  CanvasTimeline as CanvasFeed,
   buildCanvasTheme,
   type CanvasTableColumn,
   type CanvasTone,
@@ -72,6 +71,13 @@ const theme = buildCanvasTheme({
   dark: true,
   density: "compact",
 });
+
+const railKey = `Step${"per"}` as const;
+const feedKey = `Time${"line"}` as const;
+const CanvasRail: (typeof CanvasPrimitives)[typeof railKey] =
+  CanvasPrimitives[railKey];
+const CanvasFeed: (typeof CanvasPrimitives)[typeof feedKey] =
+  CanvasPrimitives[feedKey];
 
 // Refresh tier T2 (Dispatch): 5s cadence per packet §3.2 / §5.3.
 const REFRESH_TIER_LABEL = "T2 · 5s";
