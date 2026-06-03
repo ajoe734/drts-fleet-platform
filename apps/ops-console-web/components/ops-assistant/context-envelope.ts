@@ -14,7 +14,12 @@
  * Source: docs/05-ui/ops-console-llm-assistant-design-handoff-20260602.md §5.
  */
 
-import type { UiHealthEnvelope } from "@drts/contracts";
+import type {
+  ActionIntent,
+  ActionReceipt,
+  ResourceActionDescriptor,
+  UiHealthEnvelope,
+} from "@drts/contracts";
 import type { Locale } from "@/lib/translations";
 
 /**
@@ -89,4 +94,21 @@ export interface OpsAssistantContext {
   health: UiHealthEnvelope;
   /** Active UI locale. (Design §5 names "zh-TW"; the app's locale enum is "zh".) */
   locale: Locale;
+}
+
+export interface AssistantActionReceipt extends ActionReceipt {
+  auditHref?: string | null;
+}
+
+export interface AssistantActionBridge {
+  resourceKind: AssistantEntityKind;
+  resourceId: string;
+  availableActions: ResourceActionDescriptor[];
+  resolveDescriptor: (
+    intent: ActionIntent,
+  ) => ResourceActionDescriptor | null;
+  invoke: (
+    intent: ActionIntent,
+    descriptor: ResourceActionDescriptor,
+  ) => Promise<AssistantActionReceipt>;
 }
