@@ -42,6 +42,7 @@ import {
   CanvasPill as Pill,
   CanvasTable as Table,
   buildCanvasTheme,
+  type CanvasActionButtonProps,
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -82,6 +83,9 @@ type QueueRow = Record<string, unknown> & {
 
 type DashboardActionLink = {
   descriptor: ResourceActionDescriptor;
+  label: ReactNode;
+  en?: ReactNode;
+  icon?: CanvasActionButtonProps["icon"];
   href?: string;
   link?: CrossAppResourceLink;
 };
@@ -307,81 +311,6 @@ function buildAction(
     riskLevel,
     ...overrides,
   };
-}
-
-function getActionButtonMeta(action: string, locale: Locale) {
-  switch (action) {
-    case "open_call_session":
-      return {
-        label: locale === "en" ? "Open call session" : "開新 call session",
-        en: "session",
-        icon: "phone" as const,
-      };
-    case "open_duty_handbook":
-      return {
-        label: locale === "en" ? "Duty handbook" : "值班手冊",
-        en: "runbook",
-        icon: "ext" as const,
-      };
-    case "open_dispatch":
-      return {
-        label: locale === "en" ? "Open dispatch" : "前往派遣",
-        en: "dispatch",
-      };
-    case "open_forwarded_dispatch":
-      return {
-        label: locale === "en" ? "Forwarded board" : "查看 forwarded board",
-        en: "forwarded",
-        icon: "ext" as const,
-      };
-    case "open_incidents":
-      return {
-        label: locale === "en" ? "Open incidents" : "前往事故",
-        en: "incidents",
-      };
-    case "inspect_adapter_registry":
-      return {
-        label: locale === "en" ? "Adapter registry" : "查看 adapter registry",
-        en: "adapter",
-        icon: "ext" as const,
-      };
-    case "refresh_dashboard":
-      return {
-        label: locale === "en" ? "Refresh now" : "立即重新整理",
-        en: "refresh",
-      };
-    case "clear_filters":
-      return {
-        label: locale === "en" ? "Clear filters" : "清除篩選",
-        en: "filters",
-      };
-    case "request_access":
-      return {
-        label: locale === "en" ? "Request access" : "申請權限",
-        en: "access",
-      };
-    case "retry_fetch":
-      return {
-        label: locale === "en" ? "Retry load" : "重試載入",
-        en: "retry",
-      };
-    case "open_platform_status":
-      return {
-        label: locale === "en" ? "Platform status" : "查看平台狀態",
-        en: "status",
-        icon: "ext" as const,
-      };
-    case "contact_owner":
-      return {
-        label: locale === "en" ? "Contact owner" : "通知負責人",
-        en: "owner",
-      };
-    default:
-      return {
-        label: formatOpsCodeLabel(locale, action),
-        en: action,
-      };
-  }
 }
 
 function isComplaintActive(status: ComplaintCaseStatus) {
@@ -655,15 +584,16 @@ function ActionLinkButton({
   locale: Locale;
   variant?: "primary" | "secondary" | "ghost";
 }) {
-  const meta = getActionButtonMeta(action.descriptor.action, locale);
   const button = (
     <CanvasActionButton
       theme={theme}
       descriptor={action.descriptor}
       variant={variant}
-      icon={action.link?.openMode === "new_tab" ? "ext" : meta.icon}
-      label={meta.label}
-      en={meta.en}
+      icon={
+        action.icon ?? (action.link?.openMode === "new_tab" ? "ext" : undefined)
+      }
+      label={action.label}
+      en={action.en}
     />
   );
 
@@ -709,6 +639,36 @@ function EmptyStateCard({
     ? (() => {
         const action: DashboardActionLink = {
           descriptor: nextActionDescriptor,
+          label:
+            nextActionDescriptor.action === "clear_filters"
+              ? locale === "en"
+                ? "Clear filters"
+                : "清除篩選"
+              : nextActionDescriptor.action === "retry_fetch"
+                ? locale === "en"
+                  ? "Retry load"
+                  : "重試載入"
+                : nextActionDescriptor.action === "open_platform_status"
+                  ? locale === "en"
+                    ? "Platform status"
+                    : "查看平台狀態"
+                  : nextActionDescriptor.action === "request_access"
+                    ? locale === "en"
+                      ? "Request access"
+                      : "申請權限"
+                    : locale === "en"
+                      ? "Contact owner"
+                      : "通知負責人",
+          en:
+            nextActionDescriptor.action === "clear_filters"
+              ? "filters"
+              : nextActionDescriptor.action === "retry_fetch"
+                ? "retry"
+                : nextActionDescriptor.action === "open_platform_status"
+                  ? "status"
+                  : nextActionDescriptor.action === "request_access"
+                    ? "access"
+                    : "owner",
         };
         if (nextActionDescriptor.action === "clear_filters") {
           action.href = buildDashboardDispatchHref("ready_queue");
@@ -723,6 +683,7 @@ function EmptyStateCard({
             openMode: "new_tab",
             label: "Adapter registry",
           };
+          action.icon = "ext";
         }
         return action;
       })()
@@ -1203,10 +1164,15 @@ export default async function DashboardPage() {
   );
   const refreshAction: DashboardActionLink = {
     descriptor: buildAction("refresh_dashboard", "low"),
+    label: locale === "en" ? "Refresh now" : "立即重新整理",
+    en: "refresh",
     href: "/dashboard?refresh=1",
   };
   const handbookAction: DashboardActionLink = {
     descriptor: buildAction("open_duty_handbook", "low"),
+    label: locale === "en" ? "Duty handbook" : "值班手冊",
+    en: "runbook",
+    icon: "ext",
     link: {
       targetApp: "ops-console",
       route: "/docs/03-runbooks/phase1-operator-routing-runbook.md",
@@ -1218,6 +1184,9 @@ export default async function DashboardPage() {
   };
   const callSessionAction: DashboardActionLink = {
     descriptor: buildAction("open_call_session", "medium"),
+    label: locale === "en" ? "Open call session" : "開新 call session",
+    en: "session",
+    icon: "phone",
     href: "/callcenter",
   };
 
@@ -1275,6 +1244,8 @@ export default async function DashboardPage() {
           actions: [
             {
               descriptor: buildAction("open_incidents", "medium"),
+              label: locale === "en" ? "Open incidents" : "前往事故",
+              en: "incidents",
               href: "/incidents",
             },
           ],
@@ -1295,6 +1266,8 @@ export default async function DashboardPage() {
           actions: [
             {
               descriptor: buildAction("open_dispatch", "low"),
+              label: locale === "en" ? "Open dispatch" : "前往派遣",
+              en: "dispatch",
               href: buildDashboardDispatchHref("no_eligible_supply"),
             },
           ],
@@ -1315,10 +1288,18 @@ export default async function DashboardPage() {
           actions: [
             {
               descriptor: buildAction("open_forwarded_dispatch", "low"),
+              label:
+                locale === "en" ? "Forwarded board" : "查看 forwarded board",
+              en: "forwarded",
+              icon: "ext",
               href: buildDashboardDispatchHref("forwarded_mirror"),
             },
             {
               descriptor: buildAction("inspect_adapter_registry", "low"),
+              label:
+                locale === "en" ? "Adapter registry" : "查看 adapter registry",
+              en: "adapter",
+              icon: "ext",
               link: {
                 targetApp: "platform-admin",
                 route: "/adapter-registry",
@@ -1667,6 +1648,12 @@ export default async function DashboardPage() {
                 <ActionLinkButton
                   action={{
                     descriptor: buildAction("inspect_adapter_registry", "low"),
+                    label:
+                      locale === "en"
+                        ? "Adapter registry"
+                        : "查看 adapter registry",
+                    en: "adapter",
+                    icon: "ext",
                     link: {
                       targetApp: "platform-admin",
                       route: "/adapter-registry",
@@ -1868,6 +1855,8 @@ export default async function DashboardPage() {
               <ActionLinkButton
                 action={{
                   descriptor: buildAction("open_dispatch", "low"),
+                  label: locale === "en" ? "Open dispatch" : "前往派遣",
+                  en: "dispatch",
                   href: buildDashboardDispatchHref("ready_queue"),
                 }}
                 locale={locale}
@@ -1950,6 +1939,8 @@ export default async function DashboardPage() {
             <ActionLinkButton
               action={{
                 descriptor: buildAction("open_dispatch", "low"),
+                label: locale === "en" ? "Open dispatch" : "前往派遣",
+                en: "dispatch",
                 href: buildDashboardDispatchHref("ready_queue"),
               }}
               locale={locale}
