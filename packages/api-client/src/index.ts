@@ -41,6 +41,7 @@ import type {
   CreateDriverProfileCommand,
   CreateOwnedOrderCommand,
   CreatePublicInfoVersionCommand,
+  CreateVehicleContractCommand,
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
   CreatePlatformPricingRuleCommand,
@@ -2418,6 +2419,17 @@ export class ApiClient {
   async listContracts(): Promise<VehicleContractRecord[]> {
     return this.getList<VehicleContractRecord>(
       "/api/regulatory-registry/contracts",
+    );
+  }
+
+  async createContract(
+    command: CreateVehicleContractCommand,
+  ): Promise<VehicleContractRecord> {
+    return this.post<VehicleContractRecord>(
+      "/api/regulatory-registry/contracts",
+      {
+        body: command,
+      },
     );
   }
 
