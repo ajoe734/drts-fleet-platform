@@ -121,6 +121,30 @@ export interface ApiListData<T> {
   pageInfo: ApiPageInfo;
 }
 
+export interface KnowledgeCitationRecord {
+  documentId: string;
+  sourcePath: string;
+  title: string;
+  section: string | null;
+  lineStart: number;
+  lineEnd: number;
+}
+
+export interface KnowledgeSearchSnippetRecord {
+  snippetId: string;
+  score: number;
+  text: string;
+  matchedTerms: string[];
+  citation: KnowledgeCitationRecord;
+}
+
+export interface KnowledgeSearchResponse {
+  corpusVersion: string;
+  query: string;
+  totalHits: number;
+  snippets: KnowledgeSearchSnippetRecord[];
+}
+
 export interface ApiErrorEnvelope {
   error: {
     code: string;
