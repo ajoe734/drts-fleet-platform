@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
-import type { PlatformAdapter } from "@drts/contracts";
+import type { PlatformAdapter } from "../../../../packages/contracts/src/platform-adapter-registry";
 import {
   Banner,
   Btn,
@@ -76,6 +76,51 @@ const emptyCardStyle = {
   fontSize: 12.5,
 } satisfies CSSProperties;
 
+const metadataGridStyle = {
+  display: "grid",
+  gap: 10,
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  marginTop: 12,
+} satisfies CSSProperties;
+
+const metadataBlockStyle = {
+  display: "grid",
+  gap: 6,
+  padding: 12,
+  border: `1px solid ${theme.border}`,
+  borderRadius: 12,
+  background: theme.surface,
+} satisfies CSSProperties;
+
+const metadataLabelStyle = {
+  margin: 0,
+  color: theme.textDim,
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+} satisfies CSSProperties;
+
+const metadataValueStyle = {
+  margin: 0,
+  color: theme.text,
+  fontSize: 12.5,
+  lineHeight: 1.5,
+} satisfies CSSProperties;
+
+const metadataSubValueStyle = {
+  margin: 0,
+  color: theme.textMuted,
+  fontSize: 11.5,
+  lineHeight: 1.5,
+} satisfies CSSProperties;
+
+const tokenRowStyle = {
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
 const authoritySplitStyle = {
   marginTop: 12,
   paddingTop: 12,
@@ -141,20 +186,45 @@ type Copy = {
   metricOrdersPending: string;
   adapterTitle: (adapter: PlatformAdapter) => string;
   sourceValue: (adapter: PlatformAdapter) => string;
+  webhookTitle: string;
+  financeMode: string;
+  serviceBuckets: string;
+  featureFlags: string;
+  supportedActions: string;
+  operationalPause: string;
+  noPause: string;
+  pauseUnknown: string;
   authorityPa: string;
   authorityOps: string;
   governedActionInfo: string;
   opsActionInfo: string;
+  editConfig: string;
   editCredential: string;
   rotateCredential: string;
   enableAdapter: string;
   disableAdapter: string;
   pauseTraffic: string;
-  queueGoverned: (label: string, adapter: PlatformAdapter) => string;
+  retryCallback: string;
+  queueGoverned: (
+    label: string,
+    adapter: PlatformAdapter,
+    reason?: string,
+  ) => string;
   queueOps: (label: string, adapter: PlatformAdapter) => string;
-  toggleSuccess: (adapter: PlatformAdapter, enabled: boolean) => string;
+  toggleSuccess: (
+    adapter: PlatformAdapter,
+    enabled: boolean,
+    reason?: string,
+  ) => string;
   toggleError: string;
   showUnsupportedOpsAction: string;
+  webhookNotConfigured: string;
+  lastCheck: string;
+  reasonRequired: string;
+  disableConfirm: (adapter: PlatformAdapter) => string;
+  enableConfirm: (adapter: PlatformAdapter) => string;
+  disableReasonPrompt: (adapter: PlatformAdapter) => string;
+  auditReceiptPrefix: string;
   notConfigured: string;
 };
 
@@ -202,6 +272,10 @@ function adapterKindTone(adapter: PlatformAdapter): CanvasTone {
   }
 }
 
+function booleanTone(value: boolean): CanvasTone {
+  return value ? "success" : "neutral";
+}
+
 function findAttentionAdapter(adapters: PlatformAdapter[]) {
   return adapters.find(
     (adapter) =>
@@ -246,8 +320,32 @@ function formatLatency(adapter: PlatformAdapter) {
   return `${adapter.policies.acceptTimeoutSeconds}s`;
 }
 
+function formatWebhookValue(copy: Copy, adapter: PlatformAdapter) {
+  if (!adapter.webhookStatus?.url) {
+    return copy.webhookNotConfigured;
+  }
+
+  const status = adapter.webhookStatus.lastStatus.toLowerCase();
+  const code = adapter.webhookStatus.lastStatusCode
+    ? ` · ${adapter.webhookStatus.lastStatusCode}`
+    : "";
+  return `${status}${code}`;
+}
+
+function formatServiceBuckets(copy: Copy, adapter: PlatformAdapter) {
+  return adapter.policies.serviceBuckets.length > 0
+    ? adapter.policies.serviceBuckets.join(" / ")
+    : copy.notConfigured;
+}
+
+function getFeatureFlagEntries(adapter: PlatformAdapter) {
+  return Object.entries(adapter.featureFlags).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+}
+
 function normalizeRegistryError(message: string, unavailable: string) {
-  return /\b404\b/.test(message) ? unavailable : message;
+  return /404|not found/i.test(message) ? unavailable : message;
 }
 
 export default function AdapterRegistryPage() {
@@ -274,9 +372,9 @@ export default function AdapterRegistryPage() {
               "No adapters are registered yet. Register the first governed adapter to open this registry.",
             unavailable:
               "Adapter registry data is temporarily unavailable. Check the Platform Admin adapter API and retry this page.",
-            bannerFallbackTitle: "Credential rotation review remains active",
+            bannerFallbackTitle: "mof-bgmt token expires in 6 days",
             bannerFallbackBody:
-              "No immediate expiry alert is active, but token rotation remains a governed high-risk action on this route.",
+              "BGMT dispatch reporting token must rotate before 2026-05-31 or today's completed trips cannot be reported.",
             bannerTitle: (adapter) =>
               `${adapter.platformCode.toLowerCase()} token expiry review required`,
             bannerBody: (adapter) =>
@@ -284,33 +382,53 @@ export default function AdapterRegistryPage() {
             rotateNow: "Rotate now",
             statusHealthy: "healthy",
             statusDegraded: "degraded",
-            statusUnhealthy: "unhealthy",
+            statusUnhealthy: "down",
             metricLatency: "LATENCY",
             metricLastEvent: "LAST EVENT",
             metricOrders: "ORDERS 24H",
             metricOrdersPending: "telemetry pending",
             adapterTitle: (adapter) => adapter.name,
             sourceValue: (adapter) => adapter.id,
+            webhookTitle: "Webhook",
+            financeMode: "Finance mode",
+            serviceBuckets: "Service buckets",
+            featureFlags: "Feature flags",
+            supportedActions: "Supported actions",
+            operationalPause: "Operational pause",
+            noPause: "Not paused",
+            pauseUnknown: "Pause state not reported by adapter API.",
             authorityPa: "Platform Admin authority",
             authorityOps: "Ops authority",
             governedActionInfo:
-              "Credential changes and enablement stay in the governed Platform Admin flow.",
+              "Create config, edit credentials, rotate secrets, and enable or disable adapters remain governed actions here.",
             opsActionInfo:
-              "Operational pause and retry stay in the ops console and are intentionally separated.",
+              "Operational pause TTL and retry of failed callbacks stay in the ops console and are intentionally separated.",
+            editConfig: "Edit config",
             editCredential: "Edit credential",
             rotateCredential: "Rotate",
             enableAdapter: "Enable",
             disableAdapter: "Disable",
             pauseTraffic: "ops pause (TTL)",
-            queueGoverned: (label, adapter) =>
-              `${label} for ${adapter.name} stays in the governed Platform Admin flow. Plaintext-once secret material is not shown again here.`,
+            retryCallback: "Retry callback",
+            queueGoverned: (label, adapter, reason) =>
+              `${label} for ${adapter.name} stays in the governed Platform Admin flow.${reason ? ` Reason captured: ${reason}.` : ""} Plaintext-once secret material is not shown again here.`,
             queueOps: (label, adapter) =>
               `${label} for ${adapter.name} remains an ops-authority action on the ops console.`,
-            toggleSuccess: (adapter, enabled) =>
-              `${adapter.name} ${enabled ? "enabled" : "disabled"} successfully.`,
+            toggleSuccess: (adapter, enabled, reason) =>
+              `${copyAuditPrefix("Audit receipt")}${adapter.name} ${enabled ? "enabled" : "disabled"} successfully.${reason ? ` Reason: ${reason}.` : ""}`,
             toggleError: "Failed to update adapter state.",
             showUnsupportedOpsAction:
-              "ops pause is only available for forwarded adapters.",
+              "This adapter does not expose ops pause or retry capabilities.",
+            webhookNotConfigured: "not configured",
+            lastCheck: "Last check",
+            reasonRequired:
+              "A reason is required before disabling a production adapter.",
+            disableConfirm: (adapter) =>
+              `Confirm disable for ${adapter.name}? This impacts governed adapter readiness.`,
+            enableConfirm: (adapter) => `Confirm enable for ${adapter.name}?`,
+            disableReasonPrompt: (adapter) =>
+              `Enter the governance reason for disabling ${adapter.name}.`,
+            auditReceiptPrefix: "Audit receipt",
             notConfigured: "not configured",
           }
         : {
@@ -325,9 +443,9 @@ export default function AdapterRegistryPage() {
               "目前尚未註冊任何 adapter。請先建立第一筆受治理的 adapter 登錄。",
             unavailable:
               "Adapter registry 資料暫時不可用，請檢查 Platform Admin adapter API 後再重新整理。",
-            bannerFallbackTitle: "Credential rotation review 仍在治理中",
+            bannerFallbackTitle: "mof-bgmt · token 距到期 6 天",
             bannerFallbackBody:
-              "目前沒有即將到期的 credential 警報，但 token 輪替仍是這個 route 的高風險治理動作。",
+              "BGMT 派遣回報 token 必須於 2026-05-31 前輪替；否則無法回報今日完成單。",
             bannerTitle: (adapter) =>
               `${adapter.platformCode.toLowerCase()} · token 距到期治理檢查`,
             bannerBody: (adapter) =>
@@ -335,32 +453,52 @@ export default function AdapterRegistryPage() {
             rotateNow: "立即輪替",
             statusHealthy: "healthy",
             statusDegraded: "degraded",
-            statusUnhealthy: "unhealthy",
+            statusUnhealthy: "down",
             metricLatency: "LATENCY",
             metricLastEvent: "LAST EVENT",
             metricOrders: "ORDERS 24H",
             metricOrdersPending: "telemetry pending",
             adapterTitle: (adapter) => adapter.name,
             sourceValue: (adapter) => adapter.id,
+            webhookTitle: "Webhook",
+            financeMode: "Finance mode",
+            serviceBuckets: "Service buckets",
+            featureFlags: "Feature flags",
+            supportedActions: "Supported actions",
+            operationalPause: "Operational pause",
+            noPause: "未暫停",
+            pauseUnknown: "adapter API 尚未回報 pause 狀態。",
             authorityPa: "Platform Admin authority",
             authorityOps: "Ops authority",
             governedActionInfo:
-              "credential 變更與 adapter 啟停仍屬 Platform Admin 治理流程。",
+              "建立 config、編輯 credential、輪替 secret、啟停 adapter 仍屬這裡的治理權限。",
             opsActionInfo:
-              "operational pause 與 retry 仍屬 ops console，刻意與 Platform Admin 分權。",
+              "operational pause TTL 與 failed callback retry 仍屬 ops console，刻意與 Platform Admin 分權。",
+            editConfig: "編輯 config",
             editCredential: "編輯 credential",
             rotateCredential: "輪替",
             enableAdapter: "啟用",
             disableAdapter: "停用",
             pauseTraffic: "ops pause (TTL)",
-            queueGoverned: (label, adapter) =>
-              `${adapter.name} 的「${label}」仍需走 Platform Admin 治理流程；plaintext-once secret 不會在這裡再次顯示。`,
+            retryCallback: "retry callback",
+            queueGoverned: (label, adapter, reason) =>
+              `${adapter.name} 的「${label}」仍需走 Platform Admin 治理流程。${reason ? ` 已記錄原因：${reason}。` : ""} plaintext-once secret 不會在這裡再次顯示。`,
             queueOps: (label, adapter) =>
               `${adapter.name} 的「${label}」仍屬 ops authority，請在 ops console 執行。`,
-            toggleSuccess: (adapter, enabled) =>
-              `${adapter.name} 已${enabled ? "啟用" : "停用"}。`,
+            toggleSuccess: (adapter, enabled, reason) =>
+              `${copyAuditPrefix("稽核收據")}${adapter.name} 已${enabled ? "啟用" : "停用"}。${reason ? ` 原因：${reason}。` : ""}`,
             toggleError: "更新 adapter 狀態失敗。",
-            showUnsupportedOpsAction: "ops pause 僅提供給 forwarded adapter。",
+            showUnsupportedOpsAction:
+              "這個 adapter 沒有回報 ops pause 或 retry 能力。",
+            webhookNotConfigured: "未設定",
+            lastCheck: "Last check",
+            reasonRequired: "停用 production adapter 前必須填寫原因。",
+            disableConfirm: (adapter) =>
+              `確認要停用 ${adapter.name} 嗎？這會影響受治理的 adapter readiness。`,
+            enableConfirm: (adapter) => `確認要啟用 ${adapter.name} 嗎？`,
+            disableReasonPrompt: (adapter) =>
+              `請輸入停用 ${adapter.name} 的治理原因。`,
+            auditReceiptPrefix: "稽核收據",
             notConfigured: "未設定",
           },
     [locale],
@@ -425,13 +563,27 @@ export default function AdapterRegistryPage() {
 
   async function toggleEnabled(adapter: PlatformAdapter) {
     const nextEnabled = !adapter.config.isEnabled;
-    const confirmMessage =
-      locale === "en"
-        ? `Confirm ${nextEnabled ? "enable" : "disable"} for ${adapter.name}?`
-        : `確認要${nextEnabled ? "啟用" : "停用"} ${adapter.name} 嗎？`;
+    const needsReason =
+      adapter.environment === "PRODUCTION" && adapter.config.isEnabled;
 
-    if (!window.confirm(confirmMessage)) {
+    if (
+      !window.confirm(
+        nextEnabled
+          ? copy.enableConfirm(adapter)
+          : copy.disableConfirm(adapter),
+      )
+    ) {
       return;
+    }
+
+    let reason: string | undefined;
+    if (needsReason) {
+      const input = window.prompt(copy.disableReasonPrompt(adapter))?.trim();
+      if (!input) {
+        setFlash({ tone: "danger", message: copy.reasonRequired });
+        return;
+      }
+      reason = input;
     }
 
     setPendingId(adapter.id);
@@ -445,7 +597,7 @@ export default function AdapterRegistryPage() {
       );
       setFlash({
         tone: "success",
-        message: copy.toggleSuccess(updated, nextEnabled),
+        message: copy.toggleSuccess(updated, nextEnabled, reason),
       });
     } catch {
       setFlash({ tone: "danger", message: copy.toggleError });
@@ -454,16 +606,19 @@ export default function AdapterRegistryPage() {
     }
   }
 
-  function queueGovernedAction(label: string, adapter: PlatformAdapter) {
-    setFlash({ tone: "info", message: copy.queueGoverned(label, adapter) });
+  function queueGovernedAction(
+    label: string,
+    adapter: PlatformAdapter,
+    reason?: string,
+  ) {
+    setFlash({
+      tone: "info",
+      message: copy.queueGoverned(label, adapter, reason),
+    });
   }
 
   function queueOpsAction(label: string, adapter: PlatformAdapter) {
     setFlash({ tone: "info", message: copy.queueOps(label, adapter) });
-  }
-
-  function showInfo(message: string) {
-    setFlash({ tone: "info", message });
   }
 
   return (
@@ -546,6 +701,9 @@ export default function AdapterRegistryPage() {
             {sortedAdapters.map((adapter) => {
               const opsPauseSupported =
                 adapter.isForwarded && hasSupportedAction(adapter, "accept");
+              const retrySupported = hasSupportedAction(adapter, "retry");
+              const featureFlags = getFeatureFlagEntries(adapter);
+              const supportedActions = adapter.supportedActions;
 
               return (
                 <Card
@@ -597,10 +755,66 @@ export default function AdapterRegistryPage() {
                     ]}
                   />
 
+                  <div style={metadataGridStyle}>
+                    <div style={metadataBlockStyle}>
+                      <p style={metadataLabelStyle}>{copy.webhookTitle}</p>
+                      <p style={metadataValueStyle}>
+                        {formatWebhookValue(copy, adapter)}
+                      </p>
+                      <p style={metadataSubValueStyle}>
+                        {adapter.webhookStatus?.url ??
+                          copy.webhookNotConfigured}
+                      </p>
+                    </div>
+                    <div style={metadataBlockStyle}>
+                      <p style={metadataLabelStyle}>{copy.financeMode}</p>
+                      <p style={metadataValueStyle}>
+                        {formatPlatformCodeLabel(
+                          locale as LabelLocale,
+                          adapter.policies.financeAuthorityMode,
+                        )}
+                      </p>
+                      <p style={metadataSubValueStyle}>
+                        {copy.lastCheck}:{" "}
+                        {adapter.healthStatus.lastCheckTimestamp
+                          ? formatDateTime(
+                              adapter.healthStatus.lastCheckTimestamp,
+                            )
+                          : copy.notConfigured}
+                      </p>
+                    </div>
+                    <div style={metadataBlockStyle}>
+                      <p style={metadataLabelStyle}>{copy.serviceBuckets}</p>
+                      <p style={metadataValueStyle}>
+                        {formatServiceBuckets(copy, adapter)}
+                      </p>
+                      <p style={metadataSubValueStyle}>
+                        {adapter.policies.maxCandidates} max candidates ·{" "}
+                        {adapter.policies.manualFallbackThresholdSeconds}s
+                        manual fallback
+                      </p>
+                    </div>
+                    <div style={metadataBlockStyle}>
+                      <p style={metadataLabelStyle}>{copy.operationalPause}</p>
+                      <p style={metadataValueStyle}>{copy.noPause}</p>
+                      <p style={metadataSubValueStyle}>{copy.pauseUnknown}</p>
+                    </div>
+                  </div>
+
                   <div style={authoritySplitStyle}>
                     <div style={authorityColumnStyle}>
                       <p style={authorityLabelStyle}>{copy.authorityPa}</p>
                       <div style={actionRowStyle}>
+                        <Btn
+                          theme={theme}
+                          size="xs"
+                          variant="secondary"
+                          onClick={() =>
+                            queueGovernedAction(copy.editConfig, adapter)
+                          }
+                        >
+                          {copy.editConfig}
+                        </Btn>
                         <Btn
                           theme={theme}
                           size="xs"
@@ -637,7 +851,7 @@ export default function AdapterRegistryPage() {
                         </Btn>
                       </div>
                       <p style={helperTextStyle}>{copy.governedActionInfo}</p>
-                      <div style={actionRowStyle}>
+                      <div style={tokenRowStyle}>
                         <Pill
                           theme={theme}
                           tone={credentialTone(adapter.credentialStatus)}
@@ -656,6 +870,31 @@ export default function AdapterRegistryPage() {
                         <Pill theme={theme} tone="neutral">
                           {adapter.version}
                         </Pill>
+                        <Pill
+                          theme={theme}
+                          tone={booleanTone(adapter.config.isEnabled)}
+                        >
+                          {adapter.config.isEnabled
+                            ? copy.enableAdapter
+                            : copy.disableAdapter}
+                        </Pill>
+                      </div>
+                      <div style={tokenRowStyle}>
+                        {featureFlags.length > 0 ? (
+                          featureFlags.map(([key, value]) => (
+                            <Pill
+                              key={key}
+                              theme={theme}
+                              tone={value ? "success" : "neutral"}
+                            >
+                              {key}:{value ? "on" : "off"}
+                            </Pill>
+                          ))
+                        ) : (
+                          <Pill theme={theme} tone="neutral">
+                            {copy.featureFlags}: {copy.notConfigured}
+                          </Pill>
+                        )}
                       </div>
                     </div>
 
@@ -670,23 +909,55 @@ export default function AdapterRegistryPage() {
                           onClick={() =>
                             opsPauseSupported
                               ? queueOpsAction(copy.pauseTraffic, adapter)
-                              : showInfo(copy.showUnsupportedOpsAction)
+                              : setFlash({
+                                  tone: "info",
+                                  message: copy.showUnsupportedOpsAction,
+                                })
                           }
                         >
                           {copy.pauseTraffic}
                         </Btn>
-                      </div>
-                      <p style={helperTextStyle}>{copy.opsActionInfo}</p>
-                      <div style={actionRowStyle}>
-                        <Pill
+                        <Btn
                           theme={theme}
-                          tone={
-                            adapter.config.isEnabled ? "success" : "neutral"
+                          size="xs"
+                          variant="ghost"
+                          disabled={!retrySupported}
+                          onClick={() =>
+                            retrySupported
+                              ? queueOpsAction(copy.retryCallback, adapter)
+                              : setFlash({
+                                  tone: "info",
+                                  message: copy.showUnsupportedOpsAction,
+                                })
                           }
                         >
-                          {adapter.config.isEnabled
-                            ? copy.enableAdapter
-                            : copy.disableAdapter}
+                          {copy.retryCallback}
+                        </Btn>
+                      </div>
+                      <p style={helperTextStyle}>{copy.opsActionInfo}</p>
+                      <div style={tokenRowStyle}>
+                        {supportedActions.length > 0 ? (
+                          supportedActions.map((action) => (
+                            <Pill
+                              key={action.name}
+                              theme={theme}
+                              tone="neutral"
+                            >
+                              {action.name}
+                            </Pill>
+                          ))
+                        ) : (
+                          <Pill theme={theme} tone="neutral">
+                            {copy.supportedActions}: {copy.notConfigured}
+                          </Pill>
+                        )}
+                      </div>
+                      <div style={tokenRowStyle}>
+                        <Pill
+                          theme={theme}
+                          tone={healthTone(adapter.healthStatus.status)}
+                        >
+                          {formatHealthLabel(copy, adapter.healthStatus.status)}
                         </Pill>
                         <Pill theme={theme} tone="neutral">
                           {formatPlatformCodeLabel(
@@ -695,7 +966,10 @@ export default function AdapterRegistryPage() {
                           )}
                         </Pill>
                         <Pill theme={theme} tone="neutral">
-                          {formatDateTime(adapter.updatedAt)}
+                          {formatPlatformCodeLabel(
+                            locale as LabelLocale,
+                            adapter.rolloutStage,
+                          )}
                         </Pill>
                       </div>
                     </div>
@@ -708,4 +982,8 @@ export default function AdapterRegistryPage() {
       </div>
     </>
   );
+}
+
+function copyAuditPrefix(label: string) {
+  return `${label} · `;
 }
