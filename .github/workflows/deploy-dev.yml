@@ -389,7 +389,7 @@ jobs:
             --set-cloudsql-instances "${{ needs.prepare.outputs.cloudsql }}" \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "NODE_ENV=production,API_PORT=3001" \
+            --set-env-vars "NODE_ENV=production,API_PORT=3001,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=mock,LLM_GATEWAY_CHAT_MODEL=mock-chat-v1,LLM_GATEWAY_SUMMARIZER_MODEL=mock-summary-v1" \
             ${{ needs.prepare.outputs.api_exposure_flag }} \
             --min-instances 0 \
             --max-instances 3 \
@@ -433,7 +433,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
             ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
             --min-instances 0 \
             --max-instances 2 \

@@ -10,6 +10,7 @@ import os
 import socket
 import random
 import re
+import shutil
 import shlex
 import signal
 import subprocess
@@ -150,6 +151,7 @@ CHAIR_REVIEW_OUTPUT_KEYS = {
     "recommended_focus",
 }
 CLOSEOUT_SKILL_PATH = THIS_DIR / "skills" / "task-closeout-finalization.md"
+INTEGRATION_CLOSEOUT_SKILL_PATH = THIS_DIR / "skills" / "integration-closeout.md"
 CHAIRMAN_SKILL_PATH = THIS_DIR / "skills" / "chairman-operational-review.md"
 
 
@@ -368,8 +370,11 @@ def supervisor_pid_path(config: dict[str, Any]) -> Path:
 
 def write_supervisor_pid(config: dict[str, Any]) -> None:
     path = supervisor_pid_path(config)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    except OSError as exc:
+        console_log(f"unable to write supervisor pid file {path}: {exc}", quiet=SUPERVISOR_LOG_QUIET)
 
 
 def clear_supervisor_pid(config: dict[str, Any]) -> None:
@@ -382,6 +387,330 @@ def clear_supervisor_pid(config: dict[str, Any]) -> None:
         return
     if current == str(os.getpid()):
         path.unlink(missing_ok=True)
+
+
+def disk_guard_settings(config: dict[str, Any]) -> dict[str, Any]:
+    supervisor_settings = config.get("supervisor", {}) if isinstance(config.get("supervisor"), dict) else {}
+    raw = supervisor_settings.get("disk_guard")
+    settings = dict(raw) if isinstance(raw, dict) else {}
+    # Keep disabled unless the deployment config opts in, so small unit-test
+    # configs and ad-hoc local runs are not coupled to host disk pressure.
+    settings.setdefault("enabled", bool(raw))
+    settings.setdefault("path", ".")
+    settings.setdefault("warn_usage_percent", 80.0)
+    settings.setdefault("cleanup_usage_percent", 85.0)
+    settings.setdefault("block_dispatch_usage_percent", 85.0)
+    settings.setdefault("min_free_gb", 5.0)
+    settings.setdefault("cleanup_interval_seconds", 3600.0)
+    settings.setdefault("worktree_retention_days", 3.0)
+    settings.setdefault("max_worktrees_removed_per_tick", 200)
+    settings.setdefault("remove_dirty_worktrees", False)
+    return settings
+
+
+def _disk_guard_path(config: dict[str, Any], settings: dict[str, Any]) -> Path:
+    raw_path = Path(str(settings.get("path") or ".")).expanduser()
+    if raw_path.is_absolute():
+        return raw_path
+    try:
+        root = config_path(config, "status_file").parent
+    except KeyError:
+        root = THIS_DIR.parent
+    return (root / raw_path).resolve()
+
+
+def disk_usage_snapshot(path: Path) -> dict[str, Any] | None:
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        return None
+    usage_percent = (usage.used / usage.total * 100.0) if usage.total else 0.0
+    return {
+        "path": str(path),
+        "total_bytes": usage.total,
+        "used_bytes": usage.used,
+        "free_bytes": usage.free,
+        "usage_percent": round(usage_percent, 2),
+        "free_gb": round(usage.free / (1024**3), 2),
+    }
+
+
+def active_worker_workspace_roots(state: dict[str, Any]) -> set[str]:
+    active_statuses = ACTIVE_RUNTIME_STATUSES
+    roots: set[str] = set()
+    for worker in (state.get("workers", {}) or {}).values():
+        if not isinstance(worker, dict):
+            continue
+        if str(worker.get("status") or "") not in active_statuses:
+            continue
+        for key in ("workspace_root", "cwd", "worktree", "worktree_path"):
+            value = worker.get(key)
+            if value:
+                roots.add(str(Path(str(value)).expanduser().resolve()))
+        command = worker.get("command") or []
+        if isinstance(command, list):
+            for index, token in enumerate(command[:-1]):
+                if token == "-C":
+                    roots.add(str(Path(str(command[index + 1])).expanduser().resolve()))
+    return roots
+
+
+def _registered_worktrees(repo_root: Path) -> list[dict[str, Any]]:
+    result = _git_capture(repo_root, ["worktree", "list", "--porcelain"], timeout=30.0)
+    if result.returncode != 0:
+        return []
+    records: list[dict[str, Any]] = []
+    current: dict[str, Any] = {}
+    for line in (result.stdout or "").splitlines():
+        if line.startswith("worktree "):
+            if current:
+                records.append(current)
+            current = {"path": line[len("worktree "):]}
+        elif line.startswith("branch "):
+            current["branch"] = line[len("branch "):]
+        elif line.startswith("HEAD "):
+            current["head"] = line[len("HEAD "):]
+        elif line == "locked":
+            current["locked"] = True
+    if current:
+        records.append(current)
+    return records
+
+
+def prune_stale_worker_worktrees(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        repo_root = config_path(config, "status_file").parent.resolve()
+    except KeyError:
+        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "errors": ["missing status_file path"]}
+    if not _worker_worktrees_enabled(config):
+        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "errors": ["worker worktrees disabled"]}
+
+    base = _worker_worktree_base(config, repo_root)
+    if not base.exists():
+        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "errors": []}
+
+    retention_seconds = max(0.0, float(settings.get("worktree_retention_days", 3.0))) * 86400.0
+    cutoff = time.time() - retention_seconds
+    max_removed = max(0, int(settings.get("max_worktrees_removed_per_tick", 200)))
+    remove_dirty = bool(settings.get("remove_dirty_worktrees", False))
+    active_roots = active_worker_workspace_roots(state)
+    checked = removed = skipped = failed = 0
+    errors: list[str] = []
+
+    for record in sorted(_registered_worktrees(repo_root), key=lambda item: str(item.get("path") or "")):
+        if max_removed and removed >= max_removed:
+            break
+        raw_path = str(record.get("path") or "").strip()
+        if not raw_path:
+            continue
+        path = Path(raw_path).expanduser().resolve()
+        if path == repo_root or not str(path).startswith(str(base) + os.sep):
+            continue
+        checked += 1
+        if str(path) in active_roots:
+            skipped += 1
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            skipped += 1
+            continue
+        if stat.st_mtime > cutoff:
+            skipped += 1
+            continue
+        command = ["worktree", "remove"]
+        if remove_dirty:
+            command.append("--force")
+        command.append(str(path))
+        result = _git_capture(repo_root, command, timeout=30.0)
+        if result.returncode == 0:
+            removed += 1
+            continue
+        failed += 1
+        if len(errors) < 10:
+            message = (result.stderr or result.stdout or "").strip().replace("\n", " | ")
+            errors.append(f"{path}: {message[:240]}")
+
+    prune = _git_capture(repo_root, ["worktree", "prune"], timeout=30.0)
+    if prune.returncode != 0 and len(errors) < 10:
+        errors.append(f"git worktree prune: {(prune.stderr or prune.stdout or '').strip()[:240]}")
+    return {"checked": checked, "removed": removed, "skipped": skipped, "failed": failed, "errors": errors}
+
+
+def _disk_guard_should_cleanup(record: dict[str, Any], settings: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    if float(snapshot.get("usage_percent") or 0.0) >= float(settings.get("cleanup_usage_percent", 85.0)):
+        return True
+    last_cleanup = _parse_iso_utc(record.get("last_cleanup_at"))
+    if last_cleanup is None:
+        return True
+    return (datetime.now(timezone.utc) - last_cleanup).total_seconds() >= float(
+        settings.get("cleanup_interval_seconds", 3600.0)
+    )
+
+
+def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
+    settings = disk_guard_settings(config)
+    if not settings.get("enabled", False):
+        return False
+
+    record = state.setdefault("disk_guard", {})
+    path = _disk_guard_path(config, settings)
+    snapshot = disk_usage_snapshot(path)
+    if snapshot is None:
+        record["last_check_at"] = utc_now()
+        record["last_error"] = f"Unable to read disk usage for {path}"
+        return True
+
+    changed = False
+    before_blocked = bool(record.get("dispatch_blocked"))
+    record.update(snapshot)
+    record["last_check_at"] = utc_now()
+
+    cleanup_result: dict[str, Any] | None = None
+    if _disk_guard_should_cleanup(record, settings, snapshot):
+        cleanup_result = prune_stale_worker_worktrees(config, state, settings)
+        record["last_cleanup_at"] = utc_now()
+        record["last_cleanup"] = cleanup_result
+        changed = True
+        refreshed = disk_usage_snapshot(path)
+        if refreshed is not None:
+            snapshot = refreshed
+            record.update(snapshot)
+
+    usage_percent = float(snapshot.get("usage_percent") or 0.0)
+    free_gb = float(snapshot.get("free_gb") or 0.0)
+    block_percent = float(settings.get("block_dispatch_usage_percent", 85.0))
+    min_free_gb = float(settings.get("min_free_gb", 5.0))
+    dispatch_blocked = usage_percent >= block_percent or free_gb < min_free_gb
+    record["dispatch_blocked"] = dispatch_blocked
+    record["reason"] = (
+        f"disk usage {usage_percent:.2f}% >= {block_percent:.2f}% or free {free_gb:.2f}GB < {min_free_gb:.2f}GB"
+        if dispatch_blocked
+        else None
+    )
+    if before_blocked != dispatch_blocked:
+        changed = True
+
+    warn_percent = float(settings.get("warn_usage_percent", 80.0))
+    if cleanup_result and int(cleanup_result.get("removed") or 0) > 0:
+        try:
+            write_activity_log(
+                config,
+                {
+                    "type": "disk_guard_worktree_prune",
+                    "message": (
+                        f"Pruned {cleanup_result.get('removed')} stale clean auto worktree(s); "
+                        f"disk usage now {usage_percent:.2f}% with {free_gb:.2f}GB free."
+                    ),
+                    "checked": cleanup_result.get("checked"),
+                    "removed": cleanup_result.get("removed"),
+                    "skipped": cleanup_result.get("skipped"),
+                    "failed": cleanup_result.get("failed"),
+                    "usage_percent": usage_percent,
+                    "free_gb": free_gb,
+                },
+            )
+        except OSError:
+            pass
+    if dispatch_blocked or usage_percent >= warn_percent:
+        console_log(
+            (
+                "disk guard: "
+                f"usage={usage_percent:.2f}% free={free_gb:.2f}GB "
+                f"dispatch_blocked={dispatch_blocked}"
+            ),
+            quiet=SUPERVISOR_LOG_QUIET,
+        )
+    return changed
+
+
+def disk_guard_dispatch_blocked(config: dict[str, Any], state: dict[str, Any]) -> bool:
+    settings = disk_guard_settings(config)
+    if not settings.get("enabled", False):
+        return False
+    record = state.get("disk_guard") if isinstance(state.get("disk_guard"), dict) else {}
+    if bool(record.get("dispatch_blocked")):
+        return True
+    snapshot = disk_usage_snapshot(_disk_guard_path(config, settings))
+    if snapshot is None:
+        return False
+    return (
+        float(snapshot.get("usage_percent") or 0.0) >= float(settings.get("block_dispatch_usage_percent", 85.0))
+        or float(snapshot.get("free_gb") or 0.0) < float(settings.get("min_free_gb", 5.0))
+    )
+
+
+def note_dispatch_blocked_by_disk_guard(config: dict[str, Any], state: dict[str, Any], source: str) -> bool:
+    if not disk_guard_dispatch_blocked(config, state):
+        return False
+    guard = state.setdefault("disk_guard", {})
+    reason = str(guard.get("reason") or "disk guard blocked dispatch")
+    now = utc_now()
+    last_at = _parse_iso_utc(guard.get("last_dispatch_block_log_at"))
+    cooldown_seconds = 300.0
+    if (
+        guard.get("last_dispatch_block_source") == source
+        and guard.get("last_dispatch_block_reason") == reason
+        and last_at is not None
+        and (datetime.now(timezone.utc) - last_at).total_seconds() < cooldown_seconds
+    ):
+        return False
+    guard["last_dispatch_block_source"] = source
+    guard["last_dispatch_block_reason"] = reason
+    guard["last_dispatch_block_log_at"] = now
+    try:
+        write_activity_log(
+            config,
+            {
+                "type": "dispatch_blocked_disk_guard",
+                "source": source,
+                "message": reason,
+                "usage_percent": guard.get("usage_percent"),
+                "free_gb": guard.get("free_gb"),
+            },
+        )
+    except OSError:
+        pass
+    console_log(f"dispatch blocked by disk guard ({source}): {reason}", quiet=SUPERVISOR_LOG_QUIET)
+    return True
+
+
+def mark_dispatch_deferred_by_disk_guard(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    record: dict[str, Any],
+    *,
+    event_id: str | None = None,
+    task_id: str | None = None,
+    target_agent: str | None = None,
+) -> bool:
+    reason = str((state.get("disk_guard") or {}).get("reason") or "disk guard blocked dispatch")
+    now = utc_now()
+    changed = record.get("status") != "queued" or record.get("deferred_reason") != "disk_guard"
+    record["status"] = "queued"
+    record["deferred_reason"] = "disk_guard"
+    record["last_deferred_at"] = now
+    record["last_deferred_message"] = reason
+    try:
+        write_activity_log(
+            config,
+            {
+                "type": "dispatch_deferred_disk_guard",
+                "task_id": task_id,
+                "target_agent": target_agent,
+                "queue_event_id": event_id,
+                "message": reason,
+                "usage_percent": (state.get("disk_guard") or {}).get("usage_percent"),
+                "free_gb": (state.get("disk_guard") or {}).get("free_gb"),
+            },
+        )
+    except OSError:
+        pass
+    return changed
 
 
 def supervisor_shutdown_reason(signum: int) -> str:
@@ -1375,6 +1704,10 @@ def build_request(config: dict[str, Any], event: dict[str, Any]) -> DeliveryRequ
             )
         ]
     if request_reason := str(event.get("reason") or ""):
+        if request_reason in EXECUTION_DISPATCH_REASONS and INTEGRATION_CLOSEOUT_SKILL_PATH.exists():
+            integration_path = relpath(INTEGRATION_CLOSEOUT_SKILL_PATH)
+            if integration_path not in context_files:
+                context_files.append(integration_path)
         if request_reason == "owned_finalize_dispatch" and CLOSEOUT_SKILL_PATH.exists():
             closeout_path = relpath(CLOSEOUT_SKILL_PATH)
             if closeout_path not in context_files:
@@ -1624,6 +1957,16 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
                 },
             )
             changed = True
+            continue
+        if disk_guard_dispatch_blocked(config, state):
+            changed = mark_dispatch_deferred_by_disk_guard(
+                config,
+                state,
+                record,
+                event_id=event_id,
+                task_id=event.get("task_id"),
+                target_agent=event.get("target_display_name") or event.get("target_agent"),
+            ) or changed
             continue
         request = build_request(config, event)
         record["attempt_count"] = int(record.get("attempt_count", 0)) + 1
@@ -3095,6 +3438,13 @@ def reconcile_status_from_git(config: dict[str, Any], state: dict[str, Any]) -> 
         rc = proc.returncode
         stdout_path = in_flight["stdout_path"]
         stderr_path = in_flight["stderr_path"]
+        for handle_key in ("stdout_fh", "stderr_fh"):
+            handle = in_flight.get(handle_key)
+            if handle is not None:
+                try:
+                    handle.close()
+                except OSError:
+                    pass
         try:
             stdout = stdout_path.read_text() if stdout_path.exists() else ""
         except OSError:
@@ -3164,6 +3514,11 @@ def reconcile_status_from_git(config: dict[str, Any], state: dict[str, Any]) -> 
             stderr=stderr_fh,
         )
     except OSError as exc:
+        for handle in (stdout_fh, stderr_fh):
+            try:
+                handle.close()
+            except OSError:
+                pass
         write_activity_log(
             config,
             {
@@ -7660,6 +8015,8 @@ def dispatch_ready_tasks(
     settings = ready_dispatch_settings(config)
     if not settings.get("enabled", True):
         return False
+    if disk_guard_dispatch_blocked(config, state):
+        return note_dispatch_blocked_by_disk_guard(config, state, "ready_dispatcher")
 
     status = load_status(config)
     schema = config.get("schema", {})
@@ -7893,6 +8250,8 @@ def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, 
     if not settings.get("enabled", True):
         tracking["below_threshold_since"] = None
         return changed
+    if disk_guard_dispatch_blocked(config, state):
+        return note_dispatch_blocked_by_disk_guard(config, state, "underutilization_sidecars") or changed
 
     if ratio >= threshold:
         if tracking.get("below_threshold_since") is not None:
@@ -8107,6 +8466,8 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
     settings = underutilization_settings(config)
     if not settings.get("enabled", True):
         return False
+    if disk_guard_dispatch_blocked(config, state):
+        return note_dispatch_blocked_by_disk_guard(config, state, "underutilization_main_tasks")
 
     tracking = state.setdefault("underutilization", {})
     productive_statuses = {str(v) for v in settings.get("productive_worker_statuses", [])}
@@ -8340,9 +8701,12 @@ def run_once(
     once: bool = False,
     manage_pid_file: bool = True,
 ) -> bool:
+    heartbeat_at = utc_now()
+    state = load_runtime_state(config)
+    changed = maintain_disk_guard(config, state)
+    disk_guard_record = dict(state.get("disk_guard", {}) or {})
     if manage_pid_file:
         write_supervisor_pid(config)
-    heartbeat_at = utc_now()
     status = load_status(config)
     desired_focus_mode = desired_focus_mode_from_status(status)
 
@@ -8362,10 +8726,8 @@ def run_once(
         )
 
     _sd_notify("WATCHDOG=1")
-    state = load_runtime_state(config)
     previous_heartbeat = state.get("supervisor", {}).get("last_heartbeat_at")
     stamp_supervisor_state(state)
-    changed = False
     provider_report = load_provider_report(config)
     changed = bool(expire_provider_pauses(config, state, provider_report)) or changed
     pruned = prune_stale_approvals(config)
@@ -8374,6 +8736,8 @@ def run_once(
     if watch:
         changed = run_scan(config, state, replay=replay, provider_capabilities=provider_report) or changed
         state = load_runtime_state(config)
+        if disk_guard_record:
+            state["disk_guard"] = disk_guard_record
         stamp_supervisor_state(state)
         changed = bool(expire_provider_pauses(config, state, provider_report)) or changed
     status = load_status(config)
@@ -8408,7 +8772,11 @@ def run_once(
     trim_worker_history(state, int(config.get("supervisor", {}).get("max_worker_history", 200)))
     trim_seen_events(state, int(config.get("watcher", {}).get("max_seen_events", 2000)))
     stamp_supervisor_state(state)
-    save_runtime_state(config, state)
+    try:
+        save_runtime_state(config, state)
+    except OSError as exc:
+        console_log(f"unable to save runtime state: {exc}", quiet=SUPERVISOR_LOG_QUIET)
+        return changed
     log_runtime_summary(
         state,
         safe_load_approval_state(config),

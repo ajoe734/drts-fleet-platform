@@ -6,6 +6,7 @@ import signal
 import subprocess
 import tempfile
 import pathlib
+import time
 from datetime import datetime, timezone
 import unittest
 import os
@@ -670,6 +671,79 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "")
             self.assertIn("isolated coordination worktree", request.message)
             self.assertEqual(request.metadata["workspace_root"], str(workspace))
+
+
+class DiskGuardTests(unittest.TestCase):
+    def _repo_config(self, root: Path) -> dict:
+        (root / "ai-status.json").write_text('{"tasks":[]}\n', encoding="utf-8")
+        return {
+            "paths": {
+                "status_file": str(root / "ai-status.json"),
+                "activity_log": str(root / "ai-activity-log.jsonl"),
+                "state_file": str(root / ".orchestrator/state.json"),
+            },
+            "branch_strategy": {
+                "worker_worktrees": {
+                    "enabled": True,
+                    "root": ".artifacts/worktrees/auto",
+                }
+            },
+            "supervisor": {
+                "disk_guard": {
+                    "enabled": True,
+                    "worktree_retention_days": 3,
+                    "max_worktrees_removed_per_tick": 20,
+                    "remove_dirty_worktrees": False,
+                }
+            },
+        }
+
+    def _init_repo(self, root: Path) -> None:
+        _git(root, "init", "-b", "dev")
+        _git(root, "config", "user.email", "test@example.com")
+        _git(root, "config", "user.name", "Test User")
+        (root / "README.md").write_text("test\n", encoding="utf-8")
+        _git(root, "add", "README.md")
+        _git(root, "commit", "-m", "init")
+
+    def test_prunes_only_stale_clean_inactive_auto_worktrees(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            base = root / ".artifacts/worktrees/auto"
+            clean = base / "codex-old-clean"
+            dirty = base / "codex-old-dirty"
+            active = base / "codex-old-active"
+            _git(root, "worktree", "add", "-b", "codex/old-clean", str(clean), "dev")
+            _git(root, "worktree", "add", "-b", "codex/old-dirty", str(dirty), "dev")
+            _git(root, "worktree", "add", "-b", "codex/old-active", str(active), "dev")
+            (dirty / "scratch.txt").write_text("untracked work\n", encoding="utf-8")
+            old = time.time() - 4 * 86400
+            for path in (clean, dirty, active):
+                os.utime(path, (old, old))
+
+            result = supervisor.prune_stale_worker_worktrees(
+                self._repo_config(root),
+                {
+                    "workers": {
+                        "active-run": {
+                            "status": "running",
+                            "workspace_root": str(active),
+                        }
+                    }
+                },
+                {
+                    "worktree_retention_days": 3,
+                    "max_worktrees_removed_per_tick": 20,
+                    "remove_dirty_worktrees": False,
+                },
+            )
+
+            self.assertEqual(result["removed"], 1)
+            self.assertFalse(clean.exists())
+            self.assertTrue(dirty.exists())
+            self.assertTrue(active.exists())
 
 
 class ProcessQueueDispatchGuardTests(unittest.TestCase):
@@ -1387,6 +1461,55 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         build_request.assert_called_once_with(self.config, queue_payload)
         start_worker.assert_called_once()
 
+    def test_process_queue_defers_worker_start_when_disk_guard_blocks_dispatch(self) -> None:
+        queued_task = {
+            "id": "BUS-VAL-005",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Gemini",
+            "depends_on": [],
+            "last_update": "2026-04-05T14:54:01Z",
+        }
+        queued_event = supervisor.build_dispatch_event(
+            queued_task,
+            "Codex",
+            "owned_in_progress_dispatch",
+            {"BUS-VAL-005": queued_task},
+        )
+        queue_payload = {
+            "event_id": "evt-disk",
+            "event_key": queued_event["key"],
+            "task_id": "BUS-VAL-005",
+            "target_agent": "codex",
+            "target_display_name": "Codex",
+            "reason": "owned_in_progress_dispatch",
+            "message": "wake",
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {},
+            "disk_guard": {
+                "dispatch_blocked": True,
+                "reason": "disk usage 90.00% >= 85.00%",
+            },
+        }
+        config = {**self.config, "supervisor": {"disk_guard": {"enabled": True}}}
+
+        with (
+            mock.patch.object(supervisor, "load_event_queue", return_value=[queue_payload]),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [queued_task]}),
+            mock.patch.object(supervisor, "build_request", side_effect=AssertionError("worker request should be deferred")),
+            mock.patch.object(supervisor, "start_worker_for_request", side_effect=AssertionError("worker should not start")),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.process_queue(config, state, self.provider_report)
+
+        self.assertTrue(changed)
+        record = state["queue"]["events"]["evt-disk"]
+        self.assertEqual(record["status"], "queued")
+        self.assertEqual(record["attempt_count"], 0)
+        self.assertEqual(record["deferred_reason"], "disk_guard")
+
     def test_dispatcher_can_requeue_same_task_after_previous_failure(self) -> None:
         current_task = {
             "id": "REG-002",
@@ -1433,6 +1556,38 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertEqual(queued_event["task_id"], "REG-002")
         self.assertEqual(queued_event["target_agent"], "Codex")
         self.assertEqual(queued_event["reason"], "owned_in_progress_dispatch")
+
+    def test_dispatcher_does_not_queue_new_events_when_disk_guard_blocks_dispatch(self) -> None:
+        current_task = {
+            "id": "REG-DISK-001",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": [],
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {},
+            "seen_event_keys": {},
+            "disk_guard": {
+                "dispatch_blocked": True,
+                "reason": "disk usage 90.00% >= 85.00%",
+            },
+        }
+        status = {"tasks": [current_task]}
+        config = {**self.config, "supervisor": {"disk_guard": {"enabled": True}}}
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", side_effect=AssertionError("new event should not be queued")),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["queue"]["events"], {})
+        self.assertEqual(state["disk_guard"]["last_dispatch_block_source"], "ready_dispatcher")
 
     def test_dispatcher_queues_owner_finalize_after_review_approved(self) -> None:
         current_task = {
@@ -2228,6 +2383,23 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
 
 
 class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._clear_reconcile_registry()
+
+    def tearDown(self) -> None:
+        self._clear_reconcile_registry()
+
+    def _clear_reconcile_registry(self) -> None:
+        for entry in supervisor._RECONCILE_PROCS.values():
+            for handle_key in ("stdout_fh", "stderr_fh"):
+                handle = entry.get(handle_key)
+                if handle is not None:
+                    try:
+                        handle.close()
+                    except OSError:
+                        pass
+        supervisor._RECONCILE_PROCS.clear()
+
     def _config(self, root: Path, *, interval: float | None = None) -> dict[str, object]:
         supervisor_cfg: dict[str, object] = {}
         if interval is not None:
@@ -2238,7 +2410,13 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
         }
         return config
 
-    def test_first_call_runs_and_stamps_timestamp(self) -> None:
+    def _fake_popen(self) -> mock.MagicMock:
+        proc = mock.MagicMock()
+        proc.poll.return_value = None
+        proc.returncode = None
+        return proc
+
+    def test_first_call_spawns_and_stamps_timestamp(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "ai-status.json").write_text("{}", encoding="utf-8")
@@ -2247,11 +2425,10 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
             script.write_text("# placeholder\n", encoding="utf-8")
             config = self._config(root)
             state: dict[str, object] = {"supervisor": {}}
-            fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="reconcile-from-git: no drift found against origin/dev\n", stderr="")
-            with mock.patch.object(supervisor.subprocess, "run", return_value=fake_result) as run_mock:
+            with mock.patch.object(supervisor.subprocess, "Popen", return_value=self._fake_popen()) as popen_mock:
                 ran = supervisor.reconcile_status_from_git(config, state)
-            self.assertTrue(ran)
-            run_mock.assert_called_once()
+            self.assertFalse(ran)
+            popen_mock.assert_called_once()
             self.assertIn("last_git_reconcile_at", state["supervisor"])  # type: ignore[index]
 
     def test_second_call_within_window_skips_subprocess(self) -> None:
@@ -2270,10 +2447,10 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
                     .replace("+00:00", "Z"),
                 }
             }
-            with mock.patch.object(supervisor.subprocess, "run") as run_mock:
+            with mock.patch.object(supervisor.subprocess, "Popen") as popen_mock:
                 ran = supervisor.reconcile_status_from_git(config, state)
             self.assertFalse(ran)
-            run_mock.assert_not_called()
+            popen_mock.assert_not_called()
 
     def test_second_call_after_window_runs_subprocess(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2291,21 +2468,20 @@ class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
                     .replace("+00:00", "Z"),
                 }
             }
-            fake_result = subprocess.CompletedProcess(args=[], returncode=0, stdout="reconcile-from-git: no drift found against origin/dev\n", stderr="")
-            with mock.patch.object(supervisor.subprocess, "run", return_value=fake_result) as run_mock:
+            with mock.patch.object(supervisor.subprocess, "Popen", return_value=self._fake_popen()) as popen_mock:
                 ran = supervisor.reconcile_status_from_git(config, state)
-            self.assertTrue(ran)
-            run_mock.assert_called_once()
+            self.assertFalse(ran)
+            popen_mock.assert_called_once()
 
     def test_skips_when_status_file_path_missing(self) -> None:
         # OPS-STATE-RECONCILE-002 guard: don't raise KeyError when config
         # omits paths.status_file (e.g. minimal test config).
         config: dict[str, object] = {"paths": {}, "supervisor": {}}
         state: dict[str, object] = {"supervisor": {}}
-        with mock.patch.object(supervisor.subprocess, "run") as run_mock:
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen_mock:
             ran = supervisor.reconcile_status_from_git(config, state)
         self.assertFalse(ran)
-        run_mock.assert_not_called()
+        popen_mock.assert_not_called()
 
 
 class UnderutilizationSidecarDispatchTests(unittest.TestCase):
@@ -7054,11 +7230,22 @@ class ReconcileStatusFromGitAsyncTests(unittest.TestCase):
             "supervisor": {"git_reconcile_interval_seconds": 60},
         }
         # ensure the registry is empty across tests
-        supervisor._RECONCILE_PROCS.clear()
+        self._clear_reconcile_registry()
 
     def tearDown(self) -> None:
-        supervisor._RECONCILE_PROCS.clear()
+        self._clear_reconcile_registry()
         self._tmp.cleanup()
+
+    def _clear_reconcile_registry(self) -> None:
+        for entry in supervisor._RECONCILE_PROCS.values():
+            for handle_key in ("stdout_fh", "stderr_fh"):
+                handle = entry.get(handle_key)
+                if handle is not None:
+                    try:
+                        handle.close()
+                    except OSError:
+                        pass
+        supervisor._RECONCILE_PROCS.clear()
 
     def _fake_popen(self, *, alive: bool, returncode: int = 0,
                      stdout: str = "", stderr: str = "") -> mock.MagicMock:

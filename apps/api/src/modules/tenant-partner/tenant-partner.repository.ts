@@ -61,6 +61,7 @@ type WebhookRuntimeMetadata = {
   lastSignaturePreview: string | null;
   disabledAt: string | null;
   disableReason: "manual_disable" | "delivery_failed" | null;
+  disableReasonNote?: string | null;
   retryPolicy: WebhookRetryPolicy;
   secretRotation: {
     currentVersion: number;

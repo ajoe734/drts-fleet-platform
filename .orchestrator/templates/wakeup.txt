@@ -20,6 +20,7 @@
 - owner 完成 acceptance 並跑完可執行檢查後，必須用 `AI_NAME={{target_agent}} scripts/ai-status.sh handoff {{task_id}} <reviewer> "<完成內容與驗證>"` 交給 reviewer，讓狀態進入 `review`。
 - reviewer 收到 `review` 任務後，通過就用 `AI_NAME={{target_agent}} scripts/ai-status.sh approve {{task_id}} "<review 結論>"`；不通過就 `reopen` 或 `blocker`。
 - owner 收到 `review_approved` closeout 時，只有在已完成 task-scoped commit、普通 non-force push，且可提供 `COMMIT_HASH` / `COMMIT_SUBJECT` / `PUSH_REMOTE` / `PUSH_BRANCH` 後，才能 `done`。
+- `done` 不是整個開發閉環完成。finalize 時必須用 `INTEGRATION_STATUS` 標明目前層級：`branch_pushed` / `pr_open` / `ci_pending` / `ci_failed` / `merged_to_dev` / `deploy_blocked` / `dev_deployed` / `not_applicable`。沒有 `dev_deployed` 證據時，不要說已 publish 到 dev 測試機。
 - 如果你無法完成，請用 `progress` 或 `blocker` 說清楚卡點；不要安靜退出，否則會被 supervisor 視為 failure。
 {{sidecar_guardrails}}
 {{closeout_guardrails}}

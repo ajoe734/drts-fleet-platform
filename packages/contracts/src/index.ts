@@ -1,8 +1,12 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 import type {
+  CrossAppResourceLink,
   DriverMatchingSuppression,
+  EmptyStateEnvelope,
+  RefreshTier,
   ResourceActionDescriptor,
+  UiRefreshMetadata,
 } from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
@@ -823,6 +827,7 @@ export interface TenantNotificationPreferences {
   tenantId: string;
   subscriptions: TenantNotificationSubscription[];
   updatedAt: string;
+  availableActions?: ResourceActionDescriptor[];
 }
 
 export interface WebhookRetryPolicyRecord {
@@ -857,6 +862,7 @@ export interface TenantWebhookRuntimeMetadata {
   lastSignaturePreview: string | null;
   disabledAt: string | null;
   disableReason: TenantWebhookDisableReason | null;
+  disableReasonNote?: string | null;
   retryPolicy: WebhookRetryPolicyRecord;
   secretRotation: {
     currentVersion: number;
@@ -890,6 +896,7 @@ export interface TenantWebhookEndpoint {
   secretPreview: string;
   createdAt: string;
   updatedAt: string;
+  availableActions?: ResourceActionDescriptor[];
   retryPolicy?: WebhookRetryPolicyRecord;
   runtimeMetadata?: TenantWebhookRuntimeMetadata;
   secretHistory?: TenantWebhookSecretRotationRecord[];
@@ -899,6 +906,11 @@ export interface UpdateTenantWebhookEndpointCommand {
   url?: string;
   events?: string[];
   status?: TenantWebhookEndpointStatus;
+  disableReason?: string;
+}
+
+export interface DeleteTenantWebhookEndpointCommand {
+  reason: string;
 }
 
 export interface SendTestWebhookCommand {
@@ -915,12 +927,18 @@ export interface WebhookDeliveryRecord {
   httpStatus: number | null;
   signature: string;
   createdAt: string;
+  availableActions?: ResourceActionDescriptor[];
 }
 
 export interface UpdateTenantSlaProfileCommand {
   waitThresholdMin?: number;
   arrivalThresholdMin?: number;
   completionThresholdMin?: number;
+  reason?: string;
+}
+
+export interface RecalculateTenantSlaBookingsCommand {
+  reason: string;
 }
 
 export interface TenantSlaProfile {
@@ -929,6 +947,17 @@ export interface TenantSlaProfile {
   arrivalThresholdMin: number;
   completionThresholdMin: number;
   updatedAt: string;
+}
+
+export interface TenantSlaProfileView {
+  profile: TenantSlaProfile | null;
+  emptyState: EmptyStateEnvelope | null;
+  availableActions: ResourceActionDescriptor[];
+  refreshTier: RefreshTier;
+  refreshMetadata: UiRefreshMetadata;
+  resourceLinks: CrossAppResourceLink[];
+  updatedBy: string | null;
+  lastRecalculationAt: string | null;
 }
 
 export const TENANT_PASSENGER_MASTER_ROLES = [
@@ -1651,6 +1680,7 @@ export interface TenantWebhookGovernancePolicy {
 export interface TenantIntegrationGovernancePackage {
   tenantId: string;
   generatedAt: string;
+  availableActions?: ResourceActionDescriptor[];
   apiKeyPolicy: TenantApiKeyGovernancePolicy;
   webhookPolicy: TenantWebhookGovernancePolicy;
   baselineWebhookEvents: string[];
@@ -4928,6 +4958,24 @@ export interface PublishPlatformPricingRuleCommand {
 export interface SetTenantStatusCommand {
   status: "active" | "paused";
   reason?: string;
+}
+
+export interface ProposeActionToolInput {
+  resourceKind: string;
+  resourceId: string;
+  action: string;
+  args?: Record<string, unknown>;
+}
+
+export interface ActionIntent {
+  type: "action_intent";
+  tool: string;
+  resourceKind: string;
+  resourceId: string;
+  action: string;
+  args: Record<string, unknown>;
+  confirmationRequired: boolean;
+  mutates: boolean;
 }
 
 export * from "./platform-codes";

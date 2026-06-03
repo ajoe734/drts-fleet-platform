@@ -98,10 +98,10 @@ export class BillingSettlementController {
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items = this.billingSettlementService.listTenantInvoices(
+    const data = this.billingSettlementService.listTenantInvoicesRuntime(
       this.requireTenantId(tenantId),
     );
-    return toApiSuccessEnvelope(toApiListData(items), requestId);
+    return toApiSuccessEnvelope(data, requestId);
   }
 
   @Get("tenant/invoices/:invoiceId")

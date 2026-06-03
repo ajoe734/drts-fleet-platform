@@ -33,6 +33,7 @@ import {
   createControlledDownloadMetadata,
   type ControlledDownloadMetadata,
 } from "../../common/controlled-download";
+import type { AuditedActionResult } from "../../common/action-receipt";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   PlatformAdminRepository,
@@ -670,6 +671,13 @@ export class PlatformAdminService implements OnModuleInit {
     command: CreatePlatformNoticeCommand,
     requestId?: string,
   ): PlatformNoticeRecord {
+    return this.createPlatformNoticeWithAudit(command, requestId).data;
+  }
+
+  createPlatformNoticeWithAudit(
+    command: CreatePlatformNoticeCommand,
+    requestId?: string,
+  ): AuditedActionResult<PlatformNoticeRecord> {
     this.assertNonBlank(command.title, "title");
     this.assertNonBlank(command.body, "body");
     const now = new Date().toISOString();
@@ -687,7 +695,7 @@ export class PlatformAdminService implements OnModuleInit {
       updatedAt: now,
     };
     this.platformNotices.unshift({ ...notice });
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "platform_admin",
@@ -700,7 +708,10 @@ export class PlatformAdminService implements OnModuleInit {
       },
       requestId,
     );
-    return { ...notice };
+    return {
+      data: { ...notice },
+      auditLog,
+    };
   }
 
   resolveNotice(noticeId: string, requestId?: string): PlatformNoticeRecord {
@@ -742,6 +753,13 @@ export class PlatformAdminService implements OnModuleInit {
     command: SetPlatformMaintenanceModeCommand,
     requestId?: string,
   ): PlatformMaintenanceModeRecord {
+    return this.setMaintenanceModeWithAudit(command, requestId).data;
+  }
+
+  setMaintenanceModeWithAudit(
+    command: SetPlatformMaintenanceModeCommand,
+    requestId?: string,
+  ): AuditedActionResult<PlatformMaintenanceModeRecord> {
     const now = new Date().toISOString();
     this.maintenanceMode = {
       enabled: command.enabled,
@@ -751,7 +769,7 @@ export class PlatformAdminService implements OnModuleInit {
       updatedBy: null,
       updatedAt: now,
     };
-    this.recordAudit(
+    const auditLog = this.recordAudit(
       {
         actorId: null,
         actorType: "platform_admin",
@@ -761,7 +779,7 @@ export class PlatformAdminService implements OnModuleInit {
           ? "enable_maintenance_mode"
           : "disable_maintenance_mode",
         resourceType: "platform_maintenance_mode",
-        resourceId: null,
+        resourceId: "platform",
         newValuesSummary: {
           enabled: command.enabled,
           reason: command.reason ?? null,
@@ -769,7 +787,10 @@ export class PlatformAdminService implements OnModuleInit {
       },
       requestId,
     );
-    return { ...this.maintenanceMode };
+    return {
+      data: { ...this.maintenanceMode },
+      auditLog,
+    };
   }
 
   // ── Platform Pricing Rules ────────────────────────────────────────────────
@@ -993,7 +1014,7 @@ export class PlatformAdminService implements OnModuleInit {
     if (requestId) {
       auditLogInput.requestId = requestId;
     }
-    this.auditNotificationService.recordAuditLog(auditLogInput);
+    return this.auditNotificationService.recordAuditLog(auditLogInput);
   }
 
   private clonePublicInfoVersion(

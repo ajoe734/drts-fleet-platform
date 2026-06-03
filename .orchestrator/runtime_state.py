@@ -35,6 +35,11 @@ def default_state() -> dict[str, Any]:
         "failure_streaks": {},
         "chair_reassignment_guards": {},
         "dispatch_pauses": [],
+        "disk_guard": {
+            "last_check_at": None,
+            "last_cleanup_at": None,
+            "dispatch_blocked": False,
+        },
         "chair_review": {
             "active_review": None,
             "rotation_index": 0,
@@ -86,6 +91,10 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state.setdefault("failure_streaks", {})
     state.setdefault("chair_reassignment_guards", {})
     state.setdefault("dispatch_pauses", [])
+    state.setdefault("disk_guard", {})
+    state["disk_guard"].setdefault("last_check_at", None)
+    state["disk_guard"].setdefault("last_cleanup_at", None)
+    state["disk_guard"].setdefault("dispatch_blocked", False)
     if not isinstance(state.get("chair_review"), dict):
         state["chair_review"] = {}
     state["chair_review"].setdefault("active_review", None)

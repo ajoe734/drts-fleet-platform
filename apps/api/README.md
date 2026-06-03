@@ -84,3 +84,9 @@ Helpful local commands:
 - `pnpm db:migrate`
 - `pnpm db:seed`
 - `pnpm db:verify`
+
+LLM gateway runtime notes:
+
+- `PLATFORM_ADMIN_ASSISTANT_ENABLED=false` keeps the assistant backend gated off by default.
+- `LLM_GATEWAY_PROVIDER=mock` is the default and remains the fallback in local/CI when no `LLM_GATEWAY_API_KEY` is present.
+- Real provider keys belong only in API runtime env / Secret Manager, never frontend runtime config.

@@ -20,6 +20,7 @@ import type {
   IssuePartnerIngressCredentialCommand,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
+  DeleteTenantWebhookEndpointCommand,
   DisableTenantCostCenterCommand,
   EvaluateTenantApprovalRuleCommand,
   ListOpsPendingApprovalRequestsQuery,
@@ -38,6 +39,7 @@ import type {
   PartnerEligibilityReviewQueueItem,
   PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
+  RecalculateTenantSlaBookingsCommand,
   ResolvePartnerEligibilityReviewCommand,
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
@@ -1034,12 +1036,14 @@ export class TenantPartnerController {
   @Get("tenant/integration-governance")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   getTenantIntegrationGovernancePackage(
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const item: TenantIntegrationGovernancePackage =
       this.tenantPartnerService.getIntegrationGovernancePackage(
         this.requireTenantId(tenantId),
+        identity,
       );
     return toApiSuccessEnvelope(item, requestId);
   }
@@ -1074,11 +1078,13 @@ export class TenantPartnerController {
 
   @Get("tenant/webhooks")
   listWebhookEndpoints(
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const items = this.tenantPartnerService.listWebhookEndpoints(
       this.requireTenantId(tenantId),
+      identity,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
@@ -1140,6 +1146,7 @@ export class TenantPartnerController {
   @Delete("tenant/webhooks/:webhookId")
   deleteWebhookEndpoint(
     @Param("webhookId") webhookId: string,
+    @Body() command: DeleteTenantWebhookEndpointCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -1147,6 +1154,7 @@ export class TenantPartnerController {
       this.tenantPartnerService.deleteWebhookEndpoint(
         this.requireTenantId(tenantId),
         webhookId,
+        command,
         requestId,
       ) ?? {
         status: "not_found",
@@ -1220,6 +1228,27 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
+  @Post("tenant/webhooks/:webhookId/deliveries/:deliveryId/retry")
+  @RequireRealms("tenant", "platform", "ops")
+  retryWebhookDelivery(
+    @Param("webhookId") webhookId: string,
+    @Param("deliveryId") deliveryId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.retryWebhookDelivery(
+        this.requireTenantId(tenantId),
+        webhookId,
+        deliveryId,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
   @Get("tenant/sla")
   getSlaProfile(
     @Headers("x-tenant-id") tenantId?: string,
@@ -1231,16 +1260,49 @@ export class TenantPartnerController {
     );
   }
 
+  @Get("tenant/sla/view")
+  getSlaProfileView(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getSlaProfileView(
+        this.requireTenantId(tenantId),
+      ),
+      requestId,
+    );
+  }
+
   @Post("tenant/sla")
   updateSlaProfile(
     @Body() command: UpdateTenantSlaProfileCommand,
     @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-actor-id") actorId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.updateSlaProfile(
         this.requireTenantId(tenantId),
         command,
+        actorId,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/sla/recalculate")
+  recalculateSlaBookings(
+    @Body() command: RecalculateTenantSlaBookingsCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-actor-id") actorId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.recalculateSlaBookings(
+        this.requireTenantId(tenantId),
+        command,
+        actorId,
         requestId,
       ),
       requestId,

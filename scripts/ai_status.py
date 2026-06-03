@@ -8,10 +8,16 @@ import shutil
 import subprocess
 import sys
 import uuid
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
 
 ROOT = Path(
     os.environ.get("AI_STATUS_ROOT")
@@ -129,6 +135,74 @@ NON_CANONICAL_LAYER_FILES = {
     "current-work.md",
     "docs-site/index.html",
 }
+LOG_ENTRY_START_RE = re.compile(r'(?=\{"(?:ts|timestamp)"\s*:)')
+
+
+def _jsonl_lock_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.lock")
+
+
+@contextmanager
+def _hold_jsonl_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = _jsonl_lock_path(path).open("a+", encoding="utf-8")
+    try:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def _append_jsonl_line(path: Path, line: str) -> None:
+    payload = (line + "\n").encode("utf-8")
+    with _hold_jsonl_lock(path):
+        fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
+        try:
+            written = 0
+            while written < len(payload):
+                chunk = os.write(fd, payload[written:])
+                if chunk == 0:
+                    raise OSError(f"short write while appending {path}")
+                written += chunk
+        finally:
+            os.close(fd)
+
+
+def _normalize_log_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    if "ts" not in entry and entry.get("timestamp"):
+        entry["ts"] = entry["timestamp"]
+    if "message" not in entry and entry.get("summary"):
+        entry["message"] = entry["summary"]
+    if "type" not in entry and entry.get("action"):
+        entry["type"] = entry["action"]
+    return entry
+
+
+def _decode_log_line(line: str) -> list[dict[str, Any]]:
+    cleaned = line.replace("\x00", "").strip()
+    if not cleaned:
+        return []
+    try:
+        entry = json.loads(cleaned)
+        return [_normalize_log_entry(entry)] if isinstance(entry, dict) else []
+    except json.JSONDecodeError:
+        starts = [match.start() for match in LOG_ENTRY_START_RE.finditer(cleaned)]
+        if not starts:
+            return []
+        starts.append(len(cleaned))
+        entries: list[dict[str, Any]] = []
+        for index, start in enumerate(starts[:-1]):
+            fragment = cleaned[start:starts[index + 1]].strip()
+            try:
+                entry = json.loads(fragment)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(entry, dict):
+                entries.append(_normalize_log_entry(entry))
+        return entries
 
 
 def default_canonical_document_layers() -> dict[str, list[str]]:
@@ -381,6 +455,65 @@ def git_commit_exists(commit_hash: str) -> bool:
     return result.returncode == 0
 
 
+INTEGRATION_STATUS_VALUES = {
+    "not_applicable",
+    "branch_pushed",
+    "pr_open",
+    "ci_pending",
+    "ci_failed",
+    "merged_to_dev",
+    "deploy_blocked",
+    "dev_deployed",
+}
+
+
+def integration_metadata_from_env(commit_required: bool, timestamp: str) -> dict[str, Any]:
+    integration_status = os.environ.get("INTEGRATION_STATUS", "").strip().lower()
+    if not integration_status:
+        integration_status = "branch_pushed" if commit_required else "not_applicable"
+    if integration_status not in INTEGRATION_STATUS_VALUES:
+        allowed = ", ".join(sorted(INTEGRATION_STATUS_VALUES))
+        raise SystemExit(f"INTEGRATION_STATUS must be one of: {allowed}")
+
+    pr_url = os.environ.get("PR_URL", "").strip()
+    ci_status = os.environ.get("CI_STATUS", "").strip()
+    ci_run_url = os.environ.get("CI_RUN_URL", "").strip()
+    merged_ref = os.environ.get("MERGED_REF", "").strip()
+    merge_commit = os.environ.get("MERGE_COMMIT", "").strip()
+    dev_deploy_run_url = os.environ.get("DEV_DEPLOY_RUN_URL", "").strip()
+    dev_deploy_sha = os.environ.get("DEV_DEPLOY_SHA", "").strip()
+    dev_deploy_source_ref = os.environ.get("DEV_DEPLOY_SOURCE_REF", "").strip()
+
+    if integration_status == "merged_to_dev" and not (merged_ref or merge_commit):
+        raise SystemExit("INTEGRATION_STATUS=merged_to_dev requires MERGED_REF or MERGE_COMMIT")
+    if integration_status == "dev_deployed":
+        if not (merged_ref or merge_commit):
+            raise SystemExit("INTEGRATION_STATUS=dev_deployed requires MERGED_REF or MERGE_COMMIT")
+        if not dev_deploy_run_url or not dev_deploy_sha:
+            raise SystemExit("INTEGRATION_STATUS=dev_deployed requires DEV_DEPLOY_RUN_URL and DEV_DEPLOY_SHA")
+    if integration_status == "ci_failed" and not (ci_status or ci_run_url):
+        raise SystemExit("INTEGRATION_STATUS=ci_failed requires CI_STATUS or CI_RUN_URL")
+    if integration_status == "deploy_blocked" and not (dev_deploy_run_url or dev_deploy_source_ref or merged_ref):
+        raise SystemExit("INTEGRATION_STATUS=deploy_blocked requires deploy or merge evidence")
+
+    metadata: dict[str, Any] = {
+        "integration_status": integration_status,
+        "integration_recorded_at": timestamp,
+    }
+    optional_fields = {
+        "pr_url": pr_url,
+        "ci_status": ci_status,
+        "ci_run_url": ci_run_url,
+        "merged_ref": merged_ref,
+        "merge_commit": merge_commit,
+        "dev_deploy_run_url": dev_deploy_run_url,
+        "dev_deploy_sha": dev_deploy_sha,
+        "dev_deploy_source_ref": dev_deploy_source_ref,
+    }
+    metadata.update({key: value for key, value in optional_fields.items() if value})
+    return metadata
+
+
 def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, Any]:
     commit_required = task_requires_commit(task)
     no_commit_required = os.environ.get("NO_COMMIT_REQUIRED", "").strip().lower() in {"1", "true", "yes"}
@@ -393,6 +526,7 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
     push_commit = os.environ.get("PUSH_COMMIT", "").strip() or commit_hash
     reviewer = canonical_agent_name(task.get("reviewer"))
     timestamp = iso_now()
+    integration_metadata = integration_metadata_from_env(commit_required, timestamp)
 
     if commit_required:
         if no_commit_required:
@@ -420,6 +554,7 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
             "push_ref": push_ref or f"{push_remote}/{push_branch}",
             "push_commit": push_commit,
             "push_recorded_at": timestamp,
+            **integration_metadata,
         }
 
     if no_commit_required:
@@ -429,8 +564,9 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
             "commit_agent": canonical_agent_name(commit_agent),
             "commit_reviewer": reviewer,
             "commit_recorded_at": timestamp,
+            **integration_metadata,
         }
-    return {}
+    return integration_metadata
 
 
 def iso_now() -> str:
@@ -560,24 +696,15 @@ def load_logs() -> list[dict[str, Any]]:
         return []
     logs: list[dict[str, Any]] = []
     for line_no, line in enumerate(LOG_FILE.read_text(encoding="utf-8").splitlines(), start=1):
-        line = line.strip()
-        if not line:
+        if not line.strip():
             continue
-        try:
-            entry = json.loads(line)
-            if isinstance(entry, dict):
-                # Tolerate legacy or external review log schemas so summary generation
-                # does not fail when adjacent tooling writes timestamp/summary fields.
-                if "ts" not in entry and entry.get("timestamp"):
-                    entry["ts"] = entry["timestamp"]
-                if "message" not in entry and entry.get("summary"):
-                    entry["message"] = entry["summary"]
-                if "type" not in entry and entry.get("action"):
-                    entry["type"] = entry["action"]
-            logs.append(entry)
-        except json.JSONDecodeError as exc:
+        entries = _decode_log_line(line)
+        if entries:
+            logs.extend(entries)
+            continue
+        if line.replace("\x00", "").strip():
             print(
-                f"Warning: skipping malformed ai-activity-log.jsonl line {line_no}: {exc}",
+                f"Warning: skipping malformed ai-activity-log.jsonl line {line_no}",
                 file=sys.stderr,
             )
     return logs
@@ -701,8 +828,7 @@ def save_state(state: dict[str, Any]) -> None:
 
 
 def append_log(entry: dict[str, Any]) -> None:
-    with LOG_FILE.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    _append_jsonl_line(LOG_FILE, json.dumps(entry, ensure_ascii=False))
 
 
 def ensure_agent(name: str, *, allow_retired: bool = False) -> dict[str, Any]:

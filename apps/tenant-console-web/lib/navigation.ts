@@ -11,6 +11,7 @@ export const TENANT_CONSOLE_SEARCH_PLACEHOLDER =
 type TenantNavIcon =
   | "home"
   | "bookings"
+  | "bell"
   | "plus"
   | "passengers"
   | "addresses"
@@ -19,6 +20,8 @@ type TenantNavIcon =
   | "reports"
   | "apiKeys"
   | "webhooks"
+  | "integrationGov"
+  | "sla"
   | "audit"
   | "users";
 
@@ -56,7 +59,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "plus",
     label: "建立叫車",
   },
-  { divider: "通訊錄" },
+  { divider: "資料維護" },
   {
     key: "passengers",
     href: "/passengers",
@@ -81,7 +84,33 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "flags",
     label: "審批與配額",
   },
-  { divider: "帳務" },
+  { divider: "帳號與權限" },
+  {
+    key: "users",
+    href: "/users",
+    icon: "users",
+    label: "人員與角色",
+  },
+  { divider: "通知與 SLA" },
+  {
+    key: "notifications",
+    href: "/notifications",
+    icon: "bell",
+    label: "通知",
+  },
+  {
+    key: "sla",
+    href: "/sla",
+    icon: "sla",
+    label: "SLA",
+  },
+  { divider: "帳務與治理" },
+  {
+    key: "billing",
+    href: "/billing",
+    icon: "billing",
+    label: "帳務概覽",
+  },
   {
     key: "invoices",
     href: "/invoices",
@@ -108,23 +137,29 @@ export const tenantNavEntries: TenantNavEntry[] = [
     label: "Webhook",
   },
   {
-    key: "audit",
-    href: "/audit",
-    icon: "audit",
-    label: "稽核",
+    key: "integration-governance",
+    href: "/integration-governance",
+    icon: "integrationGov",
+    label: "整合就緒度",
   },
-  { divider: "組織" },
+  { divider: "系統" },
   {
-    key: "users",
-    href: "/users",
-    icon: "users",
-    label: "人員與角色",
+    key: "featureflags",
+    href: "/feature-flags",
+    icon: "flags",
+    label: "功能旗標",
   },
   {
     key: "settings",
     href: "/settings",
     icon: "flags",
     label: "租戶設定",
+  },
+  {
+    key: "audit",
+    href: "/audit",
+    icon: "audit",
+    label: "稽核",
   },
 ];
 

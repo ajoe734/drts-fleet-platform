@@ -53,6 +53,29 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: drts-staging-internal-key
+            - name: PLATFORM_ADMIN_ASSISTANT_ENABLED
+              value: "false"
+            - name: LLM_GATEWAY_PROVIDER
+              value: mock
+            - name: LLM_GATEWAY_CHAT_MODEL
+              value: mock-chat-v1
+            - name: LLM_GATEWAY_SUMMARIZER_MODEL
+              value: mock-summary-v1
+            - name: LLM_GATEWAY_DAILY_BUDGET_USD
+              value: "25"
+            - name: LLM_GATEWAY_REQUESTS_PER_MINUTE
+              value: "30"
+            - name: LLM_GATEWAY_INPUT_TOKENS_PER_MINUTE
+              value: "120000"
+            - name: LLM_GATEWAY_OUTPUT_TOKENS_PER_MINUTE
+              value: "16000"
+            - name: LLM_GATEWAY_TRANSCRIPT_RETENTION_DAYS
+              value: "30"
+            - name: LLM_GATEWAY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: drts-staging-llm-gateway-api-key
           startupProbe:
             httpGet:
               path: /health

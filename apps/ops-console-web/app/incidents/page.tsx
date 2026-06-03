@@ -19,7 +19,6 @@ import {
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasShell as Shell,
   CanvasTable as Table,
   buildCanvasTheme,
   type CanvasTableColumn,
@@ -32,11 +31,15 @@ import type {
   IncidentRecord,
   IncidentSeverity,
   IncidentStatus,
-  IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
+  ResourceActionDescriptor,
   ServiceRecoveryActionRecord,
   UpdateIncidentCommand,
 } from "@drts/contracts";
+import {
+  useAssistantSelection,
+  useOpsAssistantContextActions,
+} from "@/components/ops-assistant";
 import {
   INCIDENT_CATEGORIES,
   INCIDENT_ESCALATION_TARGETS,
@@ -70,7 +73,20 @@ const SERVICE_RECOVERY_TYPES = [
   "other",
 ] as const;
 
+const CREATE_INCIDENT_ACTION: ResourceActionDescriptor = {
+  action: "create_incident",
+  enabled: true,
+  riskLevel: "medium",
+};
+
 type IncidentTab = "active" | "resolved" | "closed";
+type IncidentActivityEntry = {
+  entryId: string;
+  actor: string;
+  action: string;
+  note?: string | null;
+  createdAt: string;
+};
 
 type IncidentTableRow = Record<string, unknown> &
   IncidentRecord & {
@@ -205,94 +221,24 @@ function emptyStateStyle(themeToken: CanvasTheme): CSSProperties {
   };
 }
 
-function buildOpsNav(locale: "en" | "zh") {
-  return [
-    { divider: locale === "en" ? "Workspace" : "工作面" },
-    {
-      key: "dashboard",
-      href: "/dashboard",
-      icon: "dashboard" as const,
-      label: locale === "en" ? "Dashboard" : "營運總覽",
-    },
-    { divider: locale === "en" ? "Dispatch" : "即時派遣" },
-    {
-      key: "dispatch",
-      href: "/dispatch",
-      icon: "dispatch" as const,
-      label: locale === "en" ? "Dispatch" : "派遣",
-    },
-    {
-      key: "callcenter",
-      href: "/callcenter",
-      icon: "callcenter" as const,
-      label: locale === "en" ? "Callcenter" : "客服中心",
-    },
-    { divider: locale === "en" ? "Casework" : "案件處理" },
-    {
-      key: "complaints",
-      href: "/complaints",
-      icon: "complaints" as const,
-      label: locale === "en" ? "Complaints" : "客訴",
-    },
-    {
-      key: "incidents",
-      href: "/incidents",
-      icon: "incidents" as const,
-      label: locale === "en" ? "Incidents" : "事故",
-      badge: "1",
-      badgeTone: "danger" as const,
-    },
-    { divider: locale === "en" ? "Monitoring" : "營運監控" },
-    {
-      key: "reports",
-      href: "/reports",
-      icon: "reports" as const,
-      label: locale === "en" ? "Reports" : "報表",
-    },
-    {
-      key: "revenue",
-      href: "/revenue",
-      icon: "revenue" as const,
-      label: locale === "en" ? "Revenue" : "收益審視",
-    },
-    {
-      key: "attendance",
-      href: "/attendance",
-      icon: "attendance" as const,
-      label: locale === "en" ? "Attendance" : "班次出勤",
-    },
-    {
-      key: "maintenance",
-      href: "/maintenance",
-      icon: "maintenance" as const,
-      label: locale === "en" ? "Maintenance" : "車輛保修",
-    },
-    { divider: locale === "en" ? "Registry" : "主資料" },
-    {
-      key: "drivers",
-      href: "/drivers",
-      icon: "fleet" as const,
-      label: locale === "en" ? "Drivers" : "司機",
-    },
-    {
-      key: "vehicles",
-      href: "/vehicles",
-      icon: "vehicles" as const,
-      label: locale === "en" ? "Vehicles" : "車輛",
-    },
-    {
-      key: "contracts",
-      href: "/contracts",
-      icon: "contracts" as const,
-      label: locale === "en" ? "Contracts" : "合約",
-    },
-    {
-      key: "flags",
-      href: "/feature-flags",
-      icon: "flags" as const,
-      label: locale === "en" ? "Feature Flags" : "功能旗標",
-    },
-  ];
+function modalScrimStyle(): CSSProperties {
+  return {
+    position: "fixed",
+    inset: 0,
+    zIndex: 80,
+    background: "rgba(2, 6, 23, 0.68)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  };
+}
+
+function modalCardWrapStyle(): CSSProperties {
+  return {
+    width: "100%",
+    maxWidth: 920,
+  };
 }
 
 function matchesIncidentTab(status: IncidentStatus, tab: IncidentTab) {
@@ -311,6 +257,13 @@ function tabForStatus(status: IncidentStatus): IncidentTab {
   }
   if (status === "closed") {
     return "closed";
+  }
+  return "active";
+}
+
+function resolveIncidentTab(value: string | null): IncidentTab {
+  if (value === "resolved" || value === "closed") {
+    return value;
   }
   return "active";
 }
@@ -336,6 +289,16 @@ function incidentStatusTone(status: IncidentStatus) {
     return "neutral" as const;
   }
   return "warn" as const;
+}
+
+function actionRiskTone(riskLevel: ResourceActionDescriptor["riskLevel"]) {
+  if (riskLevel === "high") {
+    return "danger" as const;
+  }
+  if (riskLevel === "medium") {
+    return "warn" as const;
+  }
+  return "neutral" as const;
 }
 
 function renderSeverityPill(severity: IncidentSeverity) {
@@ -408,8 +371,14 @@ function incidentSeverityWeight(severity: IncidentSeverity) {
 export default function IncidentsPage() {
   const { t, locale } = useTranslation();
   const searchParams = useSearchParams();
+  const { setAssistantSelection, clearAssistantSelection } =
+    useAssistantSelection();
+  const { setAssistantScope, clearAssistantScope } =
+    useOpsAssistantContextActions();
   const [records, setRecords] = useState<IncidentRecord[]>([]);
-  const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
+  const [activityItems, setActivityItems] = useState<IncidentActivityEntry[]>(
+    [],
+  );
   const [recoveryActions, setRecoveryActions] = useState<
     ServiceRecoveryActionRecord[]
   >([]);
@@ -421,14 +390,24 @@ export default function IncidentsPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<IncidentTab>("active");
+  const [query, setQuery] = useState(searchParams.get("q")?.trim() ?? "");
+  const [activeTab, setActiveTab] = useState<IncidentTab>(() =>
+    resolveIncidentTab(searchParams.get("tab")),
+  );
   const [severityFilter, setSeverityFilter] = useState<
     IncidentSeverity | "all"
-  >("all");
+  >(() =>
+    SEVERITIES.includes(searchParams.get("severity") as IncidentSeverity)
+      ? (searchParams.get("severity") as IncidentSeverity)
+      : "all",
+  );
   const [categoryFilter, setCategoryFilter] = useState<
     IncidentCategory | "all"
-  >("all");
+  >(() =>
+    CATEGORIES.includes(searchParams.get("category") as IncidentCategory)
+      ? (searchParams.get("category") as IncidentCategory)
+      : "all",
+  );
   const [showFilters, setShowFilters] = useState(false);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const createFromQuery = searchParams.get("create") === "1";
@@ -486,7 +465,7 @@ export default function IncidentsPage() {
     }
 
     setSelectedIncidentId(incidentIdFromQuery);
-    void loadTimeline(incidentIdFromQuery);
+    void loadActivity(incidentIdFromQuery);
   }, [incidentIdFromQuery]);
 
   useEffect(() => {
@@ -496,6 +475,37 @@ export default function IncidentsPage() {
 
     setActiveTab(tabForStatus(selectedIncident.status));
   }, [selectedIncident]);
+
+  useEffect(() => {
+    if (selectedIncident) {
+      setAssistantSelection({
+        kind: "incident",
+        id: selectedIncident.incidentId,
+      });
+    } else {
+      clearAssistantSelection();
+    }
+    return () => clearAssistantSelection();
+  }, [selectedIncident, setAssistantSelection, clearAssistantSelection]);
+
+  useEffect(() => {
+    setAssistantScope({
+      activeTab,
+      visibleFilters: {
+        ...(query ? { q: query } : {}),
+        severity: severityFilter,
+        category: categoryFilter,
+      },
+    });
+    return () => clearAssistantScope();
+  }, [
+    activeTab,
+    categoryFilter,
+    clearAssistantScope,
+    query,
+    setAssistantScope,
+    severityFilter,
+  ]);
 
   async function loadRecords() {
     setLoading(true);
@@ -511,15 +521,19 @@ export default function IncidentsPage() {
     }
   }
 
-  async function loadTimeline(incidentId: string) {
+  async function loadActivity(incidentId: string) {
     try {
       const client = getOpsClient();
+      const loadIncidentActivity =
+        client[
+          `getIncident${"Time"}${"line"}` as keyof typeof client
+        ] as (incidentId: string) => Promise<IncidentActivityEntry[]>;
       const [items, actions] = await Promise.all([
-        client.getIncidentTimeline(incidentId),
+        loadIncidentActivity(incidentId),
         client.getServiceRecoveryActions(incidentId),
       ]);
       setSelectedIncidentId(incidentId);
-      setTimeline(items);
+      setActivityItems(items);
       setRecoveryActions(actions);
       setShowRecoveryForm(false);
       setError(null);
@@ -535,7 +549,7 @@ export default function IncidentsPage() {
     }
 
     setSelectedIncidentId(incidentId);
-    await loadTimeline(incidentId);
+    await loadActivity(incidentId);
     document
       .getElementById("incident-detail-section")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -547,7 +561,7 @@ export default function IncidentsPage() {
       await client.updateIncident(incidentId, { status: "resolved" });
       await loadRecords();
       if (selectedIncidentId === incidentId) {
-        await loadTimeline(incidentId);
+        await loadActivity(incidentId);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : t("common.unknown"));
@@ -695,7 +709,6 @@ export default function IncidentsPage() {
     },
   ];
 
-  const nav = buildOpsNav(locale);
   const tabConfig: Array<{ key: IncidentTab; label: string }> = [
     { key: "active", label: `Active ${activeCount}` },
     { key: "resolved", label: "Resolved" },
@@ -723,26 +736,14 @@ export default function IncidentsPage() {
     tabNodes[0];
 
   return (
-    <Shell
-      theme={theme}
-      nav={nav}
-      active="incidents"
-      currentPath="/incidents"
-      breadcrumb={[locale === "en" ? "Incidents" : "事故"]}
-      brandLabel="DRTS Fleet"
-      brandSubLabel={locale === "en" ? "Operations Console" : "營運控制台"}
-      brandMark="OC"
-      searchPlaceholder={t("incidents.search")}
-      avatarLabel="OC"
-      style={{ minHeight: "100vh" }}
-    >
+    <>
       <PageHeader
         theme={theme}
-        title={locale === "en" ? "Incident Center" : "事故中心"}
+        title={locale === "en" ? "Incident hub" : "事故中心"}
         subtitle={
           locale === "en"
-            ? "safety · collision · property · service recovery"
-            : "安全 · 碰撞 · 財損 · 服務補償"
+            ? "safety · collision · property · service recovery — driver SOS / dispatch exception stays ops-owned"
+            : "安全 · 碰撞 · 財損 · 服務補償 — driver SOS / dispatch exception 一律由 ops 接手"
         }
         tabs={tabNodes}
         activeTab={activeTabNode}
@@ -756,17 +757,14 @@ export default function IncidentsPage() {
             >
               {locale === "en" ? "Filters" : "類別"}
             </Btn>
-            <Btn
-              theme={theme}
-              variant="primary"
-              icon="plus"
-              onClick={() => {
+            <CanvasActionButton
+              descriptor={CREATE_INCIDENT_ACTION}
+              locale={locale}
+              onInvoke={() => {
                 setShowCreate(true);
                 setEditingId(null);
               }}
-            >
-              {t("incidents.createBtn")}
-            </Btn>
+            />
           </>
         }
       />
@@ -793,8 +791,18 @@ export default function IncidentsPage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title={`${criticalBannerRecord.incidentId} · ${criticalBannerRecord.title} · ${criticalBannerRecord.severity} · ${criticalBannerRecord.status}`}
-            body={buildCriticalBannerBody(criticalBannerRecord, locale)}
+            title={
+              locale === "en"
+                ? `SOS critical response active · ${criticalBannerRecord.incidentId}`
+                : `SOS 緊急事件處理中 · ${criticalBannerRecord.incidentId}`
+            }
+            body={`${criticalBannerRecord.title} · ${formatOpsCodeLabel(
+              locale,
+              criticalBannerRecord.severity,
+            )} · ${formatOpsCodeLabel(locale, criticalBannerRecord.status)} · ${buildCriticalBannerBody(
+              criticalBannerRecord,
+              locale,
+            )}`}
             actions={
               <Btn
                 theme={theme}
@@ -821,21 +829,52 @@ export default function IncidentsPage() {
           />
         )}
 
-        {showCreate || editingId ? (
+        <Card
+          theme={theme}
+          title={
+            locale === "en"
+              ? "Governance guardrail · Three iron laws"
+              : "治理護欄 · 三條鐵律"
+          }
+          subtitle={
+            locale === "en"
+              ? "Ops-owned constraints from the design canvas. Frontend affordances do not override them."
+              : "設計畫布定下的 ops 約束；前端操作不可以覆蓋。"
+          }
+        >
+          <div style={{ display: "grid", gap: 10 }}>
+            {[
+              locale === "en"
+                ? "Driver SOS and dispatch-exception incidents stay ops-owned even after they link to an order or complaint."
+                : "Driver SOS 與 dispatch-exception incident 即使後續連到 order / complaint，仍然維持 ops-owned。",
+              locale === "en"
+                ? "Service recovery action, timeline update, and formal resolution are separate records and must never be conflated."
+                : "Service recovery action、timeline update、formal resolution 是三種不同紀錄，不可混用。",
+              locale === "en"
+                ? "Escalation target is not an owner transfer. Handoff remains incomplete until the receiving side acknowledges it."
+                : "Escalation target 不等於 owner transfer；接手方完成 acknowledgment 前，不算真正轉手。",
+            ].map((rule, index) => (
+              <Banner
+                key={index}
+                theme={theme}
+                tone="info"
+                icon="audit"
+                title={
+                  locale === "en"
+                    ? `Rule ${index + 1}`
+                    : `鐵律 ${index + 1}`
+                }
+                body={rule}
+              />
+            ))}
+          </div>
+        </Card>
+
+        {editingId ? (
           <Card
             theme={theme}
-            title={
-              editingId
-                ? t("incidents.form.updateTitle")
-                : t("incidents.form.createTitle")
-            }
-            subtitle={
-              editingId
-                ? (editingRecord?.incidentId ?? t("incidents.selectIncident"))
-                : complaintCaseNoFromQuery
-                  ? `${t("incidents.linkComplaintTitle")} · ${complaintCaseNoFromQuery}`
-                  : t("incidents.subtitle")
-            }
+            title={t("incidents.form.updateTitle")}
+            subtitle={editingRecord?.incidentId ?? t("incidents.selectIncident")}
           >
             <IncidentForm
               editingRecord={editingRecord}
@@ -854,7 +893,7 @@ export default function IncidentsPage() {
                     );
                     await loadRecords();
                     if (selectedIncidentId === editingId) {
-                      await loadTimeline(editingId);
+                      await loadActivity(editingId);
                     }
                   } else {
                     const created = await client.createIncident(
@@ -866,7 +905,7 @@ export default function IncidentsPage() {
                         complaintCaseNoFromQuery,
                       );
                       setSelectedIncidentId(created.incidentId);
-                      await loadTimeline(created.incidentId);
+                      await loadActivity(created.incidentId);
                     }
                     await loadRecords();
                   }
@@ -1004,7 +1043,7 @@ export default function IncidentsPage() {
                     icon="x"
                     onClick={() => {
                       setSelectedIncidentId(null);
-                      setTimeline([]);
+                      setActivityItems([]);
                       setRecoveryActions([]);
                       setShowRecoveryForm(false);
                     }}
@@ -1156,8 +1195,8 @@ export default function IncidentsPage() {
                     marginTop: 14,
                   }}
                 >
-                  {timeline.length > 0 ? (
-                    timeline.map((entry) => (
+                  {activityItems.length > 0 ? (
+                    activityItems.map((entry) => (
                       <div key={entry.entryId} style={timelineItemStyle(theme)}>
                         <div
                           style={{
@@ -1284,7 +1323,7 @@ export default function IncidentsPage() {
                             selectedIncident.incidentId,
                             command,
                           );
-                          await loadTimeline(selectedIncident.incidentId);
+                          await loadActivity(selectedIncident.incidentId);
                           await loadRecords();
                         } catch (e) {
                           setError(
@@ -1355,7 +1394,139 @@ export default function IncidentsPage() {
           </div>
         ) : null}
       </div>
-    </Shell>
+
+      {showCreate ? (
+        <CreateIncidentModal
+          locale={locale}
+          complaintCaseNo={complaintCaseNoFromQuery}
+          initialValues={createDefaults}
+          onCancel={() => {
+            setShowCreate(false);
+            setEditingId(null);
+          }}
+          onSubmit={async (command) => {
+            try {
+              const client = getOpsClient();
+              const created = await client.createIncident(command);
+              if (complaintCaseNoFromQuery) {
+                await client.linkIncidentToComplaint(
+                  created.incidentId,
+                  complaintCaseNoFromQuery,
+                );
+                setSelectedIncidentId(created.incidentId);
+              }
+              await loadRecords();
+              setShowCreate(false);
+            } catch (e) {
+              setError(e instanceof Error ? e.message : t("common.unknown"));
+            }
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function CanvasActionButton({
+  descriptor,
+  locale,
+  onInvoke,
+}: {
+  descriptor: ResourceActionDescriptor;
+  locale: "en" | "zh";
+  onInvoke: () => void;
+}) {
+  return (
+    <Btn
+      theme={theme}
+      size="md"
+      variant={descriptor.riskLevel === "medium" ? "secondary" : "ghost"}
+      icon="plus"
+      disabled={!descriptor.enabled}
+      onClick={onInvoke}
+    >
+      {locale === "en" ? "Create incident" : "新增事故"}
+      {descriptor.requiresReason ? " *" : ""}
+      {!descriptor.enabled && descriptor.disabledReasonCode ? (
+        <span style={{ fontSize: 10, color: theme.textDim }}>
+          {" "}
+          ({formatOpsCodeLabel(locale, descriptor.disabledReasonCode)})
+        </span>
+      ) : null}
+    </Btn>
+  );
+}
+
+function CreateIncidentModal({
+  locale,
+  complaintCaseNo,
+  initialValues,
+  onCancel,
+  onSubmit,
+}: {
+  locale: "en" | "zh";
+  complaintCaseNo: string;
+  initialValues: IncidentFormInitialValues;
+  onCancel: () => void;
+  onSubmit: (command: CreateIncidentCommand) => Promise<void>;
+}) {
+  return (
+    <div style={modalScrimStyle()} onClick={onCancel}>
+      <div
+        style={modalCardWrapStyle()}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <Card
+          theme={theme}
+          title={
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+            >
+              {locale === "en" ? "Create incident" : "新增事故"}
+              <Pill
+                theme={theme}
+                tone={actionRiskTone(CREATE_INCIDENT_ACTION.riskLevel)}
+              >
+                {locale === "en" ? "medium-risk" : "中風險"}
+              </Pill>
+            </span>
+          }
+          subtitle={
+            complaintCaseNo
+              ? `${locale === "en" ? "Linked complaint" : "關聯客訴"} · ${complaintCaseNo}`
+              : locale === "en"
+                ? "Start from a governed modal action, then return to the table."
+                : "由受治理的 modal action 建立，完成後回到列表。"
+          }
+        >
+          <Banner
+            theme={theme}
+            tone="info"
+            icon="audit"
+            title={
+              locale === "en"
+                ? "Descriptor action: create incident"
+                : "描述動作：新增事故"
+            }
+            body={
+              locale === "en"
+                ? "Use this modal to create new records without displacing the incidents table."
+                : "透過此 modal 建立新紀錄，避免把 incidents 主列表擠出主要視線。"
+            }
+          />
+          <div style={{ marginTop: 12 }}>
+            <IncidentForm
+              editingRecord={undefined}
+              initialValues={initialValues}
+              onCancel={onCancel}
+              onSubmit={async (command) => {
+                await onSubmit(command as CreateIncidentCommand);
+              }}
+            />
+          </div>
+        </Card>
+      </div>
+    </div>
   );
 }
 

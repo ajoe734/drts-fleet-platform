@@ -1621,6 +1621,142 @@ describe("TenantPartnerService sensitive-data governance", () => {
       status: "test_pending",
       runtimeMetadata: expect.objectContaining({
         disableReason: null,
+        disableReasonNote: null,
+      }),
+    });
+  });
+
+  it("retries failed webhook deliveries through the tenant command surface", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 410,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+      });
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      new WebhookDispatchService(fetchImpl as never),
+      [],
+    );
+
+    const created = service.createWebhookEndpoint(
+      "tenant-demo-001",
+      {
+        url: "https://tenant.example/webhooks/retry-once",
+        secret: "whsec_retry_once",
+        events: ["booking.created"],
+      },
+      "req-webhook-create-retry-001",
+    );
+
+    await service.sendTestWebhook(
+      "tenant-demo-001",
+      {
+        webhookId: created.webhookId,
+      },
+      "req-webhook-test-retry-001",
+    );
+
+    const [failedDelivery] = service.listWebhookDeliveriesByWebhook(
+      "tenant-demo-001",
+      created.webhookId,
+      "req-webhook-deliveries-retry-001",
+      {
+        actorType: "tenant_admin",
+        actorId: "tenant-admin-001",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roles: ["tc_admin"],
+        scopes: [
+          "tenant:webhooks:read",
+          "tenant:webhooks:write",
+          "tenant:read",
+        ],
+      },
+    );
+    expect(failedDelivery).toMatchObject({
+      status: "delivery_failed",
+      availableActions: expect.arrayContaining([
+        expect.objectContaining({
+          action: "retryFailedDelivery",
+          enabled: true,
+        }),
+      ]),
+    });
+
+    const retried = await service.retryWebhookDelivery(
+      "tenant-demo-001",
+      created.webhookId,
+      failedDelivery.deliveryId,
+      "req-webhook-retry-001",
+      {
+        actorType: "tenant_admin",
+        actorId: "tenant-admin-001",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roles: ["tc_admin"],
+        scopes: [
+          "tenant:webhooks:read",
+          "tenant:webhooks:write",
+          "tenant:read",
+        ],
+      },
+    );
+
+    expect(retried).toMatchObject({
+      deliveryId: failedDelivery.deliveryId,
+      status: "delivered",
+      attempt: 2,
+      httpStatus: 202,
+    });
+    expect(service.listWebhookEndpoints("tenant-demo-001")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          webhookId: created.webhookId,
+          status: "active",
+        }),
+      ]),
+    );
+  });
+
+  it("preserves manual disable reason notes on webhook endpoints", () => {
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      undefined,
+      new WebhookDispatchService(
+        vi.fn(async () => ({ ok: true, status: 202 })) as never,
+      ),
+      [],
+    );
+
+    const created = service.createWebhookEndpoint("tenant-demo-001", {
+      url: "https://tenant.example/webhooks/manual-disable",
+      secret: "whsec_manual_disable",
+      events: ["booking.created"],
+    });
+
+    const updated = service.updateWebhookEndpoint(
+      "tenant-demo-001",
+      created.webhookId,
+      {
+        status: "disabled",
+        disableReason: "Receiver maintenance window",
+      },
+      "req-webhook-disable-005",
+    );
+
+    expect(updated).toMatchObject({
+      webhookId: created.webhookId,
+      status: "disabled",
+      runtimeMetadata: expect.objectContaining({
+        disableReason: "manual_disable",
+        disableReasonNote: "Receiver maintenance window",
       }),
     });
   });
@@ -2099,8 +2235,10 @@ describe("TenantPartnerService approval rules", () => {
       results.filter((result) => result.status === "rejected"),
     ).toHaveLength(1);
     expect(
-      service.getTenantQuotaSummary("tenant-demo-001").usage
-        .pendingReservedBookingCount,
+      service.getTenantQuotaSummary(
+        "tenant-demo-001",
+        "2026-05-13T10:00:00.000Z",
+      ).usage.pendingReservedBookingCount,
     ).toBe(1);
   });
 

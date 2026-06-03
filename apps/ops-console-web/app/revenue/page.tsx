@@ -25,12 +25,14 @@ import {
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
+  CanvasStaleBanner as StaleBanner,
   buildCanvasTheme,
   type CanvasTableColumn,
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
 
+import { PublishAssistantScope } from "@/components/ops-assistant";
 import { RevenueAutoRefresh } from "@/components/revenue-auto-refresh";
 import { getOpsClient } from "@/lib/api-client";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
@@ -1137,6 +1139,14 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
   return (
     <>
+      <PublishAssistantScope
+        activeTab={tab}
+        visibleFilters={{
+          period: filters.period,
+          serviceBucket: filters.serviceBucket,
+          vehicleId: filters.vehicleId,
+        }}
+      />
       <RevenueAutoRefresh tier={refreshTier} />
       <PageHeader
         theme={theme}
@@ -1160,10 +1170,9 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
           />
         ) : null}
 
-        <Banner
+        <StaleBanner
           theme={theme}
-          tone={freshness.isStale ? "warn" : "info"}
-          icon="clock"
+          freshness={refreshMetadata.dataFreshness}
           title={t("revenue.banner.staleTitle", locale, {
             minutes: freshness.minutesOld,
             seconds: freshness.secondsUntilNextTick,

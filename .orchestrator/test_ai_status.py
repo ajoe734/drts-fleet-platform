@@ -5,8 +5,9 @@ import importlib.util
 import os
 import io
 import sys
+import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from pathlib import Path
@@ -18,6 +19,31 @@ SPEC = importlib.util.spec_from_file_location("ai_status", ROOT / "scripts" / "a
 assert SPEC is not None and SPEC.loader is not None
 ai_status = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ai_status)
+
+
+class LoadLogsRecoveryTest(unittest.TestCase):
+    def test_load_logs_ignores_nul_padding_and_salvages_later_valid_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "ai-activity-log.jsonl"
+            log_path.write_text(
+                '\n'.join([
+                    '{"ts":"2026-06-02T16:34:50Z","type":"healthy","message":"ok"}',
+                    '\x00\x00\x00\x00',
+                    '{"ts":"2026-06-02T17:05:11Z","type":"broken","hook_payload":{"cwd"'
+                    '{"ts":"2026-06-02T23:24:47Z","type":"recovered","message":"still usable"}',
+                ])
+                + "\n",
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(ai_status, "LOG_FILE", log_path),
+                redirect_stderr(stderr),
+            ):
+                logs = ai_status.load_logs()
+
+        self.assertEqual([entry["type"] for entry in logs], ["healthy", "recovered"])
+        self.assertEqual(stderr.getvalue(), "")
 
 
 class CompletionMetadataTest(unittest.TestCase):
