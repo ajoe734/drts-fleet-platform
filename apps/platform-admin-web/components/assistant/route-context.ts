@@ -1,4 +1,4 @@
-\"use client\";
+"use client";
 
 /**
  * Deterministic route-context registry + adapters for the Platform Admin LLM
@@ -38,6 +38,7 @@
 import type { CrossAppResourceLink } from "@drts/contracts";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  createElement,
   createContext,
   useContext,
   useEffect,
@@ -75,7 +76,12 @@ export const PLATFORM_ADMIN_ROUTE_REGISTRY = {
 export type PlatformAdminRouteId = keyof typeof PLATFORM_ADMIN_ROUTE_REGISTRY;
 
 export type AssistantToolResult =
-  | { ok: true; code: string; message: string; payload?: Record<string, unknown> }
+  | {
+      ok: true;
+      code: string;
+      message: string;
+      payload?: Record<string, unknown>;
+    }
   | {
       ok: false;
       code: string;
@@ -421,7 +427,7 @@ export interface RouteMatch {
 function toSegments(path: string): string[] {
   const [withoutQuery] = path.split("?");
   const [clean] = (withoutQuery ?? "").split("#");
-  return clean.split("/").filter((segment) => segment.length > 0);
+  return (clean ?? "").split("/").filter((segment) => segment.length > 0);
 }
 
 function isDynamicSegment(segment: string): boolean {
@@ -578,7 +584,9 @@ export function buildRouteContext(
   const routeRefs: AssistantEntityRef[] = (descriptor.paramEntities ?? [])
     .map(({ param, kind }) => {
       const id = params[param];
-      return id ? ({ kind, id, source: "route-param" } as AssistantEntityRef) : null;
+      return id
+        ? ({ kind, id, source: "route-param" } as AssistantEntityRef)
+        : null;
     })
     .filter((ref): ref is AssistantEntityRef => ref !== null);
 
@@ -751,11 +759,7 @@ export function PlatformAdminAssistantProvider({
     [pageBridge, pathname, router],
   );
 
-  return (
-    <PlatformAdminRouteContext.Provider value={value}>
-      {children}
-    </PlatformAdminRouteContext.Provider>
-  );
+  return createElement(PlatformAdminRouteContext.Provider, { value }, children);
 }
 
 function usePlatformAdminRouteContext() {

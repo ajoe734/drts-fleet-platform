@@ -62,6 +62,10 @@ const TENANT_FILTER_VALUES = new Set<TenantFilter>([
   "rollback_hold",
 ]);
 
+function isTenantFilter(value: string): value is TenantFilter {
+  return TENANT_FILTER_VALUES.has(value as TenantFilter);
+}
+
 const th = buildCanvasTheme({
   surface: "platform",
   dark: true,
@@ -346,7 +350,7 @@ export default function TenantsPage() {
       filters: {
         rollout_stage: {
           apply(value: unknown) {
-            if (typeof value !== "string" || !TENANT_FILTER_VALUES.has(value)) {
+            if (typeof value !== "string" || !isTenantFilter(value)) {
               return {
                 ok: false,
                 code: "invalid_filter_value",
