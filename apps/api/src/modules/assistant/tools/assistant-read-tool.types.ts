@@ -22,12 +22,12 @@ export interface AssistantReadToolDefinition {
 }
 
 export interface AssistantReadToolExecutionRequest {
-  toolName: AssistantReadToolName;
-  input?: Record<string, unknown>;
+  toolName: string;
+  input?: Record<string, unknown> | undefined;
   identity: BootstrapRequestIdentity | null;
 }
 
 export interface AssistantReadToolExecutionResult {
-  toolName: AssistantReadToolName;
+  toolName: string;
   output: unknown;
 }

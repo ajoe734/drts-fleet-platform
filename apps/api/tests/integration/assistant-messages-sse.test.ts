@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { BootstrapAuthGuard } from "../../src/common/auth";
 import { AssistantController } from "../../src/modules/assistant/assistant.controller";
+import { AssistantGuardrailService } from "../../src/modules/assistant/assistant.guardrail.service";
 import { AssistantLlmGatewayService } from "../../src/modules/assistant/assistant-llm-gateway.service";
 import { AssistantService } from "../../src/modules/assistant/assistant.service";
 import { AssistantReadToolRegistry } from "../../src/modules/assistant/tools/assistant-read-tool.registry";
@@ -57,6 +58,7 @@ class TestBootstrapController {
 @Module({
   controllers: [AssistantController, TestBootstrapController],
   providers: [
+    AssistantGuardrailService,
     AssistantLlmGatewayService,
     AssistantService,
     {

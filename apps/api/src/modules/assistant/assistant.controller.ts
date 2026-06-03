@@ -1,4 +1,6 @@
-import { Body, Controller, Headers, Param, Post, Res } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post, Res } from "@nestjs/common";
+
+import type { ProposeActionToolInput } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import {
@@ -7,6 +9,7 @@ import {
   RequireScopes,
 } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { ASSISTANT_PROPOSE_ACTION_TOOL } from "./assistant.instructions";
 import { AssistantService } from "./assistant.service";
 import type {
   AssistantStreamEnvelope,
@@ -30,6 +33,52 @@ function formatSseEvent<T>(event: AssistantStreamEnvelope<T>) {
 @Controller("assistant")
 export class AssistantController {
   constructor(private readonly assistantService: AssistantService) {}
+
+  @Get("tools/runtime-definition")
+  @RequireRealms("system", "platform", "ops", "tenant")
+  @RequireScopes("assistant:write")
+  getRuntimeDefinition(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.assistantService.getRuntimeDefinition(identity),
+      requestId,
+    );
+  }
+
+  @Post("tools/propose-action")
+  @RequireRealms("system", "platform", "ops", "tenant")
+  @RequireScopes("assistant:write")
+  proposeAction(
+    @Body() input: ProposeActionToolInput,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.assistantService.invokeTool(
+        ASSISTANT_PROPOSE_ACTION_TOOL,
+        input,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tools/:toolName")
+  @RequireRealms("system", "platform", "ops", "tenant")
+  @RequireScopes("assistant:write")
+  invokeTool(
+    @Param("toolName") toolName: string,
+    @Body() input: unknown,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.assistantService.invokeTool(toolName, input, identity),
+      requestId,
+    );
+  }
 
   @Post("conversations")
   @RequireRealms("system", "platform", "ops", "tenant")
