@@ -2,8 +2,32 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { CanvasPageHeader as PageHeader, buildCanvasTheme } from "@drts/ui-web";
+import {
+  type CSSProperties,
+  type ReactNode,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import {
+  ActionButton,
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasDL,
+  CanvasEmptyState,
+  CanvasField,
+  CanvasInput,
+  CanvasKPI,
+  CanvasPageHeader as PageHeader,
+  CanvasPill,
+  CanvasSelect,
+  CanvasTable,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+  type CanvasTone,
+} from "@drts/ui-web";
 import type {
   AttachCallRecordingCommand,
   CallbackTaskRecord,
@@ -118,6 +142,102 @@ const FALLBACK_REFRESH_METADATA: UiRefreshMetadata = {
   source: "live",
 };
 
+const pageBodyStyle: CSSProperties = {
+  minHeight: "100%",
+  padding: 24,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+  background: theme.bg,
+  color: theme.text,
+};
+
+const intakeGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 14,
+};
+
+const workspaceGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns:
+    "minmax(260px, 0.95fr) minmax(360px, 1.3fr) minmax(260px, 0.95fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
+const columnStackStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+  minWidth: 0,
+};
+
+const formGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 14,
+};
+
+const dualFormGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+  gap: 14,
+};
+
+const actionGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+  gap: 10,
+};
+
+const nativeInputStyle: CSSProperties = {
+  width: "100%",
+  minHeight: 34,
+  padding: "7px 10px",
+  borderRadius: 7,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  color: theme.text,
+  fontSize: 12.5,
+  fontFamily: theme.fontFamily,
+};
+
+const nativeTextAreaStyle: CSSProperties = {
+  ...nativeInputStyle,
+  minHeight: 92,
+  resize: "vertical",
+};
+
+const subtleTextStyle: CSSProperties = {
+  fontSize: 11.5,
+  lineHeight: 1.45,
+  color: theme.textMuted,
+};
+
+const linkPillStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 28,
+  padding: "0 10px",
+  borderRadius: 999,
+  border: `1px solid ${theme.accentBorder}`,
+  background: theme.accentBg,
+  color: theme.accent,
+  textDecoration: "none",
+  fontSize: 11.5,
+  fontWeight: 600,
+};
+
+const queueButtonStyle: CSSProperties = {
+  width: "100%",
+  padding: 0,
+  border: 0,
+  background: "transparent",
+  textAlign: "left",
+  cursor: "pointer",
+};
+
 function formatDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
     return "—";
@@ -137,36 +257,6 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
 
 function toIsoString(value: string) {
   return value ? new Date(value).toISOString() : "";
-}
-
-function getRecordingStateTone(recordingState: CallRecordingState) {
-  switch (recordingState) {
-    case "ready":
-      return "state-pill state-positive";
-    case "missing":
-      return "state-pill state-danger";
-    case "pending":
-    default:
-      return "state-pill state-warning";
-  }
-}
-
-function getEmptyReasonTone(reason: EmptyReason) {
-  switch (reason) {
-    case "not_provisioned":
-      return "empty-state empty-warn";
-    case "fetch_failed":
-      return "empty-state empty-danger";
-    case "permission_denied":
-      return "empty-state empty-danger";
-    case "external_unavailable":
-      return "empty-state empty-warn";
-    case "filtered_empty":
-      return "empty-state empty-info";
-    case "no_data":
-    default:
-      return "empty-state";
-  }
 }
 
 function getEmptyStateCopy(
@@ -614,42 +704,6 @@ function isRefreshStale(refresh: UiRefreshMetadata) {
   );
 }
 
-function getFreshnessTone(refresh: UiRefreshMetadata) {
-  if (refresh.dataFreshness === "degraded") {
-    return "freshness-pill freshness-degraded";
-  }
-  if (isRefreshStale(refresh)) {
-    return "freshness-pill freshness-stale";
-  }
-  return "freshness-pill freshness-fresh";
-}
-
-function renderResourceLink(link: CrossAppResourceLink, className: string) {
-  if (link.openMode === "new_tab") {
-    return (
-      <a
-        key={`${link.targetApp}-${link.resourceId}-${link.route}`}
-        href={link.route}
-        target="_blank"
-        rel="noreferrer"
-        className={className}
-      >
-        {link.label}
-      </a>
-    );
-  }
-
-  return (
-    <Link
-      key={`${link.targetApp}-${link.resourceId}-${link.route}`}
-      href={link.route}
-      className={className}
-    >
-      {link.label}
-    </Link>
-  );
-}
-
 function formatRelativeDeadline(value: string, locale: Locale) {
   const deltaMinutes = Math.round(
     (new Date(value).getTime() - Date.now()) / (1000 * 60),
@@ -718,22 +772,65 @@ function renderActionMeta(
   descriptor: ResourceActionDescriptor,
 ) {
   return (
-    <div className="action-meta">
-      <span className="action-risk">
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <span style={subtleTextStyle}>
         {getRiskLabel(locale, descriptor.riskLevel)}
       </span>
       {descriptor.disabledReasonCode && !descriptor.enabled ? (
-        <span className="action-note">
+        <span style={subtleTextStyle}>
           {getDisabledReasonLabel(locale, descriptor.disabledReasonCode)}
         </span>
       ) : null}
       {descriptor.requiresReason ? (
-        <span className="action-note">
+        <span style={subtleTextStyle}>
           {locale === "en" ? "Reason required" : "需要理由"}
         </span>
       ) : null}
     </div>
   );
+}
+
+function getActionHelper(
+  locale: Locale,
+  descriptor?: ResourceActionDescriptor,
+): ReactNode {
+  return descriptor ? renderActionMeta(locale, descriptor) : undefined;
+}
+
+function getPillToneForRecordingState(
+  recordingState: CallRecordingState,
+): CanvasTone {
+  switch (recordingState) {
+    case "ready":
+      return "success";
+    case "missing":
+      return "danger";
+    case "pending":
+    default:
+      return "warn";
+  }
+}
+
+function getToneForHealthStatus(
+  status: UiHealthEnvelope["status"],
+): CanvasTone {
+  return status === "healthy" ? "success" : "warn";
+}
+
+function getToneForEmptyReason(reason: EmptyReason): CanvasTone {
+  switch (reason) {
+    case "fetch_failed":
+    case "permission_denied":
+      return "danger";
+    case "external_unavailable":
+    case "not_provisioned":
+      return "warn";
+    case "filtered_empty":
+      return "info";
+    case "no_data":
+    default:
+      return "neutral";
+  }
 }
 
 export default function CallcenterPage() {
@@ -771,9 +868,9 @@ export default function CallcenterPage() {
     useState<EmptyReason | null>(null);
   const [callbackEmptyReason, setCallbackEmptyReason] =
     useState<EmptyReason | null>(null);
-  const [sessionEmptyNextAction, setSessionEmptyNextAction] =
+  const [, setSessionEmptyNextAction] =
     useState<ResourceActionDescriptor | null>(null);
-  const [callbackEmptyNextAction, setCallbackEmptyNextAction] =
+  const [, setCallbackEmptyNextAction] =
     useState<ResourceActionDescriptor | null>(null);
   const [health, setHealth] = useState<UiHealthEnvelope>(
     buildFallbackHealth(null),
@@ -881,18 +978,6 @@ export default function CallcenterPage() {
     emptyReason === "no_data"
       ? (sessionEmptyReason ?? callbackEmptyReason ?? emptyReason)
       : emptyReason;
-  // The server-supplied empty-state CTA follows the same source as the reason:
-  // session envelope first, then callback. Only honored when the client itself
-  // classified no_data (i.e. a clean fetch with empty items) so an error-derived
-  // reason can never resurrect a stale server action.
-  const effectiveEmptyNextAction =
-    emptyReason === "no_data"
-      ? sessionEmptyReason
-        ? sessionEmptyNextAction
-        : callbackEmptyReason
-          ? callbackEmptyNextAction
-          : null
-      : null;
   const emptyCopy = getEmptyStateCopy(currentLocale, effectiveEmptyReason);
   const workspaceAction = buildWorkspaceAction(
     sessions.some((session) => session.status === "active"),
@@ -1106,119 +1191,150 @@ export default function CallcenterPage() {
     <button
       key={tab.id}
       type="button"
-      className="header-tab-btn"
       onClick={() => setQueueView(tab.id)}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        border: 0,
+        background: "transparent",
+        color: "inherit",
+        padding: 0,
+        cursor: "pointer",
+      }}
     >
       <span>{tab.label}</span>
-      <span className="header-tab-badge">{tab.badge}</span>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minWidth: 22,
+          minHeight: 22,
+          padding: "0 7px",
+          borderRadius: 999,
+          background: theme.surfaceLo,
+          fontSize: 11,
+          fontWeight: 700,
+        }}
+      >
+        {tab.badge}
+      </span>
     </button>
   ));
 
-  const activeQueueCard =
-    queueView === "callback"
-      ? {
-          kicker: currentLocale === "en" ? "Callback queue" : "Callback 佇列",
-          title: currentLocale === "en" ? "Pending follow-up" : "待追蹤回覆",
-          count: pendingCallbacks.length,
-          body:
-            filteredCallbackQueue.length > 0 ? (
-              filteredCallbackQueue.map((callback) => (
-                <button
-                  key={callback.callbackTaskId}
-                  type="button"
-                  className="queue-item"
-                  onClick={() => setSelectedCallId(callback.callId)}
-                >
-                  <div>
-                    <strong>{callback.callbackTaskId}</strong>
-                    <p>{getCallbackSummary(callback, currentLocale)}</p>
-                  </div>
-                  <span>
-                    {formatRelativeDeadline(callback.dueAt, currentLocale)}
-                  </span>
-                </button>
-              ))
-            ) : (
-              <div className="subtle-empty">
-                {currentLocale === "en"
-                  ? "No callbacks match the current scope."
-                  : "目前 scope 內沒有 callback。"}
-              </div>
-            ),
-        }
-      : queueView === "recording"
-        ? {
-            kicker: currentLocale === "en" ? "Recording queue" : "錄音佇列",
-            title:
-              currentLocale === "en"
-                ? "Awaiting auto-link or manual attach"
-                : "等待自動連結或手動補掛",
-            count: recordingQueue.length,
-            body:
-              recordingQueue.length > 0 ? (
-                recordingQueue.map((session) => (
-                  <button
-                    key={session.callId}
-                    type="button"
-                    className="queue-item"
-                    onClick={() => setSelectedCallId(session.callId)}
-                  >
-                    <div>
-                      <strong>{session.callId}</strong>
-                      <p>{session.callerPhone}</p>
-                    </div>
-                    <span
-                      className={getRecordingStateTone(session.recordingState)}
-                    >
-                      {formatOpsCodeLabel(
-                        currentLocale,
-                        session.recordingState,
-                      )}
-                    </span>
-                  </button>
-                ))
-              ) : (
-                <div className="subtle-empty">
-                  {currentLocale === "en"
-                    ? "No recording gaps right now."
-                    : "目前沒有錄音缺口。"}
-                </div>
-              ),
-          }
-        : {
-            kicker: currentLocale === "en" ? "Waiting queue" : "等待佇列",
-            title:
-              currentLocale === "en" ? "Other live calls" : "其他進行中的通話",
-            count: waitingSessions.length,
-            body:
-              waitingSessions.length > 0 ? (
-                waitingSessions.map((session) => (
-                  <button
-                    key={session.callId}
-                    type="button"
-                    className="queue-item"
-                    onClick={() => setSelectedCallId(session.callId)}
-                  >
-                    <div>
-                      <strong>{session.callId}</strong>
-                      <p>
-                        {formatOpsCodeLabel(currentLocale, session.callType)} ·{" "}
-                        {session.callerPhone}
-                      </p>
-                    </div>
-                    <span>
-                      {formatDateTime(currentLocale, session.startedAt)}
-                    </span>
-                  </button>
-                ))
-              ) : (
-                <div className="subtle-empty">
-                  {currentLocale === "en"
-                    ? "No extra waiting calls."
-                    : "目前沒有其他等待中的通話。"}
-                </div>
-              ),
-          };
+  const waitingColumns: CanvasTableColumn<SessionResource>[] = [
+    {
+      h: currentLocale === "en" ? "Call" : "通話",
+      r: (session) => (
+        <button
+          type="button"
+          style={queueButtonStyle}
+          onClick={() => setSelectedCallId(session.callId)}
+        >
+          <div style={{ fontWeight: 600 }}>{session.callId}</div>
+          <div style={subtleTextStyle}>
+            {formatOpsCodeLabel(currentLocale, session.callType)} ·{" "}
+            {session.callerPhone}
+          </div>
+        </button>
+      ),
+    },
+    {
+      h: currentLocale === "en" ? "Started" : "開始時間",
+      r: (session) => formatDateTime(currentLocale, session.startedAt),
+    },
+  ];
+
+  const callbackColumns: CanvasTableColumn<RuntimeCallbackRecord>[] = [
+    {
+      h: currentLocale === "en" ? "Task" : "任務",
+      r: (callback) => (
+        <button
+          type="button"
+          style={queueButtonStyle}
+          onClick={() => setSelectedCallId(callback.callId)}
+        >
+          <div style={{ fontWeight: 600 }}>{callback.callbackTaskId}</div>
+          <div style={subtleTextStyle}>
+            {getCallbackSummary(callback, currentLocale)}
+          </div>
+        </button>
+      ),
+    },
+    {
+      h: currentLocale === "en" ? "Due" : "到期",
+      r: (callback) => formatRelativeDeadline(callback.dueAt, currentLocale),
+    },
+  ];
+
+  const recordingColumns: CanvasTableColumn<SessionResource>[] = [
+    {
+      h: currentLocale === "en" ? "Session" : "Session",
+      r: (session) => (
+        <button
+          type="button"
+          style={queueButtonStyle}
+          onClick={() => setSelectedCallId(session.callId)}
+        >
+          <div style={{ fontWeight: 600 }}>{session.callId}</div>
+          <div style={subtleTextStyle}>{session.callerPhone}</div>
+        </button>
+      ),
+    },
+    {
+      h: currentLocale === "en" ? "Recording" : "錄音",
+      r: (session) => (
+        <CanvasPill
+          theme={theme}
+          tone={getPillToneForRecordingState(session.recordingState)}
+        >
+          {formatOpsCodeLabel(currentLocale, session.recordingState)}
+        </CanvasPill>
+      ),
+    },
+  ];
+
+  const historyColumns: CanvasTableColumn<SessionResource>[] = [
+    {
+      h: currentLocale === "en" ? "Session" : "Session",
+      r: (session) => (
+        <button
+          type="button"
+          style={queueButtonStyle}
+          onClick={() => setSelectedCallId(session.callId)}
+        >
+          <div style={{ fontWeight: 600 }}>{session.callId}</div>
+          <div style={subtleTextStyle}>
+            {formatOpsCodeLabel(currentLocale, session.callType)} ·{" "}
+            {session.callerPhone}
+          </div>
+        </button>
+      ),
+    },
+    {
+      h: currentLocale === "en" ? "Closed" : "結束",
+      r: (session) => formatDateTime(currentLocale, session.endedAt),
+    },
+  ];
+
+  const traceColumns: CanvasTableColumn<DispatchTraceLogRecord>[] = [
+    {
+      h: currentLocale === "en" ? "Event" : "事件",
+      r: (entry) => (
+        <div>
+          <div style={{ fontWeight: 600 }}>
+            {formatOpsCodeLabel(currentLocale, entry.eventType)}
+          </div>
+          <div style={subtleTextStyle}>{entry.message}</div>
+        </div>
+      ),
+    },
+    {
+      h: currentLocale === "en" ? "At" : "時間",
+      r: (entry) => formatDateTime(currentLocale, entry.createdAt),
+    },
+  ];
 
   return (
     <>
@@ -1233,38 +1349,19 @@ export default function CallcenterPage() {
         tabs={headerTabs}
         activeTab={headerTabs[activeTabIndex] ?? headerTabs[0]}
         actions={[
-          <button
+          <CanvasBtn
             key="open-session"
-            className="header-action header-action-primary"
-            type="button"
             onClick={() => setShowIntake((current) => !current)}
             disabled={!workspaceAction.enabled}
-            title={
-              workspaceAction.enabled
-                ? undefined
-                : getDisabledReasonLabel(
-                    currentLocale,
-                    workspaceAction.disabledReasonCode,
-                  )
-            }
+            variant="primary"
           >
             {showIntake
               ? t("callcenter.hideIntake")
               : getActionLabel(currentLocale, "open_call_session")}
-          </button>,
-          <button
+          </CanvasBtn>,
+          <CanvasBtn
             key="close-session"
-            className="header-action"
-            type="button"
             disabled={!closeAction?.enabled || busyKey === "close-header"}
-            title={
-              closeAction?.enabled
-                ? undefined
-                : getDisabledReasonLabel(
-                    currentLocale,
-                    closeAction?.disabledReasonCode,
-                  )
-            }
             onClick={() =>
               selectedSession &&
               void runGuardedAction("close-header", closeAction, async () => {
@@ -1281,84 +1378,32 @@ export default function CallcenterPage() {
             }
           >
             {currentLocale === "en" ? "Close current" : "結束目前"}
-          </button>,
+          </CanvasBtn>,
         ]}
         sticky={false}
       />
 
-      <div className="callcenter-shell">
-        <section className="hero-card hero-card-compact">
-          <div className="hero-copy">
-            <span className="hero-eyebrow">
-              {currentLocale === "en"
-                ? `Refresh tier ${CALLCENTER_REFRESH_TIER} · 5s auto refresh`
-                : `Refresh tier ${CALLCENTER_REFRESH_TIER} · 每 5 秒自動刷新`}
-            </span>
-            <h2>
-              {selectedSession
-                ? `${selectedSession.callId} · ${formatOpsCodeLabel(currentLocale, selectedSession.callType)}`
-                : currentLocale === "en"
-                  ? "Idle workspace"
-                  : "Idle workspace"}
-            </h2>
-            <p>
-              {selectedSession
-                ? currentLocale === "en"
-                  ? "Handle booking, callback, complaint handoff, and recording evidence without leaving the canvas."
-                  : "在同一個 canvas 內完成建單、callback、客訴轉案與錄音證據補齊。"
-                : emptyCopy.body}
-            </p>
-          </div>
-          <div className="hero-controls">
-            <div className="hero-metrics">
-              <div className="hero-chip hero-chip-accent">
-                <span>
-                  {currentLocale === "en" ? "Open sessions" : "Active session"}
-                </span>
-                <strong>{openSessionsCount}</strong>
-              </div>
-              <div className="hero-chip">
-                <span>
-                  {currentLocale === "en"
-                    ? "Pending callbacks"
-                    : "待回覆 callback"}
-                </span>
-                <strong>{pendingCallbacks.length}</strong>
-              </div>
-              <div className="hero-chip hero-chip-warning">
-                <span>
-                  {currentLocale === "en" ? "Recording gaps" : "錄音待補"}
-                </span>
-                <strong>{recordingGapCount}</strong>
-              </div>
-              <div className="hero-chip">
-                <span>
-                  {currentLocale === "en" ? "Complaint transfers" : "客訴轉案"}
-                </span>
-                <strong>{complaintTransferCount}</strong>
-              </div>
-            </div>
-            <div className="toolbar">
-              <input
-                className="search-input"
-                type="search"
-                value={query}
-                placeholder={t("callcenter.search")}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-              <button
-                className="toolbar-btn"
-                type="button"
-                onClick={() => {
-                  void loadData(selectedCallId ?? undefined);
-                }}
+      <div style={pageBodyStyle}>
+        <CanvasCard
+          theme={theme}
+          title={
+            selectedSession
+              ? `${selectedSession.callId} · ${formatOpsCodeLabel(currentLocale, selectedSession.callType)}`
+              : currentLocale === "en"
+                ? "Idle workspace"
+                : "Idle workspace"
+          }
+          subtitle={
+            currentLocale === "en"
+              ? `Refresh tier ${CALLCENTER_REFRESH_TIER} · one active session per agent`
+              : `Refresh tier ${CALLCENTER_REFRESH_TIER} · 每位 agent 僅一個 active session`
+          }
+          actions={
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <CanvasPill
+                theme={theme}
+                tone={workspaceStale ? "warn" : "success"}
               >
-                {currentLocale === "en" ? "Refresh now" : "立即刷新"}
-              </button>
-            </div>
-            <div className="toolbar-meta">
-              <span className="tier-chip">T2</span>
-              <span className={getFreshnessTone(activeRefresh)}>
                 {workspaceStale
                   ? currentLocale === "en"
                     ? "Stale"
@@ -1366,8 +1411,11 @@ export default function CallcenterPage() {
                   : currentLocale === "en"
                     ? "Fresh"
                     : "最新"}
-              </span>
-              <span className="status-chip">
+              </CanvasPill>
+              <CanvasPill
+                theme={theme}
+                tone={getToneForHealthStatus(health.status)}
+              >
                 {health.status === "healthy"
                   ? currentLocale === "en"
                     ? "Healthy"
@@ -1375,65 +1423,152 @@ export default function CallcenterPage() {
                   : currentLocale === "en"
                     ? "Degraded"
                     : "降級中"}
-              </span>
-              <span className="toolbar-hint">
-                {currentLocale === "en" ? "Last refresh" : "最近刷新"}:{" "}
-                {lastRefreshAt
-                  ? formatDateTime(currentLocale, lastRefreshAt)
-                  : "—"}
-              </span>
+              </CanvasPill>
             </div>
+          }
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+              gap: 12,
+              marginBottom: 16,
+            }}
+          >
+            <CanvasKPI
+              theme={theme}
+              label={
+                currentLocale === "en" ? "Open sessions" : "Active session"
+              }
+              value={String(openSessionsCount)}
+            />
+            <CanvasKPI
+              theme={theme}
+              label={
+                currentLocale === "en" ? "Pending callbacks" : "待回覆 callback"
+              }
+              value={String(pendingCallbacks.length)}
+            />
+            <CanvasKPI
+              theme={theme}
+              label={currentLocale === "en" ? "Recording gaps" : "錄音待補"}
+              value={String(recordingGapCount)}
+            />
+            <CanvasKPI
+              theme={theme}
+              label={
+                currentLocale === "en" ? "Complaint transfers" : "客訴轉案"
+              }
+              value={String(complaintTransferCount)}
+            />
           </div>
-        </section>
+          <div style={formGridStyle}>
+            <CanvasField theme={theme} label={t("callcenter.search")}>
+              <input
+                type="search"
+                value={query}
+                placeholder={t("callcenter.search")}
+                onChange={(event) => setQuery(event.target.value)}
+                style={nativeInputStyle}
+              />
+            </CanvasField>
+            <CanvasField
+              theme={theme}
+              label={currentLocale === "en" ? "Last refresh" : "最近刷新"}
+            >
+              <CanvasInput
+                theme={theme}
+                value={
+                  lastRefreshAt
+                    ? formatDateTime(currentLocale, lastRefreshAt)
+                    : "—"
+                }
+              />
+            </CanvasField>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <CanvasBtn
+              theme={theme}
+              onClick={() => {
+                void loadData(selectedCallId ?? undefined);
+              }}
+            >
+              {currentLocale === "en" ? "Refresh now" : "立即刷新"}
+            </CanvasBtn>
+            <CanvasPill theme={theme} tone="neutral">
+              {health.degradedServices.length > 0
+                ? health.degradedServices
+                    .map(
+                      (service: UiHealthEnvelope["degradedServices"][number]) =>
+                        service.service,
+                    )
+                    .join(" · ")
+                : currentLocale === "en"
+                  ? "No degraded dependencies"
+                  : "目前沒有降級依賴"}
+            </CanvasPill>
+          </div>
+        </CanvasCard>
 
         {outcomeNotice ? (
-          <div
-            className={
-              outcomeNotice.tone === "success"
-                ? "notice-banner"
-                : "notice-banner notice-warning"
+          <CanvasBanner
+            theme={theme}
+            tone={outcomeNotice.tone === "success" ? "success" : "warn"}
+            icon={outcomeNotice.tone === "success" ? "ok" : "warn"}
+            title={outcomeNotice.message}
+            body={
+              outcomeNotice.href && outcomeNotice.label ? (
+                outcomeNotice.external ? (
+                  <a
+                    href={outcomeNotice.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={linkPillStyle}
+                  >
+                    {outcomeNotice.label}
+                  </a>
+                ) : (
+                  <Link href={outcomeNotice.href} style={linkPillStyle}>
+                    {outcomeNotice.label}
+                  </Link>
+                )
+              ) : undefined
             }
-          >
-            <span>{outcomeNotice.message}</span>
-            {outcomeNotice.href && outcomeNotice.label ? (
-              outcomeNotice.external ? (
-                <a
-                  href={outcomeNotice.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="notice-link"
-                >
-                  {outcomeNotice.label}
-                </a>
-              ) : (
-                <Link href={outcomeNotice.href} className="notice-link">
-                  {outcomeNotice.label}
-                </Link>
-              )
-            ) : null}
-          </div>
+          />
         ) : null}
 
         {error ? (
-          <div className="error-banner">
-            <strong>{currentLocale === "en" ? "Error" : "錯誤"}</strong>
-            <span>{error}</span>
-          </div>
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={currentLocale === "en" ? "Error" : "錯誤"}
+            body={error}
+          />
         ) : null}
 
         {showIntake ? (
-          <section className="canvas-card">
-            <div className="card-head">
-              <div>
-                <span className="section-kicker">
-                  {currentLocale === "en" ? "Entry" : "入口"}
-                </span>
-                <h3>{t("callcenter.newIntake")}</h3>
-                <p>{t("callcenter.intakeNote")}</p>
-              </div>
-            </div>
+          <CanvasCard
+            theme={theme}
+            title={t("callcenter.newIntake")}
+            subtitle={t("callcenter.intakeNote")}
+            actions={
+              <CanvasPill
+                theme={theme}
+                tone={workspaceAction.enabled ? "success" : "warn"}
+              >
+                {workspaceAction.enabled
+                  ? currentLocale === "en"
+                    ? "Ready"
+                    : "可建立"
+                  : currentLocale === "en"
+                    ? "Blocked by active session"
+                    : "受 active session 限制"}
+              </CanvasPill>
+            }
+          >
             <form
-              className="grid-form"
+              style={intakeGridStyle}
               onSubmit={(event) => {
                 event.preventDefault();
                 void runGuardedAction(
@@ -1457,27 +1592,43 @@ export default function CallcenterPage() {
                 );
               }}
             >
-              <label>
-                <span>{t("callcenter.form.callType")}</span>
-                <select
-                  value={intakeForm.callType}
-                  onChange={(event) =>
-                    setIntakeForm((current: OpenCallSessionCommand) => ({
-                      ...current,
-                      callType: event.target
-                        .value as OpenCallSessionCommand["callType"],
-                    }))
-                  }
-                >
-                  {CALL_TYPE_OPTIONS.map((callType) => (
-                    <option key={callType} value={callType}>
-                      {formatOpsCodeLabel(currentLocale, callType)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>{t("callcenter.form.callerPhone")}</span>
+              <CanvasField
+                theme={theme}
+                label={t("callcenter.form.callType")}
+                required
+              >
+                <>
+                  <CanvasSelect
+                    theme={theme}
+                    value={formatOpsCodeLabel(
+                      currentLocale,
+                      intakeForm.callType,
+                    )}
+                  />
+                  <select
+                    value={intakeForm.callType}
+                    onChange={(event) =>
+                      setIntakeForm((current: OpenCallSessionCommand) => ({
+                        ...current,
+                        callType: event.target
+                          .value as OpenCallSessionCommand["callType"],
+                      }))
+                    }
+                    style={{ ...nativeInputStyle, marginTop: 6 }}
+                  >
+                    {CALL_TYPE_OPTIONS.map((callType) => (
+                      <option key={callType} value={callType}>
+                        {formatOpsCodeLabel(currentLocale, callType)}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              </CanvasField>
+              <CanvasField
+                theme={theme}
+                label={t("callcenter.form.callerPhone")}
+                required
+              >
                 <input
                   type="text"
                   required
@@ -1488,10 +1639,14 @@ export default function CallcenterPage() {
                       callerPhone: event.target.value,
                     }))
                   }
+                  style={nativeInputStyle}
                 />
-              </label>
-              <label>
-                <span>{t("callcenter.form.agentId")}</span>
+              </CanvasField>
+              <CanvasField
+                theme={theme}
+                label={t("callcenter.form.agentId")}
+                required
+              >
                 <input
                   type="text"
                   required
@@ -1502,197 +1657,167 @@ export default function CallcenterPage() {
                       agentId: event.target.value,
                     }))
                   }
+                  style={nativeInputStyle}
                 />
-              </label>
-              <label className="check-field">
-                <input
-                  type="checkbox"
-                  checked={intakeForm.agentIdentityAnnounced}
-                  onChange={(event) =>
-                    setIntakeForm((current: OpenCallSessionCommand) => ({
-                      ...current,
-                      agentIdentityAnnounced: event.target.checked,
-                    }))
-                  }
-                />
-                <span>{t("callcenter.form.announced")}</span>
-              </label>
-              <div className="form-actions">
-                <button
-                  className="toolbar-btn toolbar-btn-primary"
-                  type="submit"
-                  disabled={
-                    busyKey === "open-intake" || !workspaceAction.enabled
-                  }
+              </CanvasField>
+              <CanvasField theme={theme} label={t("callcenter.form.announced")}>
+                <label
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
                 >
-                  {busyKey === "open-intake"
-                    ? t("callcenter.form.opening")
-                    : t("callcenter.form.openSession")}
-                </button>
+                  <input
+                    type="checkbox"
+                    checked={intakeForm.agentIdentityAnnounced}
+                    onChange={(event) =>
+                      setIntakeForm((current: OpenCallSessionCommand) => ({
+                        ...current,
+                        agentIdentityAnnounced: event.target.checked,
+                      }))
+                    }
+                  />
+                  <span style={subtleTextStyle}>
+                    {t("callcenter.form.announced")}
+                  </span>
+                </label>
+              </CanvasField>
+              <div style={{ display: "flex", alignItems: "end" }}>
+                <ActionButton
+                  theme={theme}
+                  disabled={!workspaceAction.enabled}
+                  helper={getActionHelper(currentLocale, workspaceAction)}
+                  busy={busyKey === "open-intake"}
+                  label={
+                    busyKey === "open-intake"
+                      ? t("callcenter.form.opening")
+                      : t("callcenter.form.openSession")
+                  }
+                  variant="primary"
+                  type="submit"
+                />
               </div>
             </form>
-          </section>
+          </CanvasCard>
         ) : null}
 
-        <div className="workspace-grid">
-          <aside className="workspace-left-rail">
-            <article className="canvas-card rail-card">
-              <div className="card-head">
-                <div>
-                  <span className="section-kicker">
-                    {activeQueueCard.kicker}
-                  </span>
-                  <h3>{activeQueueCard.title}</h3>
-                </div>
-                <span className="count-pill">{activeQueueCard.count}</span>
-              </div>
-              <div className="queue-list">{activeQueueCard.body}</div>
-            </article>
-
-            {!selectedSession ? (
-              <article
-                className={`canvas-card ${getEmptyReasonTone(effectiveEmptyReason)}`}
-              >
-                <span className="empty-accent">{emptyCopy.accent}</span>
-                <h4>{emptyCopy.title}</h4>
-                <p>{emptyCopy.body}</p>
-                {effectiveEmptyReason === "filtered_empty" ? (
-                  <button
-                    className="toolbar-btn"
-                    type="button"
-                    onClick={() => setQuery("")}
-                  >
-                    {currentLocale === "en" ? "Clear search" : "清除搜尋"}
-                  </button>
-                ) : effectiveEmptyNextAction ? (
-                  <button
-                    className="toolbar-btn toolbar-btn-primary"
-                    type="button"
-                    onClick={() => {
-                      if (
-                        effectiveEmptyNextAction.action === "open_call_session"
-                      ) {
-                        setShowIntake(true);
-                      }
-                    }}
-                    disabled={!effectiveEmptyNextAction.enabled}
+        <div style={workspaceGridStyle}>
+          <div style={columnStackStyle}>
+            <CanvasCard
+              theme={theme}
+              title={currentLocale === "en" ? "Waiting list" : "等待佇列"}
+              subtitle={
+                queueView === "sessions"
+                  ? currentLocale === "en"
+                    ? "Other active calls in the same workspace"
+                    : "同一 workspace 內其他 active 通話"
+                  : queueView === "callback"
+                    ? currentLocale === "en"
+                      ? "Use the tabs to pivot queue attention"
+                      : "用上方 tabs 切換 queue 焦點"
+                    : currentLocale === "en"
+                      ? "Recording issues remain visible beside the session"
+                      : "錄音缺口需與 session 並列可見"
+              }
+              actions={
+                <CanvasPill theme={theme}>{waitingSessions.length}</CanvasPill>
+              }
+              padding={0}
+            >
+              {waitingSessions.length > 0 ? (
+                <CanvasTable
+                  theme={theme}
+                  columns={waitingColumns}
+                  rows={waitingSessions}
+                />
+              ) : (
+                <div style={{ padding: 16 }}>
+                  <CanvasEmptyState
+                    theme={theme}
+                    tone="neutral"
                     title={
-                      !effectiveEmptyNextAction.enabled
-                        ? getDisabledReasonLabel(
-                            currentLocale,
-                            effectiveEmptyNextAction.disabledReasonCode,
-                          )
-                        : undefined
+                      currentLocale === "en"
+                        ? "No waiting calls"
+                        : "目前沒有等待通話"
                     }
-                  >
-                    {getActionLabel(
-                      currentLocale,
-                      effectiveEmptyNextAction.action,
-                    )}
-                  </button>
-                ) : effectiveEmptyReason === "no_data" ? (
-                  <button
-                    className="toolbar-btn toolbar-btn-primary"
-                    type="button"
-                    onClick={() => setShowIntake(true)}
-                    disabled={!workspaceAction.enabled}
-                    title={
-                      !workspaceAction.enabled
-                        ? getDisabledReasonLabel(
-                            currentLocale,
-                            workspaceAction.disabledReasonCode,
-                          )
-                        : undefined
+                    body={
+                      currentLocale === "en"
+                        ? "One-active-session enforcement is holding; no additional live calls are waiting."
+                        : "一個 agent 一個 active session 規則已生效，沒有額外等待中的 live call。"
                     }
-                  >
-                    {getActionLabel(currentLocale, "open_call_session")}
-                  </button>
-                ) : null}
-              </article>
-            ) : (
-              <article className="canvas-card rail-card">
-                <div className="card-head">
-                  <div>
-                    <span className="section-kicker">
-                      {currentLocale === "en"
-                        ? "Workspace signals"
-                        : "Workspace 訊號"}
-                    </span>
-                    <h3>
-                      {currentLocale === "en"
-                        ? "Health and contracts"
-                        : "健康度與契約"}
-                    </h3>
-                  </div>
+                  />
                 </div>
-                <div className="queue-list">
-                  <div className="signal-card">
-                    <span>
-                      {currentLocale === "en"
-                        ? "availableActions"
-                        : "availableActions"}
-                    </span>
-                    <strong>{selectedSession.availableActions.length}</strong>
-                    <small>
-                      {currentLocale === "en"
-                        ? "Affordances stay visible even when disabled."
-                        : "即使 disabled 也保留 affordance。"}
-                    </small>
-                  </div>
-                  <div className="signal-card">
-                    <span>
-                      {currentLocale === "en" ? "Deep links" : "Deep links"}
-                    </span>
-                    <strong>{selectedSession.deepLinks.length}</strong>
-                    <small>
-                      {currentLocale === "en"
-                        ? "Dispatch and complaint routes are contract-driven."
-                        : "Dispatch 與 complaint 連結由 contract 決定。"}
-                    </small>
-                  </div>
-                  <div className="signal-card">
-                    <span>{currentLocale === "en" ? "Health" : "健康度"}</span>
-                    <strong>{health.status}</strong>
-                    <small>
-                      {health.degradedServices.length > 0
-                        ? health.degradedServices
-                            .map((service) => service.service)
-                            .join(" · ")
-                        : currentLocale === "en"
-                          ? "No degraded dependencies."
-                          : "目前沒有降級依賴。"}
-                    </small>
-                  </div>
-                </div>
-              </article>
-            )}
-          </aside>
+              )}
+            </CanvasCard>
 
-          <section className="workspace-main">
-            <article className="canvas-card spotlight-card">
-              <div className="card-head">
-                <div>
-                  <span className="section-kicker">
-                    {currentLocale === "en"
-                      ? "Active session panel"
-                      : "Active session panel"}
-                  </span>
-                  <h3>
-                    {selectedSession
-                      ? selectedSession.callId
-                      : currentLocale === "en"
-                        ? "Idle workspace"
-                        : "Idle workspace"}
-                  </h3>
-                  <p>
-                    {currentLocale === "en"
-                      ? "Must-show: call type, caller phone, agent identity, linked order, recording state, and dispatch trace."
-                      : "必顯示：call type、caller phone、agent identity、linked order、recording state 與 dispatch trace。"}
-                  </p>
-                </div>
-                {selectedSession ? (
-                  <span
-                    className={getRecordingStateTone(
+            <CanvasCard
+              theme={theme}
+              title={
+                currentLocale === "en" ? "Workspace status" : "Workspace 狀態"
+              }
+              subtitle={
+                currentLocale === "en"
+                  ? "Contract-driven affordances stay visible even when disabled."
+                  : "由 contract 驅動的 affordance 即使 disabled 也會保留。"
+              }
+            >
+              {selectedSession ? (
+                <CanvasDL
+                  theme={theme}
+                  items={[
+                    {
+                      label:
+                        currentLocale === "en"
+                          ? "availableActions"
+                          : "availableActions",
+                      value: String(selectedSession.availableActions.length),
+                    },
+                    {
+                      label:
+                        currentLocale === "en" ? "Deep links" : "Deep links",
+                      value: String(selectedSession.deepLinks.length),
+                    },
+                    {
+                      label: currentLocale === "en" ? "Health" : "健康度",
+                      value: health.status,
+                    },
+                    {
+                      label:
+                        currentLocale === "en"
+                          ? "Refresh tier"
+                          : "Refresh tier",
+                      value: CALLCENTER_REFRESH_TIER,
+                    },
+                  ]}
+                />
+              ) : (
+                <CanvasEmptyState
+                  theme={theme}
+                  tone={getToneForEmptyReason(effectiveEmptyReason)}
+                  title={emptyCopy.title}
+                  body={emptyCopy.body}
+                />
+              )}
+            </CanvasCard>
+          </div>
+
+          <div style={columnStackStyle}>
+            <CanvasCard
+              theme={theme}
+              title={
+                selectedSession
+                  ? selectedSession.callId
+                  : currentLocale === "en"
+                    ? "Active session"
+                    : "Active session"
+              }
+              subtitle={
+                currentLocale === "en"
+                  ? "Must-show session facts stay in CanvasField / CanvasInput / CanvasSelect blocks."
+                  : "必顯示欄位以 CanvasField / CanvasInput / CanvasSelect 呈現。"
+              }
+              actions={
+                selectedSession ? (
+                  <CanvasPill
+                    theme={theme}
+                    tone={getPillToneForRecordingState(
                       selectedSession.recordingState,
                     )}
                   >
@@ -1700,211 +1825,156 @@ export default function CallcenterPage() {
                       currentLocale,
                       selectedSession.recordingState,
                     )}
-                  </span>
-                ) : null}
-              </div>
-
+                  </CanvasPill>
+                ) : undefined
+              }
+            >
               {loading ? (
-                <div className="loading-state">
-                  {currentLocale === "en"
-                    ? "Loading call center workspace..."
-                    : "正在載入 call center workspace..."}
-                </div>
+                <CanvasEmptyState
+                  theme={theme}
+                  tone="info"
+                  title={
+                    currentLocale === "en"
+                      ? "Loading workspace"
+                      : "載入 workspace"
+                  }
+                  body={
+                    currentLocale === "en"
+                      ? "Refreshing sessions, callbacks, and recording state."
+                      : "正在刷新 sessions、callbacks 與錄音狀態。"
+                  }
+                />
               ) : selectedSession ? (
                 <>
-                  <div className="spotlight-grid">
-                    <div className="spotlight-cell">
-                      <span>{currentLocale === "en" ? "Call" : "通話"}</span>
-                      <strong>
-                        {formatOpsCodeLabel(
+                  <div style={formGridStyle}>
+                    <CanvasField
+                      theme={theme}
+                      label={currentLocale === "en" ? "Call type" : "通話類型"}
+                    >
+                      <CanvasSelect
+                        theme={theme}
+                        value={formatOpsCodeLabel(
                           currentLocale,
                           selectedSession.callType,
                         )}
-                      </strong>
-                      <small>{selectedSession.callId}</small>
-                    </div>
-                    <div className="spotlight-cell">
-                      <span>
-                        {currentLocale === "en" ? "Caller" : "來電者"}
-                      </span>
-                      <strong>{selectedSession.callerPhone}</strong>
-                      <small>
-                        {formatDateTime(
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={
+                        currentLocale === "en" ? "Caller phone" : "來電號碼"
+                      }
+                    >
+                      <CanvasInput
+                        theme={theme}
+                        value={selectedSession.callerPhone}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={currentLocale === "en" ? "Agent" : "客服人員"}
+                    >
+                      <CanvasInput
+                        theme={theme}
+                        value={selectedSession.agentId ?? "—"}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={
+                        currentLocale === "en" ? "Linked records" : "已連結紀錄"
+                      }
+                    >
+                      <CanvasInput
+                        theme={theme}
+                        value={
+                          selectedSession.linkedOrderId ??
+                          selectedSession.linkedCaseNo ??
+                          "—"
+                        }
+                      />
+                    </CanvasField>
+                  </div>
+                  <CanvasDL
+                    theme={theme}
+                    items={[
+                      {
+                        label: currentLocale === "en" ? "Started" : "開始時間",
+                        value: formatDateTime(
                           currentLocale,
                           selectedSession.startedAt,
-                        )}
-                      </small>
-                    </div>
-                    <div className="spotlight-cell">
-                      <span>
-                        {currentLocale === "en" ? "Agent" : "客服人員"}
-                      </span>
-                      <strong>{selectedSession.agentId ?? "—"}</strong>
-                      <small>
-                        {selectedSession.agentIdentityAnnounced
+                        ),
+                      },
+                      {
+                        label:
+                          currentLocale === "en"
+                            ? "Agent identity"
+                            : "身分告知",
+                        value: selectedSession.agentIdentityAnnounced
                           ? currentLocale === "en"
                             ? `Announced at ${formatDateTime(currentLocale, selectedSession.agentIdentityAnnouncedAt)}`
-                            : `${formatDateTime(currentLocale, selectedSession.agentIdentityAnnouncedAt)} 已告知身分`
+                            : `${formatDateTime(currentLocale, selectedSession.agentIdentityAnnouncedAt)} 已告知`
                           : currentLocale === "en"
-                            ? "Identity not announced"
-                            : "尚未告知身分"}
-                      </small>
-                    </div>
-                    <div className="spotlight-cell">
-                      <span>
+                            ? "Not announced"
+                            : "尚未告知",
+                      },
+                      {
+                        label: currentLocale === "en" ? "Flags" : "旗標",
+                        value:
+                          selectedSession.flags.length > 0
+                            ? formatOpsCodeList(
+                                currentLocale,
+                                selectedSession.flags,
+                              )
+                            : "—",
+                      },
+                      {
+                        label: currentLocale === "en" ? "Last ETA" : "最近 ETA",
+                        value: selectedSession.lastEtaQuotedMinutes
+                          ? `${selectedSession.lastEtaQuotedMinutes} min`
+                          : "—",
+                      },
+                    ]}
+                  />
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {selectedSession.deepLinks.length > 0 ? (
+                      selectedSession.deepLinks.map(
+                        (link: CrossAppResourceLink) =>
+                          link.openMode === "new_tab" ? (
+                            <a
+                              key={`${link.targetApp}-${link.resourceId}-${link.route}`}
+                              href={link.route}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={linkPillStyle}
+                            >
+                              {link.label}
+                            </a>
+                          ) : (
+                            <Link
+                              key={`${link.targetApp}-${link.resourceId}-${link.route}`}
+                              href={link.route}
+                              style={linkPillStyle}
+                            >
+                              {link.label}
+                            </Link>
+                          ),
+                      )
+                    ) : (
+                      <span style={subtleTextStyle}>
                         {currentLocale === "en"
-                          ? "Linked records"
-                          : "已連結紀錄"}
+                          ? "No linked resources"
+                          : "尚無 linked resource"}
                       </span>
-                      <strong>
-                        {selectedSession.linkedOrderId ??
-                          selectedSession.linkedCaseNo ??
-                          "—"}
-                      </strong>
-                      <small>
-                        {selectedSession.linkedOrderId &&
-                        selectedSession.linkedCaseNo
-                          ? `${selectedSession.linkedOrderId} + ${selectedSession.linkedCaseNo}`
-                          : selectedSession.linkedOrderId
-                            ? currentLocale === "en"
-                              ? "Order linked"
-                              : "已綁定訂單"
-                            : selectedSession.linkedCaseNo
-                              ? currentLocale === "en"
-                                ? "Complaint linked"
-                                : "已連結客訴"
-                              : currentLocale === "en"
-                                ? "No downstream link yet"
-                                : "尚未連結下游紀錄"}
-                      </small>
-                    </div>
-                    <div className="spotlight-cell">
-                      <span>{currentLocale === "en" ? "Flags" : "旗標"}</span>
-                      <strong>
-                        {selectedSession.flags.length > 0
-                          ? formatOpsCodeList(
-                              currentLocale,
-                              selectedSession.flags,
-                            )
-                          : "—"}
-                      </strong>
-                      <small>
-                        {selectedSession.lastEtaQuotedMinutes
-                          ? currentLocale === "en"
-                            ? `Last ETA ${selectedSession.lastEtaQuotedMinutes} min`
-                            : `最近 ETA ${selectedSession.lastEtaQuotedMinutes} 分鐘`
-                          : currentLocale === "en"
-                            ? "No ETA quoted yet"
-                            : "尚未回覆 ETA"}
-                      </small>
-                    </div>
-                    <div className="spotlight-cell">
-                      <span>
-                        {currentLocale === "en" ? "Deep links" : "Deep links"}
-                      </span>
-                      <div className="deep-link-list">
-                        {selectedSession.deepLinks.length > 0 ? (
-                          selectedSession.deepLinks.map(
-                            (link: CrossAppResourceLink) =>
-                              renderResourceLink(link, "deep-link-pill"),
-                          )
-                        ) : (
-                          <span className="deep-link-empty">
-                            {currentLocale === "en"
-                              ? "No linked resources"
-                              : "尚無 linked resource"}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="action-strip">
-                    {selectedSession.availableActions.map(
-                      (descriptor: ResourceActionDescriptor) => (
-                        <div
-                          key={descriptor.action}
-                          className="action-chip-card"
-                        >
-                          <strong>
-                            {getActionLabel(currentLocale, descriptor.action)}
-                          </strong>
-                          {renderActionMeta(currentLocale, descriptor)}
-                        </div>
-                      ),
                     )}
                   </div>
-                </>
-              ) : (
-                <div className={getEmptyReasonTone(emptyReason)}>
-                  <span className="empty-accent">{emptyCopy.accent}</span>
-                  <h4>{emptyCopy.title}</h4>
-                  <p>{emptyCopy.body}</p>
-                  {emptyReason === "filtered_empty" ? (
-                    <button
-                      className="toolbar-btn"
-                      type="button"
-                      onClick={() => setQuery("")}
-                    >
-                      {currentLocale === "en" ? "Clear search" : "清除搜尋"}
-                    </button>
-                  ) : (
-                    <button
-                      className="toolbar-btn toolbar-btn-primary"
-                      type="button"
-                      onClick={() => setShowIntake(true)}
-                      disabled={!workspaceAction.enabled}
-                    >
-                      {getActionLabel(currentLocale, "open_call_session")}
-                    </button>
-                  )}
-                </div>
-              )}
-            </article>
-
-            <article className="canvas-card">
-              <div className="card-head">
-                <div>
-                  <span className="section-kicker">
-                    {currentLocale === "en"
-                      ? "Session actions"
-                      : "Session 動作"}
-                  </span>
-                  <h3>
-                    {currentLocale === "en"
-                      ? "Greeting to resolution"
-                      : "從 greeting 到 resolution"}
-                  </h3>
-                  <p>
-                    {currentLocale === "en"
-                      ? "Affordances stay visible even when disabled; enabled state comes from availableActions."
-                      : "即使 disabled 也保留 affordance；enabled 狀態由 availableActions 決定。"}
-                  </p>
-                </div>
-              </div>
-
-              <div className="action-panels">
-                <section className="mini-panel">
-                  <h4>
-                    {currentLocale === "en"
-                      ? "Session controls"
-                      : "Session 控制"}
-                  </h4>
-                  <div className="mini-actions">
-                    <button
-                      className="toolbar-btn"
-                      type="button"
-                      disabled={
-                        !announceAction?.enabled || busyKey === "announce"
-                      }
-                      title={
-                        announceAction?.enabled
-                          ? undefined
-                          : getDisabledReasonLabel(
-                              currentLocale,
-                              announceAction?.disabledReasonCode,
-                            )
-                      }
+                  <div style={actionGridStyle}>
+                    <ActionButton
+                      theme={theme}
+                      disabled={!announceAction?.enabled}
+                      helper={getActionHelper(currentLocale, announceAction)}
+                      busy={busyKey === "announce"}
+                      label={getActionLabel(currentLocale, "announce_identity")}
                       onClick={() =>
                         selectedSession &&
                         void runGuardedAction(
@@ -1931,21 +2001,14 @@ export default function CallcenterPage() {
                           },
                         )
                       }
-                    >
-                      {getActionLabel(currentLocale, "announce_identity")}
-                    </button>
-                    <button
-                      className="toolbar-btn"
-                      type="button"
-                      disabled={!closeAction?.enabled || busyKey === "close"}
-                      title={
-                        closeAction?.enabled
-                          ? undefined
-                          : getDisabledReasonLabel(
-                              currentLocale,
-                              closeAction?.disabledReasonCode,
-                            )
-                      }
+                    />
+                    <ActionButton
+                      theme={theme}
+                      disabled={!closeAction?.enabled}
+                      helper={getActionHelper(currentLocale, closeAction)}
+                      busy={busyKey === "close"}
+                      label={getActionLabel(currentLocale, "close_session")}
+                      danger
                       onClick={() =>
                         selectedSession &&
                         void runGuardedAction(
@@ -1966,22 +2029,82 @@ export default function CallcenterPage() {
                           },
                         )
                       }
-                    >
-                      {getActionLabel(currentLocale, "close_session")}
-                    </button>
+                    />
+                    <ActionButton
+                      theme={theme}
+                      disabled={!quoteEtaAction?.enabled}
+                      helper={getActionHelper(currentLocale, quoteEtaAction)}
+                      busy={busyKey === "quote-eta"}
+                      label={getActionLabel(currentLocale, "quote_eta")}
+                      onClick={() =>
+                        document
+                          .getElementById("callcenter-session-actions")
+                          ?.scrollIntoView({
+                            behavior: "smooth",
+                            block: "start",
+                          })
+                      }
+                    />
+                    <ActionButton
+                      theme={theme}
+                      disabled={!attachRecordingAction?.enabled}
+                      helper={getActionHelper(
+                        currentLocale,
+                        attachRecordingAction,
+                      )}
+                      busy={busyKey === "attach-recording"}
+                      label={getActionLabel(currentLocale, "attach_recording")}
+                      onClick={() =>
+                        document
+                          .getElementById("callcenter-session-actions")
+                          ?.scrollIntoView({
+                            behavior: "smooth",
+                            block: "start",
+                          })
+                      }
+                    />
                   </div>
-                  {announceAction
-                    ? renderActionMeta(currentLocale, announceAction)
-                    : null}
-                  {closeAction
-                    ? renderActionMeta(currentLocale, closeAction)
-                    : null}
-                </section>
+                </>
+              ) : (
+                <CanvasEmptyState
+                  theme={theme}
+                  tone={getToneForEmptyReason(effectiveEmptyReason)}
+                  title={emptyCopy.title}
+                  body={emptyCopy.body}
+                  action={
+                    effectiveEmptyReason === "filtered_empty" ? (
+                      <CanvasBtn theme={theme} onClick={() => setQuery("")}>
+                        {currentLocale === "en" ? "Clear search" : "清除搜尋"}
+                      </CanvasBtn>
+                    ) : (
+                      <CanvasBtn
+                        theme={theme}
+                        variant="primary"
+                        disabled={!workspaceAction.enabled}
+                        onClick={() => setShowIntake(true)}
+                      >
+                        {getActionLabel(currentLocale, "open_call_session")}
+                      </CanvasBtn>
+                    )
+                  }
+                />
+              )}
+            </CanvasCard>
 
-                <section className="mini-panel">
-                  <h4>{currentLocale === "en" ? "Quote ETA" : "回覆 ETA"}</h4>
+            <div id="callcenter-session-actions">
+              <CanvasCard
+                theme={theme}
+                title={
+                  currentLocale === "en" ? "Session actions" : "Session 動作"
+                }
+                subtitle={
+                  currentLocale === "en"
+                    ? "Operate ETA, recording, booking, callback, and complaint transfer from the same column."
+                    : "在同一欄內完成 ETA、錄音、建單、callback 與客訴轉案。"
+                }
+              >
+                <div style={dualFormGridStyle}>
                   <form
-                    className="stack-form"
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (!selectedSession) {
@@ -2009,35 +2132,33 @@ export default function CallcenterPage() {
                       );
                     }}
                   >
-                    <input
-                      type="number"
-                      min={1}
-                      value={quotedEtaMinutes}
-                      onChange={(event) =>
-                        setQuotedEtaMinutes(event.target.value)
-                      }
-                    />
-                    <button
-                      className="toolbar-btn"
-                      type="submit"
-                      disabled={
-                        !quoteEtaAction?.enabled || busyKey === "quote-eta"
+                    <CanvasField
+                      theme={theme}
+                      label={
+                        currentLocale === "en" ? "ETA minutes" : "ETA 分鐘"
                       }
                     >
-                      {getActionLabel(currentLocale, "quote_eta")}
-                    </button>
+                      <input
+                        type="number"
+                        min={1}
+                        value={quotedEtaMinutes}
+                        onChange={(event) =>
+                          setQuotedEtaMinutes(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <ActionButton
+                      theme={theme}
+                      disabled={!quoteEtaAction?.enabled}
+                      helper={getActionHelper(currentLocale, quoteEtaAction)}
+                      busy={busyKey === "quote-eta"}
+                      label={getActionLabel(currentLocale, "quote_eta")}
+                      type="submit"
+                    />
                   </form>
-                  {quoteEtaAction
-                    ? renderActionMeta(currentLocale, quoteEtaAction)
-                    : null}
-                </section>
 
-                <section className="mini-panel">
-                  <h4>
-                    {currentLocale === "en" ? "Recording evidence" : "錄音證據"}
-                  </h4>
                   <form
-                    className="stack-form"
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (!selectedSession) {
@@ -2070,186 +2191,211 @@ export default function CallcenterPage() {
                       );
                     }}
                   >
-                    <input
-                      type="text"
-                      placeholder={t("callcenter.recordingIdPlaceholder")}
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.recordingIdPlaceholder")}
                       required
-                      value={recordingForm.recordingId}
-                      onChange={(event) =>
-                        setRecordingForm((current: RecordingFormState) => ({
-                          ...current,
-                          recordingId: event.target.value,
-                        }))
-                      }
-                    />
-                    <input
-                      type="text"
-                      placeholder={t("callcenter.providerRefPlaceholder")}
-                      value={recordingForm.providerRecordingRef ?? ""}
-                      onChange={(event) =>
-                        setRecordingForm((current: RecordingFormState) => ({
-                          ...current,
-                          providerRecordingRef: event.target.value,
-                        }))
-                      }
-                    />
-                    <input
-                      type="url"
-                      placeholder={t("callcenter.recordingUrlPlaceholder")}
-                      value={recordingForm.recordingUrl ?? ""}
-                      onChange={(event) =>
-                        setRecordingForm((current: RecordingFormState) => ({
-                          ...current,
-                          recordingUrl: event.target.value,
-                        }))
-                      }
-                    />
-                    <button
-                      className="toolbar-btn"
-                      type="submit"
-                      disabled={
-                        !attachRecordingAction?.enabled ||
-                        busyKey === "attach-recording"
-                      }
                     >
-                      {getActionLabel(currentLocale, "attach_recording")}
-                    </button>
+                      <input
+                        type="text"
+                        required
+                        value={recordingForm.recordingId}
+                        onChange={(event) =>
+                          setRecordingForm((current: RecordingFormState) => ({
+                            ...current,
+                            recordingId: event.target.value,
+                          }))
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.providerRefPlaceholder")}
+                    >
+                      <input
+                        type="text"
+                        value={recordingForm.providerRecordingRef ?? ""}
+                        onChange={(event) =>
+                          setRecordingForm((current: RecordingFormState) => ({
+                            ...current,
+                            providerRecordingRef: event.target.value,
+                          }))
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.recordingUrlPlaceholder")}
+                    >
+                      <input
+                        type="url"
+                        value={recordingForm.recordingUrl ?? ""}
+                        onChange={(event) =>
+                          setRecordingForm((current: RecordingFormState) => ({
+                            ...current,
+                            recordingUrl: event.target.value,
+                          }))
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <ActionButton
+                      theme={theme}
+                      disabled={!attachRecordingAction?.enabled}
+                      helper={getActionHelper(
+                        currentLocale,
+                        attachRecordingAction,
+                      )}
+                      busy={busyKey === "attach-recording"}
+                      label={getActionLabel(currentLocale, "attach_recording")}
+                      type="submit"
+                    />
                   </form>
-                  {attachRecordingAction
-                    ? renderActionMeta(currentLocale, attachRecordingAction)
-                    : null}
-                </section>
-              </div>
-            </article>
-
-            <article className="canvas-card">
-              <div className="card-head">
-                <div>
-                  <span className="section-kicker">
-                    {currentLocale === "en"
-                      ? "Resolution desk"
-                      : "Resolution desk"}
-                  </span>
-                  <h3>
-                    {currentLocale === "en"
-                      ? "Booking, callback, and complaint handoff"
-                      : "建單、callback 與客訴轉案"}
-                  </h3>
-                  <p>
-                    {currentLocale === "en"
-                      ? "Primary decision points: new booking vs existing order, and callback vs complaint remediation."
-                      : "主要決策點：新建訂單或既有訂單，以及 callback 或客訴補救。"}
-                  </p>
                 </div>
-              </div>
+              </CanvasCard>
+            </div>
 
-              <div className="action-panels action-panels-wide">
-                <section className="mini-panel">
-                  <h4>
-                    {getActionLabel(currentLocale, "create_phone_booking")}
-                  </h4>
-                  <form
-                    className="stack-form"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      if (!selectedSession) {
-                        return;
-                      }
-
-                      const command: CreateCallCenterOrderCommand = {
-                        callId: selectedSession.callId,
-                        agentId:
-                          selectedSession.agentId ??
-                          intakeForm.agentId ??
-                          "AGENT-OPS-001",
-                        recordingId: selectedSession.recordingId,
-                        pickup: { address: orderForm.pickupAddress },
-                        dropoff: { address: orderForm.dropoffAddress },
-                        passenger: {
-                          name: orderForm.passengerName,
-                          phone:
-                            orderForm.passengerPhone ||
-                            selectedSession.callerPhone,
-                        },
-                        ...(orderForm.notes.trim()
-                          ? { notes: orderForm.notes.trim() }
-                          : {}),
-                      };
-
-                      void runGuardedAction(
-                        "create-booking",
-                        createBookingAction,
-                        async () => {
-                          const created =
-                            await getOpsClient().createCallCenterOrder(command);
-                          setOrderForm(INITIAL_ORDER_FORM);
-                          setOutcomeNotice({
-                            tone: "success",
-                            message:
-                              currentLocale === "en"
-                                ? `Phone booking created from ${selectedSession.callId}.`
-                                : `已從 ${selectedSession.callId} 建立電話訂單。`,
-                            href: `/dispatch/${encodeURIComponent(created.orderId)}`,
-                            label:
-                              currentLocale === "en"
-                                ? "Open dispatch workspace"
-                                : "前往 dispatch workspace",
-                          });
-                          await loadData(selectedSession.callId);
-                        },
-                      );
-                    }}
+            <CanvasCard
+              theme={theme}
+              title={
+                currentLocale === "en" ? "Resolution desk" : "Resolution desk"
+              }
+              subtitle={
+                currentLocale === "en"
+                  ? "Transfer-to-complaint redirects immediately after the contract result returns."
+                  : "transfer-to-complaint 在 contract 回傳後會立即跳轉。"
+              }
+            >
+              <div style={dualFormGridStyle}>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (!selectedSession) {
+                      return;
+                    }
+                    const command: CreateCallCenterOrderCommand = {
+                      callId: selectedSession.callId,
+                      agentId:
+                        selectedSession.agentId ??
+                        intakeForm.agentId ??
+                        "AGENT-OPS-001",
+                      recordingId: selectedSession.recordingId,
+                      pickup: { address: orderForm.pickupAddress },
+                      dropoff: { address: orderForm.dropoffAddress },
+                      passenger: {
+                        name: orderForm.passengerName,
+                        phone:
+                          orderForm.passengerPhone ||
+                          selectedSession.callerPhone,
+                      },
+                      ...(orderForm.notes.trim()
+                        ? { notes: orderForm.notes.trim() }
+                        : {}),
+                    };
+                    void runGuardedAction(
+                      "create-booking",
+                      createBookingAction,
+                      async () => {
+                        const created =
+                          await getOpsClient().createCallCenterOrder(command);
+                        setOrderForm(INITIAL_ORDER_FORM);
+                        setOutcomeNotice({
+                          tone: "success",
+                          message:
+                            currentLocale === "en"
+                              ? `Phone booking created from ${selectedSession.callId}.`
+                              : `已從 ${selectedSession.callId} 建立電話訂單。`,
+                          href: `/dispatch/${encodeURIComponent(created.orderId)}`,
+                          label:
+                            currentLocale === "en"
+                              ? "Open dispatch workspace"
+                              : "前往 dispatch workspace",
+                        });
+                        await loadData(selectedSession.callId);
+                      },
+                    );
+                  }}
+                >
+                  <div style={formGridStyle}>
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.passengerNamePlaceholder")}
+                      required
+                    >
+                      <input
+                        type="text"
+                        required
+                        value={orderForm.passengerName}
+                        onChange={(event) =>
+                          setOrderForm((current) => ({
+                            ...current,
+                            passengerName: event.target.value,
+                          }))
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.passengerPhonePlaceholder")}
+                    >
+                      <input
+                        type="text"
+                        value={orderForm.passengerPhone}
+                        onChange={(event) =>
+                          setOrderForm((current) => ({
+                            ...current,
+                            passengerPhone: event.target.value,
+                          }))
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.pickupAddressPlaceholder")}
+                      required
+                    >
+                      <input
+                        type="text"
+                        required
+                        value={orderForm.pickupAddress}
+                        onChange={(event) =>
+                          setOrderForm((current) => ({
+                            ...current,
+                            pickupAddress: event.target.value,
+                          }))
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.dropoffAddressPlaceholder")}
+                      required
+                    >
+                      <input
+                        type="text"
+                        required
+                        value={orderForm.dropoffAddress}
+                        onChange={(event) =>
+                          setOrderForm((current) => ({
+                            ...current,
+                            dropoffAddress: event.target.value,
+                          }))
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                  </div>
+                  <CanvasField
+                    theme={theme}
+                    label={t("callcenter.opsNotePlaceholder")}
                   >
-                    <input
-                      type="text"
-                      required
-                      placeholder={t("callcenter.passengerNamePlaceholder")}
-                      value={orderForm.passengerName}
-                      onChange={(event) =>
-                        setOrderForm((current) => ({
-                          ...current,
-                          passengerName: event.target.value,
-                        }))
-                      }
-                    />
-                    <input
-                      type="text"
-                      placeholder={t("callcenter.passengerPhonePlaceholder")}
-                      value={orderForm.passengerPhone}
-                      onChange={(event) =>
-                        setOrderForm((current) => ({
-                          ...current,
-                          passengerPhone: event.target.value,
-                        }))
-                      }
-                    />
-                    <input
-                      type="text"
-                      required
-                      placeholder={t("callcenter.pickupAddressPlaceholder")}
-                      value={orderForm.pickupAddress}
-                      onChange={(event) =>
-                        setOrderForm((current) => ({
-                          ...current,
-                          pickupAddress: event.target.value,
-                        }))
-                      }
-                    />
-                    <input
-                      type="text"
-                      required
-                      placeholder={t("callcenter.dropoffAddressPlaceholder")}
-                      value={orderForm.dropoffAddress}
-                      onChange={(event) =>
-                        setOrderForm((current) => ({
-                          ...current,
-                          dropoffAddress: event.target.value,
-                        }))
-                      }
-                    />
                     <textarea
                       rows={3}
-                      placeholder={t("callcenter.opsNotePlaceholder")}
                       value={orderForm.notes}
                       onChange={(event) =>
                         setOrderForm((current) => ({
@@ -2257,29 +2403,27 @@ export default function CallcenterPage() {
                           notes: event.target.value,
                         }))
                       }
+                      style={nativeTextAreaStyle}
                     />
-                    <button
-                      className="toolbar-btn toolbar-btn-primary"
-                      type="submit"
-                      disabled={
-                        !createBookingAction?.enabled ||
-                        busyKey === "create-booking"
-                      }
-                    >
-                      {getActionLabel(currentLocale, "create_phone_booking")}
-                    </button>
-                  </form>
-                  {createBookingAction
-                    ? renderActionMeta(currentLocale, createBookingAction)
-                    : null}
-                </section>
+                  </CanvasField>
+                  <ActionButton
+                    theme={theme}
+                    disabled={!createBookingAction?.enabled}
+                    helper={getActionHelper(currentLocale, createBookingAction)}
+                    busy={busyKey === "create-booking"}
+                    label={getActionLabel(
+                      currentLocale,
+                      "create_phone_booking",
+                    )}
+                    variant="primary"
+                    type="submit"
+                  />
+                </form>
 
-                <section className="mini-panel">
-                  <h4>
-                    {getActionLabel(currentLocale, "link_existing_order")}
-                  </h4>
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 14 }}
+                >
                   <form
-                    className="stack-form"
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (!selectedSession) {
@@ -2313,34 +2457,35 @@ export default function CallcenterPage() {
                       );
                     }}
                   >
-                    <input
-                      type="text"
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.existingOrderIdPlaceholder")}
                       required
-                      placeholder={t("callcenter.existingOrderIdPlaceholder")}
-                      value={existingOrderId}
-                      onChange={(event) =>
-                        setExistingOrderId(event.target.value)
-                      }
-                    />
-                    <button
-                      className="toolbar-btn"
-                      type="submit"
-                      disabled={
-                        !linkOrderAction?.enabled || busyKey === "link-order"
-                      }
                     >
-                      {getActionLabel(currentLocale, "link_existing_order")}
-                    </button>
+                      <input
+                        type="text"
+                        required
+                        value={existingOrderId}
+                        onChange={(event) =>
+                          setExistingOrderId(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <ActionButton
+                      theme={theme}
+                      disabled={!linkOrderAction?.enabled}
+                      helper={getActionHelper(currentLocale, linkOrderAction)}
+                      busy={busyKey === "link-order"}
+                      label={getActionLabel(
+                        currentLocale,
+                        "link_existing_order",
+                      )}
+                      type="submit"
+                    />
                   </form>
-                  {linkOrderAction
-                    ? renderActionMeta(currentLocale, linkOrderAction)
-                    : null}
-                </section>
 
-                <section className="mini-panel">
-                  <h4>{getActionLabel(currentLocale, "create_callback")}</h4>
                   <form
-                    className="stack-form"
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (!selectedSession) {
@@ -2371,31 +2516,49 @@ export default function CallcenterPage() {
                       );
                     }}
                   >
-                    <input
-                      type="datetime-local"
-                      required
-                      value={callbackDueAt}
-                      onChange={(event) => setCallbackDueAt(event.target.value)}
-                    />
-                    <textarea
-                      rows={3}
-                      placeholder={t("callcenter.callbackNotePlaceholder")}
-                      value={callbackNote}
-                      onChange={(event) => setCallbackNote(event.target.value)}
-                    />
-                    <button
-                      className="toolbar-btn"
-                      type="submit"
-                      disabled={
-                        !callbackAction?.enabled ||
-                        busyKey === "create-callback"
+                    <CanvasField
+                      theme={theme}
+                      label={
+                        currentLocale === "en"
+                          ? "Callback due at"
+                          : "Callback 到期時間"
                       }
+                      required
                     >
-                      {getActionLabel(currentLocale, "create_callback")}
-                    </button>
+                      <input
+                        type="datetime-local"
+                        required
+                        value={callbackDueAt}
+                        onChange={(event) =>
+                          setCallbackDueAt(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.callbackNotePlaceholder")}
+                    >
+                      <textarea
+                        rows={3}
+                        value={callbackNote}
+                        onChange={(event) =>
+                          setCallbackNote(event.target.value)
+                        }
+                        style={nativeTextAreaStyle}
+                      />
+                    </CanvasField>
+                    <ActionButton
+                      theme={theme}
+                      disabled={!callbackAction?.enabled}
+                      helper={getActionHelper(currentLocale, callbackAction)}
+                      busy={busyKey === "create-callback"}
+                      label={getActionLabel(currentLocale, "create_callback")}
+                      type="submit"
+                    />
                   </form>
+
                   <form
-                    className="stack-form inline-complete"
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (!selectedSession?.callbackTask) {
@@ -2407,9 +2570,7 @@ export default function CallcenterPage() {
                         async () => {
                           await getOpsClient().completeCallbackTask(
                             selectedSession.callbackTask!.callbackTaskId,
-                            {
-                              note: callbackCompleteNote,
-                            },
+                            { note: callbackCompleteNote },
                           );
                           setCallbackCompleteNote("");
                           setOutcomeNotice({
@@ -2424,45 +2585,38 @@ export default function CallcenterPage() {
                       );
                     }}
                   >
-                    <input
-                      type="text"
-                      placeholder={t("callcenter.completionNotePlaceholder")}
-                      value={callbackCompleteNote}
-                      onChange={(event) =>
-                        setCallbackCompleteNote(event.target.value)
-                      }
-                    />
-                    <button
-                      className="toolbar-btn"
-                      type="submit"
-                      disabled={
-                        !completeCallbackAction?.enabled ||
-                        busyKey === "complete-callback"
-                      }
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.completionNotePlaceholder")}
                     >
-                      {getActionLabel(currentLocale, "complete_callback")}
-                    </button>
+                      <input
+                        type="text"
+                        value={callbackCompleteNote}
+                        onChange={(event) =>
+                          setCallbackCompleteNote(event.target.value)
+                        }
+                        style={nativeInputStyle}
+                      />
+                    </CanvasField>
+                    <ActionButton
+                      theme={theme}
+                      disabled={!completeCallbackAction?.enabled}
+                      helper={getActionHelper(
+                        currentLocale,
+                        completeCallbackAction,
+                      )}
+                      busy={busyKey === "complete-callback"}
+                      label={getActionLabel(currentLocale, "complete_callback")}
+                      type="submit"
+                    />
                   </form>
-                  {callbackAction
-                    ? renderActionMeta(currentLocale, callbackAction)
-                    : null}
-                  {completeCallbackAction
-                    ? renderActionMeta(currentLocale, completeCallbackAction)
-                    : null}
-                </section>
 
-                <section className="mini-panel">
-                  <h4>
-                    {getActionLabel(currentLocale, "transfer_to_complaint")}
-                  </h4>
                   <form
-                    className="stack-form"
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (!selectedSession) {
                         return;
                       }
-
                       void runGuardedAction(
                         "transfer-complaint",
                         transferComplaintAction,
@@ -2504,870 +2658,330 @@ export default function CallcenterPage() {
                       );
                     }}
                   >
-                    <select
-                      value={transferForm.category}
-                      onChange={(event) =>
-                        setTransferForm(
-                          (current: TransferCallToComplaintCommand) => ({
-                            ...current,
-                            category: event.target.value as ComplaintCategory,
-                          }),
-                        )
-                      }
-                    >
-                      {COMPLAINT_CATEGORY_OPTIONS.map((category) => (
-                        <option key={category} value={category}>
-                          {formatOpsCodeLabel(currentLocale, category)}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={transferForm.severity}
-                      onChange={(event) =>
-                        setTransferForm(
-                          (current: TransferCallToComplaintCommand) => ({
-                            ...current,
-                            severity: event.target
-                              .value as TransferCallToComplaintCommand["severity"],
-                          }),
-                        )
-                      }
-                    >
-                      <option value="normal">
-                        {formatOpsCodeLabel(currentLocale, "normal")}
-                      </option>
-                      <option value="high">
-                        {formatOpsCodeLabel(currentLocale, "high")}
-                      </option>
-                    </select>
-                    <textarea
-                      rows={4}
+                    <CanvasField
+                      theme={theme}
+                      label={currentLocale === "en" ? "Category" : "類別"}
                       required
-                      placeholder={t(
-                        "callcenter.complaintDescriptionPlaceholder",
-                      )}
-                      value={transferForm.description}
-                      onChange={(event) =>
-                        setTransferForm(
-                          (current: TransferCallToComplaintCommand) => ({
-                            ...current,
-                            description: event.target.value,
-                          }),
-                        )
-                      }
-                    />
-                    <button
-                      className="toolbar-btn"
-                      type="submit"
-                      disabled={
-                        !transferComplaintAction?.enabled ||
-                        busyKey === "transfer-complaint"
-                      }
                     >
-                      {getActionLabel(currentLocale, "transfer_to_complaint")}
-                    </button>
+                      <>
+                        <CanvasSelect
+                          theme={theme}
+                          value={formatOpsCodeLabel(
+                            currentLocale,
+                            transferForm.category,
+                          )}
+                        />
+                        <select
+                          value={transferForm.category}
+                          onChange={(event) =>
+                            setTransferForm(
+                              (current: TransferCallToComplaintCommand) => ({
+                                ...current,
+                                category: event.target
+                                  .value as ComplaintCategory,
+                              }),
+                            )
+                          }
+                          style={{ ...nativeInputStyle, marginTop: 6 }}
+                        >
+                          {COMPLAINT_CATEGORY_OPTIONS.map((category) => (
+                            <option key={category} value={category}>
+                              {formatOpsCodeLabel(currentLocale, category)}
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={currentLocale === "en" ? "Severity" : "嚴重程度"}
+                      required
+                    >
+                      <>
+                        <CanvasSelect
+                          theme={theme}
+                          value={formatOpsCodeLabel(
+                            currentLocale,
+                            transferForm.severity,
+                          )}
+                        />
+                        <select
+                          value={transferForm.severity}
+                          onChange={(event) =>
+                            setTransferForm(
+                              (current: TransferCallToComplaintCommand) => ({
+                                ...current,
+                                severity: event.target
+                                  .value as TransferCallToComplaintCommand["severity"],
+                              }),
+                            )
+                          }
+                          style={{ ...nativeInputStyle, marginTop: 6 }}
+                        >
+                          <option value="normal">
+                            {formatOpsCodeLabel(currentLocale, "normal")}
+                          </option>
+                          <option value="high">
+                            {formatOpsCodeLabel(currentLocale, "high")}
+                          </option>
+                        </select>
+                      </>
+                    </CanvasField>
+                    <CanvasField
+                      theme={theme}
+                      label={t("callcenter.complaintDescriptionPlaceholder")}
+                      required
+                    >
+                      <textarea
+                        rows={4}
+                        required
+                        value={transferForm.description}
+                        onChange={(event) =>
+                          setTransferForm(
+                            (current: TransferCallToComplaintCommand) => ({
+                              ...current,
+                              description: event.target.value,
+                            }),
+                          )
+                        }
+                        style={nativeTextAreaStyle}
+                      />
+                    </CanvasField>
+                    <ActionButton
+                      theme={theme}
+                      disabled={!transferComplaintAction?.enabled}
+                      helper={getActionHelper(
+                        currentLocale,
+                        transferComplaintAction,
+                      )}
+                      busy={busyKey === "transfer-complaint"}
+                      label={getActionLabel(
+                        currentLocale,
+                        "transfer_to_complaint",
+                      )}
+                      variant="primary"
+                      type="submit"
+                    />
                   </form>
-                  {transferComplaintAction
-                    ? renderActionMeta(currentLocale, transferComplaintAction)
-                    : null}
-                </section>
-              </div>
-            </article>
-
-            <article className="canvas-card">
-              <div className="card-head">
-                <div>
-                  <span className="section-kicker">
-                    {currentLocale === "en"
-                      ? "Dispatch trace"
-                      : "Dispatch trace"}
-                  </span>
-                  <h3>
-                    {currentLocale === "en"
-                      ? "Linked order and downstream visibility"
-                      : "已連結訂單與下游可視性"}
-                  </h3>
-                  <p>
-                    {currentLocale === "en"
-                      ? "Deep links and trace stay in the same workspace while the operator resolves the call."
-                      : "當操作員處理通話時，deep link 與 trace 要保留在同一個 workspace。"}
-                  </p>
                 </div>
               </div>
+            </CanvasCard>
+          </div>
 
+          <div style={columnStackStyle}>
+            <CanvasCard
+              theme={theme}
+              title={
+                currentLocale === "en" ? "Callback queue" : "Callback 佇列"
+              }
+              subtitle={
+                currentLocale === "en"
+                  ? "Across all sessions"
+                  : "跨所有 session"
+              }
+              actions={
+                <CanvasPill theme={theme}>{pendingCallbacks.length}</CanvasPill>
+              }
+              padding={0}
+            >
+              {filteredCallbackQueue.length > 0 ? (
+                <CanvasTable
+                  theme={theme}
+                  columns={callbackColumns}
+                  rows={filteredCallbackQueue}
+                />
+              ) : (
+                <div style={{ padding: 16 }}>
+                  <CanvasEmptyState
+                    theme={theme}
+                    tone="neutral"
+                    title={
+                      currentLocale === "en" ? "No callbacks" : "沒有 callback"
+                    }
+                    body={
+                      currentLocale === "en"
+                        ? "No callbacks match the current scope."
+                        : "目前 scope 內沒有 callback。"
+                    }
+                  />
+                </div>
+              )}
+            </CanvasCard>
+
+            <CanvasCard
+              theme={theme}
+              title={currentLocale === "en" ? "Recording queue" : "錄音佇列"}
+              subtitle={
+                currentLocale === "en"
+                  ? "Awaiting auto-link or manual attach"
+                  : "等待自動連結或手動補掛"
+              }
+              actions={
+                <CanvasPill theme={theme} tone="warn">
+                  {recordingQueue.length}
+                </CanvasPill>
+              }
+              padding={0}
+            >
+              {recordingQueue.length > 0 ? (
+                <CanvasTable
+                  theme={theme}
+                  columns={recordingColumns}
+                  rows={recordingQueue}
+                />
+              ) : (
+                <div style={{ padding: 16 }}>
+                  <CanvasEmptyState
+                    theme={theme}
+                    tone="success"
+                    title={
+                      currentLocale === "en"
+                        ? "No recording gaps"
+                        : "沒有錄音缺口"
+                    }
+                    body={
+                      currentLocale === "en"
+                        ? "Every visible session already has recording evidence."
+                        : "目前可見 session 都已具備錄音證據。"
+                    }
+                  />
+                </div>
+              )}
+            </CanvasCard>
+
+            <CanvasCard
+              theme={theme}
+              title={
+                currentLocale === "en" ? "Dispatch trace" : "Dispatch trace"
+              }
+              subtitle={
+                currentLocale === "en"
+                  ? "Linked order and downstream visibility"
+                  : "已連結訂單與下游可視性"
+              }
+            >
               {selectedOrder ? (
-                <div className="trace-stack">
-                  <div className="spotlight-grid">
-                    <div className="spotlight-cell">
-                      <span>{currentLocale === "en" ? "Order" : "訂單"}</span>
-                      <strong>{selectedOrder.orderNo}</strong>
-                      <small>{selectedOrder.orderId}</small>
-                    </div>
-                    <div className="spotlight-cell">
-                      <span>{currentLocale === "en" ? "Status" : "狀態"}</span>
-                      <strong>
-                        {formatOpsCodeLabel(
+                <>
+                  <CanvasDL
+                    theme={theme}
+                    items={[
+                      {
+                        label: currentLocale === "en" ? "Order" : "訂單",
+                        value: `${selectedOrder.orderNo} · ${selectedOrder.orderId}`,
+                      },
+                      {
+                        label: currentLocale === "en" ? "Status" : "狀態",
+                        value: formatOpsCodeLabel(
                           currentLocale,
                           selectedOrder.status,
-                        )}
-                      </strong>
-                      <small>
-                        {selectedOrder.etaSnapshot
-                          ? currentLocale === "en"
-                            ? `${selectedOrder.etaSnapshot.etaMinutes} min ETA`
-                            : `${selectedOrder.etaSnapshot.etaMinutes} 分鐘 ETA`
-                          : currentLocale === "en"
-                            ? "ETA pending"
-                            : "ETA 尚未回傳"}
-                      </small>
-                    </div>
-                    <div className="spotlight-cell">
-                      <span>{currentLocale === "en" ? "Route" : "路線"}</span>
-                      <strong>{selectedOrder.pickup.address}</strong>
-                      <small>{selectedOrder.dropoff.address}</small>
-                    </div>
-                    <div className="spotlight-cell">
-                      <span>
-                        {currentLocale === "en" ? "Compliance" : "合規"}
-                      </span>
-                      <strong>
-                        {selectedOrder.complianceFlags.length > 0
-                          ? formatOpsCodeList(
-                              currentLocale,
-                              selectedOrder.complianceFlags,
-                            )
-                          : "—"}
-                      </strong>
-                      <small>{selectedOrder.recordingId ?? "—"}</small>
-                    </div>
-                  </div>
-
-                  <div className="trace-links">
+                        ),
+                      },
+                      {
+                        label: currentLocale === "en" ? "Route" : "路線",
+                        value: `${selectedOrder.pickup.address} → ${selectedOrder.dropoff.address}`,
+                      },
+                      {
+                        label: currentLocale === "en" ? "Compliance" : "合規",
+                        value:
+                          selectedOrder.complianceFlags.length > 0
+                            ? formatOpsCodeList(
+                                currentLocale,
+                                selectedOrder.complianceFlags,
+                              )
+                            : "—",
+                      },
+                    ]}
+                  />
+                  <div style={{ marginTop: 12, marginBottom: 12 }}>
                     <Link
-                      className="deep-link-pill"
                       href={`/dispatch/${encodeURIComponent(selectedOrder.orderId)}`}
+                      style={linkPillStyle}
                     >
                       {currentLocale === "en"
                         ? "Open dispatch detail"
                         : "開啟 dispatch 明細"}
                     </Link>
                   </div>
-
-                  <div className="timeline-list">
-                    {dispatchTrace.length > 0 ? (
-                      dispatchTrace.map((entry) => (
-                        <article key={entry.traceId} className="timeline-item">
-                          <div>
-                            <strong>
-                              {formatOpsCodeLabel(
-                                currentLocale,
-                                entry.eventType,
-                              )}
-                            </strong>
-                            <p>{entry.message}</p>
-                          </div>
-                          <span>
-                            {formatDateTime(currentLocale, entry.createdAt)}
-                          </span>
-                        </article>
-                      ))
-                    ) : (
-                      <div className="subtle-empty">
-                        {currentLocale === "en"
-                          ? "No dispatch trace entries yet."
-                          : "尚無 dispatch trace 紀錄。"}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                  {dispatchTrace.length > 0 ? (
+                    <CanvasTable
+                      theme={theme}
+                      columns={traceColumns}
+                      rows={dispatchTrace}
+                    />
+                  ) : (
+                    <CanvasEmptyState
+                      theme={theme}
+                      tone="neutral"
+                      title={
+                        currentLocale === "en"
+                          ? "No trace entries"
+                          : "尚無 trace 紀錄"
+                      }
+                      body={
+                        currentLocale === "en"
+                          ? "The linked order exists, but no dispatch trace rows have been recorded yet."
+                          : "訂單已連結，但尚未產生 dispatch trace 紀錄。"
+                      }
+                    />
+                  )}
+                </>
               ) : (
-                <div className="subtle-empty">
-                  {currentLocale === "en"
-                    ? "Select or link an order to load dispatch trace."
-                    : "請先選取或連結訂單，才能載入 dispatch trace。"}
+                <CanvasEmptyState
+                  theme={theme}
+                  tone="neutral"
+                  title={
+                    currentLocale === "en" ? "No linked order" : "尚未連結訂單"
+                  }
+                  body={
+                    currentLocale === "en"
+                      ? "Select or link an order to load dispatch trace."
+                      : "請先選取或連結訂單，才能載入 dispatch trace。"
+                  }
+                />
+              )}
+            </CanvasCard>
+
+            <CanvasCard
+              theme={theme}
+              title={
+                currentLocale === "en" ? "Session history" : "Session 歷史"
+              }
+              subtitle={
+                currentLocale === "en"
+                  ? "Closed calls remain selectable for context."
+                  : "已關閉通話仍可點選回看上下文。"
+              }
+              actions={
+                <CanvasPill theme={theme}>{sessionHistory.length}</CanvasPill>
+              }
+              padding={0}
+            >
+              {sessionHistory.length > 0 ? (
+                <CanvasTable
+                  theme={theme}
+                  columns={historyColumns}
+                  rows={sessionHistory}
+                />
+              ) : (
+                <div style={{ padding: 16 }}>
+                  <CanvasEmptyState
+                    theme={theme}
+                    tone="neutral"
+                    title={
+                      currentLocale === "en" ? "No history yet" : "尚無歷史"
+                    }
+                    body={
+                      currentLocale === "en"
+                        ? "Closed sessions will appear here after resolution."
+                        : "結束的 session 會在此處顯示。"
+                    }
+                  />
                 </div>
               )}
-            </article>
-          </section>
-
-          <aside className="workspace-rail">
-            <article className="canvas-card rail-card">
-              <div className="card-head">
-                <div>
-                  <span className="section-kicker">
-                    {currentLocale === "en"
-                      ? "Callback queue"
-                      : "Callback 佇列"}
-                  </span>
-                  <h3>
-                    {currentLocale === "en"
-                      ? "Across all sessions"
-                      : "跨所有 session"}
-                  </h3>
-                </div>
-                <span className="count-pill">{pendingCallbacks.length}</span>
-              </div>
-              <div className="queue-list">
-                {filteredCallbackQueue.length > 0 ? (
-                  filteredCallbackQueue.map((callback) => (
-                    <button
-                      key={callback.callbackTaskId}
-                      type="button"
-                      className="queue-item"
-                      onClick={() => setSelectedCallId(callback.callId)}
-                    >
-                      <div>
-                        <strong>{callback.callbackTaskId}</strong>
-                        <p>{getCallbackSummary(callback, currentLocale)}</p>
-                      </div>
-                      <span>
-                        {formatRelativeDeadline(callback.dueAt, currentLocale)}
-                      </span>
-                    </button>
-                  ))
-                ) : (
-                  <div className="subtle-empty">
-                    {currentLocale === "en"
-                      ? "No callbacks match the current scope."
-                      : "目前 scope 內沒有 callback。"}
-                  </div>
-                )}
-              </div>
-            </article>
-
-            <article className="canvas-card rail-card">
-              <div className="card-head">
-                <div>
-                  <span className="section-kicker">
-                    {currentLocale === "en" ? "Recording queue" : "錄音佇列"}
-                  </span>
-                  <h3>
-                    {currentLocale === "en"
-                      ? "Awaiting auto-link or manual attach"
-                      : "等待自動連結或手動補掛"}
-                  </h3>
-                </div>
-                <span className="count-pill">{recordingQueue.length}</span>
-              </div>
-              <div className="queue-list">
-                {recordingQueue.length > 0 ? (
-                  recordingQueue.map((session) => (
-                    <button
-                      key={session.callId}
-                      type="button"
-                      className="queue-item"
-                      onClick={() => setSelectedCallId(session.callId)}
-                    >
-                      <div>
-                        <strong>{session.callId}</strong>
-                        <p>{session.callerPhone}</p>
-                      </div>
-                      <span
-                        className={getRecordingStateTone(
-                          session.recordingState,
-                        )}
-                      >
-                        {formatOpsCodeLabel(
-                          currentLocale,
-                          session.recordingState,
-                        )}
-                      </span>
-                    </button>
-                  ))
-                ) : (
-                  <div className="subtle-empty">
-                    {currentLocale === "en"
-                      ? "No recording gaps right now."
-                      : "目前沒有錄音缺口。"}
-                  </div>
-                )}
-              </div>
-            </article>
-
-            <article className="canvas-card rail-card">
-              <div className="card-head">
-                <div>
-                  <span className="section-kicker">
-                    {currentLocale === "en"
-                      ? "Session history"
-                      : "Session 歷史"}
-                  </span>
-                  <h3>
-                    {currentLocale === "en" ? "Closed calls" : "已結束通話"}
-                  </h3>
-                </div>
-                <span className="count-pill">{sessionHistory.length}</span>
-              </div>
-              <div className="queue-list">
-                {sessionHistory.length > 0 ? (
-                  sessionHistory.map((session) => (
-                    <button
-                      key={session.callId}
-                      type="button"
-                      className="queue-item"
-                      onClick={() => setSelectedCallId(session.callId)}
-                    >
-                      <div>
-                        <strong>{session.callId}</strong>
-                        <p>
-                          {formatOpsCodeLabel(currentLocale, session.callType)}{" "}
-                          · {session.callerPhone}
-                        </p>
-                      </div>
-                      <span>
-                        {formatDateTime(currentLocale, session.endedAt)}
-                      </span>
-                    </button>
-                  ))
-                ) : (
-                  <div className="subtle-empty">
-                    {currentLocale === "en"
-                      ? "No closed sessions yet."
-                      : "目前尚無已關閉 session。"}
-                  </div>
-                )}
-              </div>
-            </article>
-          </aside>
+            </CanvasCard>
+          </div>
         </div>
       </div>
-
-      <style>{`
-        .callcenter-shell {
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-          padding-bottom: 28px;
-          color: ${theme.text};
-        }
-
-        .hero-card,
-        .canvas-card,
-        .summary-card {
-          border: 1px solid ${theme.border};
-          border-radius: 24px;
-          background:
-            linear-gradient(160deg, rgba(255, 255, 255, 0.03), transparent 40%),
-            ${theme.surface};
-          box-shadow: 0 24px 64px rgba(6, 11, 20, 0.28);
-        }
-
-        .hero-card {
-          display: grid;
-          grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
-          gap: 20px;
-          padding: 28px;
-          background:
-            radial-gradient(circle at top left, rgba(255, 122, 89, 0.22), transparent 36%),
-            linear-gradient(160deg, rgba(255, 255, 255, 0.03), transparent 42%),
-            ${theme.surface};
-        }
-
-        .hero-copy h2 {
-          margin: 8px 0 12px;
-          font-size: 32px;
-          line-height: 1.05;
-        }
-
-        .hero-copy p {
-          margin: 0;
-          max-width: 68ch;
-          color: ${theme.textMuted};
-        }
-
-        .hero-eyebrow,
-        .section-kicker {
-          display: inline-flex;
-          padding: 6px 10px;
-          border-radius: 999px;
-          background: rgba(255, 122, 89, 0.14);
-          color: ${theme.accent};
-          font-size: 12px;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-        }
-
-        .header-action {
-          min-height: 40px;
-          padding: 0 16px;
-          border-radius: 999px;
-          border: 1px solid ${theme.border};
-          background: ${theme.surfaceLo};
-          color: ${theme.text};
-          font-weight: 600;
-          cursor: pointer;
-        }
-
-        .header-action-primary {
-          background: ${theme.accent};
-          border-color: ${theme.accent};
-          color: #0d1015;
-        }
-
-        .header-action:disabled,
-        .header-tab-btn:disabled {
-          opacity: 0.45;
-          cursor: not-allowed;
-        }
-
-        .header-tab-btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          padding: 0;
-          border: 0;
-          background: transparent;
-          color: inherit;
-          font: inherit;
-          cursor: pointer;
-        }
-
-        .header-tab-badge {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          min-width: 22px;
-          min-height: 22px;
-          padding: 0 7px;
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.08);
-          font-size: 11px;
-          font-weight: 700;
-        }
-
-        .hero-metrics,
-        .summary-grid,
-        .action-strip,
-        .mini-actions,
-        .trace-links,
-        .deep-link-list {
-          display: flex;
-          gap: 12px;
-          flex-wrap: wrap;
-        }
-
-        .hero-metrics {
-          align-content: start;
-          justify-content: flex-end;
-        }
-
-        .hero-controls {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          align-items: stretch;
-        }
-
-        .hero-chip,
-        .summary-card,
-        .action-chip-card {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-          min-width: 140px;
-          padding: 14px 16px;
-          border-radius: 18px;
-          background: ${theme.surfaceLo};
-          border: 1px solid ${theme.border};
-        }
-
-        .hero-chip strong,
-        .summary-card strong {
-          font-size: 24px;
-        }
-
-        .hero-chip span,
-        .summary-card span,
-        .spotlight-cell span {
-          color: ${theme.textMuted};
-          font-size: 12px;
-          text-transform: uppercase;
-          letter-spacing: 0.06em;
-        }
-
-        .hero-chip-accent {
-          background: ${theme.accentBg};
-          border-color: ${theme.accentBorder};
-        }
-
-        .hero-chip-warning {
-          background: rgba(255, 184, 77, 0.12);
-          border-color: rgba(255, 184, 77, 0.28);
-        }
-
-        .notice-banner,
-        .error-banner {
-          display: flex;
-          gap: 12px;
-          align-items: center;
-          padding: 14px 16px;
-          border-radius: 18px;
-          border: 1px solid ${theme.info};
-          background: ${theme.infoBg};
-        }
-
-        .notice-warning {
-          border-color: rgba(255, 184, 77, 0.42);
-          background: rgba(255, 184, 77, 0.12);
-        }
-
-        .error-banner {
-          border-color: rgba(255, 91, 91, 0.42);
-          background: rgba(255, 91, 91, 0.12);
-        }
-
-        .notice-link {
-          color: ${theme.accent};
-          font-weight: 600;
-        }
-
-        .summary-grid {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 14px;
-        }
-
-        .summary-card small,
-        .spotlight-cell small,
-        .action-note,
-        .card-head p,
-        .subtle-empty,
-        .empty-state p,
-        .queue-item p,
-        .timeline-item p,
-        .action-chip-card {
-          color: ${theme.textMuted};
-        }
-
-        .toolbar {
-          display: flex;
-          gap: 12px;
-          align-items: center;
-          flex-wrap: wrap;
-        }
-
-        .search-input,
-        .grid-form input,
-        .grid-form select,
-        .stack-form input,
-        .stack-form select,
-        .stack-form textarea {
-          width: 100%;
-          min-height: 44px;
-          padding: 12px 14px;
-          border-radius: 14px;
-          border: 1px solid ${theme.border};
-          background: ${theme.surfaceLo};
-          color: ${theme.text};
-        }
-
-        .search-input {
-          flex: 1 1 280px;
-        }
-
-        .toolbar-btn {
-          min-height: 44px;
-          padding: 0 16px;
-          border-radius: 14px;
-          border: 1px solid ${theme.border};
-          background: ${theme.surfaceLo};
-          color: ${theme.text};
-          cursor: pointer;
-        }
-
-        .toolbar-btn:disabled {
-          opacity: 0.45;
-          cursor: not-allowed;
-        }
-
-        .toolbar-btn-primary {
-          background: ${theme.accent};
-          border-color: ${theme.accent};
-          color: #0d1015;
-          font-weight: 700;
-        }
-
-        .toolbar-meta {
-          display: flex;
-          gap: 10px;
-          align-items: center;
-          margin-left: auto;
-          flex-wrap: wrap;
-        }
-
-        .toolbar-hint {
-          color: ${theme.textMuted};
-          font-size: 12px;
-        }
-
-        .tier-chip,
-        .count-pill,
-        .state-pill,
-        .status-chip,
-        .freshness-pill {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          min-height: 28px;
-          padding: 0 10px;
-          border-radius: 999px;
-          border: 1px solid ${theme.border};
-          background: ${theme.surfaceLo};
-          font-size: 12px;
-          font-weight: 700;
-        }
-
-        .freshness-fresh {
-          border-color: rgba(55, 211, 153, 0.34);
-          color: #83f1c2;
-        }
-
-        .freshness-stale,
-        .freshness-degraded {
-          border-color: rgba(255, 184, 77, 0.28);
-          color: #ffd08a;
-        }
-
-        .status-chip {
-          border-color: rgba(104, 179, 255, 0.28);
-          color: #92c9ff;
-        }
-
-        .state-positive {
-          background: rgba(55, 211, 153, 0.14);
-          border-color: rgba(55, 211, 153, 0.34);
-          color: #83f1c2;
-        }
-
-        .state-warning {
-          background: rgba(255, 184, 77, 0.12);
-          border-color: rgba(255, 184, 77, 0.28);
-          color: #ffd08a;
-        }
-
-        .state-danger {
-          background: rgba(255, 91, 91, 0.12);
-          border-color: rgba(255, 91, 91, 0.34);
-          color: #ff9c9c;
-        }
-
-        .action-meta {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-          align-items: center;
-        }
-
-        .action-risk,
-        .action-note {
-          font-size: 12px;
-        }
-
-        .canvas-card {
-          padding: 22px;
-        }
-
-        .card-head {
-          display: flex;
-          justify-content: space-between;
-          gap: 16px;
-          align-items: flex-start;
-          margin-bottom: 18px;
-        }
-
-        .card-head h3,
-        .mini-panel h4,
-        .empty-state h4 {
-          margin: 8px 0 10px;
-        }
-
-        .workspace-grid {
-          display: grid;
-          grid-template-columns: minmax(260px, 320px) minmax(0, 1.3fr) minmax(260px, 0.82fr);
-          gap: 18px;
-        }
-
-        .workspace-left-rail,
-        .workspace-main,
-        .workspace-rail,
-        .trace-stack,
-        .queue-list,
-        .stack-form {
-          display: flex;
-          flex-direction: column;
-          gap: 14px;
-        }
-
-        .spotlight-grid,
-        .action-panels {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 14px;
-        }
-
-        .action-panels-wide {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
-        .spotlight-cell,
-        .mini-panel,
-        .queue-item,
-        .signal-card,
-        .timeline-item,
-        .loading-state,
-        .empty-state {
-          border-radius: 18px;
-          border: 1px solid ${theme.border};
-          background: ${theme.surfaceLo};
-        }
-
-        .spotlight-cell,
-        .mini-panel,
-        .signal-card,
-        .loading-state,
-        .empty-state {
-          padding: 16px;
-        }
-
-        .signal-card span {
-          color: ${theme.textMuted};
-          font-size: 12px;
-          text-transform: uppercase;
-          letter-spacing: 0.06em;
-        }
-
-        .signal-card strong {
-          display: block;
-          margin-top: 6px;
-        }
-
-        .signal-card small {
-          display: block;
-          margin-top: 6px;
-          color: ${theme.textMuted};
-        }
-
-        .spotlight-cell strong,
-        .queue-item strong,
-        .timeline-item strong {
-          display: block;
-          margin-top: 6px;
-        }
-
-        .deep-link-pill {
-          display: inline-flex;
-          align-items: center;
-          min-height: 34px;
-          padding: 0 12px;
-          border-radius: 999px;
-          border: 1px solid ${theme.accentBorder};
-          background: ${theme.accentBg};
-          color: ${theme.accent};
-          text-decoration: none;
-        }
-
-        .deep-link-empty {
-          color: ${theme.textMuted};
-        }
-
-        .empty-state {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          align-items: flex-start;
-        }
-
-        .empty-accent {
-          display: inline-flex;
-          padding: 6px 10px;
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.06);
-          font-size: 12px;
-          text-transform: uppercase;
-          letter-spacing: 0.08em;
-        }
-
-        .empty-info {
-          border-color: rgba(104, 179, 255, 0.28);
-          background: rgba(104, 179, 255, 0.08);
-        }
-
-        .empty-warn {
-          border-color: rgba(255, 184, 77, 0.28);
-          background: rgba(255, 184, 77, 0.08);
-        }
-
-        .empty-danger {
-          border-color: rgba(255, 91, 91, 0.28);
-          background: rgba(255, 91, 91, 0.08);
-        }
-
-        .grid-form {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 14px;
-        }
-
-        .grid-form label,
-        .check-field {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          color: ${theme.textMuted};
-        }
-
-        .check-field {
-          flex-direction: row;
-          align-items: center;
-          gap: 10px;
-          padding-top: 30px;
-        }
-
-        .form-actions {
-          display: flex;
-          align-items: end;
-        }
-
-        .mini-panel h4 {
-          font-size: 16px;
-        }
-
-        .queue-item,
-        .timeline-item {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 12px;
-          padding: 14px 16px;
-          color: ${theme.text};
-          text-align: left;
-        }
-
-        button.queue-item {
-          cursor: pointer;
-        }
-
-        .inline-complete {
-          border-top: 1px dashed ${theme.border};
-          padding-top: 12px;
-        }
-
-        @media (max-width: 1180px) {
-          .hero-card,
-          .workspace-grid,
-          .spotlight-grid,
-          .action-panels,
-          .summary-grid,
-          .grid-form {
-            grid-template-columns: 1fr;
-          }
-
-          .toolbar-meta {
-            width: 100%;
-            margin-left: 0;
-          }
-        }
-      `}</style>
     </>
   );
 }

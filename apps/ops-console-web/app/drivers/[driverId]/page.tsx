@@ -34,14 +34,15 @@ import {
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
-  Timeline,
-  WorkflowEmptyState,
   buildCanvasTheme,
   type CanvasTableColumn,
   type CanvasTone,
-  type ManagementTone,
-  type TimelineItem,
 } from "@drts/ui-web";
+import {
+  CanvasActivityFeed,
+  CanvasEmptyPanel,
+  type CanvasActivityItem,
+} from "@/lib/canvas-workflow";
 
 type DriverDetailPageProps = {
   params: Promise<{
@@ -264,14 +265,14 @@ function classifyErrorReason(error: string): EmptyReason {
   return "fetch_failed";
 }
 
-function emptyTone(reason: EmptyReason): ManagementTone {
+function emptyTone(reason: EmptyReason): CanvasTone {
   if (reason === "fetch_failed") return "danger";
   if (
     reason === "permission_denied" ||
     reason === "external_unavailable" ||
     reason === "not_provisioned"
   ) {
-    return "warning";
+    return "warn";
   }
   return "neutral";
 }
@@ -362,7 +363,8 @@ function renderEmptyState(
   action?: DriverAction,
 ) {
   return (
-    <WorkflowEmptyState
+    <CanvasEmptyPanel
+      theme={theme}
       title={
         <span
           style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}
@@ -1132,11 +1134,11 @@ export default async function DriverDetailPage({
     .map((incident) => ({ incident }));
 
   // ── Manual override / suppression timeline ──
-  const timelineItems: TimelineItem[] = [];
+  const activityItems: CanvasActivityItem[] = [];
   if (activeSuppression) {
-    timelineItems.push({
+    activityItems.push({
       id: "suppression",
-      tone: "warning",
+      tone: "warn",
       eyebrow: copy(locale, "Matching suppression", "派遣抑制"),
       title: formatOpsCodeLabel(locale, activeSuppression.reasonCode),
       timestamp: copy(
@@ -1165,12 +1167,12 @@ export default async function DriverDetailPage({
     });
   }
   for (const incident of openDriverIncidents.slice(0, 5)) {
-    timelineItems.push({
+    activityItems.push({
       id: incident.incidentId,
       tone:
         incident.severity === "critical" || incident.severity === "high"
           ? "danger"
-          : "warning",
+          : "warn",
       eyebrow: `${formatOpsCodeLabel(
         locale,
         incident.category,
@@ -1517,13 +1519,12 @@ export default async function DriverDetailPage({
               flexWrap: "wrap",
             }}
           >
-            <span>{driver.name}</span>
             <span
               style={{
                 ...monoStyle,
-                fontSize: "12px",
-                color: theme.textMuted,
-                fontWeight: 500,
+                fontSize: "16px",
+                color: theme.text,
+                fontWeight: 700,
               }}
             >
               {driver.driverId}
@@ -1837,9 +1838,10 @@ export default async function DriverDetailPage({
                   "人工介入與抑制紀錄",
                 )}
               >
-                <Timeline
+                <CanvasActivityFeed
+                  theme={theme}
                   density="compact"
-                  items={timelineItems}
+                  items={activityItems}
                   emptyState={renderEmptyState(
                     locale,
                     "no_data",
