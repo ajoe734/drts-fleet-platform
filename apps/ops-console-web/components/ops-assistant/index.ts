@@ -1,9 +1,9 @@
 /**
  * Ops Assistant — public surface.
  *
- * Phase A (ASSIST-FE-CTX) ships the Context Envelope provider + page selection
- * plumbing. The floating widget (ASSIST-FE-WIDGET) and action bridge land in
- * later tasks and re-export from here.
+ * Ships the Context Envelope provider, page selection/scope publishers, and
+ * the floating widget shell used to surface assistant navigation/deep-link
+ * actions inside ops-console.
  */
 
 export type {

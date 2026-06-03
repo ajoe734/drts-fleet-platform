@@ -12,6 +12,7 @@ import type {
   UiRefreshMetadata,
   VehicleRegistryRecord,
 } from "@drts/contracts";
+import { PublishAssistantScope } from "@/components/ops-assistant";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
@@ -1776,6 +1777,16 @@ export default async function VehiclesPage({
 
   return (
     <>
+      <PublishAssistantScope
+        activeTab={filters.tab}
+        visibleFilters={{
+          ...(filters.q ? { q: filters.q } : {}),
+          status: filters.status,
+          type: filters.type,
+          dispatchable: filters.dispatchable,
+          overdue: filters.overdue,
+        }}
+      />
       <PageHeader
         theme={theme}
         title={copy(locale, "Vehicles", "車輛")}

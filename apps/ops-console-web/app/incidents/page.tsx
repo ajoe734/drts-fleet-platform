@@ -37,6 +37,10 @@ import type {
   UpdateIncidentCommand,
 } from "@drts/contracts";
 import {
+  useAssistantSelection,
+  useOpsAssistantContextActions,
+} from "@/components/ops-assistant";
+import {
   INCIDENT_CATEGORIES,
   INCIDENT_ESCALATION_TARGETS,
   INCIDENT_SEVERITIES,
@@ -224,6 +228,13 @@ function tabForStatus(status: IncidentStatus): IncidentTab {
   return "active";
 }
 
+function resolveIncidentTab(value: string | null): IncidentTab {
+  if (value === "resolved" || value === "closed") {
+    return value;
+  }
+  return "active";
+}
+
 function incidentSeverityTone(severity: IncidentSeverity) {
   if (severity === "critical" || severity === "high") {
     return "danger" as const;
@@ -317,6 +328,10 @@ function incidentSeverityWeight(severity: IncidentSeverity) {
 export default function IncidentsPage() {
   const { t, locale } = useTranslation();
   const searchParams = useSearchParams();
+  const { setAssistantSelection, clearAssistantSelection } =
+    useAssistantSelection();
+  const { setAssistantScope, clearAssistantScope } =
+    useOpsAssistantContextActions();
   const [records, setRecords] = useState<IncidentRecord[]>([]);
   const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
   const [recoveryActions, setRecoveryActions] = useState<
@@ -330,14 +345,24 @@ export default function IncidentsPage() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<IncidentTab>("active");
+  const [query, setQuery] = useState(searchParams.get("q")?.trim() ?? "");
+  const [activeTab, setActiveTab] = useState<IncidentTab>(() =>
+    resolveIncidentTab(searchParams.get("tab")),
+  );
   const [severityFilter, setSeverityFilter] = useState<
     IncidentSeverity | "all"
-  >("all");
+  >(() =>
+    SEVERITIES.includes(searchParams.get("severity") as IncidentSeverity)
+      ? (searchParams.get("severity") as IncidentSeverity)
+      : "all",
+  );
   const [categoryFilter, setCategoryFilter] = useState<
     IncidentCategory | "all"
-  >("all");
+  >(() =>
+    CATEGORIES.includes(searchParams.get("category") as IncidentCategory)
+      ? (searchParams.get("category") as IncidentCategory)
+      : "all",
+  );
   const [showFilters, setShowFilters] = useState(false);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const createFromQuery = searchParams.get("create") === "1";
@@ -405,6 +430,37 @@ export default function IncidentsPage() {
 
     setActiveTab(tabForStatus(selectedIncident.status));
   }, [selectedIncident]);
+
+  useEffect(() => {
+    if (selectedIncident) {
+      setAssistantSelection({
+        kind: "incident",
+        id: selectedIncident.incidentId,
+      });
+    } else {
+      clearAssistantSelection();
+    }
+    return () => clearAssistantSelection();
+  }, [selectedIncident, setAssistantSelection, clearAssistantSelection]);
+
+  useEffect(() => {
+    setAssistantScope({
+      activeTab,
+      visibleFilters: {
+        ...(query ? { q: query } : {}),
+        severity: severityFilter,
+        category: categoryFilter,
+      },
+    });
+    return () => clearAssistantScope();
+  }, [
+    activeTab,
+    categoryFilter,
+    clearAssistantScope,
+    query,
+    setAssistantScope,
+    severityFilter,
+  ]);
 
   async function loadRecords() {
     setLoading(true);

@@ -4,6 +4,7 @@ import {
   useEffect,
   useEffectEvent,
   useId,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -11,7 +12,14 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import { buildCanvasTheme, CanvasIcon } from "@drts/ui-web";
+import { useOpsAssistantContext } from "./assistant-context-provider";
+import {
+  buildAssistantActions,
+  resolveAssistantActionHref,
+  type AssistantAction,
+} from "./assistant-actions";
 
 type DockSide = "free" | "left" | "right";
 
@@ -213,6 +221,8 @@ function ActionButton({
 }
 
 export function OpsAssistantWidget() {
+  const router = useRouter();
+  const context = useOpsAssistantContext();
   const titleId = useId();
   const instructionsId = useId();
   const liveRegionId = useId();
@@ -232,6 +242,7 @@ export function OpsAssistantWidget() {
     activeIndex: 0,
     visibleChars: 0,
   });
+  const actions = useMemo(() => buildAssistantActions(context), [context]);
 
   const activeMessage = STREAM_MESSAGES[stream.activeIndex] ?? "";
 
@@ -516,6 +527,15 @@ export function OpsAssistantWidget() {
     }
   };
 
+  const handleAction = (action: AssistantAction) => {
+    const href = resolveAssistantActionHref(action);
+    if (action.kind === "cross_app") {
+      window.open(href, "_blank", "noopener,noreferrer");
+      return;
+    }
+    router.push(href);
+  };
+
   if (!portalNode) {
     return null;
   }
@@ -736,23 +756,52 @@ export function OpsAssistantWidget() {
                 }}
               >
                 <div style={{ fontSize: 11, color: theme.textDim }}>
-                  Quick actions
+                  Assistant actions
                 </div>
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
                     gap: 8,
                   }}
                 >
-                  {[
-                    "Open incident queue",
-                    "Draft handoff",
-                    "Summarize dispatch lag",
-                    "Inspect vehicle alerts",
-                  ].map((label) => (
+                  {actions.length > 0 ? (
+                    actions.map((action) => (
+                      <button
+                        key={`${action.kind}:${resolveAssistantActionHref(action)}`}
+                        type="button"
+                        onClick={() => handleAction(action)}
+                        style={actionButtonStyle}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 12,
+                          }}
+                        >
+                          <span style={{ fontSize: 12.5, fontWeight: 700 }}>
+                            {action.label}
+                          </span>
+                          <CanvasIcon
+                            name={action.kind === "cross_app" ? "ext" : "arrow"}
+                            size={13}
+                          />
+                        </div>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: theme.textMuted,
+                            lineHeight: 1.45,
+                            textAlign: "left",
+                          }}
+                        >
+                          {action.description}
+                        </span>
+                      </button>
+                    ))
+                  ) : (
                     <div
-                      key={label}
                       style={{
                         borderRadius: 10,
                         border: `1px solid ${theme.border}`,
@@ -760,12 +809,57 @@ export function OpsAssistantWidget() {
                         background: theme.surfaceLo,
                         fontSize: 12,
                         color: theme.textMuted,
+                        lineHeight: 1.45,
                       }}
                     >
-                      {label}
+                      Open a board or detail page to let the assistant emit
+                      route-aware actions and deep links.
                     </div>
-                  ))}
+                  )}
                 </div>
+              </div>
+
+              <div
+                style={{
+                  borderRadius: 12,
+                  border: `1px solid ${theme.border}`,
+                  background: theme.surface,
+                  padding: 12,
+                  display: "grid",
+                  gap: 8,
+                }}
+              >
+                <div style={{ fontSize: 11, color: theme.textDim }}>
+                  Context envelope
+                </div>
+                <dl
+                  style={{
+                    margin: 0,
+                    display: "grid",
+                    gridTemplateColumns: "max-content 1fr",
+                    gap: "6px 10px",
+                    fontSize: 11.5,
+                  }}
+                >
+                  <dt style={{ color: theme.textDim }}>Route</dt>
+                  <dd style={contextValueStyle}>{context?.route ?? "—"}</dd>
+                  <dt style={{ color: theme.textDim }}>Board</dt>
+                  <dd style={contextValueStyle}>{context?.board ?? "—"}</dd>
+                  <dt style={{ color: theme.textDim }}>Tab</dt>
+                  <dd style={contextValueStyle}>{context?.activeTab ?? "—"}</dd>
+                  <dt style={{ color: theme.textDim }}>Selection</dt>
+                  <dd style={contextValueStyle}>
+                    {context?.selectedEntity
+                      ? `${context.selectedEntity.kind}:${context.selectedEntity.id}`
+                      : "—"}
+                  </dd>
+                  <dt style={{ color: theme.textDim }}>Filters</dt>
+                  <dd style={contextValueStyle}>
+                    {context?.visibleFilters
+                      ? JSON.stringify(context.visibleFilters)
+                      : "—"}
+                  </dd>
+                </dl>
               </div>
             </div>
 
@@ -904,4 +998,23 @@ const restoreButtonStyle: CSSProperties = {
   fontWeight: 700,
   padding: "6px 10px",
   cursor: "pointer",
+};
+
+const actionButtonStyle: CSSProperties = {
+  borderRadius: 10,
+  border: `1px solid ${theme.border}`,
+  padding: "10px 12px",
+  background: theme.surfaceLo,
+  color: theme.text,
+  display: "grid",
+  gap: 6,
+  textAlign: "left",
+  cursor: "pointer",
+};
+
+const contextValueStyle: CSSProperties = {
+  margin: 0,
+  color: theme.text,
+  fontFamily: theme.monoFamily,
+  wordBreak: "break-word",
 };
