@@ -27,6 +27,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { PlatformAssistantOverlay } from "@/components/assistant/platform-assistant-overlay";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
 import type { Locale } from "@/lib/translations";
@@ -602,6 +603,7 @@ export function AdminShell({ children }: AdminShellProps) {
       />
       <Topbar activeRoute={activeRoute} pathname={pathname} locale={locale} />
       <main style={mainStyle}>{children}</main>
+      <PlatformAssistantOverlay />
     </div>
   );
 }
