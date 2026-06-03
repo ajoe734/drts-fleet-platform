@@ -147,4 +147,33 @@ describe("LlmGatewayService usage enforcement", () => {
       }),
     );
   });
+
+  it("rejects responses once the configured output token rate limit is exhausted", () => {
+    const service = new LlmGatewayService({
+      env: {
+        LLM_GATEWAY_OUTPUT_TOKENS_PER_MINUTE: "2",
+      },
+      now: () => Date.parse("2026-06-03T00:00:00.000Z"),
+    });
+
+    const reservation = service.reserveRequest({
+      actorKey: "pa-admin-3",
+      requestText: "ok",
+    });
+
+    expect(() =>
+      service.completeRequest({
+        reservation,
+        responseText: "this response is too long",
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_OUTPUT_TOKEN_RATE_LIMITED",
+          }),
+        }),
+      }),
+    );
+  });
 });

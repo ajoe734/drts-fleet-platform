@@ -221,6 +221,42 @@ describe("PlatformAdminAssistantService", () => {
     );
   });
 
+  it("surfaces llm gateway output token rate limits when provider output exceeds the remaining budget", async () => {
+    const gateway = new LlmGatewayService({
+      env: {
+        LLM_GATEWAY_OUTPUT_TOKENS_PER_MINUTE: "2",
+      },
+      now: () => Date.parse("2026-06-03T13:00:00.000Z"),
+    });
+    const service = new PlatformAdminAssistantService(
+      new StaticProvider({
+        answer: "This response is intentionally too long.",
+        citations: [],
+        suggestedPrompts: [],
+        actionPlan: null,
+      }),
+      new PlatformAdminService(new AuditNotificationService()),
+      new AuditNotificationService(),
+      gateway,
+    );
+    const identity = platformIdentity();
+    const session = service.createSession(identity, {});
+
+    await expect(
+      service.createMessage(session.sessionId, identity, {
+        message: "Short request",
+      }),
+    ).rejects.toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_OUTPUT_TOKEN_RATE_LIMITED",
+          }),
+        }),
+      }),
+    );
+  });
+
   it("returns degraded help-search guidance when the provider key is missing", async () => {
     const service = new PlatformAdminAssistantService(
       new ThrowingProvider({

@@ -150,6 +150,23 @@ export class LlmGatewayService {
     this.pruneDailySpend(usage, now);
 
     const estimatedOutputTokens = this.estimateTokens(input.responseText);
+    const minuteOutputTokens = this.sumTokenWindow(usage.outputTokenEvents);
+    if (
+      minuteOutputTokens + estimatedOutputTokens >
+      this.config.outputTokensPerMinute
+    ) {
+      throw new ApiRequestError(
+        429,
+        "ASSISTANT_OUTPUT_TOKEN_RATE_LIMITED",
+        "Platform Admin assistant output token rate limit exceeded.",
+        {
+          actorKey: input.reservation.actorKey,
+          limit: this.config.outputTokensPerMinute,
+          windowMs: MINUTE_MS,
+        },
+      );
+    }
+
     usage.outputTokenEvents.push({
       timestamp: now,
       tokens: estimatedOutputTokens,
