@@ -257,6 +257,43 @@ describe("PlatformAdminAssistantService", () => {
     );
   });
 
+  it("surfaces llm gateway daily budget limits when provider output would exceed the remaining budget", async () => {
+    const gateway = new LlmGatewayService({
+      env: {
+        LLM_GATEWAY_DAILY_BUDGET_USD: "0.00001",
+      },
+      now: () => Date.parse("2026-06-03T13:00:00.000Z"),
+    });
+    const service = new PlatformAdminAssistantService(
+      new StaticProvider({
+        answer:
+          "This response is intentionally long enough to exceed the remaining daily budget.",
+        citations: [],
+        suggestedPrompts: [],
+        actionPlan: null,
+      }),
+      new PlatformAdminService(new AuditNotificationService()),
+      new AuditNotificationService(),
+      gateway,
+    );
+    const identity = platformIdentity();
+    const session = service.createSession(identity, {});
+
+    await expect(
+      service.createMessage(session.sessionId, identity, {
+        message: "Short request",
+      }),
+    ).rejects.toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_DAILY_BUDGET_EXCEEDED",
+          }),
+        }),
+      }),
+    );
+  });
+
   it("returns degraded help-search guidance when the provider key is missing", async () => {
     const service = new PlatformAdminAssistantService(
       new ThrowingProvider({

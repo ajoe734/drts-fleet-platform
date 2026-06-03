@@ -176,4 +176,41 @@ describe("LlmGatewayService usage enforcement", () => {
       }),
     );
   });
+
+  it("rejects responses that would push spend past the configured daily budget", () => {
+    const service = new LlmGatewayService({
+      env: {
+        LLM_GATEWAY_DAILY_BUDGET_USD: "0.00001",
+      },
+      now: () => Date.parse("2026-06-03T00:00:00.000Z"),
+    });
+
+    const reservation = service.reserveRequest({
+      actorKey: "pa-admin-4",
+      requestText: "ok",
+    });
+
+    expect(() =>
+      service.completeRequest({
+        reservation,
+        responseText:
+          "This response is intentionally long enough to exceed the remaining daily budget.",
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_DAILY_BUDGET_EXCEEDED",
+          }),
+        }),
+      }),
+    );
+
+    expect(service.getUsageSnapshot("pa-admin-4")).toMatchObject({
+      outputTokensInCurrentMinute: 0,
+    });
+    expect(service.getUsageSnapshot("pa-admin-4").estimatedDailySpendUsd).toBe(
+      reservation.estimatedInputCostUsd,
+    );
+  });
 });

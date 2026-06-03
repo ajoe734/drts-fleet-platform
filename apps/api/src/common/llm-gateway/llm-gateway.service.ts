@@ -167,15 +167,27 @@ export class LlmGatewayService {
       );
     }
 
-    usage.outputTokenEvents.push({
-      timestamp: now,
-      tokens: estimatedOutputTokens,
-    });
-
     const outputCostUsd =
       (estimatedOutputTokens / 1000) * OUTPUT_COST_USD_PER_1K_TOKENS;
     const dayKey = this.dayKey(now);
     const currentDailySpend = usage.dailySpendByDay.get(dayKey) ?? 0;
+    if (currentDailySpend + outputCostUsd > this.config.dailyBudgetUsd) {
+      throw new ApiRequestError(
+        429,
+        "ASSISTANT_DAILY_BUDGET_EXCEEDED",
+        "Platform Admin assistant daily budget exceeded.",
+        {
+          actorKey: input.reservation.actorKey,
+          estimatedDailySpendUsd: currentDailySpend,
+          dailyBudgetUsd: this.config.dailyBudgetUsd,
+        },
+      );
+    }
+
+    usage.outputTokenEvents.push({
+      timestamp: now,
+      tokens: estimatedOutputTokens,
+    });
     usage.dailySpendByDay.set(dayKey, currentDailySpend + outputCostUsd);
   }
 
