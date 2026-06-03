@@ -677,6 +677,7 @@ export interface BtnProps {
   children: ReactNode;
   danger?: boolean;
   disabled?: boolean;
+  type?: "button" | "submit" | "reset";
   onClick?: () => void;
   style?: CSSProperties;
 }
@@ -689,6 +690,7 @@ export function Btn({
   children,
   danger = false,
   disabled = false,
+  type = "button",
   onClick,
   style,
 }: BtnProps) {
@@ -724,7 +726,7 @@ export function Btn({
 
   return (
     <button
-      type="button"
+      type={type}
       disabled={disabled}
       onClick={onClick}
       style={{
@@ -806,6 +808,129 @@ export function Pill({
   );
 }
 
+export interface ActionButtonProps {
+  theme?: CanvasTheme;
+  label: ReactNode;
+  helper?: ReactNode;
+  busy?: boolean;
+  disabled?: boolean;
+  variant?: "primary" | "secondary" | "ghost";
+  size?: "xs" | "sm" | "md";
+  icon?: CanvasIconName | ReactNode;
+  danger?: boolean;
+  type?: "button" | "submit" | "reset";
+  onClick?: () => void;
+  style?: CSSProperties;
+}
+
+export function ActionButton({
+  theme: providedTheme,
+  label,
+  helper,
+  busy = false,
+  disabled = false,
+  variant = "secondary",
+  size = "sm",
+  icon,
+  danger = false,
+  type = "button",
+  onClick,
+  style,
+}: ActionButtonProps) {
+  const theme = resolveTheme(providedTheme);
+  const isDisabled = busy || disabled;
+  const buttonClickProps = onClick ? { onClick } : {};
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${theme.border}`,
+        borderRadius: 10,
+        background: theme.surfaceLo,
+        padding: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        ...style,
+      }}
+    >
+      <Btn
+        theme={theme}
+        variant={variant}
+        size={size}
+        icon={icon}
+        danger={danger}
+        disabled={isDisabled}
+        type={type}
+        {...buttonClickProps}
+        style={{ width: "100%", justifyContent: "center" }}
+      >
+        {label}
+      </Btn>
+      {helper ? (
+        <div
+          style={{
+            fontSize: 11.5,
+            lineHeight: 1.45,
+            color: theme.textMuted,
+          }}
+        >
+          {helper}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export interface EmptyStateProps {
+  theme?: CanvasTheme;
+  tone?: CanvasTone;
+  title: ReactNode;
+  body: ReactNode;
+  action?: ReactNode;
+  style?: CSSProperties;
+}
+
+export function EmptyState({
+  theme: providedTheme,
+  tone = "neutral",
+  title,
+  body,
+  action,
+  style,
+}: EmptyStateProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <div
+      style={{
+        border: `1px dashed ${toneStyles(theme, tone).bd}`,
+        borderRadius: 10,
+        padding: 16,
+        background: theme.surfaceLo,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        ...style,
+      }}
+    >
+      <Pill theme={theme} tone={tone}>
+        {title}
+      </Pill>
+      <div
+        style={{
+          fontSize: 11.5,
+          lineHeight: 1.45,
+          color: theme.textMuted,
+        }}
+      >
+        {body}
+      </div>
+      {action}
+    </div>
+  );
+}
+
 export interface CardProps {
   theme?: CanvasTheme;
   title?: ReactNode;
@@ -883,7 +1008,7 @@ export function Card({
   );
 }
 
-export interface TableColumn<Row extends Record<string, unknown>> {
+export interface TableColumn<Row extends object> {
   h: ReactNode;
   k?: keyof Row & string;
   w?: string | number;
@@ -892,14 +1017,14 @@ export interface TableColumn<Row extends Record<string, unknown>> {
   r?: (row: Row, index: number) => ReactNode;
 }
 
-export interface TableProps<Row extends Record<string, unknown>> {
+export interface TableProps<Row extends object> {
   theme?: CanvasTheme;
   columns: TableColumn<Row>[];
   rows: readonly Row[];
   dense?: boolean;
 }
 
-export function Table<Row extends Record<string, unknown>>({
+export function Table<Row extends object>({
   theme: providedTheme,
   columns,
   rows,
@@ -943,41 +1068,45 @@ export function Table<Row extends Record<string, unknown>>({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr
-              key={`row-${rowIndex}`}
-              style={{
-                borderBottom: `1px solid ${theme.border}`,
-                background:
-                  "_selected" in row && row._selected
-                    ? theme.rowSelect
-                    : "transparent",
-              }}
-            >
-              {columns.map((column, columnIndex) => (
-                <td
-                  key={`cell-${rowIndex}-${columnIndex}`}
-                  style={{
-                    padding: dense ? "7px 12px" : "10px 12px",
-                    textAlign: column.align ?? "left",
-                    fontSize: column.mono ? 11.5 : 12.5,
-                    fontFamily: column.mono
-                      ? theme.monoFamily
-                      : theme.fontFamily,
-                    color: theme.text,
-                    verticalAlign: "middle",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {column.r
-                    ? column.r(row, rowIndex)
-                    : column.k
-                      ? (row[column.k] as ReactNode)
-                      : null}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {rows.map((row, rowIndex) => {
+            const keyedRow = row as Record<string, unknown>;
+
+            return (
+              <tr
+                key={`row-${rowIndex}`}
+                style={{
+                  borderBottom: `1px solid ${theme.border}`,
+                  background:
+                    "_selected" in keyedRow && keyedRow._selected
+                      ? theme.rowSelect
+                      : "transparent",
+                }}
+              >
+                {columns.map((column, columnIndex) => (
+                  <td
+                    key={`cell-${rowIndex}-${columnIndex}`}
+                    style={{
+                      padding: dense ? "7px 12px" : "10px 12px",
+                      textAlign: column.align ?? "left",
+                      fontSize: column.mono ? 11.5 : 12.5,
+                      fontFamily: column.mono
+                        ? theme.monoFamily
+                        : theme.fontFamily,
+                      color: theme.text,
+                      verticalAlign: "middle",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {column.r
+                      ? column.r(row, rowIndex)
+                      : column.k
+                        ? (keyedRow[column.k] as ReactNode)
+                        : null}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

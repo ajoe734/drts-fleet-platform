@@ -11,10 +11,12 @@ import {
   useState,
 } from "react";
 import {
+  CanvasActionButton,
   CanvasBanner,
   CanvasBtn,
   CanvasCard,
   CanvasDL,
+  CanvasEmptyState,
   CanvasField,
   CanvasInput,
   CanvasKPI,
@@ -24,7 +26,6 @@ import {
   CanvasTable,
   buildCanvasTheme,
   type CanvasTableColumn,
-  type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
 import type {
@@ -212,16 +213,6 @@ const subtleTextStyle: CSSProperties = {
   fontSize: 11.5,
   lineHeight: 1.45,
   color: theme.textMuted,
-};
-
-const actionCardStyle: CSSProperties = {
-  border: `1px solid ${theme.border}`,
-  borderRadius: 10,
-  background: theme.surfaceLo,
-  padding: 12,
-  display: "flex",
-  flexDirection: "column",
-  gap: 8,
 };
 
 const linkPillStyle: CSSProperties = {
@@ -799,6 +790,13 @@ function renderActionMeta(
   );
 }
 
+function getActionHelper(
+  locale: Locale,
+  descriptor?: ResourceActionDescriptor,
+): ReactNode {
+  return descriptor ? renderActionMeta(locale, descriptor) : undefined;
+}
+
 function getPillToneForRecordingState(
   recordingState: CallRecordingState,
 ): CanvasTone {
@@ -833,123 +831,6 @@ function getToneForEmptyReason(reason: EmptyReason): CanvasTone {
     default:
       return "neutral";
   }
-}
-
-function CanvasActionButton({
-  theme,
-  locale,
-  descriptor,
-  busy,
-  label,
-  onClick,
-  variant = "secondary",
-  danger = false,
-  submit = false,
-}: {
-  theme: CanvasTheme;
-  locale: Locale;
-  descriptor?: ResourceActionDescriptor;
-  busy?: boolean;
-  label: string;
-  onClick?: () => void;
-  variant?: "primary" | "secondary" | "ghost";
-  danger?: boolean;
-  submit?: boolean;
-}) {
-  const isDisabled = Boolean((descriptor && !descriptor.enabled) || busy);
-  const buttonClickProps = onClick ? { onClick } : {};
-  const buttonStyle: CSSProperties = {
-    width: "100%",
-    minHeight: 34,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    padding: "5px 10px",
-    fontSize: 12,
-    fontWeight: 500,
-    lineHeight: 1,
-    fontFamily: theme.fontFamily,
-    borderRadius: 7,
-    cursor: isDisabled ? "not-allowed" : "pointer",
-    opacity: isDisabled ? 0.55 : 1,
-    border: `1px solid ${
-      danger
-        ? theme.danger
-        : variant === "primary"
-          ? theme.accent
-          : theme.border
-    }`,
-    background: danger
-      ? theme.danger
-      : variant === "primary"
-        ? theme.accent
-        : variant === "ghost"
-          ? "transparent"
-          : theme.surface,
-    color:
-      danger || variant === "primary"
-        ? "#fff"
-        : variant === "ghost"
-          ? theme.textMuted
-          : theme.text,
-  };
-
-  return (
-    <div style={actionCardStyle}>
-      {submit ? (
-        <button type="submit" disabled={isDisabled} style={buttonStyle}>
-          {label}
-        </button>
-      ) : (
-        <CanvasBtn
-          theme={theme}
-          variant={variant}
-          danger={danger}
-          disabled={isDisabled}
-          {...buttonClickProps}
-          style={{ width: "100%", justifyContent: "center" }}
-        >
-          {label}
-        </CanvasBtn>
-      )}
-      {descriptor ? renderActionMeta(locale, descriptor) : null}
-    </div>
-  );
-}
-
-function CanvasEmptyState({
-  theme,
-  tone,
-  title,
-  body,
-  action,
-}: {
-  theme: CanvasTheme;
-  tone: CanvasTone;
-  title: string;
-  body: string;
-  action?: ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        border: `1px dashed ${theme.border}`,
-        borderRadius: 10,
-        padding: 16,
-        background: theme.surfaceLo,
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-      }}
-    >
-      <CanvasPill theme={theme} tone={tone}>
-        {title}
-      </CanvasPill>
-      <div style={subtleTextStyle}>{body}</div>
-      {action}
-    </div>
-  );
 }
 
 export default function CallcenterPage() {
@@ -1801,8 +1682,8 @@ export default function CallcenterPage() {
               <div style={{ display: "flex", alignItems: "end" }}>
                 <CanvasActionButton
                   theme={theme}
-                  locale={currentLocale}
-                  descriptor={workspaceAction}
+                  disabled={!workspaceAction.enabled}
+                  helper={getActionHelper(currentLocale, workspaceAction)}
                   busy={busyKey === "open-intake"}
                   label={
                     busyKey === "open-intake"
@@ -1810,7 +1691,7 @@ export default function CallcenterPage() {
                       : t("callcenter.form.openSession")
                   }
                   variant="primary"
-                  submit
+                  type="submit"
                 />
               </div>
             </form>
@@ -2090,8 +1971,8 @@ export default function CallcenterPage() {
                   <div style={actionGridStyle}>
                     <CanvasActionButton
                       theme={theme}
-                      locale={currentLocale}
-                      descriptor={announceAction}
+                      disabled={!announceAction?.enabled}
+                      helper={getActionHelper(currentLocale, announceAction)}
                       busy={busyKey === "announce"}
                       label={getActionLabel(currentLocale, "announce_identity")}
                       onClick={() =>
@@ -2123,8 +2004,8 @@ export default function CallcenterPage() {
                     />
                     <CanvasActionButton
                       theme={theme}
-                      locale={currentLocale}
-                      descriptor={closeAction}
+                      disabled={!closeAction?.enabled}
+                      helper={getActionHelper(currentLocale, closeAction)}
                       busy={busyKey === "close"}
                       label={getActionLabel(currentLocale, "close_session")}
                       danger
@@ -2151,8 +2032,8 @@ export default function CallcenterPage() {
                     />
                     <CanvasActionButton
                       theme={theme}
-                      locale={currentLocale}
-                      descriptor={quoteEtaAction}
+                      disabled={!quoteEtaAction?.enabled}
+                      helper={getActionHelper(currentLocale, quoteEtaAction)}
                       busy={busyKey === "quote-eta"}
                       label={getActionLabel(currentLocale, "quote_eta")}
                       onClick={() =>
@@ -2166,8 +2047,11 @@ export default function CallcenterPage() {
                     />
                     <CanvasActionButton
                       theme={theme}
-                      locale={currentLocale}
-                      descriptor={attachRecordingAction}
+                      disabled={!attachRecordingAction?.enabled}
+                      helper={getActionHelper(
+                        currentLocale,
+                        attachRecordingAction,
+                      )}
                       busy={busyKey === "attach-recording"}
                       label={getActionLabel(currentLocale, "attach_recording")}
                       onClick={() =>
@@ -2266,11 +2150,11 @@ export default function CallcenterPage() {
                     </CanvasField>
                     <CanvasActionButton
                       theme={theme}
-                      locale={currentLocale}
-                      descriptor={quoteEtaAction}
+                      disabled={!quoteEtaAction?.enabled}
+                      helper={getActionHelper(currentLocale, quoteEtaAction)}
                       busy={busyKey === "quote-eta"}
                       label={getActionLabel(currentLocale, "quote_eta")}
-                      submit
+                      type="submit"
                     />
                   </form>
 
@@ -2359,11 +2243,14 @@ export default function CallcenterPage() {
                     </CanvasField>
                     <CanvasActionButton
                       theme={theme}
-                      locale={currentLocale}
-                      descriptor={attachRecordingAction}
+                      disabled={!attachRecordingAction?.enabled}
+                      helper={getActionHelper(
+                        currentLocale,
+                        attachRecordingAction,
+                      )}
                       busy={busyKey === "attach-recording"}
                       label={getActionLabel(currentLocale, "attach_recording")}
-                      submit
+                      type="submit"
                     />
                   </form>
                 </div>
@@ -2521,15 +2408,15 @@ export default function CallcenterPage() {
                   </CanvasField>
                   <CanvasActionButton
                     theme={theme}
-                    locale={currentLocale}
-                    descriptor={createBookingAction}
+                    disabled={!createBookingAction?.enabled}
+                    helper={getActionHelper(currentLocale, createBookingAction)}
                     busy={busyKey === "create-booking"}
                     label={getActionLabel(
                       currentLocale,
                       "create_phone_booking",
                     )}
                     variant="primary"
-                    submit
+                    type="submit"
                   />
                 </form>
 
@@ -2587,14 +2474,14 @@ export default function CallcenterPage() {
                     </CanvasField>
                     <CanvasActionButton
                       theme={theme}
-                      locale={currentLocale}
-                      descriptor={linkOrderAction}
+                      disabled={!linkOrderAction?.enabled}
+                      helper={getActionHelper(currentLocale, linkOrderAction)}
                       busy={busyKey === "link-order"}
                       label={getActionLabel(
                         currentLocale,
                         "link_existing_order",
                       )}
-                      submit
+                      type="submit"
                     />
                   </form>
 
@@ -2663,11 +2550,11 @@ export default function CallcenterPage() {
                     </CanvasField>
                     <CanvasActionButton
                       theme={theme}
-                      locale={currentLocale}
-                      descriptor={callbackAction}
+                      disabled={!callbackAction?.enabled}
+                      helper={getActionHelper(currentLocale, callbackAction)}
                       busy={busyKey === "create-callback"}
                       label={getActionLabel(currentLocale, "create_callback")}
-                      submit
+                      type="submit"
                     />
                   </form>
 
@@ -2713,11 +2600,14 @@ export default function CallcenterPage() {
                     </CanvasField>
                     <CanvasActionButton
                       theme={theme}
-                      locale={currentLocale}
-                      descriptor={completeCallbackAction}
+                      disabled={!completeCallbackAction?.enabled}
+                      helper={getActionHelper(
+                        currentLocale,
+                        completeCallbackAction,
+                      )}
                       busy={busyKey === "complete-callback"}
                       label={getActionLabel(currentLocale, "complete_callback")}
-                      submit
+                      type="submit"
                     />
                   </form>
 
@@ -2859,15 +2749,18 @@ export default function CallcenterPage() {
                     </CanvasField>
                     <CanvasActionButton
                       theme={theme}
-                      locale={currentLocale}
-                      descriptor={transferComplaintAction}
+                      disabled={!transferComplaintAction?.enabled}
+                      helper={getActionHelper(
+                        currentLocale,
+                        transferComplaintAction,
+                      )}
                       busy={busyKey === "transfer-complaint"}
                       label={getActionLabel(
                         currentLocale,
                         "transfer_to_complaint",
                       )}
                       variant="primary"
-                      submit
+                      type="submit"
                     />
                   </form>
                 </div>

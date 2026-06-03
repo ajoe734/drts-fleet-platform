@@ -6,11 +6,13 @@ export { PageHeader } from "./page-header";
 export type { PageHeaderProps } from "./page-header";
 export * as CanvasPrimitives from "./canvas-primitives";
 export {
+  ActionButton as CanvasActionButton,
   Banner as CanvasBanner,
   Btn as CanvasBtn,
   CanvasIcon,
   Card as CanvasCard,
   DL as CanvasDL,
+  EmptyState as CanvasEmptyState,
   Field as CanvasField,
   Input as CanvasInput,
   KPI as CanvasKPI,
@@ -23,11 +25,13 @@ export {
   WindowChrome as CanvasWindowChrome,
 } from "./canvas-primitives";
 export type {
+  ActionButtonProps as CanvasActionButtonProps,
   BannerProps as CanvasBannerProps,
   BtnProps as CanvasBtnProps,
   CardProps as CanvasCardProps,
   DLItem as CanvasDLItem,
   DLProps as CanvasDLProps,
+  EmptyStateProps as CanvasEmptyStateProps,
   FieldProps as CanvasFieldProps,
   InputProps as CanvasInputProps,
   KPIProps as CanvasKPIProps,
