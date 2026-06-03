@@ -6,6 +6,14 @@
   "release_url": "https://github.com/openclaw/openclaw/releases/tag/v2026.5.28",
   "tarball_url": "https://registry.npmjs.org/openclaw/-/openclaw-2026.5.28.tgz",
   "integrity": "sha512-p7jGN9wzCrqEvHNI6Y7+eh6DWoYDzJ1iQGKTm8xqQ2uQ9/2mY1CCf87WoZeb0+m3eHKSGchlI3tN33fE1lMtEA==",
+  "plugins": {
+    "codex": {
+      "package": "@openclaw/codex",
+      "version": "2026.5.28",
+      "tarball_url": "https://registry.npmjs.org/@openclaw/codex/-/codex-2026.5.28.tgz",
+      "integrity": "sha512-E5PaTQ5UIIyYMGd2oVFTqhML0r8/lYsRtIVXon+axTDx9S3tXyy2TSl/VkYgDVKG4gpWvg/k0N8Yc4yGNPRvYA=="
+    }
+  },
   "node_engine": ">=22.19.0",
   "install_method": "npm-tarball-prefix",
   "fetched_at": "2026-06-03T00:00:00Z"

@@ -1,4 +1,21 @@
 {
+  "plugins": {
+    "allow": [
+      "codex"
+    ],
+    "entries": {
+      "codex": {
+        "enabled": true
+      }
+    }
+  },
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": "drts-openclaw-local-token"
+    }
+  },
   "agents": {
     "defaults": {
       "workspace": "__WORKSPACE__",
@@ -9,7 +26,7 @@
     },
     "list": [
       {
-        "id": "drts-platform-admin",
+        "id": "main",
         "default": true,
         "identity": {
           "name": "DRTS Platform Admin Dev Assistant",
@@ -62,7 +79,8 @@
         "env": {
           "ORCH_STATUS_ROOT": "__STATUS_ROOT__",
           "AI_STATUS_ROOT": "__STATUS_ROOT__",
-          "DRTS_OPENCLAW_TOKEN_INJECTED": "__TOKEN_INJECTED__"
+          "DRTS_OPENCLAW_TOKEN_INJECTED": "__TOKEN_INJECTED__",
+          "DRTS_OPENCLAW_MCP_LOG": "__MCP_LOG__"
         }
       }
     }

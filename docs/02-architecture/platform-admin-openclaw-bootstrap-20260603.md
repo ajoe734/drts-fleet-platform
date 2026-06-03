@@ -50,6 +50,14 @@ Behavior:
 5. Installs the tarball into `.local/openclaw/install/<version>/` using
    `npm install --prefix`, then updates `.local/openclaw/current`.
 
+Pinned companion plugin:
+
+- `@openclaw/codex@2026.5.28`
+
+The launcher ensures this plugin is installed into the isolated OpenClaw home
+before executing user commands, because `openai/gpt-*` Codex-backed runs need
+the external `codex` plugin in this OpenClaw release line.
+
 This keeps the fetched runtime out of git while still making the installed
 artifact deterministic from committed metadata.
 
@@ -72,7 +80,8 @@ Safe defaults in the generated profile:
 
 - workspace is the current repo root
 - default model is `openai/gpt-5.5` unless `DRTS_OPENCLAW_MODEL` overrides it
-- agent id is `drts-platform-admin`
+- agent id is `main` so OpenClaw can reuse its default-agent auth bootstrap and
+  read-through behavior
 - tool profile starts from `coding`
 - denied tools:
   `group:fs`, `exec`, `process`, `write`, `edit`, `apply_patch`, `browser`,
@@ -88,6 +97,7 @@ so local drift in `openclaw.json` does not silently become machine truth.
 Adapter:
 
 - `.orchestrator/adapters/openclaw_drts_mcp.py`
+- `.orchestrator/bin/openclaw-prepare-auth-bridge.sh`
 
 Bounded tools exposed to OpenClaw:
 
@@ -107,14 +117,20 @@ Credential handling:
 
 - No provider secrets are committed to the repo.
 - No DRTS bearer token is written into `openclaw.json`.
+- No OpenAI/Codex OAuth tokens are written into tracked repo files.
 - If `DRTS_OPENCLAW_IAP_TOKEN_COMMAND` is provided, the launcher executes it at
   runtime and exports the result only into the OpenClaw child process as
   `DRTS_OPENCLAW_BEARER_TOKEN`.
 - If a caller already exports `DRTS_OPENCLAW_BEARER_TOKEN`, the launcher uses
   it as-is and marks the MCP environment with `DRTS_OPENCLAW_TOKEN_INJECTED=true`.
-- OpenClaw provider auth is expected to come from native shell/runtime state,
-  for example existing Codex ChatGPT OAuth or shell-provided `OPENAI_API_KEY`,
-  not from committed repo files.
+- `openclaw-prepare-auth-bridge.sh` reads the existing host Codex login store
+  (`${CODEX_HOME:-~/.codex}/auth.json` by default), writes a canonical
+  `auth-profiles.json` bridge under `${XDG_STATE_HOME:-~/.local/state}/drts-openclaw/`,
+  and symlinks the isolated agent's `auth-profiles.json` to that external
+  bridge file.
+- OpenClaw provider auth therefore comes from native host login state or
+  shell-provided env, not from committed repo files and not from repo-local
+  secret blobs.
 
 This satisfies the direct-adoption guardrail from PA-AI-OSS-001: the repo wires
 OpenClaw to ephemeral environment inputs and bounded adapters rather than broad,
@@ -137,7 +153,7 @@ Validate the generated isolated profile:
 Run a one-shot local agent turn:
 
 ```bash
-.orchestrator/bin/openclaw-launch.sh agent --local --agent drts-platform-admin \
+.orchestrator/bin/openclaw-launch.sh agent --local --agent main \
   --session-key drts-smoke --thinking minimal \
   --message "Call drts_runtime_profile and summarize it."
 ```

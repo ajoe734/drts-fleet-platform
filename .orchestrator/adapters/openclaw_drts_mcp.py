@@ -100,7 +100,7 @@ def handle_tool_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if not task_id:
             raise ValueError("task_id is required")
         result = subprocess.run(
-            ["python3", "scripts/ai_status.py", "get-task", task_id],
+            ["bash", "scripts/ai-status.sh", "show", task_id],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,

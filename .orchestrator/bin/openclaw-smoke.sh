@@ -15,7 +15,7 @@ export DRTS_OPENCLAW_MCP_LOG="$MCP_LOG"
 "$ROOT_DIR/.orchestrator/bin/openclaw-launch.sh" config validate >/dev/null
 "$ROOT_DIR/.orchestrator/bin/openclaw-launch.sh" agent \
   --local \
-  --agent drts-platform-admin \
+  --agent main \
   --session-key drts-smoke \
   --thinking minimal \
   --json \
