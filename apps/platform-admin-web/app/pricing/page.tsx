@@ -7,6 +7,7 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
+import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import type {
@@ -66,6 +67,13 @@ type HistoryRow = Record<string, unknown> & {
   publishedBy: string;
   status: "published" | "retired";
 };
+
+const PRICING_TAB_VALUES = new Set<TabId>([
+  "passenger",
+  "driver",
+  "subsidy",
+  "history",
+]);
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -748,6 +756,78 @@ export default function PricingPage() {
     setPublishFrom(selectedDraft.effectiveFrom.slice(0, 16));
     setPublishTo(selectedDraft.effectiveTo?.slice(0, 16) ?? "");
   }, [selectedDraft]);
+
+  const assistantBridge = useMemo(
+    () => ({
+      pageId: "pricing",
+      filters: {
+        active_tab: {
+          apply(value: unknown) {
+            if (
+              typeof value !== "string" ||
+              !PRICING_TAB_VALUES.has(value as TabId)
+            ) {
+              return {
+                ok: false,
+                code: "invalid_filter_value",
+                message:
+                  "Pricing tab filter accepts only passenger, driver, subsidy, or history.",
+              } as const;
+            }
+            setActiveTab(value as TabId);
+            return {
+              ok: true,
+              code: "filter_applied",
+              message: `Applied pricing tab ${value}.`,
+              payload: { filterId: "active_tab", value },
+            } as const;
+          },
+        },
+      },
+      drafts: {
+        publish_rule_window: {
+          fill(values: Record<string, unknown>) {
+            const ruleId =
+              typeof values.ruleId === "string" ? values.ruleId : null;
+            if (ruleId) {
+              const matchedRule =
+                draftRules.find((rule) => rule.ruleId === ruleId) ?? null;
+              if (!matchedRule) {
+                return {
+                  ok: false,
+                  code: "draft_rule_not_found",
+                  message:
+                    "Publish window draft requires a known draft pricing rule id.",
+                } as const;
+              }
+              setSelectedDraftId(matchedRule.ruleId);
+              setPublishFrom(matchedRule.effectiveFrom.slice(0, 16));
+              setPublishTo(matchedRule.effectiveTo?.slice(0, 16) ?? "");
+            }
+            setPublishFrom((current) =>
+              typeof values.effectiveFrom === "string"
+                ? values.effectiveFrom
+                : current,
+            );
+            setPublishTo((current) =>
+              typeof values.effectiveTo === "string"
+                ? values.effectiveTo
+                : current,
+            );
+            setPublishModalOpen(true);
+            return {
+              ok: true,
+              code: "draft_filled",
+              message: "Filled pricing publish window draft without submitting.",
+            } as const;
+          },
+        },
+      },
+    }),
+    [draftRules],
+  );
+
+  usePlatformAdminAssistantPage(assistantBridge);
 
   const passengerColumns: CanvasTableColumn<PricingRow>[] = [
     { h: "VERSION", k: "version", mono: true, w: 108 },
