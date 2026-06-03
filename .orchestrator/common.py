@@ -9,10 +9,16 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
 
 ROOT = Path(__file__).resolve().parents[1]
 ORCHESTRATOR_DIR = ROOT / ".orchestrator"
@@ -36,6 +42,38 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
     tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     tmp_path.write_text(content, encoding=encoding)
     tmp_path.replace(path)
+
+
+def _jsonl_lock_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.lock")
+
+
+@contextmanager
+def _hold_jsonl_lock(path: Path):
+    ensure_parent(path)
+    handle = _jsonl_lock_path(path).open("a+", encoding="utf-8")
+    try:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def _append_jsonl_line_unlocked(path: Path, line: str) -> None:
+    payload = (line + "\n").encode("utf-8")
+    fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
+    try:
+        written = 0
+        while written < len(payload):
+            chunk = os.write(fd, payload[written:])
+            if chunk == 0:
+                raise OSError(f"short write while appending {path}")
+            written += chunk
+    finally:
+        os.close(fd)
 
 
 def _strip_js_comments(text: str) -> str:
@@ -135,8 +173,8 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     ensure_parent(path)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    with _hold_jsonl_lock(path):
+        _append_jsonl_line_unlocked(path, json.dumps(payload, ensure_ascii=False))
 
 
 def deep_merge(base: Any, overlay: Any) -> Any:
@@ -408,15 +446,16 @@ def write_activity_log(config: dict[str, Any], entry: dict[str, Any]) -> None:
         **entry,
     }
     log_path = config_path(config, "activity_log")
-    # Wrap rotation in try/except as a belt-and-suspenders defence:
-    # _rotate_activity_log_if_oversize already swallows its own errors, but
-    # activity logging is part of the hot path and must not surface ANY
-    # exception to callers regardless of what the helper does in future.
-    try:
-        _rotate_activity_log_if_oversize(log_path)
-    except Exception:
-        pass
-    append_jsonl(log_path, payload)
+    encoded_payload = json.dumps(payload, ensure_ascii=False)
+    with _hold_jsonl_lock(log_path):
+        # Rotation and append must share the same lock. Otherwise a rotator can
+        # replace the file while another process appends, producing NUL-padded
+        # or concatenated JSONL records that make the dashboard look broken.
+        try:
+            _rotate_activity_log_if_oversize(log_path)
+        except Exception:
+            pass
+        _append_jsonl_line_unlocked(log_path, encoded_payload)
 
 
 def runtime_log_path(prefix: str, target: str) -> Path:

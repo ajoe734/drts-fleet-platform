@@ -8,10 +8,16 @@ import shutil
 import subprocess
 import sys
 import uuid
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
 
 ROOT = Path(
     os.environ.get("AI_STATUS_ROOT")
@@ -129,6 +135,74 @@ NON_CANONICAL_LAYER_FILES = {
     "current-work.md",
     "docs-site/index.html",
 }
+LOG_ENTRY_START_RE = re.compile(r'(?=\{"(?:ts|timestamp)"\s*:)')
+
+
+def _jsonl_lock_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.lock")
+
+
+@contextmanager
+def _hold_jsonl_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = _jsonl_lock_path(path).open("a+", encoding="utf-8")
+    try:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def _append_jsonl_line(path: Path, line: str) -> None:
+    payload = (line + "\n").encode("utf-8")
+    with _hold_jsonl_lock(path):
+        fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
+        try:
+            written = 0
+            while written < len(payload):
+                chunk = os.write(fd, payload[written:])
+                if chunk == 0:
+                    raise OSError(f"short write while appending {path}")
+                written += chunk
+        finally:
+            os.close(fd)
+
+
+def _normalize_log_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    if "ts" not in entry and entry.get("timestamp"):
+        entry["ts"] = entry["timestamp"]
+    if "message" not in entry and entry.get("summary"):
+        entry["message"] = entry["summary"]
+    if "type" not in entry and entry.get("action"):
+        entry["type"] = entry["action"]
+    return entry
+
+
+def _decode_log_line(line: str) -> list[dict[str, Any]]:
+    cleaned = line.replace("\x00", "").strip()
+    if not cleaned:
+        return []
+    try:
+        entry = json.loads(cleaned)
+        return [_normalize_log_entry(entry)] if isinstance(entry, dict) else []
+    except json.JSONDecodeError:
+        starts = [match.start() for match in LOG_ENTRY_START_RE.finditer(cleaned)]
+        if not starts:
+            return []
+        starts.append(len(cleaned))
+        entries: list[dict[str, Any]] = []
+        for index, start in enumerate(starts[:-1]):
+            fragment = cleaned[start:starts[index + 1]].strip()
+            try:
+                entry = json.loads(fragment)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(entry, dict):
+                entries.append(_normalize_log_entry(entry))
+        return entries
 
 
 def default_canonical_document_layers() -> dict[str, list[str]]:
@@ -622,24 +696,15 @@ def load_logs() -> list[dict[str, Any]]:
         return []
     logs: list[dict[str, Any]] = []
     for line_no, line in enumerate(LOG_FILE.read_text(encoding="utf-8").splitlines(), start=1):
-        line = line.strip()
-        if not line:
+        if not line.strip():
             continue
-        try:
-            entry = json.loads(line)
-            if isinstance(entry, dict):
-                # Tolerate legacy or external review log schemas so summary generation
-                # does not fail when adjacent tooling writes timestamp/summary fields.
-                if "ts" not in entry and entry.get("timestamp"):
-                    entry["ts"] = entry["timestamp"]
-                if "message" not in entry and entry.get("summary"):
-                    entry["message"] = entry["summary"]
-                if "type" not in entry and entry.get("action"):
-                    entry["type"] = entry["action"]
-            logs.append(entry)
-        except json.JSONDecodeError as exc:
+        entries = _decode_log_line(line)
+        if entries:
+            logs.extend(entries)
+            continue
+        if line.replace("\x00", "").strip():
             print(
-                f"Warning: skipping malformed ai-activity-log.jsonl line {line_no}: {exc}",
+                f"Warning: skipping malformed ai-activity-log.jsonl line {line_no}",
                 file=sys.stderr,
             )
     return logs
@@ -763,8 +828,7 @@ def save_state(state: dict[str, Any]) -> None:
 
 
 def append_log(entry: dict[str, Any]) -> None:
-    with LOG_FILE.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    _append_jsonl_line(LOG_FILE, json.dumps(entry, ensure_ascii=False))
 
 
 def ensure_agent(name: str, *, allow_retired: bool = False) -> dict[str, Any]:
