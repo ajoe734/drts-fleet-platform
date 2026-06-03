@@ -19,11 +19,21 @@ export interface KnowledgeCorpusRecord {
   chunks: KnowledgeChunkRecord[];
 }
 
+export type KnowledgeSourceKind = "markdown" | "jsx" | "html";
+
 export interface KnowledgeSourceManifestEntry {
   documentId: string;
   sourcePath: string;
   title: string;
-  kind: "markdown" | "jsx" | "html";
+  kind: KnowledgeSourceKind;
+}
+
+export interface KnowledgeSourceRecord extends KnowledgeSourceManifestEntry {
+  content: string;
+}
+
+export interface KnowledgeCorpusArtifactRecord extends KnowledgeCorpusRecord {
+  generatedFrom: KnowledgeSourceManifestEntry[];
 }
 
 export function toKnowledgeCitation(

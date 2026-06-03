@@ -1,10 +1,9 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import type {
   KnowledgeChunkRecord,
+  KnowledgeCorpusArtifactRecord,
   KnowledgeCorpusRecord,
   KnowledgeSourceManifestEntry,
+  KnowledgeSourceRecord,
 } from "./knowledge-internal.types";
 import {
   KNOWLEDGE_CORPUS_VERSION,
@@ -169,17 +168,14 @@ function buildSourceChunks(
 }
 
 export function buildKnowledgeCorpus(
-  repoRoot: string,
-  manifest: KnowledgeSourceManifestEntry[] = KNOWLEDGE_SOURCE_MANIFEST,
+  sources: KnowledgeSourceRecord[],
   corpusVersion = KNOWLEDGE_CORPUS_VERSION,
 ): KnowledgeCorpusRecord {
-  const chunks = manifest.flatMap((entry) => {
-    const filePath = resolve(repoRoot, entry.sourcePath);
-    const rawContent = readFileSync(filePath, "utf8");
+  const chunks = sources.flatMap((entry) => {
     if (entry.kind === "markdown") {
-      return buildMarkdownChunks(entry, rawContent);
+      return buildMarkdownChunks(entry, entry.content);
     }
-    return buildSourceChunks(entry, rawContent);
+    return buildSourceChunks(entry, entry.content);
   });
 
   return {
@@ -189,15 +185,36 @@ export function buildKnowledgeCorpus(
   };
 }
 
-export function serializeKnowledgeCorpus(
+export function toKnowledgeCorpusArtifact(
   corpus: KnowledgeCorpusRecord,
-): string {
-  return `import type { KnowledgeCorpusRecord } from "../knowledge-internal.types";
+  manifest: KnowledgeSourceManifestEntry[] = KNOWLEDGE_SOURCE_MANIFEST,
+): KnowledgeCorpusArtifactRecord {
+  return {
+    ...corpus,
+    generatedFrom: manifest,
+  };
+}
 
-export const GENERATED_KNOWLEDGE_CORPUS: KnowledgeCorpusRecord = ${JSON.stringify(
-    corpus,
+export function serializeKnowledgeCorpusArtifactModule(
+  artifact: KnowledgeCorpusArtifactRecord,
+  typeImportPath: string,
+): string {
+  return `import type { KnowledgeCorpusArtifactRecord, KnowledgeCorpusRecord } from "${typeImportPath}";
+
+export const GENERATED_KNOWLEDGE_CORPUS_ARTIFACT: KnowledgeCorpusArtifactRecord = ${JSON.stringify(
+    artifact,
     null,
     2,
   )} as const;
+
+export const GENERATED_KNOWLEDGE_CORPUS: KnowledgeCorpusRecord = GENERATED_KNOWLEDGE_CORPUS_ARTIFACT;
+`;
+}
+
+export function serializeKnowledgeCorpusEntrypoint(corpusVersion: string): string {
+  return `export {
+  GENERATED_KNOWLEDGE_CORPUS,
+  GENERATED_KNOWLEDGE_CORPUS_ARTIFACT,
+} from "./artifacts/${corpusVersion}/knowledge-corpus.generated";
 `;
 }

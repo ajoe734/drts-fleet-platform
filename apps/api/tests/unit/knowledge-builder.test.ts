@@ -1,13 +1,12 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
 import { describe, expect, it } from "vitest";
 
 import {
   buildKnowledgeCorpus,
   resolveKnowledgeGeneratedAt,
+  serializeKnowledgeCorpusArtifactModule,
+  serializeKnowledgeCorpusEntrypoint,
   tokenizeKnowledgeText,
+  toKnowledgeCorpusArtifact,
 } from "../../src/modules/assistant/knowledge/knowledge-builder";
 
 describe("knowledge-builder", () => {
@@ -21,29 +20,20 @@ describe("knowledge-builder", () => {
   });
 
   it("builds chunks with section-aware citations from curated sources", () => {
-    const repoRoot = mkdtempSync(join(tmpdir(), "assistant-knowledge-"));
-    const docsDir = join(repoRoot, "docs");
-    mkdirSync(docsDir, { recursive: true });
-    writeFileSync(
-      join(docsDir, "sample.md"),
-      [
-        "# Ops Console",
-        "Primary route overview.",
-        "",
-        "## Approval Queue",
-        "Only scoped roles can approve exception holds.",
-      ].join("\n"),
-      "utf8",
-    );
-
     const corpus = buildKnowledgeCorpus(
-      repoRoot,
       [
         {
           documentId: "sample-doc",
-          sourcePath: "docs/sample.md",
+          sourcePath: "knowledge/sample.md",
           title: "Sample Doc",
           kind: "markdown",
+          content: [
+            "# Ops Console",
+            "Primary route overview.",
+            "",
+            "## Approval Queue",
+            "Only scoped roles can approve exception holds.",
+          ].join("\n"),
         },
       ],
       "test-version",
@@ -65,6 +55,40 @@ describe("knowledge-builder", () => {
           text: expect.stringContaining("Only scoped roles can approve"),
         }),
       ]),
+    );
+  });
+
+  it("serializes a versioned artifact module and stable entrypoint", () => {
+    const corpus = buildKnowledgeCorpus(
+      [
+        {
+          documentId: "sample-doc",
+          sourcePath: "knowledge/sample.md",
+          title: "Sample Doc",
+          kind: "markdown",
+          content: "# Heading\nBody",
+        },
+      ],
+      "2026-06-03",
+    );
+
+    const artifact = toKnowledgeCorpusArtifact(corpus, [
+      {
+        documentId: "sample-doc",
+        sourcePath: "knowledge/sample.md",
+        title: "Sample Doc",
+        kind: "markdown",
+      },
+    ]);
+
+    expect(
+      serializeKnowledgeCorpusArtifactModule(
+        artifact,
+        "../../knowledge-internal.types",
+      ),
+    ).toContain("GENERATED_KNOWLEDGE_CORPUS_ARTIFACT");
+    expect(serializeKnowledgeCorpusEntrypoint("2026-06-03")).toContain(
+      './artifacts/2026-06-03/knowledge-corpus.generated',
     );
   });
 

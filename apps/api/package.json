@@ -6,7 +6,7 @@
   "scripts": {
     "build": "pnpm run knowledge:build && pnpm --filter @drts/contracts build && tsc -p tsconfig.json",
     "dev": "node --watch -r ts-node/register src/main.ts",
-    "knowledge:build": "node scripts/build-assistant-knowledge.mjs",
+    "knowledge:build": "tsx scripts/build-assistant-knowledge.ts",
     "lint": "eslint src --max-warnings=0",
     "start": "node dist/main.js",
     "seed:tenant-governance": "tsx --tsconfig tsconfig.seed.json seed/tenant-governance-default.ts",
