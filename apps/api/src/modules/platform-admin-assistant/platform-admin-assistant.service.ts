@@ -8,9 +8,12 @@ import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { PlatformAdminService } from "../platform-admin/platform-admin.service";
 import { resolvePlatformAdminAssistantAction } from "./platform-admin-assistant.actions";
+import { createPlatformAdminAssistantDevelopmentArtifacts } from "./platform-admin-assistant.development";
 import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.types";
 import type {
   CreatePlatformAdminAssistantMessageCommand,
+  PlatformAdminAssistantDevelopmentArtifactCommand,
+  PlatformAdminAssistantDevelopmentArtifactRecord,
   ExecutePlatformAdminAssistantActionCommand,
   PlatformAdminAssistantActionCommand,
   PlatformAdminAssistantActionExecutionResult,
@@ -39,6 +42,11 @@ export class PlatformAdminAssistantService {
   private readonly plans = new Map<
     string,
     PlatformAdminAssistantPlanRecord[]
+  >();
+
+  private readonly developmentArtifacts = new Map<
+    string,
+    PlatformAdminAssistantDevelopmentArtifactRecord[]
   >();
 
   constructor(
@@ -99,6 +107,17 @@ export class PlatformAdminAssistantService {
       ...plan,
       steps: plan.steps.map((step) => ({ ...step })),
     }));
+  }
+
+  listDevelopmentArtifacts(
+    sessionId: string,
+    identity: BootstrapRequestIdentity | null,
+  ) {
+    this.requireOwnedSession(sessionId, identity);
+
+    return (this.developmentArtifacts.get(sessionId) ?? []).map((artifact) =>
+      this.cloneDevelopmentArtifact(artifact),
+    );
   }
 
   async createMessage(
@@ -199,6 +218,61 @@ export class PlatformAdminAssistantService {
           }
         : null,
     };
+  }
+
+  async generateDevelopmentArtifacts(
+    sessionId: string,
+    identity: BootstrapRequestIdentity | null,
+    command: PlatformAdminAssistantDevelopmentArtifactCommand,
+  ): Promise<PlatformAdminAssistantDevelopmentArtifactRecord> {
+    const session = this.requireOwnedSession(sessionId, identity);
+
+    if (!command.requestTitle?.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ASSISTANT_DEV_REQUEST_TITLE_REQUIRED",
+        "Development artifact generation requires a request title.",
+      );
+    }
+
+    if (!command.requestedChange?.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ASSISTANT_DEV_REQUEST_CHANGE_REQUIRED",
+        "Development artifact generation requires a requested change description.",
+      );
+    }
+
+    if (!command.tasks?.length) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ASSISTANT_DEV_TASKS_REQUIRED",
+        "Development artifact generation requires at least one task brief definition.",
+      );
+    }
+
+    const artifactRecord =
+      await createPlatformAdminAssistantDevelopmentArtifacts({
+        actorId: session.actor.actorId,
+        sessionId,
+        command,
+      });
+
+    this.developmentArtifacts.set(sessionId, [
+      ...(this.developmentArtifacts.get(sessionId) ?? []),
+      artifactRecord,
+    ]);
+
+    this.sessions.set(sessionId, {
+      ...session,
+      updatedAt: artifactRecord.createdAt,
+      latestAnswerPreview: `Archived ${artifactRecord.files.length} development artifacts for ${artifactRecord.requestTitle}`.slice(
+        0,
+        160,
+      ),
+    });
+
+    return this.cloneDevelopmentArtifact(artifactRecord);
   }
 
   previewAction(
@@ -418,6 +492,24 @@ export class PlatformAdminAssistantService {
         "Explain the safest manual follow-up while the provider is degraded.",
       ],
       actionPlan: null,
+    };
+  }
+
+  private cloneDevelopmentArtifact(
+    artifact: PlatformAdminAssistantDevelopmentArtifactRecord,
+  ): PlatformAdminAssistantDevelopmentArtifactRecord {
+    return {
+      ...artifact,
+      files: artifact.files.map((file) => ({ ...file })),
+      citations: artifact.citations.map((citation) => ({ ...citation })),
+      tasks: artifact.tasks.map((task) => ({
+        ...task,
+        dependsOn: [...(task.dependsOn ?? [])],
+        artifacts: [...(task.artifacts ?? [])],
+        acceptance: [...(task.acceptance ?? [])],
+        guardrails: [...(task.guardrails ?? [])],
+        verification: [...(task.verification ?? [])],
+      })),
     };
   }
 

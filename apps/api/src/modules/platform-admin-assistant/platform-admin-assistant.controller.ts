@@ -6,6 +6,7 @@ import type { BootstrapRequestIdentity } from "../../common/auth";
 import { PlatformAdminAssistantService } from "./platform-admin-assistant.service";
 import type {
   CreatePlatformAdminAssistantMessageCommand,
+  PlatformAdminAssistantDevelopmentArtifactCommand,
   ExecutePlatformAdminAssistantActionCommand,
   PlatformAdminAssistantActionCommand,
   CreatePlatformAdminAssistantSessionCommand,
@@ -89,6 +90,40 @@ export class PlatformAdminAssistantController {
           identity,
         ),
       },
+      requestId,
+    );
+  }
+
+  @Get("sessions/:sessionId/development-artifacts")
+  listDevelopmentArtifacts(
+    @Param("sessionId") sessionId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      {
+        items: this.platformAdminAssistantService.listDevelopmentArtifacts(
+          sessionId,
+          identity,
+        ),
+      },
+      requestId,
+    );
+  }
+
+  @Post("sessions/:sessionId/development-artifacts")
+  async generateDevelopmentArtifacts(
+    @Param("sessionId") sessionId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: PlatformAdminAssistantDevelopmentArtifactCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.platformAdminAssistantService.generateDevelopmentArtifacts(
+        sessionId,
+        identity,
+        command,
+      ),
       requestId,
     );
   }

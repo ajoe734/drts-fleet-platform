@@ -30,6 +30,37 @@ export interface CreatePlatformAdminAssistantMessageCommand {
   message: string;
 }
 
+export interface PlatformAdminAssistantDevelopmentTaskCommand {
+  taskId: string;
+  title: string;
+  summary: string;
+  summaryZh?: string;
+  owner: string;
+  reviewer: string;
+  dependsOn?: string[];
+  artifacts?: string[];
+  acceptance?: string[];
+  guardrails?: string[];
+  verification?: string[];
+  status?: "backlog" | "todo";
+}
+
+export interface PlatformAdminAssistantDevelopmentArtifactCommand {
+  requestTitle: string;
+  requestedChange: string;
+  summary?: string;
+  problemStatement?: string;
+  currentContext?: string[];
+  affectedArtifacts?: string[];
+  dependencies?: string[];
+  acceptance?: string[];
+  guardrails?: string[];
+  planningRef?: string;
+  artifactSlug?: string;
+  citations?: PlatformAdminAssistantCitation[];
+  tasks: PlatformAdminAssistantDevelopmentTaskCommand[];
+}
+
 export type PlatformAdminAssistantActionToolName =
   | "action.create_platform_notice"
   | "action.set_maintenance_mode";
@@ -86,6 +117,31 @@ export interface PlatformAdminAssistantProviderResponse {
   citations: PlatformAdminAssistantCitation[];
   suggestedPrompts: string[];
   actionPlan: PlatformAdminAssistantActionPlan | null;
+}
+
+export type PlatformAdminAssistantDevelopmentArtifactKind =
+  | "system_analysis"
+  | "system_design"
+  | "task_brief";
+
+export interface PlatformAdminAssistantDevelopmentArtifactFile {
+  kind: PlatformAdminAssistantDevelopmentArtifactKind;
+  title: string;
+  path: string;
+  taskId?: string;
+}
+
+export interface PlatformAdminAssistantDevelopmentArtifactRecord {
+  artifactBundleId: string;
+  sessionId: string;
+  requestTitle: string;
+  summary: string;
+  createdAt: string;
+  actorId: string;
+  planningRef: string;
+  files: PlatformAdminAssistantDevelopmentArtifactFile[];
+  citations: PlatformAdminAssistantCitation[];
+  tasks: PlatformAdminAssistantDevelopmentTaskCommand[];
 }
 
 export interface PlatformAdminAssistantMessageRecord extends PlatformAdminAssistantProviderResponse {
