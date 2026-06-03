@@ -158,14 +158,6 @@ const routes: NavRoute[] = [
     en: "Payments",
   },
   {
-    key: "reimbursements",
-    href: "/payments/reimbursements",
-    icon: CreditCard,
-    section: "commerce",
-    zh: "代墊批次",
-    en: "Reimbursements",
-  },
-  {
     key: "adapter-registry",
     icon: ShieldCheck,
     section: "commerce",
@@ -221,7 +213,10 @@ function getActiveRoute(pathname: string): NavRoute {
   );
   if (matchedRoutes.length > 0) {
     return matchedRoutes.reduce((best, route) =>
-      route.href.length > best.href.length ? route : best,
+      PLATFORM_ADMIN_ROUTE_REGISTRY[route.key].href.length >
+      PLATFORM_ADMIN_ROUTE_REGISTRY[best.key].href.length
+        ? route
+        : best,
     );
   }
 
