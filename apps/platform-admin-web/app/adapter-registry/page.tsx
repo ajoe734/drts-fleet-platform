@@ -30,7 +30,7 @@ const pageBodyStyle = {
 const cardGridStyle = {
   display: "grid",
   gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
 } satisfies CSSProperties;
 
 const cardTitleStyle = {
@@ -44,7 +44,7 @@ const metaRowStyle = {
   display: "flex",
   flexWrap: "wrap",
   gap: 6,
-  marginTop: 10,
+  marginTop: 12,
   alignItems: "center",
 } satisfies CSSProperties;
 
@@ -56,11 +56,31 @@ const actionSectionStyle = {
   gap: 10,
 } satisfies CSSProperties;
 
-const descriptionStyle = {
-  margin: "10px 0 0",
+const sourceRowStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  marginTop: 12,
+} satisfies CSSProperties;
+
+const sourceLabelStyle = {
+  margin: 0,
+  color: theme.text,
+  fontSize: 13,
+  fontWeight: 600,
+} satisfies CSSProperties;
+
+const sourceMetaStyle = {
+  margin: 0,
   color: theme.textMuted,
-  fontSize: 12.5,
+  fontSize: 12,
   lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const sourceSummaryStyle = {
+  display: "grid",
+  gap: 2,
 } satisfies CSSProperties;
 
 const sectionLabelStyle = {
@@ -74,7 +94,7 @@ const sectionLabelStyle = {
 
 const authorityGroupStyle = {
   display: "grid",
-  gap: 8,
+  gap: 6,
 } satisfies CSSProperties;
 
 const authorityMetaStyle = {
@@ -93,7 +113,7 @@ const actionRowStyle = {
 const authorityGridStyle = {
   display: "grid",
   gap: 10,
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
 } satisfies CSSProperties;
 
 const helperTextStyle = {
@@ -104,7 +124,8 @@ const helperTextStyle = {
 } satisfies CSSProperties;
 
 const authorityDividerStyle = {
-  height: 1,
+  width: 1,
+  justifySelf: "stretch",
   background: theme.border,
 } satisfies CSSProperties;
 
@@ -179,6 +200,7 @@ type Copy = {
   kindValue: (adapter: PlatformAdapter) => string;
   adapterTitle: (adapter: PlatformAdapter) => string;
   sourceStatus: (adapter: PlatformAdapter) => string;
+  sourceName: (adapter: PlatformAdapter) => string;
   authorityPa: string;
   authorityOps: string;
   editCredential: string;
@@ -353,11 +375,11 @@ export default function AdapterRegistryPage() {
               "Adapter registry data is temporarily unavailable. Check the Platform Admin adapter API and retry this page.",
             bannerFallbackTitle: "Credential rotation review remains active",
             bannerFallbackBody:
-              "No immediate expiry alert is active, but registration and credential rotation remain governed high-risk actions on this route.",
+              "No immediate expiry alert is active, but token rotation remains a governed high-risk action on this route.",
             bannerTitle: (adapter) =>
-              `${adapter.platformCode.toLowerCase()} requires credential review`,
+              `${adapter.platformCode.toLowerCase()} token expiry review required`,
             bannerBody: (adapter) =>
-              `${adapter.name} is ${formatPlatformCodeLabel(locale, adapter.credentialStatus).toLowerCase()} with ${adapter.healthStatus.status.toLowerCase()} health. Review and rotate before production impact expands.`,
+              `${adapter.name} is ${formatPlatformCodeLabel(locale, adapter.credentialStatus).toLowerCase()} with ${adapter.healthStatus.status.toLowerCase()} health. Review token rotation before production traffic is impacted.`,
             rotateNow: "Rotate now",
             statusHealthy: "healthy",
             statusDegraded: "degraded",
@@ -378,6 +400,7 @@ export default function AdapterRegistryPage() {
               adapter.isForwarded
                 ? "forwarded source"
                 : "platform-owned source",
+            sourceName: (adapter) => adapter.name,
             authorityPa: "Platform Admin authority",
             authorityOps: "Ops authority",
             editCredential: "Edit credential",
@@ -414,11 +437,11 @@ export default function AdapterRegistryPage() {
               "Adapter registry 資料暫時不可用，請檢查 Platform Admin adapter API 後再重新整理。",
             bannerFallbackTitle: "Credential rotation review 仍在治理中",
             bannerFallbackBody:
-              "目前沒有即將到期的 credential 警報，但註冊與 credential 輪替仍是這個 route 的高風險治理動作。",
+              "目前沒有即將到期的 credential 警報，但 token 輪替仍是這個 route 的高風險治理動作。",
             bannerTitle: (adapter) =>
-              `${adapter.platformCode.toLowerCase()} 需要 credential 治理檢查`,
+              `${adapter.platformCode.toLowerCase()} 需要 token 到期治理檢查`,
             bannerBody: (adapter) =>
-              `${adapter.name} 目前 credential 為 ${formatPlatformCodeLabel(locale, adapter.credentialStatus)}，健康狀態為 ${adapter.healthStatus.status.toLowerCase()}。請在 production 受影響前完成治理檢查與輪替。`,
+              `${adapter.name} 目前 credential 為 ${formatPlatformCodeLabel(locale, adapter.credentialStatus)}，健康狀態為 ${adapter.healthStatus.status.toLowerCase()}。請在 production 受影響前完成 token 治理檢查與輪替。`,
             rotateNow: "立即輪替",
             statusHealthy: "healthy",
             statusDegraded: "degraded",
@@ -439,6 +462,7 @@ export default function AdapterRegistryPage() {
               adapter.isForwarded
                 ? "forwarded source"
                 : "platform-owned source",
+            sourceName: (adapter) => adapter.name,
             authorityPa: "Platform Admin authority",
             authorityOps: "Ops authority",
             editCredential: "編輯 credential",
@@ -685,12 +709,13 @@ export default function AdapterRegistryPage() {
                     ]}
                   />
 
-                  <p style={descriptionStyle}>{adapter.description}</p>
-
-                  <div style={metaRowStyle}>
-                    <CanvasPill theme={theme} tone="neutral">
-                      {copy.sourceStatus(adapter)}
-                    </CanvasPill>
+                  <div style={sourceRowStyle}>
+                    <div style={sourceSummaryStyle}>
+                      <p style={sourceLabelStyle}>{copy.sourceName(adapter)}</p>
+                      <p style={sourceMetaStyle}>
+                        {copy.sourceStatus(adapter)}
+                      </p>
+                    </div>
                     <CanvasPill
                       theme={theme}
                       tone={credentialTone(adapter.credentialStatus)}
@@ -700,6 +725,9 @@ export default function AdapterRegistryPage() {
                         adapter.credentialStatus,
                       )}
                     </CanvasPill>
+                  </div>
+
+                  <div style={metaRowStyle}>
                     <CanvasPill
                       theme={theme}
                       tone={financeTone(adapter.policies.financeAuthorityMode)}
@@ -736,13 +764,11 @@ export default function AdapterRegistryPage() {
                     <div style={authorityGridStyle}>
                       <div style={authorityGroupStyle}>
                         <p style={sectionLabelStyle}>{copy.authorityPa}</p>
-                        <p style={authorityMetaStyle}>
-                          {copy.governedActionInfo}
-                        </p>
                         <div style={actionRowStyle}>
                           <CanvasBtn
                             theme={theme}
                             size="xs"
+                            variant="secondary"
                             icon="apiKeys"
                             onClick={() =>
                               queueGovernedAction(copy.editCredential, adapter)
@@ -753,6 +779,7 @@ export default function AdapterRegistryPage() {
                           <CanvasBtn
                             theme={theme}
                             size="xs"
+                            variant="secondary"
                             icon="refresh"
                             onClick={() =>
                               queueGovernedAction(
@@ -766,6 +793,7 @@ export default function AdapterRegistryPage() {
                           <CanvasBtn
                             theme={theme}
                             size="xs"
+                            variant="secondary"
                             danger={adapter.config.isEnabled}
                             disabled={pendingId === adapter.id}
                             onClick={() => void toggleEnabled(adapter)}
@@ -775,6 +803,9 @@ export default function AdapterRegistryPage() {
                               : copy.enableAdapter}
                           </CanvasBtn>
                         </div>
+                        <p style={authorityMetaStyle}>
+                          {copy.governedActionInfo}
+                        </p>
                         <p style={helperTextStyle}>
                           {adapter.version} ·{" "}
                           {formatPlatformCodeLabel(locale, adapter.environment)}
@@ -785,11 +816,11 @@ export default function AdapterRegistryPage() {
 
                       <div style={authorityGroupStyle}>
                         <p style={sectionLabelStyle}>{copy.authorityOps}</p>
-                        <p style={authorityMetaStyle}>{copy.opsActionInfo}</p>
                         <div style={actionRowStyle}>
                           <CanvasBtn
                             theme={theme}
                             size="xs"
+                            variant="ghost"
                             disabled={!opsPauseSupported}
                             onClick={() =>
                               opsPauseSupported
@@ -800,6 +831,7 @@ export default function AdapterRegistryPage() {
                             {copy.pauseTraffic}
                           </CanvasBtn>
                         </div>
+                        <p style={authorityMetaStyle}>{copy.opsActionInfo}</p>
                         <p style={helperTextStyle}>
                           {adapter.healthStatus.message ??
                             copy.metricOrdersPending}
