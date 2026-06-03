@@ -68,3 +68,15 @@ docs/03-runbooks/local-development.local.md
 # root cause of the 2026-05-26 canonical-root task-visibility incident).
 /ai-status.json
 /current-work.md
+
+# Dotted runtime variants of the above — the supervisor now writes hidden
+# (leading-dot) status/activity files plus their atomic .tmp and flock .lock
+# siblings; the non-dotted rules above don't match these, so they leaked into
+# `git status`. Ignore the whole families.
+.ai-status.json
+.ai-status.json.*
+.ai-activity-log.jsonl
+.ai-activity-log.jsonl.*
+.orchestrator/.event-queue.jsonl
+.orchestrator/.event-queue.jsonl.*
+.orchestrator/*.lock
