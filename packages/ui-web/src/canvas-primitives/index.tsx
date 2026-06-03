@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import {
   buildCanvasTheme,
+  type CanvasDensity,
   type CanvasTheme,
   type CanvasTone,
 } from "../canvas-tokens";
@@ -84,6 +85,10 @@ function renderIcon(
   return icon;
 }
 
+function densityGap(density: CanvasDensity, compact: string, comfy: string) {
+  return density === "compact" ? compact : comfy;
+}
+
 export interface ShellNavItem {
   key?: string;
   href?: string;
@@ -93,6 +98,91 @@ export interface ShellNavItem {
   badgeTone?: CanvasTone;
   divider?: string;
   matchPaths?: string[];
+}
+
+export interface EmptyStateProps {
+  theme?: CanvasTheme;
+  title: ReactNode;
+  description?: ReactNode;
+  tone?: CanvasTone;
+  density?: CanvasDensity;
+  actions?: ReactNode;
+  icon?: CanvasIconName | ReactNode;
+  style?: CSSProperties;
+}
+
+export function EmptyState({
+  theme: providedTheme,
+  title,
+  description,
+  tone = "neutral",
+  density,
+  actions,
+  icon,
+  style,
+}: EmptyStateProps) {
+  const theme = resolveTheme(providedTheme);
+  const resolvedDensity = density ?? theme.density;
+  const toneStyle = toneStyles(theme, tone);
+
+  return (
+    <div
+      role="status"
+      style={{
+        padding: resolvedDensity === "compact" ? "16px" : "20px",
+        borderRadius: 16,
+        border: `1px dashed ${toneStyle.bd}`,
+        background: toneStyle.bg,
+        color: theme.text,
+        display: "grid",
+        justifyItems: "center",
+        textAlign: "center",
+        gap: densityGap(resolvedDensity, "8px", "10px"),
+        ...style,
+      }}
+    >
+      {icon ? (
+        <span
+          aria-hidden
+          style={{ color: toneStyle.fg, display: "inline-flex" }}
+        >
+          {renderIcon(icon, resolvedDensity === "compact" ? 18 : 20, 1.8)}
+        </span>
+      ) : null}
+      <strong
+        style={{
+          color: theme.text,
+          fontSize: resolvedDensity === "compact" ? 13.5 : 14,
+        }}
+      >
+        {title}
+      </strong>
+      {description ? (
+        <span
+          style={{
+            color: theme.textMuted,
+            fontSize: resolvedDensity === "compact" ? 12.5 : 13,
+            lineHeight: 1.5,
+            maxWidth: 480,
+          }}
+        >
+          {description}
+        </span>
+      ) : null}
+      {actions ? (
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "8px",
+            justifyContent: "center",
+          }}
+        >
+          {actions}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export interface ShellProps {

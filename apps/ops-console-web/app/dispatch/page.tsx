@@ -25,10 +25,10 @@ import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
+  CanvasEmptyState,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
-  WorkflowEmptyState,
   buildCanvasTheme,
   type CanvasTableColumn,
 } from "@drts/ui-web";
@@ -1149,12 +1149,6 @@ function renderEmptyState(
     emptyState.reason in mapping ? emptyState.reason : "no_data"
   ) as keyof typeof mapping;
   const content: (typeof mapping)[keyof typeof mapping] = mapping[contentKey]!;
-  const tone =
-    content.tone === "danger"
-      ? "danger"
-      : content.tone === "warn"
-        ? "warning"
-        : content.tone;
   const nextAction = emptyState.nextAction
     ? buildEmptyStateActionContext(
         board,
@@ -1165,8 +1159,9 @@ function renderEmptyState(
       )
     : null;
   return (
-    <WorkflowEmptyState
-      tone={tone}
+    <CanvasEmptyState
+      theme={theme}
+      tone={content.tone}
       density="compact"
       title={content.title}
       description={`${content.description} ${
@@ -1454,7 +1449,8 @@ function renderBoardSignalBanner({
 function renderActionList(actions: BoardActionContext[], locale: Locale) {
   if (actions.length === 0) {
     return (
-      <WorkflowEmptyState
+      <CanvasEmptyState
+        theme={theme}
         density="compact"
         title={locale === "zh" ? "目前沒有可用動作" : "No available actions"}
         description={
@@ -2629,7 +2625,8 @@ export default async function DispatchPage({
                       {renderActionList(selectedActions, locale)}
                     </>
                   ) : (
-                    <WorkflowEmptyState
+                    <CanvasEmptyState
+                      theme={theme}
                       density="compact"
                       title={zh ? "沒有焦點 work item" : "No focused work item"}
                       description={

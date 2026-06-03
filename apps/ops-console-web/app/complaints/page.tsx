@@ -29,7 +29,6 @@ import type {
   ComplaintCategory,
   ComplaintExportViewRecord,
   ComplaintResolutionCode,
-  ComplaintTimelineEntry,
   CreateComplaintCaseCommand,
   EscalateComplaintToIncidentCommand,
   EmptyReason,
@@ -458,7 +457,6 @@ export default function ComplaintsPage() {
       : tx(locale, "Unknown error", "未知錯誤");
 
   const [records, setRecords] = useState<ComplaintCaseUiRecord[]>([]);
-  const [timeline, setTimeline] = useState<ComplaintTimelineEntry[]>([]);
   const [exportView, setExportView] =
     useState<ComplaintExportViewRecord | null>(null);
   const [selectedCaseNo, setSelectedCaseNo] = useState<string | null>(null);
@@ -593,10 +591,9 @@ export default function ComplaintsPage() {
     return () => clearInterval(id);
   }, []);
 
-  // selected-case timeline + export view
+  // selected-case export view
   useEffect(() => {
     if (!selectedCaseNo) {
-      setTimeline([]);
       setExportView(null);
       return;
     }
@@ -604,14 +601,11 @@ export default function ComplaintsPage() {
     void (async () => {
       try {
         const client = getOpsClient();
-        const [nextTimeline, nextExportView] = await Promise.all([
-          client.getComplaintTimeline(selectedCaseNo),
-          client.getComplaintExportView(selectedCaseNo),
-        ]);
+        const nextExportView =
+          await client.getComplaintExportView(selectedCaseNo);
         if (cancelled) {
           return;
         }
-        setTimeline(nextTimeline);
         setExportView(nextExportView);
       } catch (nextError) {
         if (!cancelled) {
@@ -1709,48 +1703,6 @@ export default function ComplaintsPage() {
                     `產生於 ${formatDateTime(exportView?.exportGeneratedAt)}`,
                   )}
                 />
-              </Card>
-
-              <Card theme={theme} title={tx(locale, "Timeline", "時間軸")}>
-                {timeline.length > 0 ? (
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                    }}
-                  >
-                    {timeline.map((entry) => (
-                      <div
-                        key={entry.entryId}
-                        style={{
-                          borderLeft: `2px solid ${theme.accent}`,
-                          paddingLeft: 10,
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 600,
-                            color: theme.text,
-                          }}
-                        >
-                          {formatOpsCodeLabel(locale, entry.action)}
-                        </div>
-                        <div style={{ fontSize: 12, color: theme.textMuted }}>
-                          {entry.note}
-                        </div>
-                        <div style={{ fontSize: 10.5, color: theme.textDim }}>
-                          {formatDateTime(entry.createdAt)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p style={{ margin: 0, color: theme.textDim, fontSize: 12 }}>
-                    {tx(locale, "No timeline entries.", "尚無時間軸紀錄。")}
-                  </p>
-                )}
               </Card>
             </div>
           </div>

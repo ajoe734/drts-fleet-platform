@@ -20,7 +20,14 @@ import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { Badge, Card, CardBody, CardHeader } from "@drts/ui-web";
+import {
+  Badge,
+  CanvasEmptyState,
+  buildCanvasTheme,
+  Card,
+  CardBody,
+  CardHeader,
+} from "@drts/ui-web";
 
 type ForwardedFilter =
   | "all"
@@ -80,6 +87,12 @@ const COMMON_NATIVE_STATUS_OPTIONS = [
   "taken",
   "cancelled",
 ];
+
+const canvasTheme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
 
 function sortOrders(orders: ForwardedOrderRecord[]) {
   return [...orders].sort((left, right) =>
@@ -1216,13 +1229,14 @@ export function ForwardedOrderBoard({
                   <tr>
                     <td
                       colSpan={8}
-                      style={{
-                        padding: "24px 16px",
-                        textAlign: "center",
-                        color: "#64748b",
-                      }}
+                      style={{ padding: "20px 16px" }}
                     >
-                      {t("dispatch.forwarded.empty")}
+                      <CanvasEmptyState
+                        theme={canvasTheme}
+                        density="compact"
+                        title={t("dispatch.forwarded.empty")}
+                        icon="search"
+                      />
                     </td>
                   </tr>
                 )}
@@ -1756,9 +1770,12 @@ export function ForwardedOrderBoard({
                 )}
               </>
             ) : (
-              <div style={{ color: "#64748b", fontSize: "13px" }}>
-                {t("dispatch.forwarded.detail.selectHint")}
-              </div>
+              <CanvasEmptyState
+                theme={canvasTheme}
+                density="compact"
+                title={t("dispatch.forwarded.detail.selectHint")}
+                icon="arrow"
+              />
             )}
           </CardBody>
         </Card>
@@ -1841,13 +1858,14 @@ export function ForwardedOrderBoard({
                   <tr>
                     <td
                       colSpan={4}
-                      style={{
-                        padding: "20px 16px",
-                        textAlign: "center",
-                        color: "#64748b",
-                      }}
+                      style={{ padding: "20px 16px" }}
                     >
-                      {t("dispatch.forwarded.health.empty")}
+                      <CanvasEmptyState
+                        theme={canvasTheme}
+                        density="compact"
+                        title={t("dispatch.forwarded.health.empty")}
+                        icon="warn"
+                      />
                     </td>
                   </tr>
                 )}
@@ -1954,13 +1972,14 @@ export function ForwardedOrderBoard({
                   <tr>
                     <td
                       colSpan={4}
-                      style={{
-                        padding: "20px 16px",
-                        textAlign: "center",
-                        color: "#64748b",
-                      }}
+                      style={{ padding: "20px 16px" }}
                     >
-                      {t("dispatch.forwarded.reconciliation.empty")}
+                      <CanvasEmptyState
+                        theme={canvasTheme}
+                        density="compact"
+                        title={t("dispatch.forwarded.reconciliation.empty")}
+                        icon="check"
+                      />
                     </td>
                   </tr>
                 )}
