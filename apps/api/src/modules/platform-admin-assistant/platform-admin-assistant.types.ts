@@ -1,3 +1,4 @@
+import type { LlmGatewayProvider } from "../../common/llm-gateway";
 import type {
   ActionReceipt,
   CreatePlatformNoticeCommand,
@@ -6,8 +7,7 @@ import type {
 } from "@drts/contracts";
 
 import type { RetrievalResult } from "./knowledge";
-
-export type PlatformAdminAssistantProviderKind = "mock";
+export type PlatformAdminAssistantProviderKind = LlmGatewayProvider;
 
 export const PLATFORM_ADMIN_ASSISTANT_PROVIDER =
   "PLATFORM_ADMIN_ASSISTANT_PROVIDER";
