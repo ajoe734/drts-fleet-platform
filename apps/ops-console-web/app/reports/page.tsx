@@ -331,6 +331,21 @@ function artifactExpired(job: Pick<ReportJobRecord, "status" | "artifact">) {
   return job.status === "expired" || isExpired(job.artifact?.expiresAt);
 }
 
+function artifactDownloadUrl(
+  artifact: ReportJobRecord["artifact"] | null | undefined,
+) {
+  if (!artifact || typeof artifact !== "object") {
+    return null;
+  }
+
+  const downloadMetadata = (
+    artifact as { downloadMetadata?: { downloadUrl?: unknown } }
+  ).downloadMetadata;
+  return typeof downloadMetadata?.downloadUrl === "string"
+    ? downloadMetadata.downloadUrl
+    : null;
+}
+
 function jobDownloadDescriptor(
   job: Pick<ReportJobRecord, "status" | "artifact">,
 ): ResourceActionDescriptor | null {
@@ -341,11 +356,7 @@ function jobDownloadDescriptor(
   const expired = artifactExpired(job);
   const enabled =
     job.status === "completed" &&
-    Boolean(
-      job.artifact &&
-        "downloadMetadata" in job.artifact &&
-        job.artifact.downloadMetadata.downloadUrl,
-    ) &&
+    Boolean(artifactDownloadUrl(job.artifact)) &&
     !expired;
 
   let disabledReasonCode: string | undefined;
@@ -484,6 +495,8 @@ function ActionButton({
   }
 
   const disabledReason = actionDisabledReasonLabel(locale, descriptor);
+  const interactiveProps =
+    descriptor.enabled && !busy ? { onClick: onInvoke } : {};
 
   return (
     <CanvasBtn
@@ -492,7 +505,7 @@ function ActionButton({
       variant={variant}
       disabled={!descriptor.enabled || busy}
       {...(icon ? { icon } : {})}
-      onClick={descriptor.enabled && !busy ? onInvoke : undefined}
+      {...interactiveProps}
     >
       {label}
       {!descriptor.enabled && disabledReason ? ` (${disabledReason})` : ""}
@@ -535,10 +548,7 @@ function ReportJobComposerModal({
 }) {
   return (
     <div style={modalBackdropStyle} onClick={onCancel}>
-      <div
-        style={modalFrameStyle}
-        onClick={(event) => event.stopPropagation()}
-      >
+      <div style={modalFrameStyle} onClick={(event) => event.stopPropagation()}>
         <CanvasCard
           theme={th}
           title={copyText(locale, "Create report job", "建立報表任務")}
@@ -605,11 +615,7 @@ function ReportJobComposerModal({
             <CanvasField
               theme={th}
               label={copyText(locale, "Period", "期別")}
-              hint={copyText(
-                locale,
-                "Example: 2026-05",
-                "例如：2026-05",
-              )}
+              hint={copyText(locale, "Example: 2026-05", "例如：2026-05")}
             >
               <input
                 value={periodLabel}
@@ -646,7 +652,12 @@ function ReportJobComposerModal({
               )}
             </div>
             <div style={actionRowStyle}>
-              <CanvasBtn theme={th} size="sm" onClick={onCancel} disabled={pending}>
+              <CanvasBtn
+                theme={th}
+                size="sm"
+                onClick={onCancel}
+                disabled={pending}
+              >
                 {copyText(locale, "Cancel", "取消")}
               </CanvasBtn>
               <CanvasBtn
@@ -756,7 +767,7 @@ export default function ReportsPage() {
       const detail = await getOpsClient().getReportJob(jobId);
       setSelectedJobId(jobId);
       setJobDetail(detail);
-      openDownload(detail.artifact?.downloadMetadata.downloadUrl);
+      openDownload(artifactDownloadUrl(detail.artifact));
     } catch (e) {
       setError(e instanceof Error ? e.message : t("common.unknown"));
     } finally {
@@ -1467,14 +1478,18 @@ export default function ReportsPage() {
                       label={t("reports.detail.openSignedArtifact")}
                       icon="ext"
                       onInvoke={() =>
-                        openDownload(jobDetail.artifact?.downloadMetadata.downloadUrl)
+                        openDownload(artifactDownloadUrl(jobDetail.artifact))
                       }
                     />
                     <ActionButton
                       descriptor={jobRetryDescriptor(jobDetail)}
                       locale={locale}
                       busy={pending}
-                      label={copyText(locale, "Retry report job", "重試報表工作")}
+                      label={copyText(
+                        locale,
+                        "Retry report job",
+                        "重試報表工作",
+                      )}
                       icon="arrow"
                       onInvoke={() => retryReportJob(jobDetail)}
                     />
