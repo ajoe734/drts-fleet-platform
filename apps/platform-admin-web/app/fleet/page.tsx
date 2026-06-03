@@ -30,10 +30,8 @@ import {
   CanvasIcon,
   CanvasPageHeader,
   CanvasPill,
-  CanvasShell,
   CanvasTable,
   buildCanvasTheme,
-  type CanvasShellNavItem,
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -228,111 +226,6 @@ const stepperRowStyle: CSSProperties = {
   alignItems: "center",
   padding: "6px 0",
 };
-
-function buildPlatformNav(locale: string): CanvasShellNavItem[] {
-  const labels =
-    locale === "en"
-      ? {
-          workspace: "Workspace",
-          home: "Governance Home",
-          health: "Platform Health",
-          tenantGov: "Tenant Governance",
-          tenants: "Tenants",
-          partners: "Partner entry",
-          users: "Platform staff",
-          fleetGov: "Fleet & Compliance",
-          fleet: "Fleet & compliance",
-          pricingGov: "Platform & Commerce",
-          pricing: "Pricing",
-          payments: "Settlement governance",
-          platformLayer: "Platform Ops & Risk",
-          switchboard: "Public info & placards",
-          notices: "Notices & maintenance",
-          audit: "Audit & evidence",
-          flags: "Feature flags",
-        }
-      : {
-          workspace: "工作面",
-          home: "工作首頁",
-          health: "平台健康",
-          tenantGov: "租戶治理",
-          tenants: "租戶",
-          partners: "合作夥伴 entry",
-          users: "平台人員",
-          fleetGov: "車隊與法遵",
-          fleet: "車隊與合規",
-          pricingGov: "平台與商務",
-          pricing: "費率治理",
-          payments: "結算治理",
-          platformLayer: "平台維運",
-          switchboard: "公開資訊與牌貼",
-          notices: "公告與維護",
-          audit: "稽核與證據",
-          flags: "功能旗標",
-        };
-
-  return [
-    { divider: labels.workspace },
-    { key: "home", href: "/", icon: "home", label: labels.home },
-    {
-      key: "health",
-      href: "/health",
-      icon: "health",
-      label: labels.health,
-      badge: "2",
-      badgeTone: "warn",
-    },
-    { divider: labels.tenantGov },
-    {
-      key: "tenants",
-      href: "/tenants",
-      icon: "tenants",
-      label: labels.tenants,
-    },
-    {
-      key: "partners",
-      href: "/partners",
-      icon: "partners",
-      label: labels.partners,
-    },
-    { key: "users", href: "/users", icon: "users", label: labels.users },
-    { divider: labels.fleetGov },
-    { key: "fleet", href: "/fleet", icon: "fleet", label: labels.fleet },
-    {
-      key: "switchboard",
-      href: "/switchboard",
-      icon: "switchboard",
-      label: labels.switchboard,
-    },
-    { divider: labels.pricingGov },
-    {
-      key: "pricing",
-      href: "/pricing",
-      icon: "pricing",
-      label: labels.pricing,
-    },
-    {
-      key: "payments",
-      href: "/payments",
-      icon: "payments",
-      label: labels.payments,
-    },
-    { divider: labels.platformLayer },
-    {
-      key: "notices",
-      href: "/notices",
-      icon: "notices",
-      label: labels.notices,
-    },
-    { key: "audit", href: "/audit", icon: "audit", label: labels.audit },
-    {
-      key: "flags",
-      href: "/feature-flags",
-      icon: "flags",
-      label: labels.flags,
-    },
-  ];
-}
 
 function opsHref(route: string) {
   return OPS_CONSOLE_ORIGIN ? `${OPS_CONSOLE_ORIGIN}${route}` : route;
@@ -1712,25 +1605,7 @@ export default function FleetPage() {
   );
 
   return (
-    <CanvasShell
-      theme={theme}
-      nav={buildPlatformNav(locale)}
-      active="fleet"
-      currentPath="/fleet"
-      breadcrumb={[
-        locale === "en" ? "People & Fleet" : "人員與車隊",
-        locale === "en" ? "Fleet & Compliance" : "車隊與法遵",
-      ]}
-      env="production"
-      versionLabel="canvas"
-      searchPlaceholder={
-        locale === "en"
-          ? "Search vehicles, drivers, audit..."
-          : "搜尋車輛、司機、稽核..."
-      }
-      avatarLabel={locale === "en" ? "FG" : "法遵"}
-      style={{ height: "100%" }}
-    >
+    <>
       <CanvasPageHeader
         theme={theme}
         title={
@@ -1953,6 +1828,6 @@ export default function FleetPage() {
           )}
         </CanvasCard>
       </div>
-    </CanvasShell>
+    </>
   );
 }
