@@ -26,6 +26,7 @@ import {
   resolveAssistantActionHref,
   type AssistantAction,
 } from "./assistant-actions";
+import { buildTier0HelpResult, buildTier1ScopedResult } from "./help-search";
 import type { AssistantActionReceipt } from "./context-envelope";
 
 type DockSide = "free" | "left" | "right";
@@ -73,6 +74,7 @@ const MOVE_STEP = 24;
 const RESIZE_STEP = 24;
 const STREAM_TICK_MS = 42;
 const STREAM_PAUSE_MS = 1500;
+const FORCE_DEGRADED_KEY = "ops-console.assistant.force-degraded";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -196,6 +198,20 @@ function writeStoredState(state: WidgetState) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function isAssistantEnabled() {
+  return process.env.NEXT_PUBLIC_OPS_ASSISTANT_ENABLED !== "false";
+}
+
+function isForcedDegraded() {
+  if (typeof window === "undefined") {
+    return process.env.NEXT_PUBLIC_OPS_ASSISTANT_DEGRADED === "true";
+  }
+  return (
+    process.env.NEXT_PUBLIC_OPS_ASSISTANT_DEGRADED === "true" ||
+    window.localStorage.getItem(FORCE_DEGRADED_KEY) === "true"
+  );
+}
+
 function ActionButton({
   label,
   icon,
@@ -237,6 +253,10 @@ function ActionButton({
 }
 
 export function OpsAssistantWidget() {
+  if (!isAssistantEnabled()) {
+    return null;
+  }
+
   const router = useRouter();
   const context = useOpsAssistantContext();
   const actionBridge = useOpsAssistantActionBridge();
@@ -263,6 +283,7 @@ export function OpsAssistantWidget() {
   const [pendingIntent, setPendingIntent] = useState<ActionIntent | null>(null);
   const [isProposing, setIsProposing] = useState(false);
   const [isExecutingIntent, setIsExecutingIntent] = useState(false);
+  const [draft, setDraft] = useState("");
   const actions = useMemo(() => buildAssistantActions(context), [context]);
 
   const activeMessage = STREAM_MESSAGES[stream.activeIndex] ?? "";
@@ -574,6 +595,51 @@ export function OpsAssistantWidget() {
       : "No enabled alternatives.";
   };
 
+  const handleSubmitPrompt = () => {
+    const query = draft.trim();
+    if (!query) {
+      return;
+    }
+
+    appendConversation({
+      id: `${Date.now()}-operator-query`,
+      author: "operator",
+      tone: "neutral",
+      message: query,
+    });
+
+    const scoped = buildTier1ScopedResult(context, actionBridge);
+    const lowerQuery = query.toLowerCase();
+    const wantsScopedAnswer =
+      /scope|selected|current|available|action|actions|can i|what can/i.test(
+        lowerQuery,
+      );
+
+    if (wantsScopedAnswer && scoped) {
+      appendConversation({
+        id: `${Date.now()}-scoped-answer`,
+        author: "assistant",
+        tone: "accent",
+        message: scoped.message,
+        meta: scoped.meta,
+      });
+      setDraft("");
+      return;
+    }
+
+    const help = buildTier0HelpResult(query);
+    appendConversation({
+      id: `${Date.now()}-tier0-answer`,
+      author: "assistant",
+      tone: isForcedDegraded() ? "neutral" : "accent",
+      message: isForcedDegraded()
+        ? `LLM degraded. Showing curated help-search fallback.\n\n${help.message}`
+        : help.message,
+      meta: help.meta,
+    });
+    setDraft("");
+  };
+
   async function handleProposeAction(action: ResourceActionDescriptor) {
     if (!actionBridge || isProposing) {
       return;
@@ -725,6 +791,7 @@ export function OpsAssistantWidget() {
       {widget.closed ? (
         <button
           type="button"
+          data-testid="ops-assistant-launcher"
           aria-label="Open operations assistant"
           onClick={() =>
             setWidget((current) => ({ ...current, closed: false }))
@@ -753,6 +820,7 @@ export function OpsAssistantWidget() {
       ) : null}
 
       <section
+        data-testid="ops-assistant-panel"
         role="region"
         aria-labelledby={titleId}
         aria-describedby={instructionsId}
@@ -760,6 +828,7 @@ export function OpsAssistantWidget() {
         style={shellStyle}
       >
         <div
+          data-testid="ops-assistant-drag-handle"
           tabIndex={0}
           onPointerDown={onDragPointerDown}
           onKeyDown={onHeaderKeyDown}
@@ -930,6 +999,7 @@ export function OpsAssistantWidget() {
                         <button
                           key={`assistant-action:${action.action}`}
                           type="button"
+                          data-testid={`ops-assistant-action-${action.action}`}
                           disabled={isProposing || isExecutingIntent}
                           onClick={() => void handleProposeAction(action)}
                           style={actionButtonStyle}
@@ -1002,6 +1072,7 @@ export function OpsAssistantWidget() {
                         >
                           <button
                             type="button"
+                            data-testid="ops-assistant-open-confirmation"
                             disabled={isExecutingIntent}
                             onClick={() => void handleExecuteIntent()}
                             style={primaryAssistButtonStyle}
@@ -1060,6 +1131,42 @@ export function OpsAssistantWidget() {
                     gap: 8,
                   }}
                 >
+                  <label
+                    htmlFor="ops-assistant-composer"
+                    style={{ fontSize: 11, color: theme.textDim }}
+                  >
+                    Ask assistant
+                  </label>
+                  <textarea
+                    id="ops-assistant-composer"
+                    data-testid="ops-assistant-composer"
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    placeholder="Ask about refresh tiers, current scope, or available actions"
+                    rows={3}
+                    style={{
+                      width: "100%",
+                      resize: "vertical",
+                      borderRadius: 10,
+                      border: `1px solid ${theme.border}`,
+                      background: theme.surfaceLo,
+                      color: theme.text,
+                      padding: "10px 12px",
+                      font: "inherit",
+                      lineHeight: 1.45,
+                      boxSizing: "border-box",
+                    }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      data-testid="ops-assistant-send"
+                      onClick={handleSubmitPrompt}
+                      style={primaryAssistButtonStyle}
+                    >
+                      Ask
+                    </button>
+                  </div>
                   {actions.length > 0 ? (
                     actions.map((action) => (
                       <button
@@ -1231,6 +1338,7 @@ export function OpsAssistantWidget() {
               </div>
               <button
                 type="button"
+                data-testid="ops-assistant-resize-handle"
                 aria-label="Resize assistant widget"
                 onPointerDown={onResizePointerDown}
                 onKeyDown={onResizeKeyDown}
@@ -1272,6 +1380,7 @@ export function OpsAssistantWidget() {
             <span>Minimized. Expand to resume the live mock stream.</span>
             <button
               type="button"
+              data-testid="ops-assistant-restore"
               aria-label="Restore assistant widget"
               onClick={() =>
                 setWidget((current) => ({ ...current, minimized: false }))
