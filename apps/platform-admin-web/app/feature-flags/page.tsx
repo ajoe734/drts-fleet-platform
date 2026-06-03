@@ -85,6 +85,19 @@ type FlagTableRow = {
   updatedBy: string;
 } & Record<string, unknown>;
 
+type RolloutFilter =
+  | "all"
+  | "mid_rollout"
+  | "rolled_out"
+  | "deprecated"
+  | "tenant_overrides";
+
+type RolloutFilterOption = {
+  value: RolloutFilter;
+  label: string;
+  count: number;
+};
+
 const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
@@ -131,10 +144,44 @@ const toolbarStyle = {
 const toolbarMetaStyle = {
   display: "flex",
   flexWrap: "wrap",
-  justifyContent: "flex-end",
+  justifyContent: "space-between",
   alignItems: "center",
   gap: 8,
-  minHeight: 38,
+  minHeight: 32,
+} satisfies CSSProperties;
+
+const filterRowStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 8,
+} satisfies CSSProperties;
+
+const filterButtonStyle = {
+  appearance: "none",
+  border: 0,
+  padding: 0,
+  margin: 0,
+  background: "transparent",
+  cursor: "pointer",
+} satisfies CSSProperties;
+
+const summaryGridStyle = {
+  display: "grid",
+  gap: 12,
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+} satisfies CSSProperties;
+
+const summaryCardBodyStyle = {
+  display: "grid",
+  gap: 6,
+} satisfies CSSProperties;
+
+const summaryValueStyle = {
+  color: theme.text,
+  fontSize: 24,
+  fontWeight: 700,
+  lineHeight: 1,
 } satisfies CSSProperties;
 
 const loadingStateStyle = {
@@ -159,11 +206,6 @@ const fieldHintStyle = {
 const secondaryPanelStyle = {
   display: "grid",
   gap: 16,
-} satisfies CSSProperties;
-
-const secondaryCardBodyStyle = {
-  display: "grid",
-  gap: 12,
 } satisfies CSSProperties;
 
 const selectStyle = (th: CanvasTheme): CSSProperties => ({
@@ -288,6 +330,12 @@ const composerSummaryStyle = {
   marginTop: 10,
 } satisfies CSSProperties;
 
+const secondarySectionStyle = {
+  display: "grid",
+  gap: 12,
+  marginTop: 12,
+} satisfies CSSProperties;
+
 function toggleButtonStyle(
   th: CanvasTheme,
   enabled: boolean,
@@ -345,6 +393,15 @@ function sortFlags(left: FeatureFlag, right: FeatureFlag) {
   return (left.tenantId ?? "").localeCompare(right.tenantId ?? "");
 }
 
+function isDeprecatedFlag(flag: FeatureFlag) {
+  const content = `${flag.key} ${flag.description}`.toLowerCase();
+  return (
+    content.includes("deprecated") ||
+    content.includes("legacy") ||
+    content.includes("sunset")
+  );
+}
+
 export default function FeatureFlagsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -353,6 +410,7 @@ export default function FeatureFlagsPage() {
   const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [rolloutFilter, setRolloutFilter] = useState<RolloutFilter>("all");
   const [loading, setLoading] = useState(true);
   const [tenantLoading, setTenantLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -407,20 +465,83 @@ export default function FeatureFlagsPage() {
     () => [...flags].sort(sortFlags).map(toFlagTableRow),
     [flags],
   );
-  const filteredRows = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
-    if (!query) {
-      return rows;
+  const rolloutStateByKey = useMemo(() => {
+    const grouped = new Map<
+      string,
+      {
+        enabledStates: Set<boolean>;
+        hasTenantOverride: boolean;
+        deprecated: boolean;
+      }
+    >();
+
+    for (const flag of flags) {
+      const current = grouped.get(flag.key) ?? {
+        enabledStates: new Set<boolean>(),
+        hasTenantOverride: false,
+        deprecated: false,
+      };
+      current.enabledStates.add(flag.enabled);
+      current.hasTenantOverride ||= Boolean(flag.tenantId);
+      current.deprecated ||= isDeprecatedFlag(flag);
+      grouped.set(flag.key, current);
     }
 
-    return rows.filter((row) => row.key.toLowerCase().includes(query));
-  }, [rows, searchTerm]);
+    return grouped;
+  }, [flags]);
+  const filteredRows = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    return rows.filter((row) => {
+      const matchesQuery = !query || row.key.toLowerCase().includes(query);
+      if (!matchesQuery) {
+        return false;
+      }
+
+      const rolloutState = rolloutStateByKey.get(row.key);
+      const isMidRollout =
+        Boolean(rolloutState?.hasTenantOverride) ||
+        (rolloutState?.enabledStates.size ?? 0) > 1;
+      const isDeprecated = Boolean(rolloutState?.deprecated);
+      const isRolledOut = row.enabled && !isMidRollout && !isDeprecated;
+
+      switch (rolloutFilter) {
+        case "mid_rollout":
+          return isMidRollout;
+        case "rolled_out":
+          return isRolledOut;
+        case "deprecated":
+          return isDeprecated;
+        case "tenant_overrides":
+          return Boolean(row.tenantId);
+        case "all":
+        default:
+          return true;
+      }
+    });
+  }, [rolloutFilter, rolloutStateByKey, rows, searchTerm]);
   const selectedTenant =
     tenants.find((tenant) => tenant.id === selectedTenantId) ?? null;
   const overrideCount = rows.filter((row) => row.tenantId).length;
   const platformDefaultCount = rows.filter((row) => !row.tenantId).length;
   const enabledCount = filteredRows.filter((row) => row.enabled).length;
   const disabledCount = filteredRows.length - enabledCount;
+  const midRolloutCount = rows.filter((row) => {
+    const rolloutState = rolloutStateByKey.get(row.key);
+    return (
+      Boolean(rolloutState?.hasTenantOverride) ||
+      (rolloutState?.enabledStates.size ?? 0) > 1
+    );
+  }).length;
+  const rolledOutCount = rows.filter((row) => {
+    const rolloutState = rolloutStateByKey.get(row.key);
+    const isMidRollout =
+      Boolean(rolloutState?.hasTenantOverride) ||
+      (rolloutState?.enabledStates.size ?? 0) > 1;
+    return row.enabled && !isMidRollout && !rolloutState?.deprecated;
+  }).length;
+  const deprecatedCount = rows.filter((row) =>
+    Boolean(rolloutStateByKey.get(row.key)?.deprecated),
+  ).length;
   const sortedFlagKeys = useMemo(
     () =>
       Array.from(new Set(flags.map((flag) => flag.key))).sort((left, right) =>
@@ -435,6 +556,33 @@ export default function FeatureFlagsPage() {
         : auditReceipts,
     [auditReceipts, historyKey],
   );
+  const filterOptions: RolloutFilterOption[] = [
+    {
+      value: "all",
+      label: locale === "en" ? "All" : "全部",
+      count: rows.length,
+    },
+    {
+      value: "mid_rollout",
+      label: locale === "en" ? "Mid-rollout" : "進行中 rollout",
+      count: midRolloutCount,
+    },
+    {
+      value: "rolled_out",
+      label: locale === "en" ? "Rolled out" : "已全面 rollout",
+      count: rolledOutCount,
+    },
+    {
+      value: "deprecated",
+      label: locale === "en" ? "Deprecated" : "Deprecated",
+      count: deprecatedCount,
+    },
+    {
+      value: "tenant_overrides",
+      label: locale === "en" ? "Tenant overrides" : "Tenant overrides",
+      count: overrideCount,
+    },
+  ];
 
   const copy =
     locale === "en"
@@ -469,6 +617,13 @@ export default function FeatureFlagsPage() {
           tableTitle: "Feature flag registry",
           tableSubtitle:
             "KEY, SCOPE, STATE TOGGLE, UPDATED BY, AT, and ACTIONS match the canvas handoff.",
+          summaryTitle: "Current write lane",
+          summaryVisible: "Visible rows",
+          summaryScope: "Active scope",
+          summaryMode: "Change lane",
+          summaryModeValue: "WRITE authority",
+          filterLabel: "Rollout state",
+          filterPill: "table-first layout",
           keyHeader: "Key",
           scopeHeader: "Scope",
           stateHeader: "State toggle",
@@ -528,6 +683,8 @@ export default function FeatureFlagsPage() {
           actionComposerIdle:
             "Toggle and override mutations require an explicit reason before confirmation.",
           actionApplied: "Audit receipt recorded",
+          noFlagsInFilter:
+            "No feature flags match the current rollout filter and search query.",
         }
       : {
           pageTitle: "Feature Flags · WRITE authority",
@@ -560,6 +717,13 @@ export default function FeatureFlagsPage() {
           tableTitle: "Feature flag registry",
           tableSubtitle:
             "依畫布 handoff 對齊 KEY、SCOPE、STATE TOGGLE、UPDATED BY、AT、ACTIONS。",
+          summaryTitle: "目前 write lane",
+          summaryVisible: "可見列數",
+          summaryScope: "目前 scope",
+          summaryMode: "變更權限",
+          summaryModeValue: "WRITE authority",
+          filterLabel: "Rollout 狀態",
+          filterPill: "table-first layout",
           keyHeader: "Key",
           scopeHeader: "Scope",
           stateHeader: "State toggle",
@@ -611,6 +775,8 @@ export default function FeatureFlagsPage() {
           actionComposerTitle: "待確認的高風險變更",
           actionComposerIdle: "toggle 與 override 變更都必須先填寫原因再確認。",
           actionApplied: "已記錄 audit receipt",
+          noFlagsInFilter:
+            "目前 rollout 篩選與搜尋條件沒有符合的 feature flags。",
         };
 
   const columns: CanvasTableColumn<FlagTableRow>[] = [
@@ -952,6 +1118,62 @@ export default function FeatureFlagsPage() {
               />
             ) : null}
 
+            <div style={summaryGridStyle}>
+              <CanvasCard
+                theme={theme}
+                title={copy.summaryVisible}
+                subtitle={copy.visibleRows}
+              >
+                <div style={summaryCardBodyStyle}>
+                  <div style={summaryValueStyle}>{filteredRows.length}</div>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.summaryEnabled}: {enabledCount}
+                  </CanvasPill>
+                </div>
+              </CanvasCard>
+              <CanvasCard
+                theme={theme}
+                title={copy.summaryPlatformDefault}
+                subtitle={copy.overrideVisible}
+              >
+                <div style={summaryCardBodyStyle}>
+                  <div style={summaryValueStyle}>{platformDefaultCount}</div>
+                  <CanvasPill
+                    theme={theme}
+                    tone={overrideCount > 0 ? "accent" : "neutral"}
+                  >
+                    {copy.summaryTenantOverride}: {overrideCount}
+                  </CanvasPill>
+                </div>
+              </CanvasCard>
+              <CanvasCard
+                theme={theme}
+                title={copy.summaryScope}
+                subtitle={copy.scopeHint}
+              >
+                <div style={summaryCardBodyStyle}>
+                  <div style={summaryValueStyle}>
+                    {selectedTenant ? "Tenant" : "Platform"}
+                  </div>
+                  <CanvasPill theme={theme} tone="neutral">
+                    {copy.currentScope}
+                  </CanvasPill>
+                </div>
+              </CanvasCard>
+              <CanvasCard
+                theme={theme}
+                title={copy.summaryMode}
+                subtitle={copy.riskTitle}
+              >
+                <div style={summaryCardBodyStyle}>
+                  <div style={summaryValueStyle}>{auditReceipts.length}</div>
+                  <CanvasPill theme={theme} tone="accent" dot>
+                    {copy.summaryModeValue}
+                  </CanvasPill>
+                </div>
+              </CanvasCard>
+            </div>
+
             <CanvasCard
               theme={theme}
               title={copy.tableTitle}
@@ -986,16 +1208,32 @@ export default function FeatureFlagsPage() {
                   />
                 </CanvasField>
               </div>
-              <div style={toolbarMetaStyle}>
+              <div style={filterRowStyle}>
+                {filterOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    style={filterButtonStyle}
+                    onClick={() => setRolloutFilter(option.value)}
+                    aria-pressed={rolloutFilter === option.value}
+                  >
+                    <CanvasPill
+                      theme={theme}
+                      tone={
+                        rolloutFilter === option.value ? "accent" : "neutral"
+                      }
+                      dot={rolloutFilter === option.value}
+                    >
+                      {option.label}: {option.count}
+                    </CanvasPill>
+                  </button>
+                ))}
+                <span style={{ flex: 1 }} />
                 <CanvasPill theme={theme} tone="neutral">
-                  {copy.summaryPlatformDefault}: {platformDefaultCount}
+                  {copy.filterPill}
                 </CanvasPill>
-                <CanvasPill
-                  theme={theme}
-                  tone={overrideCount > 0 ? "accent" : "neutral"}
-                >
-                  {copy.summaryTenantOverride}: {overrideCount}
-                </CanvasPill>
+              </div>
+              <div style={toolbarMetaStyle}>
                 <CanvasPill
                   theme={theme}
                   tone={enabledCount > 0 ? "success" : "neutral"}
@@ -1008,9 +1246,6 @@ export default function FeatureFlagsPage() {
                 <CanvasPill theme={theme} tone="neutral">
                   {copy.currentScope}
                 </CanvasPill>
-                <CanvasPill theme={theme} tone="neutral">
-                  {copy.visibleRows}
-                </CanvasPill>
               </div>
 
               <div style={fieldHintStyle}>
@@ -1019,7 +1254,11 @@ export default function FeatureFlagsPage() {
               </div>
 
               {filteredRows.length === 0 ? (
-                <div style={emptyStateStyle}>{copy.noFlags}</div>
+                <div style={emptyStateStyle}>
+                  {searchTerm || rolloutFilter !== "all"
+                    ? copy.noFlagsInFilter
+                    : copy.noFlags}
+                </div>
               ) : (
                 <CanvasTable<FlagTableRow>
                   theme={theme}
@@ -1029,18 +1268,23 @@ export default function FeatureFlagsPage() {
               )}
             </CanvasCard>
 
-            <CanvasCard
-              theme={theme}
-              title={copy.secondaryPanelTitle}
-              subtitle={copy.secondaryPanelSubtitle}
+            <details
+              style={detailsStyle}
+              open={Boolean(pendingAction || actionError || historyKey)}
             >
-              <div style={secondaryCardBodyStyle}>
+              <summary style={detailSummaryStyle}>
+                {copy.secondaryPanelTitle}
+              </summary>
+              <div style={secondarySectionStyle}>
                 <CanvasBanner
                   theme={theme}
                   tone="warn"
                   title={copy.riskTitle}
                   body={copy.riskBody}
                 />
+                <div style={secondaryTextStyle}>
+                  {copy.secondaryPanelSubtitle}
+                </div>
                 <details
                   style={detailsStyle}
                   open={Boolean(pendingAction || actionError)}
@@ -1284,10 +1528,24 @@ export default function FeatureFlagsPage() {
                         {copy.historyEmpty}
                       </div>
                     )}
+                    {historyKey ? (
+                      <div style={{ marginTop: 10 }}>
+                        <CanvasBtn
+                          theme={theme}
+                          variant="secondary"
+                          size="xs"
+                          onClick={() => setHistoryKey(null)}
+                        >
+                          {locale === "en"
+                            ? "Show all receipts"
+                            : "顯示全部 receipts"}
+                        </CanvasBtn>
+                      </div>
+                    ) : null}
                   </details>
                 </div>
               </div>
-            </CanvasCard>
+            </details>
           </>
         )}
       </div>
