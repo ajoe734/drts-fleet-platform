@@ -11,6 +11,7 @@ import { PlatformAdminAssistantController } from "./platform-admin-assistant.con
 import { LlmGatewayPlatformAdminAssistantProvider } from "./platform-admin-assistant.provider";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { PlatformAdminAssistantReadToolService } from "./platform-admin-assistant-read-tools.service";
+import { PlatformAdminAssistantOrchestratorBridgeService } from "./platform-admin-assistant.orchestrator-bridge";
 import { PlatformAdminAssistantService } from "./platform-admin-assistant.service";
 import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.types";
 
@@ -31,6 +32,11 @@ import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.ty
     {
       provide: PLATFORM_ADMIN_ASSISTANT_PROVIDER,
       useExisting: LlmGatewayPlatformAdminAssistantProvider,
+    },
+    PlatformAdminAssistantReadToolService,
+    {
+      provide: PlatformAdminAssistantOrchestratorBridgeService,
+      useFactory: () => new PlatformAdminAssistantOrchestratorBridgeService(),
     },
     PlatformAdminAssistantReadToolService,
     PlatformAdminAssistantService,
