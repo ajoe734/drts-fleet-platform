@@ -37,6 +37,9 @@ type FetchLike = (
 interface AnthropicContentBlock {
   type: string;
   text?: string;
+  cache_control?: {
+    type: "ephemeral";
+  };
 }
 
 interface AnthropicMessageResponse {
@@ -252,11 +255,23 @@ export class AnthropicLlmGatewayProvider implements LlmGatewayProvider {
     request: ResolvedLlmGatewayRequest,
     stream: boolean,
   ) {
+    const messages = request.request.messages.map(
+      (message, index, allMessages) => {
+        const isLastMessage = index === allMessages.length - 1;
+        return {
+          role: message.role,
+          content: [
+            this.buildTextContentBlock(
+              message.content,
+              request.promptCachingEnabled && isLastMessage,
+            ),
+          ],
+        };
+      },
+    );
+
     const body: Record<string, unknown> = {
-      messages: request.request.messages.map((message) => ({
-        role: message.role,
-        content: message.content,
-      })),
+      messages,
       max_tokens: request.request.maxOutputTokens,
       temperature: request.request.temperature,
       metadata: request.request.metadata,
@@ -264,11 +279,12 @@ export class AnthropicLlmGatewayProvider implements LlmGatewayProvider {
     };
 
     if (request.request.system) {
-      body.system = request.request.system;
-    }
-
-    if (request.promptCachingEnabled) {
-      body.cache_control = { type: "ephemeral" };
+      body.system = [
+        this.buildTextContentBlock(
+          request.request.system,
+          request.promptCachingEnabled && messages.length === 0,
+        ),
+      ];
     }
 
     if (this.config.anthropicApiKey) {
@@ -278,6 +294,22 @@ export class AnthropicLlmGatewayProvider implements LlmGatewayProvider {
     }
 
     return body;
+  }
+
+  private buildTextContentBlock(
+    text: string,
+    enableCaching: boolean,
+  ): AnthropicContentBlock {
+    const block: AnthropicContentBlock = {
+      type: "text",
+      text,
+    };
+
+    if (enableCaching) {
+      block.cache_control = { type: "ephemeral" };
+    }
+
+    return block;
   }
 
   private buildResponse(

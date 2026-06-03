@@ -47,17 +47,11 @@ export class LlmGatewayService {
     this.assertEnabled();
 
     const resolved = this.resolveRequest(request);
-    let finalResponse: LlmGatewayResponse | undefined;
-
     for await (const event of this.runStreamWithRetry(resolved)) {
       if (event.type === "response") {
-        finalResponse = event.response;
+        this.budgetTracker.recordUsage(event.response.usage);
       }
       yield event;
-    }
-
-    if (finalResponse) {
-      this.budgetTracker.recordUsage(finalResponse.usage);
     }
   }
 

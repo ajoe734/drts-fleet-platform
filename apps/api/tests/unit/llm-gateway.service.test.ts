@@ -270,6 +270,7 @@ describe("LlmGatewayService", () => {
       }),
     );
     expect(trace).toEqual(["start", "after-first-yield"]);
+    expect(service.getSpentTokens()).toBe(15);
 
     const third = await iterator.next();
     expect(third.done).toBe(true);
