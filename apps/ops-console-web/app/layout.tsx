@@ -6,7 +6,10 @@ import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import { buildOpsShellNav } from "@/lib/ops-shell-nav";
 import { OpsShell } from "@/components/ops-shell";
-import { OpsAssistantContextProvider } from "@/components/ops-assistant";
+import {
+  OpsAssistantContextProvider,
+  OpsAssistantWidget,
+} from "@/components/ops-assistant";
 import {
   resolveOpsAssistantIdentity,
   seedOpsAssistantHealth,
@@ -49,6 +52,7 @@ export default async function RootLayout({
             >
               {children}
             </OpsShell>
+            <OpsAssistantWidget />
           </OpsAssistantContextProvider>
         </LanguageProvider>
       </body>
