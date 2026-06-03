@@ -4,6 +4,7 @@ import { AuditNotificationModule } from "../audit-notification/audit-notificatio
 import { FeatureFlagsModule } from "../feature-flags/feature-flags.module";
 import { ForwarderModule } from "../forwarder/forwarder.module";
 import { PlatformAdminModule } from "../platform-admin/platform-admin.module";
+import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { PlatformAdminAssistantController } from "./platform-admin-assistant.controller";
 import { MockPlatformAdminAssistantProvider } from "./platform-admin-assistant.provider";
 import { PlatformAdminAssistantReadToolService } from "./platform-admin-assistant-read-tools.service";
@@ -16,6 +17,7 @@ import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.ty
     AuditNotificationModule,
     FeatureFlagsModule,
     ForwarderModule,
+    TenantPartnerModule,
   ],
   controllers: [PlatformAdminAssistantController],
   providers: [
