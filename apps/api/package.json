@@ -4,7 +4,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "build": "pnpm --filter @drts/contracts build && tsc -p tsconfig.json",
+    "build": "pnpm run build:knowledge-index",
+    "build:knowledge-index": "pnpm --filter @drts/contracts build && tsc -p tsconfig.json && node src/modules/assistant/knowledge/build-knowledge-index.js",
     "dev": "node --watch -r ts-node/register src/main.ts",
     "lint": "eslint src --max-warnings=0",
     "start": "node dist/main.js",

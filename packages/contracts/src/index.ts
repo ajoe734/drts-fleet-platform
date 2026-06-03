@@ -4962,4 +4962,5 @@ export interface SetTenantStatusCommand {
 
 export * from "./platform-codes";
 export * from "./platform-adapter-registry";
+export * from "./assistant-knowledge";
 export * from "./ui-runtime";
