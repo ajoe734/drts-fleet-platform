@@ -5,6 +5,8 @@ import type {
   SetPlatformMaintenanceModeCommand,
 } from "@drts/contracts";
 
+import type { RetrievalResult } from "./knowledge";
+
 export type PlatformAdminAssistantProviderKind = "mock";
 
 export const PLATFORM_ADMIN_ASSISTANT_PROVIDER =
@@ -115,6 +117,7 @@ export interface PlatformAdminAssistantProviderRequest {
   session: PlatformAdminAssistantSessionRecord;
   message: string;
   history: PlatformAdminAssistantMessageRecord[];
+  retrieval: RetrievalResult;
 }
 
 export interface PlatformAdminAssistantProvider {

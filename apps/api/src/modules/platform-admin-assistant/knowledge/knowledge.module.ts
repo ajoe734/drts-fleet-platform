@@ -1,6 +1,36 @@
-import { Module } from "@nestjs/common";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
+import { Logger, Module } from "@nestjs/common";
+
+import { APPROVED_SOURCES } from "./approved-sources";
 import { PlatformAdminAssistantKnowledgeService } from "./knowledge-retrieval.service";
+import type { KnowledgeSourceDocument } from "./knowledge.types";
+
+function loadApprovedKnowledgeDocuments(): KnowledgeSourceDocument[] {
+  const logger = new Logger("PlatformAdminAssistantKnowledgeModule");
+
+  return APPROVED_SOURCES.flatMap((source) => {
+    try {
+      return [
+        {
+          sourcePath: source.sourcePath,
+          content: readFileSync(
+            resolve(process.cwd(), source.sourcePath),
+            "utf8",
+          ),
+        },
+      ];
+    } catch (error) {
+      logger.warn(
+        `Skipping approved knowledge source ${source.sourcePath}: ${
+          error instanceof Error ? error.message : "read_failed"
+        }`,
+      );
+      return [];
+    }
+  });
+}
 
 /**
  * Self-contained knowledge-retrieval module for the Platform Admin assistant.
@@ -16,7 +46,11 @@ import { PlatformAdminAssistantKnowledgeService } from "./knowledge-retrieval.se
   providers: [
     {
       provide: PlatformAdminAssistantKnowledgeService,
-      useFactory: () => new PlatformAdminAssistantKnowledgeService(),
+      useFactory: () => {
+        const service = new PlatformAdminAssistantKnowledgeService();
+        service.loadDocuments(loadApprovedKnowledgeDocuments());
+        return service;
+      },
     },
   ],
   exports: [PlatformAdminAssistantKnowledgeService],

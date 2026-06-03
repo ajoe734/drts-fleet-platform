@@ -2,14 +2,54 @@ import { describe, expect, it } from "vitest";
 
 import type { BootstrapRequestIdentity } from "../../src/common/auth";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
-import { PlatformAdminAssistantService } from "../../src/modules/platform-admin-assistant/platform-admin-assistant.service";
+import { PlatformAdminAssistantKnowledgeService } from "../../src/modules/platform-admin-assistant/knowledge/knowledge-retrieval.service";
+import type { KnowledgeSourceDocument } from "../../src/modules/platform-admin-assistant/knowledge/knowledge.types";
 import { MockPlatformAdminAssistantProvider } from "../../src/modules/platform-admin-assistant/platform-admin-assistant.provider";
+import { PlatformAdminAssistantService } from "../../src/modules/platform-admin-assistant/platform-admin-assistant.service";
 import type {
   PlatformAdminAssistantProvider,
   PlatformAdminAssistantProviderRequest,
   PlatformAdminAssistantProviderResponse,
 } from "../../src/modules/platform-admin-assistant/platform-admin-assistant.types";
 import { PlatformAdminService } from "../../src/modules/platform-admin/platform-admin.service";
+
+const PLAN_PATH =
+  "docs/05-ui/platform-admin-llm-assistant-design-development-plan-20260602.md";
+const ARCHITECTURE_PATH =
+  "docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md";
+const RUNBOOK_PATH =
+  "docs/03-runbooks/system-design-pack-implementation-runbook-20260524.md";
+
+const FIXTURE_DOCS: KnowledgeSourceDocument[] = [
+  {
+    sourcePath: PLAN_PATH,
+    content: [
+      "# Platform Admin LLM Assistant Plan",
+      "",
+      "## 7.2 Citations",
+      "Every grounded answer must include citations with the source path and section.",
+    ].join("\n"),
+  },
+  {
+    sourcePath: ARCHITECTURE_PATH,
+    content: [
+      "# Platform Admin Agentic Assistant Architecture Plan",
+      "",
+      "## 6.3 RAG and Knowledge Layer",
+      "Knowledge sources stay allowlisted and citation-backed.",
+      "Every answer that relies on docs includes citations.",
+    ].join("\n"),
+  },
+  {
+    sourcePath: RUNBOOK_PATH,
+    content: [
+      "# System Design Pack Implementation Runbook",
+      "",
+      "## Operator follow-up",
+      "Operators should verify the cited control-plane flow before executing changes.",
+    ].join("\n"),
+  },
+];
 
 function platformIdentity(actorId = "pa-admin-001"): BootstrapRequestIdentity {
   return {
@@ -39,6 +79,23 @@ function nonPlatformIdentity(): BootstrapRequestIdentity {
   };
 }
 
+function buildKnowledgeService(): PlatformAdminAssistantKnowledgeService {
+  const service = new PlatformAdminAssistantKnowledgeService();
+  service.loadDocuments(FIXTURE_DOCS);
+  return service;
+}
+
+function buildService(
+  provider: PlatformAdminAssistantProvider = new MockPlatformAdminAssistantProvider(),
+) {
+  return new PlatformAdminAssistantService(
+    provider,
+    new PlatformAdminService(new AuditNotificationService()),
+    new AuditNotificationService(),
+    buildKnowledgeService(),
+  );
+}
+
 class ThrowingProvider implements PlatformAdminAssistantProvider {
   readonly kind = "mock" as const;
 
@@ -54,11 +111,7 @@ class ThrowingProvider implements PlatformAdminAssistantProvider {
 
 describe("PlatformAdminAssistantService", () => {
   it("binds assistant sessions to the current platform control-plane identity", () => {
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(new AuditNotificationService()),
-      new AuditNotificationService(),
-    );
+    const service = buildService();
 
     const session = service.createSession(platformIdentity("pa-admin-777"), {
       title: "Tenant rollout triage",
@@ -79,11 +132,7 @@ describe("PlatformAdminAssistantService", () => {
   });
 
   it("rejects access from a different human control-plane identity", () => {
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(new AuditNotificationService()),
-      new AuditNotificationService(),
-    );
+    const service = buildService();
     const session = service.createSession(platformIdentity("pa-admin-777"), {});
 
     expect(() =>
@@ -99,24 +148,21 @@ describe("PlatformAdminAssistantService", () => {
     );
   });
 
-  it("stores provider-generated plans from the mock provider without requiring a real key", async () => {
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(new AuditNotificationService()),
-      new AuditNotificationService(),
-    );
+  it("stores provider-generated plans from grounded approved-doc retrieval", async () => {
+    const service = buildService();
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
 
     const response = await service.createMessage(session.sessionId, identity, {
-      message: "Review the current rollout blockers for tenant t-demo.",
+      message: "What must grounded answers include?",
     });
 
-    expect(response.answer).toContain("Mock assistant response");
+    expect(response.answer).toContain("Grounded answer");
     expect(response.citations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          section: "§7.3 Current route map",
+          href: PLAN_PATH,
+          section: "7.2 Citations",
         }),
       ]),
     );
@@ -130,20 +176,33 @@ describe("PlatformAdminAssistantService", () => {
     ]);
   });
 
+  it("returns uncertainty guidance instead of fabricating when approved docs do not match", async () => {
+    const service = buildService();
+    const identity = platformIdentity();
+    const session = service.createSession(identity, {});
+
+    const response = await service.createMessage(session.sessionId, identity, {
+      message: "quantum teleportation latency budget for warp drives",
+    });
+
+    expect(response.answer).toMatch(/couldn't find|not confident/i);
+    expect(response.actionPlan).toBeNull();
+    expect(response.citations.length).toBeGreaterThan(0);
+    expect(response.citations[0]?.href).toEqual(expect.any(String));
+  });
+
   it("returns degraded help-search guidance when the provider key is missing", async () => {
-    const service = new PlatformAdminAssistantService(
+    const service = buildService(
       new ThrowingProvider({
         code: "missing_api_key",
         message: "LLM provider API key is missing.",
       }),
-      new PlatformAdminService(new AuditNotificationService()),
-      new AuditNotificationService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
 
     const response = await service.createMessage(session.sessionId, identity, {
-      message: "Check current maintenance-mode policy.",
+      message: "What must grounded answers include?",
     });
 
     expect(response.answer).toContain("degraded mode");
@@ -151,7 +210,7 @@ describe("PlatformAdminAssistantService", () => {
     expect(response.citations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          section: "§4 Mock Provider Policy",
+          href: PLAN_PATH,
         }),
       ]),
     );
@@ -172,11 +231,7 @@ describe("PlatformAdminAssistantService", () => {
         message: "Provider is unavailable.",
       },
     ]) {
-      const service = new PlatformAdminAssistantService(
-        new ThrowingProvider(error),
-        new PlatformAdminService(new AuditNotificationService()),
-        new AuditNotificationService(),
-      );
+      const service = buildService(new ThrowingProvider(error));
       const identity = platformIdentity();
       const session = service.createSession(identity, {});
 
@@ -200,6 +255,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      buildKnowledgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -232,6 +288,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      buildKnowledgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -260,6 +317,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      buildKnowledgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -294,6 +352,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       platformAdminService,
       auditNotificationService,
+      buildKnowledgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -330,6 +389,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      buildKnowledgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -365,6 +425,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      buildKnowledgeService(),
     );
 
     expect(() => service.createSession(nonPlatformIdentity(), {})).toThrowError(
@@ -384,6 +445,7 @@ describe("PlatformAdminAssistantService", () => {
       new MockPlatformAdminAssistantProvider(),
       new PlatformAdminService(auditNotificationService),
       auditNotificationService,
+      buildKnowledgeService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
