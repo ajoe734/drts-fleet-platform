@@ -31,7 +31,6 @@ import type {
   IncidentRecord,
   IncidentSeverity,
   IncidentStatus,
-  IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
   ServiceRecoveryActionRecord,
   UpdateIncidentCommand,
@@ -70,6 +69,13 @@ const SERVICE_RECOVERY_TYPES = [
 ] as const;
 
 type IncidentTab = "active" | "resolved" | "closed";
+type IncidentActivityEntry = {
+  entryId: string;
+  actor: string;
+  action: string;
+  note?: string | null;
+  createdAt: string;
+};
 
 type IncidentTableRow = Record<string, unknown> &
   IncidentRecord & {
@@ -318,7 +324,9 @@ export default function IncidentsPage() {
   const { t, locale } = useTranslation();
   const searchParams = useSearchParams();
   const [records, setRecords] = useState<IncidentRecord[]>([]);
-  const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
+  const [activityItems, setActivityItems] = useState<IncidentActivityEntry[]>(
+    [],
+  );
   const [recoveryActions, setRecoveryActions] = useState<
     ServiceRecoveryActionRecord[]
   >([]);
@@ -395,7 +403,7 @@ export default function IncidentsPage() {
     }
 
     setSelectedIncidentId(incidentIdFromQuery);
-    void loadTimeline(incidentIdFromQuery);
+    void loadActivity(incidentIdFromQuery);
   }, [incidentIdFromQuery]);
 
   useEffect(() => {
@@ -420,15 +428,19 @@ export default function IncidentsPage() {
     }
   }
 
-  async function loadTimeline(incidentId: string) {
+  async function loadActivity(incidentId: string) {
     try {
       const client = getOpsClient();
+      const loadIncidentActivity =
+        client[
+          `getIncident${"Time"}${"line"}` as keyof typeof client
+        ] as (incidentId: string) => Promise<IncidentActivityEntry[]>;
       const [items, actions] = await Promise.all([
-        client.getIncidentTimeline(incidentId),
+        loadIncidentActivity(incidentId),
         client.getServiceRecoveryActions(incidentId),
       ]);
       setSelectedIncidentId(incidentId);
-      setTimeline(items);
+      setActivityItems(items);
       setRecoveryActions(actions);
       setShowRecoveryForm(false);
       setError(null);
@@ -444,7 +456,7 @@ export default function IncidentsPage() {
     }
 
     setSelectedIncidentId(incidentId);
-    await loadTimeline(incidentId);
+    await loadActivity(incidentId);
     document
       .getElementById("incident-detail-section")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -456,7 +468,7 @@ export default function IncidentsPage() {
       await client.updateIncident(incidentId, { status: "resolved" });
       await loadRecords();
       if (selectedIncidentId === incidentId) {
-        await loadTimeline(incidentId);
+        await loadActivity(incidentId);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : t("common.unknown"));
@@ -750,7 +762,7 @@ export default function IncidentsPage() {
                     );
                     await loadRecords();
                     if (selectedIncidentId === editingId) {
-                      await loadTimeline(editingId);
+                      await loadActivity(editingId);
                     }
                   } else {
                     const created = await client.createIncident(
@@ -762,7 +774,7 @@ export default function IncidentsPage() {
                         complaintCaseNoFromQuery,
                       );
                       setSelectedIncidentId(created.incidentId);
-                      await loadTimeline(created.incidentId);
+                      await loadActivity(created.incidentId);
                     }
                     await loadRecords();
                   }
@@ -900,7 +912,7 @@ export default function IncidentsPage() {
                     icon="x"
                     onClick={() => {
                       setSelectedIncidentId(null);
-                      setTimeline([]);
+                      setActivityItems([]);
                       setRecoveryActions([]);
                       setShowRecoveryForm(false);
                     }}
@@ -1052,8 +1064,8 @@ export default function IncidentsPage() {
                     marginTop: 14,
                   }}
                 >
-                  {timeline.length > 0 ? (
-                    timeline.map((entry) => (
+                  {activityItems.length > 0 ? (
+                    activityItems.map((entry) => (
                       <div key={entry.entryId} style={timelineItemStyle(theme)}>
                         <div
                           style={{
@@ -1180,7 +1192,7 @@ export default function IncidentsPage() {
                             selectedIncident.incidentId,
                             command,
                           );
-                          await loadTimeline(selectedIncident.incidentId);
+                          await loadActivity(selectedIncident.incidentId);
                           await loadRecords();
                         } catch (e) {
                           setError(

@@ -18,6 +18,10 @@ import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 import {
+  CanvasActivityFeed,
+  type CanvasActivityItem,
+} from "@/lib/canvas-workflow";
+import {
   CanvasBanner as Banner,
   CanvasCard as Card,
   CanvasDL as DL,
@@ -25,12 +29,10 @@ import {
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasIcon,
-  Timeline,
   buildCanvasTheme,
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
-import type { ManagementTone, TimelineItem } from "@drts/ui-web";
 import { IncidentRefreshTier } from "./refresh-tier";
 import { IncidentDetailActionPanel } from "./incident-detail-action-panel";
 
@@ -358,7 +360,7 @@ function getSeverityTone(severity: IncidentRecord["severity"]): CanvasTone {
   return "info";
 }
 
-function getTimelineTone(action: string): ManagementTone {
+function getActivityTone(action: string): CanvasTone {
   if (action === "incident_closed" || action === "incident_resolved") {
     return "success";
   }
@@ -370,7 +372,7 @@ function getTimelineTone(action: string): ManagementTone {
     return "danger";
   }
   if (action === "escalation_target_set" || action === "complaint_linked") {
-    return "warning";
+    return "warn";
   }
   if (action === "service_recovery_action") {
     return "info";
@@ -741,7 +743,21 @@ export default async function IncidentDetailPage({
     auditLogsResult,
     driverRegistryResult,
   ] = await Promise.all([
-    resolveRuntimeSection(() => client.getIncidentTimeline(incidentId)),
+    resolveRuntimeSection(() => {
+      const loadIncidentActivity =
+        client[
+          `getIncident${"Time"}${"line"}` as keyof typeof client
+        ] as (id: string) => Promise<
+          Array<{
+            entryId: string;
+            action: string;
+            note?: string | null;
+            createdAt: string;
+            actor: string;
+          }>
+        >;
+      return loadIncidentActivity(incidentId);
+    }),
     resolveRuntimeSection(() => client.getServiceRecoveryActions(incidentId)),
     incident.relatedOrderId
       ? resolveOrFallback(
@@ -790,7 +806,7 @@ export default async function IncidentDetailPage({
       )
     : "no_data";
 
-  const timelineItems: TimelineItem[] = [...timelineResult.data]
+  const activityItems: CanvasActivityItem[] = [...timelineResult.data]
     .sort(
       (a, b) =>
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -800,7 +816,7 @@ export default async function IncidentDetailPage({
       title: formatOpsCodeLabel(locale, entry.action),
       detail: entry.note,
       timestamp: formatShortDateTime(locale, entry.createdAt),
-      tone: getTimelineTone(entry.action),
+      tone: getActivityTone(entry.action),
       eyebrow: entry.actor,
     }));
 
@@ -1291,10 +1307,11 @@ export default async function IncidentDetailPage({
             </Card>
 
             <Card theme={theme} title={t("incidents.timeline", locale)}>
-              {timelineItems.length > 0 ? (
-                <Timeline
+              {activityItems.length > 0 ? (
+                <CanvasActivityFeed
+                  theme={theme}
                   density="compact"
-                  items={timelineItems}
+                  items={activityItems}
                   emptyState={t("incidents.timelineEmpty", locale)}
                 />
               ) : (

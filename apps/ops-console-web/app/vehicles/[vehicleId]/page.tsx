@@ -29,15 +29,16 @@ import {
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
-  Timeline,
-  WorkflowEmptyState,
   buildCanvasTheme,
   type CanvasTableColumn,
-  type ManagementTone,
   type CanvasTheme,
   type CanvasTone,
-  type TimelineItem,
 } from "@drts/ui-web";
+import {
+  CanvasActivityFeed,
+  CanvasEmptyPanel,
+  type CanvasActivityItem,
+} from "@/lib/canvas-workflow";
 
 type VehicleDetailPageProps = {
   params: Promise<{
@@ -293,14 +294,14 @@ function classifyErrorReason(error: string): EmptyReason {
   return "fetch_failed";
 }
 
-function emptyTone(reason: EmptyReason): ManagementTone {
+function emptyTone(reason: EmptyReason): CanvasTone {
   if (reason === "fetch_failed") return "danger";
   if (
     reason === "permission_denied" ||
     reason === "external_unavailable" ||
     reason === "not_provisioned"
   ) {
-    return "warning";
+    return "warn";
   }
   return "neutral";
 }
@@ -541,7 +542,8 @@ function renderEmptyState(
   action?: VehicleAction,
 ) {
   return (
-    <WorkflowEmptyState
+    <CanvasEmptyPanel
+      theme={theme}
       title={
         <span
           style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}
@@ -925,10 +927,10 @@ function isContractExpiringSoon(contract: VehicleContractRecord) {
   return endAt <= Date.now() + 30 * 24 * 60 * 60 * 1000;
 }
 
-function buildAuditTimelineItems(
+function buildAuditActivityItems(
   locale: Locale,
   entries: AuditLogRecord[],
-): TimelineItem[] {
+): CanvasActivityItem[] {
   return entries.map((entry) => ({
     id: entry.auditId,
     title: formatOpsCodeLabel(locale, entry.actionName),
@@ -939,7 +941,7 @@ function buildAuditTimelineItems(
     tone:
       entry.actionName.includes("offboarding") ||
       entry.actionName.includes("reject")
-        ? "warning"
+        ? "warn"
         : entry.actionName.includes("create") ||
             entry.actionName.includes("activate")
           ? "success"
@@ -1509,7 +1511,7 @@ export default async function VehicleDetailPage({
     relatedMaintenance,
     vehicle,
   );
-  const auditTimeline = buildAuditTimelineItems(locale, auditEntries);
+  const auditActivity = buildAuditActivityItems(locale, auditEntries);
 
   const regulatoryItems = [
     {
@@ -1968,9 +1970,10 @@ export default async function VehicleDetailPage({
                   ),
                   auditEmptyAction,
                 )
-              ) : auditTimeline.length > 0 ? (
-                <Timeline
-                  items={auditTimeline}
+              ) : auditActivity.length > 0 ? (
+                <CanvasActivityFeed
+                  theme={theme}
+                  items={auditActivity}
                   emptyState={copy(
                     locale,
                     "No audit events recorded for this vehicle yet.",
