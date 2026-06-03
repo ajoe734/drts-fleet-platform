@@ -66,7 +66,7 @@ const en = {
   // ── Dashboard ──
   "dashboard.title": "Operations Overview",
   "dashboard.subtitle":
-    "Operational overview — dispatch health, revenue pulse, and exception backlog",
+    "Six KPI strip, pending handoff work, health signals, and the current dispatch queue.",
   "dashboard.todayRevenue": "Today's Revenue",
   "dashboard.todayRevenueSub": "{trips} completed trips",
   "dashboard.queueDepth": "Dispatch Queue",
@@ -1652,7 +1652,7 @@ const zh: Record<keyof typeof en, string> = {
 
   // ── Dashboard ──
   "dashboard.title": "營運總覽",
-  "dashboard.subtitle": "營運概覽 — 派車健康狀態、收益脈搏與例外積壓",
+  "dashboard.subtitle": "6 組 KPI、待處理工作、健康訊號與目前派車佇列。",
   "dashboard.todayRevenue": "今日收益",
   "dashboard.todayRevenueSub": "{trips} 趟已完成",
   "dashboard.queueDepth": "派遣佇列",
