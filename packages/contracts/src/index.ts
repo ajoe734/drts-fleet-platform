@@ -8,6 +8,11 @@ import type {
   ResourceActionDescriptor,
   UiRefreshMetadata,
 } from "./ui-runtime";
+export {
+  evaluateAssistantActionExecution,
+  findMatchingActionDescriptor,
+  getActionExecutionRequirements,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];

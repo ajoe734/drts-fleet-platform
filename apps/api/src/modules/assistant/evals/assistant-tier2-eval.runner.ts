@@ -1,7 +1,11 @@
 import type {
   ActionIntent,
-  ProposeActionToolInput,
+  AssistantActionExecutionCheck,
+  AssistantActionBlockedBy,
   ResourceActionDescriptor,
+} from "@drts/contracts";
+import {
+  evaluateAssistantActionExecution,
 } from "@drts/contracts";
 
 import type {
@@ -13,46 +17,12 @@ import type {
 type Tier2Outcome = AssistantTier2EvalCaseResult["outcome"];
 
 export interface AssistantActionIntentProposer {
-  proposeAction(input: ProposeActionToolInput): ActionIntent;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-function requireNonBlank(value: string, field: string) {
-  const normalized = value.trim();
-  if (normalized.length === 0) {
-    throw new Error(`Assistant proposeAction requires a non-empty ${field}.`);
-  }
-  return normalized;
-}
-
-export function createAssistantActionIntent(
-  input: ProposeActionToolInput,
-): ActionIntent {
-  return {
-    type: "action_intent",
-    tool: "proposeAction",
-    resourceKind: requireNonBlank(input.resourceKind, "resourceKind"),
-    resourceId: requireNonBlank(input.resourceId, "resourceId"),
-    action: requireNonBlank(input.action, "action"),
-    args:
-      input.args === undefined
-        ? {}
-        : isPlainObject(input.args)
-          ? structuredClone(input.args)
-          : (() => {
-              throw new Error("Assistant proposeAction args must be an object.");
-            })(),
-    confirmationRequired: true,
-    mutates: false,
-  };
+  proposeAction(input: {
+    resourceKind: string;
+    resourceId: string;
+    action: string;
+    args?: Record<string, unknown>;
+  }): ActionIntent;
 }
 
 function toExecutedDescriptor(descriptor: ResourceActionDescriptor) {
@@ -64,78 +34,18 @@ function toExecutedDescriptor(descriptor: ResourceActionDescriptor) {
   };
 }
 
-function findDescriptor(
-  intent: ActionIntent,
-  availableActions: ResourceActionDescriptor[],
-) {
-  return (
-    availableActions.find((descriptor) => descriptor.action === intent.action) ??
-    null
-  );
-}
-
-function executeIntent(
-  intent: ActionIntent,
-  availableActions: ResourceActionDescriptor[],
-  confirm: boolean,
-  reason?: string,
+function toOutcome(
+  check: AssistantActionExecutionCheck,
+  blockedBy: AssistantActionBlockedBy | null,
 ): Tier2Outcome {
-  const descriptor = findDescriptor(intent, availableActions);
-
-  if (!descriptor) {
-    return {
-      executed: false,
-      effectiveRisk: null,
-      confirmationPrompted: false,
-      reasonPrompted: false,
-      blockedBy: "action_unavailable",
-    };
-  }
-
-  const confirmationPrompted = descriptor.riskLevel !== "low";
-  const reasonPrompted =
-    descriptor.riskLevel === "high" || Boolean(descriptor.requiresReason);
-
-  if (!descriptor.enabled) {
-    return {
-      executed: false,
-      effectiveRisk: descriptor.riskLevel,
-      confirmationPrompted,
-      reasonPrompted,
-      blockedBy: "action_disabled",
-      executedDescriptor: toExecutedDescriptor(descriptor),
-    };
-  }
-
-  if (!confirm) {
-    return {
-      executed: false,
-      effectiveRisk: descriptor.riskLevel,
-      confirmationPrompted,
-      reasonPrompted,
-      blockedBy: "confirmation_required",
-      executedDescriptor: toExecutedDescriptor(descriptor),
-    };
-  }
-
-  if (reasonPrompted && !reason?.trim()) {
-    return {
-      executed: false,
-      effectiveRisk: descriptor.riskLevel,
-      confirmationPrompted,
-      reasonPrompted,
-      blockedBy: "reason_required",
-      executedDescriptor: toExecutedDescriptor(descriptor),
-    };
-  }
-
+  const descriptor = check.descriptor;
   return {
-    executed: true,
-    effectiveRisk: descriptor.riskLevel,
-    confirmationPrompted,
-    reasonPrompted,
-    blockedBy: null,
-    executedDescriptor: toExecutedDescriptor(descriptor),
+    executed: blockedBy === null,
+    effectiveRisk: check.effectiveRisk,
+    confirmationPrompted: check.confirmationPrompted,
+    reasonPrompted: check.reasonPrompted,
+    blockedBy,
+    ...(descriptor ? { executedDescriptor: toExecutedDescriptor(descriptor) } : {}),
   };
 }
 
@@ -150,12 +60,15 @@ export class AssistantTier2EvalRunner {
         action: testCase.action,
         ...(testCase.args ? { args: testCase.args } : {}),
       });
-      const outcome = executeIntent(
+      const check = evaluateAssistantActionExecution(
         intent,
         testCase.availableActions,
-        testCase.confirm,
-        testCase.reason,
+        {
+          confirmed: testCase.confirm,
+          ...(testCase.reason ? { reason: testCase.reason } : {}),
+        },
       );
+      const outcome = toOutcome(check, check.blockedBy);
 
       const confirmGate =
         outcome.executed === testCase.expected.executed &&

@@ -13,7 +13,12 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import type { ActionIntent, ResourceActionDescriptor } from "@drts/contracts";
+import {
+  findMatchingActionDescriptor,
+  getActionExecutionRequirements,
+  type ActionIntent,
+  type ResourceActionDescriptor,
+} from "@drts/contracts";
 import { buildCanvasTheme, CanvasIcon } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
@@ -619,7 +624,12 @@ export function OpsAssistantWidget() {
       return;
     }
 
-    const descriptor = actionBridge.resolveDescriptor(pendingIntent);
+    const descriptor =
+      actionBridge.resolveDescriptor(pendingIntent) ??
+      findMatchingActionDescriptor(
+        pendingIntent,
+        actionBridge.availableActions,
+      );
     if (!descriptor) {
       appendConversation({
         id: `${Date.now()}-unavailable`,
@@ -647,6 +657,7 @@ export function OpsAssistantWidget() {
     }
 
     setIsExecutingIntent(true);
+    const requirements = getActionExecutionRequirements(descriptor);
     appendConversation({
       id: `${Date.now()}-execute`,
       author: "operator",
@@ -655,7 +666,7 @@ export function OpsAssistantWidget() {
         descriptor.riskLevel === "low"
           ? `Executing ${descriptor.action}.`
           : `Opening ${descriptor.riskLevel}-risk confirmation for ${descriptor.action}.`,
-      ...(descriptor.requiresReason || descriptor.riskLevel === "high"
+      ...(requirements.reasonPrompted
         ? {
             meta: "Reason may be required by the existing page confirmation UI.",
           }

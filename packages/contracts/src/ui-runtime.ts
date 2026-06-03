@@ -180,6 +180,97 @@ export interface ActionIntent {
   mutates: false;
 }
 
+export type AssistantActionBlockedBy =
+  | "confirmation_required"
+  | "action_unavailable"
+  | "action_disabled"
+  | "reason_required";
+
+export interface AssistantActionExecutionCheck {
+  descriptor: ResourceActionDescriptor | null;
+  effectiveRisk: ActionRiskLevel | null;
+  confirmationPrompted: boolean;
+  reasonPrompted: boolean;
+  blockedBy: AssistantActionBlockedBy | null;
+}
+
+export function getActionExecutionRequirements(
+  descriptor: ResourceActionDescriptor,
+) {
+  return {
+    confirmationPrompted: descriptor.riskLevel !== "low",
+    reasonPrompted:
+      descriptor.riskLevel === "high" || Boolean(descriptor.requiresReason),
+  };
+}
+
+export function findMatchingActionDescriptor(
+  intent: Pick<ActionIntent, "action">,
+  availableActions: ResourceActionDescriptor[],
+): ResourceActionDescriptor | null {
+  return (
+    availableActions.find(
+      (descriptor) => descriptor.action.toLowerCase() === intent.action.toLowerCase(),
+    ) ?? null
+  );
+}
+
+export function evaluateAssistantActionExecution(
+  intent: Pick<ActionIntent, "action" | "confirmationRequired">,
+  availableActions: ResourceActionDescriptor[],
+  options: { confirmed: boolean; reason?: string },
+): AssistantActionExecutionCheck {
+  const descriptor = findMatchingActionDescriptor(intent, availableActions);
+  if (!descriptor) {
+    return {
+      descriptor: null,
+      effectiveRisk: null,
+      confirmationPrompted: false,
+      reasonPrompted: false,
+      blockedBy: "action_unavailable",
+    };
+  }
+
+  const requirements = getActionExecutionRequirements(descriptor);
+  if (!descriptor.enabled) {
+    return {
+      descriptor,
+      effectiveRisk: descriptor.riskLevel,
+      confirmationPrompted: requirements.confirmationPrompted,
+      reasonPrompted: requirements.reasonPrompted,
+      blockedBy: "action_disabled",
+    };
+  }
+
+  if (intent.confirmationRequired && !options.confirmed) {
+    return {
+      descriptor,
+      effectiveRisk: descriptor.riskLevel,
+      confirmationPrompted: requirements.confirmationPrompted,
+      reasonPrompted: requirements.reasonPrompted,
+      blockedBy: "confirmation_required",
+    };
+  }
+
+  if (requirements.reasonPrompted && !options.reason?.trim()) {
+    return {
+      descriptor,
+      effectiveRisk: descriptor.riskLevel,
+      confirmationPrompted: requirements.confirmationPrompted,
+      reasonPrompted: requirements.reasonPrompted,
+      blockedBy: "reason_required",
+    };
+  }
+
+  return {
+    descriptor,
+    effectiveRisk: descriptor.riskLevel,
+    confirmationPrompted: requirements.confirmationPrompted,
+    reasonPrompted: requirements.reasonPrompted,
+    blockedBy: null,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Q-X15 — EmptyStateEnvelope
 // ─────────────────────────────────────────────────────────────────────────────
