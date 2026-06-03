@@ -6,7 +6,7 @@
 > **Helper Kind:** `acceptance_packet`
 > **Mutates Canonical:** `false`
 > **Planning Ref:** `docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md`
-> **Source of task truth:** `ai-status.json`, parent task brief `.orchestrator/task-briefs/PA-AI-ACTION-001.md`
+> **Source of task truth:** `ai-status.json`, embedded dispatch brief in the current worker wake-up
 
 This packet is a support artifact only. It does not modify L1 product truth, core
 contracts, runtime/registry/governance implementation, or the parent's owned files.
