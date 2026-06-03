@@ -1,6 +1,12 @@
 "use client";
 
-import { startTransition, useEffect, useMemo, useState } from "react";
+import {
+  startTransition,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type {
   IncidentCategory,
@@ -25,6 +31,7 @@ import {
   CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasField as Field,
+  CanvasIcon,
   buildCanvasTheme,
 } from "@drts/ui-web";
 
@@ -82,6 +89,7 @@ function actionIntent(action: string) {
   if (normalized.includes("close")) return "close";
   if (normalized.includes("recovery")) return "service_recovery";
   if (normalized.includes("ack")) return "acknowledge";
+  if (normalized.includes("police")) return "notify_police";
   if (normalized.includes("lift")) return "lift_suppression";
   return normalized;
 }
@@ -102,6 +110,9 @@ function actionCopy(action: string, locale: Locale) {
   }
   if (normalized.includes("ack")) {
     return locale === "en" ? "Acknowledge escalation" : "確認升級";
+  }
+  if (normalized.includes("police")) {
+    return locale === "en" ? "Notify police" : "通知警方";
   }
   if (normalized.includes("lift")) {
     return locale === "en" ? "Lift suppression" : "解除抑制";
@@ -131,6 +142,10 @@ function actionSummary(intent: string, locale: Locale) {
       return locale === "en"
         ? "Record that the escalation target accepted the handoff."
         : "記錄升級對象已接受此次 handoff。";
+    case "notify_police":
+      return locale === "en"
+        ? "Escalate this incident to law enforcement and capture the reason in the incident workspace."
+        : "將事故升級給警方處理，並在 incident 工作區留下原因。";
     default:
       return locale === "en"
         ? "This action stays in the incident workspace."
@@ -146,6 +161,66 @@ function actionTone(riskLevel: ResourceActionDescriptor["riskLevel"]) {
     return "warn";
   }
   return "info";
+}
+
+function actionVariant(riskLevel: ResourceActionDescriptor["riskLevel"]) {
+  if (riskLevel === "high") {
+    return { variant: "secondary" as const, danger: true };
+  }
+  if (riskLevel === "medium") {
+    return { variant: "primary" as const, danger: false };
+  }
+  return { variant: "secondary" as const, danger: false };
+}
+
+function actionDetail(action: ResourceActionDescriptor, locale: Locale) {
+  const details = [];
+  if (!action.enabled && action.disabledReasonCode) {
+    details.push(formatOpsCodeLabel(locale, action.disabledReasonCode));
+  }
+  if (action.requiresReason) {
+    details.push(locale === "en" ? "Reason required" : "必填原因");
+  }
+  return details.join(" · ");
+}
+
+function CanvasActionButton({
+  action,
+  locale,
+  icon,
+  children,
+  disabled,
+  onClick,
+}: {
+  action: ResourceActionDescriptor;
+  locale: Locale;
+  icon?: Parameters<typeof CanvasIcon>[0]["name"];
+  children: ReactNode;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  const { variant, danger } = actionVariant(action.riskLevel);
+
+  return (
+    <Btn
+      theme={theme}
+      size="sm"
+      variant={variant}
+      danger={danger}
+      disabled={disabled ?? !action.enabled}
+      {...(onClick ? { onClick } : {})}
+      {...(icon ? { icon } : {})}
+      {...(actionDetail(action, locale)
+        ? {
+            style: {
+              position: "relative" as const,
+            },
+          }
+        : {})}
+    >
+      {children}
+    </Btn>
+  );
 }
 
 function buildBasePath(incidentId: string, searchParams: URLSearchParams) {
@@ -202,6 +277,13 @@ export function IncidentDetailActionPanel({
   const [receipt, setReceipt] = useState<ReceiptState | null>(null);
   const currentIntent =
     normalizeIntent(searchParams.get("intent")) ?? initialIntent;
+  const supportedIntent =
+    currentIntent === "update" ||
+    currentIntent === "resolve" ||
+    currentIntent === "close" ||
+    currentIntent === "service_recovery" ||
+    currentIntent === "acknowledge" ||
+    currentIntent === "notify_police";
 
   const selectedAction = useMemo(
     () =>
@@ -277,7 +359,7 @@ export function IncidentDetailActionPanel({
   const basePath = buildBasePath(incidentId, searchParams);
 
   async function handleSubmit() {
-    if (!selectedAction || !selectedAction.enabled) {
+    if (!selectedAction || !selectedAction.enabled || !supportedIntent) {
       return;
     }
 
@@ -331,6 +413,7 @@ export function IncidentDetailActionPanel({
           currentIntent === "update"
             ? {
                 status,
+                category,
                 severity,
                 escalationTarget: escalationTarget || null,
                 ...withOptionalString(assignedTo, (trimmed) => ({
@@ -350,25 +433,38 @@ export function IncidentDetailActionPanel({
                     status: "closed",
                     resolutionNote: reasonText.trim(),
                   }
-                : {
-                    // No dedicated acknowledge endpoint on the current backend
-                    // (UI-BE-007-DSP does not expose one yet); record the
-                    // acknowledgment — including who acknowledged — into the
-                    // resolution note so it persists and lands on the timeline,
-                    // without silently reassigning ownership.
-                    resolutionNote: (() => {
-                      const actor = ackActor.trim() || "ops-user";
-                      const note = reasonText.trim();
-                      if (note) {
+                : currentIntent === "notify_police"
+                  ? {
+                      resolutionNote: (() => {
+                        const note = reasonText.trim();
+                        const prefix =
+                          locale === "en"
+                            ? `Police notified: ${note}`
+                            : `已通知警方：${note}`;
+                        return resolutionNote.trim()
+                          ? `${resolutionNote.trim()}\n${prefix}`
+                          : prefix;
+                      })(),
+                    }
+                  : {
+                      // No dedicated acknowledge endpoint on the current backend
+                      // (UI-BE-007-DSP does not expose one yet); record the
+                      // acknowledgment — including who acknowledged — into the
+                      // resolution note so it persists and lands on the timeline,
+                      // without silently reassigning ownership.
+                      resolutionNote: (() => {
+                        const actor = ackActor.trim() || "ops-user";
+                        const note = reasonText.trim();
+                        if (note) {
+                          return locale === "en"
+                            ? `Escalation acknowledged by ${actor}: ${note}`
+                            : `升級已由 ${actor} 確認：${note}`;
+                        }
                         return locale === "en"
-                          ? `Escalation acknowledged by ${actor}: ${note}`
-                          : `升級已由 ${actor} 確認：${note}`;
-                      }
-                      return locale === "en"
-                        ? `Escalation acknowledged by ${actor}.`
-                        : `升級已由 ${actor} 確認。`;
-                    })(),
-                  };
+                          ? `Escalation acknowledged by ${actor}.`
+                          : `升級已由 ${actor} 確認。`;
+                      })(),
+                    };
 
         await client.updateIncident(incidentId, payload);
         nextReceipt = {
@@ -491,6 +587,24 @@ export function IncidentDetailActionPanel({
             }
             body={actionSummary(currentIntent ?? "", locale)}
           />
+
+          {!supportedIntent ? (
+            <Banner
+              theme={theme}
+              tone="warn"
+              icon="warn"
+              title={
+                locale === "en"
+                  ? "This action remains descriptor-driven, but the incident form cannot submit it yet"
+                  : "這個動作維持 descriptor-driven，但 incident 表單目前還不能直接送出"
+              }
+              body={
+                locale === "en"
+                  ? "Keep the CTA visible for parity. This intent still needs a dedicated backend endpoint before the form can execute it."
+                  : "保留 CTA 以維持 parity；這個 intent 仍需要專屬後端端點，表單才能真正執行。"
+              }
+            />
+          ) : null}
 
           {currentIntent === "update" ? (
             <div style={{ display: "grid", gap: 12 }}>
@@ -704,11 +818,13 @@ export function IncidentDetailActionPanel({
           ) : null}
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Btn
-              theme={theme}
-              size="sm"
+            <CanvasActionButton
+              action={selectedAction}
+              locale={locale}
               icon={selectedAction.riskLevel === "high" ? "warn" : "check"}
-              disabled={isPending || !selectedAction.enabled}
+              disabled={
+                isPending || !selectedAction.enabled || !supportedIntent
+              }
               onClick={() => {
                 void handleSubmit();
               }}
@@ -720,7 +836,7 @@ export function IncidentDetailActionPanel({
                 : locale === "en"
                   ? `Confirm ${actionCopy(selectedAction.action, locale)}`
                   : `確認${actionCopy(selectedAction.action, locale)}`}
-            </Btn>
+            </CanvasActionButton>
             <Btn
               theme={theme}
               size="sm"
@@ -735,6 +851,12 @@ export function IncidentDetailActionPanel({
             {!selectedAction.enabled && selectedAction.disabledReasonCode ? (
               <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
                 {formatOpsCodeLabel(locale, selectedAction.disabledReasonCode)}
+              </span>
+            ) : !supportedIntent ? (
+              <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
+                {locale === "en"
+                  ? "Backend endpoint pending for this intent."
+                  : "此 intent 對應的後端端點尚未提供。"}
               </span>
             ) : null}
           </div>

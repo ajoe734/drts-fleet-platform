@@ -24,13 +24,13 @@ import {
   CanvasField as Field,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
+  Timeline as CanvasTimeline,
   CanvasIcon,
-  Timeline,
   buildCanvasTheme,
   type CanvasTheme,
   type CanvasTone,
+  type TimelineItem,
 } from "@drts/ui-web";
-import type { ManagementTone, TimelineItem } from "@drts/ui-web";
 import { IncidentRefreshTier } from "./refresh-tier";
 import { IncidentDetailActionPanel } from "./incident-detail-action-panel";
 
@@ -81,6 +81,14 @@ type RuntimeSectionLoadResult<T> = {
   error: Error | null;
   refresh: UiRefreshMetadata | null;
   emptyState: RuntimeEmptyState | null;
+};
+
+type IncidentEventRecord = {
+  entryId: string;
+  action: string;
+  note?: string | null;
+  createdAt: string;
+  actor: string;
 };
 
 const theme = buildCanvasTheme({
@@ -270,27 +278,33 @@ function formatIncidentAge(locale: Locale, value: string | null | undefined) {
 
 function actionLinkStyle(
   theme: CanvasTheme,
-  variant: "primary" | "secondary" | "ghost" = "secondary",
+  variant: "primary" | "secondary" | "ghost" | "danger" = "secondary",
   disabled = false,
 ) {
   const base =
-    variant === "primary"
+    variant === "danger"
       ? {
-          background: theme.accent,
+          background: theme.danger,
           color: "#ffffff",
-          border: `1px solid ${theme.accent}`,
+          border: `1px solid ${theme.danger}`,
         }
-      : variant === "ghost"
+      : variant === "primary"
         ? {
-            background: "transparent",
-            color: theme.textMuted,
-            border: "1px solid transparent",
+            background: theme.accent,
+            color: "#ffffff",
+            border: `1px solid ${theme.accent}`,
           }
-        : {
-            background: theme.surface,
-            color: theme.text,
-            border: `1px solid ${theme.border}`,
-          };
+        : variant === "ghost"
+          ? {
+              background: "transparent",
+              color: theme.textMuted,
+              border: "1px solid transparent",
+            }
+          : {
+              background: theme.surface,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
+            };
 
   return {
     display: "inline-flex",
@@ -310,31 +324,112 @@ function actionLinkStyle(
   } as const;
 }
 
-function ActionAffordance({
+function actionVariant(riskLevel: ResourceActionDescriptor["riskLevel"]) {
+  if (riskLevel === "high") {
+    return "danger" as const;
+  }
+  if (riskLevel === "medium") {
+    return "primary" as const;
+  }
+  return "secondary" as const;
+}
+
+function actionDetail(
+  action: ResourceActionDescriptor,
+  locale: Locale,
+  isInPlace: boolean,
+) {
+  const details = [];
+  if (!action.enabled && action.disabledReasonCode) {
+    details.push(formatOpsCodeLabel(locale, action.disabledReasonCode));
+  }
+  if (action.requiresReason) {
+    details.push(locale === "en" ? "Reason required" : "必填原因");
+  }
+  if (isInPlace) {
+    details.push(
+      locale === "en" ? "Stays in this workspace" : "停留在此工作區",
+    );
+  }
+  return details.join(" · ");
+}
+
+function CanvasActionButton({
   href,
-  disabled,
-  title,
-  style,
+  action,
+  locale,
+  icon,
   children,
 }: {
   href: string;
-  disabled: boolean;
-  title: string | undefined;
-  style: ReturnType<typeof actionLinkStyle>;
+  action: ResourceActionDescriptor;
+  locale: Locale;
+  icon?: Parameters<typeof CanvasIcon>[0]["name"];
   children: ReactNode;
 }) {
-  if (disabled) {
+  const detail = actionDetail(action, locale, true);
+  const style = actionLinkStyle(
+    theme,
+    actionVariant(action.riskLevel),
+    !action.enabled,
+  );
+  const content = (
+    <>
+      {icon ? <CanvasIcon name={icon} size={12} /> : null}
+      <span>{children}</span>
+      {action.requiresReason && action.enabled ? (
+        <span
+          aria-hidden
+          style={{
+            width: 5,
+            height: 5,
+            borderRadius: 999,
+            background: "currentColor",
+            opacity: 0.65,
+          }}
+        />
+      ) : null}
+    </>
+  );
+
+  if (!action.enabled) {
     return (
-      <span title={title} aria-disabled="true" style={style}>
-        {children}
+      <span style={{ display: "grid", gap: 4 }}>
+        <span title={detail || undefined} aria-disabled="true" style={style}>
+          {content}
+        </span>
+        {detail ? (
+          <span
+            style={{
+              color: theme.textDim,
+              fontSize: 11,
+              fontFamily: theme.monoFamily,
+            }}
+          >
+            {detail}
+          </span>
+        ) : null}
       </span>
     );
   }
 
   return (
-    <Link href={href} title={title} style={style}>
-      {children}
-    </Link>
+    <span style={{ display: "grid", gap: 4 }}>
+      <Link href={href} title={detail || undefined} style={style}>
+        {content}
+      </Link>
+      {detail ? (
+        <span
+          style={{
+            color: theme.textDim,
+            fontSize: 11,
+            fontFamily: theme.monoFamily,
+          }}
+        >
+          {detail}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -358,7 +453,7 @@ function getSeverityTone(severity: IncidentRecord["severity"]): CanvasTone {
   return "info";
 }
 
-function getTimelineTone(action: string): ManagementTone {
+function getEventTone(action: string): CanvasTone {
   if (action === "incident_closed" || action === "incident_resolved") {
     return "success";
   }
@@ -370,12 +465,12 @@ function getTimelineTone(action: string): ManagementTone {
     return "danger";
   }
   if (action === "escalation_target_set" || action === "complaint_linked") {
-    return "warning";
+    return "warn";
   }
   if (action === "service_recovery_action") {
     return "info";
   }
-  return "accent";
+  return "neutral";
 }
 
 function getTenantLabel(order: OwnedOrderRecord | null) {
@@ -508,6 +603,9 @@ function getActionIntent(action: string) {
   if (normalized.includes("ack")) {
     return "acknowledge";
   }
+  if (normalized.includes("police")) {
+    return "notify_police";
+  }
   if (normalized.includes("lift")) {
     return "lift_suppression";
   }
@@ -531,47 +629,48 @@ function getActionIcon(action: string) {
   if (normalized.includes("ack")) {
     return "warn";
   }
+  if (normalized.includes("police")) {
+    return "warn";
+  }
   if (normalized.includes("update")) {
     return "copy";
   }
   return "ext";
 }
 
-function buildActionTitle(
+function decorateIncidentActionDescriptor(
+  incident: IncidentRuntimeRecord,
   action: ResourceActionDescriptor,
-  locale: Locale,
-  isInPlace: boolean,
 ) {
-  const details = [
-    action.enabled
-      ? null
-      : locale === "en"
-        ? `Disabled: ${formatOpsCodeLabel(locale, action.disabledReasonCode ?? "unavailable")}`
-        : `停用：${formatOpsCodeLabel(locale, action.disabledReasonCode ?? "unavailable")}`,
-    action.riskLevel === "high"
-      ? locale === "en"
-        ? "High-risk confirmation"
-        : "高風險確認"
-      : action.riskLevel === "medium"
-        ? locale === "en"
-          ? "Medium-risk confirmation"
-          : "中風險確認"
-        : locale === "en"
-          ? "Low-risk action"
-          : "低風險動作",
-    action.requiresReason
-      ? locale === "en"
-        ? "Reason required"
-        : "必填原因"
-      : null,
-    isInPlace
-      ? locale === "en"
-        ? "Stays in this incident workspace"
-        : "停留在此事故工作區"
-      : null,
-  ].filter(Boolean);
+  const intent = getActionIntent(action.action);
+  const recoveryCount = incident.serviceRecoveryActions.length;
 
-  return details.join(" · ");
+  if (intent === "close") {
+    const disabledReasonCode =
+      incident.status === "open"
+        ? "incident_open"
+        : recoveryCount === 0
+          ? "recovery_required"
+          : action.disabledReasonCode;
+
+    return {
+      ...action,
+      riskLevel: "high" as const,
+      requiresReason: true,
+      enabled: disabledReasonCode ? false : action.enabled,
+      ...(disabledReasonCode ? { disabledReasonCode } : {}),
+    };
+  }
+
+  if (intent === "notify_police" || intent === "lift_suppression") {
+    return {
+      ...action,
+      riskLevel: "high" as const,
+      requiresReason: true,
+    };
+  }
+
+  return action;
 }
 
 function actionTarget(
@@ -741,7 +840,12 @@ export default async function IncidentDetailPage({
     auditLogsResult,
     driverRegistryResult,
   ] = await Promise.all([
-    resolveRuntimeSection(() => client.getIncidentTimeline(incidentId)),
+    resolveRuntimeSection(
+      () =>
+        client.getIncidentTimeline(incidentId) as Promise<
+          RuntimeListEnvelope<IncidentEventRecord>
+        >,
+    ),
     resolveRuntimeSection(() => client.getServiceRecoveryActions(incidentId)),
     incident.relatedOrderId
       ? resolveOrFallback(
@@ -766,7 +870,9 @@ export default async function IncidentDetailPage({
   const tenantLabel = getTenantLabel(relatedOrder);
   const suppression = inferSuppression(incident, relatedDriver);
   const refreshMetadata = incident.refreshMetadata ?? null;
-  const availableActions = incident.availableActions ?? [];
+  const availableActions = (incident.availableActions ?? []).map((action) =>
+    decorateIncidentActionDescriptor(incident, action),
+  );
   const serviceRecoveryAction =
     availableActions.find((action) =>
       action.action.toLowerCase().includes("recovery"),
@@ -790,7 +896,7 @@ export default async function IncidentDetailPage({
       )
     : "no_data";
 
-  const timelineItems: TimelineItem[] = [...timelineResult.data]
+  const eventItems: TimelineItem[] = [...timelineResult.data]
     .sort(
       (a, b) =>
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -800,7 +906,7 @@ export default async function IncidentDetailPage({
       title: formatOpsCodeLabel(locale, entry.action),
       detail: entry.note,
       timestamp: formatShortDateTime(locale, entry.createdAt),
-      tone: getTimelineTone(entry.action),
+      tone: getEventTone(entry.action),
       eyebrow: entry.actor,
     }));
 
@@ -1119,27 +1225,15 @@ export default async function IncidentDetailPage({
               {availableActions.length > 0 ? (
                 availableActions.map(
                   (action: ResourceActionDescriptor, index: number) => (
-                    <ActionAffordance
+                    <CanvasActionButton
                       key={`${action.action}:${index}`}
                       href={actionTarget(incident, action)}
-                      disabled={!action.enabled}
-                      title={buildActionTitle(action, locale, true)}
-                      style={actionLinkStyle(
-                        theme,
-                        action.riskLevel === "high"
-                          ? "primary"
-                          : action.riskLevel === "medium"
-                            ? "secondary"
-                            : "ghost",
-                        !action.enabled,
-                      )}
+                      action={action}
+                      locale={locale}
+                      icon={getActionIcon(action.action)}
                     >
-                      <CanvasIcon
-                        name={getActionIcon(action.action)}
-                        size={12}
-                      />
-                      <span>{getActionCopy(action.action, locale)}</span>
-                    </ActionAffordance>
+                      {getActionCopy(action.action, locale)}
+                    </CanvasActionButton>
                   ),
                 )
               ) : (
@@ -1291,12 +1385,8 @@ export default async function IncidentDetailPage({
             </Card>
 
             <Card theme={theme} title={t("incidents.timeline", locale)}>
-              {timelineItems.length > 0 ? (
-                <Timeline
-                  density="compact"
-                  items={timelineItems}
-                  emptyState={t("incidents.timelineEmpty", locale)}
-                />
+              {eventItems.length > 0 ? (
+                <CanvasTimeline density="compact" items={eventItems} />
               ) : (
                 <EmptyStateBlock
                   reason={normalizeIncidentEmptyReason(
@@ -1310,33 +1400,14 @@ export default async function IncidentDetailPage({
                   {...(timelineEmptyAction
                     ? {
                         nextAction: (
-                          <ActionAffordance
+                          <CanvasActionButton
                             href={actionTarget(incident, timelineEmptyAction)}
-                            disabled={!timelineEmptyAction.enabled}
-                            title={buildActionTitle(
-                              timelineEmptyAction,
-                              locale,
-                              true,
-                            )}
-                            style={actionLinkStyle(
-                              theme,
-                              timelineEmptyAction.riskLevel === "high"
-                                ? "primary"
-                                : "secondary",
-                              !timelineEmptyAction.enabled,
-                            )}
+                            action={timelineEmptyAction}
+                            locale={locale}
+                            icon={getActionIcon(timelineEmptyAction.action)}
                           >
-                            <CanvasIcon
-                              name={getActionIcon(timelineEmptyAction.action)}
-                              size={12}
-                            />
-                            <span>
-                              {getActionCopy(
-                                timelineEmptyAction.action,
-                                locale,
-                              )}
-                            </span>
-                          </ActionAffordance>
+                            {getActionCopy(timelineEmptyAction.action, locale)}
+                          </CanvasActionButton>
                         ),
                       }
                     : {})}
@@ -1365,23 +1436,14 @@ export default async function IncidentDetailPage({
               title={t("incidents.serviceRecovery.title", locale)}
               actions={
                 serviceRecoveryAction ? (
-                  <ActionAffordance
+                  <CanvasActionButton
                     href={actionTarget(incident, serviceRecoveryAction)}
-                    title={
-                      serviceRecoveryAction.enabled
-                        ? undefined
-                        : serviceRecoveryAction.disabledReasonCode
-                    }
-                    disabled={!serviceRecoveryAction.enabled}
-                    style={actionLinkStyle(
-                      theme,
-                      "primary",
-                      !serviceRecoveryAction.enabled,
-                    )}
+                    action={serviceRecoveryAction}
+                    locale={locale}
+                    icon="plus"
                   >
-                    <CanvasIcon name="plus" size={12} />
-                    <span>{t("incidents.serviceRecovery.add", locale)}</span>
-                  </ActionAffordance>
+                    {t("incidents.serviceRecovery.add", locale)}
+                  </CanvasActionButton>
                 ) : undefined
               }
             >
@@ -1401,33 +1463,14 @@ export default async function IncidentDetailPage({
                     if (recoveryEmptyAction) {
                       return {
                         nextAction: (
-                          <ActionAffordance
+                          <CanvasActionButton
                             href={actionTarget(incident, recoveryEmptyAction)}
-                            disabled={!recoveryEmptyAction.enabled}
-                            title={buildActionTitle(
-                              recoveryEmptyAction,
-                              locale,
-                              true,
-                            )}
-                            style={actionLinkStyle(
-                              theme,
-                              recoveryEmptyAction.riskLevel === "high"
-                                ? "primary"
-                                : "secondary",
-                              !recoveryEmptyAction.enabled,
-                            )}
+                            action={recoveryEmptyAction}
+                            locale={locale}
+                            icon={getActionIcon(recoveryEmptyAction.action)}
                           >
-                            <CanvasIcon
-                              name={getActionIcon(recoveryEmptyAction.action)}
-                              size={12}
-                            />
-                            <span>
-                              {getActionCopy(
-                                recoveryEmptyAction.action,
-                                locale,
-                              )}
-                            </span>
-                          </ActionAffordance>
+                            {getActionCopy(recoveryEmptyAction.action, locale)}
+                          </CanvasActionButton>
                         ),
                       };
                     }
