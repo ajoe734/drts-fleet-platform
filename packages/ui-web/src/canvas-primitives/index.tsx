@@ -1041,6 +1041,246 @@ export function Banner({
   );
 }
 
+export interface EmptyStateProps {
+  theme?: CanvasTheme;
+  title: ReactNode;
+  description: ReactNode;
+  tone?: CanvasTone;
+  icon?: CanvasIconName | ReactNode;
+  actions?: ReactNode;
+  style?: CSSProperties;
+}
+
+export function EmptyState({
+  theme: providedTheme,
+  title,
+  description,
+  tone = "neutral",
+  icon,
+  actions,
+  style,
+}: EmptyStateProps) {
+  const theme = resolveTheme(providedTheme);
+  const toneSet = toneStyles(theme, tone);
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        justifyItems: "center",
+        gap: "12px",
+        padding: "24px 16px",
+        textAlign: "center",
+        border: `1px dashed ${toneSet.bd}`,
+        borderRadius: "14px",
+        background: toneSet.bg,
+        ...style,
+      }}
+    >
+      <div
+        style={{
+          width: "40px",
+          height: "40px",
+          borderRadius: "999px",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: theme.surface,
+          color: toneSet.fg,
+          border: `1px solid ${toneSet.bd}`,
+        }}
+      >
+        {renderIcon(icon, 22, 1.8)}
+      </div>
+      <div style={{ display: "grid", gap: "6px", maxWidth: "56ch" }}>
+        <div
+          style={{
+            color: theme.text,
+            fontSize: "14px",
+            fontWeight: 600,
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            color: theme.textMuted,
+            fontSize: "12.5px",
+            lineHeight: 1.6,
+          }}
+        >
+          {description}
+        </div>
+      </div>
+      {actions ? <div>{actions}</div> : null}
+    </div>
+  );
+}
+
+export interface TimelineItem {
+  id: string;
+  title: ReactNode;
+  detail?: ReactNode;
+  timestamp?: ReactNode;
+  tone?: CanvasTone;
+  eyebrow?: string;
+  supportingContent?: ReactNode;
+  actions?: ReactNode;
+}
+
+export interface TimelineProps {
+  theme?: CanvasTheme;
+  items: TimelineItem[];
+  emptyState?: ReactNode;
+  style?: CSSProperties;
+}
+
+export function Timeline({
+  theme: providedTheme,
+  items,
+  emptyState,
+  style,
+}: TimelineProps) {
+  const theme = resolveTheme(providedTheme);
+
+  if (items.length === 0) {
+    return emptyState ?? null;
+  }
+
+  return (
+    <ol
+      style={{
+        listStyle: "none",
+        margin: 0,
+        padding: "16px",
+        display: "grid",
+        gap: "14px",
+        ...style,
+      }}
+    >
+      {items.map((item, index) => {
+        const toneSet = toneStyles(theme, item.tone ?? "accent");
+        return (
+          <li
+            key={item.id}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "20px minmax(0, 1fr)",
+              gap: "12px",
+              alignItems: "start",
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                justifyItems: "center",
+                gap: "8px",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: "18px",
+                  height: "18px",
+                  borderRadius: "999px",
+                  background: toneSet.fg,
+                  color: "#ffffff",
+                  boxShadow: `0 0 0 4px ${toneSet.bg}`,
+                  marginTop: "2px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "10px",
+                  fontWeight: 700,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {index + 1}
+              </span>
+              {index < items.length - 1 ? (
+                <span
+                  aria-hidden
+                  style={{
+                    width: "2px",
+                    minHeight: "40px",
+                    background: toneSet.bd,
+                  }}
+                />
+              ) : null}
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gap: "6px",
+                paddingBottom: index < items.length - 1 ? "4px" : 0,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  alignItems: "baseline",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ display: "grid", gap: "4px" }}>
+                  {item.eyebrow ? (
+                    <span
+                      style={{
+                        color: toneSet.fg,
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        letterSpacing: "0.02em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {item.eyebrow}
+                    </span>
+                  ) : null}
+                  <span style={{ color: theme.text, fontSize: "13px" }}>
+                    {item.title}
+                  </span>
+                </div>
+                {item.timestamp ? (
+                  <span
+                    style={{
+                      color: theme.textDim,
+                      fontSize: "11px",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {item.timestamp}
+                  </span>
+                ) : null}
+              </div>
+              {item.detail ? (
+                <div
+                  style={{
+                    color: theme.textMuted,
+                    fontSize: "12px",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {item.detail}
+                </div>
+              ) : null}
+              {item.supportingContent ? (
+                <div>{item.supportingContent}</div>
+              ) : null}
+              {item.actions ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  {item.actions}
+                </div>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export interface KPIProps {
   theme?: CanvasTheme;
   label: ReactNode;
