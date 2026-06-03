@@ -30,7 +30,7 @@ const pageBodyStyle = {
 const cardGridStyle = {
   display: "grid",
   gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
 } satisfies CSSProperties;
 
 const cardTitleStyle = {
@@ -44,7 +44,7 @@ const metaRowStyle = {
   display: "flex",
   flexWrap: "wrap",
   gap: 6,
-  marginTop: 12,
+  marginTop: 10,
   alignItems: "center",
 } satisfies CSSProperties;
 
@@ -54,6 +54,13 @@ const actionSectionStyle = {
   borderTop: `1px solid ${theme.border}`,
   display: "grid",
   gap: 10,
+} satisfies CSSProperties;
+
+const descriptionStyle = {
+  margin: "10px 0 0",
+  color: theme.textMuted,
+  fontSize: 12.5,
+  lineHeight: 1.45,
 } satisfies CSSProperties;
 
 const sectionLabelStyle = {
@@ -70,6 +77,13 @@ const authorityGroupStyle = {
   gap: 8,
 } satisfies CSSProperties;
 
+const authorityMetaStyle = {
+  margin: 0,
+  color: theme.textMuted,
+  fontSize: 12,
+  lineHeight: 1.45,
+} satisfies CSSProperties;
+
 const actionRowStyle = {
   display: "flex",
   flexWrap: "wrap",
@@ -80,6 +94,13 @@ const authorityGridStyle = {
   display: "grid",
   gap: 10,
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+} satisfies CSSProperties;
+
+const helperTextStyle = {
+  margin: 0,
+  color: theme.textDim,
+  fontSize: 11.5,
+  lineHeight: 1.45,
 } satisfies CSSProperties;
 
 const authorityDividerStyle = {
@@ -153,6 +174,7 @@ type Copy = {
   metricOrders: string;
   metricOrdersPending: string;
   metricRollout: string;
+  metricUpdated: string;
   kindForwarder: string;
   kindValue: (adapter: PlatformAdapter) => string;
   adapterTitle: (adapter: PlatformAdapter) => string;
@@ -293,6 +315,14 @@ function formatRolloutValue(locale: LabelLocale, adapter: PlatformAdapter) {
   )}`;
 }
 
+function formatLatency(adapter: PlatformAdapter) {
+  return `${adapter.policies.acceptTimeoutSeconds}s`;
+}
+
+function formatUpdatedAt(adapter: PlatformAdapter) {
+  return formatDateTime(adapter.updatedAt);
+}
+
 export default function AdapterRegistryPage() {
   const client = usePlatformAdminClient();
   const { locale } = useTranslation();
@@ -337,6 +367,7 @@ export default function AdapterRegistryPage() {
             metricOrders: "ORDERS 24H",
             metricOrdersPending: "telemetry pending",
             metricRollout: "ROLLOUT",
+            metricUpdated: "UPDATED",
             kindForwarder: "forwarder",
             kindValue: (adapter) =>
               adapter.isForwarded
@@ -397,6 +428,7 @@ export default function AdapterRegistryPage() {
             metricOrders: "ORDERS 24H",
             metricOrdersPending: "telemetry pending",
             metricRollout: "ROLLOUT",
+            metricUpdated: "UPDATED",
             kindForwarder: "forwarder",
             kindValue: (adapter) =>
               adapter.isForwarded
@@ -586,7 +618,9 @@ export default function AdapterRegistryPage() {
         {flash ? (
           <div style={flashStyle(flash.tone)}>{flash.message}</div>
         ) : null}
-        {error ? <div style={flashStyle("danger")}>{error}</div> : null}
+        {error && adapters.length > 0 ? (
+          <div style={flashStyle("danger")}>{error}</div>
+        ) : null}
 
         {loading ? (
           <CanvasCard theme={theme}>
@@ -635,7 +669,7 @@ export default function AdapterRegistryPage() {
                     items={[
                       {
                         k: copy.metricLatency,
-                        v: `${adapter.policies.acceptTimeoutSeconds}s`,
+                        v: formatLatency(adapter),
                         mono: true,
                       },
                       {
@@ -648,12 +682,10 @@ export default function AdapterRegistryPage() {
                         v: copy.metricOrdersPending,
                         mono: true,
                       },
-                      {
-                        k: copy.metricRollout,
-                        v: formatRolloutValue(locale, adapter),
-                      },
                     ]}
                   />
+
+                  <p style={descriptionStyle}>{adapter.description}</p>
 
                   <div style={metaRowStyle}>
                     <CanvasPill theme={theme} tone="neutral">
@@ -691,12 +723,22 @@ export default function AdapterRegistryPage() {
                         ? copy.enableAdapter
                         : copy.disableAdapter}
                     </CanvasPill>
+                    <CanvasPill theme={theme} tone="neutral">
+                      {copy.metricRollout}:{" "}
+                      {formatRolloutValue(locale, adapter)}
+                    </CanvasPill>
+                    <CanvasPill theme={theme} tone="neutral">
+                      {copy.metricUpdated}: {formatUpdatedAt(adapter)}
+                    </CanvasPill>
                   </div>
 
                   <div style={actionSectionStyle}>
                     <div style={authorityGridStyle}>
                       <div style={authorityGroupStyle}>
                         <p style={sectionLabelStyle}>{copy.authorityPa}</p>
+                        <p style={authorityMetaStyle}>
+                          {copy.governedActionInfo}
+                        </p>
                         <div style={actionRowStyle}>
                           <CanvasBtn
                             theme={theme}
@@ -733,12 +775,17 @@ export default function AdapterRegistryPage() {
                               : copy.enableAdapter}
                           </CanvasBtn>
                         </div>
+                        <p style={helperTextStyle}>
+                          {adapter.version} ·{" "}
+                          {formatPlatformCodeLabel(locale, adapter.environment)}
+                        </p>
                       </div>
 
                       <span style={authorityDividerStyle} aria-hidden="true" />
 
                       <div style={authorityGroupStyle}>
                         <p style={sectionLabelStyle}>{copy.authorityOps}</p>
+                        <p style={authorityMetaStyle}>{copy.opsActionInfo}</p>
                         <div style={actionRowStyle}>
                           <CanvasBtn
                             theme={theme}
@@ -753,6 +800,10 @@ export default function AdapterRegistryPage() {
                             {copy.pauseTraffic}
                           </CanvasBtn>
                         </div>
+                        <p style={helperTextStyle}>
+                          {adapter.healthStatus.message ??
+                            copy.metricOrdersPending}
+                        </p>
                       </div>
                     </div>
                   </div>
