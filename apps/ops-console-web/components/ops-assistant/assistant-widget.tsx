@@ -14,8 +14,7 @@ import {
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
-  findMatchingActionDescriptor,
-  getActionExecutionRequirements,
+  evaluateAssistantActionExecution,
   type ActionIntent,
   type ResourceActionDescriptor,
 } from "@drts/contracts";
@@ -624,13 +623,15 @@ export function OpsAssistantWidget() {
       return;
     }
 
+    const executionCheck = evaluateAssistantActionExecution(
+      pendingIntent,
+      actionBridge.availableActions,
+      { confirmed: false },
+    );
     const descriptor =
       actionBridge.resolveDescriptor(pendingIntent) ??
-      findMatchingActionDescriptor(
-        pendingIntent,
-        actionBridge.availableActions,
-      );
-    if (!descriptor) {
+      executionCheck.descriptor;
+    if (executionCheck.blockedBy === "action_unavailable" || !descriptor) {
       appendConversation({
         id: `${Date.now()}-unavailable`,
         author: "assistant",
@@ -642,7 +643,7 @@ export function OpsAssistantWidget() {
       return;
     }
 
-    if (!descriptor.enabled) {
+    if (executionCheck.blockedBy === "action_disabled") {
       appendConversation({
         id: `${Date.now()}-disabled`,
         author: "assistant",
@@ -657,16 +658,14 @@ export function OpsAssistantWidget() {
     }
 
     setIsExecutingIntent(true);
-    const requirements = getActionExecutionRequirements(descriptor);
     appendConversation({
       id: `${Date.now()}-execute`,
       author: "operator",
       tone: "neutral",
-      message:
-        descriptor.riskLevel === "low"
-          ? `Executing ${descriptor.action}.`
-          : `Opening ${descriptor.riskLevel}-risk confirmation for ${descriptor.action}.`,
-      ...(requirements.reasonPrompted
+      message: executionCheck.confirmationPrompted
+        ? `Opening ${descriptor.riskLevel}-risk confirmation for ${descriptor.action}.`
+        : `Executing ${descriptor.action}.`,
+      ...(executionCheck.reasonPrompted
         ? {
             meta: "Reason may be required by the existing page confirmation UI.",
           }

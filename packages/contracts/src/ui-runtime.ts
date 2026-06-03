@@ -210,7 +210,8 @@ export function findMatchingActionDescriptor(
 ): ResourceActionDescriptor | null {
   return (
     availableActions.find(
-      (descriptor) => descriptor.action.toLowerCase() === intent.action.toLowerCase(),
+      (descriptor) =>
+        descriptor.action.toLowerCase() === intent.action.toLowerCase(),
     ) ?? null
   );
 }
@@ -242,7 +243,7 @@ export function evaluateAssistantActionExecution(
     };
   }
 
-  if (intent.confirmationRequired && !options.confirmed) {
+  if (requirements.confirmationPrompted && !options.confirmed) {
     return {
       descriptor,
       effectiveRisk: descriptor.riskLevel,
