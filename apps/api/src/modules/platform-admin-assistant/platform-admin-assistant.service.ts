@@ -7,6 +7,11 @@ import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { PlatformAdminService } from "../platform-admin/platform-admin.service";
+import type { RetrievalResult } from "./knowledge";
+import {
+  getApprovedSource,
+  PlatformAdminAssistantKnowledgeService,
+} from "./knowledge";
 import { resolvePlatformAdminAssistantAction } from "./platform-admin-assistant.actions";
 import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.types";
 import type {
@@ -46,6 +51,7 @@ export class PlatformAdminAssistantService {
     private readonly assistantProvider: PlatformAdminAssistantProvider,
     private readonly platformAdminService: PlatformAdminService,
     private readonly auditNotificationService: AuditNotificationService,
+    private readonly knowledgeService: PlatformAdminAssistantKnowledgeService,
   ) {}
 
   listSessions(identity: BootstrapRequestIdentity | null) {
@@ -377,21 +383,29 @@ export class PlatformAdminAssistantService {
     message: string,
     history: PlatformAdminAssistantMessageRecord[],
   ): Promise<PlatformAdminAssistantProviderResponse> {
+    const retrieval = this.knowledgeService.answer({ question: message });
+
     try {
       return await this.assistantProvider.generate({
         session,
         message,
         history: history.map((entry) => this.cloneMessage(entry)),
+        retrieval,
       });
     } catch (error) {
-      return this.buildDegradedProviderResponse(error);
+      return this.buildDegradedProviderResponse(error, retrieval);
     }
   }
 
   private buildDegradedProviderResponse(
     error: unknown,
+    retrieval: RetrievalResult,
   ): PlatformAdminAssistantProviderResponse {
     const reason = this.classifyProviderFailure(error);
+    const citations =
+      retrieval.kind === "grounded"
+        ? retrieval.citations
+        : retrieval.suggestedSources;
 
     return {
       answer:
@@ -400,18 +414,17 @@ export class PlatformAdminAssistantService {
           : reason === "quota"
             ? "Assistant provider is temporarily degraded because the provider quota or rate budget is exhausted. I can still route you to approved docs and manual follow-up guidance."
             : "Assistant provider is temporarily unavailable. I can still help with approved docs search and safe manual follow-up guidance.",
-      citations: [
-        {
-          title: "Platform Admin assistant runtime plan",
-          section: "§4 Mock Provider Policy",
-          href: "docs/05-ui/platform-admin-llm-assistant-design-development-plan-20260602.md",
-        },
-        {
-          title: "Platform Admin shell questions",
-          section: "§7.3 Shell",
-          href: "docs/05-ui/platform-admin-design-handoff-packet-20260525.md",
-        },
-      ],
+      citations: citations.map((citation) => {
+        const result = {
+          title:
+            getApprovedSource(citation.sourcePath)?.label ??
+            citation.sourcePath,
+          href: citation.sourcePath,
+        };
+        return citation.section === null
+          ? result
+          : { ...result, section: citation.section };
+      }),
       suggestedPrompts: [
         "Search approved Platform Admin policy for this workflow.",
         "List the relevant control-plane routes for this task.",

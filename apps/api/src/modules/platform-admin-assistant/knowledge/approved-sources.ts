@@ -29,6 +29,12 @@ export const APPROVED_SOURCES: readonly ApprovedSource[] = [
     label: "Platform Admin LLM Assistant — Design & Development Plan",
   },
   {
+    sourcePath:
+      "docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md",
+    category: "architecture_plan",
+    label: "Platform Admin Agentic Assistant Architecture Plan",
+  },
+  {
     sourcePath: "docs/05-ui/platform-admin-design-handoff-packet-20260525.md",
     category: "design_handoff",
     label: "Platform Admin — Design Handoff Packet",
@@ -56,9 +62,21 @@ export const APPROVED_SOURCES: readonly ApprovedSource[] = [
     label: "Cross-App Navigation & Shell Topology",
   },
   {
+    sourcePath:
+      "docs/02-architecture/platform-admin-control-plane-state-machines-20260524.md",
+    category: "state_machine",
+    label: "Platform Admin Control-Plane State Machines",
+  },
+  {
     sourcePath: "docs/04-api/ui-functional-contracts-20260524.md",
     category: "ui_contract",
     label: "UI Functional Contracts",
+  },
+  {
+    sourcePath:
+      "docs/03-runbooks/system-design-pack-implementation-runbook-20260524.md",
+    category: "runbook",
+    label: "System Design Pack Implementation Runbook",
   },
 ] as const;
 
