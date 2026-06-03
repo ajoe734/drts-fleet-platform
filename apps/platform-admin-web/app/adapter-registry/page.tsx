@@ -3,14 +3,14 @@
 import React, { type CSSProperties } from "react";
 import { useTranslation } from "@/lib/i18n";
 import {
-  CanvasBanner,
-  CanvasBtn,
-  CanvasCard,
-  CanvasDL,
-  CanvasPageHeader,
-  CanvasPill,
-  buildCanvasTheme,
-} from "@drts/ui-web";
+  Banner as CanvasBanner,
+  Btn as CanvasBtn,
+  Card as CanvasCard,
+  DL as CanvasDL,
+  PageHeader as CanvasPageHeader,
+  Pill as CanvasPill,
+} from "@drts/ui-web/canvas-primitives";
+import { buildCanvasTheme } from "@drts/ui-web/canvas-tokens";
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -23,6 +23,10 @@ const pageBodyStyle = {
 const adapterGridStyle = {
   display: "grid",
   gap: 12,
+} satisfies CSSProperties;
+
+const statGridStyle = {
+  marginTop: 12,
 } satisfies CSSProperties;
 
 const titleRowStyle = {
@@ -38,51 +42,24 @@ const authorityCopyStyle = {
   lineHeight: 1.45,
 } satisfies CSSProperties;
 
-const authoritySummaryCardStyle = {
-  display: "grid",
-  gap: 12,
-  padding: 14,
-  borderRadius: 12,
-  border: `1px solid ${theme.border}`,
-  background: theme.surface,
-} satisfies CSSProperties;
-
-const authoritySummaryGridStyle = {
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-} satisfies CSSProperties;
-
-const authoritySummaryBlockStyle = {
-  display: "grid",
-  gap: 8,
-} satisfies CSSProperties;
-
-const authoritySummaryLabelStyle = {
-  color: theme.text,
-  fontSize: 11,
-  fontWeight: 700,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-} satisfies CSSProperties;
-
-const authoritySummaryBodyStyle = {
-  color: theme.textDim,
-  fontSize: 12,
-  lineHeight: 1.5,
-} satisfies CSSProperties;
-
 const actionSectionStyle = {
   display: "grid",
   gap: 12,
   marginTop: 12,
 } satisfies CSSProperties;
 
+const authorityGridStyle = {
+  display: "grid",
+  gap: 12,
+} satisfies CSSProperties;
+
 const actionLaneStyle = {
   display: "grid",
   gap: 8,
-  paddingTop: 12,
-  borderTop: `1px solid ${theme.border}`,
+  padding: 12,
+  border: `1px solid ${theme.border}`,
+  borderRadius: 14,
+  background: theme.surfaceLo,
 } satisfies CSSProperties;
 
 const actionLaneRowsStyle = {
@@ -111,9 +88,24 @@ const buttonRowStyle = {
   flexWrap: "wrap",
 } satisfies CSSProperties;
 
+const laneEyebrowStyle = {
+  color: theme.textMuted,
+  fontFamily: theme.monoFamily,
+  fontSize: 11,
+  lineHeight: 1.4,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+} satisfies CSSProperties;
+
 const laneSummaryStyle = {
   color: theme.textDim,
   fontSize: 11.5,
+  lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const disabledReasonStyle = {
+  color: theme.textMuted,
+  fontSize: 11,
   lineHeight: 1.45,
 } satisfies CSSProperties;
 
@@ -122,6 +114,12 @@ const monoCaptionStyle = {
   fontFamily: theme.monoFamily,
   fontSize: 11,
   lineHeight: 1.4,
+} satisfies CSSProperties;
+
+const headerActionStackStyle = {
+  display: "grid",
+  gap: 4,
+  justifyItems: "end",
 } satisfies CSSProperties;
 
 const noop = () => {};
@@ -136,6 +134,7 @@ type AdapterAction = {
   icon?: "plus" | "apiKeys" | "arrow";
   danger?: boolean;
   disabled?: boolean;
+  disabledReason?: string;
 };
 
 type AdapterRecord = {
@@ -242,7 +241,12 @@ const adapters: AdapterRecord[] = [
       { label: "編輯 credential", scope: "platform", icon: "apiKeys" },
       { label: "輪替", scope: "platform", icon: "arrow" },
       { label: "停用", scope: "platform", danger: true },
-      { label: "observe only", scope: "ops", disabled: true },
+      {
+        label: "observe only",
+        scope: "ops",
+        disabled: true,
+        disabledReason: "filing adapters stay read-only in ops",
+      },
     ],
   },
   {
@@ -307,19 +311,16 @@ export default function AdapterRegistryPage() {
           subtitle:
             "Config and credential governance stays in Platform Admin; operational pause and retry stay in Ops per Q-ADM17 split authority.",
           createAction: "Register adapter",
+          createHint: "High-risk action · reason + audit receipt",
           rotateAction: "Rotate now",
           dangerTitle: "mof-bgmt · token expires in 6 days",
           dangerBody:
             "The BGMT dispatch reporting token must rotate before May 31, 2026 or today's completion reports cannot reach the upstream endpoint.",
-          authorityTitle: "Q-ADM17 split authority",
-          authorityPlatform:
-            "Platform Admin keeps credential writes, rotation, and hard disable.",
-          authorityOps:
-            "Ops receives pause and retry controls only for runtime traffic handling.",
           platformAuthority: "Platform Admin",
           opsAuthority: "Ops Console",
           platformScope: "Write authority",
           opsScope: "Operational handoff",
+          authorityModel: "Q-ADM17 split authority",
           latency: "LATENCY",
           lastEvent: "LAST EVENT",
           orders24h: "ORDERS 24H",
@@ -335,19 +336,16 @@ export default function AdapterRegistryPage() {
           subtitle:
             "config / credential 治理在 platform-admin · operational pause / retry 在 ops (Q-ADM17 split)",
           createAction: "註冊 adapter",
+          createHint: "高風險動作 · 必填 reason + audit receipt",
           rotateAction: "立即輪替",
           dangerTitle: "mof-bgmt · token 距到期 6 天",
           dangerBody:
             "BGMT 派遣回報 token 必須於 2026-05-31 前輪替；否則無法回報今日完成單。",
-          authorityTitle: "Q-ADM17 權限切分",
-          authorityPlatform:
-            "Platform Admin 保留 credential 編輯、輪替與 hard disable。",
-          authorityOps:
-            "Ops 只接 pause / retry 類執行面控制，不在此頁寫入 credential。",
           platformAuthority: "Platform Admin",
           opsAuthority: "Ops Console",
           platformScope: "Write authority",
           opsScope: "Operational handoff",
+          authorityModel: "Q-ADM17 split authority",
           latency: "LATENCY",
           lastEvent: "LAST EVENT",
           orders24h: "ORDERS 24H",
@@ -366,9 +364,17 @@ export default function AdapterRegistryPage() {
         title={copy.title}
         subtitle={copy.subtitle}
         actions={
-          <CanvasBtn theme={theme} variant="primary" icon="plus" onClick={noop}>
-            {copy.createAction}
-          </CanvasBtn>
+          <div style={headerActionStackStyle}>
+            <CanvasBtn
+              theme={theme}
+              variant="primary"
+              icon="plus"
+              onClick={noop}
+            >
+              {copy.createAction}
+            </CanvasBtn>
+            <span style={monoCaptionStyle}>{copy.createHint}</span>
+          </div>
         }
       />
 
@@ -378,8 +384,18 @@ export default function AdapterRegistryPage() {
             grid-template-columns: repeat(2, minmax(0, 1fr));
           }
 
+          .authority-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
           @media (max-width: 1080px) {
             .adapter-grid {
+              grid-template-columns: minmax(0, 1fr);
+            }
+          }
+
+          @media (max-width: 720px) {
+            .authority-grid {
               grid-template-columns: minmax(0, 1fr);
             }
           }
@@ -402,32 +418,6 @@ export default function AdapterRegistryPage() {
             </CanvasBtn>
           }
         />
-
-        <div style={authoritySummaryCardStyle}>
-          <div style={actionLaneHeaderStyle}>
-            <div style={actionLabelStyle}>{copy.authorityTitle}</div>
-            <CanvasPill theme={theme} tone="accent">
-              {copy.platformScope}
-            </CanvasPill>
-            <CanvasPill theme={theme} tone="info">
-              {copy.opsScope}
-            </CanvasPill>
-          </div>
-          <div style={authoritySummaryGridStyle}>
-            <div style={authoritySummaryBlockStyle}>
-              <div style={authoritySummaryLabelStyle}>
-                {copy.platformAuthority}
-              </div>
-              <div style={authoritySummaryBodyStyle}>
-                {copy.authorityPlatform}
-              </div>
-            </div>
-            <div style={authoritySummaryBlockStyle}>
-              <div style={authoritySummaryLabelStyle}>{copy.opsAuthority}</div>
-              <div style={authoritySummaryBodyStyle}>{copy.authorityOps}</div>
-            </div>
-          </div>
-        </div>
 
         <div className="adapter-grid" style={adapterGridStyle}>
           {adapters.map((adapter) => {
@@ -475,34 +465,67 @@ export default function AdapterRegistryPage() {
                   </CanvasPill>
                 }
               >
-                <CanvasDL
-                  theme={theme}
-                  cols={3}
-                  items={[
-                    { k: copy.latency, v: adapter.latency, mono: true },
-                    { k: copy.lastEvent, v: adapter.last, mono: true },
-                    { k: copy.orders24h, v: adapter.orders24h, mono: true },
-                  ]}
-                />
+                <div style={statGridStyle}>
+                  <CanvasDL
+                    theme={theme}
+                    cols={3}
+                    items={[
+                      { k: copy.latency, v: adapter.latency, mono: true },
+                      { k: copy.lastEvent, v: adapter.last, mono: true },
+                      { k: copy.orders24h, v: adapter.orders24h, mono: true },
+                    ]}
+                  />
+                </div>
 
                 <div style={actionSectionStyle}>
-                  <div style={actionLaneStyle}>
-                    <div style={actionLaneHeaderStyle}>
-                      <div style={actionLabelStyle}>
-                        {copy.platformAuthority}
+                  <div style={laneEyebrowStyle}>{copy.authorityModel}</div>
+
+                  <div className="authority-grid" style={authorityGridStyle}>
+                    <div style={actionLaneStyle}>
+                      <div style={actionLaneHeaderStyle}>
+                        <div style={actionLabelStyle}>
+                          {copy.platformAuthority}
+                        </div>
+                        <CanvasPill theme={theme} tone="accent">
+                          {copy.platformScope}
+                        </CanvasPill>
                       </div>
-                      <CanvasPill theme={theme} tone="accent">
-                        {copy.platformScope}
-                      </CanvasPill>
+
+                      <div style={authorityCopyStyle}>
+                        {adapter.authoritySummary}
+                      </div>
+
+                      <div style={actionLaneRowsStyle}>
+                        <div style={buttonRowStyle}>
+                          {platformActions.map((action) => (
+                            <CanvasBtn
+                              key={`${adapter.id}-${action.label}`}
+                              theme={theme}
+                              variant="secondary"
+                              size="xs"
+                              onClick={noop}
+                              {...getActionProps(action)}
+                            >
+                              {action.label}
+                            </CanvasBtn>
+                          ))}
+                        </div>
+                        <div style={monoCaptionStyle}>{adapter.id}</div>
+                      </div>
                     </div>
 
-                    <div style={authorityCopyStyle}>
-                      {adapter.authoritySummary}
-                    </div>
+                    <div style={actionLaneStyle}>
+                      <div style={actionLaneHeaderStyle}>
+                        <div style={actionLabelStyle}>{copy.opsAuthority}</div>
+                        <CanvasPill theme={theme} tone="info">
+                          {copy.opsScope}
+                        </CanvasPill>
+                      </div>
 
-                    <div style={actionLaneRowsStyle}>
+                      <div style={laneSummaryStyle}>{adapter.opsSummary}</div>
+
                       <div style={buttonRowStyle}>
-                        {platformActions.map((action) => (
+                        {opsActions.map((action) => (
                           <CanvasBtn
                             key={`${adapter.id}-${action.label}`}
                             theme={theme}
@@ -515,33 +538,14 @@ export default function AdapterRegistryPage() {
                           </CanvasBtn>
                         ))}
                       </div>
-                      <div style={monoCaptionStyle}>{adapter.id}</div>
-                    </div>
-                  </div>
-
-                  <div style={actionLaneStyle}>
-                    <div style={actionLaneHeaderStyle}>
-                      <div style={actionLabelStyle}>{copy.opsAuthority}</div>
-                      <CanvasPill theme={theme} tone="info">
-                        {copy.opsScope}
-                      </CanvasPill>
-                    </div>
-
-                    <div style={laneSummaryStyle}>{adapter.opsSummary}</div>
-
-                    <div style={buttonRowStyle}>
-                      {opsActions.map((action) => (
-                        <CanvasBtn
-                          key={`${adapter.id}-${action.label}`}
-                          theme={theme}
-                          variant="secondary"
-                          size="xs"
-                          onClick={noop}
-                          {...getActionProps(action)}
-                        >
-                          {action.label}
-                        </CanvasBtn>
-                      ))}
+                      {opsActions.some((action) => action.disabledReason) ? (
+                        <div style={disabledReasonStyle}>
+                          {
+                            opsActions.find((action) => action.disabledReason)
+                              ?.disabledReason
+                          }
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
