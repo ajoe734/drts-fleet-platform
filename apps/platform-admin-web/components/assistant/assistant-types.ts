@@ -111,6 +111,15 @@ export function assistantStatusTone(state: AssistantViewState) {
   }
 }
 
+export function assistantStateLabel(state: AssistantViewState) {
+  switch (state) {
+    case "awaiting_confirmation":
+      return "awaiting confirmation";
+    default:
+      return state.replaceAll("_", " ");
+  }
+}
+
 export function assistantRiskTone(risk: AssistantRiskLevel) {
   switch (risk) {
     case "high":

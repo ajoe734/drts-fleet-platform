@@ -1,10 +1,11 @@
 "use client";
 
-import type { CSSProperties, KeyboardEvent } from "react";
+import type { KeyboardEvent } from "react";
 import { SendHorizontal, Sparkles } from "lucide-react";
 import {
   assistantCardStyle,
   assistantMutedTextStyle,
+  assistantStateLabel,
   assistantStatusTone,
   assistantTheme,
   type AssistantViewState,
@@ -86,7 +87,7 @@ export function AssistantComposer({
             </strong>
           </div>
           <Pill theme={assistantTheme} tone={assistantStatusTone(state)}>
-            {state.replace("_", " ")}
+            {assistantStateLabel(state)}
           </Pill>
         </div>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { CSSProperties } from "react";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { CanvasPill as Pill } from "@drts/ui-web";
@@ -69,6 +69,7 @@ export function AssistantConfirmationPanel({
   onConfirm: (reason: string) => void | Promise<void>;
   onCancel?: () => void;
 }) {
+  const reasonFieldId = useId();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const requiresReason = Boolean(request.requiresReason || request.riskLevel === "high");
@@ -133,7 +134,7 @@ export function AssistantConfirmationPanel({
 
         <div style={{ display: "grid", gap: 8 }}>
           <label
-            htmlFor="assistant-confirmation-reason"
+            htmlFor={reasonFieldId}
             style={{
               fontSize: 12,
               fontWeight: 700,
@@ -143,9 +144,14 @@ export function AssistantConfirmationPanel({
             {request.reasonLabel ?? "Execution reason"}
           </label>
           <textarea
-            id="assistant-confirmation-reason"
+            id={reasonFieldId}
             value={reason}
-            onChange={(event) => setReason(event.target.value)}
+            onChange={(event) => {
+              setReason(event.target.value);
+              if (error) {
+                setError(null);
+              }
+            }}
             placeholder={
               request.reasonPlaceholder ??
               (requiresReason

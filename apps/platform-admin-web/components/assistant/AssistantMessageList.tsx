@@ -13,6 +13,7 @@ import { AssistantActionPlanCard } from "./AssistantActionPlanCard";
 import { AssistantConfirmationPanel } from "./AssistantConfirmationPanel";
 import { AssistantReceiptCard } from "./AssistantReceiptCard";
 import {
+  assistantStateLabel,
   assistantCardStyle,
   assistantMutedTextStyle,
   assistantStatusTone,
@@ -60,26 +61,54 @@ function roleMeta(role: AssistantMessageRecord["role"]) {
 }
 
 function stateBanner(message: AssistantMessageRecord) {
-  if (message.state === "thinking" || message.state === "executing") {
-    return {
-      tone: assistantStatusTone(message.state),
-      icon: <LoaderCircle size={15} className="animate-spin" />,
-      text:
-        message.state === "thinking"
-          ? "Assistant is analyzing current platform context."
-          : "Assistant is executing the approved action.",
-    };
+  switch (message.state) {
+    case "thinking":
+      return {
+        tone: "info" as const,
+        icon: <LoaderCircle size={15} className="animate-spin" />,
+        text: "Assistant is analyzing current platform context.",
+      };
+    case "planning":
+      return {
+        tone: "info" as const,
+        icon: <LoaderCircle size={15} className="animate-spin" />,
+        text: "Assistant is preparing a governed action plan for review.",
+      };
+    case "awaiting_confirmation":
+      return {
+        tone: "warn" as const,
+        icon: <AlertTriangle size={15} />,
+        text: "Execution is paused until an operator confirms the action.",
+      };
+    case "executing":
+      return {
+        tone: "accent" as const,
+        icon: <LoaderCircle size={15} className="animate-spin" />,
+        text: "Assistant is executing the approved action.",
+      };
+    case "receipt":
+      return {
+        tone: "success" as const,
+        icon: <CheckCircle2 size={15} />,
+        text: "Execution completed and a receipt has been recorded.",
+      };
+    case "error":
+      if (!message.error) {
+        return {
+          tone: "danger" as const,
+          icon: <AlertTriangle size={15} />,
+          text: "Execution error",
+        };
+      }
+      return {
+        tone: "danger" as const,
+        icon: <AlertTriangle size={15} />,
+        text: message.error.title ?? "Execution error",
+      };
+    case "idle":
+    default:
+      return null;
   }
-
-  if (message.state === "error" && message.error) {
-    return {
-      tone: "danger" as const,
-      icon: <AlertTriangle size={15} />,
-      text: message.error.title ?? "Execution error",
-    };
-  }
-
-  return null;
 }
 
 export function AssistantMessageList({
@@ -157,7 +186,7 @@ export function AssistantMessageList({
                 </div>
                 {message.state ? (
                   <Pill theme={assistantTheme} tone={assistantStatusTone(message.state)}>
-                    {message.state.replace("_", " ")}
+                    {assistantStateLabel(message.state)}
                   </Pill>
                 ) : null}
               </div>
@@ -180,16 +209,32 @@ export function AssistantMessageList({
                     border: `1px solid ${
                       banner.tone === "danger"
                         ? assistantTheme.dangerBorder
-                        : assistantTheme.infoBorder
+                        : banner.tone === "warn"
+                          ? assistantTheme.warnBorder
+                          : banner.tone === "success"
+                            ? assistantTheme.successBorder
+                            : assistantTheme.infoBorder
                     }`,
                     background:
                       banner.tone === "danger"
                         ? assistantTheme.dangerBg
-                        : assistantTheme.infoBg,
+                        : banner.tone === "warn"
+                          ? assistantTheme.warnBg
+                          : banner.tone === "success"
+                            ? assistantTheme.successBg
+                            : banner.tone === "accent"
+                              ? assistantTheme.accentBg
+                              : assistantTheme.infoBg,
                     color:
                       banner.tone === "danger"
                         ? assistantTheme.danger
-                        : assistantTheme.info,
+                        : banner.tone === "warn"
+                          ? assistantTheme.warn
+                          : banner.tone === "success"
+                            ? assistantTheme.success
+                            : banner.tone === "accent"
+                              ? assistantTheme.accent
+                              : assistantTheme.info,
                     padding: "10px 12px",
                     display: "flex",
                     alignItems: "center",
@@ -210,11 +255,11 @@ export function AssistantMessageList({
                   request={message.confirmation}
                   isSubmitting={isConfirming}
                   onConfirm={(reason) => onConfirmAction(message.id, reason)}
-                  onCancel={
-                    onCancelConfirmation
-                      ? () => onCancelConfirmation(message.id)
-                      : undefined
-                  }
+                  {...(onCancelConfirmation
+                    ? {
+                        onCancel: () => onCancelConfirmation(message.id),
+                      }
+                    : {})}
                 />
               ) : null}
 
