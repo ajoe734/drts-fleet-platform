@@ -14,11 +14,12 @@ understands the current route and visible records, can help fill forms and
 complete governed operations, and can convert requested product changes into
 SA/SD/task packets for the existing supervisor and auto-worker system.
 
-The architecture should use an OpenClaw-style pattern as inspiration: a gateway,
-agent runtime, sessions/runs, tool registry, and channel adapters. It should not
-drop an unrestricted OSS agent directly into the Platform Admin runtime. All
-system reads and writes must stay behind DRTS API authorization, policy gates,
-audit receipts, redaction, and human confirmation for risky actions.
+The architecture should adopt OpenClaw directly as the primary agent runtime
+for the Platform Admin assistant and development workers. DRTS still keeps the
+policy boundary: OpenClaw owns session/run/tool orchestration, while all system
+reads and writes stay behind DRTS API authorization, policy gates, audit
+receipts, redaction, reviewer workflow, filesystem guardrails, and human
+confirmation for risky actions.
 
 ## 2. Current Baseline
 
@@ -127,6 +128,7 @@ Orchestrator Bridge
   Permission Broker
   Branch Routing
   Worker Tree Guard
+  OpenClaw Runtime Adapter
   Supervisor / Auto Workers
 ```
 
@@ -328,32 +330,45 @@ Dispatch packet:
 }
 ```
 
-### 6.8 OpenClaw-Style OSS Runtime Fit
+### 6.8 Direct OpenClaw Runtime Adoption
 
-OpenClaw-style architecture is useful as a reference for multi-channel agent
-sessions and agent CLI runs. It should be evaluated as a sidecar/runtime option,
-not as a privileged in-process dependency.
+OpenClaw is the default runtime for both Platform Admin assistant sessions and
+DRTS dev workers. DRTS does not re-implement a parallel agent loop. Instead, it
+wraps OpenClaw with DRTS-owned identity, policy, and control-plane adapters.
 
-Recommendation:
+Adoption boundary:
 
-- Use the pattern: gateway, sessions/runs, tool adapters, channel adapters,
-  watchers.
-- Do not let an OSS agent call Platform Admin APIs directly with broad tokens.
-- Do not store DRTS provider keys inside an OSS agent config.
-- If adopted, run it as a sandboxed dev-side worker behind the orchestrator
-  bridge, using isolated worktrees and command allowlists.
-- Keep production system actions in DRTS API services, not in the OSS runner.
+- OpenClaw owns agent sessions, runs, tool-call sequencing, channel adapters,
+  skill/plugin loading, and watcher-style runtime intervention.
+- DRTS owns actor identity, RBAC, provider secret issuance, action confirmation,
+  audit receipts, task lifecycle truth, branch routing, worker tree guard, and
+  status scripts.
+- OpenClaw must never become an authority for DRTS write policy, task truth, or
+  credential storage.
 
-External reference points for the evaluation:
+OpenClaw-to-DRTS control-plane mapping:
 
-- OpenClaw agent CLI documentation describes direct agent runs through
-  `openclaw agent --message ...`.
-- OpenClaw public docs describe messaging/channel-oriented agent interaction.
-- OpenClaw security literature recommends layered defenses such as skills,
-  plugins, and watchers; this maps well to DRTS policy, permission broker, and
-  tree guard layers.
+| OpenClaw runtime concern | DRTS wrapper / owner | Boundary rule |
+| --- | --- | --- |
+| Session / run lifecycle | Platform Admin assistant gateway + orchestrator bridge | DRTS creates actor-bound sessions and can terminate runs. |
+| Tool registry | DRTS adapter-safe tool bus | Only DRTS-approved tool descriptors are exposed. |
+| Exec / filesystem tools | `.orchestrator/permission_broker.py` + worker tree guard | No writes outside isolated task worktree; no unrestricted shell. |
+| Skills / plugins | DRTS allowlist and packaged runtime profile | Third-party packages disabled by default; only reviewed bundles ship. |
+| Provider access | DRTS Secret Manager broker | Runtime receives ephemeral scoped credentials, never long-lived keys in config. |
+| Audit / transcript | DRTS audit pipeline | Tool calls, confirmations, and writes emit DRTS receipts. |
+| Task state / progress | `scripts/ai-status.sh` / `python3 scripts/ai_status.py` | OpenClaw cannot mutate canonical machine truth directly. |
+| Worker dispatch | supervisor + signed dispatch packet | Runtime executes only after DRTS dispatch validation. |
 
-Detailed evaluation output for dispatch task `PA-AI-OSS-001`:
+Runtime packaging model:
+
+- Platform Admin assistant uses OpenClaw through an API-side runtime adapter,
+  not by embedding DRTS policy into prompt-only conventions.
+- Dev workers launch OpenClaw in isolated task worktrees on task branches.
+- The orchestrator bridge injects bounded task context, reviewed skills,
+  allowlisted tools, and per-run environment variables.
+- Production action tools stay DRTS-owned even when the run loop is OpenClaw.
+
+Detailed adoption plan for dispatch task `PA-AI-OSS-001`:
 
 - `docs/02-architecture/platform-admin-openclaw-style-runtime-evaluation-20260603.md`
 
@@ -362,7 +377,8 @@ Detailed evaluation output for dispatch task `PA-AI-OSS-001`:
 Mandatory guardrails:
 
 - Caller-scoped tools only; no privilege widening.
-- Provider keys in API Secret Manager only.
+- Provider keys stay in DRTS Secret Manager or short-lived runtime injection
+  only; never in checked-in config, plugin bundles, or persistent OpenClaw home.
 - Prompt-injection filtering for docs, page content, and tool output.
 - Redaction before persistence and before provider calls.
 - Rate, token, and daily cost budgets.
@@ -370,6 +386,9 @@ Mandatory guardrails:
 - High-risk action reason and confirmation.
 - Domain audit and assistant audit for all writes.
 - Orchestrator writes go through bridge + tree guard + isolated worktree.
+- OpenClaw filesystem access is constrained to the assigned task worktree and
+  explicit output paths.
+- OpenClaw exec/tool approvals are subordinate to DRTS permission broker policy.
 - Dev/prod behavior differs explicitly; mock mode cannot masquerade as real
   provider mode.
 
@@ -379,52 +398,67 @@ Environment policy:
 | --- | --- | --- | --- |
 | local | mock by default, real optional | sandbox/local only | optional |
 | CI | mock only | test fixtures only | no live dispatch |
-| dev | real provider required for acceptance; mock only as degraded | enabled with confirmations | enabled behind bridge |
-| staging | real provider after approval | limited pilot | limited pilot |
+| dev | real provider required for acceptance; mock only as degraded | enabled with confirmations | enabled behind OpenClaw adapter + bridge |
+| staging | real provider after approval | limited pilot | limited OpenClaw pilot |
 | prod | approved provider only | strict policy | disabled unless separately approved |
 
 ## 8. Implementation Phases
 
-### Phase 0: Correct the Baseline
+### Phase 0: Decision Reset and Runtime Contract
 
-- Update docs and UI copy so dev does not claim mock is complete.
-- Keep current overlay but label degraded/mock state accurately.
-- Confirm assistant sessions remain actor-bound.
+- Update docs, task briefs, and board summaries to state that OpenClaw direct
+  adoption is the default runtime direction.
+- Freeze the DRTS-owned policy boundary: identity, secret broker, audit,
+  confirmation, status truth, and worker tree guard stay first-party.
+- Define the OpenClaw runtime profile for Platform Admin and dev workers:
+  reviewed skills/plugins only, scoped tools only, isolated filesystem only.
 
-### Phase 1: Real Read-Only Assistant
+### Phase 1: Dev Worker Pilot
+
+- Run OpenClaw as the default dev worker runtime in isolated task worktrees.
+- Map existing supervisor dispatch packets to OpenClaw session/run launches.
+- Prove status writes, branch routing, and tree guard stay authoritative outside
+  the runtime.
+- Acceptance: dispatched worker task runs through OpenClaw with bounded tools
+  and no direct machine-truth mutation.
+
+### Phase 2: Real Read-Only Assistant
 
 - Implement real provider gateway.
 - Add context mesh v2.
-- Connect RAG and read-only tools.
+- Connect OpenClaw runtime adapter, RAG, and read-only tools.
 - Dev acceptance: ask about current page and visible records with cited answers
   from real provider.
 
-### Phase 2: Governed Operator Actions
+### Phase 3: Governed Operator Actions
 
 - Add preview/confirm/execute lifecycle to chat UI.
 - Expand Platform Admin action tools.
 - Emit receipts and audit entries.
 - Dev acceptance: assistant previews and executes a safe platform action.
 
-### Phase 3: Development Collaboration
+### Phase 4: Development Collaboration
 
 - Add SA/SD generation tools.
 - Add task brief generator.
 - Add progress/status writer through approved scripts.
 - Dev acceptance: user request becomes archived SA/SD and task briefs.
 
-### Phase 4: Supervisor / Auto-Worker Bridge
+### Phase 5: Supervisor / Auto-Worker Bridge
 
 - Add signed dispatch packet endpoint.
-- Queue work through existing supervisor primitives.
+- Queue work through existing supervisor primitives and the OpenClaw runtime
+  adapter.
 - Track PR/CI/deploy state in assistant panel.
 - Dev acceptance: assistant creates a task packet and supervisor picks it up.
 
-### Phase 5: Hardening and Evaluation
+### Phase 6: Staging Pilot and Hardening
 
 - Add eval scenarios, prompt-injection tests, RBAC tests, budget tests, and live
   smoke.
 - Run red-team cases for malicious docs/page text/tool output.
+- Run a staging pilot with reviewed skill/plugin bundles, ephemeral credentials,
+  and audited tool traces.
 - Keep rollback documented.
 
 ## 9. Parallel Dispatch Plan
@@ -439,11 +473,20 @@ only when a later task consumes an implemented contract.
 | `PA-AI-RAG-001` | Codex | Claude | yes | none |
 | `PA-AI-TOOLS-001` | Claude | Codex2 | yes | none |
 | `PA-AI-SEC-001` | Codex2 | Claude | yes | none |
-| `PA-AI-OSS-001` | Gemini2 | Codex | yes | none |
+| `PA-AI-OSS-001` | Codex2 | Claude | yes | none |
 | `PA-AI-ACTION-001` | Codex2 | Claude2 | partial | `PA-AI-TOOLS-001` for full execution |
 | `PA-AI-DEV-001` | Claude | Codex | partial | `PA-AI-RAG-001` for cited generation |
 | `PA-AI-ORCH-001` | Gemini2 | Claude | partial | `PA-AI-DEV-001`, `PA-AI-SEC-001` |
 | `PA-AI-E2E-001` | Gemini | Codex | no | all implementation tasks |
+
+OpenClaw-specific dependency notes:
+
+- `PA-AI-SEC-001` defines the credential, audit, and tool boundary that
+  `PA-AI-ORCH-001` must enforce around OpenClaw.
+- `PA-AI-ORCH-001` maps supervisor events and dispatch packets onto OpenClaw
+  runtime launches.
+- `PA-AI-DEV-001` assumes task brief generation and progress writes happen from
+  an OpenClaw worker through approved scripts, not direct status-file mutation.
 
 ## 10. Acceptance Matrix
 
@@ -464,21 +507,23 @@ only when a later task consumes an implemented contract.
   local Ollama?
 - Should dev allow autonomous low-risk writes without per-action confirmation,
   or require confirmation for every assistant write during pilot?
-- Should OpenClaw-style runtime be adopted directly for dev workers, or should
-  DRTS keep the current `.orchestrator` runtime and only borrow design patterns?
 - Which Platform Admin modules are first pilot surfaces for write actions:
   notices/maintenance only, or payments/tenants/pricing too?
+- Which reviewed OpenClaw skill/plugin bundle should be the minimal production
+  profile for Platform Admin and dev workers?
 
 ## 12. Decision Recommendation
 
-Proceed with a DRTS-owned agentic assistant architecture:
+Proceed with direct OpenClaw runtime adoption under DRTS-owned policy control:
 
-- Use real provider gateway in dev.
-- Use OpenClaw-style concepts, not unrestricted OpenClaw embedding.
-- Keep all system actions behind DRTS API policy and audit.
-- Use the existing `.orchestrator` as the worker control plane.
-- Keep any OpenClaw-style OSS runtime as an optional dev-side sidecar adapter,
-  not the default worker runtime.
+- Use OpenClaw as the default runtime for assistant sessions and dev workers.
+- Keep all system actions behind DRTS API policy, confirmation, and audit.
+- Keep the existing `.orchestrator` as the control plane, task truth, branch
+  router, and guard layer around OpenClaw execution.
+- Ship only a reviewed OpenClaw runtime profile with DRTS-owned credential,
+  tooling, and filesystem boundaries.
+- Roll out in phases: dev worker pilot first, then read-only assistant, then
+  governed actions and dispatch.
 - Dispatch the parallel task set in section 9 after this plan is accepted.
 
 ## 13. External References For PA-AI-OSS-001

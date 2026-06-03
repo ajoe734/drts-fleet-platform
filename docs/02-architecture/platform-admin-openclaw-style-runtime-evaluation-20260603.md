@@ -1,4 +1,4 @@
-# Platform Admin OpenClaw-Style Runtime Evaluation
+# Platform Admin OpenClaw Direct Runtime Adoption Plan
 
 Status: proposed recommendation for `PA-AI-OSS-001`
 Date: 2026-06-03
@@ -7,271 +7,200 @@ Planning ref: `docs/05-ui/platform-admin-agentic-assistant-architecture-plan-202
 
 ## 1. Scope
 
-This document evaluates whether DRTS should adopt OpenClaw directly, wrap an
-OpenClaw-style OSS runtime as a development-side sidecar, or keep a DRTS-owned
-runtime while borrowing the architectural pattern.
+This document resets the earlier evaluation and defines the direct adoption plan
+for OpenClaw as the primary runtime for:
 
-The decision target is narrow:
+- Platform Admin assistant sessions
+- development-side DRTS workers
+- future orchestrator-launched agent runs
 
-- development-side worker and agent-sidecar use only
-- no privileged in-process adoption inside `platform-admin-api`
-- no change to the DRTS rule that production writes stay behind DRTS API
-  authorization, policy, audit, and human confirmation
+The adoption is runtime-direct, not policy-direct. DRTS keeps authority over
+identity, credentials, task truth, approvals, audit, and filesystem scope.
 
 ## 2. Decision Summary
 
-Recommendation:
-
-- Reject direct OpenClaw embedding into the Platform Admin API runtime.
-- Allow a bounded POC where an OpenClaw-style OSS runtime runs as an optional
-  dev-side sidecar behind the existing `.orchestrator` bridge.
-- Keep the long-term control plane DRTS-owned unless a later evaluation proves
-  that the OSS runtime can meet DRTS guardrails without weakening isolation,
-  auditability, or secret handling.
-
-Decision for `PA-AI-ORCH-001`:
-
-- use OpenClaw-style concepts as reference
-- do not make OpenClaw the default worker runtime
-- if a POC is pursued, treat it as a replaceable runner behind a DRTS adapter
-
-## 3. Evaluation Criteria
-
-The architecture plan requires these outcomes for any candidate runtime:
-
-1. No privilege widening beyond the current Platform Admin actor.
-2. No provider secrets or DRTS service credentials stored in OSS runtime config.
-3. Orchestrator writes must stay behind signed dispatch packets, tree guard,
-   isolated worktrees, and approved status scripts.
-4. Production system actions must stay in DRTS API services, not in an external
-   agent runner.
-5. The integration must be removable without rewriting the assistant gateway.
-
-## 4. What OpenClaw Currently Provides
-
-Based on OpenClaw public docs and security literature reviewed on 2026-06-03:
-
-- OpenClaw exposes an agent CLI that can run an agent turn through a gateway or
-  locally with `--local`, and can fall back from gateway mode to embedded mode.
-- OpenClaw's runtime model is a single embedded agent runtime per gateway, with
-  one workspace, bootstrap files, session store, and built-in tool surface.
-- The built-in tool surface includes file I/O, shell execution, browser
-  control, web access, messaging, and sub-agent coordination.
-- OpenClaw treats skills as prompt-injected operating guides and plugins as
-  packages that can register tools, providers, channels, and other
-  capabilities.
-- OpenClaw has exec approvals, plugin approval requests, skill gating, and
-  allow/deny controls, but these are runtime guardrails inside the OpenClaw
-  trust boundary rather than a substitute for DRTS API and orchestrator policy.
-- OpenClaw documentation explicitly warns that third-party skills are untrusted
-  code and recommends sandboxed runs for untrusted inputs and risky tools.
-- Recent security literature describes the OpenClaw attack surface as enlarged
-  by persistent memory, high-privilege operations, third-party skills, and
-  multi-agent interaction, and recommends layered defenses such as skills,
-  plugin enforcement, and decoupled watchers.
-
-Inference from those sources:
-
-- OpenClaw is structurally useful as a reusable agent runner pattern.
-- OpenClaw is not, by itself, a sufficient policy boundary for DRTS-sensitive
-  actions.
-
-## 5. Option Analysis
-
-### 5.1 Option A: direct adoption inside Platform Admin runtime
-
-Description:
-
-- run OpenClaw or an OpenClaw-derived agent process as part of the Platform
-  Admin API request path
-- allow the assistant gateway to rely on OpenClaw's runtime/session/tool loop
-
-Benefits:
-
-- faster access to mature session, tool, plugin, and channel abstractions
-- lower short-term implementation effort for agent loop mechanics
-
-Risks:
-
-- collapses DRTS policy boundary into an OSS runtime that also owns tools,
-  prompts, workspace files, and plugin loading
-- raises the blast radius of prompt injection, tool misuse, or skill/plugin
-  supply-chain compromise
-- increases pressure to place provider and environment credentials into the OSS
-  runtime's execution surface
-- conflicts with the architecture plan's requirement that production system
-  actions remain DRTS-owned API operations
-
 Decision:
 
-- reject
+- Adopt OpenClaw directly as the default agent runtime.
+- Do not treat pattern-only reuse as the default recommendation.
+- Do not allow unrestricted OpenClaw execution to become the DRTS policy
+  boundary.
 
-### 5.2 Option B: optional dev-side sidecar behind `.orchestrator`
+Meaning:
 
-Description:
+- OpenClaw is responsible for the run loop: sessions, runs, tool sequencing,
+  skills/plugins, and channel interaction.
+- DRTS is responsible for the control plane: actor binding, dispatch approval,
+  permission broker, worker tree guard, audit receipts, and canonical task
+  status updates.
 
-- run an OSS runtime in a separate process or container outside the
-  `platform-admin-api` runtime
-- invoke it only through a DRTS bridge adapter
-- keep DRTS as the authority for task creation, approvals, worktree setup,
-  status writes, and artifact persistence
+Decision for downstream tasks:
 
-Benefits:
+- `PA-AI-ORCH-001` should implement an OpenClaw runtime adapter, not a parallel
+  DRTS-owned agent loop.
+- `PA-AI-SEC-001` defines the outer policy boundary that OpenClaw must obey.
+- `PA-AI-DEV-001` and worker tasks assume progress/status writes continue
+  through approved DRTS scripts.
 
-- preserves a strong boundary between product runtime and experimentation
-- allows rapid evaluation of session/routing/tool orchestration ideas
-- makes the runtime replaceable if the POC underperforms or fails review
+## 3. Why Direct Adoption Now
 
-Risks:
+Direct adoption is preferred because OpenClaw already provides the runtime
+primitives DRTS needs:
 
-- still inherits OpenClaw-side risks around tool execution, skills, plugins, and
-  prompt-layer steering if the sidecar is over-privileged
-- requires careful environment scrubbing, command allowlists, transcript
-  retention limits, and kill-switch controls
-- adds another runtime surface to operate and support
+- agent sessions and run state
+- tool-call orchestration
+- skill/plugin packaging
+- channel-oriented interaction
+- watcher/intervention hooks
+- guarded exec/file/browser/web primitives
 
-Decision:
+Re-creating those primitives inside DRTS would duplicate runtime complexity
+without reducing the need for DRTS policy guardrails. The better boundary is:
 
-- acceptable for POC only, with strict boundary conditions in section 6
+- reuse OpenClaw for runtime mechanics
+- keep DRTS for policy and system authority
 
-### 5.3 Option C: pattern-only, DRTS-owned runtime
+## 4. Non-Negotiable Security Boundary
 
-Description:
+Direct adoption is allowed only with all of these outer controls:
 
-- keep the current `.orchestrator` and future assistant gateway runtime DRTS
-  owned
-- borrow the architectural concepts only: sessions/runs, tool registry,
-  approvals, channel adapters, watcher-style enforcement
+1. OpenClaw cannot widen the current Platform Admin or worker actor identity.
+2. Provider/API credentials must be injected ephemerally by DRTS; no long-lived
+   secrets in OpenClaw config, plugin config, workspace files, or persistent
+   runtime homes.
+3. OpenClaw cannot write canonical task truth directly; status changes must
+   continue through `scripts/ai-status.sh` or `python3 scripts/ai_status.py`.
+4. OpenClaw filesystem access must stay inside the assigned task worktree plus
+   explicit output paths approved by the bridge.
+5. OpenClaw exec access must remain subordinate to `.orchestrator`
+   permission-broker policy and per-task command scope.
+6. Third-party skills/plugins are disabled by default; only reviewed bundles may
+   ship in the DRTS runtime profile.
+7. Platform Admin write actions stay behind DRTS API confirmation, policy, and
+   audit, even if OpenClaw proposes the action.
+8. Transcript retention must redact secrets, tokens, private headers, and raw
+   privileged outputs before persistence.
 
-Benefits:
+## 5. OpenClaw-to-DRTS Control-Plane Mapping
 
-- best alignment with existing branch routing, permission broker, tree guard,
-  status writer, and task lifecycle contracts
-- easiest way to keep DRTS API credentials, audit receipts, and platform action
-  semantics inside first-party code
-- lowest supply-chain risk
-
-Risks:
-
-- more DRTS implementation work
-- slower to reach parity with mature OSS agent ergonomics
-
-Decision:
-
-- recommended default
-
-## 6. Required Security Boundary For Any POC
-
-If DRTS evaluates an OpenClaw-style sidecar, the sidecar must operate under all
-of these constraints:
-
-1. No DRTS production or staging API credentials in sidecar config, workspace,
-   plugin config, or skill env.
-2. No direct calls from the OSS runtime to privileged Platform Admin write
-   endpoints.
-3. No direct status-file mutation; progress updates must continue through
-   `scripts/ai-status.sh` or `python3 scripts/ai_status.py`.
-4. No unrestricted `exec` or file write outside the isolated worker worktree.
-5. No third-party skill or plugin installation by default.
-6. No automatic approval persistence for risky commands.
-7. No transcript retention of secrets, tokens, or raw privileged tool outputs.
-8. No user-facing claim that the OSS sidecar is the authority for policy,
-   approvals, or action execution.
-
-Concrete DRTS mapping:
-
-| Concern | OpenClaw-side capability | DRTS-required outer boundary |
+| OpenClaw capability | DRTS owner / wrapper | Required boundary |
 | --- | --- | --- |
-| Host exec | exec approvals, allowlists | `.orchestrator` permission broker plus task-specific command scope |
-| Plugin action approval | plugin permission requests | DRTS confirmation policy and reviewer-controlled task lifecycle |
-| Skill guidance | `SKILL.md` injection | DRTS-owned task guardrails and artifact contracts |
-| Workspace isolation | configured workspace / sandbox | isolated git worktree anchored to task branch |
-| Session persistence | JSONL session store | DRTS audit/log retention policy, with sidecar treated as ephemeral |
-| Tool exposure | tools allow/deny lists | DRTS bridge exposes only adapter-safe tools |
+| Session and run lifecycle | assistant gateway + orchestrator bridge | DRTS creates actor-bound sessions and can terminate them. |
+| Tool exposure | DRTS adapter-safe tool registry | Only reviewed tool families are surfaced. |
+| File access | worker tree guard | No writes outside task branch/worktree scope. |
+| Exec approvals | permission broker | Runtime approval cannot bypass DRTS command policy. |
+| Skills/plugins | reviewed runtime profile | Third-party installation disabled by default. |
+| Provider routing | DRTS secret broker + gateway config | Runtime receives only scoped ephemeral credentials. |
+| Audit trail | DRTS audit pipeline | Tool calls and writes emit DRTS receipts with actor/session/run ids. |
+| Status/progress updates | approved scripts | Canonical machine truth remains DRTS-owned. |
+| Worker dispatch | supervisor + signed dispatch packet | OpenClaw run starts only after task validation. |
 
-## 7. Recommended POC Shape
+## 6. Credential and Tooling Model
 
-The POC should not target Platform Admin write actions first. It should target
-development-side documentation and task-slicing support.
+### 6.1 Credentials
 
-### 7.1 POC boundary
+- Platform Admin provider keys stay in Secret Manager.
+- Worker credentials are injected per run through the orchestrator bridge.
+- OpenClaw runtime homes must be scrubbed of durable DRTS secrets after run
+  completion.
+- No shared credential file may be written into the repo worktree.
 
-- caller: DRTS-owned orchestrator bridge
-- callee: optional sidecar runner adapter
-- allowed inputs:
-  - checked-out repo worktree
-  - bounded task brief
-  - allowlisted documentation files
-  - explicit output path(s)
-- allowed outputs:
-  - draft SA/SD/task artifacts under known repo paths
-  - stdout/stderr evidence for the bridge
-- forbidden outputs:
-  - direct dashboard mutation
-  - direct PR merge or deploy actions
-  - direct Platform Admin write actions
+### 6.2 Tooling profile
 
-### 7.2 POC tool profile
+Default tool profile for dev workers:
 
-Start with the smallest possible tool surface:
-
-- read-only repo file access
-- bounded web fetch/search only if the task explicitly requires latest external
+- repo file read/write inside assigned worktree
+- bounded shell commands needed for git/doc/test workflows
+- bounded web access only when the task explicitly requires current external
   information
-- optional patch/write only into an isolated worktree output directory
-- `exec` disabled by default; if enabled for the experiment, allowlist only a
-  minimal command set such as `git status`, `git diff`, `find`, `grep`, and
-  validation commands selected by the bridge
+- no unreviewed plugin installation
+- no direct status JSON mutation
 
-### 7.3 POC success criteria
+Default tool profile for Platform Admin assistant:
 
-The POC is useful only if it proves all of the following:
+- route/data/docs/audit/action tool buses through DRTS APIs
+- no raw shell
+- no direct filesystem mutation outside reviewed artifact generation flows
+- confirmation gates before medium/high-risk writes
 
-1. The sidecar can be launched and torn down per task without leaving durable
-   credentials behind.
-2. The bridge can constrain its workspace, environment, tools, and outputs.
-3. The sidecar produces artifacts that are no harder to review than current
-   DRTS worker output.
-4. Failure or compromise of the sidecar does not let it bypass tree guard,
-   status truth, branch strategy, or API write policy.
-5. The sidecar can be removed and replaced without changing Platform Admin API
-   contracts.
+## 7. Audit and Filesystem Guard Model
 
-## 8. Adoption Recommendation
+Required audit fields for OpenClaw-backed runs:
 
-For the current architecture wave:
+- human actor id
+- assistant session id
+- runtime run id
+- tool name
+- tool risk level
+- confirmation receipt id when applicable
+- task id / dispatch packet id for worker runs
 
-- `PA-AI-ORCH-001` should continue with a DRTS-owned orchestrator bridge.
-- The bridge contract should be runner-agnostic so that a future OSS sidecar can
-  be plugged in as one implementation.
-- OpenClaw-style ideas worth borrowing now:
-  - sessions and runs as first-class objects
-  - explicit tool registry and approval checkpoints
-  - watcher-style runtime intervention
-  - channel adapters separated from task logic
-- OpenClaw capabilities to avoid coupling to now:
-  - workspace bootstrap file semantics as a source of authority
-  - direct plugin ecosystem trust
-  - embedded fallback modes that blur gateway versus local execution boundaries
-  - broad built-in tool exposure as the default operating model
+Filesystem rules:
 
-Net recommendation:
+- each worker run executes in an isolated task worktree on the task branch
+- branch routing remains DRTS-owned
+- writes to fragile surfaces require anchor commits per branch strategy
+- the runtime must not access canonical root status files except through
+  approved status commands
 
-- adopt pattern, not platform
-- permit a sidecar POC only behind a DRTS adapter and only for dev-side
-  artifact generation
-- do not route Platform Admin production actions or secrets through OpenClaw
+## 8. Adoption Phases
 
-## 9. Evidence Links
+### Phase 0: Contract reset
 
-Primary sources reviewed on 2026-06-03:
+- Update architecture docs, task briefs, and board summaries to state that
+  OpenClaw direct adoption is the default runtime plan.
+- Freeze DRTS-owned outer boundaries for identity, credentials, audit, and
+  machine truth.
 
-- Architecture plan: `docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md`
-- OpenClaw agent CLI docs: <https://docs.openclaw.ai/cli/agent>
-- OpenClaw agent runtime docs: <https://docs.openclaw.ai/agent>
-- OpenClaw tools/plugins overview: <https://docs.openclaw.ai/tools/index>
-- OpenClaw exec approvals: <https://docs.openclaw.ai/tools/exec-approvals>
-- OpenClaw skills/security notes: <https://docs.openclaw.ai/tools/skills>
-- OpenClaw plugin permission requests: <https://docs.openclaw.ai/plugins/plugin-permission-requests>
-- ClawKeeper paper: <https://arxiv.org/abs/2603.24414>
-- Security of OpenClaw Agents survey: <https://arxiv.org/abs/2605.25435>
+### Phase 1: Dev worker pilot
+
+- Launch OpenClaw as the default runtime for a bounded worker task in an
+  isolated worktree.
+- Verify permission-broker, tree-guard, and status-script enforcement.
+
+### Phase 2: Read-only Platform Admin assistant
+
+- Run the assistant gateway through the OpenClaw runtime adapter.
+- Expose only read/citation tools and redacted context packets.
+
+### Phase 3: Governed action pilot
+
+- Add confirmation-backed Platform Admin write tools.
+- Require DRTS receipts for all writes proposed by OpenClaw.
+
+### Phase 4: Supervisor bridge integration
+
+- Map dispatch packets, worker status, and artifact outputs onto OpenClaw run
+  lifecycle primitives.
+- Keep supervisor task truth and reviewer workflow unchanged.
+
+### Phase 5: Staging hardening
+
+- Validate prompt-injection defense, credential scrubbing, audit trace
+  completeness, and rollback.
+- Run the reviewed runtime profile only; no ad hoc skill/plugin drift.
+
+## 9. Rollback Position
+
+Direct adoption must remain removable at the adapter layer.
+
+If OpenClaw fails hardening or operational review:
+
+- keep DRTS control-plane contracts unchanged
+- replace only the runtime adapter implementation
+- preserve the same task truth, audit, and secret boundary
+
+## 10. Required Task Alignment
+
+The following artifacts must align to this decision:
+
+- `docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md`
+- `.orchestrator/task-briefs/PA-AI-OSS-001.md`
+- any downstream security/orchestrator briefs that still describe OpenClaw as
+  optional sidecar or pattern-only guidance
+
+## 11. Net Recommendation
+
+Adopt OpenClaw directly as the runtime. Keep DRTS as the governing shell around
+it. The architecture should optimize for a thin DRTS adapter over a mature agent
+runtime, not for a new first-party runtime that duplicates OpenClaw mechanics.
