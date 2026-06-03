@@ -45,6 +45,24 @@ describe("PlatformAdminAssistantController", () => {
             },
           ],
         },
+        governedAction: {
+          toolName: "action.create_platform_notice",
+          payload: {
+            title: "Assistant drafted notice",
+            body: "Review before execution.",
+            severity: "warning",
+            targetAudience: "all",
+          },
+          descriptor: {
+            action: "create_platform_notice",
+            enabled: true,
+            riskLevel: "medium",
+            requiresReason: false,
+          },
+          confirmationRequired: true,
+          title: "Confirm platform notice creation",
+          message: "This will publish a warning notice for all.",
+        },
       })),
     };
     const controller = new PlatformAdminAssistantController(
@@ -90,6 +108,24 @@ describe("PlatformAdminAssistantController", () => {
               status: "in_progress",
             },
           ],
+        },
+        governedAction: {
+          toolName: "action.create_platform_notice",
+          payload: {
+            title: "Assistant drafted notice",
+            body: "Review before execution.",
+            severity: "warning",
+            targetAudience: "all",
+          },
+          descriptor: {
+            action: "create_platform_notice",
+            enabled: true,
+            riskLevel: "medium",
+            requiresReason: false,
+          },
+          confirmationRequired: true,
+          title: "Confirm platform notice creation",
+          message: "This will publish a warning notice for all.",
         },
       },
       meta: {

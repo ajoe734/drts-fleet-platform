@@ -57,6 +57,22 @@ export interface PlatformAdminAssistantActionPreview {
   confirmationRequired: boolean;
 }
 
+export interface PlatformAdminAssistantGovernedActionRequest {
+  toolName: PlatformAdminAssistantActionToolName;
+  payload: PlatformAdminAssistantActionCommand["payload"];
+  descriptor: ResourceActionDescriptor;
+  confirmationRequired: boolean;
+  title: string;
+  message: string;
+  resourceLabel?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  reasonLabel?: string;
+  reasonPlaceholder?: string;
+  reasonHint?: string;
+  disabledReason?: string | null;
+}
+
 export interface PlatformAdminAssistantActionExecutionResult {
   receipt: ActionReceipt;
   assistantAuditId: string;
@@ -86,6 +102,7 @@ export interface PlatformAdminAssistantProviderResponse {
   citations: PlatformAdminAssistantCitation[];
   suggestedPrompts: string[];
   actionPlan: PlatformAdminAssistantActionPlan | null;
+  governedAction: PlatformAdminAssistantActionCommand | null;
 }
 
 export interface PlatformAdminAssistantMessageRecord extends PlatformAdminAssistantProviderResponse {

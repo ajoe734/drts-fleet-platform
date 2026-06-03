@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { PlatformAdminModule } from "../platform-admin/platform-admin.module";
 import { PlatformAdminAssistantController } from "./platform-admin-assistant.controller";
+import { PlatformAdminAssistantAuditRecorder } from "./platform-admin-assistant.audit";
 import { MockPlatformAdminAssistantProvider } from "./platform-admin-assistant.provider";
 import { PlatformAdminAssistantService } from "./platform-admin-assistant.service";
 import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.types";
@@ -16,6 +17,7 @@ import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.ty
       provide: PLATFORM_ADMIN_ASSISTANT_PROVIDER,
       useExisting: MockPlatformAdminAssistantProvider,
     },
+    PlatformAdminAssistantAuditRecorder,
     PlatformAdminAssistantService,
   ],
 })

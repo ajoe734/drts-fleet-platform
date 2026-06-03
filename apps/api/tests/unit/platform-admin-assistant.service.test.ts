@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { BootstrapRequestIdentity } from "../../src/common/auth";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
-import { PlatformAdminAssistantService } from "../../src/modules/platform-admin-assistant/platform-admin-assistant.service";
+import { PlatformAdminAssistantAuditRecorder } from "../../src/modules/platform-admin-assistant/platform-admin-assistant.audit";
 import { MockPlatformAdminAssistantProvider } from "../../src/modules/platform-admin-assistant/platform-admin-assistant.provider";
+import { PlatformAdminAssistantService } from "../../src/modules/platform-admin-assistant/platform-admin-assistant.service";
 import type {
   PlatformAdminAssistantProvider,
   PlatformAdminAssistantProviderRequest,
@@ -52,13 +53,27 @@ class ThrowingProvider implements PlatformAdminAssistantProvider {
   }
 }
 
+function createService(
+  provider: PlatformAdminAssistantProvider = new MockPlatformAdminAssistantProvider(),
+) {
+  const auditNotificationService = new AuditNotificationService();
+  const assistantAuditRecorder = new PlatformAdminAssistantAuditRecorder();
+  const service = new PlatformAdminAssistantService(
+    provider,
+    new PlatformAdminService(auditNotificationService),
+    auditNotificationService,
+    assistantAuditRecorder,
+  );
+
+  return {
+    service,
+    assistantAuditRecorder,
+  };
+}
+
 describe("PlatformAdminAssistantService", () => {
   it("binds assistant sessions to the current platform control-plane identity", () => {
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(new AuditNotificationService()),
-      new AuditNotificationService(),
-    );
+    const { service } = createService();
 
     const session = service.createSession(platformIdentity("pa-admin-777"), {
       title: "Tenant rollout triage",
@@ -79,11 +94,7 @@ describe("PlatformAdminAssistantService", () => {
   });
 
   it("rejects access from a different human control-plane identity", () => {
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(new AuditNotificationService()),
-      new AuditNotificationService(),
-    );
+    const { service } = createService();
     const session = service.createSession(platformIdentity("pa-admin-777"), {});
 
     expect(() =>
@@ -100,11 +111,7 @@ describe("PlatformAdminAssistantService", () => {
   });
 
   it("stores provider-generated plans from the mock provider without requiring a real key", async () => {
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(new AuditNotificationService()),
-      new AuditNotificationService(),
-    );
+    const { service } = createService();
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
 
@@ -122,6 +129,7 @@ describe("PlatformAdminAssistantService", () => {
     );
     expect(response.suggestedPrompts.length).toBeGreaterThan(0);
     expect(response.actionPlan?.steps).toHaveLength(3);
+    expect(response.governedAction).toBeNull();
     expect(service.listPlans(session.sessionId, identity)).toEqual([
       expect.objectContaining({
         sessionId: session.sessionId,
@@ -131,13 +139,11 @@ describe("PlatformAdminAssistantService", () => {
   });
 
   it("returns degraded help-search guidance when the provider key is missing", async () => {
-    const service = new PlatformAdminAssistantService(
+    const { service } = createService(
       new ThrowingProvider({
         code: "missing_api_key",
         message: "LLM provider API key is missing.",
       }),
-      new PlatformAdminService(new AuditNotificationService()),
-      new AuditNotificationService(),
     );
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
@@ -159,6 +165,7 @@ describe("PlatformAdminAssistantService", () => {
       "Search approved Platform Admin policy for this workflow.",
     );
     expect(response.actionPlan).toBeNull();
+    expect(response.governedAction).toBeNull();
   });
 
   it("returns degraded help-search guidance when the provider is quota-limited or down", async () => {
@@ -172,35 +179,23 @@ describe("PlatformAdminAssistantService", () => {
         message: "Provider is unavailable.",
       },
     ]) {
-      const service = new PlatformAdminAssistantService(
-        new ThrowingProvider(error),
-        new PlatformAdminService(new AuditNotificationService()),
-        new AuditNotificationService(),
-      );
+      const { service } = createService(new ThrowingProvider(error));
       const identity = platformIdentity();
       const session = service.createSession(identity, {});
 
-      const response = await service.createMessage(
-        session.sessionId,
-        identity,
-        {
-          message: "Summarize adapter outage handling.",
-        },
-      );
+      const response = await service.createMessage(session.sessionId, identity, {
+        message: "Summarize adapter outage handling.",
+      });
 
       expect(response.answer).toContain("approved docs");
       expect(response.answer).toContain("manual follow-up");
       expect(response.actionPlan).toBeNull();
+      expect(response.governedAction).toBeNull();
     }
   });
 
   it("returns a descriptor-backed preview for registered assistant actions", () => {
-    const auditNotificationService = new AuditNotificationService();
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(auditNotificationService),
-      auditNotificationService,
-    );
+    const { service } = createService();
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
 
@@ -227,12 +222,7 @@ describe("PlatformAdminAssistantService", () => {
   });
 
   it("treats prompt-injection text inside action payloads as inert data", () => {
-    const auditNotificationService = new AuditNotificationService();
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(auditNotificationService),
-      auditNotificationService,
-    );
+    const { service } = createService();
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
 
@@ -255,12 +245,7 @@ describe("PlatformAdminAssistantService", () => {
   });
 
   it("rejects execution when the action descriptor cannot be resolved", () => {
-    const auditNotificationService = new AuditNotificationService();
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(auditNotificationService),
-      auditNotificationService,
-    );
+    const { service } = createService();
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
 
@@ -286,15 +271,7 @@ describe("PlatformAdminAssistantService", () => {
   });
 
   it("rejects execution when the resolved descriptor is disabled", () => {
-    const auditNotificationService = new AuditNotificationService();
-    const platformAdminService = new PlatformAdminService(
-      auditNotificationService,
-    );
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      platformAdminService,
-      auditNotificationService,
-    );
+    const { service } = createService();
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
 
@@ -325,12 +302,7 @@ describe("PlatformAdminAssistantService", () => {
   });
 
   it("requires a non-empty reason before executing high-risk assistant actions", () => {
-    const auditNotificationService = new AuditNotificationService();
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(auditNotificationService),
-      auditNotificationService,
-    );
+    const { service } = createService();
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
 
@@ -360,12 +332,7 @@ describe("PlatformAdminAssistantService", () => {
   });
 
   it("rejects action execution from a non-platform control-plane actor", () => {
-    const auditNotificationService = new AuditNotificationService();
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(auditNotificationService),
-      auditNotificationService,
-    );
+    const { service } = createService();
 
     expect(() => service.createSession(nonPlatformIdentity(), {})).toThrowError(
       expect.objectContaining({
@@ -379,12 +346,7 @@ describe("PlatformAdminAssistantService", () => {
   });
 
   it("returns ActionReceipt plus assistantAuditId for descriptor-backed execution", () => {
-    const auditNotificationService = new AuditNotificationService();
-    const service = new PlatformAdminAssistantService(
-      new MockPlatformAdminAssistantProvider(),
-      new PlatformAdminService(auditNotificationService),
-      auditNotificationService,
-    );
+    const { service, assistantAuditRecorder } = createService();
     const identity = platformIdentity();
     const session = service.createSession(identity, {});
 
@@ -412,5 +374,33 @@ describe("PlatformAdminAssistantService", () => {
       message: "Platform notice created.",
     });
     expect(result.assistantAuditId).toEqual(expect.any(String));
+    expect(
+      assistantAuditRecorder.list().map((event) => event.event),
+    ).toContain("assistant_action_executed");
+  });
+
+  it("returns a governed action proposal with preview metadata for assistant-authored write plans", async () => {
+    const { service, assistantAuditRecorder } = createService();
+    const identity = platformIdentity();
+    const session = service.createSession(identity, {});
+
+    const response = await service.createMessage(session.sessionId, identity, {
+      message:
+        "[Platform Admin route context]\nPath: /notices\n\n[Operator question]\n請幫我建立公告",
+    });
+
+    expect(response.governedAction).toMatchObject({
+      toolName: "action.create_platform_notice",
+      descriptor: {
+        action: "create_platform_notice",
+        enabled: true,
+        riskLevel: "medium",
+      },
+      confirmationRequired: true,
+      title: "Confirm platform notice creation",
+    });
+    expect(
+      assistantAuditRecorder.list().map((event) => event.event),
+    ).toContain("assistant_plan_created");
   });
 });

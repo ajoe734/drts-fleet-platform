@@ -32,6 +32,7 @@ import { buildRouteContext } from "./route-context";
 import type {
   AssistantActionPlan,
   AssistantMessageRecord,
+  AssistantReceipt,
   AssistantRouteContext,
   AssistantStepStatus,
 } from "./assistant-types";
@@ -77,6 +78,43 @@ type AssistantApiMessageResponse = {
   citations: AssistantApiCitation[];
   suggestedPrompts: string[];
   actionPlan: AssistantApiActionPlan | null;
+  governedAction: AssistantApiGovernedAction | null;
+};
+
+type AssistantApiActionDescriptor = {
+  action: string;
+  enabled: boolean;
+  disabledReasonCode?: string;
+  requiresReason?: boolean;
+  riskLevel: "low" | "medium" | "high";
+};
+
+type AssistantApiGovernedAction = {
+  toolName: string;
+  payload: Record<string, unknown>;
+  descriptor: AssistantApiActionDescriptor;
+  confirmationRequired: boolean;
+  title: string;
+  message: string;
+  resourceLabel?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  reasonLabel?: string;
+  reasonPlaceholder?: string;
+  reasonHint?: string;
+  disabledReason?: string | null;
+};
+
+type AssistantApiActionExecutionResponse = {
+  receipt: {
+    actionId: string;
+    auditId: string;
+    resourceType: string;
+    resourceId: string;
+    status: AssistantReceipt["status"];
+    message: string;
+  };
+  assistantAuditId: string;
 };
 
 const DEFAULT_SUGGESTED_PROMPTS = [
@@ -214,6 +252,27 @@ function formatAssistantContent(response: AssistantApiMessageResponse) {
   return sections.join("\n\n");
 }
 
+function mapReceipt(
+  response: AssistantApiActionExecutionResponse,
+): AssistantReceipt {
+  return {
+    title: "Action receipt",
+    message: response.receipt.message,
+    actionId: response.receipt.actionId,
+    requestId: response.receipt.actionId,
+    auditId: response.receipt.auditId,
+    resourceType: response.receipt.resourceType,
+    resourceId: response.receipt.resourceId,
+    resourceLabel: [
+      response.receipt.resourceType,
+      response.receipt.resourceId,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    status: response.receipt.status,
+  };
+}
+
 function buildContextPrompt(
   message: string,
   routeContext: AssistantRouteContext,
@@ -269,6 +328,7 @@ export function PlatformAssistantOverlay() {
   const [messages, setMessages] = useState<AssistantMessageRecord[]>([]);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
   const [suggestedPrompts, setSuggestedPrompts] = useState(
     DEFAULT_SUGGESTED_PROMPTS,
   );
@@ -455,13 +515,42 @@ export function PlatformAssistantOverlay() {
         },
       );
       const plan = mapActionPlan(response.actionPlan);
+      const governedAction = response.governedAction;
       const assistantMessage: AssistantMessageRecord = {
         id: nextMessageId("paas-assistant"),
         role: "assistant",
         content: formatAssistantContent(response),
         createdAt: new Date().toISOString(),
-        state: plan ? "planning" : "idle",
+        state: governedAction
+          ? "awaiting_confirmation"
+          : plan
+            ? "planning"
+            : "idle",
         plan,
+        pendingAction: governedAction
+          ? {
+              toolName: governedAction.toolName,
+              payload: governedAction.payload,
+            }
+          : null,
+        confirmation: governedAction
+          ? {
+              title: governedAction.title,
+              message: governedAction.message,
+              riskLevel: governedAction.descriptor.riskLevel,
+              resourceLabel: governedAction.resourceLabel,
+              confirmLabel: governedAction.confirmLabel,
+              cancelLabel: governedAction.cancelLabel,
+              reasonLabel: governedAction.reasonLabel,
+              reasonPlaceholder: governedAction.reasonPlaceholder,
+              reasonHint: governedAction.reasonHint,
+              requiresReason:
+                governedAction.descriptor.requiresReason ??
+                governedAction.descriptor.riskLevel === "high",
+              disabled: !governedAction.descriptor.enabled,
+              disabledReason: governedAction.disabledReason ?? null,
+            }
+          : null,
       };
 
       setSuggestedPrompts(
@@ -502,6 +591,89 @@ export function PlatformAssistantOverlay() {
     void submitPrompt(draft);
   }
 
+  async function handleConfirmAction(messageId: string, reason: string) {
+    const message = messages.find((entry) => entry.id === messageId);
+    if (!message?.pendingAction || !session) {
+      return;
+    }
+
+    setIsConfirming(true);
+    setMessages((current) =>
+      current.map((entry) =>
+        entry.id === messageId
+          ? {
+              ...entry,
+              state: "executing",
+              error: null,
+            }
+          : entry,
+      ),
+    );
+
+    try {
+      const response = await client().post<AssistantApiActionExecutionResponse>(
+        `/api/platform-admin/assistant/sessions/${encodeURIComponent(
+          session.sessionId,
+        )}/actions/execute`,
+        {
+          body: {
+            toolName: message.pendingAction.toolName,
+            payload: message.pendingAction.payload,
+            reason,
+          },
+        },
+      );
+
+      setMessages((current) =>
+        current.map((entry) =>
+          entry.id === messageId
+            ? {
+                ...entry,
+                state: "receipt",
+                confirmation: null,
+                pendingAction: null,
+                receipt: mapReceipt(response),
+              }
+            : entry,
+        ),
+      );
+    } catch (error) {
+      setMessages((current) =>
+        current.map((entry) =>
+          entry.id === messageId
+            ? {
+                ...entry,
+                state: "error",
+                error: {
+                  title: "Action execution failed",
+                  message: errorMessage(error),
+                  hint:
+                    "Review the governed action payload, confirmation reason, and backend audit logs.",
+                },
+              }
+            : entry,
+        ),
+      );
+    } finally {
+      setIsConfirming(false);
+    }
+  }
+
+  function handleCancelConfirmation(messageId: string) {
+    setMessages((current) =>
+      current.map((entry) =>
+        entry.id === messageId
+          ? {
+              ...entry,
+              state: "idle",
+              confirmation: null,
+              pendingAction: null,
+            }
+          : entry,
+      ),
+    );
+  }
+
   function handleResetPosition() {
     const nextPosition = getDefaultDesktopPosition();
     setPosition(nextPosition);
@@ -512,6 +684,7 @@ export function PlatformAssistantOverlay() {
     setSession(null);
     setMessages([]);
     setDraft("");
+    setIsConfirming(false);
     setSuggestedPrompts(DEFAULT_SUGGESTED_PROMPTS);
   }
 
@@ -659,6 +832,11 @@ export function PlatformAssistantOverlay() {
           <div style={panelBodyStyle}>
             <AssistantMessageList
               messages={messages}
+              isConfirming={isConfirming}
+              onConfirmAction={(messageId, reason) =>
+                handleConfirmAction(messageId, reason)
+              }
+              onCancelConfirmation={handleCancelConfirmation}
               emptyTitle={copy.emptyTitle}
               emptyBody={copy.emptyBody}
             />

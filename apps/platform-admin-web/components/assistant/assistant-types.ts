@@ -59,6 +59,13 @@ export interface AssistantConfirmationRequest {
   reasonPlaceholder?: string;
   reasonHint?: string | null;
   requiresReason?: boolean;
+  disabled?: boolean;
+  disabledReason?: string | null;
+}
+
+export interface AssistantPendingAction {
+  toolName: string;
+  payload: Record<string, unknown>;
 }
 
 export interface AssistantReceipt {
@@ -87,6 +94,7 @@ export interface AssistantMessageRecord {
   createdAt?: string | null;
   state?: AssistantViewState;
   plan?: AssistantActionPlan | null;
+  pendingAction?: AssistantPendingAction | null;
   confirmation?: AssistantConfirmationRequest | null;
   receipt?: AssistantReceipt | null;
   error?: AssistantErrorState | null;
