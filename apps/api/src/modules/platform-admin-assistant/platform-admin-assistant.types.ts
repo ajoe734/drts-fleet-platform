@@ -64,12 +64,12 @@ export interface PlatformAdminAssistantGovernedActionRequest {
   confirmationRequired: boolean;
   title: string;
   message: string;
-  resourceLabel?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  reasonLabel?: string;
-  reasonPlaceholder?: string;
-  reasonHint?: string;
+  resourceLabel?: string | undefined;
+  confirmLabel?: string | undefined;
+  cancelLabel?: string | undefined;
+  reasonLabel?: string | undefined;
+  reasonPlaceholder?: string | undefined;
+  reasonHint?: string | undefined;
   disabledReason?: string | null;
 }
 
@@ -105,7 +105,14 @@ export interface PlatformAdminAssistantProviderResponse {
   governedAction: PlatformAdminAssistantActionCommand | null;
 }
 
-export interface PlatformAdminAssistantMessageRecord extends PlatformAdminAssistantProviderResponse {
+export interface PlatformAdminAssistantMessageResponse extends Omit<
+  PlatformAdminAssistantProviderResponse,
+  "governedAction"
+> {
+  governedAction: PlatformAdminAssistantGovernedActionRequest | null;
+}
+
+export interface PlatformAdminAssistantMessageRecord extends PlatformAdminAssistantMessageResponse {
   messageId: string;
   sessionId: string;
   role: "user" | "assistant";

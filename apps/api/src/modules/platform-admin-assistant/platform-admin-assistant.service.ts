@@ -20,6 +20,7 @@ import type {
   CreatePlatformAdminAssistantSessionCommand,
   PlatformAdminAssistantControlPlaneIdentity,
   PlatformAdminAssistantMessageRecord,
+  PlatformAdminAssistantMessageResponse,
   PlatformAdminAssistantPlanRecord,
   PlatformAdminAssistantProvider,
   PlatformAdminAssistantProviderResponse,
@@ -111,7 +112,7 @@ export class PlatformAdminAssistantService {
     sessionId: string,
     identity: BootstrapRequestIdentity | null,
     command: CreatePlatformAdminAssistantMessageCommand,
-  ): Promise<PlatformAdminAssistantProviderResponse> {
+  ): Promise<PlatformAdminAssistantMessageResponse> {
     const session = this.requireOwnedSession(sessionId, identity);
     const trimmedMessage = command.message?.trim();
 
@@ -148,7 +149,11 @@ export class PlatformAdminAssistantService {
       this.sessionRoutes.set(sessionId, route);
     }
     const governedAction = providerResponse.governedAction
-      ? this.buildGovernedActionRequest(sessionId, identity, providerResponse.governedAction)
+      ? this.buildGovernedActionRequest(
+          sessionId,
+          identity,
+          providerResponse.governedAction,
+        )
       : null;
 
     const assistantMessage: PlatformAdminAssistantMessageRecord = {
@@ -205,14 +210,19 @@ export class PlatformAdminAssistantService {
     }
 
     if (governedAction) {
-      const auditRoute = route ?? this.sessionRoutes.get(sessionId) ?? "/platform-admin/assistant";
+      const auditRoute =
+        route ??
+        this.sessionRoutes.get(sessionId) ??
+        "/platform-admin/assistant";
       if (governedAction.descriptor.enabled) {
         this.assistantAuditRecorder.recordPlanCreated({
           actorId: session.actor.actorId,
           sessionId,
           route: auditRoute,
           resourceType: governedAction.descriptor.action,
-          resourceId: governedAction.resourceLabel,
+          ...(governedAction.resourceLabel !== undefined
+            ? { resourceId: governedAction.resourceLabel }
+            : {}),
           metadata: {
             toolName: governedAction.toolName,
             riskLevel: governedAction.descriptor.riskLevel,
@@ -225,7 +235,9 @@ export class PlatformAdminAssistantService {
           sessionId,
           route: auditRoute,
           resourceType: governedAction.descriptor.action,
-          resourceId: governedAction.resourceLabel,
+          ...(governedAction.resourceLabel !== undefined
+            ? { resourceId: governedAction.resourceLabel }
+            : {}),
           metadata: {
             toolName: governedAction.toolName,
             disabledReasonCode:
@@ -338,7 +350,7 @@ export class PlatformAdminAssistantService {
       route: auditRoute,
       resourceType: resolvedAction.descriptor.action,
       resourceId: resolvedAction.toolName,
-      actionId: requestId,
+      ...(requestId !== undefined ? { actionId: requestId } : {}),
       metadata: {
         toolName: resolvedAction.toolName,
         reason: normalizedReason || null,
