@@ -29,9 +29,14 @@ export function resolvePlatformAdminAssistantAction(
 ): PlatformAdminAssistantResolvedAction | null {
   switch (command.toolName) {
     case "action.create_platform_notice":
-      return resolveCreatePlatformNoticeAction(command.payload);
+      return resolveCreatePlatformNoticeAction(
+        command.payload as CreatePlatformNoticeCommand,
+      );
     case "action.set_maintenance_mode":
-      return resolveSetMaintenanceModeAction(platformAdminService, command.payload);
+      return resolveSetMaintenanceModeAction(
+        platformAdminService,
+        command.payload as SetPlatformMaintenanceModeCommand,
+      );
     default:
       return null;
   }
