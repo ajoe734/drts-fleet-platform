@@ -34,6 +34,7 @@ import { MaintenanceModule } from "./modules/maintenance/maintenance.module";
 import { OwnedMobilityModule } from "./modules/owned-mobility/owned-mobility.module";
 import { OperationalObservabilityModule } from "./modules/operational-observability/operational-observability.module";
 import { PlatformAdminModule } from "./modules/platform-admin/platform-admin.module";
+import { PlatformAdminAssistantModule } from "./modules/platform-admin-assistant/platform-admin-assistant.module";
 import { PlatformPresenceModule } from "./modules/platform-presence/platform-presence.module";
 import { PlatformEarningsModule } from "./modules/platform-earnings/platform-earnings.module";
 import { ProductRuleModule } from "./modules/product-rule/product-rule.module";
@@ -61,6 +62,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     OwnedMobilityModule,
     OperationalObservabilityModule,
     PlatformAdminModule,
+    PlatformAdminAssistantModule,
     BillingSettlementModule,
     ReportingFilingModule,
     ForwarderModule,
