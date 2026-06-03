@@ -9,6 +9,7 @@ import React, {
   useState,
   type CSSProperties,
 } from "react";
+import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import {
   EMPTY_TENANT_FORM,
   createTenantModuleLabels,
@@ -52,6 +53,18 @@ type TenantFilter =
 
 type TenantStageValue = Exclude<TenantFilter, "all">;
 type TenantRow = PlatformAdminTenantRecord & Record<string, unknown>;
+
+const TENANT_FILTER_VALUES = new Set<TenantFilter>([
+  "all",
+  "sandbox",
+  "pilot",
+  "production",
+  "rollback_hold",
+]);
+
+function isTenantFilter(value: string): value is TenantFilter {
+  return TENANT_FILTER_VALUES.has(value as TenantFilter);
+}
 
 const th = buildCanvasTheme({
   surface: "platform",
@@ -330,6 +343,36 @@ export default function TenantsPage() {
   const [filter, setFilter] = useState<TenantFilter>("all");
   const [createForm, setCreateForm] =
     useState<TenantFormState>(EMPTY_TENANT_FORM);
+
+  const assistantBridge = useMemo(
+    () => ({
+      pageId: "tenants",
+      filters: {
+        rollout_stage: {
+          apply(value: unknown) {
+            if (typeof value !== "string" || !isTenantFilter(value)) {
+              return {
+                ok: false,
+                code: "invalid_filter_value",
+                message:
+                  "Tenants filter accepts only all, sandbox, pilot, production, or rollback_hold.",
+              } as const;
+            }
+            setFilter(value as TenantFilter);
+            return {
+              ok: true,
+              code: "filter_applied",
+              message: `Applied tenants filter ${value}.`,
+              payload: { filterId: "rollout_stage", value },
+            } as const;
+          },
+        },
+      },
+    }),
+    [],
+  );
+
+  usePlatformAdminAssistantPage(assistantBridge);
 
   const copy =
     locale === "en"

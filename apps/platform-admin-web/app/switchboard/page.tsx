@@ -21,6 +21,7 @@ import React, {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { getPlatformLabel } from "@/lib/localized-labels";
@@ -656,6 +657,114 @@ export default function SwitchboardPage() {
   const placardSourceBlocked = isPlacardSourceSelectionBlocked(
     selectedPlacardSource,
   );
+
+  const assistantBridge = useMemo(
+    () => ({
+      pageId: "switchboard",
+      filters: {
+        workspace_tab: {
+          apply(value: unknown) {
+            if (
+              value !== "versions" &&
+              value !== "placards" &&
+              value !== "history"
+            ) {
+              return {
+                ok: false,
+                code: "invalid_filter_value",
+                message:
+                  "Switchboard tab filter accepts only versions, placards, or history.",
+              } as const;
+            }
+            setActiveTab(value);
+            return {
+              ok: true,
+              code: "filter_applied",
+              message: `Applied switchboard tab ${value}.`,
+              payload: { filterId: "workspace_tab", value },
+            } as const;
+          },
+        },
+      },
+      drafts: {
+        public_info_version: {
+          fill(values: Record<string, unknown>) {
+            setModal("create");
+            setPublicInfoForm((current) => ({
+              ...current,
+              title:
+                typeof values.title === "string" ? values.title : current.title,
+              callPhone:
+                typeof values.callPhone === "string"
+                  ? values.callPhone
+                  : (current.callPhone ?? null),
+              complaintPhone:
+                typeof values.complaintPhone === "string"
+                  ? values.complaintPhone
+                  : (current.complaintPhone ?? null),
+              callRateText:
+                typeof values.callRateText === "string"
+                  ? values.callRateText
+                  : (current.callRateText ?? null),
+              fareText:
+                typeof values.fareText === "string"
+                  ? values.fareText
+                  : (current.fareText ?? null),
+              paymentMethodText:
+                typeof values.paymentMethodText === "string"
+                  ? values.paymentMethodText
+                  : (current.paymentMethodText ?? null),
+              effectiveFrom:
+                typeof values.effectiveFrom === "string"
+                  ? values.effectiveFrom
+                  : (current.effectiveFrom ?? null),
+              effectiveTo:
+                typeof values.effectiveTo === "string"
+                  ? values.effectiveTo
+                  : (current.effectiveTo ?? null),
+            }));
+            return {
+              ok: true,
+              code: "draft_filled",
+              message: "Filled public info draft without submitting.",
+            } as const;
+          },
+        },
+        placard_version: {
+          fill(values: Record<string, unknown>) {
+            setModal("placard");
+            setPlacardForm((current) => ({
+              ...current,
+              versionCode:
+                typeof values.versionCode === "string"
+                  ? values.versionCode
+                  : current.versionCode,
+              publicInfoVersionId:
+                typeof values.publicInfoVersionId === "string"
+                  ? values.publicInfoVersionId
+                  : current.publicInfoVersionId,
+              templateName:
+                typeof values.templateName === "string"
+                  ? values.templateName
+                  : current.templateName,
+              artifactFileId:
+                typeof values.artifactFileId === "string"
+                  ? values.artifactFileId
+                  : current.artifactFileId,
+            }));
+            return {
+              ok: true,
+              code: "draft_filled",
+              message: "Filled placard draft without submitting.",
+            } as const;
+          },
+        },
+      },
+    }),
+    [],
+  );
+
+  usePlatformAdminAssistantPage(assistantBridge);
 
   const closeModal = useCallback(() => setModal(null), []);
 
