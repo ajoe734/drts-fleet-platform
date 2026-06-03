@@ -9,7 +9,6 @@ import {
   CanvasCard,
   CanvasField,
   CanvasInput,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasTable,
@@ -37,12 +36,6 @@ const splitGridStyle: React.CSSProperties = {
   display: "grid",
   gap: 16,
   gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
-};
-
-const kpiGridStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 16,
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
 };
 
 const formGridStyle: React.CSSProperties = {
@@ -88,6 +81,23 @@ const modalBackdropStyle: React.CSSProperties = {
 const modalCardStyle: React.CSSProperties = {
   width: "min(560px, 100%)",
   boxShadow: "0 24px 80px rgba(15, 23, 42, 0.24)",
+};
+
+const headerTabButtonStyle: React.CSSProperties = {
+  appearance: "none",
+  border: "none",
+  background: "transparent",
+  padding: 0,
+  font: "inherit",
+  color: "inherit",
+  cursor: "pointer",
+};
+
+const emptyStateStyle: React.CSSProperties = {
+  padding: 24,
+  color: theme.textMuted,
+  fontSize: 12.5,
+  lineHeight: 1.45,
 };
 
 type ActiveTab = "notices" | "maint" | "history";
@@ -575,6 +585,49 @@ export default function NoticesPage() {
     [copy.broadcastAt, copy.delivery, copy.noticeTitle, copy.severity, locale],
   );
 
+  const pageTabs = useMemo(() => {
+    const noticesTab = (
+      <button
+        key="notices-tab"
+        type="button"
+        onClick={() => setActiveTab("notices")}
+        style={headerTabButtonStyle}
+      >
+        {copy.notices} ({counts.notices})
+      </button>
+    );
+    const maintenanceTab = (
+      <button
+        key="maintenance-tab"
+        type="button"
+        onClick={() => setActiveTab("maint")}
+        style={headerTabButtonStyle}
+      >
+        {copy.maintenance}
+      </button>
+    );
+    const historyTab = (
+      <button
+        key="history-tab"
+        type="button"
+        onClick={() => setActiveTab("history")}
+        style={headerTabButtonStyle}
+      >
+        {copy.history}
+      </button>
+    );
+
+    return {
+      tabs: [noticesTab, maintenanceTab, historyTab],
+      active:
+        activeTab === "notices"
+          ? noticesTab
+          : activeTab === "maint"
+            ? maintenanceTab
+            : historyTab,
+    };
+  }, [activeTab, copy.history, copy.maintenance, copy.notices, counts.notices]);
+
   async function handleCreateNotice(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCreating(true);
@@ -673,18 +726,8 @@ export default function NoticesPage() {
         theme={theme}
         title={copy.title}
         subtitle={copy.subtitle}
-        tabs={[
-          `${copy.notices} (${counts.notices})`,
-          copy.maintenance,
-          copy.history,
-        ]}
-        activeTab={
-          activeTab === "notices"
-            ? `${copy.notices} (${counts.notices})`
-            : activeTab === "maint"
-              ? copy.maintenance
-              : copy.history
-        }
+        tabs={pageTabs.tabs}
+        activeTab={pageTabs.active}
         actions={
           <>
             <CanvasBtn
@@ -720,90 +763,8 @@ export default function NoticesPage() {
           />
         ) : null}
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            onClick={() => setActiveTab("notices")}
-            style={{
-              border: "none",
-              background: "transparent",
-              padding: 0,
-              cursor: "pointer",
-            }}
-          >
-            <CanvasPill
-              theme={theme}
-              tone={activeTab === "notices" ? "accent" : "neutral"}
-              dot
-            >
-              {copy.notices} {counts.notices}
-            </CanvasPill>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("maint")}
-            style={{
-              border: "none",
-              background: "transparent",
-              padding: 0,
-              cursor: "pointer",
-            }}
-          >
-            <CanvasPill
-              theme={theme}
-              tone={activeTab === "maint" ? "accent" : "neutral"}
-              dot
-            >
-              {copy.maintenance}
-            </CanvasPill>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("history")}
-            style={{
-              border: "none",
-              background: "transparent",
-              padding: 0,
-              cursor: "pointer",
-            }}
-          >
-            <CanvasPill
-              theme={theme}
-              tone={activeTab === "history" ? "accent" : "neutral"}
-              dot
-            >
-              {copy.history}
-            </CanvasPill>
-          </button>
-        </div>
-
         {activeTab === "notices" ? (
           <>
-            <div style={kpiGridStyle}>
-              <CanvasKPI
-                theme={theme}
-                label="Notices"
-                value={counts.notices}
-                sub={copy.noticeComposerSubtitle}
-              />
-              <CanvasKPI
-                theme={theme}
-                label="Active"
-                value={counts.active}
-                delta={`${counts.scheduled} scheduled`}
-                deltaTone={counts.active > 0 ? "up" : "neutral"}
-                sub={copy.status}
-              />
-              <CanvasKPI
-                theme={theme}
-                label="Critical"
-                value={counts.critical}
-                delta={`${counts.notices - counts.critical} non-critical`}
-                deltaTone={counts.critical > 0 ? "down" : "neutral"}
-                sub={copy.severity}
-              />
-            </div>
-
             {showComposer ? (
               <CanvasCard
                 theme={theme}
@@ -931,15 +892,6 @@ export default function NoticesPage() {
               </CanvasCard>
             ) : null}
 
-            {maintenance?.enabled ? (
-              <CanvasBanner
-                theme={theme}
-                tone="danger"
-                title={copy.maintenanceEnabled}
-                body={maintenance.reason ?? copy.maintenanceSummary}
-              />
-            ) : null}
-
             <CanvasCard theme={theme} padding={0}>
               {noticeRows.length > 0 ? (
                 <CanvasTable
@@ -948,9 +900,7 @@ export default function NoticesPage() {
                   rows={noticeRows}
                 />
               ) : (
-                <div style={{ padding: 24, color: theme.textMuted }}>
-                  {copy.emptyNotices}
-                </div>
+                <div style={emptyStateStyle}>{copy.emptyNotices}</div>
               )}
             </CanvasCard>
           </>
@@ -1080,7 +1030,7 @@ export default function NoticesPage() {
                       variant="primary"
                       danger
                       onClick={handlePrimaryAction}
-                      disabled={updatingMaintenance}
+                      disabled={updatingMaintenance || !maintReason.trim()}
                     >
                       {copy.saveMaintenance}
                     </CanvasBtn>
@@ -1088,61 +1038,56 @@ export default function NoticesPage() {
                 </div>
               </CanvasCard>
 
-              <div style={{ display: "grid", gap: 16 }}>
-                <CanvasCard theme={theme} title={copy.previewTitle}>
+              <CanvasCard theme={theme} title={copy.previewTitle}>
+                <div style={{ display: "grid", gap: 12 }}>
                   <CanvasBanner
                     theme={theme}
                     tone={maintEnabled ? "danger" : "warn"}
                     title={maintenancePreview}
                     body={copy.previewTargets}
                   />
-                </CanvasCard>
-
-                <CanvasCard theme={theme} title="Current status">
-                  <div style={{ display: "grid", gap: 10 }}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <CanvasPill
-                        theme={theme}
-                        tone={maintenance?.enabled ? "danger" : "success"}
-                        dot
-                      >
-                        {maintenance?.enabled
-                          ? copy.maintenanceEnabled
-                          : copy.maintenanceDisabled}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <CanvasPill
+                      theme={theme}
+                      tone={maintenance?.enabled ? "danger" : "success"}
+                      dot
+                    >
+                      {maintenance?.enabled
+                        ? copy.maintenanceEnabled
+                        : copy.maintenanceDisabled}
+                    </CanvasPill>
+                    {maintenance?.reason ? (
+                      <CanvasPill theme={theme} tone="neutral">
+                        {maintenance.reason}
                       </CanvasPill>
-                      {maintenance?.reason ? (
-                        <CanvasPill theme={theme} tone="neutral">
-                          {maintenance.reason}
-                        </CanvasPill>
-                      ) : null}
-                    </div>
-                    <CanvasField theme={theme} label={copy.window}>
-                      <CanvasInput
-                        theme={theme}
-                        mono
-                        value={formatWindow(
-                          maintenance?.scheduledStart ?? null,
-                          maintenance?.scheduledEnd ?? null,
-                          locale,
-                        )}
-                      />
-                    </CanvasField>
-                    <CanvasField theme={theme} label={copy.updatedBy}>
-                      <CanvasInput
-                        theme={theme}
-                        value={maintenance?.updatedBy ?? "system"}
-                      />
-                    </CanvasField>
-                    <CanvasField theme={theme} label={copy.createdAt}>
-                      <CanvasInput
-                        theme={theme}
-                        mono
-                        value={formatDateTime(maintenance?.updatedAt ?? "")}
-                      />
-                    </CanvasField>
+                    ) : null}
                   </div>
-                </CanvasCard>
-              </div>
+                  <CanvasField theme={theme} label={copy.window}>
+                    <CanvasInput
+                      theme={theme}
+                      mono
+                      value={formatWindow(
+                        maintenance?.scheduledStart ?? null,
+                        maintenance?.scheduledEnd ?? null,
+                        locale,
+                      )}
+                    />
+                  </CanvasField>
+                  <CanvasField theme={theme} label={copy.updatedBy}>
+                    <CanvasInput
+                      theme={theme}
+                      value={maintenance?.updatedBy ?? "system"}
+                    />
+                  </CanvasField>
+                  <CanvasField theme={theme} label={copy.createdAt}>
+                    <CanvasInput
+                      theme={theme}
+                      mono
+                      value={formatDateTime(maintenance?.updatedAt ?? "")}
+                    />
+                  </CanvasField>
+                </div>
+              </CanvasCard>
             </div>
           </>
         ) : null}
@@ -1161,9 +1106,7 @@ export default function NoticesPage() {
                 rows={historyRows}
               />
             ) : (
-              <div style={{ padding: 24, color: theme.textMuted }}>
-                {copy.emptyHistory}
-              </div>
+              <div style={emptyStateStyle}>{copy.emptyHistory}</div>
             )}
           </CanvasCard>
         ) : null}
