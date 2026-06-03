@@ -29,3 +29,4 @@ export {
   type PublishAssistantSelectionProps,
   type PublishAssistantScopeProps,
 } from "./publish-assistant-context";
+export { OpsAssistantWidget } from "./assistant-widget";
