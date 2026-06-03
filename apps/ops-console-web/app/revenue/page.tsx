@@ -31,6 +31,7 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
+import { PublishAssistantScope } from "@/components/ops-assistant";
 import { RevenueAutoRefresh } from "@/components/revenue-auto-refresh";
 import { getOpsClient } from "@/lib/api-client";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
@@ -1137,6 +1138,14 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
   return (
     <>
+      <PublishAssistantScope
+        activeTab={tab}
+        visibleFilters={{
+          period: filters.period,
+          serviceBucket: filters.serviceBucket,
+          vehicleId: filters.vehicleId,
+        }}
+      />
       <RevenueAutoRefresh tier={refreshTier} />
       <PageHeader
         theme={theme}
