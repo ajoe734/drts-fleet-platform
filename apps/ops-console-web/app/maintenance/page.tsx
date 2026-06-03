@@ -902,11 +902,11 @@ export default function MaintenancePage() {
                 label={actionLabel(action, locale)}
                 reason={actionReason(action, locale)}
                 tone={actionTone(action)}
-                href={
-                  action.action === "open_vehicle" ? row.vehicleLink : undefined
-                }
                 locale={locale}
                 onInvoke={() => onActionClick(row, action)}
+                {...(action.action === "open_vehicle"
+                  ? { href: row.vehicleLink }
+                  : {})}
               />
             );
           })}
