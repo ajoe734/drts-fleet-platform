@@ -1,5 +1,7 @@
 "use client";
 
+import { PLATFORM_ADMIN_ROUTE_REGISTRY } from "@/components/assistant/route-context";
+import { PlatformAssistantOverlay } from "@/components/assistant/platform-assistant-overlay";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -68,8 +70,7 @@ type AdminShellProps = {
 };
 
 type NavRoute = {
-  key: string;
-  href: string;
+  key: keyof typeof PLATFORM_ADMIN_ROUTE_REGISTRY;
   icon: LucideIcon;
   section: string;
   zh: string;
@@ -95,7 +96,6 @@ const sections: NavSection[] = [
 const routes: NavRoute[] = [
   {
     key: "home",
-    href: "/",
     icon: LayoutDashboard,
     section: "workspace",
     zh: "工作首頁",
@@ -103,7 +103,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "tenants",
-    href: "/tenants",
     icon: Shield,
     section: "tenant",
     zh: "租戶",
@@ -111,7 +110,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "tenant-governance",
-    href: "/tenant-governance",
     icon: ShieldCheck,
     section: "tenant",
     zh: "跨租戶治理",
@@ -119,7 +117,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "partners",
-    href: "/partners",
     icon: Handshake,
     section: "tenant",
     zh: "合作夥伴",
@@ -127,7 +124,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "users",
-    href: "/users",
     icon: Users,
     section: "tenant",
     zh: "平台人員",
@@ -135,7 +131,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "fleet",
-    href: "/fleet",
     icon: Truck,
     section: "fleet",
     zh: "車隊與法遵",
@@ -143,7 +138,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "switchboard",
-    href: "/switchboard",
     icon: Radio,
     section: "commerce",
     zh: "公開資訊",
@@ -151,7 +145,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "pricing",
-    href: "/pricing",
     icon: DollarSign,
     section: "commerce",
     zh: "費率治理",
@@ -159,7 +152,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "payments",
-    href: "/payments",
     icon: CreditCard,
     section: "commerce",
     zh: "結算與帳務",
@@ -167,7 +159,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "adapter-registry",
-    href: "/adapter-registry",
     icon: ShieldCheck,
     section: "commerce",
     zh: "平台 Adapter",
@@ -175,7 +166,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "health",
-    href: "/health",
     icon: Activity,
     section: "ops",
     zh: "平台健康",
@@ -183,7 +173,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "notices",
-    href: "/notices",
     icon: Bell,
     section: "ops",
     zh: "公告與維護",
@@ -191,7 +180,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "audit",
-    href: "/audit",
     icon: ClipboardList,
     section: "ops",
     zh: "稽核與證據",
@@ -199,7 +187,6 @@ const routes: NavRoute[] = [
   },
   {
     key: "feature-flags",
-    href: "/feature-flags",
     icon: Flag,
     section: "ops",
     zh: "功能旗標",
@@ -212,11 +199,12 @@ function labelFor(locale: Locale, item: { zh: string; en: string }) {
 }
 
 function pathMatchesRoute(route: NavRoute, pathname: string) {
-  if (route.href === "/") {
+  const href = PLATFORM_ADMIN_ROUTE_REGISTRY[route.key].href;
+  if (href === "/") {
     return pathname === "/";
   }
 
-  return pathname === route.href || pathname.startsWith(`${route.href}/`);
+  return pathname === href || pathname.startsWith(`${href}/`);
 }
 
 function getActiveRoute(pathname: string): NavRoute {
@@ -405,10 +393,11 @@ function SidebarNavItem({
   locale: Locale;
 }) {
   const Icon = route.icon;
+  const href = PLATFORM_ADMIN_ROUTE_REGISTRY[route.key].href;
 
   return (
     <Link
-      href={route.href}
+      href={href}
       title={labelFor(locale, route)}
       aria-current={active ? "page" : undefined}
       style={{
@@ -542,10 +531,11 @@ function Topbar({
   const activeSection = sections.find(
     (section) => section.key === activeRoute.section,
   );
+  const activeHref = PLATFORM_ADMIN_ROUTE_REGISTRY[activeRoute.key].href;
   const hasDetailCrumb =
-    activeRoute.href !== "/" &&
-    pathname !== activeRoute.href &&
-    pathname.startsWith(`${activeRoute.href}/`);
+    activeHref !== "/" &&
+    pathname !== activeHref &&
+    pathname.startsWith(`${activeHref}/`);
   const breadcrumbs = [
     activeSection ? labelFor(locale, activeSection) : "Platform Admin",
     labelFor(locale, activeRoute),
@@ -602,6 +592,7 @@ export function AdminShell({ children }: AdminShellProps) {
       />
       <Topbar activeRoute={activeRoute} pathname={pathname} locale={locale} />
       <main style={mainStyle}>{children}</main>
+      <PlatformAssistantOverlay />
     </div>
   );
 }

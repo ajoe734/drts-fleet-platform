@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
+import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -60,6 +61,10 @@ type PricingRuleRow = PlatformPricingRuleRecord &
   };
 
 type FeePlanRow = DriverFeePlanRecord & Record<string, unknown>;
+
+const PRICING_FILTER_VALUES = new Set<"all" | "active" | "draft" | "archived">(
+  ["all", "active", "draft", "archived"],
+);
 
 const EMPTY_PRICING_FORM: PricingFormState = {
   ruleName: "",
@@ -677,6 +682,140 @@ export default function PricingPage() {
         .map((plan) => ({ ...plan })),
     [feePlans],
   );
+
+  const assistantBridge = useMemo(
+    () => ({
+      pageId: "pricing",
+      filters: {
+        rule_status: {
+          apply(value: unknown) {
+            if (
+              typeof value !== "string" ||
+              !PRICING_FILTER_VALUES.has(value as typeof filter)
+            ) {
+              return {
+                ok: false,
+                code: "invalid_filter_value",
+                message:
+                  "Pricing filter accepts only all, active, draft, or archived.",
+              } as const;
+            }
+            setFilter(value as typeof filter);
+            return {
+              ok: true,
+              code: "filter_applied",
+              message: `Applied pricing filter ${value}.`,
+              payload: { filterId: "rule_status", value },
+            } as const;
+          },
+        },
+      },
+      drafts: {
+        pricing_rule_create: {
+          fill(values: Record<string, unknown>) {
+            setShowCreate(true);
+            setPricingForm((current) => ({
+              ...current,
+              ruleName:
+                typeof values.ruleName === "string"
+                  ? values.ruleName
+                  : current.ruleName,
+              version:
+                typeof values.version === "string"
+                  ? values.version
+                  : current.version,
+              serviceFeeBps:
+                typeof values.serviceFeeBps === "string"
+                  ? values.serviceFeeBps
+                  : current.serviceFeeBps,
+              reimbursementMode:
+                values.reimbursementMode === "platform_funded" ||
+                values.reimbursementMode === "mixed"
+                  ? values.reimbursementMode
+                  : current.reimbursementMode,
+              applicableTo:
+                typeof values.applicableTo === "string"
+                  ? values.applicableTo
+                  : current.applicableTo,
+              notes:
+                typeof values.notes === "string" ? values.notes : current.notes,
+            }));
+            return {
+              ok: true,
+              code: "draft_filled",
+              message: "Filled pricing rule draft without submitting.",
+            } as const;
+          },
+        },
+        publish_rule_window: {
+          fill(values: Record<string, unknown>) {
+            const ruleId =
+              typeof values.ruleId === "string" ? values.ruleId : null;
+            if (ruleId) {
+              const matchedRule =
+                draftRules.find((rule) => rule.ruleId === ruleId) ?? null;
+              if (!matchedRule) {
+                return {
+                  ok: false,
+                  code: "draft_rule_not_found",
+                  message:
+                    "Publish window draft requires a known draft pricing rule id.",
+                } as const;
+              }
+              openPublishRuleForm(matchedRule);
+            }
+            setPublishRuleForm((current) => ({
+              effectiveFrom:
+                typeof values.effectiveFrom === "string"
+                  ? values.effectiveFrom
+                  : current.effectiveFrom,
+              effectiveTo:
+                typeof values.effectiveTo === "string"
+                  ? values.effectiveTo
+                  : current.effectiveTo,
+            }));
+            return {
+              ok: true,
+              code: "draft_filled",
+              message: "Filled pricing publish window draft without submitting.",
+            } as const;
+          },
+        },
+        driver_fee_plan_publish: {
+          fill(values: Record<string, unknown>) {
+            setFeePlanForm((current) => ({
+              ...current,
+              planName:
+                typeof values.planName === "string"
+                  ? values.planName
+                  : current.planName,
+              version:
+                typeof values.version === "string"
+                  ? values.version
+                  : current.version,
+              serviceFeeBps:
+                typeof values.serviceFeeBps === "string"
+                  ? values.serviceFeeBps
+                  : current.serviceFeeBps,
+              reimbursementMode:
+                values.reimbursementMode === "platform_funded" ||
+                values.reimbursementMode === "mixed"
+                  ? values.reimbursementMode
+                  : current.reimbursementMode,
+            }));
+            return {
+              ok: true,
+              code: "draft_filled",
+              message: "Filled fee plan draft without submitting.",
+            } as const;
+          },
+        },
+      },
+    }),
+    [draftRules],
+  );
+
+  usePlatformAdminAssistantPage(assistantBridge);
 
   async function handleCreatePricingRule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
