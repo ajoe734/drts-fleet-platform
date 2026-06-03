@@ -3,6 +3,7 @@ import path from "path";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  distDir: process.env.NEXT_DIST_DIR?.trim() || ".next",
   allowedDevOrigins: [
     "127.0.0.1",
     "*.trycloudflare.com",
