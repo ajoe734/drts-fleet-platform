@@ -33,6 +33,7 @@ import type {
   IncidentStatus,
   IncidentTimelineEntry,
   RecordServiceRecoveryActionCommand,
+  ResourceActionDescriptor,
   ServiceRecoveryActionRecord,
   UpdateIncidentCommand,
 } from "@drts/contracts";
@@ -68,6 +69,12 @@ const SERVICE_RECOVERY_TYPES = [
   "driver_reassigned",
   "other",
 ] as const;
+
+const CREATE_INCIDENT_ACTION: ResourceActionDescriptor = {
+  action: "create_incident",
+  enabled: true,
+  riskLevel: "medium",
+};
 
 type IncidentTab = "active" | "resolved" | "closed";
 
@@ -204,6 +211,26 @@ function emptyStateStyle(themeToken: CanvasTheme): CSSProperties {
   };
 }
 
+function modalScrimStyle(): CSSProperties {
+  return {
+    position: "fixed",
+    inset: 0,
+    zIndex: 80,
+    background: "rgba(2, 6, 23, 0.68)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  };
+}
+
+function modalCardWrapStyle(): CSSProperties {
+  return {
+    width: "100%",
+    maxWidth: 920,
+  };
+}
+
 function matchesIncidentTab(status: IncidentStatus, tab: IncidentTab) {
   if (tab === "active") {
     return status === "open" || status === "investigating";
@@ -245,6 +272,16 @@ function incidentStatusTone(status: IncidentStatus) {
     return "neutral" as const;
   }
   return "warn" as const;
+}
+
+function actionRiskTone(riskLevel: ResourceActionDescriptor["riskLevel"]) {
+  if (riskLevel === "high") {
+    return "danger" as const;
+  }
+  if (riskLevel === "medium") {
+    return "warn" as const;
+  }
+  return "neutral" as const;
 }
 
 function renderSeverityPill(severity: IncidentSeverity) {
@@ -634,11 +671,11 @@ export default function IncidentsPage() {
     <>
       <PageHeader
         theme={theme}
-        title={locale === "en" ? "Incident Center" : "事故中心"}
+        title={locale === "en" ? "Incident hub" : "事故中心"}
         subtitle={
           locale === "en"
-            ? "safety · collision · property · service recovery"
-            : "安全 · 碰撞 · 財損 · 服務補償"
+            ? "safety · collision · property · service recovery — driver SOS / dispatch exception stays ops-owned"
+            : "安全 · 碰撞 · 財損 · 服務補償 — driver SOS / dispatch exception 一律由 ops 接手"
         }
         tabs={tabNodes}
         activeTab={activeTabNode}
@@ -652,17 +689,14 @@ export default function IncidentsPage() {
             >
               {locale === "en" ? "Filters" : "類別"}
             </Btn>
-            <Btn
-              theme={theme}
-              variant="primary"
-              icon="plus"
-              onClick={() => {
+            <CanvasActionButton
+              descriptor={CREATE_INCIDENT_ACTION}
+              locale={locale}
+              onInvoke={() => {
                 setShowCreate(true);
                 setEditingId(null);
               }}
-            >
-              {t("incidents.createBtn")}
-            </Btn>
+            />
           </>
         }
       />
@@ -689,8 +723,18 @@ export default function IncidentsPage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title={`${criticalBannerRecord.incidentId} · ${criticalBannerRecord.title} · ${criticalBannerRecord.severity} · ${criticalBannerRecord.status}`}
-            body={buildCriticalBannerBody(criticalBannerRecord, locale)}
+            title={
+              locale === "en"
+                ? `SOS critical response active · ${criticalBannerRecord.incidentId}`
+                : `SOS 緊急事件處理中 · ${criticalBannerRecord.incidentId}`
+            }
+            body={`${criticalBannerRecord.title} · ${formatOpsCodeLabel(
+              locale,
+              criticalBannerRecord.severity,
+            )} · ${formatOpsCodeLabel(locale, criticalBannerRecord.status)} · ${buildCriticalBannerBody(
+              criticalBannerRecord,
+              locale,
+            )}`}
             actions={
               <Btn
                 theme={theme}
@@ -717,21 +761,52 @@ export default function IncidentsPage() {
           />
         )}
 
-        {showCreate || editingId ? (
+        <Card
+          theme={theme}
+          title={
+            locale === "en"
+              ? "Governance guardrail · Three iron laws"
+              : "治理護欄 · 三條鐵律"
+          }
+          subtitle={
+            locale === "en"
+              ? "Ops-owned constraints from the design canvas. Frontend affordances do not override them."
+              : "設計畫布定下的 ops 約束；前端操作不可以覆蓋。"
+          }
+        >
+          <div style={{ display: "grid", gap: 10 }}>
+            {[
+              locale === "en"
+                ? "Driver SOS and dispatch-exception incidents stay ops-owned even after they link to an order or complaint."
+                : "Driver SOS 與 dispatch-exception incident 即使後續連到 order / complaint，仍然維持 ops-owned。",
+              locale === "en"
+                ? "Service recovery action, timeline update, and formal resolution are separate records and must never be conflated."
+                : "Service recovery action、timeline update、formal resolution 是三種不同紀錄，不可混用。",
+              locale === "en"
+                ? "Escalation target is not an owner transfer. Handoff remains incomplete until the receiving side acknowledges it."
+                : "Escalation target 不等於 owner transfer；接手方完成 acknowledgment 前，不算真正轉手。",
+            ].map((rule, index) => (
+              <Banner
+                key={index}
+                theme={theme}
+                tone="info"
+                icon="audit"
+                title={
+                  locale === "en"
+                    ? `Rule ${index + 1}`
+                    : `鐵律 ${index + 1}`
+                }
+                body={rule}
+              />
+            ))}
+          </div>
+        </Card>
+
+        {editingId ? (
           <Card
             theme={theme}
-            title={
-              editingId
-                ? t("incidents.form.updateTitle")
-                : t("incidents.form.createTitle")
-            }
-            subtitle={
-              editingId
-                ? (editingRecord?.incidentId ?? t("incidents.selectIncident"))
-                : complaintCaseNoFromQuery
-                  ? `${t("incidents.linkComplaintTitle")} · ${complaintCaseNoFromQuery}`
-                  : t("incidents.subtitle")
-            }
+            title={t("incidents.form.updateTitle")}
+            subtitle={editingRecord?.incidentId ?? t("incidents.selectIncident")}
           >
             <IncidentForm
               editingRecord={editingRecord}
@@ -1251,7 +1326,140 @@ export default function IncidentsPage() {
           </div>
         ) : null}
       </div>
+
+      {showCreate ? (
+        <CreateIncidentModal
+          locale={locale}
+          complaintCaseNo={complaintCaseNoFromQuery}
+          initialValues={createDefaults}
+          onCancel={() => {
+            setShowCreate(false);
+            setEditingId(null);
+          }}
+          onSubmit={async (command) => {
+            try {
+              const client = getOpsClient();
+              const created = await client.createIncident(command);
+              if (complaintCaseNoFromQuery) {
+                await client.linkIncidentToComplaint(
+                  created.incidentId,
+                  complaintCaseNoFromQuery,
+                );
+                setSelectedIncidentId(created.incidentId);
+                await loadTimeline(created.incidentId);
+              }
+              await loadRecords();
+              setShowCreate(false);
+            } catch (e) {
+              setError(e instanceof Error ? e.message : t("common.unknown"));
+            }
+          }}
+        />
+      ) : null}
     </>
+  );
+}
+
+function CanvasActionButton({
+  descriptor,
+  locale,
+  onInvoke,
+}: {
+  descriptor: ResourceActionDescriptor;
+  locale: "en" | "zh";
+  onInvoke: () => void;
+}) {
+  return (
+    <Btn
+      theme={theme}
+      size="md"
+      variant={descriptor.riskLevel === "medium" ? "secondary" : "ghost"}
+      icon="plus"
+      disabled={!descriptor.enabled}
+      onClick={onInvoke}
+    >
+      {locale === "en" ? "Create incident" : "新增事故"}
+      {descriptor.requiresReason ? " *" : ""}
+      {!descriptor.enabled && descriptor.disabledReasonCode ? (
+        <span style={{ fontSize: 10, color: theme.textDim }}>
+          {" "}
+          ({formatOpsCodeLabel(locale, descriptor.disabledReasonCode)})
+        </span>
+      ) : null}
+    </Btn>
+  );
+}
+
+function CreateIncidentModal({
+  locale,
+  complaintCaseNo,
+  initialValues,
+  onCancel,
+  onSubmit,
+}: {
+  locale: "en" | "zh";
+  complaintCaseNo: string;
+  initialValues: IncidentFormInitialValues;
+  onCancel: () => void;
+  onSubmit: (command: CreateIncidentCommand) => Promise<void>;
+}) {
+  return (
+    <div style={modalScrimStyle()} onClick={onCancel}>
+      <div
+        style={modalCardWrapStyle()}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <Card
+          theme={theme}
+          title={
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+            >
+              {locale === "en" ? "Create incident" : "新增事故"}
+              <Pill
+                theme={theme}
+                tone={actionRiskTone(CREATE_INCIDENT_ACTION.riskLevel)}
+              >
+                {locale === "en" ? "medium-risk" : "中風險"}
+              </Pill>
+            </span>
+          }
+          subtitle={
+            complaintCaseNo
+              ? `${locale === "en" ? "Linked complaint" : "關聯客訴"} · ${complaintCaseNo}`
+              : locale === "en"
+                ? "Start from a governed modal action, then return to the table."
+                : "由受治理的 modal action 建立，完成後回到列表。"
+          }
+        >
+          <Banner
+            theme={theme}
+            tone="info"
+            icon="audit"
+            title={
+              locale === "en"
+                ? "Descriptor action: create incident"
+                : "描述動作：新增事故"
+            }
+            body={
+              locale === "en"
+                ? "Use this modal to create new records without displacing the incidents table."
+                : "透過此 modal 建立新紀錄，避免把 incidents 主列表擠出主要視線。"
+            }
+          />
+          <div style={{ marginTop: 12 }}>
+            <IncidentForm
+              editingRecord={undefined}
+              initialValues={initialValues}
+              onCancel={onCancel}
+              onSubmit={async (command) => {
+                await onSubmit(command as CreateIncidentCommand);
+              }}
+            />
+          </div>
+        </Card>
+      </div>
+    </div>
   );
 }
 
