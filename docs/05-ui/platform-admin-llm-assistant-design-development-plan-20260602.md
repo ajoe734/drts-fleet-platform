@@ -1,6 +1,6 @@
 # Platform Admin LLM Assistant Design & Development Plan
 
-Status: implementation-aligned backend configuration baseline  
+Status: implementation-aligned backend configuration baseline
 Last updated: 2026-06-02
 
 ## 1. Scope
