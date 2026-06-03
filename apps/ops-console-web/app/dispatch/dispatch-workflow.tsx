@@ -25,7 +25,6 @@ import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import {
-  CanvasPrimitives,
   CanvasActionButton as ActionButton,
   CanvasCard as Card,
   CanvasDL as DL,
@@ -33,6 +32,10 @@ import {
   buildCanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
+import {
+  DispatchCanvasActivityFeed as CanvasFeed,
+  DispatchCanvasStateRail as CanvasRail,
+} from "./canvas-workflow-primitives";
 import {
   getCandidateLocationState,
   getCandidateLocationTone,
@@ -49,13 +52,6 @@ const theme = buildCanvasTheme({
   dark: true,
   density: "compact",
 });
-
-const railKey = `Step${"per"}` as const;
-const feedKey = `Time${"line"}` as const;
-const CanvasRail: (typeof CanvasPrimitives)[typeof railKey] =
-  CanvasPrimitives[railKey];
-const CanvasFeed: (typeof CanvasPrimitives)[typeof feedKey] =
-  CanvasPrimitives[feedKey];
 
 type QueueState =
   | "pending"

@@ -22,7 +22,6 @@ import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import {
-  CanvasPrimitives,
   CanvasActionButton as ActionButton,
   CanvasBanner as Banner,
   CanvasCard as Card,
@@ -35,6 +34,10 @@ import {
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
+import {
+  DispatchCanvasActivityFeed as CanvasFeed,
+  DispatchCanvasStateRail as CanvasRail,
+} from "../canvas-workflow-primitives";
 import { getCandidateLocationState } from "../location-state";
 
 type DispatchDetailPageProps = {
@@ -71,13 +74,6 @@ const theme = buildCanvasTheme({
   dark: true,
   density: "compact",
 });
-
-const railKey = `Step${"per"}` as const;
-const feedKey = `Time${"line"}` as const;
-const CanvasRail: (typeof CanvasPrimitives)[typeof railKey] =
-  CanvasPrimitives[railKey];
-const CanvasFeed: (typeof CanvasPrimitives)[typeof feedKey] =
-  CanvasPrimitives[feedKey];
 
 // Refresh tier T2 (Dispatch): 5s cadence per packet §3.2 / §5.3.
 const REFRESH_TIER_LABEL = "T2 · 5s";
@@ -1153,7 +1149,9 @@ function renderHeaderActions(
             <ActionButton
               theme={theme}
               riskLevel={action.riskLevel}
-              requiresReason={action.requiresReason}
+              {...(action.requiresReason === undefined
+                ? {}
+                : { requiresReason: action.requiresReason })}
               disabled={!action.enabled}
               icon={visual.icon}
             >
@@ -2050,6 +2048,11 @@ async function renderOwnedWorkspace({
               theme={theme}
               cols={2}
               items={[
+                {
+                  k: "domain",
+                  v: `${order.orderDomain} · ${order.dispatchSemantics}`,
+                  mono: true,
+                },
                 {
                   k: "license valid",
                   v: `${licenseClearCount}/${candidateRows.length || 0} ${
