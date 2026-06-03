@@ -655,10 +655,11 @@ export function OpsAssistantWidget() {
         descriptor.riskLevel === "low"
           ? `Executing ${descriptor.action}.`
           : `Opening ${descriptor.riskLevel}-risk confirmation for ${descriptor.action}.`,
-      meta:
-        descriptor.requiresReason || descriptor.riskLevel === "high"
-          ? "Reason may be required by the existing page confirmation UI."
-          : undefined,
+      ...(descriptor.requiresReason || descriptor.riskLevel === "high"
+        ? {
+            meta: "Reason may be required by the existing page confirmation UI.",
+          }
+        : {}),
     });
 
     try {
@@ -670,8 +671,7 @@ export function OpsAssistantWidget() {
       appendConversation({
         id: `${Date.now()}-execute-error`,
         author: "system",
-        tone:
-          message === "ASSISTANT_ACTION_CANCELLED" ? "neutral" : "danger",
+        tone: message === "ASSISTANT_ACTION_CANCELLED" ? "neutral" : "danger",
         message:
           message === "ASSISTANT_ACTION_CANCELLED"
             ? "Action cancelled."
@@ -691,7 +691,9 @@ export function OpsAssistantWidget() {
         tone: "success",
         message: receipt.message || `${action} completed.`,
         meta: `actionId ${receipt.actionId} · auditId ${receipt.auditId}`,
-        auditHref: receipt.auditHref ?? `/audit?auditId=${encodeURIComponent(receipt.auditId)}`,
+        auditHref:
+          receipt.auditHref ??
+          `/audit?auditId=${encodeURIComponent(receipt.auditId)}`,
       });
     },
   );
@@ -949,7 +951,10 @@ export function OpsAssistantWidget() {
                                 color: theme.textDim,
                               }}
                             >
-                              {formatOpsCodeLabel(context?.locale ?? "en", action.riskLevel)}
+                              {formatOpsCodeLabel(
+                                context?.locale ?? "en",
+                                action.riskLevel,
+                              )}
                             </span>
                           </div>
                           <span
@@ -992,7 +997,9 @@ export function OpsAssistantWidget() {
                         >
                           {describeIntent(pendingIntent)}
                         </span>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <div
+                          style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+                        >
                           <button
                             type="button"
                             disabled={isExecutingIntent}
@@ -1028,7 +1035,8 @@ export function OpsAssistantWidget() {
                     }}
                   >
                     Focus a supported detail view to let the assistant resolve
-                    `ActionIntent` against that resource&apos;s available actions.
+                    `ActionIntent` against that resource&apos;s available
+                    actions.
                   </div>
                 )}
               </div>
@@ -1134,8 +1142,10 @@ export function OpsAssistantWidget() {
                               : "System"
                         }
                         message={entry.message}
-                        meta={entry.meta}
-                        auditHref={entry.auditHref}
+                        {...(entry.meta ? { meta: entry.meta } : {})}
+                        {...(entry.auditHref !== undefined
+                          ? { auditHref: entry.auditHref }
+                          : {})}
                       />
                     ))
                   ) : (
