@@ -27,7 +27,7 @@ import {
   type CanvasTheme,
 } from "@drts/ui-web";
 
-type ActionIntent = "toggle" | "override" | "removeOverride";
+type ActionIntent = "toggle" | "override";
 
 type ActionDescriptor = {
   intent: ActionIntent | "history";
@@ -53,16 +53,7 @@ type OverrideDraft = {
   enabled: boolean;
 };
 
-type RemoveOverrideDraft = {
-  intent: "removeOverride";
-  key: string;
-  tenantId: string;
-  description: string;
-  enabled: boolean;
-  scopeLabel: string;
-};
-
-type PendingAction = ToggleDraft | OverrideDraft | RemoveOverrideDraft;
+type PendingAction = ToggleDraft | OverrideDraft;
 
 type AuditReceipt = {
   id: string;
@@ -114,11 +105,6 @@ const actionDescriptors: Record<ActionDescriptor["intent"], ActionDescriptor> =
     },
     override: {
       intent: "override",
-      riskLevel: "high",
-      requiresReason: true,
-    },
-    removeOverride: {
-      intent: "removeOverride",
       riskLevel: "high",
       requiresReason: true,
     },
@@ -914,32 +900,6 @@ export default function FeatureFlagsPage() {
           >
             {copy.history}
           </CanvasBtn>
-          {row.tenantId ? (
-            <CanvasBtn
-              theme={theme}
-              size="xs"
-              variant="ghost"
-              onClick={() => {
-                const tenantId = row.tenantId;
-                if (!tenantId) {
-                  return;
-                }
-                setActionError(null);
-                setActionReason("");
-                setPendingAction({
-                  intent: "removeOverride",
-                  key: row.key,
-                  tenantId,
-                  description: row.description === "—" ? "" : row.description,
-                  enabled: row.enabled,
-                  scopeLabel: row.scopeLabel,
-                });
-              }}
-              disabled={updating === row.key}
-            >
-              {copy.removeOverride}
-            </CanvasBtn>
-          ) : null}
         </div>
       ),
     },
@@ -957,11 +917,7 @@ export default function FeatureFlagsPage() {
       return;
     }
 
-    if (
-      (pendingAction.intent === "override" ||
-        pendingAction.intent === "removeOverride") &&
-      !pendingAction.tenantId
-    ) {
+    if (pendingAction.intent === "override" && !pendingAction.tenantId) {
       setActionError(copy.overrideTenantField);
       return;
     }
@@ -992,7 +948,7 @@ export default function FeatureFlagsPage() {
             pendingAction.nextEnabled,
           );
         }
-      } else if (pendingAction.intent === "override") {
+      } else {
         await client.post<FeatureFlag>(
           `/api/admin/flags/${encodeURIComponent(
             pendingAction.key,
@@ -1006,14 +962,6 @@ export default function FeatureFlagsPage() {
             },
           },
         );
-      } else {
-        await client.delete<FeatureFlag>(
-          `/api/admin/flags/${encodeURIComponent(
-            pendingAction.key,
-          )}/tenant-overrides?tenantId=${encodeURIComponent(
-            pendingAction.tenantId,
-          )}`,
-        );
       }
 
       const requestedAt = new Date().toISOString();
@@ -1024,9 +972,7 @@ export default function FeatureFlagsPage() {
       const summary =
         pendingAction.intent === "toggle"
           ? `${pendingAction.nextEnabled ? copy.confirmEnable : copy.confirmDisable} ${pendingAction.key}`
-          : pendingAction.intent === "override"
-            ? `${copy.confirmCreate} ${pendingAction.key}`
-            : `${copy.confirmRemove} ${pendingAction.key}`;
+          : `${copy.confirmCreate} ${pendingAction.key}`;
 
       setAuditReceipts((previous) => [
         {
@@ -1400,11 +1346,6 @@ export default function FeatureFlagsPage() {
                                 {copy.overrideDescriptionHint}
                               </div>
                             </>
-                          ) : pendingAction.intent === "removeOverride" ? (
-                            <div style={secondaryTextStyle}>
-                              <strong>{pendingAction.key}</strong> ·{" "}
-                              {pendingAction.scopeLabel} · {copy.confirmRemove}
-                            </div>
                           ) : (
                             <div style={secondaryTextStyle}>
                               <strong>{pendingAction.key}</strong> ·{" "}
@@ -1462,9 +1403,7 @@ export default function FeatureFlagsPage() {
                                   ? pendingAction.nextEnabled
                                     ? copy.confirmEnable
                                     : copy.confirmDisable
-                                  : pendingAction.intent === "override"
-                                    ? copy.confirmCreate
-                                    : copy.confirmRemove}
+                                  : copy.confirmCreate}
                             </CanvasBtn>
                           </div>
                         </>
