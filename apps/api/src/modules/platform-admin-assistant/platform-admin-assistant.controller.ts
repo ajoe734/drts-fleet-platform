@@ -6,6 +6,8 @@ import type { BootstrapRequestIdentity } from "../../common/auth";
 import { PlatformAdminAssistantService } from "./platform-admin-assistant.service";
 import type {
   CreatePlatformAdminAssistantMessageCommand,
+  ExecutePlatformAdminAssistantActionCommand,
+  PlatformAdminAssistantActionCommand,
   CreatePlatformAdminAssistantSessionCommand,
 } from "./platform-admin-assistant.types";
 
@@ -87,6 +89,41 @@ export class PlatformAdminAssistantController {
           identity,
         ),
       },
+      requestId,
+    );
+  }
+
+  @Post("sessions/:sessionId/actions/preview")
+  previewAction(
+    @Param("sessionId") sessionId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: PlatformAdminAssistantActionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminAssistantService.previewAction(
+        sessionId,
+        identity,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("sessions/:sessionId/actions/execute")
+  executeAction(
+    @Param("sessionId") sessionId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: ExecutePlatformAdminAssistantActionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminAssistantService.executeAction(
+        sessionId,
+        identity,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }

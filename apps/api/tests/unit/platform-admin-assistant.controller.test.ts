@@ -98,4 +98,64 @@ describe("PlatformAdminAssistantController", () => {
       },
     });
   });
+
+  it("wraps action execute responses with ActionReceipt and assistantAuditId", () => {
+    const platformAdminAssistantService = {
+      executeAction: vi.fn(() => ({
+        receipt: {
+          actionId: "req-assistant-action-001",
+          auditId: "audit-domain-001",
+          resourceType: "platform_notice",
+          resourceId: "notice_001",
+          status: "completed",
+          message: "Platform notice created.",
+        },
+        assistantAuditId: "audit-assistant-001",
+      })),
+    };
+    const controller = new PlatformAdminAssistantController(
+      platformAdminAssistantService as never,
+    );
+
+    const response = controller.executeAction(
+      "session-001",
+      platformIdentity(),
+      {
+        toolName: "action.create_platform_notice",
+        payload: {
+          title: "Dispatch notice",
+          body: "Planned maintenance",
+          severity: "warning",
+          targetAudience: "all",
+        },
+      },
+      "req-assistant-action-001",
+    );
+
+    expect(platformAdminAssistantService.executeAction).toHaveBeenCalledWith(
+      "session-001",
+      expect.objectContaining({ actorId: "pa-admin-001" }),
+      expect.objectContaining({
+        toolName: "action.create_platform_notice",
+      }),
+      "req-assistant-action-001",
+    );
+    expect(response).toEqual({
+      data: {
+        receipt: {
+          actionId: "req-assistant-action-001",
+          auditId: "audit-domain-001",
+          resourceType: "platform_notice",
+          resourceId: "notice_001",
+          status: "completed",
+          message: "Platform notice created.",
+        },
+        assistantAuditId: "audit-assistant-001",
+      },
+      meta: {
+        requestId: "req-assistant-action-001",
+        timestamp: expect.any(String),
+      },
+    });
+  });
 });

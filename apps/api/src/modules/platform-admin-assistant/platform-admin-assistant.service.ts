@@ -2,11 +2,19 @@ import { randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 
+import { toActionReceipt } from "../../common/action-receipt";
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { PlatformAdminService } from "../platform-admin/platform-admin.service";
+import { resolvePlatformAdminAssistantAction } from "./platform-admin-assistant.actions";
 import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.types";
 import type {
   CreatePlatformAdminAssistantMessageCommand,
+  ExecutePlatformAdminAssistantActionCommand,
+  PlatformAdminAssistantActionCommand,
+  PlatformAdminAssistantActionExecutionResult,
+  PlatformAdminAssistantActionPreview,
   CreatePlatformAdminAssistantSessionCommand,
   PlatformAdminAssistantControlPlaneIdentity,
   PlatformAdminAssistantMessageRecord,
@@ -36,6 +44,8 @@ export class PlatformAdminAssistantService {
   constructor(
     @Inject(PLATFORM_ADMIN_ASSISTANT_PROVIDER)
     private readonly assistantProvider: PlatformAdminAssistantProvider,
+    private readonly platformAdminService: PlatformAdminService,
+    private readonly auditNotificationService: AuditNotificationService,
   ) {}
 
   listSessions(identity: BootstrapRequestIdentity | null) {
@@ -191,6 +201,88 @@ export class PlatformAdminAssistantService {
     };
   }
 
+  previewAction(
+    sessionId: string,
+    identity: BootstrapRequestIdentity | null,
+    command: PlatformAdminAssistantActionCommand,
+  ): PlatformAdminAssistantActionPreview {
+    this.requireOwnedSession(sessionId, identity);
+    const resolvedAction = this.requireResolvedAction(command);
+
+    return {
+      toolName: resolvedAction.toolName,
+      descriptor: { ...resolvedAction.descriptor },
+      confirmationRequired: resolvedAction.descriptor.riskLevel !== "low",
+    };
+  }
+
+  executeAction(
+    sessionId: string,
+    identity: BootstrapRequestIdentity | null,
+    command: ExecutePlatformAdminAssistantActionCommand,
+    requestId?: string,
+  ): PlatformAdminAssistantActionExecutionResult {
+    const actor = this.requirePlatformAdminIdentity(identity);
+    this.requireOwnedSession(sessionId, identity);
+    const resolvedAction = this.requireResolvedAction(command);
+
+    if (!resolvedAction.descriptor.enabled) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ASSISTANT_ACTION_DISABLED",
+        "Assistant action is currently disabled by its ResourceActionDescriptor.",
+        {
+          toolName: resolvedAction.toolName,
+          disabledReasonCode: resolvedAction.descriptor.disabledReasonCode ?? null,
+        },
+      );
+    }
+
+    const normalizedReason = command.reason?.trim() ?? "";
+    if (resolvedAction.descriptor.riskLevel === "high" && !normalizedReason) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ASSISTANT_ACTION_REASON_REQUIRED",
+        "High-risk assistant actions require a non-empty reason before execution.",
+        {
+          toolName: resolvedAction.toolName,
+        },
+      );
+    }
+
+    const domainResult = resolvedAction.execute(
+      this.platformAdminService,
+      requestId,
+    );
+    const receipt = toActionReceipt({
+      auditLog: domainResult.auditLog,
+      message: resolvedAction.successMessage,
+    });
+    const assistantAudit = this.auditNotificationService.recordAuditLog({
+      actorId: actor.actorId,
+      actorType: actor.actorType,
+      tenantId: actor.tenantId,
+      moduleName: "platform-admin-assistant",
+      actionName: "execute_descriptor_backed_action",
+      resourceType: receipt.resourceType,
+      resourceId: receipt.resourceId,
+      newValuesSummary: {
+        assistantSessionId: sessionId,
+        toolName: resolvedAction.toolName,
+        riskLevel: resolvedAction.descriptor.riskLevel,
+        requiresReason: resolvedAction.descriptor.requiresReason ?? false,
+        reason: normalizedReason || null,
+        domainAuditId: receipt.auditId,
+      },
+      requestId,
+    });
+
+    return {
+      receipt,
+      assistantAuditId: assistantAudit.auditId,
+    };
+  }
+
   private requireOwnedSession(
     sessionId: string,
     identity: BootstrapRequestIdentity | null,
@@ -257,6 +349,28 @@ export class PlatformAdminAssistantService {
       scopes: [...identity.scopes],
       requestId: identity.requestId,
     };
+  }
+
+  private requireResolvedAction(
+    command: PlatformAdminAssistantActionCommand,
+  ) {
+    const resolvedAction = resolvePlatformAdminAssistantAction(
+      this.platformAdminService,
+      command,
+    );
+
+    if (!resolvedAction) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "ASSISTANT_ACTION_DESCRIPTOR_NOT_FOUND",
+        "Assistant action descriptor could not be resolved from the registered tool set.",
+        {
+          toolName: command.toolName,
+        },
+      );
+    }
+
+    return resolvedAction;
   }
 
   private deriveSessionTitle(message: string) {

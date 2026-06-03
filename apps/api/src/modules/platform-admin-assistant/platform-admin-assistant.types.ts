@@ -1,3 +1,10 @@
+import type {
+  ActionReceipt,
+  CreatePlatformNoticeCommand,
+  ResourceActionDescriptor,
+  SetPlatformMaintenanceModeCommand,
+} from "@drts/contracts";
+
 export type PlatformAdminAssistantProviderKind = "mock";
 
 export const PLATFORM_ADMIN_ASSISTANT_PROVIDER =
@@ -21,6 +28,38 @@ export interface CreatePlatformAdminAssistantSessionCommand {
 
 export interface CreatePlatformAdminAssistantMessageCommand {
   message: string;
+}
+
+export type PlatformAdminAssistantActionToolName =
+  | "action.create_platform_notice"
+  | "action.set_maintenance_mode";
+
+interface PlatformAdminAssistantActionPayloadMap {
+  "action.create_platform_notice": CreatePlatformNoticeCommand;
+  "action.set_maintenance_mode": SetPlatformMaintenanceModeCommand;
+}
+
+export type PlatformAdminAssistantActionCommand<
+  TToolName extends PlatformAdminAssistantActionToolName = PlatformAdminAssistantActionToolName,
+> = {
+  toolName: TToolName;
+  payload: PlatformAdminAssistantActionPayloadMap[TToolName];
+};
+
+export interface ExecutePlatformAdminAssistantActionCommand
+  extends PlatformAdminAssistantActionCommand {
+  reason?: string | null;
+}
+
+export interface PlatformAdminAssistantActionPreview {
+  toolName: PlatformAdminAssistantActionToolName;
+  descriptor: ResourceActionDescriptor;
+  confirmationRequired: boolean;
+}
+
+export interface PlatformAdminAssistantActionExecutionResult {
+  receipt: ActionReceipt;
+  assistantAuditId: string;
 }
 
 export interface PlatformAdminAssistantCitation {
