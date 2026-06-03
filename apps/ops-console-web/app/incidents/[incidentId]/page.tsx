@@ -436,6 +436,25 @@ function getStatusTone(status: IncidentRecord["status"]): CanvasTone {
   return "info";
 }
 
+function getResponseState(status: IncidentRecord["status"]) {
+  if (status === "open" || status === "investigating") {
+    return "in_response";
+  }
+
+  return status;
+}
+
+function getResponseTone(status: IncidentRecord["status"]): CanvasTone {
+  const responseState = getResponseState(status);
+  if (responseState === "in_response") {
+    return "accent";
+  }
+  if (responseState === "resolved") {
+    return "success";
+  }
+  return "neutral";
+}
+
 function getSeverityTone(severity: IncidentRecord["severity"]): CanvasTone {
   if (severity === "critical" || severity === "high") {
     return "danger";
@@ -1195,8 +1214,8 @@ export default async function IncidentDetailPage({
       <Pill theme={theme} tone={getSeverityTone(incident.severity)} dot>
         {formatOpsCodeLabel(locale, incident.severity)}
       </Pill>
-      <Pill theme={theme} tone={getStatusTone(incident.status)}>
-        {formatOpsCodeLabel(locale, incident.status)}
+      <Pill theme={theme} tone={getResponseTone(incident.status)}>
+        {formatOpsCodeLabel(locale, getResponseState(incident.status))}
       </Pill>
     </span>
   );

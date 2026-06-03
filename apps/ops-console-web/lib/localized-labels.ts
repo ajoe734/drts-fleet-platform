@@ -154,6 +154,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   hybrid: { en: "Hybrid", zh: "Hybrid" },
   immutable: { en: "Immutable", zh: "不可變" },
   in_progress: { en: "In Progress", zh: "進行中" },
+  in_response: { en: "In Response", zh: "應變中" },
   incident_assigned: { en: "Incident Assigned", zh: "事故已指派" },
   incident_closed: { en: "Incident Closed", zh: "事故已關閉" },
   incident_created: { en: "Incident Created", zh: "事故已建立" },
