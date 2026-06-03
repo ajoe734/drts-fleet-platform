@@ -170,6 +170,14 @@ describe("assistant message SSE endpoint", () => {
       expect(events[1]?.event).toBe("tool_result");
       expect(events[2]?.event).toBe("action_intent");
       expect(events.some((event) => event.event === "token")).toBe(true);
+      const tokenEvents = events.filter((event) => event.event === "token");
+      expect(tokenEvents).not.toHaveLength(0);
+      for (const tokenEvent of tokenEvents) {
+        expect(tokenEvent.data.data.delta).toEqual(expect.any(String));
+        expect(tokenEvent.data.data.delta).not.toContain("system prompt");
+        expect(tokenEvent.data.data.delta).not.toContain("0911222333");
+        expect(tokenEvent.data.data.delta).not.toContain("@example.com");
+      }
       expect(events.at(-1)?.event).toBe("final");
       expect(events.at(-1)?.data.type).toBe("final");
       expect(events.at(-1)?.data.data.content).toEqual(expect.any(String));
