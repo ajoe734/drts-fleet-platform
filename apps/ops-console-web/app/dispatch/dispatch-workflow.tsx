@@ -21,14 +21,16 @@ import type {
   OwnedOrderRecord,
 } from "@drts/contracts";
 import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
+import {
+  CanvasActivityFeed,
+  CanvasEmptyPanel,
+} from "@/lib/canvas-workflow";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import {
   AuthorityBadge,
   DetailMetadataGrid,
-  Timeline,
-  WorkflowEmptyState,
   WorkflowPanel,
   WorkflowSplitLayout,
 } from "@drts/ui-web";
@@ -91,12 +93,12 @@ interface ActionDraft {
   rejectionReason: string;
 }
 
-interface DispatchTimelineEntry {
+interface DispatchActivityEntry {
   id: string;
   title: string;
   body: string;
   at: string;
-  tone: "default" | "warning" | "critical";
+  tone: "default" | "warn" | "critical";
 }
 
 const AUTO_LOAD_CANDIDATE_LIMIT = 6;
@@ -276,14 +278,14 @@ function getOwnedAuthorityLabelKey(
 function getOwnedAuthorityTone(
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
-): "danger" | "success" | "warning" | "info" {
+): "danger" | "success" | "warn" | "info" {
   if (
     order.status === "exception_hold" ||
     order.status === "dispatch_timeout" ||
     order.status === "no_supply" ||
     order.status === "delayed_queue"
   ) {
-    return "warning";
+    return "warn";
   }
   if (job?.status === "assigned") {
     return "success";
@@ -413,7 +415,7 @@ function listDownstreamReviewDuties(gates: ComplianceGateRecord[]) {
   );
 }
 
-function getTimelineTone(eventType: string): DispatchTimelineEntry["tone"] {
+function getActivityTone(eventType: string): DispatchActivityEntry["tone"] {
   if (
     eventType.includes("hold") ||
     eventType.includes("blocked") ||
@@ -427,29 +429,29 @@ function getTimelineTone(eventType: string): DispatchTimelineEntry["tone"] {
     eventType.includes("timeout") ||
     eventType.includes("no_supply")
   ) {
-    return "warning";
+    return "warn";
   }
   return "default";
 }
 
-function getTimelineManagementTone(
-  tone: DispatchTimelineEntry["tone"],
-): "info" | "warning" | "danger" {
+function getActivityCanvasTone(
+  tone: DispatchActivityEntry["tone"],
+): "info" | "warn" | "danger" {
   switch (tone) {
     case "critical":
       return "danger";
-    case "warning":
-      return "warning";
+    case "warn":
+      return "warn";
     default:
       return "info";
   }
 }
 
-function buildFallbackTimelineEntries(
+function buildFallbackActivityEntries(
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
-): DispatchTimelineEntry[] {
-  const entries: DispatchTimelineEntry[] = [
+): DispatchActivityEntry[] {
+  const entries: DispatchActivityEntry[] = [
     {
       id: `${order.orderId}:created`,
       title: "Order created",
@@ -465,7 +467,7 @@ function buildFallbackTimelineEntries(
       title: "Dispatch job active",
       body: `Job ${job.dispatchJobId} is ${job.status}.`,
       at: job.updatedAt,
-      tone: getTimelineTone(job.status),
+      tone: getActivityTone(job.status),
     });
   }
 
@@ -475,7 +477,7 @@ function buildFallbackTimelineEntries(
       title: "Dispatch timeout",
       body: `Timeout escalated as ${order.dispatchTimeout.escalationAction}.`,
       at: order.dispatchTimeout.timeoutAt,
-      tone: "warning",
+      tone: "warn",
     });
   }
 
@@ -485,7 +487,7 @@ function buildFallbackTimelineEntries(
       title: "No supply escalation",
       body: `Attempt ${order.noSupplyEscalation.attemptCount} escalated via ${order.noSupplyEscalation.escalationAction}.`,
       at: order.noSupplyEscalation.escalatedAt,
-      tone: "warning",
+      tone: "warn",
     });
   }
 
@@ -503,7 +505,7 @@ function buildFallbackTimelineEntries(
         title: "Override request",
         body: `${order.exceptionHold.overrideRequest.status} by ${order.exceptionHold.overrideRequest.requestedBy.actorId}.`,
         at: order.exceptionHold.overrideRequest.requestedAt,
-        tone: "warning",
+        tone: "warn",
       });
     }
     if (order.exceptionHold.resolution) {
@@ -523,7 +525,7 @@ function buildFallbackTimelineEntries(
       title: "Manual fare override",
       body: `${order.manualFareOverride.actorId} applied a fare override.`,
       at: order.manualFareOverride.overriddenAt,
-      tone: "warning",
+      tone: "warn",
     });
   }
 
@@ -1409,30 +1411,30 @@ export function DispatchWorkflow({
       ? `${formatDateTime(locale, selectedOrder.reservationWindowStart)} - ${formatDateTime(locale, selectedOrder.reservationWindowEnd)}`
       : t("dispatch.workflow.detail.immediateQueue")
     : "-";
-  const selectedTimelineEntries = selectedOrder
+  const selectedActivityEntries = selectedOrder
     ? selectedDispatchTrace.length > 0
       ? selectedDispatchTrace
           .map(
-            (trace): DispatchTimelineEntry => ({
+            (trace): DispatchActivityEntry => ({
               id: trace.traceId,
               title: formatOpsCodeLabel(locale, trace.eventType),
               body: trace.message,
               at: trace.createdAt,
-              tone: getTimelineTone(trace.eventType),
+              tone: getActivityTone(trace.eventType),
             }),
           )
           .sort(
             (left, right) =>
               new Date(right.at).getTime() - new Date(left.at).getTime(),
           )
-      : buildFallbackTimelineEntries(selectedOrder, selectedJob)
+      : buildFallbackActivityEntries(selectedOrder, selectedJob)
     : [];
-  const selectedTimelineItems = selectedTimelineEntries.map((entry) => ({
+  const selectedActivityItems = selectedActivityEntries.map((entry) => ({
     id: entry.id,
     title: entry.title,
     detail: entry.body,
     timestamp: formatDateTime(locale, entry.at),
-    tone: getTimelineManagementTone(entry.tone),
+    tone: getActivityCanvasTone(entry.tone),
   }));
 
   const renderActionDraftForm = (
@@ -1852,7 +1854,7 @@ export function DispatchWorkflow({
           <AuthorityBadge
             category="ops"
             label={t("dispatch.workflow.schema.exceptionDesk")}
-            tone="warning"
+            tone="warn"
           />
         </div>
         <div className="board-schema-grid">
@@ -2165,7 +2167,7 @@ export function DispatchWorkflow({
                     orderNo: selectedOrder.orderNo,
                   })}
                   description={selectedWorkflowHint}
-                  tone={selectedPrimaryGate ? "warning" : "neutral"}
+                  tone={selectedPrimaryGate ? "warn" : "neutral"}
                   meta={
                     <div className="detail-workflow-meta">
                       <AuthorityBadge
@@ -2329,7 +2331,7 @@ export function DispatchWorkflow({
                     selectedPrimaryGate?.state === "blocked"
                       ? "danger"
                       : selectedPrimaryGate
-                        ? "warning"
+                        ? "warn"
                         : "neutral"
                   }
                 >
@@ -2362,7 +2364,7 @@ export function DispatchWorkflow({
                             ...(selectedPrimaryGate.state === "blocked"
                               ? { tone: "danger" as const }
                               : selectedPrimaryGate.state === "review_required"
-                                ? { tone: "warning" as const }
+                                ? { tone: "warn" as const }
                                 : {}),
                           },
                           {
@@ -2581,15 +2583,15 @@ export function DispatchWorkflow({
                       {
                         id: "timeline-events",
                         label: t("dispatch.workflow.detail.timelineEvents"),
-                        value: selectedTimelineEntries.length,
+                        value: selectedActivityEntries.length,
                       },
                       {
                         id: "timeline-latest",
                         label: t("dispatch.workflow.detail.timelineLatest"),
-                        value: selectedTimelineEntries[0]
+                        value: selectedActivityEntries[0]
                           ? formatDateTime(
                               locale,
-                              selectedTimelineEntries[0].at,
+                              selectedActivityEntries[0].at,
                             )
                           : "-",
                       },
@@ -2598,8 +2600,9 @@ export function DispatchWorkflow({
                   {traceLoadingOrderId === selectedOrder.orderId ? (
                     <div className="cell-subcopy">{t("common.loading")}</div>
                   ) : (
-                    <Timeline
-                      items={selectedTimelineItems}
+                    <CanvasActivityFeed
+                      theme={theme}
+                      items={selectedActivityItems}
                       emptyState={t("dispatch.workflow.detail.timelineEmpty")}
                     />
                   )}
@@ -2612,7 +2615,7 @@ export function DispatchWorkflow({
                   eyebrow={t("dispatch.workflow.detail.actionPanel")}
                   title={t("dispatch.workflow.detail.actionPanel")}
                   description={t("dispatch.workflow.detail.actionPanelHint")}
-                  tone={selectedPrimaryGate ? "warning" : "info"}
+                  tone={selectedPrimaryGate ? "warn" : "info"}
                   meta={
                     <div className="detail-workflow-meta">
                       <AuthorityBadge
@@ -2653,7 +2656,7 @@ export function DispatchWorkflow({
                         hint: selectedWorkflowHint,
                         ...(selectedOrder.dispatchSemantics ===
                         "forwarder_broadcast"
-                          ? { tone: "warning" as const }
+                          ? { tone: "warn" as const }
                           : {}),
                       },
                       {
@@ -2706,7 +2709,8 @@ export function DispatchWorkflow({
             }
           />
         ) : (
-          <WorkflowEmptyState
+          <CanvasEmptyPanel
+            theme={theme}
             title={t("dispatch.workflow.detail.emptyTitle")}
             description={t("dispatch.workflow.detail.emptyBody")}
           />

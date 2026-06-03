@@ -26,7 +26,7 @@ const UI_LABELS: Record<string, LocalizedText> = {
     en: "{count} active critical incident(s)",
     zh: "{count} 筆重大事故處理中",
   },
-  incidentsReviewTimeline: { en: "Review timeline", zh: "檢視時間軸" },
+  incidentsReviewActivity: { en: "Review timeline", zh: "檢視時間軸" },
   incidentsAllClear: {
     en: "No critical incidents. All clear for now.",
     zh: "目前沒有重大事故，現況正常。",

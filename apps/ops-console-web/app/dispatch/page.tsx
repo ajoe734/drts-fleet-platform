@@ -16,6 +16,7 @@ import type {
 } from "@drts/contracts";
 import { DispatchAutoRefresh } from "@/components/dispatch-auto-refresh";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { CanvasEmptyPanel } from "@/lib/canvas-workflow";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatCompactNumber } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
@@ -28,7 +29,6 @@ import {
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
-  WorkflowEmptyState,
   buildCanvasTheme,
   type CanvasTableColumn,
 } from "@drts/ui-web";
@@ -1165,7 +1165,8 @@ function renderEmptyState(
       )
     : null;
   return (
-    <WorkflowEmptyState
+    <CanvasEmptyPanel
+      theme={theme}
       tone={tone}
       density="compact"
       title={content.title}
@@ -1454,7 +1455,8 @@ function renderBoardSignalBanner({
 function renderActionList(actions: BoardActionContext[], locale: Locale) {
   if (actions.length === 0) {
     return (
-      <WorkflowEmptyState
+      <CanvasEmptyPanel
+        theme={theme}
         density="compact"
         title={locale === "zh" ? "目前沒有可用動作" : "No available actions"}
         description={
@@ -2629,7 +2631,8 @@ export default async function DispatchPage({
                       {renderActionList(selectedActions, locale)}
                     </>
                   ) : (
-                    <WorkflowEmptyState
+                    <CanvasEmptyPanel
+                      theme={theme}
                       density="compact"
                       title={zh ? "沒有焦點 work item" : "No focused work item"}
                       description={

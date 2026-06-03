@@ -56,7 +56,7 @@ type CandidateRow = Record<string, unknown> & {
   _selected?: boolean;
 };
 
-type TimelineEntry = {
+type ActivityEntry = {
   id: string;
   title: string;
   body: string;
@@ -542,7 +542,7 @@ function getForwardedStepIndex(order: ForwardedOrderRecord) {
   }
 }
 
-function getTimelineTone(value: string) {
+function getActivityTone(value: string) {
   const normalized = value.toLowerCase();
 
   if (
@@ -593,13 +593,13 @@ function readTraceActor(details: Record<string, unknown> | undefined) {
   return null;
 }
 
-function buildFallbackTimeline(
+function buildFallbackActivity(
   locale: Locale,
   order: OwnedOrderRecord,
   job: DispatchJobRecord | undefined,
   task: DriverTaskRecord | null,
 ) {
-  const entries: TimelineEntry[] = [
+  const entries: ActivityEntry[] = [
     {
       id: `${order.orderId}:created`,
       title: locale === "zh" ? "進入 queue" : "Entered queue",
@@ -645,7 +645,7 @@ function buildFallbackTimeline(
           ? `job ${job.dispatchJobId} 目前為 ${formatOpsCodeLabel(locale, job.status)}。`
           : `Job ${job.dispatchJobId} is ${job.status}.`,
       at: job.updatedAt,
-      tone: getTimelineTone(job.status),
+      tone: getActivityTone(job.status),
       actor: "dispatch.scorer",
     });
   }
@@ -804,7 +804,7 @@ function buildFallbackTimeline(
   );
 }
 
-function buildTimelineEntries(
+function buildActivityEntries(
   locale: Locale,
   trace: DispatchTraceLogRecord[],
   order: OwnedOrderRecord,
@@ -812,17 +812,17 @@ function buildTimelineEntries(
   task: DriverTaskRecord | null,
 ) {
   if (trace.length === 0) {
-    return buildFallbackTimeline(locale, order, job, task);
+    return buildFallbackActivity(locale, order, job, task);
   }
 
   return [...trace]
     .map(
-      (entry): TimelineEntry => ({
+      (entry): ActivityEntry => ({
         id: entry.traceId,
         title: formatOpsCodeLabel(locale, entry.eventType),
         body: entry.message,
         at: entry.createdAt,
-        tone: getTimelineTone(entry.eventType),
+        tone: getActivityTone(entry.eventType),
         actor: readTraceActor(entry.details),
       }),
     )
@@ -832,11 +832,11 @@ function buildTimelineEntries(
     );
 }
 
-function buildForwardedTimeline(
+function buildForwardedActivity(
   locale: Locale,
   order: ForwardedOrderRecord,
-): TimelineEntry[] {
-  const entries: TimelineEntry[] = [
+): ActivityEntry[] {
+  const entries: ActivityEntry[] = [
     {
       id: `${order.mirrorOrderId}:received`,
       title: copy(locale, "Mirror received", "鏡像建立"),
@@ -858,7 +858,7 @@ function buildForwardedTimeline(
         `本地鏡像狀態為 ${formatOpsCodeLabel(locale, order.status)}；最後外部狀態 ${order.lastNativeStatus ?? "未知"}。`,
       ),
       at: order.updatedAt,
-      tone: getTimelineTone(order.status),
+      tone: getActivityTone(order.status),
       actor: "forwarder.sync",
     },
   ];
@@ -969,7 +969,7 @@ function buildOverrideSummary(locale: Locale, order: OwnedOrderRecord) {
   };
 }
 
-function renderStepper(
+function renderSequenceRail(
   locale: Locale,
   currentIndex: number,
   timestampByStep: (string | null)[],
@@ -1070,7 +1070,7 @@ function renderStepper(
   );
 }
 
-function renderTimeline(locale: Locale, entries: TimelineEntry[]) {
+function renderActivityFeed(locale: Locale, entries: ActivityEntry[]) {
   if (entries.length === 0) {
     return (
       <div style={{ color: theme.textMuted, fontSize: "12.5px" }}>
@@ -2117,7 +2117,7 @@ async function renderOwnedWorkspace({
   const liveCandidateCount = sortedCandidates.filter(
     (candidate) => getCandidateLocationState(candidate) === "live",
   ).length;
-  const timelineEntries = buildTimelineEntries(
+  const activityEntries = buildActivityEntries(
     locale,
     dispatchTrace,
     order,
@@ -2325,8 +2325,8 @@ async function renderOwnedWorkspace({
         </div>
 
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
-          <Card theme={theme} title={copy(locale, "State machine", "訂單狀態")}>
-            {renderStepper(
+          <Card theme={theme} title={copy(locale, "Delivery sequence", "訂單狀態")}>
+            {renderSequenceRail(
               locale,
               getWorkflowStepIndex(order, dispatchJob, currentTask),
               stepperTimestamps,
@@ -2335,9 +2335,9 @@ async function renderOwnedWorkspace({
 
           <Card
             theme={theme}
-            title={copy(locale, "Activity · Timeline", "活動")}
+            title={copy(locale, "Recent activity", "活動")}
           >
-            {renderTimeline(locale, timelineEntries)}
+            {renderActivityFeed(locale, activityEntries)}
           </Card>
         </div>
       </div>
@@ -2396,7 +2396,7 @@ function renderForwardedWorkspace({
     order.reconciliationJob?.mismatchCount ??
     0;
   const stateTone = getForwardedStateTone(order.status);
-  const timelineEntries = buildForwardedTimeline(locale, order);
+  const activityEntries = buildForwardedActivity(locale, order);
   const terminal = isForwardedTerminal(order);
 
   const adapterLink: CrossAppResourceLink = {
@@ -2655,8 +2655,8 @@ function renderForwardedWorkspace({
         </div>
 
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
-          <Card theme={theme} title={copy(locale, "State machine", "訂單狀態")}>
-            {renderStepper(locale, getForwardedStepIndex(order), [
+          <Card theme={theme} title={copy(locale, "Delivery sequence", "訂單狀態")}>
+            {renderSequenceRail(locale, getForwardedStepIndex(order), [
               order.createdAt,
               order.createdAt,
               order.status === "broadcasted" ||
@@ -2672,9 +2672,9 @@ function renderForwardedWorkspace({
 
           <Card
             theme={theme}
-            title={copy(locale, "Activity · Timeline", "活動")}
+            title={copy(locale, "Recent activity", "活動")}
           >
-            {renderTimeline(locale, timelineEntries)}
+            {renderActivityFeed(locale, activityEntries)}
           </Card>
         </div>
       </div>
