@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  type ReactNode,
   startTransition,
   useDeferredValue,
   useEffect,
@@ -25,12 +26,12 @@ import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import {
-  AuthorityBadge,
-  DetailMetadataGrid,
-  Timeline,
-  WorkflowEmptyState,
-  WorkflowPanel,
-  WorkflowSplitLayout,
+  CanvasBtn as Btn,
+  CanvasCard as Card,
+  CanvasDL as DL,
+  CanvasPill as Pill,
+  buildCanvasTheme,
+  type CanvasTone,
 } from "@drts/ui-web";
 import {
   getCandidateLocationState,
@@ -42,6 +43,12 @@ interface DispatchWorkflowProps {
   dispatchJobs: DispatchJobRecord[];
   focusOrderId?: string;
 }
+
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
 
 type QueueState =
   | "pending"
@@ -91,12 +98,33 @@ interface ActionDraft {
   rejectionReason: string;
 }
 
-interface DispatchTimelineEntry {
+interface DispatchActivityEntry {
   id: string;
   title: string;
   body: string;
   at: string;
   tone: "default" | "warning" | "critical";
+}
+
+interface DetailActionDescriptor {
+  action:
+    | "assign_candidate"
+    | "reassign_candidate"
+    | "redispatch"
+    | "redispatch_with_reason"
+    | "retry_dispatch"
+    | "resolve_no_supply"
+    | "request_override"
+    | "approve_override"
+    | "reject_override"
+    | "release_driver"
+    | "cancel_order"
+    | "fare_override"
+    | "escalate_incident";
+  enabled: boolean;
+  requiresReason?: boolean;
+  disabledReasonCode?: string;
+  riskLevel: "low" | "medium" | "high";
 }
 
 const AUTO_LOAD_CANDIDATE_LIMIT = 6;
@@ -252,6 +280,24 @@ function getBoardStateColor(state: BoardStateTone): string {
   }
 }
 
+function getBoardStateCanvasTone(state: BoardStateTone): CanvasTone {
+  switch (state) {
+    case "pending":
+    case "reserved":
+    case "active":
+      return "info";
+    case "exception":
+    case "timeout":
+    case "no_supply":
+      return "warn";
+    case "closed":
+      return "neutral";
+    case "intake":
+    default:
+      return "accent";
+  }
+}
+
 function getOwnedAuthorityLabelKey(
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
@@ -276,14 +322,14 @@ function getOwnedAuthorityLabelKey(
 function getOwnedAuthorityTone(
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
-): "danger" | "success" | "warning" | "info" {
+): CanvasTone {
   if (
     order.status === "exception_hold" ||
     order.status === "dispatch_timeout" ||
     order.status === "no_supply" ||
     order.status === "delayed_queue"
   ) {
-    return "warning";
+    return "warn";
   }
   if (job?.status === "assigned") {
     return "success";
@@ -346,6 +392,20 @@ function getComplianceTone(state: string): string {
   }
 }
 
+function getComplianceCanvasTone(state: string): CanvasTone {
+  switch (state) {
+    case "clear":
+      return "success";
+    case "review_required":
+      return "warn";
+    case "blocked":
+      return "danger";
+    case "pending":
+    default:
+      return "neutral";
+  }
+}
+
 function buildActionDraft(
   order: OwnedOrderRecord,
   mode: ActionMode,
@@ -380,6 +440,8 @@ function getOverrideStatusLabel(
       return "dispatch.workflow.override.rejected";
     case "expired":
       return "dispatch.workflow.override.expired";
+    default:
+      return "dispatch.workflow.override.pending";
   }
 }
 
@@ -394,6 +456,8 @@ function getOverrideStatusTone(
     case "rejected":
       return "bg-rose-100 text-rose-800";
     case "expired":
+      return "bg-slate-100 text-slate-700";
+    default:
       return "bg-slate-100 text-slate-700";
   }
 }
@@ -413,7 +477,51 @@ function listDownstreamReviewDuties(gates: ComplianceGateRecord[]) {
   );
 }
 
-function getTimelineTone(eventType: string): DispatchTimelineEntry["tone"] {
+function getDetailActionTone(riskLevel: DetailActionDescriptor["riskLevel"]) {
+  if (riskLevel === "high") {
+    return { variant: "primary" as const, danger: true };
+  }
+  if (riskLevel === "medium") {
+    return { variant: "secondary" as const, danger: false };
+  }
+  return { variant: "ghost" as const, danger: false };
+}
+
+function getDetailActionLabel(
+  action: DetailActionDescriptor["action"],
+  t: (key: string) => string,
+) {
+  switch (action) {
+    case "assign_candidate":
+      return t("dispatch.workflow.assign");
+    case "reassign_candidate":
+      return t("dispatch.workflow.reassign");
+    case "redispatch":
+      return t("dispatch.workflow.redispatch");
+    case "redispatch_with_reason":
+      return t("dispatch.workflow.redispatchWithReason");
+    case "retry_dispatch":
+      return t("dispatch.workflow.retryDispatch");
+    case "resolve_no_supply":
+      return t("dispatch.workflow.resolveNoSupply");
+    case "request_override":
+      return t("dispatch.workflow.override.request");
+    case "approve_override":
+      return t("dispatch.workflow.override.approve");
+    case "reject_override":
+      return t("dispatch.workflow.override.reject");
+    case "release_driver":
+      return t("dispatch.workflow.release");
+    case "cancel_order":
+      return t("dispatch.workflow.cancelOrder");
+    case "fare_override":
+      return t("dispatch.workflow.overrideFare");
+    case "escalate_incident":
+      return t("dispatch.workflow.escalateIncident");
+  }
+}
+
+function getActivityTone(eventType: string): DispatchActivityEntry["tone"] {
   if (
     eventType.includes("hold") ||
     eventType.includes("blocked") ||
@@ -432,24 +540,11 @@ function getTimelineTone(eventType: string): DispatchTimelineEntry["tone"] {
   return "default";
 }
 
-function getTimelineManagementTone(
-  tone: DispatchTimelineEntry["tone"],
-): "info" | "warning" | "danger" {
-  switch (tone) {
-    case "critical":
-      return "danger";
-    case "warning":
-      return "warning";
-    default:
-      return "info";
-  }
-}
-
-function buildFallbackTimelineEntries(
+function buildFallbackActivityEntries(
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
-): DispatchTimelineEntry[] {
-  const entries: DispatchTimelineEntry[] = [
+): DispatchActivityEntry[] {
+  const entries: DispatchActivityEntry[] = [
     {
       id: `${order.orderId}:created`,
       title: "Order created",
@@ -465,7 +560,7 @@ function buildFallbackTimelineEntries(
       title: "Dispatch job active",
       body: `Job ${job.dispatchJobId} is ${job.status}.`,
       at: job.updatedAt,
-      tone: getTimelineTone(job.status),
+      tone: getActivityTone(job.status),
     });
   }
 
@@ -542,6 +637,217 @@ function buildCandidateSearchHaystack(items: DispatchCandidate[]): string {
     ])
     .join(" ")
     .toLowerCase();
+}
+
+function renderStateTrack(
+  locale: "en" | "zh",
+  currentIndex: number,
+  labels: string[],
+  timestamps: Array<string | null>,
+) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))",
+        gap: 8,
+      }}
+    >
+      {labels.map((label, index) => {
+        const isCurrent = index === currentIndex;
+        const isComplete = index < currentIndex;
+        const tone = isCurrent
+          ? {
+              border: theme.accentBorder,
+              bg: theme.accentBg,
+              fg: theme.accent,
+            }
+          : isComplete
+            ? {
+                border: theme.infoBorder,
+                bg: theme.infoBg,
+                fg: theme.info,
+              }
+            : {
+                border: theme.border,
+                bg: theme.surfaceLo,
+                fg: theme.textMuted,
+              };
+
+        return (
+          <div
+            key={`${label}-${index}`}
+            style={{
+              display: "grid",
+              gap: 6,
+              minWidth: 0,
+              padding: "10px 12px",
+              borderRadius: 8,
+              border: `1px solid ${tone.border}`,
+              background: tone.bg,
+            }}
+          >
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 20,
+                height: 20,
+                borderRadius: 999,
+                background: tone.fg,
+                color: theme.invert,
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {index + 1}
+            </span>
+            <div style={{ display: "grid", gap: 2 }}>
+              <strong
+                style={{
+                  fontSize: 12,
+                  color: isCurrent || isComplete ? theme.text : theme.textMuted,
+                }}
+              >
+                {label}
+              </strong>
+              <span style={{ fontSize: 11, color: theme.textDim }}>
+                {timestamps[index]
+                  ? formatDateTime(locale, timestamps[index])
+                  : isCurrent
+                    ? locale === "zh"
+                      ? "進行中"
+                      : "active"
+                    : locale === "zh"
+                      ? "等待中"
+                      : "waiting"}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderActivityFeed(
+  locale: "en" | "zh",
+  entries: DispatchActivityEntry[],
+  emptyLabel: string,
+) {
+  if (entries.length === 0) {
+    return (
+      <div style={{ color: theme.textMuted, fontSize: 12.5 }}>{emptyLabel}</div>
+    );
+  }
+
+  const toneMap = {
+    default: { dot: theme.info, rail: theme.infoBorder, bg: theme.infoBg },
+    warning: { dot: theme.warn, rail: theme.warnBorder, bg: theme.warnBg },
+    critical: {
+      dot: theme.danger,
+      rail: theme.dangerBorder,
+      bg: theme.dangerBg,
+    },
+  } as const;
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {entries.map((entry, index) => {
+        const tone = toneMap[entry.tone];
+        return (
+          <div
+            key={entry.id}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "18px minmax(0, 1fr)",
+              gap: 12,
+              alignItems: "start",
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                justifyItems: "center",
+                gap: 4,
+                minHeight: 32,
+              }}
+            >
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 999,
+                  background: tone.dot,
+                  marginTop: 3,
+                }}
+              />
+              {index < entries.length - 1 ? (
+                <span
+                  style={{
+                    width: 2,
+                    flex: 1,
+                    minHeight: 28,
+                    background: tone.rail,
+                    borderRadius: 999,
+                  }}
+                />
+              ) : null}
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gap: 4,
+                padding: "8px 10px",
+                borderRadius: 8,
+                border: `1px solid ${tone.rail}`,
+                background: tone.bg,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <strong style={{ fontSize: 12.5, color: theme.text }}>
+                  {entry.title}
+                </strong>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: theme.textDim,
+                    fontFamily: theme.monoFamily,
+                  }}
+                >
+                  {formatDateTime(locale, entry.at)}
+                </span>
+              </div>
+              <div style={{ fontSize: 12, color: theme.text }}>{entry.body}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderBadgeRow(items: Array<ReactNode | null | false>) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 8,
+        alignItems: "center",
+      }}
+    >
+      {items.filter(Boolean)}
+    </div>
+  );
 }
 
 function hasCoordinates(
@@ -1404,36 +1710,209 @@ export function DispatchWorkflow({
       ? t("dispatch.workflow.detail.forwardedAuthorityHint")
       : t("dispatch.workflow.detail.ownedAuthorityHint")
     : "";
+  const stateTrackLabels = [
+    locale === "zh" ? "建立" : "Created",
+    locale === "zh" ? "排隊" : "Queued",
+    locale === "zh" ? "媒合" : "Matching",
+    locale === "zh" ? "指派" : "Assigned",
+    locale === "zh" ? "載客中" : "On trip",
+    locale === "zh" ? "完成" : "Completed",
+  ];
   const selectedReservationWindow = selectedOrder
     ? selectedOrder.reservationWindowStart && selectedOrder.reservationWindowEnd
       ? `${formatDateTime(locale, selectedOrder.reservationWindowStart)} - ${formatDateTime(locale, selectedOrder.reservationWindowEnd)}`
       : t("dispatch.workflow.detail.immediateQueue")
     : "-";
-  const selectedTimelineEntries = selectedOrder
+  const selectedStateTrackTimestamps = selectedOrder
+    ? [
+        selectedOrder.createdAt,
+        selectedOrder.createdAt,
+        selectedJob?.status === "matching" ? selectedJob.updatedAt : null,
+        selectedJob?.status === "assigned" ||
+        selectedOrder.status === "assigned" ||
+        selectedOrder.status === "driver_accepted" ||
+        selectedOrder.status === "enroute_pickup" ||
+        selectedOrder.status === "arrived_pickup"
+          ? selectedJob?.updatedAt ?? selectedOrder.updatedAt
+          : null,
+        selectedOrder.status === "on_trip" ||
+        selectedOrder.status === "proof_pending"
+          ? selectedOrder.updatedAt
+          : null,
+        selectedOrder.status === "completed" ? selectedOrder.updatedAt : null,
+      ]
+    : [];
+  const selectedStateTrackIndex = selectedOrder
+    ? selectedOrder.status === "completed"
+      ? 5
+      : selectedOrder.status === "on_trip" ||
+          selectedOrder.status === "proof_pending"
+        ? 4
+      : selectedJob?.status === "assigned" ||
+            selectedOrder.status === "driver_accepted" ||
+            selectedOrder.status === "assigned" ||
+            selectedOrder.status === "enroute_pickup" ||
+            selectedOrder.status === "arrived_pickup"
+          ? 3
+          : selectedJob?.status === "matching"
+            ? 2
+            : 1
+    : 0;
+  const selectedActivityEntries = selectedOrder
     ? selectedDispatchTrace.length > 0
       ? selectedDispatchTrace
           .map(
-            (trace): DispatchTimelineEntry => ({
+            (trace): DispatchActivityEntry => ({
               id: trace.traceId,
               title: formatOpsCodeLabel(locale, trace.eventType),
               body: trace.message,
               at: trace.createdAt,
-              tone: getTimelineTone(trace.eventType),
+              tone: getActivityTone(trace.eventType),
             }),
           )
           .sort(
             (left, right) =>
               new Date(right.at).getTime() - new Date(left.at).getTime(),
           )
-      : buildFallbackTimelineEntries(selectedOrder, selectedJob)
+      : buildFallbackActivityEntries(selectedOrder, selectedJob)
     : [];
-  const selectedTimelineItems = selectedTimelineEntries.map((entry) => ({
-    id: entry.id,
-    title: entry.title,
-    detail: entry.body,
-    timestamp: formatDateTime(locale, entry.at),
-    tone: getTimelineManagementTone(entry.tone),
-  }));
+  const selectedDetailActions: DetailActionDescriptor[] = (() => {
+    if (!selectedOrder) {
+      return [];
+    }
+
+    const isExceptionHold = selectedOrder.status === "exception_hold";
+    const isRedispatchRequired =
+      selectedOrder.status === "redispatch_required" ||
+      selectedJob?.status === "redispatch_required";
+    const isDispatchTimeout =
+      selectedOrder.status === "dispatch_timeout" ||
+      selectedJob?.status === "timed_out";
+    const isNoSupply =
+      selectedOrder.status === "no_supply" ||
+      selectedOrder.status === "delayed_queue" ||
+      selectedJob?.status === "no_supply";
+    const next: DetailActionDescriptor[] = [];
+
+    if (selectedJob) {
+      next.push({
+        action: "assign_candidate",
+        enabled: Boolean(selectedCandidateValue),
+        ...(selectedCandidateValue
+          ? {}
+          : { disabledReasonCode: "no_eligible_candidate" }),
+        riskLevel: "medium",
+      });
+    }
+    if (selectedJob?.status === "assigned") {
+      next.push({
+        action: "reassign_candidate",
+        enabled: Boolean(selectedCandidateValue),
+        ...(selectedCandidateValue
+          ? {}
+          : { disabledReasonCode: "no_eligible_candidate" }),
+        riskLevel: "low",
+      });
+    }
+    if (isRedispatchRequired || isDispatchTimeout) {
+      next.push({
+        action: "redispatch",
+        enabled: true,
+        riskLevel: "medium",
+      });
+      next.push({
+        action: "redispatch_with_reason",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      });
+    }
+    if (isNoSupply) {
+      next.push({
+        action: "retry_dispatch",
+        enabled: true,
+        riskLevel: "medium",
+      });
+      next.push({
+        action: "resolve_no_supply",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "medium",
+      });
+    }
+    if (isExceptionHold && !selectedOrder.exceptionHold?.overrideRequest?.status) {
+      next.push({
+        action: "request_override",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      });
+    }
+    if (
+      isExceptionHold &&
+      selectedOrder.exceptionHold?.overrideRequest?.status ===
+        "pending_approval"
+    ) {
+      next.push(
+        {
+          action: "approve_override",
+          enabled: true,
+          requiresReason: true,
+          riskLevel: "high",
+        },
+        {
+          action: "reject_override",
+          enabled: true,
+          requiresReason: true,
+          riskLevel: "high",
+        },
+      );
+    }
+    if (
+      isExceptionHold &&
+      (selectedOrder.exceptionHold?.overrideRequest?.status === "rejected" ||
+        selectedOrder.exceptionHold?.overrideRequest?.status === "expired")
+    ) {
+      next.push({
+        action: "request_override",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      });
+    }
+    if (isExceptionHold) {
+      next.push(
+        {
+          action: "release_driver",
+          enabled: true,
+          requiresReason: true,
+          riskLevel: "medium",
+        },
+        {
+          action: "cancel_order",
+          enabled: true,
+          requiresReason: true,
+          riskLevel: "high",
+        },
+      );
+    }
+    if (selectedOrder.fixedPrice) {
+      next.push({
+        action: "fare_override",
+        enabled: true,
+        requiresReason: true,
+        riskLevel: "high",
+      });
+    }
+    if (isExceptionHold) {
+      next.push({
+        action: "escalate_incident",
+        enabled: true,
+        riskLevel: "medium",
+      });
+    }
+    return next;
+  })();
 
   const renderActionDraftForm = (
     order: OwnedOrderRecord,
@@ -1647,168 +2126,96 @@ export function DispatchWorkflow({
     job?: DispatchJobRecord,
   ) => {
     const actionDraft = actionDrafts[order.orderId];
-    const isExceptionHold = order.status === "exception_hold";
-    const isRedispatchRequired =
-      order.status === "redispatch_required" ||
-      job?.status === "redispatch_required";
-    const isDispatchTimeout =
-      order.status === "dispatch_timeout" || job?.status === "timed_out";
-    const isNoSupply =
-      order.status === "no_supply" ||
-      order.status === "delayed_queue" ||
-      job?.status === "no_supply";
-    const exceptionHold = order.exceptionHold;
     const incidentHref = `/incidents?sourceOrderId=${encodeURIComponent(order.orderId)}`;
+
+    const invokeDescriptor = (descriptor: DetailActionDescriptor) => {
+      switch (descriptor.action) {
+        case "assign_candidate":
+          void handleAssign(job?.dispatchJobId ?? "");
+          return;
+        case "reassign_candidate":
+          void handleReassign(job?.dispatchJobId ?? "");
+          return;
+        case "redispatch":
+          void handleRedispatch(order.orderId);
+          return;
+        case "retry_dispatch":
+          void handleResolveNoSupply(order.orderId, "retry_dispatch");
+          return;
+        case "resolve_no_supply":
+          openActionDraft(order, "resolve_no_supply");
+          return;
+        case "redispatch_with_reason":
+          openActionDraft(order, "redispatch_with_reason");
+          return;
+        case "request_override":
+          openActionDraft(order, "request_override");
+          return;
+        case "approve_override":
+          openActionDraft(order, "approve_override");
+          return;
+        case "reject_override":
+          openActionDraft(order, "reject_override");
+          return;
+        case "release_driver":
+          openActionDraft(order, "release");
+          return;
+        case "cancel_order":
+          openActionDraft(order, "cancel");
+          return;
+        case "fare_override":
+          openActionDraft(order, "fare_override");
+          return;
+        case "escalate_incident":
+          window.location.assign(incidentHref);
+          return;
+      }
+    };
 
     return (
       <>
-        <div className="detail-action-toolbar">
-          {job && (
-            <button
-              className="btn btn-primary"
-              disabled={
-                !selectedCandidate[job.dispatchJobId] ||
-                loading === job.dispatchJobId
-              }
-              type="button"
-              onClick={() => handleAssign(job.dispatchJobId)}
-            >
-              {t("dispatch.workflow.assign")}
-            </button>
-          )}
-          {job && job.status === "assigned" && (
-            <button
-              className="btn"
-              disabled={
-                !selectedCandidate[job.dispatchJobId] ||
-                loading === job.dispatchJobId
-              }
-              type="button"
-              onClick={() => handleReassign(job.dispatchJobId)}
-            >
-              {t("dispatch.workflow.reassign")}
-            </button>
-          )}
-          {(isRedispatchRequired || isDispatchTimeout) && (
-            <button
-              className="btn btn-warning"
-              disabled={loading === order.orderId}
-              type="button"
-              onClick={() => handleRedispatch(order.orderId)}
-            >
-              {t("dispatch.workflow.redispatch")}
-            </button>
-          )}
-          {(isRedispatchRequired || isDispatchTimeout) && (
-            <button
-              className="btn"
-              disabled={loading === order.orderId}
-              type="button"
-              onClick={() => openActionDraft(order, "redispatch_with_reason")}
-            >
-              {t("dispatch.workflow.redispatchWithReason")}
-            </button>
-          )}
-          {isNoSupply && (
-            <button
-              className="btn btn-primary"
-              disabled={loading === order.orderId}
-              type="button"
-              onClick={() =>
-                handleResolveNoSupply(order.orderId, "retry_dispatch")
-              }
-            >
-              {t("dispatch.workflow.retryDispatch")}
-            </button>
-          )}
-          {isNoSupply && (
-            <button
-              className="btn"
-              disabled={loading === order.orderId}
-              type="button"
-              onClick={() => openActionDraft(order, "resolve_no_supply")}
-            >
-              {t("dispatch.workflow.resolveNoSupply")}
-            </button>
-          )}
-          {isExceptionHold && !exceptionHold?.overrideRequest?.status && (
-            <button
-              className="btn btn-primary"
-              disabled={loading === order.orderId}
-              type="button"
-              onClick={() => openActionDraft(order, "request_override")}
-            >
-              {t("dispatch.workflow.override.request")}
-            </button>
-          )}
-          {isExceptionHold &&
-            exceptionHold?.overrideRequest?.status === "pending_approval" && (
-              <>
-                <button
-                  className="btn btn-primary"
-                  disabled={loading === order.orderId}
-                  type="button"
-                  onClick={() => openActionDraft(order, "approve_override")}
-                >
-                  {t("dispatch.workflow.override.approve")}
-                </button>
-                <button
-                  className="btn btn-warning"
-                  disabled={loading === order.orderId}
-                  type="button"
-                  onClick={() => openActionDraft(order, "reject_override")}
-                >
-                  {t("dispatch.workflow.override.reject")}
-                </button>
-              </>
-            )}
-          {isExceptionHold &&
-            (exceptionHold?.overrideRequest?.status === "rejected" ||
-              exceptionHold?.overrideRequest?.status === "expired") && (
-              <button
-                className="btn"
-                disabled={loading === order.orderId}
-                type="button"
-                onClick={() => openActionDraft(order, "request_override")}
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          {selectedDetailActions.map((descriptor) => {
+            const tone = getDetailActionTone(descriptor.riskLevel);
+            const busyTarget =
+              descriptor.action === "assign_candidate" ||
+              descriptor.action === "reassign_candidate"
+                ? job?.dispatchJobId
+                : order.orderId;
+            const button = (
+              <Btn
+                theme={theme}
+                key={descriptor.action}
+                variant={tone.variant}
+                danger={tone.danger}
+                disabled={!descriptor.enabled || loading === busyTarget}
+                onClick={() => invokeDescriptor(descriptor)}
               >
-                {t("dispatch.workflow.override.requestNew")}
-              </button>
-            )}
-          {isExceptionHold && (
-            <button
-              className="btn"
-              disabled={loading === order.orderId}
-              type="button"
-              onClick={() => openActionDraft(order, "release")}
-            >
-              {t("dispatch.workflow.release")}
-            </button>
-          )}
-          {isExceptionHold && (
-            <button
-              className="btn"
-              disabled={loading === order.orderId}
-              type="button"
-              onClick={() => openActionDraft(order, "cancel")}
-            >
-              {t("dispatch.workflow.cancelOrder")}
-            </button>
-          )}
-          {order.fixedPrice && (
-            <button
-              className="btn"
-              disabled={loading === order.orderId}
-              type="button"
-              onClick={() => openActionDraft(order, "fare_override")}
-            >
-              {t("dispatch.workflow.overrideFare")}
-            </button>
-          )}
-          {isExceptionHold && (
-            <Link className="btn" href={incidentHref}>
-              {t("dispatch.workflow.escalateIncident")}
-            </Link>
-          )}
+                {getDetailActionLabel(descriptor.action, t)}
+                {descriptor.requiresReason ? " *" : ""}
+              </Btn>
+            );
+            return (
+              <span
+                key={descriptor.action}
+                title={
+                  descriptor.disabledReasonCode
+                    ? formatOpsCodeLabel(locale, descriptor.disabledReasonCode)
+                    : undefined
+                }
+                style={{ display: "inline-flex" }}
+              >
+                {button}
+              </span>
+            );
+          })}
         </div>
         {actionDraft ? (
           renderActionDraftForm(order, actionDraft)
@@ -1839,21 +2246,15 @@ export function DispatchWorkflow({
           </div>
         </div>
         <div className="board-intro-badges">
-          <AuthorityBadge
-            category="owned"
-            label={t("dispatch.workflow.authority.local")}
-            tone="info"
-          />
-          <AuthorityBadge
-            category="queue"
-            label={t("dispatch.workflow.schema.activeAssignment")}
-            tone="success"
-          />
-          <AuthorityBadge
-            category="ops"
-            label={t("dispatch.workflow.schema.exceptionDesk")}
-            tone="warning"
-          />
+          <Pill theme={theme} tone="info">
+            {t("dispatch.workflow.authority.local")}
+          </Pill>
+          <Pill theme={theme} tone="success">
+            {t("dispatch.workflow.schema.activeAssignment")}
+          </Pill>
+          <Pill theme={theme} tone="warn">
+            {t("dispatch.workflow.schema.exceptionDesk")}
+          </Pill>
         </div>
         <div className="board-schema-grid">
           <div className="board-schema-card">
@@ -2154,266 +2555,209 @@ export function DispatchWorkflow({
         </div>
 
         {selectedOrder ? (
-          <WorkflowSplitLayout
-            ariaLabel={t("dispatch.workflow.detail.title")}
-            sideMaxWidth="440px"
-            main={
-              <>
-                <WorkflowPanel
-                  eyebrow={t("dispatch.workflow.detail.summary")}
-                  title={t("dispatch.workflow.detail.selectedOrder", {
-                    orderNo: selectedOrder.orderNo,
-                  })}
-                  description={selectedWorkflowHint}
-                  tone={selectedPrimaryGate ? "warning" : "neutral"}
-                  meta={
-                    <div className="detail-workflow-meta">
-                      <AuthorityBadge
-                        category="owned"
-                        label={t(selectedAuthorityLabelKey)}
-                        tone={selectedAuthorityTone}
-                      />
-                      {selectedQueueState ? (
-                        <span
-                          className={`queue-badge ${getBoardStateColor(selectedQueueState.tone)}`}
-                        >
-                          {t(selectedQueueState.label)}
-                        </span>
-                      ) : null}
-                      {selectedPrimaryGate ? (
-                        <span
-                          className={`queue-badge ${getComplianceTone(selectedPrimaryGate.state)}`}
-                        >
-                          {t(
-                            `dispatch.workflow.gate.${selectedPrimaryGate.gateType}`,
-                          )}
-                        </span>
-                      ) : null}
-                    </div>
-                  }
-                >
-                  <DetailMetadataGrid
-                    minColumnWidth="220px"
-                    items={[
-                      {
-                        id: "passenger",
-                        label: t("dispatch.workflow.detail.passenger"),
-                        value: selectedOrder.passenger.name,
-                        hint: selectedOrder.passenger.phone,
-                      },
-                      {
-                        id: "contact",
-                        label: t("dispatch.workflow.detail.contact"),
-                        value: selectedOrder.onsiteContact?.name ?? "-",
-                        hint: selectedOrder.onsiteContact?.phone ?? "-",
-                      },
-                      {
-                        id: "revenue",
-                        label: t("dispatch.workflow.col.revenue"),
-                        value: formatMinorCurrency(
-                          selectedOrder.quotedFare?.amountMinor ?? 0,
-                        ),
-                        hint: selectedOrder.fixedPrice
-                          ? t("dispatch.workflow.fixedPrice")
-                          : t("dispatch.workflow.metered"),
-                      },
-                      {
-                        id: "updated",
-                        label: t("dispatch.workflow.detail.lastUpdated"),
-                        value: formatDateTime(locale, selectedOrder.updatedAt),
-                        hint: selectedJob
-                          ? formatDateTime(locale, selectedJob.updatedAt)
-                          : "-",
-                      },
-                      {
-                        id: "order-status",
-                        label: t("dispatch.workflow.detail.orderStatus"),
-                        value: formatOpsCodeLabel(locale, selectedOrder.status),
-                        hint: selectedOrder.orderId,
-                      },
-                      {
-                        id: "dispatch-status",
-                        label: t("dispatch.workflow.detail.dispatchStatus"),
-                        value: selectedJob
-                          ? formatOpsCodeLabel(locale, selectedJob.status)
-                          : t("dispatch.workflow.noJob"),
-                        hint: selectedJob?.dispatchJobId ?? "-",
-                      },
-                      {
-                        id: "service-window",
-                        label: t("dispatch.workflow.detail.reservationWindow"),
-                        value: selectedReservationWindow,
-                        hint: `${t("dispatch.workflow.col.eta")}: ${selectedEta.display}`,
-                      },
-                      {
-                        id: "queue",
-                        label: t("dispatch.workflow.col.queue"),
-                        value: selectedQueueState ? (
-                          <span
-                            className={`queue-badge ${getBoardStateColor(selectedQueueState.tone)}`}
-                          >
-                            {t(selectedQueueState.label)}
-                          </span>
-                        ) : (
-                          formatOpsCodeLabel(locale, selectedOrder.status)
-                        ),
-                        hint: selectedOrder.queueFamily
-                          ? formatOpsCodeLabel(
-                              locale,
-                              selectedOrder.queueFamily,
-                            )
+          <div className="detail-canvas-grid" aria-label={t("dispatch.workflow.detail.title")}>
+            <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
+              <Card
+                theme={theme}
+                title={t("dispatch.workflow.detail.selectedOrder", {
+                  orderNo: selectedOrder.orderNo,
+                })}
+                subtitle={selectedWorkflowHint}
+                actions={renderBadgeRow([
+                  <Pill
+                    key="authority"
+                    theme={theme}
+                    tone={selectedAuthorityTone}
+                  >
+                    {t(selectedAuthorityLabelKey)}
+                  </Pill>,
+                  selectedQueueState ? (
+                    <Pill
+                      key="queue"
+                      theme={theme}
+                      tone={getBoardStateCanvasTone(selectedQueueState.tone)}
+                    >
+                      {t(selectedQueueState.label)}
+                    </Pill>
+                  ) : null,
+                  selectedPrimaryGate ? (
+                    <Pill
+                      key="gate"
+                      theme={theme}
+                      tone={getComplianceCanvasTone(selectedPrimaryGate.state)}
+                    >
+                      {t(`dispatch.workflow.gate.${selectedPrimaryGate.gateType}`)}
+                    </Pill>
+                  ) : null,
+                ])}
+              >
+                <DL
+                  theme={theme}
+                  items={[
+                    {
+                      k: t("dispatch.workflow.detail.passenger"),
+                      v: `${selectedOrder.passenger.name} · ${selectedOrder.passenger.phone}`,
+                    },
+                    {
+                      k: t("dispatch.workflow.detail.contact"),
+                      v: `${selectedOrder.onsiteContact?.name ?? "-"} · ${selectedOrder.onsiteContact?.phone ?? "-"}`,
+                    },
+                    {
+                      k: t("dispatch.workflow.col.revenue"),
+                      v: `${formatMinorCurrency(selectedOrder.quotedFare?.amountMinor ?? 0)} · ${selectedOrder.fixedPrice ? t("dispatch.workflow.fixedPrice") : t("dispatch.workflow.metered")}`,
+                    },
+                    {
+                      k: t("dispatch.workflow.detail.lastUpdated"),
+                      v: formatDateTime(locale, selectedOrder.updatedAt),
+                    },
+                    {
+                      k: t("dispatch.workflow.detail.orderStatus"),
+                      v: `${formatOpsCodeLabel(locale, selectedOrder.status)} · ${selectedOrder.orderId}`,
+                    },
+                    {
+                      k: t("dispatch.workflow.detail.dispatchStatus"),
+                      v: selectedJob
+                        ? `${formatOpsCodeLabel(locale, selectedJob.status)} · ${selectedJob.dispatchJobId}`
+                        : t("dispatch.workflow.noJob"),
+                    },
+                    {
+                      k: t("dispatch.workflow.detail.reservationWindow"),
+                      v: selectedReservationWindow,
+                    },
+                    {
+                      k: t("dispatch.workflow.col.queue"),
+                      v: selectedOrder.queueFamily
+                        ? `${selectedQueueState ? t(selectedQueueState.label) : formatOpsCodeLabel(locale, selectedOrder.status)} · ${formatOpsCodeLabel(locale, selectedOrder.queueFamily)}`
+                        : selectedQueueState
+                          ? t(selectedQueueState.label)
                           : formatOpsCodeLabel(locale, selectedOrder.status),
-                      },
-                    ]}
-                  />
-                </WorkflowPanel>
+                    },
+                  ]}
+                />
+              </Card>
 
-                <WorkflowPanel
-                  title={t("dispatch.workflow.detail.route")}
-                  description={selectedOrder.notes || undefined}
-                >
-                  <div className="route-grid">
-                    <div className="route-stop">
-                      <span className="route-stop-chip route-stop-pickup">
-                        P
-                      </span>
-                      <div>
-                        <div className="detail-meta-label">
-                          {t("dispatch.workflow.detail.pickup")}
-                        </div>
-                        <div className="cell-title">
-                          {selectedOrder.pickup.addressName ??
-                            selectedOrder.pickup.address}
-                        </div>
-                        <div className="cell-subcopy">
-                          {selectedOrder.pickup.address}
-                        </div>
+              <Card
+                theme={theme}
+                title={t("dispatch.workflow.detail.route")}
+                subtitle={selectedOrder.notes || undefined}
+              >
+                <div className="route-grid">
+                  <div className="route-stop">
+                    <span className="route-stop-chip route-stop-pickup">P</span>
+                    <div>
+                      <div className="detail-meta-label">
+                        {t("dispatch.workflow.detail.pickup")}
                       </div>
-                    </div>
-                    <div className="route-stop">
-                      <span className="route-stop-chip route-stop-dropoff">
-                        D
-                      </span>
-                      <div>
-                        <div className="detail-meta-label">
-                          {t("dispatch.workflow.detail.dropoff")}
-                        </div>
-                        <div className="cell-title">
-                          {selectedOrder.dropoff.addressName ??
-                            selectedOrder.dropoff.address}
-                        </div>
-                        <div className="cell-subcopy">
-                          {selectedOrder.dropoff.address}
-                        </div>
+                      <div className="cell-title">
+                        {selectedOrder.pickup.addressName ??
+                          selectedOrder.pickup.address}
+                      </div>
+                      <div className="cell-subcopy">
+                        {selectedOrder.pickup.address}
                       </div>
                     </div>
                   </div>
-                  {selectedOrder.notes ? (
-                    <div className="detail-notes">
+                  <div className="route-stop">
+                    <span className="route-stop-chip route-stop-dropoff">D</span>
+                    <div>
                       <div className="detail-meta-label">
-                        {t("dispatch.workflow.detail.notes")}
+                        {t("dispatch.workflow.detail.dropoff")}
                       </div>
-                      <div className="cell-subcopy">{selectedOrder.notes}</div>
+                      <div className="cell-title">
+                        {selectedOrder.dropoff.addressName ??
+                          selectedOrder.dropoff.address}
+                      </div>
+                      <div className="cell-subcopy">
+                        {selectedOrder.dropoff.address}
+                      </div>
                     </div>
-                  ) : null}
-                </WorkflowPanel>
+                  </div>
+                </div>
+                {selectedOrder.notes ? (
+                  <div className="detail-notes">
+                    <div className="detail-meta-label">
+                      {t("dispatch.workflow.detail.notes")}
+                    </div>
+                    <div className="cell-subcopy">{selectedOrder.notes}</div>
+                  </div>
+                ) : null}
+              </Card>
 
-                <WorkflowPanel
-                  title={t("dispatch.workflow.detail.compliance")}
-                  description={
-                    selectedPrimaryGate
-                      ? selectedPrimaryGate.nextAction
-                      : t("dispatch.workflow.detail.noComplianceIssues")
-                  }
-                  tone={
-                    selectedPrimaryGate?.state === "blocked"
-                      ? "danger"
-                      : selectedPrimaryGate
-                        ? "warning"
-                        : "neutral"
-                  }
-                >
-                  {selectedPrimaryGate ? (
-                    <>
-                      <div className="badge-stack">
-                        {selectedComplianceGates.map((gate) => (
-                          <span
-                            key={gate.gateType}
-                            className={`queue-badge ${getComplianceTone(gate.state)}`}
-                          >
-                            {t(`dispatch.workflow.gate.${gate.gateType}`)}
-                          </span>
-                        ))}
-                      </div>
-                      <DetailMetadataGrid
-                        minColumnWidth="220px"
-                        items={[
-                          {
-                            id: "compliance-status",
-                            label: t("common.status"),
-                            value: t(
-                              `dispatch.workflow.gateState.${selectedPrimaryGate.state}`,
+              <Card
+                theme={theme}
+                title={t("dispatch.workflow.detail.compliance")}
+                subtitle={
+                  selectedPrimaryGate
+                    ? selectedPrimaryGate.nextAction
+                    : t("dispatch.workflow.detail.noComplianceIssues")
+                }
+              >
+                {selectedPrimaryGate ? (
+                  <div style={{ display: "grid", gap: 12 }}>
+                    {renderBadgeRow(
+                      selectedComplianceGates.map((gate) => (
+                        <Pill
+                          key={gate.gateType}
+                          theme={theme}
+                          tone={getComplianceCanvasTone(gate.state)}
+                        >
+                          {t(`dispatch.workflow.gate.${gate.gateType}`)}
+                        </Pill>
+                      )),
+                    )}
+                    <DL
+                      theme={theme}
+                      items={[
+                        {
+                          k: t("common.status"),
+                          v: t(
+                            `dispatch.workflow.gateState.${selectedPrimaryGate.state}`,
+                          ),
+                        },
+                        {
+                          k: t("dispatch.workflow.detail.nextStep"),
+                          v: selectedPrimaryGate.nextAction,
+                        },
+                        {
+                          k: t("dispatch.workflow.downstreamReview"),
+                          v:
+                            selectedDownstreamReviewDuties.length > 0 ? (
+                              <div className="detail-list">
+                                {selectedDownstreamReviewDuties.map((duty) => (
+                                  <div
+                                    key={duty.key}
+                                    className="cell-subcopy detail-line"
+                                  >
+                                    {formatOpsCodeLabel(locale, duty.stage)}
+                                    {duty.reviewerLabel
+                                      ? ` · ${duty.reviewerLabel}`
+                                      : ""}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              "-"
                             ),
-                          },
-                          {
-                            id: "next-step",
-                            label: t("dispatch.workflow.detail.nextStep"),
-                            value: selectedPrimaryGate.nextAction,
-                            ...(selectedPrimaryGate.state === "blocked"
-                              ? { tone: "danger" as const }
-                              : selectedPrimaryGate.state === "review_required"
-                                ? { tone: "warning" as const }
-                                : {}),
-                          },
-                          {
-                            id: "downstream-review",
-                            label: t("dispatch.workflow.downstreamReview"),
-                            value:
-                              selectedDownstreamReviewDuties.length > 0 ? (
-                                <div className="detail-list">
-                                  {selectedDownstreamReviewDuties.map(
-                                    (duty) => (
-                                      <div
-                                        key={duty.key}
-                                        className="cell-subcopy detail-line"
-                                      >
-                                        {formatOpsCodeLabel(locale, duty.stage)}
-                                        {duty.reviewerLabel
-                                          ? ` · ${duty.reviewerLabel}`
-                                          : ""}
-                                      </div>
-                                    ),
-                                  )}
-                                </div>
-                              ) : (
-                                "-"
-                              ),
-                            hint:
-                              selectedDownstreamReviewDuties.length > 0
-                                ? undefined
-                                : t(
-                                    "dispatch.workflow.detail.noComplianceIssues",
-                                  ),
-                            columnSpan: 2,
-                          },
-                        ]}
-                      />
-                    </>
-                  ) : (
-                    <div className="cell-subcopy">
-                      {t("dispatch.workflow.detail.noComplianceIssues")}
-                    </div>
-                  )}
-                </WorkflowPanel>
+                        },
+                      ]}
+                    />
+                  </div>
+                ) : (
+                  <div className="cell-subcopy">
+                    {t("dispatch.workflow.detail.noComplianceIssues")}
+                  </div>
+                )}
+              </Card>
 
-                <WorkflowPanel
-                  title={t("dispatch.workflow.detail.candidates")}
-                  description={
-                    selectedJob
-                      ? t("dispatch.workflow.detail.candidateHint")
-                      : t("dispatch.workflow.awaitingJob")
-                  }
-                >
+              <Card
+                theme={theme}
+                title={t("dispatch.workflow.detail.candidates")}
+                subtitle={
+                  selectedJob
+                    ? t("dispatch.workflow.detail.candidateHint")
+                    : t("dispatch.workflow.awaitingJob")
+                }
+              >
                   {selectedJob ? (
                     selectedCandidates.length > 0 ? (
                       <>
@@ -2569,147 +2913,169 @@ export function DispatchWorkflow({
                       {t("dispatch.workflow.awaitingJob")}
                     </div>
                   )}
-                </WorkflowPanel>
+              </Card>
 
-                <WorkflowPanel
+                <Card
+                  theme={theme}
                   title={t("dispatch.workflow.detail.timeline")}
-                  description={t("dispatch.workflow.detail.timelineHint")}
                 >
-                  <DetailMetadataGrid
-                    minColumnWidth="180px"
-                    items={[
-                      {
-                        id: "timeline-events",
-                        label: t("dispatch.workflow.detail.timelineEvents"),
-                        value: selectedTimelineEntries.length,
-                      },
-                      {
-                        id: "timeline-latest",
-                        label: t("dispatch.workflow.detail.timelineLatest"),
-                        value: selectedTimelineEntries[0]
-                          ? formatDateTime(
-                              locale,
-                              selectedTimelineEntries[0].at,
-                            )
-                          : "-",
-                      },
-                    ]}
-                  />
-                  {traceLoadingOrderId === selectedOrder.orderId ? (
-                    <div className="cell-subcopy">{t("common.loading")}</div>
-                  ) : (
-                    <Timeline
-                      items={selectedTimelineItems}
-                      emptyState={t("dispatch.workflow.detail.timelineEmpty")}
+                  <div style={{ display: "grid", gap: 12 }}>
+                    <DL
+                      theme={theme}
+                      cols={2}
+                      items={[
+                        {
+                          k: t("dispatch.workflow.detail.timelineEvents"),
+                          v: selectedActivityEntries.length,
+                          mono: true,
+                        },
+                        {
+                          k: t("dispatch.workflow.detail.timelineLatest"),
+                          v: selectedActivityEntries[0]
+                            ? formatDateTime(
+                                locale,
+                                selectedActivityEntries[0].at,
+                              )
+                            : "-",
+                          mono: true,
+                        },
+                      ]}
                     />
-                  )}
-                </WorkflowPanel>
-              </>
-            }
-            side={
-              <>
-                <WorkflowPanel
-                  eyebrow={t("dispatch.workflow.detail.actionPanel")}
-                  title={t("dispatch.workflow.detail.actionPanel")}
-                  description={t("dispatch.workflow.detail.actionPanelHint")}
-                  tone={selectedPrimaryGate ? "warning" : "info"}
-                  meta={
-                    <div className="detail-workflow-meta">
-                      <AuthorityBadge
-                        category="owned"
-                        label={t(selectedAuthorityLabelKey)}
-                        tone={selectedAuthorityTone}
-                      />
-                      {selectedQueueState ? (
-                        <span
-                          className={`queue-badge ${getBoardStateColor(selectedQueueState.tone)}`}
-                        >
-                          {t(selectedQueueState.label)}
-                        </span>
-                      ) : null}
-                    </div>
-                  }
-                >
-                  {renderDetailActionPanel(selectedOrder, selectedJob)}
-                </WorkflowPanel>
+                    {traceLoadingOrderId === selectedOrder.orderId ? (
+                      <div className="cell-subcopy">{t("common.loading")}</div>
+                    ) : (
+                      renderActivityFeed(
+                        locale,
+                        selectedActivityEntries,
+                        t("dispatch.workflow.detail.timelineEmpty"),
+                      )
+                    )}
+                  </div>
+                </Card>
+            </div>
 
-                <WorkflowPanel
-                  title={t("dispatch.workflow.detail.workflowCues")}
-                  description={t("dispatch.workflow.detail.workflowCuesHint")}
-                >
-                  <DetailMetadataGrid
-                    columns={1}
-                    items={[
-                      {
-                        id: "authority-mode",
-                        label: t("dispatch.workflow.col.authority"),
-                        value: (
-                          <AuthorityBadge
-                            category="owned"
-                            label={t(selectedAuthorityLabelKey)}
-                            tone={selectedAuthorityTone}
-                          />
-                        ),
-                        hint: selectedWorkflowHint,
-                        ...(selectedOrder.dispatchSemantics ===
-                        "forwarder_broadcast"
-                          ? { tone: "warning" as const }
-                          : {}),
-                      },
-                      {
-                        id: "dispatch-semantic",
-                        label: t("dispatch.workflow.detail.dispatchSemantic"),
+            <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
+              <Card
+                theme={theme}
+                title={t("dispatch.workflow.detail.actionPanel")}
+                subtitle={t("dispatch.workflow.detail.actionPanelHint")}
+                actions={renderBadgeRow([
+                  <Pill
+                    key="authority"
+                    theme={theme}
+                    tone={selectedAuthorityTone}
+                  >
+                    {t(selectedAuthorityLabelKey)}
+                  </Pill>,
+                  selectedQueueState ? (
+                    <Pill
+                      key="queue"
+                      theme={theme}
+                      tone={getBoardStateCanvasTone(selectedQueueState.tone)}
+                    >
+                      {t(selectedQueueState.label)}
+                    </Pill>
+                  ) : null,
+                ])}
+              >
+                  <div style={{ display: "grid", gap: 12 }}>
+                    {renderDetailActionPanel(selectedOrder, selectedJob)}
+                  </div>
+              </Card>
+
+              <Card
+                theme={theme}
+                title={t("dispatch.workflow.detail.workflowCues")}
+                subtitle={t("dispatch.workflow.detail.workflowCuesHint")}
+              >
+                  <div style={{ display: "grid", gap: 12 }}>
+                    <DL
+                      theme={theme}
+                      cols={1}
+                      items={[
+                        {
+                          k: t("dispatch.workflow.col.authority"),
+                          v: t(selectedAuthorityLabelKey),
+                        },
+                        {
+                          k: t("dispatch.workflow.detail.dispatchSemantic"),
+                          v: formatOpsCodeLabel(
+                            locale,
+                            selectedOrder.dispatchSemantics,
+                          ),
+                        },
+                        {
+                          k: t("dispatch.workflow.detail.queueState"),
+                          v: selectedQueueState ? (
+                            <span
+                              className={`queue-badge ${getBoardStateColor(selectedQueueState.tone)}`}
+                            >
+                              {t(selectedQueueState.label)}
+                            </span>
+                          ) : (
+                            formatOpsCodeLabel(locale, selectedOrder.status)
+                          ),
+                        },
+                        {
+                          k: t("dispatch.workflow.detail.compliance"),
+                          v: selectedPrimaryGate
+                            ? t(
+                                `dispatch.workflow.gateState.${selectedPrimaryGate.state}`,
+                              )
+                            : t("dispatch.workflow.detail.noComplianceIssues"),
+                        },
+                      ]}
+                    />
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {renderStateTrack(
+                        locale,
+                        selectedStateTrackIndex,
+                        stateTrackLabels,
+                        selectedStateTrackTimestamps,
+                      )}
+                    </div>
+                    <div className="cell-subcopy">
+                      {getOpsLabel(locale, "dispatchSource", {
                         value: formatOpsCodeLabel(
                           locale,
-                          selectedOrder.dispatchSemantics,
+                          selectedOrder.orderSource,
                         ),
-                        hint: getOpsLabel(locale, "dispatchSource", {
-                          value: formatOpsCodeLabel(
-                            locale,
-                            selectedOrder.orderSource,
-                          ),
-                        }),
-                      },
-                      {
-                        id: "workflow-queue",
-                        label: t("dispatch.workflow.detail.queueState"),
-                        value: selectedQueueState ? (
-                          <span
-                            className={`queue-badge ${getBoardStateColor(selectedQueueState.tone)}`}
-                          >
-                            {t(selectedQueueState.label)}
-                          </span>
-                        ) : (
-                          formatOpsCodeLabel(locale, selectedOrder.status)
-                        ),
-                        hint:
-                          selectedOrder.queueEntryReason &&
-                          formatOpsCodeLabel(
+                      })}
+                      {selectedOrder.queueEntryReason
+                        ? ` · ${formatOpsCodeLabel(
                             locale,
                             selectedOrder.queueEntryReason,
-                          ),
-                      },
-                      {
-                        id: "workflow-gate",
-                        label: t("dispatch.workflow.detail.compliance"),
-                        value: selectedPrimaryGate
-                          ? t(
-                              `dispatch.workflow.gateState.${selectedPrimaryGate.state}`,
-                            )
-                          : t("dispatch.workflow.detail.noComplianceIssues"),
-                        hint: selectedPrimaryGate?.nextAction,
-                      },
-                    ]}
-                  />
-                </WorkflowPanel>
-              </>
-            }
-          />
+                          )}`
+                        : ""}
+                      {selectedPrimaryGate?.nextAction
+                        ? ` · ${selectedPrimaryGate.nextAction}`
+                        : ""}
+                    </div>
+                    <div className="cell-subcopy">{selectedWorkflowHint}</div>
+                  </div>
+              </Card>
+            </div>
+          </div>
         ) : (
-          <WorkflowEmptyState
-            title={t("dispatch.workflow.detail.emptyTitle")}
-            description={t("dispatch.workflow.detail.emptyBody")}
-          />
+          <Card theme={theme} title={t("dispatch.workflow.detail.emptyTitle")}>
+            <div
+              style={{
+                minHeight: 180,
+                display: "grid",
+                placeItems: "center",
+                textAlign: "center",
+                color: theme.textMuted,
+                padding: 24,
+              }}
+            >
+              <div style={{ display: "grid", gap: 8 }}>
+                <strong style={{ color: theme.text }}>
+                  {t("dispatch.workflow.detail.emptyTitle")}
+                </strong>
+                <span>{t("dispatch.workflow.detail.emptyBody")}</span>
+              </div>
+            </div>
+          </Card>
         )}
       </section>
 
@@ -2937,11 +3303,12 @@ export function DispatchWorkflow({
                     </td>
                     <td>
                       <div className="dispatch-block">
-                        <AuthorityBadge
-                          category="owned"
-                          label={t(getOwnedAuthorityLabelKey(order, job))}
+                        <Pill
+                          theme={theme}
                           tone={getOwnedAuthorityTone(order, job)}
-                        />
+                        >
+                          {t(getOwnedAuthorityLabelKey(order, job))}
+                        </Pill>
                         <div className="cell-subcopy">
                           {getOpsLabel(locale, "dispatchSource", {
                             value: formatOpsCodeLabel(
