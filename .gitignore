@@ -39,7 +39,11 @@ ai-task-archive.jsonl
 
 # orchestrator runtime
 .llm-inbox/
-.orchestrator/bin/
+.orchestrator/bin/*
+!.orchestrator/bin/
+!.orchestrator/bin/openclaw-bootstrap.sh
+!.orchestrator/bin/openclaw-launch.sh
+!.orchestrator/bin/openclaw-smoke.sh
 .orchestrator/logs/
 .orchestrator/supervisor.pid
 .orchestrator/event-queue.jsonl
