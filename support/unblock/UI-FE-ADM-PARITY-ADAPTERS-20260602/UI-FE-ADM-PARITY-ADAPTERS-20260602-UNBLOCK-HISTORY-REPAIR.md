@@ -41,6 +41,12 @@ The contamination was therefore:
 - missing remote parent branch publication
 - missing PR evidence for the canonical parent rail
 - helper/parent worktree ambiguity about which branch should continue the task
+- review re-entry helper contamination on the wrong lane: the assigned
+  `codex2/ui-fe-adm-parity-adapters-20260602-unblock-history-repair` worktree
+  sits directly on `12f918d2277ee10091560defabb7731138c20643` and tracks
+  `origin/dev`, while the approved repair evidence commit exists only on
+  `origin/codex/ui-fe-adm-parity-adapters-20260602-unblock-history-repair @
+  e47063033939ec04bd5f2b3854012575bf3d2b8c`
 
 ## Evidence Before Repair
 
@@ -60,6 +66,14 @@ The contamination was therefore:
   returned no remote branch
 - `gh pr list --head codex:codex/ui-fe-adm-parity-adapters-20260602 --state all`
   returned `[]`
+- `git rev-parse refs/heads/codex2/ui-fe-adm-parity-adapters-20260602-unblock-history-repair`
+  returned `12f918d2277ee10091560defabb7731138c20643`
+- `git for-each-ref --format='%(refname:short) %(upstream:short)'
+  refs/heads/codex2/ui-fe-adm-parity-adapters-20260602-unblock-history-repair`
+  returned
+  `codex2/ui-fe-adm-parity-adapters-20260602-unblock-history-repair origin/dev`
+- `git rev-parse refs/remotes/origin/codex/ui-fe-adm-parity-adapters-20260602-unblock-history-repair`
+  returned `e47063033939ec04bd5f2b3854012575bf3d2b8c`
 
 ### Parent provenance
 
@@ -118,6 +132,14 @@ The remaining parent blocker is no longer branch contamination. It returns to
 the already-recorded acceptance gap: repo-wide
 `pnpm --filter @drts/platform-admin-web typecheck` and `build` failures outside
 this route still prevent final closeout evidence.
+
+The concrete operator instruction from this unblock is:
+
+- do not close the parent from
+  `codex2/ui-fe-adm-parity-adapters-20260602-unblock-history-repair`
+- continue only from
+  `origin/codex/ui-fe-adm-parity-adapters-20260602 @ ceb6ec5a5e5432b760ef331801f378aedf2671c2`
+  and draft PR `#494`
 
 ## Why This Is Safe
 
