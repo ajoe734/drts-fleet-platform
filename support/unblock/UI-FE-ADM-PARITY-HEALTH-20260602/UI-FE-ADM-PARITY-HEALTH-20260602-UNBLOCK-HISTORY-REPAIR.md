@@ -155,3 +155,15 @@ The key unblock is: machine truth must stop treating `396edcff` on
 - Confirmed worktree divergence between the `codex` and `codex2` variants:
   - `git diff codex2/ui-fe-adm-parity-health-20260602 -- apps/platform-admin-web/app/health/page.tsx`
   - `git diff --no-index --stat <codex parent page> <codex2 page>`
+
+## Closeout Evidence
+
+- Review state at closeout: `review_approved`
+- Canonical helper branch for this task:
+  `codex/ui-fe-adm-parity-health-20260602-unblock-history-repair`
+- Remote branch evidence:
+  `origin/codex/ui-fe-adm-parity-health-20260602-unblock-history-repair`
+- Documentation evidence commit already on the helper branch before owner
+  closeout: `150bbb03fba7b7c0eaf69ca8f6b184b243258a19`
+- Parent task machine-truth next step already points back to the canonical
+  `codex/...` rail and no longer claims the `codex2/...` commit is canonical.
