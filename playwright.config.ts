@@ -3,6 +3,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
+  workers: 1,
   retries: 0,
   use: {
     viewport: {
@@ -38,6 +39,13 @@ export default defineConfig({
     },
   ],
   webServer: [
+    {
+      command:
+        "pnpm --filter @drts/contracts build && cd apps/api && NODE_ENV=test API_PORT=3001 CONTROLLED_DOWNLOAD_SIGNING_SECRET=e2e-signing-secret pnpm dev",
+      url: "http://127.0.0.1:3001/health",
+      reuseExistingServer: !process.env.CI,
+      timeout: 300_000,
+    },
     {
       command:
         "pnpm --filter @drts/contracts build && pnpm --filter @drts/ui-tokens build && cd apps/ops-console-web && NEXT_PUBLIC_OPS_ASSISTANT_ENABLED=true pnpm exec next dev --hostname 127.0.0.1 --port 3202",

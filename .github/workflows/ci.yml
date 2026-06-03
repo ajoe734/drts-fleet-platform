@@ -115,3 +115,7 @@ jobs:
         run: pnpm run typecheck
       - name: Unit tests
         run: pnpm run test:unit
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+      - name: E2E route suite
+        run: pnpm run test:e2e -- tests/e2e/deterministic-route-suite.spec.ts
