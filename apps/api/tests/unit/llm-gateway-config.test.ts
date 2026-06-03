@@ -51,6 +51,7 @@ describe("resolveLlmGatewayConfig", () => {
         PLATFORM_ADMIN_ASSISTANT_ENABLED: "true",
         LLM_GATEWAY_PROVIDER: "openai",
         LLM_GATEWAY_API_KEY: "sk-test",
+        LLM_GATEWAY_BASE_URL: "https://gateway.example/v1",
         LLM_GATEWAY_CHAT_MODEL: "gpt-4.1-mini",
         LLM_GATEWAY_SUMMARIZER_MODEL: "gpt-4.1-nano",
         LLM_GATEWAY_DAILY_BUDGET_USD: "18.5",
@@ -65,6 +66,7 @@ describe("resolveLlmGatewayConfig", () => {
       provider: "openai",
       requestedProvider: "openai",
       apiKey: "sk-test",
+      baseUrl: "https://gateway.example/v1",
       chatModel: "gpt-4.1-mini",
       summarizerModel: "gpt-4.1-nano",
       dailyBudgetUsd: 18.5,
@@ -84,6 +86,16 @@ describe("resolveLlmGatewayConfig", () => {
       }),
     ).toThrow(
       "LLM_GATEWAY_API_KEY is required when PLATFORM_ADMIN_ASSISTANT_ENABLED=true and LLM_GATEWAY_PROVIDER is not mock in production",
+    );
+  });
+
+  it("rejects unsupported provider slugs", () => {
+    expect(() =>
+      resolveLlmGatewayConfig({
+        LLM_GATEWAY_PROVIDER: "bedrock",
+      }),
+    ).toThrow(
+      "LLM_GATEWAY_PROVIDER must be one of: mock, openai, anthropic, openrouter, ollama",
     );
   });
 });

@@ -52,6 +52,28 @@ class ThrowingProvider implements PlatformAdminAssistantProvider {
   }
 }
 
+class StaticProvider implements PlatformAdminAssistantProvider {
+  readonly kind = "openai" as const;
+
+  async generate(
+    request: PlatformAdminAssistantProviderRequest,
+  ): Promise<PlatformAdminAssistantProviderResponse> {
+    void request;
+    return {
+      answer: "Live provider response for platform admin.",
+      citations: [
+        {
+          title: "Platform Admin agentic assistant architecture plan",
+          section: "§10 Acceptance Matrix",
+          href: "docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md",
+        },
+      ],
+      suggestedPrompts: ["List the next safe operator step."],
+      actionPlan: null,
+    };
+  }
+}
+
 describe("PlatformAdminAssistantService", () => {
   it("binds assistant sessions to the current platform control-plane identity", () => {
     const service = new PlatformAdminAssistantService(
@@ -128,6 +150,24 @@ describe("PlatformAdminAssistantService", () => {
         title: "Mock action plan",
       }),
     ]);
+  });
+
+  it("records the active non-mock provider kind on new sessions", async () => {
+    const service = new PlatformAdminAssistantService(
+      new StaticProvider(),
+      new PlatformAdminService(new AuditNotificationService()),
+      new AuditNotificationService(),
+    );
+    const identity = platformIdentity();
+    const session = service.createSession(identity, {});
+
+    expect(session.provider).toBe("openai");
+
+    const response = await service.createMessage(session.sessionId, identity, {
+      message: "Explain the current dev acceptance gate.",
+    });
+
+    expect(response.answer).toContain("Live provider response");
   });
 
   it("returns degraded help-search guidance when the provider key is missing", async () => {
