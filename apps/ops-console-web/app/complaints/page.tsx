@@ -8,6 +8,7 @@ import {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -24,6 +25,8 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 import type {
+  ActionIntent,
+  ActionReceipt,
   ComplaintCaseRecord,
   ComplaintCaseStatus,
   ComplaintCategory,
@@ -43,6 +46,10 @@ import {
   COMPLAINT_CATEGORY_VALID_RESOLUTIONS,
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import {
+  useAssistantActionBridgeRegistration,
+  useAssistantSelection,
+} from "@/components/ops-assistant";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 
@@ -443,14 +450,22 @@ type ModalState = {
 } | null;
 
 type Receipt = {
+  actionId: string;
   message: string;
   auditId: string;
+  auditHref: string;
 } | null;
 
 export default function ComplaintsPage() {
   const { locale } = useTranslation();
   const searchParams = useSearchParams();
   const caseNoFromQuery = searchParams.get("caseNo");
+  const { setAssistantSelection, clearAssistantSelection } =
+    useAssistantSelection();
+  const assistantBridgePromiseRef = useRef<{
+    resolve: (receipt: ActionReceipt & { auditHref?: string | null }) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
 
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error
@@ -520,6 +535,15 @@ export default function ComplaintsPage() {
         : [],
     [selectedRecord],
   );
+
+  useEffect(() => {
+    if (!selectedRecord) {
+      clearAssistantSelection();
+      return;
+    }
+    setAssistantSelection({ kind: "complaint", id: selectedRecord.caseNo });
+    return () => clearAssistantSelection();
+  }, [selectedRecord, setAssistantSelection, clearAssistantSelection]);
 
   useEffect(() => {
     if (!selectedRecord) {
@@ -624,31 +648,44 @@ export default function ComplaintsPage() {
     };
   }, [selectedCaseNo]);
 
-  async function runAction(key: string, action: () => Promise<void>) {
+  async function runAction<T>(key: string, action: () => Promise<T>) {
     setBusyKey(key);
     try {
-      await action();
+      const result = await action();
       setError(null);
+      return result;
     } catch (nextError) {
       setError(resolveErrorMessage(nextError));
+      throw nextError;
     } finally {
       setBusyKey(null);
     }
   }
 
-  function emitReceipt(action: string, record: ComplaintCaseUiRecord) {
-    // Backend ActionReceipt would carry the canonical auditId; until then we
-    // surface a deterministic local reference so the receipt + audit deep link
-    // pattern (§3.4) is wired and visible.
+  function buildActionReceipt(
+    action: string,
+    record: ComplaintCaseUiRecord,
+  ): ActionReceipt & { auditHref: string } {
     const auditId = `audit-${record.caseNo}-${action}`;
-    setReceipt({
+    return {
+      actionId: `action-${record.caseNo}-${action}`,
+      auditId,
+      resourceType: "complaint_case",
+      resourceId: record.caseNo,
+      status: "completed",
       message: tx(
         locale,
         `${actionLabel(action, "en")} submitted`,
         `${actionLabel(action, "zh")}已送出`,
       ),
-      auditId,
-    });
+      auditHref: `/audit?auditId=${encodeURIComponent(auditId)}`,
+    };
+  }
+
+  function emitReceipt(action: string, record: ComplaintCaseUiRecord) {
+    const receipt = buildActionReceipt(action, record);
+    setReceipt(receipt);
+    return receipt;
   }
 
   function openAction(
@@ -687,23 +724,25 @@ export default function ComplaintsPage() {
   async function invokeDirect(
     descriptor: ResourceActionDescriptor,
     record: ComplaintCaseUiRecord,
-  ) {
+  ): Promise<ActionReceipt & { auditHref?: string | null }> {
     const client = getOpsClient();
     if (descriptor.action === "mark_sla_breach") {
-      await runAction(`mark_sla_breach-${record.caseNo}`, async () => {
+      return runAction(`mark_sla_breach-${record.caseNo}`, async () => {
         await client.markComplaintSlaBreach(record.caseNo);
-        emitReceipt("mark_sla_breach", record);
+        const receipt = emitReceipt("mark_sla_breach", record);
         await loadRecords(record.caseNo, true);
+        return receipt;
       });
-      return;
     }
     if (descriptor.action === "export_view") {
-      await runAction(`export_view-${record.caseNo}`, async () => {
+      return runAction(`export_view-${record.caseNo}`, async () => {
         const view = await client.getComplaintExportView(record.caseNo);
         setExportView(view);
-        emitReceipt("export_view", record);
+        return emitReceipt("export_view", record);
       });
     }
+
+    throw new Error(`Unsupported complaint action: ${descriptor.action}`);
   }
 
   async function submitModal() {
@@ -713,53 +752,63 @@ export default function ComplaintsPage() {
     const { descriptor, record } = modal;
     const client = getOpsClient();
     const key = `${descriptor.action}-${record.caseNo}`;
-
-    await runAction(key, async () => {
-      switch (descriptor.action) {
-        case "assign":
-          await client.assignComplaint(record.caseNo, {
-            assigneeId,
-            note: assignmentNote,
-          });
-          setAssignmentNote("");
-          break;
-        case "add_note":
-          await client.addComplaintNote(record.caseNo, { note: noteText });
-          setNoteText("");
-          break;
-        case "resolve":
-          await client.resolveComplaint(record.caseNo, {
-            resolutionCode,
-            closingNote,
-          });
-          break;
-        case "close":
-          await client.closeComplaint(record.caseNo, {
-            resolutionCode,
-            closingNote,
-          });
-          break;
-        case "reopen":
-          await client.reopenComplaint(record.caseNo, { reason: reopenReason });
-          setReopenReason("");
-          break;
-        case "escalate_to_incident":
-          await client.escalateComplaintToIncident(record.caseNo, {
-            title: escalateTitle,
-            severity: escalateSeverity,
-            reason: escalateReason,
-          });
-          setEscalateTitle("");
-          setEscalateReason("");
-          setEscalateSeverity("medium");
-          break;
-        default:
-          break;
-      }
-      emitReceipt(descriptor.action, record);
-      await loadRecords(record.caseNo, true);
-      setModal(null);
-    });
+    try {
+      await runAction(key, async () => {
+        switch (descriptor.action) {
+          case "assign":
+            await client.assignComplaint(record.caseNo, {
+              assigneeId,
+              note: assignmentNote,
+            });
+            setAssignmentNote("");
+            break;
+          case "add_note":
+            await client.addComplaintNote(record.caseNo, { note: noteText });
+            setNoteText("");
+            break;
+          case "resolve":
+            await client.resolveComplaint(record.caseNo, {
+              resolutionCode,
+              closingNote,
+            });
+            break;
+          case "close":
+            await client.closeComplaint(record.caseNo, {
+              resolutionCode,
+              closingNote,
+            });
+            break;
+          case "reopen":
+            await client.reopenComplaint(record.caseNo, {
+              reason: reopenReason,
+            });
+            setReopenReason("");
+            break;
+          case "escalate_to_incident":
+            await client.escalateComplaintToIncident(record.caseNo, {
+              title: escalateTitle,
+              severity: escalateSeverity,
+              reason: escalateReason,
+            });
+            setEscalateTitle("");
+            setEscalateReason("");
+            setEscalateSeverity("medium");
+            break;
+          default:
+            break;
+        }
+        const receipt = emitReceipt(descriptor.action, record);
+        await loadRecords(record.caseNo, true);
+        setModal(null);
+        assistantBridgePromiseRef.current?.resolve(receipt);
+        assistantBridgePromiseRef.current = null;
+      });
+    } catch (error) {
+      assistantBridgePromiseRef.current?.reject(
+        error instanceof Error ? error : new Error("Complaint action failed."),
+      );
+      assistantBridgePromiseRef.current = null;
+    }
   }
 
   async function submitCreate() {
@@ -1066,9 +1115,43 @@ export default function ComplaintsPage() {
     _selected: record.caseNo === selectedCaseNo,
   }));
 
-  const selectedActions = selectedRecord
-    ? getComplaintActions(selectedRecord)
-    : [];
+  const selectedActions = useMemo(
+    () => (selectedRecord ? getComplaintActions(selectedRecord) : []),
+    [selectedRecord],
+  );
+  const assistantActionBridge = useMemo(
+    () =>
+      selectedRecord
+        ? {
+            resourceKind: "complaint" as const,
+            resourceId: selectedRecord.caseNo,
+            availableActions: selectedActions,
+            resolveDescriptor: (intent: ActionIntent) =>
+              selectedActions.find(
+                (descriptor) =>
+                  descriptor.action.toLowerCase() === intent.action.toLowerCase(),
+              ) ?? null,
+            invoke: async (
+              _intent: ActionIntent,
+              descriptor: ResourceActionDescriptor,
+            ) => {
+              if (actionRunsDirect(descriptor)) {
+                return invokeDirect(descriptor, selectedRecord);
+              }
+
+              return new Promise<ActionReceipt & { auditHref?: string | null }>(
+                (resolve, reject) => {
+                  assistantBridgePromiseRef.current = { resolve, reject };
+                  openAction(descriptor, selectedRecord);
+                },
+              );
+            },
+          }
+        : null,
+    [selectedActions, selectedRecord],
+  );
+
+  useAssistantActionBridgeRegistration(assistantActionBridge);
 
   return (
     <>
@@ -1793,7 +1876,13 @@ export default function ComplaintsPage() {
           setEscalateSeverity={setEscalateSeverity}
           escalateReason={escalateReason}
           setEscalateReason={setEscalateReason}
-          onCancel={() => setModal(null)}
+          onCancel={() => {
+            setModal(null);
+            assistantBridgePromiseRef.current?.reject(
+              new Error("ASSISTANT_ACTION_CANCELLED"),
+            );
+            assistantBridgePromiseRef.current = null;
+          }}
           onConfirm={() => void submitModal()}
         />
       ) : null}
@@ -1819,10 +1908,13 @@ export default function ComplaintsPage() {
                 style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
               >
                 <span style={{ fontFamily: theme.monoFamily, fontSize: 11 }}>
+                  {receipt.actionId}
+                </span>
+                <span style={{ fontFamily: theme.monoFamily, fontSize: 11 }}>
                   {receipt.auditId}
                 </span>
                 <a
-                  href={`/audit?auditId=${encodeURIComponent(receipt.auditId)}`}
+                  href={receipt.auditHref}
                   target="_blank"
                   rel="noreferrer"
                   style={{ color: theme.accent, textDecoration: "none" }}
