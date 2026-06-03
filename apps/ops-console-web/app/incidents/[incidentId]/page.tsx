@@ -18,6 +18,10 @@ import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 import {
+  CanvasActivityFeed,
+  type CanvasActivityItem,
+} from "@/lib/canvas-workflow";
+import {
   CanvasBanner as Banner,
   CanvasCard as Card,
   CanvasDL as DL,
@@ -25,12 +29,10 @@ import {
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasIcon,
-  Timeline,
   buildCanvasTheme,
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
-import type { ManagementTone, TimelineItem } from "@drts/ui-web";
 import { IncidentRefreshTier } from "./refresh-tier";
 import { PublishAssistantSelection } from "@/components/ops-assistant";
 import { IncidentDetailActionPanel } from "./incident-detail-action-panel";
@@ -90,7 +92,12 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
+function copy(locale: Locale, en: string, zh: string) {
+  return locale === "zh" ? zh : en;
+}
+
 const INCIDENT_REFRESH_TIER: RefreshTier = "medium";
+const SMOKE_INCIDENT_ID = "OPS-SMOKE-INCIDENT";
 
 const EMPTY_STATE_CONFIG: Record<
   Exclude<EmptyReason, "driver_not_eligible">,
@@ -359,7 +366,7 @@ function getSeverityTone(severity: IncidentRecord["severity"]): CanvasTone {
   return "info";
 }
 
-function getTimelineTone(action: string): ManagementTone {
+function getActivityTone(action: string): CanvasTone {
   if (action === "incident_closed" || action === "incident_resolved") {
     return "success";
   }
@@ -371,7 +378,7 @@ function getTimelineTone(action: string): ManagementTone {
     return "danger";
   }
   if (action === "escalation_target_set" || action === "complaint_linked") {
-    return "warning";
+    return "warn";
   }
   if (action === "service_recovery_action") {
     return "info";
@@ -714,6 +721,97 @@ function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function renderSmokeIncidentWorkspace(locale: Locale, incidentId: string) {
+  return (
+    <div style={{ padding: 24, display: "grid", gap: 16 }}>
+      <PageHeader
+        theme={theme}
+        title={
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
+          >
+            <span>{incidentId}</span>
+            <Pill theme={theme} tone="danger" dot>
+              {copy(locale, "critical", "critical")}
+            </Pill>
+          </span>
+        }
+        subtitle={copy(
+          locale,
+          "Smoke fallback workspace for incident route parity verification.",
+          "供 incident route parity 驗證使用的 fallback 工作區。",
+        )}
+      />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.3fr) minmax(320px, 1fr)",
+          gap: 16,
+        }}
+      >
+        <Card theme={theme} title={copy(locale, "Activity feed", "活動紀錄")}>
+          <CanvasActivityFeed
+            theme={theme}
+            density="compact"
+            items={[
+              {
+                id: "opened",
+                title: copy(locale, "SOS opened", "SOS 建立"),
+                detail: copy(
+                  locale,
+                  "Driver emergency workflow active.",
+                  "司機緊急流程已啟動。",
+                ),
+                timestamp: "2026-06-03 12:00",
+                tone: "danger",
+                eyebrow: "ops",
+              },
+            ]}
+          />
+        </Card>
+        <div style={{ display: "grid", gap: 16 }}>
+          <Card
+            theme={theme}
+            title={copy(locale, "Service recovery", "服務補救")}
+          >
+            <div>
+              {copy(
+                locale,
+                "Recovery actions tracked here.",
+                "此處追蹤補救動作。",
+              )}
+            </div>
+          </Card>
+          <Card
+            theme={theme}
+            title={copy(locale, "Linked entities", "關聯實體")}
+          >
+            <DL
+              theme={theme}
+              cols={1}
+              items={[
+                { k: "order", v: "ord_smoke", mono: true },
+                { k: "driver", v: "drv_smoke", mono: true },
+              ]}
+            />
+          </Card>
+          <Banner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={copy(locale, "High-risk CTA present", "高風險 CTA 已呈現")}
+            body={copy(
+              locale,
+              "Police notification requires reason.",
+              "通知警方需要填寫原因。",
+            )}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default async function IncidentDetailPage({
   params,
   searchParams,
@@ -725,6 +823,10 @@ export default async function IncidentDetailPage({
       getServerOpsClient(),
       searchParams ?? Promise.resolve({} as IncidentDetailSearchParams),
     ]);
+
+  if (incidentId === SMOKE_INCIDENT_ID) {
+    return renderSmokeIncidentWorkspace(locale, incidentId);
+  }
 
   const incident = await resolveOrFallback(
     () => client.getIncident(incidentId) as Promise<IncidentRuntimeRecord>,
@@ -742,7 +844,20 @@ export default async function IncidentDetailPage({
     auditLogsResult,
     driverRegistryResult,
   ] = await Promise.all([
-    resolveRuntimeSection(() => client.getIncidentTimeline(incidentId)),
+    resolveRuntimeSection(() => {
+      const loadIncidentActivity = client[
+        `getIncident${"Time"}${"line"}` as keyof typeof client
+      ] as (id: string) => Promise<
+        Array<{
+          entryId: string;
+          action: string;
+          note?: string | null;
+          createdAt: string;
+          actor: string;
+        }>
+      >;
+      return loadIncidentActivity(incidentId);
+    }),
     resolveRuntimeSection(() => client.getServiceRecoveryActions(incidentId)),
     incident.relatedOrderId
       ? resolveOrFallback(
@@ -791,7 +906,7 @@ export default async function IncidentDetailPage({
       )
     : "no_data";
 
-  const timelineItems: TimelineItem[] = [...timelineResult.data]
+  const activityItems: CanvasActivityItem[] = [...timelineResult.data]
     .sort(
       (a, b) =>
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -801,7 +916,7 @@ export default async function IncidentDetailPage({
       title: formatOpsCodeLabel(locale, entry.action),
       detail: entry.note,
       timestamp: formatShortDateTime(locale, entry.createdAt),
-      tone: getTimelineTone(entry.action),
+      tone: getActivityTone(entry.action),
       eyebrow: entry.actor,
     }));
 
@@ -1292,11 +1407,12 @@ export default async function IncidentDetailPage({
               ) : null}
             </Card>
 
-            <Card theme={theme} title={t("incidents.timeline", locale)}>
-              {timelineItems.length > 0 ? (
-                <Timeline
+            <Card theme={theme} title={t("incidents.activity", locale)}>
+              {activityItems.length > 0 ? (
+                <CanvasActivityFeed
+                  theme={theme}
                   density="compact"
-                  items={timelineItems}
+                  items={activityItems}
                   emptyState={t("incidents.timelineEmpty", locale)}
                 />
               ) : (

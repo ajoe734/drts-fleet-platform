@@ -6,11 +6,14 @@ export { PageHeader } from "./page-header";
 export type { PageHeaderProps } from "./page-header";
 export * as CanvasPrimitives from "./canvas-primitives";
 export {
+  ActionButton,
   Banner as CanvasBanner,
+  CanvasActionButton,
   Btn as CanvasBtn,
   CanvasIcon,
   Card as CanvasCard,
   DL as CanvasDL,
+  EmptyState as CanvasEmptyState,
   Field as CanvasField,
   Input as CanvasInput,
   KPI as CanvasKPI,
@@ -18,16 +21,20 @@ export {
   Pill as CanvasPill,
   Select as CanvasSelect,
   Shell as CanvasShell,
+  StaleBanner as CanvasStaleBanner,
   Table as CanvasTable,
   TrafficLights as CanvasTrafficLights,
   WindowChrome as CanvasWindowChrome,
 } from "./canvas-primitives";
 export type {
+  ActionButtonProps,
+  CanvasActionButtonProps,
   BannerProps as CanvasBannerProps,
   BtnProps as CanvasBtnProps,
   CardProps as CanvasCardProps,
   DLItem as CanvasDLItem,
   DLProps as CanvasDLProps,
+  EmptyStateProps as CanvasEmptyStateProps,
   FieldProps as CanvasFieldProps,
   InputProps as CanvasInputProps,
   KPIProps as CanvasKPIProps,
@@ -36,6 +43,7 @@ export type {
   SelectProps as CanvasSelectProps,
   ShellNavItem as CanvasShellNavItem,
   ShellProps as CanvasShellProps,
+  StaleBannerProps as CanvasStaleBannerProps,
   TableColumn as CanvasTableColumn,
   TableProps as CanvasTableProps,
   WindowChromeProps as CanvasWindowChromeProps,

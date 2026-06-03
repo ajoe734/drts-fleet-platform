@@ -1,8 +1,41 @@
 import type { CanvasShellNavItem } from "@drts/ui-web";
 import { t, type Locale } from "@/lib/translations";
 
-export function buildOpsShellNav(locale: Locale): CanvasShellNavItem[] {
-  return [
+const APPROVAL_QUEUE_ALLOWED_ROLES = new Set([
+  "ops_approval_triage",
+  "ops_manager",
+  "ops_compliance",
+]);
+
+function compactNav(nav: CanvasShellNavItem[]): CanvasShellNavItem[] {
+  const compacted: CanvasShellNavItem[] = [];
+  for (const item of nav) {
+    if ("divider" in item) {
+      const previous = compacted[compacted.length - 1];
+      if (!previous || "divider" in previous) {
+        continue;
+      }
+    }
+    compacted.push(item);
+  }
+  while (
+    compacted.length > 0 &&
+    "divider" in compacted[compacted.length - 1]!
+  ) {
+    compacted.pop();
+  }
+  return compacted;
+}
+
+export function buildOpsShellNav(
+  locale: Locale,
+  roles: readonly string[] = [],
+): CanvasShellNavItem[] {
+  const canAccessApprovalQueue = roles.some((role) =>
+    APPROVAL_QUEUE_ALLOWED_ROLES.has(role),
+  );
+
+  return compactNav([
     { divider: locale === "en" ? "Workspaces" : "工作面" },
     {
       key: "dashboard",
@@ -38,12 +71,16 @@ export function buildOpsShellNav(locale: Locale): CanvasShellNavItem[] {
       label: t("nav.incidents", locale),
       matchPaths: ["/incidents"],
     },
-    {
-      key: "approval-requests",
-      href: "/approval-requests",
-      icon: "audit",
-      label: t("nav.approvalRequests", locale),
-    },
+    ...(canAccessApprovalQueue
+      ? [
+          {
+            key: "approval-requests",
+            href: "/approval-requests",
+            icon: "audit",
+            label: t("nav.approvalRequests", locale),
+          } satisfies CanvasShellNavItem,
+        ]
+      : []),
     { divider: locale === "en" ? "Monitoring" : "營運監控" },
     {
       key: "reports",
@@ -94,5 +131,5 @@ export function buildOpsShellNav(locale: Locale): CanvasShellNavItem[] {
       icon: "flags",
       label: t("nav.featureFlags", locale),
     },
-  ];
+  ]);
 }

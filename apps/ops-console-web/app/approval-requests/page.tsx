@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import type {
   OpsPendingApprovalRequestRecord,
+  ResourceActionDescriptor,
   TenantBookingApprovalRequestStatus,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
@@ -26,6 +27,12 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
+const tenantChipTheme = buildCanvasTheme({
+  surface: "tenant",
+  dark: true,
+  density: "compact",
+});
+
 type Locale = "en" | "zh";
 
 type TabStatus = "pending" | "approved" | "rejected";
@@ -38,8 +45,10 @@ type ApprovalRow = Record<string, unknown> & {
   orderId: string;
   approvers: number;
   created: string;
+  timeoutAt: string;
+  timeoutWarning: boolean;
   slaBreached: boolean;
-  actions: string[];
+  actions: ResourceActionDescriptor[];
 };
 
 type ApprovalRequestsPageProps = {
@@ -68,6 +77,39 @@ function formatStamp(value: string | null | undefined): string {
     return "—";
   }
   return value.slice(0, 16).replace("T", " ");
+}
+
+function isApproachingTimeout(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  const timeoutAt = Date.parse(value);
+  if (!Number.isFinite(timeoutAt)) {
+    return false;
+  }
+  const remainingMs = timeoutAt - Date.now();
+  return remainingMs > 0 && remainingMs <= 12 * 60 * 60 * 1000;
+}
+
+function formatRemaining(value: string | null | undefined): string {
+  if (!value) {
+    return "—";
+  }
+  const timeoutAt = Date.parse(value);
+  if (!Number.isFinite(timeoutAt)) {
+    return "—";
+  }
+  const remainingMs = timeoutAt - Date.now();
+  if (remainingMs <= 0) {
+    return "breached";
+  }
+  const totalMinutes = Math.ceil(remainingMs / 60000);
+  if (totalMinutes < 60) {
+    return `< ${totalMinutes}m`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes === 0 ? `< ${hours}h` : `< ${hours}h ${minutes}m`;
 }
 
 function statusTone(status: TenantBookingApprovalRequestStatus): CanvasTone {
@@ -122,10 +164,10 @@ export default async function ApprovalRequestsPage({
     orderId: record.orderId,
     approvers: record.approvers.length,
     created: record.createdAt,
+    timeoutAt: record.timeoutAt,
+    timeoutWarning: isApproachingTimeout(record.timeoutAt),
     slaBreached: record.slaBreached,
-    actions: record.availableActions
-      .filter((action) => action.enabled)
-      .map((action) => action.action),
+    actions: record.availableActions.filter((action) => action.enabled),
   }));
 
   const columns: CanvasTableColumn<ApprovalRow>[] = [
@@ -142,7 +184,16 @@ export default async function ApprovalRequestsPage({
       h: copy(locale, "TENANT", "租戶"),
       w: 140,
       r: (row) => (
-        <Pill theme={theme} tone="info" dot>
+        <Pill
+          theme={theme}
+          tone="neutral"
+          dot
+          style={{
+            color: tenantChipTheme.accent,
+            background: tenantChipTheme.accentBg,
+            borderColor: tenantChipTheme.accentBorder,
+          }}
+        >
           {row.tenant}
         </Pill>
       ),
@@ -187,12 +238,17 @@ export default async function ApprovalRequestsPage({
       r: (row) => formatStamp(row.created),
     },
     {
-      h: "SLA",
+      h: copy(locale, "TIMEOUT", "逾時"),
       w: 130,
       r: (row) =>
         row.slaBreached ? (
           <Pill theme={theme} tone="danger" dot>
-            {copy(locale, "breached", "已違規")}
+            {copy(locale, "breached", "已逾時")}
+          </Pill>
+        ) : row.timeoutWarning ? (
+          <Pill theme={theme} tone="danger" dot>
+            {copy(locale, "warning", "即將逾時")} ·{" "}
+            {formatRemaining(row.timeoutAt)}
           </Pill>
         ) : (
           <Pill theme={theme} tone="success" dot>
@@ -204,18 +260,13 @@ export default async function ApprovalRequestsPage({
       h: copy(locale, "ACTIONS", "操作"),
       w: 240,
       r: (row) => {
-        const canApprove = row.actions.includes("approve");
-        const canNudge = row.status === "pending";
-        const canAcknowledge = row.slaBreached;
-        if (!canApprove && !canNudge && !canAcknowledge) {
+        if (row.actions.length === 0) {
           return "—";
         }
         return (
           <ApprovalActions
             requestId={row.request}
-            canApprove={canApprove}
-            canNudge={canNudge}
-            canAcknowledge={canAcknowledge}
+            actions={row.actions}
             locale={locale}
           />
         );
@@ -254,8 +305,8 @@ export default async function ApprovalRequestsPage({
         )}
         subtitle={copy(
           locale,
-          "Visible only to ops_approval_triage / ops_manager / ops_compliance. Approve, nudge, or acknowledge SLA breach per row.",
-          "僅 ops_approval_triage / ops_manager / ops_compliance 可見。可逐筆核准、提醒或確認 SLA 違規。",
+          "Visible only to ops_approval_triage / ops_manager / ops_compliance. Approve, reject, or escalate each request with an audit reason.",
+          "僅 ops_approval_triage / ops_manager / ops_compliance 可見。可逐筆核准、退回或升級，並留下稽核理由。",
         )}
         tabs={tabNodes}
         activeTab={activeTabNode}

@@ -25,6 +25,7 @@ import {
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
+  CanvasStaleBanner as StaleBanner,
   buildCanvasTheme,
   type CanvasTableColumn,
   type CanvasTheme,
@@ -1169,10 +1170,9 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
           />
         ) : null}
 
-        <Banner
+        <StaleBanner
           theme={theme}
-          tone={freshness.isStale ? "warn" : "info"}
-          icon="clock"
+          freshness={refreshMetadata.dataFreshness}
           title={t("revenue.banner.staleTitle", locale, {
             minutes: freshness.minutesOld,
             seconds: freshness.secondsUntilNextTick,

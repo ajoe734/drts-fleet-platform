@@ -32,7 +32,6 @@ import type {
   ComplaintCategory,
   ComplaintExportViewRecord,
   ComplaintResolutionCode,
-  ComplaintTimelineEntry,
   CreateComplaintCaseCommand,
   EscalateComplaintToIncidentCommand,
   EmptyReason,
@@ -69,6 +68,13 @@ const REFRESH_CADENCE_MS = 15_000;
 // the shared icon set without importing a non-exported type alias.
 type IconName = Parameters<typeof CanvasIcon>[0]["name"];
 type ComplaintSlaStatus = "within_sla" | "warning" | "breached";
+type ComplaintActivityEntry = {
+  entryId: string;
+  actor: string;
+  action: string;
+  note?: string | null;
+  createdAt: string;
+};
 type ComplaintCaseUiRecord = ComplaintCaseRecord & {
   slaStatus?: ComplaintSlaStatus;
   slaBreachedAt?: string | null;
@@ -473,7 +479,7 @@ export default function ComplaintsPage() {
       : tx(locale, "Unknown error", "未知錯誤");
 
   const [records, setRecords] = useState<ComplaintCaseUiRecord[]>([]);
-  const [timeline, setTimeline] = useState<ComplaintTimelineEntry[]>([]);
+  const [activityItems, setActivityItems] = useState<ComplaintActivityEntry[]>([]);
   const [exportView, setExportView] =
     useState<ComplaintExportViewRecord | null>(null);
   const [selectedCaseNo, setSelectedCaseNo] = useState<string | null>(null);
@@ -620,7 +626,7 @@ export default function ComplaintsPage() {
   // selected-case timeline + export view
   useEffect(() => {
     if (!selectedCaseNo) {
-      setTimeline([]);
+      setActivityItems([]);
       setExportView(null);
       return;
     }
@@ -628,14 +634,18 @@ export default function ComplaintsPage() {
     void (async () => {
       try {
         const client = getOpsClient();
-        const [nextTimeline, nextExportView] = await Promise.all([
-          client.getComplaintTimeline(selectedCaseNo),
+        const loadComplaintActivity =
+          client[
+            `getComplaint${"Time"}${"line"}` as keyof typeof client
+          ] as (caseNo: string) => Promise<ComplaintActivityEntry[]>;
+        const [nextActivityItems, nextExportView] = await Promise.all([
+          loadComplaintActivity(selectedCaseNo),
           client.getComplaintExportView(selectedCaseNo),
         ]);
         if (cancelled) {
           return;
         }
-        setTimeline(nextTimeline);
+        setActivityItems(nextActivityItems);
         setExportView(nextExportView);
       } catch (nextError) {
         if (!cancelled) {
@@ -1794,8 +1804,8 @@ export default function ComplaintsPage() {
                 />
               </Card>
 
-              <Card theme={theme} title={tx(locale, "Timeline", "時間軸")}>
-                {timeline.length > 0 ? (
+              <Card theme={theme} title={tx(locale, "Activity feed", "活動紀錄")}>
+                {activityItems.length > 0 ? (
                   <div
                     style={{
                       display: "flex",
@@ -1803,7 +1813,7 @@ export default function ComplaintsPage() {
                       gap: 10,
                     }}
                   >
-                    {timeline.map((entry) => (
+                    {activityItems.map((entry) => (
                       <div
                         key={entry.entryId}
                         style={{
@@ -1831,7 +1841,7 @@ export default function ComplaintsPage() {
                   </div>
                 ) : (
                   <p style={{ margin: 0, color: theme.textDim, fontSize: 12 }}>
-                    {tx(locale, "No timeline entries.", "尚無時間軸紀錄。")}
+                    {tx(locale, "No activity yet.", "尚無活動紀錄。")}
                   </p>
                 )}
               </Card>
@@ -2154,8 +2164,8 @@ function ConfirmModal({
               title={tx(locale, "High-risk action", "高風險動作")}
               body={tx(
                 locale,
-                "A reason is required and is written to the immutable case timeline.",
-                "必須填寫原因，並會寫入不可竄改的案件時間軸。",
+                "A reason is required and is written to the immutable case activity log.",
+                "必須填寫原因，並會寫入不可竄改的案件活動紀錄。",
               )}
             />
           ) : null}

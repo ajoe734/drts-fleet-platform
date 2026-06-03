@@ -34,8 +34,8 @@ export function platformAdminReconciliationLink(
   if (issueId) {
     return {
       targetApp: "platform-admin",
-      route: "/payments",
-      resourceType: "reconciliation_issue",
+      route: `/payments/reconciliation/${encodeURIComponent(issueId)}`,
+      resourceType: "reconciliation",
       resourceId: issueId,
       openMode: "new_tab",
       label,
