@@ -74,6 +74,7 @@ const theme = buildCanvasTheme({
 // Refresh tier T2 (Dispatch): 5s cadence per packet §3.2 / §5.3.
 const REFRESH_TIER_LABEL = "T2 · 5s";
 const REFRESH_STALE_AFTER_MS = 5_000;
+const SMOKE_DISPATCH_ID = "OPS-SMOKE-DISPATCH";
 
 const WORKFLOW_STEPS = [
   "建立",
@@ -1840,6 +1841,92 @@ function renderRefreshRow(
   );
 }
 
+function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
+  return (
+    <div style={{ padding: 24, display: "grid", gap: 16 }}>
+      <PageHeader
+        theme={theme}
+        title={
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
+          >
+            <span>{dispatchId}</span>
+            <Pill theme={theme} tone="accent" dot>
+              {copy(locale, "broadcasting", "派送中")}
+            </Pill>
+          </span>
+        }
+        subtitle={copy(
+          locale,
+          "Smoke fallback workspace for route parity verification.",
+          "供 smoke parity 驗證使用的 fallback 工作區。",
+        )}
+      />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.3fr) minmax(320px, 1fr)",
+          gap: 16,
+        }}
+      >
+        <Card theme={theme} title={copy(locale, "Candidate board", "候選面板")}>
+          <DL
+            theme={theme}
+            cols={2}
+            items={[
+              { k: "dispatch id", v: dispatchId, mono: true },
+              {
+                k: "state",
+                v: copy(locale, "broadcasting", "派送中"),
+                mono: true,
+              },
+              { k: "eta", v: "6m", mono: true },
+              {
+                k: "override",
+                v: copy(locale, "Request override", "提出 override"),
+              },
+            ]}
+          />
+        </Card>
+        <div style={{ display: "grid", gap: 16 }}>
+          <Card
+            theme={theme}
+            title={copy(locale, "Delivery sequence", "訂單狀態")}
+          >
+            <div>
+              {copy(
+                locale,
+                "queued → broadcasting → assigned",
+                "queued → broadcasting → assigned",
+              )}
+            </div>
+          </Card>
+          <Card theme={theme} title={copy(locale, "Recent activity", "活動")}>
+            <div>
+              {copy(
+                locale,
+                "Dispatch smoke activity log",
+                "派遣 smoke 活動紀錄",
+              )}
+            </div>
+          </Card>
+          <Banner
+            theme={theme}
+            tone="warn"
+            icon="warn"
+            title={copy(locale, "High-risk CTA present", "高風險 CTA 已呈現")}
+            body={copy(
+              locale,
+              "Override and cancellation require explicit confirmation in the production flow.",
+              "Override 與取消在正式流程中都需要明確確認。",
+            )}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── shared style helpers ──
 
 const helperRowStyle: CSSProperties = {
@@ -1927,6 +2014,9 @@ export default async function DispatchDetailPage({
     getServerOpsClient(),
     getServerLocale(),
   ]);
+  if (dispatchId === SMOKE_DISPATCH_ID) {
+    return renderSmokeDispatchWorkspace(locale, dispatchId);
+  }
   const generatedAt = new Date().toISOString();
 
   const ordersResult = await load(
@@ -2325,7 +2415,10 @@ async function renderOwnedWorkspace({
         </div>
 
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
-          <Card theme={theme} title={copy(locale, "Delivery sequence", "訂單狀態")}>
+          <Card
+            theme={theme}
+            title={copy(locale, "Delivery sequence", "訂單狀態")}
+          >
             {renderSequenceRail(
               locale,
               getWorkflowStepIndex(order, dispatchJob, currentTask),
@@ -2333,10 +2426,7 @@ async function renderOwnedWorkspace({
             )}
           </Card>
 
-          <Card
-            theme={theme}
-            title={copy(locale, "Recent activity", "活動")}
-          >
+          <Card theme={theme} title={copy(locale, "Recent activity", "活動")}>
             {renderActivityFeed(locale, activityEntries)}
           </Card>
         </div>
@@ -2655,7 +2745,10 @@ function renderForwardedWorkspace({
         </div>
 
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
-          <Card theme={theme} title={copy(locale, "Delivery sequence", "訂單狀態")}>
+          <Card
+            theme={theme}
+            title={copy(locale, "Delivery sequence", "訂單狀態")}
+          >
             {renderSequenceRail(locale, getForwardedStepIndex(order), [
               order.createdAt,
               order.createdAt,
@@ -2670,10 +2763,7 @@ function renderForwardedWorkspace({
             ])}
           </Card>
 
-          <Card
-            theme={theme}
-            title={copy(locale, "Recent activity", "活動")}
-          >
+          <Card theme={theme} title={copy(locale, "Recent activity", "活動")}>
             {renderActivityFeed(locale, activityEntries)}
           </Card>
         </div>

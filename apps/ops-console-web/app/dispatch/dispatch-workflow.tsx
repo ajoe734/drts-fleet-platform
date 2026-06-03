@@ -21,16 +21,14 @@ import type {
   OwnedOrderRecord,
 } from "@drts/contracts";
 import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
-import {
-  CanvasActivityFeed,
-  CanvasEmptyPanel,
-} from "@/lib/canvas-workflow";
+import { CanvasActivityFeed, CanvasEmptyPanel } from "@/lib/canvas-workflow";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import {
   AuthorityBadge,
   DetailMetadataGrid,
+  buildCanvasTheme,
   WorkflowPanel,
   WorkflowSplitLayout,
 } from "@drts/ui-web";
@@ -118,6 +116,12 @@ const TERMINAL_ORDER_STATUSES = new Set<OwnedOrderRecord["status"]>([
   "completed",
   "cancelled",
 ]);
+
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
 
 function buildDispatchTraceSyncKey(
   order: OwnedOrderRecord | null,

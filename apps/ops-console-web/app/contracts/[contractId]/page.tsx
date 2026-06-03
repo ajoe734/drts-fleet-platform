@@ -110,7 +110,7 @@ export default async function ContractDetailPage({
   }
 
   const locale = await getServerLocale();
-  const client = getServerOpsClient();
+  const client = await getServerOpsClient();
   const list = await client.listContracts().catch(() => []);
   const contract =
     list.find((entry) => entry.contractId === contractId) ??
@@ -121,9 +121,15 @@ export default async function ContractDetailPage({
       <PageHeader
         theme={theme}
         title={
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+          <span
+            style={{ display: "inline-flex", alignItems: "center", gap: 10 }}
+          >
             <span>{contract.contractId}</span>
-            <Pill theme={theme} tone={contract.status === "active" ? "success" : "warn"} dot>
+            <Pill
+              theme={theme}
+              tone={contract.status === "active" ? "success" : "warn"}
+              dot
+            >
               {formatOpsCodeLabel(locale, contract.status)}
             </Pill>
             <Pill theme={theme} tone="info">
@@ -160,7 +166,11 @@ export default async function ContractDetailPage({
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {["overview", "terms", "history"].map((tab) => (
-          <Pill key={tab} theme={theme} tone={tab === "overview" ? "accent" : "neutral"}>
+          <Pill
+            key={tab}
+            theme={theme}
+            tone={tab === "overview" ? "accent" : "neutral"}
+          >
             {tab}
           </Pill>
         ))}
@@ -170,7 +180,11 @@ export default async function ContractDetailPage({
         theme={theme}
         tone="warn"
         icon="ext"
-        title={copy(locale, "High-risk changes happen outside Ops Console", "高風險變更不在 Ops Console 執行")}
+        title={copy(
+          locale,
+          "High-risk changes happen outside Ops Console",
+          "高風險變更不在 Ops Console 執行",
+        )}
         body={copy(
           locale,
           "Version changes, termination, and rate edits must be performed in Platform Admin with a separate approval trail.",
@@ -186,7 +200,10 @@ export default async function ContractDetailPage({
         }}
       >
         <div style={{ display: "grid", gap: 16 }}>
-          <Card theme={theme} title={copy(locale, "Operational terms", "營運條款")}>
+          <Card
+            theme={theme}
+            title={copy(locale, "Operational terms", "營運條款")}
+          >
             <DL
               theme={theme}
               cols={2}
@@ -195,15 +212,40 @@ export default async function ContractDetailPage({
                 { k: "partner", v: contract.partnerId, mono: true },
                 { k: "vehicle", v: contract.vehicleId, mono: true },
                 { k: "scope", v: contract.serviceScope, mono: true },
-                { k: "effective from", v: formatDateTime(locale, contract.effectiveFrom), mono: true },
-                { k: "effective to", v: formatDateTime(locale, contract.effectiveTo), mono: true },
-                { k: "proof", v: copy(locale, "pickup photo + dropoff receipt", "取車照片 + 送達簽收") },
-                { k: "waiting", v: copy(locale, "5 min free, then surcharge", "免費等候 5 分鐘，之後加價") },
+                {
+                  k: "effective from",
+                  v: formatDateTime(locale, contract.effectiveFrom),
+                  mono: true,
+                },
+                {
+                  k: "effective to",
+                  v: formatDateTime(locale, contract.effectiveTo),
+                  mono: true,
+                },
+                {
+                  k: "proof",
+                  v: copy(
+                    locale,
+                    "pickup photo + dropoff receipt",
+                    "取車照片 + 送達簽收",
+                  ),
+                },
+                {
+                  k: "waiting",
+                  v: copy(
+                    locale,
+                    "5 min free, then surcharge",
+                    "免費等候 5 分鐘，之後加價",
+                  ),
+                },
               ]}
             />
           </Card>
 
-          <Card theme={theme} title={copy(locale, "Version history", "版本紀錄")}>
+          <Card
+            theme={theme}
+            title={copy(locale, "Version history", "版本紀錄")}
+          >
             <CanvasActivityFeed
               theme={theme}
               density="compact"
@@ -213,19 +255,43 @@ export default async function ContractDetailPage({
         </div>
 
         <div style={{ display: "grid", gap: 16 }}>
-          <Card theme={theme} title={copy(locale, "Authority redirect", "權限導向")}>
+          <Card
+            theme={theme}
+            title={copy(locale, "Authority redirect", "權限導向")}
+          >
             <DL
               theme={theme}
               cols={1}
               items={[
-                { k: "mutations", v: copy(locale, "Platform Admin / partners", "Platform Admin / partners") },
-                { k: "ops role", v: copy(locale, "dispatch + revenue awareness only", "僅供派遣與收益感知") },
-                { k: "review lane", v: "ops_finance_reviewer / ops_manager", mono: true },
+                {
+                  k: "mutations",
+                  v: copy(
+                    locale,
+                    "Platform Admin / partners",
+                    "Platform Admin / partners",
+                  ),
+                },
+                {
+                  k: "ops role",
+                  v: copy(
+                    locale,
+                    "dispatch + revenue awareness only",
+                    "僅供派遣與收益感知",
+                  ),
+                },
+                {
+                  k: "review lane",
+                  v: "ops_finance_reviewer / ops_manager",
+                  mono: true,
+                },
               ]}
             />
           </Card>
 
-          <Card theme={theme} title={copy(locale, "Linked surfaces", "關聯介面")}>
+          <Card
+            theme={theme}
+            title={copy(locale, "Linked surfaces", "關聯介面")}
+          >
             <DL
               theme={theme}
               cols={1}

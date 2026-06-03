@@ -1167,12 +1167,12 @@ export default async function DriverDetailPage({
     });
   }
   for (const incident of openDriverIncidents.slice(0, 5)) {
-    timelineItems.push({
+    activityItems.push({
       id: incident.incidentId,
       tone:
         incident.severity === "critical" || incident.severity === "high"
           ? "danger"
-          : "warning",
+          : "warn",
       eyebrow: `${formatOpsCodeLabel(
         locale,
         incident.category,

@@ -1153,7 +1153,7 @@ function renderEmptyState(
     content.tone === "danger"
       ? "danger"
       : content.tone === "warn"
-        ? "warning"
+        ? "warn"
         : content.tone;
   const nextAction = emptyState.nextAction
     ? buildEmptyStateActionContext(
