@@ -1564,7 +1564,7 @@ export default async function VehicleDetailPage({
     vehicleId: vehicle.vehicleId,
   };
   const runtimePageActions = Array.isArray(vehicle.availableActions)
-    ? vehicle.availableActions.map((descriptor) =>
+    ? vehicle.availableActions.map((descriptor: ResourceActionDescriptor) =>
         buildVehicleActionFromDescriptor(
           locale,
           descriptor,
@@ -1578,7 +1578,8 @@ export default async function VehicleDetailPage({
       : [
           refreshPageAction,
           ...runtimePageActions.filter(
-            (action) => action.descriptor.action.toLowerCase() !== "refresh",
+            (action: VehicleAction) =>
+              action.descriptor.action.toLowerCase() !== "refresh",
           ),
         ];
   const driverBindingAction =
