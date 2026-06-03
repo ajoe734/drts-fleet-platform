@@ -11,15 +11,10 @@ const nextConfig: NextConfig = {
     "@drts/ui-tokens",
     "@drts/ui-web",
   ],
-  webpack(config) {
-    config.resolve.alias = {
-      ...(config.resolve.alias ?? {}),
-      "@drts/contracts": path.join(__dirname, "../../packages/contracts/src"),
-      "@drts/ui-tokens": path.join(__dirname, "../../packages/ui-tokens/src"),
-    };
-
-    return config;
-  },
+  // No custom webpack() alias: Next 16 defaults to Turbopack and a webpack-only
+  // config breaks the build. @drts/contracts and @drts/ui-tokens already resolve
+  // from their package `src` exports (see UI-BASELINE-001), so transpilePackages
+  // alone is enough — same as apps/platform-admin-web.
 };
 
 export default nextConfig;
