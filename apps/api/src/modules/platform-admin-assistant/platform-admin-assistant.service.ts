@@ -131,11 +131,11 @@ export class PlatformAdminAssistantService {
     };
     sessionMessages.push(userMessage);
 
-    const providerResponse = await this.assistantProvider.generate({
+    const providerResponse = await this.generateProviderResponse(
       session,
-      message: trimmedMessage,
-      history: sessionMessages.map((message) => this.cloneMessage(message)),
-    });
+      trimmedMessage,
+      sessionMessages,
+    );
 
     const assistantMessage: PlatformAdminAssistantMessageRecord = {
       messageId: `paas_msg_${randomUUID()}`,
@@ -370,6 +370,98 @@ export class PlatformAdminAssistantService {
     }
 
     return resolvedAction;
+  }
+
+  private async generateProviderResponse(
+    session: PlatformAdminAssistantSessionRecord,
+    message: string,
+    history: PlatformAdminAssistantMessageRecord[],
+  ): Promise<PlatformAdminAssistantProviderResponse> {
+    try {
+      return await this.assistantProvider.generate({
+        session,
+        message,
+        history: history.map((entry) => this.cloneMessage(entry)),
+      });
+    } catch (error) {
+      return this.buildDegradedProviderResponse(error);
+    }
+  }
+
+  private buildDegradedProviderResponse(
+    error: unknown,
+  ): PlatformAdminAssistantProviderResponse {
+    const reason = this.classifyProviderFailure(error);
+
+    return {
+      answer:
+        reason === "missing_key"
+          ? "Assistant provider is in degraded mode because no runtime provider key is configured. I can still point you to approved Platform Admin docs and safe follow-up paths."
+          : reason === "quota"
+            ? "Assistant provider is temporarily degraded because the provider quota or rate budget is exhausted. I can still route you to approved docs and manual follow-up guidance."
+            : "Assistant provider is temporarily unavailable. I can still help with approved docs search and safe manual follow-up guidance.",
+      citations: [
+        {
+          title: "Platform Admin assistant runtime plan",
+          section: "§4 Mock Provider Policy",
+          href: "docs/05-ui/platform-admin-llm-assistant-design-development-plan-20260602.md",
+        },
+        {
+          title: "Platform Admin shell questions",
+          section: "§7.3 Shell",
+          href: "docs/05-ui/platform-admin-design-handoff-packet-20260525.md",
+        },
+      ],
+      suggestedPrompts: [
+        "Search approved Platform Admin policy for this workflow.",
+        "List the relevant control-plane routes for this task.",
+        "Explain the safest manual follow-up while the provider is degraded.",
+      ],
+      actionPlan: null,
+    };
+  }
+
+  private classifyProviderFailure(
+    error: unknown,
+  ): "missing_key" | "quota" | "down" {
+    const code =
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      typeof (error as { code?: unknown }).code === "string"
+        ? (error as { code: string }).code.toLowerCase()
+        : "";
+    const message =
+      typeof error === "object" &&
+      error !== null &&
+      "message" in error &&
+      typeof (error as { message?: unknown }).message === "string"
+        ? (error as { message: string }).message.toLowerCase()
+        : "";
+
+    if (
+      code.includes("missing") ||
+      code.includes("no_api_key") ||
+      code.includes("key_missing") ||
+      message.includes("api key") ||
+      message.includes("credential not configured") ||
+      message.includes("missing key")
+    ) {
+      return "missing_key";
+    }
+
+    if (
+      code.includes("quota") ||
+      code.includes("rate_limit") ||
+      code.includes("budget") ||
+      message.includes("quota") ||
+      message.includes("rate limit") ||
+      message.includes("budget")
+    ) {
+      return "quota";
+    }
+
+    return "down";
   }
 
   private deriveSessionTitle(message: string) {
