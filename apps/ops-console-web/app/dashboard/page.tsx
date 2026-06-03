@@ -1103,7 +1103,8 @@ export default async function DashboardPage() {
       createFallbackListEnvelope([] as ComplaintCaseRecord[]),
     ),
     resolveOrFallback(
-      () => client.getListEnvelope<ForwardedOrderRecord>("/api/forwarder/orders"),
+      () =>
+        client.getListEnvelope<ForwardedOrderRecord>("/api/forwarder/orders"),
       createFallbackListEnvelope([] as ForwardedOrderRecord[]),
     ),
   ]);
@@ -1167,7 +1168,8 @@ export default async function DashboardPage() {
   const sortedAdapterDetails = [...observability.adapterDetails].sort(
     (left, right) => {
       const severityDiff =
-        getAdapterSeverityRank(left.status) - getAdapterSeverityRank(right.status);
+        getAdapterSeverityRank(left.status) -
+        getAdapterSeverityRank(right.status);
       if (severityDiff !== 0) {
         return severityDiff;
       }
@@ -1353,8 +1355,7 @@ export default async function DashboardPage() {
           : "success",
     },
     {
-      label:
-        locale === "en" ? "Webhook delivery p95" : "Webhook 投遞 p95",
+      label: locale === "en" ? "Webhook delivery p95" : "Webhook 投遞 p95",
       value:
         observability.webhook.oldestQueuedDeliveryLagMinutes !== null
           ? locale === "en"
@@ -1376,9 +1377,7 @@ export default async function DashboardPage() {
     })),
     {
       label:
-        topAdapter?.credentialStatus &&
-        topAdapter.credentialStatus !== "valid" &&
-        topAdapter.credentialStatus !== "healthy"
+        topAdapter?.credentialStatus && topAdapter.credentialStatus !== "valid"
           ? `${formatOpsCodeLabel(locale, topAdapter.platformCode)} ${
               locale === "en" ? "credential" : "憑證"
             }`
@@ -1393,7 +1392,7 @@ export default async function DashboardPage() {
       tone:
         topAdapter &&
         (topAdapter.credentialStatus !== "valid" ||
-          topAdapter.authStatus !== "healthy")
+          topAdapter.authStatus !== "authenticated")
           ? "danger"
           : "success",
     },

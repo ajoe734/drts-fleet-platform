@@ -64,15 +64,15 @@ const en = {
   "common.dash": "-",
 
   // ── Dashboard ──
-  "dashboard.title": "Dashboard",
+  "dashboard.title": "Operations Overview",
   "dashboard.subtitle":
     "Operational overview — dispatch health, revenue pulse, and exception backlog",
   "dashboard.todayRevenue": "Today's Revenue",
   "dashboard.todayRevenueSub": "{trips} completed trips",
-  "dashboard.queueDepth": "Queue Depth",
+  "dashboard.queueDepth": "Dispatch Queue",
   "dashboard.queueDepthSub": "Avg ETA {eta} min",
   "dashboard.queueDepthSubPending": "ETA pending",
-  "dashboard.activeOrders": "Active Orders",
+  "dashboard.activeOrders": "In-Progress Orders",
   "dashboard.activeOrdersSub": "Realtime + reservation",
   "dashboard.dispatchableVehicles": "Dispatchable Vehicles",
   "dashboard.dispatchableVehiclesSub": "{count} offline",
@@ -1651,14 +1651,14 @@ const zh: Record<keyof typeof en, string> = {
   "common.dash": "—",
 
   // ── Dashboard ──
-  "dashboard.title": "儀表板",
+  "dashboard.title": "營運總覽",
   "dashboard.subtitle": "營運概覽 — 派車健康狀態、收益脈搏與例外積壓",
   "dashboard.todayRevenue": "今日收益",
   "dashboard.todayRevenueSub": "{trips} 趟已完成",
-  "dashboard.queueDepth": "排隊深度",
+  "dashboard.queueDepth": "派遣佇列",
   "dashboard.queueDepthSub": "平均 ETA {eta} 分鐘",
   "dashboard.queueDepthSubPending": "ETA 待確認",
-  "dashboard.activeOrders": "活躍訂單",
+  "dashboard.activeOrders": "進行中訂單",
   "dashboard.activeOrdersSub": "即時 + 預約中",
   "dashboard.dispatchableVehicles": "可派車輛",
   "dashboard.dispatchableVehiclesSub": "{count} 輛離線",
