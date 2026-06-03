@@ -282,14 +282,14 @@ function getOwnedAuthorityLabelKey(
 function getOwnedAuthorityTone(
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
-): "danger" | "success" | "warn" | "info" {
+): "danger" | "success" | "warning" | "info" {
   if (
     order.status === "exception_hold" ||
     order.status === "dispatch_timeout" ||
     order.status === "no_supply" ||
     order.status === "delayed_queue"
   ) {
-    return "warn";
+    return "warning";
   }
   if (job?.status === "assigned") {
     return "success";
@@ -1858,7 +1858,7 @@ export function DispatchWorkflow({
           <AuthorityBadge
             category="ops"
             label={t("dispatch.workflow.schema.exceptionDesk")}
-            tone="warn"
+            tone="warning"
           />
         </div>
         <div className="board-schema-grid">
@@ -2171,7 +2171,7 @@ export function DispatchWorkflow({
                     orderNo: selectedOrder.orderNo,
                   })}
                   description={selectedWorkflowHint}
-                  tone={selectedPrimaryGate ? "warn" : "neutral"}
+                  tone={selectedPrimaryGate ? "warning" : "neutral"}
                   meta={
                     <div className="detail-workflow-meta">
                       <AuthorityBadge
@@ -2335,7 +2335,7 @@ export function DispatchWorkflow({
                     selectedPrimaryGate?.state === "blocked"
                       ? "danger"
                       : selectedPrimaryGate
-                        ? "warn"
+                        ? "warning"
                         : "neutral"
                   }
                 >
@@ -2368,7 +2368,7 @@ export function DispatchWorkflow({
                             ...(selectedPrimaryGate.state === "blocked"
                               ? { tone: "danger" as const }
                               : selectedPrimaryGate.state === "review_required"
-                                ? { tone: "warn" as const }
+                                ? { tone: "warning" as const }
                                 : {}),
                           },
                           {
@@ -2586,7 +2586,7 @@ export function DispatchWorkflow({
                     items={[
                       {
                         id: "timeline-events",
-                        label: t("dispatch.workflow.detail.timelineEvents"),
+                        label: t("dispatch.workflow.detail.activityEvents"),
                         value: selectedActivityEntries.length,
                       },
                       {
@@ -2619,7 +2619,7 @@ export function DispatchWorkflow({
                   eyebrow={t("dispatch.workflow.detail.actionPanel")}
                   title={t("dispatch.workflow.detail.actionPanel")}
                   description={t("dispatch.workflow.detail.actionPanelHint")}
-                  tone={selectedPrimaryGate ? "warn" : "info"}
+                  tone={selectedPrimaryGate ? "warning" : "info"}
                   meta={
                     <div className="detail-workflow-meta">
                       <AuthorityBadge
@@ -2660,7 +2660,7 @@ export function DispatchWorkflow({
                         hint: selectedWorkflowHint,
                         ...(selectedOrder.dispatchSemantics ===
                         "forwarder_broadcast"
-                          ? { tone: "warn" as const }
+                          ? { tone: "warning" as const }
                           : {}),
                       },
                       {

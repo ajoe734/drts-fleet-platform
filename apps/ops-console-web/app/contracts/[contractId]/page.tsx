@@ -59,14 +59,19 @@ function buildFallbackContract(contractId: string): VehicleContractRecord {
     contractId,
     vehicleId: "VH-OPS-001",
     partnerId: "partner_ctbc",
+    partnerType: "fleet_operator",
+    contractType: "exclusive",
     serviceScope: "premium",
     operatingAreaId: "taipei",
-    effectiveFrom: now,
-    effectiveTo: new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString(),
+    startAt: now,
+    endAt: new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString(),
     status: "active",
+    lifecycleStatus: "active",
+    approvedBy: null,
+    approvedAt: null,
     createdAt: now,
     updatedAt: now,
-  } as VehicleContractRecord;
+  };
 }
 
 function buildActivityItems(
@@ -214,12 +219,12 @@ export default async function ContractDetailPage({
                 { k: "scope", v: contract.serviceScope, mono: true },
                 {
                   k: "effective from",
-                  v: formatDateTime(locale, contract.effectiveFrom),
+                  v: formatDateTime(locale, contract.startAt),
                   mono: true,
                 },
                 {
                   k: "effective to",
-                  v: formatDateTime(locale, contract.effectiveTo),
+                  v: formatDateTime(locale, contract.endAt),
                   mono: true,
                 },
                 {

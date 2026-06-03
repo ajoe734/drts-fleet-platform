@@ -62,7 +62,7 @@ function buildFallbackRecord(caseNo: string): ComplaintCaseRecord {
   const now = new Date().toISOString();
   return {
     caseNo,
-    category: "driver_conduct",
+    category: "driver_service",
     severity: "high",
     status: "under_investigation",
     description:
@@ -70,6 +70,11 @@ function buildFallbackRecord(caseNo: string): ComplaintCaseRecord {
     caseSource: "ops",
     relatedOrderId: "ord_8175",
     relatedCallId: "call_2014",
+    relatedIncidentId: null,
+    assigneeId: null,
+    reopenCount: 0,
+    resolutionCode: null,
+    closingNote: null,
     createdAt: now,
     updatedAt: now,
     slaDueAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
@@ -158,9 +163,7 @@ export default async function ComplaintDetailPage({
   const loadComplaintActivity = client[
     `getComplaint${"Time"}${"line"}` as keyof typeof client
   ] as
-    | ((
-        id: string,
-      ) => Promise<
+    | ((id: string) => Promise<
         Array<{
           entryId: string;
           action: string;
@@ -190,15 +193,12 @@ export default async function ComplaintDetailPage({
     : buildActivityItems(locale, caseNo, complaint);
 
   const exportView = await client.getComplaintExportView(caseNo).catch(
-    (): ComplaintExportViewRecord =>
-      ({
-        caseNo,
-        exportGeneratedAt: complaint.updatedAt,
-        summary: complaint.description,
-        customerStatement: null,
-        driverStatement: null,
-        attachments: [],
-      }) as ComplaintExportViewRecord,
+    (): ComplaintExportViewRecord => ({
+      complaintCase: complaint,
+      timeline: [],
+      exportGeneratedAt: complaint.updatedAt,
+      readyForAudit: false,
+    }),
   );
 
   return (
@@ -342,11 +342,18 @@ export default async function ComplaintDetailPage({
                 },
                 {
                   k: "summary",
-                  v: exportView.summary ?? complaint.description,
+                  v: complaint.description,
                 },
                 {
-                  k: "attachments",
-                  v: String(exportView.attachments?.length ?? 0),
+                  k: "readyForAudit",
+                  v: exportView.readyForAudit
+                    ? copy(locale, "Yes", "是")
+                    : copy(locale, "No", "否"),
+                  mono: true,
+                },
+                {
+                  k: "timelineEntries",
+                  v: String(exportView.timeline.length),
                   mono: true,
                 },
               ]}

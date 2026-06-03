@@ -1405,7 +1405,7 @@ export default async function IncidentDetailPage({
               ) : null}
             </Card>
 
-            <Card theme={theme} title={t("incidents.timeline", locale)}>
+            <Card theme={theme} title={t("incidents.activity", locale)}>
               {activityItems.length > 0 ? (
                 <CanvasActivityFeed
                   theme={theme}
