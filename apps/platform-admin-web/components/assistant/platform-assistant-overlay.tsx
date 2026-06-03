@@ -1,19 +1,43 @@
 "use client";
 
-import { MessageSquare, Minimize2, RotateCcw, Sparkles, X } from "lucide-react";
+import { usePathname, useSearchParams } from "next/navigation";
+import {
+  Bot,
+  LoaderCircle,
+  MessageSquare,
+  Minimize2,
+  Plus,
+  RotateCcw,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
 import {
   useEffect,
   useId,
   useRef,
   useState,
   type CSSProperties,
+  type FormEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { isPlatformAdminAssistantEnabled } from "@/lib/runtime-config";
+import { getPlatformAdminClient } from "@/lib/platform-admin-client-factory";
+import {
+  getRuntimeApiBaseUrl,
+  isPlatformAdminAssistantEnabled,
+} from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
+import { AssistantMessageList } from "./AssistantMessageList";
+import { buildRouteContext } from "./route-context";
+import type {
+  AssistantActionPlan,
+  AssistantMessageRecord,
+  AssistantRouteContext,
+  AssistantStepStatus,
+} from "./assistant-types";
 
-const PANEL_WIDTH = 368;
-const PANEL_HEIGHT = 520;
+const PANEL_WIDTH = 430;
+const PANEL_HEIGHT = 620;
 const MOBILE_BREAKPOINT = 768;
 const DESKTOP_MARGIN = 24;
 const MOBILE_MARGIN = 12;
@@ -23,6 +47,54 @@ type Position = {
   x: number;
   y: number;
 };
+
+type AssistantApiSession = {
+  sessionId: string;
+  title: string;
+};
+
+type AssistantApiCitation = {
+  title: string;
+  section?: string;
+  href?: string;
+};
+
+type AssistantApiPlanStep = {
+  stepId: string;
+  title: string;
+  status: "pending" | "in_progress" | "completed";
+};
+
+type AssistantApiActionPlan = {
+  planId: string;
+  title: string;
+  summary: string;
+  steps: AssistantApiPlanStep[];
+};
+
+type AssistantApiMessageResponse = {
+  answer: string;
+  citations: AssistantApiCitation[];
+  suggestedPrompts: string[];
+  actionPlan: AssistantApiActionPlan | null;
+};
+
+const DEFAULT_SUGGESTED_PROMPTS = [
+  "Summarize what I should check on this page.",
+  "Draft an operator checklist for the current route.",
+  "What risks should I review before changing platform state?",
+];
+
+function nextMessageId(prefix = "paas-ui") {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return `${prefix}-${globalThis.crypto.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 function clampPosition(position: Position): Position {
   if (typeof window === "undefined") {
@@ -84,10 +156,108 @@ function persistPosition(position: Position) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(position));
 }
 
+function normalizeStepStatus(status: string): AssistantStepStatus {
+  if (
+    status === "pending" ||
+    status === "in_progress" ||
+    status === "completed" ||
+    status === "blocked"
+  ) {
+    return status;
+  }
+
+  return "pending";
+}
+
+function mapActionPlan(
+  plan: AssistantApiActionPlan | null,
+): AssistantActionPlan | null {
+  if (!plan) {
+    return null;
+  }
+
+  return {
+    title: plan.title,
+    summary: plan.summary,
+    riskLevel: "low",
+    steps: plan.steps.map((step) => ({
+      id: step.stepId,
+      title: step.title,
+      status: normalizeStepStatus(step.status),
+    })),
+  };
+}
+
+function formatCitation(citation: AssistantApiCitation) {
+  return [citation.title, citation.section].filter(Boolean).join(" ");
+}
+
+function formatAssistantContent(response: AssistantApiMessageResponse) {
+  const citations = response.citations.map(formatCitation);
+  const suggestedPrompts = response.suggestedPrompts.slice(0, 3);
+  const sections = [response.answer.trim()];
+
+  if (citations.length > 0) {
+    sections.push(
+      `Sources:\n${citations.map((item) => `- ${item}`).join("\n")}`,
+    );
+  }
+
+  if (suggestedPrompts.length > 0) {
+    sections.push(
+      `Suggested next prompts:\n${suggestedPrompts
+        .map((item) => `- ${item}`)
+        .join("\n")}`,
+    );
+  }
+
+  return sections.join("\n\n");
+}
+
+function buildContextPrompt(
+  message: string,
+  routeContext: AssistantRouteContext,
+  locale: "zh" | "en",
+) {
+  const routeTitle = routeContext.title[locale];
+  const warnings =
+    routeContext.warnings.length > 0
+      ? routeContext.warnings
+          .map((warning) => `${warning.code}: ${warning.message[locale]}`)
+          .join("; ")
+      : "none";
+  const entityRefs =
+    routeContext.visibleEntityRefs.length > 0
+      ? routeContext.visibleEntityRefs
+          .map((entity) => `${entity.kind}:${entity.id}`)
+          .join(", ")
+      : "none";
+
+  return [
+    "[Platform Admin route context]",
+    `Path: ${routeContext.pathname}`,
+    `Page: ${routeTitle}`,
+    `Active tab: ${routeContext.activeTab ?? "none"}`,
+    `Refresh tier: ${routeContext.refreshTier}`,
+    `Visible entities: ${entityRefs}`,
+    `Warnings: ${warnings}`,
+    "",
+    "[Operator question]",
+    message,
+  ].join("\n");
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function PlatformAssistantOverlay() {
   const enabled = isPlatformAdminAssistantEnabled();
+  const pathname = usePathname() ?? "/";
+  const searchParams = useSearchParams();
   const { locale } = useTranslation();
   const titleId = useId();
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -95,6 +265,13 @@ export function PlatformAssistantOverlay() {
     x: DESKTOP_MARGIN,
     y: DESKTOP_MARGIN,
   });
+  const [session, setSession] = useState<AssistantApiSession | null>(null);
+  const [messages, setMessages] = useState<AssistantMessageRecord[]>([]);
+  const [draft, setDraft] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [suggestedPrompts, setSuggestedPrompts] = useState(
+    DEFAULT_SUGGESTED_PROMPTS,
+  );
   const dragRef = useRef<{
     pointerId: number;
     startPointerX: number;
@@ -137,6 +314,14 @@ export function PlatformAssistantOverlay() {
     persistPosition(clamped);
   }, [enabled, isMounted, isMobile, position]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    messagesEndRef.current?.scrollIntoView({ block: "end" });
+  }, [isOpen, messages]);
+
   if (!enabled || !isMounted) {
     return null;
   }
@@ -149,16 +334,20 @@ export function PlatformAssistantOverlay() {
           label: "平台助理",
           subtitle: "治理操作輔助",
           heading: "Platform Admin Assistant",
-          status: "僅提供 shell-level 入口；後續再接 LLM 工作流。",
-          bodyTitle: "本次 wave 交付",
-          bullets: [
-            "浮動 launcher 與面板由 feature flag 控制。",
-            "桌面版支援拖曳、位置記憶與視窗邊界限制。",
-            "手機版改為底部抽屜，不覆寫既有 route body。",
-          ],
+          status: "已連接 dev mock gateway，可回答操作問題與產生行動計畫。",
+          inputLabel: "輸入平台助理問題",
+          inputPlaceholder: "問我這頁該怎麼操作、風險在哪、下一步怎麼做...",
+          send: "送出",
+          sending: "分析中",
+          newSession: "新對話",
           minimize: "最小化",
           close: "關閉",
           reset: "重設位置",
+          emptyTitle: "平台助理已就緒",
+          emptyBody:
+            "詢問目前頁面的操作方式、治理風險，或請我產生一份平台操作檢查清單。",
+          thinking: "我正在讀取目前 Platform Admin route context 並整理回答...",
+          sessionTitle: "Platform Admin assistant",
         }
       : {
           launcher: "Open platform assistant",
@@ -167,16 +356,22 @@ export function PlatformAssistantOverlay() {
           subtitle: "governance copilot",
           heading: "Platform Admin Assistant",
           status:
-            "Shell entry only for this wave; LLM workflow wiring follows later.",
-          bodyTitle: "Delivered in this wave",
-          bullets: [
-            "Floating launcher and panel are feature-flagged.",
-            "Desktop supports drag, persistence, and viewport clamping.",
-            "Mobile switches to a bottom sheet without changing route bodies.",
-          ],
+            "Connected to the dev mock gateway for operation Q&A and action planning.",
+          inputLabel: "Ask the platform assistant",
+          inputPlaceholder:
+            "Ask how to operate this page, what risks matter, or what to do next...",
+          send: "Send",
+          sending: "Thinking",
+          newSession: "New chat",
           minimize: "Minimize",
           close: "Close",
           reset: "Reset position",
+          emptyTitle: "Platform Admin assistant is ready",
+          emptyBody:
+            "Ask about the current page, governance risks, or request an operator checklist.",
+          thinking:
+            "Reading the current Platform Admin route context and preparing an answer...",
+          sessionTitle: "Platform Admin assistant",
         };
 
   const panelStyle: CSSProperties = isMobile
@@ -185,7 +380,7 @@ export function PlatformAssistantOverlay() {
         left: MOBILE_MARGIN,
         right: MOBILE_MARGIN,
         bottom: MOBILE_MARGIN,
-        maxHeight: "min(70vh, 560px)",
+        maxHeight: "min(78vh, 640px)",
         width: "auto",
         borderRadius: 20,
       }
@@ -198,10 +393,126 @@ export function PlatformAssistantOverlay() {
         borderRadius: 20,
       };
 
+  function client() {
+    return getPlatformAdminClient(getRuntimeApiBaseUrl());
+  }
+
+  async function ensureSession() {
+    if (session) {
+      return session;
+    }
+
+    const created = await client().post<AssistantApiSession>(
+      "/api/platform-admin/assistant/sessions",
+      {
+        body: { title: copy.sessionTitle },
+      },
+    );
+    setSession(created);
+    return created;
+  }
+
+  async function submitPrompt(prompt: string) {
+    const trimmed = prompt.trim();
+    if (!trimmed || isSending) {
+      return;
+    }
+
+    const userMessage: AssistantMessageRecord = {
+      id: nextMessageId("paas-user"),
+      role: "user",
+      content: trimmed,
+      createdAt: new Date().toISOString(),
+      state: "idle",
+    };
+    const thinkingId = nextMessageId("paas-thinking");
+    const thinkingMessage: AssistantMessageRecord = {
+      id: thinkingId,
+      role: "assistant",
+      content: copy.thinking,
+      createdAt: new Date().toISOString(),
+      state: "thinking",
+    };
+
+    setDraft("");
+    setIsSending(true);
+    setMessages((current) => [...current, userMessage, thinkingMessage]);
+
+    try {
+      const activeSession = await ensureSession();
+      const routeContext = buildRouteContext(
+        pathname,
+        searchParams?.toString() ?? "",
+      );
+      const response = await client().post<AssistantApiMessageResponse>(
+        `/api/platform-admin/assistant/sessions/${encodeURIComponent(
+          activeSession.sessionId,
+        )}/messages`,
+        {
+          body: {
+            message: buildContextPrompt(trimmed, routeContext, locale),
+          },
+        },
+      );
+      const plan = mapActionPlan(response.actionPlan);
+      const assistantMessage: AssistantMessageRecord = {
+        id: nextMessageId("paas-assistant"),
+        role: "assistant",
+        content: formatAssistantContent(response),
+        createdAt: new Date().toISOString(),
+        state: plan ? "planning" : "idle",
+        plan,
+      };
+
+      setSuggestedPrompts(
+        response.suggestedPrompts.length > 0
+          ? response.suggestedPrompts.slice(0, 3)
+          : DEFAULT_SUGGESTED_PROMPTS,
+      );
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === thinkingId ? assistantMessage : message,
+        ),
+      );
+    } catch (error) {
+      const failedMessage: AssistantMessageRecord = {
+        id: nextMessageId("paas-error"),
+        role: "assistant",
+        content: "The assistant could not complete this request.",
+        createdAt: new Date().toISOString(),
+        state: "error",
+        error: {
+          title: "Assistant request failed",
+          message: errorMessage(error),
+          hint: "Check the dev API assistant flag, control-plane proxy, and Cloud Run logs.",
+        },
+      };
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === thinkingId ? failedMessage : message,
+        ),
+      );
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void submitPrompt(draft);
+  }
+
   function handleResetPosition() {
     const nextPosition = getDefaultDesktopPosition();
     setPosition(nextPosition);
     persistPosition(nextPosition);
+  }
+
+  function handleNewSession() {
+    setSession(null);
+    setMessages([]);
+    setDraft("");
+    setSuggestedPrompts(DEFAULT_SUGGESTED_PROMPTS);
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -210,7 +521,10 @@ export function PlatformAssistantOverlay() {
     }
 
     const target = event.target;
-    if (target instanceof Element && target.closest("button")) {
+    if (
+      target instanceof Element &&
+      target.closest("button, textarea, input, a")
+    ) {
       return;
     }
 
@@ -302,6 +616,15 @@ export function PlatformAssistantOverlay() {
               </div>
             </div>
             <div style={headerActionsStyle}>
+              <button
+                type="button"
+                onClick={handleNewSession}
+                aria-label={copy.newSession}
+                title={copy.newSession}
+                style={iconButtonStyle}
+              >
+                <Plus size={15} />
+              </button>
               {!isMobile ? (
                 <button
                   type="button"
@@ -334,16 +657,65 @@ export function PlatformAssistantOverlay() {
             </div>
           </div>
           <div style={panelBodyStyle}>
-            <div style={heroCardStyle}>
-              <span style={heroEyebrowStyle}>{copy.bodyTitle}</span>
-              <ul style={bulletListStyle}>
-                {copy.bullets.map((bullet) => (
-                  <li key={bullet} style={bulletItemStyle}>
-                    {bullet}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <AssistantMessageList
+              messages={messages}
+              emptyTitle={copy.emptyTitle}
+              emptyBody={copy.emptyBody}
+            />
+            <div ref={messagesEndRef} />
+          </div>
+          <div style={promptRailStyle} aria-label="Assistant suggested prompts">
+            {suggestedPrompts.map((prompt) => (
+              <button
+                key={prompt}
+                type="button"
+                onClick={() => void submitPrompt(prompt)}
+                disabled={isSending}
+                style={promptChipStyle}
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+          <form onSubmit={handleSubmit} style={composerStyle}>
+            <textarea
+              aria-label={copy.inputLabel}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault();
+                  void submitPrompt(draft);
+                }
+              }}
+              placeholder={copy.inputPlaceholder}
+              rows={3}
+              disabled={isSending}
+              style={composerTextAreaStyle}
+            />
+            <button
+              type="submit"
+              data-testid="platform-assistant-send"
+              disabled={isSending || draft.trim().length === 0}
+              style={{
+                ...sendButtonStyle,
+                opacity: isSending || draft.trim().length === 0 ? 0.55 : 1,
+              }}
+            >
+              {isSending ? (
+                <LoaderCircle size={15} className="animate-spin" />
+              ) : (
+                <Send size={15} />
+              )}
+              {isSending ? copy.sending : copy.send}
+            </button>
+          </form>
+          <div style={panelFootnoteStyle}>
+            <Bot size={13} />
+            <span>
+              Mock provider in dev. Actions still require governed backend
+              gates.
+            </span>
           </div>
         </section>
       ) : null}
@@ -478,9 +850,9 @@ const iconButtonStyle: CSSProperties = {
   width: 32,
   height: 32,
   borderRadius: 10,
-  border: "1px solid rgba(203, 213, 225, 0.9)",
-  background: "#FFFFFF",
-  color: "#334155",
+  border: "1px solid rgba(203, 213, 225, 0.82)",
+  background: "rgba(255, 255, 255, 0.72)",
+  color: "#0F172A",
   cursor: "pointer",
 };
 
@@ -489,36 +861,82 @@ const panelBodyStyle: CSSProperties = {
   overflow: "auto",
   padding: 16,
   background:
-    "radial-gradient(circle at top right, rgba(199, 210, 254, 0.48), transparent 36%), #F8FAFC",
+    "linear-gradient(180deg, rgba(248, 250, 252, 0.55), rgba(255, 255, 255, 0.98))",
 };
 
-const heroCardStyle: CSSProperties = {
+const promptRailStyle: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  overflowX: "auto",
+  padding: "10px 14px",
+  borderTop: "1px solid rgba(226, 232, 240, 0.92)",
+  background: "rgba(248, 250, 252, 0.92)",
+};
+
+const promptChipStyle: CSSProperties = {
+  flex: "0 0 auto",
+  maxWidth: 260,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  border: "1px solid rgba(199, 210, 254, 0.98)",
+  borderRadius: 999,
+  background: "#EEF2FF",
+  color: "#3730A3",
+  padding: "8px 11px",
+  fontSize: 11.5,
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const composerStyle: CSSProperties = {
   display: "grid",
-  gap: 12,
-  padding: 16,
-  borderRadius: 18,
-  border: "1px solid rgba(199, 210, 254, 0.8)",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gap: 10,
+  alignItems: "end",
+  padding: 14,
+  borderTop: "1px solid rgba(226, 232, 240, 0.92)",
   background: "#FFFFFF",
 };
 
-const heroEyebrowStyle: CSSProperties = {
-  fontSize: 11,
-  fontWeight: 800,
-  letterSpacing: 0.5,
-  textTransform: "uppercase",
-  color: "#4F46E5",
-};
-
-const bulletListStyle: CSSProperties = {
-  margin: 0,
-  paddingLeft: 18,
-  display: "grid",
-  gap: 10,
+const composerTextAreaStyle: CSSProperties = {
+  width: "100%",
+  resize: "none",
+  borderRadius: 14,
+  border: "1px solid rgba(203, 213, 225, 0.95)",
+  padding: "10px 12px",
   color: "#0F172A",
+  background: "#FFFFFF",
   fontSize: 13,
-  lineHeight: 1.5,
+  lineHeight: 1.45,
+  fontFamily:
+    '"Inter", "Noto Sans TC", -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+  boxSizing: "border-box",
 };
 
-const bulletItemStyle: CSSProperties = {
-  paddingLeft: 2,
+const sendButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
+  minWidth: 92,
+  minHeight: 42,
+  borderRadius: 14,
+  border: "1px solid #4F46E5",
+  background: "#4F46E5",
+  color: "#FFFFFF",
+  fontSize: 13,
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const panelFootnoteStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "8px 14px 12px",
+  color: "#64748B",
+  background: "#FFFFFF",
+  fontSize: 11.5,
+  lineHeight: 1.35,
 };

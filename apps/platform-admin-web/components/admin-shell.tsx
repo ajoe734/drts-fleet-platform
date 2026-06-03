@@ -1,6 +1,9 @@
 "use client";
 
-import { PLATFORM_ADMIN_ROUTE_REGISTRY } from "@/components/assistant/route-context";
+import {
+  PLATFORM_ADMIN_ROUTE_REGISTRY,
+  PlatformAdminAssistantProvider,
+} from "@/components/assistant/route-context";
 import { PlatformAssistantOverlay } from "@/components/assistant/platform-assistant-overlay";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -598,16 +601,18 @@ export function AdminShell({ children }: AdminShellProps) {
   const activeRoute = useMemo(() => getActiveRoute(pathname), [pathname]);
 
   return (
-    <div style={shellStyle}>
-      <Sidebar
-        activeRoute={activeRoute}
-        locale={locale}
-        setLocale={setLocale}
-      />
-      <Topbar activeRoute={activeRoute} pathname={pathname} locale={locale} />
-      <main style={mainStyle}>{children}</main>
-      <PlatformAssistantOverlay />
-    </div>
+    <PlatformAdminAssistantProvider>
+      <div style={shellStyle}>
+        <Sidebar
+          activeRoute={activeRoute}
+          locale={locale}
+          setLocale={setLocale}
+        />
+        <Topbar activeRoute={activeRoute} pathname={pathname} locale={locale} />
+        <main style={mainStyle}>{children}</main>
+        <PlatformAssistantOverlay />
+      </div>
+    </PlatformAdminAssistantProvider>
   );
 }
 

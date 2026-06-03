@@ -13,12 +13,117 @@ const routeSmokeTargets = [
   "/feature-flags",
 ] as const;
 
+type AssistantMockState = {
+  lastMessage: string | null;
+};
+
 function isEnabledProject(testInfo: TestInfo) {
   return testInfo.project.name === ENABLED_PROJECT;
 }
 
 function isDisabledProject(testInfo: TestInfo) {
   return testInfo.project.name === DISABLED_PROJECT;
+}
+
+async function mockAssistantApi(page: Page): Promise<AssistantMockState> {
+  const state: AssistantMockState = { lastMessage: null };
+
+  await page.route(
+    "**/control-plane-proxy/platform-admin/assistant/sessions",
+    async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: {
+            session_id: "paas_e2e_session_001",
+            title: "E2E Platform Admin assistant",
+            created_at: "2026-06-03T09:30:00.000Z",
+            updated_at: "2026-06-03T09:30:00.000Z",
+            provider: "mock",
+            actor: {
+              auth_mode: "bootstrap_headers",
+              actor_type: "platform_admin",
+              actor_id: "pa-admin-e2e",
+              realm: "platform",
+              tenant_id: null,
+              role_families: ["platform"],
+              roles: ["superadmin"],
+              scopes: ["foundation:read", "foundation:write"],
+              request_id: "req-e2e-session",
+            },
+            latest_answer_preview: null,
+          },
+          meta: {
+            request_id: "req-e2e-session",
+            timestamp: "2026-06-03T09:30:00.000Z",
+          },
+        }),
+      });
+    },
+  );
+
+  await page.route(
+    "**/control-plane-proxy/platform-admin/assistant/sessions/*/messages",
+    async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+
+      const body = route.request().postDataJSON() as { message?: string };
+      state.lastMessage = body.message ?? null;
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: {
+            answer:
+              "Mock assistant response for pa-admin-e2e: review the current route risks before changing platform state.",
+            citations: [
+              {
+                title: "Platform Admin product routes",
+                section: "§7.3 Current route map",
+              },
+            ],
+            suggested_prompts: [
+              "List the route risks.",
+              "Draft the operator checklist.",
+            ],
+            action_plan: {
+              plan_id: "plan-e2e-001",
+              title: "Mock action plan",
+              summary: "Inspect current state before taking action.",
+              steps: [
+                {
+                  step_id: "validate-context",
+                  title: "Validate current Platform Admin context",
+                  status: "completed",
+                },
+                {
+                  step_id: "inspect-state",
+                  title: "Inspect the impacted governance state",
+                  status: "in_progress",
+                },
+              ],
+            },
+          },
+          meta: {
+            request_id: "req-e2e-message",
+            timestamp: "2026-06-03T09:30:01.000Z",
+          },
+        }),
+      });
+    },
+  );
+
+  return state;
 }
 
 async function gotoShellRoute(
@@ -162,6 +267,42 @@ test.describe("platform admin assistant overlay", () => {
     expect(
       Math.abs((afterReload?.y ?? 0) - (afterDrag?.y ?? 0)),
     ).toBeLessThanOrEqual(4);
+  });
+
+  test("sends a question and renders the assistant response, citations, and action plan", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isEnabledProject(testInfo));
+    test.setTimeout(90_000);
+
+    const mockState = await mockAssistantApi(page);
+
+    await gotoShellRoute(page, "/payments", { assistantEnabled: true });
+
+    await page.getByTestId("platform-assistant-launcher").click();
+    const panel = page.getByTestId("platform-assistant-panel");
+    await expect(panel).toBeVisible();
+
+    await panel
+      .getByLabel(/Ask the platform assistant|輸入平台助理問題/)
+      .fill("What should I check before changing payments?");
+    await panel.getByTestId("platform-assistant-send").click();
+
+    await expect(
+      panel.getByText("Mock assistant response for pa-admin-e2e"),
+    ).toBeVisible();
+    await expect(
+      panel.getByText("Platform Admin product routes"),
+    ).toBeVisible();
+    await expect(panel.getByText("Mock action plan")).toBeVisible();
+    await expect(
+      panel.getByText("Validate current Platform Admin context"),
+    ).toBeVisible();
+    await expect(
+      panel.getByRole("button", { name: "List the route risks." }),
+    ).toBeVisible();
+    expect(mockState.lastMessage).toContain("[Platform Admin route context]");
+    expect(mockState.lastMessage).toContain("Path: /payments");
   });
 
   test("route-context smoke keeps one shell/sidebar across key routes", async ({
