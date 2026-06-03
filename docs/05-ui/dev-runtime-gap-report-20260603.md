@@ -8,13 +8,15 @@
 ## 0. Method & limitations
 
 - **Runtime load test:** every route GET'd on the live dev URL; HTTP status recorded. Dynamic detail routes tested with a placeholder id (a `404` there means "no such record", which is correct behaviour, **not** a bug).
+- **Browser functional audit:** a headless Chromium pass (Playwright) over all 29 list routes on the live dev URL — captured per route: render status, JS `pageerror`/console errors, count of visible interactive elements (buttons/links/inputs/tabs), a tab-switch interaction, and a full-page screenshot (`.artifacts/func-audit/*.png`). **No login is required** — neither web app ships auth middleware and the dev Cloud Run services are deployed `--allow-unauthenticated`; pages render directly (the `401` seen earlier is only the backend API's own data-layer auth, which the pages' `loadWithError` guards tolerate).
 - **Code/parity audit:** each route's `page.tsx` on `dev` compared against the canvas authority (`docs/05-ui/drts-design-canvas/*`) and the 2026-06-02 body-parity audits.
-- **Limitation — feature-level interaction NOT runtime-tested:** both consoles are auth-gated (API returns `401` to unauthenticated calls; `/api/health` is `200`). Without a dev login session, individual buttons/forms/flows cannot be driven from here. Feature gaps below are therefore from **code audit**, not click-through. A logged-in Playwright pass is the recommended complement (see §6).
+- **Scope note:** the browser pass is a *functional smoke* (page renders, no JS errors, interactive elements present, tab switch works) — not an exhaustive click-through of every individual action. Per-action assertions (each form submit, each high-risk confirm) remain a deeper Playwright suite (see §6).
 
 ## 1. Executive summary
 
 - **Platform Admin: healthy.** All **18/18** routes return `200`, including all detail routes. No runtime breakage found.
 - **Ops Console: 4 list pages are hard-broken (`500`).** `/revenue`, `/drivers`, `/vehicles`, `/contracts` return HTTP 500 (server render crash) on dev right now. These are the top-priority gaps.
+- **Browser functional smoke (29 routes, headless Chromium, no login):** the 25 working routes all render with interactive controls and **zero JS `pageerror`s**; a tab-switch interaction ran clean (e.g. Platform Admin `/payments` 5 tabs, `/feature-flags` 52 buttons, ops `/callcenter` 22 buttons / 18 inputs). The 4 broken routes render nothing (0 controls). Screenshots: `.artifacts/func-audit/*.png`.
 - **Ops Console parity (from #504) verified landed:** the two previously-404 routes now resolve, callcenter is on Canvas primitives, and the Management/Workflow primitive-mixing is gone from the detail pages (0 residual `Stepper`/`Timeline`/`WorkflowEmptyState` refs).
 - **All four `500`s root-caused (reproduced locally):**
   - `/revenue` — async server component calls the browser client `getOpsClient()` (derefs `window`). One-line fix (use `getServerOpsClient()`); **fixed in PR #506**.
@@ -90,7 +92,7 @@ RSC forbids passing functions across the server→client boundary, so the render
 
 1. **P0 — `/revenue`** `getServerOpsClient()` swap. **Done — PR #506.**
 2. **P0 — `/drivers`, `/vehicles`, `/contracts`** extract each table into a `"use client"` child component so the column render functions no longer cross the server→client boundary (root cause confirmed §4.2). 3 pages, same change.
-3. **P1 — logged-in Playwright pass** over all 21 ops-console + 18 platform-admin routes to exercise feature-level interactions (the part this report could not runtime-test). Note: the existing `tests/e2e/*.spec.ts` suite covers assistant + parity smoke only, not every page/function.
+3. **P1 — deeper Playwright per-action suite.** A headless browser *smoke* over all 29 routes is **done** (this report; no login needed) — all 25 working routes render with interactive elements and zero JS `pageerror`s. What remains is per-action assertions (drive each form submit / high-risk confirm / drawer) and wiring it into `tests/e2e/` (which today covers assistant + parity smoke only).
 4. **P1 — callcenter descriptor-button migration** for interaction parity.
 
 ## 7. Scoreboard
