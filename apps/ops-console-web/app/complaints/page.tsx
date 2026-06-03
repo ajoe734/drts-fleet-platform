@@ -922,22 +922,18 @@ export default function ComplaintsPage() {
       w: 110,
       mono: true,
       r: (row) => (
-        <button
-          type="button"
-          onClick={() => setSelectedCaseNo(row.caseNo)}
+        <Link
+          href={`/complaints/${encodeURIComponent(row.caseNo)}`}
           style={{
-            background: "transparent",
-            border: "none",
-            padding: 0,
-            cursor: "pointer",
             color: theme.accent,
             fontWeight: 600,
             fontFamily: theme.monoFamily,
             fontSize: 11.5,
+            textDecoration: "none",
           }}
         >
           {row.caseNo}
-        </button>
+        </Link>
       ),
     },
     {

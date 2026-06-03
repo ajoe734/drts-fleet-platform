@@ -2490,7 +2490,7 @@ export default function CallcenterPage() {
                               currentLocale === "en"
                                 ? `Complaint ${result.complaintCase.caseNo} created from ${selectedSession.callId}.`
                                 : `已從 ${selectedSession.callId} 建立客訴 ${result.complaintCase.caseNo}。`,
-                            href: `/complaints?caseNo=${encodeURIComponent(result.complaintCase.caseNo)}`,
+                            href: `/complaints/${encodeURIComponent(result.complaintCase.caseNo)}`,
                             label:
                               currentLocale === "en"
                                 ? "Open complaint queue"
@@ -2498,7 +2498,7 @@ export default function CallcenterPage() {
                           });
                           await loadData(selectedSession.callId);
                           router.push(
-                            `/complaints?caseNo=${encodeURIComponent(result.complaintCase.caseNo)}`,
+                            `/complaints/${encodeURIComponent(result.complaintCase.caseNo)}`,
                           );
                         },
                       );

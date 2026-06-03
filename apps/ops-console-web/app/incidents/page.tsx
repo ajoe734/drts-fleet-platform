@@ -1012,7 +1012,7 @@ export default function IncidentsPage() {
                       k: "COMPLAINT",
                       v: selectedIncident.relatedComplaintCaseNo ? (
                         <Link
-                          href={`/complaints?caseNo=${encodeURIComponent(selectedIncident.relatedComplaintCaseNo)}`}
+                          href={`/complaints/${encodeURIComponent(selectedIncident.relatedComplaintCaseNo)}`}
                           style={inlineLinkStyle(theme)}
                         >
                           {selectedIncident.relatedComplaintCaseNo}
@@ -1152,7 +1152,7 @@ export default function IncidentsPage() {
                           ) : null}
                           {selectedIncident.relatedComplaintCaseNo ? (
                             <Link
-                              href={`/complaints?caseNo=${encodeURIComponent(selectedIncident.relatedComplaintCaseNo)}`}
+                              href={`/complaints/${encodeURIComponent(selectedIncident.relatedComplaintCaseNo)}`}
                               style={inlineLinkStyle(theme)}
                             >
                               {getOpsLabel(locale, "complaint")}
