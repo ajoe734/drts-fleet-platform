@@ -28,12 +28,19 @@ import {
 } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
 import { AssistantMessageList } from "./AssistantMessageList";
-import { buildRouteContext } from "./route-context";
+import {
+  buildRouteContext,
+  usePlatformAdminAssistantRouteContext,
+} from "./route-context";
 import type {
   AssistantActionPlan,
+  AssistantFormSummary,
   AssistantMessageRecord,
+  AssistantPageActionSummary,
   AssistantRouteContext,
   AssistantStepStatus,
+  AssistantTableSummary,
+  AssistantEntityRef,
 } from "./assistant-types";
 
 const PANEL_WIDTH = 430;
@@ -217,6 +224,12 @@ function formatAssistantContent(response: AssistantApiMessageResponse) {
 function buildContextPrompt(
   message: string,
   routeContext: AssistantRouteContext,
+  pageContext: {
+    visibleTables?: AssistantTableSummary[];
+    selectedRecords?: AssistantEntityRef[];
+    availableActions?: AssistantPageActionSummary[];
+    forms?: AssistantFormSummary[];
+  },
   locale: "zh" | "en",
 ) {
   const routeTitle = routeContext.title[locale];
@@ -232,6 +245,84 @@ function buildContextPrompt(
           .map((entity) => `${entity.kind}:${entity.id}`)
           .join(", ")
       : "none";
+  const visibleTables =
+    pageContext.visibleTables && pageContext.visibleTables.length > 0
+      ? pageContext.visibleTables
+          .map((table) => {
+            const selectedRows =
+              table.selectedRowIds && table.selectedRowIds.length > 0
+                ? ` selected=${table.selectedRowIds.join(", ")}`
+                : "";
+            const actions =
+              table.availableActions && table.availableActions.length > 0
+                ? ` actions=${table.availableActions
+                    .map((action) => action.actionId)
+                    .join(", ")}`
+                : "";
+            return `- ${table.tableId} (${table.title}): rows=${table.visibleRowCount}; visible=${table.visibleRowIds.join(", ") || "none"}${selectedRows}${actions}`;
+          })
+          .join("\n")
+      : "- none";
+  const selectedRecords =
+    pageContext.selectedRecords && pageContext.selectedRecords.length > 0
+      ? pageContext.selectedRecords
+          .map((record) => `${record.kind}:${record.id}`)
+          .join(", ")
+      : "none";
+  const availableActions =
+    pageContext.availableActions && pageContext.availableActions.length > 0
+      ? pageContext.availableActions
+          .map(
+            (action) =>
+              `${action.actionId}${action.riskLevel ? `(${action.riskLevel})` : ""}${action.disabled ? "[disabled]" : ""}`,
+          )
+          .join(", ")
+      : "none";
+  const forms =
+    pageContext.forms && pageContext.forms.length > 0
+      ? pageContext.forms
+          .map((form) => {
+            const fields =
+              form.fields.length > 0
+                ? form.fields
+                    .map((field) => {
+                      const parts = [
+                        field.fieldId,
+                        field.valueSummary === null ||
+                        typeof field.valueSummary === "undefined"
+                          ? "empty"
+                          : JSON.stringify(field.valueSummary),
+                      ];
+                      if (field.required) {
+                        parts.push("required");
+                      }
+                      if (field.dirty) {
+                        parts.push("dirty");
+                      }
+                      return parts.join("=");
+                    })
+                    .join("; ")
+                : "none";
+            const validationErrors =
+              form.validationErrors.length > 0
+                ? form.validationErrors
+                    .map((error) =>
+                      error.fieldId
+                        ? `${error.fieldId}:${error.code}:${error.message}`
+                        : `${error.code}:${error.message}`,
+                    )
+                    .join("; ")
+                : "none";
+            const actions =
+              form.availableActions && form.availableActions.length > 0
+                ? form.availableActions
+                    .map((action) => action.actionId)
+                    .join(", ")
+                : "none";
+            return `- ${form.formId} (${form.title}): dirty=${form.dirty ? "yes" : "no"}; fields=${fields}; validationErrors=${validationErrors}; actions=${actions}`;
+          })
+          .join("\n")
+      : "- none";
 
   return [
     "[Platform Admin route context]",
@@ -241,6 +332,12 @@ function buildContextPrompt(
     `Refresh tier: ${routeContext.refreshTier}`,
     `Visible entities: ${entityRefs}`,
     `Warnings: ${warnings}`,
+    "",
+    "[Platform Admin page context]",
+    `Visible tables:\n${visibleTables}`,
+    `Selected records: ${selectedRecords}`,
+    `Available actions: ${availableActions}`,
+    `Forms:\n${forms}`,
     "",
     "[Operator question]",
     message,
@@ -256,6 +353,7 @@ export function PlatformAssistantOverlay() {
   const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
   const { locale } = useTranslation();
+  const { pageBridge } = usePlatformAdminAssistantRouteContext();
   const titleId = useId();
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const [isMounted, setIsMounted] = useState(false);
@@ -440,9 +538,11 @@ export function PlatformAssistantOverlay() {
 
     try {
       const activeSession = await ensureSession();
+      const pageContext = pageBridge?.contextSnapshot;
       const routeContext = buildRouteContext(
         pathname,
         searchParams?.toString() ?? "",
+        pageContext,
       );
       const response = await client().post<AssistantApiMessageResponse>(
         `/api/platform-admin/assistant/sessions/${encodeURIComponent(
@@ -450,7 +550,12 @@ export function PlatformAssistantOverlay() {
         )}/messages`,
         {
           body: {
-            message: buildContextPrompt(trimmed, routeContext, locale),
+            message: buildContextPrompt(
+              trimmed,
+              routeContext,
+              pageContext ?? {},
+              locale,
+            ),
           },
         },
       );
