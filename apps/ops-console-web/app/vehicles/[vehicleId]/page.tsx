@@ -25,14 +25,17 @@ import {
   CanvasBanner as Banner,
   CanvasCard as Card,
   CanvasDL as DL,
+  CanvasEmptyState,
   CanvasIcon,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasTable as Table,
+  CanvasTimeline,
   buildCanvasTheme,
   type CanvasTableColumn,
   type CanvasTheme,
   type CanvasTone,
+  type CanvasTimelineItem,
 } from "@drts/ui-web";
 
 type VehicleDetailPageProps = {
@@ -122,17 +125,6 @@ type VehicleActionContext = {
   vehicleId: string;
 };
 
-type CanvasActivityRailItem = {
-  id: string;
-  title: ReactNode;
-  detail?: ReactNode;
-  timestamp?: ReactNode;
-  tone?: CanvasTone;
-  eyebrow?: string;
-  supportingContent?: ReactNode;
-  actions?: ReactNode;
-};
-
 const theme = buildCanvasTheme({
   surface: "ops",
   dark: true,
@@ -175,14 +167,6 @@ const actionRowStyle: CSSProperties = {
 
 const monoStyle: CSSProperties = {
   fontFamily: theme.monoFamily,
-};
-
-const emptyStateRootStyle: CSSProperties = {
-  display: "grid",
-  justifyItems: "center",
-  gap: "12px",
-  padding: "24px 16px",
-  textAlign: "center",
 };
 
 function copy(locale: Locale, en: string, zh: string) {
@@ -530,7 +514,7 @@ function renderVehicleAction(action: VehicleAction) {
         key={action.descriptor.action}
         href={href}
         target="_blank"
-        rel="noreferrer"
+        rel="noopener noreferrer"
         title={title}
         style={style}
       >
@@ -552,256 +536,6 @@ function renderVehicleAction(action: VehicleAction) {
   );
 }
 
-function getToneStyle(tone: CanvasTone) {
-  switch (tone) {
-    case "success":
-      return {
-        border: theme.successBorder,
-        background: theme.successBg,
-        foreground: theme.success,
-      };
-    case "warn":
-      return {
-        border: theme.warnBorder,
-        background: theme.warnBg,
-        foreground: theme.warn,
-      };
-    case "danger":
-      return {
-        border: theme.dangerBorder,
-        background: theme.dangerBg,
-        foreground: theme.danger,
-      };
-    case "info":
-      return {
-        border: theme.infoBorder,
-        background: theme.infoBg,
-        foreground: theme.info,
-      };
-    case "accent":
-      return {
-        border: theme.accentBorder,
-        background: theme.accentBg,
-        foreground: theme.accent,
-      };
-    case "neutral":
-    default:
-      return {
-        border: theme.border,
-        background: theme.surfaceHi,
-        foreground: theme.textMuted,
-      };
-  }
-}
-
-function CanvasEmptyState({
-  title,
-  description,
-  tone,
-  icon,
-  actions,
-  toneStyle = getToneStyle(tone),
-}: {
-  title: ReactNode;
-  description: ReactNode;
-  tone: CanvasTone;
-  icon?: ReactNode;
-  actions?: ReactNode;
-  toneStyle?: ReturnType<typeof getToneStyle>;
-}) {
-  return (
-    <div
-      style={{
-        ...emptyStateRootStyle,
-        border: `1px dashed ${toneStyle.border}`,
-        borderRadius: "14px",
-        background: toneStyle.background,
-      }}
-    >
-      <div
-        style={{
-          width: "40px",
-          height: "40px",
-          borderRadius: "999px",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: theme.surface,
-          color: toneStyle.foreground,
-          border: `1px solid ${toneStyle.border}`,
-        }}
-      >
-        {icon}
-      </div>
-      <div style={{ display: "grid", gap: "6px", maxWidth: "56ch" }}>
-        <div
-          style={{
-            color: theme.text,
-            fontSize: "14px",
-            fontWeight: 600,
-          }}
-        >
-          {title}
-        </div>
-        <div
-          style={{
-            color: theme.textMuted,
-            fontSize: "12.5px",
-            lineHeight: 1.6,
-          }}
-        >
-          {description}
-        </div>
-      </div>
-      {actions ? <div>{actions}</div> : null}
-    </div>
-  );
-}
-
-function CanvasActivityRail({
-  items,
-  emptyState,
-}: {
-  items: CanvasActivityRailItem[];
-  emptyState?: ReactNode;
-}) {
-  if (items.length === 0) {
-    return emptyState ?? null;
-  }
-
-  return (
-    <ol
-      style={{
-        listStyle: "none",
-        margin: 0,
-        padding: "16px",
-        display: "grid",
-        gap: "14px",
-      }}
-    >
-      {items.map((item, index) => {
-        const toneStyle = getToneStyle(item.tone ?? "accent");
-        return (
-          <li
-            key={item.id}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "20px minmax(0, 1fr)",
-              gap: "12px",
-              alignItems: "start",
-            }}
-          >
-            <div
-              style={{
-                display: "grid",
-                justifyItems: "center",
-                gap: "8px",
-              }}
-            >
-              <span
-                aria-hidden
-                style={{
-                  width: "18px",
-                  height: "18px",
-                  borderRadius: "999px",
-                  background: toneStyle.foreground,
-                  color: "#ffffff",
-                  boxShadow: `0 0 0 4px ${toneStyle.background}`,
-                  marginTop: "2px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "10px",
-                  fontWeight: 700,
-                  fontVariantNumeric: "tabular-nums",
-                }}
-              >
-                {index + 1}
-              </span>
-              {index < items.length - 1 ? (
-                <span
-                  aria-hidden
-                  style={{
-                    width: "2px",
-                    minHeight: "40px",
-                    background: toneStyle.border,
-                  }}
-                />
-              ) : null}
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gap: "6px",
-                paddingBottom: index < items.length - 1 ? "4px" : 0,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  gap: "10px",
-                  alignItems: "baseline",
-                  justifyContent: "space-between",
-                  flexWrap: "wrap",
-                }}
-              >
-                <div style={{ display: "grid", gap: "4px" }}>
-                  {item.eyebrow ? (
-                    <span
-                      style={{
-                        color: toneStyle.foreground,
-                        fontSize: "11px",
-                        fontWeight: 600,
-                        letterSpacing: "0.02em",
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      {item.eyebrow}
-                    </span>
-                  ) : null}
-                  <span style={{ color: theme.text, fontSize: "13px" }}>
-                    {item.title}
-                  </span>
-                </div>
-                {item.timestamp ? (
-                  <span
-                    style={{
-                      color: theme.textDim,
-                      fontSize: "11px",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {item.timestamp}
-                  </span>
-                ) : null}
-              </div>
-              {item.detail ? (
-                <div
-                  style={{
-                    color: theme.textMuted,
-                    fontSize: "12px",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {item.detail}
-                </div>
-              ) : null}
-              {item.supportingContent ? (
-                <div>{item.supportingContent}</div>
-              ) : null}
-              {item.actions ? (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-                  {item.actions}
-                </div>
-              ) : null}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
 function renderEmptyState(
   locale: Locale,
   reason: EmptyReason,
@@ -809,9 +543,9 @@ function renderEmptyState(
   action?: VehicleAction,
 ) {
   const tone = emptyTone(reason);
-  const toneStyle = getToneStyle(tone);
   return (
     <CanvasEmptyState
+      theme={theme}
       title={
         <span
           style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}
@@ -828,7 +562,6 @@ function renderEmptyState(
       tone={tone}
       icon={<CanvasIcon name={emptyIcon(reason)} size={22} />}
       actions={action ? <div>{renderVehicleAction(action)}</div> : undefined}
-      toneStyle={toneStyle}
     />
   );
 }
@@ -1198,7 +931,7 @@ function isContractExpiringSoon(contract: VehicleContractRecord) {
 function buildAuditActivityItems(
   locale: Locale,
   entries: AuditLogRecord[],
-): CanvasActivityRailItem[] {
+): CanvasTimelineItem[] {
   return entries.map((entry) => ({
     id: entry.auditId,
     title: formatOpsCodeLabel(locale, entry.actionName),
@@ -2240,10 +1973,12 @@ export default async function VehicleDetailPage({
                   auditEmptyAction,
                 )
               ) : auditActivityItems.length > 0 ? (
-                <CanvasActivityRail
+                <CanvasTimeline
+                  theme={theme}
                   items={auditActivityItems}
                   emptyState={
                     <CanvasEmptyState
+                      theme={theme}
                       title={copy(
                         locale,
                         "No audit events recorded for this vehicle yet.",

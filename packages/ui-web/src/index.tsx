@@ -11,6 +11,7 @@ export {
   CanvasIcon,
   Card as CanvasCard,
   DL as CanvasDL,
+  EmptyState as CanvasEmptyState,
   Field as CanvasField,
   Input as CanvasInput,
   KPI as CanvasKPI,
@@ -19,6 +20,7 @@ export {
   Select as CanvasSelect,
   Shell as CanvasShell,
   Table as CanvasTable,
+  Timeline as CanvasTimeline,
   TrafficLights as CanvasTrafficLights,
   WindowChrome as CanvasWindowChrome,
 } from "./canvas-primitives";
@@ -28,6 +30,7 @@ export type {
   CardProps as CanvasCardProps,
   DLItem as CanvasDLItem,
   DLProps as CanvasDLProps,
+  EmptyStateProps as CanvasEmptyStateProps,
   FieldProps as CanvasFieldProps,
   InputProps as CanvasInputProps,
   KPIProps as CanvasKPIProps,
@@ -38,6 +41,8 @@ export type {
   ShellProps as CanvasShellProps,
   TableColumn as CanvasTableColumn,
   TableProps as CanvasTableProps,
+  TimelineItem as CanvasTimelineItem,
+  TimelineProps as CanvasTimelineProps,
   WindowChromeProps as CanvasWindowChromeProps,
 } from "./canvas-primitives";
 export {
