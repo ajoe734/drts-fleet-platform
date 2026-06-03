@@ -44,11 +44,10 @@ export class LlmGatewayService {
         degraded: attempt.degraded,
         degradedReason: attempt.degradedReason,
       };
-    } catch (error) {
+    } catch {
       return this.chatWithFallback(
         request,
         attempt.degradedReason ?? "provider_error",
-        error,
       );
     }
   }
