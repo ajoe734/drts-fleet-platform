@@ -681,6 +681,20 @@ export interface BtnProps {
   style?: CSSProperties;
 }
 
+export interface ActionButtonProps {
+  theme?: CanvasTheme;
+  riskLevel?: "low" | "medium" | "high";
+  requiresReason?: boolean;
+  icon?: CanvasIconName | ReactNode;
+  children: ReactNode;
+  disabled?: boolean;
+  onClick?: () => void;
+  href?: string;
+  target?: string;
+  rel?: string;
+  style?: CSSProperties;
+}
+
 export function Btn({
   theme: providedTheme,
   variant = "secondary",
@@ -750,6 +764,384 @@ export function Btn({
       {renderIcon(icon, sizing.icon)}
       {children}
     </button>
+  );
+}
+
+export function ActionButton({
+  theme: providedTheme,
+  riskLevel = "low",
+  requiresReason = false,
+  icon,
+  children,
+  disabled = false,
+  onClick,
+  href,
+  target,
+  rel,
+  style,
+}: ActionButtonProps) {
+  const theme = resolveTheme(providedTheme);
+  const styles =
+    riskLevel === "high"
+      ? {
+          bg: theme.dangerBg,
+          fg: theme.danger,
+          bd: theme.dangerBorder,
+          metaBg: theme.danger,
+          metaFg: "#fff",
+        }
+      : riskLevel === "medium"
+        ? {
+            bg: theme.accentBg,
+            fg: theme.accent,
+            bd: theme.accentBorder,
+            metaBg: theme.accent,
+            metaFg: "#fff",
+          }
+        : {
+            bg: theme.surfaceLo,
+            fg: theme.text,
+            bd: theme.border,
+            metaBg: theme.surface,
+            metaFg: theme.textMuted,
+          };
+
+  const content = (
+    <>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 7,
+          minWidth: 0,
+        }}
+      >
+        {renderIcon(icon, 13)}
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+          {children}
+        </span>
+      </span>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "2px 6px",
+            borderRadius: 999,
+            background: styles.metaBg,
+            color: styles.metaFg,
+            textTransform: "uppercase",
+            letterSpacing: ".04em",
+          }}
+        >
+          {riskLevel}
+        </span>
+        {requiresReason ? (
+          <span
+            style={{
+              fontSize: 10.5,
+              color: theme.textDim,
+              fontFamily: theme.monoFamily,
+            }}
+          >
+            reason
+          </span>
+        ) : null}
+      </span>
+    </>
+  );
+
+  const sharedStyle: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    minHeight: 34,
+    minWidth: 0,
+    padding: "8px 10px",
+    borderRadius: 9,
+    border: `1px solid ${styles.bd}`,
+    background: styles.bg,
+    color: styles.fg,
+    fontSize: 12,
+    fontWeight: 600,
+    lineHeight: 1.2,
+    fontFamily: theme.fontFamily,
+    textDecoration: "none",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+    ...style,
+  };
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        target={target}
+        rel={rel}
+        aria-disabled={disabled}
+        style={{
+          ...sharedStyle,
+          pointerEvents: disabled ? "none" : "auto",
+        }}
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      style={sharedStyle}
+    >
+      {content}
+    </button>
+  );
+}
+
+export interface StepperItem {
+  key?: string;
+  label: ReactNode;
+  meta?: ReactNode;
+  status: "complete" | "current" | "upcoming";
+  tone?: CanvasTone;
+}
+
+export interface StepperProps {
+  theme?: CanvasTheme;
+  items: StepperItem[];
+  minWidth?: number;
+  style?: CSSProperties;
+}
+
+export function Stepper({
+  theme: providedTheme,
+  items,
+  minWidth = 96,
+  style,
+}: StepperProps) {
+  const theme = resolveTheme(providedTheme);
+
+  return (
+    <div style={{ overflowX: "auto", ...style }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${items.length}, minmax(${minWidth}px, 1fr))`,
+          gap: 8,
+          minWidth: items.length * minWidth + Math.max(0, items.length - 1) * 8,
+        }}
+      >
+        {items.map((item, index) => {
+          const tone = toneStyles(
+            theme,
+            item.tone ??
+              (item.status === "current"
+                ? "accent"
+                : item.status === "complete"
+                  ? "info"
+                  : "neutral"),
+          );
+          const current = item.status === "current";
+          const complete = item.status === "complete";
+          return (
+            <div
+              key={item.key ?? `step-${index}`}
+              style={{
+                display: "grid",
+                gap: 8,
+                padding: "10px 12px",
+                borderRadius: 8,
+                border: `1px solid ${tone.bd}`,
+                background: tone.bg,
+                minWidth: 0,
+              }}
+            >
+              <span
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 999,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color:
+                    current || complete ? theme.invert : theme.textMuted,
+                  background:
+                    current || complete ? tone.fg : theme.surface,
+                  border: `1px solid ${
+                    current || complete ? "transparent" : theme.border
+                  }`,
+                }}
+              >
+                {index + 1}
+              </span>
+              <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                <strong
+                  style={{
+                    fontSize: 12,
+                    color:
+                      item.status === "upcoming" ? theme.textMuted : theme.text,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {item.label}
+                </strong>
+                {item.meta !== undefined ? (
+                  <span
+                    style={{
+                      fontSize: 10.5,
+                      color: theme.textDim,
+                    }}
+                  >
+                    {item.meta}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export interface TimelineItem {
+  key?: string;
+  title: ReactNode;
+  body?: ReactNode;
+  timestamp?: ReactNode;
+  meta?: ReactNode;
+  tone?: CanvasTone;
+}
+
+export interface TimelineProps {
+  theme?: CanvasTheme;
+  items: TimelineItem[];
+  empty?: ReactNode;
+  style?: CSSProperties;
+}
+
+export function Timeline({
+  theme: providedTheme,
+  items,
+  empty,
+  style,
+}: TimelineProps) {
+  const theme = resolveTheme(providedTheme);
+
+  if (items.length === 0) {
+    return (
+      <div style={{ color: theme.textMuted, fontSize: 12.5, ...style }}>
+        {empty ?? "No activity yet."}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 12, ...style }}>
+      {items.map((item, index) => {
+        const tone = toneStyles(theme, item.tone ?? "info");
+        return (
+          <div
+            key={item.key ?? `timeline-${index}`}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "18px minmax(0, 1fr)",
+              gap: 12,
+              alignItems: "start",
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                justifyItems: "center",
+                gap: 6,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 999,
+                  background: tone.fg,
+                  marginTop: 3,
+                }}
+              />
+              {index < items.length - 1 ? (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: 2,
+                    minHeight: 28,
+                    background: tone.bd,
+                    borderRadius: 999,
+                  }}
+                />
+              ) : null}
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gap: 4,
+                padding: "8px 10px",
+                borderRadius: 8,
+                border: `1px solid ${tone.bd}`,
+                background: tone.bg,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
+                  <strong style={{ fontSize: 12.5, color: theme.text }}>
+                    {item.title}
+                  </strong>
+                  {item.meta !== undefined ? (
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        color: theme.textDim,
+                        fontFamily: theme.monoFamily,
+                      }}
+                    >
+                      {item.meta}
+                    </span>
+                  ) : null}
+                </div>
+                {item.timestamp !== undefined ? (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: theme.textDim,
+                      fontFamily: theme.monoFamily,
+                    }}
+                  >
+                    {item.timestamp}
+                  </span>
+                ) : null}
+              </div>
+              {item.body !== undefined ? (
+                <div style={{ fontSize: 12, color: theme.text }}>{item.body}</div>
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

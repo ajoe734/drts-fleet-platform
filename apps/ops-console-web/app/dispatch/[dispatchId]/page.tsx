@@ -22,14 +22,16 @@ import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import {
+  CanvasActionButton as ActionButton,
   CanvasBanner as Banner,
-  CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasIcon,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
+  CanvasStepper as Stepper,
   CanvasTable as Table,
+  CanvasTimeline as Timeline,
   buildCanvasTheme,
   type CanvasTableColumn,
   type CanvasTone,
@@ -56,7 +58,7 @@ type CandidateRow = Record<string, unknown> & {
   _selected?: boolean;
 };
 
-type TimelineEntry = {
+type ActivityEntry = {
   id: string;
   title: string;
   body: string;
@@ -542,7 +544,7 @@ function getForwardedStepIndex(order: ForwardedOrderRecord) {
   }
 }
 
-function getTimelineTone(value: string) {
+function getActivityTone(value: string) {
   const normalized = value.toLowerCase();
 
   if (
@@ -593,13 +595,13 @@ function readTraceActor(details: Record<string, unknown> | undefined) {
   return null;
 }
 
-function buildFallbackTimeline(
+function buildFallbackActivity(
   locale: Locale,
   order: OwnedOrderRecord,
   job: DispatchJobRecord | undefined,
   task: DriverTaskRecord | null,
 ) {
-  const entries: TimelineEntry[] = [
+  const entries: ActivityEntry[] = [
     {
       id: `${order.orderId}:created`,
       title: locale === "zh" ? "進入 queue" : "Entered queue",
@@ -645,7 +647,7 @@ function buildFallbackTimeline(
           ? `job ${job.dispatchJobId} 目前為 ${formatOpsCodeLabel(locale, job.status)}。`
           : `Job ${job.dispatchJobId} is ${job.status}.`,
       at: job.updatedAt,
-      tone: getTimelineTone(job.status),
+      tone: getActivityTone(job.status),
       actor: "dispatch.scorer",
     });
   }
@@ -804,7 +806,7 @@ function buildFallbackTimeline(
   );
 }
 
-function buildTimelineEntries(
+function buildActivityEntries(
   locale: Locale,
   trace: DispatchTraceLogRecord[],
   order: OwnedOrderRecord,
@@ -812,17 +814,17 @@ function buildTimelineEntries(
   task: DriverTaskRecord | null,
 ) {
   if (trace.length === 0) {
-    return buildFallbackTimeline(locale, order, job, task);
+    return buildFallbackActivity(locale, order, job, task);
   }
 
   return [...trace]
     .map(
-      (entry): TimelineEntry => ({
+      (entry): ActivityEntry => ({
         id: entry.traceId,
         title: formatOpsCodeLabel(locale, entry.eventType),
         body: entry.message,
         at: entry.createdAt,
-        tone: getTimelineTone(entry.eventType),
+        tone: getActivityTone(entry.eventType),
         actor: readTraceActor(entry.details),
       }),
     )
@@ -832,11 +834,11 @@ function buildTimelineEntries(
     );
 }
 
-function buildForwardedTimeline(
+function buildForwardedActivity(
   locale: Locale,
   order: ForwardedOrderRecord,
-): TimelineEntry[] {
-  const entries: TimelineEntry[] = [
+): ActivityEntry[] {
+  const entries: ActivityEntry[] = [
     {
       id: `${order.mirrorOrderId}:received`,
       title: copy(locale, "Mirror received", "鏡像建立"),
@@ -858,7 +860,7 @@ function buildForwardedTimeline(
         `本地鏡像狀態為 ${formatOpsCodeLabel(locale, order.status)}；最後外部狀態 ${order.lastNativeStatus ?? "未知"}。`,
       ),
       at: order.updatedAt,
-      tone: getTimelineTone(order.status),
+      tone: getActivityTone(order.status),
       actor: "forwarder.sync",
     },
   ];
@@ -969,363 +971,136 @@ function buildOverrideSummary(locale: Locale, order: OwnedOrderRecord) {
   };
 }
 
-function renderStepper(
+function renderStateRail(
   locale: Locale,
   currentIndex: number,
   timestampByStep: (string | null)[],
 ) {
   return (
-    <div style={{ overflowX: "auto" }}>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(6, minmax(96px, 1fr))",
-          gap: "8px",
-          minWidth: "640px",
-        }}
-      >
-        {WORKFLOW_STEPS.map((step, index) => {
-          const complete = index < currentIndex;
-          const current = index === currentIndex;
-          const idle = index > currentIndex;
-          const borderColor = current
-            ? theme.accent
-            : complete
-              ? theme.info
-              : theme.border;
-          const background = current
-            ? theme.accentBg
-            : complete
-              ? theme.infoBg
-              : theme.surfaceLo;
-
-          return (
-            <div
-              key={step}
-              style={{
-                display: "grid",
-                gap: "8px",
-                padding: "10px",
-                borderRadius: "8px",
-                border: `1px solid ${borderColor}`,
-                background,
-                minWidth: 0,
-              }}
-            >
-              <div
-                style={{
-                  width: "20px",
-                  height: "20px",
-                  borderRadius: "999px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "11px",
-                  fontWeight: 700,
-                  color: current || complete ? theme.invert : theme.textMuted,
-                  background: current
-                    ? theme.accent
-                    : complete
-                      ? theme.info
-                      : theme.surface,
-                  border: `1px solid ${current || complete ? "transparent" : theme.border}`,
-                }}
-              >
-                {index + 1}
-              </div>
-              <div style={{ display: "grid", gap: "3px", minWidth: 0 }}>
-                <strong
-                  style={{
-                    fontSize: "12px",
-                    color: idle ? theme.textMuted : theme.text,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {step}
-                </strong>
-                <span
-                  style={{
-                    fontSize: "10.5px",
-                    color: theme.textDim,
-                  }}
-                >
-                  {timestampByStep[index]
-                    ? formatDateTime(locale, timestampByStep[index])
-                    : idle
-                      ? locale === "zh"
-                        ? "waiting"
-                        : "waiting"
-                      : locale === "zh"
-                        ? "active"
-                        : "active"}
-                </span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+    <Stepper
+      theme={theme}
+      items={WORKFLOW_STEPS.map((step, index) => ({
+        key: step,
+        label: step,
+        status:
+          index < currentIndex
+            ? "complete"
+            : index === currentIndex
+              ? "current"
+              : "upcoming",
+        meta: timestampByStep[index]
+          ? formatDateTime(locale, timestampByStep[index])
+          : index > currentIndex
+            ? "waiting"
+            : "active",
+      }))}
+      minWidth={96}
+    />
   );
 }
 
-function renderTimeline(locale: Locale, entries: TimelineEntry[]) {
-  if (entries.length === 0) {
-    return (
-      <div style={{ color: theme.textMuted, fontSize: "12.5px" }}>
-        {locale === "zh"
-          ? "目前沒有 dispatch activity。"
-          : "No dispatch activity yet."}
-      </div>
-    );
-  }
-
-  const toneStyles = {
-    accent: {
-      dot: theme.accent,
-      rail: theme.accentBorder,
-      bg: theme.accentBg,
-    },
-    info: {
-      dot: theme.info,
-      rail: theme.infoBorder,
-      bg: theme.infoBg,
-    },
-    warn: {
-      dot: theme.warn,
-      rail: theme.warnBorder,
-      bg: theme.warnBg,
-    },
-    danger: {
-      dot: theme.danger,
-      rail: theme.dangerBorder,
-      bg: theme.dangerBg,
-    },
-  } as const;
-
+function renderActivityFeed(locale: Locale, entries: ActivityEntry[]) {
   return (
-    <div style={{ display: "grid", gap: "12px" }}>
-      {entries.map((entry, index) => {
-        const tone = toneStyles[entry.tone];
-        return (
-          <div
-            key={entry.id}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "18px minmax(0, 1fr)",
-              gap: "12px",
-              alignItems: "start",
-            }}
-          >
-            <div
-              style={{
-                display: "grid",
-                justifyItems: "center",
-                gap: "6px",
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  width: "16px",
-                  height: "16px",
-                  borderRadius: "999px",
-                  background: tone.dot,
-                  boxShadow: `0 0 0 4px ${tone.bg}`,
-                  display: "inline-flex",
-                }}
-              />
-              {index < entries.length - 1 ? (
-                <span
-                  aria-hidden="true"
-                  style={{
-                    width: "2px",
-                    minHeight: "34px",
-                    background: tone.rail,
-                  }}
-                />
-              ) : null}
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gap: "4px",
-                paddingBottom: index < entries.length - 1 ? "14px" : 0,
-                borderBottom:
-                  index < entries.length - 1
-                    ? `1px solid ${theme.border}`
-                    : "none",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  justifyContent: "space-between",
-                  gap: "12px",
-                }}
-              >
-                <div style={{ display: "grid", gap: "4px", minWidth: 0 }}>
-                  <strong style={{ fontSize: "13px", color: theme.text }}>
-                    {entry.title}
-                  </strong>
-                  {entry.actor ? (
-                    <span
-                      style={{
-                        fontSize: "10.5px",
-                        color: theme.textDim,
-                        fontFamily: theme.monoFamily,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.04em",
-                      }}
-                    >
-                      {entry.actor}
-                    </span>
-                  ) : null}
-                </div>
-                <span
-                  style={{
-                    fontSize: "11px",
-                    color: theme.textMuted,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {formatDateTime(locale, entry.at)}
-                </span>
-              </div>
-              <div
-                style={{
-                  fontSize: "12.5px",
-                  color: theme.textMuted,
-                  lineHeight: 1.5,
-                }}
-              >
-                {entry.body}
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
+    <Timeline
+      theme={theme}
+      empty={
+        locale === "zh"
+          ? "目前沒有 dispatch activity。"
+          : "No dispatch activity yet."
+      }
+      items={entries.map((entry) => ({
+        key: entry.id,
+        title: entry.title,
+        body: entry.body,
+        timestamp: formatDateTime(locale, entry.at),
+        meta: entry.actor ?? undefined,
+        tone: entry.tone,
+      }))}
+    />
   );
 }
 
 // ── availableActions → CTA (§3.5 authority boundaries, §3.4 confirmation) ──
 
 type ActionVisual = {
-  icon: Parameters<typeof Btn>[0]["icon"];
+  icon: Parameters<typeof CanvasIcon>[0]["name"];
   label: string;
-  variant: "primary" | "secondary";
-  danger: boolean;
 };
 
 function actionVisual(
   action: ResourceActionDescriptor,
   locale: Locale,
 ): ActionVisual {
-  const danger = action.riskLevel === "high";
-  const variant: "primary" | "secondary" =
-    action.riskLevel === "medium" ? "primary" : "secondary";
-
   switch (action.action) {
     case "contact_passenger":
       return {
         icon: "phone",
         label: copy(locale, "Contact rider", "聯絡乘客"),
-        variant: "secondary",
-        danger: false,
       };
     case "assign_candidate":
       return {
         icon: "check",
         label: copy(locale, "Assign #1", "指派候選 #1"),
-        variant: "primary",
-        danger: false,
       };
     case "release_driver":
       return {
         icon: "switchboard",
         label: copy(locale, "Release driver", "釋放司機"),
-        variant,
-        danger,
       };
     case "cancel_order":
       return {
         icon: "x",
         label: copy(locale, "Cancel order", "取消訂單"),
-        variant,
-        danger,
       };
     case "fare_override":
       return {
         icon: "warn",
         label: copy(locale, "Fare override", "車資覆寫"),
-        variant,
-        danger: true,
       };
     case "redispatch":
       return {
         icon: "dispatch",
         label: copy(locale, "Redispatch", "重新派遣"),
-        variant,
-        danger,
       };
     case "resolve_no_supply":
       return {
         icon: "health",
         label: copy(locale, "Resolve no-supply", "處理無供給"),
-        variant,
-        danger,
       };
     case "escalate_incident":
       return {
         icon: "incidents",
         label: copy(locale, "Escalate to incident", "升級事故"),
-        variant,
-        danger: true,
       };
     case "complete_reconciliation":
       return {
         icon: "check",
         label: copy(locale, "Complete reconciliation", "完成對帳"),
-        variant: "primary",
-        danger: false,
       };
     case "engage_manual_fallback":
       return {
         icon: "switchboard",
         label: copy(locale, "Manual fallback", "人工 fallback"),
-        variant,
-        danger,
       };
     case "force_refresh":
       return {
         icon: "clock",
         label: copy(locale, "Force refresh", "強制刷新"),
-        variant: "secondary",
-        danger: false,
       };
     case "broadcast_eligible":
       return {
         icon: "dispatch",
         label: copy(locale, "Broadcast", "廣播候選"),
-        variant,
-        danger,
       };
     case "report_sync_failure":
       return {
         icon: "warn",
         label: copy(locale, "Report sync failure", "回報同步失敗"),
-        variant,
-        danger: true,
       };
     default:
       return {
         icon: "more",
         label: formatOpsCodeLabel(locale, action.action),
-        variant,
-        danger,
       };
   }
 }
@@ -1369,15 +1144,15 @@ function renderHeaderActions(
             title={actionHint(action, locale)}
             style={{ display: "inline-flex" }}
           >
-            <Btn
+            <ActionButton
               theme={theme}
-              variant={visual.variant}
-              danger={visual.danger}
+              riskLevel={action.riskLevel}
+              requiresReason={action.requiresReason}
               disabled={!action.enabled}
               icon={visual.icon}
             >
               {visual.label}
-            </Btn>
+            </ActionButton>
           </span>
         );
       })}
@@ -2117,7 +1892,7 @@ async function renderOwnedWorkspace({
   const liveCandidateCount = sortedCandidates.filter(
     (candidate) => getCandidateLocationState(candidate) === "live",
   ).length;
-  const timelineEntries = buildTimelineEntries(
+  const activityEntries = buildActivityEntries(
     locale,
     dispatchTrace,
     order,
@@ -2326,18 +2101,15 @@ async function renderOwnedWorkspace({
 
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card theme={theme} title={copy(locale, "State machine", "訂單狀態")}>
-            {renderStepper(
+            {renderStateRail(
               locale,
               getWorkflowStepIndex(order, dispatchJob, currentTask),
               stepperTimestamps,
             )}
           </Card>
 
-          <Card
-            theme={theme}
-            title={copy(locale, "Activity · Timeline", "活動")}
-          >
-            {renderTimeline(locale, timelineEntries)}
+          <Card theme={theme} title={copy(locale, "Activity log", "活動紀錄")}>
+            {renderActivityFeed(locale, activityEntries)}
           </Card>
         </div>
       </div>
@@ -2396,7 +2168,7 @@ function renderForwardedWorkspace({
     order.reconciliationJob?.mismatchCount ??
     0;
   const stateTone = getForwardedStateTone(order.status);
-  const timelineEntries = buildForwardedTimeline(locale, order);
+  const activityEntries = buildForwardedActivity(locale, order);
   const terminal = isForwardedTerminal(order);
 
   const adapterLink: CrossAppResourceLink = {
@@ -2656,7 +2428,7 @@ function renderForwardedWorkspace({
 
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card theme={theme} title={copy(locale, "State machine", "訂單狀態")}>
-            {renderStepper(locale, getForwardedStepIndex(order), [
+            {renderStateRail(locale, getForwardedStepIndex(order), [
               order.createdAt,
               order.createdAt,
               order.status === "broadcasted" ||
@@ -2670,11 +2442,8 @@ function renderForwardedWorkspace({
             ])}
           </Card>
 
-          <Card
-            theme={theme}
-            title={copy(locale, "Activity · Timeline", "活動")}
-          >
-            {renderTimeline(locale, timelineEntries)}
+          <Card theme={theme} title={copy(locale, "Activity log", "活動紀錄")}>
+            {renderActivityFeed(locale, activityEntries)}
           </Card>
         </div>
       </div>

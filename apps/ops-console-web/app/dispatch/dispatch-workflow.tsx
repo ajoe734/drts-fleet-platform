@@ -26,10 +26,12 @@ import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import {
-  CanvasBtn as Btn,
+  CanvasActionButton as ActionButton,
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasPill as Pill,
+  CanvasStepper as Stepper,
+  CanvasTimeline as Timeline,
   buildCanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -477,16 +479,6 @@ function listDownstreamReviewDuties(gates: ComplianceGateRecord[]) {
   );
 }
 
-function getDetailActionTone(riskLevel: DetailActionDescriptor["riskLevel"]) {
-  if (riskLevel === "high") {
-    return { variant: "primary" as const, danger: true };
-  }
-  if (riskLevel === "medium") {
-    return { variant: "secondary" as const, danger: false };
-  }
-  return { variant: "ghost" as const, danger: false };
-}
-
 function getDetailActionLabel(
   action: DetailActionDescriptor["action"],
   t: (key: string) => string,
@@ -646,88 +638,29 @@ function renderStateTrack(
   timestamps: Array<string | null>,
 ) {
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))",
-        gap: 8,
-      }}
-    >
-      {labels.map((label, index) => {
-        const isCurrent = index === currentIndex;
-        const isComplete = index < currentIndex;
-        const tone = isCurrent
-          ? {
-              border: theme.accentBorder,
-              bg: theme.accentBg,
-              fg: theme.accent,
-            }
-          : isComplete
-            ? {
-                border: theme.infoBorder,
-                bg: theme.infoBg,
-                fg: theme.info,
-              }
-            : {
-                border: theme.border,
-                bg: theme.surfaceLo,
-                fg: theme.textMuted,
-              };
-
-        return (
-          <div
-            key={`${label}-${index}`}
-            style={{
-              display: "grid",
-              gap: 6,
-              minWidth: 0,
-              padding: "10px 12px",
-              borderRadius: 8,
-              border: `1px solid ${tone.border}`,
-              background: tone.bg,
-            }}
-          >
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 20,
-                height: 20,
-                borderRadius: 999,
-                background: tone.fg,
-                color: theme.invert,
-                fontSize: 11,
-                fontWeight: 700,
-              }}
-            >
-              {index + 1}
-            </span>
-            <div style={{ display: "grid", gap: 2 }}>
-              <strong
-                style={{
-                  fontSize: 12,
-                  color: isCurrent || isComplete ? theme.text : theme.textMuted,
-                }}
-              >
-                {label}
-              </strong>
-              <span style={{ fontSize: 11, color: theme.textDim }}>
-                {timestamps[index]
-                  ? formatDateTime(locale, timestamps[index])
-                  : isCurrent
-                    ? locale === "zh"
-                      ? "進行中"
-                      : "active"
-                    : locale === "zh"
-                      ? "等待中"
-                      : "waiting"}
-              </span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
+    <Stepper
+      theme={theme}
+      items={labels.map((label, index) => ({
+        key: `${label}-${index}`,
+        label,
+        status:
+          index < currentIndex
+            ? "complete"
+            : index === currentIndex
+              ? "current"
+              : "upcoming",
+        meta: timestamps[index]
+          ? formatDateTime(locale, timestamps[index])
+          : index === currentIndex
+            ? locale === "zh"
+              ? "進行中"
+              : "active"
+            : locale === "zh"
+              ? "等待中"
+              : "waiting",
+      }))}
+      minWidth={96}
+    />
   );
 }
 
@@ -736,102 +669,23 @@ function renderActivityFeed(
   entries: DispatchActivityEntry[],
   emptyLabel: string,
 ) {
-  if (entries.length === 0) {
-    return (
-      <div style={{ color: theme.textMuted, fontSize: 12.5 }}>{emptyLabel}</div>
-    );
-  }
-
-  const toneMap = {
-    default: { dot: theme.info, rail: theme.infoBorder, bg: theme.infoBg },
-    warning: { dot: theme.warn, rail: theme.warnBorder, bg: theme.warnBg },
-    critical: {
-      dot: theme.danger,
-      rail: theme.dangerBorder,
-      bg: theme.dangerBg,
-    },
-  } as const;
-
   return (
-    <div style={{ display: "grid", gap: 10 }}>
-      {entries.map((entry, index) => {
-        const tone = toneMap[entry.tone];
-        return (
-          <div
-            key={entry.id}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "18px minmax(0, 1fr)",
-              gap: 12,
-              alignItems: "start",
-            }}
-          >
-            <div
-              style={{
-                display: "grid",
-                justifyItems: "center",
-                gap: 4,
-                minHeight: 32,
-              }}
-            >
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: 999,
-                  background: tone.dot,
-                  marginTop: 3,
-                }}
-              />
-              {index < entries.length - 1 ? (
-                <span
-                  style={{
-                    width: 2,
-                    flex: 1,
-                    minHeight: 28,
-                    background: tone.rail,
-                    borderRadius: 999,
-                  }}
-                />
-              ) : null}
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gap: 4,
-                padding: "8px 10px",
-                borderRadius: 8,
-                border: `1px solid ${tone.rail}`,
-                background: tone.bg,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  flexWrap: "wrap",
-                }}
-              >
-                <strong style={{ fontSize: 12.5, color: theme.text }}>
-                  {entry.title}
-                </strong>
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: theme.textDim,
-                    fontFamily: theme.monoFamily,
-                  }}
-                >
-                  {formatDateTime(locale, entry.at)}
-                </span>
-              </div>
-              <div style={{ fontSize: 12, color: theme.text }}>{entry.body}</div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
+    <Timeline
+      theme={theme}
+      empty={emptyLabel}
+      items={entries.map((entry) => ({
+        key: entry.id,
+        title: entry.title,
+        body: entry.body,
+        timestamp: formatDateTime(locale, entry.at),
+        tone:
+          entry.tone === "critical"
+            ? "danger"
+            : entry.tone === "warning"
+              ? "warn"
+              : "info",
+      }))}
+    />
   );
 }
 
@@ -2183,24 +2037,22 @@ export function DispatchWorkflow({
           }}
         >
           {selectedDetailActions.map((descriptor) => {
-            const tone = getDetailActionTone(descriptor.riskLevel);
             const busyTarget =
               descriptor.action === "assign_candidate" ||
               descriptor.action === "reassign_candidate"
                 ? job?.dispatchJobId
                 : order.orderId;
             const button = (
-              <Btn
+              <ActionButton
                 theme={theme}
                 key={descriptor.action}
-                variant={tone.variant}
-                danger={tone.danger}
+                riskLevel={descriptor.riskLevel}
+                requiresReason={descriptor.requiresReason}
                 disabled={!descriptor.enabled || loading === busyTarget}
                 onClick={() => invokeDescriptor(descriptor)}
               >
                 {getDetailActionLabel(descriptor.action, t)}
-                {descriptor.requiresReason ? " *" : ""}
-              </Btn>
+              </ActionButton>
             );
             return (
               <span
