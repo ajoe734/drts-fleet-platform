@@ -1041,6 +1041,42 @@ export function Banner({
   );
 }
 
+export interface StaleBannerProps {
+  theme?: CanvasTheme;
+  freshness: "fresh" | "degraded" | "stale" | "unknown";
+  title?: ReactNode;
+  body?: ReactNode;
+  actions?: ReactNode;
+}
+
+export function StaleBanner({
+  theme,
+  freshness,
+  title,
+  body,
+  actions,
+}: StaleBannerProps) {
+  if (freshness === "fresh") {
+    return null;
+  }
+  const bannerProps =
+    theme === undefined
+      ? {}
+      : {
+          theme,
+        };
+  return (
+    <Banner
+      {...bannerProps}
+      tone={freshness === "degraded" ? "warn" : "info"}
+      icon={freshness === "degraded" ? "warn" : "clock"}
+      title={title}
+      body={body}
+      actions={actions}
+    />
+  );
+}
+
 export interface KPIProps {
   theme?: CanvasTheme;
   label: ReactNode;
