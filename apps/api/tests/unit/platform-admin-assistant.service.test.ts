@@ -221,6 +221,36 @@ describe("PlatformAdminAssistantService", () => {
     );
   });
 
+  it("does not double-count the current prompt toward llm gateway input budgets", async () => {
+    const gateway = new LlmGatewayService({
+      env: {
+        LLM_GATEWAY_INPUT_TOKENS_PER_MINUTE: "6",
+      },
+      now: () => Date.parse("2026-06-03T13:00:00.000Z"),
+    });
+    const service = new PlatformAdminAssistantService(
+      new StaticProvider({
+        answer: "ok",
+        citations: [],
+        suggestedPrompts: [],
+        actionPlan: null,
+      }),
+      new PlatformAdminService(new AuditNotificationService()),
+      new AuditNotificationService(),
+      gateway,
+    );
+    const identity = platformIdentity();
+    const session = service.createSession(identity, {});
+
+    await expect(
+      service.createMessage(session.sessionId, identity, {
+        message: "1234567890123456",
+      }),
+    ).resolves.toMatchObject({
+      answer: "ok",
+    });
+  });
+
   it("surfaces llm gateway output token rate limits when provider output exceeds the remaining budget", async () => {
     const gateway = new LlmGatewayService({
       env: {

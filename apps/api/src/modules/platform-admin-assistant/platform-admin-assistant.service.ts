@@ -160,7 +160,7 @@ export class PlatformAdminAssistantService {
 
     const reservation = this.llmGatewayService.reserveRequest({
       actorKey: session.actor.actorId,
-      requestText: this.buildProviderUsageText(trimmedMessage, sessionMessages),
+      requestText: this.buildProviderUsageText(sessionMessages),
     });
 
     const providerResponse = await this.generateProviderResponse(
@@ -652,13 +652,9 @@ export class PlatformAdminAssistantService {
   }
 
   private buildProviderUsageText(
-    message: string,
     history: PlatformAdminAssistantMessageRecord[],
   ): string {
-    return [
-      message,
-      ...history.map((entry) => `${entry.role}:${entry.content}`),
-    ].join("\n");
+    return history.map((entry) => `${entry.role}:${entry.content}`).join("\n");
   }
 
   private assertSafeTranscriptRecord(record: unknown): void {
