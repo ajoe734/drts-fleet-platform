@@ -189,3 +189,17 @@ rail.
 
 No runtime tests were run. This task repairs history diagnosis and replay
 instructions only.
+
+## Closeout Evidence
+
+- Approved helper artifact commit on this branch:
+  `2c61389a834cdea9ac0fc2649ff7024c081bc054`
+  `OPS-PARITY-FORMS-INC-UNBLOCK-HISTORY-REPAIR: document branch contamination repair path`
+- Normal push evidence:
+  `origin/codex/ops-parity-forms-inc-unblock-history-repair`
+  points at `2c61389a834cdea9ac0fc2649ff7024c081bc054`
+- Parent machine truth was updated before closeout:
+  `OPS-PARITY-FORMS-INC.next` now instructs the owner to resume on
+  `codex/ops-parity-forms-inc`, replay the intended delta from
+  `2be8e57831892ce5b2754c49d7bee2440c6b0308` onto `5ece460f7ec1119647d47eb0bd6de34797d4b642`,
+  and push only the canonical rail normally.
