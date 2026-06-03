@@ -301,6 +301,188 @@ const monoValueStyle = {
   color: theme.textMuted,
 } satisfies CSSProperties;
 
+const LOCAL_PARTNER_ENTRY: PartnerChannelEntryRecord = {
+  partnerId: "partner_ctbc_world_elite",
+  partnerCode: "ctbc",
+  partnerType: "bank_partner",
+  programId: "World Elite",
+  programCode: "world_elite",
+  tenantId: "tnt_003",
+  bankCode: "CTBC_BIZ",
+  entrySlug: "ctbc-elite",
+  displayName: "CTBC World Elite",
+  businessDispatchSubtype: "credit_card_airport_transfer",
+  authMode: "partner_api_key",
+  eligibilityMode: "bank_card_inline",
+  entryHost: "ctbc.drts.io",
+  entryPath: "/partner/ctbc-elite",
+  themeAccent: "#0B7285",
+  brandingMetadata: {
+    displayName: "CTBC World Elite",
+    themeAccent: "#0B7285",
+    supportEmail: "biz-card@ctbcbank.com",
+    supportPhone: "+886-2-1234-5678",
+  },
+  eligibilityContract: {
+    contractId: "elig_ctbc_we_2026q2",
+    adapterCode: "card_bin",
+    adapterKind: "issuer_card_lookup",
+    adapterVersion: "2026.05",
+    eligibilityMode: "bank_card_inline",
+    decisionTtlSeconds: 300,
+    retryPolicy: {
+      timeoutMs: 1500,
+      maxAttempts: 2,
+      initialBackoffMs: 250,
+      backoffMultiplier: 2,
+      maxBackoffMs: 1000,
+      retryableErrorCodes: ["timeout", "upstream_5xx"],
+    },
+    manualFallbackPolicy: {
+      queue: "ops_console",
+      requiredOnTimeout: true,
+      requiredOnRetryExhausted: true,
+      requiredOnAmbiguousResponse: true,
+      requiredAuditFields: ["reasonCode", "requestedBy", "notes"],
+    },
+    sensitiveDataPolicy: {
+      referenceTokenStorage: "hash_only",
+      rawTokenExposure: "never",
+      benefitReferencePolicy: "canonical_internal_masked_exports",
+      issuerAuthorizationReferencePolicy: "canonical_internal_masked_exports",
+      auditExposure: "status_reason_only",
+    },
+    notes: ["World Elite card BIN list synced with issuer on 2026-05-20."],
+  },
+  status: "active",
+  activeFlag: true,
+  revokedAt: null,
+  revokedBy: null,
+  revokeReason: null,
+  createdAt: "2026-04-12T03:20:00.000Z",
+  updatedAt: "2026-06-01T09:15:00.000Z",
+  auditMetadata: {
+    source: "platform-admin.preview",
+    requestId: "req_preview_ctbc_elite",
+    createdBy: "platform-admin",
+    updatedBy: "platform-admin",
+  },
+};
+
+const LOCAL_PARTNER_CREDENTIALS: PartnerIngressCredentialRecord[] = [
+  {
+    keyId: "cred_ctbc_oauth",
+    entrySlug: "ctbc-elite",
+    keyPrefix: "drts_partner_live_",
+    maskedSuffix: "aE32",
+    source: "platform_admin",
+    createdAt: "2026-04-12T03:22:00.000Z",
+    lastUsedAt: "2026-06-02T18:45:00.000Z",
+    revokedAt: null,
+    issuedBy: "platform-admin",
+    revokedBy: null,
+    rotationReason: "initial production launch",
+    revokeReason: null,
+  },
+  {
+    keyId: "cred_ctbc_webhook",
+    entrySlug: "ctbc-elite",
+    keyPrefix: "drts_partner_live_",
+    maskedSuffix: "8B2k",
+    source: "platform_admin",
+    createdAt: "2026-04-12T03:23:00.000Z",
+    lastUsedAt: "2026-06-02T18:43:00.000Z",
+    revokedAt: null,
+    issuedBy: "platform-admin",
+    revokedBy: null,
+    rotationReason: "webhook bootstrap",
+    revokeReason: null,
+  },
+  {
+    keyId: "cred_ctbc_ingress",
+    entrySlug: "ctbc-elite",
+    keyPrefix: "drts_partner_live_",
+    maskedSuffix: "K1yQ",
+    source: "platform_admin",
+    createdAt: "2026-03-01T02:10:00.000Z",
+    lastUsedAt: "2026-06-02T18:41:00.000Z",
+    revokedAt: null,
+    issuedBy: "platform-admin",
+    revokedBy: null,
+    rotationReason: "quarterly refresh",
+    revokeReason: null,
+  },
+];
+
+function cloneLocalPartnerEntry() {
+  return structuredClone(LOCAL_PARTNER_ENTRY);
+}
+
+function cloneLocalPartnerCredentials() {
+  return structuredClone(LOCAL_PARTNER_CREDENTIALS);
+}
+
+function buildLocalIssuedCredential(
+  entrySlug: string,
+  reason: string,
+  previousCredentialId?: string | null,
+): PartnerIngressCredentialIssued {
+  const createdAt = new Date().toISOString();
+  const nonce = Math.random().toString(36).slice(2, 10);
+  const plaintextKey = `drts_partner_live_${nonce}_preview_secret`;
+  return {
+    credential: {
+      keyId: `cred_preview_${nonce}`,
+      entrySlug,
+      keyPrefix: "drts_partner_live_",
+      maskedSuffix: plaintextKey.slice(-4),
+      source: "platform_admin",
+      createdAt,
+      lastUsedAt: null,
+      revokedAt: null,
+      issuedBy: "platform-admin.preview",
+      revokedBy: null,
+      rotationReason: reason.trim() || "preview issue",
+      revokeReason: null,
+    },
+    plaintextKey,
+    revokedCredentialId: previousCredentialId ?? null,
+  };
+}
+
+function applyFormToEntry(
+  entry: PartnerChannelEntryRecord,
+  form: EntryFormState,
+): PartnerChannelEntryRecord {
+  return {
+    ...entry,
+    tenantId: form.tenantId,
+    partnerCode: form.partnerCode,
+    partnerType: form.partnerType,
+    programId: form.programId,
+    programCode: form.programCode || null,
+    bankCode: form.bankCode || null,
+    displayName: form.displayName,
+    businessDispatchSubtype: form.businessDispatchSubtype,
+    authMode: form.authMode,
+    eligibilityMode: form.eligibilityMode,
+    entryHost: form.entryHost || null,
+    entryPath: form.entryPath || null,
+    themeAccent: form.themeAccent || null,
+    brandingMetadata: {
+      displayName: form.displayName,
+      themeAccent: form.themeAccent || null,
+      supportEmail: form.supportEmail || null,
+      supportPhone: form.supportPhone || null,
+    },
+    updatedAt: new Date().toISOString(),
+    auditMetadata: {
+      ...entry.auditMetadata,
+      updatedBy: "platform-admin.preview",
+    },
+  };
+}
+
 function toCanvasTone(
   tone: ReturnType<typeof partnerStatusTone>,
 ): "neutral" | "success" | "warn" | "danger" {
@@ -804,6 +986,8 @@ export default function PartnerDetailPage() {
   const [issuingCredential, setIssuingCredential] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [isCompactViewport, setIsCompactViewport] = useState(false);
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [previewNotice, setPreviewNotice] = useState<string | null>(null);
   const [credentialActionMode, setCredentialActionMode] = useState<
     "issue" | "rotate" | null
   >(null);
@@ -835,6 +1019,8 @@ export default function PartnerDetailPage() {
           notFoundBody: "The requested partner entry could not be found.",
           updateErrorTitle: "Unable to update partner entry",
           issueErrorTitle: "Unable to issue credential",
+          previewNotice:
+            "Platform Admin API data is unavailable in this workspace. Showing the canvas-aligned preview fixture for local verification.",
           tabs: {
             overview: "Overview",
             branding: "Branding",
@@ -948,6 +1134,8 @@ export default function PartnerDetailPage() {
           notFoundBody: "找不到指定的 partner entry。",
           updateErrorTitle: "Partner entry 更新失敗",
           issueErrorTitle: "Credential 發行失敗",
+          previewNotice:
+            "目前無法從 Platform Admin API 取得資料；此頁改用符合畫布的 preview fixture 供本地驗證。",
           tabs: {
             overview: "Overview",
             branding: "Branding",
@@ -1057,6 +1245,8 @@ export default function PartnerDetailPage() {
         setEntry(null);
         setEditForm(EMPTY_ENTRY_FORM);
         setCredentials([]);
+        setIsPreviewMode(false);
+        setPreviewNotice(null);
         setLoading(false);
         return;
       }
@@ -1072,6 +1262,8 @@ export default function PartnerDetailPage() {
 
         setEntry(selected);
         setEditForm(selected ? toPartnerFormState(selected) : EMPTY_ENTRY_FORM);
+        setIsPreviewMode(false);
+        setPreviewNotice(null);
 
         if (!options?.preserveIssuedCredential) {
           setIssuedCredential(null);
@@ -1089,17 +1281,29 @@ export default function PartnerDetailPage() {
           );
         setCredentials(nextCredentials ?? []);
       } catch (nextError: unknown) {
-        setError(
-          nextError instanceof Error ? nextError.message : String(nextError),
-        );
-        setEntry(null);
-        setEditForm(EMPTY_ENTRY_FORM);
-        setCredentials([]);
+        if (entrySlug === LOCAL_PARTNER_ENTRY.entrySlug) {
+          const fallbackEntry = cloneLocalPartnerEntry();
+          setEntry(fallbackEntry);
+          setEditForm(toPartnerFormState(fallbackEntry));
+          setCredentials(cloneLocalPartnerCredentials());
+          setIsPreviewMode(true);
+          setPreviewNotice(copy.previewNotice);
+          setError(null);
+        } else {
+          setError(
+            nextError instanceof Error ? nextError.message : String(nextError),
+          );
+          setEntry(null);
+          setEditForm(EMPTY_ENTRY_FORM);
+          setCredentials([]);
+          setIsPreviewMode(false);
+          setPreviewNotice(null);
+        }
       } finally {
         setLoading(false);
       }
     },
-    [client, entrySlug],
+    [client, copy.previewNotice, entrySlug],
   );
 
   useEffect(() => {
@@ -1108,6 +1312,13 @@ export default function PartnerDetailPage() {
 
   const saveEntry = useCallback(async () => {
     if (!entry) {
+      return;
+    }
+
+    if (isPreviewMode) {
+      const nextEntry = applyFormToEntry(entry, editForm);
+      setEntry(nextEntry);
+      setEditForm(toPartnerFormState(nextEntry));
       return;
     }
 
@@ -1127,10 +1338,42 @@ export default function PartnerDetailPage() {
     } finally {
       setSaving(false);
     }
-  }, [client, editForm, entry, loadEntry]);
+  }, [client, editForm, entry, isPreviewMode, loadEntry]);
 
   const issueCredential = useCallback(async () => {
     if (!entry || !credentialActionMode) {
+      return;
+    }
+
+    if (isPreviewMode) {
+      const previousActiveCredential = credentials.find(
+        (credential) => !credential.revokedAt,
+      );
+      const issued = buildLocalIssuedCredential(
+        entry.entrySlug,
+        credentialActionReason,
+        credentialActionMode === "rotate"
+          ? (previousActiveCredential?.keyId ?? null)
+          : null,
+      );
+      const nextCredentials = credentials.map((credential) =>
+        credentialActionMode === "rotate" &&
+        previousActiveCredential &&
+        credential.keyId === previousActiveCredential.keyId
+          ? {
+              ...credential,
+              revokedAt: issued.credential.createdAt,
+              revokedBy: "platform-admin.preview",
+              revokeReason: credentialActionReason.trim() || "preview rotate",
+            }
+          : credential,
+      );
+      setCredentials([issued.credential, ...nextCredentials]);
+      setIssuedCredential(issued);
+      setSecretAcknowledged(false);
+      setCredentialActionMode(null);
+      setCredentialActionReason("");
+      setActiveTab("credentials");
       return;
     }
 
@@ -1158,10 +1401,81 @@ export default function PartnerDetailPage() {
     } finally {
       setIssuingCredential(false);
     }
-  }, [client, credentialActionMode, credentialActionReason, entry, loadEntry]);
+  }, [
+    client,
+    credentialActionMode,
+    credentialActionReason,
+    credentials,
+    entry,
+    isPreviewMode,
+    loadEntry,
+  ]);
 
   const runGovernanceAction = useCallback(async () => {
     if (!entry) {
+      return;
+    }
+
+    if (isPreviewMode) {
+      const now = new Date().toISOString();
+      if (entryActionMode === "activate") {
+        setEntry((current) =>
+          current
+            ? {
+                ...current,
+                activeFlag: true,
+                status: "active",
+                revokedAt: null,
+                revokedBy: null,
+                revokeReason: null,
+                updatedAt: now,
+              }
+            : current,
+        );
+      } else if (entryActionMode === "deactivate") {
+        setEntry((current) =>
+          current
+            ? {
+                ...current,
+                activeFlag: false,
+                status: "inactive",
+                updatedAt: now,
+              }
+            : current,
+        );
+      } else if (entryActionMode === "revoke") {
+        setEntry((current) =>
+          current
+            ? {
+                ...current,
+                activeFlag: false,
+                status: "revoked",
+                revokedAt: now,
+                revokedBy: "platform-admin.preview",
+                revokeReason: governanceReason.trim() || "preview revoke",
+                updatedAt: now,
+              }
+            : current,
+        );
+      } else if (credentialToRevoke) {
+        setCredentials((current) =>
+          current.map((credential) =>
+            credential.keyId === credentialToRevoke.keyId
+              ? {
+                  ...credential,
+                  revokedAt: now,
+                  revokedBy: "platform-admin.preview",
+                  revokeReason:
+                    governanceReason.trim() || "preview credential revoke",
+                }
+              : credential,
+          ),
+        );
+      }
+
+      setEntryActionMode(null);
+      setCredentialToRevoke(null);
+      setGovernanceReason("");
       return;
     }
 
@@ -1200,6 +1514,7 @@ export default function PartnerDetailPage() {
     entry,
     entryActionMode,
     governanceReason,
+    isPreviewMode,
     loadEntry,
   ]);
 
@@ -1733,6 +2048,17 @@ export default function PartnerDetailPage() {
       />
 
       <div style={pageBodyStyle}>
+        {previewNotice ? (
+          <Banner
+            theme={theme}
+            tone="info"
+            title={
+              locale === "en" ? "Preview fixture mode" : "Preview fixture 模式"
+            }
+            body={previewNotice}
+          />
+        ) : null}
+
         {error ? (
           <Banner
             theme={theme}
