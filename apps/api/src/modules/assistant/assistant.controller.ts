@@ -18,6 +18,17 @@ export class AssistantController {
     );
   }
 
+  @Post("propose-action")
+  proposeAction(
+    @Body() input: ProposeActionToolInput,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.assistantService.invokeTool(ASSISTANT_PROPOSE_ACTION_TOOL, input),
+      requestId,
+    );
+  }
+
   @Post(":toolName")
   invokeTool(
     @Param("toolName") toolName: string,
@@ -26,17 +37,6 @@ export class AssistantController {
   ) {
     return toApiSuccessEnvelope(
       this.assistantService.invokeTool(toolName, input),
-      requestId,
-    );
-  }
-
-  @Post("propose-action")
-  proposeAction(
-    @Body() input: ProposeActionToolInput,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    return toApiSuccessEnvelope(
-      this.assistantService.invokeTool(ASSISTANT_PROPOSE_ACTION_TOOL, input),
       requestId,
     );
   }
