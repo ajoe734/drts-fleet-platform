@@ -3,9 +3,31 @@ import { HttpStatus, Injectable } from "@nestjs/common";
 import type { ActionIntent, ProposeActionToolInput } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  ASSISTANT_PROPOSE_ACTION_TOOL,
+  ASSISTANT_RUNTIME_DEFINITION,
+  type AssistantRuntimeDefinition,
+} from "./assistant.instructions";
 
 @Injectable()
 export class AssistantService {
+  getRuntimeDefinition(): AssistantRuntimeDefinition {
+    return structuredClone(ASSISTANT_RUNTIME_DEFINITION);
+  }
+
+  invokeTool(toolName: string, input: unknown): ActionIntent {
+    if (toolName !== ASSISTANT_PROPOSE_ACTION_TOOL) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ASSISTANT_TOOL_UNSUPPORTED",
+        `Assistant tool '${toolName}' is not supported.`,
+        { toolName },
+      );
+    }
+
+    return this.proposeAction(this.coerceProposeActionInput(input));
+  }
+
   proposeAction(input: ProposeActionToolInput): ActionIntent {
     const resourceKind = this.requireNonBlank(
       input.resourceKind,
@@ -24,6 +46,45 @@ export class AssistantService {
       args,
       confirmationRequired: true,
       mutates: false,
+    };
+  }
+
+  private coerceProposeActionInput(input: unknown): ProposeActionToolInput {
+    if (!this.isPlainObject(input)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ASSISTANT_TOOL_INPUT_INVALID",
+        "Assistant tool input must be an object.",
+      );
+    }
+
+    const { resourceKind, resourceId, action, args } = input;
+
+    if (
+      typeof resourceKind !== "string" ||
+      typeof resourceId !== "string" ||
+      typeof action !== "string"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ASSISTANT_TOOL_INPUT_INVALID",
+        "Assistant tool input requires string resourceKind, resourceId, and action fields.",
+      );
+    }
+
+    if (args !== undefined && !this.isPlainObject(args)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ASSISTANT_ACTION_ARGS_INVALID",
+        "Assistant proposeAction args must be an object.",
+      );
+    }
+
+    return {
+      resourceKind,
+      resourceId,
+      action,
+      ...(args === undefined ? {} : { args: structuredClone(args) }),
     };
   }
 
