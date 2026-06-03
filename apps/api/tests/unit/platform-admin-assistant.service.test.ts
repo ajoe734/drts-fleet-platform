@@ -1,3 +1,7 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import type { BootstrapRequestIdentity } from "../../src/common/auth";
@@ -514,5 +518,214 @@ describe("PlatformAdminAssistantService", () => {
       message: "Platform notice created.",
     });
     expect(result.assistantAuditId).toEqual(expect.any(String));
+  });
+
+  it("archives SA/SD/task brief artifacts for a session-scoped development request", async () => {
+    const tempRoot = await mkdtemp(
+      path.join(tmpdir(), "pa-assistant-dev-artifacts-"),
+    );
+    const previousRoot = process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT;
+    process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT = tempRoot;
+
+    try {
+      const auditNotificationService = new AuditNotificationService();
+      const service = new PlatformAdminAssistantService(
+        new MockPlatformAdminAssistantProvider(),
+        new PlatformAdminService(auditNotificationService),
+        auditNotificationService,
+      );
+      const identity = platformIdentity("pa-admin-dev-001");
+      const session = service.createSession(identity, {
+        title: "Assistant dev collaboration",
+      });
+
+      const artifactRecord = await service.generateDevelopmentArtifacts(
+        session.sessionId,
+        identity,
+        {
+          requestTitle: "Add governed task-packet generation",
+          requestedChange:
+            "Generate archived SA, SD, and task-brief outputs from the current assistant session.",
+          summary:
+            "Convert Platform Admin change requests into archived engineering artifacts.",
+          currentContext: [
+            "Current assistant service is session-scoped and actor-bound.",
+            "Mock provider exists, but development collaboration writes are missing.",
+          ],
+          affectedArtifacts: [
+            "apps/api/src/modules/platform-admin-assistant/",
+            "docs/02-architecture/",
+            "docs/05-ui/",
+            ".orchestrator/task-briefs/",
+          ],
+          acceptance: [
+            "Archive one SA doc, one SD doc, and at least one task brief.",
+          ],
+          tasks: [
+            {
+              taskId: "PA-AI-DEV-101",
+              title: "Archive dev collaboration artifacts",
+              summary:
+                "Add a session-scoped API path that writes SA/SD/task briefs to approved repo targets.",
+              owner: "Codex",
+              reviewer: "Claude",
+              artifacts: [
+                "apps/api/src/modules/platform-admin-assistant/",
+                ".orchestrator/task-briefs/",
+              ],
+            },
+          ],
+        },
+      );
+
+      expect(artifactRecord.files).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "system_analysis",
+            path: expect.stringContaining("docs/02-architecture/"),
+          }),
+          expect.objectContaining({
+            kind: "system_design",
+            path: expect.stringContaining("docs/05-ui/"),
+          }),
+          expect.objectContaining({
+            kind: "task_brief",
+            path: ".orchestrator/task-briefs/PA-AI-DEV-101.md",
+            taskId: "PA-AI-DEV-101",
+          }),
+        ]),
+      );
+      expect(
+        service.listDevelopmentArtifacts(session.sessionId, identity),
+      ).toHaveLength(1);
+
+      const taskBriefContent = await readFile(
+        path.join(tempRoot, ".orchestrator/task-briefs/PA-AI-DEV-101.md"),
+        "utf8",
+      );
+
+      expect(taskBriefContent).toContain("# Task Brief: PA-AI-DEV-101");
+      expect(taskBriefContent).toContain("Archive dev collaboration artifacts");
+      expect(taskBriefContent).toContain("- Owner: `Codex`");
+    } finally {
+      if (previousRoot === undefined) {
+        delete process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT;
+      } else {
+        process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT = previousRoot;
+      }
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects development artifact generation for empty task lists", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new PlatformAdminAssistantService(
+      new MockPlatformAdminAssistantProvider(),
+      new PlatformAdminService(auditNotificationService),
+      auditNotificationService,
+    );
+    const identity = platformIdentity();
+    const session = service.createSession(identity, {});
+
+    await expect(
+      service.generateDevelopmentArtifacts(session.sessionId, identity, {
+        requestTitle: "Missing tasks",
+        requestedChange: "Try to generate without tasks.",
+        tasks: [],
+      }),
+    ).rejects.toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_DEV_TASKS_REQUIRED",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("rejects development artifact generation when a task id attempts path traversal", async () => {
+    const tempRoot = await mkdtemp(
+      path.join(tmpdir(), "pa-assistant-dev-artifacts-"),
+    );
+    const previousRoot = process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT;
+    process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT = tempRoot;
+
+    try {
+      const auditNotificationService = new AuditNotificationService();
+      const service = new PlatformAdminAssistantService(
+        new MockPlatformAdminAssistantProvider(),
+        new PlatformAdminService(auditNotificationService),
+        auditNotificationService,
+      );
+      const identity = platformIdentity();
+      const session = service.createSession(identity, {});
+
+      await expect(
+        service.generateDevelopmentArtifacts(session.sessionId, identity, {
+          requestTitle: "Traversal attempt",
+          requestedChange: "Try to escape task brief directory.",
+          tasks: [
+            {
+              taskId: "../../.github/workflows/deploy",
+              title: "Escape repo root",
+              summary: "Attempt traversal via taskId.",
+              owner: "Codex",
+              reviewer: "Claude",
+            },
+          ],
+        }),
+      ).rejects.toThrow(
+        expect.objectContaining({
+          response: expect.objectContaining({
+            error: expect.objectContaining({
+              code: "ASSISTANT_DEV_TASK_ID_INVALID",
+            }),
+          }),
+        }),
+      );
+    } finally {
+      if (previousRoot === undefined) {
+        delete process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT;
+      } else {
+        process.env.PLATFORM_ADMIN_ASSISTANT_REPO_ROOT = previousRoot;
+      }
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects development artifact generation when a task field is missing", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new PlatformAdminAssistantService(
+      new MockPlatformAdminAssistantProvider(),
+      new PlatformAdminService(auditNotificationService),
+      auditNotificationService,
+    );
+    const identity = platformIdentity();
+    const session = service.createSession(identity, {});
+
+    await expect(
+      service.generateDevelopmentArtifacts(session.sessionId, identity, {
+        requestTitle: "Missing task field",
+        requestedChange: "Submit a task without an owner.",
+        tasks: [
+          {
+            taskId: "PA-AI-DEV-102",
+            title: "Incomplete task",
+            summary: "This task omits owner.",
+            owner: "   ",
+            reviewer: "Claude",
+          },
+        ],
+      }),
+    ).rejects.toThrow(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "ASSISTANT_DEV_TASK_FIELD_REQUIRED",
+          }),
+        }),
+      }),
+    );
   });
 });
