@@ -398,7 +398,7 @@ function buildTimelineItems(
         contract.status === "terminated" ||
         contract.lifecycleStatus === "expired"
           ? "danger"
-          : "warn",
+          : "warning",
     });
   }
 
