@@ -253,31 +253,31 @@ export default function SwitchboardPage() {
               callPhone:
                 typeof values.callPhone === "string"
                   ? values.callPhone
-                  : current.callPhone,
+                  : (current.callPhone ?? null),
               complaintPhone:
                 typeof values.complaintPhone === "string"
                   ? values.complaintPhone
-                  : current.complaintPhone,
+                  : (current.complaintPhone ?? null),
               callRateText:
                 typeof values.callRateText === "string"
                   ? values.callRateText
-                  : current.callRateText,
+                  : (current.callRateText ?? null),
               fareText:
                 typeof values.fareText === "string"
                   ? values.fareText
-                  : current.fareText,
+                  : (current.fareText ?? null),
               paymentMethodText:
                 typeof values.paymentMethodText === "string"
                   ? values.paymentMethodText
-                  : current.paymentMethodText,
+                  : (current.paymentMethodText ?? null),
               effectiveFrom:
                 typeof values.effectiveFrom === "string"
                   ? values.effectiveFrom
-                  : current.effectiveFrom,
+                  : (current.effectiveFrom ?? null),
               effectiveTo:
                 typeof values.effectiveTo === "string"
                   ? values.effectiveTo
-                  : current.effectiveTo,
+                  : (current.effectiveTo ?? null),
             }));
             return {
               ok: true,

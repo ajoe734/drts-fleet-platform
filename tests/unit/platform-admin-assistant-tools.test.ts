@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createPlatformAdminAssistantTools } from "../../apps/platform-admin-web/components/assistant/assistant-tools";
+import { createPlatformAdminAssistantTools } from "../../apps/platform-admin-web/components/assistant/assistant-tool-bridge";
 import {
   resolveCrossAppHref,
   resolvePlatformAdminRouteByHref,
-} from "../../apps/platform-admin-web/components/assistant/route-context";
+} from "../../apps/platform-admin-web/components/assistant/assistant-bridge";
 
 describe("platform admin assistant tools", () => {
   it("allows only registered platform-admin routes", () => {
@@ -27,8 +27,7 @@ describe("platform admin assistant tools", () => {
     expect(denied).toEqual({
       ok: false,
       code: "route_not_allowed",
-      message:
-        "route.open only accepts registered Platform Admin routes.",
+      message: "route.open only accepts registered Platform Admin routes.",
     });
   });
 

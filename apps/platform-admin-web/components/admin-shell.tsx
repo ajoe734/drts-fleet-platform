@@ -1,6 +1,6 @@
 "use client";
 
-import { PLATFORM_ADMIN_ROUTE_REGISTRY } from "@/components/assistant/route-context";
+import { PLATFORM_ADMIN_ROUTE_REGISTRY } from "@/components/assistant/assistant-bridge";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -530,10 +530,11 @@ function Topbar({
   const activeSection = sections.find(
     (section) => section.key === activeRoute.section,
   );
+  const activeHref = PLATFORM_ADMIN_ROUTE_REGISTRY[activeRoute.key].href;
   const hasDetailCrumb =
-    activeRoute.href !== "/" &&
-    pathname !== activeRoute.href &&
-    pathname.startsWith(`${activeRoute.href}/`);
+    activeHref !== "/" &&
+    pathname !== activeHref &&
+    pathname.startsWith(`${activeHref}/`);
   const breadcrumbs = [
     activeSection ? labelFor(locale, activeSection) : "Platform Admin",
     labelFor(locale, activeRoute),
