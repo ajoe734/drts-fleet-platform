@@ -6,6 +6,7 @@ import { toActionReceipt } from "../../common/action-receipt";
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import type { PlatformAdminAssistantToolResult } from "../platform-admin/platform-admin-assistant.policy";
 import { PlatformAdminService } from "../platform-admin/platform-admin.service";
 import type { RetrievalResult } from "./knowledge";
 import {
@@ -14,9 +15,11 @@ import {
 } from "./knowledge";
 import { resolvePlatformAdminAssistantAction } from "./platform-admin-assistant.actions";
 import { createPlatformAdminAssistantDevelopmentArtifacts } from "./platform-admin-assistant.development";
+import { PlatformAdminAssistantReadToolService } from "./platform-admin-assistant-read-tools.service";
 import { PLATFORM_ADMIN_ASSISTANT_PROVIDER } from "./platform-admin-assistant.types";
 import type {
   CreatePlatformAdminAssistantMessageCommand,
+  ExecutePlatformAdminAssistantReadToolCommand,
   PlatformAdminAssistantDevelopmentArtifactCommand,
   PlatformAdminAssistantDevelopmentArtifactRecord,
   ExecutePlatformAdminAssistantActionCommand,
@@ -57,6 +60,7 @@ export class PlatformAdminAssistantService {
   constructor(
     @Inject(PLATFORM_ADMIN_ASSISTANT_PROVIDER)
     private readonly assistantProvider: PlatformAdminAssistantProvider,
+    private readonly platformAdminAssistantReadToolService: PlatformAdminAssistantReadToolService,
     private readonly platformAdminService: PlatformAdminService,
     private readonly auditNotificationService: AuditNotificationService,
     private readonly knowledgeService: PlatformAdminAssistantKnowledgeService,
@@ -294,6 +298,19 @@ export class PlatformAdminAssistantService {
       descriptor: { ...resolvedAction.descriptor },
       confirmationRequired: resolvedAction.descriptor.riskLevel !== "low",
     };
+  }
+
+  async executeReadTool(
+    sessionId: string,
+    identity: BootstrapRequestIdentity | null,
+    command: ExecutePlatformAdminAssistantReadToolCommand,
+  ): Promise<PlatformAdminAssistantToolResult> {
+    this.requireOwnedSession(sessionId, identity);
+
+    return this.platformAdminAssistantReadToolService.execute(
+      identity,
+      command,
+    );
   }
 
   executeAction(

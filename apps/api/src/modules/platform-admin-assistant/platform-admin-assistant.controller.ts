@@ -7,6 +7,7 @@ import { PlatformAdminAssistantService } from "./platform-admin-assistant.servic
 import type {
   CreatePlatformAdminAssistantMessageCommand,
   PlatformAdminAssistantDevelopmentArtifactCommand,
+  ExecutePlatformAdminAssistantReadToolCommand,
   ExecutePlatformAdminAssistantActionCommand,
   PlatformAdminAssistantActionCommand,
   CreatePlatformAdminAssistantSessionCommand,
@@ -69,6 +70,23 @@ export class PlatformAdminAssistantController {
   ) {
     return toApiSuccessEnvelope(
       await this.platformAdminAssistantService.createMessage(
+        sessionId,
+        identity,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("sessions/:sessionId/tools/execute")
+  async executeReadTool(
+    @Param("sessionId") sessionId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: ExecutePlatformAdminAssistantReadToolCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.platformAdminAssistantService.executeReadTool(
         sessionId,
         identity,
         command,
