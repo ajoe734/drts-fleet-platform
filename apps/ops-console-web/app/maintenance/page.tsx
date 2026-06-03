@@ -77,7 +77,7 @@ const EMPTY_REASON_CODES: Record<EmptyReason, string> = {
   driver_not_eligible: "driver_not_eligible",
 };
 
-type StatusTab = "all" | "scheduled" | "in_progress" | "overdue";
+type StatusTab = "scheduled" | "in_progress" | "completed" | "overdue";
 
 type MaintenanceTableRow = Record<string, unknown> &
   MaintenanceRecord & {
@@ -155,6 +155,34 @@ function emptyStateStyle(): CSSProperties {
   };
 }
 
+function modalOverlayStyle(): CSSProperties {
+  return {
+    position: "fixed",
+    inset: 0,
+    zIndex: 50,
+    background: "rgba(2,6,23,0.66)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  };
+}
+
+function modalCardStyle(width = "min(720px, 100%)"): CSSProperties {
+  return {
+    width,
+    maxHeight: "calc(100vh - 48px)",
+    overflowY: "auto",
+    background: theme.surface,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 12,
+    padding: 18,
+    display: "grid",
+    gap: 12,
+    boxShadow: "0 18px 48px rgba(0,0,0,0.35)",
+  };
+}
+
 function tinyMetaStyle(
   themeToken: CanvasTheme,
   tone: CanvasTone,
@@ -224,7 +252,6 @@ function statusTone(status: MaintenanceStatus): CanvasTone {
 }
 
 function matchesTab(status: MaintenanceStatus, tab: StatusTab) {
-  if (tab === "all") return true;
   return status === tab;
 }
 
@@ -279,16 +306,13 @@ function synthesizeAvailableActions(
 ): ResourceActionDescriptor[] {
   const closed = record.status === "completed" || record.status === "cancelled";
   const completable =
-    record.status === "scheduled" ||
-    record.status === "in_progress" ||
-    record.status === "overdue" ||
-    isMaintenanceOverdue(record);
+    record.status === "scheduled" || record.status === "in_progress";
 
   return [
     {
       action: "edit_maintenance",
       enabled: !closed,
-      ...(closed ? { disabledReasonCode: "already_closed" } : {}),
+      ...(closed ? { disabledReasonCode: "completed" } : {}),
       riskLevel: "medium",
     },
     {
@@ -327,14 +351,18 @@ function actionLabel(action: ResourceActionDescriptor, locale: Locale) {
 
 function actionReason(action: ResourceActionDescriptor, locale: Locale) {
   if (!action.disabledReasonCode) return null;
-  if (action.disabledReasonCode === "already_closed") {
-    return copy(locale, "Work order is already closed.", "工單已結案。");
+  if (action.disabledReasonCode === "completed") {
+    return copy(
+      locale,
+      "Closed work orders are read-only.",
+      "已結工單不可再編輯。",
+    );
   }
   if (action.disabledReasonCode === "not_in_progress") {
     return copy(
       locale,
-      "Only open work orders can be completed.",
-      "僅未結工單可標記完成。",
+      "Only scheduled or in-progress work orders can be completed.",
+      "僅排程中或進行中的工單可標記完成。",
     );
   }
   return formatOpsCodeLabel(locale, action.disabledReasonCode);
@@ -511,7 +539,7 @@ export default function MaintenancePage() {
   const [loading, setLoading] = useState(true);
   const [generatedAtMs, setGeneratedAtMs] = useState<number>(0);
   const [nowMs, setNowMs] = useState<number>(0);
-  const [activeTab, setActiveTab] = useState<StatusTab>("all");
+  const [activeTab, setActiveTab] = useState<StatusTab>("scheduled");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<MaintenanceStatus | "all">(
     "all",
@@ -663,7 +691,9 @@ export default function MaintenancePage() {
   }, [records, activeTab, statusFilter, deferredQuery]);
 
   const hasActiveFilters =
-    activeTab !== "all" || statusFilter !== "all" || deferredQuery.length > 0;
+    statusFilter !== "all" ||
+    deferredQuery.length > 0 ||
+    filteredRecords.length !== records.length;
 
   let emptyReason: EmptyReason | null = null;
   if (isEmptyReason(emptyReasonOverride)) {
@@ -754,11 +784,29 @@ export default function MaintenancePage() {
       w: 110,
       mono: true,
       r: (row) => (
-        <div style={{ display: "grid", gap: 3, whiteSpace: "normal" }}>
+        <div
+          style={{
+            display: "grid",
+            gap: 3,
+            whiteSpace: "normal",
+            padding: row.overdue ? "6px 8px" : 0,
+            margin: row.overdue ? "-6px -8px" : 0,
+            borderRadius: row.overdue ? 8 : 0,
+            background: row.overdue ? theme.dangerBg : "transparent",
+            border: row.overdue ? `1px solid ${theme.dangerBorder}` : "none",
+          }}
+        >
           <span style={{ fontWeight: 600 }}>{row.maintenanceId}</span>
           <span style={{ color: theme.textMuted, fontSize: 10.5 }}>
             {formatOpsCodeLabel(locale, row.type)}
           </span>
+          {row.overdue ? (
+            <span
+              style={{ color: theme.danger, fontSize: 10.5, fontWeight: 600 }}
+            >
+              {copy(locale, "Dispatch risk", "派車風險")}
+            </span>
+          ) : null}
         </div>
       ),
     },
@@ -808,8 +856,23 @@ export default function MaintenancePage() {
       w: 160,
       mono: true,
       r: (row) => (
-        <div style={{ display: "grid", gap: 3, whiteSpace: "normal" }}>
+        <div
+          style={{
+            display: "grid",
+            gap: 3,
+            whiteSpace: "normal",
+            padding: row.overdue ? "6px 8px" : 0,
+            margin: row.overdue ? "-6px -8px" : 0,
+            borderRadius: row.overdue ? 8 : 0,
+            background: row.overdue ? theme.dangerBg : "transparent",
+          }}
+        >
           <span>{formatTableDateTime(row.scheduledAt)}</span>
+          {row.overdue ? (
+            <span style={{ color: theme.danger, fontSize: 10.5 }}>
+              {copy(locale, "Overdue for service", "已逾期未保修")}
+            </span>
+          ) : null}
           {row.completedAt ? (
             <span style={{ color: theme.success, fontSize: 10.5 }}>
               {copy(locale, "done", "完成")} ·{" "}
@@ -832,44 +895,19 @@ export default function MaintenancePage() {
       r: (row) => (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
           {row.availableActions.map((action) => {
-            if (action.action === "open_vehicle") {
-              return (
-                <Link
-                  key={`${row.maintenanceId}-${action.action}`}
-                  href={row.vehicleLink}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    height: 26,
-                    padding: "0 8px",
-                    borderRadius: 6,
-                    border: `1px solid ${theme.border}`,
-                    background: theme.surfaceLo,
-                    color: theme.textMuted,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    textDecoration: "none",
-                  }}
-                >
-                  {actionLabel(action, locale)}
-                </Link>
-              );
-            }
-            const reason = actionReason(action, locale);
             return (
-              <Btn
+              <CanvasActionButton
                 key={`${row.maintenanceId}-${action.action}`}
-                theme={theme}
-                size="xs"
-                danger={actionTone(action) === "danger"}
-                disabled={!action.enabled}
-                onClick={() => onActionClick(row, action)}
-              >
-                <span title={reason ?? undefined}>
-                  {actionLabel(action, locale)}
-                </span>
-              </Btn>
+                descriptor={action}
+                label={actionLabel(action, locale)}
+                reason={actionReason(action, locale)}
+                tone={actionTone(action)}
+                href={
+                  action.action === "open_vehicle" ? row.vehicleLink : undefined
+                }
+                locale={locale}
+                onInvoke={() => onActionClick(row, action)}
+              />
             );
           })}
           {row.crossAppLinks.map((link) => (
@@ -904,17 +942,16 @@ export default function MaintenancePage() {
 
   const tabConfig: Array<{ key: StatusTab; label: string; tone?: CanvasTone }> =
     [
-      { key: "all", label: copy(locale, "All", "全部") },
       { key: "scheduled", label: copy(locale, "Scheduled", "排程中") },
       { key: "in_progress", label: copy(locale, "In progress", "進行中") },
+      { key: "completed", label: copy(locale, "Completed", "已完成") },
       {
         key: "overdue",
         label: copy(locale, "Overdue", "逾期"),
         tone: "danger",
       },
     ];
-  const tabCountFor = (key: StatusTab) =>
-    key === "all" ? counts.all : counts[key];
+  const tabCountFor = (key: StatusTab) => counts[key];
   const tabNodes = tabConfig.map((tab) => (
     <button
       key={tab.key}
@@ -1152,81 +1189,6 @@ export default function MaintenancePage() {
           </Card>
         ) : null}
 
-        {showCreate || editingId ? (
-          <Card
-            theme={theme}
-            title={
-              editingId
-                ? copy(locale, "Update work order", "更新工單")
-                : copy(locale, "Create work order", "開立工單")
-            }
-            subtitle={
-              editingId
-                ? (editingRecord?.maintenanceId ??
-                  copy(locale, "Select a record", "請選擇工單"))
-                : copy(locale, "Maintenance · medium risk", "保修 · 中度風險")
-            }
-          >
-            <MaintenanceForm
-              locale={locale}
-              editingRecord={editingRecord}
-              initialVehicleId={editingId ? "" : vehicleIdFromQuery}
-              onCancel={() => {
-                setShowCreate(false);
-                setEditingId(null);
-              }}
-              onSubmit={async (command) => {
-                try {
-                  const client = getOpsClient();
-                  if (editingId) {
-                    await client.updateMaintenance(
-                      editingId,
-                      command as UpdateMaintenanceRecordCommand,
-                    );
-                    setToast({
-                      tone: "success",
-                      message: copy(
-                        locale,
-                        `Work order ${editingId} updated.`,
-                        `工單 ${editingId} 已更新。`,
-                      ),
-                      actionId: `act_${editingId}`,
-                      auditId: `audit_${editingId}`,
-                    });
-                  } else {
-                    const created = (await client.createMaintenance(
-                      command as CreateMaintenanceRecordCommand,
-                    )) as MaintenanceRecord;
-                    setToast({
-                      tone: "success",
-                      message: copy(
-                        locale,
-                        `Work order ${created.maintenanceId} created.`,
-                        `工單 ${created.maintenanceId} 已建立。`,
-                      ),
-                      actionId: `act_${created.maintenanceId}`,
-                      auditId: `audit_${created.maintenanceId}`,
-                    });
-                  }
-                  setShowCreate(false);
-                  setEditingId(null);
-                  await loadRecords("poll");
-                } catch (e) {
-                  setToast({
-                    tone: "danger",
-                    message:
-                      e instanceof Error
-                        ? e.message
-                        : getOpsLabel(locale, "unknown"),
-                    actionId: "—",
-                    auditId: "—",
-                  });
-                }
-              }}
-            />
-          </Card>
-        ) : null}
-
         <Card theme={theme} padding={0}>
           {loading ? (
             <div style={{ padding: "18px 14px", color: theme.textMuted }}>
@@ -1312,6 +1274,66 @@ export default function MaintenancePage() {
         />
       ) : null}
 
+      {showCreate || editingId ? (
+        <MaintenanceFormModal
+          locale={locale}
+          editingRecord={editingRecord}
+          initialVehicleId={editingId ? "" : vehicleIdFromQuery}
+          onCancel={() => {
+            setShowCreate(false);
+            setEditingId(null);
+          }}
+          onSubmit={async (command) => {
+            try {
+              const client = getOpsClient();
+              if (editingId) {
+                await client.updateMaintenance(
+                  editingId,
+                  command as UpdateMaintenanceRecordCommand,
+                );
+                setToast({
+                  tone: "success",
+                  message: copy(
+                    locale,
+                    `Work order ${editingId} updated.`,
+                    `工單 ${editingId} 已更新。`,
+                  ),
+                  actionId: `act_${editingId}`,
+                  auditId: `audit_${editingId}`,
+                });
+              } else {
+                const created = (await client.createMaintenance(
+                  command as CreateMaintenanceRecordCommand,
+                )) as MaintenanceRecord;
+                setToast({
+                  tone: "success",
+                  message: copy(
+                    locale,
+                    `Work order ${created.maintenanceId} created.`,
+                    `工單 ${created.maintenanceId} 已建立。`,
+                  ),
+                  actionId: `act_${created.maintenanceId}`,
+                  auditId: `audit_${created.maintenanceId}`,
+                });
+              }
+              setShowCreate(false);
+              setEditingId(null);
+              await loadRecords("poll");
+            } catch (e) {
+              setToast({
+                tone: "danger",
+                message:
+                  e instanceof Error
+                    ? e.message
+                    : getOpsLabel(locale, "unknown"),
+                actionId: "—",
+                auditId: "—",
+              });
+            }
+          }}
+        />
+      ) : null}
+
       {toast ? (
         <div
           style={{
@@ -1347,6 +1369,76 @@ export default function MaintenancePage() {
   );
 }
 
+function CanvasActionButton({
+  descriptor,
+  label,
+  reason,
+  tone,
+  href,
+  locale,
+  onInvoke,
+}: {
+  descriptor: ResourceActionDescriptor;
+  label: string;
+  reason: string | null;
+  tone: CanvasTone;
+  href?: string;
+  locale: Locale;
+  onInvoke: () => void;
+}) {
+  const button = (
+    <Btn
+      theme={theme}
+      size="xs"
+      variant={descriptor.riskLevel === "medium" ? "secondary" : "ghost"}
+      danger={tone === "danger"}
+      disabled={!descriptor.enabled}
+      {...(href ? {} : { onClick: onInvoke })}
+    >
+      <span title={reason ?? undefined}>{label}</span>
+    </Btn>
+  );
+
+  const control =
+    href && descriptor.enabled ? (
+      <Link
+        href={href}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "4px 8px",
+          height: 24,
+          fontSize: 11.5,
+          fontWeight: 500,
+          background: "transparent",
+          color: theme.textMuted,
+          border: "1px solid transparent",
+          borderRadius: 7,
+          lineHeight: 1,
+          fontFamily: theme.fontFamily,
+          textDecoration: "none",
+        }}
+        title={reason ?? undefined}
+      >
+        {label}
+      </Link>
+    ) : (
+      button
+    );
+
+  return (
+    <div style={{ display: "grid", gap: 2 }}>
+      {control}
+      {!descriptor.enabled && reason ? (
+        <span style={{ fontSize: 10, color: theme.textDim, maxWidth: 120 }}>
+          {locale === "zh" ? `停用：${reason}` : `Disabled: ${reason}`}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function ConfirmModal({
   locale,
   target,
@@ -1366,29 +1458,9 @@ function ConfirmModal({
   const confirmDisabled = requiresReason && reason.trim().length === 0;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 50,
-        background: "rgba(2,6,23,0.66)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
-      }}
-      onClick={onCancel}
-    >
+    <div style={modalOverlayStyle()} onClick={onCancel}>
       <div
-        style={{
-          width: "min(440px, 100%)",
-          background: theme.surface,
-          border: `1px solid ${theme.border}`,
-          borderRadius: 12,
-          padding: 18,
-          display: "grid",
-          gap: 12,
-        }}
+        style={modalCardStyle("min(440px, 100%)")}
         onClick={(event) => event.stopPropagation()}
       >
         <div style={{ display: "grid", gap: 4 }}>
@@ -1438,6 +1510,62 @@ function ConfirmModal({
             {copy(locale, "Confirm complete", "確認完成")}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function MaintenanceFormModal({
+  locale,
+  editingRecord,
+  initialVehicleId,
+  onCancel,
+  onSubmit,
+}: {
+  locale: Locale;
+  editingRecord: MaintenanceRecord | undefined;
+  initialVehicleId: string;
+  onCancel: () => void;
+  onSubmit: (
+    command: CreateMaintenanceRecordCommand | UpdateMaintenanceRecordCommand,
+  ) => Promise<void>;
+}) {
+  const isEditing = Boolean(editingRecord);
+
+  return (
+    <div style={modalOverlayStyle()} onClick={onCancel}>
+      <div
+        style={modalCardStyle()}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div style={{ display: "grid", gap: 4 }}>
+          <strong style={{ color: theme.text, fontSize: 14 }}>
+            {isEditing
+              ? copy(locale, "Update work order", "更新工單")
+              : copy(locale, "Create work order", "開立工單")}
+          </strong>
+          <span style={{ color: theme.textMuted, fontSize: 12 }}>
+            {isEditing
+              ? (editingRecord?.maintenanceId ??
+                copy(locale, "Select a record", "請選擇工單"))
+              : copy(
+                  locale,
+                  "Maintenance descriptor-driven edit/create flow",
+                  "保修 descriptor 驅動建立 / 編輯流程",
+                )}
+          </span>
+        </div>
+        <MaintenanceForm
+          key={
+            editingRecord?.maintenanceId ??
+            `create-${initialVehicleId || "blank"}`
+          }
+          locale={locale}
+          editingRecord={editingRecord}
+          initialVehicleId={initialVehicleId}
+          onCancel={onCancel}
+          onSubmit={onSubmit}
+        />
       </div>
     </div>
   );
