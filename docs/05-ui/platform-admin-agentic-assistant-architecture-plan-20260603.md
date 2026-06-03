@@ -353,6 +353,10 @@ External reference points for the evaluation:
   plugins, and watchers; this maps well to DRTS policy, permission broker, and
   tree guard layers.
 
+Detailed evaluation output for dispatch task `PA-AI-OSS-001`:
+
+- `docs/02-architecture/platform-admin-openclaw-style-runtime-evaluation-20260603.md`
+
 ## 7. Safety and Governance
 
 Mandatory guardrails:
@@ -473,6 +477,8 @@ Proceed with a DRTS-owned agentic assistant architecture:
 - Use OpenClaw-style concepts, not unrestricted OpenClaw embedding.
 - Keep all system actions behind DRTS API policy and audit.
 - Use the existing `.orchestrator` as the worker control plane.
+- Keep any OpenClaw-style OSS runtime as an optional dev-side sidecar adapter,
+  not the default worker runtime.
 - Dispatch the parallel task set in section 9 after this plan is accepted.
 
 ## 13. External References For PA-AI-OSS-001
