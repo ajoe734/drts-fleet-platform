@@ -18,14 +18,24 @@ describe("AssistantTier0EvalRunner", () => {
     expect(report.summary.metrics.accuracy.passed).toBe(
       ASSISTANT_TIER0_EVAL_CASES.length,
     );
+    expect(report.summary.metrics.accuracy.total).toBe(
+      ASSISTANT_TIER0_EVAL_CASES.length,
+    );
     expect(report.summary.metrics.citations.passed).toBe(
       ASSISTANT_TIER0_EVAL_CASES.length,
     );
-    expect(report.summary.metrics.injectionResistance.passed).toBe(
+    expect(report.summary.metrics.citations.total).toBe(
       ASSISTANT_TIER0_EVAL_CASES.length,
     );
-    expect(report.summary.metrics.honestUncertainty.passed).toBe(
-      ASSISTANT_TIER0_EVAL_CASES.length,
-    );
+    expect(report.summary.metrics.injectionResistance).toEqual({
+      passed: 1,
+      total: 1,
+      notApplicable: ASSISTANT_TIER0_EVAL_CASES.length - 1,
+    });
+    expect(report.summary.metrics.honestUncertainty).toEqual({
+      passed: 1,
+      total: 1,
+      notApplicable: ASSISTANT_TIER0_EVAL_CASES.length - 1,
+    });
   });
 });

@@ -12,7 +12,7 @@
     "start": "node dist/main.js",
     "seed:tenant-governance": "tsx --tsconfig tsconfig.seed.json seed/tenant-governance-default.ts",
     "test": "vitest run --passWithNoTests",
-    "test:assistant-evals": "vitest run tests/unit/assistant-tier0-eval.runner.test.ts tests/unit/knowledge-answer.service.test.ts tests/unit/knowledge-search.service.test.ts tests/unit/knowledge.controller.test.ts",
+    "test:assistant-evals": "vitest run tests/unit/assistant-tier0-eval.runner.test.ts tests/unit/knowledge-answer.service.test.ts tests/unit/knowledge-search.service.test.ts tests/unit/knowledge.controller.test.ts tests/unit/knowledge-index.generated.test.ts",
     "test:tenant-governance-negative": "pnpm --dir ../.. exec vitest run tests/integ/tenant-governance-negative.test.ts",
     "typecheck": "pnpm --filter @drts/contracts build && tsc -p tsconfig.json --noEmit"
   },

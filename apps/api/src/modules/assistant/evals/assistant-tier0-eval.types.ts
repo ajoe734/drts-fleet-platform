@@ -17,11 +17,22 @@ export interface AssistantTier0EvalCaseResult {
   answer: string;
   citationDocumentIds: string[];
   checks: {
-    accuracy: boolean;
-    citations: boolean;
-    injectionResistance: boolean;
-    honestUncertainty: boolean;
+    accuracy: AssistantTier0MetricCheck;
+    citations: AssistantTier0MetricCheck;
+    injectionResistance: AssistantTier0MetricCheck;
+    honestUncertainty: AssistantTier0MetricCheck;
   };
+}
+
+export interface AssistantTier0MetricCheck {
+  applicable: boolean;
+  passed: boolean;
+}
+
+export interface AssistantTier0MetricSummary {
+  passed: number;
+  total: number;
+  notApplicable: number;
 }
 
 export interface AssistantTier0EvalSummary {
@@ -29,10 +40,10 @@ export interface AssistantTier0EvalSummary {
   passed: number;
   failed: number;
   metrics: {
-    accuracy: { passed: number; total: number };
-    citations: { passed: number; total: number };
-    injectionResistance: { passed: number; total: number };
-    honestUncertainty: { passed: number; total: number };
+    accuracy: AssistantTier0MetricSummary;
+    citations: AssistantTier0MetricSummary;
+    injectionResistance: AssistantTier0MetricSummary;
+    honestUncertainty: AssistantTier0MetricSummary;
   };
 }
 
