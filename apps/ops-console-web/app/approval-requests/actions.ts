@@ -30,17 +30,18 @@ export async function approveApprovalRequestAction(
   return { ok: true };
 }
 
-export async function nudgeApprovalRequestAction(
+export async function rejectApprovalRequestAction(
   approvalRequestId: string,
-  reasonNote?: string,
+  reasonNote: string,
 ): Promise<ApprovalActionResult> {
-  if (!approvalRequestId.trim()) {
-    return { ok: false, message: "MISSING_REQUEST" };
+  if (!approvalRequestId.trim() || !reasonNote.trim()) {
+    return { ok: false, message: "MISSING_REQUEST_OR_REASON" };
   }
   try {
     const client = await getServerOpsClient();
-    await client.nudgeOpsApprovalRequest(approvalRequestId, {
-      reasonNote: reasonNote?.trim() ? reasonNote.trim() : null,
+    await client.rejectOpsApprovalRequest(approvalRequestId, {
+      reasonCode: "ops_triage_rejected",
+      reasonNote: reasonNote.trim(),
     });
   } catch (error) {
     return { ok: false, message: toMessage(error) };
@@ -49,17 +50,17 @@ export async function nudgeApprovalRequestAction(
   return { ok: true };
 }
 
-export async function acknowledgeBreachAction(
+export async function escalateApprovalRequestAction(
   approvalRequestId: string,
-  reasonNote?: string,
+  reasonNote: string,
 ): Promise<ApprovalActionResult> {
-  if (!approvalRequestId.trim()) {
-    return { ok: false, message: "MISSING_REQUEST" };
+  if (!approvalRequestId.trim() || !reasonNote.trim()) {
+    return { ok: false, message: "MISSING_REQUEST_OR_REASON" };
   }
   try {
     const client = await getServerOpsClient();
-    await client.acknowledgeOpsBreach(approvalRequestId, {
-      reasonNote: reasonNote?.trim() ? reasonNote.trim() : null,
+    await client.escalateOpsApprovalRequest(approvalRequestId, {
+      reasonNote: reasonNote.trim(),
     });
   } catch (error) {
     return { ok: false, message: toMessage(error) };

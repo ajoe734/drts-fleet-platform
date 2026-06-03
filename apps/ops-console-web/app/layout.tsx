@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import type { IdentityContext } from "@drts/contracts";
 import { RuntimeConfigScript } from "@/lib/runtime-config";
+import { getServerOpsClient } from "@/lib/api-client.server";
 import { LanguageProvider } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
@@ -22,8 +24,14 @@ export default async function RootLayout({
 }: {
   children: ReactNode;
 }) {
-  const locale = await getServerLocale();
-  const nav = buildOpsShellNav(locale);
+  const [client, locale] = await Promise.all([
+    getServerOpsClient(),
+    getServerLocale(),
+  ]);
+  const identity = await client
+    .get<IdentityContext>("/api/identity/context")
+    .catch(() => null as IdentityContext | null);
+  const nav = buildOpsShellNav(locale, identity?.roles ?? []);
 
   return (
     <html lang={locale}>
