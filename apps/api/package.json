@@ -5,7 +5,9 @@
   "type": "commonjs",
   "scripts": {
     "build": "pnpm --filter @drts/contracts build && tsc -p tsconfig.json",
+    "build:knowledge-index": "pnpm build && node src/modules/assistant/knowledge/build-knowledge-index.js",
     "dev": "node --watch -r ts-node/register src/main.ts",
+    "eval:assistant-tier0": "tsx src/modules/assistant/evals/assistant-tier0-eval.cli.ts",
     "lint": "eslint src --max-warnings=0",
     "start": "node dist/main.js",
     "seed:tenant-governance": "tsx --tsconfig tsconfig.seed.json seed/tenant-governance-default.ts",
