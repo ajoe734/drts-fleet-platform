@@ -681,6 +681,23 @@ export interface BtnProps {
   style?: CSSProperties;
 }
 
+export interface CanvasActionButtonProps {
+  theme?: CanvasTheme;
+  descriptor?: {
+    action: string;
+    enabled: boolean;
+    disabledReasonCode?: string | null;
+    requiresReason?: boolean;
+    riskLevel?: "low" | "medium" | "high";
+  } | null;
+  label: ReactNode;
+  en?: ReactNode;
+  icon?: CanvasIconName | ReactNode;
+  size?: "xs" | "sm" | "md";
+  variant?: "primary" | "secondary" | "ghost";
+  style?: CSSProperties;
+}
+
 export function Btn({
   theme: providedTheme,
   variant = "secondary",
@@ -750,6 +767,82 @@ export function Btn({
       {renderIcon(icon, sizing.icon)}
       {children}
     </button>
+  );
+}
+
+export function CanvasActionButton({
+  theme: providedTheme,
+  descriptor,
+  label,
+  en,
+  icon,
+  size = "sm",
+  variant,
+  style,
+}: CanvasActionButtonProps) {
+  const theme = resolveTheme(providedTheme);
+  if (!descriptor) {
+    return null;
+  }
+
+  const isHigh = descriptor.riskLevel === "high";
+  const resolvedVariant =
+    variant ??
+    (isHigh
+      ? "primary"
+      : descriptor.riskLevel === "medium"
+        ? "secondary"
+        : "ghost");
+
+  return (
+    <Btn
+      theme={theme}
+      size={size}
+      danger={isHigh}
+      variant={resolvedVariant}
+      disabled={!descriptor.enabled}
+      {...(icon ? { icon } : {})}
+      {...(style ? { style } : {})}
+    >
+      <span style={{ display: "inline-flex", alignItems: "baseline", gap: 5 }}>
+        <span>{label}</span>
+        {en ? (
+          <span
+            style={{
+              fontSize: Math.max(size === "xs" ? 9 : 10, 9),
+              opacity: 0.72,
+              fontFamily: theme.monoFamily,
+            }}
+          >
+            · {en}
+          </span>
+        ) : null}
+      </span>
+      {descriptor.requiresReason && descriptor.enabled ? (
+        <span
+          title="requires reason"
+          style={{
+            width: 5,
+            height: 5,
+            borderRadius: 999,
+            background: "currentColor",
+            opacity: 0.6,
+            marginLeft: 2,
+          }}
+        />
+      ) : null}
+      {!descriptor.enabled && descriptor.disabledReasonCode ? (
+        <span
+          style={{
+            fontSize: size === "xs" ? 9 : 10,
+            color: theme.textDim,
+            marginLeft: 2,
+          }}
+        >
+          ({descriptor.disabledReasonCode})
+        </span>
+      ) : null}
+    </Btn>
   );
 }
 

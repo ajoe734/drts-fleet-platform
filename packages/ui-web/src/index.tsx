@@ -7,6 +7,7 @@ export type { PageHeaderProps } from "./page-header";
 export * as CanvasPrimitives from "./canvas-primitives";
 export {
   Banner as CanvasBanner,
+  CanvasActionButton,
   Btn as CanvasBtn,
   CanvasIcon,
   Card as CanvasCard,
@@ -23,6 +24,7 @@ export {
   WindowChrome as CanvasWindowChrome,
 } from "./canvas-primitives";
 export type {
+  CanvasActionButtonProps,
   BannerProps as CanvasBannerProps,
   BtnProps as CanvasBtnProps,
   CardProps as CanvasCardProps,

@@ -1,20 +1,19 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type {
+  ComplaintCaseRecord,
+  ComplaintCaseStatus,
   CrossAppResourceLink,
   DispatchJobRecord,
   DriverRegistryRecord,
-  DriverStatementRecord,
   DriverTaskRecord,
   EmptyReason,
   EmptyStateEnvelope,
+  ForwardedOrderRecord,
   IncidentRecord,
   MaintenanceRecord,
   OperationalAdapterDetailRecord,
-  OperationalAlertRecord,
-  OperationalAlertState,
   OperationalObservabilitySnapshot,
-  OperationalRoleView,
   OwnedOrderRecord,
   RefreshTier,
   ReportJobRecord,
@@ -29,15 +28,13 @@ import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import {
   buildDispatchInsights,
   buildOperationsOverview,
-  buildRevenueInsights,
   formatCompactNumber,
-  formatMinorCurrency,
 } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 import {
+  CanvasActionButton,
   CanvasBanner as Banner,
-  CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasIcon,
   CanvasKPI as KPI,
@@ -85,7 +82,6 @@ type QueueRow = Record<string, unknown> & {
 
 type DashboardActionLink = {
   descriptor: ResourceActionDescriptor;
-  label: string;
   href?: string;
   link?: CrossAppResourceLink;
 };
@@ -313,35 +309,85 @@ function buildAction(
   };
 }
 
-function getActionButtonLabel(action: string, locale: Locale) {
+function getActionButtonMeta(action: string, locale: Locale) {
   switch (action) {
     case "open_call_session":
-      return locale === "en" ? "Open call session" : "開新 call session";
+      return {
+        label: locale === "en" ? "Open call session" : "開新 call session",
+        en: "session",
+        icon: "phone" as const,
+      };
     case "open_duty_handbook":
-      return locale === "en" ? "Duty handbook" : "值班手冊";
+      return {
+        label: locale === "en" ? "Duty handbook" : "值班手冊",
+        en: "runbook",
+        icon: "ext" as const,
+      };
     case "open_dispatch":
-      return locale === "en" ? "Open dispatch" : "前往派遣";
+      return {
+        label: locale === "en" ? "Open dispatch" : "前往派遣",
+        en: "dispatch",
+      };
     case "open_forwarded_dispatch":
-      return locale === "en" ? "Forwarded board" : "查看 forwarded board";
+      return {
+        label: locale === "en" ? "Forwarded board" : "查看 forwarded board",
+        en: "forwarded",
+        icon: "ext" as const,
+      };
     case "open_incidents":
-      return locale === "en" ? "Open incidents" : "前往事故";
+      return {
+        label: locale === "en" ? "Open incidents" : "前往事故",
+        en: "incidents",
+      };
     case "inspect_adapter_registry":
-      return locale === "en" ? "Adapter registry" : "查看 adapter registry";
+      return {
+        label: locale === "en" ? "Adapter registry" : "查看 adapter registry",
+        en: "adapter",
+        icon: "ext" as const,
+      };
     case "refresh_dashboard":
-      return locale === "en" ? "Refresh now" : "立即重新整理";
+      return {
+        label: locale === "en" ? "Refresh now" : "立即重新整理",
+        en: "refresh",
+      };
     case "clear_filters":
-      return locale === "en" ? "Clear filters" : "清除篩選";
+      return {
+        label: locale === "en" ? "Clear filters" : "清除篩選",
+        en: "filters",
+      };
     case "request_access":
-      return locale === "en" ? "Request access" : "申請權限";
+      return {
+        label: locale === "en" ? "Request access" : "申請權限",
+        en: "access",
+      };
     case "retry_fetch":
-      return locale === "en" ? "Retry load" : "重試載入";
+      return {
+        label: locale === "en" ? "Retry load" : "重試載入",
+        en: "retry",
+      };
     case "open_platform_status":
-      return locale === "en" ? "Platform status" : "查看平台狀態";
+      return {
+        label: locale === "en" ? "Platform status" : "查看平台狀態",
+        en: "status",
+        icon: "ext" as const,
+      };
     case "contact_owner":
-      return locale === "en" ? "Contact owner" : "通知負責人";
+      return {
+        label: locale === "en" ? "Contact owner" : "通知負責人",
+        en: "owner",
+      };
     default:
-      return formatOpsCodeLabel(locale, action);
+      return {
+        label: formatOpsCodeLabel(locale, action),
+        en: action,
+      };
   }
+}
+
+function isComplaintActive(status: ComplaintCaseStatus) {
+  return ["new", "assigned", "under_investigation", "reopened"].includes(
+    status,
+  );
 }
 
 function buildDashboardDispatchHref(
@@ -609,15 +655,16 @@ function ActionLinkButton({
   locale: Locale;
   variant?: "primary" | "secondary" | "ghost";
 }) {
+  const meta = getActionButtonMeta(action.descriptor.action, locale);
   const button = (
-    <Btn
+    <CanvasActionButton
       theme={theme}
+      descriptor={action.descriptor}
       variant={variant}
-      disabled={!action.descriptor.enabled}
-      icon={action.link?.openMode === "new_tab" ? "ext" : undefined}
-    >
-      {action.label}
-    </Btn>
+      icon={action.link?.openMode === "new_tab" ? "ext" : meta.icon}
+      label={meta.label}
+      en={meta.en}
+    />
   );
 
   if (!action.descriptor.enabled || (!action.href && !action.link)) {
@@ -662,7 +709,6 @@ function EmptyStateCard({
     ? (() => {
         const action: DashboardActionLink = {
           descriptor: nextActionDescriptor,
-          label: getActionButtonLabel(nextActionDescriptor.action, locale),
         };
         if (nextActionDescriptor.action === "clear_filters") {
           action.href = buildDashboardDispatchHref("ready_queue");
@@ -832,16 +878,6 @@ function getStateTone(stateCode: string): CanvasTone {
   return "neutral";
 }
 
-function getAlertTone(state: "healthy" | "warning" | "critical"): CanvasTone {
-  if (state === "critical") {
-    return "danger";
-  }
-  if (state === "warning") {
-    return "warn";
-  }
-  return "success";
-}
-
 function getHealthTone(status: string): CanvasTone {
   if (status === "healthy" || status === "ok") {
     return "success";
@@ -882,53 +918,6 @@ function pickCurrentTask(tasks: DriverTaskRecord[]) {
       return rightTimestamp.localeCompare(leftTimestamp);
     })[0] ?? null
   );
-}
-
-function formatAlertValue(
-  value: number,
-  unit: "count" | "minutes" | "percent",
-  locale: Locale,
-) {
-  if (unit === "minutes") {
-    return locale === "en" ? `${value} min` : `${value} 分鐘`;
-  }
-  if (unit === "percent") {
-    return `${value}%`;
-  }
-  return formatCompactNumber(value);
-}
-
-function getAlertSummary(
-  alertKey: string,
-  observability: OperationalObservabilitySnapshot,
-  locale: Locale,
-) {
-  switch (alertKey) {
-    case "dispatch_lag":
-      return t("dashboard.alert.dispatch_lag.summary", locale, {
-        count: observability.dispatch.laggedOrders,
-      });
-    case "recording_backlog":
-      return t("dashboard.alert.recording_backlog.summary", locale, {
-        count: observability.recording.pendingOrders,
-      });
-    case "driver_state_lag":
-      return t("dashboard.alert.driver_state_lag.summary", locale, {
-        count: observability.driverState.staleLocationDrivers,
-      });
-    case "eligibility_review_backlog":
-      return t("dashboard.alert.eligibility_review_backlog.summary", locale, {
-        count: observability.eligibility.totalReviewQueue,
-      });
-    case "adapter_degradation":
-      return t("dashboard.alert.adapter_degradation.summary", locale, {
-        count:
-          observability.adapters.degradedAdapters +
-          observability.adapters.downAdapters,
-      });
-    default:
-      return "";
-  }
 }
 
 async function resolveOrFallback<T>(
@@ -1045,8 +1034,9 @@ export default async function DashboardPage() {
     incidentsResponse,
     maintenanceResponse,
     reportJobsResponse,
-    driverStatementsResponse,
     observabilityResponse,
+    complaintsResponse,
+    forwardedOrdersResponse,
   ] = await Promise.all([
     resolveOrFallback<IdentitySummary>(
       () => client.getIdentityContext() as Promise<IdentitySummary>,
@@ -1103,15 +1093,18 @@ export default async function DashboardPage() {
     ),
     resolveOrFallback(
       () =>
-        client.getListEnvelope<DriverStatementRecord>("/api/driver-statements"),
-      createFallbackListEnvelope([] as DriverStatementRecord[]),
-    ),
-    resolveOrFallback(
-      () =>
         client.getEnvelope<OperationalObservabilitySnapshot>(
           "/api/operational-observability",
         ),
       createFallbackEnvelope(createFallbackObservabilitySnapshot()),
+    ),
+    resolveOrFallback(
+      () => client.getListEnvelope<ComplaintCaseRecord>("/api/complaints"),
+      createFallbackListEnvelope([] as ComplaintCaseRecord[]),
+    ),
+    resolveOrFallback(
+      () => client.getListEnvelope<ForwardedOrderRecord>("/api/forwarder/orders"),
+      createFallbackListEnvelope([] as ForwardedOrderRecord[]),
     ),
   ]);
 
@@ -1124,8 +1117,9 @@ export default async function DashboardPage() {
   const incidents = incidentsResponse.data.items;
   const maintenance = maintenanceResponse.data.items;
   const reportJobs = reportJobsResponse.data.items;
-  const driverStatements = driverStatementsResponse.data.items;
   const observability = observabilityResponse.data;
+  const complaints = complaintsResponse.data.items;
+  const forwardedOrders = forwardedOrdersResponse.data.items;
 
   const dispatch = buildDispatchInsights(orders, dispatchJobs);
   const operations = buildOperationsOverview({
@@ -1136,20 +1130,23 @@ export default async function DashboardPage() {
     maintenance,
     reportJobs,
   });
-  const todayRevenue = buildRevenueInsights(
-    orders,
-    driverTasks,
-    driverStatements,
-    {
-      period: "today",
-      serviceBucket: "all",
-      vehicleId: "all",
-    },
-  );
   const criticalIncidentCount = incidents.filter(
     (incident: IncidentRecord) =>
       (incident.status === "open" || incident.status === "investigating") &&
       incident.severity === "critical",
+  ).length;
+  const incidentInResponseCount = incidents.filter(
+    (incident: IncidentRecord) =>
+      incident.status === "open" || incident.status === "investigating",
+  ).length;
+  const activeComplaints = complaints.filter((record: ComplaintCaseRecord) =>
+    isComplaintActive(record.status),
+  );
+  const complaintSlaBreachedCount = activeComplaints.filter(
+    (record: ComplaintCaseRecord) => record.slaBreach,
+  ).length;
+  const highSeverityComplaintCount = activeComplaints.filter(
+    (record: ComplaintCaseRecord) => record.severity === "high",
   ).length;
   const dispatchEligibleDrivers =
     observability.driverState.dispatchEligibleDrivers ||
@@ -1164,33 +1161,19 @@ export default async function DashboardPage() {
         : `>${observability.driverState.oldestLocationLagMinutes} 分鐘`
       : undefined;
 
-  const opsAlertKeys = new Set(
-    observability.roleViews.find(
-      (view: OperationalRoleView) => view.route === "ops",
-    )?.alertKeys ?? [],
-  );
-  const opsAlerts = observability.alerts
-    .filter(
-      (alert: OperationalAlertRecord) =>
-        opsAlertKeys.has(alert.key) || alert.routes.includes("ops"),
-    )
-    .sort((left: OperationalAlertRecord, right: OperationalAlertRecord) => {
-      const severityRank: Record<OperationalAlertState, number> = {
-        critical: 0,
-        warning: 1,
-        healthy: 2,
-      };
-      const leftSeverity =
-        severityRank[left.state as OperationalAlertState] ?? 99;
-      const rightSeverity =
-        severityRank[right.state as OperationalAlertState] ?? 99;
-      return leftSeverity - rightSeverity;
-    });
-
   const adapterAttentionCount =
     observability.adapters.degradedAdapters +
     observability.adapters.downAdapters;
-  const topAlert = opsAlerts[0];
+  const sortedAdapterDetails = [...observability.adapterDetails].sort(
+    (left, right) => {
+      const severityDiff =
+        getAdapterSeverityRank(left.status) - getAdapterSeverityRank(right.status);
+      if (severityDiff !== 0) {
+        return severityDiff;
+      }
+      return right.lastCheckedAt.localeCompare(left.lastCheckedAt);
+    },
+  );
   const healthEnvelope = getHealthEnvelope(
     health,
     observability.adapterDetails,
@@ -1207,7 +1190,8 @@ export default async function DashboardPage() {
       incidentsResponse.meta.timestamp,
       maintenanceResponse.meta.timestamp,
       reportJobsResponse.meta.timestamp,
-      driverStatementsResponse.meta.timestamp,
+      complaintsResponse.meta.timestamp,
+      forwardedOrdersResponse.meta.timestamp,
     ],
     health.timestamp,
   );
@@ -1217,12 +1201,10 @@ export default async function DashboardPage() {
   );
   const refreshAction: DashboardActionLink = {
     descriptor: buildAction("refresh_dashboard", "low"),
-    label: getActionButtonLabel("refresh_dashboard", locale),
     href: "/dashboard?refresh=1",
   };
   const handbookAction: DashboardActionLink = {
     descriptor: buildAction("open_duty_handbook", "low"),
-    label: getActionButtonLabel("open_duty_handbook", locale),
     link: {
       targetApp: "ops-console",
       route: "/docs/03-runbooks/phase1-operator-routing-runbook.md",
@@ -1234,16 +1216,9 @@ export default async function DashboardPage() {
   };
   const callSessionAction: DashboardActionLink = {
     descriptor: buildAction("open_call_session", "medium"),
-    label: getActionButtonLabel("open_call_session", locale),
     href: "/callcenter",
   };
 
-  const queueAttentionCount =
-    dispatch.redispatchOrders +
-    dispatch.exceptionOrders +
-    observability.dispatch.laggedOrders +
-    orders.filter((order: OwnedOrderRecord) => order.status === "no_supply")
-      .length;
   const broadcastingCount = dispatchJobs.filter(
     (job: DispatchJobRecord) => job.status === "matching",
   ).length;
@@ -1257,20 +1232,11 @@ export default async function DashboardPage() {
     (order: OwnedOrderRecord) =>
       order.exceptionHold?.overrideRequest && !order.exceptionHold.resolution,
   ).length;
-  const eligibleVehicleGap =
-    operations.dispatchableVehicles - dispatch.queueDepth;
-  const topAdapter =
-    [...observability.adapterDetails].sort((left, right) => {
-      const severityDiff =
-        getAdapterSeverityRank(left.status) -
-        getAdapterSeverityRank(right.status);
-      if (severityDiff !== 0) {
-        return severityDiff;
-      }
-      return right.lastCheckedAt.localeCompare(left.lastCheckedAt);
-    })[0] ??
-    observability.adapterDetails[0] ??
-    null;
+  const syncFailedForwardedCount = forwardedOrders.filter(
+    (order: ForwardedOrderRecord) => order.status === "sync_failed",
+  ).length;
+  const topAdapter = sortedAdapterDetails[0] ?? null;
+  const healthSignalAdapters = sortedAdapterDetails.slice(0, 2);
 
   const headerSubtitle = [
     formatTimestamp(health.timestamp, locale),
@@ -1282,104 +1248,75 @@ export default async function DashboardPage() {
       : `執行 ${formatOpsCodeLabel(locale, health.execution_mode)}`,
   ].join(" · ");
 
+  const topCriticalIncident =
+    incidents.find(
+      (incident: IncidentRecord) =>
+        (incident.status === "open" || incident.status === "investigating") &&
+        incident.severity === "critical",
+    ) ?? null;
+
   const banners = [
-    topAlert
+    topCriticalIncident
       ? {
-          key: topAlert.key,
-          tone: getAlertTone(topAlert.state),
-          title: t(`dashboard.alert.${topAlert.key}.title`, locale),
-          body: `${getAlertSummary(topAlert.key, observability, locale)} · ${t(
-            "dashboard.operational.thresholds",
-            locale,
-            {
-              warning: formatAlertValue(
-                topAlert.thresholds.warning,
-                topAlert.thresholds.unit,
-                locale,
-              ),
-              critical: formatAlertValue(
-                topAlert.thresholds.critical,
-                topAlert.thresholds.unit,
-                locale,
-              ),
-            },
-          )}`,
-          actions: [
-            topAlert.key === "adapter_degradation"
-              ? {
-                  descriptor: buildAction("open_forwarded_dispatch", "low"),
-                  label: t("dashboard.platformOps.openDispatch", locale),
-                  href: buildDashboardDispatchHref("forwarded_mirror"),
-                }
-              : {
-                  descriptor: buildAction("open_incidents", "medium"),
-                  label: t("dashboard.quicklink.incidents", locale),
-                  href: "/incidents",
-                },
-          ],
-        }
-      : null,
-    criticalIncidentCount > 0
-      ? {
-          key: "critical-incident",
+          key: `incident-${topCriticalIncident.incidentId}`,
           tone: "danger" as const,
           title:
             locale === "en"
-              ? `${criticalIncidentCount} critical incident${criticalIncidentCount > 1 ? "s" : ""} need immediate review`
-              : `${criticalIncidentCount} 件重大事故待立即處理`,
+              ? `${topCriticalIncident.incidentId} · Driver SOS · critical`
+              : `${topCriticalIncident.incidentId} · 司機 SOS · critical`,
           body:
-            locale === "en"
-              ? "Critical incident banners must interrupt the shift handover. Review incident recovery before touching lower-priority queue work."
-              : "重大事故必須在交接時第一時間被看見。請先處理 incident recovery，再回到較低優先派遣佇列。",
+            topCriticalIncident.location ??
+            topCriticalIncident.description ??
+            (locale === "en"
+              ? "Critical incident requires immediate review."
+              : "重大事故需要立即處理。"),
           actions: [
             {
               descriptor: buildAction("open_incidents", "medium"),
-              label: getActionButtonLabel("open_incidents", locale),
               href: "/incidents",
             },
           ],
         }
       : null,
-    queueAttentionCount > 0
+    noSupplyCount > 0
       ? {
-          key: "dispatch-queue",
-          tone: queueAttentionCount > dispatch.queueDepth ? "danger" : "warn",
-          title: t("dashboard.dispatchBoards.title", locale),
+          key: "dispatch-no-supply",
+          tone: "warn" as const,
+          title:
+            locale === "en"
+              ? `${formatCompactNumber(noSupplyCount)} no-supply orders need intervention`
+              : `${formatCompactNumber(noSupplyCount)} 筆 no_supply 待介入`,
           body:
             locale === "en"
-              ? `${noSupplyCount} no-supply · ${exceptionHoldCount} exception hold · ${overridePendingCount} override pending`
-              : `${noSupplyCount} 筆 no_supply · ${exceptionHoldCount} 筆 exception_hold · ${overridePendingCount} 筆 override_pending`,
+              ? `${formatCompactNumber(exceptionHoldCount)} exception hold · ${formatCompactNumber(overridePendingCount)} override pending`
+              : `${formatCompactNumber(exceptionHoldCount)} 筆 exception_hold · ${formatCompactNumber(overridePendingCount)} 筆 override_pending`,
           actions: [
             {
               descriptor: buildAction("open_dispatch", "low"),
-              label: t("dashboard.dispatchBoards.openOwned", locale),
-              href:
-                noSupplyCount > 0
-                  ? buildDashboardDispatchHref("no_eligible_supply")
-                  : exceptionHoldCount > 0
-                    ? buildDashboardDispatchHref("exception_hold")
-                    : buildDashboardDispatchHref("governance_blocked"),
+              href: buildDashboardDispatchHref("no_eligible_supply"),
             },
           ],
         }
       : null,
-    adapterAttentionCount > 0
+    syncFailedForwardedCount > 0
       ? {
-          key: "platform-ops",
+          key: "forwarded-sync-failed",
           tone: "warn" as const,
-          title: t("dashboard.platformOps.metrics.adapters", locale),
-          body: t("dashboard.platformOps.degradedBanner", locale, {
-            count: adapterAttentionCount,
-          }),
+          title:
+            locale === "en"
+              ? `forwarded · sync_failed ${formatCompactNumber(syncFailedForwardedCount)}`
+              : `forwarded · sync_failed ${formatCompactNumber(syncFailedForwardedCount)}`,
+          body:
+            locale === "en"
+              ? `${formatCompactNumber(adapterAttentionCount)} degraded adapters · use forwarded board before retrying sync`
+              : `${formatCompactNumber(adapterAttentionCount)} 個 adapter 降級 · 請先查看 forwarded board 再重試同步`,
           actions: [
             {
               descriptor: buildAction("open_forwarded_dispatch", "low"),
-              label: t("dashboard.dispatchBoards.openForwarded", locale),
               href: buildDashboardDispatchHref("forwarded_mirror"),
             },
             {
               descriptor: buildAction("inspect_adapter_registry", "low"),
-              label: getActionButtonLabel("inspect_adapter_registry", locale),
               link: {
                 targetApp: "platform-admin",
                 route: "/adapter-registry",
@@ -1400,46 +1337,69 @@ export default async function DashboardPage() {
     tone: CanvasTone;
   }> = [
     {
-      label: locale === "en" ? "Supply buffer" : "供給緩衝",
+      label: locale === "en" ? "Dispatch lag" : "派遣延遲",
       value:
-        eligibleVehicleGap >= 0
+        observability.dispatch.oldestReadyOrderLagMinutes !== null
           ? locale === "en"
-            ? `+${eligibleVehicleGap} vehicles`
-            : `+${eligibleVehicleGap} 輛`
+            ? `${observability.dispatch.oldestReadyOrderLagMinutes} min`
+            : `${observability.dispatch.oldestReadyOrderLagMinutes} 分鐘`
           : locale === "en"
-            ? `${eligibleVehicleGap} vehicles`
-            : `${eligibleVehicleGap} 輛`,
-      tone: eligibleVehicleGap >= 0 ? "success" : "danger",
-    },
-    {
-      label: locale === "en" ? "Identity" : "身分摘要",
-      value: `${identity?.realm ?? "ops"} / ${identity?.actorType ?? "ops_user"}`,
-      tone: "neutral",
-    },
-    {
-      label: locale === "en" ? "Online / eligible drivers" : "在線 / 可派司機",
-      value: `${formatCompactNumber(onlineDrivers)} / ${formatCompactNumber(dispatchEligibleDrivers)}`,
-      tone: dispatchEligibleDrivers > 0 ? "success" : "warn",
+            ? "within SLA"
+            : "SLA 內",
+      tone:
+        observability.dispatch.oldestReadyOrderLagMinutes &&
+        observability.dispatch.oldestReadyOrderLagMinutes > 10
+          ? "warn"
+          : "success",
     },
     {
       label:
-        locale === "en" ? "Dispatchable / offline vehicles" : "可派 / 離線車輛",
-      value: `${formatCompactNumber(operations.dispatchableVehicles)} / ${formatCompactNumber(operations.offlineVehicles)}`,
-      tone: operations.offlineVehicles > 0 ? "warn" : "success",
+        locale === "en" ? "Webhook delivery p95" : "Webhook 投遞 p95",
+      value:
+        observability.webhook.oldestQueuedDeliveryLagMinutes !== null
+          ? locale === "en"
+            ? `${observability.webhook.oldestQueuedDeliveryLagMinutes} min queued`
+            : `${observability.webhook.oldestQueuedDeliveryLagMinutes} 分鐘佇列`
+          : locale === "en"
+            ? "healthy"
+            : "正常",
+      tone:
+        observability.webhook.failedDeliveriesLastHour > 0 ||
+        observability.webhook.oldestQueuedDeliveryLagMinutes !== null
+          ? "warn"
+          : "success",
+    },
+    ...healthSignalAdapters.map((adapter) => ({
+      label: `forwarder · ${formatOpsCodeLabel(locale, adapter.platformCode)}`,
+      value: formatOpsCodeLabel(locale, adapter.status),
+      tone: getHealthTone(adapter.status),
+    })),
+    {
+      label:
+        topAdapter?.credentialStatus &&
+        topAdapter.credentialStatus !== "valid" &&
+        topAdapter.credentialStatus !== "healthy"
+          ? `${formatOpsCodeLabel(locale, topAdapter.platformCode)} ${
+              locale === "en" ? "credential" : "憑證"
+            }`
+          : locale === "en"
+            ? "Credential / auth"
+            : "憑證 / 驗證",
+      value: topAdapter
+        ? topAdapter.credentialStatus !== "valid"
+          ? formatOpsCodeLabel(locale, topAdapter.credentialStatus)
+          : formatOpsCodeLabel(locale, topAdapter.authStatus)
+        : "—",
+      tone:
+        topAdapter &&
+        (topAdapter.credentialStatus !== "valid" ||
+          topAdapter.authStatus !== "healthy")
+          ? "danger"
+          : "success",
     },
     {
-      label: locale === "en" ? "Open / critical incidents" : "未結 / 重大事故",
-      value: `${formatCompactNumber(operations.openIncidents)} / ${formatCompactNumber(criticalIncidentCount)}`,
-      tone: criticalIncidentCount > 0 ? "danger" : "info",
-    },
-    {
-      label: locale === "en" ? "Overdue maintenance" : "逾期保養",
-      value: formatCompactNumber(operations.overdueMaintenance),
-      tone: operations.overdueMaintenance > 0 ? "warn" : "success",
-    },
-    {
-      label: t("dashboard.runtime.apiStatus", locale),
-      value: health.status,
+      label: locale === "en" ? "Identity / runtime" : "身分 / runtime",
+      value: `${identity?.realm ?? "ops"} / ${identity?.actorType ?? "ops_user"} · ${health.status}`,
       tone: getHealthTone(health.status),
     },
   ];
@@ -1708,10 +1668,6 @@ export default async function DashboardPage() {
                 <ActionLinkButton
                   action={{
                     descriptor: buildAction("inspect_adapter_registry", "low"),
-                    label: getActionButtonLabel(
-                      "inspect_adapter_registry",
-                      locale,
-                    ),
                     link: {
                       targetApp: "platform-admin",
                       route: "/adapter-registry",
@@ -1864,24 +1820,26 @@ export default async function DashboardPage() {
           />
           <KPI
             theme={theme}
-            label={t("dashboard.openIncidents", locale)}
-            value={formatCompactNumber(operations.openIncidents)}
+            label={locale === "en" ? "Open Complaints" : "客訴未結"}
+            value={formatCompactNumber(activeComplaints.length)}
             delta={
-              criticalIncidentCount > 0
+              complaintSlaBreachedCount > 0
                 ? locale === "en"
-                  ? `${formatCompactNumber(criticalIncidentCount)} critical`
-                  : `${formatCompactNumber(criticalIncidentCount)} 重大`
+                  ? `${formatCompactNumber(complaintSlaBreachedCount)} SLA breach`
+                  : `${formatCompactNumber(complaintSlaBreachedCount)} SLA breach`
                 : undefined
             }
-            deltaTone={criticalIncidentCount > 0 ? "down" : "neutral"}
-            sub={t("dashboard.openIncidentsSub", locale, {
-              count: operations.overdueMaintenance,
-            })}
+            deltaTone={complaintSlaBreachedCount > 0 ? "down" : "neutral"}
+            sub={
+              locale === "en"
+                ? `${formatCompactNumber(highSeverityComplaintCount)} high severity`
+                : `${formatCompactNumber(highSeverityComplaintCount)} 件高嚴重度`
+            }
           />
           <KPI
             theme={theme}
-            label={t("dashboard.todayRevenue", locale)}
-            value={formatMinorCurrency(todayRevenue.totalRevenueMinor)}
+            label={locale === "en" ? "Incidents In Response" : "事故進行中"}
+            value={formatCompactNumber(incidentInResponseCount)}
             delta={
               criticalIncidentCount > 0
                 ? locale === "en"
@@ -1890,9 +1848,11 @@ export default async function DashboardPage() {
                 : undefined
             }
             deltaTone={criticalIncidentCount > 0 ? "down" : "neutral"}
-            sub={t("dashboard.todayRevenueSub", locale, {
-              trips: formatCompactNumber(todayRevenue.completedTrips),
-            })}
+            sub={
+              locale === "en"
+                ? `${formatCompactNumber(operations.openIncidents)} open total`
+                : `${formatCompactNumber(operations.openIncidents)} 件未結`
+            }
           />
         </div>
 
@@ -1902,13 +1862,18 @@ export default async function DashboardPage() {
             title={locale === "en" ? "Today's Attention" : "今日待處理"}
             subtitle={
               locale === "en"
-                ? "Critical first, then SLA breach, then blocking queue"
-                : "排序：critical → SLA breach → blocking"
+                ? "SOS → no_supply → sync_failed"
+                : "排序：SOS → no_supply → sync_failed"
             }
             actions={
-              <Btn theme={theme} variant="ghost">
-                {locale === "en" ? "Open all" : "展開所有"}
-              </Btn>
+              <ActionLinkButton
+                action={{
+                  descriptor: buildAction("open_dispatch", "low"),
+                  href: buildDashboardDispatchHref("ready_queue"),
+                }}
+                locale={locale}
+                variant="ghost"
+              />
             }
           >
             <div style={bannerStackStyle}>
@@ -1953,8 +1918,8 @@ export default async function DashboardPage() {
             title={locale === "en" ? "Health Signals" : "健康訊號"}
             subtitle={
               locale === "en"
-                ? "Supply vs demand, fleet readiness, and runtime context."
-                : "供需、車隊就緒度與執行情境。"
+                ? "UiHealthEnvelope · cross-app deps"
+                : "UiHealthEnvelope · cross-app deps"
             }
           >
             {signalEmptyState ? (
@@ -1977,14 +1942,15 @@ export default async function DashboardPage() {
         <Card
           theme={theme}
           title={
-            locale === "en" ? "Current Dispatch Queue" : "當前 dispatch 隊列"
+            locale === "en"
+              ? "Current Dispatch Queue · top 5"
+              : "當前 dispatch 隊列 · top 5"
           }
           padding={0}
           actions={
             <ActionLinkButton
               action={{
                 descriptor: buildAction("open_dispatch", "low"),
-                label: getActionButtonLabel("open_dispatch", locale),
                 href: buildDashboardDispatchHref("ready_queue"),
               }}
               locale={locale}
