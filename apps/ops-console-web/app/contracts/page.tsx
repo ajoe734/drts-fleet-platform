@@ -97,6 +97,7 @@ type ContractRow = Record<string, unknown> & {
   partnerId: string;
   partnerDisplayName: string;
   partnerType: string;
+  partnerTypeLabel: string;
   partnerEntrySlug: string | null;
   vehicleId: string;
   statusKey: ContractFilterStatus;
@@ -490,6 +491,67 @@ function deriveKind(contract: ContractRuntimeRecord): {
   };
 }
 
+function formatContractKindKey(locale: Locale, kindKey: string) {
+  switch (kindKey) {
+    case "partner":
+      return t("contracts.kind.partnerProgram", locale);
+    case "forwarder":
+      return t("contracts.kind.forwarded", locale);
+    case "driver":
+      return t("contracts.kind.driver", locale);
+    case "vehicle":
+      return t("contracts.kind.vehicleFleet", locale);
+    default:
+      return formatOpsCodeLabel(locale, kindKey);
+  }
+}
+
+function formatContractPartnerType(locale: Locale, partnerType: string) {
+  const normalized = partnerType.trim().toLowerCase();
+
+  if (normalized.includes("forward")) {
+    return t("contracts.kind.forwarded", locale);
+  }
+  if (normalized.includes("partner") || normalized.includes("program")) {
+    return t("contracts.kind.partnerProgram", locale);
+  }
+  if (normalized.includes("driver")) {
+    return t("contracts.kind.driver", locale);
+  }
+  if (normalized.includes("vehicle") || normalized.includes("fleet")) {
+    return t("contracts.kind.vehicleFleet", locale);
+  }
+
+  return formatOpsCodeLabel(locale, partnerType);
+}
+
+function formatContractEligibilityMode(
+  locale: Locale,
+  eligibilityMode: string,
+) {
+  switch (eligibilityMode.trim().toLowerCase()) {
+    case "none":
+      return t("contracts.eligibility.none", locale);
+    case "bank_card_inline":
+      return t("contracts.eligibility.bankCardInline", locale);
+    case "reference_required":
+      return t("contracts.eligibility.referenceRequired", locale);
+    default:
+      return formatOpsCodeLabel(locale, eligibilityMode);
+  }
+}
+
+function formatContractAuthMode(locale: Locale, authMode: string) {
+  switch (authMode.trim().toLowerCase()) {
+    case "tenant_portal_bearer":
+      return t("contracts.auth.tenantPortalBearer", locale);
+    case "partner_api_key":
+      return t("contracts.auth.partnerApiKey", locale);
+    default:
+      return formatOpsCodeLabel(locale, authMode);
+  }
+}
+
 function daysBetween(fromIso: string, toIso: string | null): number | null {
   if (!toIso) {
     return null;
@@ -563,7 +625,7 @@ function deriveKeyTerms(
   }
   if (partnerEntry) {
     parts.push(
-      `${t("contracts.keyTerms.eligibilityMode", locale)}: ${formatOpsCodeLabel(locale, partnerEntry.eligibilityMode)}`,
+      `${t("contracts.keyTerms.eligibilityMode", locale)}: ${formatContractEligibilityMode(locale, partnerEntry.eligibilityMode)}`,
     );
   }
   return parts.join(" · ");
@@ -1103,6 +1165,7 @@ export default async function ContractsPage({
         partnerEntry?.displayName ??
         contract.partnerId,
       partnerType: contract.partnerType,
+      partnerTypeLabel: formatContractPartnerType(locale, contract.partnerType),
       partnerEntrySlug:
         contract.partnerEntrySlug ?? partnerEntry?.entrySlug ?? null,
       vehicleId: contract.vehicleId,
@@ -1136,9 +1199,9 @@ export default async function ContractsPage({
     return nextRow;
   });
 
-  const typeOptions = Array.from(new Set(rows.map((row) => row.kindKey))).sort(
-    (left, right) => left.localeCompare(right),
-  );
+  const typeOptions = Array.from(
+    new Map(rows.map((row) => [row.kindKey, row.kindLabel])).entries(),
+  ).sort(([left], [right]) => left.localeCompare(right));
 
   const filteredRows = rows.filter((row) => {
     if (filters.tab === "expiring" && !(row.expiringSoon || row.expired)) {
@@ -1314,9 +1377,12 @@ export default async function ContractsPage({
       displayName: entry.displayName,
       entrySlug: entry.entrySlug,
       programId: entry.programId,
-      partnerTypeLabel: formatOpsCodeLabel(locale, entry.partnerType),
-      eligibilityLabel: formatOpsCodeLabel(locale, entry.eligibilityMode),
-      authLabel: formatOpsCodeLabel(locale, entry.authMode),
+      partnerTypeLabel: formatContractPartnerType(locale, entry.partnerType),
+      eligibilityLabel: formatContractEligibilityMode(
+        locale,
+        entry.eligibilityMode,
+      ),
+      authLabel: formatContractAuthMode(locale, entry.authMode),
       statusLabel: formatOpsCodeLabel(locale, entry.status),
       statusTone:
         entry.status === "active" && entry.activeFlag
@@ -1521,9 +1587,9 @@ export default async function ContractsPage({
                   style={fieldStyle}
                 >
                   <option value="all">{t("common.all", locale)}</option>
-                  {typeOptions.map((value) => (
+                  {typeOptions.map(([value, label]) => (
                     <option key={value} value={value}>
-                      {formatOpsCodeLabel(locale, value)}
+                      {label || formatContractKindKey(locale, value)}
                     </option>
                   ))}
                 </select>
