@@ -34,7 +34,7 @@ import {
 
 import { PublishAssistantScope } from "@/components/ops-assistant";
 import { RevenueAutoRefresh } from "@/components/revenue-auto-refresh";
-import { getOpsClient } from "@/lib/api-client";
+import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import {
   buildRevenueInsights,
@@ -892,7 +892,7 @@ function mismatchAge(issue: ForwarderReconciliationIssue): number {
 }
 
 export default async function RevenuePage({ searchParams }: RevenuePageProps) {
-  const client = getOpsClient();
+  const client = await getServerOpsClient();
   const resolvedSearchParams = await (searchParams ??
     Promise.resolve({} as Record<string, string | string[] | undefined>));
   const filters = resolveFilters(resolvedSearchParams);
