@@ -70,12 +70,10 @@ type FlagTableRow = {
   description: string;
   enabled: boolean;
   tenantId: string | null;
-  scopeLabel: string;
-  scopeTone: "accent" | "neutral";
+  isTenantOverride: boolean;
   rolloutLabel: "mid_rollout" | "rolled_out" | "deprecated";
   rolloutTone: "warn" | "success" | "danger";
   updatedAt: string;
-  updatedBy: string;
 } & Record<string, unknown>;
 
 type RolloutFilter =
@@ -361,13 +359,10 @@ function toFlagTableRow(flag: FeatureFlag): FlagTableRow {
 
   return {
     key: flag.key,
-    description: flag.description || "—",
+    description: flag.description?.trim() ?? "",
     enabled: flag.enabled,
     tenantId: flag.tenantId ?? null,
-    scopeLabel: isTenantOverride
-      ? `Tenant override · ${flag.tenantId}`
-      : "Platform default",
-    scopeTone: isTenantOverride ? "accent" : "neutral",
+    isTenantOverride,
     rolloutLabel,
     rolloutTone:
       rolloutLabel === "deprecated"
@@ -376,7 +371,6 @@ function toFlagTableRow(flag: FeatureFlag): FlagTableRow {
           ? "success"
           : "warn",
     updatedAt: flag.updatedAt,
-    updatedBy: "Contract not exposed",
   };
 }
 
@@ -399,7 +393,7 @@ function isDeprecatedFlag(flag: FeatureFlag) {
 }
 
 export default function FeatureFlagsPage() {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
   const client = usePlatformAdminClient();
   const [flags, setFlags] = useState<FeatureFlag[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
@@ -555,235 +549,46 @@ export default function FeatureFlagsPage() {
   const filterOptions: RolloutFilterOption[] = [
     {
       value: "all",
-      label: locale === "en" ? "All" : "全部",
+      label: t("common.all"),
       count: rows.length,
     },
     {
       value: "mid_rollout",
-      label: locale === "en" ? "Mid-rollout" : "進行中 rollout",
+      label: t("featureFlagsAdmin.rolloutMid"),
       count: midRolloutCount,
     },
     {
       value: "rolled_out",
-      label: locale === "en" ? "Rolled out" : "已全面 rollout",
+      label: t("featureFlagsAdmin.rolloutFull"),
       count: rolledOutCount,
     },
     {
       value: "deprecated",
-      label: locale === "en" ? "Deprecated" : "Deprecated",
+      label: t("featureFlagsAdmin.rolloutDeprecated"),
       count: deprecatedCount,
     },
     {
       value: "tenant_overrides",
-      label: locale === "en" ? "Tenant overrides" : "Tenant overrides",
+      label: t("featureFlagsAdmin.summaryTenantOverride"),
       count: overrideCount,
     },
   ];
 
-  const copy =
-    locale === "en"
-      ? {
-          pageTitle: "Feature Flags · WRITE authority",
-          pageSubtitle:
-            "Writable only here. Ops, tenant, and driver surfaces stay on read-only GET feature flag views.",
-          metaPill: "writable only here",
-          refresh: t("common.refresh"),
-          refreshing: "Refreshing...",
-          addOverride: "Add tenant override",
-          addOverrideHint: "Select a tenant scope first to create an override.",
-          riskTitle: "High-risk actions require an explicit reason.",
-          riskBody:
-            "Toggle and tenant override changes stay in this write lane and record a local audit receipt after confirmation.",
-          scopeField: "Inspect scope",
-          searchField: "Search key",
-          searchPlaceholder: "Search by flag key",
-          scopeHint:
-            "Switch to a tenant to inspect its effective override rows. Default view stays on platform records.",
-          scopeDefault: "Platform defaults",
-          scopeLoading: "Loading tenant list...",
-          currentScope: selectedTenant
-            ? `${selectedTenant.name} (${selectedTenant.code})`
-            : "Platform defaults",
-          summaryPlatformDefault: "Platform defaults",
-          summaryTenantOverride: "Tenant overrides",
-          tableTitle: "Feature flag registry",
-          tableSubtitle:
-            "KEY, SCOPE, STATE TOGGLE, UPDATED BY, AT, and ACTIONS stay in the assigned table-first body.",
-          filterLabel: "Rollout state",
-          filterPill: "table-first layout",
-          rolloutMid: "Mid-rollout",
-          rolloutFull: "Rolled out",
-          rolloutDeprecated: "Deprecated",
-          keyHeader: "Key",
-          scopeHeader: "Scope",
-          stateHeader: "State",
-          updatedByHeader: "Updated by",
-          updatedAtHeader: "At",
-          actionsHeader: "Actions",
-          noDescription: "No description provided",
-          updatedByValue: "Contract not exposed",
-          toggle: "Toggle",
-          removeOverride: "Remove override",
-          history: "History",
-          confirmToggleTitle: "Confirm feature flag toggle",
-          confirmToggleBody:
-            "This will change the effective feature flag state shown in the current scope.",
-          confirmOverrideTitle: "Create tenant override",
-          confirmOverrideBody:
-            "This writes a tenant-specific override for the selected key and leaves other scopes unchanged.",
-          confirmRemoveOverrideTitle: "Remove tenant override",
-          confirmRemoveOverrideBody:
-            "This removes the tenant-specific override and reverts the tenant back to the platform default.",
-          reasonLabel: "High-risk reason",
-          reasonPlaceholder:
-            "Describe the rollout reason, expected blast radius, and validation plan.",
-          reasonRequired:
-            "A high-risk reason is required before this action can run.",
-          overrideTenantField: "Tenant",
-          overrideKeyField: "Flag key",
-          overrideStateField: "Override state",
-          overrideDescriptionField: "Override description",
-          overrideDescriptionHint:
-            "Optional. Leave blank to keep the existing flag description.",
-          enabled: t("common.enabled"),
-          disabled: t("common.disabled"),
-          cancel: t("common.cancel"),
-          confirming: t("common.updating"),
-          confirmEnable: "Enable",
-          confirmDisable: "Disable",
-          confirmCreate: "Create override",
-          confirmRemove: "Remove override",
-          noFlags: t("flags.empty"),
-          loading: t("flags.loading"),
-          scopeMeta: "Inspect scope",
-          resultMeta: `${filteredRows.length} visible row(s)`,
-          enabledMeta: `${enabledCount} enabled`,
-          disabledMeta: `${disabledCount} disabled`,
-          overrideMeta: `${overrideCount} tenant override row(s)`,
-          notesTitle: "Extended notes",
-          notesEmpty:
-            "No additional contract notes are exposed for the current scope.",
-          historyTitle: "Local audit receipts",
-          historyEmpty:
-            "No local receipts have been recorded in this session yet.",
-          historyHint:
-            "Use the History row action to focus receipts for a specific key.",
-          historyFocusAll:
-            "Showing all receipts recorded in this browser session.",
-          historyFocusKey: `Focused on ${historyKey ?? "all keys"}`,
-          secondaryPanelTitle: "Change control & extended details",
-          secondaryPanelSubtitle:
-            "High-risk reason capture, notes, and local history stay below the default table-first body.",
-          actionComposerTitle: "Pending high-risk change",
-          actionComposerIdle:
-            "Toggle and override mutations require an explicit reason before confirmation.",
-          actionApplied: "Audit receipt recorded",
-          noFlagsInFilter:
-            "No feature flags match the current rollout filter and search query.",
-          laneMeta: "Writable only here",
-          notesMeta: "Extended notes stay outside the default body.",
-          receiptsMeta: `${auditReceipts.length} local receipt(s)`,
-          showAllReceipts: "Show all receipts",
-        }
-      : {
-          pageTitle: "Feature Flags · WRITE authority",
-          pageSubtitle:
-            "只有這裡可寫入。ops、tenant、driver 其他頁面維持 GET feature flag 唯讀檢視。",
-          metaPill: "writable only here",
-          refresh: t("common.refresh"),
-          refreshing: "重新整理中...",
-          addOverride: "新增 tenant override",
-          addOverrideHint: "先切到 tenant 範圍，才能建立 override。",
-          riskTitle: "高風險操作必須填寫原因。",
-          riskBody:
-            "toggle 與 tenant override 都維持在這條 write lane，確認後會留下本地 audit receipt。",
-          scopeField: "檢視範圍",
-          searchField: "搜尋 key",
-          searchPlaceholder: "依 flag key 搜尋",
-          scopeHint:
-            "切到 tenant 可檢視該 tenant 的有效 override 列；預設仍以平台資料為主。",
-          scopeDefault: "平台預設",
-          scopeLoading: "載入 tenant 清單中...",
-          currentScope: selectedTenant
-            ? `${selectedTenant.name} (${selectedTenant.code})`
-            : "平台預設",
-          summaryPlatformDefault: "平台預設",
-          summaryTenantOverride: "Tenant overrides",
-          tableTitle: "Feature flag registry",
-          tableSubtitle:
-            "依畫布 handoff 對齊 KEY、SCOPE、STATE TOGGLE、UPDATED BY、AT、ACTIONS 的 table-first 主體。",
-          filterLabel: "Rollout 狀態",
-          filterPill: "table-first layout",
-          rolloutMid: "進行中 rollout",
-          rolloutFull: "已全面 rollout",
-          rolloutDeprecated: "Deprecated",
-          keyHeader: "Key",
-          scopeHeader: "Scope",
-          stateHeader: "State",
-          updatedByHeader: "Updated by",
-          updatedAtHeader: "At",
-          actionsHeader: "Actions",
-          noDescription: "尚未提供描述",
-          updatedByValue: "目前 contract 未提供",
-          toggle: "切換",
-          removeOverride: "移除 override",
-          history: "歷史",
-          confirmToggleTitle: "確認切換 feature flag",
-          confirmToggleBody: "這會變更目前檢視範圍中的有效 feature flag 狀態。",
-          confirmOverrideTitle: "建立 tenant override",
-          confirmOverrideBody:
-            "這會為所選 key 建立 tenant 專屬 override，不影響其他範圍。",
-          confirmRemoveOverrideTitle: "移除 tenant override",
-          confirmRemoveOverrideBody:
-            "這會移除 tenant 專屬 override，讓該 tenant 回到平台預設。",
-          reasonLabel: "高風險原因",
-          reasonPlaceholder:
-            "說明 rollout 原因、預期 blast radius 與驗證計畫。",
-          reasonRequired: "執行這個高風險操作前必須填寫原因。",
-          overrideTenantField: "Tenant",
-          overrideKeyField: "Flag key",
-          overrideStateField: "Override 狀態",
-          overrideDescriptionField: "Override 描述",
-          overrideDescriptionHint: "可留白，沿用既有 flag 描述。",
-          enabled: t("common.enabled"),
-          disabled: t("common.disabled"),
-          cancel: t("common.cancel"),
-          confirming: t("common.updating"),
-          confirmEnable: "啟用",
-          confirmDisable: "停用",
-          confirmCreate: "建立 override",
-          confirmRemove: "移除 override",
-          noFlags: t("flags.empty"),
-          loading: t("flags.loading"),
-          scopeMeta: "目前 scope",
-          resultMeta: `可見 ${filteredRows.length} 列`,
-          enabledMeta: `啟用 ${enabledCount} 列`,
-          disabledMeta: `停用 ${disabledCount} 列`,
-          overrideMeta: `tenant override ${overrideCount} 列`,
-          notesTitle: "延伸備註",
-          notesEmpty: "目前範圍沒有額外 contract 備註。",
-          historyTitle: "本地 audit receipts",
-          historyEmpty: "這個瀏覽 session 尚未記錄任何 receipt。",
-          historyHint: "可用 History 列操作聚焦特定 key 的 receipt。",
-          historyFocusAll: "目前顯示此瀏覽 session 的所有 receipts。",
-          historyFocusKey: `目前聚焦 ${historyKey ?? "全部 key"}`,
-          secondaryPanelTitle: "變更控制與延伸細節",
-          secondaryPanelSubtitle:
-            "高風險原因、延伸備註與本地歷史都收在表格主體下方的次要區塊。",
-          actionComposerTitle: "待確認的高風險變更",
-          actionComposerIdle: "toggle 與 override 變更都必須先填寫原因再確認。",
-          actionApplied: "已記錄 audit receipt",
-          noFlagsInFilter:
-            "目前 rollout 篩選與搜尋條件沒有符合的 feature flags。",
-          laneMeta: "僅此處可寫入",
-          notesMeta: "延伸備註收在預設主體之外。",
-          receiptsMeta: `本地 receipt ${auditReceipts.length} 筆`,
-          showAllReceipts: "顯示全部 receipts",
-        };
+  const currentScope = selectedTenant
+    ? `${selectedTenant.name} (${selectedTenant.code})`
+    : t("featureFlagsAdmin.scopePlatformDefault");
+
+  function getScopeLabel(row: FlagTableRow) {
+    return row.isTenantOverride
+      ? t("featureFlagsAdmin.scopeTenantOverride", {
+          tenantId: row.tenantId ?? "",
+        })
+      : t("featureFlagsAdmin.scopePlatformDefault");
+  }
 
   const columns: CanvasTableColumn<FlagTableRow>[] = [
     {
-      h: copy.keyHeader,
+      h: t("featureFlagsAdmin.keyHeader"),
       w: 300,
       r: (row) => (
         <div style={keyCellStyle}>
@@ -791,36 +596,41 @@ export default function FeatureFlagsPage() {
           <div style={inlinePillRowStyle}>
             <CanvasPill theme={theme} tone={row.rolloutTone}>
               {row.rolloutLabel === "deprecated"
-                ? copy.rolloutDeprecated
+                ? t("featureFlagsAdmin.rolloutDeprecated")
                 : row.rolloutLabel === "rolled_out"
-                  ? copy.rolloutFull
-                  : copy.rolloutMid}
+                  ? t("featureFlagsAdmin.rolloutFull")
+                  : t("featureFlagsAdmin.rolloutMid")}
             </CanvasPill>
           </div>
           <div style={secondaryTextStyle}>
-            {row.description === "—" ? copy.noDescription : row.description}
+            {row.description || t("featureFlagsAdmin.noDescription")}
           </div>
         </div>
       ),
     },
     {
-      h: copy.scopeHeader,
+      h: t("featureFlagsAdmin.scopeHeader"),
       w: 220,
       r: (row) => (
         <div style={keyCellStyle}>
           <div style={inlinePillRowStyle}>
-            <CanvasPill theme={theme} tone={row.scopeTone}>
-              {row.scopeLabel}
+            <CanvasPill
+              theme={theme}
+              tone={row.isTenantOverride ? "accent" : "neutral"}
+            >
+              {getScopeLabel(row)}
             </CanvasPill>
           </div>
           <div style={secondaryTextStyle}>
-            {row.tenantId ? row.tenantId : copy.scopeDefault}
+            {row.tenantId
+              ? row.tenantId
+              : t("featureFlagsAdmin.scopePlatformDefault")}
           </div>
         </div>
       ),
     },
     {
-      h: copy.stateHeader,
+      h: t("featureFlagsAdmin.stateHeader"),
       w: 200,
       r: (row) => (
         <div style={stateCellStyle}>
@@ -829,11 +639,11 @@ export default function FeatureFlagsPage() {
             tone={row.enabled ? "success" : "neutral"}
             dot
           >
-            {row.enabled ? copy.enabled : copy.disabled}
+            {row.enabled ? t("common.enabled") : t("common.disabled")}
           </CanvasPill>
           <button
             type="button"
-            aria-label={`${copy.toggle} ${row.key}`}
+            aria-label={`${t("featureFlagsAdmin.toggle")} ${row.key}`}
             onClick={() => {
               setActionError(null);
               setActionReason("");
@@ -841,10 +651,10 @@ export default function FeatureFlagsPage() {
                 intent: "toggle",
                 key: row.key,
                 tenantId: row.tenantId,
-                description: row.description === "—" ? "" : row.description,
+                description: row.description,
                 currentEnabled: row.enabled,
                 nextEnabled: !row.enabled,
-                scopeLabel: row.scopeLabel,
+                scopeLabel: getScopeLabel(row),
               });
             }}
             disabled={updating === row.key}
@@ -856,18 +666,22 @@ export default function FeatureFlagsPage() {
       ),
     },
     {
-      h: copy.updatedByHeader,
+      h: t("featureFlagsAdmin.updatedByHeader"),
       w: 160,
-      r: () => <span style={secondaryTextStyle}>{copy.updatedByValue}</span>,
+      r: () => (
+        <span style={secondaryTextStyle}>
+          {t("featureFlagsAdmin.updatedByValue")}
+        </span>
+      ),
     },
     {
-      h: copy.updatedAtHeader,
+      h: t("featureFlagsAdmin.updatedAtHeader"),
       w: 170,
       mono: true,
       r: (row) => formatDateTime(row.updatedAt),
     },
     {
-      h: copy.actionsHeader,
+      h: t("featureFlagsAdmin.actionsHeader"),
       w: 190,
       r: (row) => (
         <div style={actionRowStyle}>
@@ -882,15 +696,15 @@ export default function FeatureFlagsPage() {
                 intent: "toggle",
                 key: row.key,
                 tenantId: row.tenantId,
-                description: row.description === "—" ? "" : row.description,
+                description: row.description,
                 currentEnabled: row.enabled,
                 nextEnabled: !row.enabled,
-                scopeLabel: row.scopeLabel,
+                scopeLabel: getScopeLabel(row),
               });
             }}
             disabled={updating === row.key}
           >
-            {copy.toggle}
+            {t("featureFlagsAdmin.toggle")}
           </CanvasBtn>
           <CanvasBtn
             theme={theme}
@@ -898,7 +712,7 @@ export default function FeatureFlagsPage() {
             variant="ghost"
             onClick={() => setHistoryKey(row.key)}
           >
-            {copy.history}
+            {t("featureFlagsAdmin.history")}
           </CanvasBtn>
         </div>
       ),
@@ -913,12 +727,12 @@ export default function FeatureFlagsPage() {
     const descriptor = actionDescriptors[pendingAction.intent];
     const reason = actionReason.trim();
     if (descriptor.requiresReason && !reason) {
-      setActionError(copy.reasonRequired);
+      setActionError(t("featureFlagsAdmin.reasonRequired"));
       return;
     }
 
     if (pendingAction.intent === "override" && !pendingAction.tenantId) {
-      setActionError(copy.overrideTenantField);
+      setActionError(t("featureFlagsAdmin.overrideTenantField"));
       return;
     }
 
@@ -968,11 +782,13 @@ export default function FeatureFlagsPage() {
       const scopeLabel =
         pendingAction.intent === "toggle"
           ? pendingAction.scopeLabel
-          : `Tenant override · ${pendingAction.tenantId}`;
+          : t("featureFlagsAdmin.scopeTenantOverride", {
+              tenantId: pendingAction.tenantId,
+            });
       const summary =
         pendingAction.intent === "toggle"
-          ? `${pendingAction.nextEnabled ? copy.confirmEnable : copy.confirmDisable} ${pendingAction.key}`
-          : `${copy.confirmCreate} ${pendingAction.key}`;
+          ? `${pendingAction.nextEnabled ? t("featureFlagsAdmin.confirmEnable") : t("featureFlagsAdmin.confirmDisable")} ${pendingAction.key}`
+          : `${t("featureFlagsAdmin.confirmCreate")} ${pendingAction.key}`;
 
       setAuditReceipts((previous) => [
         {
@@ -1007,7 +823,7 @@ export default function FeatureFlagsPage() {
 
   function openOverrideComposer() {
     if (!selectedTenantId) {
-      setActionError(copy.addOverrideHint);
+      setActionError(t("featureFlagsAdmin.addOverrideHint"));
       return;
     }
 
@@ -1026,12 +842,12 @@ export default function FeatureFlagsPage() {
     <>
       <CanvasPageHeader
         theme={theme}
-        title={copy.pageTitle}
-        subtitle={copy.pageSubtitle}
+        title={t("featureFlagsAdmin.pageTitle")}
+        subtitle={t("featureFlagsAdmin.pageSubtitle")}
         actions={
           <>
             <CanvasPill theme={theme} tone="accent" dot>
-              {copy.metaPill}
+              {t("featureFlagsAdmin.metaPill")}
             </CanvasPill>
             <CanvasBtn
               theme={theme}
@@ -1039,7 +855,9 @@ export default function FeatureFlagsPage() {
               icon="arrow"
               onClick={() => void loadFlags()}
             >
-              {loading && flags.length > 0 ? copy.refreshing : copy.refresh}
+              {loading && flags.length > 0
+                ? t("featureFlagsAdmin.refreshing")
+                : t("common.refresh")}
             </CanvasBtn>
             <CanvasBtn
               theme={theme}
@@ -1052,7 +870,7 @@ export default function FeatureFlagsPage() {
                 !selectedTenantId
               }
             >
-              {copy.addOverride}
+              {t("featureFlagsAdmin.addOverride")}
             </CanvasBtn>
           </>
         }
@@ -1062,10 +880,10 @@ export default function FeatureFlagsPage() {
         {loading && flags.length === 0 ? (
           <CanvasCard
             theme={theme}
-            title={copy.pageTitle}
-            subtitle={copy.loading}
+            title={t("featureFlagsAdmin.pageTitle")}
+            subtitle={t("flags.loading")}
           >
-            <div style={loadingStateStyle}>{copy.loading}</div>
+            <div style={loadingStateStyle}>{t("flags.loading")}</div>
           </CanvasCard>
         ) : (
           <>
@@ -1074,7 +892,7 @@ export default function FeatureFlagsPage() {
                 theme={theme}
                 tone="danger"
                 title={error}
-                body={copy.riskBody}
+                body={t("featureFlagsAdmin.riskBody")}
               />
             ) : null}
 
@@ -1082,7 +900,7 @@ export default function FeatureFlagsPage() {
               <CanvasBanner
                 theme={theme}
                 tone="success"
-                title={copy.actionApplied}
+                title={t("featureFlagsAdmin.actionApplied")}
                 body={`${auditReceipts[0]?.summary} · ${auditReceipts[0]?.scopeLabel} · ${formatDateTime(
                   auditReceipts[0]?.requestedAt ?? "",
                 )}`}
@@ -1092,13 +910,16 @@ export default function FeatureFlagsPage() {
             <div style={sectionStackStyle}>
               <CanvasCard
                 theme={theme}
-                title={copy.tableTitle}
-                subtitle={copy.tableSubtitle}
+                title={t("featureFlagsAdmin.tableTitle")}
+                subtitle={t("featureFlagsAdmin.tableSubtitle")}
                 style={{ overflow: "hidden" }}
               >
                 <div style={tableHeaderStackStyle}>
                   <div style={toolbarStyle}>
-                    <CanvasField theme={theme} label={copy.scopeField}>
+                    <CanvasField
+                      theme={theme}
+                      label={t("featureFlagsAdmin.scopeField")}
+                    >
                       <select
                         value={selectedTenantId}
                         onChange={(event) =>
@@ -1107,7 +928,9 @@ export default function FeatureFlagsPage() {
                         disabled={tenantLoading}
                         style={selectStyle(theme)}
                       >
-                        <option value="">{copy.scopeDefault}</option>
+                        <option value="">
+                          {t("featureFlagsAdmin.scopePlatformDefault")}
+                        </option>
                         {tenants.map((tenant) => (
                           <option key={tenant.id} value={tenant.id}>
                             {tenant.name} ({tenant.code})
@@ -1115,12 +938,15 @@ export default function FeatureFlagsPage() {
                         ))}
                       </select>
                     </CanvasField>
-                    <CanvasField theme={theme} label={copy.searchField}>
+                    <CanvasField
+                      theme={theme}
+                      label={t("featureFlagsAdmin.searchField")}
+                    >
                       <input
                         type="search"
                         value={searchTerm}
                         onChange={(event) => setSearchTerm(event.target.value)}
-                        placeholder={copy.searchPlaceholder}
+                        placeholder={t("featureFlagsAdmin.searchPlaceholder")}
                         style={selectStyle(theme)}
                       />
                     </CanvasField>
@@ -1150,45 +976,55 @@ export default function FeatureFlagsPage() {
                   </div>
                   <div style={utilityBarStyle}>
                     <CanvasPill theme={theme} tone="accent" dot>
-                      {copy.laneMeta}
+                      {t("featureFlagsAdmin.laneMeta")}
                     </CanvasPill>
                     <CanvasPill theme={theme} tone="neutral">
-                      {copy.scopeMeta}: {copy.currentScope}
+                      {t("featureFlagsAdmin.scopeMeta")}: {currentScope}
                     </CanvasPill>
                     <CanvasPill
                       theme={theme}
                       tone={enabledCount > 0 ? "success" : "neutral"}
                     >
-                      {copy.enabledMeta}
+                      {t("featureFlagsAdmin.enabledMeta", {
+                        count: enabledCount,
+                      })}
                     </CanvasPill>
                     <CanvasPill theme={theme} tone="neutral">
-                      {copy.disabledMeta}
+                      {t("featureFlagsAdmin.disabledMeta", {
+                        count: disabledCount,
+                      })}
                     </CanvasPill>
                     <CanvasPill
                       theme={theme}
                       tone={overrideCount > 0 ? "accent" : "neutral"}
                     >
-                      {copy.overrideMeta}
+                      {t("featureFlagsAdmin.overrideMeta", {
+                        count: overrideCount,
+                      })}
                     </CanvasPill>
                     <CanvasPill theme={theme} tone="neutral">
-                      {copy.resultMeta}
+                      {t("featureFlagsAdmin.resultMeta", {
+                        count: filteredRows.length,
+                      })}
                     </CanvasPill>
                     <span style={{ flex: 1 }} />
                     <CanvasPill theme={theme} tone="neutral">
-                      {copy.filterPill}
+                      {t("featureFlagsAdmin.filterPill")}
                     </CanvasPill>
                   </div>
                 </div>
 
                 <div style={fieldHintStyle}>
-                  {tenantLoading ? copy.scopeLoading : copy.scopeHint}
+                  {tenantLoading
+                    ? t("featureFlagsAdmin.scopeLoading")
+                    : t("featureFlagsAdmin.scopeHint")}
                 </div>
 
                 {filteredRows.length === 0 ? (
                   <div style={emptyStateStyle}>
                     {searchTerm || rolloutFilter !== "all"
-                      ? copy.noFlagsInFilter
-                      : copy.noFlags}
+                      ? t("featureFlagsAdmin.noFlagsInFilter")
+                      : t("flags.empty")}
                   </div>
                 ) : (
                   <CanvasTable<FlagTableRow>
@@ -1202,16 +1038,20 @@ export default function FeatureFlagsPage() {
               <div style={secondarySectionStyle}>
                 <div style={utilityBarStyle}>
                   <CanvasPill theme={theme} tone="neutral">
-                    {copy.summaryPlatformDefault}: {platformDefaultCount}
+                    {t("featureFlagsAdmin.summaryPlatformDefault")}:{" "}
+                    {platformDefaultCount}
                   </CanvasPill>
                   <CanvasPill theme={theme} tone="neutral">
-                    {copy.summaryTenantOverride}: {overrideCount}
+                    {t("featureFlagsAdmin.summaryTenantOverride")}:{" "}
+                    {overrideCount}
                   </CanvasPill>
                   <CanvasPill theme={theme} tone="neutral">
-                    {copy.notesMeta}
+                    {t("featureFlagsAdmin.notesMeta")}
                   </CanvasPill>
                   <CanvasPill theme={theme} tone="neutral">
-                    {copy.receiptsMeta}
+                    {t("featureFlagsAdmin.receiptsMeta", {
+                      count: auditReceipts.length,
+                    })}
                   </CanvasPill>
                 </div>
 
@@ -1221,18 +1061,18 @@ export default function FeatureFlagsPage() {
                     open={Boolean(pendingAction || actionError)}
                   >
                     <summary style={detailSummaryStyle}>
-                      {copy.actionComposerTitle}
+                      {t("featureFlagsAdmin.actionComposerTitle")}
                     </summary>
                     <div style={composerSummaryStyle}>
                       <CanvasBanner
                         theme={theme}
                         tone="warn"
-                        title={copy.riskTitle}
-                        body={copy.riskBody}
+                        title={t("featureFlagsAdmin.riskTitle")}
+                        body={t("featureFlagsAdmin.riskBody")}
                       />
                       <div style={composerLeadStyle}>
                         <div style={secondaryTextStyle}>
-                          {copy.secondaryPanelSubtitle}
+                          {t("featureFlagsAdmin.secondaryPanelSubtitle")}
                         </div>
                       </div>
                       {pendingAction ? (
@@ -1241,7 +1081,9 @@ export default function FeatureFlagsPage() {
                             <>
                               <CanvasField
                                 theme={theme}
-                                label={copy.overrideTenantField}
+                                label={t(
+                                  "featureFlagsAdmin.overrideTenantField",
+                                )}
                               >
                                 <select
                                   value={pendingAction.tenantId}
@@ -1257,7 +1099,11 @@ export default function FeatureFlagsPage() {
                                   }
                                   style={selectStyle(theme)}
                                 >
-                                  <option value="">{copy.scopeDefault}</option>
+                                  <option value="">
+                                    {t(
+                                      "featureFlagsAdmin.scopePlatformDefault",
+                                    )}
+                                  </option>
                                   {tenants.map((tenant) => (
                                     <option key={tenant.id} value={tenant.id}>
                                       {tenant.name} ({tenant.code})
@@ -1267,7 +1113,7 @@ export default function FeatureFlagsPage() {
                               </CanvasField>
                               <CanvasField
                                 theme={theme}
-                                label={copy.overrideKeyField}
+                                label={t("featureFlagsAdmin.overrideKeyField")}
                               >
                                 <select
                                   value={pendingAction.key}
@@ -1293,7 +1139,9 @@ export default function FeatureFlagsPage() {
 
                               <CanvasField
                                 theme={theme}
-                                label={copy.overrideStateField}
+                                label={t(
+                                  "featureFlagsAdmin.overrideStateField",
+                                )}
                               >
                                 <select
                                   value={
@@ -1315,17 +1163,19 @@ export default function FeatureFlagsPage() {
                                   style={selectStyle(theme)}
                                 >
                                   <option value="enabled">
-                                    {copy.enabled}
+                                    {t("common.enabled")}
                                   </option>
                                   <option value="disabled">
-                                    {copy.disabled}
+                                    {t("common.disabled")}
                                   </option>
                                 </select>
                               </CanvasField>
 
                               <CanvasField
                                 theme={theme}
-                                label={copy.overrideDescriptionField}
+                                label={t(
+                                  "featureFlagsAdmin.overrideDescriptionField",
+                                )}
                               >
                                 <textarea
                                   value={pendingAction.description}
@@ -1343,7 +1193,7 @@ export default function FeatureFlagsPage() {
                                 />
                               </CanvasField>
                               <div style={fieldHintStyle}>
-                                {copy.overrideDescriptionHint}
+                                {t("featureFlagsAdmin.overrideDescriptionHint")}
                               </div>
                             </>
                           ) : (
@@ -1351,18 +1201,23 @@ export default function FeatureFlagsPage() {
                               <strong>{pendingAction.key}</strong> ·{" "}
                               {pendingAction.scopeLabel} ·{" "}
                               {pendingAction.currentEnabled
-                                ? copy.confirmDisable
-                                : copy.confirmEnable}
+                                ? t("featureFlagsAdmin.confirmDisable")
+                                : t("featureFlagsAdmin.confirmEnable")}
                             </div>
                           )}
 
-                          <CanvasField theme={theme} label={copy.reasonLabel}>
+                          <CanvasField
+                            theme={theme}
+                            label={t("featureFlagsAdmin.reasonLabel")}
+                          >
                             <textarea
                               value={actionReason}
                               onChange={(event) =>
                                 setActionReason(event.target.value)
                               }
-                              placeholder={copy.reasonPlaceholder}
+                              placeholder={t(
+                                "featureFlagsAdmin.reasonPlaceholder",
+                              )}
                               style={textareaStyle(theme)}
                             />
                           </CanvasField>
@@ -1389,7 +1244,7 @@ export default function FeatureFlagsPage() {
                               }}
                               disabled={Boolean(updating)}
                             >
-                              {copy.cancel}
+                              {t("common.cancel")}
                             </CanvasBtn>
                             <CanvasBtn
                               theme={theme}
@@ -1398,18 +1253,19 @@ export default function FeatureFlagsPage() {
                               disabled={Boolean(updating)}
                             >
                               {updating
-                                ? copy.confirming
+                                ? t("common.updating")
                                 : pendingAction.intent === "toggle"
                                   ? pendingAction.nextEnabled
-                                    ? copy.confirmEnable
-                                    : copy.confirmDisable
-                                  : copy.confirmCreate}
+                                    ? t("featureFlagsAdmin.confirmEnable")
+                                    : t("featureFlagsAdmin.confirmDisable")
+                                  : t("featureFlagsAdmin.confirmCreate")}
                             </CanvasBtn>
                           </div>
                         </>
                       ) : (
                         <div style={secondaryTextStyle}>
-                          {actionError ?? copy.actionComposerIdle}
+                          {actionError ??
+                            t("featureFlagsAdmin.actionComposerIdle")}
                         </div>
                       )}
                     </div>
@@ -1417,7 +1273,7 @@ export default function FeatureFlagsPage() {
 
                   <details style={detailsStyle}>
                     <summary style={detailSummaryStyle}>
-                      {copy.notesTitle}
+                      {t("featureFlagsAdmin.notesTitle")}
                     </summary>
                     {notes.length > 0 ? (
                       <ul style={noteListStyle}>
@@ -1427,20 +1283,24 @@ export default function FeatureFlagsPage() {
                       </ul>
                     ) : (
                       <div style={{ ...secondaryTextStyle, marginTop: 10 }}>
-                        {copy.notesEmpty}
+                        {t("featureFlagsAdmin.notesEmpty")}
                       </div>
                     )}
                   </details>
 
                   <details style={detailsStyle} open={Boolean(historyKey)}>
                     <summary style={detailSummaryStyle}>
-                      {copy.historyTitle}
+                      {t("featureFlagsAdmin.historyTitle")}
                     </summary>
                     <div style={{ ...secondaryTextStyle, marginTop: 10 }}>
-                      {historyKey ? copy.historyFocusKey : copy.historyFocusAll}
+                      {historyKey
+                        ? t("featureFlagsAdmin.historyFocusKey", {
+                            key: historyKey,
+                          })
+                        : t("featureFlagsAdmin.historyFocusAll")}
                     </div>
                     <div style={{ ...secondaryTextStyle, marginTop: 6 }}>
-                      {copy.historyHint}
+                      {t("featureFlagsAdmin.historyHint")}
                     </div>
                     {visibleAuditReceipts.length > 0 ? (
                       <div style={receiptListStyle}>
@@ -1472,7 +1332,7 @@ export default function FeatureFlagsPage() {
                       </div>
                     ) : (
                       <div style={{ ...secondaryTextStyle, marginTop: 10 }}>
-                        {copy.historyEmpty}
+                        {t("featureFlagsAdmin.historyEmpty")}
                       </div>
                     )}
                     {historyKey ? (
@@ -1483,7 +1343,7 @@ export default function FeatureFlagsPage() {
                           size="xs"
                           onClick={() => setHistoryKey(null)}
                         >
-                          {copy.showAllReceipts}
+                          {t("featureFlagsAdmin.showAllReceipts")}
                         </CanvasBtn>
                       </div>
                     ) : null}
