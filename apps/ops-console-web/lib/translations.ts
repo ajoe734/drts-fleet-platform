@@ -461,6 +461,7 @@ const en = {
 
   // ── Drivers ──
   "drivers.title": "Drivers Registry",
+  "drivers.pageHeaderTitle": "Drivers",
   "drivers.subtitle": "{count} driver(s) registered",
   "drivers.col.driverId": "Driver ID",
   "drivers.col.name": "Name",
@@ -473,6 +474,8 @@ const en = {
   "drivers.empty": "No drivers registered.",
   "drivers.list.eligibilityClear": "No active blockers",
   "drivers.list.openDetail": "Open detail",
+  "drivers.list.bindingBound": "Bound",
+  "drivers.list.bindingUnbound": "Unbound",
   "drivers.list.registryUnavailable": "Driver registry unavailable:",
   "drivers.list.locationsUnavailable": "Driver location service unavailable:",
   "drivers.list.locationLive": "Live",
@@ -556,6 +559,150 @@ const en = {
   "drivers.detail.releaseHold": "Release incident hold",
   "drivers.detail.suppressMatching": "Suppress matching (incident hold)",
   "drivers.detail.actionError": "Action failed",
+  "drivers.detailPage.empty.noDataTitle": "No records yet",
+  "drivers.detailPage.empty.notProvisionedTitle": "Not provisioned",
+  "drivers.detailPage.empty.snapshotUnavailableTitle": "Snapshot unavailable",
+  "drivers.detailPage.empty.permissionRequiredTitle": "Permission required",
+  "drivers.detailPage.empty.externalUnavailableTitle":
+    "External dependency unavailable",
+  "drivers.detailPage.empty.filteredEmptyTitle": "No matches after filtering",
+  "drivers.detailPage.empty.noDataDescription":
+    "This section is healthy, but there is nothing to show for this driver.",
+  "drivers.detailPage.empty.notProvisionedDescription":
+    "The required upstream record has not been provisioned for this driver yet.",
+  "drivers.detailPage.empty.snapshotUnavailableDescription":
+    "The service responded with an error before a usable snapshot could be rendered.",
+  "drivers.detailPage.empty.permissionRequiredDescription":
+    "Your authority can open this page, but this subsection needs a higher-scope read grant.",
+  "drivers.detailPage.empty.externalUnavailableDescription":
+    "This section depends on an external or degraded upstream system that is temporarily unavailable.",
+  "drivers.detailPage.empty.filteredEmptyDescription":
+    "The upstream dataset exists, but the current filter left no matching rows.",
+  "drivers.detailPage.empty.defaultDescription":
+    "No records are currently available.",
+  "drivers.detailPage.actionRequiresReason":
+    "{label} · requires reason ({riskLevel})",
+  "drivers.detailPage.refresh.degradedSections":
+    "Degraded sections: {sections}",
+  "drivers.detailPage.refresh.allSectionsLoaded":
+    "All driver detail surfaces loaded.",
+  "drivers.detailPage.refresh.generatedAt": "Generated {value}",
+  "drivers.detailPage.refresh.metadataUnavailable":
+    "Backend refresh metadata unavailable; showing the latest server-rendered snapshot.",
+  "drivers.detailPage.refresh.summary":
+    "T3 cadence · {source} snapshot · {freshness}",
+  "drivers.detailPage.registryBack": "Back to driver registry",
+  "drivers.detailPage.title": "Driver detail",
+  "drivers.detailPage.registryFetchFailed": "registry fetch failed",
+  "drivers.detailPage.section.platformBindings": "platform bindings",
+  "drivers.detailPage.section.relay": "relay",
+  "drivers.detailPage.section.earnings": "earnings",
+  "drivers.detailPage.section.activeTasks": "active tasks",
+  "drivers.detailPage.section.incidents": "incidents",
+  "drivers.detailPage.section.shifts": "shifts",
+  "drivers.detailPage.section.location": "location",
+  "drivers.detailPage.action.forceOfflinePerPlatform":
+    "Force offline (per platform)",
+  "drivers.detailPage.action.requestReauth": "Request re-auth",
+  "drivers.detailPage.action.liftSuppression": "Lift suppression",
+  "drivers.detailPage.action.suppressMatching": "Suppress matching",
+  "drivers.detailPage.action.adapterRegistry": "Adapter registry",
+  "drivers.detailPage.action.adapterRegistryExternal": "Adapter registry ↗",
+  "drivers.detailPage.action.openSourceIncident": "Open source incident",
+  "drivers.detailPage.action.openIncident": "Open incident",
+  "drivers.detailPage.action.relatedIncident": "Related incident",
+  "drivers.detailPage.action.generateStatement": "Generate statement",
+  "drivers.detailPage.action.markUnavailableForwarded":
+    "Mark unavailable (forwarded)",
+  "drivers.detailPage.workStateLabel": "work state",
+  "drivers.detailPage.deviceBindings": "device binding(s)",
+  "drivers.detailPage.tab.overview": "Overview",
+  "drivers.detailPage.tab.platformBindings": "Platform bindings",
+  "drivers.detailPage.tab.activeTasks": "Active tasks",
+  "drivers.detailPage.tab.earnings": "Earnings",
+  "drivers.detailPage.tab.shifts": "Shifts",
+  "drivers.detailPage.tab.incidents": "Incidents",
+  "drivers.detailPage.col.platform": "Platform",
+  "drivers.detailPage.col.account": "Account",
+  "drivers.detailPage.col.presence": "Presence",
+  "drivers.detailPage.col.eligibility": "Eligibility",
+  "drivers.detailPage.col.token": "Token",
+  "drivers.detailPage.col.adapter": "Adapter",
+  "drivers.detailPage.col.reference": "Reference",
+  "drivers.detailPage.col.domain": "Domain",
+  "drivers.detailPage.col.status": "Status",
+  "drivers.detailPage.col.detail": "Detail",
+  "drivers.detailPage.col.mirror": "Mirror",
+  "drivers.detailPage.col.error": "Error",
+  "drivers.detailPage.col.fallback": "Fallback",
+  "drivers.detailPage.col.period": "Period",
+  "drivers.detailPage.col.payout": "Payout",
+  "drivers.detailPage.col.net": "Net",
+  "drivers.detailPage.col.receipt": "Receipt",
+  "drivers.detailPage.col.shift": "Shift",
+  "drivers.detailPage.col.clockIn": "Clock-in",
+  "drivers.detailPage.col.attendance": "Attendance",
+  "drivers.detailPage.col.incident": "Incident",
+  "drivers.detailPage.col.severity": "Severity",
+  "drivers.detailPage.col.title": "Title",
+  "drivers.detailPage.platform.unbound": "unbound",
+  "drivers.detailPage.platform.reauth": "re-auth",
+  "drivers.detailPage.platform.expiring": "expiring",
+  "drivers.detailPage.relay.manualFallback": "manual fallback",
+  "drivers.detailPage.dispatchable": "dispatchable",
+  "drivers.detailPage.notDispatchable": "not_dispatchable",
+  "drivers.detailPage.matchingSuppressed": "matching suppressed",
+  "drivers.detailPage.activity.matchingSuppression": "Matching suppression",
+  "drivers.detailPage.ttlUntil": "TTL until {value}",
+  "drivers.detailPage.activity.suppressionDetail":
+    "Driver is held out of matching; ops_manager can extend the TTL.",
+  "drivers.detailPage.banner.refreshTier":
+    "Refresh tier T3 · {tier} (15s) · urgent events push",
+  "drivers.detailPage.banner.sosActive":
+    "Driver has an active SOS in response — dispatch actions are disabled",
+  "drivers.detailPage.banner.openIncidentById": "Open {incidentId}",
+  "drivers.detailPage.banner.suppressionActive":
+    "Matching suppression is active for this driver",
+  "drivers.detailPage.banner.platformPresenceDegraded":
+    "Platform presence is degraded",
+  "drivers.detailPage.card.platformBindingTitle":
+    "Platform binding · {count} platform(s)",
+  "drivers.detailPage.card.platformBindingSubtitle":
+    "{online} online · {reauth} re-auth · {ineligible} ineligible",
+  "drivers.detailPage.card.noPlatformBindings":
+    "This driver has no platform bindings yet.",
+  "drivers.detailPage.card.activeTasksTitle": "Active tasks · {count}",
+  "drivers.detailPage.card.noActiveTasks":
+    "No owned or forwarded tasks are currently in flight.",
+  "drivers.detailPage.card.earningsTitle":
+    "Earnings · {count} statement(s)",
+  "drivers.detailPage.card.latestStatement":
+    "Latest {periodMonth} · {amount} net",
+  "drivers.detailPage.card.noStatements":
+    "No earnings statements have been generated for this driver.",
+  "drivers.detailPage.card.manualOverrideTitle":
+    "Manual override & suppression log",
+  "drivers.detailPage.card.noManualOverride":
+    "No manual overrides or active suppression for this driver.",
+  "drivers.detailPage.card.failedRelayTitle":
+    "Failed relay attempts · {count} (recent)",
+  "drivers.detailPage.card.noRelayFailures":
+    "No forwarded relay failures in the current window.",
+  "drivers.detailPage.card.shiftsTitle": "Shifts & attendance · {count}",
+  "drivers.detailPage.card.noShifts":
+    "No recent shift or attendance entries for this driver.",
+  "drivers.detailPage.card.incidentsTitle":
+    "Recent incidents · {count}",
+  "drivers.detailPage.card.noIncidents":
+    "No incidents are linked to this driver.",
+  "drivers.detailPage.card.locationStatusTitle": "Location & status",
+  "drivers.detailPage.location.unknown": "Location unknown",
+  "drivers.detailPage.location.noSample": "No location sample",
+  "drivers.detailPage.location.stale": "Location stale",
+  "drivers.detailPage.location.live": "Location live",
+  "drivers.detailPage.eligibilityBlocked": "Eligibility blocked",
+  "drivers.detailPage.action.backToDrivers": "Back to drivers",
+  "drivers.detailPage.action.openDispatch": "Open dispatch",
 
   // ── Contracts ──
   "contracts.title": "Contracts Registry",
@@ -3206,6 +3353,7 @@ const zh: Record<keyof typeof en, string> = {
 
   // ── Drivers ──
   "drivers.title": "司機",
+  "drivers.pageHeaderTitle": "司機",
   "drivers.subtitle": "已登記 {count} 位司機",
   "drivers.col.driverId": "司機編號",
   "drivers.col.name": "姓名",
@@ -3218,6 +3366,8 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.empty": "尚未登記司機。",
   "drivers.list.eligibilityClear": "目前無阻塞原因",
   "drivers.list.openDetail": "開啟明細",
+  "drivers.list.bindingBound": "已綁定",
+  "drivers.list.bindingUnbound": "未綁定",
   "drivers.list.registryUnavailable": "司機名冊資料暫不可用：",
   "drivers.list.locationsUnavailable": "司機定位服務暫不可用：",
   "drivers.list.locationLive": "即時",
@@ -3297,6 +3447,138 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.detail.releaseHold": "解除事故 hold",
   "drivers.detail.suppressMatching": "暫停媒合（事故 hold）",
   "drivers.detail.actionError": "操作失敗",
+  "drivers.detailPage.empty.noDataTitle": "目前沒有資料",
+  "drivers.detailPage.empty.notProvisionedTitle": "尚未 provision",
+  "drivers.detailPage.empty.snapshotUnavailableTitle": "快照暫不可用",
+  "drivers.detailPage.empty.permissionRequiredTitle": "權限不足",
+  "drivers.detailPage.empty.externalUnavailableTitle": "外部相依暫不可用",
+  "drivers.detailPage.empty.filteredEmptyTitle": "套用篩選後沒有結果",
+  "drivers.detailPage.empty.noDataDescription":
+    "這個區塊健康可用，但目前這位司機沒有對應資料。",
+  "drivers.detailPage.empty.notProvisionedDescription":
+    "這位司機所需的上游資料尚未 provision。",
+  "drivers.detailPage.empty.snapshotUnavailableDescription":
+    "服務在回傳可用快照前發生錯誤。",
+  "drivers.detailPage.empty.permissionRequiredDescription":
+    "你可以進入此頁，但此子區塊需要更高權限才能讀取。",
+  "drivers.detailPage.empty.externalUnavailableDescription":
+    "此區塊依賴的外部或降級上游系統目前暫不可用。",
+  "drivers.detailPage.empty.filteredEmptyDescription":
+    "上游資料存在，但目前篩選條件沒有留下任何符合的列。",
+  "drivers.detailPage.empty.defaultDescription": "目前沒有可顯示的資料。",
+  "drivers.detailPage.actionRequiresReason":
+    "{label} · 需填寫理由（{riskLevel}）",
+  "drivers.detailPage.refresh.degradedSections": "降級區塊：{sections}",
+  "drivers.detailPage.refresh.allSectionsLoaded": "司機詳情區塊已完整載入。",
+  "drivers.detailPage.refresh.generatedAt": "生成時間 {value}",
+  "drivers.detailPage.refresh.metadataUnavailable":
+    "後端尚未提供 refresh metadata；目前顯示最新一次 server-rendered 快照。",
+  "drivers.detailPage.refresh.summary":
+    "T3 節奏 · {source} 快照 · {freshness}",
+  "drivers.detailPage.registryBack": "回到司機名冊",
+  "drivers.detailPage.title": "司機詳情",
+  "drivers.detailPage.registryFetchFailed": "名冊載入失敗",
+  "drivers.detailPage.section.platformBindings": "平台綁定",
+  "drivers.detailPage.section.relay": "轉派",
+  "drivers.detailPage.section.earnings": "收入",
+  "drivers.detailPage.section.activeTasks": "進行中任務",
+  "drivers.detailPage.section.incidents": "事故",
+  "drivers.detailPage.section.shifts": "班次",
+  "drivers.detailPage.section.location": "位置",
+  "drivers.detailPage.action.forceOfflinePerPlatform": "強制下線（單平台）",
+  "drivers.detailPage.action.requestReauth": "請司機 re-auth",
+  "drivers.detailPage.action.liftSuppression": "解除派遣抑制",
+  "drivers.detailPage.action.suppressMatching": "派遣抑制",
+  "drivers.detailPage.action.adapterRegistry": "Adapter registry",
+  "drivers.detailPage.action.adapterRegistryExternal": "Adapter registry ↗",
+  "drivers.detailPage.action.openSourceIncident": "前往來源事故",
+  "drivers.detailPage.action.openIncident": "前往事故",
+  "drivers.detailPage.action.relatedIncident": "相關事故",
+  "drivers.detailPage.action.generateStatement": "產生對帳單",
+  "drivers.detailPage.action.markUnavailableForwarded":
+    "標記 forwarded 不可用",
+  "drivers.detailPage.workStateLabel": "工作狀態",
+  "drivers.detailPage.deviceBindings": "裝置綁定",
+  "drivers.detailPage.tab.overview": "總覽",
+  "drivers.detailPage.tab.platformBindings": "平台綁定",
+  "drivers.detailPage.tab.activeTasks": "進行中任務",
+  "drivers.detailPage.tab.earnings": "收入",
+  "drivers.detailPage.tab.shifts": "班次",
+  "drivers.detailPage.tab.incidents": "事故",
+  "drivers.detailPage.col.platform": "平台",
+  "drivers.detailPage.col.account": "帳號",
+  "drivers.detailPage.col.presence": "在線",
+  "drivers.detailPage.col.eligibility": "資格",
+  "drivers.detailPage.col.token": "Token",
+  "drivers.detailPage.col.adapter": "Adapter",
+  "drivers.detailPage.col.reference": "編號",
+  "drivers.detailPage.col.domain": "領域",
+  "drivers.detailPage.col.status": "狀態",
+  "drivers.detailPage.col.detail": "細節",
+  "drivers.detailPage.col.mirror": "Mirror",
+  "drivers.detailPage.col.error": "錯誤",
+  "drivers.detailPage.col.fallback": "人工轉派",
+  "drivers.detailPage.col.period": "週期",
+  "drivers.detailPage.col.payout": "撥款",
+  "drivers.detailPage.col.net": "淨額",
+  "drivers.detailPage.col.receipt": "對帳單號",
+  "drivers.detailPage.col.shift": "班次",
+  "drivers.detailPage.col.clockIn": "上班",
+  "drivers.detailPage.col.attendance": "出勤",
+  "drivers.detailPage.col.incident": "事故",
+  "drivers.detailPage.col.severity": "嚴重度",
+  "drivers.detailPage.col.title": "標題",
+  "drivers.detailPage.platform.unbound": "未綁定",
+  "drivers.detailPage.platform.reauth": "需 re-auth",
+  "drivers.detailPage.platform.expiring": "即將到期",
+  "drivers.detailPage.relay.manualFallback": "人工轉派",
+  "drivers.detailPage.dispatchable": "可派遣",
+  "drivers.detailPage.notDispatchable": "不可派遣",
+  "drivers.detailPage.matchingSuppressed": "派遣抑制中",
+  "drivers.detailPage.activity.matchingSuppression": "派遣抑制",
+  "drivers.detailPage.ttlUntil": "TTL 至 {value}",
+  "drivers.detailPage.activity.suppressionDetail":
+    "司機已被排除於派遣媒合之外；ops_manager 可延長 TTL。",
+  "drivers.detailPage.banner.refreshTier":
+    "刷新層級 T3 · {tier}（15 秒）· 緊急事件即時推播",
+  "drivers.detailPage.banner.sosActive":
+    "此司機目前處於 SOS in_response — dispatch action 已停用",
+  "drivers.detailPage.banner.openIncidentById": "前往 {incidentId}",
+  "drivers.detailPage.banner.suppressionActive":
+    "此司機目前處於派遣抑制狀態",
+  "drivers.detailPage.banner.platformPresenceDegraded": "平台在線狀態降級",
+  "drivers.detailPage.card.platformBindingTitle": "平台綁定 · {count} 個平台",
+  "drivers.detailPage.card.platformBindingSubtitle":
+    "{online} 在線 · {reauth} 需 re-auth · {ineligible} 不符資格",
+  "drivers.detailPage.card.noPlatformBindings":
+    "這位司機目前沒有任何平台綁定。",
+  "drivers.detailPage.card.activeTasksTitle": "進行中任務 · {count}",
+  "drivers.detailPage.card.noActiveTasks":
+    "目前沒有進行中的自有或轉派任務。",
+  "drivers.detailPage.card.earningsTitle": "收入 · {count} 張對帳單",
+  "drivers.detailPage.card.latestStatement":
+    "最新 {periodMonth} · 淨額 {amount}",
+  "drivers.detailPage.card.noStatements":
+    "這位司機尚未產生任何對帳單。",
+  "drivers.detailPage.card.manualOverrideTitle": "人工介入與抑制紀錄",
+  "drivers.detailPage.card.noManualOverride":
+    "這位司機目前沒有人工介入或派遣抑制紀錄。",
+  "drivers.detailPage.card.failedRelayTitle": "轉派失敗 · {count}（近期）",
+  "drivers.detailPage.card.noRelayFailures": "目前時段內沒有轉派失敗。",
+  "drivers.detailPage.card.shiftsTitle": "班次與出勤 · {count}",
+  "drivers.detailPage.card.noShifts":
+    "這位司機沒有近期班次或出勤紀錄。",
+  "drivers.detailPage.card.incidentsTitle": "近期事故 · {count}",
+  "drivers.detailPage.card.noIncidents":
+    "目前沒有與這位司機相關的事故。",
+  "drivers.detailPage.card.locationStatusTitle": "位置與狀態",
+  "drivers.detailPage.location.unknown": "位置未知",
+  "drivers.detailPage.location.noSample": "無位置樣本",
+  "drivers.detailPage.location.stale": "位置過舊",
+  "drivers.detailPage.location.live": "位置即時",
+  "drivers.detailPage.eligibilityBlocked": "資格阻擋",
+  "drivers.detailPage.action.backToDrivers": "回到司機名冊",
+  "drivers.detailPage.action.openDispatch": "前往派遣",
 
   // ── Contracts ──
   "contracts.title": "合約",
