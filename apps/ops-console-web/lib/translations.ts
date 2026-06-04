@@ -1011,6 +1011,8 @@ const en = {
   "incidents.actionPanel.unknownIntent.title": "Unknown action intent",
   "incidents.actionPanel.unknownIntent.body":
     "The deep link intent was not recognized for this incident snapshot.",
+  "incidents.refreshTier.tier.dispatch": "T2 / 5s",
+  "incidents.refreshTier.tier.medium": "T3 / 15s",
   "incidents.refreshTier.tier.manual": "T6 / manual",
   "incidents.refreshTier.freshness.fresh": "fresh",
   "incidents.refreshTier.freshness.stale": "stale",
@@ -2714,6 +2716,8 @@ const zh: Record<keyof typeof en, string> = {
   "incidents.actionPanel.unknownIntent.title": "未知的動作意圖",
   "incidents.actionPanel.unknownIntent.body":
     "這個 incident snapshot 無法識別 deep link 帶來的 intent。",
+  "incidents.refreshTier.tier.dispatch": "T2 / 5s",
+  "incidents.refreshTier.tier.medium": "T3 / 15s",
   "incidents.refreshTier.tier.manual": "T6 / 手動",
   "incidents.refreshTier.freshness.fresh": "最新",
   "incidents.refreshTier.freshness.stale": "待刷新",

@@ -93,9 +93,9 @@ export function IncidentRefreshTier({
 
   const tierLabel =
     tier === "medium"
-      ? "T3 / 15s"
+      ? t("incidents.refreshTier.tier.medium", locale)
       : tier === "dispatch"
-        ? "T2 / 5s"
+        ? t("incidents.refreshTier.tier.dispatch", locale)
         : tier === "manual"
           ? t("incidents.refreshTier.tier.manual", locale)
           : `${tier}${cadenceMs ? ` / ${Math.round(cadenceMs / 1000)}s` : ""}`;
