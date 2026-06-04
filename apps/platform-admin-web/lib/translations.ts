@@ -892,6 +892,24 @@ const en = {
   "assistantOverlay.context.disabledLabel": "disabled",
   "assistantOverlay.context.fieldsLabel": "fields",
   "assistantOverlay.context.validationErrorsLabel": "validationErrors",
+  "assistantOverlay.context.routeLine": "{label}: {value}",
+  "assistantOverlay.context.pageSectionLine": "{label}:\n{value}",
+  "assistantOverlay.context.tableSelectedSegment": " {label}={value}",
+  "assistantOverlay.context.tableActionsSegment": " {label}={value}",
+  "assistantOverlay.context.tableSummary":
+    "- {tableId} ({title}): {rowsLabel}={rowCount}; {visibleLabel}={visibleRows}{selectedRows}{actions}",
+  "assistantOverlay.context.availableActionSummary":
+    "{actionId}{riskLevel}{disabled}",
+  "assistantOverlay.context.availableActionRiskLevel": "({riskLevel})",
+  "assistantOverlay.context.availableActionDisabled": "[{label}]",
+  "assistantOverlay.context.formFieldSummary": "{fieldId}={valueSummary}",
+  "assistantOverlay.context.formFieldRequiredSegment": "={label}",
+  "assistantOverlay.context.formFieldDirtySegment": "={label}",
+  "assistantOverlay.context.formValidationErrorWithField":
+    "{fieldId}:{code}:{message}",
+  "assistantOverlay.context.formValidationError": "{code}:{message}",
+  "assistantOverlay.context.formSummary":
+    "- {formId} ({title}): {dirtyLabel}={dirtyValue}; {fieldsLabel}={fields}; {validationErrorsLabel}={validationErrors}; {actionsLabel}={actions}",
   "assistantOverlay.launcher": "Open platform assistant",
   "assistantOverlay.badge": "Beta",
   "assistantOverlay.label": "Assistant",
@@ -1784,6 +1802,24 @@ const zh: typeof en = {
   "assistantOverlay.context.disabledLabel": "停用",
   "assistantOverlay.context.fieldsLabel": "欄位",
   "assistantOverlay.context.validationErrorsLabel": "驗證錯誤",
+  "assistantOverlay.context.routeLine": "{label}：{value}",
+  "assistantOverlay.context.pageSectionLine": "{label}：\n{value}",
+  "assistantOverlay.context.tableSelectedSegment": " {label}={value}",
+  "assistantOverlay.context.tableActionsSegment": " {label}={value}",
+  "assistantOverlay.context.tableSummary":
+    "- {tableId}（{title}）：{rowsLabel}={rowCount}；{visibleLabel}={visibleRows}{selectedRows}{actions}",
+  "assistantOverlay.context.availableActionSummary":
+    "{actionId}{riskLevel}{disabled}",
+  "assistantOverlay.context.availableActionRiskLevel": "（{riskLevel}）",
+  "assistantOverlay.context.availableActionDisabled": "［{label}］",
+  "assistantOverlay.context.formFieldSummary": "{fieldId}={valueSummary}",
+  "assistantOverlay.context.formFieldRequiredSegment": "={label}",
+  "assistantOverlay.context.formFieldDirtySegment": "={label}",
+  "assistantOverlay.context.formValidationErrorWithField":
+    "{fieldId}:{code}:{message}",
+  "assistantOverlay.context.formValidationError": "{code}:{message}",
+  "assistantOverlay.context.formSummary":
+    "- {formId}（{title}）：{dirtyLabel}={dirtyValue}；{fieldsLabel}={fields}；{validationErrorsLabel}={validationErrors}；{actionsLabel}={actions}",
   "assistantOverlay.launcher": "開啟平台助理",
   "assistantOverlay.badge": "Beta",
   "assistantOverlay.label": "平台助理",

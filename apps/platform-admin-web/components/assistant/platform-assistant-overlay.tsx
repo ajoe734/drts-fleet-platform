@@ -125,6 +125,42 @@ type AssistantApiActionExecutionResponse = {
   assistantAuditId: string;
 };
 
+type ContextTableSummaryParams = {
+  tableId: string;
+  title: string;
+  rowCount: number;
+  visibleRows: string;
+  selectedRows: string;
+  actions: string;
+};
+
+type ContextAvailableActionSummaryParams = {
+  actionId: string;
+  riskLevel: string;
+  disabled: string;
+};
+
+type ContextValidationErrorWithFieldParams = {
+  fieldId: string;
+  code: string;
+  message: string;
+};
+
+type ContextValidationErrorParams = {
+  code: string;
+  message: string;
+};
+
+type ContextFormSummaryParams = {
+  formId: string;
+  title: string;
+  dirtyLabel: string;
+  dirtyValue: string;
+  fields: string;
+  validationErrors: string;
+  actions: string;
+};
+
 function nextMessageId(prefix = "paas-ui") {
   if (
     typeof globalThis.crypto !== "undefined" &&
@@ -317,6 +353,24 @@ function buildContextPrompt(
     disabledLabel: string;
     fieldsLabel: string;
     validationErrorsLabel: string;
+    routeLine: (label: string, value: string) => string;
+    pageSectionLine: (label: string, value: string) => string;
+    tableSelectedSegment: (label: string, value: string) => string;
+    tableActionsSegment: (label: string, value: string) => string;
+    tableSummary: (params: ContextTableSummaryParams) => string;
+    availableActionSummary: (
+      params: ContextAvailableActionSummaryParams,
+    ) => string;
+    availableActionRiskLevel: (riskLevel: string) => string;
+    availableActionDisabled: (label: string) => string;
+    formFieldSummary: (fieldId: string, valueSummary: string) => string;
+    formFieldRequiredSegment: (label: string) => string;
+    formFieldDirtySegment: (label: string) => string;
+    formValidationErrorWithField: (
+      params: ContextValidationErrorWithFieldParams,
+    ) => string;
+    formValidationError: (params: ContextValidationErrorParams) => string;
+    formSummary: (params: ContextFormSummaryParams) => string;
   },
 ) {
   const routeTitle = routeContext.title[locale];
@@ -338,15 +392,28 @@ function buildContextPrompt(
           .map((table) => {
             const selectedRows =
               table.selectedRowIds && table.selectedRowIds.length > 0
-                ? ` ${copy.selectedLabel}=${table.selectedRowIds.join(", ")}`
+                ? copy.tableSelectedSegment(
+                    copy.selectedLabel,
+                    table.selectedRowIds.join(", "),
+                  )
                 : "";
             const actions =
               table.availableActions && table.availableActions.length > 0
-                ? ` ${copy.actionsLabel}=${table.availableActions
-                    .map((action) => action.actionId)
-                    .join(", ")}`
+                ? copy.tableActionsSegment(
+                    copy.actionsLabel,
+                    table.availableActions
+                      .map((action) => action.actionId)
+                      .join(", "),
+                  )
                 : "";
-            return `- ${table.tableId} (${table.title}): ${copy.rowsLabel}=${table.visibleRowCount}; ${copy.visibleLabel}=${table.visibleRowIds.join(", ") || copy.none}${selectedRows}${actions}`;
+            return copy.tableSummary({
+              tableId: table.tableId,
+              title: table.title,
+              rowCount: table.visibleRowCount,
+              visibleRows: table.visibleRowIds.join(", ") || copy.none,
+              selectedRows,
+              actions,
+            });
           })
           .join("\n")
       : copy.emptyList;
@@ -359,9 +426,16 @@ function buildContextPrompt(
   const availableActions =
     pageContext.availableActions && pageContext.availableActions.length > 0
       ? pageContext.availableActions
-          .map(
-            (action) =>
-              `${action.actionId}${action.riskLevel ? `(${action.riskLevel})` : ""}${action.disabled ? `[${copy.disabledLabel}]` : ""}`,
+          .map((action) =>
+            copy.availableActionSummary({
+              actionId: action.actionId,
+              riskLevel: action.riskLevel
+                ? copy.availableActionRiskLevel(action.riskLevel)
+                : "",
+              disabled: action.disabled
+                ? copy.availableActionDisabled(copy.disabledLabel)
+                : "",
+            }),
           )
           .join(", ")
       : copy.none;
@@ -374,19 +448,23 @@ function buildContextPrompt(
                 ? form.fields
                     .map((field) => {
                       const parts = [
-                        field.fieldId,
-                        field.valueSummary === null ||
-                        typeof field.valueSummary === "undefined"
-                          ? copy.empty
-                          : JSON.stringify(field.valueSummary),
+                        copy.formFieldSummary(
+                          field.fieldId,
+                          field.valueSummary === null ||
+                            typeof field.valueSummary === "undefined"
+                            ? copy.empty
+                            : JSON.stringify(field.valueSummary),
+                        ),
                       ];
                       if (field.required) {
-                        parts.push(copy.required);
+                        parts.push(
+                          copy.formFieldRequiredSegment(copy.required),
+                        );
                       }
                       if (field.dirty) {
-                        parts.push(copy.dirty);
+                        parts.push(copy.formFieldDirtySegment(copy.dirty));
                       }
-                      return parts.join("=");
+                      return parts.join("");
                     })
                     .join("; ")
                 : copy.none;
@@ -395,8 +473,15 @@ function buildContextPrompt(
                 ? form.validationErrors
                     .map((error) =>
                       error.fieldId
-                        ? `${error.fieldId}:${error.code}:${error.message}`
-                        : `${error.code}:${error.message}`,
+                        ? copy.formValidationErrorWithField({
+                            fieldId: error.fieldId,
+                            code: error.code,
+                            message: error.message,
+                          })
+                        : copy.formValidationError({
+                            code: error.code,
+                            message: error.message,
+                          }),
                     )
                     .join("; ")
                 : copy.none;
@@ -406,25 +491,33 @@ function buildContextPrompt(
                     .map((action) => action.actionId)
                     .join(", ")
                 : copy.none;
-            return `- ${form.formId} (${form.title}): ${copy.dirty}=${form.dirty ? copy.yes : copy.no}; ${copy.fieldsLabel}=${fields}; ${copy.validationErrorsLabel}=${validationErrors}; ${copy.actionsLabel}=${actions}`;
+            return copy.formSummary({
+              formId: form.formId,
+              title: form.title,
+              dirtyLabel: copy.dirty,
+              dirtyValue: form.dirty ? copy.yes : copy.no,
+              fields,
+              validationErrors,
+              actions,
+            });
           })
           .join("\n")
       : copy.emptyList;
 
   return [
     copy.routeHeading,
-    `${copy.pathLabel}: ${routeContext.pathname}`,
-    `${copy.pageLabel}: ${routeTitle}`,
-    `${copy.activeTabLabel}: ${routeContext.activeTab ?? copy.none}`,
-    `${copy.refreshTierLabel}: ${routeContext.refreshTier}`,
-    `${copy.visibleEntitiesLabel}: ${entityRefs}`,
-    `${copy.warningsLabel}: ${warnings}`,
+    copy.routeLine(copy.pathLabel, routeContext.pathname),
+    copy.routeLine(copy.pageLabel, routeTitle),
+    copy.routeLine(copy.activeTabLabel, routeContext.activeTab ?? copy.none),
+    copy.routeLine(copy.refreshTierLabel, routeContext.refreshTier),
+    copy.routeLine(copy.visibleEntitiesLabel, entityRefs),
+    copy.routeLine(copy.warningsLabel, warnings),
     "",
     copy.pageHeading,
-    `${copy.visibleTablesLabel}:\n${visibleTables}`,
-    `${copy.selectedRecordsLabel}: ${selectedRecords}`,
-    `${copy.availableActionsLabel}: ${availableActions}`,
-    `${copy.formsLabel}:\n${forms}`,
+    copy.pageSectionLine(copy.visibleTablesLabel, visibleTables),
+    copy.routeLine(copy.selectedRecordsLabel, selectedRecords),
+    copy.routeLine(copy.availableActionsLabel, availableActions),
+    copy.pageSectionLine(copy.formsLabel, forms),
     "",
     copy.questionHeading,
     message,
@@ -488,6 +581,90 @@ export function PlatformAssistantOverlay() {
     disabledLabel: t("assistantOverlay.context.disabledLabel"),
     fieldsLabel: t("assistantOverlay.context.fieldsLabel"),
     validationErrorsLabel: t("assistantOverlay.context.validationErrorsLabel"),
+    routeLine: (label: string, value: string) =>
+      t("assistantOverlay.context.routeLine", { label, value }),
+    pageSectionLine: (label: string, value: string) =>
+      t("assistantOverlay.context.pageSectionLine", { label, value }),
+    tableSelectedSegment: (label: string, value: string) =>
+      t("assistantOverlay.context.tableSelectedSegment", { label, value }),
+    tableActionsSegment: (label: string, value: string) =>
+      t("assistantOverlay.context.tableActionsSegment", { label, value }),
+    tableSummary: ({
+      tableId,
+      title,
+      rowCount,
+      visibleRows,
+      selectedRows,
+      actions,
+    }: ContextTableSummaryParams) =>
+      t("assistantOverlay.context.tableSummary", {
+        tableId,
+        title,
+        rowCount,
+        visibleLabel: t("assistantOverlay.context.visibleLabel"),
+        rowsLabel: t("assistantOverlay.context.rowsLabel"),
+        visibleRows,
+        selectedRows,
+        actions,
+      }),
+    availableActionSummary: ({
+      actionId,
+      riskLevel,
+      disabled,
+    }: ContextAvailableActionSummaryParams) =>
+      t("assistantOverlay.context.availableActionSummary", {
+        actionId,
+        riskLevel,
+        disabled,
+      }),
+    availableActionRiskLevel: (riskLevel: string) =>
+      t("assistantOverlay.context.availableActionRiskLevel", { riskLevel }),
+    availableActionDisabled: (label: string) =>
+      t("assistantOverlay.context.availableActionDisabled", { label }),
+    formFieldSummary: (fieldId: string, valueSummary: string) =>
+      t("assistantOverlay.context.formFieldSummary", { fieldId, valueSummary }),
+    formFieldRequiredSegment: (label: string) =>
+      t("assistantOverlay.context.formFieldRequiredSegment", { label }),
+    formFieldDirtySegment: (label: string) =>
+      t("assistantOverlay.context.formFieldDirtySegment", { label }),
+    formValidationErrorWithField: ({
+      fieldId,
+      code,
+      message,
+    }: ContextValidationErrorWithFieldParams) =>
+      t("assistantOverlay.context.formValidationErrorWithField", {
+        fieldId,
+        code,
+        message,
+      }),
+    formValidationError: ({ code, message }: ContextValidationErrorParams) =>
+      t("assistantOverlay.context.formValidationError", {
+        code,
+        message,
+      }),
+    formSummary: ({
+      formId,
+      title,
+      dirtyLabel,
+      dirtyValue,
+      fields,
+      validationErrors,
+      actions,
+    }: ContextFormSummaryParams) =>
+      t("assistantOverlay.context.formSummary", {
+        formId,
+        title,
+        dirtyLabel,
+        dirtyValue,
+        fieldsLabel: t("assistantOverlay.context.fieldsLabel"),
+        fields,
+        validationErrorsLabel: t(
+          "assistantOverlay.context.validationErrorsLabel",
+        ),
+        validationErrors,
+        actionsLabel: t("assistantOverlay.context.actionsLabel"),
+        actions,
+      }),
     launcher: t("assistantOverlay.launcher"),
     badge: t("assistantOverlay.badge"),
     label: t("assistantOverlay.label"),
