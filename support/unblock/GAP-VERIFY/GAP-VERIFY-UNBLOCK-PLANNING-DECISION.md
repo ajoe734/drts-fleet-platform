@@ -25,25 +25,24 @@ This unblock task therefore resolves to:
 
 The remaining issue is execution and integration evidence:
 
-- the parent's `2026-06-04 02:56:54Z` re-audit still observed live dev failures
-  (`/revenue` 500, `/vehicles/veh-demo-001` 500, `/pricing` tab regression,
-  `/attendance` tab regression)
-- one dependency (`GAP-E2E-SUITE`) is still `branch_pushed`, which affects
-  regression automation but does **not** create a missing planning-semantic
-  blocker for the parent's manual dev re-audit
+- the parent task `GAP-VERIFY` is currently `blocked`, but its machine-truth
+  `next` field already describes live dev verification failures, not an
+  unresolved product rule or API contract
+- the unresolved work is to re-run the dev audit, refresh evidence, and route
+  any still-reproducible failures as concrete implementation or integration
+  defects
 
 ## 2. Canonical Evidence
 
 | Source | Finding |
 | --- | --- |
-| `AI_COLLABORATION_GUIDE.md` §2 | Product semantics must come from higher-precedence canonical truth; unresolved product choices go to `PHASE1_OPEN_QUESTIONS.md`. No such open product choice exists for `GAP-VERIFY`. |
-| `scripts/ai-status.sh show GAP-VERIFY` | The parent is a dev-runtime verification task: re-run browser audit on dev, confirm 39 routes, single shell, and tab round-trips, then refresh the scoreboard artifact. |
-| `scripts/ai-status.sh show GAP-OPS-LIST-RSC` | The three RSC fixes for `/drivers`, `/vehicles`, and `/contracts` are already reconciled to `origin/dev@721b615f...`. |
-| `scripts/ai-status.sh show GAP-PA-FLEET-SHELL` | The `/fleet` double-shell fix is done and already squash-merged to `origin/dev` (`#508` / dev commit `1256f6d9`), so the shell decision is not missing. |
-| `scripts/ai-status.sh show GAP-PA-PRICING-TABS` | The `/pricing` URL-driven tab contract is already on `origin/dev@48ac41ed...`; the tab behavior decision is not missing. |
-| `scripts/ai-status.sh show GAP-E2E-SUITE` | The deterministic route suite is `done` but only `branch_pushed`; this is an integration follow-up for CI regression coverage, not a planning blocker for `GAP-VERIFY`. |
-| `docs/05-ui/dev-runtime-functional-gap-report-20260603.md` on branch `codex/gap-verify` at commit `a6de0eae` | The parent's latest report refresh explicitly says the `2026-06-04 02:56:54Z` live dev re-run still fails acceptance with `2` confirmed HTTP 500 routes plus `2` tab-strip regressions. |
-| `support/sidecars/GAP-VERIFY/GAP-VERIFY-SIDECAR-ACCEPTANCE.md` on branch `claude/gap-verify-sidecar-acceptance` at commit `e4e83090` | Three functional fix dependencies are reachable from `origin/dev`; `GAP-E2E-SUITE` is not yet on `origin/dev`, but that only delays persistent regression protection, not the parent's immediate dev audit. |
+| `AI_COLLABORATION_GUIDE.md` §2 | Product semantics must come from higher-precedence canonical truth; unresolved product choices go to `PHASE1_OPEN_QUESTIONS.md`. |
+| `PHASE1_OPEN_QUESTIONS.md` | No open item mentions `GAP-VERIFY`, `/pricing`, `/attendance`, `/revenue`, or an unresolved verification-time product contract that would require a new planning decision. |
+| `scripts/ai-status.sh show GAP-VERIFY` | The parent is explicitly an execution verification task: re-run browser audit on dev, confirm 39 routes, single shell, tab round-trips, and refresh the scoreboard/report artifact. Its current `next` field lists live failures from the last re-run, which is an execution-state report rather than a planning gap. |
+| `docs/05-ui/ops-console-parity-verification-20260602.md` | The ops route inventory and verification model already exist as execution evidence: route coverage, single-shell expectation, and remote-dev re-run after deploy are framed as verification/integration work, not a product-semantics question. |
+| `docs/05-ui/platform-admin-body-parity-audit-20260602.md` | `/pricing` is already specified as a four-tab body-parity target, so the remaining issue is whether current dev behavior matches the settled UI contract, not what the contract should be. |
+| `docs/05-ui/system-design-answers-all-apps-20260524.md` | Q-ADM10/Q-ADM11 already resolve the `/pricing` behavior: versioned pricing with sibling tabs under `/pricing`. This decision already exists in canonical planning artifacts. |
+| `docs/05-ui/ops-console-body-parity-audit-20260602.md` | `/attendance` and `/revenue` are already enumerated as existing ops routes with parity targets, so remaining failures are implementation or integration drift, not missing scope definition. |
 
 ## 3. Why This Is Not A Product/Contract Blocker
 
@@ -63,9 +62,10 @@ fact, not a semantics gap.
 The only unresolved items are:
 
 - whether live dev now reflects every expected fix
-- whether the remaining `/vehicles/[vehicleId]` and `/attendance` regressions
-  need new implementation tasks
-- when the deterministic route suite will be merged to `dev`
+- which remaining route regressions still reproduce on current dev and therefore
+  need concrete implementation follow-up tasks
+- whether any regression should be routed to integration hardening after the
+  re-audit
 
 Those are routing / execution follow-ups, not missing product truth.
 
@@ -78,26 +78,22 @@ What changes is the routing:
 1. `GAP-VERIFY` should resume as an execution task, not stay blocked on
    planning semantics.
 2. The parent should re-run the live dev browser audit against the current dev
-   deployment and refresh `docs/05-ui/dev-runtime-functional-gap-report-20260603.md`.
-3. If the same four live regressions still reproduce, route them as concrete
-   implementation / integration defects:
-   - ops `/vehicles/[vehicleId]`
-   - ops `/attendance` tab round-trip
-   - and, only if still reproducible on current dev, `/revenue` or `/pricing`
-4. Track `GAP-E2E-SUITE` merge-to-dev separately as regression-guard
-   hardening, not as a blocker on the parent's manual re-audit acceptance.
+   deployment and refresh its evidence artifact / scoreboard from current
+   findings.
+3. If the same live regressions still reproduce, route them as concrete
+   implementation / integration defects tied to the failing routes or tab flows.
+4. Keep regression automation or merge-to-dev hardening as a separate
+   integration follow-up, not as a blocker on the parent's manual re-audit
+   acceptance unless the parent task is explicitly re-scoped.
 
 ## 5. Parent Task Next Step
 
 The concrete next step for `GAP-VERIFY` is:
 
 > Resume the task in execution. Re-run the live dev browser audit on the
-> current `origin/dev` deployment, refresh
-> `docs/05-ui/dev-runtime-functional-gap-report-20260603.md` with the new
-> scoreboard and evidence, and treat any remaining failures as implementation /
-> integration bugs rather than missing product semantics. `GAP-E2E-SUITE`
-> remaining branch-only should be recorded as follow-up regression hardening,
-> not as a blocker for the manual dev audit.
+> current dev deployment, refresh the parent evidence artifact with the new
+> scoreboard and findings, and treat any remaining failures as implementation /
+> integration bugs rather than missing product semantics.
 
 ## 6. Acceptance Mapping
 
