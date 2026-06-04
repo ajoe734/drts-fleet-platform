@@ -1,6 +1,6 @@
 # Dev Runtime + Functional Gap Report (browser-verified)
 
-- **Last re-run:** 2026-06-04 07:16:11Z
+- **Last re-run:** 2026-06-04 08:11:47Z
 - **Auditor:** Codex
 - **Environment:** live dev Cloud Run
   - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
@@ -8,7 +8,7 @@
 - **Method:** headless Chromium route census over all 39 routes (Platform Admin 18 + Ops Console 21), fixed `1440x950` screenshots, single-shell count, and manual tab round-trip checks for `/pricing`, `/payments`, `/attendance`.
 - **Artifacts:** `.artifacts/func-audit/dev-gap-audit-results.json`, `.artifacts/func-audit/dev-gap-audit-summary.md`, and route screenshots under `.artifacts/func-audit/*.png`.
 
-## 1. Scoreboard (2026-06-04 07:16:11Z re-run)
+## 1. Scoreboard (2026-06-04 08:11:47Z re-run)
 
 | App            | Routes | Fully working | Broken                            |
 | -------------- | -----: | ------------: | --------------------------------- |
@@ -18,7 +18,7 @@
 **Current total:** 38 / 39 routes fully working.  
 **Acceptance target (`0 broken`, `0 HTTP 500`) is not met.**
 
-Raw route-census output written to `.artifacts/func-audit/dev-gap-audit-results.json` now shows `PA 18/18` and `Ops 20/21`. The audit detector still correctly ignores incidental `404` substrings inside UUID-like screen text, so **PA `/audit`** remains healthy. After this 2026-06-04 07:16:11Z re-run, the effective remaining gaps are unchanged in kind: `1` live `500` plus `2` tab-strip regressions.
+Raw route-census output written to `.artifacts/func-audit/dev-gap-audit-results.json` now shows `PA 18/18` and `Ops 20/21`. The audit detector still correctly ignores incidental `404` substrings inside UUID-like screen text, so **PA `/audit`** remains healthy. After this 2026-06-04 08:11:47Z re-run, the effective remaining gaps are still `1` live `500` plus `2` tab-strip regressions.
 
 ## 2. What is now confirmed good
 
@@ -47,7 +47,7 @@ Raw route-census output written to `.artifacts/func-audit/dev-gap-audit-results.
 - **PA route map is present.**
   - `/tenants/[tenantId]`, `/payments/reimbursements`, and `/payments/reimbursements/[batchId]` all returned `200` in this re-run.
 
-## 3. Confirmed remaining gaps after the 2026-06-04 07:16:11Z re-run
+## 3. Confirmed remaining gaps after the 2026-06-04 08:11:47Z re-run
 
 ### P0 — still broken on live dev
 
@@ -74,15 +74,15 @@ Raw route-census output written to `.artifacts/func-audit/dev-gap-audit-results.
 
 ## 4. Notes from the re-run
 
-- The regenerated audit JSON at `2026-06-04T07:16:11.401Z` still does not flag **PA `/audit`** after tightening the hard-error detector. The route returns `200` with a single shell and is not a live gap.
+- The regenerated audit JSON at `2026-06-04T08:11:47.360Z` still does not flag **PA `/audit`** after tightening the hard-error detector. The route returns `200` with a single shell and is not a live gap.
 - Several pages emitted asset/API console noise (`404`/`429`) without breaking route render. These were not counted as scoreboard failures unless they produced a dead route, nested shell, or failed manual interaction.
-- Compared with the prior `2026-06-04 07:10:00Z` re-run, there is still no further improvement on live dev. The remaining live gaps are unchanged in kind: `/pricing` and `/attendance` tab routing are still broken, and OPS `/vehicles/veh-demo-001` still returns `500`.
+- Compared with the prior `2026-06-04 07:16:11Z` re-run, there is still no further improvement on live dev. The remaining live gaps are unchanged in kind: `/pricing` and `/attendance` tab routing are still broken, and OPS `/vehicles/veh-demo-001` still returns `500`.
 
 ## 5. Closeout status for `GAP-VERIFY`
 
 This task cannot be closed as `done` yet.
 
-- **Why:** the 2026-06-04 07:16:11Z re-run still shows 1 confirmed HTTP 500 route and 2 confirmed tab-strip regressions on live dev.
+- **Why:** the 2026-06-04 08:11:47Z re-run still shows 1 confirmed HTTP 500 route and 2 confirmed tab-strip regressions on live dev.
 - **Next required fixes:**
   - fix ops vehicle detail `/vehicles/[vehicleId]`
   - re-fix platform-admin `/pricing` tab state sync
