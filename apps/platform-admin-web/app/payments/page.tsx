@@ -126,7 +126,8 @@ function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
 function sortReconciliationIssues(rows: ReconciliationIssueRecord[]) {
   return [...rows].sort((left, right) => {
     const statusDelta =
-      ISSUE_STATUS_PRIORITY[left.status] - ISSUE_STATUS_PRIORITY[right.status];
+      (ISSUE_STATUS_PRIORITY[left.status] ?? Number.MAX_SAFE_INTEGER) -
+      (ISSUE_STATUS_PRIORITY[right.status] ?? Number.MAX_SAFE_INTEGER);
     if (statusDelta !== 0) {
       return statusDelta;
     }
@@ -722,85 +723,13 @@ export default function PaymentsPage() {
       describeMatrixChannel,
     );
 
-  const copy =
-    locale === "en"
-      ? {
-          breadcrumbParent: "Pricing & Settlement",
-          pageTitle: "Settlement governance",
-          pageSubtitle:
-            "invoices · driver statements · reimbursement batches · settlement matrix · reconciliation issues",
-          export: "Export",
-          openIssue: "Open issue",
-          searchPlaceholder: "Search orders, tenants, drivers...",
-          queueSubtitle:
-            "Track finance exceptions before drilling into detailed evidence handling.",
-          queueProfileTitle: "Queue profile",
-          queueProfileSubtitle: "Current operator slice",
-          releaseControlsTitle: "Release controls",
-          releaseControlsSubtitle:
-            "Generate invoices and statements without leaving the payments route.",
-          issueActionsTitle: "Reconciliation workflow actions",
-          issueActionsSubtitle:
-            "Assignment, evidence, resolve, and reopen stay on the same control plane.",
-          createIssueTitle: "Open reconciliation issue",
-          createIssueSubtitle:
-            "Seed actor, context, and the first evidence note in one pass.",
-          outstandingLabel: "Current outstanding",
-          exposureLabel: "Cumulative exposure",
-          handlingLabel: "Average handling time",
-          reopenRateLabel: "Reopen rate",
-          reopenDeltaWarn: `warn threshold ${REOPEN_WARN_THRESHOLD}%`,
-          reopenDeltaOk: `ok < ${REOPEN_WARN_THRESHOLD}%`,
-          reopenBannerTitle: "Reopen rate exceeded threshold",
-          reopenBannerBody: (rate: string, count: number) =>
-            `${rate} of the current 30-day issue window has already been reopened. ${count} row(s) need closer queue hygiene before they recycle again.`,
-          queueWindow: "Recent issue window",
-          linkedExposure: "Linked exposure",
-          shadowIssues: "Shadow issues",
-          openMix: "Open mix",
-          actorLabel: "Finance actor ID",
-          loading: t("payments.loading"),
-        }
-      : {
-          breadcrumbParent: "計價與結算",
-          pageTitle: "結算治理",
-          pageSubtitle:
-            "invoices · driver statements · reimbursement batches · settlement matrix · reconciliation issues",
-          export: "匯出",
-          openIssue: "開立 issue",
-          searchPlaceholder: "搜尋訂單、租戶、司機...",
-          queueSubtitle: "先在總表追蹤財務例外，再往下做證據與狀態處理。",
-          queueProfileTitle: "Queue 總覽",
-          queueProfileSubtitle: "目前治理切面",
-          releaseControlsTitle: "產出控制",
-          releaseControlsSubtitle:
-            "不離開 payments route 直接產 invoice 與 statements。",
-          issueActionsTitle: "Reconciliation workflow actions",
-          issueActionsSubtitle:
-            "指派、補 evidence、結案與重開都維持在同一個 control plane。",
-          createIssueTitle: "開立 reconciliation issue",
-          createIssueSubtitle:
-            "一次補齊 actor、context 與第一筆 evidence note。",
-          outstandingLabel: "當期 outstanding",
-          exposureLabel: "差額累計",
-          handlingLabel: "平均處理時間",
-          reopenRateLabel: "reopen 率",
-          reopenDeltaWarn: `warn 閾值 ${REOPEN_WARN_THRESHOLD}%`,
-          reopenDeltaOk: `ok < ${REOPEN_WARN_THRESHOLD}%`,
-          reopenBannerTitle: "Reopen 率超過警戒值",
-          reopenBannerBody: (rate: string, count: number) =>
-            `最近 30 天 issue 視窗中已有 ${rate} 項目曾被重開。至少 ${count} 筆需要提高 queue hygiene，避免再次循環。`,
-          queueWindow: "近 30 天 issue 視窗",
-          linkedExposure: "關聯金額",
-          shadowIssues: "Shadow issues",
-          openMix: "Open mix",
-          actorLabel: "財務操作人 ID",
-          loading: t("payments.loading"),
-        };
+  const loadingLabel = t("payments.loading");
+  const openIssueLabel = t("payments.reconciliation.open");
+  const actorLabel = t("payments.reconciliation.actorId");
 
   const issueColumns: CanvasTableColumn<IssueTableRow>[] = [
     {
-      h: "Issue",
+      h: t("payments.reconciliation.col.issue"),
       w: 116,
       mono: true,
       r: (issue) => (
@@ -819,7 +748,7 @@ export default function PaymentsPage() {
       ),
     },
     {
-      h: "Source",
+      h: t("payments.reconciliation.col.source"),
       w: 132,
       r: (issue) => (
         <CanvasPill
@@ -831,7 +760,7 @@ export default function PaymentsPage() {
       ),
     },
     {
-      h: "Type",
+      h: t("payments.reconciliation.col.type"),
       w: 200,
       mono: true,
       r: (issue) => (
@@ -844,25 +773,25 @@ export default function PaymentsPage() {
       ),
     },
     {
-      h: "Tenant",
+      h: t("payments.reconciliation.col.tenant"),
       w: 128,
       mono: true,
       r: (issue) => issue.tenantId ?? "—",
     },
     {
-      h: "External order",
+      h: t("payments.reconciliation.col.externalOrder"),
       w: 164,
       mono: true,
       r: (issue) =>
         issue.externalOrderId ?? issue.mirrorOrderId ?? issue.orderId ?? "—",
     },
     {
-      h: "Owner",
+      h: t("payments.reconciliation.col.owner"),
       w: 120,
       r: (issue) => issue.ownerId ?? "—",
     },
     {
-      h: "Status",
+      h: t("payments.reconciliation.col.status"),
       w: 126,
       r: (issue) => (
         <div style={cellStackStyle()}>
@@ -878,13 +807,13 @@ export default function PaymentsPage() {
       ),
     },
     {
-      h: "Updated",
+      h: t("payments.reconciliation.col.updated"),
       w: 156,
       mono: true,
       r: (issue) => formatDateTime(issue.updatedAt),
     },
     {
-      h: "Actions",
+      h: t("payments.reconciliation.col.actions"),
       w: 184,
       r: (issue) => (
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -1192,7 +1121,7 @@ export default function PaymentsPage() {
       value: "all" | "issued" | "paid" | "draft";
       label: string;
     }> = [
-      { value: "all", label: locale === "en" ? "All" : "全部" },
+      { value: "all", label: t("common.all") },
       { value: "issued", label: formatPlatformCodeLabel(locale, "issued") },
       { value: "paid", label: formatPlatformCodeLabel(locale, "paid") },
       { value: "draft", label: formatPlatformCodeLabel(locale, "draft") },
@@ -1211,16 +1140,16 @@ export default function PaymentsPage() {
         ? [
             {
               tableId: "settlement-matrix",
-              title: locale === "en" ? "Settlement matrix" : "結算矩陣",
+              title: t("payments.matrix.title"),
               visibleRowCount: sortedMatrix.length,
               visibleRowIds: sortedMatrix
                 .slice(0, 5)
                 .map((row) => row.channelKey),
               availableActions: [
-                { actionId: "refresh_payments", label: copy.loading },
+                { actionId: "refresh_payments", label: loadingLabel },
                 {
                   actionId: "open_reconciliation_issue",
-                  label: copy.openIssue,
+                  label: openIssueLabel,
                   riskLevel: "medium" as const,
                 },
               ],
@@ -1230,7 +1159,7 @@ export default function PaymentsPage() {
           ? [
               {
                 tableId: "tenant-invoices",
-                title: locale === "en" ? "Tenant invoices" : "租戶發票",
+                title: t("payments.invoicesTitle"),
                 visibleRowCount: filteredInvoices.length,
                 visibleRowIds: filteredInvoices
                   .slice(0, 5)
@@ -1245,7 +1174,7 @@ export default function PaymentsPage() {
             ? [
                 {
                   tableId: "driver-statements",
-                  title: locale === "en" ? "Driver statements" : "司機結算單",
+                  title: t("payments.statementsTitle"),
                   visibleRowCount: statements.length,
                   visibleRowIds: statements
                     .slice(0, 5)
@@ -1255,8 +1184,7 @@ export default function PaymentsPage() {
             : [
                 {
                   tableId: "reconciliation-issues",
-                  title:
-                    locale === "en" ? "Reconciliation issues" : "對帳例外佇列",
+                  title: t("payments.reconciliation.title"),
                   visibleRowCount: sortedIssues.length,
                   visibleRowIds: sortedIssues
                     .slice(0, 5)
@@ -1265,7 +1193,7 @@ export default function PaymentsPage() {
                   availableActions: [
                     {
                       actionId: "open_reconciliation_issue",
-                      label: copy.openIssue,
+                      label: openIssueLabel,
                       riskLevel: "medium" as const,
                     },
                     {
@@ -1292,10 +1220,7 @@ export default function PaymentsPage() {
         ? [
             {
               formId: "reconciliation-issue-create",
-              title:
-                locale === "en"
-                  ? "Create reconciliation issue"
-                  : "開立對帳例外",
+              title: t("payments.page.createIssueTitle"),
               dirty:
                 financeActorId !== DEFAULT_FINANCE_ACTOR_ID ||
                 newIssue.summary.trim().length > 0 ||
@@ -1304,7 +1229,7 @@ export default function PaymentsPage() {
               fields: [
                 {
                   fieldId: "financeActorId",
-                  label: copy.actorLabel,
+                  label: actorLabel,
                   valueSummary: financeActorId,
                   required: true,
                   dirty: financeActorId !== DEFAULT_FINANCE_ACTOR_ID,
@@ -1334,7 +1259,7 @@ export default function PaymentsPage() {
                 },
                 {
                   fieldId: "externalOrderId",
-                  label: locale === "en" ? "External order" : "外部訂單",
+                  label: t("payments.page.externalOrder"),
                   valueSummary: newIssue.externalOrderId,
                   dirty: newIssue.externalOrderId.trim().length > 0,
                 },
@@ -1352,10 +1277,7 @@ export default function PaymentsPage() {
                       {
                         fieldId: "financeActorId",
                         code: "required",
-                        message:
-                          locale === "en"
-                            ? "Finance actor id is required."
-                            : "財務操作人 ID 為必填。",
+                        message: t("payments.page.financeActorIdRequired"),
                       },
                     ]),
                 ...(newIssue.summary.trim()
@@ -1364,17 +1286,14 @@ export default function PaymentsPage() {
                       {
                         fieldId: "summary",
                         code: "required",
-                        message:
-                          locale === "en"
-                            ? "Issue summary is required."
-                            : "Issue 摘要為必填。",
+                        message: t("payments.page.issueSummaryRequired"),
                       },
                     ]),
               ],
               availableActions: [
                 {
                   actionId: "submit_create_issue",
-                  label: copy.openIssue,
+                  label: openIssueLabel,
                   riskLevel: "medium" as const,
                 },
               ],
@@ -1422,10 +1341,9 @@ export default function PaymentsPage() {
                         {
                           fieldId: "assigneeId",
                           code: "required",
-                          message:
-                            locale === "en"
-                              ? "Assignee is required."
-                              : "Assignee 為必填。",
+                          message: t(
+                            "payments.reconciliation.assigneeRequired",
+                          ),
                         },
                       ],
                 availableActions: [
@@ -1479,10 +1397,7 @@ export default function PaymentsPage() {
                           {
                             fieldId: "resolutionCode",
                             code: "required",
-                            message:
-                              locale === "en"
-                                ? "Resolution code is required."
-                                : "Resolution code 為必填。",
+                            message: t("payments.page.resolutionCodeRequired"),
                           },
                         ]),
                     ...((
@@ -1493,10 +1408,9 @@ export default function PaymentsPage() {
                           {
                             fieldId: "resolutionSummary",
                             code: "required",
-                            message:
-                              locale === "en"
-                                ? "Resolution summary is required."
-                                : "Resolution summary 為必填。",
+                            message: t(
+                              "payments.reconciliation.resolveSummaryRequired",
+                            ),
                           },
                         ]),
                   ],
@@ -1542,10 +1456,9 @@ export default function PaymentsPage() {
                           {
                             fieldId: "reopenReason",
                             code: "required",
-                            message:
-                              locale === "en"
-                                ? "Reopen reason is required."
-                                : "重開原因為必填。",
+                            message: t(
+                              "payments.reconciliation.reopenReasonRequired",
+                            ),
                           },
                         ],
                     availableActions: [
@@ -1593,10 +1506,10 @@ export default function PaymentsPage() {
         ],
         visibleTables,
         availableActions: [
-          { actionId: "refresh_payments", label: copy.loading },
+          { actionId: "refresh_payments", label: loadingLabel },
           {
             actionId: "open_reconciliation_issue",
-            label: copy.openIssue,
+            label: openIssueLabel,
             riskLevel: "medium" as const,
           },
           {
@@ -1610,9 +1523,7 @@ export default function PaymentsPage() {
   }, [
     activeModal,
     activeTab,
-    copy.actorLabel,
-    copy.loading,
-    copy.openIssue,
+    actorLabel,
     error,
     filteredInvoices,
     financeActorId,
@@ -1626,12 +1537,14 @@ export default function PaymentsPage() {
     locale,
     modalIssue,
     newIssue,
+    openIssueLabel,
     reopenRate,
     reopenRateWarning,
     sortedIssues,
     sortedMatrix,
     statements,
     t,
+    loadingLabel,
   ]);
 
   usePlatformAdminAssistantPage(assistantBridge);
@@ -1692,30 +1605,11 @@ export default function PaymentsPage() {
     ),
   ];
 
-  const emptyCopy = {
-    matrix:
-      locale === "en"
-        ? "Settlement matrix is empty for the current scope."
-        : "目前範圍沒有結算矩陣資料。",
-    invoices:
-      locale === "en"
-        ? "No tenant invoices match this filter."
-        : "沒有符合篩選條件的租戶 invoice。",
-    statements:
-      locale === "en"
-        ? "No driver statements generated yet."
-        : "尚未產生司機結算單。",
-    recon:
-      locale === "en"
-        ? "No reconciliation issues — the queue is clear."
-        : "目前沒有 reconciliation issue，佇列已清空。",
-  };
-
   const invoiceFilters: Array<{
     value: "all" | "issued" | "paid" | "draft";
     label: string;
   }> = [
-    { value: "all", label: locale === "en" ? "All" : "全部" },
+    { value: "all", label: t("common.all") },
     { value: "issued", label: formatPlatformCodeLabel(locale, "issued") },
     { value: "paid", label: formatPlatformCodeLabel(locale, "paid") },
     { value: "draft", label: formatPlatformCodeLabel(locale, "draft") },
@@ -1731,7 +1625,9 @@ export default function PaymentsPage() {
           rows={sortedMatrix as MatrixTableRow[]}
         />
       ) : (
-        <div style={emptyStateStyle(theme)}>{emptyCopy.matrix}</div>
+        <div style={emptyStateStyle(theme)}>
+          {t("payments.page.emptyMatrix")}
+        </div>
       );
   } else if (activeTab === "invoices") {
     activeTable = (
@@ -1764,7 +1660,9 @@ export default function PaymentsPage() {
             rows={filteredInvoices as InvoiceTableRow[]}
           />
         ) : (
-          <div style={emptyStateStyle(theme)}>{emptyCopy.invoices}</div>
+          <div style={emptyStateStyle(theme)}>
+            {t("payments.page.emptyInvoices")}
+          </div>
         )}
       </div>
     );
@@ -1777,7 +1675,9 @@ export default function PaymentsPage() {
           rows={statements as StatementTableRow[]}
         />
       ) : (
-        <div style={emptyStateStyle(theme)}>{emptyCopy.statements}</div>
+        <div style={emptyStateStyle(theme)}>
+          {t("payments.page.emptyStatements")}
+        </div>
       );
   } else {
     activeTable =
@@ -1788,7 +1688,9 @@ export default function PaymentsPage() {
           rows={sortedIssues as IssueTableRow[]}
         />
       ) : (
-        <div style={emptyStateStyle(theme)}>{emptyCopy.recon}</div>
+        <div style={emptyStateStyle(theme)}>
+          {t("payments.reconciliation.empty")}
+        </div>
       );
   }
 
@@ -1800,23 +1702,23 @@ export default function PaymentsPage() {
       icon="x"
       onClick={() => setActiveModal(null)}
     >
-      {locale === "en" ? "Close" : "關閉"}
+      {t("common.close")}
     </CanvasBtn>
   );
-  const cancelLabel = locale === "en" ? "Cancel" : "取消";
+  const cancelLabel = t("common.cancel");
 
   return (
     <div style={viewportStyle(theme)}>
       <CanvasPageHeader
         theme={theme}
-        title={copy.pageTitle}
-        subtitle={copy.pageSubtitle}
+        title={t("payments.page.title")}
+        subtitle={t("payments.page.subtitle")}
         tabs={tabs}
         activeTab={activeTabNode}
         actions={
           <>
             <CanvasBtn theme={theme} icon="reports" disabled>
-              {copy.export}
+              {t("payments.page.export")}
             </CanvasBtn>
             <CanvasBtn
               theme={theme}
@@ -1824,7 +1726,7 @@ export default function PaymentsPage() {
               icon="plus"
               onClick={() => setActiveModal({ kind: "create" })}
             >
-              {copy.openIssue}
+              {openIssueLabel}
             </CanvasBtn>
           </>
         }
@@ -1834,11 +1736,11 @@ export default function PaymentsPage() {
         {loading ? (
           <CanvasCard
             theme={theme}
-            title={copy.pageTitle}
-            subtitle={copy.loading}
+            title={t("payments.page.title")}
+            subtitle={loadingLabel}
           >
             <div style={{ color: theme.textMuted, fontSize: 12.5 }}>
-              {copy.loading}
+              {loadingLabel}
             </div>
           </CanvasCard>
         ) : (
@@ -1848,7 +1750,7 @@ export default function PaymentsPage() {
                 theme={theme}
                 tone="danger"
                 title={`${getPlatformLabel(locale, "error")}: ${error}`}
-                body={copy.queueSubtitle}
+                body={t("payments.page.queueSubtitle")}
               />
             ) : null}
 
@@ -1856,11 +1758,11 @@ export default function PaymentsPage() {
               <CanvasBanner
                 theme={theme}
                 tone="warn"
-                title={copy.reopenBannerTitle}
-                body={copy.reopenBannerBody(
-                  `${reopenRate.toFixed(1)}%`,
-                  reopenedWindowCount,
-                )}
+                title={t("payments.page.reopenBannerTitle")}
+                body={t("payments.page.reopenBannerBody", {
+                  rate: `${reopenRate.toFixed(1)}%`,
+                  count: reopenedWindowCount,
+                })}
               />
             ) : null}
 
@@ -1873,7 +1775,7 @@ export default function PaymentsPage() {
             >
               <CanvasKPI
                 theme={theme}
-                label={copy.outstandingLabel}
+                label={t("payments.page.outstandingLabel")}
                 value={String(openReconciliationCount)}
                 sub={
                   openIssueMix !== "—"
@@ -1883,20 +1785,18 @@ export default function PaymentsPage() {
               />
               <CanvasKPI
                 theme={theme}
-                label={copy.exposureLabel}
+                label={t("payments.page.exposureLabel")}
                 value={formatMinorMoney(exposureMinor, exposureCurrency)}
                 delta={
                   linkedExposureCount > 0
                     ? `${linkedExposureCount} linked`
-                    : locale === "en"
-                      ? "no linked docs"
-                      : "無關聯單據"
+                    : t("payments.page.noLinkedDocs")
                 }
-                sub={copy.linkedExposure}
+                sub={t("payments.page.linkedExposure")}
               />
               <CanvasKPI
                 theme={theme}
-                label={copy.handlingLabel}
+                label={t("payments.page.handlingLabel")}
                 value={formatHours(averageHandlingHours)}
                 delta={
                   resolvedWindow.length > 0
@@ -1905,23 +1805,25 @@ export default function PaymentsPage() {
                 }
                 sub={
                   resolvedWindow.length > 0
-                    ? locale === "en"
-                      ? "resolved issue window"
-                      : "resolved issue 視窗"
-                    : locale === "en"
-                      ? "active queue age fallback"
-                      : "以 active queue age 補位"
+                    ? t("payments.page.handlingResolvedWindow")
+                    : t("payments.page.handlingActiveFallback")
                 }
               />
               <CanvasKPI
                 theme={theme}
-                label={copy.reopenRateLabel}
+                label={t("payments.page.reopenRateLabel")}
                 value={`${reopenRate.toFixed(1)}%`}
                 delta={
-                  reopenRateWarning ? copy.reopenDeltaWarn : copy.reopenDeltaOk
+                  reopenRateWarning
+                    ? t("payments.page.reopenDeltaWarn", {
+                        threshold: REOPEN_WARN_THRESHOLD,
+                      })
+                    : t("payments.page.reopenDeltaOk", {
+                        threshold: REOPEN_WARN_THRESHOLD,
+                      })
                 }
                 deltaTone={reopenRateWarning ? "down" : "up"}
-                sub={copy.queueWindow}
+                sub={t("payments.page.queueWindow")}
               />
             </div>
 
@@ -1954,8 +1856,8 @@ export default function PaymentsPage() {
             {activeModal.kind === "create" ? (
               <CanvasCard
                 theme={theme}
-                title={copy.createIssueTitle}
-                subtitle={copy.createIssueSubtitle}
+                title={t("payments.page.createIssueTitle")}
+                subtitle={t("payments.page.createIssueSubtitle")}
                 actions={closeModalButton}
               >
                 <form
@@ -1964,7 +1866,7 @@ export default function PaymentsPage() {
                   }
                   style={{ display: "grid", gap: 2 }}
                 >
-                  <CanvasField theme={theme} label={copy.actorLabel} required>
+                  <CanvasField theme={theme} label={actorLabel} required>
                     <input
                       value={financeActorId}
                       onChange={(event) =>
@@ -2054,7 +1956,7 @@ export default function PaymentsPage() {
                     </CanvasField>
                     <CanvasField
                       theme={theme}
-                      label={locale === "en" ? "External order" : "外部訂單"}
+                      label={t("payments.page.externalOrder")}
                     >
                       <input
                         value={newIssue.externalOrderId}
@@ -2108,7 +2010,7 @@ export default function PaymentsPage() {
                     >
                       {issueDraftPending
                         ? t("payments.saving")
-                        : copy.openIssue}
+                        : openIssueLabel}
                     </button>
                   </div>
                 </form>
@@ -2126,13 +2028,23 @@ export default function PaymentsPage() {
                   theme={theme}
                   cols={2}
                   items={[
-                    { k: "ISSUE", v: modalIssue.issueId, mono: true },
                     {
-                      k: "STATUS",
+                      k: t("payments.page.issueLabel"),
+                      v: modalIssue.issueId,
+                      mono: true,
+                    },
+                    {
+                      k: t("payments.page.statusLabel"),
                       v: formatPlatformCodeLabel(locale, modalIssue.status),
                     },
-                    { k: "OWNER", v: modalIssue.ownerId ?? "—" },
-                    { k: "SUMMARY", v: modalIssue.summary },
+                    {
+                      k: t("payments.page.ownerLabel"),
+                      v: modalIssue.ownerId ?? "—",
+                    },
+                    {
+                      k: t("payments.page.summaryLabel"),
+                      v: modalIssue.summary,
+                    },
                   ]}
                 />
                 <form
@@ -2218,12 +2130,19 @@ export default function PaymentsPage() {
                   theme={theme}
                   cols={2}
                   items={[
-                    { k: "ISSUE", v: modalIssue.issueId, mono: true },
                     {
-                      k: "STATUS",
+                      k: t("payments.page.issueLabel"),
+                      v: modalIssue.issueId,
+                      mono: true,
+                    },
+                    {
+                      k: t("payments.page.statusLabel"),
                       v: formatPlatformCodeLabel(locale, modalIssue.status),
                     },
-                    { k: "SUMMARY", v: modalIssue.summary },
+                    {
+                      k: t("payments.page.summaryLabel"),
+                      v: modalIssue.summary,
+                    },
                   ]}
                 />
                 <form
@@ -2333,13 +2252,17 @@ export default function PaymentsPage() {
                   theme={theme}
                   cols={2}
                   items={[
-                    { k: "ISSUE", v: modalIssue.issueId, mono: true },
                     {
-                      k: "STATUS",
+                      k: t("payments.page.issueLabel"),
+                      v: modalIssue.issueId,
+                      mono: true,
+                    },
+                    {
+                      k: t("payments.page.statusLabel"),
                       v: formatPlatformCodeLabel(locale, modalIssue.status),
                     },
                     {
-                      k: "RESOLUTION",
+                      k: t("payments.page.resolutionLabel"),
                       v: modalIssue.resolutionSummary ?? "—",
                     },
                   ]}
