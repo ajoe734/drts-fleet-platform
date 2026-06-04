@@ -329,7 +329,7 @@ Before claiming UI-FE-OPS complete:
 - **Where do the new canvas primitives live?** Recommendation: in shared `@drts/ui-web/canvas-primitives` so platform-admin and tenant-console reuse them — not ops-local. This is the cleanest way to kill mixing platform-wide.
 - **Param rename `/dispatch/[dispatchId]` → `[workItemId]`?** Canvas uses `[workItemId]` and the screen serves both owned + forwarded. Recommendation: rename for parity, or document the alias and keep the `domain` flag.
 - **Keep operational inline forms or move to modals?** Recommendation: modals/drawers behind canvas actions unless design explicitly approves an inline form for a specific page.
-- **Bilingual labels:** canvas mock renders `zh · en` via `BiLabel`. Confirm whether ops bodies render bilingual or zh-primary (shell already zh-primary). Follow design decision; provide `CanvasBiLabel` either way.
+- **Bilingual labels:** resolved for the 2026-06-04 i18n remediation wave via `docs/05-ui/i18n-remediation-implementation-20260604.md`: touched ops body surfaces remain single-locale output, with `zh` locale rendered as zh-primary. `CanvasBiLabel` stays a separate parity/design follow-up rather than a blocker for the current driver i18n centralization slice.
 
 ## 11. Current Status
 
