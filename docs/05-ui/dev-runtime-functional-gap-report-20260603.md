@@ -1,6 +1,6 @@
 # Dev Runtime + Functional Gap Report (browser-verified)
 
-- **Last re-run:** 2026-06-04
+- **Last re-run:** 2026-06-04T04:05:47Z
 - **Auditor:** Codex2
 - **Environment:** live dev Cloud Run
   - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
@@ -10,13 +10,19 @@
 
 ## 1. Scoreboard (2026-06-04 re-run)
 
-| App | Routes | Fully working | Broken |
-| --- | ---: | ---: | --- |
-| Platform Admin | 18 | 18 | none |
-| Ops Console | 21 | 19 | `/revenue` HTTP 500, `/vehicles/veh-demo-001` HTTP 500 |
+| App            | Routes | Fully working | Broken                                                 |
+| -------------- | -----: | ------------: | ------------------------------------------------------ |
+| Platform Admin |     18 |            18 | none                                                   |
+| Ops Console    |     21 |            19 | `/revenue` HTTP 500, `/vehicles/veh-demo-001` HTTP 500 |
 
 **Current total:** 37 / 39 routes fully working.  
 **Acceptance target (`0 broken`, `0 HTTP 500`) is not met.**
+
+This 2026-06-04T04:05:47Z re-run reproduced the same three gaps from the prior live-dev audit:
+
+- OPS `/revenue` still returns HTTP 500.
+- OPS `/vehicles/veh-demo-001` still returns HTTP 500.
+- PA `/pricing` tab switching still fails to push `/pricing?tab=driver`.
 
 ## 2. What is now confirmed good
 
