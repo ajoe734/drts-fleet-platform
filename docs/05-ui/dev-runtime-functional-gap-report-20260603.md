@@ -1,6 +1,6 @@
 # Dev Runtime + Functional Gap Report (browser-verified)
 
-- **Last re-run:** 2026-06-04T12:00:42Z
+- **Last re-run:** 2026-06-04T12:09:11Z
 - **Auditor:** Codex2
 - **Environment:** live dev Cloud Run
   - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
@@ -8,7 +8,7 @@
 - **Method:** headless Chromium route census over all 39 routes (Platform Admin 18 + Ops Console 21), fixed `1440x950` screenshots, shell-count checks, and manual tab round-trip checks for `/pricing`, `/payments`, `/attendance`.
 - **Artifacts:** `.artifacts/func-audit/dev-gap-audit-results.json`, `.artifacts/func-audit/dev-gap-audit-summary.md`, and route screenshots under `.artifacts/func-audit/*.png`.
 
-## 1. Scoreboard (2026-06-04T12:00:42Z re-run)
+## 1. Scoreboard (2026-06-04T12:09:11Z re-run)
 
 | App            | Routes | Fully working | Broken                            |
 | -------------- | -----: | ------------: | --------------------------------- |
@@ -18,7 +18,7 @@
 **Current total:** 38 / 39 routes fully working.  
 **Acceptance target (`0 broken`, `0 HTTP 500`) is still not met.**
 
-This 2026-06-04T12:00:42Z re-run reconfirms the current dev state: the shell fix remains live, but acceptance is still blocked by one remaining HTTP 500 and two manual tab-strip regressions:
+This 2026-06-04T12:09:11Z re-run reconfirms the current dev state: the shell fix remains live, but acceptance is still blocked by one remaining HTTP 500 and two manual tab-strip regressions:
 
 - OPS `/vehicles/veh-demo-001` still returns HTTP 500.
 - PA `/pricing` tab switching still fails to push `/pricing?tab=driver`.
@@ -61,14 +61,14 @@ This 2026-06-04T12:00:42Z re-run reconfirms the current dev state: the shell fix
 ### P1 — interaction regression still present
 
 2. **PA `/pricing` tab switching is still broken.**
-   - Playwright re-run at `2026-06-04T12:00:42Z` still recorded `checks.pricingTabs=fail`.
+   - Playwright re-run at `2026-06-04T12:09:11Z` still recorded `checks.pricingTabs=fail`.
    - Manual browser probe reconfirmed that clicking `Passenger Pricing`, `Driver Fee Plans`, and `Published Versions` leaves the URL pinned at `/pricing`; expected `/pricing?tab=passenger|driver|history`.
    - Evidence:
      - `.artifacts/func-audit/pricing-tab-driver-failed.png`
      - `.artifacts/func-audit/dev-gap-audit-results.json` (`checks.pricingTabs`)
 
 3. **PA `/payments` tab strip still does not round-trip into the reimbursement route.**
-   - Playwright re-run at `2026-06-04T12:00:42Z` still recorded `checks.paymentsTabs=fail`.
+   - Playwright re-run at `2026-06-04T12:09:11Z` still recorded `checks.paymentsTabs=fail`.
    - Manual browser probe reconfirmed that `租戶發票` and `司機結算單` can flip selected state locally, but clicking `報銷` still leaves the URL pinned at `/payments` instead of handing off into `/payments/reimbursements`.
    - Evidence:
      - `.artifacts/func-audit/payments-tab-roundtrip-failed.png`
@@ -86,7 +86,7 @@ This 2026-06-04T12:00:42Z re-run reconfirms the current dev state: the shell fix
 
 This task cannot be closed as `done` yet.
 
-- **Why:** live dev still has 1 confirmed HTTP 500 route and 2 confirmed tab-strip regressions in the 2026-06-04T12:00:42Z rerun.
+- **Why:** live dev still has 1 confirmed HTTP 500 route and 2 confirmed tab-strip regressions in the 2026-06-04T12:09:11Z rerun.
 - **Acceptance not met:**
   - all 39 routes verified on dev: **failed** (`1` HTTP 500 remains)
   - single shell everywhere: **passed**
