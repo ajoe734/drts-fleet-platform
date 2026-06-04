@@ -47,9 +47,9 @@ export function OpsShell({
   brandLabel,
   brandSubLabel,
   searchPlaceholder,
-  avatarLabel,
-  versionLabel,
-  env,
+  avatarLabel = "OC",
+  versionLabel = "canvas",
+  env = "production",
   children,
 }: OpsShellProps) {
   const pathname = usePathname() ?? "";
@@ -63,10 +63,10 @@ export function OpsShell({
       brandLabel={brandLabel}
       brandSubLabel={brandSubLabel}
       breadcrumb={breadcrumb}
+      env={env}
+      versionLabel={versionLabel}
+      avatarLabel={avatarLabel}
       style={{ minHeight: "100vh", height: "100vh" }}
-      {...(env !== undefined ? { env } : {})}
-      {...(versionLabel !== undefined ? { versionLabel } : {})}
-      {...(avatarLabel !== undefined ? { avatarLabel } : {})}
       {...(searchPlaceholder !== undefined ? { searchPlaceholder } : {})}
     >
       {children}

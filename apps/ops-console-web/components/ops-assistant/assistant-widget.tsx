@@ -17,7 +17,6 @@ import type { ActionIntent, ResourceActionDescriptor } from "@drts/contracts";
 import { buildCanvasTheme, CanvasIcon } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { useTranslation } from "@/lib/i18n";
 import {
   useOpsAssistantActionBridge,
   useOpsAssistantContext,
@@ -83,6 +82,12 @@ const theme = buildCanvasTheme({
   dark: true,
   density: "compact",
 });
+
+const STREAM_MESSAGES = [
+  "Assistant shell online. Monitoring dispatch exceptions, handoff notes, and queue pressure.",
+  "Mock stream active. Replace this source with the real assistant transport when the API contract lands.",
+  "Widget state persists locally so operators keep position, dock choice, and density across route changes.",
+];
 
 function getViewportRect() {
   if (typeof window === "undefined") {
@@ -262,7 +267,6 @@ export function OpsAssistantWidget() {
   const router = useRouter();
   const context = useOpsAssistantContext();
   const actionBridge = useOpsAssistantActionBridge();
-  const { t } = useTranslation();
   const titleId = useId();
   const instructionsId = useId();
   const liveRegionId = useId();
@@ -288,16 +292,8 @@ export function OpsAssistantWidget() {
   const [isExecutingIntent, setIsExecutingIntent] = useState(false);
   const [draft, setDraft] = useState("");
   const actions = useMemo(() => buildAssistantActions(context), [context]);
-  const streamMessages = useMemo(
-    () => [
-      t("assistant.stream.online"),
-      t("assistant.stream.mockTransport"),
-      t("assistant.stream.persistentLayout"),
-    ],
-    [t],
-  );
 
-  const activeMessage = streamMessages[stream.activeIndex] ?? "";
+  const activeMessage = STREAM_MESSAGES[stream.activeIndex] ?? "";
 
   const appendConversation = useEffectEvent((entry: ConversationEntry) => {
     setConversation((current) => [...current.slice(-9), entry]);
@@ -353,7 +349,7 @@ export function OpsAssistantWidget() {
     const timeout = window.setTimeout(
       () => {
         setStream((current) => {
-          const message = streamMessages[current.activeIndex] ?? "";
+          const message = STREAM_MESSAGES[current.activeIndex] ?? "";
           if (current.visibleChars < message.length) {
             return {
               ...current,
@@ -361,7 +357,7 @@ export function OpsAssistantWidget() {
             };
           }
           return {
-            activeIndex: (current.activeIndex + 1) % streamMessages.length,
+            activeIndex: (current.activeIndex + 1) % STREAM_MESSAGES.length,
             visibleChars: 0,
           };
         });
@@ -372,7 +368,7 @@ export function OpsAssistantWidget() {
     );
 
     return () => window.clearTimeout(timeout);
-  }, [activeMessage.length, stream, streamMessages.length]);
+  }, [activeMessage.length, stream]);
 
   const clearPointerInteraction = useEffectEvent(() => {
     dragStateRef.current = null;
@@ -602,10 +598,8 @@ export function OpsAssistantWidget() {
       .map((descriptor) => descriptor.action)
       .slice(0, 3);
     return alternatives.length > 0
-      ? t("assistant.intent.alternatives", {
-          actions: alternatives.join(", "),
-        })
-      : t("assistant.intent.noAlternatives");
+      ? `Available: ${alternatives.join(", ")}`
+      : "No enabled alternatives.";
   };
 
   const handleSubmitPrompt = () => {
@@ -640,13 +634,13 @@ export function OpsAssistantWidget() {
       return;
     }
 
-    const help = buildTier0HelpResult(query, context?.locale ?? "en");
+    const help = buildTier0HelpResult(query);
     appendConversation({
       id: `${Date.now()}-tier0-answer`,
       author: "assistant",
       tone: isForcedDegraded() ? "neutral" : "accent",
       message: isForcedDegraded()
-        ? t("assistant.prompt.degraded", { message: help.message })
+        ? `LLM degraded. Showing curated help-search fallback.\n\n${help.message}`
         : help.message,
       meta: help.meta,
     });
@@ -675,11 +669,7 @@ export function OpsAssistantWidget() {
         id: `${Date.now()}-${intent.action}`,
         author: "assistant",
         tone: "accent",
-        message: t("assistant.intent.proposed", {
-          action: intent.action,
-          resourceKind: intent.resourceKind,
-          resourceId: intent.resourceId,
-        }),
+        message: `Proposed ${intent.action} for ${intent.resourceKind} ${intent.resourceId}.`,
         meta: describeIntent(intent),
       });
     } catch (error) {
@@ -690,7 +680,7 @@ export function OpsAssistantWidget() {
         message:
           error instanceof Error
             ? error.message
-            : t("assistant.intent.proposeFailed"),
+            : "Assistant action proposal failed.",
       });
     } finally {
       setIsProposing(false);
@@ -708,9 +698,7 @@ export function OpsAssistantWidget() {
         id: `${Date.now()}-unavailable`,
         author: "assistant",
         tone: "danger",
-        message: t("assistant.intent.unavailable", {
-          action: pendingIntent.action,
-        }),
+        message: `Unavailable action: ${pendingIntent.action}.`,
         meta: buildAlternatives(actionBridge.availableActions),
       });
       setPendingIntent(null);
@@ -722,9 +710,7 @@ export function OpsAssistantWidget() {
         id: `${Date.now()}-disabled`,
         author: "assistant",
         tone: "danger",
-        message: t("assistant.intent.blocked", {
-          action: descriptor.action,
-        }),
+        message: `Action blocked: ${descriptor.action}.`,
         meta: descriptor.disabledReasonCode
           ? `${descriptor.disabledReasonCode} · ${buildAlternatives(actionBridge.availableActions)}`
           : buildAlternatives(actionBridge.availableActions),
@@ -740,14 +726,11 @@ export function OpsAssistantWidget() {
       tone: "neutral",
       message:
         descriptor.riskLevel === "low"
-          ? t("assistant.intent.executing", { action: descriptor.action })
-          : t("assistant.intent.openingConfirmation", {
-              riskLevel: descriptor.riskLevel,
-              action: descriptor.action,
-            }),
+          ? `Executing ${descriptor.action}.`
+          : `Opening ${descriptor.riskLevel}-risk confirmation for ${descriptor.action}.`,
       ...(descriptor.requiresReason || descriptor.riskLevel === "high"
         ? {
-            meta: t("assistant.intent.reasonMayBeRequired"),
+            meta: "Reason may be required by the existing page confirmation UI.",
           }
         : {}),
     });
@@ -757,14 +740,14 @@ export function OpsAssistantWidget() {
       appendReceipt(receipt, descriptor.action);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : t("assistant.intent.failed");
+        error instanceof Error ? error.message : "Assistant action failed.";
       appendConversation({
         id: `${Date.now()}-execute-error`,
         author: "system",
         tone: message === "ASSISTANT_ACTION_CANCELLED" ? "neutral" : "danger",
         message:
           message === "ASSISTANT_ACTION_CANCELLED"
-            ? t("assistant.intent.cancelled")
+            ? "Action cancelled."
             : message,
       });
     } finally {
@@ -779,7 +762,7 @@ export function OpsAssistantWidget() {
         id: `${Date.now()}-${receipt.actionId}`,
         author: "assistant",
         tone: "success",
-        message: receipt.message || t("assistant.intent.completed", { action }),
+        message: receipt.message || `${action} completed.`,
         meta: `actionId ${receipt.actionId} · auditId ${receipt.auditId}`,
         auditHref:
           receipt.auditHref ??
@@ -816,7 +799,7 @@ export function OpsAssistantWidget() {
         <button
           type="button"
           data-testid="ops-assistant-launcher"
-          aria-label={t("assistant.launcher.openAria")}
+          aria-label="Open operations assistant"
           onClick={() =>
             setWidget((current) => ({ ...current, closed: false }))
           }
@@ -839,9 +822,7 @@ export function OpsAssistantWidget() {
           }}
         >
           <CanvasIcon name="callcenter" size={16} />
-          <span style={{ fontSize: 13, fontWeight: 700 }}>
-            {t("assistant.launcher.label")}
-          </span>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>Assistant</span>
         </button>
       ) : null}
 
@@ -858,7 +839,7 @@ export function OpsAssistantWidget() {
           tabIndex={0}
           onPointerDown={onDragPointerDown}
           onKeyDown={onHeaderKeyDown}
-          aria-label={t("assistant.header.dragHandleAria")}
+          aria-label="Assistant widget header. Use arrow keys to move, Home or End to dock, Escape to close."
           style={{
             display: "flex",
             alignItems: "center",
@@ -885,21 +866,19 @@ export function OpsAssistantWidget() {
               id={titleId}
               style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.15 }}
             >
-              {t("assistant.header.title")}
+              Operations Assistant
             </div>
             <div
               style={{ fontSize: 11, color: theme.textMuted, lineHeight: 1.15 }}
             >
-              {t("assistant.header.subtitle")}
+              Floating shell · mock stream · persistent layout
             </div>
           </div>
 
           <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <ActionButton
               label={
-                widget.minimized
-                  ? t("assistant.header.expand")
-                  : t("assistant.header.minimize")
+                widget.minimized ? "Expand assistant" : "Minimize assistant"
               }
               icon="minus"
               pressed={widget.minimized}
@@ -912,7 +891,7 @@ export function OpsAssistantWidget() {
               }
             />
             <ActionButton
-              label={t("assistant.header.dockLeft")}
+              label="Dock assistant to left edge"
               icon="pin"
               pressed={widget.docked === "left"}
               onClick={() =>
@@ -920,7 +899,7 @@ export function OpsAssistantWidget() {
               }
             />
             <ActionButton
-              label={t("assistant.header.dockRight")}
+              label="Dock assistant to right edge"
               icon="arrow"
               pressed={widget.docked === "right"}
               onClick={() =>
@@ -928,7 +907,7 @@ export function OpsAssistantWidget() {
               }
             />
             <ActionButton
-              label={t("assistant.header.close")}
+              label="Close assistant"
               icon="x"
               onClick={() =>
                 setWidget((current) => ({ ...current, closed: true }))
@@ -973,7 +952,7 @@ export function OpsAssistantWidget() {
                   }}
                 >
                   <span style={{ fontSize: 11, color: theme.textDim }}>
-                    {t("assistant.session.label")}
+                    Session
                   </span>
                   <span
                     style={{
@@ -986,18 +965,18 @@ export function OpsAssistantWidget() {
                       padding: "2px 8px",
                     }}
                   >
-                    {t("assistant.session.online")}
+                    online
                   </span>
                 </div>
                 <div style={{ display: "grid", gap: 8 }}>
                   <MessageBubble
                     tone="neutral"
-                    author={t("assistant.message.system")}
-                    message={t("assistant.message.queueScan")}
+                    author="System"
+                    message="Queue scan complete. No active blocking incidents in the shell frame."
                   />
                   <MessageBubble
                     tone="accent"
-                    author={t("assistant.message.assistant")}
+                    author="Assistant"
                     message={activeMessage.slice(0, stream.visibleChars)}
                     liveRegionId={liveRegionId}
                   />
@@ -1015,7 +994,7 @@ export function OpsAssistantWidget() {
                 }}
               >
                 <div style={{ fontSize: 11, color: theme.textDim }}>
-                  {t("assistant.actionBridge.title")}
+                  Action bridge
                 </div>
                 {actionBridge ? (
                   <>
@@ -1065,13 +1044,9 @@ export function OpsAssistantWidget() {
                           >
                             {action.enabled
                               ? action.requiresReason
-                                ? t("assistant.actionBridge.requiresReason")
-                                : t("assistant.actionBridge.usesPageFlow")
-                              : t("assistant.actionBridge.disabled", {
-                                  reason:
-                                    action.disabledReasonCode ??
-                                    t("common.unknown"),
-                                })}
+                                ? "Existing confirmation flow requires a reason."
+                                : "Resolve via availableActions, then reuse the existing page action flow."
+                              : `Disabled: ${action.disabledReasonCode ?? "unavailable"}`}
                           </span>
                         </button>
                       ))}
@@ -1088,9 +1063,7 @@ export function OpsAssistantWidget() {
                         }}
                       >
                         <span style={{ fontSize: 12.5, color: theme.text }}>
-                          {t("assistant.actionBridge.pendingIntent", {
-                            action: pendingIntent.action,
-                          })}
+                          {`Pending intent · ${pendingIntent.action}`}
                         </span>
                         <span
                           style={{
@@ -1112,8 +1085,8 @@ export function OpsAssistantWidget() {
                             style={primaryAssistButtonStyle}
                           >
                             {isExecutingIntent
-                              ? t("common.working")
-                              : t("assistant.actionBridge.confirm")}
+                              ? "Working..."
+                              : "Open confirmation"}
                           </button>
                           <button
                             type="button"
@@ -1121,7 +1094,7 @@ export function OpsAssistantWidget() {
                             onClick={() => setPendingIntent(null)}
                             style={secondaryAssistButtonStyle}
                           >
-                            {t("common.dismiss")}
+                            Dismiss
                           </button>
                         </div>
                       </div>
@@ -1139,7 +1112,9 @@ export function OpsAssistantWidget() {
                       lineHeight: 1.45,
                     }}
                   >
-                    {t("assistant.actionBridge.empty")}
+                    Focus a supported detail view to let the assistant resolve
+                    `ActionIntent` against that resource&apos;s available
+                    actions.
                   </div>
                 )}
               </div>
@@ -1155,7 +1130,7 @@ export function OpsAssistantWidget() {
                 }}
               >
                 <div style={{ fontSize: 11, color: theme.textDim }}>
-                  {t("assistant.actions.title")}
+                  Assistant actions
                 </div>
                 <div
                   style={{
@@ -1167,14 +1142,14 @@ export function OpsAssistantWidget() {
                     htmlFor="ops-assistant-composer"
                     style={{ fontSize: 11, color: theme.textDim }}
                   >
-                    {t("assistant.actions.askLabel")}
+                    Ask assistant
                   </label>
                   <textarea
                     id="ops-assistant-composer"
                     data-testid="ops-assistant-composer"
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
-                    placeholder={t("assistant.actions.placeholder")}
+                    placeholder="Ask about refresh tiers, current scope, or available actions"
                     rows={3}
                     style={{
                       width: "100%",
@@ -1196,7 +1171,7 @@ export function OpsAssistantWidget() {
                       onClick={handleSubmitPrompt}
                       style={primaryAssistButtonStyle}
                     >
-                      {t("assistant.actions.ask")}
+                      Ask
                     </button>
                   </div>
                   {actions.length > 0 ? (
@@ -1247,7 +1222,8 @@ export function OpsAssistantWidget() {
                         lineHeight: 1.45,
                       }}
                     >
-                      {t("assistant.actions.empty")}
+                      Open a board or detail page to let the assistant emit
+                      route-aware actions and deep links.
                     </div>
                   )}
                 </div>
@@ -1264,7 +1240,7 @@ export function OpsAssistantWidget() {
                 }}
               >
                 <div style={{ fontSize: 11, color: theme.textDim }}>
-                  {t("assistant.conversation.title")}
+                  Conversation
                 </div>
                 <div style={{ display: "grid", gap: 8 }}>
                   {conversation.length > 0 ? (
@@ -1274,10 +1250,10 @@ export function OpsAssistantWidget() {
                         tone={entry.tone}
                         author={
                           entry.author === "assistant"
-                            ? t("assistant.message.assistant")
+                            ? "Assistant"
                             : entry.author === "operator"
-                              ? t("assistant.message.operator")
-                              : t("assistant.message.system")
+                              ? "Operator"
+                              : "System"
                         }
                         message={entry.message}
                         {...(entry.meta ? { meta: entry.meta } : {})}
@@ -1298,7 +1274,8 @@ export function OpsAssistantWidget() {
                         lineHeight: 1.45,
                       }}
                     >
-                      {t("assistant.conversation.empty")}
+                      Proposed actions, disabled refusals, and action receipts
+                      will be written back here.
                     </div>
                   )}
                 </div>
@@ -1315,7 +1292,7 @@ export function OpsAssistantWidget() {
                 }}
               >
                 <div style={{ fontSize: 11, color: theme.textDim }}>
-                  {t("assistant.context.title")}
+                  Context envelope
                 </div>
                 <dl
                   style={{
@@ -1326,29 +1303,19 @@ export function OpsAssistantWidget() {
                     fontSize: 11.5,
                   }}
                 >
-                  <dt style={{ color: theme.textDim }}>
-                    {t("assistant.context.route")}
-                  </dt>
+                  <dt style={{ color: theme.textDim }}>Route</dt>
                   <dd style={contextValueStyle}>{context?.route ?? "—"}</dd>
-                  <dt style={{ color: theme.textDim }}>
-                    {t("assistant.context.board")}
-                  </dt>
+                  <dt style={{ color: theme.textDim }}>Board</dt>
                   <dd style={contextValueStyle}>{context?.board ?? "—"}</dd>
-                  <dt style={{ color: theme.textDim }}>
-                    {t("assistant.context.tab")}
-                  </dt>
+                  <dt style={{ color: theme.textDim }}>Tab</dt>
                   <dd style={contextValueStyle}>{context?.activeTab ?? "—"}</dd>
-                  <dt style={{ color: theme.textDim }}>
-                    {t("assistant.context.selection")}
-                  </dt>
+                  <dt style={{ color: theme.textDim }}>Selection</dt>
                   <dd style={contextValueStyle}>
                     {context?.selectedEntity
                       ? `${context.selectedEntity.kind}:${context.selectedEntity.id}`
                       : "—"}
                   </dd>
-                  <dt style={{ color: theme.textDim }}>
-                    {t("assistant.context.filters")}
-                  </dt>
+                  <dt style={{ color: theme.textDim }}>Filters</dt>
                   <dd style={contextValueStyle}>
                     {context?.visibleFilters
                       ? JSON.stringify(context.visibleFilters)
@@ -1373,12 +1340,13 @@ export function OpsAssistantWidget() {
                 id={instructionsId}
                 style={{ fontSize: 11, color: theme.textMuted, minWidth: 0 }}
               >
-                {t("assistant.footer.instructions")}
+                Header arrows move. Resize handle arrows resize. Layout persists
+                in local storage.
               </div>
               <button
                 type="button"
                 data-testid="ops-assistant-resize-handle"
-                aria-label={t("assistant.footer.resizeAria")}
+                aria-label="Resize assistant widget"
                 onPointerDown={onResizePointerDown}
                 onKeyDown={onResizeKeyDown}
                 style={{
@@ -1416,17 +1384,17 @@ export function OpsAssistantWidget() {
               background: theme.surface,
             }}
           >
-            <span>{t("assistant.minimized.note")}</span>
+            <span>Minimized. Expand to resume the live mock stream.</span>
             <button
               type="button"
               data-testid="ops-assistant-restore"
-              aria-label={t("assistant.minimized.restoreAria")}
+              aria-label="Restore assistant widget"
               onClick={() =>
                 setWidget((current) => ({ ...current, minimized: false }))
               }
               style={restoreButtonStyle}
             >
-              {t("common.restore")}
+              Restore
             </button>
           </div>
         )}
@@ -1451,7 +1419,6 @@ function MessageBubble({
   auditHref?: string | null;
   liveRegionId?: string;
 }) {
-  const { t } = useTranslation();
   const bubbleTheme =
     tone === "accent"
       ? {
@@ -1533,7 +1500,7 @@ function MessageBubble({
             textDecoration: "none",
           }}
         >
-          {t("assistant.audit.view")}
+          View audit
         </a>
       ) : null}
     </div>
