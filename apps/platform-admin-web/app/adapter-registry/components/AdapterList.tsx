@@ -120,7 +120,7 @@ export function AdapterList() {
     };
 
     fetchAdapters();
-  }, []);
+  }, [locale]);
 
   const filteredAdapters = adapters.filter((adapter) => {
     switch (filter) {

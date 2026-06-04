@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useEffect,
+  useCallback,
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -59,9 +60,11 @@ export function LanguageProvider({
 export function useTranslation() {
   const { locale, setLocale } = useContext(LanguageContext);
 
-  function t(key: string, params?: Record<string, string | number>): string {
-    return translate(key, locale, params);
-  }
+  const t = useCallback(
+    (key: string, params?: Record<string, string | number>): string =>
+      translate(key, locale, params),
+    [locale],
+  );
 
   return { locale, setLocale, t };
 }
