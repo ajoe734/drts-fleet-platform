@@ -1477,62 +1477,20 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       filtersActive,
     });
 
-    const productColumns: CanvasTableColumn<{
-      label: string;
-      trips: number;
-      revenue: number;
-      average: number;
-    }>[] = [
+    // RSC-safe: columns carry no render functions; cells are pre-formatted into
+    // the row data (see CanvasTable: renders row[k] as a ReactNode when no `r`).
+    const productColumns: CanvasTableColumn<Record<string, ReactNode>>[] = [
       { h: t("revenue.col.product", locale), k: "label" },
-      {
-        h: t("revenue.col.trips", locale),
-        k: "trips",
-        align: "right",
-        r: (row) => formatCompactNumber(row.trips),
-      },
-      {
-        h: t("revenue.col.revenue", locale),
-        k: "revenue",
-        mono: true,
-        align: "right",
-        r: (row) => formatMinorCurrency(row.revenue),
-      },
-      {
-        h: t("revenue.col.average", locale),
-        k: "average",
-        mono: true,
-        align: "right",
-        r: (row) => formatMinorCurrency(row.average),
-      },
+      { h: t("revenue.col.trips", locale), k: "trips", align: "right" },
+      { h: t("revenue.col.revenue", locale), k: "revenue", mono: true, align: "right" },
+      { h: t("revenue.col.average", locale), k: "average", mono: true, align: "right" },
     ];
 
-    const vehicleColumns: CanvasTableColumn<{
-      label: string;
-      trips: number;
-      revenue: number;
-      average: number;
-    }>[] = [
+    const vehicleColumns: CanvasTableColumn<Record<string, ReactNode>>[] = [
       { h: t("revenue.col.vehicle", locale), k: "label", mono: true },
-      {
-        h: t("revenue.col.trips", locale),
-        k: "trips",
-        align: "right",
-        r: (row) => formatCompactNumber(row.trips),
-      },
-      {
-        h: t("revenue.col.revenue", locale),
-        k: "revenue",
-        mono: true,
-        align: "right",
-        r: (row) => formatMinorCurrency(row.revenue),
-      },
-      {
-        h: t("revenue.col.average", locale),
-        k: "average",
-        mono: true,
-        align: "right",
-        r: (row) => formatMinorCurrency(row.average),
-      },
+      { h: t("revenue.col.trips", locale), k: "trips", align: "right" },
+      { h: t("revenue.col.revenue", locale), k: "revenue", mono: true, align: "right" },
+      { h: t("revenue.col.average", locale), k: "average", mono: true, align: "right" },
     ];
 
     return (
@@ -1563,9 +1521,9 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               columns={productColumns}
               rows={insights.serviceBuckets.map((row) => ({
                 label: row.label,
-                trips: row.trips,
-                revenue: row.revenueMinor,
-                average: row.averageMinor,
+                trips: formatCompactNumber(row.trips),
+                revenue: formatMinorCurrency(row.revenueMinor),
+                average: formatMinorCurrency(row.averageMinor),
               }))}
             />
           )}
@@ -1590,9 +1548,9 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               columns={vehicleColumns}
               rows={insights.vehicles.map((row) => ({
                 label: row.label,
-                trips: row.trips,
-                revenue: row.revenueMinor,
-                average: row.averageMinor,
+                trips: formatCompactNumber(row.trips),
+                revenue: formatMinorCurrency(row.revenueMinor),
+                average: formatMinorCurrency(row.averageMinor),
               }))}
             />
           )}
@@ -1608,31 +1566,15 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       filtersActive,
     });
 
-    const columns: CanvasTableColumn<{
-      key: string;
-      label: string;
-      trips: number;
-      revenueMinor: number;
-      shareLabel: string;
-    }>[] = [
+    const columns: CanvasTableColumn<Record<string, ReactNode>>[] = [
       { h: t("revenue.channelMix.col.channel", locale), k: "label" },
-      {
-        h: t("revenue.channelMix.col.trips", locale),
-        k: "trips",
-        align: "right",
-        r: (row) => formatCompactNumber(row.trips),
-      },
-      {
-        h: t("revenue.channelMix.col.share", locale),
-        k: "shareLabel",
-        align: "right",
-      },
+      { h: t("revenue.channelMix.col.trips", locale), k: "trips", align: "right" },
+      { h: t("revenue.channelMix.col.share", locale), k: "shareLabel", align: "right" },
       {
         h: t("revenue.channelMix.col.revenue", locale),
         k: "revenueMinor",
         mono: true,
         align: "right",
-        r: (row) => formatMinorCurrency(row.revenueMinor),
       },
     ];
 
@@ -1652,7 +1594,16 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             themeRef={theme}
           />
         ) : (
-          <Table theme={theme} columns={columns} rows={channelBuckets} />
+          <Table
+            theme={theme}
+            columns={columns}
+            rows={channelBuckets.map((row) => ({
+              label: row.label,
+              shareLabel: row.shareLabel,
+              trips: formatCompactNumber(row.trips),
+              revenueMinor: formatMinorCurrency(row.revenueMinor),
+            }))}
+          />
         )}
       </Card>
     );
@@ -1740,11 +1691,22 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       ledgerMode: row.localLedgerMode,
     }));
 
-    const columns: CanvasTableColumn<(typeof matrixRows)[number]>[] = [
-      {
-        h: t("revenue.matrix.col.channel", locale),
-        w: 220,
-        r: (row) => (
+    const columns: CanvasTableColumn<Record<string, ReactNode>>[] = [
+      { h: t("revenue.matrix.col.channel", locale), w: 220, k: "channel" },
+      { h: t("revenue.matrix.col.payer", locale), k: "payer" },
+      { h: t("revenue.matrix.col.sponsor", locale), k: "sponsor" },
+      { h: t("revenue.matrix.col.documents", locale), k: "documents" },
+      { h: t("revenue.matrix.col.payout", locale), k: "payoutAuthority" },
+      { h: t("revenue.matrix.col.discount", locale), k: "discount" },
+      { h: t("revenue.matrix.col.ledger", locale), w: 130, k: "ledger" },
+    ];
+
+    const matrixDisplayRows: Record<string, ReactNode>[] = matrixRows.map(
+      (row) => ({
+        payer: row.payer,
+        sponsor: row.sponsor,
+        payoutAuthority: row.payoutAuthority,
+        channel: (
           <div>
             <div style={{ color: theme.text, fontWeight: 600 }}>
               {row.channelLabel}
@@ -1754,12 +1716,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             </div>
           </div>
         ),
-      },
-      { h: t("revenue.matrix.col.payer", locale), k: "payer" },
-      { h: t("revenue.matrix.col.sponsor", locale), k: "sponsor" },
-      {
-        h: t("revenue.matrix.col.documents", locale),
-        r: (row) => (
+        documents: (
           <div>
             <div>{row.invoiceOwner}</div>
             <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
@@ -1770,11 +1727,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             </div>
           </div>
         ),
-      },
-      { h: t("revenue.matrix.col.payout", locale), k: "payoutAuthority" },
-      {
-        h: t("revenue.matrix.col.discount", locale),
-        r: (row) => (
+        discount: (
           <div>
             <div>{row.discountFunding}</div>
             <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
@@ -1782,11 +1735,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             </div>
           </div>
         ),
-      },
-      {
-        h: t("revenue.matrix.col.ledger", locale),
-        w: 130,
-        r: (row) => (
+        ledger: (
           <Pill
             theme={theme}
             tone={row.ledgerMode === "shadow_only" ? "warn" : "success"}
@@ -1797,8 +1746,8 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               : t("revenue.matrix.ledger.full_service", locale)}
           </Pill>
         ),
-      },
-    ];
+      }),
+    );
 
     return (
       <Card
@@ -1807,7 +1756,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         subtitle={t("revenue.matrix.subtitle", locale)}
         padding={0}
       >
-        <Table theme={theme} columns={columns} rows={matrixRows} />
+        <Table theme={theme} columns={columns} rows={matrixDisplayRows} />
       </Card>
     );
   }
@@ -1972,109 +1921,89 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       }
     };
 
-    const columns: CanvasTableColumn<MismatchRow>[] = [
-      {
-        h: t("revenue.mismatch.col.issueId", locale),
-        w: 200,
-        r: (row) => (
-          <div>
-            <div style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
-              {row.issueIdLabel}
-            </div>
-            {row.issueIdSub ? (
-              <div
-                style={{
-                  color: theme.textMuted,
-                  fontSize: 11,
-                  fontFamily: theme.monoFamily,
-                }}
-              >
-                {row.issueIdSub}
-              </div>
-            ) : null}
-          </div>
-        ),
-      },
-      {
-        h: t("revenue.mismatch.col.mirror", locale),
-        w: 220,
-        r: (row) => (
-          <div>
-            <div style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
-              {row.mirrorOrderId.slice(0, 14)}
-            </div>
-            <div style={{ color: theme.textMuted, fontSize: 11 }}>
-              {row.externalOrderId}
-            </div>
-          </div>
-        ),
-      },
+    const columns: CanvasTableColumn<Record<string, ReactNode>>[] = [
+      { h: t("revenue.mismatch.col.issueId", locale), w: 200, k: "issueId" },
+      { h: t("revenue.mismatch.col.mirror", locale), w: 220, k: "mirror" },
       { h: t("revenue.mismatch.col.platform", locale), k: "platform" },
-      {
-        h: t("revenue.mismatch.col.reason", locale),
-        r: (row) => (
-          <div>
-            <Pill
-              theme={theme}
-              tone={row.status === "sync_failed" ? "danger" : "warn"}
-              dot
-            >
-              {formatOpsCodeLabel(locale, row.status)}
-            </Pill>
+      { h: t("revenue.mismatch.col.reason", locale), k: "reason" },
+      { h: t("revenue.mismatch.col.owner", locale), k: "owner" },
+      { h: t("revenue.mismatch.col.age", locale), w: 90, align: "right", k: "age" },
+      { h: t("revenue.mismatch.col.cta", locale), w: 300, align: "right", k: "cta" },
+    ];
+
+    const mismatchDisplayRows: Record<string, ReactNode>[] = rows.map((row) => ({
+      platform: row.platform,
+      issueId: (
+        <div>
+          <div style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
+            {row.issueIdLabel}
+          </div>
+          {row.issueIdSub ? (
             <div
               style={{
                 color: theme.textMuted,
                 fontSize: 11,
-                marginTop: 2,
+                fontFamily: theme.monoFamily,
               }}
             >
-              {row.reason}
+              {row.issueIdSub}
             </div>
+          ) : null}
+        </div>
+      ),
+      mirror: (
+        <div>
+          <div style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
+            {row.mirrorOrderId.slice(0, 14)}
           </div>
-        ),
-      },
-      {
-        h: t("revenue.mismatch.col.owner", locale),
-        r: (row) => (
-          <Pill theme={theme} tone={row.ownerTone} dot>
-            {row.ownerLabel}
+          <div style={{ color: theme.textMuted, fontSize: 11 }}>
+            {row.externalOrderId}
+          </div>
+        </div>
+      ),
+      reason: (
+        <div>
+          <Pill
+            theme={theme}
+            tone={row.status === "sync_failed" ? "danger" : "warn"}
+            dot
+          >
+            {formatOpsCodeLabel(locale, row.status)}
           </Pill>
-        ),
-      },
-      {
-        h: t("revenue.mismatch.col.age", locale),
-        w: 90,
-        align: "right",
-        r: (row) => (
-          <span
-            title={row.ageAria}
-            style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}
-          >
-            {row.ageCompact}
-          </span>
-        ),
-      },
-      {
-        h: t("revenue.mismatch.col.cta", locale),
-        w: 300,
-        align: "right",
-        r: (row) => (
-          <div
-            style={{
-              display: "inline-flex",
-              gap: 6,
-              justifyContent: "flex-end",
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            {row.availableActions.map((descriptor) =>
-              renderMismatchRowAction(row, descriptor),
-            )}
+          <div style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>
+            {row.reason}
           </div>
-        ),
-      },
-    ];
+        </div>
+      ),
+      owner: (
+        <Pill theme={theme} tone={row.ownerTone} dot>
+          {row.ownerLabel}
+        </Pill>
+      ),
+      age: (
+        <span
+          title={row.ageAria}
+          style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}
+        >
+          {row.ageCompact}
+        </span>
+      ),
+      cta: (
+        <div
+          style={{
+            display: "inline-flex",
+            gap: 6,
+            justifyContent: "flex-end",
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          {row.availableActions.map((descriptor) =>
+            renderMismatchRowAction(row, descriptor),
+          )}
+        </div>
+      ),
+    }));
 
     return (
       <Card
@@ -2086,7 +2015,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         )}`}
         padding={0}
       >
-        <Table theme={theme} columns={columns} rows={rows} />
+        <Table theme={theme} columns={columns} rows={mismatchDisplayRows} />
       </Card>
     );
   }
