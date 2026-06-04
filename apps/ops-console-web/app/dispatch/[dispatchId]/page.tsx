@@ -124,10 +124,6 @@ async function resolveOrFallback<T>(
   }
 }
 
-function copy(locale: Locale, en: string, zh: string) {
-  return locale === "zh" ? zh : en;
-}
-
 function text(
   locale: Locale,
   key: string,
@@ -221,7 +217,7 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
 
 function formatLongDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return copy(locale, "unknown", "未知");
+    return text(locale, "common.unknown");
   }
 
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
@@ -239,7 +235,7 @@ function formatLongDateTime(locale: Locale, value: string | null | undefined) {
 
 function formatWindow(order: OwnedOrderRecord, locale: Locale) {
   if (!order.reservationWindowStart || !order.reservationWindowEnd) {
-    return locale === "zh" ? "即時" : "realtime";
+    return text(locale, "dispatch.workflow.detail.immediateQueue");
   }
 
   return `${formatDateTime(locale, order.reservationWindowStart)} → ${formatDateTime(locale, order.reservationWindowEnd)}`;
@@ -265,7 +261,7 @@ function formatForwardedWindow(order: ForwardedOrderRecord, locale: Locale) {
     return formatDateTime(locale, start);
   }
 
-  return locale === "zh" ? "即時" : "realtime";
+  return text(locale, "dispatch.workflow.detail.immediateQueue");
 }
 
 function getAddressLabel(
@@ -625,7 +621,9 @@ function buildFallbackActivity(
       id: `${order.orderId}:fare`,
       title: text(locale, "dispatch.detail.activity.pricing"),
       body: text(locale, "dispatch.detail.activity.pricingBody", {
-        rule: order.quotedFareRuleVersion ?? "manual",
+        rule:
+          order.quotedFareRuleVersion ??
+          text(locale, "dispatch.detail.owned.compliance.manual"),
         amount: formatMinorCurrency(
           order.quotedFare.amountMinor,
           order.quotedFare.currency,
@@ -1225,91 +1223,91 @@ function actionVisual(
     case "contact_passenger":
       return {
         icon: "phone",
-        label: copy(locale, "Contact rider", "聯絡乘客"),
+        label: text(locale, "dispatch.detail.action.contact_passenger"),
         variant: "secondary",
         danger: false,
       };
     case "assign_candidate":
       return {
         icon: "check",
-        label: copy(locale, "Assign #1", "指派候選 #1"),
+        label: text(locale, "dispatch.detail.action.assign_candidate"),
         variant: "primary",
         danger: false,
       };
     case "release_driver":
       return {
         icon: "switchboard",
-        label: copy(locale, "Release driver", "釋放司機"),
+        label: text(locale, "dispatch.detail.action.release_driver"),
         variant,
         danger,
       };
     case "cancel_order":
       return {
         icon: "x",
-        label: copy(locale, "Cancel order", "取消訂單"),
+        label: text(locale, "dispatch.detail.action.cancel_order"),
         variant,
         danger,
       };
     case "fare_override":
       return {
         icon: "warn",
-        label: copy(locale, "Fare override", "車資覆寫"),
+        label: text(locale, "dispatch.detail.action.fare_override"),
         variant,
         danger: true,
       };
     case "redispatch":
       return {
         icon: "dispatch",
-        label: copy(locale, "Redispatch", "重新派遣"),
+        label: text(locale, "dispatch.detail.action.redispatch"),
         variant,
         danger,
       };
     case "resolve_no_supply":
       return {
         icon: "health",
-        label: copy(locale, "Resolve no-supply", "處理無供給"),
+        label: text(locale, "dispatch.detail.action.resolve_no_supply"),
         variant,
         danger,
       };
     case "escalate_incident":
       return {
         icon: "incidents",
-        label: copy(locale, "Escalate to incident", "升級事故"),
+        label: text(locale, "dispatch.detail.action.escalate_incident"),
         variant,
         danger: true,
       };
     case "complete_reconciliation":
       return {
         icon: "check",
-        label: copy(locale, "Complete reconciliation", "完成對帳"),
+        label: text(locale, "dispatch.detail.action.complete_reconciliation"),
         variant: "primary",
         danger: false,
       };
     case "engage_manual_fallback":
       return {
         icon: "switchboard",
-        label: copy(locale, "Manual fallback", "人工備援"),
+        label: text(locale, "dispatch.detail.action.engage_manual_fallback"),
         variant,
         danger,
       };
     case "force_refresh":
       return {
         icon: "clock",
-        label: copy(locale, "Force refresh", "強制刷新"),
+        label: text(locale, "dispatch.detail.action.force_refresh"),
         variant: "secondary",
         danger: false,
       };
     case "broadcast_eligible":
       return {
         icon: "dispatch",
-        label: copy(locale, "Broadcast", "廣播候選"),
+        label: text(locale, "dispatch.detail.action.broadcast_eligible"),
         variant,
         danger,
       };
     case "report_sync_failure":
       return {
         icon: "warn",
-        label: copy(locale, "Report sync failure", "回報同步失敗"),
+        label: text(locale, "dispatch.detail.action.report_sync_failure"),
         variant,
         danger: true,
       };
@@ -1327,16 +1325,14 @@ function actionHint(action: ResourceActionDescriptor, locale: Locale) {
   if (!action.enabled) {
     return action.disabledReasonCode
       ? formatOpsCodeLabel(locale, action.disabledReasonCode)
-      : copy(locale, "unavailable", "目前不可用");
+      : text(locale, "dispatch.detail.action.unavailable");
   }
 
-  const risk = copy(
-    locale,
-    `risk:${action.riskLevel}`,
-    `風險:${action.riskLevel}`,
-  );
+  const risk = text(locale, "dispatch.detail.action.risk", {
+    value: action.riskLevel,
+  });
   return action.requiresReason
-    ? `${risk} · ${copy(locale, "reason required", "需填原因")}`
+    ? `${risk} · ${text(locale, "dispatch.detail.action.reasonRequired")}`
     : risk;
 }
 
@@ -1347,7 +1343,7 @@ function renderHeaderActions(
   if (actions.length === 0) {
     return (
       <Pill theme={theme} tone="neutral">
-        {copy(locale, "read-only · terminal", "唯讀 · 終態")}
+        {text(locale, "dispatch.detail.action.readOnlyTerminal")}
       </Pill>
     );
   }
@@ -1561,13 +1557,15 @@ function buildCandidateEmptyState(
       return {
         tone: "info",
         icon: "dispatch",
-        title: copy(locale, "Dispatch job not started", "派遣工作尚未啟動"),
-        description: copy(
+        title: text(locale, "dispatch.detail.empty.notProvisioned.title"),
+        description: text(
           locale,
-          "No dispatch job exists for this order yet. Candidate scoring begins once it enters matching.",
-          "此訂單尚未建立派遣工作，進入 matching 後才會開始評分候選。",
+          "dispatch.detail.empty.notProvisioned.description",
         ),
-        actionLabel: copy(locale, "Open dispatch board", "回派車看板"),
+        actionLabel: text(
+          locale,
+          "dispatch.detail.empty.notProvisioned.action",
+        ),
         actionHref: "/dispatch?board=ready",
         actionNewTab: false,
       };
@@ -1575,13 +1573,12 @@ function buildCandidateEmptyState(
       return {
         tone: "danger",
         icon: "warn",
-        title: copy(locale, "Candidate snapshot failed", "候選快照讀取失敗"),
-        description: copy(
+        title: text(locale, "dispatch.detail.empty.fetchFailed.title"),
+        description: text(
           locale,
-          "The candidate endpoint did not return a usable payload. Retry the snapshot.",
-          "候選端點未回傳可用內容，請重新整理快照。",
+          "dispatch.detail.empty.fetchFailed.description",
         ),
-        actionLabel: copy(locale, "Retry", "重新整理"),
+        actionLabel: text(locale, "dispatch.detail.empty.fetchFailed.action"),
         actionHref: `/dispatch/${encodeURIComponent(orderId)}`,
         actionNewTab: false,
       };
@@ -1589,13 +1586,15 @@ function buildCandidateEmptyState(
       return {
         tone: "warn",
         icon: "users",
-        title: copy(locale, "Candidate scope denied", "無候選讀取權限"),
-        description: copy(
+        title: text(locale, "dispatch.detail.empty.permissionDenied.title"),
+        description: text(
           locale,
-          "This actor can open the workspace but lacks supply read scope for candidate scoring.",
-          "目前帳號可進入工作區，但缺少候選評分的供給讀取權限。",
+          "dispatch.detail.empty.permissionDenied.description",
         ),
-        actionLabel: copy(locale, "Open ops dashboard", "返回儀表板"),
+        actionLabel: text(
+          locale,
+          "dispatch.detail.empty.permissionDenied.action",
+        ),
         actionHref: "/dashboard",
         actionNewTab: false,
       };
@@ -1603,13 +1602,15 @@ function buildCandidateEmptyState(
       return {
         tone: "warn",
         icon: "health",
-        title: copy(locale, "No eligible supply", "目前無可用供給"),
-        description: copy(
+        title: text(locale, "dispatch.detail.empty.externalUnavailable.title"),
+        description: text(
           locale,
-          "Supply is exhausted or the no-supply lane is active. Hand off via the no-supply / governance lane.",
-          "供給耗盡或 no-supply 流程啟動中，請改由 no-supply / 治理流程接手。",
+          "dispatch.detail.empty.externalUnavailable.description",
         ),
-        actionLabel: copy(locale, "No-supply board", "無供給看板"),
+        actionLabel: text(
+          locale,
+          "dispatch.detail.empty.externalUnavailable.action",
+        ),
         actionHref: "/dispatch?board=no_supply",
         actionNewTab: false,
       };
@@ -1617,17 +1618,12 @@ function buildCandidateEmptyState(
       return {
         tone: "accent",
         icon: "filter",
-        title: copy(
+        title: text(locale, "dispatch.detail.empty.filteredEmpty.title"),
+        description: text(
           locale,
-          "No candidates match the gate filter",
-          "目前篩選沒有候選",
+          "dispatch.detail.empty.filteredEmpty.description",
         ),
-        description: copy(
-          locale,
-          "Every scored candidate is filtered out by the current gate slice. Widen the gate view.",
-          "目前 gate 篩選把所有評分候選都排除了，請放寬 gate 檢視。",
-        ),
-        actionLabel: copy(locale, "Clear gate filter", "清除 gate 篩選"),
+        actionLabel: text(locale, "dispatch.detail.empty.filteredEmpty.action"),
         actionHref: `/dispatch/${encodeURIComponent(orderId)}`,
         actionNewTab: false,
       };
@@ -1635,17 +1631,15 @@ function buildCandidateEmptyState(
       return {
         tone: "warn",
         icon: "users",
-        title: copy(
+        title: text(locale, "dispatch.detail.empty.driverNotEligible.title"),
+        description: text(
           locale,
-          "Candidates blocked by eligibility",
-          "候選因資格被擋",
+          "dispatch.detail.empty.driverNotEligible.description",
         ),
-        description: copy(
+        actionLabel: text(
           locale,
-          "All nearby drivers failed an eligibility or license gate. Resolve compliance before assignment.",
-          "附近司機皆未通過資格或證照 gate，指派前請先處理法遵。",
+          "dispatch.detail.empty.driverNotEligible.action",
         ),
-        actionLabel: copy(locale, "Open fleet governance", "開啟車隊治理"),
         actionHref: platformAdminFleet,
         actionNewTab: true,
       };
@@ -1654,13 +1648,9 @@ function buildCandidateEmptyState(
       return {
         tone: "neutral",
         icon: "dispatch",
-        title: copy(locale, "No candidates yet", "目前沒有候選"),
-        description: copy(
-          locale,
-          "Matching is healthy but no candidate has surfaced for this work item yet.",
-          "matching 正常，但此工作項目目前還沒有評分出候選。",
-        ),
-        actionLabel: copy(locale, "Back to dispatch board", "回派車看板"),
+        title: text(locale, "dispatch.detail.empty.noData.title"),
+        description: text(locale, "dispatch.detail.empty.noData.description"),
+        actionLabel: text(locale, "dispatch.detail.empty.noData.action"),
         actionHref: "/dispatch?board=ready",
         actionNewTab: false,
       };
@@ -1709,7 +1699,7 @@ function renderCandidateEmptyState(
         {view.actionNewTab ? <CanvasIcon name="ext" size={11} /> : null}
       </Link>
       <span style={tinyMetaStyle(view.tone)}>
-        {copy(locale, "emptyReason", "空狀態")} ·{" "}
+        {text(locale, "dispatch.detail.empty.metaLabel")} ·{" "}
         {CANDIDATE_EMPTY_REASON_CODES[reason]}
       </span>
     </div>
@@ -1791,11 +1781,10 @@ function synthesizeRefreshMetadata(
 }
 
 function refreshBody(refresh: UiRefreshMetadata, locale: Locale) {
-  return copy(
-    locale,
-    `Snapshot ${formatLongDateTime(locale, refresh.generatedAt)} UTC from ${refresh.source}.`,
-    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} UTC 產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
-  );
+  return text(locale, "dispatch.detail.refresh.snapshotBody", {
+    generatedAt: formatLongDateTime(locale, refresh.generatedAt),
+    source: formatOpsCodeLabel(locale, refresh.source),
+  });
 }
 
 function renderRefreshRow(
@@ -1803,11 +1792,10 @@ function renderRefreshRow(
   locale: Locale,
   extra?: string,
 ) {
-  const freshnessLabel = copy(
-    locale,
-    refresh.dataFreshness.toUpperCase(),
-    formatOpsCodeLabel(locale, refresh.dataFreshness),
-  );
+  const freshnessLabel =
+    refresh.dataFreshness === "fresh"
+      ? text(locale, "dispatch.detail.refresh.fresh")
+      : text(locale, "dispatch.detail.refresh.degraded");
   return (
     <div style={helperRowStyle}>
       <Pill
@@ -1818,15 +1806,11 @@ function renderRefreshRow(
         {freshnessLabel} · {REFRESH_TIER_LABEL}
       </Pill>
       <span style={{ ...helperTextStyle, ...monoTextStyle }}>
-        {copy(locale, "generated", "生成時間")} ·{" "}
+        {text(locale, "dispatch.detail.refresh.generatedAt")} ·{" "}
         {formatLongDateTime(locale, refresh.generatedAt)} UTC
       </span>
       <span style={helperTextStyle}>
-        {copy(
-          locale,
-          "CTAs come from availableActions",
-          "畫面 CTA 以 availableActions 為準",
-        )}
+        {text(locale, "dispatch.detail.refresh.ctaSource")}
       </span>
       {extra ? <span style={helperTextStyle}>{extra}</span> : null}
     </div>
@@ -1844,15 +1828,11 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
           >
             <span>{dispatchId}</span>
             <Pill theme={theme} tone="accent" dot>
-              {copy(locale, "broadcasting", "派送中")}
+              {text(locale, "dispatch.detail.workflow.broadcasting")}
             </Pill>
           </span>
         }
-        subtitle={copy(
-          locale,
-          "Smoke fallback workspace for route parity verification.",
-          "供 smoke parity 驗證使用的備援工作區。",
-        )}
+        subtitle={text(locale, "dispatch.detail.smoke.subtitle")}
       />
       <div
         style={{
@@ -1861,21 +1841,35 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
           gap: 16,
         }}
       >
-        <Card theme={theme} title={copy(locale, "Candidate board", "候選面板")}>
+        <Card
+          theme={theme}
+          title={text(locale, "dispatch.detail.smoke.candidateBoard")}
+        >
           <DL
             theme={theme}
             cols={2}
             items={[
-              { k: "dispatch id", v: dispatchId, mono: true },
               {
-                k: "state",
-                v: copy(locale, "broadcasting", "派送中"),
+                k: text(locale, "dispatch.detail.smoke.dispatchId"),
+                v: dispatchId,
                 mono: true,
               },
-              { k: "eta", v: "6m", mono: true },
               {
-                k: "override",
-                v: copy(locale, "Request override", "提出例外覆核"),
+                k: text(locale, "dispatch.detail.smoke.state"),
+                v: text(locale, "dispatch.detail.workflow.broadcasting"),
+                mono: true,
+              },
+              {
+                k: text(locale, "dispatch.detail.smoke.eta"),
+                v: "6m",
+                mono: true,
+              },
+              {
+                k: text(locale, "dispatch.detail.smoke.override"),
+                v: text(
+                  locale,
+                  "dispatch.detail.activity.exceptionReviewRequest",
+                ),
               },
             ]}
           />
@@ -1885,36 +1879,20 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
             theme={theme}
             title={text(locale, "dispatch.workflow.detail.timeline")}
           >
-            <div>
-              {copy(
-                locale,
-                "queued → broadcasting → assigned",
-                "queued → broadcasting → assigned",
-              )}
-            </div>
+            <div>{text(locale, "dispatch.detail.smoke.sequence")}</div>
           </Card>
           <Card
             theme={theme}
             title={text(locale, "dispatch.workflow.detail.activityEvents")}
           >
-            <div>
-              {copy(
-                locale,
-                "Dispatch smoke activity log",
-                "派遣 smoke 活動紀錄",
-              )}
-            </div>
+            <div>{text(locale, "dispatch.detail.smoke.activityLog")}</div>
           </Card>
           <Banner
             theme={theme}
             tone="warn"
             icon="warn"
-            title={copy(locale, "High-risk CTA present", "高風險 CTA 已呈現")}
-            body={copy(
-              locale,
-              "Override and cancellation require explicit confirmation in the production flow.",
-              "覆寫與取消在正式流程中都需要明確確認。",
-            )}
+            title={text(locale, "dispatch.detail.smoke.highRiskTitle")}
+            body={text(locale, "dispatch.detail.smoke.highRiskBody")}
           />
         </div>
       </div>
@@ -2184,7 +2162,7 @@ async function renderOwnedWorkspace({
         gateTone: gate.tone,
         gateCell: (
           <Pill theme={theme} tone={gate.tone} dot>
-            {gate.label}
+            {formatOpsCodeLabel(locale, gate.label)}
           </Pill>
         ),
         score: getCandidateScore(candidate, order, driver),
@@ -2242,12 +2220,38 @@ async function renderOwnedWorkspace({
   const terminal = isOwnedTerminal(order, currentTask);
 
   const candidateColumns: CanvasTableColumn<CandidateRow>[] = [
-    { h: "RANK", k: "rankCell", w: 52 },
-    { h: "DRIVER", k: "driverCell", w: 180 },
-    { h: "VEHICLE", k: "vehicle", w: 132, mono: true },
-    { h: "ETA", k: "etaCell", w: 84 },
-    { h: "GATE", k: "gateCell", w: 164 },
-    { h: "SCORE", k: "score", w: 68, mono: true },
+    {
+      h: text(locale, "dispatch.detail.owned.column.rank"),
+      k: "rankCell",
+      w: 52,
+    },
+    {
+      h: text(locale, "dispatch.detail.owned.column.driver"),
+      k: "driverCell",
+      w: 180,
+    },
+    {
+      h: text(locale, "dispatch.detail.owned.column.vehicle"),
+      k: "vehicle",
+      w: 132,
+      mono: true,
+    },
+    {
+      h: text(locale, "dispatch.detail.owned.column.eta"),
+      k: "etaCell",
+      w: 84,
+    },
+    {
+      h: text(locale, "dispatch.detail.owned.column.gate"),
+      k: "gateCell",
+      w: 164,
+    },
+    {
+      h: text(locale, "dispatch.detail.owned.column.score"),
+      k: "score",
+      w: 68,
+      mono: true,
+    },
   ];
 
   const stepperTimestamps: (string | null)[] = [
@@ -2269,7 +2273,7 @@ async function renderOwnedWorkspace({
           >
             <span>{`${order.orderNo} · ${getTenantLabel(order)}`}</span>
             <Pill theme={theme} tone="accent">
-              OWNED
+              {text(locale, "dispatch.detail.owned.pill")}
             </Pill>
           </span>
         }
@@ -2280,7 +2284,9 @@ async function renderOwnedWorkspace({
       {renderRefreshRow(
         refresh,
         locale,
-        `${candidateRows.length} ${copy(locale, "candidates", "候選")}`,
+        text(locale, "dispatch.detail.refresh.candidates", {
+          count: candidateRows.length,
+        }),
       )}
 
       <div style={{ padding: "12px 24px 0", display: "grid", gap: 12 }}>
@@ -2289,11 +2295,7 @@ async function renderOwnedWorkspace({
             theme={theme}
             tone="warn"
             icon="warn"
-            title={copy(
-              locale,
-              "Some dispatch data is degraded",
-              "部分派遣資料降級",
-            )}
+            title={text(locale, "dispatch.detail.owned.dataDegraded")}
             body={refreshBody(refresh, locale)}
           />
         ) : null}
@@ -2302,16 +2304,8 @@ async function renderOwnedWorkspace({
             theme={theme}
             tone="info"
             icon="check"
-            title={copy(
-              locale,
-              "Work item is in a terminal state — read-only",
-              "工作項目已進入終態 · 唯讀",
-            )}
-            body={copy(
-              locale,
-              "No dispatch CTAs are offered; review the timeline and compliance record below.",
-              "不提供派遣 CTA；可檢視下方時間軸與法遵紀錄。",
-            )}
+            title={text(locale, "dispatch.detail.owned.terminalTitle")}
+            body={text(locale, "dispatch.detail.owned.terminalBody")}
           />
         ) : null}
       </div>
@@ -2328,7 +2322,9 @@ async function renderOwnedWorkspace({
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card
             theme={theme}
-            title={`${copy(locale, "Candidates · ranked", "候選 driver · ranked")} (${candidateRows.length})`}
+            title={text(locale, "dispatch.detail.owned.candidatesCardTitle", {
+              count: candidateRows.length,
+            })}
             {...(candidateRows.length > 0 ? { padding: 0 } : {})}
           >
             {candidateRows.length > 0 ? (
@@ -2348,21 +2344,31 @@ async function renderOwnedWorkspace({
 
           <Card
             theme={theme}
-            title={copy(locale, "Compliance gates", "Compliance gates")}
+            title={text(locale, "dispatch.detail.owned.complianceTitle")}
           >
             <DL
               theme={theme}
               cols={2}
               items={[
                 {
-                  k: "license valid",
-                  v: `${licenseClearCount}/${candidateRows.length || 0} ${
-                    locale === "zh" ? "候選通過" : "candidates clear"
-                  }`,
+                  k: text(
+                    locale,
+                    "dispatch.detail.owned.compliance.licenseValid",
+                  ),
+                  v: text(
+                    locale,
+                    "dispatch.detail.owned.compliance.candidatesClear",
+                    {
+                      count: `${licenseClearCount}/${candidateRows.length || 0}`,
+                    },
+                  ),
                   mono: true,
                 },
                 {
-                  k: "service bucket",
+                  k: text(
+                    locale,
+                    "dispatch.detail.owned.compliance.serviceBucket",
+                  ),
                   v: `${formatOpsCodeLabel(locale, order.serviceBucket)} · ${
                     candidateRows.length > 0 &&
                     candidateRows.every((row) =>
@@ -2370,38 +2376,59 @@ async function renderOwnedWorkspace({
                         order.serviceBucket,
                       ),
                     )
-                      ? "ok"
-                      : "review"
+                      ? text(locale, "dispatch.detail.owned.compliance.ok")
+                      : text(locale, "dispatch.detail.owned.compliance.review")
                   }`,
                   mono: true,
                 },
                 {
-                  k: "dispatch state",
+                  k: text(
+                    locale,
+                    "dispatch.detail.owned.compliance.dispatchState",
+                  ),
                   v: `${formatOpsCodeLabel(locale, currentState)} · ${dispatchJob?.dispatchJobId ?? "—"}`,
                   mono: true,
                 },
                 {
-                  k: "device binding",
-                  v: `${liveCandidateCount}/${candidateRows.length || 0} live · ${eligibleCandidateCount}/${candidateRows.length || 0} eligible`,
+                  k: text(
+                    locale,
+                    "dispatch.detail.owned.compliance.deviceBinding",
+                  ),
+                  v: text(
+                    locale,
+                    "dispatch.detail.owned.compliance.deviceBindingValue",
+                    {
+                      liveCount: liveCandidateCount,
+                      eligibleCount: eligibleCandidateCount,
+                      totalCount: candidateRows.length || 0,
+                    },
+                  ),
                   mono: true,
                 },
                 {
-                  k: "fare quoted",
+                  k: text(
+                    locale,
+                    "dispatch.detail.owned.compliance.fareQuoted",
+                  ),
                   v: order.quotedFare
                     ? `${formatMinorCurrency(
                         order.quotedFare.amountMinor,
                         order.quotedFare.currency,
-                      )} · ${order.quotedFareRuleVersion ?? "manual"}`
+                      )} · ${order.quotedFareRuleVersion ?? text(locale, "dispatch.detail.owned.compliance.manual")}`
                     : "—",
                   mono: true,
                 },
                 {
-                  k: "override allowed",
+                  k: text(
+                    locale,
+                    "dispatch.detail.owned.compliance.overrideAllowed",
+                  ),
                   v: order.exceptionHold
                     ? `${overrideSummary.status} · ${overrideSummary.nextAction}`
-                    : locale === "zh"
-                      ? "not needed"
-                      : "not needed",
+                    : text(
+                        locale,
+                        "dispatch.detail.owned.compliance.notNeeded",
+                      ),
                   mono: true,
                 },
               ]}
@@ -2493,7 +2520,7 @@ function renderForwardedWorkspace({
     resourceType: "adapter",
     resourceId: order.platformCode,
     openMode: "new_tab",
-    label: copy(locale, "Inspect adapter", "檢視 adapter"),
+    label: text(locale, "dispatch.detail.forwarded.inspectAdapter"),
   };
   const reconciliationLink: CrossAppResourceLink | null = reconciliationIssue
     ? {
@@ -2502,7 +2529,7 @@ function renderForwardedWorkspace({
         resourceType: "reconciliation",
         resourceId: reconciliationIssue.reconciliationJob.reconciliationJobId,
         openMode: "new_tab",
-        label: copy(locale, "Open reconciliation", "開啟對帳"),
+        label: text(locale, "dispatch.detail.forwarded.openReconciliation"),
       }
     : null;
 
@@ -2536,11 +2563,11 @@ function renderForwardedWorkspace({
       stateCell:
         order.acceptedDriverId === driverId ? (
           <Pill theme={theme} tone="success" dot>
-            {copy(locale, "accepted", "已接受")}
+            {text(locale, "dispatch.detail.forwarded.accepted")}
           </Pill>
         ) : (
           <Pill theme={theme} tone="info">
-            {copy(locale, "broadcast", "廣播中")}
+            {text(locale, "dispatch.detail.forwarded.broadcasting")}
           </Pill>
         ),
     }),
@@ -2550,8 +2577,16 @@ function renderForwardedWorkspace({
     (typeof candidateDriverRows)[number]
   >[] = [
     { h: "#", k: "rankCell", w: 44 },
-    { h: copy(locale, "DRIVER", "司機"), k: "driverCell", w: 200 },
-    { h: copy(locale, "PLATFORM STATE", "平台狀態"), k: "stateCell", w: 160 },
+    {
+      h: text(locale, "dispatch.detail.forwarded.driverColumn"),
+      k: "driverCell",
+      w: 200,
+    },
+    {
+      h: text(locale, "dispatch.detail.forwarded.platformStateColumn"),
+      k: "stateCell",
+      w: 160,
+    },
   ];
 
   return (
@@ -2564,7 +2599,7 @@ function renderForwardedWorkspace({
           >
             <span>{order.mirrorOrderId}</span>
             <Pill theme={theme} tone="info">
-              FORWARDED
+              {text(locale, "dispatch.detail.forwarded.pill")}
             </Pill>
             <Pill theme={theme} tone={stateTone} dot>
               {formatOpsCodeLabel(locale, order.status)}
@@ -2579,7 +2614,9 @@ function renderForwardedWorkspace({
         refresh,
         locale,
         adapterHealth
-          ? `${copy(locale, "adapter", "轉接器")} ${formatOpsCodeLabel(locale, adapterHealth.status)}`
+          ? text(locale, "dispatch.detail.refresh.adapter", {
+              status: formatOpsCodeLabel(locale, adapterHealth.status),
+            })
           : undefined,
       )}
 
@@ -2588,16 +2625,8 @@ function renderForwardedWorkspace({
           theme={theme}
           tone="info"
           icon="adapters"
-          title={copy(
-            locale,
-            "Forwarded mirror — do not treat as owned",
-            "此訂單為 forwarded mirror · 不可假裝為 owned",
-          )}
-          body={copy(
-            locale,
-            "No owned assignment exists. Every mutation must flow through a reconciliation issue to the platform finance owner; locally we only sync external state.",
-            "本地沒有 owned 指派。所有 mutation 必須透過 reconciliation issue 走平台 finance owner，本地僅同步外部狀態。",
-          )}
+          title={text(locale, "dispatch.detail.forwarded.bannerTitle")}
+          body={text(locale, "dispatch.detail.forwarded.bannerBody")}
           actions={
             <>
               {renderCrossAppLink(adapterLink)}
@@ -2612,15 +2641,20 @@ function renderForwardedWorkspace({
             theme={theme}
             tone={adapterHealth?.status === "down" ? "danger" : "warn"}
             icon="health"
-            title={copy(
+            title={text(
               locale,
-              "Adapter dependency is degraded",
-              "轉接器相依降級",
+              "dispatch.detail.forwarded.adapterDegradedTitle",
             )}
-            body={copy(
+            body={text(
               locale,
-              `${order.platformCode} adapter is ${adapterHealth?.status ?? "degraded"}${adapterHealth?.lastError ? ` · ${adapterHealth.lastError}` : ""}. Broadcast and live sync may be unavailable.`,
-              `${order.platformCode} 轉接器為 ${adapterHealth?.status ?? "degraded"}${adapterHealth?.lastError ? ` · ${adapterHealth.lastError}` : ""}；廣播與即時同步可能不可用。`,
+              "dispatch.detail.forwarded.adapterDegradedBody",
+              {
+                platformCode: order.platformCode,
+                status: adapterHealth?.status ?? "degraded",
+                errorSuffix: adapterHealth?.lastError
+                  ? ` · ${adapterHealth.lastError}`
+                  : "",
+              },
             )}
           />
         ) : null}
@@ -2629,16 +2663,8 @@ function renderForwardedWorkspace({
             theme={theme}
             tone="info"
             icon="check"
-            title={copy(
-              locale,
-              "Mirror reached a terminal state — read-only",
-              "鏡像已進入終態 · 唯讀",
-            )}
-            body={copy(
-              locale,
-              "Only force refresh is offered; reconciliation and finance settle at the owner platform.",
-              "僅提供強制刷新；對帳與金流於來源平台結算。",
-            )}
+            title={text(locale, "dispatch.detail.forwarded.terminalTitle")}
+            body={text(locale, "dispatch.detail.forwarded.terminalBody")}
           />
         ) : null}
       </div>
@@ -2655,7 +2681,11 @@ function renderForwardedWorkspace({
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card
             theme={theme}
-            title={`${copy(locale, "Broadcast candidates", "廣播候選")} (${candidateDriverRows.length})`}
+            title={text(
+              locale,
+              "dispatch.detail.forwarded.candidatesCardTitle",
+              { count: candidateDriverRows.length },
+            )}
             {...(candidateDriverRows.length > 0 ? { padding: 0 } : {})}
           >
             {candidateDriverRows.length > 0 ? (
@@ -2675,33 +2705,36 @@ function renderForwardedWorkspace({
 
           <Card
             theme={theme}
-            title={copy(
-              locale,
-              "Authority chain · finance",
-              "Compliance gates · authority chain",
-            )}
+            title={text(locale, "dispatch.detail.forwarded.authorityTitle")}
           >
             <DL
               theme={theme}
               cols={2}
               items={[
                 {
-                  k: "domain",
+                  k: text(locale, "dispatch.detail.forwarded.domain"),
                   v: `forwarded · ${order.dispatchSemantics}`,
                   mono: true,
                 },
                 {
-                  k: "source platform",
+                  k: text(locale, "dispatch.detail.forwarded.sourcePlatform"),
                   v: `${formatOpsCodeLabel(locale, order.platformCode)} · ${order.externalOrderId}`,
                   mono: true,
                 },
                 {
-                  k: "route locked",
-                  v: `${copy(locale, "yes", "是")} · ${waypointCount} ${copy(locale, "waypoints", "途經點")}`,
+                  k: text(locale, "dispatch.detail.forwarded.routeLocked"),
+                  v: text(
+                    locale,
+                    "dispatch.detail.forwarded.routeLockedValue",
+                    {
+                      yes: text(locale, "common.yes"),
+                      count: waypointCount,
+                    },
+                  ),
                   mono: true,
                 },
                 {
-                  k: "fare authority",
+                  k: text(locale, "dispatch.detail.forwarded.fareAuthority"),
                   v: formatOpsCodeLabel(
                     locale,
                     order.financeContext.fareAuthority,
@@ -2709,19 +2742,19 @@ function renderForwardedWorkspace({
                   mono: true,
                 },
                 {
-                  k: "settlement",
+                  k: text(locale, "dispatch.detail.forwarded.settlement"),
                   v: `${formatOpsCodeLabel(locale, order.financeContext.settlementAuthority)} · ${formatOpsCodeLabel(locale, order.financeContext.localLedgerMode)}`,
                   mono: true,
                 },
                 {
-                  k: "sync state",
+                  k: text(locale, "dispatch.detail.forwarded.syncState"),
                   v: order.lastSyncError
                     ? `${formatOpsCodeLabel(locale, order.lastSyncError.code)}`
                     : `${order.lastNativeStatus ?? formatOpsCodeLabel(locale, order.status)}`,
                   mono: true,
                 },
                 {
-                  k: "last callback",
+                  k: text(locale, "dispatch.detail.forwarded.lastCallback"),
                   v: formatDateTime(
                     locale,
                     order.lastSyncError?.failedAt ?? order.updatedAt,
@@ -2729,11 +2762,21 @@ function renderForwardedWorkspace({
                   mono: true,
                 },
                 {
-                  k: "reconciliation",
+                  k: text(locale, "dispatch.detail.forwarded.reconciliation"),
                   v: order.reconciliationJob
-                    ? `${formatOpsCodeLabel(locale, order.reconciliationJob.status)} · ${mismatchCount} mismatch`
+                    ? text(
+                        locale,
+                        "dispatch.detail.forwarded.reconciliationValue",
+                        {
+                          status: formatOpsCodeLabel(
+                            locale,
+                            order.reconciliationJob.status,
+                          ),
+                          count: mismatchCount,
+                        },
+                      )
                     : order.manualFallback.required
-                      ? copy(locale, "manual fallback", "人工備援")
+                      ? text(locale, "dispatch.detail.forwarded.manualFallback")
                       : "—",
                   mono: true,
                 },
