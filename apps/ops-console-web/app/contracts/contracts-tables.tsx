@@ -26,6 +26,7 @@ export type ContractRow = Record<string, unknown> & {
   partnerId: string;
   partnerDisplayName: string;
   partnerType: string;
+  partnerTypeLabel: string;
   partnerEntrySlug: string | null;
   vehicleId: string;
   statusKey: "all" | "active" | "draft" | "expiring" | "terminated";
@@ -348,7 +349,7 @@ function buildContractColumns(
         <div style={stackStyle}>
           <span style={primaryTextStyle}>{row.partnerDisplayName}</span>
           <span style={{ ...secondaryTextStyle, ...monoTextStyle }}>
-            {row.partnerId} · {formatOpsCodeLabel(locale, row.partnerType)}
+            {row.partnerId} · {row.partnerTypeLabel}
           </span>
           {row.partnerEntrySlug ? (
             <span style={mutedTextStyle}>{row.partnerEntrySlug}</span>
