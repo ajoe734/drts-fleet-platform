@@ -92,22 +92,22 @@ function actionIntent(action: string) {
 function actionCopy(action: string, locale: Locale) {
   const normalized = action.toLowerCase();
   if (normalized.includes("update")) {
-    return t("incidents.actions.updateIncident", locale);
+    return locale === "en" ? "Update incident" : "更新事故";
   }
   if (normalized.includes("resolve")) {
-    return t("incidents.actions.resolveIncident", locale);
+    return locale === "en" ? "Resolve incident" : "標記事故已處理";
   }
   if (normalized.includes("close")) {
-    return t("incidents.actions.closeIncident", locale);
+    return locale === "en" ? "Close incident" : "關閉事故";
   }
   if (normalized.includes("recovery")) {
-    return t("incidents.actions.addRecoveryAction", locale);
+    return locale === "en" ? "Add recovery action" : "新增補救行動";
   }
   if (normalized.includes("ack")) {
-    return t("incidents.actions.acknowledgeEscalation", locale);
+    return locale === "en" ? "Acknowledge escalation" : "確認升級";
   }
   if (normalized.includes("lift")) {
-    return t("incidents.actions.liftSuppression", locale);
+    return locale === "en" ? "Lift suppression" : "解除抑制";
   }
   return formatOpsCodeLabel(locale, action);
 }
@@ -115,17 +115,29 @@ function actionCopy(action: string, locale: Locale) {
 function actionSummary(intent: string, locale: Locale) {
   switch (intent) {
     case "update":
-      return t("incidents.actionPanel.summary.update", locale);
+      return locale === "en"
+        ? "Adjust category, severity, owner, escalation target, status, and resolution note."
+        : "調整分類、嚴重程度、負責人、升級對象、狀態與結案備註。";
     case "resolve":
-      return t("incidents.actionPanel.summary.resolve", locale);
+      return locale === "en"
+        ? "Mark the incident resolved after recovery is complete."
+        : "在補救完成後將事故標記為已處理。";
     case "close":
-      return t("incidents.actionPanel.summary.close", locale);
+      return locale === "en"
+        ? "Close the incident and record the required closeout reason."
+        : "關閉事故並記錄必填的結案原因。";
     case "service_recovery":
-      return t("incidents.actionPanel.summary.serviceRecovery", locale);
+      return locale === "en"
+        ? "Record a passenger or operational recovery action into the timeline."
+        : "將乘客或營運補救行動記錄進時間線。";
     case "acknowledge":
-      return t("incidents.actionPanel.summary.acknowledge", locale);
+      return locale === "en"
+        ? "Record that the escalation target accepted the handoff."
+        : "記錄升級對象已接受此次 handoff。";
     default:
-      return t("incidents.actionPanel.summary.default", locale);
+      return locale === "en"
+        ? "This action stays in the incident workspace."
+        : "此動作會停留在 incident 工作區內完成。";
   }
 }
 
@@ -287,14 +299,22 @@ export function IncidentDetailActionPanel({
     return (
       <Card
         theme={theme}
-        title={t("incidents.actions.liftSuppression", locale)}
+        title={locale === "en" ? "Lift suppression" : "解除抑制"}
       >
         <Banner
           theme={theme}
           tone="warn"
           icon="warn"
-          title={t("incidents.actionPanel.liftSuppression.title", locale)}
-          body={t("incidents.actionPanel.liftSuppression.body", locale)}
+          title={
+            locale === "en"
+              ? "Driver-side suppression lift is not writable from this incident form"
+              : "這個 incident 表單目前不能直接寫入司機抑制解除"
+          }
+          body={
+            locale === "en"
+              ? "The deep link now lands correctly. Continue in Driver detail for contextual review, then return here after the driver state is updated."
+              : "deep link 現在會正確落點。請先到 Driver detail 做情境確認，再回到此頁追蹤司機狀態更新。"
+          }
         />
         <div
           style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}
@@ -305,7 +325,7 @@ export function IncidentDetailActionPanel({
             icon="arrow"
             onClick={() => router.replace(href)}
           >
-            {t("incidents.actionPanel.dismiss", locale)}
+            {locale === "en" ? "Dismiss" : "關閉"}
           </Btn>
         </div>
       </Card>
@@ -320,7 +340,11 @@ export function IncidentDetailActionPanel({
     }
 
     if (selectedAction.requiresReason && reasonText.trim().length === 0) {
-      setError(t("incidents.actionPanel.error.reasonRequired", locale));
+      setError(
+        locale === "en"
+          ? "Reason is required for this action."
+          : "此動作必須填寫原因。",
+      );
       return;
     }
 
@@ -330,7 +354,10 @@ export function IncidentDetailActionPanel({
     try {
       const client = getOpsClient();
       const receiptTitle = actionCopy(selectedAction.action, locale);
-      let receiptBody = t("incidents.actionPanel.receipt.body.default", locale);
+      let receiptBody =
+        locale === "en"
+          ? "Mutation completed. Refreshing timeline and audit subset."
+          : "動作已送出，正在刷新 timeline 與 audit 摘要。";
       let nextReceipt: ReceiptState | null = null;
 
       // NOTE: the current backend does not return a receipt envelope on
@@ -347,10 +374,9 @@ export function IncidentDetailActionPanel({
           note: recoveryNote.trim(),
         });
         receiptBody =
-          t("incidents.actionPanel.receipt.body.serviceRecovery", locale, {
-            actionType: formatOpsCodeLabel(locale, created.actionType),
-            actor: created.actor,
-          });
+          locale === "en"
+            ? `Recorded ${formatOpsCodeLabel(locale, created.actionType)} by ${created.actor}.`
+            : `已由 ${created.actor} 記錄 ${formatOpsCodeLabel(locale, created.actionType)}。`;
         nextReceipt = {
           actionId: created.actionId,
           auditId: null,
@@ -392,17 +418,13 @@ export function IncidentDetailActionPanel({
                       const actor = ackActor.trim() || "ops-user";
                       const note = reasonText.trim();
                       if (note) {
-                        return t(
-                          "incidents.actionPanel.acknowledgment.withNote",
-                          locale,
-                          { actor, note },
-                        );
+                        return locale === "en"
+                          ? `Escalation acknowledged by ${actor}: ${note}`
+                          : `升級已由 ${actor} 確認：${note}`;
                       }
-                      return t(
-                        "incidents.actionPanel.acknowledgment.noNote",
-                        locale,
-                        { actor },
-                      );
+                      return locale === "en"
+                        ? `Escalation acknowledged by ${actor}.`
+                        : `升級已由 ${actor} 確認。`;
                     })(),
                   };
 
@@ -454,7 +476,9 @@ export function IncidentDetailActionPanel({
       setError(
         submitError instanceof Error
           ? submitError.message
-          : t("incidents.actionPanel.error.unknownFailure", locale),
+          : locale === "en"
+            ? "Unknown incident action failure."
+            : "incident 動作失敗。",
       );
     } finally {
       setIsPending(false);
@@ -467,7 +491,9 @@ export function IncidentDetailActionPanel({
       title={
         selectedAction
           ? actionCopy(selectedAction.action, locale)
-          : t("incidents.actionPanel.contextTitle", locale)
+          : locale === "en"
+            ? "Action context"
+            : "動作上下文"
       }
     >
       {receipt ? (
@@ -477,19 +503,21 @@ export function IncidentDetailActionPanel({
             tone="success"
             icon="check"
             title={
-              t("incidents.actionPanel.receipt.completedTitle", locale, {
-                title: receipt.title,
-              })
+              locale === "en"
+                ? `${receipt.title} completed`
+                : `${receipt.title}已完成`
             }
             body={receipt.body}
           />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
               {receipt.actionId
-                ? t("incidents.actionPanel.receipt.actionRecorded", locale, {
-                    actionId: receipt.actionId,
-                  })
-                : t("incidents.actionPanel.receipt.pendingBackend", locale)}
+                ? locale === "en"
+                  ? `Action ${receipt.actionId} recorded`
+                  : `已記錄動作 ${receipt.actionId}`
+                : locale === "en"
+                  ? "Action recorded · receipt id pending backend"
+                  : "動作已記錄 · 回執編號待後端提供"}
             </span>
             {receipt.auditHref ? (
               <a
@@ -502,11 +530,13 @@ export function IncidentDetailActionPanel({
                   textDecoration: "none",
                 }}
               >
-                {t("incidents.detail.navigation.openLatestAudit", locale)}
+                {locale === "en" ? "Open latest audit" : "開啟最新審計"}
               </a>
             ) : (
               <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
-                {t("incidents.actionPanel.receipt.auditRefreshes", locale)}
+                {locale === "en"
+                  ? "Audit subset refreshes on the server snapshot."
+                  : "audit 摘要會隨 server snapshot 一起刷新。"}
               </span>
             )}
             <button
@@ -521,7 +551,7 @@ export function IncidentDetailActionPanel({
                 fontSize: 12.5,
               }}
             >
-              {t("incidents.actionPanel.dismissReceipt", locale)}
+              {locale === "en" ? "Dismiss receipt" : "關閉回執"}
             </button>
           </div>
         </div>
@@ -534,9 +564,9 @@ export function IncidentDetailActionPanel({
             tone={actionTone(selectedAction.riskLevel)}
             icon={selectedAction.riskLevel === "high" ? "warn" : "info"}
             title={
-              t("incidents.actionPanel.confirmationTitle", locale, {
-                action: actionCopy(selectedAction.action, locale),
-              })
+              locale === "en"
+                ? `${actionCopy(selectedAction.action, locale)} confirmation`
+                : `${actionCopy(selectedAction.action, locale)}確認`
             }
             body={actionSummary(currentIntent ?? "", locale)}
           />
@@ -575,7 +605,7 @@ export function IncidentDetailActionPanel({
               </Field>
               <Field
                 theme={theme}
-                label={t("incidents.form.category", locale)}
+                label={locale === "en" ? "Category" : "分類"}
               >
                 <select
                   value={category}
@@ -643,7 +673,9 @@ export function IncidentDetailActionPanel({
               theme={theme}
               label={
                 currentIntent === "close"
-                  ? t("incidents.actionPanel.closeReason", locale)
+                  ? locale === "en"
+                    ? "Close reason"
+                    : "關閉原因"
                   : t("incidents.form.resolutionNote", locale)
               }
             >
@@ -660,7 +692,7 @@ export function IncidentDetailActionPanel({
             <div style={{ display: "grid", gap: 12 }}>
               <Field
                 theme={theme}
-                label={t("incidents.actionPanel.acknowledgedBy", locale)}
+                label={locale === "en" ? "Acknowledged by" : "確認人"}
               >
                 <input
                   value={ackActor}
@@ -670,7 +702,7 @@ export function IncidentDetailActionPanel({
               </Field>
               <Field
                 theme={theme}
-                label={t("incidents.actionPanel.acknowledgmentNote", locale)}
+                label={locale === "en" ? "Acknowledgment note" : "確認備註"}
               >
                 <textarea
                   value={reasonText}
@@ -735,7 +767,7 @@ export function IncidentDetailActionPanel({
           currentIntent !== "resolve" ? (
             <Field
               theme={theme}
-              label={t("incidents.actionPanel.requiredReason", locale)}
+              label={locale === "en" ? "Required reason" : "必填原因"}
             >
               <textarea
                 value={reasonText}
@@ -761,10 +793,12 @@ export function IncidentDetailActionPanel({
               }}
             >
               {isPending
-                ? t("incidents.actionPanel.submitting", locale)
-                : t("incidents.actionPanel.confirmAction", locale, {
-                    action: actionCopy(selectedAction.action, locale),
-                  })}
+                ? locale === "en"
+                  ? "Submitting"
+                  : "送出中"
+                : locale === "en"
+                  ? `Confirm ${actionCopy(selectedAction.action, locale)}`
+                  : `確認${actionCopy(selectedAction.action, locale)}`}
             </Btn>
             <Btn
               theme={theme}
@@ -779,7 +813,7 @@ export function IncidentDetailActionPanel({
                 router.replace(basePath);
               }}
             >
-              {t("common.cancel", locale)}
+              {locale === "en" ? "Cancel" : "取消"}
             </Btn>
             {!selectedAction.enabled && selectedAction.disabledReasonCode ? (
               <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
@@ -793,8 +827,12 @@ export function IncidentDetailActionPanel({
           theme={theme}
           tone="info"
           icon="info"
-          title={t("incidents.actionPanel.unknownIntent.title", locale)}
-          body={t("incidents.actionPanel.unknownIntent.body", locale)}
+          title={locale === "en" ? "Unknown action intent" : "未知的動作意圖"}
+          body={
+            locale === "en"
+              ? "The deep link intent was not recognized for this incident snapshot."
+              : "這個 incident snapshot 無法識別 deep link 帶來的 intent。"
+          }
         />
       )}
     </Card>

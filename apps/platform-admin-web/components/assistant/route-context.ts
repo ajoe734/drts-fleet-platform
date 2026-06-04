@@ -46,10 +46,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import {
-  platformAdminAssistantWarningMessages,
-  platformAdminRouteLabels,
-} from "../../lib/translations";
 import type {
   AssistantEntityRef,
   AssistantQueryInput,
@@ -104,7 +100,6 @@ export type AssistantDraftAdapter = {
 
 export type PlatformAdminAssistantPageBridge = {
   pageId: string;
-  contextSnapshot?: PageContextSnapshot;
   filters?: Record<string, AssistantFilterAdapter>;
   drafts?: Record<string, AssistantDraftAdapter>;
   crossAppLinks?: Record<string, CrossAppResourceLink>;
@@ -117,43 +112,64 @@ export type PlatformAdminAssistantPageBridge = {
 const HIGH_RISK_ACTIONS_WARNING: RouteContextWarning = {
   code: "high_risk_actions_present",
   severity: "warning",
-  message: platformAdminAssistantWarningMessages.highRiskActionsPresent,
+  message: {
+    zh: "本頁含高風險操作，需 modal 確認、填寫原因並產生稽核紀錄。",
+    en: "This route exposes high-risk actions requiring modal confirmation, a reason, and an audit receipt.",
+  },
 };
 
 const WRITE_AUTHORITY_WARNING: RouteContextWarning = {
   code: "platform_write_authority",
   severity: "warning",
-  message: platformAdminAssistantWarningMessages.platformWriteAuthority,
+  message: {
+    zh: "本頁具平台寫入權限（唯一可寫旗標的 App），變更會即時影響其他 App。",
+    en: "This route holds platform write authority (the only app that can write flags); changes propagate to other apps.",
+  },
 };
 
 const PLAINTEXT_SECRET_WARNING: RouteContextWarning = {
   code: "plaintext_secret_once",
   severity: "warning",
-  message: platformAdminAssistantWarningMessages.plaintextSecretOnce,
+  message: {
+    zh: "憑證/密鑰僅在發行或輪替當下以明文顯示一次，之後不可再檢視。",
+    en: "Credentials/secrets are shown in plaintext only once at issue/rotation and cannot be viewed again.",
+  },
 };
 
 const MAINTENANCE_MODE_WARNING: RouteContextWarning = {
   code: "maintenance_mode_surface",
   severity: "warning",
-  message: platformAdminAssistantWarningMessages.maintenanceModeSurface,
+  message: {
+    zh: "維護模式為高風險操作，啟用會跨 App 推送橫幅到 ops/tenant/driver。",
+    en: "Maintenance mode is high-risk; enabling it pushes a cross-app banner to ops/tenant/driver.",
+  },
 };
 
 const LEGAL_HOLD_WARNING: RouteContextWarning = {
   code: "legal_hold_evidence_governance",
   severity: "info",
-  message: platformAdminAssistantWarningMessages.legalHoldEvidenceGovernance,
+  message: {
+    zh: "稽核證據治理：法律保留與刪除例外為高風險操作，需原因並記錄擁有者。",
+    en: "Evidence governance: legal holds and deletion exceptions are high-risk and require a reason plus a recorded owner.",
+  },
 };
 
 const BODY_PARITY_PENDING_WARNING: RouteContextWarning = {
   code: "route_body_parity_pending",
   severity: "info",
-  message: platformAdminAssistantWarningMessages.routeBodyParityPending,
+  message: {
+    zh: "此路由的頁面實作由 body-parity 工作項負責，可能尚未上線；metadata 已就緒。",
+    en: "This route's page body is owned by a body-parity work item and may not be live yet; metadata is ready.",
+  },
 };
 
 const UNKNOWN_ROUTE_WARNING: RouteContextWarning = {
   code: "unknown_route",
   severity: "info",
-  message: platformAdminAssistantWarningMessages.unknownRoute,
+  message: {
+    zh: "未在 Platform Admin 路由註冊表中找到此路徑，已退回首頁 context。",
+    en: "Path is not in the Platform Admin route registry; falling back to home context.",
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -170,7 +186,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "home",
     pathTemplate: "/",
     section: "workspace",
-    title: platformAdminRouteLabels.home,
+    title: { zh: "工作首頁", en: "Home" },
     tabs: [],
     defaultTab: null,
     refreshTier: "slow",
@@ -179,7 +195,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "tenants",
     pathTemplate: "/tenants",
     section: "tenant",
-    title: platformAdminRouteLabels.tenants,
+    title: { zh: "租戶", en: "Tenants" },
     tabs: [],
     defaultTab: null,
     refreshTier: "slow",
@@ -188,7 +204,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "tenant-detail",
     pathTemplate: "/tenants/[tenantId]",
     section: "tenant",
-    title: platformAdminRouteLabels["tenant-detail"],
+    title: { zh: "租戶詳情", en: "Tenant Detail" },
     tabs: [],
     defaultTab: null,
     refreshTier: "slow",
@@ -200,7 +216,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "tenant-governance",
     pathTemplate: "/tenant-governance",
     section: "tenant",
-    title: platformAdminRouteLabels["tenant-governance"],
+    title: { zh: "跨租戶治理", en: "Tenant Governance" },
     tabs: [],
     defaultTab: null,
     refreshTier: "slow",
@@ -210,7 +226,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "partners",
     pathTemplate: "/partners",
     section: "tenant",
-    title: platformAdminRouteLabels.partners,
+    title: { zh: "合作夥伴", en: "Partner Entries" },
     tabs: [],
     defaultTab: null,
     refreshTier: "slow",
@@ -220,7 +236,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "partner-detail",
     pathTemplate: "/partners/[entrySlug]",
     section: "tenant",
-    title: platformAdminRouteLabels["partner-detail"],
+    title: { zh: "合作夥伴詳情", en: "Partner Entry Detail" },
     tabs: [],
     defaultTab: null,
     refreshTier: "slow",
@@ -231,7 +247,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "users",
     pathTemplate: "/users",
     section: "tenant",
-    title: platformAdminRouteLabels.users,
+    title: { zh: "平台人員", en: "Platform Staff" },
     tabs: [],
     defaultTab: null,
     refreshTier: "slow",
@@ -241,7 +257,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "fleet",
     pathTemplate: "/fleet",
     section: "fleet",
-    title: platformAdminRouteLabels.fleet,
+    title: { zh: "車隊與法遵", en: "Fleet & Compliance" },
     tabs: [
       "vehicles",
       "drivers",
@@ -257,7 +273,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "switchboard",
     pathTemplate: "/switchboard",
     section: "commerce",
-    title: platformAdminRouteLabels.switchboard,
+    title: { zh: "公開資訊", en: "Public Info & Placards" },
     tabs: ["public-info", "placards"],
     defaultTab: "public-info",
     refreshTier: "slow",
@@ -267,7 +283,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "pricing",
     pathTemplate: "/pricing",
     section: "commerce",
-    title: platformAdminRouteLabels.pricing,
+    title: { zh: "費率治理", en: "Pricing" },
     tabs: [
       "passenger-pricing",
       "driver-fee-plans",
@@ -282,7 +298,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "payments",
     pathTemplate: "/payments",
     section: "commerce",
-    title: platformAdminRouteLabels.payments,
+    title: { zh: "結算與帳務", en: "Payments" },
     tabs: [
       "tenant-invoices",
       "driver-statements",
@@ -299,7 +315,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "reimbursements",
     pathTemplate: "/payments/reimbursements",
     section: "commerce",
-    title: platformAdminRouteLabels.reimbursements,
+    title: { zh: "代墊批次", en: "Reimbursements" },
     tabs: [],
     defaultTab: null,
     refreshTier: "slow",
@@ -311,7 +327,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "reimbursement-batch-detail",
     pathTemplate: "/payments/reimbursements/[batchId]",
     section: "commerce",
-    title: platformAdminRouteLabels["reimbursement-batch-detail"],
+    title: { zh: "代墊批次詳情", en: "Reimbursement Batch Detail" },
     tabs: [],
     defaultTab: null,
     refreshTier: "slow",
@@ -323,7 +339,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "adapter-registry",
     pathTemplate: "/adapter-registry",
     section: "commerce",
-    title: platformAdminRouteLabels["adapter-registry"],
+    title: { zh: "平台 Adapter", en: "Adapter Registry" },
     tabs: [],
     defaultTab: null,
     refreshTier: "medium",
@@ -334,7 +350,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "health",
     pathTemplate: "/health",
     section: "ops",
-    title: platformAdminRouteLabels.health,
+    title: { zh: "平台健康", en: "Platform Health" },
     tabs: ["alerts", "adapters"],
     defaultTab: "alerts",
     refreshTier: "medium",
@@ -343,7 +359,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "notices",
     pathTemplate: "/notices",
     section: "ops",
-    title: platformAdminRouteLabels.notices,
+    title: { zh: "公告與維護", en: "Notices & Maintenance" },
     tabs: ["notices", "maintenance-mode", "broadcast-history"],
     defaultTab: "notices",
     refreshTier: "slow",
@@ -353,7 +369,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "audit",
     pathTemplate: "/audit",
     section: "ops",
-    title: platformAdminRouteLabels.audit,
+    title: { zh: "稽核與證據", en: "Audit & Evidence" },
     tabs: [],
     defaultTab: null,
     refreshTier: "manual",
@@ -364,7 +380,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "feature-flags",
     pathTemplate: "/feature-flags",
     section: "ops",
-    title: platformAdminRouteLabels["feature-flags"],
+    title: { zh: "功能旗標", en: "Feature Flags" },
     tabs: [],
     defaultTab: null,
     refreshTier: "slow",

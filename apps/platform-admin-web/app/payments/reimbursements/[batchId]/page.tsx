@@ -59,11 +59,6 @@ type FallbackBatchRuntime = {
   warning: string;
 };
 
-type TranslateFn = (
-  key: string,
-  params?: Record<string, string | number>,
-) => string;
-
 const pageShellStyle = {
   minHeight: "100%",
   background: theme.bg,
@@ -232,7 +227,7 @@ function formatMoney(
 
 function buildFallbackBatch(
   batchId: string,
-  t: TranslateFn,
+  locale: string,
 ): FallbackBatchRuntime {
   const normalizedBatchId = batchId || "rb_2026_05_001";
   return {
@@ -257,9 +252,7 @@ function buildFallbackBatch(
             amountMinor: 994560,
             currency: "TWD",
           },
-          reason: t(
-            "payments.reimbursements.detail.fallbackReason.sponsorQ2Apr",
-          ),
+          reason: "sponsor reimbursement Q2-Apr",
           channelKey: "World Elite",
         },
         {
@@ -269,9 +262,7 @@ function buildFallbackBatch(
             amountMinor: 246240,
             currency: "TWD",
           },
-          reason: t(
-            "payments.reimbursements.detail.fallbackReason.sponsorQ2Apr",
-          ),
+          reason: "sponsor reimbursement Q2-Apr",
           channelKey: "Infinite",
         },
         {
@@ -281,14 +272,15 @@ function buildFallbackBatch(
             amountMinor: 180000,
             currency: "TWD",
           },
-          reason: t(
-            "payments.reimbursements.detail.fallbackReason.reconciliationAdjustment",
-          ),
+          reason: "差額 TWD 1,820 × 99 筆",
           channelKey: "reconciliation_adjustment",
         },
       ],
     },
-    warning: t("payments.reimbursements.detail.fallbackWarning"),
+    warning:
+      locale === "en"
+        ? "API reimbursement detail is unavailable, so the page is rendering route-local fallback data aligned to the canvas artboard."
+        : "目前 reimbursement detail API 無法使用，頁面改以 route-local fallback 資料渲染 canvas 對齊內容。",
   };
 }
 
@@ -324,36 +316,21 @@ function workflowTone(step: WorkflowStep): CanvasTone {
   }
 }
 
-function workflowLabel(step: WorkflowStep, t: TranslateFn) {
+function workflowLabel(step: WorkflowStep) {
   switch (step) {
     case "pending_approval":
-      return t("payments.reimbursements.status.pendingApproval");
-    case "approved":
-      return t("payments.reimbursements.status.approved");
-    case "exported":
-      return t("payments.reimbursements.status.exported");
-    case "paid":
-      return t("payments.reimbursements.status.paid");
-    case "reconciled":
-      return t("payments.reimbursements.status.reconciled");
-    case "draft":
+      return "pending approval";
     default:
-      return t("payments.reimbursements.status.draft");
+      return step;
   }
 }
 
-function buildTimeline(
-  batch: ReimbursementBatchRecord,
-  t: TranslateFn,
-): TimelineEntry[] {
+function buildTimeline(batch: ReimbursementBatchRecord): TimelineEntry[] {
   const entries: TimelineEntry[] = [
     {
       at: batch.periodMonth,
-      title: t("payments.reimbursements.timeline.batchCreated"),
-      body: t("payments.reimbursements.timeline.batchCreatedBody", {
-        statementId: batch.statementId,
-        driverId: batch.driverId,
-      }),
+      title: "Batch created",
+      body: `Generated for statement ${batch.statementId} and driver ${batch.driverId}.`,
       tone: "neutral",
     },
   ];
@@ -361,10 +338,8 @@ function buildTimeline(
   if (batch.items.length > 0) {
     entries.push({
       at: batch.periodMonth,
-      title: t("payments.reimbursements.timeline.submittedForApproval"),
-      body: t("payments.reimbursements.timeline.submittedForApprovalBody", {
-        count: batch.items.length,
-      }),
+      title: "Submitted for approval",
+      body: `${batch.items.length} reimbursement line items queued for finance review.`,
       tone: "warn",
     });
   }
@@ -372,8 +347,8 @@ function buildTimeline(
   if (batch.approvedAt) {
     entries.push({
       at: batch.approvedAt,
-      title: t("payments.reimbursements.timeline.approved"),
-      body: t("payments.reimbursements.timeline.approvedBody"),
+      title: "Approved",
+      body: "Batch approved and ready for export/remittance handling.",
       tone: "info",
     });
   }
@@ -381,10 +356,8 @@ function buildTimeline(
   if (batch.remittanceProofId) {
     entries.push({
       at: batch.paidAt ?? batch.approvedAt ?? batch.periodMonth,
-      title: t("payments.reimbursements.timeline.remittanceProofAttached"),
-      body: t("payments.reimbursements.timeline.remittanceProofAttachedBody", {
-        proofId: batch.remittanceProofId,
-      }),
+      title: "Remittance proof attached",
+      body: `Proof ID ${batch.remittanceProofId} recorded on the batch.`,
       tone: "info",
     });
   }
@@ -392,8 +365,8 @@ function buildTimeline(
   if (batch.paidAt) {
     entries.push({
       at: batch.paidAt,
-      title: t("payments.reimbursements.timeline.markedPaid"),
-      body: t("payments.reimbursements.timeline.markedPaidBody"),
+      title: "Marked paid",
+      body: "Driver reimbursement has been marked paid in the finance console.",
       tone: "success",
     });
   }
@@ -401,8 +374,8 @@ function buildTimeline(
   if (!batch.approvedAt) {
     entries.push({
       at: batch.periodMonth,
-      title: t("payments.reimbursements.timeline.waitingApproval"),
-      body: t("payments.reimbursements.timeline.waitingApprovalBody"),
+      title: "Waiting approval",
+      body: "High-risk approval still requires reason capture before state can advance.",
       tone: "warn",
     });
   }
@@ -410,20 +383,13 @@ function buildTimeline(
   return entries;
 }
 
-function buildLineItemRows(
-  batch: ReimbursementBatchRecord,
-  t: TranslateFn,
-): LineItemRow[] {
+function buildLineItemRows(batch: ReimbursementBatchRecord): LineItemRow[] {
   return batch.items.map((item: ReimbursementItemRecord, index: number) => ({
     id: item.itemId,
     recipient: `${batch.driverId}${item.channelKey ? ` · ${item.channelKey}` : ""}`,
     amount: formatMoney(item.amount),
     sourceReference: item.orderId,
-    note:
-      item.reason ||
-      t("payments.reimbursements.detail.lineItemsFallbackNote", {
-        index: index + 1,
-      }),
+    note: item.reason || `Line item ${index + 1}`,
   }));
 }
 
@@ -447,7 +413,7 @@ function actionButtonLinkStyle(primary = false) {
 export default function ReimbursementDetailPage() {
   const client = usePlatformAdminClient();
   const params = useParams<{ batchId: string }>();
-  const { t } = useTranslation();
+  const { locale } = useTranslation();
   const batchId = Array.isArray(params.batchId)
     ? params.batchId[0]
     : params.batchId;
@@ -490,7 +456,7 @@ export default function ReimbursementDetailPage() {
           return;
         }
 
-        const fallback = buildFallbackBatch(batchId, t);
+        const fallback = buildFallbackBatch(batchId, locale);
         setBatch(fallback.batch);
         setUsingFallbackData(true);
         setFallbackWarning(fallback.warning);
@@ -499,7 +465,7 @@ export default function ReimbursementDetailPage() {
         if (!active) {
           return;
         }
-        const fallback = buildFallbackBatch(batchId, t);
+        const fallback = buildFallbackBatch(batchId, locale);
         setBatch(fallback.batch);
         setUsingFallbackData(true);
         setFallbackWarning(fallback.warning);
@@ -517,7 +483,7 @@ export default function ReimbursementDetailPage() {
     return () => {
       active = false;
     };
-  }, [batchId, client, t]);
+  }, [batchId, client, locale]);
 
   async function handleApprove() {
     if (!batch) {
@@ -526,7 +492,9 @@ export default function ReimbursementDetailPage() {
     const reason = approveReason.trim();
     if (!reason) {
       setApprovalError(
-        t("payments.reimbursements.detail.approvalReasonRequired"),
+        locale === "en"
+          ? "Approval reason is required for this high-risk action."
+          : "高風險核准操作必須填寫原因。",
       );
       return;
     }
@@ -545,7 +513,9 @@ export default function ReimbursementDetailPage() {
           });
       setBatch(nextBatch);
       setApprovalReceipt(
-        t("payments.reimbursements.detail.approvalRecorded", { reason }),
+        locale === "en"
+          ? `Approval recorded with reason: ${reason}`
+          : `已記錄核准原因：${reason}`,
       );
       setApproveReason("");
     } catch (nextError: any) {
@@ -579,7 +549,11 @@ export default function ReimbursementDetailPage() {
           });
       setBatch(nextBatch);
       setRemittanceProofId(nextBatch.remittanceProofId ?? remittanceProofId);
-      setApprovalReceipt(t("payments.reimbursements.detail.markedPaid"));
+      setApprovalReceipt(
+        locale === "en"
+          ? "Batch marked paid and remittance proof captured."
+          : "批次已標記為已付款，且已記錄匯款憑證。",
+      );
     } catch (nextError: any) {
       setApprovalError(nextError?.message ?? String(nextError));
     } finally {
@@ -590,7 +564,7 @@ export default function ReimbursementDetailPage() {
   if (loading) {
     return (
       <div style={emptyStateStyle}>
-        {t("payments.reimbursements.detail.loading")}
+        {locale === "en" ? "Loading…" : "載入中…"}
       </div>
     );
   }
@@ -600,11 +574,11 @@ export default function ReimbursementDetailPage() {
       <div style={pageShellStyle}>
         <PageHeader
           theme={theme}
-          title={t("payments.reimbursements.detail.pageTitle")}
+          title={locale === "en" ? "Reimbursement batch" : "代墊批次"}
           subtitle={batchId}
           actions={
             <Link href="/payments" style={actionButtonLinkStyle()}>
-              {t("payments.reimbursements.detail.backToPayments")}
+              {locale === "en" ? "Back to payments" : "返回結算治理"}
             </Link>
           }
         />
@@ -612,9 +586,12 @@ export default function ReimbursementDetailPage() {
           <Banner
             theme={theme}
             tone="danger"
-            title={t("payments.reimbursements.detail.batchUnavailable")}
+            title={locale === "en" ? "Batch unavailable" : "找不到批次"}
             body={
-              error ?? t("payments.reimbursements.detail.batchUnavailableBody")
+              error ??
+              (locale === "en"
+                ? "The reimbursement batch route resolves, but the batch was not found."
+                : "Route 已建立，但找不到對應的代墊批次資料。")
             }
           />
         </div>
@@ -624,30 +601,30 @@ export default function ReimbursementDetailPage() {
 
   const workflowState = getWorkflowState(batch);
   const workflowIndex = WORKFLOW_STEPS.indexOf(workflowState);
-  const lineItemRows = buildLineItemRows(batch, t);
-  const timelineEntries = buildTimeline(batch, t);
+  const lineItemRows = buildLineItemRows(batch);
+  const timelineEntries = buildTimeline(batch);
   const statusTone = workflowTone(workflowState);
   const lineItemColumns: CanvasTableColumn<LineItemRow>[] = [
     {
-      h: t("payments.reimbursements.detail.lineItems.col.recipient"),
+      h: locale === "en" ? "RECIPIENT" : "RECIPIENT",
       w: 220,
       r: (row: LineItemRow) => row.recipient,
     },
     {
-      h: t("payments.reimbursements.detail.lineItems.col.amount"),
+      h: locale === "en" ? "AMOUNT" : "AMOUNT",
       w: 140,
       mono: true,
       align: "right",
       r: (row: LineItemRow) => row.amount,
     },
     {
-      h: t("payments.reimbursements.detail.lineItems.col.sourceReference"),
+      h: locale === "en" ? "SOURCE REFERENCE" : "SOURCE REFERENCE",
       w: 220,
       mono: true,
       r: (row: LineItemRow) => row.sourceReference,
     },
     {
-      h: t("payments.reimbursements.detail.lineItems.col.note"),
+      h: locale === "en" ? "NOTE" : "NOTE",
       r: (row: LineItemRow) => row.note,
     },
   ];
@@ -662,25 +639,25 @@ export default function ReimbursementDetailPage() {
           >
             <span style={monoStyle}>{batch.batchId}</span>
             <Pill theme={theme} tone={statusTone} dot>
-              {workflowLabel(workflowState, t)}
+              {workflowLabel(workflowState)}
             </Pill>
           </span>
         }
-        subtitle={`${batch.driverId} · ${formatMoney(batch.totalAmount)} · ${t("payments.reimbursements.detail.stateMachineSubtitle")}`}
+        subtitle={`${batch.driverId} · ${formatMoney(batch.totalAmount)} · 6-state reimbursement workflow`}
         actions={
           <>
             <Link
               href="/payments/reimbursements"
               style={actionButtonLinkStyle()}
             >
-              {t("payments.reimbursements.detail.queueLink")}
+              {locale === "en" ? "Queue" : "批次佇列"}
             </Link>
             <Btn
               theme={theme}
               icon="copy"
               onClick={() => setApprovalReceipt(batch.batchId)}
             >
-              {t("payments.reimbursements.detail.copyBatchId")}
+              {locale === "en" ? "Copy batch ID" : "複製批次 ID"}
             </Btn>
           </>
         }
@@ -691,7 +668,7 @@ export default function ReimbursementDetailPage() {
           <Banner
             theme={theme}
             tone="danger"
-            title={t("payments.reimbursements.detail.refreshFailed")}
+            title={locale === "en" ? "Refresh failed" : "重新整理失敗"}
             body={error}
           />
         ) : null}
@@ -700,7 +677,11 @@ export default function ReimbursementDetailPage() {
           <Banner
             theme={theme}
             tone="warn"
-            title={t("payments.reimbursements.detail.fallbackTitle")}
+            title={
+              locale === "en"
+                ? "Fallback reimbursement detail"
+                : "Fallback 代墊批次詳情"
+            }
             body={fallbackWarning}
           />
         ) : null}
@@ -708,23 +689,37 @@ export default function ReimbursementDetailPage() {
         <Banner
           theme={theme}
           tone="info"
-          title={t("payments.reimbursements.detail.auditViewTitle")}
-          body={t("payments.reimbursements.detail.auditViewBody")}
+          title={
+            locale === "en"
+              ? "Audit-derived workflow view"
+              : "Audit-derived workflow 視圖"
+          }
+          body={
+            locale === "en"
+              ? "The six-state stepper matches the canvas while underlying contract data is derived from batch approval, remittance, and payment timestamps."
+              : "六狀態 stepper 對齊 canvas；目前狀態由 batch 的核准、匯款憑證與付款時間推導呈現。"
+          }
         />
 
         {approvalReceipt ? (
           <Banner
             theme={theme}
             tone="success"
-            title={t("payments.reimbursements.detail.auditReceipt")}
+            title={locale === "en" ? "Audit receipt" : "稽核收據"}
             body={approvalReceipt}
           />
         ) : null}
 
         <Card
           theme={theme}
-          title={t("payments.reimbursements.detail.stateMachineTitle")}
-          subtitle={t("payments.reimbursements.detail.stateMachineSubtitle")}
+          title={
+            locale === "en" ? "State machine · Q-ADM12" : "狀態機 · Q-ADM12"
+          }
+          subtitle={
+            locale === "en"
+              ? "draft → pending approval → approved → exported → paid → reconciled"
+              : "draft → pending approval → approved → exported → paid → reconciled"
+          }
         >
           <div style={stepperStyle}>
             {WORKFLOW_STEPS.map((step, index) => {
@@ -742,7 +737,7 @@ export default function ReimbursementDetailPage() {
                   <div
                     style={{ fontSize: 12.5, fontWeight: active ? 700 : 600 }}
                   >
-                    {workflowLabel(step, t)}
+                    {workflowLabel(step)}
                   </div>
                 </div>
               );
@@ -751,93 +746,70 @@ export default function ReimbursementDetailPage() {
         </Card>
 
         <div style={heroGridStyle}>
-          <Card
-            theme={theme}
-            title={t("payments.reimbursements.detail.headerCardTitle")}
-          >
+          <Card theme={theme} title="Header">
             <DL
               theme={theme}
               cols={2}
               items={[
+                { k: "BATCH ID", v: batch.batchId, mono: true },
+                { k: "DRIVER", v: batch.driverId, mono: true },
+                { k: "STATEMENT", v: batch.statementId, mono: true },
+                { k: "PERIOD", v: batch.periodMonth, mono: true },
                 {
-                  k: t("payments.reimbursements.detail.summary.batchId"),
-                  v: batch.batchId,
-                  mono: true,
-                },
-                {
-                  k: t("payments.reimbursements.detail.summary.driver"),
-                  v: batch.driverId,
-                  mono: true,
-                },
-                {
-                  k: t("payments.reimbursements.detail.summary.statement"),
-                  v: batch.statementId,
-                  mono: true,
-                },
-                {
-                  k: t("payments.reimbursements.detail.summary.period"),
-                  v: batch.periodMonth,
-                  mono: true,
-                },
-                {
-                  k: t("payments.reimbursements.detail.summary.totalAmount"),
+                  k: "TOTAL AMOUNT",
                   v: formatMoney(batch.totalAmount),
                   mono: true,
                 },
+                { k: "STATE", v: workflowLabel(workflowState), mono: true },
                 {
-                  k: t("payments.reimbursements.detail.summary.state"),
-                  v: workflowLabel(workflowState, t),
-                  mono: true,
-                },
-                {
-                  k: t("payments.reimbursements.detail.summary.approvedAt"),
+                  k: "APPROVED AT",
                   v: batch.approvedAt ? formatDateTime(batch.approvedAt) : "—",
                   mono: true,
                 },
                 {
-                  k: t("payments.reimbursements.detail.summary.paidAt"),
+                  k: "PAID AT",
                   v: batch.paidAt ? formatDateTime(batch.paidAt) : "—",
                   mono: true,
                 },
                 {
-                  k: t(
-                    "payments.reimbursements.detail.summary.remittanceProof",
-                  ),
+                  k: "REMITTANCE PROOF",
                   v: batch.remittanceProofId ?? "—",
                   mono: true,
                 },
-                {
-                  k: t("payments.reimbursements.detail.summary.lineItems"),
-                  v: String(batch.items.length),
-                  mono: true,
-                },
+                { k: "LINE ITEMS", v: String(batch.items.length), mono: true },
               ]}
             />
           </Card>
 
           <Card
             theme={theme}
-            title={t("payments.reimbursements.detail.approveFlowTitle")}
-            subtitle={t("payments.reimbursements.detail.approveFlowSubtitle")}
+            title={locale === "en" ? "Approve reason flow" : "核准原因流程"}
+            subtitle={
+              locale === "en"
+                ? "High-risk action requires a reason before approval."
+                : "高風險操作在核准前必須填寫原因。"
+            }
           >
             <div style={actionPanelStyle}>
               <label style={{ display: "grid", gap: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 700 }}>
-                  {t("payments.reimbursements.detail.approvalReason")}
+                  {locale === "en" ? "Approval reason" : "核准原因"}
                 </span>
                 <textarea
                   value={approveReason}
                   onChange={(event) => setApproveReason(event.target.value)}
-                  placeholder={t(
-                    "payments.reimbursements.detail.approvalReasonPlaceholder",
-                  )}
+                  placeholder={
+                    locale === "en"
+                      ? "Explain sponsor exposure, evidence, or audit context."
+                      : "說明 sponsor exposure、佐證或 audit context。"
+                  }
                   style={textAreaStyle}
                 />
               </label>
 
               <label style={{ display: "grid", gap: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 700 }}>
-                  {t("payments.reimbursements.detail.remittanceProof")}
+                  {locale === "en" ? "Remittance proof" : "匯款憑證"}
                 </span>
                 <input
                   value={remittanceProofId}
@@ -860,7 +832,7 @@ export default function ReimbursementDetailPage() {
                 <Banner
                   theme={theme}
                   tone="danger"
-                  title={t("payments.reimbursements.detail.actionFailed")}
+                  title={locale === "en" ? "Action failed" : "操作失敗"}
                   body={approvalError}
                 />
               ) : null}
@@ -874,8 +846,12 @@ export default function ReimbursementDetailPage() {
                   onClick={() => void handleApprove()}
                 >
                   {savingAction === "approve"
-                    ? t("payments.saving")
-                    : t("payments.approve")}
+                    ? locale === "en"
+                      ? "Saving…"
+                      : "儲存中…"
+                    : locale === "en"
+                      ? "Approve"
+                      : "核准"}
                 </Btn>
                 <Btn
                   theme={theme}
@@ -889,8 +865,12 @@ export default function ReimbursementDetailPage() {
                   onClick={() => void handleMarkPaid()}
                 >
                   {savingAction === "paid"
-                    ? t("payments.saving")
-                    : t("payments.reimbursements.detail.markPaid")}
+                    ? locale === "en"
+                      ? "Saving…"
+                      : "儲存中…"
+                    : locale === "en"
+                      ? "Mark paid"
+                      : "標記已付款"}
                 </Btn>
               </div>
             </div>
@@ -900,7 +880,11 @@ export default function ReimbursementDetailPage() {
         <div style={heroGridStyle}>
           <Card
             theme={theme}
-            title={t("payments.reimbursements.detail.timelineTitle")}
+            title={
+              locale === "en"
+                ? "State timeline · audit-derived"
+                : "狀態時間軸 · audit-derived"
+            }
           >
             <div style={timelineListStyle}>
               {timelineEntries.map((entry, index) => (
@@ -939,43 +923,54 @@ export default function ReimbursementDetailPage() {
 
           <Card
             theme={theme}
-            title={t("payments.reimbursements.detail.batchSummaryTitle")}
-            subtitle={t(
-              usingFallbackData
-                ? "payments.reimbursements.detail.batchSummarySubtitle.fallback"
-                : "payments.reimbursements.detail.batchSummarySubtitle.live",
-            )}
+            title={locale === "en" ? "Batch summary" : "批次摘要"}
+            subtitle={
+              locale === "en"
+                ? usingFallbackData
+                  ? "Canvas body density rendered from route-local fallback finance context."
+                  : "Canvas body density with route-local finance context."
+                : usingFallbackData
+                  ? "以 route-local fallback finance context 補齊 canvas body 密度。"
+                  : "以 route-local finance context 補齊 canvas body 密度。"
+            }
           >
             <div style={{ display: "grid", gap: 10, fontSize: 12.5 }}>
               <div>
                 <strong>
-                  {t("payments.reimbursements.detail.approvalGate")}
+                  {locale === "en" ? "Approval gate:" : "核准關卡："}
                 </strong>{" "}
                 {batch.approvedAt
-                  ? t("payments.reimbursements.detail.approvalGateCompleted")
-                  : t("payments.reimbursements.detail.approvalGatePending")}
+                  ? locale === "en"
+                    ? "Completed"
+                    : "已完成"
+                  : locale === "en"
+                    ? "Pending super-admin signoff"
+                    : "待 super-admin 簽核"}
               </div>
               <div>
                 <strong>
-                  {t("payments.reimbursements.detail.exportPosture")}
+                  {locale === "en" ? "Export posture:" : "匯出姿態："}
                 </strong>{" "}
                 {batch.remittanceProofId
-                  ? t("payments.reimbursements.detail.exportPostureAttached")
-                  : t("payments.reimbursements.detail.exportPosturePending")}
+                  ? locale === "en"
+                    ? "Proof attached"
+                    : "已附憑證"
+                  : locale === "en"
+                    ? "Not exported yet"
+                    : "尚未匯出"}
               </div>
               <div>
                 <strong>
-                  {t("payments.reimbursements.detail.settlementTarget")}
+                  {locale === "en" ? "Settlement target:" : "結算對象："}
                 </strong>{" "}
                 <span style={monoStyle}>{batch.driverId}</span>
               </div>
               <div>
                 <strong>
-                  {t("payments.reimbursements.detail.evidenceScope")}
+                  {locale === "en" ? "Evidence scope:" : "佐證範圍："}
                 </strong>{" "}
-                {t("payments.reimbursements.detail.evidenceScopeCount", {
-                  count: lineItemRows.length,
-                })}
+                {lineItemRows.length}{" "}
+                {locale === "en" ? "line items" : "筆 line item"}
               </div>
             </div>
           </Card>
@@ -983,10 +978,12 @@ export default function ReimbursementDetailPage() {
 
         <Card
           theme={theme}
-          title={t("payments.reimbursements.detail.lineItemsTitle")}
-          subtitle={t("payments.reimbursements.detail.lineItemsSubtitle", {
-            count: lineItemRows.length,
-          })}
+          title={locale === "en" ? "Line items" : "Line items"}
+          subtitle={
+            locale === "en"
+              ? `${lineItemRows.length} sources contributing to the batch total.`
+              : `${lineItemRows.length} 筆來源構成此批次總額。`
+          }
           padding={0}
         >
           {lineItemRows.length > 0 ? (
@@ -1000,7 +997,9 @@ export default function ReimbursementDetailPage() {
             <div
               style={{ padding: 18, color: theme.textMuted, fontSize: 12.5 }}
             >
-              {t("payments.reimbursements.detail.lineItemsEmpty")}
+              {locale === "en"
+                ? "No reimbursement line items were returned for this batch."
+                : "此批次目前沒有可顯示的 reimbursement line item。"}
             </div>
           )}
         </Card>

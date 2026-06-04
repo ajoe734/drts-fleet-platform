@@ -1,0 +1,1301 @@
+===== ops-console-web/app/approval-requests/approval-actions.tsx =====
+44:          copy(locale, "Action failed: ", "操作失敗：") + result.message,
+55:        "核准理由（高風險操作必填）：",
+70:          "對此審批請求發送提醒？",
+85:          "確認此請求的 SLA 違規？",
+104:          {copy(locale, "Approve", "核准")}
+115:          {copy(locale, "Nudge", "提醒")}
+126:          {copy(locale, "Ack breach", "確認違規")}
+===== ops-console-web/app/approval-requests/page.tsx =====
+133:      h: copy(locale, "REQUEST", "請求"),
+142:      h: copy(locale, "TENANT", "租戶"),
+151:      h: copy(locale, "STATUS", "狀態"),
+160:      h: copy(locale, "MODE", "模式"),
+165:      h: copy(locale, "ORDER", "訂單"),
+180:      h: copy(locale, "APPROVERS", "審批人"),
+185:      h: copy(locale, "CREATED", "建立時間"),
+195:            {copy(locale, "breached", "已違規")}
+199:            {copy(locale, "on track", "正常")}
+204:      h: copy(locale, "ACTIONS", "操作"),
+253:          "審批佇列 · 跨租戶",
+258:          "僅 ops_approval_triage / ops_manager / ops_compliance 可見。可逐筆核准、提醒或確認 SLA 違規。",
+273:              "無法載入審批請求",
+278:              "可能是權限不足，或服務暫時無法使用。",
+296:                ? copy(locale, "No data to display.", "沒有可顯示的資料。")
+300:                    "此檢視目前沒有審批請求。",
+===== ops-console-web/app/attendance/page.tsx =====
+194:    return locale === "en" ? "No records" : "無記錄";
+372:      label: locale === "en" ? "Today" : "今日",
+377:      label: locale === "en" ? "This week" : "本週",
+382:      label: locale === "en" ? "Exceptions" : "異常",
+407:            {locale === "en" ? "Export" : "匯出"}
+420:                : "出勤資料暫時無法載入"
+433:                : `${exceptionCount} 筆出勤異常待追蹤`
+438:                : `目前服務日有 ${absentCount} 筆未到、${lateCount} 筆部分出勤。`
+446:            label={locale === "en" ? "Scheduled drivers" : "排班司機"}
+466:            label={locale === "en" ? "Exception / late" : "異常 / 遲到"}
+472:                  : `${absentCount} 未到`
+480:                  : `${partialCount} 部分出勤`
+488:          title={locale === "en" ? "On-duty gantt" : "當班甘特"}
+492:                {locale === "en" ? "active" : "進行中"}
+495:                {locale === "en" ? "completed" : "已完成"}
+499:                  {locale === "en" ? "abandoned" : "中止"}
+===== ops-console-web/app/callcenter/page.tsx =====
+185:            title: "Workspace 尚未 provision",
+186:            body: "這位操作員缺少 call-center scope 或 telephony bootstrap。",
+197:            title: "資料抓取失敗",
+198:            body: "Workspace 無法從後端刷新。請檢查錯誤訊息後再重試。",
+209:            title: "權限不足",
+210:            body: "目前操作員可看到路由頁面，但沒有執行 call-center 動作所需的 scope。",
+221:            title: "外部 telephony 不可用",
+222:            body: "CTI 或錄音連結目前降級。請先依 queue 資訊分流，待依賴恢復後再重試。",
+233:            title: "目前篩選沒有結果",
+234:            body: "清除搜尋條件後，可回到完整的 session、callback 與歷史列表。",
+246:            title: "目前沒有 active session",
+247:            body: "Workspace 處於 idle 狀態。可開新 session，或持續留意 callback 與錄音待補佇列。",
+258:        : "請先結束目前的 active session。";
+262:        : "已標記身分告知。";
+266:        : "已關閉 session 為唯讀。";
+270:        : "這筆 session 已綁定訂單。";
+274:        : "這筆 session 已連結客訴。";
+278:        : "目前沒有待完成的 callback。";
+282:        : "手動補掛錄音需要 compliance scope。";
+284:      return locale === "en" ? "Action not available." : "此動作目前不可用。";
+290:    open_call_session: { en: "Open call session", zh: "開新 call session" },
+291:    announce_identity: { en: "Announce identity", zh: "標記已告知身分" },
+292:    close_session: { en: "Close session", zh: "關閉 session" },
+293:    quote_eta: { en: "Quote ETA", zh: "回覆 ETA" },
+294:    create_callback: { en: "Create callback", zh: "建立 callback" },
+295:    complete_callback: { en: "Complete callback", zh: "完成 callback" },
+296:    create_phone_booking: { en: "Create phone booking", zh: "建立電話訂車" },
+297:    link_existing_order: { en: "Link existing order", zh: "連結既有訂單" },
+298:    transfer_to_complaint: { en: "Transfer to complaint", zh: "轉交客訴" },
+299:    attach_recording: { en: "Manual attach recording", zh: "手動補掛錄音" },
+311:    return locale === "en" ? "High" : "高風險";
+314:    return locale === "en" ? "Medium" : "中風險";
+316:  return locale === "en" ? "Low" : "低風險";
+661:      : `${deltaMinutes} 分鐘後到期`;
+666:    : `已逾期 ${Math.abs(deltaMinutes)} 分鐘`;
+671:    callback.agentId ?? (locale === "en" ? "Unassigned" : "未指派"),
+672:    callback.note ?? (locale === "en" ? "No note" : "無備註"),
+691:        : `確認執行「${getActionLabel(locale, descriptor.action)}」？`,
+703:        : "請輸入這個高風險動作的操作備註。",
+732:          {locale === "en" ? "Reason required" : "需要理由"}
+906:      label: currentLocale === "en" ? "Sessions" : "當前 session",
+911:      label: currentLocale === "en" ? "Callback queue" : "Callback 佇列",
+916:      label: currentLocale === "en" ? "Recordings" : "錄音待補",
+1120:          kicker: currentLocale === "en" ? "Callback queue" : "Callback 佇列",
+1121:          title: currentLocale === "en" ? "Pending follow-up" : "待追蹤回覆",
+1145:                  : "目前 scope 內沒有 callback。"}
+1151:            kicker: currentLocale === "en" ? "Recording queue" : "錄音佇列",
+1155:                : "等待自動連結或手動補掛",
+1184:                    : "目前沒有錄音缺口。"}
+1189:            kicker: currentLocale === "en" ? "Waiting queue" : "等待佇列",
+1191:              currentLocale === "en" ? "Other live calls" : "其他進行中的通話",
+1218:                    : "目前沒有其他等待中的通話。"}
+1231:            : "每位 agent 同時間僅一個 active session，等待 / callback / 錄音 / 歷史佇列維持在同一個 workspace。"
+1277:                      : `已關閉 session ${selectedSession.callId}。`,
+1283:            {currentLocale === "en" ? "Close current" : "結束目前"}
+1295:                : `Refresh tier ${CALLCENTER_REFRESH_TIER} · 每 5 秒自動刷新`}
+1308:                  : "在同一個 canvas 內完成建單、callback、客訴轉案與錄音證據補齊。"
+1324:                    : "待回覆 callback"}
+1330:                  {currentLocale === "en" ? "Recording gaps" : "錄音待補"}
+1336:                  {currentLocale === "en" ? "Complaint transfers" : "客訴轉案"}
+1356:                {currentLocale === "en" ? "Refresh now" : "立即刷新"}
+1365:                    : "已過期"
+1368:                    : "最新"}
+1374:                    : "健康"
+1377:                    : "降級中"}
+1380:                {currentLocale === "en" ? "Last refresh" : "最近刷新"}:{" "}
+1419:            <strong>{currentLocale === "en" ? "Error" : "錯誤"}</strong>
+1429:                  {currentLocale === "en" ? "Entry" : "入口"}
+1453:                          : `已開啟 session ${created.callId}。`,
+1565:                    {currentLocale === "en" ? "Clear search" : "清除搜尋"}
+1619:                        : "Workspace 訊號"}
+1624:                        : "健康度與契約"}
+1639:                        : "即使 disabled 也保留 affordance。"}
+1650:                        : "Dispatch 與 complaint 連結由 contract 決定。"}
+1654:                    <span>{currentLocale === "en" ? "Health" : "健康度"}</span>
+1663:                          : "目前沒有降級依賴。"}
+1690:                      : "必顯示：call type、caller phone、agent identity、linked order、recording state 與 dispatch trace。"}
+1711:                    : "正在載入 call center workspace..."}
+1717:                      <span>{currentLocale === "en" ? "Call" : "通話"}</span>
+1728:                        {currentLocale === "en" ? "Caller" : "來電者"}
+1740:                        {currentLocale === "en" ? "Agent" : "客服人員"}
+1747:                            : `${formatDateTime(currentLocale, selectedSession.agentIdentityAnnouncedAt)} 已告知身分`
+1750:                            : "尚未告知身分"}
+1757:                          : "已連結紀錄"}
+1771:                              : "已綁定訂單"
+1775:                                : "已連結客訴"
+1778:                                : "尚未連結下游紀錄"}
+1782:                      <span>{currentLocale === "en" ? "Flags" : "旗標"}</span>
+1795:                            : `最近 ETA ${selectedSession.lastEtaQuotedMinutes} 分鐘`
+1798:                            : "尚未回覆 ETA"}
+1815:                              : "尚無 linked resource"}
+1849:                      {currentLocale === "en" ? "Clear search" : "清除搜尋"}
+1871:                      : "Session 動作"}
+1876:                      : "從 greeting 到 resolution"}
+1881:                      : "即使 disabled 也保留 affordance；enabled 狀態由 availableActions 決定。"}
+1891:                      : "Session 控制"}
+1928:                                  : `已為 ${selectedSession.callId} 標記身分告知。`,
+1963:                                  : `已關閉 session ${selectedSession.callId}。`,
+1982:                  <h4>{currentLocale === "en" ? "Quote ETA" : "回覆 ETA"}</h4>
+2005:                                : `已儲存 ETA ${quotedEtaMinutes} 分鐘。`,
+2037:                    {currentLocale === "en" ? "Recording evidence" : "錄音證據"}
+2066:                                : `已補掛錄音，操作備註：${reason}`,
+2136:                      : "建單、callback 與客訴轉案"}
+2141:                      : "主要決策點：新建訂單或既有訂單，以及 callback 或客訴補救。"}
+2191:                                : `已從 ${selectedSession.callId} 建立電話訂單。`,
+2196:                                : "前往 dispatch workspace",
+2304:                                : `已將訂單 ${existingOrderId} 綁定到 ${selectedSession.callId}。`,
+2309:                                : "開啟已綁定 dispatch",
+2367:                                : `已為 ${selectedSession.callId} 建立 callback。`,
+2420:                                : `已完成 callback ${selectedSession.callbackTask!.callbackTaskId}。`,
+2492:                                : `已從 ${selectedSession.callId} 建立客訴 ${result.complaintCase.caseNo}。`,
+2497:                                : "開啟客訴佇列",
+2588:                      : "已連結訂單與下游可視性"}
+2593:                      : "當操作員處理通話時，deep link 與 trace 要保留在同一個 workspace。"}
+2602:                      <span>{currentLocale === "en" ? "Order" : "訂單"}</span>
+2607:                      <span>{currentLocale === "en" ? "Status" : "狀態"}</span>
+2618:                            : `${selectedOrder.etaSnapshot.etaMinutes} 分鐘 ETA`
+2621:                            : "ETA 尚未回傳"}
+2625:                      <span>{currentLocale === "en" ? "Route" : "路線"}</span>
+2631:                        {currentLocale === "en" ? "Compliance" : "合規"}
+2652:                        : "開啟 dispatch 明細"}
+2678:                          : "尚無 dispatch trace 紀錄。"}
+2687:                    : "請先選取或連結訂單，才能載入 dispatch trace。"}
+2700:                      : "Callback 佇列"}
+2705:                      : "跨所有 session"}
+2732:                      : "目前 scope 內沒有 callback。"}
+2742:                    {currentLocale === "en" ? "Recording queue" : "錄音佇列"}
+2747:                      : "等待自動連結或手動補掛"}
+2781:                      : "目前沒有錄音缺口。"}
+2793:                      : "Session 歷史"}
+2796:                    {currentLocale === "en" ? "Closed calls" : "已結束通話"}
+2826:                      : "目前尚無已關閉 session。"}
+===== ops-console-web/app/complaints/page.tsx =====
+223:      `還有 ${deltaMinutes} 分鐘`,
+229:    `逾期 ${Math.abs(deltaMinutes)} 分鐘`,
+237:  add_note: { icon: "plus", en: "Add note", zh: "新增備註" },
+238:  assign: { icon: "users", en: "Assign / reassign", zh: "指派 / 重新指派" },
+239:  resolve: { icon: "check", en: "Resolve", zh: "結案處理" },
+240:  close: { icon: "check", en: "Close", zh: "關閉案件" },
+241:  reopen: { icon: "arrow", en: "Reopen", zh: "重啟案件" },
+245:    zh: "升級事故",
+247:  mark_sla_breach: { icon: "sla", en: "Mark SLA breach", zh: "標記 SLA 違規" },
+248:  export_view: { icon: "reports", en: "Export view", zh: "匯出案件視圖" },
+249:  create: { icon: "plus", en: "Create complaint", zh: "建立客訴" },
+346:      title: "目前沒有客訴案件",
+347:      body: "此範圍目前沒有任何客訴案件。",
+359:      title: "沒有符合篩選的案件",
+360:      body: "放寬範圍、狀態、嚴重度或 SLA 篩選即可看到更多案件。",
+361:      cta: "清除篩選",
+373:      title: "客訴模組尚未啟用",
+374:      body: "此租戶 / 範圍尚未啟用客訴模組。",
+375:      cta: "重試",
+387:      title: "無法載入客訴",
+388:      body: "後端在載入案件時回傳錯誤。",
+389:      cta: "重試",
+400:      title: "無客訴存取權限",
+401:      body: "你的角色沒有讀取客訴案件的權限範圍。",
+413:      title: "客訴服務暫時無法使用",
+414:      body: "上游依賴目前降級，案件可能暫時無法讀取。",
+415:      cta: "重試",
+473:      : tx(locale, "Unknown error", "未知錯誤");
+679:        `${actionLabel(action, "zh")}已送出`,
+910:    { key: "all", label: tx(locale, "All", "全部"), count: records.length },
+913:      label: tx(locale, "Mine", "我負責"),
+919:      label: tx(locale, "Unassigned", "未指派"),
+924:      label: tx(locale, "SLA breach", "SLA 違規"),
+930:      label: tx(locale, "Escalated", "已升級"),
+970:      h: tx(locale, "CASE", "案件"),
+993:      h: tx(locale, "CATEGORY", "類別"),
+998:      h: tx(locale, "SEV", "嚴重度"),
+1011:      h: tx(locale, "DESCRIPTION", "說明"),
+1029:      h: tx(locale, "ORDER", "訂單"),
+1045:      h: tx(locale, "SLA · backend computed", "SLA · 後端計算"),
+1062:                  "前端推導（後端 slaStatus 待補）",
+1073:      h: tx(locale, "OWNER", "負責人"),
+1079:            {tx(locale, "unassigned", "未指派")}
+1084:      h: tx(locale, "STATUS", "狀態"),
+1093:      h: tx(locale, "ACTIONS", "動作"),
+1160:        title={tx(locale, "Complaint Center", "客訴中心")}
+1164:          "案件全流程 · SLA · 升級 · reopen 不得覆蓋紀錄",
+1180:              {tx(locale, "Export", "匯出")}
+1188:              {tx(locale, "Create complaint", "建立客訴")}
+1210:            title={tx(locale, "Data may be stale", "資料可能已過舊")}
+1214:              "目前快照已超過更新時限，請重新整理以取得最新案件。",
+1223:                {tx(locale, "Refresh", "重新整理")}
+1244:            {tx(locale, "Auto-refresh", "自動更新")} ·{" "}
+1248:            {tx(locale, "Updated", "更新於")}{" "}
+1260:            {tx(locale, "Refresh", "重新整理")}
+1274:            label={tx(locale, "Open cases", "未結客訴")}
+1281:                    `${breachedCount} 件 SLA 違規`,
+1289:            label={tx(locale, "SLA breached", "SLA 違規")}
+1291:            sub={tx(locale, "Backend-computed (Q-OPS13)", "後端計算 (Q-OPS13)")}
+1295:            label={tx(locale, "Escalated to incident", "升級事故")}
+1297:            sub={tx(locale, "Linked incident cases", "已連結事故案件")}
+1301:            label={tx(locale, "Reopens", "reopen 次數")}
+1303:            sub={tx(locale, "Across all cases", "所有案件累計")}
+1364:              "搜尋案件、訂單、來電、負責人…",
+1377:              {tx(locale, "All statuses", "全部狀態")}
+1393:              {tx(locale, "All categories", "全部類別")}
+1407:              {tx(locale, "All SLA states", "全部 SLA 狀態")}
+1417:              {tx(locale, "Clear", "清除")}
+1426:            title={tx(locale, "New complaint case", "建立客訴案件")}
+1434:                {tx(locale, "Close", "關閉")}
+1446:                {tx(locale, "Source", "來源")}
+1466:                {tx(locale, "Category", "類別")}
+1485:                {tx(locale, "Severity", "嚴重度")}
+1505:                {tx(locale, "Related order", "關聯訂單")}
+1519:                {tx(locale, "Related call", "關聯來電")}
+1539:                {tx(locale, "Description", "說明")}
+1563:                    ? tx(locale, "Saving…", "儲存中…")
+1564:                    : tx(locale, "Create case", "建立案件")}
+1574:          title={tx(locale, "Case backlog", "客訴佇列")}
+1578:            `${filteredRecords.length} / ${records.length} 件案件`,
+1584:              {tx(locale, "Loading complaints…", "載入客訴中…")}
+1665:                  label={tx(locale, "SLA due", "SLA 期限")}
+1669:                  label={tx(locale, "SLA breached at", "SLA 違規時間")}
+1673:                  label={tx(locale, "Assignee", "負責人")}
+1676:                    tx(locale, "Unassigned", "未指派")
+1680:                  label={tx(locale, "Reopens", "reopen 次數")}
+1684:                  label={tx(locale, "Related order", "關聯訂單")}
+1699:                  label={tx(locale, "Related call", "關聯來電")}
+1714:                  label={tx(locale, "Linked incident", "連結事故")}
+1724:                      tx(locale, "Not escalated", "未升級")
+1729:                  label={tx(locale, "Resolution", "處理結果")}
+1768:                      "你的角色僅可檢視。",
+1778:                title={tx(locale, "Audit export", "稽核匯出")}
+1786:                      ? tx(locale, "Ready for audit", "可供稽核")
+1787:                      : tx(locale, "Not export-ready", "尚未可匯出")
+1792:                    `產生於 ${formatDateTime(exportView?.exportGeneratedAt)}`,
+1797:              <Card theme={theme} title={tx(locale, "Timeline", "時間軸")}>
+1834:                    {tx(locale, "No timeline entries.", "尚無時間軸紀錄。")}
+1850:          ← {tx(locale, "Back to dashboard", "返回儀表板")}
+1922:                  {tx(locale, "View audit ↗", "查看稽核 ↗")}
+1933:                {tx(locale, "Dismiss", "關閉")}
+2154:              title={tx(locale, "High-risk action", "高風險動作")}
+2158:                "必須填寫原因，並會寫入不可竄改的案件時間軸。",
+2173:                <ModalField label={tx(locale, "Assignee ID", "負責人 ID")}>
+2180:                <ModalField label={tx(locale, "Assignment note", "指派備註")}>
+2191:              <ModalField label={tx(locale, "Investigation note", "調查備註")}>
+2202:                <ModalField label={tx(locale, "Resolution code", "處理代碼")}>
+2219:                <ModalField label={tx(locale, "Closing note", "結案備註")}>
+2231:                label={tx(locale, "Reopen reason", "重啟原因")}
+2245:                  label={tx(locale, "Incident title", "事故標題")}
+2254:                <ModalField label={tx(locale, "Severity", "嚴重度")}>
+2273:                  label={tx(locale, "Escalation reason", "升級原因")}
+2295:              {tx(locale, "Cancel", "取消")}
+2306:                ? tx(locale, "Working…", "處理中…")
+2307:                : tx(locale, "Confirm", "確認")}
+===== ops-console-web/app/contracts/page.tsx =====
+469:    return copy(locale, "open-ended", "未設定");
+484:    return copy(locale, "unknown", "未知");
+508:      label: (locale) => copy(locale, "Partner program", "夥伴方案"),
+514:      label: (locale) => copy(locale, "Forwarder", "轉派合作"),
+520:      label: (locale) => copy(locale, "Driver", "司機合約"),
+525:    label: (locale) => copy(locale, "Vehicle / fleet", "車輛 / 車隊"),
+550:      label: copy(locale, "Terminated", "已終止"),
+557:      label: copy(locale, "Expired", "已到期"),
+564:      label: copy(locale, "Draft", "草稿"),
+571:      label: copy(locale, "Expiring soon", "即將到期"),
+577:    label: copy(locale, "Active", "生效中"),
+593:    `${copy(locale, "Scope", "服務範圍")}: ${contract.serviceScope || formatOpsCodeLabel(locale, contract.contractType)}`,
+597:      `${copy(locale, "Area", "營運區")}: ${contract.operatingAreaId}`,
+602:      `${copy(locale, "Eligibility", "資格模式")}: ${formatOpsCodeLabel(locale, partnerEntry.eligibilityMode)}`,
+668:        label: copy(locale, "Partner governance", "夥伴治理"),
+680:      label: copy(locale, "Fleet governance", "車隊治理"),
+697:      return copy(locale, "Contract detail", "合約詳情");
+699:      return copy(locale, "Partner governance", "夥伴治理");
+701:      return copy(locale, "Fleet governance", "車隊治理");
+716:      "唯讀詳情路由將由後續 ops 子任務交付（Q-OPS03）。",
+795:    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} UTC 產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
+1020:          "合約主檔尚未開通",
+1025:          "本環境的夥伴與車隊合約仍由 Platform Admin 治理面建立。",
+1027:        actionLabel: copy(locale, "Open partner governance", "開啟夥伴治理"),
+1035:        title: copy(locale, "Contract snapshot failed", "合約快照讀取失敗"),
+1041:            "登記資料端點未回傳可用內容。",
+1043:        actionLabel: copy(locale, "Retry", "重新整理"),
+1051:        title: copy(locale, "Contract scope denied", "無法存取合約範圍"),
+1055:          "目前帳號可進入殼層，但沒有合約登記讀取權限。",
+1057:        actionLabel: copy(locale, "Open ops dashboard", "返回儀表板"),
+1065:        title: copy(locale, "Partner directory unavailable", "夥伴目錄不可用"),
+1069:          "夥伴渠道補充資料降級，交易對手名稱可能缺漏；請改用夥伴治理確認最新關係狀態。",
+1071:        actionLabel: copy(locale, "Open platform admin", "開啟 Platform Admin"),
+1082:          "目前條件沒有符合的合約",
+1087:          "放寬狀態、類型或即將到期條件即可恢復結果。",
+1089:        actionLabel: copy(locale, "Clear filters", "清除條件"),
+1098:        title: copy(locale, "No contracts registered", "尚未登記合約"),
+1102:          "登記資料健康，但此環境目前還沒有任何合約紀錄。",
+1104:        actionLabel: copy(locale, "Open revenue review", "前往收益審視"),
+1144:        {copy(locale, `risk:${action.riskLevel}`, `風險:${action.riskLevel}`)}
+1146:          ? copy(locale, " · reason required", " · 需填原因")
+1159:      h: copy(locale, "CONTRACT", "合約"),
+1168:            {row.operatingAreaId ?? copy(locale, "no area", "無營運區")}
+1174:      h: copy(locale, "KIND", "類型"),
+1186:      h: copy(locale, "COUNTERPARTY", "交易對手"),
+1201:      h: copy(locale, "TERM", "合約期間"),
+1219:              ? copy(locale, "Expired", "已到期")
+1221:                ? copy(locale, "Open-ended", "無到期日")
+1226:                      `${row.daysToExpiry} 天後到期`,
+1231:                      `剩 ${row.daysToExpiry} 天`,
+1238:      h: copy(locale, "STATUS / TERMS", "狀態 / 條款"),
+1255:      h: copy(locale, "ACTIONS", "操作"),
+1562:          {copy(locale, "All", "全部")}
+1580:          {copy(locale, "Expiring", "即將到期")}
+1598:          {copy(locale, "Partner programs", "夥伴方案")}
+1634:        title={copy(locale, "Contracts", "合約")}
+1638:          "ops 只讀；mutation 走 Platform Admin / Tenant Governance",
+1652:              {copy(locale, "Refresh", "重新整理")}
+1667:              "合約頁面目前為降級模式",
+1686:              } · 檢查時間 ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
+1699:              "目前顯示的快照非最新",
+1713:              "有合約即將到期",
+1718:              `${expiringCount} 份合約將於 ${EXPIRING_SOON_DAYS} 天內到期；請於影響派車 / 帳務前，向 Platform Admin 確認續約條款。`,
+1725:                {copy(locale, "View expiring", "檢視即將到期")}
+1734:              {copy(locale, "Registered", "已登記")}
+1738:              {copy(locale, "contract master rows", "合約主檔筆數")}
+1743:              {copy(locale, "Active", "生效中")}
+1749:              {copy(locale, "currently effective", "目前有效")}
+1754:              {copy(locale, "Expiring soon", "即將到期")}
+1768:                `${EXPIRING_SOON_DAYS} 天內`,
+1774:              {copy(locale, "Partner entries", "夥伴渠道")}
+1784:                    `${manualReviewCount} 筆待人工審核`,
+1786:                : copy(locale, "no review backlog", "無審核積壓")}
+1793:          title={copy(locale, "Filters", "篩選")}
+1797:            "狀態、類型與即將到期條件都套用同一份快照。",
+1812:                  {copy(locale, "Search", "搜尋")}
+1820:                    "合約編號、夥伴、車輛",
+1828:                  {copy(locale, "Status", "狀態")}
+1835:                  <option value="all">{copy(locale, "All", "全部")}</option>
+1837:                    {copy(locale, "Active", "生效中")}
+1839:                  <option value="draft">{copy(locale, "Draft", "草稿")}</option>
+1841:                    {copy(locale, "Expiring soon", "即將到期")}
+1844:                    {copy(locale, "Terminated / expired", "終止 / 到期")}
+1851:                  {copy(locale, "Kind", "類型")}
+1858:                  <option value="all">{copy(locale, "All", "全部")}</option>
+1869:                  {copy(locale, "Expiring", "即將到期")}
+1876:                  <option value="all">{copy(locale, "All", "全部")}</option>
+1877:                  <option value="yes">{copy(locale, "Yes", "是")}</option>
+1878:                  <option value="no">{copy(locale, "No", "否")}</option>
+1885:                  {copy(locale, "Apply", "套用")}
+1888:                  {copy(locale, "Reset", "重設")}
+1899:                `目前顯示 ${displayedRows.length} / 總數 ${rows.length}`,
+1903:              {copy(locale, "generated", "生成時間")} ·{" "}
+1910:                "畫面 CTA 以 availableActions 為準",
+1918:          title={copy(locale, "Contract registry", "合約登記清單")}
+1922:            "在同一張表整合交易對手、類型、合約期間與關鍵營運條款，提供派車與帳務參考；ops 端僅可讀。",
+1957:                {copy(locale, "emptyReason", "空狀態")} ·{" "}
+1968:          title={copy(locale, "Partner relations", "夥伴關係")}
+1972:            "夥伴合約背後的渠道 slug、方案 id、狀態與資格模式。",
+1986:                  "範圍內沒有夥伴渠道",
+2000:                      "夥伴目錄降級，關係內容暫時不可用。",
+2005:                      "夥伴方案由 Platform Admin 治理面建立。",
+2015:                    h: copy(locale, "PARTNER ENTRY", "夥伴渠道"),
+2029:                    h: copy(locale, "PROGRAM", "方案"),
+2043:                    h: copy(locale, "ELIGIBILITY", "資格模式"),
+2059:                    h: copy(locale, "STATUS", "狀態"),
+2068:                    h: copy(locale, "GOVERNANCE", "治理"),
+2077:                        {copy(locale, "Partner admin", "夥伴管理")}
+===== ops-console-web/app/dashboard/page.tsx =====
+322:      return locale === "en" ? "Open call session" : "開新 call session";
+324:      return locale === "en" ? "Duty handbook" : "值班手冊";
+326:      return locale === "en" ? "Open dispatch" : "前往派遣";
+328:      return locale === "en" ? "Forwarded board" : "查看 forwarded board";
+330:      return locale === "en" ? "Open incidents" : "前往事故";
+332:      return locale === "en" ? "Adapter registry" : "查看 adapter registry";
+334:      return locale === "en" ? "Refresh now" : "立即重新整理";
+336:      return locale === "en" ? "Clear filters" : "清除篩選";
+338:      return locale === "en" ? "Request access" : "申請權限";
+340:      return locale === "en" ? "Retry load" : "重試載入";
+342:      return locale === "en" ? "Platform status" : "查看平台狀態";
+344:      return locale === "en" ? "Contact owner" : "通知負責人";
+498:      return locale === "en" ? "fresh" : "最新";
+500:      return locale === "en" ? "stale" : "已過舊";
+502:      return locale === "en" ? "degraded" : "降級";
+504:      return locale === "en" ? "unknown" : "未知";
+510:    return locale === "en" ? "T3 · 15s" : "T3 · 15 秒";
+524:          locale === "en" ? "Nothing urgent right now" : "目前沒有待處理項目",
+528:            : "目前班次狀態穩定。留意 refresh 時間，並保持派遣工作面待命。",
+533:        title: locale === "en" ? "Not provisioned" : "尚未開通",
+537:            : "後端回報此資料面尚未對目前環境或租戶開通。",
+542:        title: locale === "en" ? "Unable to load data" : "資料載入失敗",
+546:            : "請求失敗。請重試儀表板，或前往對應工作面做直接診斷。",
+551:        title: locale === "en" ? "Permission required" : "需要權限",
+555:            : "你目前的 ops scope 無法查看此資料集。請向 owner app 申請所需角色。",
+563:            : "外部依賴不可用",
+567:            : "外部平台停擺或降級。請先使用 fallback 路徑並檢查 adapter 健康狀態。",
+572:        title: locale === "en" ? "Filters are too narrow" : "篩選條件過窄",
+576:            : "目前 drill-down 條件沒有結果。請清除篩選或回到完整看板。",
+581:        title: locale === "en" ? "No data" : "沒有資料",
+736:      return "訂單";
+738:      return "租戶";
+740:      return "上車地";
+742:      return "時窗";
+744:      return "狀態";
+746:      return "司機";
+756:    return locale === "zh" ? "即時" : "realtime";
+896:    return locale === "en" ? `${value} min` : `${value} 分鐘`;
+1167:        : `>${observability.driverState.oldestLocationLagMinutes} 分鐘`
+1282:      : `模式 ${formatOpsCodeLabel(locale, health.mode)}`,
+1285:      : `執行 ${formatOpsCodeLabel(locale, health.execution_mode)}`,
+1332:              : `${criticalIncidentCount} 件重大事故待立即處理`,
+1336:              : "重大事故必須在交接時第一時間被看見。請先處理 incident recovery，再回到較低優先派遣佇列。",
+1354:              : `${noSupplyCount} 筆 no_supply · ${exceptionHoldCount} 筆 exception_hold · ${overridePendingCount} 筆 override_pending`,
+1406:      label: locale === "en" ? "Supply buffer" : "供給緩衝",
+1411:            : `+${eligibleVehicleGap} 輛`
+1414:            : `${eligibleVehicleGap} 輛`,
+1418:      label: locale === "en" ? "Identity" : "身分摘要",
+1423:      label: locale === "en" ? "Online / eligible drivers" : "在線 / 可派司機",
+1429:        locale === "en" ? "Dispatchable / offline vehicles" : "可派 / 離線車輛",
+1434:      label: locale === "en" ? "Open / critical incidents" : "未結 / 重大事故",
+1439:      label: locale === "en" ? "Overdue maintenance" : "逾期保養",
+1623:                : "關鍵依賴已降級"
+1634:                : "儀表板資料可能已過舊。")
+1645:            title={locale === "en" ? "Shift readiness" : "班次就緒狀態"}
+1649:                : "T3 dashboard 的身份摘要、refresh tier 與 stale-data 提示。"
+1675:                    {locale === "en" ? "Generated" : "產生時間"}
+1681:                    {locale === "en" ? "Source" : "來源"}:{" "}
+1687:                    {locale === "en" ? "Health checked" : "健康檢查"}
+1693:                    {locale === "en" ? "Service state" : "服務狀態"}:{" "}
+1703:            title={locale === "en" ? "Adapter summary" : "Adapter 摘要"}
+1707:                : "在 Dashboard 即可看到 forwarded 依賴健康狀態。"
+1777:                      : `最後檢查 ${formatTimestamp(topAdapter.lastCheckedAt, locale)}`}
+1782:                    {locale === "en" ? "error" : "錯誤"}
+1788:                        : "目前沒有 adapter 錯誤。")}
+1813:                  : `${formatCompactNumber(dispatch.queueDepth)} 筆在隊列`
+1838:            label={locale === "en" ? "Dispatch-Eligible Drivers" : "可派司機"}
+1844:                : `${formatCompactNumber(onlineDrivers)} 在線`
+1849:            label={locale === "en" ? "Stale Location" : "位置失聯"}
+1855:                  : `${formatCompactNumber(staleLocationDrivers)} 筆 stale`
+1876:                  : `${formatCompactNumber(criticalIncidentCount)} 重大`
+1892:                  : `${formatCompactNumber(criticalIncidentCount)} 重大`
+1905:            title={locale === "en" ? "Today's Attention" : "今日待處理"}
+1909:                : "排序：critical → SLA breach → blocking"
+1913:                {locale === "en" ? "Open all" : "展開所有"}
+1956:            title={locale === "en" ? "Health Signals" : "健康訊號"}
+1960:                : "供需、車隊就緒度與執行情境。"
+1983:            locale === "en" ? "Current Dispatch Queue" : "當前 dispatch 隊列"
+===== ops-console-web/app/dispatch/[dispatchId]/page.tsx =====
+79:  "建立",
+215:    return copy(locale, "unknown", "未知");
+233:    return locale === "zh" ? "即時" : "realtime";
+259:  return locale === "zh" ? "即時" : "realtime";
+415:            ? "人工覆核"
+605:      title: locale === "zh" ? "進入 queue" : "Entered queue",
+608:          ? `${formatOpsCodeLabel(locale, getTenantLabel(order))} 透過 ${formatOpsCodeLabel(
+611:            )} 建立訂單。`
+622:      title: locale === "zh" ? "計價" : "Pricing",
+625:          ? `套用 ${order.quotedFareRuleVersion ?? "manual"}：${formatMinorCurrency(
+642:      title: locale === "zh" ? "派遣評估" : "Dispatch evaluation",
+645:          ? `job ${job.dispatchJobId} 目前為 ${formatOpsCodeLabel(locale, job.status)}。`
+659:          ? `第 ${order.noSupplyEscalation.attemptCount} 次嘗試後，執行 ${formatOpsCodeLabel(
+673:      title: locale === "zh" ? "人工覆核觸發" : "Exception hold raised",
+676:          ? `原因：${formatOpsCodeLabel(locale, order.exceptionHold.reasonCode)}。`
+693:            )}，申請人 ${order.exceptionHold.overrideRequest.requestedBy.actorId}。`
+704:      title: locale === "zh" ? "覆核完成" : "Exception resolved",
+707:          ? `${order.exceptionHold.resolution.actorId} 記錄 ${formatOpsCodeLabel(
+721:      title: locale === "zh" ? "人工車資覆寫" : "Manual fare override",
+724:          ? `${order.manualFareOverride.actorId} 套用人工車資，原因：${order.manualFareOverride.reason}。`
+735:      title: locale === "zh" ? "司機已接單" : "Driver accepted",
+738:          ? `${task.driverId} 已接受 ${task.vehicleId} 的任務。`
+749:      title: locale === "zh" ? "前往接送點" : "Departed to pickup",
+752:          ? `${task.vehicleId} 已開始前往接送點。`
+763:      title: locale === "zh" ? "到達接送點" : "Arrived at pickup",
+766:          ? `${task.vehicleId} 已到達接送點。`
+777:      title: locale === "zh" ? "開始行程" : "Trip started",
+780:          ? `${task.driverId} 已開始載客。`
+791:      title: locale === "zh" ? "完成任務" : "Task completed",
+794:          ? `${task.vehicleId} 已完成任務。`
+842:      title: copy(locale, "Mirror received", "鏡像建立"),
+846:        `為 ${formatOpsCodeLabel(locale, order.platformCode)} 訂單 ${order.externalOrderId} 建立 forwarded 鏡像 ${order.mirrorOrderId}。`,
+854:      title: copy(locale, "Status sync", "狀態同步"),
+858:        `本地鏡像狀態為 ${formatOpsCodeLabel(locale, order.status)}；最後外部狀態 ${order.lastNativeStatus ?? "未知"}。`,
+869:      title: copy(locale, "Sync failure", "同步失敗"),
+880:      title: copy(locale, "Manual fallback engaged", "啟動人工 fallback"),
+883:        copy(locale, "Manual fallback required.", "需要人工 fallback。"),
+893:      title: copy(locale, "Reconciliation", "對帳"),
+897:        `對帳 ${formatOpsCodeLabel(locale, order.reconciliationJob.status)} · ${order.reconciliationJob.mismatchCount} 筆不符 · 原因 ${formatOpsCodeLabel(locale, order.reconciliationJob.reason)}。`,
+936:            ? "可由 reviewer 放行"
+939:            ? "需維持人工覆核"
+947:      status: locale === "zh" ? "已套用" : "applied",
+951:        locale === "zh" ? "確認後回到一般派遣" : "return to normal dispatch",
+957:    status: locale === "zh" ? "未申請" : "not requested",
+965:            ? "目前沒有手動 override"
+968:      locale === "zh" ? "可直接指派或重派候選" : "candidate can be assigned",
+1078:          ? "目前沒有 dispatch activity。"
+1235:        label: copy(locale, "Contact rider", "聯絡乘客"),
+1242:        label: copy(locale, "Assign #1", "指派候選 #1"),
+1249:        label: copy(locale, "Release driver", "釋放司機"),
+1256:        label: copy(locale, "Cancel order", "取消訂單"),
+1263:        label: copy(locale, "Fare override", "車資覆寫"),
+1270:        label: copy(locale, "Redispatch", "重新派遣"),
+1277:        label: copy(locale, "Resolve no-supply", "處理無供給"),
+1284:        label: copy(locale, "Escalate to incident", "升級事故"),
+1291:        label: copy(locale, "Complete reconciliation", "完成對帳"),
+1298:        label: copy(locale, "Manual fallback", "人工 fallback"),
+1305:        label: copy(locale, "Force refresh", "強制刷新"),
+1312:        label: copy(locale, "Broadcast", "廣播候選"),
+1319:        label: copy(locale, "Report sync failure", "回報同步失敗"),
+1337:      : copy(locale, "unavailable", "目前不可用");
+1343:    `風險:${action.riskLevel}`,
+1346:    ? `${risk} · ${copy(locale, "reason required", "需填原因")}`
+1357:        {copy(locale, "read-only · terminal", "唯讀 · 終態")}
+1571:        title: copy(locale, "Dispatch job not started", "派遣工作尚未啟動"),
+1575:          "此訂單尚未建立派遣工作，進入 matching 後才會開始評分候選。",
+1577:        actionLabel: copy(locale, "Open dispatch board", "回派車看板"),
+1585:        title: copy(locale, "Candidate snapshot failed", "候選快照讀取失敗"),
+1589:          "候選端點未回傳可用內容，請重新整理快照。",
+1591:        actionLabel: copy(locale, "Retry", "重新整理"),
+1599:        title: copy(locale, "Candidate scope denied", "無候選讀取權限"),
+1603:          "目前帳號可進入工作區，但缺少候選評分的供給讀取權限。",
+1605:        actionLabel: copy(locale, "Open ops dashboard", "返回儀表板"),
+1613:        title: copy(locale, "No eligible supply", "目前無可用供給"),
+1617:          "供給耗盡或 no-supply 流程啟動中，請改由 no-supply / 治理流程接手。",
+1619:        actionLabel: copy(locale, "No-supply board", "無供給看板"),
+1630:          "目前篩選沒有候選",
+1635:          "目前 gate 篩選把所有評分候選都排除了，請放寬 gate 檢視。",
+1637:        actionLabel: copy(locale, "Clear gate filter", "清除 gate 篩選"),
+1648:          "候選因資格被擋",
+1653:          "附近司機皆未通過資格或證照 gate，指派前請先處理法遵。",
+1655:        actionLabel: copy(locale, "Open fleet governance", "開啟車隊治理"),
+1664:        title: copy(locale, "No candidates yet", "目前沒有候選"),
+1668:          "matching 正常，但此工作項目目前還沒有評分出候選。",
+1670:        actionLabel: copy(locale, "Back to dispatch board", "回派車看板"),
+1719:        {copy(locale, "emptyReason", "空狀態")} ·{" "}
+1804:    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} UTC 產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
+1828:        {copy(locale, "generated", "生成時間")} ·{" "}
+1835:          "畫面 CTA 以 availableActions 為準",
+2198:        `${candidateRows.length} ${copy(locale, "candidates", "候選")}`,
+2210:              "部分派遣資料降級",
+2223:              "工作項目已進入終態 · 唯讀",
+2228:              "不提供派遣 CTA；可檢視下方時間軸與法遵紀錄。",
+2246:            title={`${copy(locale, "Candidates · ranked", "候選 driver · ranked")} (${candidateRows.length})`}
+2275:                    locale === "zh" ? "候選通過" : "candidates clear"
+2328:          <Card theme={theme} title={copy(locale, "State machine", "訂單狀態")}>
+2338:            title={copy(locale, "Activity · Timeline", "活動")}
+2408:    label: copy(locale, "Inspect adapter", "檢視 adapter"),
+2417:        label: copy(locale, "Open reconciliation", "開啟對帳"),
+2451:            {copy(locale, "accepted", "已接受")}
+2455:            {copy(locale, "broadcast", "廣播中")}
+2465:    { h: copy(locale, "DRIVER", "司機"), k: "driverCell", w: 200 },
+2466:    { h: copy(locale, "PLATFORM STATE", "平台狀態"), k: "stateCell", w: 160 },
+2494:          ? `${copy(locale, "adapter", "轉接器")} ${formatOpsCodeLabel(locale, adapterHealth.status)}`
+2506:            "此訂單為 forwarded mirror · 不可假裝為 owned",
+2511:            "本地沒有 owned 指派。所有 mutation 必須透過 reconciliation issue 走平台 finance owner，本地僅同步外部狀態。",
+2530:              "轉接器相依降級",
+2535:              `${order.platformCode} 轉接器為 ${adapterHealth?.status ?? "degraded"}${adapterHealth?.lastError ? ` · ${adapterHealth.lastError}` : ""}；廣播與即時同步可能不可用。`,
+2547:              "鏡像已進入終態 · 唯讀",
+2552:              "僅提供強制刷新；對帳與金流於來源平台結算。",
+2570:            title={`${copy(locale, "Broadcast candidates", "廣播候選")} (${candidateDriverRows.length})`}
+2612:                  v: `${copy(locale, "yes", "是")} · ${waypointCount} ${copy(locale, "waypoints", "途經點")}`,
+2648:                      ? copy(locale, "manual fallback", "人工 fallback")
+2658:          <Card theme={theme} title={copy(locale, "State machine", "訂單狀態")}>
+2675:            title={copy(locale, "Activity · Timeline", "活動")}
+===== ops-console-web/app/dispatch/forwarded-order-board.tsx =====
+235:    return locale === "zh" ? "未知" : "Unknown";
+===== ops-console-web/app/dispatch/page.tsx =====
+416:          ? "待派送與廣播中的自營訂單。"
+423:          ? "已指派司機、進行中的工作項目。"
+430:          ? "例外保留，需要先清除 gate 才能回到 queue。"
+437:          ? "無合格供給，需要人工延展或升級。"
+444:          ? "等待 override / approval request 的治理阻塞。"
+451:          ? "外部平台鏡像、adapter 與 reconciliation 觀察。"
+484:    return locale === "zh" ? `${totalMinutes} 分` : `${totalMinutes}m`;
+489:    ? `${hours} 小時 ${minutes} 分`
+495:    return locale === "zh" ? "即時" : "realtime";
+635:  return locale === "zh" ? "即時" : "realtime";
+778:          ? `${mismatchCount} 筆不一致`
+816:      return zh ? "指派候選司機" : "Assign candidate";
+820:      return zh ? "釋放 / 改派司機" : "Release / reassign driver";
+824:      return zh ? "重新派送" : "Redispatch";
+827:      return zh ? "取消訂單" : "Cancel order";
+831:      return zh ? "申請車資覆寫" : "Request fare override";
+834:      return zh ? "解除保留" : "Resolve hold";
+836:      return zh ? "申請例外覆核" : "Request override";
+838:      return zh ? "核准 override" : "Approve override";
+840:      return zh ? "拒絕 override" : "Reject override";
+843:      return zh ? "升級為事件" : "Escalate to incident";
+845:      return zh ? "延展搜尋" : "Extend search";
+847:      return zh ? "取消 no-supply 訂單" : "Cancel no-supply order";
+849:      return zh ? "人工處理 no-supply" : "Resolve no-supply";
+851:      return zh ? "前往 approval request" : "Open approval request";
+854:      return zh ? "觸發 reconciliation" : "Trigger reconciliation";
+856:      return zh ? "啟動 manual fallback" : "Engage manual fallback";
+860:      return zh ? "強制刷新" : "Force refresh";
+862:      return zh ? "查看 adapter ↗" : "Inspect adapter ↗";
+1092:      title: zh ? "目前沒有工作項目" : "No work items yet",
+1094:        ? "這個 board 目前沒有資料，等待新的 dispatch 狀態流入。"
+1100:      title: zh ? "尚未完成佈建" : "Not provisioned",
+1102:        ? "此 board 需要先完成 adapter / integration 設定後才會有資料。"
+1108:      title: zh ? "讀取失敗" : "Failed to load",
+1110:        ? "資料請求失敗。請使用 refresh，或查看 degraded banner。"
+1116:      title: zh ? "沒有權限" : "Permission denied",
+1118:        ? "目前角色沒有此 board 所需的權限。"
+1124:      title: zh ? "外部系統不可用" : "External platform unavailable",
+1126:        ? "外部 adapter / callback 無法提供資料，請改走 manual fallback。"
+1132:      title: zh ? "目前不可派送" : "Not eligible right now",
+1134:        ? "此狀態通常不適用於 ops console，但後端回傳了 driver eligibility 限制。"
+1140:      title: zh ? "篩選後無結果" : "No matches for current filters",
+1142:        ? "這個 board 有資料，但目前的 service / facet 篩選沒有命中。"
+1176:            ? "請改查 adapter health 與 reconciliation queue。"
+1193:              {zh ? "重設 board" : "Reset board"}
+1233:          (locale === "zh" ? "目前不可用" : "Unavailable")}
+1250:        {action.label ?? (locale === "zh" ? "前往處理" : "Open")}
+1281:        label: zh ? "查看 adapter ↗" : "Inspect adapter ↗",
+1293:            ? `${formatDispatchCode(locale, degradedAdapters[0]?.platformCode, "Adapter")} 降級 · Forwarded mirror 受影響`
+1298:            ? `目前可見 ${visibleCount} / ${boardCount} 筆鏡像單；優先走 reconciliation / manual fallback。`
+1329:            ? `狀態 ${formatDispatchCode(locale, selectedRecord.status)}；外部單號 ${selectedRecord.externalOrderId}。`
+1346:            ? "需平台審批 · /approval-requests"
+1351:            ? `${title} 正等待 override / approval request。`
+1366:      locale === "zh" ? "未知" : "unknown",
+1373:        title={zh ? "例外保留需先清除" : "Exception hold must be cleared"}
+1376:            ? `${title} · hold 原因 ${holdReason}`
+1400:            ? "No eligible supply 需要人工介入"
+1405:            ? `${title} · 已嘗試 ${selectedRecord.dispatchAttemptCount} 次，最後原因 ${formatDispatchCode(locale, selectedRecord.lastDispatchFailureReason ?? "unknown")}。`
+1444:            ? "目前為已指派 / 行程進行中工作項目。"
+1445:            : "目前為 ready queue 焦點工作項目。"
+1460:        title={locale === "zh" ? "目前沒有可用動作" : "No available actions"}
+1463:            ? "這個 work item 目前是 read-only，或後端尚未提供 `availableActions`。"
+1511:                  ? "由 availableActions 驅動的可執行 CTA。"
+1544:        {locale === "zh" ? "無動作" : "No actions"}
+1599:        ? "資料已過期"
+1602:        ? "資料新鮮度未知"
+1633:            ? "Dispatch 依賴服務中斷"
+1636:            ? "Dispatch 依賴服務降級"
+2222:              (zh ? "前往 approval" : "Open approval")}
+2336:            ? "即時派車工作流 · 6 個子看板 · queue / candidates / ETA / override"
+2445:                        ["all", `${zh ? "全部" : "All"} ${forwardedBaseCount}`],
+2448:                          `${zh ? "需注意" : "Attention"} ${sortedForwardedOrders.filter(needsForwardedAttention).length}`,
+2460:                          `${zh ? "終態" : "Terminal"} ${sortedForwardedOrders.filter(isForwardedTerminal).length}`,
+2484:                      ["all", zh ? "全部服務" : "All services"],
+2525:                    ? `${zh ? "顯示" : "Showing"} ${visibleForwardedOrders.length} / ${forwardedBaseCount}`
+2526:                    : `${zh ? "顯示" : "Showing"} ${visibleOwnedByBoard.length} / ${boardCounts[board]}`}
+2551:                            {zh ? "焦點 work item" : "Focused work item"}
+2566:                            {zh ? "跨 app deep links" : "Cross-app deep links"}
+2643:                      title={zh ? "沒有焦點 work item" : "No focused work item"}
+2646:                          ? "目前 board 沒有可選擇的列。"
+===== ops-console-web/app/drivers/[driverId]/page.tsx =====
+238:          : copy(locale, "Unknown error", "未知錯誤"),
+291:      return copy(locale, "No records yet", "目前沒有資料");
+293:      return copy(locale, "Not provisioned", "尚未 provision");
+295:      return copy(locale, "Snapshot unavailable", "快照暫不可用");
+297:      return copy(locale, "Permission required", "權限不足");
+302:        "外部相依暫不可用",
+305:      return copy(locale, "No matches after filtering", "套用篩選後沒有結果");
+307:      return copy(locale, "No records yet", "目前沒有資料");
+317:        "這個區塊健康可用，但目前這位司機沒有對應資料。",
+323:        "這位司機所需的上游資料尚未 provision。",
+329:        "服務在回傳可用快照前發生錯誤。",
+335:        "你可以進入此頁，但此子區塊需要更高權限才能讀取。",
+341:        "此區塊依賴的外部或降級上游系統目前暫不可用。",
+347:        "上游資料存在，但目前篩選條件沒有留下任何符合的列。",
+353:        "目前沒有可顯示的資料。",
+471:      `${action.label} · 需填寫理由（${descriptor.riskLevel}）`,
+612:          `降級區塊：${degradedSections.join("、")}`,
+617:          "司機詳情區塊已完整載入。",
+623:        `生成時間 ${formatDateTime(locale, metadata.generatedAt)}`,
+628:        "後端尚未提供 refresh metadata；目前顯示最新一次 server-rendered 快照。",
+635:      `T3 節奏 · ${metadata.source} 快照 · ${freshnessLabel}`,
+823:      label: copy(locale, "Back to driver registry", "回到司機名冊"),
+831:          title={copy(locale, "Driver detail", "司機詳情")}
+835:            "名冊載入失敗",
+946:    presenceResult.error ? copy(locale, "platform bindings", "平台綁定") : null,
+947:    forwardedResult.error ? copy(locale, "relay", "轉派") : null,
+948:    statementsResult.error ? copy(locale, "earnings", "收入") : null,
+949:    tasksResult.error ? copy(locale, "active tasks", "進行中任務") : null,
+950:    incidentsResult.error ? copy(locale, "incidents", "事故") : null,
+952:      ? copy(locale, "shifts", "班次")
+954:    locationsResult.error ? copy(locale, "location", "位置") : null,
+1031:      label: copy(locale, "Force offline (per platform)", "強制下線（單平台）"),
+1038:      label: copy(locale, "Request re-auth", "請司機 re-auth"),
+1045:          label: copy(locale, "Lift suppression", "解除 suppression"),
+1059:    label: copy(locale, "Refresh", "重新整理"),
+1140:      eyebrow: copy(locale, "Matching suppression", "派遣抑制"),
+1145:        `TTL 至 ${formatDateTime(locale, activeSuppression.expiresAt)}`,
+1150:        "司機已被排除於派遣媒合之外；ops_manager 可延長 TTL。",
+1160:                {copy(locale, "Open source incident", "前往來源事故")}
+1190:          {copy(locale, "Open incident", "前往事故")}
+1198:    `${copy(locale, "work state", "工作狀態")}: ${formatOpsCodeLabel(
+1206:      "裝置綁定",
+1211:    <span key="overview">{copy(locale, "Overview", "總覽")}</span>,
+1213:      {copy(locale, "Platform bindings", "平台綁定")}
+1215:    <span key="tasks">{copy(locale, "Active tasks", "進行中任務")}</span>,
+1216:    <span key="earnings">{copy(locale, "Earnings", "收入")}</span>,
+1217:    <span key="shifts">{copy(locale, "Shifts", "班次")}</span>,
+1222:      {copy(locale, "Incidents", "事故")}
+1233:      h: copy(locale, "Platform", "平台"),
+1240:      h: copy(locale, "Account", "帳號"),
+1248:            {copy(locale, "unbound", "未綁定")}
+1253:      h: copy(locale, "Presence", "在線"),
+1262:              {copy(locale, "re-auth", "需 re-auth")}
+1269:      h: copy(locale, "Eligibility", "資格"),
+1289:                {copy(locale, "expiring", "即將到期")}
+1310:      h: copy(locale, "Reference", "編號"),
+1327:      h: copy(locale, "Domain", "領域"),
+1336:      h: copy(locale, "Status", "狀態"),
+1345:      h: copy(locale, "Detail", "細節"),
+1352:      h: copy(locale, "Platform", "平台"),
+1363:      h: copy(locale, "Error", "錯誤"),
+1377:      h: copy(locale, "Fallback", "人工轉派"),
+1383:              copy(locale, "manual fallback", "人工轉派")}
+1393:      h: copy(locale, "Period", "週期"),
+1399:      h: copy(locale, "Payout", "撥款"),
+1412:      h: copy(locale, "Net", "淨額"),
+1423:      h: copy(locale, "Receipt", "對帳單號"),
+1431:      h: copy(locale, "Shift", "班次"),
+1437:      h: copy(locale, "Status", "狀態"),
+1446:      h: copy(locale, "Clock-in", "上班"),
+1452:      h: copy(locale, "Attendance", "出勤"),
+1466:      h: copy(locale, "Incident", "事故"),
+1480:      h: copy(locale, "Severity", "嚴重度"),
+1493:      h: copy(locale, "Status", "狀態"),
+1502:      h: copy(locale, "Title", "標題"),
+1539:                ? copy(locale, "dispatchable", "可派遣")
+1540:                : copy(locale, "not_dispatchable", "不可派遣")}
+1549:                {copy(locale, "matching suppressed", "派遣抑制中")}
+1578:            `刷新層級 T3 · ${REFRESH_TIER}（15 秒）· 緊急事件即時推播`,
+1596:              "此司機目前處於 SOS in_response — dispatch action 已停用",
+1614:                        `前往 ${sosIncident.incidentId}`,
+1635:              "此司機目前處於派遣抑制狀態",
+1643:              `TTL 至 ${formatDateTime(locale, activeSuppression.expiresAt)}`,
+1654:                      label: copy(locale, "Related incident", "相關事故"),
+1673:              "平台在線狀態降級",
+1687:                  `平台綁定 · ${presences.length} 個平台`,
+1692:                  `${onlinePlatforms.length} 在線 · ${reauthPlatforms.length} 需 re-auth · ${ineligiblePlatforms.length} 不符資格`,
+1720:                      "這位司機目前沒有任何平台綁定。",
+1733:                  `進行中任務 · ${taskRows.length}`,
+1741:                      "標記 forwarded 不可用",
+1764:                      "目前沒有進行中的自有或轉派任務。",
+1776:                `收入 · ${driverStatements.length} 張對帳單`,
+1786:                      `最新 ${latestStatement.periodMonth} · 淨額 ${formatMinorCurrency(
+1796:                  label: copy(locale, "Generate statement", "產生對帳單"),
+1823:                    "這位司機尚未產生任何對帳單。",
+1837:                  "人工介入與抑制紀錄",
+1849:                      "這位司機目前沒有人工介入或派遣抑制紀錄。",
+1861:                `轉派失敗 · ${relayFailures.length}（近期）`,
+1880:                    "目前時段內沒有轉派失敗。",
+1891:                `班次與出勤 · ${driverShifts.length}`,
+1912:                    "這位司機沒有近期班次或出勤紀錄。",
+1923:                `近期事故 · ${driverIncidents.length}`,
+1946:                    "目前沒有與這位司機相關的事故。",
+1954:              title={copy(locale, "Location & status", "位置與狀態")}
+1970:                      ? copy(locale, "Location unknown", "位置未知")
+1972:                        ? copy(locale, "No location sample", "無位置樣本")
+1974:                          ? copy(locale, "Location stale", "位置過舊")
+1975:                          : copy(locale, "Location live", "位置即時")}
+1990:                      {copy(locale, "Eligibility blocked", "資格阻擋")}:
+2003:                      label: copy(locale, "Back to drivers", "回到司機名冊"),
+2017:                      label: copy(locale, "Open dispatch", "前往派遣"),
+===== ops-console-web/app/drivers/page.tsx =====
+355:      ? "已綁定"
+358:      ? "未綁定"
+1314:        title={locale === "zh" ? "司機" : "Drivers"}
+===== ops-console-web/app/feature-flags/page.tsx =====
+342:    "driver-app.earnings": "啟用司機 App 收益讀模型",
+343:    "driver-app.incidents": "啟用司機 App 事故回報",
+344:    "driver-app.shift": "啟用司機 App 班次與出勤追蹤",
+345:    "driver-app.tasks": "啟用司機 App 任務生命週期",
+346:    "ops-console.callcenter": "啟用營運後台客服中心工作階段檢視",
+347:    "ops-console.complaint": "啟用營運後台客訴案件管理",
+348:    "ops-console.dispatch": "啟用營運後台派車調度板",
+349:    "ops-console.reports": "啟用營運後台報表任務管理",
+350:    "phase1.read-models": "啟用 Phase 1 讀模型介面",
+351:    "phase1.smoke-paths": "啟用 Phase 1 smoke test 端點",
+352:    "tenant-portal.billing": "啟用租戶入口帳務檢視",
+353:    "tenant-portal.booking": "啟用租戶入口訂車管理",
+354:    "tenant-portal.reports": "啟用租戶入口報表任務提交",
+355:    "tenant-portal.webhooks": "啟用租戶入口 Webhook 管理",
+952:          locale === "zh" ? "功能旗標 · read only" : "Feature Flags · read only"
+1094:                  label={locale === "zh" ? "可見旗標" : "Visible flags"}
+1097:                    locale === "zh" ? "目前快照總數" : "Current snapshot total"
+1102:                  label={locale === "zh" ? "進行中 rollout" : "Mid-rollout"}
+1105:                    locale === "zh" ? "跨租戶值不一致" : "Tenant values diverge"
+1152:            title={locale === "zh" ? "治理邊界" : "Governance boundary"}
+1155:                ? "ops 只做 read-only 可見性與交叉 app 深連結。"
+1178:                  label={locale === "zh" ? "已啟用" : "Enabled"}
+1182:                      ? "營運可見 enabled"
+1188:                  label={locale === "zh" ? "租戶層級" : "Tenant-scoped"}
+1192:                      ? "有 override 足跡"
+===== ops-console-web/app/incidents/[incidentId]/incident-detail-action-panel.tsx =====
+95:    return locale === "en" ? "Update incident" : "更新事故";
+98:    return locale === "en" ? "Resolve incident" : "標記事故已處理";
+101:    return locale === "en" ? "Close incident" : "關閉事故";
+104:    return locale === "en" ? "Add recovery action" : "新增補救行動";
+107:    return locale === "en" ? "Acknowledge escalation" : "確認升級";
+110:    return locale === "en" ? "Lift suppression" : "解除抑制";
+120:        : "調整分類、嚴重程度、負責人、升級對象、狀態與結案備註。";
+124:        : "在補救完成後將事故標記為已處理。";
+128:        : "關閉事故並記錄必填的結案原因。";
+132:        : "將乘客或營運補救行動記錄進時間線。";
+136:        : "記錄升級對象已接受此次 handoff。";
+140:        : "此動作會停留在 incident 工作區內完成。";
+302:        title={locale === "en" ? "Lift suppression" : "解除抑制"}
+311:              : "這個 incident 表單目前不能直接寫入司機抑制解除"
+316:              : "deep link 現在會正確落點。請先到 Driver detail 做情境確認，再回到此頁追蹤司機狀態更新。"
+328:            {locale === "en" ? "Dismiss" : "關閉"}
+346:          : "此動作必須填寫原因。",
+360:          : "動作已送出，正在刷新 timeline 與 audit 摘要。";
+379:            : `已由 ${created.actor} 記錄 ${formatOpsCodeLabel(locale, created.actionType)}。`;
+423:                          : `升級已由 ${actor} 確認：${note}`;
+427:                        : `升級已由 ${actor} 確認。`;
+481:            : "incident 動作失敗。",
+496:            : "動作上下文"
+508:                : `${receipt.title}已完成`
+517:                  : `已記錄動作 ${receipt.actionId}`
+520:                  : "動作已記錄 · 回執編號待後端提供"}
+533:                {locale === "en" ? "Open latest audit" : "開啟最新審計"}
+539:                  : "audit 摘要會隨 server snapshot 一起刷新。"}
+554:              {locale === "en" ? "Dismiss receipt" : "關閉回執"}
+569:                : `${actionCopy(selectedAction.action, locale)}確認`
+608:                label={locale === "en" ? "Category" : "分類"}
+678:                    : "關閉原因"
+695:                label={locale === "en" ? "Acknowledged by" : "確認人"}
+705:                label={locale === "en" ? "Acknowledgment note" : "確認備註"}
+770:              label={locale === "en" ? "Required reason" : "必填原因"}
+798:                  : "送出中"
+801:                  : `確認${actionCopy(selectedAction.action, locale)}`}
+816:              {locale === "en" ? "Cancel" : "取消"}
+830:          title={locale === "en" ? "Unknown action intent" : "未知的動作意圖"}
+834:              : "這個 incident snapshot 無法識別 deep link 帶來的 intent。"
+===== ops-console-web/app/incidents/[incidentId]/page.tsx =====
+102:    title: { en: "No records yet", zh: "目前沒有資料" },
+105:      zh: "這個區塊目前是合法空白；等事故流程產生資料後會顯示在這裡。",
+111:    title: { en: "Feature not provisioned", zh: "功能尚未開通" },
+114:      zh: "這個租戶或環境尚未開通對應能力。",
+120:    title: { en: "Fetch failed", zh: "資料讀取失敗" },
+123:      zh: "請求失敗，頁面無法建立可信的區塊狀態。",
+129:    title: { en: "Permission denied", zh: "沒有檢視權限" },
+132:      zh: "你可以看到事故頁框架，但沒有此關聯資料的讀取權限。",
+138:    title: { en: "External dependency unavailable", zh: "外部依賴暫時不可用" },
+141:      zh: "這個區塊依賴其他服務；事故仍可檢視，但外部依賴目前降級。",
+149:      zh: "目前篩選條件沒有結果",
+153:      zh: "來源有資料，但目前篩選視圖把它排除了。",
+254:    return locale === "en" ? "Time not recorded" : "尚未記錄時間";
+265:      : `${deltaMinutes} 分鐘前`;
+269:  return locale === "en" ? `${deltaHours} hr ago` : `${deltaHours} 小時前`;
+462:    return locale === "en" ? "Update incident" : "更新事故";
+465:    return locale === "en" ? "Resolve" : "標記已處理";
+468:    return locale === "en" ? "Close" : "關閉事故";
+471:    return locale === "en" ? "Add recovery" : "新增補救";
+474:    return locale === "en" ? "Acknowledge escalation" : "確認升級";
+477:    return locale === "en" ? "Lift suppression" : "解除抑制";
+551:        : `停用：${formatOpsCodeLabel(locale, action.disabledReasonCode ?? "unavailable")}`,
+555:        : "高風險確認"
+559:          : "中風險確認"
+562:          : "低風險動作",
+566:        : "必填原因"
+571:        : "停留在此事故工作區"
+831:                    {locale === "en" ? "Recorded" : "已記錄"}
+863:      k: locale === "en" ? "Dispatch" : "派遣單",
+879:      k: locale === "en" ? "Vehicle" : "車輛",
+893:      k: locale === "en" ? "Driver" : "司機",
+907:      k: locale === "en" ? "Complaint" : "客訴",
+921:      k: locale === "en" ? "Latest audit" : "最新審計",
+931:              : "於新分頁開啟 platform-admin 審計"
+945:      k: locale === "en" ? "Occurred" : "發生時間",
+950:      k: locale === "en" ? "Created" : "建立時間",
+955:      k: locale === "en" ? "Assigned to" : "負責人",
+980:                : "已確認"
+983:                : "待確認"}
+989:      k: locale === "en" ? "Severity" : "嚴重程度",
+997:      k: locale === "en" ? "Acknowledged at" : "確認時間",
+1002:      k: locale === "en" ? "Status" : "狀態",
+1010:      k: locale === "en" ? "Escalation" : "升級對象",
+1019:      k: locale === "en" ? "Location" : "地點",
+1023:      k: locale === "en" ? "Vehicle" : "車輛",
+1028:      k: locale === "en" ? "Tenant" : "租戶",
+1033:      k: locale === "en" ? "Reported by" : "回報來源",
+1048:        : `來自派遣異常 ${incident.sourceDispatchExceptionOrderId}`
+1054:        : `目前由 ${incident.assignedTo} 處理`
+1151:                    : "依 contract 唯讀"}
+1165:                : "所有 CTA 由 availableActions 驅動；中高風險動作維持確認語意，高風險動作必須填寫原因。"}
+1187:                  : `${formatOpsCodeLabel(locale, incident.severity)}事故協調進行中`
+1205:                      : `資料快照目前為 ${formatOpsCodeLabel(locale, refreshMetadata.dataFreshness)}`
+1208:                      : "缺少刷新中繼資料"
+1214:                      : `來源 ${formatOpsCodeLabel(locale, refreshMetadata.source)}。若時間線或指派狀態看起來過期，請先重新整理再操作。`
+1217:                      : "後端沒有為這筆 incident snapshot 回傳 UiRefreshMetadata。"
+1228:                  locale === "en" ? "Read-only incident state" : "唯讀事故狀態"
+1233:                    : "此事故已處理或關閉。補救與審計資訊仍可檢視，但變更動作應維持停用。"
+1254:              title={locale === "en" ? "Event summary" : "事件摘要"}
+1351:              title={locale === "en" ? "Audit subset" : "事故審計摘要"}
+1448:                            : "這是 pre-recovery 狀態；請透過 incident 流程記錄第一筆補救。"}
+1459:              title={locale === "en" ? "Suppression state" : "配對抑制狀態"}
+1470:                        : "司機配對已被抑制"
+1475:                        : `原因 ${suppression.reasonCode}`,
+1477:                        ? `${locale === "en" ? "Expires" : "到期"} ${formatDateTime(locale, suppression.expiresAt)}`
+1488:                        k: locale === "en" ? "Reason code" : "原因代碼",
+1492:                        k: locale === "en" ? "Expires at" : "到期時間",
+1497:                        k: locale === "en" ? "Source incident" : "來源事故",
+1501:                        k: locale === "en" ? "Lifted at" : "解除時間",
+1518:                          : "此事故已有關聯司機，但目前沒有生效中的 DriverMatchingSuppression。"}
+1531:                        : "這筆事故目前沒有關聯司機，因此不適用配對抑制狀態。"}
+1540:              title={locale === "en" ? "Linked entities" : "關聯實體"}
+1547:              title={locale === "en" ? "Navigation" : "導覽"}
+1562:                      {locale === "en" ? "Open dispatch" : "開啟派遣單"}
+1572:                    <span>{locale === "en" ? "Open driver" : "開啟司機"}</span>
+1581:                    <span>{locale === "en" ? "Open vehicle" : "開啟車輛"}</span>
+1593:                      {locale === "en" ? "Open complaint" : "開啟客訴"}
+===== ops-console-web/app/incidents/[incidentId]/refresh-tier.tsx =====
+100:            ? "T6 / 手動"
+107:        ? "最新"
+109:          ? "待刷新"
+111:            ? "降級"
+112:            : "未知"
+165:        {locale === "zh" ? "重新整理" : "Refresh"}
+===== ops-console-web/app/incidents/page.tsx =====
+114:    return locale === "en" ? "Time not recorded" : "尚未記錄時間";
+123:      : `${deltaMinutes} 分鐘前`;
+127:  return locale === "en" ? `${deltaHours} hr ago` : `${deltaHours} 小時前`;
+281:      : `司機 ${record.relatedDriverId}`
+284:      : "未連結司機";
+288:      : `於 ${record.location}`
+291:      : "地點待補";
+295:      : `目前由 ${record.assignedTo} 接手處理。`
+298:      : "目前尚未指派 owner。";
+693:        title={locale === "en" ? "Incident Center" : "事故中心"}
+697:            : "安全 · 碰撞 · 財損 · 服務補償"
+709:              {locale === "en" ? "Filters" : "類別"}
+758:                {locale === "en" ? "Open incident" : "前往事件"}
+771:                : "目前沒有重大事故待處理。"
+840:            title={locale === "en" ? "Filter incidents" : "篩選事故"}
+933:                    {locale === "en" ? "Open detail" : "詳細頁"}
+964:                    {locale === "en" ? "Hide" : "收起"}
+997:                      (locale === "en" ? "Unassigned" : "未指派")
+1024:                      locale === "en" ? "actions recorded" : "筆行動已記錄"
+===== ops-console-web/app/maintenance/page.tsx =====
+260:      label: copy(locale, "Fleet governance", "車隊治理"),
+318:      return copy(locale, "Edit", "編輯");
+320:      return copy(locale, "Complete", "完成");
+322:      return copy(locale, "Vehicle", "車輛");
+331:    return copy(locale, "Work order is already closed.", "工單已結案。");
+337:      "僅未結工單可標記完成。",
+376:          "保修模組尚未開通",
+381:          "此環境尚未啟用工單追蹤功能。",
+383:        actionLabel: copy(locale, "Open feature flags", "前往功能旗標"),
+391:        title: copy(locale, "Maintenance snapshot failed", "保修快照讀取失敗"),
+397:            "保修資料端點未回傳可用內容。",
+399:        actionLabel: copy(locale, "Retry", "重新整理"),
+407:        title: copy(locale, "Maintenance scope denied", "無法存取保修範圍"),
+411:          "目前帳號可進入殼層，但沒有保修讀取權限。",
+413:        actionLabel: copy(locale, "Open ops dashboard", "返回儀表板"),
+424:          "保修相依服務不可用",
+429:          "車隊保修轉接器降級，請改用車隊治理檢視最新法遵狀態。",
+431:        actionLabel: copy(locale, "Open fleet governance", "開啟車隊治理"),
+442:          "目前條件沒有符合的工單",
+447:          "放寬狀態分頁、搜尋或狀態條件即可恢復結果。",
+449:        actionLabel: copy(locale, "Clear filters", "清除條件"),
+458:        title: copy(locale, "No maintenance records", "尚無保修工單"),
+462:          "保修資料健康，但此環境目前還沒有任何工單。",
+464:        actionLabel: copy(locale, "Open vehicle registry", "前往車輛主檔"),
+714:            `工單 ${record.maintenanceId} 已標記完成。`,
+753:      h: copy(locale, "WO", "工單"),
+766:      h: copy(locale, "VEHICLE", "車輛"),
+784:      h: copy(locale, "DETAIL", "類別"),
+791:              {copy(locale, "Technician", "技師")} · {row.technician}
+807:      h: copy(locale, "SCHEDULE", "排定"),
+815:              {copy(locale, "done", "完成")} ·{" "}
+823:      h: copy(locale, "COST", "費用"),
+907:      { key: "all", label: copy(locale, "All", "全部") },
+908:      { key: "scheduled", label: copy(locale, "Scheduled", "排程中") },
+909:      { key: "in_progress", label: copy(locale, "In progress", "進行中") },
+912:        label: copy(locale, "Overdue", "逾期"),
+949:        title={copy(locale, "Maintenance", "車輛保修")}
+953:          "工單 · 排程 · 技師 · 影響派遣",
+971:              {copy(locale, "Filters", "篩選")}
+978:              {copy(locale, "Refresh", "重新整理")}
+989:              {copy(locale, "Create work order", "開立工單")}
+1011:              "保修頁面目前為降級模式",
+1025:              "目前顯示的快照非最新",
+1030:              `最後更新 ${formatLongDateTime(new Date(generatedAtMs).toISOString())} UTC，每 15 秒自動刷新（T3）。`,
+1043:              `${counts.overdue} 筆逾期工單正影響可派車量`,
+1048:              "請評估逾期保修是否應將相關車輛移出可派遣車隊。",
+1056:                {copy(locale, "View overdue", "檢視逾期")}
+1071:            label={copy(locale, "Active orders", "進行中工單")}
+1073:            delta={copy(locale, "scheduled + in progress", "排程 + 進行中")}
+1078:            label={copy(locale, "Overdue", "逾期")}
+1082:                ? copy(locale, "dispatch risk", "派車風險")
+1083:                : copy(locale, "clear", "正常")
+1089:            label={copy(locale, "Completed", "已完成")}
+1091:            delta={copy(locale, "closed work orders", "已結工單")}
+1096:            label={copy(locale, "Dispatch impact", "派車影響")}
+1098:            delta={copy(locale, "open vs supply", "未結影響供給")}
+1106:            title={copy(locale, "Filter work orders", "篩選工單")}
+1110:              `目前顯示 ${filteredRecords.length} / 總數 ${records.length}`,
+1120:              <Field theme={theme} label={copy(locale, "Search", "搜尋")}>
+1127:                    "工單、車輛、技師",
+1133:              <Field theme={theme} label={copy(locale, "Status", "狀態")}>
+1143:                  <option value="all">{copy(locale, "All", "全部")}</option>
+1160:                ? copy(locale, "Update work order", "更新工單")
+1161:                : copy(locale, "Create work order", "開立工單")
+1166:                  copy(locale, "Select a record", "請選擇工單"))
+1167:                : copy(locale, "Maintenance · medium risk", "保修 · 中度風險")
+1191:                        `工單 ${editingId} 已更新。`,
+1205:                        `工單 ${created.maintenanceId} 已建立。`,
+1233:              {copy(locale, "Loading work orders...", "載入工單中...")}
+1279:                {copy(locale, "emptyReason", "空狀態")} ·{" "}
+1292:            "畫面 CTA 以 availableActions 為準 · ",
+1294:          {copy(locale, "generated", "生成時間")} ·{" "}
+1396:            {copy(locale, "Complete work order", "完成工單")}
+1402:              "中度風險",
+1410:            "此動作會將工單標記為完成，並讓車輛可重新投入派車；系統會寫入稽核紀錄。",
+1415:          label={copy(locale, "Completion note (optional)", "完成備註（選填）")}
+1426:            {copy(locale, "Cancel", "取消")}
+1438:            {copy(locale, "Confirm complete", "確認完成")}
+1539:              label={copy(locale, "Vehicle", "車輛")}
+1549:            <Field theme={theme} label={copy(locale, "Type", "類別")}>
+1566:              label={copy(locale, "Scheduled at", "排定時間")}
+1578:                label={copy(locale, "Description", "工單描述")}
+1593:            <Field theme={theme} label={copy(locale, "Status", "狀態")}>
+1610:              label={copy(locale, "Completed at", "完成時間")}
+1621:        <Field theme={theme} label={copy(locale, "Technician", "技師")}>
+1628:        <Field theme={theme} label={copy(locale, "Cost (TWD)", "費用 (TWD)")}>
+1639:          <Field theme={theme} label={copy(locale, "Notes", "備註")}>
+1657:            ? copy(locale, "Saving...", "儲存中...")
+1659:              ? copy(locale, "Save changes", "儲存變更")
+1660:              : copy(locale, "Create record", "建立工單")}
+1663:          {copy(locale, "Cancel", "取消")}
+===== ops-console-web/app/reports/page.tsx =====
+732:          "report jobs · filing packages · signed artifact 短效 URL",
+791:                "工作會在背景執行，完成後提供簽名產物下載。",
+858:                  "可選，用於限定單一車輛的輸出。",
+875:                  "保留既有 report-job contract 與 i18n key；這次僅調整畫面結構。",
+885:                  {copyText(locale, "Cancel", "取消")}
+923:                "產生後的申報包保持不可變，並以短時效 ZIP / PDF 簽名下載提供。",
+976:                  "申報包生成仍走相同 backend 流程；變更僅限畫面呈現。",
+986:                  {copyText(locale, "Cancel", "取消")}
+1056:                          "報表工作失敗",
+1061:                          "請檢查輸入條件，若仍需最新產物請重新執行。",
+1078:                          "簽名網址即將過期",
+1083:                          "交付下游人員前，請先下載或重新整理產物連結。",
+1100:                          "此工作仍在等待簽名產物可供下載。",
+1126:                        label: copyText(locale, "Updated", "更新"),
+1135:                        label: copyText(locale, "Period", "期別"),
+1177:                    "本次請求 payload",
+1395:                          "ZIP / PDF 簽名申報包尚未完成。",
+1428:                        label: copyText(locale, "Mutability", "可變性"),
+1478:                    "目前申報包交付狀態",
+1569:                "目前尚未設定排程",
+1574:                "本次 handoff 保留 report job 與 filing package 流程；自動排程仍屬後續工作。",
+1581:                label={copyText(locale, "Queued jobs", "排隊中工作")}
+1586:                  `${runningReports} 筆執行中`,
+1591:                label={copyText(locale, "Ready artifacts", "可下載產物")}
+1596:                  `${expiringArtifacts} 筆即將過期`,
+1601:                label={copyText(locale, "Completed packages", "已完成申報包")}
+1606:                  `${regulatoryJobs} 筆監管類工作`,
+1616:                "目前報表狀態",
+1624:                    label: copyText(locale, "Report jobs", "報表工作"),
+1629:                    label: copyText(locale, "Completed jobs", "已完成工作"),
+1634:                    label: copyText(locale, "Package types", "申報包類型"),
+1638:                    label: copyText(locale, "Default scope", "預設 scope"),
+===== ops-console-web/app/vehicles/[vehicleId]/page.tsx =====
+232:    return copy(locale, "No active dispatch blockers", "目前沒有派遣阻塞");
+320:      return copy(locale, "No records yet", "目前沒有資料");
+322:      return copy(locale, "Not provisioned", "尚未 provision");
+324:      return copy(locale, "Snapshot unavailable", "快照暫不可用");
+326:      return copy(locale, "Permission required", "權限不足");
+331:        "外部相依暫不可用",
+334:      return copy(locale, "No matches after filtering", "套用篩選後沒有結果");
+336:      return copy(locale, "No records yet", "目前沒有資料");
+346:        "這個區塊健康可用，但目前這輛車沒有對應資料。",
+352:        "這輛車所需的上游資料尚未 provision。",
+358:        "服務在回傳可用快照前發生錯誤。",
+364:        "你可以進入此頁，但此子區塊需要更高權限才能讀取。",
+370:        "此區塊依賴的外部或降級上游系統目前暫不可用。",
+376:        "上游資料存在，但目前篩選條件沒有留下任何符合的列。",
+382:        "目前沒有可顯示的資料。",
+579:          : copy(locale, "Unknown error", "未知錯誤"),
+611:          : copy(locale, "Unknown error", "未知錯誤"),
+768:          `降級區塊：${degradedSections.join("、")}`,
+773:          "車輛詳情區塊已完整載入。",
+779:        `生成時間 ${formatDateTime(locale, metadata.generatedAt)}`,
+784:        "後端尚未提供 refresh metadata；目前顯示最新一次 server-rendered 快照。",
+791:      `T3 節奏 · ${metadata.source} 快照 · ${freshnessLabel}`,
+815:      label: copy(locale, "Refresh", "重新整理"),
+825:      label: copy(locale, "Open maintenance", "查看保修"),
+835:      label: copy(locale, "Open current driver", "開啟目前司機"),
+849:      label: copy(locale, "Open contract", "開啟合約"),
+863:      label: copy(locale, "Open incident", "開啟事故"),
+892:      label: copy(locale, "Back to registry", "回到車輛名冊"),
+902:      label: copy(locale, "Add ops note", "新增營運備註"),
+991:      return copy(locale, "driver binding", "司機綁定");
+993:      return copy(locale, "maintenance", "保修");
+995:      return copy(locale, "contracts", "合約");
+997:      return copy(locale, "incidents", "事故");
+999:      return copy(locale, "audit", "稽核");
+1086:      label: copy(locale, "Retry vehicle snapshot", "重試車輛快照"),
+1095:          title={copy(locale, "Vehicle detail", "車輛詳情")}
+1099:            "名冊載入失敗",
+1122:      label: copy(locale, "Back to registry", "回到車輛名冊"),
+1130:          title={copy(locale, "Vehicle not found", "找不到車輛")}
+1144:                "目前 ops 名冊快照中沒有符合此編號的車輛。",
+1208:      "在 Platform Admin 開啟退場流程",
+1217:    label: copy(locale, "Refresh", "重新整理"),
+1228:    label: copy(locale, "Open maintenance", "查看保修"),
+1242:    label: copy(locale, "Open current driver", "開啟目前司機"),
+1281:      label: copy(locale, "Add ops note", "新增營運備註"),
+1380:      h: copy(locale, "Type", "類別"),
+1404:      h: copy(locale, "Scheduled", "排定"),
+1432:    { h: copy(locale, "Counterparty", "對象"), k: "partner", w: 220 },
+1433:    { h: copy(locale, "Type", "類型"), k: "type", w: 180 },
+1434:    { h: copy(locale, "Term", "期間"), k: "term", mono: true, w: 200 },
+1466:    { h: copy(locale, "Title", "標題"), k: "title", w: 240 },
+1468:      h: copy(locale, "Severity", "嚴重度"),
+1486:      h: copy(locale, "Status", "狀態"),
+1502:    { h: copy(locale, "Updated", "更新"), k: "updated", mono: true, w: 180 },
+1516:      k: copy(locale, "Vehicle ID", "車輛編號"),
+1521:      k: copy(locale, "Plate", "車牌"),
+1526:      k: copy(locale, "Type", "類型"),
+1530:      k: copy(locale, "Operating area", "營運區域"),
+1535:      k: copy(locale, "Dispatchable", "可派遣"),
+1537:        ? copy(locale, "yes", "是")
+1538:        : copy(locale, "no", "否"),
+1542:      k: copy(locale, "Primary status", "主狀態"),
+1547:      k: copy(locale, "Dispatch blockers", "派遣阻塞"),
+1551:      k: copy(locale, "Insurance expiry", "保險到期"),
+1556:      k: copy(locale, "Vehicle license", "車輛牌照"),
+1560:        "目前 read model 沒有獨立欄位",
+1564:      k: copy(locale, "Contract", "合約"),
+1569:      k: copy(locale, "Exclusivity", "排他委託"),
+1577:      k: copy(locale, "Offboarding state", "退場狀態"),
+1582:      k: copy(locale, "Debrand due", "除標識期限"),
+1590:      k: copy(locale, "Last lifecycle trace", "最近 lifecycle 追蹤"),
+1617:                ? copy(locale, "dispatchable", "可派遣")
+1618:                : copy(locale, "not_dispatchable", "不可派遣")}
+1625:                  `${overdueMaintenanceCount} 筆逾期保修`,
+1660:            `刷新層級 T3 · ${REFRESH_TIER}`,
+1678:              "此車輛已進入 offboarding state machine",
+1686:                ? copy(locale, "debranding pending", "除標識待完成")
+1692:                    `除標識期限 ${formatDateOnly(locale, vehicle.supplyLifecycle.offboarding.debrandingDueAt)}`,
+1708:              "逾期保修已影響派遣判斷",
+1713:              `此車目前有 ${overdueMaintenanceCount} 筆逾期工單未結案。`,
+1722:              title={copy(locale, "Regulatory profile", "監管檔案")}
+1732:                "保修紀錄 · 最近 5 筆",
+1763:                      "目前這輛車沒有任何保修紀錄。",
+1773:              title={copy(locale, "Contract references", "合約參照")}
+1803:                      "這輛車目前找不到任何有效或歷史合約參照。",
+1815:              title={copy(locale, "Current driver binding", "目前司機綁定")}
+1840:                      k: copy(locale, "Driver", "司機"),
+1857:                      k: copy(locale, "Source", "來源"),
+1863:                              "進行中 driver task",
+1865:                          : copy(locale, "active shift", "進行中班次"),
+1868:                      k: copy(locale, "Binding state", "綁定狀態"),
+1873:                      k: copy(locale, "Binding id", "綁定編號"),
+1878:                      k: copy(locale, "Bound at", "綁定時間"),
+1895:                        "此車正在退場且已停派，因此目前不預期會有 active driver binding。",
+1900:                        "目前沒有 active task 或 shift 將司機綁定到此車。",
+1912:                `關聯事故 · ${relatedIncidents.length} 筆（90 天）`,
+1943:                      "目前事故快照中沒有任何事件關聯到這輛車。",
+1956:                "稽核子集 · 車輛範圍",
+1977:                    "目前這輛車還沒有任何稽核事件。",
+1990:                      "目前找不到這輛車或其關聯 maintenance / contract resource 的稽核紀錄。",
+===== ops-console-web/app/vehicles/page.tsx =====
+477:    return copy(locale, "No signal", "無訊號");
+494:    return copy(locale, "unknown", "未知");
+515:    return copy(locale, "Unclassified", "未分類");
+559:      label: copy(locale, "Not dispatchable", "不可派遣"),
+567:      label: copy(locale, "Maintenance attention", "保修注意"),
+575:      label: copy(locale, "Bound to active shift", "綁定當前班次"),
+582:    label: copy(locale, "Ready reserve", "待命可派"),
+599:        ? copy(locale, "Overdue", "已逾期")
+600:        : copy(locale, "Clear", "正常"),
+620:      label: copy(locale, "Overdue", "已逾期"),
+639:      ? copy(locale, "Upcoming", "待保修")
+640:      : copy(locale, "Clear", "正常"),
+717:        label: copy(locale, "Fleet governance", "車隊治理"),
+730:        label: copy(locale, "Compliance trace", "法遵檢視"),
+750:      return copy(locale, "Vehicle detail", "車輛詳情");
+752:      return copy(locale, "Driver binding", "司機綁定");
+754:      return copy(locale, "Maintenance", "保修檢視");
+756:      return copy(locale, "Fleet governance", "車隊治理");
+771:      "詳情路由由 UI-FE-OPS-VEHID 交付。",
+864:    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} UTC 產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
+1090:          "車隊主檔尚未開通",
+1095:          "目前環境的車輛主檔仍由 Platform Admin 車隊治理面建立。",
+1097:        actionLabel: copy(locale, "Open fleet governance", "開啟車隊治理"),
+1105:        title: copy(locale, "Vehicle snapshot failed", "車輛快照讀取失敗"),
+1111:            "登記資料端點未回傳可用內容。",
+1113:        actionLabel: copy(locale, "Retry", "重新整理"),
+1121:        title: copy(locale, "Vehicle scope denied", "無法存取車輛範圍"),
+1125:          "目前帳號可進入殼層，但沒有車隊登記讀取權限。",
+1127:        actionLabel: copy(locale, "Open ops dashboard", "返回儀表板"),
+1138:          "外部相依服務不可用",
+1143:          "司機綁定或保修補充資料降級，請改用治理檢視確認最新法遵狀態。",
+1145:        actionLabel: copy(locale, "Open platform admin", "開啟 Platform Admin"),
+1156:          "目前條件沒有符合的車輛",
+1161:          "放寬狀態、類型、可派遣或逾期條件即可恢復結果。",
+1163:        actionLabel: copy(locale, "Clear filters", "清除條件"),
+1172:        title: copy(locale, "No vehicles registered", "尚未登記車輛"),
+1176:          "登記資料健康，但此環境目前還沒有任何車輛紀錄。",
+1178:        actionLabel: copy(locale, "Open dispatch board", "前往派車看板"),
+1218:        {copy(locale, `risk:${action.riskLevel}`, `風險:${action.riskLevel}`)}
+1220:          ? copy(locale, " · reason required", " · 需填原因")
+1233:      h: copy(locale, "VEHICLE", "車輛"),
+1245:      h: copy(locale, "TYPE / STATUS", "類型 / 狀態"),
+1259:      h: copy(locale, "DISPATCHABLE", "派遣可用"),
+1270:                ? copy(locale, "yes", "可派")
+1271:                : copy(locale, "no", "不可派")}
+1277:              : copy(locale, "No blocking gate", "無阻塞 gate")}
+1283:      h: copy(locale, "CURRENT DRIVER", "當前司機"),
+1296:              {copy(locale, "Unbound", "未綁定")}
+1301:              copy(locale, "No active shift", "無啟用班次")}
+1307:      h: copy(locale, "COMPLIANCE", "法遵覆蓋"),
+1312:            {copy(locale, "Contract", "合約")} · {row.contractLabel}
+1315:            {copy(locale, "Insurance", "保險")} · {row.insuranceLabel}
+1322:      h: copy(locale, "MAINT / LAST SEEN", "保修 / 最近訊號"),
+1336:              ? copy(locale, "Next due", "下次保修") +
+1338:              : copy(locale, "No open work order", "無未結工單")}
+1347:      h: copy(locale, "ACTIONS", "操作"),
+1523:      copy(locale, "Last seen", "最近訊號") +
+1568:          ? copy(locale, "Debrand pending", "除標識待完成")
+1570:            ? copy(locale, "Offboarding", "退場中")
+1571:            : copy(locale, "No debrand", "無除標識"),
+1730:          {copy(locale, "All", "全部")}
+1748:          {copy(locale, "Dispatchable", "可派")}
+1766:          {copy(locale, "Offboarding", "退場")}
+1792:        title={copy(locale, "Vehicles", "車輛")}
+1796:          "dispatchable · 合約 · 保險 · debrand",
+1810:              {copy(locale, "Refresh", "重新整理")}
+1825:              "車輛頁面目前為降級模式",
+1844:              } · 檢查時間 ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
+1857:              "目前顯示的快照非最新",
+1871:              "供給警報：大量車輛離線或不可派遣",
+1876:              `目前 ${blockedCount}/${rows.length} 輛車不可派遣；請優先處理退場與法遵阻塞，避免派車佇列失速。`,
+1885:                {copy(locale, "Open Fleet Gov", "開啟車隊治理")}
+1895:              {copy(locale, "Registered", "已登記")}
+1899:              {copy(locale, "vehicle master rows", "車輛主檔筆數")}
+1904:              {copy(locale, "Dispatchable", "可派遣")}
+1910:              {copy(locale, "ready for queue", "可進入派車佇列")}
+1915:              {copy(locale, "Maintenance", "保修")}
+1926:              {copy(locale, "vehicles with overdue work", "逾期工單車輛")}
+1931:              {copy(locale, "Bound drivers", "綁定司機")}
+1937:              {copy(locale, "active shift bindings", "當前班次綁定")}
+1944:          title={copy(locale, "Filters", "篩選")}
+1948:            "狀態、類型、可派遣與逾期條件都套用同一份快照。",
+1963:                  {copy(locale, "Search", "搜尋")}
+1971:                    "車輛編號、車牌、司機",
+1979:                  {copy(locale, "Status", "狀態")}
+1986:                  <option value="all">{copy(locale, "All", "全部")}</option>
+1988:                    {copy(locale, "Active", "運作中")}
+1991:                    {copy(locale, "Attention", "注意")}
+1994:                    {copy(locale, "Blocked", "阻塞")}
+1997:                    {copy(locale, "Offboarding", "退場")}
+2004:                  {copy(locale, "Type", "類型")}
+2011:                  <option value="all">{copy(locale, "All", "全部")}</option>
+2022:                  {copy(locale, "Dispatchable", "可派遣")}
+2029:                  <option value="all">{copy(locale, "All", "全部")}</option>
+2030:                  <option value="yes">{copy(locale, "Yes", "可派")}</option>
+2031:                  <option value="no">{copy(locale, "No", "不可派")}</option>
+2037:                  {copy(locale, "Overdue", "逾期")}
+2044:                  <option value="all">{copy(locale, "All", "全部")}</option>
+2045:                  <option value="yes">{copy(locale, "Yes", "是")}</option>
+2046:                  <option value="no">{copy(locale, "No", "否")}</option>
+2053:                  {copy(locale, "Apply", "套用")}
+2056:                  {copy(locale, "Reset", "重設")}
+2067:                `目前顯示 ${displayedRows.length} / 總數 ${rows.length}`,
+2071:              {copy(locale, "generated", "生成時間")} ·{" "}
+2078:                "畫面 CTA 以 availableActions 為準",
+2086:          title={copy(locale, "Vehicle registry", "車輛登記清單")}
+2090:            "在同一張表內整合司機綁定、可派遣狀態、保修與治理交接。",
+2125:                {copy(locale, "emptyReason", "空狀態")} ·{" "}

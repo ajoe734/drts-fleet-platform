@@ -18,17 +18,21 @@ function platformIdentity(): BootstrapRequestIdentity {
 }
 
 describe("PlatformAdminAssistantController", () => {
-  it("wraps message responses with answer/citations/prompts/action plan", async () => {
-    const service = {
+  it("returns the required answer/citations/suggested prompts/action plan shape for message calls", async () => {
+    const platformAdminAssistantService = {
       createMessage: vi.fn(async () => ({
-        answer: "Use the current platform admin identity.",
+        answer:
+          "Use the current platform admin identity and inspect the rollout gates.",
         citations: [
           {
             title: "Platform Admin product routes",
             section: "§7.3 Current route map",
           },
         ],
-        suggestedPrompts: ["Summarize the rollout blockers."],
+        suggestedPrompts: [
+          "Summarize the rollout blockers.",
+          "Draft a tenant-safe follow-up.",
+        ],
         actionPlan: {
           planId: "plan-001",
           title: "Rollout review plan",
@@ -41,27 +45,11 @@ describe("PlatformAdminAssistantController", () => {
             },
           ],
         },
-        governedAction: {
-          toolName: "action.create_platform_notice",
-          payload: {
-            title: "Assistant drafted notice",
-            body: "Review before execution.",
-            severity: "warning",
-            targetAudience: "all",
-          },
-          descriptor: {
-            action: "create_platform_notice",
-            enabled: true,
-            riskLevel: "medium",
-            requiresReason: false,
-          },
-          confirmationRequired: true,
-          title: "Confirm platform notice creation",
-          message: "This will publish a warning notice for all.",
-        },
       })),
     };
-    const controller = new PlatformAdminAssistantController(service as never);
+    const controller = new PlatformAdminAssistantController(
+      platformAdminAssistantService as never,
+    );
 
     const response = await controller.createMessage(
       "session-001",
@@ -70,91 +58,104 @@ describe("PlatformAdminAssistantController", () => {
       "req-assistant-msg-001",
     );
 
-    expect(service.createMessage).toHaveBeenCalledWith(
+    expect(platformAdminAssistantService.createMessage).toHaveBeenCalledWith(
       "session-001",
-      expect.objectContaining({ actorId: "pa-admin-001" }),
+      expect.objectContaining({
+        actorId: "pa-admin-001",
+      }),
       { message: "What should I check before approving rollout?" },
     );
-    expect(response.meta.requestId).toBe("req-assistant-msg-001");
-    expect(response.data.answer).toContain("current platform admin identity");
-    expect(response.data.governedAction).toMatchObject({
-      toolName: "action.create_platform_notice",
-      confirmationRequired: true,
-      descriptor: {
-        action: "create_platform_notice",
-        enabled: true,
-        riskLevel: "medium",
+    expect(response).toEqual({
+      data: {
+        answer:
+          "Use the current platform admin identity and inspect the rollout gates.",
+        citations: [
+          {
+            title: "Platform Admin product routes",
+            section: "§7.3 Current route map",
+          },
+        ],
+        suggestedPrompts: [
+          "Summarize the rollout blockers.",
+          "Draft a tenant-safe follow-up.",
+        ],
+        actionPlan: {
+          planId: "plan-001",
+          title: "Rollout review plan",
+          summary: "Inspect current state before taking action.",
+          steps: [
+            {
+              stepId: "review-gates",
+              title: "Review rollout gates",
+              status: "in_progress",
+            },
+          ],
+        },
+      },
+      meta: {
+        requestId: "req-assistant-msg-001",
+        timestamp: expect.any(String),
       },
     });
   });
 
-  it("wraps read-tool execution responses", async () => {
-    const service = {
-      executeReadTool: vi.fn(async () => ({
-        toolName: "data.list_payment_records",
-        family: "data",
-        outputType: "record_set",
-        items: [{ recordId: "pay-001" }],
+  it("wraps action execute responses with ActionReceipt and assistantAuditId", () => {
+    const platformAdminAssistantService = {
+      executeAction: vi.fn(() => ({
+        receipt: {
+          actionId: "req-assistant-action-001",
+          auditId: "audit-domain-001",
+          resourceType: "platform_notice",
+          resourceId: "notice_001",
+          status: "completed",
+          message: "Platform notice created.",
+        },
+        assistantAuditId: "audit-assistant-001",
       })),
     };
-    const controller = new PlatformAdminAssistantController(service as never);
-
-    const response = await controller.executeReadTool(
-      "session-001",
-      platformIdentity(),
-      { toolName: "data.list_payment_records", input: { limit: 1 } },
-      "req-tool-001",
+    const controller = new PlatformAdminAssistantController(
+      platformAdminAssistantService as never,
     );
 
-    expect(service.executeReadTool).toHaveBeenCalledWith(
-      "session-001",
-      expect.objectContaining({ actorId: "pa-admin-001" }),
-      { toolName: "data.list_payment_records", input: { limit: 1 } },
-    );
-    expect(response.data.items).toHaveLength(1);
-  });
-
-  it("wraps dispatch packet submission and task status readback", () => {
-    const service = {
-      submitDispatchPacket: vi.fn(() => ({
-        accepted: true,
-        mode: "dry_run",
-        supervisorStatus: "queued",
-      })),
-      getTaskRuntimeStatus: vi.fn(() => ({
-        taskId: "PA-AI-E2E-001",
-        status: "dry_run",
-      })),
-    };
-    const controller = new PlatformAdminAssistantController(service as never);
-
-    const dispatchResponse = controller.submitDispatchPacket(
+    const response = controller.executeAction(
       "session-001",
       platformIdentity(),
       {
-        packet: {
-          packetId: "pkt-001",
-          payload: {
-            assistantSessionId: "session-001",
-          },
+        toolName: "action.create_platform_notice",
+        payload: {
+          title: "Dispatch notice",
+          body: "Planned maintenance",
+          severity: "warning",
+          targetAudience: "all",
         },
-      } as never,
-      "req-dispatch-001",
-    );
-    const statusResponse = controller.getTaskRuntimeStatus(
-      "session-001",
-      "PA-AI-E2E-001",
-      platformIdentity(),
-      "req-status-001",
+      },
+      "req-assistant-action-001",
     );
 
-    expect(service.submitDispatchPacket).toHaveBeenCalled();
-    expect(service.getTaskRuntimeStatus).toHaveBeenCalledWith(
+    expect(platformAdminAssistantService.executeAction).toHaveBeenCalledWith(
       "session-001",
       expect.objectContaining({ actorId: "pa-admin-001" }),
-      "PA-AI-E2E-001",
+      expect.objectContaining({
+        toolName: "action.create_platform_notice",
+      }),
+      "req-assistant-action-001",
     );
-    expect(dispatchResponse.data.accepted).toBe(true);
-    expect(statusResponse.data.status).toBe("dry_run");
+    expect(response).toEqual({
+      data: {
+        receipt: {
+          actionId: "req-assistant-action-001",
+          auditId: "audit-domain-001",
+          resourceType: "platform_notice",
+          resourceId: "notice_001",
+          status: "completed",
+          message: "Platform notice created.",
+        },
+        assistantAuditId: "audit-assistant-001",
+      },
+      meta: {
+        requestId: "req-assistant-action-001",
+        timestamp: expect.any(String),
+      },
+    });
   });
 });

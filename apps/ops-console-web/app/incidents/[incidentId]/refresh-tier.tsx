@@ -8,7 +8,6 @@ import {
   CanvasPill as Pill,
   type CanvasTheme,
 } from "@drts/ui-web";
-import { t } from "@/lib/translations";
 
 const REFRESH_TIER_CADENCE_MS: Record<RefreshTier, number | null> = {
   urgent: 5_000,
@@ -93,17 +92,25 @@ export function IncidentRefreshTier({
 
   const tierLabel =
     tier === "medium"
-      ? t("incidents.refreshTier.tier.medium", locale)
+      ? "T3 / 15s"
       : tier === "dispatch"
-        ? t("incidents.refreshTier.tier.dispatch", locale)
+        ? "T2 / 5s"
         : tier === "manual"
-          ? t("incidents.refreshTier.tier.manual", locale)
+          ? locale === "zh"
+            ? "T6 / 手動"
+            : "T6 / manual"
           : `${tier}${cadenceMs ? ` / ${Math.round(cadenceMs / 1000)}s` : ""}`;
 
-  const freshnessLabel = t(
-    `incidents.refreshTier.freshness.${freshness}` as const,
-    locale,
-  );
+  const freshnessLabel =
+    locale === "zh"
+      ? freshness === "fresh"
+        ? "最新"
+        : freshness === "stale"
+          ? "待刷新"
+          : freshness === "degraded"
+            ? "降級"
+            : "未知"
+      : freshness;
 
   return (
     <div
@@ -138,11 +145,10 @@ export function IncidentRefreshTier({
         }}
       >
         {metadata
-          ? t("incidents.refreshTier.snapshot", locale, {
-              time: formatClock(locale, metadata.generatedAt),
-              source: metadata.source,
-            })
-          : t("incidents.refreshTier.snapshotUnavailable", locale)}
+          ? `${locale === "zh" ? "snapshot" : "snapshot"} ${formatClock(locale, metadata.generatedAt)} UTC · ${metadata.source}`
+          : locale === "zh"
+            ? "snapshot -- · metadata unavailable"
+            : "snapshot -- · metadata unavailable"}
       </span>
       <Btn
         theme={theme}
@@ -156,7 +162,7 @@ export function IncidentRefreshTier({
           });
         }}
       >
-        {t("common.refresh", locale)}
+        {locale === "zh" ? "重新整理" : "Refresh"}
       </Btn>
     </div>
   );

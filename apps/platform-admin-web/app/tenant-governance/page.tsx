@@ -21,7 +21,6 @@ import {
 } from "@drts/ui-web";
 
 const PAGE_SIZE = 8;
-type TFn = (key: string, params?: Record<string, string | number>) => string;
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -114,8 +113,10 @@ function formatPercent(value: number) {
   })}%`;
 }
 
-function formatMonthlyPlan(value: number, t: TFn) {
-  return t("tenantGovernance.planPerMonth", { value: formatCount(value) });
+function formatMonthlyPlan(value: number, locale: string) {
+  return locale === "en"
+    ? `${formatCount(value)}/mo`
+    : `${formatCount(value)}/月`;
 }
 
 function getThresholdTone(value: number): CanvasTone {
@@ -128,14 +129,24 @@ function getThresholdTone(value: number): CanvasTone {
   return "success";
 }
 
-function getThresholdLabel(t: TFn, value: number) {
+function getThresholdLabel(locale: string, value: number) {
+  if (locale === "en") {
+    if (value > 90) {
+      return "over_threshold";
+    }
+    if (value > 80) {
+      return "warning";
+    }
+    return "ok";
+  }
+
   if (value > 90) {
-    return t("tenantGovernance.status.overThreshold");
+    return "超標";
   }
   if (value > 80) {
-    return t("tenantGovernance.status.warning");
+    return "警戒";
   }
-  return t("tenantGovernance.status.ok");
+  return "正常";
 }
 
 function hasNoApprovers(flag: PlatformTenantGovernanceAlertFlag) {
@@ -143,7 +154,7 @@ function hasNoApprovers(flag: PlatformTenantGovernanceAlertFlag) {
 }
 
 export default function TenantGovernancePage() {
-  const { t } = useTranslation();
+  const { locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [summary, setSummary] =
     useState<PlatformTenantGovernanceSummaryResponse | null>(null);
@@ -267,47 +278,72 @@ export default function TenantGovernancePage() {
     };
   }, [rows]);
 
-  const copy = useMemo(
-    () => ({
-      title: t("tenantGovernance.title"),
-      subtitle: t("tenantGovernance.subtitle"),
-      errorTitle: t("tenantGovernance.errorTitle"),
-      loading: t("tenantGovernance.loading"),
-      empty: t("tenantGovernance.empty"),
-      cardTitle: t("tenantGovernance.cardTitle"),
-      columns: {
-        tenant: t("tenantGovernance.col.tenant"),
-        plan: t("tenantGovernance.col.plan"),
-        usage: t("tenantGovernance.col.usage"),
-        percent: t("tenantGovernance.col.percent"),
-        status: t("tenantGovernance.col.status"),
-      },
-      kpis: {
-        quotaWarn: t("tenantGovernance.kpi.quotaWarn"),
-        approvalBacklog: t("tenantGovernance.kpi.approvalBacklog"),
-        costCenterAnomaly: t("tenantGovernance.kpi.costCenterAnomaly"),
-        riskSignals: t("tenantGovernance.kpi.riskSignals"),
-      },
-      quotaWarnSub: (count: number) =>
-        t("tenantGovernance.quotaWarnSub", { count }),
-      approvalSub: (hours: number | null) =>
-        hours === null
-          ? t("tenantGovernance.approvalSub.none")
-          : t("tenantGovernance.approvalSub.avg", { hours }),
-      costCenterSub: t("tenantGovernance.costCenterSub"),
-      riskSignalsSub: (
-        noApproverSignals: number,
-        quotaCriticalSignals: number,
-        pendingSignals: number,
-      ) =>
-        t("tenantGovernance.riskSignalsSub", {
-          noApproverSignals,
-          quotaCriticalSignals,
-          pendingSignals,
-        }),
-    }),
-    [t],
-  );
+  const copy =
+    locale === "en"
+      ? {
+          title: "Cross-tenant Governance",
+          subtitle:
+            "quota usage · approval backlog · cost-center health · governance risk — Q-ADM01",
+          errorTitle: "Unable to load tenant governance heatmap",
+          loading: "Loading cross-tenant governance heatmap…",
+          empty: "No tenant governance rows are available yet.",
+          cardTitle: "Quota usage heatmap · top 8 tenant · current month",
+          columns: {
+            tenant: "TENANT",
+            plan: "PLAN",
+            usage: "USAGE (MTD)",
+            percent: "%",
+            status: "STATUS",
+          },
+          kpis: {
+            quotaWarn: "quota warning (>80%)",
+            approvalBacklog: "cross-tenant approval backlog",
+            costCenterAnomaly: "cost-center anomaly",
+            riskSignals: "governance risk signals",
+          },
+          quotaWarnSub: (count: number) => `across ${count} tenant(s)`,
+          approvalSub: (hours: number | null) =>
+            hours === null ? "no stale approvals" : `average ${hours} h`,
+          costCenterSub: "missing cost center owner or active rule",
+          riskSignalsSub: (
+            noApproverSignals: number,
+            quotaCriticalSignals: number,
+            pendingSignals: number,
+          ) =>
+            `no approver ${noApproverSignals} · quota critical ${quotaCriticalSignals} · stale approval ${pendingSignals}`,
+        }
+      : {
+          title: "跨租戶治理",
+          subtitle:
+            "quota usage · approval backlog · cost-center health · governance risk — Q-ADM01",
+          errorTitle: "無法載入跨租戶治理熱圖",
+          loading: "正在載入跨租戶治理熱圖…",
+          empty: "目前沒有 tenant governance 資料。",
+          cardTitle: "Quota 使用熱圖 · top 8 tenant · 本月",
+          columns: {
+            tenant: "TENANT",
+            plan: "PLAN",
+            usage: "USAGE (MTD)",
+            percent: "%",
+            status: "STATUS",
+          },
+          kpis: {
+            quotaWarn: "quota 警戒 (>80%)",
+            approvalBacklog: "跨租戶審批 backlog",
+            costCenterAnomaly: "cost-center 異常",
+            riskSignals: "治理風險訊號",
+          },
+          quotaWarnSub: (count: number) => `跨 ${count} 個租戶`,
+          approvalSub: (hours: number | null) =>
+            hours === null ? "目前沒有逾時待審" : `平均 ${hours} 小時`,
+          costCenterSub: "缺少 cost center owner 或 active rule",
+          riskSignalsSub: (
+            noApproverSignals: number,
+            quotaCriticalSignals: number,
+            pendingSignals: number,
+          ) =>
+            `approver 缺口 ${noApproverSignals} · quota critical ${quotaCriticalSignals} · stale approval ${pendingSignals}`,
+        };
 
   const columns = useMemo<CanvasTableColumn<GovernanceRow>[]>(
     () => [
@@ -325,7 +361,7 @@ export default function TenantGovernancePage() {
         h: copy.columns.plan,
         w: 120,
         mono: true,
-        r: (row) => formatMonthlyPlan(row.quotaPlan, t),
+        r: (row) => formatMonthlyPlan(row.quotaPlan, locale),
       },
       {
         h: copy.columns.usage,
@@ -357,12 +393,12 @@ export default function TenantGovernancePage() {
             tone={getThresholdTone(row.monthlyQuotaPercentUsed)}
             dot
           >
-            {getThresholdLabel(t, row.monthlyQuotaPercentUsed)}
+            {getThresholdLabel(locale, row.monthlyQuotaPercentUsed)}
           </CanvasPill>
         ),
       },
     ],
-    [copy.columns, t],
+    [copy.columns, locale],
   );
 
   return (
@@ -391,7 +427,9 @@ export default function TenantGovernancePage() {
             value={metrics.quotaWarning}
             delta={
               metrics.quotaWarning > 0
-                ? t("tenantGovernance.delta.thresholdWarning")
+                ? locale === "en"
+                  ? "thresholdWarning"
+                  : "thresholdWarning"
                 : undefined
             }
             deltaTone={metrics.quotaWarning > 0 ? "down" : "neutral"}
@@ -403,7 +441,9 @@ export default function TenantGovernancePage() {
             value={metrics.approvalBacklog}
             delta={
               metrics.approvalBacklog > 0
-                ? t("tenantGovernance.delta.opsApprovalTriage")
+                ? locale === "en"
+                  ? "ops_approval_triage"
+                  : "ops_approval_triage"
                 : undefined
             }
             deltaTone={metrics.approvalBacklog > 0 ? "neutral" : "up"}
@@ -415,7 +455,9 @@ export default function TenantGovernancePage() {
             value={metrics.costCenterAnomaly}
             delta={
               metrics.costCenterAnomaly > 0
-                ? t("tenantGovernance.delta.needsGovernanceFollowup")
+                ? locale === "en"
+                  ? "needs_governance_followup"
+                  : "需治理補件"
                 : undefined
             }
             deltaTone={metrics.costCenterAnomaly > 0 ? "down" : "up"}
@@ -427,7 +469,9 @@ export default function TenantGovernancePage() {
             value={metrics.riskSignals}
             delta={
               metrics.riskSignals > 0
-                ? t("tenantGovernance.delta.triageOpen")
+                ? locale === "en"
+                  ? "triage open"
+                  : "待分流"
                 : undefined
             }
             deltaTone={metrics.riskSignals > 0 ? "down" : "up"}

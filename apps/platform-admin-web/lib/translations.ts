@@ -1,10 +1,3 @@
-import type {
-  OperationalAlertRecord,
-  PlatformNoticeRecord,
-  PlatformNoticeSeverity,
-  PlatformNoticeStatus,
-} from "@drts/contracts";
-
 export type Locale = "en" | "zh";
 
 const en = {
@@ -44,7 +37,6 @@ const en = {
   "common.apply": "Apply",
   "common.hide": "Hide",
   "common.close": "Close",
-  "common.edit": "Edit",
   "common.approve": "Approve",
   "common.error": "Error",
   "common.all": "All",
@@ -61,103 +53,14 @@ const en = {
   "common.generating": "Generating...",
   "common.adding": "Adding...",
   "common.unknown": "Unknown error",
-  "common.na": "N/A",
   "common.yes": "Yes",
   "common.no": "No",
-  "common.true": "true",
-  "common.false": "false",
   "common.allTenants": "All tenants",
   "common.newValues": "New Values",
   "common.oldValues": "Old Values",
   "common.confirmPublish": "Confirm publish",
   "common.deleteDraft": "Delete draft",
   "common.cancelDraft": "Cancel draft",
-
-  // ── Assistant ──
-  "assistant.common.name": "Platform Admin assistant",
-  "assistant.state.idle": "Idle",
-  "assistant.state.thinking": "Thinking",
-  "assistant.state.planning": "Planning",
-  "assistant.state.awaiting_confirmation": "Awaiting confirmation",
-  "assistant.state.executing": "Executing",
-  "assistant.state.receipt": "Receipt",
-  "assistant.state.error": "Error",
-  "assistant.risk.low": "Low risk",
-  "assistant.risk.medium": "Medium risk",
-  "assistant.risk.high": "High risk",
-  "assistant.stepStatus.pending": "Pending",
-  "assistant.stepStatus.in_progress": "In progress",
-  "assistant.stepStatus.completed": "Completed",
-  "assistant.stepStatus.blocked": "Blocked",
-  "assistant.composer.placeholder":
-    "Ask Platform Admin to inspect, plan, or execute a governed action...",
-  "assistant.composer.submit": "Send",
-  "assistant.composer.waiting": "Waiting...",
-  "assistant.composer.helper.idle":
-    "Use Enter to submit or Shift+Enter for a new line.",
-  "assistant.composer.helper.thinking":
-    "Assistant is drafting the next response.",
-  "assistant.composer.helper.planning": "Plan is being prepared for review.",
-  "assistant.composer.helper.awaitingConfirmation":
-    "Execution is paused until you confirm.",
-  "assistant.composer.helper.executing":
-    "Command is running; avoid duplicate submissions.",
-  "assistant.composer.helper.receipt":
-    "Last action completed. You can continue the conversation.",
-  "assistant.composer.helper.error":
-    "The last turn failed. Adjust the request or retry.",
-  "assistant.message.role.user": "Operator",
-  "assistant.message.role.system": "System",
-  "assistant.message.role.assistant": "Assistant",
-  "assistant.message.empty.title": "Platform Admin assistant is ready",
-  "assistant.message.empty.body":
-    "Ask for an analysis, review a plan, or approve a governed action to start the conversation.",
-  "assistant.message.banner.thinking":
-    "Assistant is analyzing current platform context.",
-  "assistant.message.banner.planning":
-    "Assistant is preparing a governed action plan for review.",
-  "assistant.message.banner.awaitingConfirmation":
-    "Execution is paused until an operator confirms the action.",
-  "assistant.message.banner.executing":
-    "Assistant is executing the approved action.",
-  "assistant.message.banner.receipt":
-    "Execution completed and a receipt has been recorded.",
-  "assistant.message.banner.error": "Execution error",
-  "assistant.message.error.title": "Assistant error",
-  "assistant.plan.ariaLabel": "Assistant action plan",
-  "assistant.plan.field.resource": "Resource",
-  "assistant.plan.field.whyNow": "Why now",
-  "assistant.plan.attention": "Attention",
-  "assistant.confirmation.ariaLabel": "Assistant confirmation panel",
-  "assistant.confirmation.targetResource": "Target resource",
-  "assistant.confirmation.reasonLabel": "Execution reason",
-  "assistant.confirmation.reasonPlaceholder.required":
-    "Required for high-risk execution.",
-  "assistant.confirmation.reasonPlaceholder.optional":
-    "Optional operator note.",
-  "assistant.confirmation.reasonHint.required":
-    "This action cannot execute until a non-empty reason is supplied.",
-  "assistant.confirmation.reasonHint.optional":
-    "Reason will be attached to the audit trail when provided.",
-  "assistant.confirmation.error.reasonRequired":
-    "Reason is required before this action can run.",
-  "assistant.confirmation.error.unavailable":
-    "This action is currently unavailable.",
-  "assistant.confirmation.cancel": "Cancel",
-  "assistant.confirmation.confirm": "Confirm and execute",
-  "assistant.confirmation.executing": "Executing...",
-  "assistant.receipt.ariaLabel": "Assistant action receipt",
-  "assistant.receipt.title": "Action receipt",
-  "assistant.receipt.field.actionId": "Action ID",
-  "assistant.receipt.field.requestId": "Request ID",
-  "assistant.receipt.field.auditId": "Audit ID",
-  "assistant.receipt.field.resource": "Resource",
-  "assistant.receipt.field.status": "Status",
-  "assistant.receipt.status.accepted": "Accepted",
-  "assistant.receipt.status.completed": "Completed",
-  "assistant.receipt.status.failed": "Failed",
-  "assistant.receipt.status.queued": "Queued",
-  "assistant.receipt.viewAuditEvidence": "View audit evidence",
 
   // ── Home ──
   "home.title": "Platform Administration",
@@ -192,144 +95,6 @@ const en = {
   "home.featureFlags.title": "Feature Flags",
   "home.featureFlags.desc":
     "Feature flag management with tenant-level overrides",
-
-  // ── Adapter Registry ──
-  "adapterRegistry.metadata.title": "Platform Adapter Registry",
-  "adapterRegistry.metadata.description":
-    "Governed adapter registry for platform configuration, credentials, and authority boundaries.",
-  "adapterRegistry.title": "Platform Adapter Registry",
-  "adapterRegistry.pageTitle": "External Platform Adapter Registry",
-  "adapterRegistry.pageSubtitle":
-    "Config and credential governance stays in Platform Admin while operational pause and retry stays in Ops.",
-  "adapterRegistry.registerAction": "Register adapter",
-  "adapterRegistry.registerInfo":
-    "Adapter registration remains a governed high-risk flow and is not opened inline on this route.",
-  "adapterRegistry.loading": "Loading adapter registry...",
-  "adapterRegistry.empty":
-    "No adapters are registered yet. Register the first governed adapter to open this registry.",
-  "adapterRegistry.unavailable":
-    "Adapter registry data is temporarily unavailable. Check the Platform Admin adapter API and retry this page.",
-  "adapterRegistry.bannerFallbackTitle": "mof-bgmt token expires in 6 days",
-  "adapterRegistry.bannerFallbackBody":
-    "BGMT dispatch reporting token must rotate before 2026-05-31 or today's completed trips cannot be reported.",
-  "adapterRegistry.bannerTitle": "{platformCode} token expiry review required",
-  "adapterRegistry.bannerBody":
-    "{name} is {credentialStatus} with {healthStatus} health. Review token rotation before production traffic is impacted.",
-  "adapterRegistry.rotateNow": "Rotate now",
-  "adapterRegistry.status.healthy": "healthy",
-  "adapterRegistry.status.degraded": "degraded",
-  "adapterRegistry.status.unhealthy": "down",
-  "adapterRegistry.metric.latency": "LATENCY",
-  "adapterRegistry.metric.lastEvent": "LAST EVENT",
-  "adapterRegistry.metric.orders": "ORDERS 24H",
-  "adapterRegistry.metric.ordersPending": "telemetry pending",
-  "adapterRegistry.webhookTitle": "Webhook",
-  "adapterRegistry.financeMode": "Finance mode",
-  "adapterRegistry.serviceBuckets": "Service buckets",
-  "adapterRegistry.featureFlags": "Feature flags",
-  "adapterRegistry.supportedActions": "Supported actions",
-  "adapterRegistry.supportedAction.accept.label": "Accept",
-  "adapterRegistry.supportedAction.accept.description":
-    "Accept and claim a dispatch task.",
-  "adapterRegistry.supportedAction.complete.label": "Complete",
-  "adapterRegistry.supportedAction.complete.description":
-    "Close the owned trip workflow.",
-  "adapterRegistry.supportedAction.incident.label": "Incident",
-  "adapterRegistry.supportedAction.incident.description":
-    "Raise a safety or service incident.",
-  "adapterRegistry.supportedAction.reject.label": "Reject",
-  "adapterRegistry.supportedAction.reject.description":
-    "Send the rejection reason back to the source platform.",
-  "adapterRegistry.supportedAction.proofUpload.label": "Proof upload",
-  "adapterRegistry.supportedAction.proofUpload.description":
-    "Upload completion proof for reconciliation.",
-  "adapterRegistry.operationalPause": "Operational pause",
-  "adapterRegistry.noPause": "Not paused",
-  "adapterRegistry.pauseUnknown":
-    "Pause state is not reported by the adapter API.",
-  "adapterRegistry.authorityPa": "Platform Admin authority",
-  "adapterRegistry.authorityOps": "Ops authority",
-  "adapterRegistry.governedActionInfo":
-    "Create config, edit credentials, rotate secrets, and enable or disable adapters remain governed actions here.",
-  "adapterRegistry.opsActionInfo":
-    "Operational pause TTL and retry of failed callbacks stay in the Ops console and are intentionally separated.",
-  "adapterRegistry.editConfig": "Edit config",
-  "adapterRegistry.editCredential": "Edit credential",
-  "adapterRegistry.rotateCredential": "Rotate credential",
-  "adapterRegistry.enableAdapter": "Enable adapter",
-  "adapterRegistry.disableAdapter": "Disable adapter",
-  "adapterRegistry.pauseTraffic": "Ops pause (TTL)",
-  "adapterRegistry.retryCallback": "Retry callback",
-  "adapterRegistry.queueGoverned":
-    "{label} for {name} stays in the governed Platform Admin flow.{reason} Plaintext-once secret material is not shown again here.",
-  "adapterRegistry.queueGovernedReason": " Reason captured: {reason}.",
-  "adapterRegistry.queueOps":
-    "{label} for {name} remains an ops-authority action on the Ops console.",
-  "adapterRegistry.toggleSuccess":
-    "Audit receipt · {name} {status} successfully.{reason}",
-  "adapterRegistry.toggleSuccess.enabled": "enabled",
-  "adapterRegistry.toggleSuccess.disabled": "disabled",
-  "adapterRegistry.toggleSuccessReason": " Reason: {reason}.",
-  "adapterRegistry.toggleError": "Failed to update adapter state.",
-  "adapterRegistry.showUnsupportedOpsAction":
-    "This adapter does not expose ops pause or retry capabilities.",
-  "adapterRegistry.webhookNotConfigured": "Not configured",
-  "adapterRegistry.lastCheck": "Last check",
-  "adapterRegistry.reasonRequired":
-    "A reason is required before disabling a production adapter.",
-  "adapterRegistry.disableConfirm":
-    "Confirm disable for {name}? This impacts governed adapter readiness.",
-  "adapterRegistry.enableConfirm": "Confirm enable for {name}?",
-  "adapterRegistry.disableReasonPrompt":
-    "Enter the governance reason for disabling {name}.",
-  "adapterRegistry.notConfigured": "Not configured",
-  "adapterRegistry.forwarder": "Forwarder",
-  "adapterRegistry.featureFlagState.on": "on",
-  "adapterRegistry.featureFlagState.off": "off",
-  "adapterRegistry.maxCandidatesManualFallback":
-    "{maxCandidates} max candidates · {seconds}s manual fallback",
-  "adapterRegistry.list.subtitle":
-    "Shared data-view baseline for adapter readiness, rollout posture, and finance authority ownership.",
-  "adapterRegistry.list.summary":
-    "Compact rows, pill filters, status chips, and owned or forwarded authority badges all come from shared ui-web primitives.",
-  "adapterRegistry.list.showing": "Showing {shown} / {total}",
-  "adapterRegistry.list.ownedTag": "owned",
-  "adapterRegistry.list.forwardedTag": "forwarded",
-  "adapterRegistry.list.financeTag": "finance",
-  "adapterRegistry.list.health": "Health",
-  "adapterRegistry.list.enabled": "Enabled",
-  "adapterRegistry.list.webhook": "Webhook",
-  "adapterRegistry.list.authority": "Authority",
-  "adapterRegistry.list.rollout": "Rollout",
-  "adapterRegistry.list.filter.all": "All",
-  "adapterRegistry.list.filter.forwarded": "Forwarded",
-  "adapterRegistry.list.filter.enabled": "Enabled",
-  "adapterRegistry.list.filter.attention": "Attention",
-  "adapterRegistry.col.name": "Adapter",
-  "adapterRegistry.col.environment": "Environment",
-  "adapterRegistry.col.version": "Version",
-  "adapterRegistry.col.rolloutStatus": "Rollout stage",
-  "adapterRegistry.errors.fetchFailed": "Failed to load adapter registry.",
-  "adapterRegistry.errors.updateFailed": "Failed to update adapter.",
-  "adapterRegistry.modal.title": "Edit adapter: {name}",
-  "adapterRegistry.modal.name": "Name",
-  "adapterRegistry.modal.version": "Version",
-  "adapterRegistry.modal.enabled": "Enabled",
-  "adapterRegistry.modal.rolloutStatus": "Rollout status",
-  "adapterRegistry.modal.credentialStatus": "Credential status",
-  "adapterRegistry.modal.webhookSettings": "Webhook settings",
-  "adapterRegistry.modal.webhookEnabled": "Webhook enabled",
-  "adapterRegistry.modal.webhookUrl": "Webhook URL",
-  "adapterRegistry.modal.webhookPlaceholder": "https://example.com/webhook",
-  "adapterRegistry.modal.policySettings": "Policy settings",
-  "adapterRegistry.modal.serviceBuckets": "Service buckets (comma-separated)",
-  "adapterRegistry.modal.maxCandidates": "Max candidates",
-  "adapterRegistry.modal.acceptTimeoutSeconds": "Accept timeout (seconds)",
-  "adapterRegistry.modal.manualFallbackThresholdSeconds":
-    "Manual fallback threshold (seconds)",
-  "adapterRegistry.modal.supportedActions": "Supported actions",
-  "adapterRegistry.modal.noSupportedActions":
-    "No adapter actions are enabled for this platform.",
 
   // ── Tenants ──
   "tenants.title": "Tenant Management",
@@ -430,234 +195,6 @@ const en = {
   "partners.credentialMeta.source": "Source",
   "partners.ready": "Ready",
   "partners.missing": "Missing",
-  "partners.page.title": "Partner Entry",
-  "partners.page.subtitle":
-    "Bank / hotel / enterprise partner entry routing, auth, eligibility, and branding.",
-  "partners.page.filterAction": "Filter",
-  "partners.page.createAction": "Create entry",
-  "partners.page.createTitle": "Create partner entry",
-  "partners.page.createSubtitle":
-    "Provision routing, auth mode, eligibility mode, and brand metadata before traffic goes live.",
-  "partners.page.last30Days": "Last 30 days",
-  "partners.page.errorTitle": "Unable to load partner entries",
-  "partners.page.openDetail": "Open partner entry detail",
-  "partners.page.filter.all": "All",
-  "partners.page.filter.active": "Active",
-  "partners.page.filter.inactive": "Inactive",
-  "partners.page.filter.attention": "Attention",
-  "partners.page.filter.revoked": "Revoked",
-  "partners.page.table.entry": "ENTRY",
-  "partners.page.table.program": "PROGRAM",
-  "partners.page.table.subtype": "SUBTYPE",
-  "partners.page.table.auth": "AUTH",
-  "partners.page.table.eligibility": "ELIGIBILITY",
-  "partners.page.table.status": "STATUS",
-  "partners.page.table.readiness": "READINESS",
-  "partners.page.readiness.ok": "OK",
-  "partners.page.readiness.gap_one": "{count} gap",
-  "partners.page.readiness.gap_other": "{count} gaps",
-  "partners.detail.notFoundTitle": "Partner entry unavailable",
-  "partners.detail.notFoundBody":
-    "The requested partner entry could not be found.",
-  "partners.detail.updateErrorTitle": "Unable to update partner entry",
-  "partners.detail.issueErrorTitle": "Unable to issue credential",
-  "partners.detail.previewNotice":
-    "Platform Admin API data is unavailable in this workspace. Showing the canvas-aligned preview fixture for local verification.",
-  "partners.detail.previewModeTitle": "Preview fixture mode",
-  "partners.detail.headerSubtitle": "/{entrySlug} · partner_id {partnerId}",
-  "partners.detail.tabs.overview": "Overview",
-  "partners.detail.tabs.branding": "Branding",
-  "partners.detail.tabs.auth": "Auth",
-  "partners.detail.tabs.eligibility": "Eligibility",
-  "partners.detail.tabs.credentials": "Credentials",
-  "partners.detail.tabs.audit": "Audit",
-  "partners.detail.preview": "Preview entry",
-  "partners.detail.activateEntry": "Activate",
-  "partners.detail.deactivateEntry": "Deactivate",
-  "partners.detail.revokeEntry": "Revoke entry",
-  "partners.detail.issueCredential": "Issue credential",
-  "partners.detail.rotateCredential": "Rotate credential",
-  "partners.detail.save": "Save changes",
-  "partners.detail.saveHint":
-    "Apply branding, routing, auth, and eligibility changes without moving away from the platform-governed entry model.",
-  "partners.detail.overviewTitle": "Entry basics",
-  "partners.detail.overviewSubtitle":
-    "Platform-owned routing, identity, and launch posture for the selected partner entry.",
-  "partners.detail.readinessTitle": "Readiness · masked governance gates",
-  "partners.detail.readinessReady": "Ready to promote",
-  "partners.detail.readinessBlocked": "Readiness gaps remain",
-  "partners.detail.readinessReadyBody":
-    "All required gates are green. Promotion can proceed without hiding governance controls.",
-  "partners.detail.readinessBlockedBody":
-    "Keep traffic blocked until branding, contract, audit, and credential gaps are resolved.",
-  "partners.detail.readiness.ok": "OK {ready}/{total}",
-  "partners.detail.readiness.gap": "GAP",
-  "partners.detail.credentialsTitle": "Active credentials · masked only",
-  "partners.detail.credentialsSubtitle":
-    "Plaintext values are only shown once at issue time. The roster below remains masked.",
-  "partners.detail.credentialsEmpty":
-    "No active ingress credentials are available for this entry yet.",
-  "partners.detail.credentialsBannerTitle":
-    "{ready}/{total} governance gates ready",
-  "partners.detail.credentialsBannerBody":
-    "{count} active credential(s) remain masked in the table below.",
-  "partners.detail.brandingTitle": "Branding",
-  "partners.detail.brandingSubtitle":
-    "Partner-facing title, route, accent, and support metadata.",
-  "partners.detail.authTitle": "Auth",
-  "partners.detail.authSubtitle":
-    "Authority stays on the platform side even when partner-specific credentials are used.",
-  "partners.detail.authBannerTitle": "Credential posture",
-  "partners.detail.authBannerBody.active":
-    "{count} credential(s) currently gate ingress traffic.",
-  "partners.detail.authBannerBody.none":
-    "Partner API key mode is active, but there is no usable ingress credential.",
-  "partners.detail.authBannerBody.notRequired":
-    "This entry does not require partner-managed ingress credentials.",
-  "partners.detail.eligibilityTitle": "Eligibility",
-  "partners.detail.eligibilitySubtitle":
-    "Contract snapshot, adapter posture, and fallback behavior for this entry.",
-  "partners.detail.eligibilityBannerTitle": "Contract posture",
-  "partners.detail.eligibilityBannerBody.none":
-    "No partner-side eligibility verification is required before fulfillment.",
-  "partners.detail.eligibilityBannerBody.linked":
-    "Eligibility remains platform-governed and is backed by the linked contract snapshot.",
-  "partners.detail.auditTitle": "Audit",
-  "partners.detail.auditSubtitle":
-    "Creation, updates, credential events, and request lineage for platform review.",
-  "partners.detail.routeHint": "Public route preview",
-  "partners.detail.accentHint": "Brand accent delivered to the partner skin",
-  "partners.detail.placeholder.entryHost": "partner.example",
-  "partners.detail.placeholder.entryPath": "/partner/world-elite",
-  "partners.detail.placeholder.themeAccent": "#0b7285",
-  "partners.detail.contractEmpty":
-    "No eligibility contract snapshot is currently linked to this entry.",
-  "partners.detail.secret.title":
-    "Ingress credential generated · only shown once",
-  "partners.detail.secret.subtitle": "PLAINTEXT-ONCE · Q-ADM07",
-  "partners.detail.secret.warningTitle":
-    "Closing this window permanently hides the full secret",
-  "partners.detail.secret.warningBody":
-    "If the secret is lost, create a new credential and rotate immediately. Only the masked suffix is retained afterward.",
-  "partners.detail.secret.name": "Credential name",
-  "partners.detail.secret.field": "Secret · plaintext once",
-  "partners.detail.secret.hint":
-    "Copy the value now. The full secret will not be returned again.",
-  "partners.detail.secret.scope": "SOURCE",
-  "partners.detail.secret.expiresAt": "EXPIRES AT",
-  "partners.detail.secret.createdBy": "CREATED BY",
-  "partners.detail.secret.createdAt": "CREATED AT",
-  "partners.detail.secret.stored":
-    "I stored this credential in a secure location.",
-  "partners.detail.secret.cancel": "Cancel",
-  "partners.detail.secret.complete": "Complete · I stored this key",
-  "partners.detail.secret.copy": "Copy",
-  "partners.detail.secret.download": ".txt",
-  "partners.detail.secret.downloadFilename": "{entrySlug}-credential.txt",
-  "partners.detail.credentialAction.issueTitle": "Issue ingress credential",
-  "partners.detail.credentialAction.rotateTitle": "Rotate ingress credential",
-  "partners.detail.credentialAction.subtitle":
-    "HIGH-RISK ACTION · audit reason required",
-  "partners.detail.credentialAction.fieldLabel": "Rotation reason",
-  "partners.detail.credentialAction.hint":
-    "Provide an operator reason. This action is audited and the plaintext secret will be revealed once.",
-  "partners.detail.credentialAction.placeholderIssue":
-    "Example: initial production launch for CTBC World Elite entry",
-  "partners.detail.credentialAction.placeholderRotate":
-    "Example: rotate after key exposure drill / scheduled quarterly refresh",
-  "partners.detail.credentialAction.cancel": "Cancel",
-  "partners.detail.credentialAction.issueConfirm": "Issue credential",
-  "partners.detail.credentialAction.rotateConfirm": "Rotate credential",
-  "partners.detail.governance.activateTitle": "Activate partner entry",
-  "partners.detail.governance.deactivateTitle": "Deactivate partner entry",
-  "partners.detail.governance.revokeTitle": "Revoke partner entry",
-  "partners.detail.governance.revokeCredentialTitle":
-    "Revoke ingress credential",
-  "partners.detail.governance.mediumSubtitle":
-    "MEDIUM-RISK ACTION · audit receipt",
-  "partners.detail.governance.highSubtitle":
-    "HIGH-RISK ACTION · audit reason required",
-  "partners.detail.governance.activateBody":
-    "Activation makes this entry eligible for governed traffic once readiness gates are satisfied.",
-  "partners.detail.governance.deactivateBody":
-    "Deactivation keeps the entry in the registry but blocks new governed traffic.",
-  "partners.detail.governance.revokeBody":
-    "Revocation is irreversible at the entry level and should only be used for contract termination or security withdrawal.",
-  "partners.detail.governance.revokeCredentialBody":
-    "Revoking this credential removes it from future ingress use. Rotate first if traffic continuity is required.",
-  "partners.detail.governance.fieldLabel": "Audit reason",
-  "partners.detail.governance.fieldHint":
-    "Provide a concrete operator reason. This action is recorded in Platform Admin audit history.",
-  "partners.detail.governance.fieldPlaceholder":
-    "Example: revoke after partner contract termination / security investigation",
-  "partners.detail.governance.cancel": "Cancel",
-  "partners.detail.governance.activateConfirm": "Activate",
-  "partners.detail.governance.deactivateConfirm": "Deactivate",
-  "partners.detail.governance.revokeConfirm": "Revoke entry",
-  "partners.detail.governance.revokeCredentialConfirm": "Revoke credential",
-  "partners.detail.overview.tenant": "TENANT",
-  "partners.detail.overview.bankCode": "BANK CODE",
-  "partners.detail.overview.program": "PROGRAM",
-  "partners.detail.overview.dispatchSubtype": "BUSINESS SUBTYPE",
-  "partners.detail.overview.authMode": "AUTH MODE",
-  "partners.detail.overview.eligibility": "ELIGIBILITY",
-  "partners.detail.overview.entryHost": "ENTRY HOST",
-  "partners.detail.overview.entryPath": "ENTRY PATH",
-  "partners.detail.overview.themeAccent": "THEME ACCENT",
-  "partners.detail.overview.supportContact": "SUPPORT CONTACT",
-  "partners.detail.eligibilitySnapshot.contractId": "Contract ID",
-  "partners.detail.eligibilitySnapshot.adapter": "Adapter",
-  "partners.detail.eligibilitySnapshot.adapterPosture": "Adapter posture",
-  "partners.detail.eligibilitySnapshot.fallback": "Fallback",
-  "partners.detail.eligibilitySnapshot.fallbackRequired": "Ops queue required",
-  "partners.detail.eligibilitySnapshot.fallbackNone": "No timeout fallback",
-  "partners.detail.auditMeta.source": "Audit source",
-  "partners.detail.auditMeta.requestId": "Request ID",
-  "partners.detail.auditMeta.createdBy": "Created by",
-  "partners.detail.auditMeta.createdAt": "Created at",
-  "partners.detail.auditMeta.updatedBy": "Updated by",
-  "partners.detail.auditMeta.updatedAt": "Updated at",
-  "partners.detail.auditMeta.revokedAt": "Revoked at",
-  "partners.detail.auditMeta.revokeReason": "Revoke reason",
-  "partners.detail.credentialsTable.kind": "kind",
-  "partners.detail.credentialsTable.masked": "masked",
-  "partners.detail.credentialsTable.rotated": "rotated",
-  "partners.detail.credentialsTable.lastUsed": "last_used",
-  "partners.detail.credentialsTable.actions": "actions",
-  "partners.detail.credentialsTable.revoke": "Revoke",
-  "partners.detail.auditTable.event": "EVENT",
-  "partners.detail.auditTable.actor": "ACTOR",
-  "partners.detail.auditTable.detail": "DETAIL",
-  "partners.detail.auditTable.at": "AT",
-  "partners.detail.governanceCard.title": "Governance actions",
-  "partners.detail.governanceCard.subtitle":
-    "State transitions and high-risk lifecycle controls.",
-  "partners.detail.governanceCard.status": "Status",
-  "partners.detail.governanceCard.trafficPosture": "Traffic posture",
-  "partners.detail.governanceCard.trafficActive":
-    "Entry can accept governed traffic",
-  "partners.detail.governanceCard.trafficBlocked": "Entry remains blocked",
-  "partners.detail.webhook.title": "Webhook linkage",
-  "partners.detail.webhook.subtitle":
-    "Operational delivery remains masked here; only the governance binding is shown.",
-  "partners.detail.webhook.requestLineage": "Request lineage",
-  "partners.detail.webhook.bound": "Bound",
-  "partners.detail.webhook.gap": "Gap",
-  "partners.detail.webhook.auditSource": "Audit source",
-  "partners.detail.webhook.platformOwned": "Platform-owned",
-  "partners.detail.adapterLinkage.title": "Adapter linkage",
-  "partners.detail.adapterLinkage.subtitle":
-    "Cross-link the contract snapshot to the platform adapter registry.",
-  "partners.detail.adapterLinkage.linkedAdapter": "Linked adapter",
-  "partners.detail.adapterLinkage.manualFallback": "Manual fallback",
-  "partners.detail.adapterLinkage.timeoutRequired":
-    "ops_console required on timeout",
-  "partners.detail.adapterLinkage.noTimeoutFallback": "no timeout fallback",
-  "partners.detail.adapterLinkage.snapshotLinked": "snapshot linked",
-  "partners.detail.adapterLinkage.snapshotMissing": "missing snapshot",
-  "partners.detail.auditRevokedTitle": "Entry revoked",
-  "partners.detail.auditRevokedBodyDefault":
-    "Traffic should remain blocked for this entry.",
 
   // ── Users ──
   "users.title": "Users & Roles",
@@ -671,76 +208,6 @@ const en = {
   "users.form.displayName": "Display Name",
   "users.form.role": "Role",
   "users.empty": "No users found.",
-  "users.page.title": "Platform Staff",
-  "users.page.subtitle": "6 roles · RBAC gatekeeping stays backend-authoritative",
-  "users.page.refreshing": "Refreshing…",
-  "users.page.invite": "Invite",
-  "users.page.inviteTitle": "Invite platform staff",
-  "users.page.inviteSubtitle":
-    "Create an internal user record and assign the initial role before the user enters any tenant or ops workflow.",
-  "users.page.col.name": "NAME",
-  "users.page.col.email": "EMAIL",
-  "users.page.col.role": "ROLE",
-  "users.page.col.status": "STATUS",
-  "users.page.col.updated": "UPDATED",
-  "users.page.col.actions": "ACTIONS",
-  "users.page.action.role": "Role",
-  "users.page.action.suspend": "Suspend",
-  "users.page.action.activate": "Activate",
-  "users.page.alreadySuspended": "already suspended",
-  "users.page.roleTitle": "Update role",
-  "users.page.roleSubtitle":
-    "Medium-risk change. The new role takes effect immediately and is recorded to the audit trail.",
-  "users.page.roleField": "Role",
-  "users.page.suspendTitle": "Suspend platform staff",
-  "users.page.suspendSubtitle":
-    "High-risk change. A confirmation reason is required before the user loses platform access. Access is revoked immediately on confirm.",
-  "users.page.reasonField": "Reason",
-  "users.page.reasonHint":
-    "Required to confirm this high-risk suspension.",
-  "users.page.reasonPlaceholder":
-    "e.g. Offboarding / suspected credential leak",
-  "users.page.activateTitle": "Reactivate platform staff",
-  "users.page.activateSubtitle":
-    "Restore platform access for this user. Access is granted immediately on confirm.",
-  "users.page.confirmSuspend": "Confirm suspend",
-  "users.page.confirmActivate": "Confirm activate",
-  "users.page.emailPlaceholder": "staff@platform.drts",
-
-  // ── Tenant Governance ──
-  "tenantGovernance.title": "Cross-tenant Governance",
-  "tenantGovernance.subtitle":
-    "quota usage · approval backlog · cost-center health · governance risk — Q-ADM01",
-  "tenantGovernance.errorTitle": "Unable to load tenant governance heatmap",
-  "tenantGovernance.loading": "Loading cross-tenant governance heatmap…",
-  "tenantGovernance.empty": "No tenant governance rows are available yet.",
-  "tenantGovernance.cardTitle":
-    "Quota usage heatmap · top 8 tenant · current month",
-  "tenantGovernance.col.tenant": "TENANT",
-  "tenantGovernance.col.plan": "PLAN",
-  "tenantGovernance.col.usage": "USAGE (MTD)",
-  "tenantGovernance.col.percent": "%",
-  "tenantGovernance.col.status": "STATUS",
-  "tenantGovernance.kpi.quotaWarn": "quota warning (>80%)",
-  "tenantGovernance.kpi.approvalBacklog": "cross-tenant approval backlog",
-  "tenantGovernance.kpi.costCenterAnomaly": "cost-center anomaly",
-  "tenantGovernance.kpi.riskSignals": "governance risk signals",
-  "tenantGovernance.quotaWarnSub": "across {count} tenant(s)",
-  "tenantGovernance.approvalSub.none": "no stale approvals",
-  "tenantGovernance.approvalSub.avg": "average {hours} h",
-  "tenantGovernance.costCenterSub":
-    "missing cost center owner or active rule",
-  "tenantGovernance.riskSignalsSub":
-    "no approver {noApproverSignals} · quota critical {quotaCriticalSignals} · stale approval {pendingSignals}",
-  "tenantGovernance.planPerMonth": "{value}/mo",
-  "tenantGovernance.status.overThreshold": "Over threshold",
-  "tenantGovernance.status.warning": "Warning",
-  "tenantGovernance.status.ok": "OK",
-  "tenantGovernance.delta.thresholdWarning": "threshold warning",
-  "tenantGovernance.delta.opsApprovalTriage": "ops approval triage",
-  "tenantGovernance.delta.needsGovernanceFollowup":
-    "needs governance follow-up",
-  "tenantGovernance.delta.triageOpen": "triage open",
 
   // ── Fleet ──
   "fleet.title": "Fleet & Devices",
@@ -750,12 +217,6 @@ const en = {
   "fleet.tab.vehicles": "Vehicles",
   "fleet.tab.drivers": "Drivers",
   "fleet.tab.contracts": "Contracts",
-  "fleet.tab.deviceBinding": "Device Binding",
-  "fleet.tab.exclusivity": "Exclusivity Reviews",
-  "fleet.tab.offboarding": "Offboarding",
-  "fleet.page.title": "Fleet & compliance governance",
-  "fleet.page.subtitle":
-    "vehicles · drivers · contracts · device binding · exclusivity reviews · offboarding state machine",
   "fleet.col.vehicleId": "Vehicle ID",
   "fleet.col.plate": "Plate",
   "fleet.col.area": "Area",
@@ -778,22 +239,6 @@ const en = {
   "fleet.col.partner": "Partner",
   "fleet.col.type": "Type",
   "fleet.col.status": "Status",
-  "fleet.col.coverage": "Coverage",
-  "fleet.col.compliance": "Compliance",
-  "fleet.col.driver": "Driver",
-  "fleet.col.binding": "Binding",
-  "fleet.col.counterparty": "Counterparty",
-  "fleet.col.vehicle": "Vehicle",
-  "fleet.col.term": "Term",
-  "fleet.col.device": "Device",
-  "fleet.col.state": "State",
-  "fleet.col.lastSeen": "Last seen",
-  "fleet.col.review": "Review",
-  "fleet.col.provider": "Provider",
-  "fleet.col.currentState": "Current state",
-  "fleet.col.evidence": "Evidence",
-  "fleet.col.timeline": "Timeline",
-  "fleet.col.dispatchReadiness": "Dispatch readiness",
   "fleet.dispatchable": "Dispatchable",
   "fleet.notDispatchable": "Not Dispatchable",
   "fleet.licensesValid": "Licenses Valid",
@@ -804,10 +249,6 @@ const en = {
   "fleet.noDrivers": "No drivers.",
   "fleet.noContracts": "No contracts.",
   "fleet.createDriver": "Create Driver Master",
-  "fleet.createContract": "Create contract",
-  "fleet.updateCompliance": "Update compliance",
-  "fleet.openOpsConsole": "ops-console",
-  "fleet.advanceOffboardingStep": "Advance",
   "fleet.creatingDriver": "Creating driver...",
   "fleet.form.phone": "Phone",
   "fleet.form.email": "Email",
@@ -843,68 +284,6 @@ const en = {
   "fleet.deviceRevoked": "Binding revoked",
   "fleet.deviceRebindHint":
     "After revoke, the device can register to a new driver.",
-  "fleet.readOnly": "Read-only",
-  "fleet.unavailable": "Unavailable",
-  "fleet.working": "Working...",
-  "fleet.filter": "Filter",
-  "fleet.retry": "Retry",
-  "fleet.exportList": "Export list",
-  "fleet.refreshing": "Refreshing...",
-  "fleet.awaitingFirstSnapshot": "Awaiting first snapshot",
-  "fleet.snapshotAt": "Snapshot {time}",
-  "fleet.snapshotGeneratedAt": "Snapshot {time}",
-  "fleet.refreshTierSummary": "Refresh tier {tier} / 30s · {freshness}",
-  "fleet.confirmAction": "Confirm {action}?",
-  "fleet.reasonRequired": "Reason is required.",
-  "fleet.prompt.driverName": "Driver name",
-  "fleet.prompt.vehicleId": "Vehicle ID",
-  "fleet.prompt.partnerId": "Partner ID",
-  "fleet.actionNotWired":
-    "This action is not wired to a mutation endpoint yet.",
-  "fleet.filterReserved":
-    "Canvas-aligned filter surface is reserved for the next iteration.",
-  "fleet.refreshFailed": "Fleet data refresh failed",
-  "fleet.snapshotNotFresh": "Snapshot is not fully fresh",
-  "fleet.driversNeedComplianceReview": "{count} drivers need compliance review",
-  "fleet.driverComplianceReviewBody":
-    "dispatch.compliance.license_warn_30d remains enforced in ops-console until these blockers are cleared.",
-  "fleet.exclusivityGovernanceTitle": "Exclusivity governance · Q-ADM08",
-  "fleet.exclusivityGovernanceBody":
-    "Vehicle or driver dispatchable cannot become true until exclusivity is approved.",
-  "fleet.offboardingCardTitle": "Offboarding state machine · Q-ADM09",
-  "fleet.offboardingCardSubtitle":
-    "Every transition needs timestamp · actor · evidence · audit",
-  "fleet.vehicle.exclusivityApproved": "exclusivity approved",
-  "fleet.vehicle.exclusivityPending": "exclusivity pending",
-  "fleet.vehicle.blocked": "blocked",
-  "fleet.vehicle.noDispatchBlocks": "No active dispatch blocks",
-  "fleet.driver.licenseWarning": "warning",
-  "fleet.driver.dispatchReady": "Ready for dispatch",
-  "fleet.driver.noActiveDevice": "No active device",
-  "fleet.workflow.initiated": "initiated",
-  "fleet.workflow.dispatchDisabled": "dispatch_disabled",
-  "fleet.workflow.debrandingPending": "debranding_pending",
-  "fleet.workflow.debrandingVerified": "debranding_verified",
-  "fleet.workflow.completed": "completed",
-  "fleet.workflow.none": "none",
-  "fleet.empty.notProvisioned.title": "Governance lane not provisioned",
-  "fleet.empty.notProvisioned.description":
-    "The tab exists in the sitemap, but the backing lane is not provisioned yet.",
-  "fleet.empty.fetchFailed.title": "Unable to load this tab",
-  "fleet.empty.fetchFailed.description":
-    "The read failed. Refresh or inspect the upstream dependency.",
-  "fleet.empty.permissionDenied.title": "Permission denied",
-  "fleet.empty.permissionDenied.description":
-    "The current actor can see the shell but is not allowed to read this tab.",
-  "fleet.empty.externalUnavailable.title": "External dependency unavailable",
-  "fleet.empty.externalUnavailable.description":
-    "This tab depends on a companion service that is currently unavailable.",
-  "fleet.empty.filteredEmpty.title": "No rows match the current focus",
-  "fleet.empty.filteredEmpty.description":
-    "Underlying data exists, but the current tab or focus narrows the result to zero rows.",
-  "fleet.empty.noData.title": "Nothing has been recorded yet",
-  "fleet.empty.noData.description":
-    "This governance lane is ready, but there are no rows to review.",
   "fleet.detail.dispatch": "Dispatchability",
   "fleet.detail.insurance": "Insurance Lifecycle",
   "fleet.detail.exclusivity": "Exclusivity Workflow",
@@ -918,12 +297,8 @@ const en = {
   "switchboard.subtitle":
     "Public information versioning and placard management",
   "switchboard.loading": "Loading switchboard...",
-  "switchboard.tab.versions": "Versions",
   "switchboard.tab.publicInfo": "Public Info",
   "switchboard.tab.placards": "Placards",
-  "switchboard.tab.history": "History",
-  "switchboard.routeNote":
-    "Route name preserved as /switchboard · one public-info version can produce many placards (Q-ADM14)",
   "switchboard.publishedPublicInfo": "Published public info",
   "switchboard.publishedPublicInfoNote": "Live disclosure versions",
   "switchboard.draftPublicInfo": "Draft public info",
@@ -932,23 +307,6 @@ const en = {
   "switchboard.placardVersionsNote": "Traceable seat-back outputs",
   "switchboard.placardsTiedToLive": "Placards tied to live info",
   "switchboard.placardsTiedToLiveNote": "Ready to distribute to fleet",
-  "switchboard.versionsTitle": "Public info versions",
-  "switchboard.versionsSubtitle":
-    "Effective from / to · public phones · status",
-  "switchboard.preview.currentPlacard":
-    "Current placard · {code} (source {source})",
-  "switchboard.preview.emptyPlacard": "No placard generated yet.",
-  "switchboard.preview.pendingArtifactId": "pending-artifact-id",
-  "switchboard.preview.callLabel": "Call",
-  "switchboard.preview.complaintLabel": "Complaint",
-  "switchboard.preview.sourceLabel": "Source",
-  "switchboard.downloadPdf": "Download PDF",
-  "switchboard.historyVersionsTitle": "Public info version history",
-  "switchboard.historyVersionsSubtitle":
-    "Published versions are immutable disclosure records.",
-  "switchboard.historyPlacardsTitle": "Placard lineage",
-  "switchboard.historyPlacardsSubtitle":
-    "Issued placards and the public-info version each was generated from.",
   "switchboard.newPublicInfoVersion": "New Public Info Version",
   "switchboard.hidePublicInfoForm": "Hide publish form",
   "switchboard.generatePlacardVersion": "Generate Placard Version",
@@ -960,67 +318,19 @@ const en = {
   "switchboard.publishing": "Publishing...",
   "switchboard.confirmPublish": "Confirm publish",
   "switchboard.deleteDraft": "Delete draft",
-  "switchboard.publishVersion": "Publish version",
-  "switchboard.refresh": "Refresh",
-  "switchboard.publishPlacard": "Publish",
-  "switchboard.immutable": "Immutable",
-  "switchboard.noHistory": "No published history yet.",
   "switchboard.col.version": "Version",
-  "switchboard.col.effectiveFrom": "Effective from",
-  "switchboard.col.effectiveTo": "Effective to",
-  "switchboard.col.callLine": "Call line",
-  "switchboard.col.complaintLine": "Complaint line",
-  "switchboard.col.updated": "Updated",
   "switchboard.col.phones": "Phones",
   "switchboard.col.fare": "Fare & Payment",
   "switchboard.col.lifecycle": "Lifecycle",
   "switchboard.col.actions": "Actions",
   "switchboard.col.placardId": "Placard ID",
-  "switchboard.col.placard": "Placard",
   "switchboard.col.sourceVersion": "Source Version",
   "switchboard.col.template": "Template",
   "switchboard.col.artifact": "Artifact",
   "switchboard.col.tied": "Tied to Live",
-  "switchboard.col.publishedAt": "Published at",
-  "switchboard.col.publishedBy": "Published by",
   "switchboard.immutableHistory": "Immutable history",
-  "switchboard.status.published": "Published",
-  "switchboard.status.draft": "Draft",
-  "switchboard.status.retired": "Retired",
   "switchboard.noPublicInfo": "No public info versions.",
   "switchboard.noPlacards": "No placard versions.",
-  "switchboard.createTitle": "Create public info draft",
-  "switchboard.createSubtitle": "Medium-risk · saved as draft until published.",
-  "switchboard.publishTitle": "Publish public info version",
-  "switchboard.publishSubtitle":
-    "High-risk · publishing replaces the live disclosure. A reason is required for the audit receipt.",
-  "switchboard.publishNoDrafts": "No draft versions are available to publish.",
-  "switchboard.publishPick": "Select draft version",
-  "switchboard.publishReasonLabel": "Reason (required)",
-  "switchboard.publishReasonPlaceholder":
-    "Why is this version being published now?",
-  "switchboard.generateTitle": "Generate new placard",
-  "switchboard.generateSubtitle":
-    "Medium-risk · the placard is bound to the selected source public-info version.",
-  "switchboard.receipt.publishVersion":
-    "Audit receipt: published public info {id}. Reason: {reason}",
-  "switchboard.receipt.create": "Audit receipt: public info draft created.",
-  "switchboard.receipt.generate": "Audit receipt: placard {code} generated.",
-  "switchboard.receipt.publishPlacard":
-    "Audit receipt: placard {code} published.",
-  "switchboard.disabled.noDraftVersions": "No draft versions to publish.",
-  "switchboard.disabled.noDraftSelected": "Select a draft version to publish.",
-  "switchboard.disabled.reasonRequired": "A reason is required to publish.",
-  "switchboard.disabled.titleRequired": "A title is required.",
-  "switchboard.disabled.noSourceVersion":
-    "Select a source public info version.",
-  "switchboard.disabled.sourceRetired":
-    "The selected source version is retired.",
-  "switchboard.disabled.versionCodeConflict":
-    "This version code is already in use.",
-  "switchboard.disabled.alreadyPublished": "Already published (immutable).",
-  "switchboard.disabled.noPublicInfoVersion":
-    "Create a public info version before generating placards.",
   "switchboard.form.title": "Title",
   "switchboard.form.callPhone": "Call Phone",
   "switchboard.form.complaintPhone": "Complaint Phone",
@@ -1029,37 +339,12 @@ const en = {
   "switchboard.form.paymentMethodText": "Payment Method Text",
   "switchboard.form.effectiveFrom": "Effective From",
   "switchboard.form.effectiveTo": "Effective To (optional)",
-  "switchboard.form.effectiveFromPlaceholder": "2026-07-01T00:00:00.000Z",
   "switchboard.form.versionCode": "Version Code",
-  "switchboard.form.versionCodePlaceholder": "placard-2026-q3",
   "switchboard.form.sourceVersion": "Source Public Info Version",
   "switchboard.form.template": "Template",
-  "switchboard.form.templatePlaceholder": "seatback-default",
   "switchboard.form.artifactFileId": "Artifact File ID",
   "switchboard.form.artifactHint": "Optional external asset reference",
   "switchboard.form.effectiveToHint": "Optional sunset timestamp",
-  "switchboard.form.sourceHint.none":
-    "Select a source public info version to keep placard lineage traceable.",
-  "switchboard.form.sourceHint.published":
-    "Published source selected: generated placards will inherit the live disclosure timestamp.",
-  "switchboard.form.sourceHint.retired":
-    "Retired source selected: generation is blocked because placards must link to an active draft or published disclosure version.",
-  "switchboard.form.sourceHint.draft":
-    "Draft source selected: generated placards stay draft until the linked public info is published.",
-  "switchboard.form.sourceRetiredAuditNote":
-    "Retired public info versions remain visible for audit history, but cannot be used to generate new placards.",
-  "switchboard.form.versionCodeConflict":
-    "Version code already exists in placard {placardId}. Choose a unique code before generating.",
-  "switchboard.option.retiredSourceUnavailable":
-    "{title} (retired source unavailable)",
-  "switchboard.assistant.invalidWorkspaceTab":
-    "Switchboard tab filter accepts only versions, placards, or history.",
-  "switchboard.assistant.appliedWorkspaceTab":
-    "Applied switchboard tab {value}.",
-  "switchboard.assistant.filledPublicInfoDraft":
-    "Filled public info draft without submitting.",
-  "switchboard.assistant.filledPlacardDraft":
-    "Filled placard draft without submitting.",
   "switchboard.noRateText": "No rate text",
   "switchboard.err.effectiveFrom":
     "Effective from must be a valid local date and time.",
@@ -1110,178 +395,6 @@ const en = {
   "pricing.form.effectiveTo": "Effective To",
   "pricing.noRules": "No pricing rules.",
   "pricing.noPlans": "No driver fee plans.",
-  "pricing.pageTitle": "Pricing",
-  "pricing.pageSubtitle":
-    "draft -> published -> retired · publish uses atomic replace (Q-ADM10)",
-  "pricing.loadingWorkspace": "Loading pricing workspace...",
-  "pricing.tab.passenger": "Passenger Pricing",
-  "pricing.tab.driver": "Driver Fee Plans",
-  "pricing.tab.subsidy": "Subsidy / Reimbursement Rules",
-  "pricing.tab.history": "Published Versions",
-  "pricing.action.createPassengerDraft": "Create passenger draft",
-  "pricing.action.createDriverDraft": "Create driver plan draft",
-  "pricing.action.createSubsidyDraft": "Create subsidy draft",
-  "pricing.action.viewHistory": "View version history",
-  "pricing.action.publishDriverPlan": "Publish driver fee plan",
-  "pricing.action.publishSubsidyRule": "Publish subsidy rule",
-  "pricing.banner.authority.title": "Canonical quoted fare authority",
-  "pricing.banner.authority.body":
-    "Backend pricing is the only source of truth. Any manual override must follow governance and retain actor type plus required fields.",
-  "pricing.banner.loadFailure.title": "Pricing workspace failed to load",
-  "pricing.banner.receipt.title": "Audit receipt",
-  "pricing.banner.publishUnsupported.title":
-    "{action} is not wired to a mutation yet",
-  "pricing.banner.publishUnsupported.body":
-    "The high-risk publish modal and atomic replace flow are wired only for passenger pricing right now; driver and subsidy keep parity structure and governance guidance only.",
-  "pricing.bucket.title": "Service bucket fee breakdown",
-  "pricing.bucket.fallback.base": "Canonical backend rule",
-  "pricing.bucket.fallback.continuation": "See pricing rule",
-  "pricing.bucket.fallback.fee": "{feeBps} bps",
-  "pricing.bucket.standard.label": "standard",
-  "pricing.bucket.standard.base": "NT$ 85 / start",
-  "pricing.bucket.standard.continuation": "NT$ 5 / 250m",
-  "pricing.bucket.standard.fee": "1800 bps",
-  "pricing.bucket.business.label": "business",
-  "pricing.bucket.business.base": "NT$ 120 / start",
-  "pricing.bucket.business.continuation": "NT$ 6 / 200m",
-  "pricing.bucket.business.fee": "2200 bps",
-  "pricing.bucket.airport.label": "airport",
-  "pricing.bucket.airport.base": "NT$ 180 / start",
-  "pricing.bucket.airport.continuation": "Flat by zone",
-  "pricing.bucket.airport.fee": "2500 bps",
-  "pricing.bucket.wheelchair.label": "wheelchair",
-  "pricing.bucket.wheelchair.base": "NT$ 95 / start",
-  "pricing.bucket.wheelchair.continuation": "NT$ 5 / 250m",
-  "pricing.bucket.wheelchair.fee": "900 bps · subsidy",
-  "pricing.card.activeDraft.title": "Active / Draft comparison",
-  "pricing.card.activeDraft.subtitle":
-    "Version model · compare canonical active and candidate draft before publish",
-  "pricing.card.publishStepper.title": "Publish stepper",
-  "pricing.card.publishStepper.subtitle":
-    "Select draft -> compare -> capture reason -> atomic replace",
-  "pricing.card.publishStepper.conflictTitle": "Conflict check",
-  "pricing.card.override.title": "Override governance",
-  "pricing.card.override.subtitle":
-    "Manual override is record-only governance and must not overwrite canonical quoted fare authority",
-  "pricing.card.driverComparison.title": "Active / Draft comparison",
-  "pricing.card.driverComparison.subtitle":
-    "Driver settlement plans remain immutable after publish",
-  "pricing.card.driverComparison.draftQueue": "Draft queue",
-  "pricing.card.tripFee.title": "Per-trip fee structure",
-  "pricing.card.tripFee.subtitle": "Must-show fee structure + subsidy linkage",
-  "pricing.card.subsidyLinkage.title": "Subsidy / reimbursement linkage",
-  "pricing.card.subsidyLinkage.subtitle":
-    "Subsidy rules and the reimbursement queue are governed separately but share the quoted fare authority",
-  "pricing.card.subsidyOverride.subtitle":
-    "Manual override actors and evidence obligations",
-  "pricing.card.historyFilters.title": "Published version filters",
-  "pricing.card.historyFilters.subtitle":
-    "Cross-tab history can be filtered by type, scope, and period",
-  "pricing.card.historyTable.title":
-    "All published versions · cross-tab history",
-  "pricing.col.name": "Name",
-  "pricing.col.nameUpper": "NAME",
-  "pricing.col.versionUpper": "VERSION",
-  "pricing.col.statusUpper": "STATUS",
-  "pricing.col.serviceFeeUpper": "SERVICE FEE",
-  "pricing.col.serviceFeeBpsUpper": "SERVICE FEE bps",
-  "pricing.col.reimburseUpper": "REIMBURSE",
-  "pricing.col.scopeUpper": "SCOPE",
-  "pricing.col.effectiveUpper": "EFFECTIVE",
-  "pricing.col.triggerUpper": "TRIGGER",
-  "pricing.col.amountUpper": "AMOUNT / PCT",
-  "pricing.col.typeUpper": "TYPE",
-  "pricing.col.publishedAtUpper": "PUBLISHED AT",
-  "pricing.col.publishedByUpper": "PUBLISHED BY",
-  "pricing.col.canonicalUpper": "CANONICAL",
-  "pricing.col.actorTypesUpper": "ACTOR TYPES",
-  "pricing.col.requiredFieldsUpper": "REQUIRED FIELDS",
-  "pricing.col.planUpper": "PLAN",
-  "pricing.col.publishedUpper": "PUBLISHED",
-  "pricing.col.reimbursementModeUpper": "REIMBURSEMENT MODE",
-  "pricing.col.subsidyLinkageUpper": "SUBSIDY LINKAGE",
-  "pricing.col.queueUpper": "QUEUE",
-  "pricing.col.triggerCountUpper": "TRIGGER COUNT",
-  "pricing.col.canonicalVersionUpper": "CANONICAL VERSION",
-  "pricing.col.manualOverrideUpper": "MANUAL OVERRIDE",
-  "pricing.col.tenantCanSetQuotedFareUpper": "TENANT CAN SET QUOTED FARE",
-  "pricing.col.partnerCanSetQuotedFareUpper": "PARTNER CAN SET QUOTED FARE",
-  "pricing.modal.title": "Publish version",
-  "pricing.modal.body":
-    "High-risk actions require a reason and must retain actor, reason, and trace evidence in the audit receipt.",
-  "pricing.modal.conflictTitle": "Scope conflict check",
-  "pricing.modal.errorTitle": "Unable to publish draft",
-  "pricing.form.publishEffectiveFrom": "Effective Start",
-  "pricing.form.publishEffectiveTo": "Effective End",
-  "pricing.form.publishReason": "High-risk reason",
-  "pricing.form.publishReasonPlaceholder":
-    "Describe the governance reason, impact scope, and approval basis for this pricing publish.",
-  "pricing.state.active": "Active",
-  "pricing.state.current": "Current",
-  "pricing.state.draft": "Draft",
-  "pricing.state.empty": "Empty",
-  "pricing.state.publishCandidate": "Publish candidate",
-  "pricing.state.published": "Published",
-  "pricing.status.draft": "Draft",
-  "pricing.status.published": "Published",
-  "pricing.status.retired": "Retired",
-  "pricing.step.selectDraft.title": "1. Select draft",
-  "pricing.step.selectDraft.ready": "{version} is in the publish queue",
-  "pricing.step.selectDraft.empty":
-    "No publishable draft is available right now",
-  "pricing.step.compare.title": "2. Compare active/draft",
-  "pricing.step.compare.ready": "{activeVersion} -> {draftVersion}",
-  "pricing.step.compare.empty":
-    "Both an active rule and a draft are required for comparison",
-  "pricing.step.reason.title": "3. High-risk reason",
-  "pricing.step.reason.empty": "Open the modal and fill the required reason",
-  "pricing.step.receipt.title": "4. Audit receipt",
-  "pricing.step.receipt.empty":
-    "A receipt summary will appear here after publish",
-  "pricing.empty.passenger": "No passenger pricing versions are available.",
-  "pricing.empty.activeRule": "No active pricing rule is available.",
-  "pricing.empty.publishDraft": "No pricing draft is waiting to publish.",
-  "pricing.empty.driver": "No driver fee plan versions are available.",
-  "pricing.empty.publishedPlans": "No published driver fee plan is available.",
-  "pricing.empty.driverDraft":
-    "The current backend only returns published fee plans; the draft comparison area remains reserved for governance parity.",
-  "pricing.empty.tripFee": "No fee structure is available to display.",
-  "pricing.empty.history": "No version history matches the current filter set.",
-  "pricing.error.noDraft":
-    "There is no draft pricing rule available to publish.",
-  "pricing.error.reasonTooShort":
-    "The high-risk reason must be at least 12 characters.",
-  "pricing.publishConflict.multipleDrafts":
-    "{count} drafts share scope {scope}; publish should confirm the intended winner before atomic replace.",
-  "pricing.publishConflict.activeRetire":
-    "{activeVersion} will be retired for scope {scope} when {draftVersion} publishes.",
-  "pricing.publishReceipt":
-    '{version} published with reason "{reason}" at {timestamp}',
-  "pricing.reimbursement.mixed": "Manual + platform",
-  "pricing.reimbursement.platformOnly": "Platform only",
-  "pricing.scope.business": "business",
-  "pricing.scope.standard": "standard",
-  "pricing.filter.type": "Type",
-  "pricing.filter.scope": "Scope",
-  "pricing.filter.period": "Period",
-  "pricing.filter.option.passenger": "Passenger",
-  "pricing.filter.option.driver": "Driver",
-  "pricing.filter.option.subsidy": "Subsidy",
-  "pricing.filter.option.last90d": "Last 90d",
-  "pricing.filter.option.last30d": "Last 30d",
-  "pricing.tripFee.mixedSubsidyLinkage":
-    "Mixed reimbursement requires subsidy reconciliation",
-  "pricing.tripFee.platformFundedOnly": "Platform funded only",
-  "pricing.subsidy.name.wheelchair": "Wheelchair service subsidy",
-  "pricing.subsidy.name.airportNight": "Night airport transfer subsidy",
-  "pricing.subsidy.amount.wheelchair": "NT$ 180 / trip",
-  "pricing.subsidy.amount.airportNight": "12% fare top-up",
-  "pricing.actor.system": "system",
-  "pricing.actor.platformAdmin": "platform_admin",
-  "pricing.actor.samplePublisher": "Wei Chang",
-  "pricing.value.empty": "-",
-  "pricing.value.open": "open",
-  "pricing.value.rangeArrow": "->",
 
   // ── Payments ──
   "payments.title": "Finance Console",
@@ -1422,53 +535,6 @@ const en = {
   "payments.reconciliation.col.notes": "Notes",
   "payments.reconciliation.col.actions": "Actions",
   "payments.reconciliation.empty": "No reconciliation issues.",
-  "payments.page.title": "Settlement governance",
-  "payments.page.subtitle":
-    "invoices · driver statements · reimbursement batches · settlement matrix · reconciliation issues",
-  "payments.page.export": "Export",
-  "payments.page.openIssue": "Open issue",
-  "payments.page.queueSubtitle":
-    "Track finance exceptions before drilling into detailed evidence handling.",
-  "payments.page.createIssueTitle": "Open reconciliation issue",
-  "payments.page.createIssueSubtitle":
-    "Seed actor, context, and the first evidence note in one pass.",
-  "payments.page.outstandingLabel": "Current outstanding",
-  "payments.page.exposureLabel": "Cumulative exposure",
-  "payments.page.handlingLabel": "Average handling time",
-  "payments.page.reopenRateLabel": "Reopen rate",
-  "payments.page.reopenDeltaWarn": "warn threshold {threshold}%",
-  "payments.page.reopenDeltaOk": "ok < {threshold}%",
-  "payments.page.reopenBannerTitle": "Reopen rate exceeded threshold",
-  "payments.page.reopenBannerBody":
-    "{rate} of the current 30-day issue window has already been reopened. {count} row(s) need closer queue hygiene before they recycle again.",
-  "payments.page.queueWindow": "Recent issue window",
-  "payments.page.linkedExposure": "Linked exposure",
-  "payments.page.empty.matrix":
-    "Settlement matrix is empty for the current scope.",
-  "payments.page.empty.invoices": "No tenant invoices match this filter.",
-  "payments.page.empty.statements": "No driver statements generated yet.",
-  "payments.page.empty.recon": "No reconciliation issues — the queue is clear.",
-  "payments.page.all": "All",
-  "payments.page.close": "Close",
-  "payments.page.cancel": "Cancel",
-  "payments.page.noLinkedDocs": "no linked docs",
-  "payments.page.resolvedWindow": "resolved issue window",
-  "payments.page.activeQueueAgeFallback": "active queue age fallback",
-  "payments.page.assistant.table.matrix": "Settlement matrix",
-  "payments.page.assistant.table.invoices": "Tenant invoices",
-  "payments.page.assistant.table.statements": "Driver statements",
-  "payments.page.assistant.table.reconciliation": "Reconciliation issues",
-  "payments.page.assistant.form.createTitle": "Create reconciliation issue",
-  "payments.page.externalOrder": "External order",
-  "payments.page.validation.financeActorRequired":
-    "Finance actor ID is required.",
-  "payments.page.validation.issueSummaryRequired": "Issue summary is required.",
-  "payments.page.validation.assigneeRequired": "Assignee is required.",
-  "payments.page.validation.resolutionCodeRequired":
-    "Resolution code is required.",
-  "payments.page.validation.resolutionSummaryRequired":
-    "Resolution summary is required.",
-  "payments.page.validation.reopenReasonRequired": "Reopen reason is required.",
   "payments.generateInvoice": "Generate invoice",
   "payments.generating": "Generating...",
   "payments.generateStatements": "Generate statements",
@@ -1533,64 +599,6 @@ const en = {
   "health.metric.reporting.note": "{count} queued/running jobs are still open",
   "health.metric.adapters.title": "Degraded adapter surfaces",
   "health.metric.adapters.note": "{count} adapters are being monitored",
-  "health.alertsTitle": "Active workflow alerts",
-  "health.alertsEmpty": "No active alerts.",
-  "health.adaptersTitle": "Forwarder adapter inventory",
-  "health.adaptersEmpty": "No adapter inventory is reporting yet.",
-  "health.dispatchTitle": "Dispatch operations",
-  "health.webhookTitle": "Webhook delivery",
-  "health.filingTitle": "Filing and review queues",
-  "health.dispatchEmpty": "Queue depth, redispatch load, and dispatch failures",
-  "health.webhookEmpty":
-    "Endpoint availability, queued deliveries, and delivery lag",
-  "health.filingEmpty":
-    "Reporting jobs, recording backlog, and eligibility follow-up",
-  "health.loadingAlerts": "Loading alerts...",
-  "health.loadingAdapters": "Loading adapters...",
-  "health.openAlert": "Open",
-  "health.metricsNote":
-    "Health status, adapter mode, and latest operational signal",
-  "health.refreshError": "Unable to refresh platform health",
-  "health.alert.measurement": "{measured} measured · critical at {threshold}",
-  "health.metric.minutes": "{value} min",
-  "health.tab.alertsWithCount": "Alerts{suffix}",
-  "health.tab.dispatch": "Dispatch",
-  "health.tab.webhook": "Webhook",
-  "health.tab.filing": "Filing",
-  "health.tab.adaptersInventory": "Adapters",
-  "health.adapter.entries": "{count} entries",
-  "health.adapter.sourceSuffix": "{source} channel",
-  "health.routeLabel.platform": "platform",
-  "health.routeLabel.ops": "ops",
-  "health.status.healthy": "Healthy",
-  "health.status.degraded": "Degraded",
-  "health.status.down": "Down",
-  "health.status.unknown": "Unknown",
-  "health.status.active": "Active",
-  "health.status.expiring": "Expiring",
-  "health.status.missing": "Missing",
-  "health.alert.recording_backlog.title": "Recording backlog requires review",
-  "health.alert.driver_state_lag.title": "Driver state updates are stale",
-  "health.alert.adapter_degradation.title": "Adapter degradation detected",
-  "health.summary.dispatch.queueDepth": "Ready queue depth",
-  "health.summary.dispatch.redispatchOrders": "Redispatch orders",
-  "health.summary.dispatch.exceptionHolds": "Exception holds",
-  "health.summary.dispatch.failedOrders": "Dispatch failed orders",
-  "health.summary.webhook.activeEndpoints": "Active endpoints",
-  "health.summary.webhook.disabledEndpoints": "Disabled endpoints",
-  "health.summary.webhook.queuedDeliveries": "Queued deliveries",
-  "health.summary.webhook.oldestQueuedLag": "Oldest queued lag",
-  "health.summary.filing.reportingQueuedJobs": "Reporting queued jobs",
-  "health.summary.filing.recordingBacklog": "Recording backlog",
-  "health.summary.filing.manualReviewQueue": "Manual review queue",
-  "health.summary.filing.eligibilityFailures24h": "Eligibility failures 24h",
-  "health.adapterColumns.adapter": "ADAPTER",
-  "health.adapterColumns.source": "SOURCE",
-  "health.adapterColumns.kind": "KIND",
-  "health.adapterColumns.status": "STATUS",
-  "health.adapterColumns.latency": "LATENCY",
-  "health.adapterColumns.lastEvent": "LAST EVENT",
-  "health.adapterColumns.orders24h": "orders 24h",
 
   // ── Notices ──
   "notices.title": "Notices & Maintenance",
@@ -1638,54 +646,6 @@ const en = {
   "audit.newValues": "New Values",
   "audit.oldValues": "Old Values",
   "audit.empty": "No audit records.",
-  "audit.page.title": "Audit & Evidence Governance",
-  "audit.page.subtitle":
-    "Append-only · legal hold + deletion exception shown via badge (Q-ADM16)",
-  "audit.page.refresh": "Refresh (T6 manual)",
-  "audit.page.refreshing": "Refreshing…",
-  "audit.page.exportCsv": "Export CSV",
-  "audit.page.tab.log": "Audit log",
-  "audit.page.tab.policy": "Retention policies",
-  "audit.page.tab.hold": "Active legal holds",
-  "audit.page.tab.except": "Deletion exceptions",
-  "audit.page.all": "All",
-  "audit.page.legalHoldTip": "legal hold",
-  "audit.page.deletionExceptionTip": "deletion exception",
-  "audit.page.expires": "expires",
-  "audit.page.case": "case",
-  "audit.page.owner": "owner",
-  "audit.page.reason": "reason",
-  "audit.page.loading": "Loading audit log…",
-  "audit.page.empty.log": "No audit records match the current filter.",
-  "audit.page.empty.policy": "No retention policies configured.",
-  "audit.page.empty.hold": "No active legal holds.",
-  "audit.page.empty.except": "No active deletion exceptions.",
-  "audit.page.holdsTitle": "Active legal holds",
-  "audit.page.exceptTitle": "Deletion exceptions",
-  "audit.page.col.when": "WHEN",
-  "audit.page.col.actorType": "ACTOR TYPE",
-  "audit.page.col.actor": "ACTOR",
-  "audit.page.col.module": "MODULE",
-  "audit.page.col.action": "ACTION",
-  "audit.page.col.resource": "RESOURCE",
-  "audit.page.col.request": "REQUEST",
-  "audit.page.col.reasonCode": "REASON CODE",
-  "audit.page.policy.family": "FAMILY",
-  "audit.page.policy.authority": "AUTHORITY",
-  "audit.page.policy.retention": "RETENTION",
-  "audit.page.policy.download": "DOWNLOAD",
-  "audit.page.policy.legalHold": "LEGAL HOLD",
-  "audit.page.hold.resource": "RESOURCE",
-  "audit.page.hold.case": "CASE",
-  "audit.page.hold.reason": "REASON",
-  "audit.page.hold.placedBy": "PLACED BY",
-  "audit.page.hold.placedAt": "PLACED AT",
-  "audit.page.exception.reason": "REASON",
-  "audit.page.exception.expires": "EXPIRES",
-  "audit.page.signedTtl": "signed url · {minutes}m ttl",
-  "audit.page.noDownload": "no download",
-  "audit.page.holdEnabled": "supported",
-  "audit.page.holdDisabled": "not supported",
 
   // ── Feature Flags ──
   "flags.title": "Feature Flags",
@@ -1704,102 +664,6 @@ const en = {
   "flags.enable": "Enable",
   "flags.disable": "Disable",
   "flags.empty": "No feature flags.",
-  "flags.admin.pageTitle": "Feature Flags · Write Access",
-  "flags.admin.pageSubtitle":
-    "Only this page can write feature flags. Ops, tenant, and driver surfaces remain read-only GET views.",
-  "flags.admin.metaPill": "write access only",
-  "flags.admin.refreshing": "Refreshing...",
-  "flags.admin.addOverride": "Add tenant override",
-  "flags.admin.addOverrideHint":
-    "Select a tenant scope first to create an override.",
-  "flags.admin.riskTitle": "High-risk actions require an explicit reason.",
-  "flags.admin.riskBody":
-    "Toggle and tenant override changes stay in this write lane and record a local audit receipt after confirmation.",
-  "flags.admin.scopeField": "Inspect scope",
-  "flags.admin.searchField": "Search key",
-  "flags.admin.searchPlaceholder": "Search by flag key",
-  "flags.admin.scopeHint":
-    "Switch to a tenant to inspect its effective override rows. Default view stays on platform records.",
-  "flags.admin.scopePlatformDefault": "Platform defaults",
-  "flags.admin.scopeTenantOverride": "Tenant override",
-  "flags.admin.scopeTenantOverrideWithId": "Tenant override · {id}",
-  "flags.admin.scopeLoading": "Loading tenant list...",
-  "flags.admin.summaryPlatformDefault": "Platform defaults",
-  "flags.admin.summaryTenantOverride": "Tenant overrides",
-  "flags.admin.tableTitle": "Feature flag registry",
-  "flags.admin.tableSubtitle":
-    "The assigned table-first body keeps Key, Scope, State toggle, Updated by, At, and Actions in one registry.",
-  "flags.admin.filterLabel": "Rollout state",
-  "flags.admin.filterPill": "Table-first view",
-  "flags.admin.filter.midRollout": "Mid-rollout",
-  "flags.admin.filter.rolledOut": "Rolled out",
-  "flags.admin.filter.deprecated": "Deprecated",
-  "flags.admin.filter.tenantOverrides": "Tenant overrides",
-  "flags.admin.rollout.midRollout": "Mid-rollout",
-  "flags.admin.rollout.rolledOut": "Rolled out",
-  "flags.admin.rollout.deprecated": "Deprecated",
-  "flags.admin.keyHeader": "Key",
-  "flags.admin.scopeHeader": "Scope",
-  "flags.admin.stateHeader": "State",
-  "flags.admin.updatedByHeader": "Updated by",
-  "flags.admin.updatedAtHeader": "At",
-  "flags.admin.actionsHeader": "Actions",
-  "flags.admin.noDescription": "No description provided",
-  "flags.admin.updatedByValue": "Not exposed by contract",
-  "flags.admin.toggle": "Toggle",
-  "flags.admin.removeOverride": "Remove override",
-  "flags.admin.history": "History",
-  "flags.admin.confirmToggleTitle": "Confirm feature flag toggle",
-  "flags.admin.confirmToggleBody":
-    "This will change the effective feature flag state shown in the current scope.",
-  "flags.admin.confirmOverrideTitle": "Create tenant override",
-  "flags.admin.confirmOverrideBody":
-    "This writes a tenant-specific override for the selected key and leaves other scopes unchanged.",
-  "flags.admin.confirmRemoveOverrideTitle": "Remove tenant override",
-  "flags.admin.confirmRemoveOverrideBody":
-    "This removes the tenant-specific override and reverts the tenant back to the platform default.",
-  "flags.admin.reasonLabel": "High-risk reason",
-  "flags.admin.reasonPlaceholder":
-    "Describe the rollout reason, expected blast radius, and validation plan.",
-  "flags.admin.reasonRequired":
-    "A high-risk reason is required before this action can run.",
-  "flags.admin.overrideTenantField": "Tenant",
-  "flags.admin.overrideKeyField": "Flag key",
-  "flags.admin.overrideStateField": "Override state",
-  "flags.admin.overrideDescriptionField": "Override description",
-  "flags.admin.overrideDescriptionHint":
-    "Optional. Leave blank to keep the existing flag description.",
-  "flags.admin.confirmCreate": "Create override",
-  "flags.admin.confirmRemove": "Remove override",
-  "flags.admin.scopeMeta": "Inspect scope",
-  "flags.admin.resultMeta": "{count} visible row(s)",
-  "flags.admin.enabledMeta": "{count} enabled",
-  "flags.admin.disabledMeta": "{count} disabled",
-  "flags.admin.overrideMeta": "{count} tenant override row(s)",
-  "flags.admin.notesTitle": "Extended notes",
-  "flags.admin.notesEmpty":
-    "No additional contract notes are exposed for the current scope.",
-  "flags.admin.historyTitle": "Local audit receipts",
-  "flags.admin.historyEmpty":
-    "No local receipts have been recorded in this session yet.",
-  "flags.admin.historyHint":
-    "Use the History row action to focus receipts for a specific key.",
-  "flags.admin.historyFocusAll":
-    "Showing all receipts recorded in this browser session.",
-  "flags.admin.historyFocusKey": "Focused on {key}",
-  "flags.admin.secondaryPanelTitle": "Change control & extended details",
-  "flags.admin.secondaryPanelSubtitle":
-    "High-risk reason capture, notes, and local history stay below the default table-first body.",
-  "flags.admin.actionComposerTitle": "Pending high-risk change",
-  "flags.admin.actionComposerIdle":
-    "Toggle and override mutations require an explicit reason before confirmation.",
-  "flags.admin.actionApplied": "Audit receipt recorded",
-  "flags.admin.noFlagsInFilter":
-    "No feature flags match the current rollout filter and search query.",
-  "flags.admin.laneMeta": "Writable only here",
-  "flags.admin.notesMeta": "Extended notes stay outside the default body.",
-  "flags.admin.receiptsMeta": "{count} local receipt(s)",
-  "flags.admin.showAllReceipts": "Show all receipts",
 
   // ── Tenants (additional) ──
   "tenants.configure": "Configure",
@@ -1843,141 +707,6 @@ const en = {
   "tenants.role.acknowledge": "Acknowledge",
   "tenants.role.invited": "Invited",
   "tenants.role.acknowledged": "Acknowledged",
-  "tenants.role.pending": "Not invited",
-  "tenants.list.pageTitle": "Tenants",
-  "tenants.list.pageSubtitle":
-    "Manage the full tenant lifecycle from creation through production rollout.",
-  "tenants.list.filterAction": "Filter",
-  "tenants.list.exportAction": "Export",
-  "tenants.list.errorTitle": "Unable to load tenant governance",
-  "tenants.list.createTitle": "Create tenant",
-  "tenants.list.createSubtitle":
-    "Bootstrap tenant identity, quotas, enabled modules, and onboarding defaults before the first promotion.",
-  "tenants.list.createSummaryTitle": "Bootstrap snapshot",
-  "tenants.list.createSummarySubtitle":
-    "Keep the initial rollout package explicit before this tenant joins the live roster.",
-  "tenants.list.col.tenant": "TENANT",
-  "tenants.list.col.stage": "STAGE",
-  "tenants.list.col.gate": "GATE",
-  "tenants.list.col.modules": "MODULES",
-  "tenants.list.col.integration": "INTEGRATION",
-  "tenants.list.col.updated": "UPDATED",
-  "tenants.list.col.quotasPerMonth": "QUOTA / MO",
-  "tenants.list.filter.production": "Production",
-  "tenants.list.filter.pilot": "Pilot",
-  "tenants.list.filter.sandbox": "Sandbox",
-  "tenants.list.filter.rollbackHold": "Rollback hold",
-  "tenants.list.moduleState.enabled": "enabled",
-  "tenants.list.moduleState.disabled": "optional",
-  "tenants.list.bootstrap.modules": "Selected modules",
-  "tenants.list.bootstrap.quota": "Bookings / month",
-  "tenants.list.bootstrap.api": "API calls / month",
-  "tenants.list.bootstrap.status": "STATUS",
-  "tenants.list.bootstrap.integration": "INTEGRATION",
-  "tenants.list.bootstrap.admin": "BOOTSTRAP ADMIN",
-  "tenants.list.bootstrap.sandbox": "SANDBOX BASE URL",
-  "tenants.list.quotaHint":
-    "Set the initial monthly quota envelope before enabling traffic.",
-  "tenants.list.modulesHint": "Keep the initial module footprint explicit.",
-  "tenants.list.onboardingHint":
-    "Seed integration posture and bootstrap ownership from the platform side.",
-  "tenants.list.kpi.modulesSub": "tenant modules",
-  "tenants.list.kpi.bookingsSub": "bookings",
-  "tenants.list.kpi.apiSub": "API",
-  "tenants.list.quotasTooltip": "{drivers} drivers · {api} API",
-  "tenants.list.placeholder.name": "Acme Mobility",
-  "tenants.list.placeholder.code": "acme_dispatch",
-  "tenants.list.placeholder.adminEmail": "admin@acme.example",
-  "tenants.list.placeholder.sandboxBaseUrl": "https://sandbox.acme.example",
-  "tenants.list.assistant.invalidFilter":
-    "Tenants filter accepts only all, sandbox, pilot, production, or rollback_hold.",
-  "tenants.list.assistant.filterApplied": "Applied tenants filter {value}.",
-  "tenants.detail.loadingWorkspace": "Loading tenant lifecycle workspace...",
-  "tenants.detail.missingTenantId": "Missing tenant id.",
-  "tenants.detail.pageTitle": "Tenant detail",
-  "tenants.detail.pageSubtitle": "tenantId: {tenantId}",
-  "tenants.detail.backToTenants": "Back to tenants",
-  "tenants.detail.loadErrorTitle": "Unable to load tenant detail",
-  "tenants.detail.notFoundTitle": "Tenant not found",
-  "tenants.detail.notFoundBody":
-    "The assigned route now resolves with a page body and no longer falls through to a 404. Pick another tenant from the lifecycle table.",
-  "tenants.detail.openConsole": "Open in Tenant Console",
-  "tenants.detail.enterRollbackHold": "Enter rollback_hold",
-  "tenants.detail.actionFailed": "Tenant detail action failed",
-  "tenants.detail.auditReceipt": "Audit receipt · {action}",
-  "tenants.detail.reasonCaptured": "Reason captured: {reason} · {at}",
-  "tenants.detail.rolloutProgressTitle": "Rollout progress · state machine",
-  "tenants.detail.rolloutProgressSubtitle":
-    "cutover owner: {cutoverOwner} · rollback owner: {rollbackOwner} (linked user records · Q-ADM06)",
-  "tenants.detail.rollbackPreparedTitle": "rollbackPrepared = {value}",
-  "tenants.detail.rollbackPrepared.ready":
-    "Tenant is ready for production rollback.",
-  "tenants.detail.rollbackPrepared.pending":
-    "Complete the rollback plan before promoting to production.",
-  "tenants.detail.roleAcknowledgementsTitle": "role acknowledgements",
-  "tenants.detail.roleAcknowledgementsBody":
-    "{acknowledged}/{total} roles invited and acknowledged.",
-  "tenants.detail.currentGateTitle": "current gate = {gate}",
-  "tenants.detail.currentGateEmpty": "No additional cutover note recorded yet.",
-  "tenants.detail.onboardingPackage": "Onboarding package",
-  "tenants.detail.rolesInvitesTitle":
-    "Roles & invites · {acknowledged}/{total} acknowledged",
-  "tenants.detail.tenantBaseline": "Tenant baseline",
-  "tenants.detail.baseline.stage": "STAGE",
-  "tenants.detail.baseline.currentGate": "CURRENT GATE",
-  "tenants.detail.baseline.updated": "UPDATED",
-  "tenants.detail.baseline.lastPromoted": "LAST PROMOTED",
-  "tenants.detail.recentActivity": "Recent activity",
-  "tenants.detail.recentActivitySubtitle":
-    "Audit subset for rollout, onboarding, and role-invite decisions",
-  "tenants.detail.recordUpdated": "Tenant record updated",
-  "tenants.detail.recordCreated": "Tenant created",
-  "tenants.detail.recordUpdatedBody": "{at} · {code}",
-  "tenants.detail.recordCreatedBody": "{at} · bootstrap package recorded",
-  "tenants.detail.bootstrapPackageRecorded": "bootstrap package recorded",
-  "tenants.detail.rollbackHoldActive": "Tenant is currently in rollback_hold",
-  "tenants.detail.rollbackHoldInactive": "No active rollback hold",
-  "tenants.detail.lastPromotion": "Last promotion: {at}",
-  "tenants.detail.noPromotionHistory": "Promotion history not yet recorded.",
-  "tenants.detail.tab.overview": "Overview",
-  "tenants.detail.tab.modules": "Modules",
-  "tenants.detail.tab.onboarding": "Onboarding",
-  "tenants.detail.tab.rollout": "Rollout",
-  "tenants.detail.tab.roles": "Roles",
-  "tenants.detail.tab.webhookBaseline": "Webhook baseline",
-  "tenants.detail.tab.billingBaseline": "Billing baseline",
-  "tenants.detail.tab.audit": "Audit",
-  "tenants.detail.role.required": "required role",
-  "tenants.detail.role.optional": "optional role",
-  "tenants.detail.role.pendingAssignment": "Pending assignment",
-  "tenants.detail.role.acknowledgedHint": "{name} acknowledged",
-  "tenants.detail.role.invitedHint": "{name} invited",
-  "tenants.detail.role.col.invitee": "INVITEE",
-  "tenants.detail.role.col.role": "ROLE",
-  "tenants.detail.role.col.state": "STATE",
-  "tenants.detail.role.col.updated": "UPDATED",
-  "tenants.detail.role.col.action": "ACTION",
-  "tenants.detail.role.inviting": "Inviting...",
-  "tenants.detail.role.saving": "Saving...",
-  "tenants.detail.onboarding.quotaPerMonth": "QUOTA / MONTH",
-  "tenants.detail.onboarding.modules": "MODULES",
-  "tenants.detail.step.gate": "gate {status}",
-  "tenants.detail.step.rollbackReady": "rollback_hold ready",
-  "tenants.detail.step.owner": "owner: {owner}",
-  "tenants.detail.step.ownerUnassigned": "owner not assigned",
-  "tenants.detail.modal.title": "Enter rollback_hold",
-  "tenants.detail.modal.subtitle":
-    "High-risk action. Reason is required before the command is sent.",
-  "tenants.detail.modal.close": "Close",
-  "tenants.detail.modal.warningTitle":
-    "{tenant} will be blocked from further promotion.",
-  "tenants.detail.modal.warningBody":
-    "Use this when rollout risk or incident state requires an explicit governance hold.",
-  "tenants.detail.modal.reasonLabel": "Reason",
-  "tenants.detail.modal.reasonPlaceholder":
-    "Describe the incident, rollout risk, or operator decision that requires rollback_hold.",
-  "tenants.detail.modal.confirm": "Confirm rollback_hold",
-  "tenants.detail.modal.submitting": "Submitting...",
 
   // ── Payments (additional) ──
   "payments.approve": "Approve",
@@ -1988,131 +717,6 @@ const en = {
   "payments.reimbursementsTitle": "Driver reimbursements",
   "payments.generateInvoiceTitle": "Generate tenant invoice",
   "payments.generateStatementsTitle": "Generate driver statements",
-  "payments.reimbursements.queue.filter.all": "All",
-  "payments.reimbursements.queue.filter.pendingApproval": "Pending approval",
-  "payments.reimbursements.queue.filter.exported": "Exported",
-  "payments.reimbursements.queue.filter.done": "Done",
-  "payments.reimbursements.queue.submitter.platformFinance": "Platform Finance",
-  "payments.reimbursements.queue.headerTitle": "Reimbursement batches",
-  "payments.reimbursements.queue.headerSubtitle":
-    "draft → pending_approval → approved → exported → paid → reconciled (Q-ADM12 6-state state machine)",
-  "payments.reimbursements.queue.empty":
-    "No reimbursement batches match this queue state.",
-  "payments.reimbursements.queue.loadError":
-    "Unable to load reimbursement batches",
-  "payments.reimbursements.queue.loading": "Loading reimbursement batches...",
-  "payments.reimbursements.queue.col.batch": "BATCH",
-  "payments.reimbursements.queue.col.scope": "SCOPE",
-  "payments.reimbursements.queue.col.amount": "AMOUNT",
-  "payments.reimbursements.queue.col.state": "STATE",
-  "payments.reimbursements.queue.col.submitter": "SUBMITTER",
-  "payments.reimbursements.queue.col.submitted": "SUBMITTED",
-  "payments.reimbursements.queue.col.updated": "UPDATED",
-  "payments.reimbursements.status.draft": "draft",
-  "payments.reimbursements.status.pendingApproval": "pending_approval",
-  "payments.reimbursements.status.approved": "approved",
-  "payments.reimbursements.status.exported": "exported",
-  "payments.reimbursements.status.paid": "paid",
-  "payments.reimbursements.status.reconciled": "reconciled",
-  "payments.reimbursements.detail.fallbackWarning":
-    "API reimbursement detail is unavailable, so the page is rendering route-local fallback data aligned to the canvas artboard.",
-  "payments.reimbursements.detail.loading": "Loading...",
-  "payments.reimbursements.detail.pageTitle": "Reimbursement batch",
-  "payments.reimbursements.detail.backToPayments": "Back to payments",
-  "payments.reimbursements.detail.batchUnavailable": "Batch unavailable",
-  "payments.reimbursements.detail.batchUnavailableBody":
-    "The reimbursement batch route resolves, but the batch was not found.",
-  "payments.reimbursements.detail.lineItemsFallbackNote": "Line item {index}",
-  "payments.reimbursements.detail.fallbackReason.sponsorQ2Apr":
-    "Sponsor reimbursement Q2-Apr",
-  "payments.reimbursements.detail.fallbackReason.reconciliationAdjustment":
-    "Variance adjustment TWD 1,820 × 99 entries",
-  "payments.reimbursements.detail.approvalReasonRequired":
-    "Approval reason is required for this high-risk action.",
-  "payments.reimbursements.detail.approvalRecorded":
-    "Approval recorded with reason: {reason}",
-  "payments.reimbursements.detail.markedPaid":
-    "Batch marked paid and remittance proof captured.",
-  "payments.reimbursements.detail.queueLink": "Queue",
-  "payments.reimbursements.detail.copyBatchId": "Copy batch ID",
-  "payments.reimbursements.detail.refreshFailed": "Refresh failed",
-  "payments.reimbursements.detail.fallbackTitle":
-    "Fallback reimbursement detail",
-  "payments.reimbursements.detail.auditViewTitle":
-    "Audit-derived workflow view",
-  "payments.reimbursements.detail.auditViewBody":
-    "The six-state stepper matches the canvas while underlying contract data is derived from batch approval, remittance, and payment timestamps.",
-  "payments.reimbursements.detail.auditReceipt": "Audit receipt",
-  "payments.reimbursements.detail.stateMachineTitle": "State machine · Q-ADM12",
-  "payments.reimbursements.detail.stateMachineSubtitle":
-    "draft → pending approval → approved → exported → paid → reconciled",
-  "payments.reimbursements.detail.headerCardTitle": "Header",
-  "payments.reimbursements.detail.summary.batchId": "BATCH ID",
-  "payments.reimbursements.detail.summary.driver": "DRIVER",
-  "payments.reimbursements.detail.summary.statement": "STATEMENT",
-  "payments.reimbursements.detail.summary.period": "PERIOD",
-  "payments.reimbursements.detail.summary.totalAmount": "TOTAL AMOUNT",
-  "payments.reimbursements.detail.summary.state": "STATE",
-  "payments.reimbursements.detail.summary.approvedAt": "APPROVED AT",
-  "payments.reimbursements.detail.summary.paidAt": "PAID AT",
-  "payments.reimbursements.detail.summary.remittanceProof": "REMITTANCE PROOF",
-  "payments.reimbursements.detail.summary.lineItems": "LINE ITEMS",
-  "payments.reimbursements.detail.approveFlowTitle": "Approve reason flow",
-  "payments.reimbursements.detail.approveFlowSubtitle":
-    "High-risk action requires a reason before approval.",
-  "payments.reimbursements.detail.approvalReason": "Approval reason",
-  "payments.reimbursements.detail.approvalReasonPlaceholder":
-    "Explain sponsor exposure, evidence, or audit context.",
-  "payments.reimbursements.detail.remittanceProof": "Remittance proof",
-  "payments.reimbursements.detail.actionFailed": "Action failed",
-  "payments.reimbursements.detail.markPaid": "Mark paid",
-  "payments.reimbursements.detail.timelineTitle":
-    "State timeline · audit-derived",
-  "payments.reimbursements.detail.batchSummaryTitle": "Batch summary",
-  "payments.reimbursements.detail.batchSummarySubtitle.fallback":
-    "Canvas body density rendered from route-local fallback finance context.",
-  "payments.reimbursements.detail.batchSummarySubtitle.live":
-    "Canvas body density with route-local finance context.",
-  "payments.reimbursements.detail.approvalGate": "Approval gate:",
-  "payments.reimbursements.detail.approvalGateCompleted": "Completed",
-  "payments.reimbursements.detail.approvalGatePending":
-    "Pending super-admin signoff",
-  "payments.reimbursements.detail.exportPosture": "Export posture:",
-  "payments.reimbursements.detail.exportPostureAttached": "Proof attached",
-  "payments.reimbursements.detail.exportPosturePending": "Not exported yet",
-  "payments.reimbursements.detail.settlementTarget": "Settlement target:",
-  "payments.reimbursements.detail.evidenceScope": "Evidence scope:",
-  "payments.reimbursements.detail.evidenceScopeCount": "{count} line items",
-  "payments.reimbursements.detail.lineItemsTitle": "Line items",
-  "payments.reimbursements.detail.lineItemsSubtitle":
-    "{count} sources contributing to the batch total.",
-  "payments.reimbursements.detail.lineItemsEmpty":
-    "No reimbursement line items were returned for this batch.",
-  "payments.reimbursements.detail.lineItems.col.recipient": "RECIPIENT",
-  "payments.reimbursements.detail.lineItems.col.amount": "AMOUNT",
-  "payments.reimbursements.detail.lineItems.col.sourceReference":
-    "SOURCE REFERENCE",
-  "payments.reimbursements.detail.lineItems.col.note": "NOTE",
-  "payments.reimbursements.timeline.batchCreated": "Batch created",
-  "payments.reimbursements.timeline.batchCreatedBody":
-    "Generated for statement {statementId} and driver {driverId}.",
-  "payments.reimbursements.timeline.submittedForApproval":
-    "Submitted for approval",
-  "payments.reimbursements.timeline.submittedForApprovalBody":
-    "{count} reimbursement line items queued for finance review.",
-  "payments.reimbursements.timeline.approved": "Approved",
-  "payments.reimbursements.timeline.approvedBody":
-    "Batch approved and ready for export/remittance handling.",
-  "payments.reimbursements.timeline.remittanceProofAttached":
-    "Remittance proof attached",
-  "payments.reimbursements.timeline.remittanceProofAttachedBody":
-    "Proof ID {proofId} recorded on the batch.",
-  "payments.reimbursements.timeline.markedPaid": "Marked paid",
-  "payments.reimbursements.timeline.markedPaidBody":
-    "Driver reimbursement has been marked paid in the finance console.",
-  "payments.reimbursements.timeline.waitingApproval": "Waiting approval",
-  "payments.reimbursements.timeline.waitingApprovalBody":
-    "High-risk approval still requires reason capture before state can advance.",
 
   // ── Pricing (additional) ──
   "pricing.platformFunded": "Platform funded",
@@ -2137,76 +741,6 @@ const en = {
   "notices.maintActiveBanner": "MAINTENANCE ACTIVE",
   "notices.currentStatus": "Current Status",
   "notices.lastUpdated": "Last Updated",
-  "notices.subtitle.detail":
-    "critical / maintenance severity pushes a cross-app banner to ops, tenant, and driver surfaces (Q-ADM15).",
-  "notices.tab.history": "Broadcast History",
-  "notices.createNotice": "Create notice",
-  "notices.enterMaintenance": "Enter maintenance",
-  "notices.refreshing": "Refreshing",
-  "notices.emptyDetailed": "No platform notices have been published yet.",
-  "notices.emptyHistory": "No broadcasts have been delivered yet.",
-  "notices.composer.title": "Create notice",
-  "notices.composer.subtitle":
-    "Publish a cross-app banner for platform operators, tenants, or drivers.",
-  "notices.guardrail.title":
-    "Maintenance notices should precede dispatch changes",
-  "notices.guardrail.body":
-    "Publish a maintenance-severity notice before enabling platform-wide maintenance mode.",
-  "notices.maintenance.currentTitle": "Maintenance mode · current state",
-  "notices.maintenance.currentSubtitle":
-    "Platform-wide dispatch and ingress control.",
-  "notices.maintenance.internalReason": "Reason · internal record",
-  "notices.maintenance.scheduledStart": "Scheduled start",
-  "notices.maintenance.scheduledEnd": "Scheduled end",
-  "notices.maintenance.save": "Save maintenance settings",
-  "notices.maintenance.previewTitle": "Current maintenance notice (preview)",
-  "notices.maintenance.previewFallback":
-    "Enable maintenance mode to push a cross-app interruption banner.",
-  "notices.maintenance.previewTargets":
-    "Target surfaces: ops · tenant · driver",
-  "notices.maintenance.reasonRequired":
-    "A high-risk maintenance action requires a reason before saving.",
-  "notices.maintenance.confirmTitle": "Confirm maintenance mode update",
-  "notices.maintenance.confirmBody":
-    "This is a high-risk action. Saving will change platform-wide dispatch and webhook behavior.",
-  "notices.maintenance.confirmReasonLabel": "Audit reason",
-  "notices.maintenance.confirmApply": "Apply maintenance update",
-  "notices.maintenance.summary":
-    "Once enabled, dispatch, webhook delivery, and partner ingress are paused.",
-  "notices.maintenance.reasonPlaceholder":
-    "Planned maintenance, partner outage mitigation, or compliance hold",
-  "notices.maintenance.startPlaceholder": "YYYY-MM-DD HH:MM",
-  "notices.maintenance.endPlaceholder": "YYYY-MM-DD HH:MM",
-  "notices.col.updated": "Updated",
-  "notices.col.targets": "Targets",
-  "notices.col.delivery": "Delivery",
-  "notices.col.broadcastAt": "Broadcast at",
-  "notices.col.updatedBy": "Updated by",
-  "notices.col.window": "Window",
-  "notices.col.action": "Action",
-  "notices.col.notice": "Notice",
-  "notices.col.id": "ID",
-  "notices.col.severityShort": "SEV",
-  "notices.history.subtitle": "Broadcast history · cross-app delivery outcomes",
-  "notices.history.delivery.archived": "resolved delivery archived",
-  "notices.history.delivery.all": "delivered 3 / 3",
-  "notices.history.delivery.single": "delivered 1 / 1",
-  "notices.noticeTitleRequired": "Notice title is required.",
-  "notices.noticeBodyRequired": "Notice body is required.",
-  "notices.warning.operationError":
-    "Notice or maintenance operation error: {error}",
-  "notices.warning.maintenanceEnabled":
-    "Platform maintenance mode is currently enabled.",
-  "notices.status.active": "active",
-  "notices.status.scheduled": "scheduled",
-  "notices.status.resolved": "resolved",
-  "notices.status.archived": "archived",
-  "notices.severity.info": "low",
-  "notices.severity.warning": "medium",
-  "notices.severity.critical": "high",
-  "notices.window.notScheduled": "Not scheduled",
-  "notices.risk.high": "high risk",
-  "notices.systemUser": "system",
 
   // ── Audit (additional) ──
   "audit.showingOf": "Showing {shown} of {total} record(s)",
@@ -2242,200 +776,8 @@ const en = {
   "audit.exceptions.reason": "Reason",
   "audit.exceptions.expiresAt": "Expires At",
 
-  // ── Admin Home ──
-  "adminHome.title": "Platform governance home",
-  "adminHome.subtitle":
-    "DRTS control plane · {count} governance item(s) need review today.",
-  "adminHome.openAll": "Open all",
-  "adminHome.openAudit": "Go to audit",
-  "adminHome.loading": "Loading governance snapshot...",
-  "adminHome.noSnapshot": "No governance snapshot available yet.",
-  "adminHome.loadErrorTitle": "Unable to load governance snapshot",
-  "adminHome.quickLinksTitle": "Module shortcuts",
-  "adminHome.todayTitle": "Today's governance queue",
-  "adminHome.todaySubtitle":
-    "Cross-module items where platform governance should intervene.",
-  "adminHome.recentTitle":
-    "Recent sensitive operations · platform-layer audit trail (24h)",
-  "adminHome.kpi.tenants": "Active tenants",
-  "adminHome.kpi.tenantsSub": "{pilot} pilot · {sandbox} sandbox",
-  "adminHome.kpi.tenantsDelta": "{count} rollback_hold",
-  "adminHome.kpi.partners": "Partner entries",
-  "adminHome.kpi.partnersSub": "{bank} bank · {nonBank} hotel / enterprise",
-  "adminHome.kpi.partnersDelta": "{count} pending readiness",
-  "adminHome.kpi.drivers": "Active drivers",
-  "adminHome.kpi.driversSub": "{eligible} dispatch-eligible · {total} total",
-  "adminHome.kpi.driversDelta": "{count} stale in dispatch feed",
-  "adminHome.kpi.driversHealthy": "healthy",
-  "adminHome.kpi.recon": "Pending reconciliation",
-  "adminHome.kpi.reconDelta": "{partner} partner · {forwarded} forwarded",
-  "adminHome.kpi.reconSub": "{count} critical platform alert(s)",
-  "adminHome.kpi.reconHintEmpty": "no open issue ids",
-  "adminHome.noAudit": "No audit records found.",
-  "adminHome.noTodos": "No platform-routed governance blockers at the moment.",
-  "adminHome.auditTime": "Time",
-  "adminHome.auditActorType": "ACTOR TYPE",
-  "adminHome.auditModule": "Module",
-  "adminHome.auditAction": "Action",
-  "adminHome.auditActor": "Actor",
-  "adminHome.auditRequest": "Request",
-  "adminHome.auditSystem": "system",
-  "adminHome.quickLink.tenants": "Tenants",
-  "adminHome.quickLink.partners": "Partners",
-  "adminHome.quickLink.pricing": "Pricing",
-  "adminHome.quickLink.payments": "Payments",
-  "adminHome.quickLink.fleet": "Fleet",
-  "adminHome.quickLink.audit": "Audit",
-  "adminHome.alert.tokenTitle":
-    "BGMT dispatch reporting token expires in 6 days",
-  "adminHome.alert.tokenDescription":
-    "Measured {measuredValue} at {observedAt}. Renew the client credential before reporting completion traffic stalls.",
-  "adminHome.alert.tokenAction": "Open adapter registry",
-  "adminHome.alert.syncTitle": "GoCab forwarded · 24h sync_failed 4.2%",
-  "adminHome.alert.syncDescription":
-    "Above the 3% warning threshold. Inspect adapter health and watch manual fallback volume before finance close.",
-  "adminHome.alert.syncAction": "Open adapter",
-  "adminHome.alert.rollbackTitle": "{tenantCode} is in rollback_hold",
-  "adminHome.alert.rollbackDescription":
-    "Customer complaint cmp_0894 escalated into inc_0212. Rollout is paused until platform and ops agree on the next move.",
-  "adminHome.alert.rollbackAction": "Open tenant",
-
-  // ── Admin Shell ──
-  "adminShell.brandSub": "Platform Admin",
-  "adminShell.api.notChecked": "not checked",
-  "adminShell.api.checking": "API checking",
-  "adminShell.api.healthy": "API healthy",
-  "adminShell.api.degraded": "API degraded",
-  "adminShell.api.down": "API down",
-  "adminShell.api.short.checking": "checking",
-  "adminShell.api.short.healthy": "healthy",
-  "adminShell.api.short.degraded": "degraded",
-  "adminShell.api.short.down": "down",
-  "adminShell.lastChecked": "last checked",
-  "adminShell.searchAria": "Search",
-  "adminShell.searchPlaceholder":
-    "Search tenants, partner entries, audit events...",
-  "adminShell.identityRole": "Platform Admin",
-  "adminShell.identityRealm": "PLATFORM",
-  "adminShell.breadcrumbRoot": "Platform Admin",
-  "adminShell.breadcrumbDetail": "Detail",
-  "adminShell.notifications": "Notifications",
-  "adminShell.navAria": "Platform Admin navigation",
-  "adminShell.environmentProduction": "production",
-  "adminShell.refresh.audit": "manual · audit evidence",
-  "adminShell.refresh.governance": "medium_slow · governance",
-  "adminShell.error.routeConfigMissing":
-    "Platform Admin routes are not configured.",
-
-  // ── Assistant Overlay ──
-  "assistantOverlay.sourcesHeading": "Sources:",
-  "assistantOverlay.suggestedHeading": "Suggested next prompts:",
-  "assistantOverlay.receiptTitle": "Action receipt",
-  "assistantOverlay.context.routeHeading": "[Platform Admin route context]",
-  "assistantOverlay.context.pageHeading": "[Platform Admin page context]",
-  "assistantOverlay.context.questionHeading": "[Operator question]",
-  "assistantOverlay.context.none": "none",
-  "assistantOverlay.context.emptyList": "- none",
-  "assistantOverlay.context.empty": "empty",
-  "assistantOverlay.context.required": "required",
-  "assistantOverlay.context.dirty": "dirty",
-  "assistantOverlay.context.yes": "yes",
-  "assistantOverlay.context.no": "no",
-  "assistantOverlay.context.pathLabel": "Path",
-  "assistantOverlay.context.pageLabel": "Page",
-  "assistantOverlay.context.activeTabLabel": "Active tab",
-  "assistantOverlay.context.refreshTierLabel": "Refresh tier",
-  "assistantOverlay.context.visibleEntitiesLabel": "Visible entities",
-  "assistantOverlay.context.warningsLabel": "Warnings",
-  "assistantOverlay.context.visibleTablesLabel": "Visible tables",
-  "assistantOverlay.context.selectedRecordsLabel": "Selected records",
-  "assistantOverlay.context.availableActionsLabel": "Available actions",
-  "assistantOverlay.context.formsLabel": "Forms",
-  "assistantOverlay.context.rowsLabel": "rows",
-  "assistantOverlay.context.visibleLabel": "visible",
-  "assistantOverlay.context.selectedLabel": "selected",
-  "assistantOverlay.context.actionsLabel": "actions",
-  "assistantOverlay.context.disabledLabel": "disabled",
-  "assistantOverlay.context.fieldsLabel": "fields",
-  "assistantOverlay.context.validationErrorsLabel": "validationErrors",
-  "assistantOverlay.context.routeLine": "{label}: {value}",
-  "assistantOverlay.context.pageSectionLine": "{label}:\n{value}",
-  "assistantOverlay.context.tableSelectedSegment": " {label}={value}",
-  "assistantOverlay.context.tableActionsSegment": " {label}={value}",
-  "assistantOverlay.context.tableSummary":
-    "- {tableId} ({title}): {rowsLabel}={rowCount}; {visibleLabel}={visibleRows}{selectedRows}{actions}",
-  "assistantOverlay.context.availableActionSummary":
-    "{actionId}{riskLevel}{disabled}",
-  "assistantOverlay.context.availableActionRiskLevel": "({riskLevel})",
-  "assistantOverlay.context.availableActionDisabled": "[{label}]",
-  "assistantOverlay.context.formFieldSummary": "{fieldId}={valueSummary}",
-  "assistantOverlay.context.formFieldRequiredSegment": "={label}",
-  "assistantOverlay.context.formFieldDirtySegment": "={label}",
-  "assistantOverlay.context.formValidationErrorWithField":
-    "{fieldId}:{code}:{message}",
-  "assistantOverlay.context.formValidationError": "{code}:{message}",
-  "assistantOverlay.context.formSummary":
-    "- {formId} ({title}): {dirtyLabel}={dirtyValue}; {fieldsLabel}={fields}; {validationErrorsLabel}={validationErrors}; {actionsLabel}={actions}",
-  "assistantOverlay.launcher": "Open platform assistant",
-  "assistantOverlay.badge": "Beta",
-  "assistantOverlay.label": "Assistant",
-  "assistantOverlay.subtitle": "governance copilot",
-  "assistantOverlay.heading": "Platform Admin Assistant",
-  "assistantOverlay.status":
-    "Connected to the dev mock gateway for operation Q&A and action planning.",
-  "assistantOverlay.inputLabel": "Ask the platform assistant",
-  "assistantOverlay.inputPlaceholder":
-    "Ask how to operate this page, what risks matter, or what to do next...",
-  "assistantOverlay.send": "Send",
-  "assistantOverlay.sending": "Thinking",
-  "assistantOverlay.newSession": "New chat",
-  "assistantOverlay.minimize": "Minimize",
-  "assistantOverlay.close": "Close",
-  "assistantOverlay.reset": "Reset position",
-  "assistantOverlay.emptyTitle": "Platform Admin assistant is ready",
-  "assistantOverlay.emptyBody":
-    "Ask about the current page, governance risks, or request an operator checklist.",
-  "assistantOverlay.thinking":
-    "Reading the current Platform Admin route context and preparing an answer...",
-  "assistantOverlay.sessionTitle": "Platform Admin assistant",
-  "assistantOverlay.requestFailedTitle": "Assistant request failed",
-  "assistantOverlay.requestFailedBody":
-    "The assistant could not complete this request.",
-  "assistantOverlay.requestFailedHint":
-    "Check the dev API assistant flag, control-plane proxy, and Cloud Run logs.",
-  "assistantOverlay.actionFailedTitle": "Action execution failed",
-  "assistantOverlay.actionFailedHint":
-    "Review the governed action payload, confirmation reason, and backend audit logs.",
-  "assistantOverlay.suggestedPromptsAria": "Assistant suggested prompts",
-  "assistantOverlay.footnote":
-    "Mock provider in dev. Actions still require governed backend gates.",
-
   // ── Common (more) ──
   "common.noValues": "No values",
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // i18n remediation 20260604 — per-domain key-block skeletons.
-  // Each parallel WP appends ITS domain's new keys under the matching header
-  // below (en side here, zh side in the zh block). Only add keys under your
-  // own domain header; do not touch another WP's block. See
-  // docs/05-ui/i18n-remediation-implementation-20260604.md §A "共享檔協調".
-  // ─────────────────────────────────────────────────────────────────────────
-  // ── home (i18n remediation 20260604) ──
-  // ── tenants (i18n remediation 20260604) ──
-  // ── tenantGov (i18n remediation 20260604) ──
-  // ── partners (i18n remediation 20260604) ──
-  // ── users (i18n remediation 20260604) ──
-  // ── fleet (i18n remediation 20260604) ──
-  // ── switchboard (i18n remediation 20260604) ──
-  // ── pricing (i18n remediation 20260604) ──
-  // ── payments (i18n remediation 20260604) ──
-  // ── reimbursements (i18n remediation 20260604) ──
-  // ── health (i18n remediation 20260604) ──
-  // ── notices (i18n remediation 20260604) ──
-  // ── audit (i18n remediation 20260604) ──
-  // ── adapters (i18n remediation 20260604) ──
-  // ── adminShell (i18n remediation 20260604) ──
-  // ── adminAssistant (i18n remediation 20260604) ──
 };
 
 const zh: typeof en = {
@@ -2475,7 +817,6 @@ const zh: typeof en = {
   "common.apply": "套用",
   "common.hide": "隱藏",
   "common.close": "關閉",
-  "common.edit": "編輯",
   "common.approve": "核准",
   "common.error": "錯誤",
   "common.all": "全部",
@@ -2492,11 +833,8 @@ const zh: typeof en = {
   "common.generating": "產生中...",
   "common.adding": "新增中...",
   "common.unknown": "未知錯誤",
-  "common.na": "N/A",
   "common.yes": "是",
   "common.no": "否",
-  "common.true": "true",
-  "common.false": "false",
   "common.allTenants": "所有租戶",
   "common.newValues": "新值",
   "common.oldValues": "舊值",
@@ -2504,86 +842,13 @@ const zh: typeof en = {
   "common.deleteDraft": "刪除草稿",
   "common.cancelDraft": "取消草稿",
 
-  // ── Assistant ──
-  "assistant.common.name": "平台管理助手",
-  "assistant.state.idle": "待命",
-  "assistant.state.thinking": "分析中",
-  "assistant.state.planning": "規劃中",
-  "assistant.state.awaiting_confirmation": "等待確認",
-  "assistant.state.executing": "執行中",
-  "assistant.state.receipt": "收據",
-  "assistant.state.error": "錯誤",
-  "assistant.risk.low": "低風險",
-  "assistant.risk.medium": "中風險",
-  "assistant.risk.high": "高風險",
-  "assistant.stepStatus.pending": "待處理",
-  "assistant.stepStatus.in_progress": "進行中",
-  "assistant.stepStatus.completed": "已完成",
-  "assistant.stepStatus.blocked": "已阻塞",
-  "assistant.composer.placeholder":
-    "請要求平台管理助手檢查、規劃或執行受治理動作……",
-  "assistant.composer.submit": "送出",
-  "assistant.composer.waiting": "等待中...",
-  "assistant.composer.helper.idle": "按 Enter 送出，按 Shift+Enter 換行。",
-  "assistant.composer.helper.thinking": "助手正在草擬下一則回覆。",
-  "assistant.composer.helper.planning": "正在準備供審閱的執行計畫。",
-  "assistant.composer.helper.awaitingConfirmation": "執行已暫停，等待你確認。",
-  "assistant.composer.helper.executing": "指令正在執行中，請避免重複送出。",
-  "assistant.composer.helper.receipt": "上一個動作已完成，你可以繼續對話。",
-  "assistant.composer.helper.error": "上一輪失敗，請調整請求或重試。",
-  "assistant.message.role.user": "操作員",
-  "assistant.message.role.system": "系統",
-  "assistant.message.role.assistant": "助手",
-  "assistant.message.empty.title": "平台管理助手已就緒",
-  "assistant.message.empty.body":
-    "請要求分析、審閱計畫，或核准受治理動作以開始對話。",
-  "assistant.message.banner.thinking": "助手正在分析目前的平台內容脈絡。",
-  "assistant.message.banner.planning": "助手正在準備供審閱的受治理動作計畫。",
-  "assistant.message.banner.awaitingConfirmation":
-    "執行已暫停，等待操作員確認此動作。",
-  "assistant.message.banner.executing": "助手正在執行已核准的動作。",
-  "assistant.message.banner.receipt": "執行已完成，且已記錄收據。",
-  "assistant.message.banner.error": "執行錯誤",
-  "assistant.message.error.title": "助手錯誤",
-  "assistant.plan.ariaLabel": "助手動作計畫",
-  "assistant.plan.field.resource": "資源",
-  "assistant.plan.field.whyNow": "現在執行原因",
-  "assistant.plan.attention": "注意",
-  "assistant.confirmation.ariaLabel": "助手確認面板",
-  "assistant.confirmation.targetResource": "目標資源",
-  "assistant.confirmation.reasonLabel": "執行原因",
-  "assistant.confirmation.reasonPlaceholder.required": "高風險執行必填。",
-  "assistant.confirmation.reasonPlaceholder.optional": "可選填操作員備註。",
-  "assistant.confirmation.reasonHint.required":
-    "提供非空白原因前，無法執行此動作。",
-  "assistant.confirmation.reasonHint.optional":
-    "若有提供原因，將附加到稽核軌跡中。",
-  "assistant.confirmation.error.reasonRequired": "執行此動作前必須提供原因。",
-  "assistant.confirmation.error.unavailable": "此動作目前無法使用。",
-  "assistant.confirmation.cancel": "取消",
-  "assistant.confirmation.confirm": "確認並執行",
-  "assistant.confirmation.executing": "執行中...",
-  "assistant.receipt.ariaLabel": "助手動作收據",
-  "assistant.receipt.title": "動作收據",
-  "assistant.receipt.field.actionId": "動作 ID",
-  "assistant.receipt.field.requestId": "請求 ID",
-  "assistant.receipt.field.auditId": "稽核 ID",
-  "assistant.receipt.field.resource": "資源",
-  "assistant.receipt.field.status": "狀態",
-  "assistant.receipt.status.accepted": "已接受",
-  "assistant.receipt.status.completed": "已完成",
-  "assistant.receipt.status.failed": "失敗",
-  "assistant.receipt.status.queued": "已排隊",
-  "assistant.receipt.viewAuditEvidence": "查看稽核證據",
-
   // ── Home ──
   "home.title": "平台管理",
   "home.subtitle": "平台全域操作的完整控制平面",
   "home.tenants.title": "租戶管理",
   "home.tenants.desc": "租戶建立、部署與生命週期管理",
   "home.partners.title": "合作方案開通",
-  "home.partners.desc":
-    "合作夥伴 / 銀行方案開通、合作夥伴入口生命週期與上線準備度",
+  "home.partners.desc": "合作夥伴 / 銀行方案開通、入口生命週期與上線 readiness",
   "home.users.title": "使用者與角色",
   "home.users.desc": "平台人員管理與角色分配",
   "home.fleet.title": "車隊與裝置",
@@ -2602,137 +867,6 @@ const zh: typeof en = {
   "home.audit.desc": "平台稽核日誌，可篩選與查看記錄",
   "home.featureFlags.title": "功能旗標",
   "home.featureFlags.desc": "功能旗標管理，支援租戶層級覆寫",
-
-  // ── Adapter Registry ──
-  "adapterRegistry.metadata.title": "平台轉接器登錄",
-  "adapterRegistry.metadata.description":
-    "用於管理平台設定、憑證與權限邊界的受治理轉接器登錄。",
-  "adapterRegistry.title": "平台轉接器登錄",
-  "adapterRegistry.pageTitle": "外部平台轉接器登錄",
-  "adapterRegistry.pageSubtitle":
-    "設定與憑證治理留在 Platform Admin，而維運暫停與重試留在 Ops。",
-  "adapterRegistry.registerAction": "註冊轉接器",
-  "adapterRegistry.registerInfo":
-    "轉接器註冊仍屬受治理的高風險流程，這個路由不直接提供 inline 建立。",
-  "adapterRegistry.loading": "載入轉接器登錄中...",
-  "adapterRegistry.empty":
-    "目前尚未註冊任何轉接器。請先建立第一筆受治理的轉接器登錄。",
-  "adapterRegistry.unavailable":
-    "轉接器登錄資料暫時不可用，請檢查 Platform Admin 轉接器 API 後再重試。",
-  "adapterRegistry.bannerFallbackTitle": "mof-bgmt token 距到期 6 天",
-  "adapterRegistry.bannerFallbackBody":
-    "BGMT 派遣回報 token 必須在 2026-05-31 前輪替，否則今日完成單將無法回報。",
-  "adapterRegistry.bannerTitle": "{platformCode} token 到期治理檢查",
-  "adapterRegistry.bannerBody":
-    "{name} 目前憑證狀態為 {credentialStatus}，健康狀態為 {healthStatus}。請在 production 流量受影響前完成 token 治理檢查與輪替。",
-  "adapterRegistry.rotateNow": "立即輪替",
-  "adapterRegistry.status.healthy": "健康",
-  "adapterRegistry.status.degraded": "降級",
-  "adapterRegistry.status.unhealthy": "異常",
-  "adapterRegistry.metric.latency": "延遲",
-  "adapterRegistry.metric.lastEvent": "最近事件",
-  "adapterRegistry.metric.orders": "24H 訂單",
-  "adapterRegistry.metric.ordersPending": "遙測待回報",
-  "adapterRegistry.webhookTitle": "Webhook",
-  "adapterRegistry.financeMode": "財務模式",
-  "adapterRegistry.serviceBuckets": "服務分桶",
-  "adapterRegistry.featureFlags": "功能旗標",
-  "adapterRegistry.supportedActions": "支援動作",
-  "adapterRegistry.supportedAction.accept.label": "接受派單",
-  "adapterRegistry.supportedAction.accept.description": "接受並認領派遣任務。",
-  "adapterRegistry.supportedAction.complete.label": "完成行程",
-  "adapterRegistry.supportedAction.complete.description": "結束自有行程流程。",
-  "adapterRegistry.supportedAction.incident.label": "回報事故",
-  "adapterRegistry.supportedAction.incident.description":
-    "回報安全或服務事故。",
-  "adapterRegistry.supportedAction.reject.label": "拒絕派單",
-  "adapterRegistry.supportedAction.reject.description":
-    "將拒絕原因回傳至來源平台。",
-  "adapterRegistry.supportedAction.proofUpload.label": "上傳憑證",
-  "adapterRegistry.supportedAction.proofUpload.description":
-    "上傳完單憑證以供對帳。",
-  "adapterRegistry.operationalPause": "維運暫停",
-  "adapterRegistry.noPause": "未暫停",
-  "adapterRegistry.pauseUnknown": "轉接器 API 尚未回報暫停狀態。",
-  "adapterRegistry.authorityPa": "Platform Admin 權限",
-  "adapterRegistry.authorityOps": "Ops 權限",
-  "adapterRegistry.governedActionInfo":
-    "建立設定、編輯憑證、輪替密鑰，以及啟用或停用轉接器，仍屬此處治理權限。",
-  "adapterRegistry.opsActionInfo":
-    "維運暫停 TTL 與失敗 callback 重試仍留在 Ops console，並刻意與 Platform Admin 分權。",
-  "adapterRegistry.editConfig": "編輯設定",
-  "adapterRegistry.editCredential": "編輯憑證",
-  "adapterRegistry.rotateCredential": "輪替憑證",
-  "adapterRegistry.enableAdapter": "啟用轉接器",
-  "adapterRegistry.disableAdapter": "停用轉接器",
-  "adapterRegistry.pauseTraffic": "Ops 暫停（TTL）",
-  "adapterRegistry.retryCallback": "重試 callback",
-  "adapterRegistry.queueGoverned":
-    "{name} 的「{label}」仍需走 Platform Admin 治理流程。{reason}一次性明文 secret 不會在這裡再次顯示。",
-  "adapterRegistry.queueGovernedReason": "已記錄原因：{reason}。",
-  "adapterRegistry.queueOps":
-    "{name} 的「{label}」仍屬 Ops 權限，請在 Ops console 執行。",
-  "adapterRegistry.toggleSuccess": "稽核收據 · {name} 已{status}。{reason}",
-  "adapterRegistry.toggleSuccess.enabled": "啟用",
-  "adapterRegistry.toggleSuccess.disabled": "停用",
-  "adapterRegistry.toggleSuccessReason": "原因：{reason}。",
-  "adapterRegistry.toggleError": "更新轉接器狀態失敗。",
-  "adapterRegistry.showUnsupportedOpsAction":
-    "這個轉接器沒有回報維運暫停或重試能力。",
-  "adapterRegistry.webhookNotConfigured": "未設定",
-  "adapterRegistry.lastCheck": "最後檢查",
-  "adapterRegistry.reasonRequired": "停用 production 轉接器前必須填寫原因。",
-  "adapterRegistry.disableConfirm":
-    "確認要停用 {name} 嗎？這會影響受治理的轉接器 readiness。",
-  "adapterRegistry.enableConfirm": "確認要啟用 {name} 嗎？",
-  "adapterRegistry.disableReasonPrompt": "請輸入停用 {name} 的治理原因。",
-  "adapterRegistry.notConfigured": "未設定",
-  "adapterRegistry.forwarder": "轉派器",
-  "adapterRegistry.featureFlagState.on": "開",
-  "adapterRegistry.featureFlagState.off": "關",
-  "adapterRegistry.maxCandidatesManualFallback":
-    "{maxCandidates} 個候選上限 · {seconds} 秒人工回退",
-  "adapterRegistry.list.subtitle":
-    "以共用 data-view 元件呈現轉接器 readiness、rollout 狀態與財務權限歸屬。",
-  "adapterRegistry.list.summary":
-    "這裡的精簡表格、篩選 pill、狀態 chip 與自有或轉派權限 badge，皆來自 ui-web 共用元件。",
-  "adapterRegistry.list.showing": "目前顯示 {shown} / {total}",
-  "adapterRegistry.list.ownedTag": "自有",
-  "adapterRegistry.list.forwardedTag": "轉派",
-  "adapterRegistry.list.financeTag": "財務",
-  "adapterRegistry.list.health": "健康",
-  "adapterRegistry.list.enabled": "啟用",
-  "adapterRegistry.list.webhook": "Webhook",
-  "adapterRegistry.list.authority": "權限",
-  "adapterRegistry.list.rollout": "Rollout",
-  "adapterRegistry.list.filter.all": "全部",
-  "adapterRegistry.list.filter.forwarded": "轉派",
-  "adapterRegistry.list.filter.enabled": "已啟用",
-  "adapterRegistry.list.filter.attention": "需關注",
-  "adapterRegistry.col.name": "轉接器",
-  "adapterRegistry.col.environment": "環境",
-  "adapterRegistry.col.version": "版本",
-  "adapterRegistry.col.rolloutStatus": "Rollout 階段",
-  "adapterRegistry.errors.fetchFailed": "載入轉接器登錄失敗。",
-  "adapterRegistry.errors.updateFailed": "更新轉接器失敗。",
-  "adapterRegistry.modal.title": "編輯轉接器：{name}",
-  "adapterRegistry.modal.name": "名稱",
-  "adapterRegistry.modal.version": "版本",
-  "adapterRegistry.modal.enabled": "啟用",
-  "adapterRegistry.modal.rolloutStatus": "Rollout 狀態",
-  "adapterRegistry.modal.credentialStatus": "憑證狀態",
-  "adapterRegistry.modal.webhookSettings": "Webhook 設定",
-  "adapterRegistry.modal.webhookEnabled": "啟用 Webhook",
-  "adapterRegistry.modal.webhookUrl": "Webhook URL",
-  "adapterRegistry.modal.webhookPlaceholder": "https://example.com/webhook",
-  "adapterRegistry.modal.policySettings": "策略設定",
-  "adapterRegistry.modal.serviceBuckets": "服務分桶（逗號分隔）",
-  "adapterRegistry.modal.maxCandidates": "候選上限",
-  "adapterRegistry.modal.acceptTimeoutSeconds": "接受逾時（秒）",
-  "adapterRegistry.modal.manualFallbackThresholdSeconds": "人工回退門檻（秒）",
-  "adapterRegistry.modal.supportedActions": "支援動作",
-  "adapterRegistry.modal.noSupportedActions":
-    "這個平台目前沒有啟用任何轉接器動作。",
 
   // ── Tenants ──
   "tenants.title": "租戶管理",
@@ -2763,22 +897,22 @@ const zh: typeof en = {
 
   // ── Partners ──
   "partners.title": "合作方案開通",
-  "partners.subtitle": "目前由平台管理 {count} 筆合作夥伴入口",
-  "partners.loading": "載入合作夥伴入口中...",
-  "partners.newEntry": "新增合作夥伴入口",
-  "partners.createEntry": "建立合作夥伴入口",
+  "partners.subtitle": "目前由平台管理 {count} 筆 partner entry",
+  "partners.loading": "載入 partner entry 中...",
+  "partners.newEntry": "新增 Partner Entry",
+  "partners.createEntry": "建立 Partner Entry",
   "partners.saveEntry": "儲存設定",
   "partners.configure": "設定",
   "partners.activate": "啟用",
   "partners.deactivate": "停用",
-  "partners.empty": "目前沒有合作夥伴入口。",
+  "partners.empty": "目前沒有 partner entry。",
   "partners.section.lifecycle": "生命週期概況",
   "partners.section.audit": "稽核資訊",
   "partners.revoke": "撤銷",
   "partners.section.branding": "品牌與支援資訊",
   "partners.section.routing": "路由與驗證",
   "partners.section.credentials": "入口憑證",
-  "partners.section.readiness": "上線準備度",
+  "partners.section.readiness": "上線 Readiness",
   "partners.col.entry": "入口",
   "partners.col.partner": "合作方 / 方案",
   "partners.col.tenant": "租戶",
@@ -2796,13 +930,13 @@ const zh: typeof en = {
   "partners.form.dispatchSubtype": "派單子類型",
   "partners.form.authMode": "驗證模式",
   "partners.form.eligibilityMode": "資格驗證模式",
-  "partners.form.entryHost": "入口主機",
-  "partners.form.entryPath": "入口路徑",
+  "partners.form.entryHost": "入口 Host",
+  "partners.form.entryPath": "入口 Path",
   "partners.form.themeAccent": "主題色",
   "partners.form.supportEmail": "支援 Email",
   "partners.form.supportPhone": "支援電話",
   "partners.form.status": "狀態",
-  "partners.readiness.audit": "稽核來源",
+  "partners.readiness.audit": "Audit 來源",
   "partners.readiness.auth": "驗證模式",
   "partners.readiness.eligibility": "資格驗證模式",
   "partners.readiness.contract": "資格驗證契約",
@@ -2834,218 +968,6 @@ const zh: typeof en = {
   "partners.credentialMeta.createdAt": "建立時間",
   "partners.credentialMeta.lastUsedAt": "最後使用",
   "partners.credentialMeta.source": "來源",
-  "partners.page.title": "合作夥伴入口",
-  "partners.page.subtitle":
-    "集中管理銀行 / 飯店 / 企業合作夥伴入口的路由、驗證、資格驗證與品牌設定。",
-  "partners.page.filterAction": "篩選",
-  "partners.page.createAction": "建立入口",
-  "partners.page.createTitle": "建立合作夥伴入口",
-  "partners.page.createSubtitle":
-    "在流量正式上線前，先完成路由、驗證模式、資格驗證模式與品牌中繼資料。",
-  "partners.page.last30Days": "近 30 天",
-  "partners.page.errorTitle": "無法載入合作夥伴入口",
-  "partners.page.openDetail": "查看合作夥伴入口詳情",
-  "partners.page.filter.all": "全部",
-  "partners.page.filter.active": "啟用",
-  "partners.page.filter.inactive": "停用",
-  "partners.page.filter.attention": "待處理",
-  "partners.page.filter.revoked": "已撤銷",
-  "partners.page.table.entry": "入口",
-  "partners.page.table.program": "方案",
-  "partners.page.table.subtype": "子類型",
-  "partners.page.table.auth": "驗證",
-  "partners.page.table.eligibility": "資格驗證",
-  "partners.page.table.status": "狀態",
-  "partners.page.table.readiness": "上線準備度",
-  "partners.page.readiness.ok": "完成",
-  "partners.page.readiness.gap_one": "{count} 項缺口",
-  "partners.page.readiness.gap_other": "{count} 項缺口",
-  "partners.detail.notFoundTitle": "合作夥伴入口目前不可用",
-  "partners.detail.notFoundBody": "找不到指定的合作夥伴入口。",
-  "partners.detail.updateErrorTitle": "合作夥伴入口更新失敗",
-  "partners.detail.issueErrorTitle": "無法核發憑證",
-  "partners.detail.previewNotice":
-    "目前無法從 Platform Admin API 取得資料；此頁改用符合畫布的預覽假資料供本地驗證。",
-  "partners.detail.previewModeTitle": "預覽假資料模式",
-  "partners.detail.headerSubtitle": "/{entrySlug} · partner_id {partnerId}",
-  "partners.detail.tabs.overview": "總覽",
-  "partners.detail.tabs.branding": "品牌",
-  "partners.detail.tabs.auth": "驗證",
-  "partners.detail.tabs.eligibility": "資格驗證",
-  "partners.detail.tabs.credentials": "憑證",
-  "partners.detail.tabs.audit": "稽核",
-  "partners.detail.preview": "預覽入口",
-  "partners.detail.activateEntry": "啟用",
-  "partners.detail.deactivateEntry": "停用",
-  "partners.detail.revokeEntry": "撤銷入口",
-  "partners.detail.issueCredential": "核發憑證",
-  "partners.detail.rotateCredential": "輪替憑證",
-  "partners.detail.save": "儲存變更",
-  "partners.detail.saveHint":
-    "在不離開平台治理模型的前提下，更新此合作夥伴入口的品牌、路由、驗證與資格驗證設定。",
-  "partners.detail.overviewTitle": "入口基本資料",
-  "partners.detail.overviewSubtitle":
-    "集中檢視此合作夥伴入口的平台路由、識別與上線姿態。",
-  "partners.detail.readinessTitle": "上線準備度 · 治理關卡遮罩檢視",
-  "partners.detail.readinessReady": "可推進上線",
-  "partners.detail.readinessBlocked": "仍有上線準備度缺口",
-  "partners.detail.readinessReadyBody":
-    "必要關卡皆已完成，可在不模糊治理邊界的前提下推進上線。",
-  "partners.detail.readinessBlockedBody":
-    "在品牌、契約、稽核與憑證缺口補齊前，應維持流量封鎖。",
-  "partners.detail.readiness.ok": "完成 {ready}/{total}",
-  "partners.detail.readiness.gap": "缺口",
-  "partners.detail.credentialsTitle": "啟用中憑證 · 僅顯示遮罩",
-  "partners.detail.credentialsSubtitle":
-    "明文密鑰只會在核發當下顯示一次；下方清單只保留遮罩資訊。",
-  "partners.detail.credentialsEmpty": "此合作夥伴入口目前沒有可用的入口憑證。",
-  "partners.detail.credentialsBannerTitle": "治理關卡完成 {ready}/{total}",
-  "partners.detail.credentialsBannerBody":
-    "下方表格仍有 {count} 組啟用中憑證以遮罩形式保存。",
-  "partners.detail.brandingTitle": "品牌",
-  "partners.detail.brandingSubtitle":
-    "管理合作夥伴可見的名稱、路由、主色與支援資訊。",
-  "partners.detail.authTitle": "驗證",
-  "partners.detail.authSubtitle":
-    "即使使用合作夥伴專屬憑證，驗證權限仍保留在平台側。",
-  "partners.detail.authBannerTitle": "憑證姿態",
-  "partners.detail.authBannerBody.active":
-    "目前有 {count} 組憑證作為入口流量的驗證關卡。",
-  "partners.detail.authBannerBody.none":
-    "目前啟用合作夥伴 API 金鑰模式，但沒有可用的入口憑證。",
-  "partners.detail.authBannerBody.notRequired":
-    "此合作夥伴入口不需要合作夥伴自行管理的入口憑證。",
-  "partners.detail.eligibilityTitle": "資格驗證",
-  "partners.detail.eligibilitySubtitle":
-    "檢視此入口的契約快照、介接姿態與備援行為。",
-  "partners.detail.eligibilityBannerTitle": "契約姿態",
-  "partners.detail.eligibilityBannerBody.none":
-    "此流程在履約前不需要合作夥伴側資格驗證。",
-  "partners.detail.eligibilityBannerBody.linked":
-    "資格驗證仍由平台治理，且已有對應的契約快照。",
-  "partners.detail.auditTitle": "稽核",
-  "partners.detail.auditSubtitle": "供平台檢視建立、更新、憑證事件與請求脈絡。",
-  "partners.detail.routeHint": "公開入口預覽",
-  "partners.detail.accentHint": "套用於合作夥伴介面的品牌主色",
-  "partners.detail.placeholder.entryHost": "partner.example",
-  "partners.detail.placeholder.entryPath": "/partner/world-elite",
-  "partners.detail.placeholder.themeAccent": "#0b7285",
-  "partners.detail.contractEmpty": "此入口尚未綁定資格驗證契約快照。",
-  "partners.detail.secret.title": "入口憑證已產生 · 明文只顯示一次",
-  "partners.detail.secret.subtitle": "PLAINTEXT-ONCE · Q-ADM07",
-  "partners.detail.secret.warningTitle": "關閉此視窗後將永久隱藏完整密鑰",
-  "partners.detail.secret.warningBody":
-    "若遺失密鑰，必須重新建立憑證並立即輪替。之後平台只保留遮罩後綴。",
-  "partners.detail.secret.name": "憑證名稱",
-  "partners.detail.secret.field": "密鑰 · 明文一次",
-  "partners.detail.secret.hint": "請立即複製；完整密鑰不會再次回傳。",
-  "partners.detail.secret.scope": "來源",
-  "partners.detail.secret.expiresAt": "到期時間",
-  "partners.detail.secret.createdBy": "建立者",
-  "partners.detail.secret.createdAt": "建立時間",
-  "partners.detail.secret.stored": "我已將這組憑證妥善保存於安全位置。",
-  "partners.detail.secret.cancel": "取消",
-  "partners.detail.secret.complete": "完成 · 我已保存此密鑰",
-  "partners.detail.secret.copy": "複製",
-  "partners.detail.secret.download": ".txt",
-  "partners.detail.secret.downloadFilename": "{entrySlug}-credential.txt",
-  "partners.detail.credentialAction.issueTitle": "核發入口憑證",
-  "partners.detail.credentialAction.rotateTitle": "輪替入口憑證",
-  "partners.detail.credentialAction.subtitle": "高風險操作 · 必填稽核原因",
-  "partners.detail.credentialAction.fieldLabel": "輪替原因",
-  "partners.detail.credentialAction.hint":
-    "請填寫操作原因。此動作會留下稽核記錄，且完整密鑰只會顯示一次。",
-  "partners.detail.credentialAction.placeholderIssue":
-    "例如：CTBC World Elite 入口首次正式上線",
-  "partners.detail.credentialAction.placeholderRotate":
-    "例如：金鑰外洩演練後輪替 / 季度例行更新",
-  "partners.detail.credentialAction.cancel": "取消",
-  "partners.detail.credentialAction.issueConfirm": "核發憑證",
-  "partners.detail.credentialAction.rotateConfirm": "輪替憑證",
-  "partners.detail.governance.activateTitle": "啟用合作夥伴入口",
-  "partners.detail.governance.deactivateTitle": "停用合作夥伴入口",
-  "partners.detail.governance.revokeTitle": "撤銷合作夥伴入口",
-  "partners.detail.governance.revokeCredentialTitle": "撤銷入口憑證",
-  "partners.detail.governance.mediumSubtitle": "中風險操作 · 產出稽核憑據",
-  "partners.detail.governance.highSubtitle": "高風險操作 · 必填稽核原因",
-  "partners.detail.governance.activateBody":
-    "啟用後，此入口會在上線準備度條件滿足時可承接平台治理流量。",
-  "partners.detail.governance.deactivateBody":
-    "停用會保留登錄紀錄，但會封鎖新的平台治理流量。",
-  "partners.detail.governance.revokeBody":
-    "入口層級撤銷不可逆，僅適用於合約終止或安全撤出等情境。",
-  "partners.detail.governance.revokeCredentialBody":
-    "撤銷後此憑證不可再用於入口驗證。若需要不中斷流量，應先輪替再撤銷。",
-  "partners.detail.governance.fieldLabel": "稽核原因",
-  "partners.detail.governance.fieldHint":
-    "請具體說明操作原因。此動作會寫入 Platform Admin 稽核歷史。",
-  "partners.detail.governance.fieldPlaceholder":
-    "例如：合作終止 / 安全事件調查後撤銷",
-  "partners.detail.governance.cancel": "取消",
-  "partners.detail.governance.activateConfirm": "啟用",
-  "partners.detail.governance.deactivateConfirm": "停用",
-  "partners.detail.governance.revokeConfirm": "撤銷入口",
-  "partners.detail.governance.revokeCredentialConfirm": "撤銷憑證",
-  "partners.detail.overview.tenant": "租戶",
-  "partners.detail.overview.bankCode": "銀行代碼",
-  "partners.detail.overview.program": "方案",
-  "partners.detail.overview.dispatchSubtype": "業務子類型",
-  "partners.detail.overview.authMode": "驗證模式",
-  "partners.detail.overview.eligibility": "資格驗證",
-  "partners.detail.overview.entryHost": "入口主機",
-  "partners.detail.overview.entryPath": "入口路徑",
-  "partners.detail.overview.themeAccent": "品牌主色",
-  "partners.detail.overview.supportContact": "支援聯絡方式",
-  "partners.detail.eligibilitySnapshot.contractId": "契約 ID",
-  "partners.detail.eligibilitySnapshot.adapter": "介接器",
-  "partners.detail.eligibilitySnapshot.adapterPosture": "介接姿態",
-  "partners.detail.eligibilitySnapshot.fallback": "備援",
-  "partners.detail.eligibilitySnapshot.fallbackRequired":
-    "逾時時需進入營運佇列",
-  "partners.detail.eligibilitySnapshot.fallbackNone": "逾時時無備援",
-  "partners.detail.auditMeta.source": "稽核來源",
-  "partners.detail.auditMeta.requestId": "請求 ID",
-  "partners.detail.auditMeta.createdBy": "建立者",
-  "partners.detail.auditMeta.createdAt": "建立時間",
-  "partners.detail.auditMeta.updatedBy": "更新者",
-  "partners.detail.auditMeta.updatedAt": "更新時間",
-  "partners.detail.auditMeta.revokedAt": "撤銷時間",
-  "partners.detail.auditMeta.revokeReason": "撤銷原因",
-  "partners.detail.credentialsTable.kind": "種類",
-  "partners.detail.credentialsTable.masked": "遮罩值",
-  "partners.detail.credentialsTable.rotated": "輪替時間",
-  "partners.detail.credentialsTable.lastUsed": "最後使用",
-  "partners.detail.credentialsTable.actions": "操作",
-  "partners.detail.credentialsTable.revoke": "撤銷",
-  "partners.detail.auditTable.event": "事件",
-  "partners.detail.auditTable.actor": "執行者",
-  "partners.detail.auditTable.detail": "細節",
-  "partners.detail.auditTable.at": "時間",
-  "partners.detail.governanceCard.title": "治理操作",
-  "partners.detail.governanceCard.subtitle":
-    "集中執行狀態切換與高風險生命週期控制。",
-  "partners.detail.governanceCard.status": "狀態",
-  "partners.detail.governanceCard.trafficPosture": "流量姿態",
-  "partners.detail.governanceCard.trafficActive": "此入口可承接平台治理流量",
-  "partners.detail.governanceCard.trafficBlocked": "此入口仍維持封鎖",
-  "partners.detail.webhook.title": "Webhook 綁定",
-  "partners.detail.webhook.subtitle":
-    "此處只顯示治理綁定，不展開營運投遞細節。",
-  "partners.detail.webhook.requestLineage": "請求脈絡",
-  "partners.detail.webhook.bound": "已綁定",
-  "partners.detail.webhook.gap": "缺口",
-  "partners.detail.webhook.auditSource": "稽核來源",
-  "partners.detail.webhook.platformOwned": "平台治理",
-  "partners.detail.adapterLinkage.title": "介接器綁定",
-  "partners.detail.adapterLinkage.subtitle": "將契約快照與平台介接器登錄對照。",
-  "partners.detail.adapterLinkage.linkedAdapter": "已綁定介接器",
-  "partners.detail.adapterLinkage.manualFallback": "人工備援",
-  "partners.detail.adapterLinkage.timeoutRequired": "逾時時需進入 ops_console",
-  "partners.detail.adapterLinkage.noTimeoutFallback": "逾時時無備援",
-  "partners.detail.adapterLinkage.snapshotLinked": "快照已綁定",
-  "partners.detail.adapterLinkage.snapshotMissing": "缺少快照",
-  "partners.detail.auditRevokedTitle": "入口已撤銷",
-  "partners.detail.auditRevokedBodyDefault": "此入口應持續維持流量封鎖。",
   // ── Users ──
   "users.title": "使用者與角色",
   "users.subtitle": "共 {count} 位人員",
@@ -3058,69 +980,6 @@ const zh: typeof en = {
   "users.form.displayName": "顯示名稱",
   "users.form.role": "角色",
   "users.empty": "沒有使用者。",
-  "users.page.title": "平台人員",
-  "users.page.subtitle": "6 個角色 · RBAC 守門以後端為準",
-  "users.page.refreshing": "重新整理中…",
-  "users.page.invite": "邀請",
-  "users.page.inviteTitle": "邀請平台人員",
-  "users.page.inviteSubtitle":
-    "先建立內部使用者主檔與初始角色，再讓該使用者進入 tenant 或 ops workflow。",
-  "users.page.col.name": "NAME",
-  "users.page.col.email": "EMAIL",
-  "users.page.col.role": "ROLE",
-  "users.page.col.status": "STATUS",
-  "users.page.col.updated": "更新",
-  "users.page.col.actions": "ACTIONS",
-  "users.page.action.role": "更新角色",
-  "users.page.action.suspend": "停用",
-  "users.page.action.activate": "啟用",
-  "users.page.alreadySuspended": "已停用",
-  "users.page.roleTitle": "更新角色",
-  "users.page.roleSubtitle": "中風險變更，套用後立即生效並寫入稽核軌跡。",
-  "users.page.roleField": "角色",
-  "users.page.suspendTitle": "停用平台人員",
-  "users.page.suspendSubtitle":
-    "高風險變更，需填寫原因確認後才停用；確認後使用者隨即失去平台存取權限。",
-  "users.page.reasonField": "原因",
-  "users.page.reasonHint": "高風險停用確認必填。",
-  "users.page.reasonPlaceholder": "例如：離職 / 疑似憑證外洩",
-  "users.page.activateTitle": "重新啟用平台人員",
-  "users.page.activateSubtitle": "恢復此使用者的平台存取權限；確認後立即生效。",
-  "users.page.confirmSuspend": "確認停用",
-  "users.page.confirmActivate": "確認啟用",
-  "users.page.emailPlaceholder": "staff@platform.drts",
-
-  // ── Tenant Governance ──
-  "tenantGovernance.title": "跨租戶治理",
-  "tenantGovernance.subtitle":
-    "quota usage · approval backlog · cost-center health · governance risk — Q-ADM01",
-  "tenantGovernance.errorTitle": "無法載入跨租戶治理熱圖",
-  "tenantGovernance.loading": "正在載入跨租戶治理熱圖…",
-  "tenantGovernance.empty": "目前沒有 tenant governance 資料。",
-  "tenantGovernance.cardTitle": "Quota 使用熱圖 · top 8 tenant · 本月",
-  "tenantGovernance.col.tenant": "TENANT",
-  "tenantGovernance.col.plan": "PLAN",
-  "tenantGovernance.col.usage": "USAGE (MTD)",
-  "tenantGovernance.col.percent": "%",
-  "tenantGovernance.col.status": "STATUS",
-  "tenantGovernance.kpi.quotaWarn": "quota 警戒 (>80%)",
-  "tenantGovernance.kpi.approvalBacklog": "跨租戶審批 backlog",
-  "tenantGovernance.kpi.costCenterAnomaly": "cost-center 異常",
-  "tenantGovernance.kpi.riskSignals": "治理風險訊號",
-  "tenantGovernance.quotaWarnSub": "跨 {count} 個租戶",
-  "tenantGovernance.approvalSub.none": "目前沒有逾時待審",
-  "tenantGovernance.approvalSub.avg": "平均 {hours} 小時",
-  "tenantGovernance.costCenterSub": "缺少 cost center owner 或 active rule",
-  "tenantGovernance.riskSignalsSub":
-    "approver 缺口 {noApproverSignals} · quota critical {quotaCriticalSignals} · stale approval {pendingSignals}",
-  "tenantGovernance.planPerMonth": "{value}/月",
-  "tenantGovernance.status.overThreshold": "超標",
-  "tenantGovernance.status.warning": "警戒",
-  "tenantGovernance.status.ok": "正常",
-  "tenantGovernance.delta.thresholdWarning": "警戒超標",
-  "tenantGovernance.delta.opsApprovalTriage": "待營運審批分流",
-  "tenantGovernance.delta.needsGovernanceFollowup": "需治理補件",
-  "tenantGovernance.delta.triageOpen": "待分流",
 
   // ── Fleet ──
   "fleet.title": "車隊與裝置",
@@ -3129,12 +988,6 @@ const zh: typeof en = {
   "fleet.tab.vehicles": "車輛",
   "fleet.tab.drivers": "司機",
   "fleet.tab.contracts": "合約",
-  "fleet.tab.deviceBinding": "裝置綁定",
-  "fleet.tab.exclusivity": "排他審核",
-  "fleet.tab.offboarding": "退場",
-  "fleet.page.title": "車隊與合規治理",
-  "fleet.page.subtitle":
-    "車輛 · 司機 · 合約 · 裝置綁定 · 排他審核 · 退場狀態機",
   "fleet.col.vehicleId": "車輛編號",
   "fleet.col.plate": "車牌",
   "fleet.col.area": "營運區域",
@@ -3157,22 +1010,6 @@ const zh: typeof en = {
   "fleet.col.partner": "合作夥伴",
   "fleet.col.type": "類型",
   "fleet.col.status": "狀態",
-  "fleet.col.coverage": "營運範圍",
-  "fleet.col.compliance": "合規",
-  "fleet.col.driver": "司機",
-  "fleet.col.binding": "裝置綁定",
-  "fleet.col.counterparty": "合作方",
-  "fleet.col.vehicle": "車輛",
-  "fleet.col.term": "有效期間",
-  "fleet.col.device": "裝置",
-  "fleet.col.state": "狀態",
-  "fleet.col.lastSeen": "最後更新",
-  "fleet.col.review": "審核",
-  "fleet.col.provider": "排他對象",
-  "fleet.col.currentState": "目前狀態",
-  "fleet.col.evidence": "證據 / 工單",
-  "fleet.col.timeline": "時間點",
-  "fleet.col.dispatchReadiness": "派遣狀態",
   "fleet.dispatchable": "可派車",
   "fleet.notDispatchable": "不可派車",
   "fleet.licensesValid": "駕照有效",
@@ -3183,10 +1020,6 @@ const zh: typeof en = {
   "fleet.noDrivers": "無司機資料。",
   "fleet.noContracts": "無合約資料。",
   "fleet.createDriver": "建立司機主檔",
-  "fleet.createContract": "建立合約",
-  "fleet.updateCompliance": "更新合規",
-  "fleet.openOpsConsole": "ops 操作面",
-  "fleet.advanceOffboardingStep": "推進",
   "fleet.creatingDriver": "建立司機中...",
   "fleet.form.phone": "電話",
   "fleet.form.email": "Email",
@@ -3213,6 +1046,7 @@ const zh: typeof en = {
   "fleet.revokingDevice": "撤銷中...",
   "fleet.deviceRevoked": "綁定已撤銷",
   "fleet.deviceRebindHint": "撤銷後，該裝置可重新註冊到其他司機。",
+
   "fleet.updatingVehicle": "更新中...",
   "fleet.markDispatchable": "恢復可派",
   "fleet.placeDispatchHold": "人工停派",
@@ -3221,66 +1055,6 @@ const zh: typeof en = {
   "fleet.rejectExclusivity": "退回排他",
   "fleet.startOffboarding": "開始退場",
   "fleet.completeDebranding": "完成除標識",
-  "fleet.readOnly": "唯讀",
-  "fleet.unavailable": "目前不可用",
-  "fleet.working": "處理中...",
-  "fleet.filter": "篩選",
-  "fleet.retry": "重試",
-  "fleet.exportList": "匯出名單",
-  "fleet.refreshing": "更新中...",
-  "fleet.awaitingFirstSnapshot": "等待首個快照",
-  "fleet.snapshotAt": "快照時間 {time}",
-  "fleet.snapshotGeneratedAt": "快照時間 {time}",
-  "fleet.refreshTierSummary": "刷新層級 {tier} / 30s · {freshness}",
-  "fleet.confirmAction": "確認執行「{action}」？",
-  "fleet.reasonRequired": "此操作必須填寫原因。",
-  "fleet.prompt.driverName": "司機姓名",
-  "fleet.prompt.vehicleId": "車輛編號",
-  "fleet.prompt.partnerId": "合作方編號",
-  "fleet.actionNotWired": "此操作尚未接到 mutation endpoint。",
-  "fleet.filterReserved": "符合 canvas 的篩選面保留到下一輪整合。",
-  "fleet.refreshFailed": "車隊資料更新失敗",
-  "fleet.snapshotNotFresh": "目前快照不是最新狀態",
-  "fleet.driversNeedComplianceReview": "{count} 位司機需要合規處理",
-  "fleet.driverComplianceReviewBody":
-    "在阻擋原因解除前，ops 端仍持續套用 dispatch.compliance.license_warn_30d。",
-  "fleet.exclusivityGovernanceTitle": "排他治理 · Q-ADM08",
-  "fleet.exclusivityGovernanceBody":
-    "車輛或司機的可派遣狀態，不會在排他核准前變成 true。",
-  "fleet.offboardingCardTitle": "退場狀態機 · Q-ADM09",
-  "fleet.offboardingCardSubtitle":
-    "每一步轉換需 timestamp · actor · evidence · audit",
-  "fleet.vehicle.exclusivityApproved": "排他已核准",
-  "fleet.vehicle.exclusivityPending": "排他待審",
-  "fleet.vehicle.blocked": "已阻擋",
-  "fleet.vehicle.noDispatchBlocks": "目前沒有阻擋原因",
-  "fleet.driver.licenseWarning": "需處理",
-  "fleet.driver.dispatchReady": "可派遣",
-  "fleet.driver.noActiveDevice": "目前沒有裝置",
-  "fleet.workflow.initiated": "已啟動",
-  "fleet.workflow.dispatchDisabled": "已停用派遣",
-  "fleet.workflow.debrandingPending": "等待除標識",
-  "fleet.workflow.debrandingVerified": "除標識已驗證",
-  "fleet.workflow.completed": "已完成",
-  "fleet.workflow.none": "未開始",
-  "fleet.empty.notProvisioned.title": "治理資料線尚未 provision",
-  "fleet.empty.notProvisioned.description":
-    "sitemap 已保留此 tab，但背後資料線目前尚未配置完成。",
-  "fleet.empty.fetchFailed.title": "此 tab 載入失敗",
-  "fleet.empty.fetchFailed.description":
-    "讀取失敗，請重新整理或先檢查上游依賴。",
-  "fleet.empty.permissionDenied.title": "目前身分沒有權限",
-  "fleet.empty.permissionDenied.description":
-    "可看頁殼，但沒有這個 tab 的資料讀取權限。",
-  "fleet.empty.externalUnavailable.title": "外部依賴暫時不可用",
-  "fleet.empty.externalUnavailable.description":
-    "這個 tab 依賴 companion service 或外部系統，目前不可用。",
-  "fleet.empty.filteredEmpty.title": "目前焦點下沒有符合資料",
-  "fleet.empty.filteredEmpty.description":
-    "底層資料存在，但目前 tab 或篩選條件將結果收斂成 0 筆。",
-  "fleet.empty.noData.title": "目前尚無資料",
-  "fleet.empty.noData.description":
-    "治理工作面已就緒，但此刻還沒有需要處理的列。",
   // ── Switchboard ──
   "switchboard.title": "交換台",
   "fleet.detail.dispatch": "派車可用性",
@@ -3292,36 +1066,19 @@ const zh: typeof en = {
   "fleet.detail.debrandingStatus": "除標識狀態",
   "switchboard.subtitle": "公開資訊版本控管與乘客提示牌管理",
   "switchboard.loading": "載入交換台中...",
-  "switchboard.tab.versions": "版本",
   "switchboard.tab.publicInfo": "公開資訊",
-  "switchboard.tab.placards": "牌貼",
-  "switchboard.tab.history": "歷史",
-  "switchboard.routeNote":
-    "路由名稱維持為 /switchboard · 1 個公開資訊版本可產生多個牌貼（Q-ADM14）",
+  "switchboard.tab.placards": "乘客提示牌",
   "switchboard.publishedPublicInfo": "已發布公開資訊",
   "switchboard.publishedPublicInfoNote": "即時揭露版本",
   "switchboard.draftPublicInfo": "草稿公開資訊",
   "switchboard.draftPublicInfoNote": "等待合規發布",
-  "switchboard.placardVersions": "牌貼版本",
+  "switchboard.placardVersions": "提示牌版本",
   "switchboard.placardVersionsNote": "可追溯的座椅背面輸出",
-  "switchboard.placardsTiedToLive": "綁定即時資訊的牌貼",
+  "switchboard.placardsTiedToLive": "綁定即時資訊的提示牌",
   "switchboard.placardsTiedToLiveNote": "可發布至車隊",
-  "switchboard.versionsTitle": "公開資訊版本",
-  "switchboard.versionsSubtitle": "生效起迄 · 公開電話 · 狀態",
-  "switchboard.preview.currentPlacard": "目前牌貼 · {code}（來源 {source}）",
-  "switchboard.preview.emptyPlacard": "目前尚未產生牌貼。",
-  "switchboard.preview.pendingArtifactId": "待產生成品 ID",
-  "switchboard.preview.callLabel": "叫車",
-  "switchboard.preview.complaintLabel": "客訴",
-  "switchboard.preview.sourceLabel": "來源",
-  "switchboard.downloadPdf": "下載 PDF",
-  "switchboard.historyVersionsTitle": "公開資訊版本歷史",
-  "switchboard.historyVersionsSubtitle": "已發布版本為不可變的揭露紀錄。",
-  "switchboard.historyPlacardsTitle": "牌貼沿革",
-  "switchboard.historyPlacardsSubtitle": "已發行牌貼及其來源公開資訊版本。",
   "switchboard.newPublicInfoVersion": "新增公開資訊版本",
   "switchboard.hidePublicInfoForm": "隱藏表單",
-  "switchboard.generatePlacardVersion": "產生牌貼版本",
+  "switchboard.generatePlacardVersion": "產生提示牌版本",
   "switchboard.hidePlacardForm": "取消",
   "switchboard.createDraftVersion": "建立草稿版本",
   "switchboard.creating": "建立中...",
@@ -3330,62 +1087,19 @@ const zh: typeof en = {
   "switchboard.publishing": "發布中...",
   "switchboard.confirmPublish": "確認發布",
   "switchboard.deleteDraft": "刪除草稿",
-  "switchboard.publishVersion": "發布版本",
-  "switchboard.refresh": "重新整理",
-  "switchboard.publishPlacard": "發布",
-  "switchboard.immutable": "不可變",
-  "switchboard.noHistory": "目前尚無已發布歷史。",
   "switchboard.col.version": "版本",
-  "switchboard.col.effectiveFrom": "生效起",
-  "switchboard.col.effectiveTo": "生效迄",
-  "switchboard.col.callLine": "叫車電話",
-  "switchboard.col.complaintLine": "客訴電話",
-  "switchboard.col.updated": "更新",
   "switchboard.col.phones": "電話",
   "switchboard.col.fare": "票價與付款",
   "switchboard.col.lifecycle": "生命週期",
   "switchboard.col.actions": "操作",
-  "switchboard.col.placardId": "牌貼編號",
-  "switchboard.col.placard": "牌貼",
+  "switchboard.col.placardId": "提示牌編號",
   "switchboard.col.sourceVersion": "來源版本",
   "switchboard.col.template": "範本",
   "switchboard.col.artifact": "成品",
   "switchboard.col.tied": "綁定即時資訊",
-  "switchboard.col.publishedAt": "發布時間",
-  "switchboard.col.publishedBy": "發布者",
   "switchboard.immutableHistory": "不可變歷史",
-  "switchboard.status.published": "已發布",
-  "switchboard.status.draft": "草稿",
-  "switchboard.status.retired": "已退役",
   "switchboard.noPublicInfo": "無公開資訊版本。",
-  "switchboard.noPlacards": "無牌貼版本。",
-  "switchboard.createTitle": "建立公開資訊草稿",
-  "switchboard.createSubtitle": "中度風險 · 發布前皆為草稿。",
-  "switchboard.publishTitle": "發布公開資訊版本",
-  "switchboard.publishSubtitle":
-    "高風險 · 發布會取代目前生效的揭露資訊；需填寫原因以產生稽核憑據。",
-  "switchboard.publishNoDrafts": "目前沒有可發布的草稿版本。",
-  "switchboard.publishPick": "選擇草稿版本",
-  "switchboard.publishReasonLabel": "原因（必填）",
-  "switchboard.publishReasonPlaceholder": "為何現在發布此版本？",
-  "switchboard.generateTitle": "產生新牌貼",
-  "switchboard.generateSubtitle":
-    "中度風險 · 牌貼會綁定所選的來源公開資訊版本。",
-  "switchboard.receipt.publishVersion":
-    "稽核憑據：已發布公開資訊 {id}。原因：{reason}",
-  "switchboard.receipt.create": "稽核憑據：已建立公開資訊草稿。",
-  "switchboard.receipt.generate": "稽核憑據：已產生牌貼 {code}。",
-  "switchboard.receipt.publishPlacard": "稽核憑據：已發布牌貼 {code}。",
-  "switchboard.disabled.noDraftVersions": "目前沒有可發布的草稿版本。",
-  "switchboard.disabled.noDraftSelected": "請選擇要發布的草稿版本。",
-  "switchboard.disabled.reasonRequired": "發布需填寫原因。",
-  "switchboard.disabled.titleRequired": "需填寫標題。",
-  "switchboard.disabled.noSourceVersion": "請選擇來源公開資訊版本。",
-  "switchboard.disabled.sourceRetired": "所選來源版本已停用。",
-  "switchboard.disabled.versionCodeConflict": "此版本代碼已被使用。",
-  "switchboard.disabled.alreadyPublished": "已發布（不可變）。",
-  "switchboard.disabled.noPublicInfoVersion":
-    "請先建立公開資訊版本再產生牌貼。",
+  "switchboard.noPlacards": "無提示牌版本。",
   "switchboard.form.title": "標題",
   "switchboard.form.callPhone": "客服電話",
   "switchboard.form.complaintPhone": "客訴電話",
@@ -3394,35 +1108,12 @@ const zh: typeof en = {
   "switchboard.form.paymentMethodText": "付款方式說明",
   "switchboard.form.effectiveFrom": "生效時間",
   "switchboard.form.effectiveTo": "失效時間（選填）",
-  "switchboard.form.effectiveFromPlaceholder": "2026-07-01T00:00:00.000Z",
   "switchboard.form.versionCode": "版本代碼",
-  "switchboard.form.versionCodePlaceholder": "placard-2026-q3",
   "switchboard.form.sourceVersion": "來源公開資訊版本",
   "switchboard.form.template": "範本",
-  "switchboard.form.templatePlaceholder": "seatback-default",
   "switchboard.form.artifactFileId": "成品檔案 ID",
   "switchboard.form.artifactHint": "選填外部資源參照",
   "switchboard.form.effectiveToHint": "選填下架時間",
-  "switchboard.form.sourceHint.none":
-    "請選擇公開資訊來源版本，以保持牌貼沿革可追溯。",
-  "switchboard.form.sourceHint.published":
-    "已選擇已發布來源：新產生的牌貼會沿用正式公開揭露時間戳。",
-  "switchboard.form.sourceHint.retired":
-    "已選擇退役來源：目前禁止產生，因為牌貼必須連結到有效草稿或已發布揭露版本。",
-  "switchboard.form.sourceHint.draft":
-    "已選擇草稿來源：產生的牌貼會維持草稿，直到關聯的公開資訊發布。",
-  "switchboard.form.sourceRetiredAuditNote":
-    "已退役的公開資訊版本仍會保留於稽核歷史中，但不可再用來產生新牌貼。",
-  "switchboard.form.versionCodeConflict":
-    "版本代碼已存在於牌貼 {placardId}。請改用唯一代碼後再產生。",
-  "switchboard.option.retiredSourceUnavailable":
-    "{title}（已退役來源，不可使用）",
-  "switchboard.assistant.invalidWorkspaceTab":
-    "交換台分頁篩選僅接受 versions、placards 或 history。",
-  "switchboard.assistant.appliedWorkspaceTab": "已套用交換台分頁 {value}。",
-  "switchboard.assistant.filledPublicInfoDraft":
-    "已填入公開資訊草稿，尚未送出。",
-  "switchboard.assistant.filledPlacardDraft": "已填入牌貼草稿，尚未送出。",
   "switchboard.noRateText": "無費率說明",
   "switchboard.err.effectiveFrom": "生效時間必須為有效的本地日期時間。",
   "switchboard.err.effectiveTo": "失效時間必須為有效的本地日期時間。",
@@ -3470,167 +1161,6 @@ const zh: typeof en = {
   "pricing.form.effectiveTo": "失效時間",
   "pricing.noRules": "無定價規則。",
   "pricing.noPlans": "無司機費用方案。",
-  "pricing.pageTitle": "定價",
-  "pricing.pageSubtitle":
-    "draft -> published -> retired · 發布採 atomic replace（Q-ADM10）",
-  "pricing.loadingWorkspace": "載入定價工作區中...",
-  "pricing.tab.passenger": "乘客定價",
-  "pricing.tab.driver": "司機費用方案",
-  "pricing.tab.subsidy": "補助／報銷規則",
-  "pricing.tab.history": "已發布版本",
-  "pricing.action.createPassengerDraft": "建立乘客定價草稿",
-  "pricing.action.createDriverDraft": "建立司機方案草稿",
-  "pricing.action.createSubsidyDraft": "建立補助草稿",
-  "pricing.action.viewHistory": "檢視版本歷史",
-  "pricing.action.publishDriverPlan": "發布司機費用方案",
-  "pricing.action.publishSubsidyRule": "發布補助規則",
-  "pricing.banner.authority.title": "報價權威來源",
-  "pricing.banner.authority.body":
-    "後端定價是唯一真值。任何 manual override 都必須遵循治理流程，並保留 actor type 與必填欄位。",
-  "pricing.banner.loadFailure.title": "定價工作區載入失敗",
-  "pricing.banner.receipt.title": "稽核收據",
-  "pricing.banner.publishUnsupported.title": "{action} 尚未接上 mutation",
-  "pricing.banner.publishUnsupported.body":
-    "目前高風險發布 modal 與 atomic replace 流程只接在乘客定價；司機與補助分頁先保留 parity 結構與治理提示。",
-  "pricing.bucket.title": "服務 bucket 費率拆解",
-  "pricing.bucket.fallback.base": "以後端 canonical rule 為準",
-  "pricing.bucket.fallback.continuation": "請參考定價規則",
-  "pricing.bucket.fallback.fee": "{feeBps} bps",
-  "pricing.bucket.standard.label": "standard",
-  "pricing.bucket.standard.base": "NT$ 85 / 起跳",
-  "pricing.bucket.standard.continuation": "NT$ 5 / 250m",
-  "pricing.bucket.standard.fee": "1800 bps",
-  "pricing.bucket.business.label": "business",
-  "pricing.bucket.business.base": "NT$ 120 / 起跳",
-  "pricing.bucket.business.continuation": "NT$ 6 / 200m",
-  "pricing.bucket.business.fee": "2200 bps",
-  "pricing.bucket.airport.label": "airport",
-  "pricing.bucket.airport.base": "NT$ 180 / 起跳",
-  "pricing.bucket.airport.continuation": "依區域固定費率",
-  "pricing.bucket.airport.fee": "2500 bps",
-  "pricing.bucket.wheelchair.label": "wheelchair",
-  "pricing.bucket.wheelchair.base": "NT$ 95 / 起跳",
-  "pricing.bucket.wheelchair.continuation": "NT$ 5 / 250m",
-  "pricing.bucket.wheelchair.fee": "900 bps · 補助",
-  "pricing.card.activeDraft.title": "生效／草稿比對",
-  "pricing.card.activeDraft.subtitle":
-    "版本模型 · 發布前比對 canonical 生效版與候選草稿",
-  "pricing.card.publishStepper.title": "發布步驟",
-  "pricing.card.publishStepper.subtitle":
-    "選擇草稿 -> 比對 -> 填寫原因 -> atomic replace",
-  "pricing.card.publishStepper.conflictTitle": "衝突檢查",
-  "pricing.card.override.title": "覆寫治理",
-  "pricing.card.override.subtitle":
-    "manual override 只能作為記錄式治理，不得覆蓋 canonical quoted fare authority",
-  "pricing.card.driverComparison.title": "生效／草稿比對",
-  "pricing.card.driverComparison.subtitle": "司機結算方案一旦發布即保持不可變",
-  "pricing.card.driverComparison.draftQueue": "草稿佇列",
-  "pricing.card.tripFee.title": "每趟費率結構",
-  "pricing.card.tripFee.subtitle": "必顯費率結構與補助連動",
-  "pricing.card.subsidyLinkage.title": "補助／報銷連動",
-  "pricing.card.subsidyLinkage.subtitle":
-    "補助規則與報銷佇列採獨立治理，但共用 quoted fare authority",
-  "pricing.card.subsidyOverride.subtitle": "manual override actor 與證據義務",
-  "pricing.card.historyFilters.title": "已發布版本篩選",
-  "pricing.card.historyFilters.subtitle":
-    "跨分頁歷史可依 type、scope、period 篩選",
-  "pricing.card.historyTable.title": "所有已發布版本 · 跨分頁歷史",
-  "pricing.col.name": "名稱",
-  "pricing.col.nameUpper": "名稱",
-  "pricing.col.versionUpper": "版本",
-  "pricing.col.statusUpper": "狀態",
-  "pricing.col.serviceFeeUpper": "服務費",
-  "pricing.col.serviceFeeBpsUpper": "服務費 bps",
-  "pricing.col.reimburseUpper": "報銷",
-  "pricing.col.scopeUpper": "範圍",
-  "pricing.col.effectiveUpper": "生效區間",
-  "pricing.col.triggerUpper": "觸發條件",
-  "pricing.col.amountUpper": "金額／比例",
-  "pricing.col.typeUpper": "類型",
-  "pricing.col.publishedAtUpper": "發布時間",
-  "pricing.col.publishedByUpper": "發布者",
-  "pricing.col.canonicalUpper": "權威來源",
-  "pricing.col.actorTypesUpper": "Actor 類型",
-  "pricing.col.requiredFieldsUpper": "必填欄位",
-  "pricing.col.planUpper": "方案",
-  "pricing.col.publishedUpper": "發布時間",
-  "pricing.col.reimbursementModeUpper": "報銷模式",
-  "pricing.col.subsidyLinkageUpper": "補助連動",
-  "pricing.col.queueUpper": "佇列",
-  "pricing.col.triggerCountUpper": "觸發數",
-  "pricing.col.canonicalVersionUpper": "權威版本",
-  "pricing.col.manualOverrideUpper": "人工覆寫",
-  "pricing.col.tenantCanSetQuotedFareUpper": "租戶可設定 quoted fare",
-  "pricing.col.partnerCanSetQuotedFareUpper": "合作方可設定 quoted fare",
-  "pricing.modal.title": "發布版本",
-  "pricing.modal.body":
-    "高風險操作必須填寫原因，並在稽核收據中保留 actor、reason 與 trace evidence。",
-  "pricing.modal.conflictTitle": "範圍衝突檢查",
-  "pricing.modal.errorTitle": "無法發布草稿",
-  "pricing.form.publishEffectiveFrom": "生效開始",
-  "pricing.form.publishEffectiveTo": "生效結束",
-  "pricing.form.publishReason": "高風險原因",
-  "pricing.form.publishReasonPlaceholder":
-    "請描述這次定價發布的治理原因、影響範圍與核准依據。",
-  "pricing.state.active": "生效版",
-  "pricing.state.current": "目前",
-  "pricing.state.draft": "草稿",
-  "pricing.state.empty": "空白",
-  "pricing.state.publishCandidate": "發布候選",
-  "pricing.state.published": "已發布",
-  "pricing.status.draft": "草稿",
-  "pricing.status.published": "已發布",
-  "pricing.status.retired": "已退役",
-  "pricing.step.selectDraft.title": "1. 選擇草稿",
-  "pricing.step.selectDraft.ready": "{version} 已進入發布佇列",
-  "pricing.step.selectDraft.empty": "目前沒有可發布的草稿",
-  "pricing.step.compare.title": "2. 比對生效版與草稿",
-  "pricing.step.compare.ready": "{activeVersion} -> {draftVersion}",
-  "pricing.step.compare.empty": "需要同時有生效版與草稿才能比對",
-  "pricing.step.reason.title": "3. 高風險原因",
-  "pricing.step.reason.empty": "開啟 modal 並填寫必填原因",
-  "pricing.step.receipt.title": "4. 稽核收據",
-  "pricing.step.receipt.empty": "發布後會在此留下收據摘要",
-  "pricing.empty.passenger": "目前沒有乘客定價版本。",
-  "pricing.empty.activeRule": "目前沒有生效中的定價規則。",
-  "pricing.empty.publishDraft": "目前沒有待發布的定價草稿。",
-  "pricing.empty.driver": "目前沒有司機費用方案版本。",
-  "pricing.empty.publishedPlans": "目前沒有已發布的司機費用方案。",
-  "pricing.empty.driverDraft":
-    "目前後端僅回傳已發布 fee plan；草稿比對區暫時保留作為治理對位。",
-  "pricing.empty.tripFee": "目前沒有可顯示的費率結構。",
-  "pricing.empty.history": "目前篩選條件下沒有可顯示的版本歷史。",
-  "pricing.error.noDraft": "目前沒有可發布的 draft pricing rule。",
-  "pricing.error.reasonTooShort": "高風險原因至少需要 12 個字元。",
-  "pricing.publishConflict.multipleDrafts":
-    "{count} 個草稿共用範圍 {scope}；發布前應先確認 atomic replace 的勝出版本。",
-  "pricing.publishConflict.activeRetire":
-    "{draftVersion} 發布後，{activeVersion} 將自範圍 {scope} 退役。",
-  "pricing.publishReceipt": "{version} 已於 {timestamp} 因「{reason}」完成發布",
-  "pricing.reimbursement.mixed": "人工 + 平台",
-  "pricing.reimbursement.platformOnly": "僅平台",
-  "pricing.scope.business": "business",
-  "pricing.scope.standard": "standard",
-  "pricing.filter.type": "類型",
-  "pricing.filter.scope": "範圍",
-  "pricing.filter.period": "期間",
-  "pricing.filter.option.passenger": "乘客",
-  "pricing.filter.option.driver": "司機",
-  "pricing.filter.option.subsidy": "補助",
-  "pricing.filter.option.last90d": "最近 90 天",
-  "pricing.filter.option.last30d": "最近 30 天",
-  "pricing.tripFee.mixedSubsidyLinkage": "混合報銷需要補助對帳",
-  "pricing.tripFee.platformFundedOnly": "僅 platform_funded",
-  "pricing.subsidy.name.wheelchair": "輪椅服務補助",
-  "pricing.subsidy.name.airportNight": "夜間機場接送補助",
-  "pricing.subsidy.amount.wheelchair": "NT$ 180 / 趟",
-  "pricing.subsidy.amount.airportNight": "票價加成 12%",
-  "pricing.actor.system": "system",
-  "pricing.actor.platformAdmin": "platform_admin",
-  "pricing.actor.samplePublisher": "張薇",
-  "pricing.value.empty": "—",
-  "pricing.value.open": "open",
-  "pricing.value.rangeArrow": "->",
 
   // ── Payments ──
   "payments.title": "財務控制台",
@@ -3755,49 +1285,6 @@ const zh: typeof en = {
   "payments.reconciliation.col.notes": "留言 / 證據",
   "payments.reconciliation.col.actions": "操作",
   "payments.reconciliation.empty": "目前沒有對帳問題。",
-  "payments.page.title": "結算治理",
-  "payments.page.subtitle":
-    "發票 · 司機結算單 · 報銷批次 · 結算矩陣 · 對帳問題",
-  "payments.page.export": "匯出",
-  "payments.page.openIssue": "開立問題",
-  "payments.page.queueSubtitle":
-    "先在總表追蹤財務例外，再往下做證據與狀態處理。",
-  "payments.page.createIssueTitle": "開立對帳問題",
-  "payments.page.createIssueSubtitle":
-    "一次補齊操作者、關聯內容與第一筆證據留言。",
-  "payments.page.outstandingLabel": "當期待處理",
-  "payments.page.exposureLabel": "差額累計",
-  "payments.page.handlingLabel": "平均處理時間",
-  "payments.page.reopenRateLabel": "重開率",
-  "payments.page.reopenDeltaWarn": "警戒閾值 {threshold}%",
-  "payments.page.reopenDeltaOk": "低於 {threshold}%",
-  "payments.page.reopenBannerTitle": "重開率超過警戒值",
-  "payments.page.reopenBannerBody":
-    "最近 30 天問題視窗中已有 {rate} 項目曾被重開。至少 {count} 筆需要改善佇列治理，避免再次循環。",
-  "payments.page.queueWindow": "近 30 天問題視窗",
-  "payments.page.linkedExposure": "關聯金額",
-  "payments.page.empty.matrix": "目前範圍沒有結算矩陣資料。",
-  "payments.page.empty.invoices": "沒有符合篩選條件的租戶發票。",
-  "payments.page.empty.statements": "尚未產生司機結算單。",
-  "payments.page.empty.recon": "目前沒有對帳問題，佇列已清空。",
-  "payments.page.all": "全部",
-  "payments.page.close": "關閉",
-  "payments.page.cancel": "取消",
-  "payments.page.noLinkedDocs": "無關聯單據",
-  "payments.page.resolvedWindow": "已結案問題視窗",
-  "payments.page.activeQueueAgeFallback": "以目前佇列等待時間補位",
-  "payments.page.assistant.table.matrix": "結算矩陣",
-  "payments.page.assistant.table.invoices": "租戶發票",
-  "payments.page.assistant.table.statements": "司機結算單",
-  "payments.page.assistant.table.reconciliation": "對帳問題",
-  "payments.page.assistant.form.createTitle": "開立對帳問題",
-  "payments.page.externalOrder": "外部訂單",
-  "payments.page.validation.financeActorRequired": "財務操作人 ID 為必填。",
-  "payments.page.validation.issueSummaryRequired": "問題摘要為必填。",
-  "payments.page.validation.assigneeRequired": "指派對象為必填。",
-  "payments.page.validation.resolutionCodeRequired": "結案代碼為必填。",
-  "payments.page.validation.resolutionSummaryRequired": "結案摘要為必填。",
-  "payments.page.validation.reopenReasonRequired": "重開原因為必填。",
   "payments.generateInvoice": "產生發票",
   "payments.generating": "產生中...",
   "payments.generateStatements": "產生結算單",
@@ -3861,61 +1348,6 @@ const zh: typeof en = {
   "health.metric.reporting.note": "{count} 筆排隊中或執行中的工作仍未關閉",
   "health.metric.adapters.title": "降級中的轉發器面",
   "health.metric.adapters.note": "共監控 {count} 個轉發器",
-  "health.alertsTitle": "目前流程警示",
-  "health.alertsEmpty": "目前沒有需處理的警示。",
-  "health.adaptersTitle": "轉發器盤點",
-  "health.adaptersEmpty": "目前沒有回報中的轉發器盤點資料。",
-  "health.dispatchTitle": "派車營運",
-  "health.webhookTitle": "Webhook 傳遞",
-  "health.filingTitle": "歸檔與審查佇列",
-  "health.dispatchEmpty": "佇列深度、重派負載與派車失敗情況",
-  "health.webhookEmpty": "端點可用性、排隊傳遞與傳遞延遲",
-  "health.filingEmpty": "報表工作、錄音回補與資格追蹤積壓",
-  "health.loadingAlerts": "載入警示中...",
-  "health.loadingAdapters": "載入轉發器中...",
-  "health.openAlert": "查看",
-  "health.metricsNote": "健康狀態、轉接模式與最新營運訊號",
-  "health.refreshError": "無法更新平台健康資料",
-  "health.alert.measurement": "目前 {measured} · 重大門檻為 {threshold}",
-  "health.metric.minutes": "{value} 分鐘",
-  "health.tab.alertsWithCount": "警示{suffix}",
-  "health.tab.dispatch": "派車",
-  "health.tab.webhook": "Webhook",
-  "health.tab.filing": "歸檔",
-  "health.tab.adaptersInventory": "轉接器",
-  "health.adapter.entries": "{count} 筆",
-  "health.adapter.sourceSuffix": "{source} 通道",
-  "health.routeLabel.platform": "平台",
-  "health.routeLabel.ops": "維運",
-  "health.status.healthy": "正常",
-  "health.status.degraded": "降級",
-  "health.status.down": "中斷",
-  "health.status.unknown": "未知",
-  "health.status.active": "啟用",
-  "health.status.expiring": "即將到期",
-  "health.status.missing": "缺失",
-  "health.alert.recording_backlog.title": "錄音回補佇列待處理",
-  "health.alert.driver_state_lag.title": "司機狀態更新延遲",
-  "health.alert.adapter_degradation.title": "Adapter 健康降級",
-  "health.summary.dispatch.queueDepth": "Ready 佇列深度",
-  "health.summary.dispatch.redispatchOrders": "重新派車訂單",
-  "health.summary.dispatch.exceptionHolds": "例外保留",
-  "health.summary.dispatch.failedOrders": "派車失敗訂單",
-  "health.summary.webhook.activeEndpoints": "啟用中的端點",
-  "health.summary.webhook.disabledEndpoints": "停用中的端點",
-  "health.summary.webhook.queuedDeliveries": "排隊中的傳遞",
-  "health.summary.webhook.oldestQueuedLag": "最久排隊延遲",
-  "health.summary.filing.reportingQueuedJobs": "排隊中的報表工作",
-  "health.summary.filing.recordingBacklog": "錄音回補積壓",
-  "health.summary.filing.manualReviewQueue": "人工審查佇列",
-  "health.summary.filing.eligibilityFailures24h": "24 小時資格失敗數",
-  "health.adapterColumns.adapter": "轉接器",
-  "health.adapterColumns.source": "來源",
-  "health.adapterColumns.kind": "類型",
-  "health.adapterColumns.status": "狀態",
-  "health.adapterColumns.latency": "延遲",
-  "health.adapterColumns.lastEvent": "最後事件",
-  "health.adapterColumns.orders24h": "24h 訂單",
 
   // ── Notices ──
   "notices.title": "公告與維護",
@@ -3963,54 +1395,6 @@ const zh: typeof en = {
   "audit.newValues": "新值",
   "audit.oldValues": "舊值",
   "audit.empty": "無稽核記錄。",
-  "audit.page.title": "稽核與證據治理",
-  "audit.page.subtitle":
-    "append-only · 透過 badge 顯示法定保留與刪除例外 (Q-ADM16)",
-  "audit.page.refresh": "重新整理 (T6 手動)",
-  "audit.page.refreshing": "重新整理中…",
-  "audit.page.exportCsv": "匯出 CSV",
-  "audit.page.tab.log": "稽核紀錄",
-  "audit.page.tab.policy": "保留政策",
-  "audit.page.tab.hold": "有效法定保留",
-  "audit.page.tab.except": "刪除例外",
-  "audit.page.all": "全部",
-  "audit.page.legalHoldTip": "法定保留",
-  "audit.page.deletionExceptionTip": "刪除例外",
-  "audit.page.expires": "到期",
-  "audit.page.case": "案號",
-  "audit.page.owner": "負責人",
-  "audit.page.reason": "原因",
-  "audit.page.loading": "載入稽核紀錄中…",
-  "audit.page.empty.log": "沒有符合目前篩選的稽核紀錄。",
-  "audit.page.empty.policy": "尚未設定保留政策。",
-  "audit.page.empty.hold": "目前沒有有效的法定保留。",
-  "audit.page.empty.except": "目前沒有有效的刪除例外。",
-  "audit.page.holdsTitle": "有效法定保留",
-  "audit.page.exceptTitle": "刪除例外",
-  "audit.page.col.when": "時間",
-  "audit.page.col.actorType": "操作者類型",
-  "audit.page.col.actor": "操作者",
-  "audit.page.col.module": "模組",
-  "audit.page.col.action": "動作",
-  "audit.page.col.resource": "資源",
-  "audit.page.col.request": "請求",
-  "audit.page.col.reasonCode": "原因代碼",
-  "audit.page.policy.family": "家族",
-  "audit.page.policy.authority": "權威模組",
-  "audit.page.policy.retention": "保存期",
-  "audit.page.policy.download": "下載",
-  "audit.page.policy.legalHold": "法定保留",
-  "audit.page.hold.resource": "資源",
-  "audit.page.hold.case": "案件",
-  "audit.page.hold.reason": "原因",
-  "audit.page.hold.placedBy": "設置者",
-  "audit.page.hold.placedAt": "設置時間",
-  "audit.page.exception.reason": "原因",
-  "audit.page.exception.expires": "到期",
-  "audit.page.signedTtl": "簽名網址 · {minutes} 分鐘 TTL",
-  "audit.page.noDownload": "不提供下載",
-  "audit.page.holdEnabled": "支援",
-  "audit.page.holdDisabled": "不支援",
 
   // ── Feature Flags ──
   "flags.title": "功能旗標",
@@ -4029,91 +1413,6 @@ const zh: typeof en = {
   "flags.enable": "啟用",
   "flags.disable": "停用",
   "flags.empty": "無功能旗標。",
-  "flags.admin.pageTitle": "功能旗標 · 寫入權限",
-  "flags.admin.pageSubtitle":
-    "只有這個頁面可寫入功能旗標。營運端、租戶端與司機端頁面維持 GET 唯讀檢視。",
-  "flags.admin.metaPill": "僅此處可寫入",
-  "flags.admin.refreshing": "重新整理中...",
-  "flags.admin.addOverride": "新增租戶覆寫",
-  "flags.admin.addOverrideHint": "先切到租戶範圍，才能建立覆寫。",
-  "flags.admin.riskTitle": "高風險操作必須填寫原因。",
-  "flags.admin.riskBody":
-    "切換與租戶覆寫都維持在這條寫入流程，確認後會留下本地稽核收據。",
-  "flags.admin.scopeField": "檢視範圍",
-  "flags.admin.searchField": "搜尋 key",
-  "flags.admin.searchPlaceholder": "依旗標 key 搜尋",
-  "flags.admin.scopeHint":
-    "切到租戶可檢視該租戶的有效覆寫列；預設仍以平台資料為主。",
-  "flags.admin.scopePlatformDefault": "平台預設",
-  "flags.admin.scopeTenantOverride": "租戶覆寫",
-  "flags.admin.scopeTenantOverrideWithId": "租戶覆寫 · {id}",
-  "flags.admin.scopeLoading": "載入租戶清單中...",
-  "flags.admin.summaryPlatformDefault": "平台預設",
-  "flags.admin.summaryTenantOverride": "租戶覆寫",
-  "flags.admin.tableTitle": "功能旗標登錄表",
-  "flags.admin.tableSubtitle":
-    "依交接要求維持以表格為主的主體，集中呈現 Key、範圍、狀態切換、更新者、時間與操作。",
-  "flags.admin.filterLabel": "推行狀態",
-  "flags.admin.filterPill": "表格主視圖",
-  "flags.admin.filter.midRollout": "推行中",
-  "flags.admin.filter.rolledOut": "已全面推行",
-  "flags.admin.filter.deprecated": "已淘汰",
-  "flags.admin.filter.tenantOverrides": "租戶覆寫",
-  "flags.admin.rollout.midRollout": "推行中",
-  "flags.admin.rollout.rolledOut": "已全面推行",
-  "flags.admin.rollout.deprecated": "已淘汰",
-  "flags.admin.keyHeader": "Key",
-  "flags.admin.scopeHeader": "範圍",
-  "flags.admin.stateHeader": "狀態",
-  "flags.admin.updatedByHeader": "更新者",
-  "flags.admin.updatedAtHeader": "時間",
-  "flags.admin.actionsHeader": "操作",
-  "flags.admin.noDescription": "尚未提供描述",
-  "flags.admin.updatedByValue": "目前合約未提供",
-  "flags.admin.toggle": "切換",
-  "flags.admin.removeOverride": "移除覆寫",
-  "flags.admin.history": "歷史",
-  "flags.admin.confirmToggleTitle": "確認切換功能旗標",
-  "flags.admin.confirmToggleBody": "這會變更目前檢視範圍中的有效功能旗標狀態。",
-  "flags.admin.confirmOverrideTitle": "建立租戶覆寫",
-  "flags.admin.confirmOverrideBody":
-    "這會為所選 key 建立租戶專屬覆寫，不影響其他範圍。",
-  "flags.admin.confirmRemoveOverrideTitle": "移除租戶覆寫",
-  "flags.admin.confirmRemoveOverrideBody":
-    "這會移除租戶專屬覆寫，讓該租戶回到平台預設。",
-  "flags.admin.reasonLabel": "高風險原因",
-  "flags.admin.reasonPlaceholder": "說明推行原因、預期影響範圍與驗證計畫。",
-  "flags.admin.reasonRequired": "執行這個高風險操作前必須填寫原因。",
-  "flags.admin.overrideTenantField": "租戶",
-  "flags.admin.overrideKeyField": "旗標 key",
-  "flags.admin.overrideStateField": "覆寫狀態",
-  "flags.admin.overrideDescriptionField": "覆寫描述",
-  "flags.admin.overrideDescriptionHint": "可留白，沿用既有旗標描述。",
-  "flags.admin.confirmCreate": "建立覆寫",
-  "flags.admin.confirmRemove": "移除覆寫",
-  "flags.admin.scopeMeta": "目前範圍",
-  "flags.admin.resultMeta": "可見 {count} 列",
-  "flags.admin.enabledMeta": "啟用 {count} 列",
-  "flags.admin.disabledMeta": "停用 {count} 列",
-  "flags.admin.overrideMeta": "租戶覆寫 {count} 列",
-  "flags.admin.notesTitle": "延伸備註",
-  "flags.admin.notesEmpty": "目前範圍沒有額外合約備註。",
-  "flags.admin.historyTitle": "本地稽核收據",
-  "flags.admin.historyEmpty": "這個瀏覽工作階段尚未記錄任何收據。",
-  "flags.admin.historyHint": "可用歷史列操作聚焦特定 key 的收據。",
-  "flags.admin.historyFocusAll": "目前顯示此瀏覽工作階段的所有收據。",
-  "flags.admin.historyFocusKey": "目前聚焦 {key}",
-  "flags.admin.secondaryPanelTitle": "變更控制與延伸細節",
-  "flags.admin.secondaryPanelSubtitle":
-    "高風險原因、延伸備註與本地歷史都收在表格主體下方的次要區塊。",
-  "flags.admin.actionComposerTitle": "待確認的高風險變更",
-  "flags.admin.actionComposerIdle": "切換與覆寫變更都必須先填寫原因再確認。",
-  "flags.admin.actionApplied": "已記錄稽核收據",
-  "flags.admin.noFlagsInFilter": "目前推行篩選與搜尋條件沒有符合的功能旗標。",
-  "flags.admin.laneMeta": "僅此處可寫入",
-  "flags.admin.notesMeta": "延伸備註收在預設主體之外。",
-  "flags.admin.receiptsMeta": "本地收據 {count} 筆",
-  "flags.admin.showAllReceipts": "顯示全部收據",
 
   // ── Tenants (additional) ──
   "tenants.configure": "設定",
@@ -4152,142 +1451,14 @@ const zh: typeof en = {
   "tenants.promote": "升級到",
   "tenants.lastPromoted": "最近一次升級",
   "tenants.rollout.stage": "階段",
+
+  // ── Payments (additional) ──
+  "payments.approve": "核准",
   "tenants.rollbackHold": "回滾保留",
   "tenants.role.invite": "邀請",
   "tenants.role.acknowledge": "確認",
   "tenants.role.invited": "已邀請",
   "tenants.role.acknowledged": "已確認",
-  "tenants.role.pending": "未邀請",
-  "tenants.list.pageTitle": "租戶",
-  "tenants.list.pageSubtitle": "管理租戶從建立到正式部署的完整生命週期。",
-  "tenants.list.filterAction": "篩選",
-  "tenants.list.exportAction": "匯出",
-  "tenants.list.errorTitle": "無法載入租戶治理資料",
-  "tenants.list.createTitle": "建立租戶",
-  "tenants.list.createSubtitle":
-    "在第一次升級前，先補齊租戶主檔、配額、模組與開通預設。",
-  "tenants.list.createSummaryTitle": "開通摘要",
-  "tenants.list.createSummarySubtitle":
-    "在租戶進入正式名單前，先把初始部署套件固定下來。",
-  "tenants.list.col.tenant": "租戶",
-  "tenants.list.col.stage": "STAGE",
-  "tenants.list.col.gate": "GATE",
-  "tenants.list.col.modules": "模組",
-  "tenants.list.col.integration": "介接",
-  "tenants.list.col.updated": "更新",
-  "tenants.list.col.quotasPerMonth": "配額/月",
-  "tenants.list.filter.production": "正式環境",
-  "tenants.list.filter.pilot": "試點",
-  "tenants.list.filter.sandbox": "沙箱",
-  "tenants.list.filter.rollbackHold": "回滾保留",
-  "tenants.list.moduleState.enabled": "已啟用",
-  "tenants.list.moduleState.disabled": "可選",
-  "tenants.list.bootstrap.modules": "已選模組",
-  "tenants.list.bootstrap.quota": "每月訂單",
-  "tenants.list.bootstrap.api": "每月 API 呼叫",
-  "tenants.list.bootstrap.status": "狀態",
-  "tenants.list.bootstrap.integration": "介接模式",
-  "tenants.list.bootstrap.admin": "開通管理員",
-  "tenants.list.bootstrap.sandbox": "沙箱 Base URL",
-  "tenants.list.quotaHint": "在正式啟用前先設定初始月配額範圍。",
-  "tenants.list.modulesHint": "把首批啟用模組明確列出。",
-  "tenants.list.onboardingHint": "由平台端預先補齊介接姿態與開通負責人。",
-  "tenants.list.kpi.modulesSub": "租戶模組",
-  "tenants.list.kpi.bookingsSub": "訂單",
-  "tenants.list.kpi.apiSub": "API",
-  "tenants.list.quotasTooltip": "{drivers} 名司機 · {api} API",
-  "tenants.list.placeholder.name": "Acme Mobility",
-  "tenants.list.placeholder.code": "acme_dispatch",
-  "tenants.list.placeholder.adminEmail": "admin@acme.example",
-  "tenants.list.placeholder.sandboxBaseUrl": "https://sandbox.acme.example",
-  "tenants.list.assistant.invalidFilter":
-    "租戶篩選只接受 all、sandbox、pilot、production 或 rollback_hold。",
-  "tenants.list.assistant.filterApplied": "已套用租戶篩選 {value}。",
-  "tenants.detail.loadingWorkspace": "載入租戶生命週期工作區中...",
-  "tenants.detail.missingTenantId": "缺少租戶 ID。",
-  "tenants.detail.pageTitle": "租戶詳情",
-  "tenants.detail.pageSubtitle": "租戶 ID：{tenantId}",
-  "tenants.detail.backToTenants": "返回租戶列表",
-  "tenants.detail.loadErrorTitle": "無法載入租戶詳情",
-  "tenants.detail.notFoundTitle": "找不到租戶",
-  "tenants.detail.notFoundBody":
-    "目前這條路由會顯示頁面內容，不再直接落到 404。請從生命週期表格改選其他租戶。",
-  "tenants.detail.openConsole": "在租戶主控台開啟",
-  "tenants.detail.enterRollbackHold": "進入 rollback_hold",
-  "tenants.detail.actionFailed": "租戶詳情操作失敗",
-  "tenants.detail.auditReceipt": "稽核回執 · {action}",
-  "tenants.detail.reasonCaptured": "已記錄原因：{reason} · {at}",
-  "tenants.detail.rolloutProgressTitle": "部署進度 · 狀態機",
-  "tenants.detail.rolloutProgressSubtitle":
-    "切換負責人：{cutoverOwner} · 回滾負責人：{rollbackOwner}（已連結使用者紀錄 · Q-ADM06）",
-  "tenants.detail.rollbackPreparedTitle": "rollbackPrepared = {value}",
-  "tenants.detail.rollbackPrepared.ready": "租戶已具備正式環境回滾條件。",
-  "tenants.detail.rollbackPrepared.pending":
-    "推進到正式環境前，需先補齊回滾計畫。",
-  "tenants.detail.roleAcknowledgementsTitle": "角色確認狀態",
-  "tenants.detail.roleAcknowledgementsBody":
-    "{acknowledged}/{total} 角色已邀請並確認。",
-  "tenants.detail.currentGateTitle": "目前 gate = {gate}",
-  "tenants.detail.currentGateEmpty": "尚未記錄額外切換備註。",
-  "tenants.detail.onboardingPackage": "開通套件",
-  "tenants.detail.rolesInvitesTitle":
-    "角色與邀請 · {acknowledged}/{total} 已確認",
-  "tenants.detail.tenantBaseline": "租戶基線",
-  "tenants.detail.baseline.stage": "STAGE",
-  "tenants.detail.baseline.currentGate": "CURRENT GATE",
-  "tenants.detail.baseline.updated": "UPDATED",
-  "tenants.detail.baseline.lastPromoted": "LAST PROMOTED",
-  "tenants.detail.recentActivity": "近期活動",
-  "tenants.detail.recentActivitySubtitle": "部署、開通與角色邀請決策的稽核子集",
-  "tenants.detail.recordUpdated": "租戶紀錄已更新",
-  "tenants.detail.recordCreated": "租戶已建立",
-  "tenants.detail.recordUpdatedBody": "{at} · {code}",
-  "tenants.detail.recordCreatedBody": "{at} · 已記錄開通套件",
-  "tenants.detail.bootstrapPackageRecorded": "已記錄開通套件",
-  "tenants.detail.rollbackHoldActive": "租戶目前處於 rollback_hold",
-  "tenants.detail.rollbackHoldInactive": "目前沒有啟用中的回滾保留",
-  "tenants.detail.lastPromotion": "最近一次升級：{at}",
-  "tenants.detail.noPromotionHistory": "尚未記錄升級歷史。",
-  "tenants.detail.tab.overview": "總覽",
-  "tenants.detail.tab.modules": "模組",
-  "tenants.detail.tab.onboarding": "開通",
-  "tenants.detail.tab.rollout": "部署",
-  "tenants.detail.tab.roles": "角色",
-  "tenants.detail.tab.webhookBaseline": "Webhook 基線",
-  "tenants.detail.tab.billingBaseline": "帳務基線",
-  "tenants.detail.tab.audit": "稽核",
-  "tenants.detail.role.required": "必要角色",
-  "tenants.detail.role.optional": "選填角色",
-  "tenants.detail.role.pendingAssignment": "待指派",
-  "tenants.detail.role.acknowledgedHint": "{name} 已確認",
-  "tenants.detail.role.invitedHint": "{name} 邀請中",
-  "tenants.detail.role.col.invitee": "邀請對象",
-  "tenants.detail.role.col.role": "角色",
-  "tenants.detail.role.col.state": "狀態",
-  "tenants.detail.role.col.updated": "更新",
-  "tenants.detail.role.col.action": "操作",
-  "tenants.detail.role.inviting": "邀請中...",
-  "tenants.detail.role.saving": "儲存中...",
-  "tenants.detail.onboarding.quotaPerMonth": "每月配額",
-  "tenants.detail.onboarding.modules": "模組",
-  "tenants.detail.step.gate": "關卡 {status}",
-  "tenants.detail.step.rollbackReady": "rollback_hold 就緒",
-  "tenants.detail.step.owner": "負責人：{owner}",
-  "tenants.detail.step.ownerUnassigned": "負責人未指派",
-  "tenants.detail.modal.title": "進入 rollback_hold",
-  "tenants.detail.modal.subtitle": "高風險操作。送出命令前必須填寫原因。",
-  "tenants.detail.modal.close": "關閉",
-  "tenants.detail.modal.warningTitle": "{tenant} 將被阻止繼續升級。",
-  "tenants.detail.modal.warningBody":
-    "當部署風險或事件狀態需要明確治理保留時，請使用這個動作。",
-  "tenants.detail.modal.reasonLabel": "原因",
-  "tenants.detail.modal.reasonPlaceholder":
-    "描述需要 rollback_hold 的 incident、rollout 風險或操作決策。",
-  "tenants.detail.modal.confirm": "確認 rollback_hold",
-  "tenants.detail.modal.submitting": "送出中...",
-
-  // ── Payments (additional) ──
-  "payments.approve": "核准",
   "payments.saving": "儲存中...",
   "payments.downloadPdf": "下載 PDF",
   "payments.invoicesTitle": "租戶發票",
@@ -4295,122 +1466,6 @@ const zh: typeof en = {
   "payments.reimbursementsTitle": "司機報銷",
   "payments.generateInvoiceTitle": "產生租戶發票",
   "payments.generateStatementsTitle": "產生司機結算單",
-  "payments.reimbursements.queue.filter.all": "全部",
-  "payments.reimbursements.queue.filter.pendingApproval": "待核准",
-  "payments.reimbursements.queue.filter.exported": "已匯出",
-  "payments.reimbursements.queue.filter.done": "已完成",
-  "payments.reimbursements.queue.submitter.platformFinance": "平台財務",
-  "payments.reimbursements.queue.headerTitle": "代墊批次",
-  "payments.reimbursements.queue.headerSubtitle":
-    "draft → pending_approval → approved → exported → paid → reconciled（Q-ADM12 六狀態 state machine）",
-  "payments.reimbursements.queue.empty": "目前沒有符合此狀態的代墊批次。",
-  "payments.reimbursements.queue.loadError": "無法載入代墊批次",
-  "payments.reimbursements.queue.loading": "正在載入代墊批次…",
-  "payments.reimbursements.queue.col.batch": "批次",
-  "payments.reimbursements.queue.col.scope": "範圍",
-  "payments.reimbursements.queue.col.amount": "金額",
-  "payments.reimbursements.queue.col.state": "狀態",
-  "payments.reimbursements.queue.col.submitter": "提交者",
-  "payments.reimbursements.queue.col.submitted": "提交時間",
-  "payments.reimbursements.queue.col.updated": "更新時間",
-  "payments.reimbursements.status.draft": "draft",
-  "payments.reimbursements.status.pendingApproval": "pending_approval",
-  "payments.reimbursements.status.approved": "approved",
-  "payments.reimbursements.status.exported": "exported",
-  "payments.reimbursements.status.paid": "paid",
-  "payments.reimbursements.status.reconciled": "reconciled",
-  "payments.reimbursements.detail.fallbackWarning":
-    "目前代墊詳情 API 無法使用，頁面改以 route-local fallback 資料渲染 canvas 對齊內容。",
-  "payments.reimbursements.detail.loading": "載入中…",
-  "payments.reimbursements.detail.pageTitle": "代墊批次",
-  "payments.reimbursements.detail.backToPayments": "返回結算治理",
-  "payments.reimbursements.detail.batchUnavailable": "找不到批次",
-  "payments.reimbursements.detail.batchUnavailableBody":
-    "Route 已建立，但找不到對應的代墊批次資料。",
-  "payments.reimbursements.detail.lineItemsFallbackNote": "項目 {index}",
-  "payments.reimbursements.detail.fallbackReason.sponsorQ2Apr":
-    "贊助代墊 Q2-Apr",
-  "payments.reimbursements.detail.fallbackReason.reconciliationAdjustment":
-    "差額調整 TWD 1,820 × 99 筆",
-  "payments.reimbursements.detail.approvalReasonRequired":
-    "高風險核准操作必須填寫原因。",
-  "payments.reimbursements.detail.approvalRecorded": "已記錄核准原因：{reason}",
-  "payments.reimbursements.detail.markedPaid":
-    "批次已標記為已付款，且已記錄匯款憑證。",
-  "payments.reimbursements.detail.queueLink": "批次佇列",
-  "payments.reimbursements.detail.copyBatchId": "複製批次 ID",
-  "payments.reimbursements.detail.refreshFailed": "重新整理失敗",
-  "payments.reimbursements.detail.fallbackTitle": "Fallback 代墊批次詳情",
-  "payments.reimbursements.detail.auditViewTitle":
-    "Audit-derived workflow 視圖",
-  "payments.reimbursements.detail.auditViewBody":
-    "六狀態 stepper 對齊 canvas；目前狀態由 batch 的核准、匯款憑證與付款時間推導呈現。",
-  "payments.reimbursements.detail.auditReceipt": "稽核收據",
-  "payments.reimbursements.detail.stateMachineTitle": "狀態機 · Q-ADM12",
-  "payments.reimbursements.detail.stateMachineSubtitle":
-    "draft → pending approval → approved → exported → paid → reconciled",
-  "payments.reimbursements.detail.headerCardTitle": "摘要",
-  "payments.reimbursements.detail.summary.batchId": "批次 ID",
-  "payments.reimbursements.detail.summary.driver": "司機",
-  "payments.reimbursements.detail.summary.statement": "結算單",
-  "payments.reimbursements.detail.summary.period": "期間",
-  "payments.reimbursements.detail.summary.totalAmount": "總金額",
-  "payments.reimbursements.detail.summary.state": "狀態",
-  "payments.reimbursements.detail.summary.approvedAt": "核准時間",
-  "payments.reimbursements.detail.summary.paidAt": "付款時間",
-  "payments.reimbursements.detail.summary.remittanceProof": "匯款憑證",
-  "payments.reimbursements.detail.summary.lineItems": "項目數",
-  "payments.reimbursements.detail.approveFlowTitle": "核准原因流程",
-  "payments.reimbursements.detail.approveFlowSubtitle":
-    "高風險操作在核准前必須填寫原因。",
-  "payments.reimbursements.detail.approvalReason": "核准原因",
-  "payments.reimbursements.detail.approvalReasonPlaceholder":
-    "說明 sponsor exposure、佐證或 audit context。",
-  "payments.reimbursements.detail.remittanceProof": "匯款憑證",
-  "payments.reimbursements.detail.actionFailed": "操作失敗",
-  "payments.reimbursements.detail.markPaid": "標記已付款",
-  "payments.reimbursements.detail.timelineTitle": "狀態時間軸 · audit-derived",
-  "payments.reimbursements.detail.batchSummaryTitle": "批次摘要",
-  "payments.reimbursements.detail.batchSummarySubtitle.fallback":
-    "以 route-local fallback finance context 補齊 canvas body 密度。",
-  "payments.reimbursements.detail.batchSummarySubtitle.live":
-    "以 route-local finance context 補齊 canvas body 密度。",
-  "payments.reimbursements.detail.approvalGate": "核准關卡：",
-  "payments.reimbursements.detail.approvalGateCompleted": "已完成",
-  "payments.reimbursements.detail.approvalGatePending": "待 super-admin 簽核",
-  "payments.reimbursements.detail.exportPosture": "匯出姿態：",
-  "payments.reimbursements.detail.exportPostureAttached": "已附憑證",
-  "payments.reimbursements.detail.exportPosturePending": "尚未匯出",
-  "payments.reimbursements.detail.settlementTarget": "結算對象：",
-  "payments.reimbursements.detail.evidenceScope": "佐證範圍：",
-  "payments.reimbursements.detail.evidenceScopeCount": "{count} 筆項目",
-  "payments.reimbursements.detail.lineItemsTitle": "項目明細",
-  "payments.reimbursements.detail.lineItemsSubtitle":
-    "{count} 筆來源構成此批次總額。",
-  "payments.reimbursements.detail.lineItemsEmpty":
-    "此批次目前沒有可顯示的代墊項目。",
-  "payments.reimbursements.detail.lineItems.col.recipient": "收款對象",
-  "payments.reimbursements.detail.lineItems.col.amount": "金額",
-  "payments.reimbursements.detail.lineItems.col.sourceReference": "來源參考",
-  "payments.reimbursements.detail.lineItems.col.note": "備註",
-  "payments.reimbursements.timeline.batchCreated": "批次建立",
-  "payments.reimbursements.timeline.batchCreatedBody":
-    "此批次依結算單 {statementId} 與司機 {driverId} 產生。",
-  "payments.reimbursements.timeline.submittedForApproval": "送交核准",
-  "payments.reimbursements.timeline.submittedForApprovalBody":
-    "{count} 筆代墊項目已排入財務審核。",
-  "payments.reimbursements.timeline.approved": "已核准",
-  "payments.reimbursements.timeline.approvedBody":
-    "批次已核准，可進入匯出與匯款處理。",
-  "payments.reimbursements.timeline.remittanceProofAttached": "已附匯款憑證",
-  "payments.reimbursements.timeline.remittanceProofAttachedBody":
-    "批次已記錄憑證 ID {proofId}。",
-  "payments.reimbursements.timeline.markedPaid": "已標記付款",
-  "payments.reimbursements.timeline.markedPaidBody":
-    "司機代墊已於財務主控台標記為已付款。",
-  "payments.reimbursements.timeline.waitingApproval": "等待核准",
-  "payments.reimbursements.timeline.waitingApprovalBody":
-    "高風險核准仍需補上原因，狀態才能繼續推進。",
 
   // ── Pricing (additional) ──
   "pricing.platformFunded": "平台資助",
@@ -4434,69 +1489,6 @@ const zh: typeof en = {
   "notices.maintActiveBanner": "維護中",
   "notices.currentStatus": "目前狀態",
   "notices.lastUpdated": "最後更新",
-  "notices.subtitle.detail":
-    "critical / maintenance 等級會推送跨應用 banner 到營運、租戶與司機端（Q-ADM15）。",
-  "notices.tab.history": "廣播歷史",
-  "notices.createNotice": "建立公告",
-  "notices.enterMaintenance": "進入維護",
-  "notices.refreshing": "重新整理中",
-  "notices.emptyDetailed": "目前沒有平台公告。",
-  "notices.emptyHistory": "目前沒有跨應用廣播紀錄。",
-  "notices.composer.title": "建立公告",
-  "notices.composer.subtitle": "發佈給平台營運、租戶或司機端的跨應用 banner。",
-  "notices.guardrail.title": "進入維護前應先發送維護公告",
-  "notices.guardrail.body": "先發佈維護等級公告，再啟用全平台維護模式。",
-  "notices.maintenance.currentTitle": "維護模式 · 目前狀態",
-  "notices.maintenance.currentSubtitle": "全平台 dispatch 與入站流量控管。",
-  "notices.maintenance.internalReason": "原因 · 內部紀錄",
-  "notices.maintenance.scheduledStart": "預定起始",
-  "notices.maintenance.scheduledEnd": "預定結束",
-  "notices.maintenance.save": "保存維護設定",
-  "notices.maintenance.previewTitle": "目前維護公告（預覽）",
-  "notices.maintenance.previewFallback":
-    "啟用維護模式後，將推送跨應用中斷公告。",
-  "notices.maintenance.previewTargets": "目標對象：ops · tenant · driver",
-  "notices.maintenance.reasonRequired":
-    "高風險 maintenance 動作必須填寫原因後才能保存。",
-  "notices.maintenance.confirmTitle": "確認更新維護模式",
-  "notices.maintenance.confirmBody":
-    "這是高風險動作。保存後會改變全平台 dispatch 與 webhook 行為。",
-  "notices.maintenance.confirmReasonLabel": "稽核原因",
-  "notices.maintenance.confirmApply": "套用維護更新",
-  "notices.maintenance.summary":
-    "啟用後將停止 dispatch、webhook 投遞與 partner 入站。",
-  "notices.maintenance.reasonPlaceholder":
-    "例如：計畫性維護、合作方故障緩解、合規保留",
-  "notices.maintenance.startPlaceholder": "YYYY-MM-DD HH:MM",
-  "notices.maintenance.endPlaceholder": "YYYY-MM-DD HH:MM",
-  "notices.col.updated": "更新",
-  "notices.col.targets": "對象",
-  "notices.col.delivery": "投遞",
-  "notices.col.broadcastAt": "廣播時間",
-  "notices.col.updatedBy": "更新者",
-  "notices.col.window": "時段",
-  "notices.col.action": "操作",
-  "notices.col.notice": "公告",
-  "notices.col.id": "ID",
-  "notices.col.severityShort": "SEV",
-  "notices.history.subtitle": "廣播歷史 · 跨應用投遞結果",
-  "notices.history.delivery.archived": "已封存的已解決投遞",
-  "notices.history.delivery.all": "已投遞 3 / 3",
-  "notices.history.delivery.single": "已投遞 1 / 1",
-  "notices.noticeTitleRequired": "公告標題為必填。",
-  "notices.noticeBodyRequired": "公告內容為必填。",
-  "notices.warning.operationError": "公告/維護模式操作異常：{error}",
-  "notices.warning.maintenanceEnabled": "目前平台維護模式為啟用狀態。",
-  "notices.status.active": "啟用中",
-  "notices.status.scheduled": "已排程",
-  "notices.status.resolved": "已解決",
-  "notices.status.archived": "已封存",
-  "notices.severity.info": "低",
-  "notices.severity.warning": "中",
-  "notices.severity.critical": "高",
-  "notices.window.notScheduled": "未排定",
-  "notices.risk.high": "高風險",
-  "notices.systemUser": "system",
 
   // ── Audit (additional) ──
   "audit.showingOf": "顯示 {shown} / {total} 筆記錄",
@@ -4505,22 +1497,22 @@ const zh: typeof en = {
   "audit.actorLabel": "操作者類型：",
   "audit.metrics.policyFamilies": "證據政策家族數",
   "audit.metrics.signedDownload": "需簽名下載的家族數",
-  "audit.metrics.activeHolds": "有效法定保留",
+  "audit.metrics.activeHolds": "有效 legal hold",
   "audit.metrics.activeExceptions": "有效刪除例外",
   "audit.policies.title": "證據治理",
   "audit.policies.subtitle":
-    "依證據家族查看 retention、下載控制與法定保留預設。",
+    "依證據家族查看 retention、下載控制與 legal hold 預設。",
   "audit.policies.family": "家族",
   "audit.policies.authority": "權威模組",
   "audit.policies.retention": "保存期",
   "audit.policies.download": "下載",
-  "audit.policies.legalHold": "法定保留",
+  "audit.policies.legalHold": "Legal Hold",
   "audit.policies.signedDownloadTtl": "簽名網址（{minutes} 分鐘）",
   "audit.policies.noDownload": "不提供直接下載",
   "audit.policies.holdEnabled": "支援",
   "audit.policies.holdDisabled": "不支援",
-  "audit.holds.title": "有效法定保留",
-  "audit.holds.empty": "目前沒有有效法定保留。",
+  "audit.holds.title": "有效 Legal Hold",
+  "audit.holds.empty": "目前沒有有效 legal hold。",
   "audit.holds.family": "家族",
   "audit.holds.subject": "主體",
   "audit.holds.case": "案件",
@@ -4532,656 +1524,11 @@ const zh: typeof en = {
   "audit.exceptions.reason": "原因",
   "audit.exceptions.expiresAt": "到期時間",
 
-  // ── Admin Home ──
-  "adminHome.title": "平台治理工作首頁",
-  "adminHome.subtitle": "DRTS 平台控制平面 · 您今日有 {count} 件需治理事項",
-  "adminHome.openAll": "展開所有",
-  "adminHome.openAudit": "前往稽核",
-  "adminHome.loading": "載入治理快照中...",
-  "adminHome.noSnapshot": "目前沒有可用的治理快照。",
-  "adminHome.loadErrorTitle": "無法載入治理快照",
-  "adminHome.quickLinksTitle": "模組捷徑",
-  "adminHome.todayTitle": "今日治理待辦",
-  "adminHome.todaySubtitle": "跨模組需要平台治理人介入",
-  "adminHome.recentTitle": "近期高敏感操作 · 平台層審計足跡 (24h)",
-  "adminHome.kpi.tenants": "活躍租戶",
-  "adminHome.kpi.tenantsSub": "{pilot} pilot · {sandbox} sandbox",
-  "adminHome.kpi.tenantsDelta": "{count} rollback_hold",
-  "adminHome.kpi.partners": "合作夥伴 entry",
-  "adminHome.kpi.partnersSub": "{bank} 銀行 · {nonBank} 飯店 / 企業",
-  "adminHome.kpi.partnersDelta": "{count} 待 readiness",
-  "adminHome.kpi.drivers": "活躍司機",
-  "adminHome.kpi.driversSub": "{eligible} 可派 · {total} 總數",
-  "adminHome.kpi.driversDelta": "{count} 筆 stale",
-  "adminHome.kpi.driversHealthy": "穩定",
-  "adminHome.kpi.recon": "待結算對帳",
-  "adminHome.kpi.reconDelta": "{partner} partner · {forwarded} forwarded",
-  "adminHome.kpi.reconSub": "{count} 筆重大平台告警",
-  "adminHome.kpi.reconHintEmpty": "目前無待處理 issue",
-  "adminHome.noAudit": "目前沒有稽核紀錄。",
-  "adminHome.noTodos": "目前沒有路由到平台端的治理阻塞。",
-  "adminHome.auditTime": "時間",
-  "adminHome.auditActorType": "操作者類型",
-  "adminHome.auditModule": "模組",
-  "adminHome.auditAction": "動作",
-  "adminHome.auditActor": "操作者",
-  "adminHome.auditRequest": "Request",
-  "adminHome.auditSystem": "system",
-  "adminHome.quickLink.tenants": "租戶 · Tenants",
-  "adminHome.quickLink.partners": "合作夥伴 · Partners",
-  "adminHome.quickLink.pricing": "費率 · Pricing",
-  "adminHome.quickLink.payments": "結算 · Payments",
-  "adminHome.quickLink.fleet": "車隊 · Fleet",
-  "adminHome.quickLink.audit": "稽核 · Audit",
-  "adminHome.alert.tokenTitle": "BGMT 派遣回報 token 將於 6 天內到期",
-  "adminHome.alert.tokenDescription":
-    "{observedAt} 量測值 {measuredValue}。需先輪替 client credential，否則今日完成單將無法回報。",
-  "adminHome.alert.tokenAction": "前往 adapter-registry",
-  "adminHome.alert.syncTitle": "GoCab forwarded · 24h sync_failed 4.2%",
-  "adminHome.alert.syncDescription":
-    "超過 3% 警戒值。建議檢查 adapter 健康並啟動 manual fallback 觀察。",
-  "adminHome.alert.syncAction": "查看 adapter",
-  "adminHome.alert.rollbackTitle": "{tenantCode} 處於 rollback_hold",
-  "adminHome.alert.rollbackDescription":
-    "客訴 cmp_0894 升級為 inc_0212 後，rollout 已暫停。需平台與營運共識下一步。",
-  "adminHome.alert.rollbackAction": "查看租戶",
-
-  // ── Admin Shell ──
-  "adminShell.brandSub": "Platform Admin",
-  "adminShell.api.notChecked": "尚未檢查",
-  "adminShell.api.checking": "API 檢查中",
-  "adminShell.api.healthy": "API 健康",
-  "adminShell.api.degraded": "API 降級",
-  "adminShell.api.down": "API 失聯",
-  "adminShell.api.short.checking": "checking",
-  "adminShell.api.short.healthy": "healthy",
-  "adminShell.api.short.degraded": "degraded",
-  "adminShell.api.short.down": "down",
-  "adminShell.lastChecked": "最後檢查",
-  "adminShell.searchAria": "搜尋",
-  "adminShell.searchPlaceholder": "搜尋租戶、合作夥伴、稽核事件…",
-  "adminShell.identityRole": "平台管理員",
-  "adminShell.identityRealm": "平台",
-  "adminShell.breadcrumbRoot": "平台管理",
-  "adminShell.breadcrumbDetail": "詳情",
-  "adminShell.notifications": "通知",
-  "adminShell.navAria": "平台管理導覽",
-  "adminShell.environmentProduction": "production",
-  "adminShell.refresh.audit": "手動 · 稽核證據",
-  "adminShell.refresh.governance": "medium_slow · 治理",
-  "adminShell.error.routeConfigMissing": "Platform Admin 路由尚未正確設定。",
-
-  // ── Assistant Overlay ──
-  "assistantOverlay.sourcesHeading": "來源：",
-  "assistantOverlay.suggestedHeading": "建議下一步提示：",
-  "assistantOverlay.receiptTitle": "操作憑證",
-  "assistantOverlay.context.routeHeading": "[Platform Admin 路由 context]",
-  "assistantOverlay.context.pageHeading": "[Platform Admin 頁面 context]",
-  "assistantOverlay.context.questionHeading": "[操作員問題]",
-  "assistantOverlay.context.none": "無",
-  "assistantOverlay.context.emptyList": "- 無",
-  "assistantOverlay.context.empty": "空白",
-  "assistantOverlay.context.required": "必填",
-  "assistantOverlay.context.dirty": "已修改",
-  "assistantOverlay.context.yes": "是",
-  "assistantOverlay.context.no": "否",
-  "assistantOverlay.context.pathLabel": "路徑",
-  "assistantOverlay.context.pageLabel": "頁面",
-  "assistantOverlay.context.activeTabLabel": "作用中分頁",
-  "assistantOverlay.context.refreshTierLabel": "更新層級",
-  "assistantOverlay.context.visibleEntitiesLabel": "可見實體",
-  "assistantOverlay.context.warningsLabel": "警示",
-  "assistantOverlay.context.visibleTablesLabel": "可見表格",
-  "assistantOverlay.context.selectedRecordsLabel": "已選記錄",
-  "assistantOverlay.context.availableActionsLabel": "可用動作",
-  "assistantOverlay.context.formsLabel": "表單",
-  "assistantOverlay.context.rowsLabel": "列數",
-  "assistantOverlay.context.visibleLabel": "可見",
-  "assistantOverlay.context.selectedLabel": "已選",
-  "assistantOverlay.context.actionsLabel": "動作",
-  "assistantOverlay.context.disabledLabel": "停用",
-  "assistantOverlay.context.fieldsLabel": "欄位",
-  "assistantOverlay.context.validationErrorsLabel": "驗證錯誤",
-  "assistantOverlay.context.routeLine": "{label}：{value}",
-  "assistantOverlay.context.pageSectionLine": "{label}：\n{value}",
-  "assistantOverlay.context.tableSelectedSegment": " {label}={value}",
-  "assistantOverlay.context.tableActionsSegment": " {label}={value}",
-  "assistantOverlay.context.tableSummary":
-    "- {tableId}（{title}）：{rowsLabel}={rowCount}；{visibleLabel}={visibleRows}{selectedRows}{actions}",
-  "assistantOverlay.context.availableActionSummary":
-    "{actionId}{riskLevel}{disabled}",
-  "assistantOverlay.context.availableActionRiskLevel": "（{riskLevel}）",
-  "assistantOverlay.context.availableActionDisabled": "［{label}］",
-  "assistantOverlay.context.formFieldSummary": "{fieldId}={valueSummary}",
-  "assistantOverlay.context.formFieldRequiredSegment": "={label}",
-  "assistantOverlay.context.formFieldDirtySegment": "={label}",
-  "assistantOverlay.context.formValidationErrorWithField":
-    "{fieldId}:{code}:{message}",
-  "assistantOverlay.context.formValidationError": "{code}:{message}",
-  "assistantOverlay.context.formSummary":
-    "- {formId}（{title}）：{dirtyLabel}={dirtyValue}；{fieldsLabel}={fields}；{validationErrorsLabel}={validationErrors}；{actionsLabel}={actions}",
-  "assistantOverlay.launcher": "開啟平台助理",
-  "assistantOverlay.badge": "Beta",
-  "assistantOverlay.label": "平台助理",
-  "assistantOverlay.subtitle": "治理操作輔助",
-  "assistantOverlay.heading": "Platform Admin Assistant",
-  "assistantOverlay.status":
-    "已連接 dev mock gateway，可回答操作問題與產生行動計畫。",
-  "assistantOverlay.inputLabel": "輸入平台助理問題",
-  "assistantOverlay.inputPlaceholder":
-    "問我這頁該怎麼操作、風險在哪、下一步怎麼做...",
-  "assistantOverlay.send": "送出",
-  "assistantOverlay.sending": "分析中",
-  "assistantOverlay.newSession": "新對話",
-  "assistantOverlay.minimize": "最小化",
-  "assistantOverlay.close": "關閉",
-  "assistantOverlay.reset": "重設位置",
-  "assistantOverlay.emptyTitle": "平台助理已就緒",
-  "assistantOverlay.emptyBody":
-    "詢問目前頁面的操作方式、治理風險，或請我產生一份平台操作檢查清單。",
-  "assistantOverlay.thinking":
-    "我正在讀取目前 Platform Admin route context 並整理回答...",
-  "assistantOverlay.sessionTitle": "Platform Admin assistant",
-  "assistantOverlay.requestFailedTitle": "助理請求失敗",
-  "assistantOverlay.requestFailedBody": "助理目前無法完成這次請求。",
-  "assistantOverlay.requestFailedHint":
-    "請檢查 dev API assistant flag、control-plane proxy 與 Cloud Run logs。",
-  "assistantOverlay.actionFailedTitle": "動作執行失敗",
-  "assistantOverlay.actionFailedHint":
-    "請檢查受治理動作 payload、確認原因與後端稽核紀錄。",
-  "assistantOverlay.suggestedPromptsAria": "助理建議提示",
-  "assistantOverlay.footnote":
-    "開發環境目前使用 mock provider；實際動作仍需通過受治理後端閘門。",
-
   // ── Common (more) ──
   "common.noValues": "無資料",
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // i18n remediation 20260604 — per-domain key-block skeletons (zh side).
-  // Mirror of the en block above. Append the zh value for every key you add to
-  // the matching en header; TS `typeof en` enforces key parity.
-  // ─────────────────────────────────────────────────────────────────────────
-  // ── home (i18n remediation 20260604) ──
-  // ── tenants (i18n remediation 20260604) ──
-  // ── tenantGov (i18n remediation 20260604) ──
-  // ── partners (i18n remediation 20260604) ──
-  // ── users (i18n remediation 20260604) ──
-  // ── fleet (i18n remediation 20260604) ──
-  // ── switchboard (i18n remediation 20260604) ──
-  // ── pricing (i18n remediation 20260604) ──
-  // ── payments (i18n remediation 20260604) ──
-  // ── reimbursements (i18n remediation 20260604) ──
-  // ── health (i18n remediation 20260604) ──
-  // ── notices (i18n remediation 20260604) ──
-  // ── audit (i18n remediation 20260604) ──
-  // ── adapters (i18n remediation 20260604) ──
-  // ── adminShell (i18n remediation 20260604) ──
-  // ── adminAssistant (i18n remediation 20260604) ──
 };
 
-export type LocalizedText = { en: string; zh: string };
-
-export const platformAdminNavSectionLabels = {
-  workspace: { zh: "工作面", en: "Workspace" },
-  tenant: { zh: "租戶治理", en: "Tenant Governance" },
-  fleet: { zh: "人員與車隊", en: "People & Fleet" },
-  commerce: { zh: "平台與商務", en: "Platform & Commerce" },
-  ops: { zh: "平台維運", en: "Platform Ops & Risk" },
-} as const satisfies Record<string, LocalizedText>;
-
-export const platformAdminRouteLabels = {
-  home: { zh: "工作首頁", en: "Home" },
-  tenants: { zh: "租戶", en: "Tenants" },
-  "tenant-detail": { zh: "租戶詳情", en: "Tenant Detail" },
-  "tenant-governance": { zh: "跨租戶治理", en: "Tenant Governance" },
-  partners: { zh: "合作夥伴", en: "Partner Entries" },
-  "partner-detail": { zh: "合作夥伴詳情", en: "Partner Entry Detail" },
-  users: { zh: "平台人員", en: "Platform Staff" },
-  fleet: { zh: "車隊與法遵", en: "Fleet & Compliance" },
-  switchboard: { zh: "公開資訊", en: "Public Info & Placards" },
-  pricing: { zh: "費率治理", en: "Pricing" },
-  payments: { zh: "結算與帳務", en: "Payments" },
-  reimbursements: { zh: "代墊批次", en: "Reimbursements" },
-  "reimbursement-batch-detail": {
-    zh: "代墊批次詳情",
-    en: "Reimbursement Batch Detail",
-  },
-  "adapter-registry": { zh: "平台 Adapter", en: "Adapter Registry" },
-  health: { zh: "平台健康", en: "Platform Health" },
-  notices: { zh: "公告與維護", en: "Notices & Maintenance" },
-  audit: { zh: "稽核與證據", en: "Audit & Evidence" },
-  "feature-flags": { zh: "功能旗標", en: "Feature Flags" },
-} as const satisfies Record<string, LocalizedText>;
-
-export const platformAdminAssistantWarningMessages = {
-  highRiskActionsPresent: {
-    zh: "本頁含高風險操作，需 modal 確認、填寫原因並產生稽核紀錄。",
-    en: "This route exposes high-risk actions requiring modal confirmation, a reason, and an audit receipt.",
-  },
-  platformWriteAuthority: {
-    zh: "本頁具平台寫入權限（唯一可寫旗標的 App），變更會即時影響其他 App。",
-    en: "This route holds platform write authority (the only app that can write flags); changes propagate to other apps.",
-  },
-  plaintextSecretOnce: {
-    zh: "憑證/密鑰僅在發行或輪替當下以明文顯示一次，之後不可再檢視。",
-    en: "Credentials/secrets are shown in plaintext only once at issue/rotation and cannot be viewed again.",
-  },
-  maintenanceModeSurface: {
-    zh: "維護模式為高風險操作，啟用會跨 App 推送橫幅到 ops/tenant/driver。",
-    en: "Maintenance mode is high-risk; enabling it pushes a cross-app banner to ops/tenant/driver.",
-  },
-  legalHoldEvidenceGovernance: {
-    zh: "稽核證據治理：法律保留與刪除例外為高風險操作，需原因並記錄擁有者。",
-    en: "Evidence governance: legal holds and deletion exceptions are high-risk and require a reason plus a recorded owner.",
-  },
-  routeBodyParityPending: {
-    zh: "此路由的頁面實作由 body-parity 工作項負責，可能尚未上線；metadata 已就緒。",
-    en: "This route's page body is owned by a body-parity work item and may not be live yet; metadata is ready.",
-  },
-  unknownRoute: {
-    zh: "未在 Platform Admin 路由註冊表中找到此路徑，已退回首頁 context。",
-    en: "Path is not in the Platform Admin route registry; falling back to home context.",
-  },
-} as const satisfies Record<string, LocalizedText>;
-
-export const platformAdminAssistantSuggestedPrompts = {
-  en: [
-    "Summarize what I should check on this page.",
-    "Draft an operator checklist for the current route.",
-    "What risks should I review before changing platform state?",
-  ],
-  zh: [
-    "整理這個頁面目前需要我檢查的重點。",
-    "幫我為目前路由產出一份操作檢查清單。",
-    "變更平台狀態前，我該先檢查哪些風險？",
-  ],
-} as const satisfies Record<Locale, readonly string[]>;
-
-export const platformAdminShellMessages = {
-  routeConfigMissing: {
-    zh: "Platform Admin 路由尚未正確設定。",
-    en: "Platform Admin routes are not configured.",
-  },
-} as const satisfies Record<string, LocalizedText>;
-
 export const translations: Record<Locale, typeof en> = { en, zh };
-
-export function getLocalizedText(locale: Locale, text: LocalizedText) {
-  return text[locale];
-}
-
-type TranslationParams = Record<string, string | number>;
-export type TranslateFn = (key: string, params?: TranslationParams) => string;
-
-function translateKey(
-  locale: Locale,
-  key: string,
-  params?: TranslationParams,
-): string {
-  return t(key, locale, params);
-}
-
-export function getBilingualText(
-  key: string,
-  params?: TranslationParams,
-): Record<Locale, string> {
-  return {
-    zh: translateKey("zh", key, params),
-    en: translateKey("en", key, params),
-  };
-}
-
-export function getHealthStatusLabel(locale: Locale, status: string): string {
-  const key = `health.status.${status}`;
-  const value = translateKey(locale, key);
-  return value === key ? status.replace(/_/g, " ") : value;
-}
-
-export function getHealthAlertTitle(
-  locale: Locale,
-  key: OperationalAlertRecord["key"],
-): string {
-  const entry = translateKey(locale, `health.alert.${key}.title`);
-  return entry === `health.alert.${key}.title` ? key : entry;
-}
-
-export function getHealthAlertRouteLabel(
-  locale: Locale,
-  route: OperationalAlertRecord["routes"][number],
-): string {
-  return translateKey(
-    locale,
-    route === "platform"
-      ? "health.routeLabel.platform"
-      : "health.routeLabel.ops",
-  );
-}
-
-export function getHealthAdapterSourceLabel(
-  locale: Locale,
-  source: string,
-): string {
-  return translateKey(locale, "health.adapter.sourceSuffix", { source });
-}
-
-export function formatLocaleNumber(locale: Locale, value: number): string {
-  return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
-}
-
-export function formatHealthMetricValue(
-  locale: Locale,
-  value: number | null,
-  unit: "count" | "minutes" | "percent",
-): string {
-  if (value == null) {
-    return "—";
-  }
-
-  if (unit === "minutes") {
-    return translateKey(locale, "health.metric.minutes", {
-      value: formatLocaleNumber(locale, value),
-    });
-  }
-
-  if (unit === "percent") {
-    return `${value}%`;
-  }
-
-  return formatLocaleNumber(locale, value);
-}
-
-export function formatHealthAdapterSource(
-  locale: Locale,
-  platformCode: string,
-): string {
-  const normalized = platformCode.replace(/[_-]+/g, " ").trim();
-  const title = normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
-  return getHealthAdapterSourceLabel(locale, title);
-}
-
-export function getHealthPageCopy(locale: Locale) {
-  return {
-    title: translateKey(locale, "health.title"),
-    subtitle: translateKey(locale, "health.subtitle"),
-    refresh: translateKey(locale, "common.refresh"),
-    alertsTitle: translateKey(locale, "health.alertsTitle"),
-    alertsEmpty: translateKey(locale, "health.alertsEmpty"),
-    adaptersTitle: translateKey(locale, "health.adaptersTitle"),
-    adaptersEmpty: translateKey(locale, "health.adaptersEmpty"),
-    dispatchTitle: translateKey(locale, "health.dispatchTitle"),
-    webhookTitle: translateKey(locale, "health.webhookTitle"),
-    filingTitle: translateKey(locale, "health.filingTitle"),
-    dispatchEmpty: translateKey(locale, "health.dispatchEmpty"),
-    webhookEmpty: translateKey(locale, "health.webhookEmpty"),
-    filingEmpty: translateKey(locale, "health.filingEmpty"),
-    loadingAlerts: translateKey(locale, "health.loadingAlerts"),
-    loadingAdapters: translateKey(locale, "health.loadingAdapters"),
-    openAlert: translateKey(locale, "health.openAlert"),
-    metricsNote: translateKey(locale, "health.metricsNote"),
-    refreshError: translateKey(locale, "health.refreshError"),
-    alertMeasurement: (params: TranslationParams) =>
-      translateKey(locale, "health.alert.measurement", params),
-    adapterEntries: (count: number) =>
-      translateKey(locale, "health.adapter.entries", { count }),
-    tab: {
-      alertsWithCount: (suffix: string) =>
-        translateKey(locale, "health.tab.alertsWithCount", { suffix }),
-      dispatch: translateKey(locale, "health.tab.dispatch"),
-      webhook: translateKey(locale, "health.tab.webhook"),
-      filing: translateKey(locale, "health.tab.filing"),
-      adapters: translateKey(locale, "health.tab.adaptersInventory"),
-    },
-    kpis: {
-      dispatch: {
-        label: translateKey(locale, "health.metric.dispatch.title"),
-        sub: (count: number) =>
-          translateKey(locale, "health.metric.dispatch.note", { count }),
-      },
-      webhook: {
-        label: translateKey(locale, "health.metric.webhook.title"),
-        sub: (count: number) =>
-          translateKey(locale, "health.metric.webhook.note", { count }),
-      },
-      eligibility: {
-        label: translateKey(locale, "health.metric.eligibility.title"),
-        sub: (count: number) =>
-          translateKey(locale, "health.metric.eligibility.note", { count }),
-      },
-      reporting: {
-        label: translateKey(locale, "health.metric.reporting.title"),
-        sub: (count: number) =>
-          translateKey(locale, "health.metric.reporting.note", { count }),
-      },
-    },
-    summary: {
-      dispatch: {
-        queueDepth: translateKey(locale, "health.summary.dispatch.queueDepth"),
-        redispatchOrders: translateKey(
-          locale,
-          "health.summary.dispatch.redispatchOrders",
-        ),
-        exceptionHolds: translateKey(
-          locale,
-          "health.summary.dispatch.exceptionHolds",
-        ),
-        failedOrders: translateKey(
-          locale,
-          "health.summary.dispatch.failedOrders",
-        ),
-      },
-      webhook: {
-        activeEndpoints: translateKey(
-          locale,
-          "health.summary.webhook.activeEndpoints",
-        ),
-        disabledEndpoints: translateKey(
-          locale,
-          "health.summary.webhook.disabledEndpoints",
-        ),
-        queuedDeliveries: translateKey(
-          locale,
-          "health.summary.webhook.queuedDeliveries",
-        ),
-        oldestQueuedLag: translateKey(
-          locale,
-          "health.summary.webhook.oldestQueuedLag",
-        ),
-      },
-      filing: {
-        reportingQueuedJobs: translateKey(
-          locale,
-          "health.summary.filing.reportingQueuedJobs",
-        ),
-        recordingBacklog: translateKey(
-          locale,
-          "health.summary.filing.recordingBacklog",
-        ),
-        manualReviewQueue: translateKey(
-          locale,
-          "health.summary.filing.manualReviewQueue",
-        ),
-        eligibilityFailures24h: translateKey(
-          locale,
-          "health.summary.filing.eligibilityFailures24h",
-        ),
-      },
-    },
-    adapterColumns: {
-      adapter: translateKey(locale, "health.adapterColumns.adapter"),
-      source: translateKey(locale, "health.adapterColumns.source"),
-      kind: translateKey(locale, "health.adapterColumns.kind"),
-      status: translateKey(locale, "health.adapterColumns.status"),
-      latency: translateKey(locale, "health.adapterColumns.latency"),
-      lastEvent: translateKey(locale, "health.adapterColumns.lastEvent"),
-      orders24h: translateKey(locale, "health.adapterColumns.orders24h"),
-    },
-  };
-}
-
-export function getNoticesAudienceLabel(
-  locale: Locale,
-  audience: PlatformNoticeRecord["targetAudience"],
-): string {
-  switch (audience) {
-    case "all":
-      return translateKey(locale, "notices.maintenance.previewTargets")
-        .replace(/^Target surfaces:\s*/u, "")
-        .replace(/^目標對象：/u, "");
-    case "tenants":
-      return translateKey(locale, "notices.audience.tenants");
-    case "ops":
-      return translateKey(locale, "notices.audience.ops");
-    case "drivers":
-      return translateKey(locale, "notices.audience.drivers");
-    default:
-      return audience;
-  }
-}
-
-export function getNoticeSeverityLabel(
-  locale: Locale,
-  severity: PlatformNoticeSeverity,
-): string {
-  return translateKey(locale, `notices.severity.${severity}`);
-}
-
-export function getNoticeStatusLabel(
-  locale: Locale,
-  status: PlatformNoticeStatus,
-): string {
-  return translateKey(locale, `notices.status.${status}`);
-}
-
-export function getNoticeWindowNotScheduled(locale: Locale): string {
-  return translateKey(locale, "notices.window.notScheduled");
-}
-
-export function formatNoticeWindow(
-  start: string | null,
-  end: string | null,
-  t: TranslateFn,
-): string {
-  if (!start && !end) {
-    return t("notices.window.notScheduled");
-  }
-  if (start && end) {
-    return `${start} - ${end}`;
-  }
-  return start ?? end ?? "";
-}
-
-export function getNoticeHistoryDeliveryLabel(
-  locale: Locale,
-  status: PlatformNoticeStatus,
-  audience: PlatformNoticeRecord["targetAudience"],
-): string {
-  if (status === "resolved") {
-    return translateKey(locale, "notices.history.delivery.archived");
-  }
-  return audience === "all"
-    ? translateKey(locale, "notices.history.delivery.all")
-    : translateKey(locale, "notices.history.delivery.single");
-}
-
-export function getNoticesPageCopy(locale: Locale) {
-  return {
-    title: translateKey(locale, "notices.title"),
-    subtitle: translateKey(locale, "notices.subtitle.detail"),
-    notices: translateKey(locale, "notices.tab.notices"),
-    maintenance: translateKey(locale, "notices.tab.maintenance"),
-    history: translateKey(locale, "notices.tab.history"),
-    createNotice: translateKey(locale, "notices.createNotice"),
-    enterMaintenance: translateKey(locale, "notices.enterMaintenance"),
-    refresh: translateKey(locale, "common.refresh"),
-    refreshing: translateKey(locale, "notices.refreshing"),
-    emptyNotices: translateKey(locale, "notices.emptyDetailed"),
-    emptyHistory: translateKey(locale, "notices.emptyHistory"),
-    noticeComposerTitle: translateKey(locale, "notices.composer.title"),
-    noticeComposerSubtitle: translateKey(locale, "notices.composer.subtitle"),
-    noticeTitle: translateKey(locale, "notices.col.title"),
-    noticeBody: translateKey(locale, "notices.form.body"),
-    noticeAudience: translateKey(locale, "notices.col.audience"),
-    noticeSeverity: translateKey(locale, "notices.col.severity"),
-    publishNotice: translateKey(locale, "notices.publishNotice"),
-    publishing: translateKey(locale, "notices.publishing"),
-    activeNoticeGuardrailTitle: translateKey(locale, "notices.guardrail.title"),
-    activeNoticeGuardrailBody: translateKey(locale, "notices.guardrail.body"),
-    currentMaintenance: translateKey(
-      locale,
-      "notices.maintenance.currentTitle",
-    ),
-    currentMaintenanceSubtitle: translateKey(
-      locale,
-      "notices.maintenance.currentSubtitle",
-    ),
-    internalReason: translateKey(locale, "notices.maintenance.internalReason"),
-    scheduledStart: translateKey(locale, "notices.maintenance.scheduledStart"),
-    scheduledEnd: translateKey(locale, "notices.maintenance.scheduledEnd"),
-    saveMaintenance: translateKey(locale, "notices.maintenance.save"),
-    previewTitle: translateKey(locale, "notices.maintenance.previewTitle"),
-    previewFallback: translateKey(
-      locale,
-      "notices.maintenance.previewFallback",
-    ),
-    previewTargets: translateKey(locale, "notices.maintenance.previewTargets"),
-    reasonRequired: translateKey(locale, "notices.maintenance.reasonRequired"),
-    confirmTitle: translateKey(locale, "notices.maintenance.confirmTitle"),
-    confirmBody: translateKey(locale, "notices.maintenance.confirmBody"),
-    confirmReasonLabel: translateKey(
-      locale,
-      "notices.maintenance.confirmReasonLabel",
-    ),
-    confirmCancel: translateKey(locale, "common.cancel"),
-    confirmApply: translateKey(locale, "notices.maintenance.confirmApply"),
-    resolving: translateKey(locale, "notices.updating"),
-    resolve: translateKey(locale, "notices.resolve"),
-    maintenanceEnabled: translateKey(locale, "notices.maintEnabled"),
-    maintenanceDisabled: translateKey(locale, "notices.maintDisabled"),
-    maintenanceSummary: translateKey(locale, "notices.maintenance.summary"),
-    reasonPlaceholder: translateKey(
-      locale,
-      "notices.maintenance.reasonPlaceholder",
-    ),
-    startPlaceholder: translateKey(
-      locale,
-      "notices.maintenance.startPlaceholder",
-    ),
-    endPlaceholder: translateKey(locale, "notices.maintenance.endPlaceholder"),
-    createdAt: translateKey(locale, "notices.col.updated"),
-    audience: translateKey(locale, "notices.col.targets"),
-    status: translateKey(locale, "common.status"),
-    severity: translateKey(locale, "notices.col.severityShort"),
-    delivery: translateKey(locale, "notices.col.delivery"),
-    broadcastAt: translateKey(locale, "notices.col.broadcastAt"),
-    updatedBy: translateKey(locale, "notices.col.updatedBy"),
-    window: translateKey(locale, "notices.col.window"),
-    action: translateKey(locale, "notices.col.action"),
-    notice: translateKey(locale, "notices.col.notice"),
-    id: translateKey(locale, "notices.col.id"),
-    historySubtitle: translateKey(locale, "notices.history.subtitle"),
-    archived: translateKey(locale, "notices.status.archived"),
-    noticeTitleRequired: translateKey(locale, "notices.noticeTitleRequired"),
-    noticeBodyRequired: translateKey(locale, "notices.noticeBodyRequired"),
-    maintenanceRisk: translateKey(locale, "notices.risk.high"),
-    systemUser: translateKey(locale, "notices.systemUser"),
-    severityOptions: {
-      info: translateKey(locale, "notices.severity.info"),
-      warning: translateKey(locale, "notices.severity.warning"),
-      critical: translateKey(locale, "notices.severity.critical"),
-    },
-    audienceOptions: {
-      ops: translateKey(locale, "notices.audience.ops"),
-      tenants: translateKey(locale, "notices.audience.tenants"),
-      drivers: translateKey(locale, "notices.audience.drivers"),
-    },
-    warning: {
-      operationError: (error: string) =>
-        getBilingualText("notices.warning.operationError", { error }),
-      maintenanceEnabled: () =>
-        getBilingualText("notices.warning.maintenanceEnabled"),
-    },
-  };
-}
 
 export function t(
   key: string,

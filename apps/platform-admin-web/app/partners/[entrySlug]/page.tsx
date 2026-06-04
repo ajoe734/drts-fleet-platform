@@ -609,8 +609,6 @@ function ModalFrame({
   footer: React.ReactNode;
   onClose: () => void;
 }) {
-  const { t } = useTranslation();
-
   return (
     <div style={modalOverlayStyle} role="presentation" onClick={onClose}>
       <div
@@ -647,7 +645,7 @@ function ModalFrame({
             ) : null}
           </div>
           <Btn theme={theme} variant="ghost" size="xs" onClick={onClose}>
-            {t("common.close")}
+            Close
           </Btn>
         </div>
         <div style={modalBodyStyle}>{children}</div>
@@ -665,6 +663,7 @@ function SecretRevealModal({
   onClose,
   onCopy,
   onDownload,
+  copy,
 }: {
   entry: PartnerChannelEntryRecord;
   issuedCredential: PartnerIngressCredentialIssued;
@@ -673,8 +672,24 @@ function SecretRevealModal({
   onClose: () => void;
   onCopy: () => void;
   onDownload: () => void;
+  copy: {
+    title: string;
+    warningTitle: string;
+    warningBody: string;
+    secretName: string;
+    secretField: string;
+    secretHint: string;
+    scope: string;
+    expiresAt: string;
+    createdBy: string;
+    createdAt: string;
+    stored: string;
+    cancel: string;
+    complete: string;
+    copyLabel: string;
+    downloadLabel: string;
+  };
 }) {
-  const { t, locale } = useTranslation();
   const credential = issuedCredential.credential;
 
   return (
@@ -695,15 +710,15 @@ function SecretRevealModal({
           >
             <CanvasIcon name="apiKeys" size={13} stroke={2} />
           </span>
-          {t("partners.detail.secret.title")}
+          {copy.title}
         </>
       }
-      subtitle={t("partners.detail.secret.subtitle")}
+      subtitle="PLAINTEXT-ONCE · Q-ADM07"
       onClose={onClose}
       footer={
         <>
           <Btn theme={theme} variant="secondary" onClick={onClose}>
-            {t("partners.detail.secret.cancel")}
+            {copy.cancel}
           </Btn>
           <Btn
             theme={theme}
@@ -711,7 +726,7 @@ function SecretRevealModal({
             disabled={!acknowledged}
             onClick={onClose}
           >
-            {t("partners.detail.secret.complete")}
+            {copy.complete}
           </Btn>
         </>
       }
@@ -719,28 +734,24 @@ function SecretRevealModal({
       <Banner
         theme={theme}
         tone="warn"
-        title={t("partners.detail.secret.warningTitle")}
-        body={t("partners.detail.secret.warningBody")}
+        title={copy.warningTitle}
+        body={copy.warningBody}
       />
 
-      <Field theme={theme} label={t("partners.detail.secret.name")}>
+      <Field theme={theme} label={copy.secretName}>
         <div style={controlStyle({ mono: true, disabled: true })}>
           {entry.displayName}
         </div>
       </Field>
 
-      <Field
-        theme={theme}
-        label={t("partners.detail.secret.field")}
-        hint={t("partners.detail.secret.hint")}
-      >
+      <Field theme={theme} label={copy.secretField} hint={copy.secretHint}>
         <div style={secretRowStyle}>
           <span style={secretTextStyle}>{issuedCredential.plaintextKey}</span>
           <Btn theme={theme} size="xs" variant="secondary" onClick={onCopy}>
-            {t("partners.detail.secret.copy")}
+            {copy.copyLabel}
           </Btn>
           <Btn theme={theme} size="xs" variant="secondary" onClick={onDownload}>
-            {t("partners.detail.secret.download")}
+            {copy.downloadLabel}
           </Btn>
         </div>
       </Field>
@@ -749,22 +760,15 @@ function SecretRevealModal({
         theme={theme}
         cols={2}
         items={[
+          { k: copy.scope, v: credential.source, mono: true },
           {
-            k: t("partners.detail.secret.scope"),
-            v: formatPlatformCodeLabel(locale, credential.source),
-            mono: true,
-          },
-          {
-            k: t("partners.detail.secret.expiresAt"),
+            k: copy.expiresAt,
             v: "—",
             mono: true,
           },
+          { k: copy.createdBy, v: credential.issuedBy ?? "platform-admin" },
           {
-            k: t("partners.detail.secret.createdBy"),
-            v: credential.issuedBy ?? "platform-admin",
-          },
-          {
-            k: t("partners.detail.secret.createdAt"),
+            k: copy.createdAt,
             v: formatDateTime(credential.createdAt),
             mono: true,
           },
@@ -777,9 +781,7 @@ function SecretRevealModal({
           checked={acknowledged}
           onChange={(event) => onAcknowledgedChange(event.target.checked)}
         />
-        <span style={{ fontSize: 12.5, color: theme.text }}>
-          {t("partners.detail.secret.stored")}
-        </span>
+        <span style={{ fontSize: 12.5, color: theme.text }}>{copy.stored}</span>
       </label>
     </ModalFrame>
   );
@@ -792,6 +794,7 @@ function CredentialActionModal({
   onReasonChange,
   onClose,
   onConfirm,
+  copy,
 }: {
   mode: "issue" | "rotate";
   reason: string;
@@ -799,23 +802,30 @@ function CredentialActionModal({
   onReasonChange: (value: string) => void;
   onClose: () => void;
   onConfirm: () => void;
+  copy: {
+    issueTitle: string;
+    rotateTitle: string;
+    subtitle: string;
+    fieldLabel: string;
+    hint: string;
+    placeholderIssue: string;
+    placeholderRotate: string;
+    cancel: string;
+    issueConfirm: string;
+    rotateConfirm: string;
+  };
 }) {
-  const { t } = useTranslation();
   const isRotate = mode === "rotate";
 
   return (
     <ModalFrame
-      title={
-        isRotate
-          ? t("partners.detail.credentialAction.rotateTitle")
-          : t("partners.detail.credentialAction.issueTitle")
-      }
-      subtitle={t("partners.detail.credentialAction.subtitle")}
+      title={isRotate ? copy.rotateTitle : copy.issueTitle}
+      subtitle={copy.subtitle}
       onClose={onClose}
       footer={
         <>
           <Btn theme={theme} variant="secondary" onClick={onClose}>
-            {t("partners.detail.credentialAction.cancel")}
+            {copy.cancel}
           </Btn>
           <Btn
             theme={theme}
@@ -825,11 +835,11 @@ function CredentialActionModal({
           >
             {busy
               ? isRotate
-                ? t("partners.detail.credentialAction.rotateConfirm")
-                : t("partners.detail.credentialAction.issueConfirm")
+                ? copy.rotateConfirm
+                : copy.issueConfirm
               : isRotate
-                ? t("partners.detail.credentialAction.rotateConfirm")
-                : t("partners.detail.credentialAction.issueConfirm")}
+                ? copy.rotateConfirm
+                : copy.issueConfirm}
           </Btn>
         </>
       }
@@ -837,23 +847,15 @@ function CredentialActionModal({
       <Banner
         theme={theme}
         tone="warn"
-        title={
-          isRotate
-            ? t("partners.detail.credentialAction.rotateTitle")
-            : t("partners.detail.credentialAction.issueTitle")
-        }
-        body={t("partners.detail.credentialAction.hint")}
+        title={isRotate ? copy.rotateTitle : copy.issueTitle}
+        body={copy.hint}
       />
       <TextAreaField
-        label={t("partners.detail.credentialAction.fieldLabel")}
+        label={copy.fieldLabel}
         value={reason}
         onChange={onReasonChange}
         required
-        placeholder={
-          isRotate
-            ? t("partners.detail.credentialAction.placeholderRotate")
-            : t("partners.detail.credentialAction.placeholderIssue")
-        }
+        placeholder={isRotate ? copy.placeholderRotate : copy.placeholderIssue}
       />
     </ModalFrame>
   );
@@ -866,6 +868,7 @@ function GovernanceActionModal({
   onReasonChange,
   onClose,
   onConfirm,
+  copy,
 }: {
   mode: EntryActionMode | "revoke_credential";
   reason: string;
@@ -873,47 +876,62 @@ function GovernanceActionModal({
   onReasonChange: (value: string) => void;
   onClose: () => void;
   onConfirm: () => void;
+  copy: {
+    activateTitle: string;
+    deactivateTitle: string;
+    revokeTitle: string;
+    revokeCredentialTitle: string;
+    mediumSubtitle: string;
+    highSubtitle: string;
+    activateBody: string;
+    deactivateBody: string;
+    revokeBody: string;
+    revokeCredentialBody: string;
+    fieldLabel: string;
+    fieldHint: string;
+    fieldPlaceholder: string;
+    cancel: string;
+    activateConfirm: string;
+    deactivateConfirm: string;
+    revokeConfirm: string;
+    revokeCredentialConfirm: string;
+  };
 }) {
-  const { t } = useTranslation();
   const requiresReason = mode === "revoke" || mode === "revoke_credential";
   const title =
     mode === "activate"
-      ? t("partners.detail.governance.activateTitle")
+      ? copy.activateTitle
       : mode === "deactivate"
-        ? t("partners.detail.governance.deactivateTitle")
+        ? copy.deactivateTitle
         : mode === "revoke"
-          ? t("partners.detail.governance.revokeTitle")
-          : t("partners.detail.governance.revokeCredentialTitle");
+          ? copy.revokeTitle
+          : copy.revokeCredentialTitle;
   const body =
     mode === "activate"
-      ? t("partners.detail.governance.activateBody")
+      ? copy.activateBody
       : mode === "deactivate"
-        ? t("partners.detail.governance.deactivateBody")
+        ? copy.deactivateBody
         : mode === "revoke"
-          ? t("partners.detail.governance.revokeBody")
-          : t("partners.detail.governance.revokeCredentialBody");
+          ? copy.revokeBody
+          : copy.revokeCredentialBody;
   const confirmLabel =
     mode === "activate"
-      ? t("partners.detail.governance.activateConfirm")
+      ? copy.activateConfirm
       : mode === "deactivate"
-        ? t("partners.detail.governance.deactivateConfirm")
+        ? copy.deactivateConfirm
         : mode === "revoke"
-          ? t("partners.detail.governance.revokeConfirm")
-          : t("partners.detail.governance.revokeCredentialConfirm");
+          ? copy.revokeConfirm
+          : copy.revokeCredentialConfirm;
 
   return (
     <ModalFrame
       title={title}
-      subtitle={
-        requiresReason
-          ? t("partners.detail.governance.highSubtitle")
-          : t("partners.detail.governance.mediumSubtitle")
-      }
+      subtitle={requiresReason ? copy.highSubtitle : copy.mediumSubtitle}
       onClose={onClose}
       footer={
         <>
           <Btn theme={theme} variant="secondary" onClick={onClose}>
-            {t("partners.detail.governance.cancel")}
+            {copy.cancel}
           </Btn>
           <Btn
             theme={theme}
@@ -935,12 +953,12 @@ function GovernanceActionModal({
       />
       {requiresReason ? (
         <TextAreaField
-          label={t("partners.detail.governance.fieldLabel")}
-          hint={t("partners.detail.governance.fieldHint")}
+          label={copy.fieldLabel}
+          hint={copy.fieldHint}
           value={reason}
           onChange={onReasonChange}
           required
-          placeholder={t("partners.detail.governance.fieldPlaceholder")}
+          placeholder={copy.fieldPlaceholder}
         />
       ) : null}
     </ModalFrame>
@@ -994,6 +1012,233 @@ export default function PartnerDetailPage() {
     return () => mediaQuery.removeEventListener("change", syncViewport);
   }, []);
 
+  const copy =
+    locale === "en"
+      ? {
+          notFoundTitle: "Partner entry unavailable",
+          notFoundBody: "The requested partner entry could not be found.",
+          updateErrorTitle: "Unable to update partner entry",
+          issueErrorTitle: "Unable to issue credential",
+          previewNotice:
+            "Platform Admin API data is unavailable in this workspace. Showing the canvas-aligned preview fixture for local verification.",
+          tabs: {
+            overview: "Overview",
+            branding: "Branding",
+            auth: "Auth",
+            eligibility: "Eligibility",
+            credentials: "Credentials",
+            audit: "Audit",
+          },
+          preview: "Preview entry",
+          issueCredential: "Issue credential",
+          rotateCredential: "Rotate credential",
+          save: "Save changes",
+          saveHint:
+            "Apply branding, routing, auth, and eligibility changes without moving away from the platform-governed entry model.",
+          overviewTitle: "Entry basics",
+          overviewSubtitle:
+            "Platform-owned routing, identity, and launch posture for the selected partner entry.",
+          readinessTitle: "Readiness · masked governance gates",
+          readinessReady: "Ready to promote",
+          readinessBlocked: "Readiness gaps remain",
+          readinessReadyBody:
+            "All required gates are green. Promotion can proceed without hiding governance controls.",
+          readinessBlockedBody:
+            "Keep traffic blocked until branding, contract, audit, and credential gaps are resolved.",
+          credentialsTitle: "Active credentials · masked only",
+          credentialsSubtitle:
+            "Plaintext values are only shown once at issue time. The roster below remains masked.",
+          credentialsEmpty:
+            "No active ingress credentials are available for this entry yet.",
+          brandingTitle: "Branding",
+          brandingSubtitle:
+            "Partner-facing title, route, accent, and support metadata.",
+          authTitle: "Auth",
+          authSubtitle:
+            "Authority stays on the platform side even when partner-specific credentials are used.",
+          eligibilityTitle: "Eligibility",
+          eligibilitySubtitle:
+            "Contract snapshot, adapter posture, and fallback behavior for this entry.",
+          auditTitle: "Audit",
+          auditSubtitle:
+            "Creation, updates, credential events, and request lineage for platform review.",
+          routeHint: "Public route preview",
+          accentHint: "Brand accent delivered to the partner skin",
+          contractEmpty:
+            "No eligibility contract snapshot is currently linked to this entry.",
+          authBannerTitle: "Credential posture",
+          eligibilityBannerTitle: "Contract posture",
+          secretModal: {
+            title: "Ingress credential generated · only shown once",
+            warningTitle:
+              "Closing this window permanently hides the full secret",
+            warningBody:
+              "If the secret is lost, create a new credential and rotate immediately. Only the masked suffix is retained afterward.",
+            secretName: "Credential name",
+            secretField: "Secret · plaintext once",
+            secretHint:
+              "Copy the value now. The full secret will not be returned again.",
+            scope: "SOURCE",
+            expiresAt: "EXPIRES AT",
+            createdBy: "CREATED BY",
+            createdAt: "CREATED AT",
+            stored: "I stored this credential in a secure location.",
+            cancel: "Cancel",
+            complete: "Complete · I stored this key",
+            copyLabel: "Copy",
+            downloadLabel: ".txt",
+          },
+          credentialActionModal: {
+            issueTitle: "Issue ingress credential",
+            rotateTitle: "Rotate ingress credential",
+            subtitle: "HIGH-RISK ACTION · audit reason required",
+            fieldLabel: "Rotation reason",
+            hint: "Provide an operator reason. This action is audited and the plaintext secret will be revealed once.",
+            placeholderIssue:
+              "Example: initial production launch for CTBC World Elite entry",
+            placeholderRotate:
+              "Example: rotate after key exposure drill / scheduled quarterly refresh",
+            cancel: "Cancel",
+            issueConfirm: "Issue credential",
+            rotateConfirm: "Rotate credential",
+          },
+          governanceActionModal: {
+            activateTitle: "Activate partner entry",
+            deactivateTitle: "Deactivate partner entry",
+            revokeTitle: "Revoke partner entry",
+            revokeCredentialTitle: "Revoke ingress credential",
+            mediumSubtitle: "MEDIUM-RISK ACTION · audit receipt",
+            highSubtitle: "HIGH-RISK ACTION · audit reason required",
+            activateBody:
+              "Activation makes this entry eligible for governed traffic once readiness gates are satisfied.",
+            deactivateBody:
+              "Deactivation keeps the entry in the registry but blocks new governed traffic.",
+            revokeBody:
+              "Revocation is irreversible at the entry level and should only be used for contract termination or security withdrawal.",
+            revokeCredentialBody:
+              "Revoking this credential removes it from future ingress use. Rotate first if traffic continuity is required.",
+            fieldLabel: "Audit reason",
+            fieldHint:
+              "Provide a concrete operator reason. This action is recorded in Platform Admin audit history.",
+            fieldPlaceholder:
+              "Example: revoke after partner contract termination / security investigation",
+            cancel: "Cancel",
+            activateConfirm: "Activate",
+            deactivateConfirm: "Deactivate",
+            revokeConfirm: "Revoke entry",
+            revokeCredentialConfirm: "Revoke credential",
+          },
+        }
+      : {
+          notFoundTitle: "Partner entry 目前不可用",
+          notFoundBody: "找不到指定的 partner entry。",
+          updateErrorTitle: "Partner entry 更新失敗",
+          issueErrorTitle: "Credential 發行失敗",
+          previewNotice:
+            "目前無法從 Platform Admin API 取得資料；此頁改用符合畫布的 preview fixture 供本地驗證。",
+          tabs: {
+            overview: "Overview",
+            branding: "Branding",
+            auth: "Auth",
+            eligibility: "Eligibility",
+            credentials: "Credentials",
+            audit: "Audit",
+          },
+          preview: "預覽 entry",
+          issueCredential: "發行 credential",
+          rotateCredential: "輪替 credential",
+          save: "儲存變更",
+          saveHint:
+            "在不脫離平台治理模型的前提下，更新此 entry 的 branding、routing、auth 與 eligibility 設定。",
+          overviewTitle: "Entry 基本資料",
+          overviewSubtitle:
+            "集中檢視此 partner entry 的平台 routing、識別與上線姿態。",
+          readinessTitle: "Readiness · masked governance gates",
+          readinessReady: "可推進上線",
+          readinessBlocked: "仍有 readiness 缺口",
+          readinessReadyBody:
+            "必要 gate 已全部轉綠，可在不模糊治理邊界下推進 promotion。",
+          readinessBlockedBody:
+            "在 branding、contract、audit 與 credential 缺口補齊前，不應直接導流。",
+          credentialsTitle: "Active credentials · masked only",
+          credentialsSubtitle:
+            "完整 plaintext secret 只在發行當下顯示一次；下方清單只保留遮罩資訊。",
+          credentialsEmpty: "此 entry 目前沒有可用的 ingress credential。",
+          brandingTitle: "Branding",
+          brandingSubtitle:
+            "partner-facing 顯示名稱、入口路由、色彩與支援資訊。",
+          authTitle: "Auth",
+          authSubtitle:
+            "即使使用 partner 專屬 credential，驗證權限仍保留在平台側。",
+          eligibilityTitle: "Eligibility",
+          eligibilitySubtitle:
+            "檢視此 entry 的 contract snapshot、adapter posture 與 fallback policy。",
+          auditTitle: "Audit",
+          auditSubtitle:
+            "平台稽核需要完整保留建立、更新、credential 事件與 request lineage。",
+          routeHint: "公開入口預覽",
+          accentHint: "套用到 partner skin 的品牌 accent",
+          contractEmpty: "此 entry 尚未綁定 eligibility contract snapshot。",
+          authBannerTitle: "Credential posture",
+          eligibilityBannerTitle: "Contract posture",
+          secretModal: {
+            title: "Ingress credential 已產生 · only shown once",
+            warningTitle: "關閉此視窗後將永久隱藏完整 secret",
+            warningBody:
+              "若遺失必須重新建立並立即輪替。之後平台只保留遮罩後綴，不可還原完整值。",
+            secretName: "Credential 名稱",
+            secretField: "Secret · plaintext once",
+            secretHint: "請現在複製。完整 secret 不會再被回傳。",
+            scope: "SOURCE",
+            expiresAt: "EXPIRES AT",
+            createdBy: "建立者",
+            createdAt: "建立時間",
+            stored: "我已將這組 credential 妥善保存於安全位置。",
+            cancel: "取消",
+            complete: "完成 · 我已保存此 key",
+            copyLabel: "複製",
+            downloadLabel: ".txt",
+          },
+          credentialActionModal: {
+            issueTitle: "發行 ingress credential",
+            rotateTitle: "輪替 ingress credential",
+            subtitle: "HIGH-RISK ACTION · 必填 audit reason",
+            fieldLabel: "輪替原因",
+            hint: "請填寫操作原因。此動作會留下 audit 記錄，且完整 secret 只會顯示一次。",
+            placeholderIssue:
+              "例如：CTBC World Elite entry 首次 production 上線",
+            placeholderRotate: "例如：金鑰外洩演練後輪替 / 季度例行更新",
+            cancel: "取消",
+            issueConfirm: "發行 credential",
+            rotateConfirm: "輪替 credential",
+          },
+          governanceActionModal: {
+            activateTitle: "啟用 partner entry",
+            deactivateTitle: "停用 partner entry",
+            revokeTitle: "撤銷 partner entry",
+            revokeCredentialTitle: "撤銷 ingress credential",
+            mediumSubtitle: "MEDIUM-RISK ACTION · 產出 audit receipt",
+            highSubtitle: "HIGH-RISK ACTION · 必填 audit reason",
+            activateBody:
+              "啟用後，此 entry 會在 readiness 條件滿足時可承接平台治理流量。",
+            deactivateBody:
+              "停用會保留 registry 紀錄，但封鎖新的平台治理流量。",
+            revokeBody:
+              "entry 層級撤銷不可逆，僅適用於合約終止或安全撤出等情境。",
+            revokeCredentialBody:
+              "撤銷後此 credential 不可再用於 ingress。若需要不中斷流量，應先輪替再撤銷。",
+            fieldLabel: "Audit 原因",
+            fieldHint:
+              "請具體說明操作原因。此動作會寫入 Platform Admin audit 歷史。",
+            fieldPlaceholder: "例如：合作終止 / 安全事件調查後撤銷",
+            cancel: "取消",
+            activateConfirm: "啟用",
+            deactivateConfirm: "停用",
+            revokeConfirm: "撤銷 entry",
+            revokeCredentialConfirm: "撤銷 credential",
+          },
+        };
+
   const loadEntry = useCallback(
     async (options?: { preserveIssuedCredential?: boolean }) => {
       if (!entrySlug) {
@@ -1042,7 +1287,7 @@ export default function PartnerDetailPage() {
           setEditForm(toPartnerFormState(fallbackEntry));
           setCredentials(cloneLocalPartnerCredentials());
           setIsPreviewMode(true);
-          setPreviewNotice(t("partners.detail.previewNotice"));
+          setPreviewNotice(copy.previewNotice);
           setError(null);
         } else {
           setError(
@@ -1058,7 +1303,7 @@ export default function PartnerDetailPage() {
         setLoading(false);
       }
     },
-    [client, entrySlug, t],
+    [client, copy.previewNotice, entrySlug],
   );
 
   useEffect(() => {
@@ -1174,7 +1419,7 @@ export default function PartnerDetailPage() {
     if (isPreviewMode) {
       const now = new Date().toISOString();
       if (entryActionMode === "activate") {
-        setEntry((current: PartnerChannelEntryRecord | null) =>
+        setEntry((current) =>
           current
             ? {
                 ...current,
@@ -1188,7 +1433,7 @@ export default function PartnerDetailPage() {
             : current,
         );
       } else if (entryActionMode === "deactivate") {
-        setEntry((current: PartnerChannelEntryRecord | null) =>
+        setEntry((current) =>
           current
             ? {
                 ...current,
@@ -1199,7 +1444,7 @@ export default function PartnerDetailPage() {
             : current,
         );
       } else if (entryActionMode === "revoke") {
-        setEntry((current: PartnerChannelEntryRecord | null) =>
+        setEntry((current) =>
           current
             ? {
                 ...current,
@@ -1313,12 +1558,12 @@ export default function PartnerDetailPage() {
     () =>
       (
         [
-          ["overview", t("partners.detail.tabs.overview")],
-          ["branding", t("partners.detail.tabs.branding")],
-          ["auth", t("partners.detail.tabs.auth")],
-          ["eligibility", t("partners.detail.tabs.eligibility")],
-          ["credentials", t("partners.detail.tabs.credentials")],
-          ["audit", t("partners.detail.tabs.audit")],
+          ["overview", copy.tabs.overview],
+          ["branding", copy.tabs.branding],
+          ["auth", copy.tabs.auth],
+          ["eligibility", copy.tabs.eligibility],
+          ["credentials", copy.tabs.credentials],
+          ["audit", copy.tabs.audit],
         ] as const
       ).map(([key, label]) => ({
         key,
@@ -1342,7 +1587,14 @@ export default function PartnerDetailPage() {
           </button>
         ),
       })),
-    [t],
+    [
+      copy.tabs.audit,
+      copy.tabs.auth,
+      copy.tabs.branding,
+      copy.tabs.credentials,
+      copy.tabs.eligibility,
+      copy.tabs.overview,
+    ],
   );
 
   const activeTabNode =
@@ -1363,56 +1615,56 @@ export default function PartnerDetailPage() {
 
     return [
       {
-        k: t("partners.detail.overview.tenant"),
+        k: "TENANT",
         v: `${entry.partnerType} · ${entry.tenantId}`,
         mono: true,
       },
       {
-        k: t("partners.detail.overview.bankCode"),
+        k: "BANK CODE",
         v: entry.bankCode ?? "—",
         mono: true,
       },
       {
-        k: t("partners.detail.overview.program"),
+        k: "PROGRAM",
         v: entry.programId,
       },
       {
-        k: t("partners.detail.overview.dispatchSubtype"),
+        k: "BUSINESS SUBTYPE",
         v: formatPlatformCodeLabel(locale, entry.businessDispatchSubtype),
         mono: true,
       },
       {
-        k: t("partners.detail.overview.authMode"),
+        k: "AUTH MODE",
         v: formatPlatformCodeLabel(locale, entry.authMode),
         mono: true,
       },
       {
-        k: t("partners.detail.overview.eligibility"),
+        k: "ELIGIBILITY",
         v: formatPlatformCodeLabel(locale, entry.eligibilityMode),
         mono: true,
       },
       {
-        k: t("partners.detail.overview.entryHost"),
+        k: "ENTRY HOST",
         v: entry.entryHost ?? "—",
         mono: true,
       },
       {
-        k: t("partners.detail.overview.entryPath"),
+        k: "ENTRY PATH",
         v: entry.entryPath ?? "—",
         mono: true,
       },
       {
-        k: t("partners.detail.overview.themeAccent"),
+        k: "THEME ACCENT",
         v: entry.themeAccent ?? "—",
         mono: true,
       },
       {
-        k: t("partners.detail.overview.supportContact"),
+        k: "SUPPORT CONTACT",
         v: supportValue,
         mono: true,
       },
     ];
-  }, [entry, locale, t]);
+  }, [entry, locale]);
 
   const eligibilitySnapshotItems = useMemo(() => {
     if (!entry) {
@@ -1423,29 +1675,33 @@ export default function PartnerDetailPage() {
 
     return [
       {
-        k: t("partners.detail.eligibilitySnapshot.contractId"),
+        k: locale === "en" ? "Contract ID" : "契約 ID",
         v: contract?.contractId ?? "—",
         mono: true,
       },
       {
-        k: t("partners.detail.eligibilitySnapshot.adapter"),
+        k: locale === "en" ? "Adapter" : "Adapter",
         v: contract
           ? `${contract.adapterCode} · ${contract.adapterVersion}`
           : "—",
         mono: true,
       },
       {
-        k: t("partners.detail.eligibilitySnapshot.adapterPosture"),
+        k: locale === "en" ? "Adapter posture" : "Adapter posture",
         v: contract?.adapterKind ?? "—",
       },
       {
-        k: t("partners.detail.eligibilitySnapshot.fallback"),
+        k: locale === "en" ? "Fallback" : "Fallback",
         v: contract?.manualFallbackPolicy?.requiredOnTimeout
-          ? t("partners.detail.eligibilitySnapshot.fallbackRequired")
-          : t("partners.detail.eligibilitySnapshot.fallbackNone"),
+          ? locale === "en"
+            ? "Ops queue required"
+            : "需進 ops queue"
+          : locale === "en"
+            ? "No timeout fallback"
+            : "無 timeout fallback",
       },
     ];
-  }, [entry, t]);
+  }, [entry, locale]);
 
   const auditItems = useMemo(() => {
     if (!entry) {
@@ -1454,43 +1710,43 @@ export default function PartnerDetailPage() {
 
     return [
       {
-        k: t("partners.detail.auditMeta.source"),
+        k: locale === "en" ? "Audit source" : "Audit 來源",
         v: entry.auditMetadata.source ?? "—",
       },
       {
-        k: t("partners.detail.auditMeta.requestId"),
+        k: locale === "en" ? "Request ID" : "Request ID",
         v: entry.auditMetadata.requestId ?? "—",
         mono: true,
       },
       {
-        k: t("partners.detail.auditMeta.createdBy"),
+        k: locale === "en" ? "Created by" : "建立者",
         v: entry.auditMetadata.createdBy ?? "—",
       },
       {
-        k: t("partners.detail.auditMeta.createdAt"),
+        k: locale === "en" ? "Created at" : "建立時間",
         v: formatDateTime(entry.createdAt),
         mono: true,
       },
       {
-        k: t("partners.detail.auditMeta.updatedBy"),
+        k: locale === "en" ? "Updated by" : "更新者",
         v: entry.auditMetadata.updatedBy ?? "—",
       },
       {
-        k: t("partners.detail.auditMeta.updatedAt"),
+        k: locale === "en" ? "Updated at" : "更新時間",
         v: formatDateTime(entry.updatedAt),
         mono: true,
       },
       {
-        k: t("partners.detail.auditMeta.revokedAt"),
+        k: locale === "en" ? "Revoked at" : "撤銷時間",
         v: entry.revokedAt ? formatDateTime(entry.revokedAt) : "—",
         mono: true,
       },
       {
-        k: t("partners.detail.auditMeta.revokeReason"),
+        k: locale === "en" ? "Revoke reason" : "撤銷原因",
         v: entry.revokeReason ?? "—",
       },
     ];
-  }, [entry, t]);
+  }, [entry, locale]);
 
   const credentialRows = useMemo<CredentialRow[]>(
     () =>
@@ -1503,7 +1759,7 @@ export default function PartnerDetailPage() {
         )
         .map((credential) => ({
           keyId: credential.keyId,
-          kind: formatPlatformCodeLabel(locale, credential.source),
+          kind: credential.source,
           masked: `${credential.keyPrefix}${credential.maskedSuffix}`,
           rotatedAt: formatDateTime(credential.createdAt),
           lastUsedAt: credential.lastUsedAt
@@ -1511,37 +1767,37 @@ export default function PartnerDetailPage() {
             : "—",
           status: credential.revokedAt ? "revoked" : "active",
         })),
-    [credentials, locale],
+    [credentials],
   );
 
   const credentialColumns = useMemo<CanvasTableColumn<CredentialRow>[]>(
     () => [
       {
-        h: t("partners.detail.credentialsTable.kind"),
+        h: "kind",
         k: "kind",
         mono: true,
         w: 160,
       },
       {
-        h: t("partners.detail.credentialsTable.masked"),
+        h: "masked",
         k: "masked",
         mono: true,
         w: 170,
       },
       {
-        h: t("partners.detail.credentialsTable.rotated"),
+        h: "rotated",
         k: "rotatedAt",
         mono: true,
         w: 160,
       },
       {
-        h: t("partners.detail.credentialsTable.lastUsed"),
+        h: "last_used",
         k: "lastUsedAt",
         mono: true,
         w: 160,
       },
       {
-        h: t("partners.detail.credentialsTable.actions"),
+        h: "actions",
         w: 120,
         r: (row) => (
           <Btn
@@ -1554,12 +1810,12 @@ export default function PartnerDetailPage() {
               setGovernanceReason("");
             }}
           >
-            {t("partners.detail.credentialsTable.revoke")}
+            Revoke
           </Btn>
         ),
       },
     ],
-    [t],
+    [],
   );
 
   const auditRows = useMemo<AuditRow[]>(() => {
@@ -1569,13 +1825,13 @@ export default function PartnerDetailPage() {
 
     const rows: AuditRow[] = [
       {
-        event: "entry.created",
+        event: locale === "en" ? "entry.created" : "entry.created",
         actor: entry.auditMetadata.createdBy ?? "system",
         detail: entry.auditMetadata.source ?? "platform-admin",
         at: formatDateTime(entry.createdAt),
       },
       {
-        event: "entry.updated",
+        event: locale === "en" ? "entry.updated" : "entry.updated",
         actor: entry.auditMetadata.updatedBy ?? "system",
         detail: entry.auditMetadata.requestId ?? "—",
         at: formatDateTime(entry.updatedAt),
@@ -1598,17 +1854,12 @@ export default function PartnerDetailPage() {
 
   const auditColumns = useMemo<CanvasTableColumn<AuditRow>[]>(
     () => [
-      {
-        h: t("partners.detail.auditTable.event"),
-        k: "event",
-        mono: true,
-        w: 170,
-      },
-      { h: t("partners.detail.auditTable.actor"), k: "actor", w: 180 },
-      { h: t("partners.detail.auditTable.detail"), k: "detail", mono: true },
-      { h: t("partners.detail.auditTable.at"), k: "at", mono: true, w: 170 },
+      { h: "EVENT", k: "event", mono: true, w: 170 },
+      { h: "ACTOR", k: "actor", w: 180 },
+      { h: "DETAIL", k: "detail", mono: true },
+      { h: "AT", k: "at", mono: true, w: 170 },
     ],
-    [t],
+    [],
   );
 
   const handleCopySecret = useCallback(async () => {
@@ -1630,9 +1881,7 @@ export default function PartnerDetailPage() {
     const url = window.URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = t("partners.detail.secret.downloadFilename", {
-      entrySlug: entrySlug || "partner-entry",
-    });
+    anchor.download = `${entrySlug || "partner-entry"}-credential.txt`;
     anchor.click();
     window.URL.revokeObjectURL(url);
   }, [entrySlug, issuedCredential]);
@@ -1646,8 +1895,8 @@ export default function PartnerDetailPage() {
       <div style={pageShellStyle}>
         <PageHeader
           theme={theme}
-          title={t("partners.detail.notFoundTitle")}
-          subtitle={t("partners.detail.notFoundBody")}
+          title={copy.notFoundTitle}
+          subtitle={copy.notFoundBody}
           actions={
             <Link
               href="/partners"
@@ -1665,8 +1914,8 @@ export default function PartnerDetailPage() {
           <Banner
             theme={theme}
             tone="danger"
-            title={t("partners.detail.notFoundTitle")}
-            body={error ?? t("partners.detail.notFoundBody")}
+            title={copy.notFoundTitle}
+            body={error ?? copy.notFoundBody}
           />
         </div>
       </div>
@@ -1713,7 +1962,7 @@ export default function PartnerDetailPage() {
             lineHeight: 1,
           }}
         >
-          {t("partners.detail.preview")}
+          {copy.preview}
         </a>
       ) : null}
       <Btn
@@ -1725,8 +1974,12 @@ export default function PartnerDetailPage() {
         }}
       >
         {entry.activeFlag
-          ? t("partners.detail.deactivateEntry")
-          : t("partners.detail.activateEntry")}
+          ? locale === "en"
+            ? "Deactivate"
+            : "停用 entry"
+          : locale === "en"
+            ? "Activate"
+            : "啟用 entry"}
       </Btn>
       <Btn
         theme={theme}
@@ -1736,7 +1989,7 @@ export default function PartnerDetailPage() {
           setCredentialActionReason("");
         }}
       >
-        {t("partners.detail.issueCredential")}
+        {copy.issueCredential}
       </Btn>
       <Btn
         theme={theme}
@@ -1746,7 +1999,7 @@ export default function PartnerDetailPage() {
           setCredentialActionReason("");
         }}
       >
-        {t("partners.detail.rotateCredential")}
+        {copy.rotateCredential}
       </Btn>
       <Btn
         theme={theme}
@@ -1757,7 +2010,7 @@ export default function PartnerDetailPage() {
           setGovernanceReason("");
         }}
       >
-        {t("partners.detail.revokeEntry")}
+        {locale === "en" ? "Revoke entry" : "撤銷 entry"}
       </Btn>
     </>
   );
@@ -1765,7 +2018,7 @@ export default function PartnerDetailPage() {
   const renderEditableFooter = (
     <div style={saveBarStyle}>
       <div style={mutedTextStyle}>
-        {t("partners.detail.saveHint")}
+        {copy.saveHint}
         <br />
         {formatDateTime(entry.updatedAt)}
       </div>
@@ -1775,7 +2028,7 @@ export default function PartnerDetailPage() {
         disabled={saving || !editForm.displayName.trim()}
         onClick={() => void saveEntry()}
       >
-        {saving ? t("common.saving") : t("partners.detail.save")}
+        {saving ? t("common.saving") : copy.save}
       </Btn>
     </div>
   );
@@ -1788,10 +2041,7 @@ export default function PartnerDetailPage() {
       <PageHeader
         theme={theme}
         title={titleNode}
-        subtitle={t("partners.detail.headerSubtitle", {
-          entrySlug: entry.entrySlug,
-          partnerId: entry.partnerId,
-        })}
+        subtitle={`/${entry.entrySlug} · partner_id ${entry.partnerId}`}
         tabs={tabDefs.map((definition) => definition.node)}
         activeTab={activeTabNode}
         actions={headerActions}
@@ -1802,7 +2052,9 @@ export default function PartnerDetailPage() {
           <Banner
             theme={theme}
             tone="info"
-            title={t("partners.detail.previewModeTitle")}
+            title={
+              locale === "en" ? "Preview fixture mode" : "Preview fixture 模式"
+            }
             body={previewNotice}
           />
         ) : null}
@@ -1813,8 +2065,8 @@ export default function PartnerDetailPage() {
             tone="danger"
             title={
               activeTab === "credentials"
-                ? t("partners.detail.issueErrorTitle")
-                : t("partners.detail.updateErrorTitle")
+                ? copy.issueErrorTitle
+                : copy.updateErrorTitle
             }
             body={error}
           />
@@ -1824,8 +2076,8 @@ export default function PartnerDetailPage() {
           <div style={gridStyle}>
             <Card
               theme={theme}
-              title={t("partners.detail.overviewTitle")}
-              subtitle={t("partners.detail.overviewSubtitle")}
+              title={copy.overviewTitle}
+              subtitle={copy.overviewSubtitle}
               actions={
                 <div style={inlinePillRowStyle}>
                   <Pill theme={theme} tone={statusTone} dot>
@@ -1848,20 +2100,20 @@ export default function PartnerDetailPage() {
             </Card>
 
             <div style={sideStackStyle}>
-              <Card theme={theme} title={t("partners.detail.readinessTitle")}>
+              <Card theme={theme} title={copy.readinessTitle}>
                 <div style={{ display: "grid", gap: 10 }}>
                   <Banner
                     theme={theme}
                     tone={readinessComplete ? "success" : "warn"}
                     title={
                       readinessComplete
-                        ? t("partners.detail.readinessReady")
-                        : t("partners.detail.readinessBlocked")
+                        ? copy.readinessReady
+                        : copy.readinessBlocked
                     }
                     body={
                       readinessComplete
-                        ? t("partners.detail.readinessReadyBody")
-                        : t("partners.detail.readinessBlockedBody")
+                        ? copy.readinessReadyBody
+                        : copy.readinessBlockedBody
                     }
                   />
 
@@ -1936,11 +2188,8 @@ export default function PartnerDetailPage() {
                           }}
                         >
                           {item.ready
-                            ? t("partners.detail.readiness.ok", {
-                                ready: readinessReadyCount,
-                                total: readinessItems.length,
-                              })
-                            : t("partners.detail.readiness.gap")}
+                            ? `OK ${readinessReadyCount}/${readinessItems.length}`
+                            : "GAP"}
                         </span>
                       </div>
                     ))}
@@ -1950,8 +2199,8 @@ export default function PartnerDetailPage() {
 
               <Card
                 theme={theme}
-                title={t("partners.detail.credentialsTitle")}
-                subtitle={t("partners.detail.credentialsSubtitle")}
+                title={copy.credentialsTitle}
+                subtitle={copy.credentialsSubtitle}
               >
                 {credentialRows.length > 0 ? (
                   <Table<CredentialRow>
@@ -1964,16 +2213,20 @@ export default function PartnerDetailPage() {
                   <Banner
                     theme={theme}
                     tone="info"
-                    title={t("partners.detail.credentialsTitle")}
-                    body={t("partners.detail.credentialsEmpty")}
+                    title={copy.credentialsTitle}
+                    body={copy.credentialsEmpty}
                   />
                 )}
               </Card>
 
               <Card
                 theme={theme}
-                title={t("partners.detail.governanceCard.title")}
-                subtitle={t("partners.detail.governanceCard.subtitle")}
+                title={locale === "en" ? "Governance actions" : "治理動作"}
+                subtitle={
+                  locale === "en"
+                    ? "State transitions and high-risk lifecycle controls."
+                    : "集中執行狀態切換與高風險 lifecycle 控制。"
+                }
               >
                 <div style={{ display: "grid", gap: 12 }}>
                   <DL
@@ -1981,14 +2234,18 @@ export default function PartnerDetailPage() {
                     cols={1}
                     items={[
                       {
-                        k: t("partners.detail.governanceCard.status"),
+                        k: locale === "en" ? "Status" : "狀態",
                         v: formatPlatformCodeLabel(locale, entry.status),
                       },
                       {
-                        k: t("partners.detail.governanceCard.trafficPosture"),
+                        k: locale === "en" ? "Traffic posture" : "流量姿態",
                         v: entry.activeFlag
-                          ? t("partners.detail.governanceCard.trafficActive")
-                          : t("partners.detail.governanceCard.trafficBlocked"),
+                          ? locale === "en"
+                            ? "Entry can accept governed traffic"
+                            : "可承接平台治理流量"
+                          : locale === "en"
+                            ? "Entry remains blocked"
+                            : "仍維持封鎖",
                       },
                     ]}
                   />
@@ -2005,8 +2262,12 @@ export default function PartnerDetailPage() {
                       }}
                     >
                       {entry.activeFlag
-                        ? t("partners.detail.deactivateEntry")
-                        : t("partners.detail.activateEntry")}
+                        ? locale === "en"
+                          ? "Deactivate"
+                          : "停用"
+                        : locale === "en"
+                          ? "Activate"
+                          : "啟用"}
                     </Btn>
                     <Btn
                       theme={theme}
@@ -2018,7 +2279,7 @@ export default function PartnerDetailPage() {
                         setGovernanceReason("");
                       }}
                     >
-                      {t("partners.detail.revokeEntry")}
+                      {locale === "en" ? "Revoke entry" : "撤銷 entry"}
                     </Btn>
                   </div>
                 </div>
@@ -2031,8 +2292,8 @@ export default function PartnerDetailPage() {
           <div style={{ display: "grid", gap: 16 }}>
             <Card
               theme={theme}
-              title={t("partners.detail.brandingTitle")}
-              subtitle={t("partners.detail.brandingSubtitle")}
+              title={copy.brandingTitle}
+              subtitle={copy.brandingSubtitle}
             >
               <div style={formGrid}>
                 <TextField
@@ -2045,28 +2306,26 @@ export default function PartnerDetailPage() {
                   label={t("partners.form.entryHost")}
                   value={editForm.entryHost}
                   onChange={(value) => updateFormField("entryHost", value)}
-                  placeholder={t("partners.detail.placeholder.entryHost")}
+                  placeholder="partner.example"
                   mono
                 />
                 <TextField
                   label={t("partners.form.entryPath")}
                   value={editForm.entryPath}
                   onChange={(value) => updateFormField("entryPath", value)}
-                  placeholder={t("partners.detail.placeholder.entryPath")}
+                  placeholder="/partner/world-elite"
                   mono
                   hint={
-                    previewUrl
-                      ? `${t("partners.detail.routeHint")}: ${previewUrl}`
-                      : undefined
+                    previewUrl ? `${copy.routeHint}: ${previewUrl}` : undefined
                   }
                 />
                 <TextField
                   label={t("partners.form.themeAccent")}
                   value={editForm.themeAccent}
                   onChange={(value) => updateFormField("themeAccent", value)}
-                  placeholder={t("partners.detail.placeholder.themeAccent")}
+                  placeholder="#0b7285"
                   mono
-                  hint={t("partners.detail.accentHint")}
+                  hint={copy.accentHint}
                 />
                 <TextField
                   label={t("partners.form.supportEmail")}
@@ -2088,8 +2347,8 @@ export default function PartnerDetailPage() {
           <div style={{ display: "grid", gap: 16 }}>
             <Card
               theme={theme}
-              title={t("partners.detail.authTitle")}
-              subtitle={t("partners.detail.authSubtitle")}
+              title={copy.authTitle}
+              subtitle={copy.authSubtitle}
               actions={
                 <div style={inlinePillRowStyle}>
                   <Pill theme={theme} tone={statusTone} dot>
@@ -2111,27 +2370,33 @@ export default function PartnerDetailPage() {
                         ? "success"
                         : "warn"
                   }
-                  title={t("partners.detail.authBannerTitle")}
+                  title={copy.authBannerTitle}
                   body={
                     entry.authMode === "partner_api_key"
                       ? activeCredentialCount > 0
-                        ? t("partners.detail.authBannerBody.active", {
-                            count: activeCredentialCount,
-                          })
-                        : t("partners.detail.authBannerBody.none")
-                      : t("partners.detail.authBannerBody.notRequired")
+                        ? `${activeCredentialCount} credential(s) currently gate ingress traffic.`
+                        : "Partner API key mode is active, but there is no usable ingress credential."
+                      : "This entry does not require partner-managed ingress credentials."
                   }
                 />
                 <Card
                   theme={theme}
-                  title={t("partners.detail.webhook.title")}
-                  subtitle={t("partners.detail.webhook.subtitle")}
+                  title={
+                    locale === "en" ? "Webhook linkage" : "Webhook linkage"
+                  }
+                  subtitle={
+                    locale === "en"
+                      ? "Operational delivery remains masked here; only the governance binding is shown."
+                      : "此處只顯示治理綁定，不展開 operational delivery 細節。"
+                  }
                 >
                   <div style={linkCardStyle}>
                     <div style={linkRowStyle}>
                       <div>
                         <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                          {t("partners.detail.webhook.requestLineage")}
+                          {locale === "en"
+                            ? "Request lineage"
+                            : "Request lineage"}
                         </div>
                         <div style={monoValueStyle}>
                           {entry.auditMetadata.requestId ?? "—"}
@@ -2142,21 +2407,25 @@ export default function PartnerDetailPage() {
                         tone={entry.auditMetadata.source ? "success" : "warn"}
                       >
                         {entry.auditMetadata.source
-                          ? t("partners.detail.webhook.bound")
-                          : t("partners.detail.webhook.gap")}
+                          ? locale === "en"
+                            ? "bound"
+                            : "已綁定"
+                          : locale === "en"
+                            ? "gap"
+                            : "缺口"}
                       </Pill>
                     </div>
                     <div style={linkRowStyle}>
                       <div>
                         <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                          {t("partners.detail.webhook.auditSource")}
+                          {locale === "en" ? "Audit source" : "Audit 來源"}
                         </div>
                         <div style={monoValueStyle}>
                           {entry.auditMetadata.source ?? "—"}
                         </div>
                       </div>
                       <Pill theme={theme} tone="info">
-                        {t("partners.detail.webhook.platformOwned")}
+                        {locale === "en" ? "platform-owned" : "平台治理"}
                       </Pill>
                     </div>
                   </div>
@@ -2241,8 +2510,8 @@ export default function PartnerDetailPage() {
           <div style={{ display: "grid", gap: 16 }}>
             <Card
               theme={theme}
-              title={t("partners.detail.eligibilityTitle")}
-              subtitle={t("partners.detail.eligibilitySubtitle")}
+              title={copy.eligibilityTitle}
+              subtitle={copy.eligibilitySubtitle}
             >
               <div style={{ display: "grid", gap: 12 }}>
                 <Banner
@@ -2254,13 +2523,17 @@ export default function PartnerDetailPage() {
                         ? "accent"
                         : "warn"
                   }
-                  title={t("partners.detail.eligibilityBannerTitle")}
+                  title={copy.eligibilityBannerTitle}
                   body={
                     entry.eligibilityMode === "none"
-                      ? t("partners.detail.eligibilityBannerBody.none")
+                      ? locale === "en"
+                        ? "No partner-side eligibility verification is required before fulfillment."
+                        : "此流程在 fulfill 前不要求 partner-side eligibility verification。"
                       : entry.eligibilityContract?.contractId
-                        ? t("partners.detail.eligibilityBannerBody.linked")
-                        : t("partners.detail.contractEmpty")
+                        ? locale === "en"
+                          ? "Eligibility remains platform-governed and is backed by the linked contract snapshot."
+                          : "Eligibility 仍由平台治理，且已有對應 contract snapshot。"
+                        : copy.contractEmpty
                   }
                 />
 
@@ -2294,14 +2567,18 @@ export default function PartnerDetailPage() {
             </Card>
             <Card
               theme={theme}
-              title={t("partners.detail.adapterLinkage.title")}
-              subtitle={t("partners.detail.adapterLinkage.subtitle")}
+              title={locale === "en" ? "Adapter linkage" : "Adapter linkage"}
+              subtitle={
+                locale === "en"
+                  ? "Cross-link the contract snapshot to the platform adapter registry."
+                  : "將 contract snapshot 與平台 adapter registry 對照。"
+              }
             >
               <div style={linkCardStyle}>
                 <div style={linkRowStyle}>
                   <div>
                     <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                      {t("partners.detail.adapterLinkage.linkedAdapter")}
+                      {locale === "en" ? "Linked adapter" : "Linked adapter"}
                     </div>
                     <div style={monoValueStyle}>
                       {entry.eligibilityContract
@@ -2323,13 +2600,17 @@ export default function PartnerDetailPage() {
                 <div style={linkRowStyle}>
                   <div>
                     <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                      {t("partners.detail.adapterLinkage.manualFallback")}
+                      {locale === "en" ? "Manual fallback" : "Manual fallback"}
                     </div>
                     <div style={monoValueStyle}>
                       {entry.eligibilityContract?.manualFallbackPolicy
                         ?.requiredOnTimeout
-                        ? t("partners.detail.adapterLinkage.timeoutRequired")
-                        : t("partners.detail.adapterLinkage.noTimeoutFallback")}
+                        ? locale === "en"
+                          ? "ops_console required on timeout"
+                          : "timeout 時需進 ops_console"
+                        : locale === "en"
+                          ? "no timeout fallback"
+                          : "無 timeout fallback"}
                     </div>
                   </div>
                   <Pill
@@ -2339,8 +2620,12 @@ export default function PartnerDetailPage() {
                     }
                   >
                     {entry.eligibilityContract?.contractId
-                      ? t("partners.detail.adapterLinkage.snapshotLinked")
-                      : t("partners.detail.adapterLinkage.snapshotMissing")}
+                      ? locale === "en"
+                        ? "snapshot linked"
+                        : "snapshot 已綁定"
+                      : locale === "en"
+                        ? "missing snapshot"
+                        : "缺少 snapshot"}
                   </Pill>
                 </div>
               </div>
@@ -2353,8 +2638,8 @@ export default function PartnerDetailPage() {
           <div style={{ display: "grid", gap: 16 }}>
             <Card
               theme={theme}
-              title={t("partners.detail.credentialsTitle")}
-              subtitle={t("partners.detail.credentialsSubtitle")}
+              title={copy.credentialsTitle}
+              subtitle={copy.credentialsSubtitle}
               actions={
                 <div style={inlinePillRowStyle}>
                   <Btn
@@ -2366,7 +2651,7 @@ export default function PartnerDetailPage() {
                       setCredentialActionReason("");
                     }}
                   >
-                    {t("partners.detail.issueCredential")}
+                    {copy.issueCredential}
                   </Btn>
                   <Btn
                     theme={theme}
@@ -2377,7 +2662,7 @@ export default function PartnerDetailPage() {
                       setCredentialActionReason("");
                     }}
                   >
-                    {t("partners.detail.rotateCredential")}
+                    {copy.rotateCredential}
                   </Btn>
                 </div>
               }
@@ -2386,16 +2671,11 @@ export default function PartnerDetailPage() {
                 <Banner
                   theme={theme}
                   tone={activeCredentialCount > 0 ? "success" : "warn"}
-                  title={t("partners.detail.credentialsBannerTitle", {
-                    ready: readinessReadyCount,
-                    total: readinessItems.length,
-                  })}
+                  title={`${readinessReadyCount}/${readinessItems.length} governance gates ready`}
                   body={
                     activeCredentialCount > 0
-                      ? t("partners.detail.credentialsBannerBody", {
-                          count: activeCredentialCount,
-                        })
-                      : t("partners.detail.credentialsEmpty")
+                      ? `${activeCredentialCount} active credential(s) remain masked in the table below.`
+                      : copy.credentialsEmpty
                   }
                 />
 
@@ -2410,8 +2690,8 @@ export default function PartnerDetailPage() {
                   <Banner
                     theme={theme}
                     tone="info"
-                    title={t("partners.detail.credentialsTitle")}
-                    body={t("partners.detail.credentialsEmpty")}
+                    title={copy.credentialsTitle}
+                    body={copy.credentialsEmpty}
                   />
                 )}
               </div>
@@ -2423,8 +2703,8 @@ export default function PartnerDetailPage() {
           <div style={{ display: "grid", gap: 16 }}>
             <Card
               theme={theme}
-              title={t("partners.detail.auditTitle")}
-              subtitle={t("partners.detail.auditSubtitle")}
+              title={copy.auditTitle}
+              subtitle={copy.auditSubtitle}
               actions={
                 <Pill theme={theme} tone={statusTone} dot>
                   {formatPlatformCodeLabel(locale, entry.status)}
@@ -2436,10 +2716,12 @@ export default function PartnerDetailPage() {
                   <Banner
                     theme={theme}
                     tone="danger"
-                    title={t("partners.detail.auditRevokedTitle")}
+                    title={locale === "en" ? "Entry revoked" : "Entry 已撤銷"}
                     body={
                       entry.revokeReason ??
-                      t("partners.detail.auditRevokedBodyDefault")
+                      (locale === "en"
+                        ? "Traffic should remain blocked for this entry."
+                        : "此 entry 應持續維持流量封鎖。")
                     }
                   />
                 ) : null}
@@ -2476,6 +2758,7 @@ export default function PartnerDetailPage() {
             setCredentialActionReason("");
           }}
           onConfirm={() => void issueCredential()}
+          copy={copy.credentialActionModal}
         />
       ) : null}
 
@@ -2494,6 +2777,7 @@ export default function PartnerDetailPage() {
             setGovernanceReason("");
           }}
           onConfirm={() => void runGovernanceAction()}
+          copy={copy.governanceActionModal}
         />
       ) : null}
 
@@ -2511,6 +2795,7 @@ export default function PartnerDetailPage() {
           }}
           onCopy={() => void handleCopySecret()}
           onDownload={handleDownloadSecret}
+          copy={copy.secretModal}
         />
       ) : null}
     </div>

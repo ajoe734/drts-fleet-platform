@@ -16,6 +16,7 @@
 
 import type {
   ActionIntent,
+  ActionReceipt,
   ResourceActionDescriptor,
   UiHealthEnvelope,
 } from "@drts/contracts";
@@ -95,13 +96,7 @@ export interface OpsAssistantContext {
   locale: Locale;
 }
 
-export interface AssistantActionReceipt {
-  actionId: string;
-  auditId: string;
-  resourceType: string;
-  resourceId: string;
-  status: "accepted" | "completed" | "failed";
-  message: string;
+export interface AssistantActionReceipt extends ActionReceipt {
   auditHref?: string | null;
 }
 
@@ -109,7 +104,9 @@ export interface AssistantActionBridge {
   resourceKind: AssistantEntityKind;
   resourceId: string;
   availableActions: ResourceActionDescriptor[];
-  resolveDescriptor: (intent: ActionIntent) => ResourceActionDescriptor | null;
+  resolveDescriptor: (
+    intent: ActionIntent,
+  ) => ResourceActionDescriptor | null;
   invoke: (
     intent: ActionIntent,
     descriptor: ResourceActionDescriptor,

@@ -336,9 +336,26 @@ function resolvePlatformAdminFlagsHref(flagKey?: string): string | null {
 }
 
 function featureFlagDescription(locale: Locale, flag: FeatureFlagRecordLike) {
-  const key = `flags.description.${flag.key}`;
-  const translated = t(key, locale);
-  return translated !== key ? translated : (flag.description ?? "—");
+  if (locale !== "zh") return flag.description ?? "—";
+
+  const descriptions: Record<string, string> = {
+    "driver-app.earnings": "啟用司機 App 收益讀模型",
+    "driver-app.incidents": "啟用司機 App 事故回報",
+    "driver-app.shift": "啟用司機 App 班次與出勤追蹤",
+    "driver-app.tasks": "啟用司機 App 任務生命週期",
+    "ops-console.callcenter": "啟用營運後台客服中心工作階段檢視",
+    "ops-console.complaint": "啟用營運後台客訴案件管理",
+    "ops-console.dispatch": "啟用營運後台派車調度板",
+    "ops-console.reports": "啟用營運後台報表任務管理",
+    "phase1.read-models": "啟用 Phase 1 讀模型介面",
+    "phase1.smoke-paths": "啟用 Phase 1 smoke test 端點",
+    "tenant-portal.billing": "啟用租戶入口帳務檢視",
+    "tenant-portal.booking": "啟用租戶入口訂車管理",
+    "tenant-portal.reports": "啟用租戶入口報表任務提交",
+    "tenant-portal.webhooks": "啟用租戶入口 Webhook 管理",
+  };
+
+  return descriptions[flag.key] || flag.description || "—";
 }
 
 function formatDateTime(value: string | null, locale: Locale) {
@@ -559,7 +576,7 @@ function buildEmptyState(
       return {
         icon: "flags",
         tone: "warn",
-        label: t("flags.emptyState.label.notProvisioned", locale),
+        label: "NOT PROVISIONED",
         title: t("flags.emptyState.notProvisioned.title", locale),
         body: t("flags.emptyState.notProvisioned.body", locale),
         actionLabel: t("flags.platformAdminLink", locale),
@@ -570,7 +587,7 @@ function buildEmptyState(
       return {
         icon: "audit",
         tone: "danger",
-        label: t("flags.emptyState.label.permissionDenied", locale),
+        label: "PERMISSION DENIED",
         title: t("flags.emptyState.permissionDenied.title", locale),
         body: t("flags.emptyState.permissionDenied.body", locale),
         actionLabel: t("common.refresh", locale),
@@ -580,7 +597,7 @@ function buildEmptyState(
       return {
         icon: "reports",
         tone: "warn",
-        label: t("flags.emptyState.label.externalUnavailable", locale),
+        label: "EXTERNAL UNAVAILABLE",
         title: t("flags.emptyState.externalUnavailable.title", locale),
         body: t("flags.emptyState.externalUnavailable.body", locale),
         actionLabel: t("common.tryAgain", locale),
@@ -590,7 +607,7 @@ function buildEmptyState(
       return {
         icon: "search",
         tone: "neutral",
-        label: t("flags.emptyState.label.filteredEmpty", locale),
+        label: "FILTERED EMPTY",
         title: t("flags.emptyState.filteredEmpty.title", locale),
         body: t("flags.emptyState.filteredEmpty.body", locale),
         actionLabel: t("flags.clearFilters", locale),
@@ -600,7 +617,7 @@ function buildEmptyState(
       return {
         icon: "warn",
         tone: "danger",
-        label: t("flags.emptyState.label.fetchFailed", locale),
+        label: "FETCH FAILED",
         title: t("flags.emptyState.fetchFailed.title", locale),
         body: t("flags.emptyState.fetchFailed.body", locale),
         actionLabel: t("common.tryAgain", locale),
@@ -611,7 +628,7 @@ function buildEmptyState(
       return {
         icon: "flags",
         tone: "neutral",
-        label: t("flags.emptyState.label.noData", locale),
+        label: "NO DATA",
         title: t("flags.emptyState.noData.title", locale),
         body: t("flags.emptyState.noData.body", locale),
         actionLabel: t("common.refresh", locale),
@@ -931,7 +948,9 @@ export default async function FeatureFlagsPage({
     <>
       <PageHeader
         theme={theme}
-        title={t("flags.titleReadOnly", locale)}
+        title={
+          locale === "zh" ? "功能旗標 · read only" : "Feature Flags · read only"
+        }
         subtitle={t("flags.subtitleReadOnly", locale)}
         actions={
           <>
@@ -1072,15 +1091,19 @@ export default async function FeatureFlagsPage({
               >
                 <KPI
                   theme={theme}
-                  label={t("flags.kpi.visible.label", locale)}
+                  label={locale === "zh" ? "可見旗標" : "Visible flags"}
                   value={payload.flags.length}
-                  sub={t("flags.kpi.visible.sub", locale)}
+                  sub={
+                    locale === "zh" ? "目前快照總數" : "Current snapshot total"
+                  }
                 />
                 <KPI
                   theme={theme}
-                  label={t("flags.kpi.partial.label", locale)}
+                  label={locale === "zh" ? "進行中 rollout" : "Mid-rollout"}
                   value={partialCount}
-                  sub={t("flags.kpi.partial.sub", locale)}
+                  sub={
+                    locale === "zh" ? "跨租戶值不一致" : "Tenant values diverge"
+                  }
                 />
               </div>
 
@@ -1126,8 +1149,12 @@ export default async function FeatureFlagsPage({
 
           <Card
             theme={theme}
-            title={t("flags.boundary.title", locale)}
-            subtitle={t("flags.boundary.subtitle", locale)}
+            title={locale === "zh" ? "治理邊界" : "Governance boundary"}
+            subtitle={
+              locale === "zh"
+                ? "ops 只做 read-only 可見性與交叉 app 深連結。"
+                : "Ops stays read-only and links to the owner app for governance."
+            }
             padding={18}
           >
             <div style={metaGridStyle}>
@@ -1136,27 +1163,35 @@ export default async function FeatureFlagsPage({
                   GET /api/ops/feature-flags
                 </Pill>
                 <Pill theme={theme} tone="neutral">
-                  {t("flags.boundary.availableActions", locale)}
+                  availableActions
                 </Pill>
                 <Pill theme={theme} tone="neutral">
-                  {t("flags.boundary.emptyReasons", locale)}
+                  EmptyReason x6
                 </Pill>
                 <Pill theme={theme} tone="neutral">
-                  {t("flags.boundary.crossAppLinks", locale)}
+                  cross-app deep links
                 </Pill>
               </div>
               <div style={{ display: "grid", gap: 10 }}>
                 <KPI
                   theme={theme}
-                  label={t("flags.kpi.enabled.label", locale)}
+                  label={locale === "zh" ? "已啟用" : "Enabled"}
                   value={enabledCount}
-                  sub={t("flags.kpi.enabled.sub", locale)}
+                  sub={
+                    locale === "zh"
+                      ? "營運可見 enabled"
+                      : "Operationally enabled"
+                  }
                 />
                 <KPI
                   theme={theme}
-                  label={t("flags.kpi.tenant.label", locale)}
+                  label={locale === "zh" ? "租戶層級" : "Tenant-scoped"}
                   value={tenantScopedCount}
-                  sub={t("flags.kpi.tenant.sub", locale)}
+                  sub={
+                    locale === "zh"
+                      ? "有 override 足跡"
+                      : "Overrides are present"
+                  }
                 />
               </div>
               <div
@@ -1217,7 +1252,11 @@ export default async function FeatureFlagsPage({
         ) : (
           <Card
             theme={theme}
-            title={t("flags.registryTableTitle", locale)}
+            title={
+              locale === "zh"
+                ? "Operational flag registry"
+                : "Operational flag registry"
+            }
             subtitle={t("flags.registrySummaryV2", locale, {
               total: payload.flags.length,
               enabled: enabledCount,

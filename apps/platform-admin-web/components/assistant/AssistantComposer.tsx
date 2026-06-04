@@ -2,10 +2,10 @@
 
 import type { KeyboardEvent } from "react";
 import { SendHorizontal, Sparkles } from "lucide-react";
-import { useTranslation } from "@/lib/i18n";
 import {
   assistantCardStyle,
   assistantMutedTextStyle,
+  assistantStateLabel,
   assistantStatusTone,
   assistantTheme,
   type AssistantViewState,
@@ -19,23 +19,23 @@ const busyStates: AssistantViewState[] = [
   "executing",
 ];
 
-function helperCopyKey(state: AssistantViewState) {
+function helperCopy(state: AssistantViewState) {
   switch (state) {
     case "thinking":
-      return "assistant.composer.helper.thinking";
+      return "Assistant is drafting the next response.";
     case "planning":
-      return "assistant.composer.helper.planning";
+      return "Plan is being prepared for review.";
     case "awaiting_confirmation":
-      return "assistant.composer.helper.awaitingConfirmation";
+      return "Execution is paused until you confirm.";
     case "executing":
-      return "assistant.composer.helper.executing";
+      return "Command is running; avoid duplicate submissions.";
     case "receipt":
-      return "assistant.composer.helper.receipt";
+      return "Last action completed. You can continue the conversation.";
     case "error":
-      return "assistant.composer.helper.error";
+      return "The last turn failed. Adjust the request or retry.";
     case "idle":
     default:
-      return "assistant.composer.helper.idle";
+      return "Use Enter to submit or Shift+Enter for a new line.";
   }
 }
 
@@ -45,8 +45,8 @@ export function AssistantComposer({
   onSubmit,
   state = "idle",
   disabled = false,
-  placeholder,
-  submitLabel,
+  placeholder = "Ask Platform Admin to inspect, plan, or execute a governed action...",
+  submitLabel = "Send",
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -56,7 +56,6 @@ export function AssistantComposer({
   placeholder?: string;
   submitLabel?: string;
 }) {
-  const { t } = useTranslation();
   const isBusy = busyStates.includes(state);
   const submitDisabled = disabled || isBusy || value.trim().length === 0;
 
@@ -84,11 +83,11 @@ export function AssistantComposer({
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Sparkles size={16} color={assistantTheme.accent} />
             <strong style={{ color: assistantTheme.text, fontSize: 15.5 }}>
-              {t("assistant.common.name")}
+              Platform Admin assistant
             </strong>
           </div>
           <Pill theme={assistantTheme} tone={assistantStatusTone(state)}>
-            {t(`assistant.state.${state}`)}
+            {assistantStateLabel(state)}
           </Pill>
         </div>
 
@@ -96,7 +95,7 @@ export function AssistantComposer({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder ?? t("assistant.composer.placeholder")}
+          placeholder={placeholder}
           rows={4}
           disabled={disabled}
           style={{
@@ -126,7 +125,7 @@ export function AssistantComposer({
             flexWrap: "wrap",
           }}
         >
-          <div style={assistantMutedTextStyle}>{t(helperCopyKey(state))}</div>
+          <div style={assistantMutedTextStyle}>{helperCopy(state)}</div>
           <button
             type="button"
             onClick={onSubmit}
@@ -149,9 +148,7 @@ export function AssistantComposer({
             }}
           >
             <SendHorizontal size={15} />
-            {isBusy
-              ? t("assistant.composer.waiting")
-              : (submitLabel ?? t("assistant.composer.submit"))}
+            {isBusy ? "Waiting..." : submitLabel}
           </button>
         </div>
       </div>

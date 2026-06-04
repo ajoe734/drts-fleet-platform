@@ -1,7 +1,6 @@
 import type { CSSProperties } from "react";
 import { managementSurfaceStyle } from "@drts/ui-web";
 
-export type TFn = (key: string, params?: Record<string, string | number>) => string;
 export type ActionButtonTone = "primary" | "secondary";
 export type ActionButtonSize = "md" | "sm";
 export type StatusTone = "success" | "warning" | "info" | "neutral" | "danger";
@@ -240,7 +239,3 @@ export const switchStyle = {
     };
   },
 };
-
-export function getSwitchAriaLabel(t: TFn, checked: boolean) {
-  return t(checked ? "common.enabled" : "common.disabled");
-}

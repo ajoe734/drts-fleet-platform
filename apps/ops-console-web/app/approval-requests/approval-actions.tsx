@@ -15,7 +15,6 @@ import {
   rejectApprovalRequestAction,
   type ApprovalActionResult,
 } from "./actions";
-import { t } from "@/lib/translations";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -25,14 +24,18 @@ const theme = buildCanvasTheme({
 
 type Locale = "en" | "zh";
 
+function copy(locale: Locale, en: string, zh: string): string {
+  return locale === "en" ? en : zh;
+}
+
 function actionLabel(action: string, locale: Locale): string {
   switch (action) {
     case "approve":
-      return t("approvalRequests.action.approve", locale);
+      return copy(locale, "Approve", "核准");
     case "reject":
-      return t("approvalRequests.action.reject", locale);
+      return copy(locale, "Reject", "退回");
     case "escalate":
-      return t("approvalRequests.action.escalate", locale);
+      return copy(locale, "Escalate", "升級");
     default:
       return action;
   }
@@ -69,9 +72,7 @@ export function ApprovalActions({
       const result = await run();
       if (!result.ok) {
         window.alert(
-          t("approvalRequests.action.failed", locale, {
-            message: result.message,
-          }),
+          copy(locale, "Action failed: ", "操作失敗：") + result.message,
         );
         return;
       }
@@ -96,9 +97,8 @@ export function ApprovalActions({
         return;
       default:
         window.alert(
-          t("approvalRequests.action.unsupported", locale, {
-            action: selectedAction.action,
-          }),
+          copy(locale, "Unsupported action: ", "不支援的操作：") +
+            selectedAction.action,
         );
     }
   }
@@ -162,9 +162,11 @@ export function ApprovalActions({
                     theme={theme}
                     tone={actionTone(selectedAction.riskLevel)}
                   >
-                    {t("approvalRequests.action.risk", locale, {
-                      riskLevel: selectedAction.riskLevel,
-                    })}
+                    {copy(
+                      locale,
+                      `${selectedAction.riskLevel} risk`,
+                      `${selectedAction.riskLevel} 風險`,
+                    )}
                   </Pill>
                 </span>
               }
@@ -174,8 +176,12 @@ export function ApprovalActions({
                 theme={theme}
                 tone="warn"
                 icon="warn"
-                title={t("approvalRequests.action.highRisk", locale)}
-                body={t("approvalRequests.action.auditNote", locale)}
+                title={copy(locale, "High-risk action", "高風險操作")}
+                body={copy(
+                  locale,
+                  "A reason is required and will be written to the immutable audit trail.",
+                  "必須填寫理由，且會寫入不可變更的稽核紀錄。",
+                )}
               />
 
               <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
@@ -188,7 +194,7 @@ export function ApprovalActions({
                     fontWeight: 600,
                   }}
                 >
-                  {t("approvalRequests.action.reason", locale)}
+                  {copy(locale, "Reason", "理由")}
                   <textarea
                     value={reason}
                     onChange={(event) => setReason(event.target.value)}
@@ -224,7 +230,7 @@ export function ApprovalActions({
                   }}
                   disabled={pending}
                 >
-                  {t("common.cancel", locale)}
+                  {copy(locale, "Cancel", "取消")}
                 </Btn>
                 <Btn
                   theme={theme}
@@ -234,8 +240,8 @@ export function ApprovalActions({
                   onClick={onConfirm}
                 >
                   {pending
-                    ? t("approvalRequests.action.working", locale)
-                    : t("approvalRequests.action.confirm", locale)}
+                    ? copy(locale, "Working…", "處理中…")
+                    : copy(locale, "Confirm", "確認")}
                 </Btn>
               </div>
             </Card>

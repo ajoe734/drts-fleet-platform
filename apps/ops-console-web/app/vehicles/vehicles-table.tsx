@@ -7,7 +7,7 @@ import type {
   ResourceActionDescriptor,
 } from "@drts/contracts";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import { t, type Locale } from "@/lib/translations";
+import type { Locale } from "@/lib/translations";
 import {
   CanvasIcon,
   CanvasPill as Pill,
@@ -101,12 +101,8 @@ const actionStackStyle: CSSProperties = {
   whiteSpace: "normal",
 };
 
-function tr(
-  locale: Locale,
-  key: string,
-  params?: Record<string, string | number>,
-) {
-  return t(key, locale, params);
+function copy(locale: Locale, en: string, zh: string) {
+  return locale === "zh" ? zh : en;
 }
 
 function linkButtonStyle(
@@ -204,13 +200,13 @@ function actionTone(action: ResourceActionDescriptor): CanvasTone {
 function actionLabel(action: ResourceActionDescriptor, locale: Locale) {
   switch (action.action) {
     case "open_vehicle_detail":
-      return tr(locale, "vehicles.table.action.openVehicleDetail");
+      return copy(locale, "Vehicle detail", "車輛詳情");
     case "open_driver_binding":
-      return tr(locale, "vehicles.table.action.openDriverBinding");
+      return copy(locale, "Driver binding", "司機綁定");
     case "review_maintenance":
-      return tr(locale, "vehicles.table.action.reviewMaintenance");
+      return copy(locale, "Maintenance", "保修檢視");
     case "open_fleet_governance":
-      return tr(locale, "vehicles.table.action.openFleetGovernance");
+      return copy(locale, "Fleet governance", "車隊治理");
     default:
       return formatOpsCodeLabel(locale, action.action);
   }
@@ -222,7 +218,11 @@ function actionReason(action: ResourceActionDescriptor, locale: Locale) {
   }
 
   if (action.disabledReasonCode === "vehicle_detail_pending") {
-    return tr(locale, "vehicles.table.reason.vehicleDetailPending");
+    return copy(
+      locale,
+      "Detail route ships in UI-FE-OPS-VEHID.",
+      "詳情路由由 UI-FE-OPS-VEHID 交付。",
+    );
   }
 
   return formatOpsCodeLabel(locale, action.disabledReasonCode);
@@ -291,9 +291,9 @@ function renderAction(
         </span>
       )}
       <span style={tinyMetaStyle(actionTone(action))}>
-        {tr(locale, "vehicles.table.meta.risk", { level: action.riskLevel })}
+        {copy(locale, `risk:${action.riskLevel}`, `風險:${action.riskLevel}`)}
         {action.requiresReason
-          ? tr(locale, "vehicles.table.meta.reasonRequired")
+          ? copy(locale, " · reason required", " · 需填原因")
           : ""}
       </span>
       {!action.enabled && reason ? (
@@ -309,7 +309,7 @@ function buildColumns(
 ): CanvasTableColumn<VehicleRow>[] {
   return [
     {
-      h: tr(locale, "vehicles.table.col.vehicle"),
+      h: copy(locale, "VEHICLE", "車輛"),
       w: 200,
       r: (row) => (
         <div style={stackStyle}>
@@ -321,7 +321,7 @@ function buildColumns(
       ),
     },
     {
-      h: tr(locale, "vehicles.table.col.typeStatus"),
+      h: copy(locale, "TYPE / STATUS", "類型 / 狀態"),
       w: 220,
       r: (row) => (
         <div style={stackStyle}>
@@ -335,7 +335,7 @@ function buildColumns(
       ),
     },
     {
-      h: tr(locale, "vehicles.table.col.dispatchable"),
+      h: copy(locale, "DISPATCHABLE", "派遣可用"),
       w: 250,
       r: (row) => (
         <div style={stackStyle}>
@@ -346,20 +346,20 @@ function buildColumns(
               dot
             >
               {row.dispatchable
-                ? tr(locale, "vehicles.table.dispatchable.yes")
-                : tr(locale, "vehicles.table.dispatchable.no")}
+                ? copy(locale, "yes", "可派")
+                : copy(locale, "no", "不可派")}
             </Pill>
           </div>
           <span style={secondaryTextStyle}>
             {row.blockedReasonLabels.length > 0
               ? row.blockedReasonLabels.join(" / ")
-              : tr(locale, "vehicles.table.noBlockingGate")}
+              : copy(locale, "No blocking gate", "無阻塞 gate")}
           </span>
         </div>
       ),
     },
     {
-      h: tr(locale, "vehicles.table.col.currentDriver"),
+      h: copy(locale, "CURRENT DRIVER", "當前司機"),
       w: 200,
       r: (row) => (
         <div style={stackStyle}>
@@ -372,33 +372,33 @@ function buildColumns(
             </Link>
           ) : (
             <span style={primaryTextStyle}>
-              {tr(locale, "vehicles.table.unbound")}
+              {copy(locale, "Unbound", "未綁定")}
             </span>
           )}
           <span style={{ ...secondaryTextStyle, ...monoTextStyle }}>
-            {row.currentShiftId ?? tr(locale, "vehicles.table.noActiveShift")}
+            {row.currentShiftId ??
+              copy(locale, "No active shift", "無啟用班次")}
           </span>
         </div>
       ),
     },
     {
-      h: tr(locale, "vehicles.table.col.compliance"),
+      h: copy(locale, "COMPLIANCE", "法遵覆蓋"),
       w: 210,
       r: (row) => (
         <div style={stackStyle}>
           <span style={secondaryTextStyle}>
-            {tr(locale, "vehicles.table.label.contract")} · {row.contractLabel}
+            {copy(locale, "Contract", "合約")} · {row.contractLabel}
           </span>
           <span style={secondaryTextStyle}>
-            {tr(locale, "vehicles.table.label.insurance")} ·{" "}
-            {row.insuranceLabel}
+            {copy(locale, "Insurance", "保險")} · {row.insuranceLabel}
           </span>
           <span style={mutedTextStyle}>{row.debrandDueLabel}</span>
         </div>
       ),
     },
     {
-      h: tr(locale, "vehicles.table.col.maintLastSeen"),
+      h: copy(locale, "MAINT / LAST SEEN", "保修 / 最近訊號"),
       w: 210,
       r: (row) => (
         <div style={stackStyle}>
@@ -412,8 +412,9 @@ function buildColumns(
           </div>
           <span style={secondaryTextStyle}>
             {row.nextMaintenanceAt
-              ? `${tr(locale, "vehicles.table.nextDue")} · ${row.nextMaintenanceAt}`
-              : tr(locale, "vehicles.table.noOpenWorkOrder")}
+              ? copy(locale, "Next due", "下次保修") +
+                ` · ${row.nextMaintenanceAt}`
+              : copy(locale, "No open work order", "無未結工單")}
           </span>
           <span style={{ ...mutedTextStyle, ...monoTextStyle }}>
             {row.lastSeenLabel}
@@ -422,7 +423,7 @@ function buildColumns(
       ),
     },
     {
-      h: tr(locale, "vehicles.table.col.actions"),
+      h: copy(locale, "ACTIONS", "操作"),
       w: 250,
       r: (row) => (
         <div style={actionStackStyle}>

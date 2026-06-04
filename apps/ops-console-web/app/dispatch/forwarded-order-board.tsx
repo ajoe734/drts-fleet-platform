@@ -19,7 +19,6 @@ import type {
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
-import { type Locale, t as translate } from "@/lib/translations";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { Badge, Card, CardBody, CardHeader } from "@drts/ui-web";
 
@@ -231,9 +230,9 @@ function matchesFilter(order: ForwardedOrderRecord, filter: ForwardedFilter) {
   }
 }
 
-function formatRelativeTime(locale: Locale, iso: string | null) {
+function formatRelativeTime(locale: "en" | "zh", iso: string | null) {
   if (!iso) {
-    return translate("common.unknown", locale);
+    return locale === "zh" ? "未知" : "Unknown";
   }
 
   const millis = Date.parse(iso);
@@ -260,9 +259,9 @@ function formatRelativeTime(locale: Locale, iso: string | null) {
   return formatter.format(Math.round(diffSeconds / 86400), "day");
 }
 
-function formatDateTime(locale: Locale, iso: string | null) {
+function formatDateTime(locale: "en" | "zh", iso: string | null) {
   if (!iso) {
-    return translate("common.dash", locale);
+    return locale === "zh" ? " - " : "-";
   }
 
   return new Date(iso).toLocaleString(locale === "zh" ? "zh-TW" : "en-US", {

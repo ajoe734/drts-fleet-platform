@@ -909,7 +909,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
 
       <PageHeader
         theme={theme}
-        title={t("drivers.pageHeaderTitle", locale)}
+        title={locale === "zh" ? "司機" : "Drivers"}
         subtitle={t("drivers.pageSubtitle", locale, {
           count: filteredRows.length,
           total: rows.length,
