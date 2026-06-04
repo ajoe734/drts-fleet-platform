@@ -45,6 +45,7 @@ import {
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { t as translate, type Locale } from "@/lib/translations";
 
 type ReportsTab = "jobs" | "packages" | "schedules";
 
@@ -247,10 +248,6 @@ const sectionCopyStyle: CSSProperties = {
   color: th.textMuted,
 };
 
-function copyText(locale: "en" | "zh", en: string, zh: string) {
-  return locale === "zh" ? zh : en;
-}
-
 function defaultClosedMonth() {
   const now = new Date();
   const year = now.getUTCFullYear();
@@ -262,17 +259,17 @@ function defaultClosedMonth() {
 }
 
 function formatDateTime(
-  locale: "en" | "zh",
+  locale: Locale,
   value: string | null | undefined,
   variant: "short" | "long" = "short",
 ) {
   if (!value) {
-    return "—";
+    return translate("common.dash", locale);
   }
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return "—";
+    return translate("common.dash", locale);
   }
 
   const formatted = new Intl.DateTimeFormat(
@@ -300,9 +297,9 @@ function formatDateTime(
   return formatted.replace(",", "");
 }
 
-function shortHash(value: string | null | undefined) {
+function shortHash(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return "—";
+    return translate("common.dash", locale);
   }
   return `${value.slice(0, 12)}...`;
 }
@@ -422,7 +419,7 @@ function summarizeJobPeriod(filters: Record<string, unknown>) {
     return vehicleId;
   }
 
-  return "—";
+  return translate("common.dash", "en");
 }
 
 function reportStatusTone(status: ReportJobStatus): CanvasTone {
@@ -458,17 +455,17 @@ function filingStatusTone(
 }
 
 function actionDisabledReasonLabel(
-  locale: "en" | "zh",
+  locale: Locale,
   descriptor: ResourceActionDescriptor,
 ) {
   if (!descriptor.disabledReasonCode) {
     return null;
   }
   if (descriptor.disabledReasonCode === "still_running") {
-    return copyText(locale, "Still running", "仍在執行");
+    return translate("reports.actionDisabled.stillRunning", locale);
   }
   if (descriptor.disabledReasonCode === "artifact_missing") {
-    return copyText(locale, "Artifact pending", "成品待處理");
+    return translate("reports.actionDisabled.artifactPending", locale);
   }
   return formatOpsCodeLabel(locale, descriptor.disabledReasonCode);
 }
@@ -514,7 +511,6 @@ function ActionButton({
 }
 
 function ReportJobComposerModal({
-  locale,
   pending,
   jobType,
   setJobType,
@@ -530,7 +526,6 @@ function ReportJobComposerModal({
   onCancel,
   onSubmit,
 }: {
-  locale: "en" | "zh";
   pending: boolean;
   jobType: ReportJobType;
   setJobType: (value: ReportJobType) => void;
@@ -546,17 +541,14 @@ function ReportJobComposerModal({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div style={modalBackdropStyle} onClick={onCancel}>
       <div style={modalFrameStyle} onClick={(event) => event.stopPropagation()}>
         <CanvasCard
           theme={th}
-          title={copyText(locale, "Create report job", "建立報表任務")}
-          subtitle={copyText(
-            locale,
-            "Queue a background export and wait for the signed artifact.",
-            "提交背景匯出工作，待後端產出已簽章成品。",
-          )}
+          title={t("reports.form.createJob")}
+          subtitle={t("reports.modal.job.subtitle")}
           actions={
             <CanvasPill theme={th} tone="info">
               {jobCategoryLabel}
@@ -567,18 +559,14 @@ function ReportJobComposerModal({
             theme={th}
             tone="info"
             icon="reports"
-            title={copyText(locale, "Background export", "背景匯出")}
-            body={copyText(
-              locale,
-              "Jobs run in the background and expose signed artifact downloads after completion.",
-              "工作會在背景執行，完成後提供簽名產物下載。",
-            )}
+            title={t("reports.modal.job.backgroundExport")}
+            body={t("reports.modal.job.backgroundExportBody")}
           />
           <div style={{ height: 14 }} />
           <div style={formGridStyle}>
             <CanvasField
               theme={th}
-              label={copyText(locale, "Type", "類型")}
+              label={t("reports.form.type")}
               hint={typeHint}
             >
               <select
@@ -596,7 +584,7 @@ function ReportJobComposerModal({
               </select>
             </CanvasField>
 
-            <CanvasField theme={th} label={copyText(locale, "Format", "格式")}>
+            <CanvasField theme={th} label={t("reports.form.format")}>
               <select
                 value={format}
                 onChange={(event) =>
@@ -614,43 +602,33 @@ function ReportJobComposerModal({
 
             <CanvasField
               theme={th}
-              label={copyText(locale, "Period", "期別")}
-              hint={copyText(locale, "Example: 2026-05", "例如：2026-05")}
+              label={t("reports.modal.job.period")}
+              hint={t("reports.modal.job.periodHint")}
             >
               <input
                 value={periodLabel}
                 onChange={(event) => setPeriodLabel(event.target.value)}
-                placeholder={copyText(locale, "2026-05", "2026-05")}
+                placeholder={t("reports.modal.job.periodPlaceholder")}
                 style={nativeMonoInputStyle}
               />
             </CanvasField>
 
             <CanvasField
               theme={th}
-              label={copyText(locale, "Vehicle ID", "車輛 ID")}
-              hint={copyText(
-                locale,
-                "Optional filter for vehicle-scoped output.",
-                "可選，用於限定單一車輛的輸出。",
-              )}
+              label={t("reports.form.vehicleId")}
+              hint={t("reports.modal.job.vehicleHint")}
             >
               <input
                 value={vehicleId}
                 onChange={(event) => setVehicleId(event.target.value)}
-                placeholder={copyText(locale, "veh_001", "veh_001")}
+                placeholder={t("reports.modal.job.vehiclePlaceholder")}
                 style={nativeMonoInputStyle}
               />
             </CanvasField>
           </div>
 
           <div style={formFooterStyle}>
-            <div style={formNoteStyle}>
-              {copyText(
-                locale,
-                "The contract stays unchanged; only the entry surface moves behind a modal.",
-                "後端契約不變；只是把建立入口移到 modal。",
-              )}
-            </div>
+            <div style={formNoteStyle}>{t("reports.modal.job.footerNote")}</div>
             <div style={actionRowStyle}>
               <CanvasBtn
                 theme={th}
@@ -658,7 +636,7 @@ function ReportJobComposerModal({
                 onClick={onCancel}
                 disabled={pending}
               >
-                {copyText(locale, "Cancel", "取消")}
+                {t("common.cancel")}
               </CanvasBtn>
               <CanvasBtn
                 theme={th}
@@ -669,8 +647,8 @@ function ReportJobComposerModal({
                 disabled={pending}
               >
                 {pending
-                  ? copyText(locale, "Submitting…", "提交中…")
-                  : copyText(locale, "Create report job", "建立報表任務")}
+                  ? t("reports.form.submitting")
+                  : t("reports.form.createJob")}
               </CanvasBtn>
             </div>
           </div>
@@ -926,7 +904,7 @@ export default function ReportsPage() {
 
   const jobColumns: CanvasTableColumn<JobRow>[] = [
     {
-      h: "JOB",
+      h: t("reports.table.job"),
       w: 156,
       mono: true,
       r: (row) => (
@@ -942,7 +920,7 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: "KIND",
+      h: t("reports.table.kind"),
       w: 220,
       r: (row) => (
         <div style={rowStackStyle}>
@@ -954,19 +932,19 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: "PERIOD",
+      h: t("reports.table.period"),
       w: 140,
       mono: true,
       r: (row) => summarizeJobPeriod(row.filters),
     },
     {
-      h: "FORMAT",
+      h: t("reports.table.format"),
       w: 90,
       mono: true,
       r: (row) => row.format.toUpperCase(),
     },
     {
-      h: "STATUS",
+      h: t("reports.table.status"),
       w: 132,
       r: (row) => (
         <CanvasPill theme={th} tone={reportStatusTone(row.status)} dot>
@@ -975,7 +953,7 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: "EXPIRES",
+      h: t("reports.table.expires"),
       w: 132,
       mono: true,
       r: (row) => (
@@ -985,19 +963,19 @@ export default function ReportsPage() {
           </span>
           {artifactExpired(row) ? (
             <span style={{ ...rowMetaStyle, color: th.warn }}>
-              {copyText(locale, "Artifact expired", "成品已過期")}
+              {t("reports.row.artifactExpired")}
             </span>
           ) : null}
         </div>
       ),
     },
     {
-      h: "CREATED",
+      h: t("reports.table.created"),
       mono: true,
       r: (row) => formatDateTime(locale, row.createdAt),
     },
     {
-      h: "ACTIONS",
+      h: t("reports.table.actions"),
       w: 260,
       r: (row) => (
         <div style={actionRowStyle}>
@@ -1005,7 +983,7 @@ export default function ReportsPage() {
             descriptor={jobDownloadDescriptor(row)}
             locale={locale}
             busy={pending}
-            label={copyText(locale, "Download", "下載")}
+            label={t("reports.download")}
             icon="ext"
             onInvoke={() => void downloadReportJob(row.jobId)}
           />
@@ -1013,7 +991,7 @@ export default function ReportsPage() {
             descriptor={jobRetryDescriptor(row)}
             locale={locale}
             busy={pending}
-            label={copyText(locale, "Retry", "重試")}
+            label={t("reports.actions.retry")}
             icon="arrow"
             onInvoke={() => retryReportJob(row)}
           />
@@ -1024,7 +1002,7 @@ export default function ReportsPage() {
 
   const packageColumns: CanvasTableColumn<PackageRow>[] = [
     {
-      h: "PACKAGE",
+      h: t("reports.table.package"),
       w: 164,
       mono: true,
       r: (row) => (
@@ -1040,12 +1018,12 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: "TYPE",
+      h: t("reports.table.type"),
       w: 180,
       r: (row) => formatOpsCodeLabel(locale, row.packageType),
     },
     {
-      h: "STATUS",
+      h: t("reports.table.status"),
       w: 132,
       r: (row) => (
         <CanvasPill theme={th} tone={filingStatusTone(row.status)} dot>
@@ -1054,25 +1032,25 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: "MANIFEST",
+      h: t("reports.table.manifest"),
       w: 136,
       mono: true,
-      r: (row) => shortHash(row.manifestHash),
+      r: (row) => shortHash(locale, row.manifestHash),
     },
     {
-      h: "ITEMS",
+      h: t("reports.table.items"),
       w: 90,
       mono: true,
       r: (row) => String(row.items.length),
     },
     {
-      h: "GENERATED",
+      h: t("reports.table.generated"),
       w: 132,
       mono: true,
       r: (row) => formatDateTime(locale, row.generatedAt),
     },
     {
-      h: "ARTIFACTS",
+      h: t("reports.table.artifacts"),
       r: (row) =>
         row.artifactZipUrl || row.artifactPdfUrl ? (
           <div style={rowStackStyle}>
@@ -1098,15 +1076,15 @@ export default function ReportsPage() {
             ) : null}
           </div>
         ) : (
-          "—"
+          t("common.dash")
         ),
     },
   ];
 
   const tabItems: Array<{ id: ReportsTab; label: string }> = [
-    { id: "jobs", label: "Report jobs" },
-    { id: "packages", label: "Filing packages" },
-    { id: "schedules", label: "Schedules" },
+    { id: "jobs", label: t("reports.tabs.jobs") },
+    { id: "packages", label: t("reports.tabs.packages") },
+    { id: "schedules", label: t("reports.tabs.schedules") },
   ];
   const renderedTabs = tabItems.map((tab) => (
     <button
@@ -1125,18 +1103,14 @@ export default function ReportsPage() {
   const packageTypeSummary =
     Object.entries(packageTypeCounts)
       .map(([type, count]) => `${formatOpsCodeLabel(locale, type)} × ${count}`)
-      .join(" · ") || "—";
+      .join(" · ") || t("common.dash");
 
   return (
     <div style={pageStyle}>
       <CanvasPageHeader
         theme={th}
         title={t("reports.title")}
-        subtitle={copyText(
-          locale,
-          "report jobs · filing packages · signed artifact short-lived URLs",
-          "report jobs · filing packages · signed artifact 短效 URL",
-        )}
+        subtitle={t("reports.header.subtitle")}
         tabs={renderedTabs}
         activeTab={activeTabNode}
         actions={
@@ -1177,7 +1151,6 @@ export default function ReportsPage() {
 
         {showJobComposer && activeTab === "jobs" ? (
           <ReportJobComposerModal
-            locale={locale}
             pending={pending}
             jobType={jobType}
             setJobType={setJobType}
@@ -1211,11 +1184,7 @@ export default function ReportsPage() {
               tone="accent"
               icon="reports"
               title={t("reports.form.generatePackage")}
-              body={copyText(
-                locale,
-                "Generated filing bundles stay immutable and surface short-lived signed ZIP/PDF downloads.",
-                "產生後的申報包保持不可變，並以短時效 ZIP / PDF 簽名下載提供。",
-              )}
+              body={t("reports.packageComposer.bannerBody")}
             />
             <div style={{ height: 14 }} />
             <div style={formGridStyle}>
@@ -1264,11 +1233,7 @@ export default function ReportsPage() {
 
             <div style={formFooterStyle}>
               <div style={formNoteStyle}>
-                {copyText(
-                  locale,
-                  "Filing package generation still uses the same backend flow; only the visual treatment changed.",
-                  "申報包生成仍走相同 backend 流程；變更僅限畫面呈現。",
-                )}
+                {t("reports.packageComposer.footerNote")}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <CanvasBtn
@@ -1277,7 +1242,7 @@ export default function ReportsPage() {
                   onClick={() => setShowPackageComposer(false)}
                   disabled={pending}
                 >
-                  {copyText(locale, "Cancel", "取消")}
+                  {t("common.cancel")}
                 </CanvasBtn>
                 <CanvasBtn
                   theme={th}
@@ -1344,16 +1309,8 @@ export default function ReportsPage() {
                         theme={th}
                         tone="danger"
                         icon="warn"
-                        title={copyText(
-                          locale,
-                          "Report job failed",
-                          "報表工作失敗",
-                        )}
-                        body={copyText(
-                          locale,
-                          "Inspect inputs and re-run the export if an updated artifact is still required.",
-                          "請檢查輸入條件，若仍需最新產物請重新執行。",
-                        )}
+                        title={t("reports.detail.failedTitle")}
+                        body={t("reports.detail.failedBody")}
                       />
                       <div style={{ height: 14 }} />
                     </>
@@ -1365,16 +1322,8 @@ export default function ReportsPage() {
                         theme={th}
                         tone="warn"
                         icon="warn"
-                        title={copyText(
-                          locale,
-                          "Signed artifact expired",
-                          "簽名成品已過期",
-                        )}
-                        body={copyText(
-                          locale,
-                          "The previous signed URL is no longer valid. Retry the report job to issue a fresh artifact.",
-                          "先前的簽名網址已失效。請重試報表工作以產生新的成品。",
-                        )}
+                        title={t("reports.detail.expiredTitle")}
+                        body={t("reports.detail.expiredBody")}
                       />
                       <div style={{ height: 14 }} />
                     </>
@@ -1388,16 +1337,8 @@ export default function ReportsPage() {
                         theme={th}
                         tone="warn"
                         icon="clock"
-                        title={copyText(
-                          locale,
-                          "Signed URL expiring soon",
-                          "簽名網址即將過期",
-                        )}
-                        body={copyText(
-                          locale,
-                          "Download or refresh the artifact before handoff to downstream operators.",
-                          "交付下游人員前，請先下載或重新整理產物連結。",
-                        )}
+                        title={t("reports.detail.expiringTitle")}
+                        body={t("reports.detail.expiringBody")}
                       />
                       <div style={{ height: 14 }} />
                     </>
@@ -1410,11 +1351,7 @@ export default function ReportsPage() {
                         tone="info"
                         icon="reports"
                         title={t("reports.detail.artifactPending")}
-                        body={copyText(
-                          locale,
-                          "This job is still waiting for a signed artifact payload.",
-                          "此工作仍在等待簽名產物可供下載。",
-                        )}
+                        body={t("reports.detail.artifactPendingBody")}
                       />
                       <div style={{ height: 14 }} />
                     </>
@@ -1439,7 +1376,7 @@ export default function ReportsPage() {
                         mono: true,
                       },
                       {
-                        label: copyText(locale, "Updated", "更新"),
+                        label: t("reports.detail.updatedLabel"),
                         value: formatDateTime(
                           locale,
                           jobDetail.updatedAt,
@@ -1448,13 +1385,16 @@ export default function ReportsPage() {
                         mono: true,
                       },
                       {
-                        label: copyText(locale, "Period", "期別"),
+                        label: t("reports.detail.periodLabel"),
                         value: summarizeJobPeriod(jobDetail.filters),
                         mono: true,
                       },
                       {
                         label: t("reports.detail.manifest"),
-                        value: shortHash(jobDetail.artifact?.manifestHash),
+                        value: shortHash(
+                          locale,
+                          jobDetail.artifact?.manifestHash,
+                        ),
                         mono: true,
                       },
                       {
@@ -1485,11 +1425,7 @@ export default function ReportsPage() {
                       descriptor={jobRetryDescriptor(jobDetail)}
                       locale={locale}
                       busy={pending}
-                      label={copyText(
-                        locale,
-                        "Retry report job",
-                        "重試報表工作",
-                      )}
+                      label={t("reports.actions.retryJob")}
                       icon="arrow"
                       onInvoke={() => retryReportJob(jobDetail)}
                     />
@@ -1499,11 +1435,7 @@ export default function ReportsPage() {
                 <CanvasCard
                   theme={th}
                   title={t("reports.detail.filters")}
-                  subtitle={copyText(
-                    locale,
-                    "Current request payload",
-                    "本次請求 payload",
-                  )}
+                  subtitle={t("reports.detail.filtersSubtitle")}
                 >
                   {Object.keys(jobDetail.filters).length > 0 ? (
                     <pre style={jsonBlockStyle}>
@@ -1620,12 +1552,12 @@ export default function ReportsPage() {
                           <span style={rowTitleStyle}>
                             {row.eligibilityVerificationId
                               ? String(row.eligibilityVerificationId)
-                              : "—"}
+                              : t("common.dash")}
                           </span>
                           <span style={rowMetaStyle}>
                             {row.issuerAuthorizationRef
                               ? String(row.issuerAuthorizationRef)
-                              : "—"}
+                              : t("common.dash")}
                           </span>
                         </div>
                       ),
@@ -1638,12 +1570,12 @@ export default function ReportsPage() {
                           <span style={rowTitleStyle}>
                             {row.benefitReference
                               ? String(row.benefitReference)
-                              : "—"}
+                              : t("common.dash")}
                           </span>
                           <span style={rowMetaStyle}>
                             {row.partnerProgramId
                               ? String(row.partnerProgramId)
-                              : "—"}
+                              : t("common.dash")}
                           </span>
                         </div>
                       ),
@@ -1717,11 +1649,7 @@ export default function ReportsPage() {
                         tone="info"
                         icon="reports"
                         title={t("reports.detail.packagePending")}
-                        body={copyText(
-                          locale,
-                          "Signed ZIP/PDF package artifacts are not ready yet.",
-                          "ZIP / PDF 簽名申報包尚未完成。",
-                        )}
+                        body={t("reports.detail.packagePendingBody")}
                       />
                       <div style={{ height: 14 }} />
                     </>
@@ -1742,7 +1670,10 @@ export default function ReportsPage() {
                       },
                       {
                         label: t("reports.detail.checksum"),
-                        value: shortHash(packageDetail.manifest?.checksum),
+                        value: shortHash(
+                          locale,
+                          packageDetail.manifest?.checksum,
+                        ),
                         mono: true,
                       },
                       {
@@ -1753,12 +1684,12 @@ export default function ReportsPage() {
                         mono: true,
                       },
                       {
-                        label: copyText(locale, "Mutability", "可變性"),
+                        label: t("reports.detail.mutability"),
                         value: formatOpsCodeLabel(locale, "immutable"),
                       },
                       {
                         label: t("reports.detail.manifest"),
-                        value: shortHash(packageDetail.manifestHash),
+                        value: shortHash(locale, packageDetail.manifestHash),
                         mono: true,
                       },
                       {
@@ -1800,11 +1731,7 @@ export default function ReportsPage() {
                 <CanvasCard
                   theme={th}
                   title={t("reports.detail.signedDownloads")}
-                  subtitle={copyText(
-                    locale,
-                    "Current package delivery posture",
-                    "目前申報包交付狀態",
-                  )}
+                  subtitle={t("reports.detail.signedDownloadsSubtitle")}
                 >
                   {packageDetail.downloadMetadata ? (
                     <CanvasDL
@@ -1873,7 +1800,7 @@ export default function ReportsPage() {
                     {
                       h: t("reports.col.manifestHash"),
                       mono: true,
-                      r: (row) => shortHash(String(row.manifestHash)),
+                      r: (row) => shortHash(locale, String(row.manifestHash)),
                     },
                   ]}
                   rows={packageDetail.manifest.entries.map((row) => ({
@@ -1891,79 +1818,61 @@ export default function ReportsPage() {
               theme={th}
               tone="info"
               icon="clock"
-              title={copyText(
-                locale,
-                "Schedules are not configured yet",
-                "目前尚未設定排程",
-              )}
-              body={copyText(
-                locale,
-                "This handoff keeps report jobs and filing packages intact; automated scheduling remains a follow-up workflow.",
-                "本次 handoff 保留 report job 與 filing package 流程；自動排程仍屬後續工作。",
-              )}
+              title={t("reports.schedules.title")}
+              body={t("reports.schedules.body")}
             />
 
             <div style={kpiGridStyle}>
               <CanvasKPI
                 theme={th}
-                label={copyText(locale, "Queued jobs", "排隊中工作")}
+                label={t("reports.schedules.queuedJobs")}
                 value={queuedReports}
-                sub={copyText(
-                  locale,
-                  `${runningReports} running`,
-                  `${runningReports} 筆執行中`,
-                )}
+                sub={t("reports.schedules.queuedJobsSub", {
+                  count: runningReports,
+                })}
               />
               <CanvasKPI
                 theme={th}
-                label={copyText(locale, "Ready artifacts", "可下載產物")}
+                label={t("reports.schedules.readyArtifacts")}
                 value={readyArtifacts}
-                sub={copyText(
-                  locale,
-                  `${expiringArtifacts} expiring`,
-                  `${expiringArtifacts} 筆即將過期`,
-                )}
+                sub={t("reports.schedules.readyArtifactsSub", {
+                  count: expiringArtifacts,
+                })}
               />
               <CanvasKPI
                 theme={th}
-                label={copyText(locale, "Completed packages", "已完成申報包")}
+                label={t("reports.schedules.completedPackages")}
                 value={completedPackages}
-                sub={copyText(
-                  locale,
-                  `${regulatoryJobs} regulatory jobs`,
-                  `${regulatoryJobs} 筆監管類工作`,
-                )}
+                sub={t("reports.schedules.completedPackagesSub", {
+                  count: regulatoryJobs,
+                })}
               />
             </div>
 
             <CanvasCard
               theme={th}
-              title={copyText(
-                locale,
-                "Current reporting posture",
-                "目前報表狀態",
-              )}
+              title={t("reports.schedules.currentPosture")}
             >
               <CanvasDL
                 theme={th}
                 cols={2}
                 items={[
                   {
-                    label: copyText(locale, "Report jobs", "報表工作"),
+                    label: t("reports.schedules.reportJobs"),
                     value: String(jobs.length),
                     mono: true,
                   },
                   {
-                    label: copyText(locale, "Completed jobs", "已完成工作"),
+                    label: t("reports.schedules.completedJobs"),
                     value: String(completedReports),
                     mono: true,
                   },
                   {
-                    label: copyText(locale, "Package types", "申報包類型"),
+                    label: t("reports.schedules.packageTypes"),
                     value: packageTypeSummary,
                   },
                   {
-                    label: copyText(locale, "Default scope", "預設 scope"),
+                    label: t("reports.schedules.defaultScope"),
                     value: packageScope,
                     mono: true,
                   },
