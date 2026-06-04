@@ -1,6 +1,6 @@
 # Dev Runtime + Functional Gap Report (browser-verified)
 
-- **Last re-run:** 2026-06-04 02:56:54Z
+- **Last re-run:** 2026-06-04 03:19:38Z
 - **Auditor:** Codex
 - **Environment:** live dev Cloud Run
   - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
@@ -8,7 +8,7 @@
 - **Method:** headless Chromium route census over all 39 routes (Platform Admin 18 + Ops Console 21), fixed `1440x950` screenshots, single-shell count, and manual tab round-trip checks for `/pricing`, `/payments`, `/attendance`.
 - **Artifacts:** `.artifacts/func-audit/dev-gap-audit-results.json`, `.artifacts/func-audit/dev-gap-audit-summary.md`, and route screenshots under `.artifacts/func-audit/*.png`.
 
-## 1. Scoreboard (2026-06-04 02:56:54Z re-run)
+## 1. Scoreboard (2026-06-04 03:19:38Z re-run)
 
 | App            | Routes | Fully working | Broken                                                                                       |
 | -------------- | -----: | ------------: | -------------------------------------------------------------------------------------------- |
@@ -18,7 +18,7 @@
 **Current total:** 35 / 39 routes fully working.  
 **Acceptance target (`0 broken`, `0 HTTP 500`) is not met.**
 
-Raw route-census output written to `.artifacts/func-audit/dev-gap-audit-results.json` shows `PA 17/18` and `Ops 19/21` because the generic hard-error detector still false-flags **PA `/audit`** while the `/attendance` base route itself renders `200`. After manual browser review, the effective remaining gaps are unchanged: `2` live `500`s plus `2` tab-strip regressions.
+Raw route-census output written to `.artifacts/func-audit/dev-gap-audit-results.json` still shows `PA 17/18` and `Ops 19/21` because the generic hard-error detector false-flags **PA `/audit`** while the route itself still returns `200` with a single shell. After this 2026-06-04 03:19:38Z re-run, the effective remaining gaps are unchanged: `2` live `500`s plus `2` tab-strip regressions.
 
 ## 2. What is now confirmed good
 
@@ -65,14 +65,15 @@ Raw route-census output written to `.artifacts/func-audit/dev-gap-audit-results.
 
 ## 4. Notes from the re-run
 
-- The regenerated audit JSON at `2026-06-04T02:56:54.888Z` still flagged **PA `/audit`** because of the generic hard-error text detector, but direct browser spot-check shows the route is `200`, single-shell, and renders the expected audit workspace. Treat that JSON flag as a detector false positive, not a confirmed gap.
+- The regenerated audit JSON at `2026-06-04T03:19:38.905Z` still flagged **PA `/audit`** because of the generic hard-error text detector, but the route again returned `200` with a single shell. Treat that JSON flag as a detector false positive, not a confirmed gap.
 - Several pages emitted asset/API console noise (`404`/`429`) without breaking route render. These were not counted as scoreboard failures unless they produced a dead route, nested shell, or failed manual interaction.
+- Compared with the prior `2026-06-04 02:56:54Z` run, there was no functional delta on live dev: `/pricing` and `/attendance` tab routing are still broken, and OPS `/revenue` plus `/vehicles/veh-demo-001` still return `500`.
 
 ## 5. Closeout status for `GAP-VERIFY`
 
 This task cannot be closed as `done` yet.
 
-- **Why:** the 2026-06-04 02:56:54Z re-run still shows 2 confirmed HTTP 500 routes and 2 confirmed tab-strip regressions on live dev.
+- **Why:** the 2026-06-04 03:19:38Z re-run still shows 2 confirmed HTTP 500 routes and 2 confirmed tab-strip regressions on live dev.
 - **Next required fixes:**
   - re-open / continue ops `/revenue`
   - fix ops vehicle detail `/vehicles/[vehicleId]`
