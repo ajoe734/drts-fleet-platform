@@ -25,11 +25,17 @@
  * Ratchet: the repo ships with ~2,170 known-debt lines across 43 pages. A
  * hard fail on all of them would red-line CI until every WP lands, blocking the
  * very PRs that fix them. So the guard is baselined: scripts/i18n-guard-baseline.json
- * records the current ERROR count per file. The guard FAILS only when a file's
- * error count rises above its baseline, or a non-baselined file has any error
- * (i.e. it catches NEW debt and regressions, while letting known debt drain).
- * Warnings never fail. As a WP cleans a file, drop/lower its baseline entry
- * (or run `--update-baseline`); the guard then locks the file clean.
+ * records, per file, a multiset of the current ERROR *signatures* — each
+ * signature being `rule + normalized violation text`, independent of line
+ * number so legitimate edits that merely shift lines do not trip it. The guard
+ * FAILS when a file contains an ERROR signature whose count exceeds its baseline
+ * allowance (a brand-new violation, or more copies of a known-shape one), or
+ * when a non-baselined file has any error. Crucially this catches a *swap* —
+ * remediating one violation and introducing a different one keeps the per-file
+ * count identical but adds a never-seen signature, which fails. Known debt still
+ * drains freely (removed signatures never fail). Warnings never fail. As a WP
+ * cleans a file, drop/lower its baseline entry (or run `--update-baseline`); the
+ * guard then locks the file clean.
  *
  * Usage:
  *   node scripts/i18n-guard.mjs                 # check all target files (CI)
@@ -353,8 +359,40 @@ function checkFile(rel) {
 }
 
 // ---------------------------------------------------------------------------
+// Violation signatures — line-independent identity of a single violation, so
+// the baseline can tell a NEW violation apart from a known one even when edits
+// shift line numbers or a remediation swaps one violation for a different one.
+// ---------------------------------------------------------------------------
+/** @param {{rule:string,text:string}} v */
+function signature(v) {
+  const norm = v.text.replace(/\s+/g, " ").trim();
+  return `${v.rule}${norm}`;
+}
+
+/**
+ * Multiset of ERROR signatures for a file's violations (warnings never gate).
+ * @param {{line:number,rule:string,severity:string,text:string}[]} violations
+ * @returns {Record<string, number>}
+ */
+function signatureCounts(violations) {
+  /** @type {Record<string, number>} */
+  const m = {};
+  for (const v of violations) {
+    if (v.severity !== "error") continue;
+    const s = signature(v);
+    m[s] = (m[s] ?? 0) + 1;
+  }
+  return m;
+}
+
+// ---------------------------------------------------------------------------
 // Baseline
 // ---------------------------------------------------------------------------
+/**
+ * @returns {Record<string, Record<string, number>|number>} per-file signature
+ *   multiset. Legacy numeric entries (old count-only baselines) are tolerated
+ *   and fall back to a total-count comparison for that file.
+ */
 function loadBaseline() {
   if (MODE.noBaseline) return {};
   try {
@@ -366,11 +404,15 @@ function loadBaseline() {
   }
 }
 
+/** @param {Record<string, Record<string, number>>} files */
 function writeBaseline(files) {
   const payload = {
     _comment:
-      "Per-file ERROR-count baseline for scripts/i18n-guard.mjs. The guard " +
-      "fails when a file exceeds its count here. Lower/remove entries as i18n " +
+      "Per-file ERROR-signature baseline for scripts/i18n-guard.mjs. Each file " +
+      "maps a violation signature ('rule\\u0001normalized text', line-independent) " +
+      "to the number of allowed occurrences. The guard fails when a file holds a " +
+      "signature beyond its allowance (a new or extra violation) — this catches a " +
+      "swap that keeps the per-file count identical. Lower/remove entries as i18n " +
       "remediation WPs clean each route; regenerate with --update-baseline.",
     generated: "i18n remediation 20260604",
     files,
@@ -388,6 +430,8 @@ function main() {
   /** @type {Record<string, {line:number,rule:string,severity:string,text:string}[]>} */
   const report = {};
   const errorCounts = {};
+  /** @type {Record<string, Record<string, number>>} per-file ERROR signature multiset */
+  const errorSigs = {};
   let totalErrors = 0;
   let totalWarn = 0;
 
@@ -395,30 +439,70 @@ function main() {
     const v = checkFile(rel);
     if (v.length) report[rel] = v;
     const ec = v.filter((x) => x.severity === "error").length;
-    if (ec) errorCounts[rel] = ec;
+    if (ec) {
+      errorCounts[rel] = ec;
+      errorSigs[rel] = signatureCounts(v);
+    }
     totalErrors += ec;
     totalWarn += v.length - ec;
   }
 
   if (MODE.updateBaseline) {
-    writeBaseline(Object.fromEntries(Object.entries(errorCounts).sort()));
+    // Persist sorted files, each with its signatures sorted, for stable diffs.
+    const sortedFiles = {};
+    for (const rel of Object.keys(errorSigs).sort()) {
+      sortedFiles[rel] = Object.fromEntries(Object.entries(errorSigs[rel]).sort());
+    }
+    writeBaseline(sortedFiles);
     process.stdout.write(
       `i18n-guard: baseline written to scripts/i18n-guard-baseline.json ` +
-        `(${Object.keys(errorCounts).length} files, ${totalErrors} errors)\n`,
+        `(${Object.keys(errorSigs).length} files, ${totalErrors} errors)\n`,
     );
     process.exit(0);
   }
 
-  // Determine failures: file error count over its baseline allowance.
+  // Determine failures by comparing each file's current ERROR signature multiset
+  // against its baseline allowance. A file fails when it carries a signature
+  // beyond its allowed count — i.e. a brand-new violation, an extra copy of a
+  // known-shape one, OR a swap (one violation remediated, a *different* one
+  // introduced: identical per-file count, but a never-seen signature). Removed
+  // signatures (known debt draining) never fail. A non-baselined file with any
+  // error fails outright (allowance 0 for every signature).
+  /** @type {{rel:string,count:number,allowed:number,offenders:{sig:string,count:number,allowed:number,lines:number[],text:string}[]}[]} */
   const failures = [];
-  for (const [rel, count] of Object.entries(errorCounts)) {
-    const allowed = baseline[rel] ?? 0;
-    if (count > allowed) failures.push({ rel, count, allowed });
+  for (const [rel, sigs] of Object.entries(errorSigs)) {
+    const base = baseline[rel];
+    // Tolerate a legacy count-only baseline entry: fall back to total-count gate.
+    if (typeof base === "number") {
+      if (errorCounts[rel] > base) {
+        failures.push({ rel, count: errorCounts[rel], allowed: base, offenders: [] });
+      }
+      continue;
+    }
+    const allowedSigs = base ?? {};
+    const offenders = [];
+    let allowedTotal = 0;
+    for (const [sig, allowed] of Object.entries(allowedSigs)) allowedTotal += allowed;
+    for (const [sig, count] of Object.entries(sigs)) {
+      const allowed = allowedSigs[sig] ?? 0;
+      if (count > allowed) {
+        // Locate the offending occurrences' file:line + display text.
+        const matches = (report[rel] ?? []).filter(
+          (x) => x.severity === "error" && signature(x) === sig,
+        );
+        const lines = matches.map((x) => x.line);
+        const text = matches[0]?.text ?? "";
+        offenders.push({ sig, count, allowed, lines, text });
+      }
+    }
+    if (offenders.length) {
+      failures.push({ rel, count: errorCounts[rel], allowed: allowedTotal, offenders });
+    }
   }
 
   if (MODE.json) {
     process.stdout.write(
-      `${JSON.stringify({ report, errorCounts, failures, totalErrors, totalWarn }, null, 2)}\n`,
+      `${JSON.stringify({ report, errorCounts, errorSigs, failures, totalErrors, totalWarn }, null, 2)}\n`,
     );
     process.exit(failures.length ? 1 : 0);
   }
@@ -442,7 +526,18 @@ function main() {
       `\n✗ FAIL — ${failures.length} file(s) above i18n baseline (new/regressed debt):\n`,
     );
     for (const f of failures.sort((a, b) => b.count - a.count)) {
-      process.stdout.write(`    ${f.rel}: ${f.count} errors (baseline ${f.allowed})\n`);
+      process.stdout.write(
+        `    ${f.rel}: ${f.count} errors (baseline ${f.allowed})\n`,
+      );
+      // List the specific new/extra violations with file:line so the worklist
+      // points straight at the regression, not just the file total.
+      for (const o of f.offenders) {
+        const where = o.lines.length ? `:${o.lines.join(",")}` : "";
+        const extra = o.count - o.allowed;
+        process.stdout.write(
+          `        + ${f.rel}${where}  [${extra} new] ${o.text}\n`,
+        );
+      }
     }
     process.stdout.write(
       `\nFix the new violations, or if you intentionally cleaned a file run\n` +
