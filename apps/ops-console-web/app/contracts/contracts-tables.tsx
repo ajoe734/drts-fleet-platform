@@ -7,7 +7,7 @@ import type {
   ResourceActionDescriptor,
 } from "@drts/contracts";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import type { Locale } from "@/lib/translations";
+import { t, type Locale } from "@/lib/translations";
 import {
   CanvasIcon,
   CanvasPill as Pill,
@@ -117,10 +117,6 @@ const actionStackStyle: CSSProperties = {
   whiteSpace: "normal",
 };
 
-function copy(locale: Locale, en: string, zh: string) {
-  return locale === "zh" ? zh : en;
-}
-
 function linkButtonStyle(
   tone: CanvasTone = "neutral",
   disabled = false,
@@ -216,11 +212,11 @@ function actionTone(action: ResourceActionDescriptor): CanvasTone {
 function actionLabel(action: ResourceActionDescriptor, locale: Locale) {
   switch (action.action) {
     case "open_contract_detail":
-      return copy(locale, "Contract detail", "合約詳情");
+      return t("contracts.table.action.contractDetail", locale);
     case "open_partner_governance":
-      return copy(locale, "Partner governance", "夥伴治理");
+      return t("contracts.link.partnerGovernance", locale);
     case "open_fleet_governance":
-      return copy(locale, "Fleet governance", "車隊治理");
+      return t("contracts.link.fleetGovernance", locale);
     default:
       return formatOpsCodeLabel(locale, action.action);
   }
@@ -232,11 +228,7 @@ function actionReason(action: ResourceActionDescriptor, locale: Locale) {
   }
 
   if (action.disabledReasonCode === "contract_detail_pending") {
-    return copy(
-      locale,
-      "Read-only detail route ships in a follow-up ops leaf (Q-OPS03).",
-      "唯讀詳情路由將由後續 ops 子任務交付（Q-OPS03）。",
-    );
+    return t("contracts.table.actionDisabled.contractDetailPending", locale);
   }
 
   return formatOpsCodeLabel(locale, action.disabledReasonCode);
@@ -305,9 +297,9 @@ function renderAction(
         </span>
       )}
       <span style={tinyMetaStyle(actionTone(action))}>
-        {copy(locale, `risk:${action.riskLevel}`, `風險:${action.riskLevel}`)}
+        {t("contracts.table.action.risk", locale, { level: action.riskLevel })}
         {action.requiresReason
-          ? copy(locale, " · reason required", " · 需填原因")
+          ? t("contracts.table.action.reasonRequired", locale)
           : ""}
       </span>
       {!action.enabled && reason ? (
@@ -323,7 +315,7 @@ function buildContractColumns(
 ): CanvasTableColumn<ContractRow>[] {
   return [
     {
-      h: copy(locale, "CONTRACT", "合約"),
+      h: t("contracts.table.contract", locale),
       w: 200,
       r: (row) => (
         <div style={stackStyle}>
@@ -332,13 +324,13 @@ function buildContractColumns(
           </span>
           <span style={secondaryTextStyle}>{row.serviceScope}</span>
           <span style={{ ...mutedTextStyle, ...monoTextStyle }}>
-            {row.operatingAreaId ?? copy(locale, "no area", "無營運區")}
+            {row.operatingAreaId ?? t("contracts.table.noArea", locale)}
           </span>
         </div>
       ),
     },
     {
-      h: copy(locale, "KIND", "類型"),
+      h: t("contracts.table.kind", locale),
       w: 130,
       r: (row) => (
         <div style={stackStyle}>
@@ -350,7 +342,7 @@ function buildContractColumns(
       ),
     },
     {
-      h: copy(locale, "COUNTERPARTY", "交易對手"),
+      h: t("contracts.table.counterparty", locale),
       w: 220,
       r: (row) => (
         <div style={stackStyle}>
@@ -365,7 +357,7 @@ function buildContractColumns(
       ),
     },
     {
-      h: copy(locale, "TERM", "合約期間"),
+      h: t("contracts.table.term", locale),
       w: 210,
       r: (row) => (
         <div style={stackStyle}>
@@ -383,26 +375,22 @@ function buildContractColumns(
             }}
           >
             {row.expired
-              ? copy(locale, "Expired", "已到期")
+              ? t("contracts.status.expired", locale)
               : row.daysToExpiry === null
-                ? copy(locale, "Open-ended", "無到期日")
+                ? t("contracts.status.openEnded", locale)
                 : row.expiringSoon
-                  ? copy(
-                      locale,
-                      `Expires in ${row.daysToExpiry}d`,
-                      `${row.daysToExpiry} 天後到期`,
-                    )
-                  : copy(
-                      locale,
-                      `${row.daysToExpiry}d remaining`,
-                      `剩 ${row.daysToExpiry} 天`,
-                    )}
+                  ? t("contracts.table.expiresIn", locale, {
+                      days: row.daysToExpiry,
+                    })
+                  : t("contracts.table.remainingDays", locale, {
+                      days: row.daysToExpiry,
+                    })}
           </span>
         </div>
       ),
     },
     {
-      h: copy(locale, "STATUS / TERMS", "狀態 / 條款"),
+      h: t("contracts.table.statusTerms", locale),
       w: 230,
       r: (row) => (
         <div style={stackStyle}>
@@ -419,7 +407,7 @@ function buildContractColumns(
       ),
     },
     {
-      h: copy(locale, "ACTIONS", "操作"),
+      h: t("contracts.table.actions", locale),
       w: 220,
       r: (row) => (
         <div style={actionStackStyle}>
@@ -459,7 +447,7 @@ function buildPartnerColumns(
 ): CanvasTableColumn<PartnerRelationRow>[] {
   return [
     {
-      h: copy(locale, "PARTNER ENTRY", "夥伴渠道"),
+      h: t("contracts.table.partnerEntry", locale),
       w: 240,
       r: (row) => (
         <div style={stackStyle}>
@@ -471,7 +459,7 @@ function buildPartnerColumns(
       ),
     },
     {
-      h: copy(locale, "PROGRAM", "方案"),
+      h: t("contracts.table.program", locale),
       w: 180,
       r: (row) => (
         <div style={stackStyle}>
@@ -483,7 +471,7 @@ function buildPartnerColumns(
       ),
     },
     {
-      h: copy(locale, "ELIGIBILITY", "資格模式"),
+      h: t("contracts.table.eligibility", locale),
       w: 180,
       r: (row) => (
         <div style={stackStyle}>
@@ -495,7 +483,7 @@ function buildPartnerColumns(
       ),
     },
     {
-      h: copy(locale, "STATUS", "狀態"),
+      h: t("common.status", locale),
       w: 130,
       r: (row) => (
         <Pill theme={theme} tone={row.statusTone} dot>
@@ -504,7 +492,7 @@ function buildPartnerColumns(
       ),
     },
     {
-      h: copy(locale, "GOVERNANCE", "治理"),
+      h: t("contracts.table.governance", locale),
       w: 160,
       r: (row) => (
         <Link
@@ -513,7 +501,7 @@ function buildPartnerColumns(
           rel="noreferrer"
           style={linkButtonStyle("info")}
         >
-          {copy(locale, "Partner admin", "夥伴管理")}
+          {t("contracts.link.partnerAdmin", locale)}
           <CanvasIcon name="ext" size={11} />
         </Link>
       ),
