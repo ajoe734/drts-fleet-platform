@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-04T07:33:27.538Z",
+  "generatedAt": "2026-06-04T07:40:08.354Z",
   "platformAdminBaseUrl": "https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app",
   "opsBaseUrl": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app",
   "totals": {
@@ -325,10 +325,7 @@
       "shellCount": 1,
       "shellOk": true,
       "bodyOk": true,
-      "consoleErrors": [
-        "Failed to load resource: the server responded with a status of 404 ()",
-        "Failed to load resource: the server responded with a status of 404 ()"
-      ],
+      "consoleErrors": [],
       "pageErrors": [],
       "screenshot": ".artifacts/func-audit/ops-console-root.png",
       "errors": []
@@ -345,6 +342,7 @@
       "shellOk": true,
       "bodyOk": true,
       "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 ()",
         "Failed to load resource: the server responded with a status of 404 ()",
         "Failed to load resource: the server responded with a status of 404 ()"
       ],
