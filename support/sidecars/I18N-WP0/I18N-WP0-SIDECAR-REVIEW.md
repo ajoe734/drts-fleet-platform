@@ -38,7 +38,7 @@ Stable fields from `ai-status.json`:
 
 - owner=`Codex`
 - reviewer=`Claude`
-- status=`in_progress` at packet creation time
+- status=`review_approved`
 - task_class=`sidecar`
 - helper_parent=`I18N-WP0`
 - helper_kind=`review_packet`
@@ -55,13 +55,16 @@ Current machine-truth state:
 
 - owner=`Claude`
 - reviewer=`Codex2`
-- status=`review_approved`
+- status=`done`
 - phase=`i18n-bilingual-remediation-202606`
 - artifacts:
   - `scripts/i18n-guard.mjs`
   - `apps/ops-console-web/lib/i18n.tsx`
   - `apps/ops-console-web/lib/translations.ts`
   - `apps/platform-admin-web/lib/translations.ts`
+- commit_hash=`31b6550fa68439dafff6ee7afee57e503499ec0a`
+- commit_subject=`I18N-WP0: signature-based i18n-guard baseline (catch same-count swaps)`
+- integration_status=`branch_pushed`
 
 Approved review note recorded in `next`:
 
@@ -78,7 +81,7 @@ Approved review note recorded in `next`:
 
 Reviewer implication:
 
-- the parent implementation review is already complete
+- the parent implementation review and owner closeout are already complete
 - this sidecar should not restage the parent as `review`
 - this packet exists only to preserve reviewer-facing evidence and handoff context outside the volatile `next` field
 
@@ -151,11 +154,13 @@ Important boundary:
 Checks performed for this support slice:
 
 - confirmed the task branch is `codex/i18n-wp0-sidecar-review`
-- confirmed sidecar task machine truth was moved from `backlog` to `in_progress`
-- confirmed parent task `I18N-WP0` is already `review_approved`
+- confirmed sidecar task machine truth is `review_approved` and awaiting owner closeout
+- confirmed parent task `I18N-WP0` is `done` with recorded commit/push metadata
 - confirmed this slice adds only `support/sidecars/I18N-WP0/I18N-WP0-SIDECAR-REVIEW.md`
 - confirmed the packet cites machine truth and approved parent commit evidence instead of editing canonical truth
 
-Pending lifecycle action after writing this packet:
+Pending lifecycle action after reviewer approval:
 
-- hand off `I18N-WP0-SIDECAR-REVIEW` to reviewer `Claude` via `scripts/ai-status.sh handoff ...`
+- owner closeout commit with `Verification:` trailer
+- scoped normal push on `codex/i18n-wp0-sidecar-review`
+- `scripts/ai-status.sh done` with `INTEGRATION_STATUS=not_applicable` because this is a support-only sidecar
