@@ -40,7 +40,9 @@ content.
 - local + remote reviewer branch
   `codex/i18n-ops-04 @ 6f8e506cfb63b022b4f52f2d45aa75ad93ad2c77`
 - helper audit branch
-  `codex2/i18n-ops-04-unblock-history-repair @ <pending push from this task>`
+  `codex2/i18n-ops-04-unblock-history-repair @ 3f82504180b3fc269a2fe05f8ea959f9ef02c224`
+- draft PR
+  `https://github.com/ajoe734/drts-fleet-platform/pull/522`
 - `git rev-list --left-right --count origin/dev...codex2/i18n-ops-04`
   returns `0 2`, confirming the owner branch is only two commits ahead of dev.
 - `git rev-list --left-right --count codex2/i18n-wp0...codex2/i18n-ops-04`
@@ -137,3 +139,7 @@ git push -u origin codex2/i18n-ops-04-repair
   - `git show --stat --summary --name-only 4e925b0d`
   - `git show --stat --summary --name-only a1dfe85f`
   - `git show --stat --summary --name-only 6f8e506c`
+- Recorded branch/PR evidence:
+  - `git push -u origin codex2/i18n-ops-04-unblock-history-repair`
+  - `gh pr list --head codex2/i18n-ops-04-unblock-history-repair --state all --json number,title,url,headRefName,baseRefName,state,isDraft`
+  - `gh pr create --base dev --head codex2/i18n-ops-04-unblock-history-repair --title "I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: document clean-rail recovery" --draft`
