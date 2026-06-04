@@ -113,7 +113,10 @@ type FleetTabState<T> = {
   refreshMetadata: UiRefreshMetadata | null;
 };
 
-type Translator = (key: string, params?: Record<string, string | number>) => string;
+type Translator = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
 
 const TAB_ORDER: TabKey[] = [
   "vehicles",
@@ -963,7 +966,9 @@ export default function FleetPage() {
                   disabled={!descriptor.enabled || busy}
                   onClick={() => void runAction(descriptor, context)}
                 >
-                  {busy ? t("fleet.working") : actionLabel(t, descriptor.action)}
+                  {busy
+                    ? t("fleet.working")
+                    : actionLabel(t, descriptor.action)}
                 </CanvasBtn>
               </span>
             );

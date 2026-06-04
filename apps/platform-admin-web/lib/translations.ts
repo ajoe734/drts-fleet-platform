@@ -332,8 +332,7 @@ const en = {
     "Canvas-aligned filter surface is reserved for the next iteration.",
   "fleet.refreshFailed": "Fleet data refresh failed",
   "fleet.snapshotNotFresh": "Snapshot is not fully fresh",
-  "fleet.driversNeedComplianceReview":
-    "{count} drivers need compliance review",
+  "fleet.driversNeedComplianceReview": "{count} drivers need compliance review",
   "fleet.driverComplianceReviewBody":
     "dispatch.compliance.license_warn_30d remains enforced in ops-console until these blockers are cleared.",
   "fleet.exclusivityGovernanceTitle": "Exclusivity governance · Q-ADM08",
