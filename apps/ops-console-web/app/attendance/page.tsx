@@ -191,7 +191,7 @@ function formatAttendanceRate(
   locale: Locale,
 ) {
   if (denominator === 0) {
-    return locale === "en" ? "No records" : "無記錄";
+    return t("attendance.noRecords", locale);
   }
   return `${Math.round((numerator / denominator) * 100)}%`;
 }
@@ -369,17 +369,17 @@ export default async function AttendancePage({
     {
       key: "today" as const,
       href: "/attendance",
-      label: locale === "en" ? "Today" : "今日",
+      label: t("attendance.tab.today", locale),
     },
     {
       key: "week" as const,
       href: "/attendance?view=week",
-      label: locale === "en" ? "This week" : "本週",
+      label: t("attendance.tab.week", locale),
     },
     {
       key: "exceptions" as const,
       href: "/attendance?view=exceptions",
-      label: locale === "en" ? "Exceptions" : "異常",
+      label: t("attendance.tab.exceptions", locale),
     },
   ];
   const tabs = tabConfigs.map((tab) =>
@@ -404,7 +404,7 @@ export default async function AttendancePage({
         activeTab={activeTab}
         actions={
           <Btn theme={theme} variant="primary" icon="ext">
-            {locale === "en" ? "Export" : "匯出"}
+            {t("attendance.export", locale)}
           </Btn>
         }
       />
@@ -414,11 +414,7 @@ export default async function AttendancePage({
           <Banner
             theme={theme}
             tone="danger"
-            title={
-              locale === "en"
-                ? "Attendance data is temporarily unavailable"
-                : "出勤資料暫時無法載入"
-            }
+            title={t("attendance.loadErrorTitle", locale)}
             body={loadError}
           />
         ) : null}
@@ -427,23 +423,20 @@ export default async function AttendancePage({
           <Banner
             theme={theme}
             tone={absentCount > 0 ? "danger" : "warn"}
-            title={
-              locale === "en"
-                ? `${exceptionCount} attendance exceptions need follow-up`
-                : `${exceptionCount} 筆出勤異常待追蹤`
-            }
-            body={
-              locale === "en"
-                ? `${absentCount} absent, ${lateCount} partial attendance in the current service day.`
-                : `目前服務日有 ${absentCount} 筆未到、${lateCount} 筆部分出勤。`
-            }
+            title={t("attendance.exceptions.bannerTitle", locale, {
+              count: exceptionCount,
+            })}
+            body={t("attendance.exceptions.bannerBody", locale, {
+              absent: absentCount,
+              partial: lateCount,
+            })}
           />
         ) : null}
 
         <div style={kpiGridStyle}>
           <KPI
             theme={theme}
-            label={locale === "en" ? "Scheduled drivers" : "排班司機"}
+            label={t("attendance.scheduledDrivers", locale)}
             value={scheduledDrivers}
           />
           <KPI
@@ -463,21 +456,21 @@ export default async function AttendancePage({
           />
           <KPI
             theme={theme}
-            label={locale === "en" ? "Exception / late" : "異常 / 遲到"}
+            label={t("attendance.exceptionLate", locale)}
             value={exceptionCount}
             delta={
               absentCount > 0
-                ? locale === "en"
-                  ? `${absentCount} absent`
-                  : `${absentCount} 未到`
+                ? t("attendance.absentCount", locale, {
+                    count: absentCount,
+                  })
                 : undefined
             }
             deltaTone={exceptionCount > 0 ? "down" : "neutral"}
             sub={
               partialCount > 0
-                ? locale === "en"
-                  ? `${partialCount} partial`
-                  : `${partialCount} 部分出勤`
+                ? t("attendance.partialCount", locale, {
+                    count: partialCount,
+                  })
                 : undefined
             }
           />
@@ -485,18 +478,18 @@ export default async function AttendancePage({
 
         <Card
           theme={theme}
-          title={locale === "en" ? "On-duty gantt" : "當班甘特"}
+          title={t("attendance.gantt.title", locale)}
           actions={
             <>
               <Pill theme={theme} tone="info" dot>
-                {locale === "en" ? "active" : "進行中"}
+                {t("attendance.gantt.legend.active", locale)}
               </Pill>
               <Pill theme={theme} tone="success" dot>
-                {locale === "en" ? "completed" : "已完成"}
+                {t("attendance.gantt.legend.completed", locale)}
               </Pill>
               {scopeShifts.some((shift) => shift.status === "abandoned") ? (
                 <Pill theme={theme} tone="danger" dot>
-                  {locale === "en" ? "abandoned" : "中止"}
+                  {t("attendance.gantt.legend.abandoned", locale)}
                 </Pill>
               ) : null}
             </>

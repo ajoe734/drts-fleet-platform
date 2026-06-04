@@ -76,7 +76,7 @@ export function DriverPlatformActions({
             >
               {pendingAction === "take-offline"
                 ? t("drivers.detail.refreshing")
-                : t("drivers.detail.takeOffline")}
+                : t("drivers.actions.takePlatformOffline")}
             </button>
             <button
               type="button"
@@ -96,7 +96,7 @@ export function DriverPlatformActions({
             >
               {pendingAction === "mark-reauth"
                 ? t("drivers.detail.refreshing")
-                : t("drivers.detail.markReauth")}
+                : t("drivers.actions.requestReauth")}
             </button>
           </>
         ) : null}
@@ -117,14 +117,14 @@ export function DriverPlatformActions({
           {pendingAction === "toggle-hold"
             ? t("drivers.detail.refreshing")
             : workState === "incident_hold"
-              ? t("drivers.detail.releaseHold")
-              : t("drivers.detail.suppressMatching")}
+              ? t("drivers.actions.releaseIncidentHold")
+              : t("drivers.actions.suppressMatching")}
         </button>
       </div>
 
       {error ? (
         <div style={{ color: "#b91c1c", fontSize: "0.82rem" }}>
-          {t("drivers.detail.actionError")}: {error}
+          {t("drivers.actions.error")}: {error}
         </div>
       ) : null}
     </div>
@@ -185,7 +185,7 @@ export function DriverPlatformRowActions({
       >
         {pendingAction === "offline"
           ? t("drivers.detail.refreshing")
-          : t("drivers.detail.takeOffline")}
+          : t("drivers.actions.takePlatformOffline")}
       </button>
       <button
         type="button"
@@ -202,11 +202,11 @@ export function DriverPlatformRowActions({
       >
         {pendingAction === "reauth"
           ? t("drivers.detail.refreshing")
-          : t("drivers.detail.markReauth")}
+          : t("drivers.actions.requestReauth")}
       </button>
       {error ? (
         <span style={{ color: "#b91c1c", fontSize: "0.78rem" }}>
-          {t("drivers.detail.actionError")}: {error}
+          {t("drivers.actions.error")}: {error}
         </span>
       ) : null}
     </div>

@@ -27,6 +27,11 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
+type TranslateFn = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
+
 type ActionReceipt = {
   action: string;
   reason?: string;
@@ -155,6 +160,10 @@ function formatList(value: string[]) {
   return value.length > 0 ? value.join(" · ") : "—";
 }
 
+function formatNullableLabel(value: string | null | undefined) {
+  return value && value.trim().length > 0 ? value : "—";
+}
+
 function getGateTone(
   gate: PlatformAdminTenantRecord["rollout"]["sandboxStatus"],
 ): CanvasTone {
@@ -212,6 +221,7 @@ function buildTenantConsoleHref(tenant: PlatformAdminTenantRecord) {
 function buildInviteeHint(
   role: PlatformTenantBootstrapRoleDefault,
   tenant: PlatformAdminTenantRecord,
+  t: TranslateFn,
 ) {
   const billingEmail = tenant.bootstrapDefaults.billingBaseline.email;
 
@@ -220,24 +230,29 @@ function buildInviteeHint(
   }
 
   if (role.acknowledgedAt) {
-    return `${role.displayName} acknowledged`;
+    return t("tenants.detail.role.acknowledgedHint", {
+      name: role.displayName,
+    });
   }
 
   if (role.invitedAt) {
-    return `${role.displayName} invited`;
+    return t("tenants.detail.role.invitedHint", { name: role.displayName });
   }
 
-  return "Pending assignment";
+  return t("tenants.detail.role.pendingAssignment");
 }
 
-function getRoleStateLabel(role: PlatformTenantBootstrapRoleDefault) {
+function getRoleStateLabel(
+  role: PlatformTenantBootstrapRoleDefault,
+  t: TranslateFn,
+) {
   if (role.acknowledgedAt) {
-    return "已確認";
+    return t("tenants.role.acknowledged");
   }
   if (role.invitedAt) {
-    return "邀請中";
+    return t("tenants.role.invited");
   }
-  return "未邀請";
+  return t("tenants.role.pending");
 }
 
 function getRoleTone(role: PlatformTenantBootstrapRoleDefault): CanvasTone {
@@ -250,16 +265,16 @@ function getRoleTone(role: PlatformTenantBootstrapRoleDefault): CanvasTone {
   return "neutral";
 }
 
-function buildTabs() {
+function buildTabs(t: TranslateFn) {
   return [
-    "Overview",
-    "Modules",
-    "Onboarding",
-    "Rollout",
-    "Roles",
-    "Webhook baseline",
-    "Billing baseline",
-    "Audit",
+    t("tenants.detail.tab.overview"),
+    t("tenants.detail.tab.modules"),
+    t("tenants.detail.tab.onboarding"),
+    t("tenants.detail.tab.rollout"),
+    t("tenants.detail.tab.roles"),
+    t("tenants.detail.tab.webhookBaseline"),
+    t("tenants.detail.tab.billingBaseline"),
+    t("tenants.detail.tab.audit"),
   ];
 }
 
@@ -341,7 +356,7 @@ export default function TenantDetailPage() {
     ? params.tenantId[0]
     : params?.tenantId;
   const client = usePlatformAdminClient();
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const [tenant, setTenant] = useState<PlatformAdminTenantRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -354,7 +369,7 @@ export default function TenantDetailPage() {
   const loadTenant = useCallback(async () => {
     if (!tenantId) {
       setLoading(false);
-      setError("Missing tenant id.");
+      setError(t("tenants.detail.missingTenantId"));
       return;
     }
 
@@ -369,13 +384,13 @@ export default function TenantDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [client, tenantId]);
+  }, [client, t, tenantId]);
 
   useEffect(() => {
     void loadTenant();
   }, [loadTenant]);
 
-  const tabs = useMemo(() => buildTabs(), []);
+  const tabs = useMemo(() => buildTabs(t), [t]);
   const activeTab = tabs[3];
 
   const acknowledgedRoles =
@@ -390,11 +405,11 @@ export default function TenantDetailPage() {
       tenant
         ? tenant.bootstrapDefaults.roleDefaults.map((role) => ({
             ...role,
-            invitee: buildInviteeHint(role, tenant),
-            stateLabel: getRoleStateLabel(role),
+            invitee: buildInviteeHint(role, tenant, t),
+            stateLabel: getRoleStateLabel(role, t),
           }))
         : [],
-    [tenant],
+    [t, tenant],
   );
 
   const handleInviteRole = useCallback(
@@ -412,7 +427,7 @@ export default function TenantDetailPage() {
         const updated = await client.inviteTenantRole(tenant.id, command);
         setTenant(updated);
         setReceipt({
-          action: `Invited ${roleCode}`,
+          action: `${t("tenants.role.invited")} ${roleCode}`,
           at: new Date().toISOString(),
         });
       } catch (cause: unknown) {
@@ -421,7 +436,7 @@ export default function TenantDetailPage() {
         setRoleActionKey(null);
       }
     },
-    [client, tenant],
+    [client, t, tenant],
   );
 
   const handleAcknowledgeRole = useCallback(
@@ -439,7 +454,7 @@ export default function TenantDetailPage() {
         const updated = await client.acknowledgeTenantRole(tenant.id, command);
         setTenant(updated);
         setReceipt({
-          action: `Acknowledged ${roleCode}`,
+          action: `${t("tenants.role.acknowledged")} ${roleCode}`,
           at: new Date().toISOString(),
         });
       } catch (cause: unknown) {
@@ -448,7 +463,7 @@ export default function TenantDetailPage() {
         setRoleActionKey(null);
       }
     },
-    [client, tenant],
+    [client, t, tenant],
   );
 
   const handleOpenTenantConsole = useCallback(() => {
@@ -475,7 +490,7 @@ export default function TenantDetailPage() {
       const updated = await client.rollbackHoldTenant(tenant.id);
       setTenant(updated);
       setReceipt({
-        action: "Entered rollback_hold",
+        action: t("tenants.detail.enterRollbackHold"),
         reason: rollbackReason.trim(),
         at: new Date().toISOString(),
       });
@@ -486,12 +501,12 @@ export default function TenantDetailPage() {
     } finally {
       setRollbackSubmitting(false);
     }
-  }, [client, rollbackReason, tenant]);
+  }, [client, rollbackReason, t, tenant]);
 
   const roleColumns = useMemo<CanvasTableColumn<RoleRow>[]>(
     () => [
       {
-        h: "INVITEE",
+        h: t("tenants.detail.role.col.invitee"),
         w: 220,
         r: (row) => (
           <div style={{ display: "grid", gap: 2 }}>
@@ -503,13 +518,15 @@ export default function TenantDetailPage() {
                 fontFamily: theme.monoFamily,
               }}
             >
-              {row.required ? "required role" : "optional role"}
+              {row.required
+                ? t("tenants.detail.role.required")
+                : t("tenants.detail.role.optional")}
             </span>
           </div>
         ),
       },
       {
-        h: "ROLE",
+        h: t("tenants.detail.role.col.role"),
         w: 180,
         r: (row) => (
           <div style={{ display: "grid", gap: 2 }}>
@@ -523,7 +540,7 @@ export default function TenantDetailPage() {
         ),
       },
       {
-        h: "STATE",
+        h: t("tenants.detail.role.col.state"),
         w: 112,
         r: (row) => (
           <Pill theme={theme} tone={getRoleTone(row)} dot>
@@ -532,14 +549,14 @@ export default function TenantDetailPage() {
         ),
       },
       {
-        h: "UPDATED",
+        h: t("tenants.detail.role.col.updated"),
         w: 112,
         mono: true,
         r: (row) =>
           formatShortDate(row.acknowledgedAt ?? row.invitedAt ?? undefined),
       },
       {
-        h: "ACTION",
+        h: t("tenants.detail.role.col.action"),
         w: 140,
         r: (row) => {
           const inviteKey = `invite:${row.roleCode}`;
@@ -554,7 +571,9 @@ export default function TenantDetailPage() {
                 disabled={roleActionKey !== null}
                 onClick={() => void handleInviteRole(row.roleCode)}
               >
-                {roleActionKey === inviteKey ? "Inviting…" : "Invite"}
+                {roleActionKey === inviteKey
+                  ? t("tenants.detail.role.inviting")
+                  : t("tenants.role.invite")}
               </Btn>
             );
           }
@@ -568,7 +587,9 @@ export default function TenantDetailPage() {
                 disabled={roleActionKey !== null}
                 onClick={() => void handleAcknowledgeRole(row.roleCode)}
               >
-                {roleActionKey === ackKey ? "Saving…" : "Acknowledge"}
+                {roleActionKey === ackKey
+                  ? t("tenants.detail.role.saving")
+                  : t("tenants.role.acknowledge")}
               </Btn>
             );
           }
@@ -579,7 +600,7 @@ export default function TenantDetailPage() {
         },
       },
     ],
-    [handleAcknowledgeRole, handleInviteRole, roleActionKey],
+    [handleAcknowledgeRole, handleInviteRole, roleActionKey, t],
   );
 
   const onboardingItems = useMemo(
@@ -587,47 +608,47 @@ export default function TenantDetailPage() {
       tenant
         ? [
             {
-              k: "INTEGRATION MODE",
+              k: t("tenants.form.integrationMode"),
               v: tenant.integrationPackage.mode,
               mono: true,
             },
             {
-              k: "BOOTSTRAP ADMIN",
+              k: t("tenants.form.bootstrapAdminEmail"),
               v: tenant.bootstrapDefaults.billingBaseline.email || "—",
               mono: true,
             },
             {
-              k: "SANDBOX BASE URL",
+              k: t("tenants.form.sandboxBaseUrl"),
               v: tenant.integrationPackage.sandboxBaseUrl || "—",
               mono: true,
             },
             {
-              k: "PRODUCTION BASE URL",
+              k: t("tenants.form.productionBaseUrl"),
               v: tenant.integrationPackage.productionBaseUrl || "—",
               mono: true,
             },
             {
-              k: "BILLING BASELINE",
+              k: t("tenants.detail.tab.billingBaseline"),
               v: `${tenant.bootstrapDefaults.billingBaseline.invoiceTitle || "—"} · ${tenant.bootstrapDefaults.billingBaseline.contactName || "—"}`,
             },
             {
-              k: "WEBHOOK BASELINE",
+              k: t("tenants.detail.tab.webhookBaseline"),
               v: formatList(tenant.bootstrapDefaults.webhookEvents),
               mono: true,
             },
             {
-              k: "QUOTA / 月",
-              v: `${tenant.quotas.monthlyBookings.toLocaleString(locale === "en" ? "en-US" : "zh-TW")} bookings`,
+              k: t("tenants.detail.onboarding.quotaPerMonth"),
+              v: `${tenant.quotas.monthlyBookings.toLocaleString(locale === "en" ? "en-US" : "zh-TW")} ${t("tenants.list.kpi.bookingsSub")}`,
               mono: true,
             },
             {
-              k: "MODULES",
+              k: t("tenants.detail.onboarding.modules"),
               v: `${tenant.enabledModules.length}/${PLATFORM_TENANT_MODULES.length}`,
               mono: true,
             },
           ]
         : [],
-    [locale, tenant],
+    [locale, t, tenant],
   );
 
   const stepDefinitions = useMemo<
@@ -644,43 +665,53 @@ export default function TenantDetailPage() {
 
     return [
       {
-        label: "sandbox",
-        subtitle: `gate ${tenant.rollout.sandboxStatus}`,
+        label: t("tenants.list.filter.sandbox"),
+        subtitle: t("tenants.detail.step.gate", {
+          status: tenant.rollout.sandboxStatus,
+        }),
         tone: getGateTone(tenant.rollout.sandboxStatus),
         active:
           tenant.rollout.stage === "sandbox" &&
           tenant.status !== "rollback_hold",
       },
       {
-        label: "pilot",
-        subtitle: `gate ${tenant.rollout.pilotStatus}`,
+        label: t("tenants.list.filter.pilot"),
+        subtitle: t("tenants.detail.step.gate", {
+          status: tenant.rollout.pilotStatus,
+        }),
         tone: getGateTone(tenant.rollout.pilotStatus),
         active:
           tenant.rollout.stage === "pilot" && tenant.status !== "rollback_hold",
       },
       {
-        label: "production",
-        subtitle: `gate ${tenant.rollout.productionStatus}`,
+        label: t("tenants.list.filter.production"),
+        subtitle: t("tenants.detail.step.gate", {
+          status: tenant.rollout.productionStatus,
+        }),
         tone: getGateTone(tenant.rollout.productionStatus),
         active:
           tenant.rollout.stage === "production" &&
           tenant.status !== "rollback_hold",
       },
       {
-        label: "rollback_hold ready",
+        label: t("tenants.detail.step.rollbackReady"),
         subtitle: tenant.rollout.rollbackOwner
-          ? `owner: ${tenant.rollout.rollbackOwner}`
-          : "owner not assigned",
+          ? t("tenants.detail.step.owner", {
+              owner: tenant.rollout.rollbackOwner,
+            })
+          : t("tenants.detail.step.ownerUnassigned"),
         tone: tenant.status === "rollback_hold" ? "danger" : "neutral",
         active: tenant.status === "rollback_hold",
       },
     ];
-  }, [tenant]);
+  }, [t, tenant]);
 
   if (loading) {
     return (
       <div style={pageBodyStyle}>
-        <div style={emptyStateStyle}>Loading tenant lifecycle workspace…</div>
+        <div style={emptyStateStyle}>
+          {t("tenants.detail.loadingWorkspace")}
+        </div>
       </div>
     );
   }
@@ -690,15 +721,19 @@ export default function TenantDetailPage() {
       <>
         <PageHeader
           theme={theme}
-          title="租戶詳情"
-          subtitle={tenantId ? `tenantId: ${tenantId}` : "Tenant detail"}
+          title={t("tenants.detail.pageTitle")}
+          subtitle={
+            tenantId
+              ? t("tenants.detail.pageSubtitle", { tenantId })
+              : t("tenants.detail.pageTitle")
+          }
           actions={
             <Btn
               theme={theme}
               variant="secondary"
               onClick={() => window.location.assign("/tenants")}
             >
-              Back to tenants
+              {t("tenants.detail.backToTenants")}
             </Btn>
           }
         />
@@ -708,7 +743,7 @@ export default function TenantDetailPage() {
               theme={theme}
               tone="danger"
               icon="warn"
-              title="Unable to load tenant detail"
+              title={t("tenants.detail.loadErrorTitle")}
               body={error}
             />
           ) : null}
@@ -717,13 +752,9 @@ export default function TenantDetailPage() {
               <div
                 style={{ color: theme.text, fontWeight: 600, marginBottom: 8 }}
               >
-                Tenant not found
+                {t("tenants.detail.notFoundTitle")}
               </div>
-              <p style={mutedTextStyle}>
-                The assigned route now resolves with a page body and no longer
-                falls through to a 404. Pick another tenant from the lifecycle
-                table.
-              </p>
+              <p style={mutedTextStyle}>{t("tenants.detail.notFoundBody")}</p>
             </div>
           </div>
         </div>
@@ -742,7 +773,7 @@ export default function TenantDetailPage() {
             {tenant.name}
             <Pill theme={theme} tone={getStatusTone(tenant.status)} dot>
               {tenant.status === "rollback_hold"
-                ? "rollback_hold"
+                ? t("tenants.list.filter.rollbackHold")
                 : tenant.rollout.stage}
             </Pill>
           </span>
@@ -758,7 +789,7 @@ export default function TenantDetailPage() {
               icon="ext"
               onClick={handleOpenTenantConsole}
             >
-              在 Tenant Console 開啟
+              {t("tenants.detail.openConsole")}
             </Btn>
             <Btn
               theme={theme}
@@ -767,7 +798,7 @@ export default function TenantDetailPage() {
               disabled={tenant.status === "rollback_hold"}
               onClick={() => setShowRollbackModal(true)}
             >
-              進入 rollback_hold
+              {t("tenants.detail.enterRollbackHold")}
             </Btn>
           </>
         }
@@ -779,7 +810,7 @@ export default function TenantDetailPage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title="Tenant detail action failed"
+            title={t("tenants.detail.actionFailed")}
             body={error}
           />
         ) : null}
@@ -789,10 +820,15 @@ export default function TenantDetailPage() {
             theme={theme}
             tone="success"
             icon="ok"
-            title={`Audit receipt · ${receipt.action}`}
+            title={t("tenants.detail.auditReceipt", {
+              action: receipt.action,
+            })}
             body={
               receipt.reason
-                ? `Reason captured: ${receipt.reason} · ${formatDateTime(receipt.at)}`
+                ? t("tenants.detail.reasonCaptured", {
+                    reason: receipt.reason,
+                    at: formatDateTime(receipt.at),
+                  })
                 : formatDateTime(receipt.at)
             }
           />
@@ -800,8 +836,11 @@ export default function TenantDetailPage() {
 
         <Card
           theme={theme}
-          title="Rollout 進度 · state machine"
-          subtitle={`cutover owner: ${tenant.rollout.cutoverOwner ?? "unassigned"} · rollback owner: ${tenant.rollout.rollbackOwner ?? "unassigned"} (linked user records · Q-ADM06)`}
+          title={t("tenants.detail.rolloutProgressTitle")}
+          subtitle={t("tenants.detail.rolloutProgressSubtitle", {
+            cutoverOwner: formatNullableLabel(tenant.rollout.cutoverOwner),
+            rollbackOwner: formatNullableLabel(tenant.rollout.rollbackOwner),
+          })}
         >
           <div style={stepperStyle}>
             {stepDefinitions.map((step) => (
@@ -819,11 +858,15 @@ export default function TenantDetailPage() {
               theme={theme}
               tone={tenant.rollout.rollbackPrepared ? "success" : "warn"}
               icon={tenant.rollout.rollbackPrepared ? "ok" : "warn"}
-              title={`rollbackPrepared = ${tenant.rollout.rollbackPrepared ? "true" : "false"}`}
+              title={t("tenants.detail.rollbackPreparedTitle", {
+                value: tenant.rollout.rollbackPrepared
+                  ? t("common.true")
+                  : t("common.false"),
+              })}
               body={
                 tenant.rollout.rollbackPrepared
-                  ? "租戶已具備 production rollback 條件。"
-                  : "推進到 production 前，需先補齊 rollback plan。"
+                  ? t("tenants.detail.rollbackPrepared.ready")
+                  : t("tenants.detail.rollbackPrepared.pending")
               }
             />
             <Banner
@@ -838,32 +881,40 @@ export default function TenantDetailPage() {
                   ? "ok"
                   : "warn"
               }
-              title="role acknowledgements"
-              body={`${acknowledgedRoles ?? 0}/${totalRoles} 角色已邀請並確認。`}
+              title={t("tenants.detail.roleAcknowledgementsTitle")}
+              body={t("tenants.detail.roleAcknowledgementsBody", {
+                acknowledged: acknowledgedRoles,
+                total: totalRoles,
+              })}
             />
             <Banner
               theme={theme}
               tone={rolloutGate === "blocked" ? "danger" : "info"}
               icon={rolloutGate === "blocked" ? "warn" : "clock"}
-              title={`current gate = ${rolloutGate}`}
+              title={t("tenants.detail.currentGateTitle", {
+                gate: formatNullableLabel(rolloutGate),
+              })}
               body={
                 tenant.rollout.notes?.trim()
                   ? tenant.rollout.notes
-                  : "尚未記錄額外 cutover note。"
+                  : t("tenants.detail.currentGateEmpty")
               }
             />
           </div>
         </Card>
 
         <div style={detailGridStyle}>
-          <Card theme={theme} title="Onboarding package">
+          <Card theme={theme} title={t("tenants.detail.onboardingPackage")}>
             <DL theme={theme} cols={2} items={onboardingItems} />
           </Card>
 
           <div style={stackStyle}>
             <Card
               theme={theme}
-              title={`Roles & invites · ${acknowledgedRoles ?? 0}/${totalRoles} acknowledged`}
+              title={t("tenants.detail.rolesInvitesTitle", {
+                acknowledged: acknowledgedRoles,
+                total: totalRoles,
+              })}
             >
               <Table
                 theme={theme}
@@ -873,28 +924,28 @@ export default function TenantDetailPage() {
               />
             </Card>
 
-            <Card theme={theme} title="Tenant baseline">
+            <Card theme={theme} title={t("tenants.detail.tenantBaseline")}>
               <DL
                 theme={theme}
                 cols={1}
                 items={[
                   {
-                    k: "STAGE",
+                    k: t("tenants.detail.baseline.stage"),
                     v: tenant.rollout.stage,
                     mono: true,
                   },
                   {
-                    k: "CURRENT GATE",
-                    v: rolloutGate ?? "—",
+                    k: t("tenants.detail.baseline.currentGate"),
+                    v: formatNullableLabel(rolloutGate),
                     mono: true,
                   },
                   {
-                    k: "UPDATED",
+                    k: t("tenants.detail.baseline.updated"),
                     v: formatDateTime(tenant.updatedAt),
                     mono: true,
                   },
                   {
-                    k: "LAST PROMOTED",
+                    k: t("tenants.detail.baseline.lastPromoted"),
                     v: formatDateTime(tenant.rollout.lastPromotedAt ?? ""),
                     mono: true,
                   },
@@ -906,23 +957,28 @@ export default function TenantDetailPage() {
 
         <Card
           theme={theme}
-          title="Recent activity"
-          subtitle="Audit subset for rollout, onboarding, and role-invite decisions"
+          title={t("tenants.detail.recentActivity")}
+          subtitle={t("tenants.detail.recentActivitySubtitle")}
         >
           <div style={bannerGridStyle}>
             <Banner
               theme={theme}
               tone="info"
               icon="clock"
-              title="Tenant record updated"
-              body={`${formatDateTime(tenant.updatedAt)} · ${tenant.code}`}
+              title={t("tenants.detail.recordUpdated")}
+              body={t("tenants.detail.recordUpdatedBody", {
+                at: formatDateTime(tenant.updatedAt),
+                code: tenant.code,
+              })}
             />
             <Banner
               theme={theme}
               tone="info"
               icon="clock"
-              title="Tenant created"
-              body={`${formatDateTime(tenant.createdAt)} · bootstrap package recorded`}
+              title={t("tenants.detail.recordCreated")}
+              body={t("tenants.detail.recordCreatedBody", {
+                at: formatDateTime(tenant.createdAt),
+              })}
             />
             <Banner
               theme={theme}
@@ -930,13 +986,15 @@ export default function TenantDetailPage() {
               icon={tenant.status === "rollback_hold" ? "warn" : "ok"}
               title={
                 tenant.status === "rollback_hold"
-                  ? "Tenant is currently in rollback_hold"
-                  : "No active rollback hold"
+                  ? t("tenants.detail.rollbackHoldActive")
+                  : t("tenants.detail.rollbackHoldInactive")
               }
               body={
                 tenant.rollout.lastPromotedAt
-                  ? `Last promotion: ${formatDateTime(tenant.rollout.lastPromotedAt)}`
-                  : "Promotion history not yet recorded."
+                  ? t("tenants.detail.lastPromotion", {
+                      at: formatDateTime(tenant.rollout.lastPromotedAt),
+                    })
+                  : t("tenants.detail.noPromotionHistory")
               }
             />
           </div>
@@ -966,7 +1024,7 @@ export default function TenantDetailPage() {
                   id="rollback-hold-title"
                   style={{ color: theme.text, fontSize: 14, fontWeight: 600 }}
                 >
-                  Enter rollback_hold
+                  {t("tenants.detail.modal.title")}
                 </div>
                 <div
                   style={{
@@ -975,8 +1033,7 @@ export default function TenantDetailPage() {
                     marginTop: 2,
                   }}
                 >
-                  High-risk action. Reason is required before the command is
-                  sent.
+                  {t("tenants.detail.modal.subtitle")}
                 </div>
               </div>
               <Btn
@@ -989,7 +1046,7 @@ export default function TenantDetailPage() {
                   }
                 }}
               >
-                Close
+                {t("tenants.detail.modal.close")}
               </Btn>
             </div>
             <div style={modalBodyStyle}>
@@ -997,14 +1054,20 @@ export default function TenantDetailPage() {
                 theme={theme}
                 tone="danger"
                 icon="warn"
-                title={`${tenant.name} will be blocked from further promotion.`}
-                body="Use this when rollout risk or incident state requires an explicit governance hold."
+                title={t("tenants.detail.modal.warningTitle", {
+                  tenant: tenant.name,
+                })}
+                body={t("tenants.detail.modal.warningBody")}
               />
-              <Field theme={theme} label="Reason" required>
+              <Field
+                theme={theme}
+                label={t("tenants.detail.modal.reasonLabel")}
+                required
+              >
                 <textarea
                   value={rollbackReason}
                   onChange={(event) => setRollbackReason(event.target.value)}
-                  placeholder="Describe the incident, rollout risk, or operator decision that requires rollback_hold."
+                  placeholder={t("tenants.detail.modal.reasonPlaceholder")}
                   style={textareaStyle}
                 />
               </Field>
@@ -1015,7 +1078,7 @@ export default function TenantDetailPage() {
                   onClick={() => setShowRollbackModal(false)}
                   disabled={rollbackSubmitting}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </Btn>
                 <Btn
                   theme={theme}
@@ -1025,7 +1088,9 @@ export default function TenantDetailPage() {
                   }
                   onClick={() => void handleConfirmRollbackHold()}
                 >
-                  {rollbackSubmitting ? "Submitting…" : "Confirm rollback_hold"}
+                  {rollbackSubmitting
+                    ? t("tenants.detail.modal.submitting")
+                    : t("tenants.detail.modal.confirm")}
                 </Btn>
               </div>
             </div>

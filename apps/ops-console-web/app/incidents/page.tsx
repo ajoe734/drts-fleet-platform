@@ -49,6 +49,7 @@ import {
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { t as translate, type Locale } from "@/lib/translations";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -107,37 +108,69 @@ type IncidentFormInitialValues = {
   location?: string;
 };
 
-function formatDateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : "—";
-}
-
-function formatTableDateTime(value: string | null | undefined) {
+function formatDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return "—";
+    return translate("common.dash", locale);
   }
 
-  return new Date(value).toISOString().slice(0, 16).replace("T", " ");
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return translate("common.dash", locale);
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(parsed)
+    .replace(",", "");
 }
 
-function formatIncidentAge(
-  value: string | null | undefined,
-  locale: "en" | "zh",
-) {
+function formatTableDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return locale === "en" ? "Time not recorded" : "尚未記錄時間";
+    return translate("common.dash", locale);
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return translate("common.dash", locale);
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(parsed)
+    .replace(",", "");
+}
+
+function formatIncidentAge(locale: Locale, value: string | null | undefined) {
+  if (!value) {
+    return translate("incidents.time.notRecorded", locale);
   }
 
   const deltaMinutes = Math.round(
     (Date.now() - new Date(value).getTime()) / (1000 * 60),
   );
   if (deltaMinutes < 60) {
-    return locale === "en"
-      ? `${deltaMinutes} min ago`
-      : `${deltaMinutes} 分鐘前`;
+    return translate("incidents.time.minutesAgo", locale, {
+      count: deltaMinutes,
+    });
   }
 
   const deltaHours = Math.round(deltaMinutes / 60);
-  return locale === "en" ? `${deltaHours} hr ago` : `${deltaHours} 小時前`;
+  return translate("incidents.time.hoursAgo", locale, {
+    count: deltaHours,
+  });
 }
 
 function controlStyle(themeToken: CanvasTheme, mono = false): CSSProperties {
@@ -301,44 +334,38 @@ function actionRiskTone(riskLevel: ResourceActionDescriptor["riskLevel"]) {
   return "neutral" as const;
 }
 
-function renderSeverityPill(severity: IncidentSeverity) {
+function renderSeverityPill(locale: Locale, severity: IncidentSeverity) {
   return (
     <Pill theme={theme} tone={incidentSeverityTone(severity)} dot>
-      {severity}
+      {formatOpsCodeLabel(locale, severity)}
     </Pill>
   );
 }
 
-function renderStatusPill(status: IncidentStatus) {
+function renderStatusPill(locale: Locale, status: IncidentStatus) {
   return (
     <Pill theme={theme} tone={incidentStatusTone(status)} dot>
-      {status}
+      {formatOpsCodeLabel(locale, status)}
     </Pill>
   );
 }
 
-function buildCriticalBannerBody(record: IncidentRecord, locale: "en" | "zh") {
+function buildCriticalBannerBody(record: IncidentRecord, locale: Locale) {
   const driverLabel = record.relatedDriverId
-    ? locale === "en"
-      ? `Driver ${record.relatedDriverId}`
-      : `司機 ${record.relatedDriverId}`
-    : locale === "en"
-      ? "Driver not linked"
-      : "未連結司機";
+    ? translate("incidents.critical.driverLinked", locale, {
+        driverId: record.relatedDriverId,
+      })
+    : translate("incidents.critical.driverMissing", locale);
   const locationLabel = record.location
-    ? locale === "en"
-      ? `at ${record.location}`
-      : `於 ${record.location}`
-    : locale === "en"
-      ? "location pending"
-      : "地點待補";
+    ? translate("incidents.critical.locationAt", locale, {
+        location: record.location,
+      })
+    : translate("incidents.critical.locationPending", locale);
   const ownerLabel = record.assignedTo
-    ? locale === "en"
-      ? `${record.assignedTo} now owns the response.`
-      : `目前由 ${record.assignedTo} 接手處理。`
-    : locale === "en"
-      ? "Ownership not assigned yet."
-      : "目前尚未指派 owner。";
+    ? translate("incidents.critical.ownerAssigned", locale, {
+        owner: record.assignedTo,
+      })
+    : translate("incidents.critical.ownerUnassigned", locale);
 
   return `${driverLabel} ${locationLabel}. ${record.description} ${ownerLabel}`;
 }
@@ -524,10 +551,9 @@ export default function IncidentsPage() {
   async function loadActivity(incidentId: string) {
     try {
       const client = getOpsClient();
-      const loadIncidentActivity =
-        client[
-          `getIncident${"Time"}${"line"}` as keyof typeof client
-        ] as (incidentId: string) => Promise<IncidentActivityEntry[]>;
+      const loadIncidentActivity = client[
+        `getIncident${"Time"}${"line"}` as keyof typeof client
+      ] as (incidentId: string) => Promise<IncidentActivityEntry[]>;
       const [items, actions] = await Promise.all([
         loadIncidentActivity(incidentId),
         client.getServiceRecoveryActions(incidentId),
@@ -622,7 +648,7 @@ export default function IncidentsPage() {
 
   const columns: CanvasTableColumn<IncidentTableRow>[] = [
     {
-      h: "INC",
+      h: t("incidents.table.incidentId"),
       w: 104,
       mono: true,
       r: (row) => (
@@ -636,7 +662,7 @@ export default function IncidentsPage() {
       ),
     },
     {
-      h: "TITLE",
+      h: t("incidents.table.title"),
       w: 300,
       r: (row) => (
         <div
@@ -662,23 +688,23 @@ export default function IncidentsPage() {
       ),
     },
     {
-      h: "CAT",
-      k: "category",
+      h: t("incidents.table.category"),
       w: 132,
       mono: true,
+      r: (row) => formatOpsCodeLabel(locale, row.category),
     },
     {
-      h: "SEV",
+      h: t("incidents.table.severity"),
       w: 110,
-      r: (row) => renderSeverityPill(row.severity),
+      r: (row) => renderSeverityPill(locale, row.severity),
     },
     {
-      h: "STATUS",
+      h: t("incidents.table.status"),
       w: 130,
-      r: (row) => renderStatusPill(row.status),
+      r: (row) => renderStatusPill(locale, row.status),
     },
     {
-      h: "DRIVER",
+      h: t("incidents.table.driver"),
       w: 110,
       mono: true,
       r: (row) =>
@@ -692,27 +718,33 @@ export default function IncidentsPage() {
             ) : null}
           </div>
         ) : (
-          "—"
+          t("common.dash")
         ),
     },
     {
-      h: "OCCURRED",
+      h: t("incidents.table.occurred"),
       w: 168,
       mono: true,
-      r: (row) => formatTableDateTime(row.occurredAt ?? row.createdAt),
+      r: (row) => formatTableDateTime(locale, row.occurredAt ?? row.createdAt),
     },
     {
-      h: "RECOVERY",
+      h: t("incidents.table.recovery"),
       w: 108,
       mono: true,
-      r: (row) => `${row.serviceRecoveryActions.length} actions`,
+      r: (row) =>
+        t("incidents.recoveryCount", {
+          count: row.serviceRecoveryActions.length,
+        }),
     },
   ];
 
   const tabConfig: Array<{ key: IncidentTab; label: string }> = [
-    { key: "active", label: `Active ${activeCount}` },
-    { key: "resolved", label: "Resolved" },
-    { key: "closed", label: "Closed" },
+    {
+      key: "active",
+      label: t("incidents.tabs.active", { count: activeCount }),
+    },
+    { key: "resolved", label: t("incidents.tabs.resolved") },
+    { key: "closed", label: t("incidents.tabs.closed") },
   ];
   const tabNodes = tabConfig.map((tab) => (
     <button
@@ -739,12 +771,8 @@ export default function IncidentsPage() {
     <>
       <PageHeader
         theme={theme}
-        title={locale === "en" ? "Incident hub" : "事故中心"}
-        subtitle={
-          locale === "en"
-            ? "safety · collision · property · service recovery — driver SOS / dispatch exception stays ops-owned"
-            : "安全 · 碰撞 · 財損 · 服務補償 — driver SOS / dispatch exception 一律由 ops 接手"
-        }
+        title={t("incidents.hubTitle")}
+        subtitle={t("incidents.hubSubtitle")}
         tabs={tabNodes}
         activeTab={activeTabNode}
         actions={
@@ -755,11 +783,10 @@ export default function IncidentsPage() {
               variant={showFilters ? "primary" : "secondary"}
               onClick={() => setShowFilters((value) => !value)}
             >
-              {locale === "en" ? "Filters" : "類別"}
+              {t("incidents.filters.toggle")}
             </Btn>
             <CanvasActionButton
               descriptor={CREATE_INCIDENT_ACTION}
-              locale={locale}
               onInvoke={() => {
                 setShowCreate(true);
                 setEditingId(null);
@@ -791,11 +818,9 @@ export default function IncidentsPage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title={
-              locale === "en"
-                ? `SOS critical response active · ${criticalBannerRecord.incidentId}`
-                : `SOS 緊急事件處理中 · ${criticalBannerRecord.incidentId}`
-            }
+            title={t("incidents.critical.active", {
+              incidentId: criticalBannerRecord.incidentId,
+            })}
             body={`${criticalBannerRecord.title} · ${formatOpsCodeLabel(
               locale,
               criticalBannerRecord.severity,
@@ -811,7 +836,7 @@ export default function IncidentsPage() {
                   void inspectIncident(criticalBannerRecord.incidentId)
                 }
               >
-                {locale === "en" ? "Open incident" : "前往事件"}
+                {t("incidents.critical.openIncident")}
               </Btn>
             }
           />
@@ -821,49 +846,29 @@ export default function IncidentsPage() {
             tone="info"
             icon="ok"
             title={getOpsLabel(locale, "incidentsAllClear")}
-            body={
-              locale === "en"
-                ? "No critical incidents are waiting in the active queue."
-                : "目前沒有重大事故待處理。"
-            }
+            body={t("incidents.critical.allClear")}
           />
         )}
 
         <Card
           theme={theme}
-          title={
-            locale === "en"
-              ? "Governance guardrail · Three iron laws"
-              : "治理護欄 · 三條鐵律"
-          }
-          subtitle={
-            locale === "en"
-              ? "Ops-owned constraints from the design canvas. Frontend affordances do not override them."
-              : "設計畫布定下的 ops 約束；前端操作不可以覆蓋。"
-          }
+          title={t("incidents.governance.title")}
+          subtitle={t("incidents.governance.subtitle")}
         >
           <div style={{ display: "grid", gap: 10 }}>
             {[
-              locale === "en"
-                ? "Driver SOS and dispatch-exception incidents stay ops-owned even after they link to an order or complaint."
-                : "Driver SOS 與 dispatch-exception incident 即使後續連到 order / complaint，仍然維持 ops-owned。",
-              locale === "en"
-                ? "Service recovery action, timeline update, and formal resolution are separate records and must never be conflated."
-                : "Service recovery action、timeline update、formal resolution 是三種不同紀錄，不可混用。",
-              locale === "en"
-                ? "Escalation target is not an owner transfer. Handoff remains incomplete until the receiving side acknowledges it."
-                : "Escalation target 不等於 owner transfer；接手方完成 acknowledgment 前，不算真正轉手。",
+              t("incidents.governance.rule1"),
+              t("incidents.governance.rule2"),
+              t("incidents.governance.rule3"),
             ].map((rule, index) => (
               <Banner
                 key={index}
                 theme={theme}
                 tone="info"
                 icon="audit"
-                title={
-                  locale === "en"
-                    ? `Rule ${index + 1}`
-                    : `鐵律 ${index + 1}`
-                }
+                title={t("incidents.governance.ruleTitle", {
+                  index: index + 1,
+                })}
                 body={rule}
               />
             ))}
@@ -874,7 +879,9 @@ export default function IncidentsPage() {
           <Card
             theme={theme}
             title={t("incidents.form.updateTitle")}
-            subtitle={editingRecord?.incidentId ?? t("incidents.selectIncident")}
+            subtitle={
+              editingRecord?.incidentId ?? t("incidents.selectIncident")
+            }
           >
             <IncidentForm
               editingRecord={editingRecord}
@@ -924,7 +931,7 @@ export default function IncidentsPage() {
         {showFilters ? (
           <Card
             theme={theme}
-            title={locale === "en" ? "Filter incidents" : "篩選事故"}
+            title={t("incidents.filters.title")}
             subtitle={t("incidents.visible", { count: filteredRecords.length })}
           >
             <div
@@ -1008,8 +1015,8 @@ export default function IncidentsPage() {
               theme={theme}
               title={`${selectedIncident.incidentId} · ${selectedIncident.title}`}
               subtitle={formatIncidentAge(
-                selectedIncident.occurredAt ?? selectedIncident.createdAt,
                 locale,
+                selectedIncident.occurredAt ?? selectedIncident.createdAt,
               )}
               actions={
                 <>
@@ -1017,7 +1024,7 @@ export default function IncidentsPage() {
                     href={`/incidents/${encodeURIComponent(selectedIncident.incidentId)}`}
                     style={inlineLinkStyle(theme)}
                   >
-                    {locale === "en" ? "Open detail" : "詳細頁"}
+                    {t("incidents.detail.openDetail")}
                   </Link>
                   <Btn
                     theme={theme}
@@ -1048,7 +1055,7 @@ export default function IncidentsPage() {
                       setShowRecoveryForm(false);
                     }}
                   >
-                    {locale === "en" ? "Hide" : "收起"}
+                    {t("incidents.detail.hide")}
                   </Btn>
                 </>
               }
@@ -1067,8 +1074,8 @@ export default function IncidentsPage() {
                     label={t("common.status")}
                     value={formatOpsCodeLabel(locale, selectedIncident.status)}
                     delta={formatIncidentAge(
-                      selectedIncident.occurredAt ?? selectedIncident.createdAt,
                       locale,
+                      selectedIncident.occurredAt ?? selectedIncident.createdAt,
                     )}
                     deltaTone="neutral"
                   />
@@ -1081,7 +1088,7 @@ export default function IncidentsPage() {
                     )}
                     delta={
                       selectedIncident.assignedTo ??
-                      (locale === "en" ? "Unassigned" : "未指派")
+                      t("incidents.detail.unassigned")
                     }
                     deltaTone={
                       selectedIncident.severity === "critical" ||
@@ -1100,16 +1107,14 @@ export default function IncidentsPage() {
                           )
                         : t("incidents.form.escalationNone")
                     }
-                    delta={formatDateTime(selectedIncident.updatedAt)}
+                    delta={formatDateTime(locale, selectedIncident.updatedAt)}
                     deltaTone="neutral"
                   />
                   <KPI
                     theme={theme}
                     label={t("incidents.serviceRecovery")}
                     value={String(visibleRecoveryCount)}
-                    delta={
-                      locale === "en" ? "actions recorded" : "筆行動已記錄"
-                    }
+                    delta={t("incidents.detail.actionsRecorded")}
                     deltaTone="neutral"
                   />
                 </div>
@@ -1118,27 +1123,32 @@ export default function IncidentsPage() {
                   theme={theme}
                   cols={2}
                   items={[
-                    { k: "CATEGORY", v: selectedIncident.category, mono: true },
                     {
-                      k: "OCCURRED",
+                      k: t("incidents.detail.category"),
+                      v: formatOpsCodeLabel(locale, selectedIncident.category),
+                      mono: true,
+                    },
+                    {
+                      k: t("incidents.detail.occurred"),
                       v: formatDateTime(
+                        locale,
                         selectedIncident.occurredAt ??
                           selectedIncident.createdAt,
                       ),
                       mono: true,
                     },
                     {
-                      k: "DRIVER",
-                      v: selectedIncident.relatedDriverId ?? "—",
+                      k: t("incidents.detail.driver"),
+                      v: selectedIncident.relatedDriverId ?? t("common.dash"),
                       mono: true,
                     },
                     {
-                      k: "VEHICLE",
-                      v: selectedIncident.relatedVehicleId ?? "—",
+                      k: t("incidents.detail.vehicle"),
+                      v: selectedIncident.relatedVehicleId ?? t("common.dash"),
                       mono: true,
                     },
                     {
-                      k: "ORDER",
+                      k: t("incidents.detail.order"),
                       v: selectedIncident.relatedOrderId ? (
                         <Link
                           href={`/dispatch?orderId=${encodeURIComponent(selectedIncident.relatedOrderId)}`}
@@ -1147,12 +1157,12 @@ export default function IncidentsPage() {
                           {selectedIncident.relatedOrderId}
                         </Link>
                       ) : (
-                        "—"
+                        t("common.dash")
                       ),
                       mono: true,
                     },
                     {
-                      k: "COMPLAINT",
+                      k: t("incidents.detail.complaint"),
                       v: selectedIncident.relatedComplaintCaseNo ? (
                         <Link
                           href={`/complaints?caseNo=${encodeURIComponent(selectedIncident.relatedComplaintCaseNo)}`}
@@ -1161,16 +1171,16 @@ export default function IncidentsPage() {
                           {selectedIncident.relatedComplaintCaseNo}
                         </Link>
                       ) : (
-                        "—"
+                        t("common.dash")
                       ),
                       mono: true,
                     },
                     {
-                      k: "LOCATION",
-                      v: selectedIncident.location ?? "—",
+                      k: t("incidents.detail.location"),
+                      v: selectedIncident.location ?? t("common.dash"),
                     },
                     {
-                      k: "REPORTED BY",
+                      k: t("incidents.detail.reportedBy"),
                       v: selectedIncident.reportedBy,
                       mono: true,
                     },
@@ -1217,7 +1227,7 @@ export default function IncidentsPage() {
                               fontFamily: theme.monoFamily,
                             }}
                           >
-                            {formatDateTime(entry.createdAt)}
+                            {formatDateTime(locale, entry.createdAt)}
                           </span>
                         </div>
                         <div style={{ color: theme.text, lineHeight: 1.45 }}>
@@ -1260,15 +1270,15 @@ export default function IncidentsPage() {
                   cols={1}
                   items={[
                     {
-                      k: "STATUS",
-                      v: renderStatusPill(selectedIncident.status),
+                      k: t("incidents.table.status"),
+                      v: renderStatusPill(locale, selectedIncident.status),
                     },
                     {
-                      k: "SEVERITY",
-                      v: renderSeverityPill(selectedIncident.severity),
+                      k: t("incidents.table.severity"),
+                      v: renderSeverityPill(locale, selectedIncident.severity),
                     },
                     {
-                      k: "ESCALATION",
+                      k: t("incidents.detail.escalation"),
                       v: selectedIncident.escalationTarget
                         ? t(
                             `incidents.escalationBadge.${selectedIncident.escalationTarget}` as any,
@@ -1276,7 +1286,7 @@ export default function IncidentsPage() {
                         : t("incidents.form.escalationNone"),
                     },
                     {
-                      k: "LINKS",
+                      k: t("incidents.detail.links"),
                       v: (
                         <div
                           style={{
@@ -1290,7 +1300,7 @@ export default function IncidentsPage() {
                               href={`/dispatch?orderId=${encodeURIComponent(selectedIncident.relatedOrderId)}`}
                               style={inlineLinkStyle(theme)}
                             >
-                              {getOpsLabel(locale, "order")}
+                              {t("incidents.detail.order")}
                             </Link>
                           ) : null}
                           {selectedIncident.relatedComplaintCaseNo ? (
@@ -1298,7 +1308,7 @@ export default function IncidentsPage() {
                               href={`/complaints?caseNo=${encodeURIComponent(selectedIncident.relatedComplaintCaseNo)}`}
                               style={inlineLinkStyle(theme)}
                             >
-                              {getOpsLabel(locale, "complaint")}
+                              {t("incidents.detail.complaint")}
                             </Link>
                           ) : null}
                           {selectedIncident.relatedOrderId ||
@@ -1372,7 +1382,7 @@ export default function IncidentsPage() {
                               fontFamily: theme.monoFamily,
                             }}
                           >
-                            {formatDateTime(action.createdAt)}
+                            {formatDateTime(locale, action.createdAt)}
                           </span>
                         </div>
                         <div style={{ color: theme.text, lineHeight: 1.45 }}>
@@ -1397,7 +1407,6 @@ export default function IncidentsPage() {
 
       {showCreate ? (
         <CreateIncidentModal
-          locale={locale}
           complaintCaseNo={complaintCaseNoFromQuery}
           initialValues={createDefaults}
           onCancel={() => {
@@ -1429,13 +1438,12 @@ export default function IncidentsPage() {
 
 function CanvasActionButton({
   descriptor,
-  locale,
   onInvoke,
 }: {
   descriptor: ResourceActionDescriptor;
-  locale: "en" | "zh";
   onInvoke: () => void;
 }) {
+  const { locale, t } = useTranslation();
   return (
     <Btn
       theme={theme}
@@ -1445,7 +1453,7 @@ function CanvasActionButton({
       disabled={!descriptor.enabled}
       onClick={onInvoke}
     >
-      {locale === "en" ? "Create incident" : "新增事故"}
+      {t("incidents.createAction")}
       {descriptor.requiresReason ? " *" : ""}
       {!descriptor.enabled && descriptor.disabledReasonCode ? (
         <span style={{ fontSize: 10, color: theme.textDim }}>
@@ -1458,18 +1466,17 @@ function CanvasActionButton({
 }
 
 function CreateIncidentModal({
-  locale,
   complaintCaseNo,
   initialValues,
   onCancel,
   onSubmit,
 }: {
-  locale: "en" | "zh";
   complaintCaseNo: string;
   initialValues: IncidentFormInitialValues;
   onCancel: () => void;
   onSubmit: (command: CreateIncidentCommand) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   return (
     <div style={modalScrimStyle()} onClick={onCancel}>
       <div
@@ -1482,37 +1489,27 @@ function CreateIncidentModal({
             <span
               style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
             >
-              {locale === "en" ? "Create incident" : "新增事故"}
+              {t("incidents.createAction")}
               <Pill
                 theme={theme}
                 tone={actionRiskTone(CREATE_INCIDENT_ACTION.riskLevel)}
               >
-                {locale === "en" ? "medium-risk" : "中風險"}
+                {t("incidents.createRisk")}
               </Pill>
             </span>
           }
           subtitle={
             complaintCaseNo
-              ? `${locale === "en" ? "Linked complaint" : "關聯客訴"} · ${complaintCaseNo}`
-              : locale === "en"
-                ? "Start from a governed modal action, then return to the table."
-                : "由受治理的 modal action 建立，完成後回到列表。"
+              ? `${t("incidents.createLinkedComplaint")} · ${complaintCaseNo}`
+              : t("incidents.createSubtitle")
           }
         >
           <Banner
             theme={theme}
             tone="info"
             icon="audit"
-            title={
-              locale === "en"
-                ? "Descriptor action: create incident"
-                : "描述動作：新增事故"
-            }
-            body={
-              locale === "en"
-                ? "Use this modal to create new records without displacing the incidents table."
-                : "透過此 modal 建立新紀錄，避免把 incidents 主列表擠出主要視線。"
-            }
+            title={t("incidents.createBannerTitle")}
+            body={t("incidents.createBannerBody")}
           />
           <div style={{ marginTop: 12 }}>
             <IncidentForm

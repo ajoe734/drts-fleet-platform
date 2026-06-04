@@ -19,14 +19,18 @@ interface LanguageContextValue {
   setLocale: (locale: Locale) => void;
 }
 
+// i18n remediation 20260604 §5: default locale is zh on both server and
+// client. The createContext fallback and LanguageProvider default must align
+// with getServerLocale() (which defaults to zh) to avoid an en->zh flash for
+// any consumer that renders outside the provider during hydration.
 const LanguageContext = createContext<LanguageContextValue>({
-  locale: "en",
+  locale: "zh",
   setLocale: () => {},
 });
 
 export function LanguageProvider({
   children,
-  defaultLocale = "en",
+  defaultLocale = "zh",
 }: {
   children: ReactNode;
   defaultLocale?: Locale;

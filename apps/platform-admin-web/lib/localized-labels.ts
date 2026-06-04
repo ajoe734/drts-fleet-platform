@@ -1,4 +1,4 @@
-import type { Locale } from "./translations";
+import { t as translate, type Locale } from "./translations";
 
 type LocalizedText = {
   en: string;
@@ -30,7 +30,6 @@ const UI_LABELS: Record<string, LocalizedText> = {
   applicableTo: { en: "Applicable To", zh: "適用對象" },
   call: { en: "Call", zh: "客服" },
   complaint: { en: "Complaint", zh: "客訴" },
-  pendingArtifactId: { en: "pending-artifact-id", zh: "待產生成品 ID" },
   defaultPlanName: {
     en: "Phase 1 Driver Fee Plan",
     zh: "Phase 1 司機費用方案",
@@ -69,6 +68,32 @@ const UI_LABELS: Record<string, LocalizedText> = {
   },
 };
 
+const SUPPORTED_ACTION_TRANSLATION_KEYS: Record<
+  string,
+  { label: string; description: string }
+> = {
+  accept: {
+    label: "adapterRegistry.supportedAction.accept.label",
+    description: "adapterRegistry.supportedAction.accept.description",
+  },
+  complete: {
+    label: "adapterRegistry.supportedAction.complete.label",
+    description: "adapterRegistry.supportedAction.complete.description",
+  },
+  incident: {
+    label: "adapterRegistry.supportedAction.incident.label",
+    description: "adapterRegistry.supportedAction.incident.description",
+  },
+  reject: {
+    label: "adapterRegistry.supportedAction.reject.label",
+    description: "adapterRegistry.supportedAction.reject.description",
+  },
+  proof_upload: {
+    label: "adapterRegistry.supportedAction.proofUpload.label",
+    description: "adapterRegistry.supportedAction.proofUpload.description",
+  },
+};
+
 const CODE_LABELS: Record<string, LocalizedText> = {
   active: { en: "Active", zh: "啟用中" },
   admin: { en: "Admin", zh: "管理員" },
@@ -78,34 +103,54 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   available: { en: "Available", zh: "可派遣" },
   critical: { en: "Critical", zh: "重大" },
   degraded: { en: "Degraded", zh: "降級" },
+  external_unavailable: { en: "External Unavailable", zh: "外部依賴不可用" },
+  fetch_failed: { en: "Fetch Failed", zh: "載入失敗" },
+  filtered_empty: { en: "Filtered Empty", zh: "篩選後無資料" },
   draft: { en: "Draft", zh: "草稿" },
   down: { en: "Down", zh: "停機" },
   drivers: { en: "Drivers", zh: "司機" },
   enterprise_dispatch: { en: "Enterprise Dispatch", zh: "企業派遣" },
+  fleet_partner: { en: "Fleet Partner", zh: "車隊合作方" },
+  fresh: { en: "Fresh", zh: "最新" },
+  governance_offboarding: { en: "Governance Offboarding", zh: "治理退場" },
   healthy: { en: "Healthy", zh: "正常" },
   inactive: { en: "Inactive", zh: "停用" },
   info: { en: "Info", zh: "資訊" },
   invited: { en: "Invited", zh: "已邀請" },
   issued: { en: "Issued", zh: "已開立" },
+  live: { en: "Live", zh: "即時" },
   mixed: { en: "Mixed", zh: "混合" },
   missing: { en: "Missing", zh: "缺漏" },
   manual_hold: { en: "Manual Hold", zh: "人工停派" },
+  no_data: { en: "No Data", zh: "無資料" },
+  not_provisioned: { en: "Not Provisioned", zh: "尚未配置" },
   operator: { en: "Operator", zh: "營運人員" },
   ops: { en: "Ops", zh: "營運" },
   ops_user: { en: "Ops User", zh: "營運使用者" },
   paid: { en: "Paid", zh: "已付款" },
   paused: { en: "Paused", zh: "暫停" },
   pending: { en: "Pending", zh: "待處理" },
+  permission_denied: { en: "Permission Denied", zh: "權限不足" },
   platform_admin: { en: "Platform Admin", zh: "平台管理員" },
   platform_funded: { en: "Platform Funded", zh: "平台資助" },
   published: { en: "Published", zh: "已發布" },
   pending_review: { en: "Pending Review", zh: "待審核" },
+  partner_api_key: { en: "Partner API Key", zh: "合作夥伴 API 金鑰" },
+  bank_card_inline: { en: "Bank Card Inline", zh: "銀行卡即時驗證" },
+  credit_card_airport_transfer: {
+    en: "Credit Card Airport Transfer",
+    zh: "信用卡機場接送",
+  },
   resolved: { en: "Resolved", zh: "已解決" },
   retired: { en: "Retired", zh: "已退役" },
   rollback_hold: { en: "Rollback Hold", zh: "回滾保留" },
   revoked: { en: "Revoked", zh: "已撤銷" },
   reporting: { en: "Reporting", zh: "報表" },
   scheduled: { en: "Scheduled", zh: "已排程" },
+  stale: { en: "Stale", zh: "過期" },
+  standard: { en: "Standard", zh: "標準" },
+  standard_taxi: { en: "Standard Taxi", zh: "標準計程車" },
+  submitted: { en: "Submitted", zh: "已送出" },
   superadmin: { en: "Superadmin", zh: "超級管理員" },
   suspended: { en: "Suspended", zh: "停用" },
   system: { en: "System", zh: "系統" },
@@ -171,6 +216,20 @@ export function getPlatformLabel(
   return formatTemplate(labels ? labels[locale] : String(key), params);
 }
 
+/**
+ * CAVEAT (i18n remediation 20260604, spec §1 + §E):
+ * This is the sanctioned path for turning enum/code values into display text,
+ * but it does NOT yet read from the central `translations.ts` dictionary — it
+ * resolves against the local `CODE_LABELS` map and, on a miss, falls back to
+ * `humanizeCode()`, which emits a title-cased *English* string regardless of
+ * `locale`. So in zh mode any code not present in `CODE_LABELS` leaks English.
+ * The shared `CODE_LABELS` map is also reused across domains, so a generic code
+ * can bleed an unrelated domain's label.
+ * TODO(i18n): migrate `CODE_LABELS` lookups to `t()` keys in `translations.ts`
+ * (key shape `<domain>.code.<value>`) so every displayed code is dictionary-
+ * backed in both locales. Tracked as a WP-0 caveat; the first WP to touch a
+ * surface that displays raw codes should fold its codes into the dictionary.
+ */
 export function formatPlatformCodeLabel(
   locale: Locale,
   value: string | null | undefined,
@@ -182,4 +241,35 @@ export function formatPlatformCodeLabel(
 
   const normalized = value.trim().toLowerCase();
   return CODE_LABELS[normalized]?.[locale] ?? humanizeCode(value);
+}
+
+export function formatSupportedActionLabel(
+  locale: Locale,
+  value: string | null | undefined,
+) {
+  if (!value) {
+    const unknownLabels = CODE_LABELS.unknown;
+    return unknownLabels ? unknownLabels[locale] : "Unknown";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  const translationKeys = SUPPORTED_ACTION_TRANSLATION_KEYS[normalized];
+  return translationKeys
+    ? translate(translationKeys.label, locale)
+    : humanizeCode(value);
+}
+
+export function formatSupportedActionDescription(
+  locale: Locale,
+  action: { name: string; description: string | null | undefined },
+) {
+  const normalized = action.name.trim().toLowerCase();
+  const translationKeys = SUPPORTED_ACTION_TRANSLATION_KEYS[normalized];
+  return (
+    (translationKeys
+      ? translate(translationKeys.description, locale)
+      : undefined) ??
+    action.description ??
+    formatSupportedActionLabel(locale, action.name)
+  );
 }
