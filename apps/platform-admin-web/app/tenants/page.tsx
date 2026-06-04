@@ -68,7 +68,6 @@ function isTenantFilter(value: string): value is TenantFilter {
 
 const th = buildCanvasTheme({
   surface: "platform",
-  dark: true,
   density: "compact",
 });
 

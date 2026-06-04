@@ -24,7 +24,6 @@ const PAGE_SIZE = 8;
 
 const theme = buildCanvasTheme({
   surface: "platform",
-  dark: true,
   density: "compact",
 });
 
