@@ -138,6 +138,7 @@ const en = {
   "opsAssistant.audit.view": "View audit",
   "opsAssistant.meta.available": "Available: {actions}",
   "opsAssistant.meta.noAlternatives": "No enabled alternatives.",
+  "opsAssistant.meta.receiptIds": "actionId {actionId} · auditId {auditId}",
   "opsAssistant.message.degradedFallback":
     "LLM degraded. Showing curated help-search fallback.\n\n{message}",
   "opsAssistant.message.proposed":
@@ -165,6 +166,9 @@ const en = {
     "Scoped to {kind}:{id}. The assistant is constrained to this visible resource and can only reuse the page's registered actions.",
   "opsAssistant.help.scope.meta":
     "Scope: {kind}:{id} | availableActions: {actions}",
+  "opsAssistant.help.scope.riskRequiresReason": "{riskLevel} / reason",
+  "opsAssistant.help.scope.disabled": "disabled:{reason}",
+  "opsAssistant.help.scope.actionSummary": "{action} ({risk}, {availability})",
   "opsAssistant.nav.openSelection": "Open {kind}",
   "opsAssistant.nav.openSelectionDescription":
     "Jump to the selected {kind} detail view.",
@@ -1858,6 +1862,7 @@ const zh: Record<keyof typeof en, string> = {
   "opsAssistant.audit.view": "檢視稽核",
   "opsAssistant.meta.available": "可用：{actions}",
   "opsAssistant.meta.noAlternatives": "沒有可用的替代動作。",
+  "opsAssistant.meta.receiptIds": "actionId {actionId} · auditId {auditId}",
   "opsAssistant.message.degradedFallback":
     "LLM 已降級。顯示策展式 help-search 備援。\n\n{message}",
   "opsAssistant.message.proposed":
@@ -1885,6 +1890,9 @@ const zh: Record<keyof typeof en, string> = {
     "目前範圍為 {kind}:{id}。助理僅限於這個可見資源，且只能重用頁面已註冊的動作。",
   "opsAssistant.help.scope.meta":
     "範圍：{kind}:{id} | availableActions：{actions}",
+  "opsAssistant.help.scope.riskRequiresReason": "{riskLevel} / 需原因",
+  "opsAssistant.help.scope.disabled": "已停用：{reason}",
+  "opsAssistant.help.scope.actionSummary": "{action}（{risk}，{availability}）",
   "opsAssistant.nav.openSelection": "開啟 {kind}",
   "opsAssistant.nav.openSelectionDescription":
     "跳轉到目前選取的 {kind} 詳情頁。",
