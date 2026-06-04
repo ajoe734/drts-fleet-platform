@@ -29,18 +29,11 @@ import {
 
 type ActionIntent = "toggle" | "override";
 
-type ActionDescriptor = {
-  intent: ActionIntent | "history";
-  riskLevel: "low" | "high";
-  requiresReason: boolean;
-};
-
 type ToggleDraft = {
   intent: "toggle";
   key: string;
   tenantId: string | null;
   description: string;
-  currentEnabled: boolean;
   nextEnabled: boolean;
   scopeLabel: string;
 };
@@ -93,25 +86,6 @@ const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
 });
-
-const actionDescriptors: Record<ActionDescriptor["intent"], ActionDescriptor> =
-  {
-    toggle: {
-      intent: "toggle",
-      riskLevel: "high",
-      requiresReason: true,
-    },
-    override: {
-      intent: "override",
-      riskLevel: "high",
-      requiresReason: true,
-    },
-    history: {
-      intent: "history",
-      riskLevel: "low",
-      requiresReason: false,
-    },
-  };
 
 const bodyStyle = {
   display: "grid",
@@ -575,8 +549,29 @@ export default function FeatureFlagsPage() {
   ];
 
   const currentScope = selectedTenant
-    ? `${selectedTenant.name} (${selectedTenant.code})`
+    ? t("featureFlagsAdmin.tenantOptionLabel", {
+        name: selectedTenant.name,
+        code: selectedTenant.code,
+      })
     : t("featureFlagsAdmin.scopePlatformDefault");
+
+  function getRolloutText(rolloutLabel: FlagTableRow["rolloutLabel"]) {
+    switch (rolloutLabel) {
+      case "deprecated":
+        return t("featureFlagsAdmin.rolloutDeprecated");
+      case "rolled_out":
+        return t("featureFlagsAdmin.rolloutFull");
+      case "mid_rollout":
+      default:
+        return t("featureFlagsAdmin.rolloutMid");
+    }
+  }
+
+  function getToggleActionText(nextEnabled: boolean) {
+    return nextEnabled
+      ? t("featureFlagsAdmin.confirmEnable")
+      : t("featureFlagsAdmin.confirmDisable");
+  }
 
   function getScopeLabel(row: FlagTableRow) {
     return row.isTenantOverride
@@ -595,11 +590,7 @@ export default function FeatureFlagsPage() {
           <code style={codeStyle}>{row.key}</code>
           <div style={inlinePillRowStyle}>
             <CanvasPill theme={theme} tone={row.rolloutTone}>
-              {row.rolloutLabel === "deprecated"
-                ? t("featureFlagsAdmin.rolloutDeprecated")
-                : row.rolloutLabel === "rolled_out"
-                  ? t("featureFlagsAdmin.rolloutFull")
-                  : t("featureFlagsAdmin.rolloutMid")}
+              {getRolloutText(row.rolloutLabel)}
             </CanvasPill>
           </div>
           <div style={secondaryTextStyle}>
@@ -654,7 +645,6 @@ export default function FeatureFlagsPage() {
                 key: row.key,
                 tenantId: row.tenantId,
                 description: row.description,
-                currentEnabled: row.enabled,
                 nextEnabled: !row.enabled,
                 scopeLabel: getScopeLabel(row),
               });
@@ -699,7 +689,6 @@ export default function FeatureFlagsPage() {
                 key: row.key,
                 tenantId: row.tenantId,
                 description: row.description,
-                currentEnabled: row.enabled,
                 nextEnabled: !row.enabled,
                 scopeLabel: getScopeLabel(row),
               });
@@ -726,15 +715,14 @@ export default function FeatureFlagsPage() {
       return;
     }
 
-    const descriptor = actionDescriptors[pendingAction.intent];
     const reason = actionReason.trim();
-    if (descriptor.requiresReason && !reason) {
+    if (!reason) {
       setActionError(t("featureFlagsAdmin.reasonRequired"));
       return;
     }
 
     if (pendingAction.intent === "override" && !pendingAction.tenantId) {
-      setActionError(t("featureFlagsAdmin.overrideTenantField"));
+      setActionError(t("featureFlagsAdmin.overrideTenantRequired"));
       return;
     }
 
@@ -790,9 +778,7 @@ export default function FeatureFlagsPage() {
       const summary =
         pendingAction.intent === "toggle"
           ? t("featureFlagsAdmin.receiptToggleSummary", {
-              action: pendingAction.nextEnabled
-                ? t("featureFlagsAdmin.confirmEnable")
-                : t("featureFlagsAdmin.confirmDisable"),
+              action: getToggleActionText(pendingAction.nextEnabled),
               key: pendingAction.key,
             })
           : t("featureFlagsAdmin.receiptCreateSummary", {
@@ -901,7 +887,7 @@ export default function FeatureFlagsPage() {
                 theme={theme}
                 tone="danger"
                 title={error}
-                body={t("featureFlagsAdmin.riskBody")}
+                body={t("featureFlagsAdmin.errorBody")}
               />
             ) : null}
 
@@ -910,9 +896,13 @@ export default function FeatureFlagsPage() {
                 theme={theme}
                 tone="success"
                 title={t("featureFlagsAdmin.actionApplied")}
-                body={`${auditReceipts[0]?.summary} · ${auditReceipts[0]?.scopeLabel} · ${formatDateTime(
-                  auditReceipts[0]?.requestedAt ?? "",
-                )}`}
+                body={t("featureFlagsAdmin.receiptBannerBody", {
+                  summary: auditReceipts[0]?.summary ?? "",
+                  scope: auditReceipts[0]?.scopeLabel ?? "",
+                  requestedAt: formatDateTime(
+                    auditReceipts[0]?.requestedAt ?? "",
+                  ),
+                })}
               />
             ) : null}
 
@@ -942,7 +932,10 @@ export default function FeatureFlagsPage() {
                         </option>
                         {tenants.map((tenant) => (
                           <option key={tenant.id} value={tenant.id}>
-                            {tenant.name} ({tenant.code})
+                            {t("featureFlagsAdmin.tenantOptionLabel", {
+                              name: tenant.name,
+                              code: tenant.code,
+                            })}
                           </option>
                         ))}
                       </select>
@@ -1115,7 +1108,13 @@ export default function FeatureFlagsPage() {
                                   </option>
                                   {tenants.map((tenant) => (
                                     <option key={tenant.id} value={tenant.id}>
-                                      {tenant.name} ({tenant.code})
+                                      {t(
+                                        "featureFlagsAdmin.tenantOptionLabel",
+                                        {
+                                          name: tenant.name,
+                                          code: tenant.code,
+                                        },
+                                      )}
                                     </option>
                                   ))}
                                 </select>
@@ -1210,9 +1209,9 @@ export default function FeatureFlagsPage() {
                               {t("featureFlagsAdmin.pendingToggleSummary", {
                                 key: pendingAction.key,
                                 scope: pendingAction.scopeLabel,
-                                action: pendingAction.currentEnabled
-                                  ? t("featureFlagsAdmin.confirmDisable")
-                                  : t("featureFlagsAdmin.confirmEnable"),
+                                action: getToggleActionText(
+                                  pendingAction.nextEnabled,
+                                ),
                               })}
                             </div>
                           )}
@@ -1266,9 +1265,9 @@ export default function FeatureFlagsPage() {
                               {updating
                                 ? t("common.updating")
                                 : pendingAction.intent === "toggle"
-                                  ? pendingAction.nextEnabled
-                                    ? t("featureFlagsAdmin.confirmEnable")
-                                    : t("featureFlagsAdmin.confirmDisable")
+                                  ? getToggleActionText(
+                                      pendingAction.nextEnabled,
+                                    )
                                   : t("featureFlagsAdmin.confirmCreate")}
                             </CanvasBtn>
                           </div>

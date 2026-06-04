@@ -676,6 +676,8 @@ const en = {
     "High-risk actions require an explicit reason.",
   "featureFlagsAdmin.riskBody":
     "Toggle and tenant override changes stay in this write flow and record a local audit receipt after confirmation.",
+  "featureFlagsAdmin.errorBody":
+    "Review the error details, then retry the write flow from this page if needed.",
   "featureFlagsAdmin.scopeField": "Inspect scope",
   "featureFlagsAdmin.searchField": "Search key",
   "featureFlagsAdmin.searchPlaceholder": "Search by flag key",
@@ -683,6 +685,7 @@ const en = {
     "Switch to a tenant to inspect its effective override rows. The default view stays on platform records.",
   "featureFlagsAdmin.scopePlatformDefault": "Platform defaults",
   "featureFlagsAdmin.scopeTenantOverride": "Tenant override · {tenantId}",
+  "featureFlagsAdmin.tenantOptionLabel": "{name} ({code})",
   "featureFlagsAdmin.scopeLoading": "Loading tenant list...",
   "featureFlagsAdmin.summaryPlatformDefault": "Platform defaults",
   "featureFlagsAdmin.summaryTenantOverride": "Tenant overrides",
@@ -710,6 +713,8 @@ const en = {
   "featureFlagsAdmin.reasonRequired":
     "A high-risk reason is required before this action can run.",
   "featureFlagsAdmin.overrideTenantField": "Tenant",
+  "featureFlagsAdmin.overrideTenantRequired":
+    "Select a tenant before creating an override.",
   "featureFlagsAdmin.overrideKeyField": "Flag key",
   "featureFlagsAdmin.overrideStateField": "Override state",
   "featureFlagsAdmin.overrideDescriptionField": "Override description",
@@ -743,6 +748,7 @@ const en = {
   "featureFlagsAdmin.actionComposerIdle":
     "Toggle and override mutations require an explicit reason before confirmation.",
   "featureFlagsAdmin.actionApplied": "Audit receipt recorded",
+  "featureFlagsAdmin.receiptBannerBody": "{summary} · {scope} · {requestedAt}",
   "featureFlagsAdmin.noFlagsInFilter":
     "No feature flags match the current rollout filter and search query.",
   "featureFlagsAdmin.laneMeta": "Writable only here",
@@ -1509,6 +1515,8 @@ const zh: typeof en = {
   "featureFlagsAdmin.riskTitle": "高風險操作必須填寫原因。",
   "featureFlagsAdmin.riskBody":
     "切換與租戶覆寫都走這條寫入流程，確認後會留下本地稽核收據。",
+  "featureFlagsAdmin.errorBody":
+    "請先確認錯誤內容，必要時再從此頁重試寫入流程。",
   "featureFlagsAdmin.scopeField": "檢視範圍",
   "featureFlagsAdmin.searchField": "搜尋 key",
   "featureFlagsAdmin.searchPlaceholder": "依旗標 key 搜尋",
@@ -1516,6 +1524,7 @@ const zh: typeof en = {
     "切到租戶可檢視該租戶的有效覆寫列；預設仍以平台資料為主。",
   "featureFlagsAdmin.scopePlatformDefault": "平台預設",
   "featureFlagsAdmin.scopeTenantOverride": "租戶覆寫 · {tenantId}",
+  "featureFlagsAdmin.tenantOptionLabel": "{name} ({code})",
   "featureFlagsAdmin.scopeLoading": "載入租戶清單中...",
   "featureFlagsAdmin.summaryPlatformDefault": "平台預設",
   "featureFlagsAdmin.summaryTenantOverride": "租戶覆寫",
@@ -1542,6 +1551,7 @@ const zh: typeof en = {
     "說明推行原因、預期影響範圍與驗證計畫。",
   "featureFlagsAdmin.reasonRequired": "執行這個高風險操作前必須填寫原因。",
   "featureFlagsAdmin.overrideTenantField": "租戶",
+  "featureFlagsAdmin.overrideTenantRequired": "建立覆寫前必須先選擇租戶。",
   "featureFlagsAdmin.overrideKeyField": "旗標 key",
   "featureFlagsAdmin.overrideStateField": "覆寫狀態",
   "featureFlagsAdmin.overrideDescriptionField": "覆寫描述",
@@ -1570,6 +1580,7 @@ const zh: typeof en = {
   "featureFlagsAdmin.actionComposerIdle":
     "切換與覆寫變更都必須先填寫原因再確認。",
   "featureFlagsAdmin.actionApplied": "已記錄稽核收據",
+  "featureFlagsAdmin.receiptBannerBody": "{summary} · {scope} · {requestedAt}",
   "featureFlagsAdmin.noFlagsInFilter":
     "目前推行篩選與搜尋條件沒有符合的功能旗標。",
   "featureFlagsAdmin.laneMeta": "僅此處可寫入",
