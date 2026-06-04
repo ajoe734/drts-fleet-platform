@@ -100,9 +100,10 @@ type PendingConfirm = {
   action: ResourceActionDescriptor;
 };
 
-function copy(locale: Locale, en: string, zh: string) {
-  return locale === "zh" ? zh : en;
-}
+type Translate = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
 
 function controlStyle(themeToken: CanvasTheme, mono = false): CSSProperties {
   return {
@@ -272,7 +273,7 @@ function resolvePlatformAdminOrigin(): string {
 function synthesizeCrossAppLinks(
   record: MaintenanceRecord,
   overdue: boolean,
-  locale: Locale,
+  t: Translate,
 ): CrossAppResourceLink[] {
   if (!overdue) {
     return [];
@@ -284,7 +285,7 @@ function synthesizeCrossAppLinks(
       resourceType: "vehicle",
       resourceId: record.vehicleId,
       openMode: "new_tab",
-      label: copy(locale, "Fleet governance", "車隊治理"),
+      label: t("maintenance.crossApp.fleetGovernance"),
     },
   ];
 }
@@ -336,34 +337,34 @@ function actionTone(action: ResourceActionDescriptor): CanvasTone {
   return "accent";
 }
 
-function actionLabel(action: ResourceActionDescriptor, locale: Locale) {
+function actionLabel(
+  action: ResourceActionDescriptor,
+  locale: Locale,
+  t: Translate,
+) {
   switch (action.action) {
     case "edit_maintenance":
-      return copy(locale, "Edit", "編輯");
+      return t("common.edit");
     case "complete_maintenance":
-      return copy(locale, "Complete", "完成");
+      return t("common.complete");
     case "open_vehicle":
-      return copy(locale, "Vehicle", "車輛");
+      return t("maintenance.action.openVehicle");
     default:
       return formatOpsCodeLabel(locale, action.action);
   }
 }
 
-function actionReason(action: ResourceActionDescriptor, locale: Locale) {
+function actionReason(
+  action: ResourceActionDescriptor,
+  locale: Locale,
+  t: Translate,
+) {
   if (!action.disabledReasonCode) return null;
   if (action.disabledReasonCode === "completed") {
-    return copy(
-      locale,
-      "Closed work orders are read-only.",
-      "已結工單不可再編輯。",
-    );
+    return t("maintenance.actionReason.completed");
   }
   if (action.disabledReasonCode === "not_in_progress") {
-    return copy(
-      locale,
-      "Only scheduled or in-progress work orders can be completed.",
-      "僅排程中或進行中的工單可標記完成。",
-    );
+    return t("maintenance.actionReason.notInProgress");
   }
   return formatOpsCodeLabel(locale, action.disabledReasonCode);
 }
@@ -390,7 +391,7 @@ type EmptyView = {
 // illustration / copy / CTA. Collapsing them to "No data" defeats the contract.
 function buildEmptyView(
   reason: EmptyReason,
-  locale: Locale,
+  t: Translate,
   rawMessage: string | null,
 ): EmptyView {
   switch (reason) {
@@ -398,17 +399,9 @@ function buildEmptyView(
       return {
         tone: "info",
         icon: "flags",
-        title: copy(
-          locale,
-          "Maintenance module not provisioned",
-          "保修模組尚未開通",
-        ),
-        description: copy(
-          locale,
-          "Work-order tracking is not enabled for this environment yet.",
-          "此環境尚未啟用工單追蹤功能。",
-        ),
-        actionLabel: copy(locale, "Open feature flags", "前往功能旗標"),
+        title: t("maintenance.empty.notProvisioned.title"),
+        description: t("maintenance.empty.notProvisioned.description"),
+        actionLabel: t("maintenance.empty.notProvisioned.action"),
         actionHref: "/feature-flags",
         actionNewTab: false,
       };
@@ -416,15 +409,10 @@ function buildEmptyView(
       return {
         tone: "danger",
         icon: "warn",
-        title: copy(locale, "Maintenance snapshot failed", "保修快照讀取失敗"),
+        title: t("maintenance.empty.fetchFailed.title"),
         description:
-          rawMessage ??
-          copy(
-            locale,
-            "The maintenance endpoint did not return a usable payload.",
-            "保修資料端點未回傳可用內容。",
-          ),
-        actionLabel: copy(locale, "Retry", "重新整理"),
+          rawMessage ?? t("maintenance.empty.fetchFailed.description"),
+        actionLabel: t("maintenance.empty.fetchFailed.action"),
         actionHref: "/maintenance",
         actionNewTab: false,
       };
@@ -432,13 +420,9 @@ function buildEmptyView(
       return {
         tone: "warn",
         icon: "users",
-        title: copy(locale, "Maintenance scope denied", "無法存取保修範圍"),
-        description: copy(
-          locale,
-          "This actor can enter the shell but lacks maintenance read scope.",
-          "目前帳號可進入殼層，但沒有保修讀取權限。",
-        ),
-        actionLabel: copy(locale, "Open ops dashboard", "返回儀表板"),
+        title: t("maintenance.empty.permissionDenied.title"),
+        description: t("maintenance.empty.permissionDenied.description"),
+        actionLabel: t("maintenance.empty.permissionDenied.action"),
         actionHref: "/dashboard",
         actionNewTab: false,
       };
@@ -446,17 +430,9 @@ function buildEmptyView(
       return {
         tone: "warn",
         icon: "health",
-        title: copy(
-          locale,
-          "Maintenance dependency unavailable",
-          "保修相依服務不可用",
-        ),
-        description: copy(
-          locale,
-          "The fleet maintenance adapter is degraded. Use fleet governance for the latest compliance state.",
-          "車隊保修轉接器降級，請改用車隊治理檢視最新法遵狀態。",
-        ),
-        actionLabel: copy(locale, "Open fleet governance", "開啟車隊治理"),
+        title: t("maintenance.empty.externalUnavailable.title"),
+        description: t("maintenance.empty.externalUnavailable.description"),
+        actionLabel: t("maintenance.empty.externalUnavailable.action"),
         actionHref: `${resolvePlatformAdminOrigin()}/fleet`,
         actionNewTab: true,
       };
@@ -464,17 +440,9 @@ function buildEmptyView(
       return {
         tone: "accent",
         icon: "filter",
-        title: copy(
-          locale,
-          "No work orders match this slice",
-          "目前條件沒有符合的工單",
-        ),
-        description: copy(
-          locale,
-          "Widen the status tab, search, or status filter to restore results.",
-          "放寬狀態分頁、搜尋或狀態條件即可恢復結果。",
-        ),
-        actionLabel: copy(locale, "Clear filters", "清除條件"),
+        title: t("maintenance.empty.filtered.title"),
+        description: t("maintenance.empty.filtered.description"),
+        actionLabel: t("maintenance.empty.filtered.action"),
         actionHref: "/maintenance",
         actionNewTab: false,
       };
@@ -483,13 +451,9 @@ function buildEmptyView(
       return {
         tone: "neutral",
         icon: "maintenance",
-        title: copy(locale, "No maintenance records", "尚無保修工單"),
-        description: copy(
-          locale,
-          "The registry is healthy but no work orders exist in this environment yet.",
-          "保修資料健康，但此環境目前還沒有任何工單。",
-        ),
-        actionLabel: copy(locale, "Open vehicle registry", "前往車輛主檔"),
+        title: t("maintenance.empty.noData.title"),
+        description: t("maintenance.empty.noData.description"),
+        actionLabel: t("maintenance.empty.noData.action"),
         actionHref: "/vehicles",
         actionNewTab: false,
       };
@@ -532,7 +496,7 @@ function isEmptyReason(value: string | null): value is EmptyReason {
 }
 
 export default function MaintenancePage() {
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const searchParams = useSearchParams();
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -709,7 +673,7 @@ export default function MaintenancePage() {
   }
 
   const emptyView = emptyReason
-    ? buildEmptyView(emptyReason, locale, loadError)
+    ? buildEmptyView(emptyReason, t, loadError)
     : null;
 
   const tableRows: MaintenanceTableRow[] = filteredRecords.map((record) => {
@@ -720,7 +684,7 @@ export default function MaintenancePage() {
       overdue,
       availableActions: synthesizeAvailableActions(record),
       vehicleLink: `/vehicles/${encodeURIComponent(record.vehicleId)}`,
-      crossAppLinks: synthesizeCrossAppLinks(record, overdue, locale),
+      crossAppLinks: synthesizeCrossAppLinks(record, overdue, t),
     };
   });
 
@@ -738,11 +702,9 @@ export default function MaintenancePage() {
         await loadRecords("poll");
         setToast({
           tone: "success",
-          message: copy(
-            locale,
-            `Work order ${record.maintenanceId} marked completed.`,
-            `工單 ${record.maintenanceId} 已標記完成。`,
-          ),
+          message: t("maintenance.toast.completed", {
+            id: record.maintenanceId,
+          }),
           actionId: `act_${record.maintenanceId}`,
           auditId: `audit_${record.maintenanceId}`,
         });
@@ -780,7 +742,7 @@ export default function MaintenancePage() {
 
   const columns: CanvasTableColumn<MaintenanceTableRow>[] = [
     {
-      h: copy(locale, "WO", "工單"),
+      h: t("maintenance.table.workOrderShort"),
       w: 110,
       mono: true,
       r: (row) => (
@@ -804,14 +766,14 @@ export default function MaintenancePage() {
             <span
               style={{ color: theme.danger, fontSize: 10.5, fontWeight: 600 }}
             >
-              {copy(locale, "Dispatch risk", "派車風險")}
+              {t("maintenance.table.dispatchRisk")}
             </span>
           ) : null}
         </div>
       ),
     },
     {
-      h: copy(locale, "VEHICLE", "車輛"),
+      h: t("common.vehicle"),
       w: 130,
       r: (row) => (
         <Link
@@ -829,14 +791,14 @@ export default function MaintenancePage() {
       ),
     },
     {
-      h: copy(locale, "DETAIL", "類別"),
+      h: t("maintenance.table.detail"),
       w: 240,
       r: (row) => (
         <div style={{ display: "grid", gap: 3, whiteSpace: "normal" }}>
           <span>{row.description}</span>
           {row.technician ? (
             <span style={{ color: theme.textDim, fontSize: 10.5 }}>
-              {copy(locale, "Technician", "技師")} · {row.technician}
+              {t("maintenance.table.technicianInline")} · {row.technician}
             </span>
           ) : null}
         </div>
@@ -852,7 +814,7 @@ export default function MaintenancePage() {
       ),
     },
     {
-      h: copy(locale, "SCHEDULE", "排定"),
+      h: t("maintenance.table.schedule"),
       w: 160,
       mono: true,
       r: (row) => (
@@ -870,12 +832,12 @@ export default function MaintenancePage() {
           <span>{formatTableDateTime(row.scheduledAt)}</span>
           {row.overdue ? (
             <span style={{ color: theme.danger, fontSize: 10.5 }}>
-              {copy(locale, "Overdue for service", "已逾期未保修")}
+              {t("maintenance.table.overdueForService")}
             </span>
           ) : null}
           {row.completedAt ? (
             <span style={{ color: theme.success, fontSize: 10.5 }}>
-              {copy(locale, "done", "完成")} ·{" "}
+              {t("maintenance.table.done")} ·{" "}
               {formatTableDateTime(row.completedAt)}
             </span>
           ) : null}
@@ -883,14 +845,14 @@ export default function MaintenancePage() {
       ),
     },
     {
-      h: copy(locale, "COST", "費用"),
+      h: t("maintenance.table.cost"),
       w: 96,
       mono: true,
       align: "right",
       r: (row) => formatCost(locale, row.cost),
     },
     {
-      h: "ACTIONS",
+      h: t("maintenance.table.actions"),
       w: 220,
       r: (row) => (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -899,10 +861,10 @@ export default function MaintenancePage() {
               <CanvasActionButton
                 key={`${row.maintenanceId}-${action.action}`}
                 descriptor={action}
-                label={actionLabel(action, locale)}
-                reason={actionReason(action, locale)}
+                label={actionLabel(action, locale, t)}
+                reason={actionReason(action, locale, t)}
                 tone={actionTone(action)}
-                locale={locale}
+                t={t}
                 onInvoke={() => onActionClick(row, action)}
                 {...(action.action === "open_vehicle"
                   ? { href: row.vehicleLink }
@@ -942,12 +904,12 @@ export default function MaintenancePage() {
 
   const tabConfig: Array<{ key: StatusTab; label: string; tone?: CanvasTone }> =
     [
-      { key: "scheduled", label: copy(locale, "Scheduled", "排程中") },
-      { key: "in_progress", label: copy(locale, "In progress", "進行中") },
-      { key: "completed", label: copy(locale, "Completed", "已完成") },
+      { key: "scheduled", label: t("maintenance.tab.scheduled") },
+      { key: "in_progress", label: t("maintenance.tab.inProgress") },
+      { key: "completed", label: t("maintenance.completed") },
       {
         key: "overdue",
-        label: copy(locale, "Overdue", "逾期"),
+        label: t("maintenance.tab.overdue"),
         tone: "danger",
       },
     ];
@@ -983,12 +945,8 @@ export default function MaintenancePage() {
     <>
       <PageHeader
         theme={theme}
-        title={copy(locale, "Maintenance", "車輛保修")}
-        subtitle={copy(
-          locale,
-          "work order · schedule · technician · dispatch impact",
-          "工單 · 排程 · 技師 · 影響派遣",
-        )}
+        title={t("maintenance.title")}
+        subtitle={t("maintenance.header.subtitle")}
         tabs={tabNodes}
         activeTab={activeTabNode}
         actions={
@@ -1005,14 +963,14 @@ export default function MaintenancePage() {
               variant={showFilters ? "primary" : "secondary"}
               onClick={() => setShowFilters((value) => !value)}
             >
-              {copy(locale, "Filters", "篩選")}
+              {t("maintenance.actions.filters")}
             </Btn>
             <Btn
               theme={theme}
               icon="arrow"
               onClick={() => void loadRecords("poll")}
             >
-              {copy(locale, "Refresh", "重新整理")}
+              {t("maintenance.actions.refresh")}
             </Btn>
             <Btn
               theme={theme}
@@ -1023,7 +981,7 @@ export default function MaintenancePage() {
                 setEditingId(null);
               }}
             >
-              {copy(locale, "Create work order", "開立工單")}
+              {t("maintenance.actions.createWorkOrder")}
             </Btn>
           </>
         }
@@ -1042,11 +1000,7 @@ export default function MaintenancePage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title={copy(
-              locale,
-              "Maintenance page is running degraded",
-              "保修頁面目前為降級模式",
-            )}
+            title={t("maintenance.banner.degraded")}
             body={`maintenance: ${loadError}`}
           />
         ) : null}
@@ -1056,16 +1010,10 @@ export default function MaintenancePage() {
             theme={theme}
             tone="info"
             icon="clock"
-            title={copy(
-              locale,
-              "Snapshot is not fresh",
-              "目前顯示的快照非最新",
-            )}
-            body={copy(
-              locale,
-              `Last refreshed ${formatLongDateTime(new Date(generatedAtMs).toISOString())} UTC. Auto-refresh runs every 15s (T3).`,
-              `最後更新 ${formatLongDateTime(new Date(generatedAtMs).toISOString())} UTC，每 15 秒自動刷新（T3）。`,
-            )}
+            title={t("maintenance.banner.snapshotStale")}
+            body={t("maintenance.banner.snapshotStaleBody", {
+              time: formatLongDateTime(new Date(generatedAtMs).toISOString()),
+            })}
           />
         ) : null}
 
@@ -1074,23 +1022,17 @@ export default function MaintenancePage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title={copy(
-              locale,
-              `${counts.overdue} overdue work order(s) impacting dispatchable supply`,
-              `${counts.overdue} 筆逾期工單正影響可派車量`,
-            )}
-            body={copy(
-              locale,
-              "Decide whether overdue maintenance should remove these vehicles from the dispatchable pool.",
-              "請評估逾期保修是否應將相關車輛移出可派遣車隊。",
-            )}
+            title={t("maintenance.banner.overdueTitle", {
+              count: counts.overdue,
+            })}
+            body={t("maintenance.banner.overdueBody")}
             actions={
               <Btn
                 theme={theme}
                 variant="primary"
                 onClick={() => setActiveTab("overdue")}
               >
-                {copy(locale, "View overdue", "檢視逾期")}
+                {t("maintenance.banner.viewOverdue")}
               </Btn>
             }
           />
@@ -1105,34 +1047,34 @@ export default function MaintenancePage() {
         >
           <KPI
             theme={theme}
-            label={copy(locale, "Active orders", "進行中工單")}
+            label={t("maintenance.activeOrders")}
             value={counts.scheduled + counts.in_progress}
-            delta={copy(locale, "scheduled + in progress", "排程 + 進行中")}
+            delta={t("maintenance.kpi.activeOrdersDelta")}
             deltaTone="neutral"
           />
           <KPI
             theme={theme}
-            label={copy(locale, "Overdue", "逾期")}
+            label={t("maintenance.overdue")}
             value={counts.overdue}
             delta={
               counts.overdue > 0
-                ? copy(locale, "dispatch risk", "派車風險")
-                : copy(locale, "clear", "正常")
+                ? t("maintenance.kpi.dispatchRisk")
+                : t("maintenance.kpi.clear")
             }
             deltaTone={counts.overdue > 0 ? "down" : "up"}
           />
           <KPI
             theme={theme}
-            label={copy(locale, "Completed", "已完成")}
+            label={t("maintenance.completed")}
             value={counts.completed}
-            delta={copy(locale, "closed work orders", "已結工單")}
+            delta={t("maintenance.kpi.closedWorkOrders")}
             deltaTone="neutral"
           />
           <KPI
             theme={theme}
-            label={copy(locale, "Dispatch impact", "派車影響")}
+            label={t("maintenance.kpi.dispatchImpact")}
             value={dispatchImpactCount}
-            delta={copy(locale, "open vs supply", "未結影響供給")}
+            delta={t("maintenance.kpi.openVsSupply")}
             deltaTone={dispatchImpactCount > 0 ? "down" : "neutral"}
           />
         </div>
@@ -1140,12 +1082,11 @@ export default function MaintenancePage() {
         {showFilters ? (
           <Card
             theme={theme}
-            title={copy(locale, "Filter work orders", "篩選工單")}
-            subtitle={copy(
-              locale,
-              `${filteredRecords.length} visible / ${records.length} total`,
-              `目前顯示 ${filteredRecords.length} / 總數 ${records.length}`,
-            )}
+            title={t("maintenance.filters.title")}
+            subtitle={t("maintenance.filters.subtitle", {
+              visible: filteredRecords.length,
+              total: records.length,
+            })}
           >
             <div
               style={{
@@ -1154,20 +1095,16 @@ export default function MaintenancePage() {
                 gap: 12,
               }}
             >
-              <Field theme={theme} label={copy(locale, "Search", "搜尋")}>
+              <Field theme={theme} label={t("common.search")}>
                 <input
                   type="search"
                   style={controlStyle(theme)}
-                  placeholder={copy(
-                    locale,
-                    "work order, vehicle, technician",
-                    "工單、車輛、技師",
-                  )}
+                  placeholder={t("maintenance.filters.searchPlaceholder")}
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                 />
               </Field>
-              <Field theme={theme} label={copy(locale, "Status", "狀態")}>
+              <Field theme={theme} label={t("common.status")}>
                 <select
                   style={controlStyle(theme)}
                   value={statusFilter}
@@ -1177,7 +1114,7 @@ export default function MaintenancePage() {
                     )
                   }
                 >
-                  <option value="all">{copy(locale, "All", "全部")}</option>
+                  <option value="all">{t("common.all")}</option>
                   {STATUSES.map((status) => (
                     <option key={status} value={status}>
                       {formatOpsCodeLabel(locale, status)}
@@ -1192,7 +1129,7 @@ export default function MaintenancePage() {
         <Card theme={theme} padding={0}>
           {loading ? (
             <div style={{ padding: "18px 14px", color: theme.textMuted }}>
-              {copy(locale, "Loading work orders...", "載入工單中...")}
+              {t("maintenance.loading")}
             </div>
           ) : emptyView ? (
             <div style={emptyStateStyle()}>
@@ -1238,7 +1175,7 @@ export default function MaintenancePage() {
                 ) : null}
               </Link>
               <span style={tinyMetaStyle(theme, emptyView.tone)}>
-                {copy(locale, "emptyReason", "空狀態")} ·{" "}
+                {t("maintenance.meta.emptyReason")} ·{" "}
                 {EMPTY_REASON_CODES[emptyReason ?? "no_data"]}
               </span>
             </div>
@@ -1248,12 +1185,8 @@ export default function MaintenancePage() {
         </Card>
 
         <div style={{ fontSize: 11, color: theme.textDim }}>
-          {copy(
-            locale,
-            "Supporting actions come from availableActions · ",
-            "畫面 CTA 以 availableActions 為準 · ",
-          )}
-          {copy(locale, "generated", "生成時間")} ·{" "}
+          {t("maintenance.meta.actionsFromAvailableActions")}
+          {t("maintenance.meta.generated")} ·{" "}
           {generatedAtMs > 0
             ? `${formatLongDateTime(new Date(generatedAtMs).toISOString())} UTC`
             : "—"}
@@ -1262,7 +1195,7 @@ export default function MaintenancePage() {
 
       {pendingConfirm ? (
         <ConfirmModal
-          locale={locale}
+          t={t}
           target={pendingConfirm}
           reason={confirmReason}
           onReasonChange={setConfirmReason}
@@ -1277,6 +1210,7 @@ export default function MaintenancePage() {
       {showCreate || editingId ? (
         <MaintenanceFormModal
           locale={locale}
+          t={t}
           editingRecord={editingRecord}
           initialVehicleId={editingId ? "" : vehicleIdFromQuery}
           onCancel={() => {
@@ -1293,11 +1227,7 @@ export default function MaintenancePage() {
                 );
                 setToast({
                   tone: "success",
-                  message: copy(
-                    locale,
-                    `Work order ${editingId} updated.`,
-                    `工單 ${editingId} 已更新。`,
-                  ),
+                  message: t("maintenance.toast.updated", { id: editingId }),
                   actionId: `act_${editingId}`,
                   auditId: `audit_${editingId}`,
                 });
@@ -1307,11 +1237,9 @@ export default function MaintenancePage() {
                 )) as MaintenanceRecord;
                 setToast({
                   tone: "success",
-                  message: copy(
-                    locale,
-                    `Work order ${created.maintenanceId} created.`,
-                    `工單 ${created.maintenanceId} 已建立。`,
-                  ),
+                  message: t("maintenance.toast.created", {
+                    id: created.maintenanceId,
+                  }),
                   actionId: `act_${created.maintenanceId}`,
                   auditId: `audit_${created.maintenanceId}`,
                 });
@@ -1375,7 +1303,7 @@ function CanvasActionButton({
   reason,
   tone,
   href,
-  locale,
+  t,
   onInvoke,
 }: {
   descriptor: ResourceActionDescriptor;
@@ -1383,7 +1311,7 @@ function CanvasActionButton({
   reason: string | null;
   tone: CanvasTone;
   href?: string;
-  locale: Locale;
+  t: Translate;
   onInvoke: () => void;
 }) {
   const button = (
@@ -1432,7 +1360,7 @@ function CanvasActionButton({
       {control}
       {!descriptor.enabled && reason ? (
         <span style={{ fontSize: 10, color: theme.textDim, maxWidth: 120 }}>
-          {locale === "zh" ? `停用：${reason}` : `Disabled: ${reason}`}
+          {t("maintenance.actions.disabledPrefix", { reason })}
         </span>
       ) : null}
     </div>
@@ -1440,14 +1368,14 @@ function CanvasActionButton({
 }
 
 function ConfirmModal({
-  locale,
+  t,
   target,
   reason,
   onReasonChange,
   onCancel,
   onConfirm,
 }: {
-  locale: Locale;
+  t: Translate;
   target: PendingConfirm;
   reason: string;
   onReasonChange: (value: string) => void;
@@ -1465,27 +1393,16 @@ function ConfirmModal({
       >
         <div style={{ display: "grid", gap: 4 }}>
           <strong style={{ color: theme.text, fontSize: 14 }}>
-            {copy(locale, "Complete work order", "完成工單")}
+            {t("maintenance.confirm.completeTitle")}
           </strong>
           <span style={{ color: theme.textMuted, fontSize: 12 }}>
-            {`${target.record.maintenanceId} · ${target.record.vehicleId} · ${copy(
-              locale,
-              "medium risk",
-              "中度風險",
-            )}`}
+            {`${target.record.maintenanceId} · ${target.record.vehicleId} · ${t("maintenance.confirm.mediumRisk")}`}
           </span>
         </div>
         <span style={{ color: theme.text, fontSize: 12.5, lineHeight: 1.5 }}>
-          {copy(
-            locale,
-            "This marks the work order completed and returns the vehicle toward dispatchable supply. An audit record is written.",
-            "此動作會將工單標記為完成，並讓車輛可重新投入派車；系統會寫入稽核紀錄。",
-          )}
+          {t("maintenance.confirm.body")}
         </span>
-        <Field
-          theme={theme}
-          label={copy(locale, "Completion note (optional)", "完成備註（選填）")}
-        >
+        <Field theme={theme} label={t("maintenance.confirm.noteOptional")}>
           <textarea
             style={textAreaStyle(theme)}
             value={reason}
@@ -1495,7 +1412,7 @@ function ConfirmModal({
         </Field>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <Btn theme={theme} onClick={onCancel}>
-            {copy(locale, "Cancel", "取消")}
+            {t("common.cancel")}
           </Btn>
           <button
             type="button"
@@ -1507,7 +1424,7 @@ function ConfirmModal({
               cursor: confirmDisabled ? "not-allowed" : "pointer",
             }}
           >
-            {copy(locale, "Confirm complete", "確認完成")}
+            {t("maintenance.confirm.button")}
           </button>
         </div>
       </div>
@@ -1517,12 +1434,14 @@ function ConfirmModal({
 
 function MaintenanceFormModal({
   locale,
+  t,
   editingRecord,
   initialVehicleId,
   onCancel,
   onSubmit,
 }: {
   locale: Locale;
+  t: Translate;
   editingRecord: MaintenanceRecord | undefined;
   initialVehicleId: string;
   onCancel: () => void;
@@ -1541,18 +1460,14 @@ function MaintenanceFormModal({
         <div style={{ display: "grid", gap: 4 }}>
           <strong style={{ color: theme.text, fontSize: 14 }}>
             {isEditing
-              ? copy(locale, "Update work order", "更新工單")
-              : copy(locale, "Create work order", "開立工單")}
+              ? t("maintenance.form.updateTitle")
+              : t("maintenance.actions.createWorkOrder")}
           </strong>
           <span style={{ color: theme.textMuted, fontSize: 12 }}>
             {isEditing
               ? (editingRecord?.maintenanceId ??
-                copy(locale, "Select a record", "請選擇工單"))
-              : copy(
-                  locale,
-                  "Maintenance descriptor-driven edit/create flow",
-                  "保修 descriptor 驅動建立 / 編輯流程",
-                )}
+                t("maintenance.form.selectRecord"))
+              : t("maintenance.form.modalDescription")}
           </span>
         </div>
         <MaintenanceForm
@@ -1561,6 +1476,7 @@ function MaintenanceFormModal({
             `create-${initialVehicleId || "blank"}`
           }
           locale={locale}
+          t={t}
           editingRecord={editingRecord}
           initialVehicleId={initialVehicleId}
           onCancel={onCancel}
@@ -1573,12 +1489,14 @@ function MaintenanceFormModal({
 
 function MaintenanceForm({
   locale,
+  t,
   editingRecord,
   initialVehicleId,
   onCancel,
   onSubmit,
 }: {
   locale: Locale;
+  t: Translate;
   editingRecord: MaintenanceRecord | undefined;
   initialVehicleId: string;
   onCancel: () => void;
@@ -1662,11 +1580,7 @@ function MaintenanceForm({
       >
         {!isEditing ? (
           <>
-            <Field
-              theme={theme}
-              label={copy(locale, "Vehicle", "車輛")}
-              required
-            >
+            <Field theme={theme} label={t("common.vehicle")} required>
               <input
                 style={controlStyle(theme, true)}
                 value={vehicleId}
@@ -1674,7 +1588,7 @@ function MaintenanceForm({
                 required
               />
             </Field>
-            <Field theme={theme} label={copy(locale, "Type", "類別")}>
+            <Field theme={theme} label={t("maintenance.form.type")}>
               <select
                 style={controlStyle(theme)}
                 value={type}
@@ -1689,10 +1603,7 @@ function MaintenanceForm({
                 ))}
               </select>
             </Field>
-            <Field
-              theme={theme}
-              label={copy(locale, "Scheduled at", "排定時間")}
-            >
+            <Field theme={theme} label={t("maintenance.form.scheduledAt")}>
               <input
                 type="datetime-local"
                 style={controlStyle(theme, true)}
@@ -1703,7 +1614,7 @@ function MaintenanceForm({
             <div style={{ gridColumn: "1 / -1" }}>
               <Field
                 theme={theme}
-                label={copy(locale, "Description", "工單描述")}
+                label={t("maintenance.form.description")}
                 required
               >
                 <textarea
@@ -1718,7 +1629,7 @@ function MaintenanceForm({
           </>
         ) : (
           <>
-            <Field theme={theme} label={copy(locale, "Status", "狀態")}>
+            <Field theme={theme} label={t("common.status")}>
               <select
                 style={controlStyle(theme)}
                 value={status}
@@ -1733,10 +1644,7 @@ function MaintenanceForm({
                 ))}
               </select>
             </Field>
-            <Field
-              theme={theme}
-              label={copy(locale, "Completed at", "完成時間")}
-            >
+            <Field theme={theme} label={t("maintenance.form.completedAt")}>
               <input
                 type="datetime-local"
                 style={controlStyle(theme, true)}
@@ -1746,14 +1654,14 @@ function MaintenanceForm({
             </Field>
           </>
         )}
-        <Field theme={theme} label={copy(locale, "Technician", "技師")}>
+        <Field theme={theme} label={t("maintenance.form.technician")}>
           <input
             style={controlStyle(theme)}
             value={technician}
             onChange={(event) => setTechnician(event.target.value)}
           />
         </Field>
-        <Field theme={theme} label={copy(locale, "Cost (TWD)", "費用 (TWD)")}>
+        <Field theme={theme} label={t("maintenance.form.costTwd")}>
           <input
             type="number"
             min="0"
@@ -1764,7 +1672,7 @@ function MaintenanceForm({
           />
         </Field>
         <div style={{ gridColumn: "1 / -1" }}>
-          <Field theme={theme} label={copy(locale, "Notes", "備註")}>
+          <Field theme={theme} label={t("common.notes")}>
             <textarea
               style={textAreaStyle(theme)}
               value={notes}
@@ -1782,13 +1690,13 @@ function MaintenanceForm({
           style={primaryButtonStyle(theme)}
         >
           {pending
-            ? copy(locale, "Saving...", "儲存中...")
+            ? t("maintenance.form.saving")
             : isEditing
-              ? copy(locale, "Save changes", "儲存變更")
-              : copy(locale, "Create record", "建立工單")}
+              ? t("maintenance.form.saveChanges")
+              : t("maintenance.form.createRecord")}
         </button>
         <Btn theme={theme} onClick={onCancel}>
-          {copy(locale, "Cancel", "取消")}
+          {t("common.cancel")}
         </Btn>
       </div>
     </form>
