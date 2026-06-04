@@ -3319,11 +3319,11 @@ const zh: Record<keyof typeof en, string> = {
   "contracts.table.action.risk": "風險:{level}",
   "contracts.table.actionDisabled.contractDetailPending":
     "唯讀詳情路由將由後續 ops 子任務交付（Q-OPS03）。",
-  "contracts.reviewTitle": "eligibility 例外佇列",
-  "contracts.reviewSubtitle": "{count} 筆合作夥伴驗證案例待操作員處理",
+  "contracts.reviewTitle": "資格模式例外佇列",
+  "contracts.reviewSubtitle": "{count} 筆合作夥伴資格模式案例待操作員處理",
   "contracts.reviewAlert":
-    "{count} 筆合作夥伴 eligibility 案例仍待 ops 跟進，否則不能放行派遣或結算。",
-  "contracts.reviewEmpty": "目前沒有待處理的 eligibility 拒絕或人工審查案例。",
+    "{count} 筆合作夥伴資格模式案例仍待 ops 跟進，否則不能放行派遣或結算。",
+  "contracts.reviewEmpty": "目前沒有待處理的資格模式拒絕或人工審查案例。",
   "contracts.reviewCol.partnerEntry": "合作夥伴入口",
   "contracts.reviewCol.reason": "原因",
   "contracts.reviewCol.status": "判定",
@@ -3340,7 +3340,7 @@ const zh: Record<keyof typeof en, string> = {
   "contracts.reviewRegistrySummary":
     "{total} 筆佇列案例 · {manual} 筆仍待人工審查",
   "contracts.registrySummary":
-    "{active} 份生效中 · {draft} 份草稿 · {attention} 筆合作夥伴 eligibility 案例待關注",
+    "{active} 份生效中 · {draft} 份草稿 · {attention} 筆合作夥伴資格模式案例待關注",
   "contracts.empty": "尚未登記合約。",
 
   // ── Feature Flags ──
