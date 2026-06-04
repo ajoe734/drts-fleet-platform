@@ -3,7 +3,7 @@
 **Task ID:** `GAP-VERIFY-UNBLOCK-PLANNING-DECISION`
 **Parent task:** `GAP-VERIFY`
 **Owner:** `Codex`
-**Reviewer:** `Claude`
+**Reviewer:** `Codex2`
 **Decision date:** 2026-06-04
 **Decision type:** Routing decision (no new product/contract change)
 
