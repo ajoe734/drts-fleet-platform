@@ -358,7 +358,7 @@ function ModalShell({
 }
 
 export default function SwitchboardPage() {
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [publicInfo, setPublicInfo] = useState<PublicInfoVersionRecord[]>([]);
   const [placards, setPlacards] = useState<PlacardVersionRecord[]>([]);
@@ -385,195 +385,71 @@ export default function SwitchboardPage() {
     null,
   );
 
-  const copy =
-    locale === "en"
-      ? {
-          title: "Public Info & Placards",
-          subtitle:
-            "Route name preserved as /switchboard · one public-info version can produce many placards (Q-ADM14)",
-          createDraft: "Create draft",
-          publishVersion: "Publish version",
-          refresh: "Refresh",
-          tabVersions: "Versions",
-          tabPlacards: "Placards",
-          tabHistory: "History",
-          versionsTitle: "Public info versions",
-          versionsSubtitle: "effective from / to · public phones · status",
-          placardPreviewTitle: (code: string, src: string) =>
-            `Current placard · ${code} (source ${src})`,
-          placardPreviewEmpty: "No placard generated yet.",
-          downloadPdf: "Download PDF",
-          generatePlacard: "Generate placard",
-          placardListTitle: "Placard versions",
-          placardListSubtitle: "Seat-back artifacts traced to a source version",
-          historyVersionsTitle: "Public info version history",
-          historyVersionsSubtitle:
-            "Published versions are immutable disclosure records.",
-          historyPlacardsTitle: "Placard lineage",
-          historyPlacardsSubtitle:
-            "Issued placards and the public-info version each was generated from.",
-          loading: "Loading switchboard...",
-          noVersions: "No public info versions.",
-          noPlacards: "No placard versions.",
-          noHistory: "No published history yet.",
-          colVersion: "Version",
-          colFrom: "Effective from",
-          colTo: "Effective to",
-          colCall: "Call line",
-          colComplaint: "Complaint line",
-          colStatus: "Status",
-          colUpdated: "Updated",
-          colPlacard: "Placard",
-          colSource: "Source version",
-          colTemplate: "Template",
-          colArtifact: "Artifact",
-          colActions: "Actions",
-          colPublishedAt: "Published at",
-          colPublishedBy: "Published by",
-          publish: "Publish",
-          publishing: "Publishing...",
-          deleteDraft: "Delete",
-          deleting: "Deleting...",
-          immutable: "Immutable",
-          createTitle: "Create public info draft",
-          createSubtitle: "Medium-risk · saved as draft until published.",
-          publishTitle: "Publish public info version",
-          publishSubtitle:
-            "High-risk · publishing replaces the live disclosure. A reason is required for the audit receipt.",
-          publishNoDrafts: "No draft versions are available to publish.",
-          publishPick: "Select draft version",
-          publishReasonLabel: "Reason (required)",
-          publishReasonPh: "Why is this version being published now?",
-          confirmPublish: "Confirm publish",
-          generateTitle: "Generate new placard",
-          generateSubtitle:
-            "Medium-risk · the placard is bound to the selected source public-info version.",
-          confirmGenerate: "Generate placard",
-          generating: "Generating...",
-          cancel: "Cancel",
-          fTitle: "Title",
-          fCallPhone: "Call phone",
-          fComplaintPhone: "Complaint phone",
-          fEffectiveFrom: "Effective from",
-          fEffectiveTo: "Effective to (optional)",
-          fCallRate: "Call rate text",
-          fFare: "Fare text",
-          fPayment: "Payment method text",
-          fSource: "Source public info version",
-          fVersionCode: "Version code",
-          fTemplate: "Template",
-          fArtifact: "Artifact file id (optional)",
-          receiptPublishVersion: (id: string, reason: string) =>
-            `Audit receipt: published public info ${id}. Reason: ${reason}`,
-          receiptCreate: "Audit receipt: public info draft created.",
-          receiptGenerate: (code: string) =>
-            `Audit receipt: placard ${code} generated.`,
-          receiptPublishPlacard: (code: string) =>
-            `Audit receipt: placard ${code} published.`,
-          disabledReason: {
-            no_draft_versions: "No draft versions to publish.",
-            no_draft_selected: "Select a draft version to publish.",
-            reason_required: "A reason is required to publish.",
-            title_required: "A title is required.",
-            no_source_version: "Select a source public info version.",
-            source_retired: "The selected source version is retired.",
-            version_code_conflict: "This version code is already in use.",
-            already_published: "Already published (immutable).",
-            no_public_info_version:
-              "Create a public info version before generating placards.",
-          } as Record<string, string>,
-        }
-      : {
-          title: "Public Info & Placards",
-          subtitle:
-            "route name 保留為 /switchboard · 1 個公開資訊版本可產生多個車牌貼 (Q-ADM14)",
-          createDraft: "建立草稿",
-          publishVersion: "發佈版本",
-          refresh: "重新整理",
-          tabVersions: "版本",
-          tabPlacards: "牌貼",
-          tabHistory: "歷史",
-          versionsTitle: "Public info versions",
-          versionsSubtitle: "effective from / to · 公開電話 · 狀態",
-          placardPreviewTitle: (code: string, src: string) =>
-            `目前發行牌貼 · ${code} (source ${src})`,
-          placardPreviewEmpty: "目前尚未產生牌貼。",
-          downloadPdf: "下載 PDF",
-          generatePlacard: "產生新 placard",
-          placardListTitle: "牌貼版本",
-          placardListSubtitle: "每張牌貼皆可追溯到來源公開資訊版本",
-          historyVersionsTitle: "公開資訊版本歷史",
-          historyVersionsSubtitle: "已發佈版本為不可變的揭露紀錄。",
-          historyPlacardsTitle: "牌貼沿革",
-          historyPlacardsSubtitle: "已發行牌貼及其來源公開資訊版本。",
-          loading: "載入交換台中...",
-          noVersions: "目前沒有公開資訊版本。",
-          noPlacards: "目前沒有牌貼版本。",
-          noHistory: "目前尚無已發佈歷史。",
-          colVersion: "版本",
-          colFrom: "EFFECTIVE FROM",
-          colTo: "EFFECTIVE TO",
-          colCall: "叫車電話",
-          colComplaint: "客訴電話",
-          colStatus: "狀態",
-          colUpdated: "更新",
-          colPlacard: "牌貼",
-          colSource: "來源版本",
-          colTemplate: "範本",
-          colArtifact: "成品",
-          colActions: "操作",
-          colPublishedAt: "發佈時間",
-          colPublishedBy: "發佈者",
-          publish: "發佈",
-          publishing: "發佈中...",
-          deleteDraft: "刪除",
-          deleting: "刪除中...",
-          immutable: "不可變",
-          createTitle: "建立公開資訊草稿",
-          createSubtitle: "中度風險 · 發佈前皆為草稿。",
-          publishTitle: "發佈公開資訊版本",
-          publishSubtitle:
-            "高風險 · 發佈會替換目前生效的揭露資訊；需填寫原因以產生稽核憑據。",
-          publishNoDrafts: "目前沒有可發佈的草稿版本。",
-          publishPick: "選擇草稿版本",
-          publishReasonLabel: "原因（必填）",
-          publishReasonPh: "為何現在發佈此版本？",
-          confirmPublish: "確認發佈",
-          generateTitle: "產生新牌貼",
-          generateSubtitle: "中度風險 · 牌貼會綁定所選的來源公開資訊版本。",
-          confirmGenerate: "產生牌貼",
-          generating: "產生中...",
-          cancel: "取消",
-          fTitle: "標題",
-          fCallPhone: "叫車電話",
-          fComplaintPhone: "客訴電話",
-          fEffectiveFrom: "生效起",
-          fEffectiveTo: "生效迄（選填）",
-          fCallRate: "叫車費率說明",
-          fFare: "計費說明",
-          fPayment: "支付方式說明",
-          fSource: "來源公開資訊版本",
-          fVersionCode: "版本代碼",
-          fTemplate: "範本",
-          fArtifact: "成品檔 id（選填）",
-          receiptPublishVersion: (id: string, reason: string) =>
-            `稽核憑據：已發佈公開資訊 ${id}。原因：${reason}`,
-          receiptCreate: "稽核憑據：已建立公開資訊草稿。",
-          receiptGenerate: (code: string) => `稽核憑據：已產生牌貼 ${code}。`,
-          receiptPublishPlacard: (code: string) =>
-            `稽核憑據：已發佈牌貼 ${code}。`,
-          disabledReason: {
-            no_draft_versions: "目前沒有可發佈的草稿版本。",
-            no_draft_selected: "請選擇要發佈的草稿版本。",
-            reason_required: "發佈需填寫原因。",
-            title_required: "需填寫標題。",
-            no_source_version: "請選擇來源公開資訊版本。",
-            source_retired: "所選來源版本已停用。",
-            version_code_conflict: "此版本代碼已被使用。",
-            already_published: "已發佈（不可變）。",
-            no_public_info_version: "請先建立公開資訊版本再產生牌貼。",
-          } as Record<string, string>,
-        };
+  function formatText(
+    key: string,
+    params?: Record<string, string | number>,
+  ): string {
+    return t(key, params);
+  }
+
+  function switchboardText(
+    key: string,
+    params?: Record<string, string | number>,
+  ): string {
+    return formatText(`switchboard.${key}`, params);
+  }
+
+  function commonText(key: string): string {
+    return formatText(`common.${key}`);
+  }
+
+  function previewPlacardTitle(code: string, source: string): string {
+    return formatText("switchboard.preview.currentPlacard", {
+      code,
+      source,
+    });
+  }
+
+  function receiptPublishVersion(id: string, reason: string): string {
+    return formatText("switchboard.receipt.publishVersion", { id, reason });
+  }
+
+  function receiptGenerate(code: string): string {
+    return formatText("switchboard.receipt.generate", { code });
+  }
+
+  function receiptPublishPlacard(code: string): string {
+    return formatText("switchboard.receipt.publishPlacard", { code });
+  }
+
+  function assistantText(
+    key: string,
+    params?: Record<string, string | number>,
+  ): string {
+    return formatText(`switchboard.assistant.${key}`, params);
+  }
+
+  function disabledReasonText(
+    code: string | null | undefined,
+  ): string | undefined {
+    if (!code) {
+      return undefined;
+    }
+
+    const keyByCode: Record<string, string> = {
+      no_draft_versions: "switchboard.disabled.noDraftVersions",
+      no_draft_selected: "switchboard.disabled.noDraftSelected",
+      reason_required: "switchboard.disabled.reasonRequired",
+      title_required: "switchboard.disabled.titleRequired",
+      no_source_version: "switchboard.disabled.noSourceVersion",
+      source_retired: "switchboard.disabled.sourceRetired",
+      version_code_conflict: "switchboard.disabled.versionCodeConflict",
+      already_published: "switchboard.disabled.alreadyPublished",
+      no_public_info_version: "switchboard.disabled.noPublicInfoVersion",
+    };
+    const key = keyByCode[code];
+    return key ? formatText(key) : code;
+  }
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -672,15 +548,16 @@ export default function SwitchboardPage() {
               return {
                 ok: false,
                 code: "invalid_filter_value",
-                message:
-                  "Switchboard tab filter accepts only versions, placards, or history.",
+                message: assistantText("invalidWorkspaceTab"),
               } as const;
             }
             setActiveTab(value);
             return {
               ok: true,
               code: "filter_applied",
-              message: `Applied switchboard tab ${value}.`,
+              message: assistantText("appliedWorkspaceTab", {
+                value: String(value),
+              }),
               payload: { filterId: "workspace_tab", value },
             } as const;
           },
@@ -726,7 +603,7 @@ export default function SwitchboardPage() {
             return {
               ok: true,
               code: "draft_filled",
-              message: "Filled public info draft without submitting.",
+              message: assistantText("filledPublicInfoDraft"),
             } as const;
           },
         },
@@ -755,7 +632,7 @@ export default function SwitchboardPage() {
             return {
               ok: true,
               code: "draft_filled",
-              message: "Filled placard draft without submitting.",
+              message: assistantText("filledPlacardDraft"),
             } as const;
           },
         },
@@ -786,7 +663,7 @@ export default function SwitchboardPage() {
         effectiveTo: cleanNullable(publicInfoForm.effectiveTo ?? ""),
       });
       setPublicInfoForm(EMPTY_PUBLIC_INFO_FORM);
-      setReceipt(copy.receiptCreate);
+      setReceipt(switchboardText("receipt.create"));
       setModal(null);
       await loadData();
     } catch (e: unknown) {
@@ -801,7 +678,7 @@ export default function SwitchboardPage() {
     setError(null);
     try {
       await client.publishPublicInfoVersion(versionId, {});
-      setReceipt(copy.receiptPublishVersion(versionId, reason));
+      setReceipt(receiptPublishVersion(versionId, reason));
       setPublishTargetId("");
       setPublishReason("");
       setModal(null);
@@ -841,7 +718,7 @@ export default function SwitchboardPage() {
         artifactFileId: cleanNullable(placardForm.artifactFileId),
       };
       await client.generatePlacardVersion(command);
-      setReceipt(copy.receiptGenerate(command.versionCode));
+      setReceipt(receiptGenerate(command.versionCode));
       setPlacardForm((current) => ({
         ...EMPTY_PLACARD_FORM,
         publicInfoVersionId: current.publicInfoVersionId,
@@ -860,7 +737,7 @@ export default function SwitchboardPage() {
     setError(null);
     try {
       await client.publishPlacardVersion(placard.placardVersionId);
-      setReceipt(copy.receiptPublishPlacard(placard.versionCode));
+      setReceipt(receiptPublishPlacard(placard.versionCode));
       await loadData();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -870,7 +747,7 @@ export default function SwitchboardPage() {
   }
 
   const reasonText = (code: string | null | undefined): string | undefined =>
-    code ? (copy.disabledReason[code] ?? code) : undefined;
+    disabledReasonText(code);
 
   const createHeaderDescriptor = buildDescriptor(
     ACTION_CREATE_PUBLIC_INFO,
@@ -931,7 +808,7 @@ export default function SwitchboardPage() {
 
   const versionColumns: CanvasTableColumn<PublicInfoRow>[] = [
     {
-      h: copy.colVersion,
+      h: switchboardText("col.version"),
       w: 200,
       r: (row) => (
         <div style={cellStackStyle}>
@@ -941,31 +818,31 @@ export default function SwitchboardPage() {
       ),
     },
     {
-      h: copy.colFrom,
+      h: switchboardText("col.effectiveFrom"),
       w: 130,
       mono: true,
       r: (row) => row.effectiveFrom ?? "—",
     },
     {
-      h: copy.colTo,
+      h: switchboardText("col.effectiveTo"),
       w: 130,
       mono: true,
       r: (row) => row.effectiveTo ?? "—",
     },
     {
-      h: copy.colCall,
+      h: switchboardText("col.callLine"),
       w: 130,
       mono: true,
       r: (row) => row.callPhone ?? "—",
     },
     {
-      h: copy.colComplaint,
+      h: switchboardText("col.complaintLine"),
       w: 130,
       mono: true,
       r: (row) => row.complaintPhone ?? "—",
     },
     {
-      h: copy.colStatus,
+      h: commonText("status"),
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={publicInfoStatusTone(row.status)} dot>
@@ -974,7 +851,7 @@ export default function SwitchboardPage() {
       ),
     },
     {
-      h: copy.colUpdated,
+      h: switchboardText("col.updated"),
       mono: true,
       r: (row) => formatDateTime(row.updatedAt),
     },
@@ -982,7 +859,7 @@ export default function SwitchboardPage() {
 
   const placardColumns: CanvasTableColumn<PlacardRow>[] = [
     {
-      h: copy.colPlacard,
+      h: switchboardText("col.placard"),
       w: 200,
       r: (row) => (
         <div style={cellStackStyle}>
@@ -992,7 +869,7 @@ export default function SwitchboardPage() {
       ),
     },
     {
-      h: copy.colSource,
+      h: switchboardText("col.sourceVersion"),
       r: (row) => {
         const source = publicInfoById[row.publicInfoVersionId];
         return (
@@ -1003,9 +880,9 @@ export default function SwitchboardPage() {
         );
       },
     },
-    { h: copy.colTemplate, k: "templateName", w: 150 },
+    { h: switchboardText("col.template"), k: "templateName", w: 150 },
     {
-      h: copy.colArtifact,
+      h: switchboardText("col.artifact"),
       w: 200,
       r: (row) => (
         <div style={cellStackStyle}>
@@ -1020,23 +897,25 @@ export default function SwitchboardPage() {
               rel="noreferrer"
               style={{ color: th.accent, fontSize: 11.5 }}
             >
-              {copy.downloadPdf}
+              {switchboardText("downloadPdf")}
             </a>
           ) : null}
         </div>
       ),
     },
     {
-      h: copy.colStatus,
+      h: commonText("status"),
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={row.publishedAt ? "success" : "warn"} dot>
-          {row.publishedAt ? "published" : "draft"}
+          {row.publishedAt
+            ? switchboardText("status.published")
+            : switchboardText("status.draft")}
         </CanvasPill>
       ),
     },
     {
-      h: copy.colActions,
+      h: commonText("actions"),
       w: 120,
       r: (row) => {
         const publishAction = findAction(
@@ -1049,8 +928,8 @@ export default function SwitchboardPage() {
         return publishAction.enabled ? (
           <DescriptorButton
             descriptor={publishAction}
-            label={copy.publish}
-            busyLabel={copy.publishing}
+            label={switchboardText("publishPlacard")}
+            busyLabel={switchboardText("publishing")}
             busy={publishingPlacardId === row.placardVersionId}
             icon="check"
             variant="primary"
@@ -1059,7 +938,8 @@ export default function SwitchboardPage() {
           />
         ) : (
           <span style={subcopyStyle}>
-            {reasonText(publishAction.disabledReasonCode) ?? copy.immutable}
+            {reasonText(publishAction.disabledReasonCode) ??
+              switchboardText("immutable")}
           </span>
         );
       },
@@ -1068,7 +948,7 @@ export default function SwitchboardPage() {
 
   const historyVersionColumns: CanvasTableColumn<PublicInfoRow>[] = [
     {
-      h: copy.colVersion,
+      h: switchboardText("col.version"),
       w: 200,
       r: (row) => (
         <div style={cellStackStyle}>
@@ -1078,14 +958,19 @@ export default function SwitchboardPage() {
       ),
     },
     {
-      h: copy.colFrom,
+      h: switchboardText("col.effectiveFrom"),
       w: 130,
       mono: true,
       r: (row) => row.effectiveFrom ?? "—",
     },
-    { h: copy.colTo, w: 130, mono: true, r: (row) => row.effectiveTo ?? "—" },
     {
-      h: copy.colStatus,
+      h: switchboardText("col.effectiveTo"),
+      w: 130,
+      mono: true,
+      r: (row) => row.effectiveTo ?? "—",
+    },
+    {
+      h: commonText("status"),
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={publicInfoStatusTone(row.status)} dot>
@@ -1094,13 +979,13 @@ export default function SwitchboardPage() {
       ),
     },
     {
-      h: copy.colPublishedAt,
+      h: switchboardText("col.publishedAt"),
       w: 170,
       mono: true,
       r: (row) => formatDateTime(row.publishedAt ?? ""),
     },
     {
-      h: copy.colPublishedBy,
+      h: switchboardText("col.publishedBy"),
       mono: true,
       r: (row) => row.publishedBy ?? "—",
     },
@@ -1108,7 +993,7 @@ export default function SwitchboardPage() {
 
   const historyPlacardColumns: CanvasTableColumn<PlacardRow>[] = [
     {
-      h: copy.colPlacard,
+      h: switchboardText("col.placard"),
       w: 200,
       r: (row) => (
         <div style={cellStackStyle}>
@@ -1118,13 +1003,13 @@ export default function SwitchboardPage() {
       ),
     },
     {
-      h: copy.colSource,
+      h: switchboardText("col.sourceVersion"),
       mono: true,
       r: (row) => row.publicInfoVersionId,
     },
-    { h: copy.colTemplate, k: "templateName", w: 150 },
+    { h: switchboardText("col.template"), k: "templateName", w: 150 },
     {
-      h: copy.colPublishedAt,
+      h: switchboardText("col.publishedAt"),
       w: 170,
       mono: true,
       r: (row) => formatDateTime(row.publishedAt ?? ""),
@@ -1132,9 +1017,17 @@ export default function SwitchboardPage() {
   ];
 
   const tabDefs: { id: TabId; label: string; count?: number }[] = [
-    { id: "versions", label: copy.tabVersions, count: publicInfo.length },
-    { id: "placards", label: copy.tabPlacards, count: placards.length },
-    { id: "history", label: copy.tabHistory },
+    {
+      id: "versions",
+      label: switchboardText("tab.versions"),
+      count: publicInfo.length,
+    },
+    {
+      id: "placards",
+      label: switchboardText("tab.placards"),
+      count: placards.length,
+    },
+    { id: "history", label: switchboardText("tab.history") },
   ];
   const tabNodes = tabDefs.map((def) => (
     <span
@@ -1152,15 +1045,15 @@ export default function SwitchboardPage() {
       <CanvasPageHeader
         theme={th}
         sticky={false}
-        title={copy.title}
-        subtitle={copy.subtitle}
+        title={switchboardText("title")}
+        subtitle={switchboardText("routeNote")}
         tabs={tabNodes}
         activeTab={tabNodes[activeTabIndex]}
         actions={
           <>
             <DescriptorButton
               descriptor={createHeaderDescriptor}
-              label={copy.createDraft}
+              label={switchboardText("createDraftVersion")}
               icon="plus"
               variant="secondary"
               danger={false}
@@ -1171,7 +1064,7 @@ export default function SwitchboardPage() {
             />
             <DescriptorButton
               descriptor={publishHeaderDescriptor}
-              label={copy.publishVersion}
+              label={switchboardText("publishVersion")}
               icon="check"
               variant="primary"
               danger={false}
@@ -1221,14 +1114,14 @@ export default function SwitchboardPage() {
 
         {loading && publicInfo.length === 0 && placards.length === 0 ? (
           <CanvasCard theme={th}>
-            <div style={emptyStateStyle}>{copy.loading}</div>
+            <div style={emptyStateStyle}>{switchboardText("loading")}</div>
           </CanvasCard>
         ) : activeTab === "versions" ? (
           <div style={versionsSplitStyle}>
             <CanvasCard
               theme={th}
-              title={copy.versionsTitle}
-              subtitle={copy.versionsSubtitle}
+              title={switchboardText("versionsTitle")}
+              subtitle={switchboardText("versionsSubtitle")}
               padding={0}
             >
               {publicInfo.length > 0 ? (
@@ -1238,7 +1131,9 @@ export default function SwitchboardPage() {
                   rows={publicInfo as PublicInfoRow[]}
                 />
               ) : (
-                <div style={emptyStateStyle}>{copy.noVersions}</div>
+                <div style={emptyStateStyle}>
+                  {switchboardText("noPublicInfo")}
+                </div>
               )}
             </CanvasCard>
 
@@ -1246,11 +1141,11 @@ export default function SwitchboardPage() {
               theme={th}
               title={
                 livePlacard
-                  ? copy.placardPreviewTitle(
+                  ? previewPlacardTitle(
                       livePlacard.versionCode,
                       livePlacard.publicInfoVersionId,
                     )
-                  : copy.placardPreviewTitle("—", "—")
+                  : previewPlacardTitle("—", "—")
               }
             >
               {livePlacard ? (
@@ -1276,9 +1171,9 @@ export default function SwitchboardPage() {
                         fontWeight: 600,
                       }}
                     >
-                      {locale === "en" ? "Call" : "叫車"}{" "}
+                      {switchboardText("preview.callLabel")}{" "}
                       {livePlacardSource?.callPhone ?? "—"} ·{" "}
-                      {locale === "en" ? "Complaint" : "客訴"}{" "}
+                      {switchboardText("preview.complaintLabel")}{" "}
                       {livePlacardSource?.complaintPhone ?? "—"}
                     </div>
                     <div style={{ fontSize: 10.5 }}>
@@ -1292,7 +1187,8 @@ export default function SwitchboardPage() {
                         <div>{livePlacardSource.paymentMethodText}</div>
                       ) : null}
                       <div style={{ marginTop: 4, color: "#666" }}>
-                        {livePlacard.versionCode} · source{" "}
+                        {livePlacard.versionCode} ·{" "}
+                        {switchboardText("preview.sourceLabel")}{" "}
                         {livePlacard.publicInfoVersionId}
                         {livePlacardSource?.effectiveFrom
                           ? ` (${livePlacardSource.effectiveFrom}${
@@ -1313,7 +1209,7 @@ export default function SwitchboardPage() {
                         style={{ textDecoration: "none" }}
                       >
                         <CanvasBtn theme={th} variant="secondary" size="sm">
-                          {copy.downloadPdf}
+                          {switchboardText("downloadPdf")}
                         </CanvasBtn>
                       </a>
                     ) : (
@@ -1323,12 +1219,12 @@ export default function SwitchboardPage() {
                         size="sm"
                         disabled
                       >
-                        {copy.downloadPdf}
+                        {switchboardText("downloadPdf")}
                       </CanvasBtn>
                     )}
                     <DescriptorButton
                       descriptor={generateOpenDescriptor}
-                      label={copy.generatePlacard}
+                      label={switchboardText("generatePlacardVersion")}
                       icon="plus"
                       variant="primary"
                       danger={false}
@@ -1342,11 +1238,11 @@ export default function SwitchboardPage() {
               ) : (
                 <div style={emptyStateStyle}>
                   <div style={{ marginBottom: 12 }}>
-                    {copy.placardPreviewEmpty}
+                    {switchboardText("preview.emptyPlacard")}
                   </div>
                   <DescriptorButton
                     descriptor={generateOpenDescriptor}
-                    label={copy.generatePlacard}
+                    label={switchboardText("generatePlacardVersion")}
                     icon="plus"
                     variant="primary"
                     danger={false}
@@ -1362,13 +1258,13 @@ export default function SwitchboardPage() {
         ) : activeTab === "placards" ? (
           <CanvasCard
             theme={th}
-            title={copy.placardListTitle}
-            subtitle={copy.placardListSubtitle}
+            title={switchboardText("placardVersions")}
+            subtitle={switchboardText("placardVersionsNote")}
             padding={0}
             actions={
               <DescriptorButton
                 descriptor={generateOpenDescriptor}
-                label={copy.generatePlacard}
+                label={switchboardText("generatePlacardVersion")}
                 icon="plus"
                 variant="primary"
                 danger={false}
@@ -1386,15 +1282,15 @@ export default function SwitchboardPage() {
                 rows={placards as PlacardRow[]}
               />
             ) : (
-              <div style={emptyStateStyle}>{copy.noPlacards}</div>
+              <div style={emptyStateStyle}>{switchboardText("noPlacards")}</div>
             )}
           </CanvasCard>
         ) : (
           <>
             <CanvasCard
               theme={th}
-              title={copy.historyVersionsTitle}
-              subtitle={copy.historyVersionsSubtitle}
+              title={switchboardText("historyVersionsTitle")}
+              subtitle={switchboardText("historyVersionsSubtitle")}
               padding={0}
             >
               {historyVersions.length > 0 ? (
@@ -1404,13 +1300,15 @@ export default function SwitchboardPage() {
                   rows={historyVersions as PublicInfoRow[]}
                 />
               ) : (
-                <div style={emptyStateStyle}>{copy.noHistory}</div>
+                <div style={emptyStateStyle}>
+                  {switchboardText("noHistory")}
+                </div>
               )}
             </CanvasCard>
             <CanvasCard
               theme={th}
-              title={copy.historyPlacardsTitle}
-              subtitle={copy.historyPlacardsSubtitle}
+              title={switchboardText("historyPlacardsTitle")}
+              subtitle={switchboardText("historyPlacardsSubtitle")}
               padding={0}
             >
               {publishedPlacards.length > 0 ? (
@@ -1420,7 +1318,9 @@ export default function SwitchboardPage() {
                   rows={publishedPlacards as PlacardRow[]}
                 />
               ) : (
-                <div style={emptyStateStyle}>{copy.noHistory}</div>
+                <div style={emptyStateStyle}>
+                  {switchboardText("noHistory")}
+                </div>
               )}
             </CanvasCard>
           </>
@@ -1429,8 +1329,8 @@ export default function SwitchboardPage() {
 
       {modal === "create" ? (
         <ModalShell
-          title={copy.createTitle}
-          subtitle={copy.createSubtitle}
+          title={switchboardText("createTitle")}
+          subtitle={switchboardText("createSubtitle")}
           onClose={closeModal}
           footer={
             <>
@@ -1440,12 +1340,12 @@ export default function SwitchboardPage() {
                 size="sm"
                 onClick={closeModal}
               >
-                {copy.cancel}
+                {commonText("cancel")}
               </CanvasBtn>
               <DescriptorButton
                 descriptor={createConfirmDescriptor}
-                label={copy.createDraft}
-                busyLabel={copy.generating}
+                label={switchboardText("createDraftVersion")}
+                busyLabel={switchboardText("creating")}
                 busy={creatingPublicInfo}
                 icon="plus"
                 variant="primary"
@@ -1464,7 +1364,9 @@ export default function SwitchboardPage() {
         >
           <div style={formGridStyle}>
             <label>
-              <span style={fieldLabelStyle}>{copy.fTitle}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.title")}
+              </span>
               <input
                 style={fieldInputStyle}
                 value={publicInfoForm.title ?? ""}
@@ -1477,7 +1379,9 @@ export default function SwitchboardPage() {
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>{copy.fCallPhone}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.callPhone")}
+              </span>
               <input
                 style={fieldInputStyle}
                 value={publicInfoForm.callPhone ?? ""}
@@ -1490,7 +1394,9 @@ export default function SwitchboardPage() {
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>{copy.fComplaintPhone}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.complaintPhone")}
+              </span>
               <input
                 style={fieldInputStyle}
                 value={publicInfoForm.complaintPhone ?? ""}
@@ -1503,11 +1409,13 @@ export default function SwitchboardPage() {
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>{copy.fEffectiveFrom}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.effectiveFrom")}
+              </span>
               <input
                 style={fieldInputStyle}
                 value={publicInfoForm.effectiveFrom ?? ""}
-                placeholder="2026-07-01T00:00:00.000Z"
+                placeholder={switchboardText("form.effectiveFromPlaceholder")}
                 onChange={(event) =>
                   setPublicInfoForm((current) => ({
                     ...current,
@@ -1517,7 +1425,9 @@ export default function SwitchboardPage() {
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>{copy.fEffectiveTo}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.effectiveTo")}
+              </span>
               <input
                 style={fieldInputStyle}
                 value={publicInfoForm.effectiveTo ?? ""}
@@ -1530,7 +1440,9 @@ export default function SwitchboardPage() {
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>{copy.fCallRate}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.callRateText")}
+              </span>
               <input
                 style={fieldInputStyle}
                 value={publicInfoForm.callRateText ?? ""}
@@ -1543,7 +1455,9 @@ export default function SwitchboardPage() {
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>{copy.fFare}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.fareText")}
+              </span>
               <input
                 style={fieldInputStyle}
                 value={publicInfoForm.fareText ?? ""}
@@ -1556,7 +1470,9 @@ export default function SwitchboardPage() {
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>{copy.fPayment}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.paymentMethodText")}
+              </span>
               <input
                 style={fieldInputStyle}
                 value={publicInfoForm.paymentMethodText ?? ""}
@@ -1574,8 +1490,8 @@ export default function SwitchboardPage() {
 
       {modal === "publish" ? (
         <ModalShell
-          title={copy.publishTitle}
-          subtitle={copy.publishSubtitle}
+          title={switchboardText("publishTitle")}
+          subtitle={switchboardText("publishSubtitle")}
           onClose={closeModal}
           footer={
             <>
@@ -1585,12 +1501,12 @@ export default function SwitchboardPage() {
                 size="sm"
                 onClick={closeModal}
               >
-                {copy.cancel}
+                {commonText("cancel")}
               </CanvasBtn>
               <DescriptorButton
                 descriptor={publishConfirmDescriptor}
-                label={copy.confirmPublish}
-                busyLabel={copy.publishing}
+                label={switchboardText("confirmPublish")}
+                busyLabel={switchboardText("publishing")}
                 busy={
                   publishTargetId !== "" &&
                   publishingVersionId === publishTargetId
@@ -1608,11 +1524,15 @@ export default function SwitchboardPage() {
           }
         >
           {draftVersions.length === 0 ? (
-            <div style={emptyStateStyle}>{copy.publishNoDrafts}</div>
+            <div style={emptyStateStyle}>
+              {switchboardText("publishNoDrafts")}
+            </div>
           ) : (
             <>
               <label>
-                <span style={fieldLabelStyle}>{copy.publishPick}</span>
+                <span style={fieldLabelStyle}>
+                  {switchboardText("publishPick")}
+                </span>
                 <select
                   style={fieldInputStyle}
                   value={publishTargetId}
@@ -1627,7 +1547,9 @@ export default function SwitchboardPage() {
                 </select>
               </label>
               <label style={{ display: "block", marginTop: 12 }}>
-                <span style={fieldLabelStyle}>{copy.publishReasonLabel}</span>
+                <span style={fieldLabelStyle}>
+                  {switchboardText("publishReasonLabel")}
+                </span>
                 <textarea
                   style={{
                     ...fieldInputStyle,
@@ -1635,7 +1557,7 @@ export default function SwitchboardPage() {
                     resize: "vertical",
                   }}
                   value={publishReason}
-                  placeholder={copy.publishReasonPh}
+                  placeholder={switchboardText("publishReasonPlaceholder")}
                   onChange={(event) => setPublishReason(event.target.value)}
                 />
               </label>
@@ -1651,8 +1573,8 @@ export default function SwitchboardPage() {
                     onClick={() => void handleDeleteDraft(publishTargetId)}
                   >
                     {deletingVersionId === publishTargetId
-                      ? copy.deleting
-                      : copy.deleteDraft}
+                      ? commonText("deleting")
+                      : switchboardText("deleteDraft")}
                   </CanvasBtn>
                 </div>
               ) : null}
@@ -1663,8 +1585,8 @@ export default function SwitchboardPage() {
 
       {modal === "placard" ? (
         <ModalShell
-          title={copy.generateTitle}
-          subtitle={copy.generateSubtitle}
+          title={switchboardText("generateTitle")}
+          subtitle={switchboardText("generateSubtitle")}
           onClose={closeModal}
           footer={
             <>
@@ -1674,12 +1596,12 @@ export default function SwitchboardPage() {
                 size="sm"
                 onClick={closeModal}
               >
-                {copy.cancel}
+                {commonText("cancel")}
               </CanvasBtn>
               <DescriptorButton
                 descriptor={generateConfirmDescriptor}
-                label={copy.confirmGenerate}
-                busyLabel={copy.generating}
+                label={switchboardText("generatePlacardVersion")}
+                busyLabel={switchboardText("generating")}
                 busy={creatingPlacard}
                 icon="plus"
                 variant="primary"
@@ -1698,7 +1620,9 @@ export default function SwitchboardPage() {
         >
           <div style={formGridStyle}>
             <label>
-              <span style={fieldLabelStyle}>{copy.fSource}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.sourceVersion")}
+              </span>
               <select
                 style={fieldInputStyle}
                 value={placardForm.publicInfoVersionId}
@@ -1722,11 +1646,13 @@ export default function SwitchboardPage() {
               </select>
             </label>
             <label>
-              <span style={fieldLabelStyle}>{copy.fVersionCode}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.versionCode")}
+              </span>
               <input
                 style={fieldInputStyle}
                 value={placardForm.versionCode}
-                placeholder="placard-2026-q3"
+                placeholder={switchboardText("form.versionCodePlaceholder")}
                 onChange={(event) =>
                   setPlacardForm((current) => ({
                     ...current,
@@ -1736,11 +1662,13 @@ export default function SwitchboardPage() {
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>{copy.fTemplate}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.template")}
+              </span>
               <input
                 style={fieldInputStyle}
                 value={placardForm.templateName}
-                placeholder="seatback-default"
+                placeholder={switchboardText("form.templatePlaceholder")}
                 onChange={(event) =>
                   setPlacardForm((current) => ({
                     ...current,
@@ -1750,7 +1678,9 @@ export default function SwitchboardPage() {
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>{copy.fArtifact}</span>
+              <span style={fieldLabelStyle}>
+                {switchboardText("form.artifactFileId")}
+              </span>
               <input
                 style={fieldInputStyle}
                 value={placardForm.artifactFileId}
