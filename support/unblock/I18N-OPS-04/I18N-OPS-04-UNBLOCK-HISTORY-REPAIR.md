@@ -65,7 +65,7 @@ identity, not by WP0 ancestry.
 - `origin/codex2/i18n-ops-04 @ 4f5e71c92c9a8c6d7c303a45ef465876de54976c`
 - `origin/codex/i18n-ops-04 @ 3ea01e2dee5c7e5c294ab0be826b47b0b53de645`
 - task branch
-  `origin/codex/i18n-ops-04-unblock-history-repair @ b5bb03a7`
+  `origin/codex/i18n-ops-04-unblock-history-repair @ 692758dd`
 - earlier helper rail
   `origin/codex2/i18n-ops-04-unblock-history-repair @ 52f0d654`
 
@@ -175,6 +175,8 @@ The supervisor or parent owner should do two things:
     `I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: add branch push and PR evidence`
   - `b5bb03a7b52886ef2a44b03baf8aac75e6adbe06`
     `I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: refresh current-rail diagnosis`
+  - `692758ddd147afbf519558945a5beb4754244219`
+    `I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: refresh parent-gap evidence`
 - push target:
   `origin/codex/i18n-ops-04-unblock-history-repair`
 - task PR:
