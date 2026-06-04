@@ -7,6 +7,7 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
@@ -74,6 +75,10 @@ const PRICING_TAB_VALUES = new Set<TabId>([
   "subsidy",
   "history",
 ]);
+
+function isTabId(value: string | null): value is TabId {
+  return value !== null && PRICING_TAB_VALUES.has(value as TabId);
+}
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -607,12 +612,14 @@ function ReasonModal({
 export default function PricingPage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rules, setRules] = useState<PlatformPricingRuleRecord[]>([]);
   const [plans, setPlans] = useState<DriverFeePlanRecord[]>([]);
   const [catalog, setCatalog] = useState<ProductRuleCatalog | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("passenger");
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   const [publishReason, setPublishReason] = useState("");
@@ -629,25 +636,14 @@ export default function PricingPage() {
     "all" | "90d" | "30d"
   >("all");
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tab = params.get("tab");
-    if (
-      tab === "passenger" ||
-      tab === "driver" ||
-      tab === "subsidy" ||
-      tab === "history"
-    ) {
-      setActiveTab(tab);
-    }
-  }, []);
+  const tabParam = searchParams.get("tab");
+  const activeTab: TabId = isTabId(tabParam) ? tabParam : "passenger";
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    params.set("tab", activeTab);
-    const next = `${window.location.pathname}?${params.toString()}`;
-    window.history.replaceState(null, "", next);
-  }, [activeTab]);
+  function handleTabChange(nextTab: TabId) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", nextTab);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }
 
   useEffect(() => {
     async function load() {
@@ -774,7 +770,7 @@ export default function PricingPage() {
                   "Pricing tab filter accepts only passenger, driver, subsidy, or history.",
               } as const;
             }
-            setActiveTab(value as TabId);
+            handleTabChange(value as TabId);
             return {
               ok: true,
               code: "filter_applied",
@@ -990,7 +986,9 @@ export default function PricingPage() {
               theme={theme}
               icon="plus"
               onClick={() =>
-                setActiveTab(activeTab === "history" ? "passenger" : activeTab)
+                handleTabChange(
+                  activeTab === "history" ? "passenger" : activeTab,
+                )
               }
             >
               {createDraftLabel}
@@ -1064,7 +1062,7 @@ export default function PricingPage() {
               key={tab.id}
               type="button"
               style={tabButtonStyle(activeTab === tab.id)}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => handleTabChange(tab.id)}
             >
               {tab.label}
             </button>
