@@ -7,6 +7,7 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
@@ -1058,14 +1059,16 @@ export default function PricingPage() {
             { id: "subsidy" as const, label: "Subsidy / Reimbursement Rules" },
             { id: "history" as const, label: "Published Versions" },
           ].map((tab) => (
-            <button
+            <Link
               key={tab.id}
-              type="button"
-              style={tabButtonStyle(activeTab === tab.id)}
-              onClick={() => handleTabChange(tab.id)}
+              href={`${pathname}?tab=${tab.id}`}
+              replace
+              scroll={false}
+              prefetch={false}
+              style={{ ...tabButtonStyle(activeTab === tab.id), textDecoration: "none", display: "inline-flex", alignItems: "center" }}
             >
               {tab.label}
-            </button>
+            </Link>
           ))}
         </div>
 
