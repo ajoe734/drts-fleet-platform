@@ -1,6 +1,6 @@
 # Dev Runtime + Functional Gap Report (browser-verified)
 
-- **Last re-run:** 2026-06-04T05:22:36Z
+- **Last re-run:** 2026-06-04T06:01:30Z
 - **Auditor:** Codex2
 - **Environment:** live dev Cloud Run
   - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
@@ -8,7 +8,7 @@
 - **Method:** headless Chromium route census over all 39 routes (Platform Admin 18 + Ops Console 21), fixed `1440x950` screenshots, shell-count checks, and manual tab round-trip checks for `/pricing`, `/payments`, `/attendance`.
 - **Artifacts:** `.artifacts/func-audit/dev-gap-audit-results.json`, `.artifacts/func-audit/dev-gap-audit-summary.md`, and route screenshots under `.artifacts/func-audit/*.png`.
 
-## 1. Scoreboard (2026-06-04T05:22:36Z re-run)
+## 1. Scoreboard (2026-06-04T06:01:30Z re-run)
 
 | App            | Routes | Fully working | Broken                            |
 | -------------- | -----: | ------------: | --------------------------------- |
@@ -16,30 +16,30 @@
 | Ops Console    |     21 |            20 | `/vehicles/veh-demo-001` HTTP 500 |
 
 **Current total:** 38 / 39 routes fully working.  
-**Acceptance target (`0 broken`, `0 HTTP 500`) is not met.**
+**Acceptance target (`0 broken`, `0 HTTP 500`) is still not met.**
 
-This 2026-06-04T05:22:36Z re-run reconfirms the current dev state: the prior shell/payments/attendance fixes remain live, but acceptance is still blocked by one remaining HTTP 500 and one manual tab-strip regression:
+This 2026-06-04T06:01:30Z re-run reconfirms the current dev state: the prior shell/payments/attendance fixes remain live, but acceptance is still blocked by one remaining HTTP 500 and one manual tab-strip regression:
 
 - OPS `/vehicles/veh-demo-001` still returns HTTP 500.
 - PA `/pricing` tab switching still fails to push `/pricing?tab=driver`.
 
 ## 2. What is now confirmed good
 
-- **PA `/fleet` single-shell fix is live.**
+- **PA `/fleet` single-shell fix is still live.**
   - Browser census counted exactly **one** Platform Admin shell on `/fleet`.
   - Evidence: `.artifacts/func-audit/platform-admin-fleet.png`
-- **OPS `/revenue` no longer returns HTTP 500.**
+- **OPS `/revenue` still no longer returns HTTP 500.**
   - The 39-route census now records `/revenue` as non-broken on dev.
   - Evidence: `.artifacts/func-audit/dev-gap-audit-results.json`
-- **PA `/payments` tab strip round-trip works.**
+- **PA `/payments` tab strip round-trip still works.**
   - `發票` → `司機結算單` → `報銷` switched correctly; `報銷` routed into `/payments/reimbursements`.
   - Evidence: `.artifacts/func-audit/payments-tab-roundtrip.png`
-- **OPS `/attendance` tab strip round-trip works.**
+- **OPS `/attendance` tab strip round-trip still works.**
   - `今日` ↔ `本週` ↔ `異常` correctly updated `?view=` and returned to `/attendance`.
   - Evidence: `.artifacts/func-audit/attendance-tab-roundtrip.png`
-- **All 18 Platform Admin routes return HTTP 200 with a single shell.**
+- **All 18 Platform Admin routes still return HTTP 200 with a single shell.**
   - Includes `/tenants/[tenantId]`, `/payments/reimbursements`, and `/payments/reimbursements/[batchId]`.
-- **Most prior OPS route 500s are cleared on dev.**
+- **Most prior OPS route 500s remain cleared on dev.**
   - `/revenue`, `/drivers`, `/contracts`, and the rest of the 21-route census except vehicle detail returned non-500 in this re-run.
 
 ## 3. Confirmed remaining gaps
@@ -72,7 +72,7 @@ This 2026-06-04T05:22:36Z re-run reconfirms the current dev state: the prior she
 
 This task cannot be closed as `done` yet.
 
-- **Why:** live dev still has 1 confirmed HTTP 500 route and 1 confirmed tab-strip regression.
+- **Why:** live dev still has 1 confirmed HTTP 500 route and 1 confirmed tab-strip regression in the 2026-06-04T06:01:30Z rerun.
 - **Acceptance not met:**
   - all 39 routes verified on dev: **failed** (`1` HTTP 500 remains)
   - single shell everywhere: **passed**
