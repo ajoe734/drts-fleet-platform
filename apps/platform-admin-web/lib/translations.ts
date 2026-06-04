@@ -100,6 +100,8 @@ const en = {
 
   // ── Adapter Registry ──
   "adapterRegistry.metadata.title": "Platform Adapter Registry",
+  "adapterRegistry.metadata.description":
+    "Governed adapter registry for platform configuration, credentials, and authority boundaries.",
   "adapterRegistry.title": "Platform Adapter Registry",
   "adapterRegistry.pageTitle": "External Platform Adapter Registry",
   "adapterRegistry.pageSubtitle":
@@ -131,6 +133,21 @@ const en = {
   "adapterRegistry.serviceBuckets": "Service buckets",
   "adapterRegistry.featureFlags": "Feature flags",
   "adapterRegistry.supportedActions": "Supported actions",
+  "adapterRegistry.supportedAction.accept.label": "Accept",
+  "adapterRegistry.supportedAction.accept.description":
+    "Accept and claim a dispatch task.",
+  "adapterRegistry.supportedAction.complete.label": "Complete",
+  "adapterRegistry.supportedAction.complete.description":
+    "Close the owned trip workflow.",
+  "adapterRegistry.supportedAction.incident.label": "Incident",
+  "adapterRegistry.supportedAction.incident.description":
+    "Raise a safety or service incident.",
+  "adapterRegistry.supportedAction.reject.label": "Reject",
+  "adapterRegistry.supportedAction.reject.description":
+    "Send the rejection reason back to the source platform.",
+  "adapterRegistry.supportedAction.proofUpload.label": "Proof upload",
+  "adapterRegistry.supportedAction.proofUpload.description":
+    "Upload completion proof for reconciliation.",
   "adapterRegistry.operationalPause": "Operational pause",
   "adapterRegistry.noPause": "Not paused",
   "adapterRegistry.pauseUnknown":
@@ -995,6 +1012,8 @@ const zh: typeof en = {
 
   // ── Adapter Registry ──
   "adapterRegistry.metadata.title": "平台轉接器登錄",
+  "adapterRegistry.metadata.description":
+    "用於管理平台設定、憑證與權限邊界的受治理轉接器登錄。",
   "adapterRegistry.title": "平台轉接器登錄",
   "adapterRegistry.pageTitle": "外部平台轉接器登錄",
   "adapterRegistry.pageSubtitle":
@@ -1026,6 +1045,19 @@ const zh: typeof en = {
   "adapterRegistry.serviceBuckets": "服務分桶",
   "adapterRegistry.featureFlags": "功能旗標",
   "adapterRegistry.supportedActions": "支援動作",
+  "adapterRegistry.supportedAction.accept.label": "接受派單",
+  "adapterRegistry.supportedAction.accept.description": "接受並認領派遣任務。",
+  "adapterRegistry.supportedAction.complete.label": "完成行程",
+  "adapterRegistry.supportedAction.complete.description": "結束自有行程流程。",
+  "adapterRegistry.supportedAction.incident.label": "回報事故",
+  "adapterRegistry.supportedAction.incident.description":
+    "回報安全或服務事故。",
+  "adapterRegistry.supportedAction.reject.label": "拒絕派單",
+  "adapterRegistry.supportedAction.reject.description":
+    "將拒絕原因回傳至來源平台。",
+  "adapterRegistry.supportedAction.proofUpload.label": "上傳憑證",
+  "adapterRegistry.supportedAction.proofUpload.description":
+    "上傳完單憑證以供對帳。",
   "adapterRegistry.operationalPause": "維運暫停",
   "adapterRegistry.noPause": "未暫停",
   "adapterRegistry.pauseUnknown": "轉接器 API 尚未回報暫停狀態。",

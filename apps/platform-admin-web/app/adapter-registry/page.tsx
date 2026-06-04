@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import {
+  formatPlatformCodeLabel,
+  formatSupportedActionLabel,
+} from "@/lib/localized-labels";
 import type { PlatformAdapter } from "../../../../packages/contracts/src/platform-adapter-registry";
 import {
   Banner,
@@ -826,7 +829,7 @@ export default function AdapterRegistryPage() {
                               theme={theme}
                               tone="neutral"
                             >
-                              {action.name}
+                              {formatSupportedActionLabel(locale, action.name)}
                             </Pill>
                           ))
                         ) : (

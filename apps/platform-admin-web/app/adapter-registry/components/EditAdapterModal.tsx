@@ -7,7 +7,11 @@ import {
   UpdatePlatformAdapterCommand,
 } from "@drts/contracts";
 import { useTranslation } from "@/lib/i18n";
-import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import {
+  formatPlatformCodeLabel,
+  formatSupportedActionDescription,
+  formatSupportedActionLabel,
+} from "@/lib/localized-labels";
 
 interface EditAdapterModalProps {
   adapter: PlatformAdapter | null;
@@ -322,10 +326,10 @@ export function EditAdapterModal({
                       className="rounded-md border border-gray-200 bg-gray-50 p-3"
                     >
                       <p className="text-sm font-medium text-gray-900">
-                        {action.name}
+                        {formatSupportedActionLabel(locale, action.name)}
                       </p>
                       <p className="mt-1 text-xs text-gray-500">
-                        {action.description}
+                        {formatSupportedActionDescription(locale, action)}
                       </p>
                     </div>
                   ),

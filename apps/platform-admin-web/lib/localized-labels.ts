@@ -1,4 +1,4 @@
-import type { Locale } from "./translations";
+import { t as translate, type Locale } from "./translations";
 
 type LocalizedText = {
   en: string;
@@ -66,6 +66,32 @@ const UI_LABELS: Record<string, LocalizedText> = {
   placardVersionCodeConflict: {
     en: "Version code already exists in placard {placardId}. Choose a unique code before generating.",
     zh: "版本代碼已存在於立牌 {placardId}。請改用唯一代碼後再產生。",
+  },
+};
+
+const SUPPORTED_ACTION_TRANSLATION_KEYS: Record<
+  string,
+  { label: string; description: string }
+> = {
+  accept: {
+    label: "adapterRegistry.supportedAction.accept.label",
+    description: "adapterRegistry.supportedAction.accept.description",
+  },
+  complete: {
+    label: "adapterRegistry.supportedAction.complete.label",
+    description: "adapterRegistry.supportedAction.complete.description",
+  },
+  incident: {
+    label: "adapterRegistry.supportedAction.incident.label",
+    description: "adapterRegistry.supportedAction.incident.description",
+  },
+  reject: {
+    label: "adapterRegistry.supportedAction.reject.label",
+    description: "adapterRegistry.supportedAction.reject.description",
+  },
+  proof_upload: {
+    label: "adapterRegistry.supportedAction.proofUpload.label",
+    description: "adapterRegistry.supportedAction.proofUpload.description",
   },
 };
 
@@ -182,4 +208,35 @@ export function formatPlatformCodeLabel(
 
   const normalized = value.trim().toLowerCase();
   return CODE_LABELS[normalized]?.[locale] ?? humanizeCode(value);
+}
+
+export function formatSupportedActionLabel(
+  locale: Locale,
+  value: string | null | undefined,
+) {
+  if (!value) {
+    const unknownLabels = CODE_LABELS.unknown;
+    return unknownLabels ? unknownLabels[locale] : "Unknown";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  const translationKeys = SUPPORTED_ACTION_TRANSLATION_KEYS[normalized];
+  return translationKeys
+    ? translate(translationKeys.label, locale)
+    : humanizeCode(value);
+}
+
+export function formatSupportedActionDescription(
+  locale: Locale,
+  action: { name: string; description: string | null | undefined },
+) {
+  const normalized = action.name.trim().toLowerCase();
+  const translationKeys = SUPPORTED_ACTION_TRANSLATION_KEYS[normalized];
+  return (
+    (translationKeys
+      ? translate(translationKeys.description, locale)
+      : undefined) ??
+    action.description ??
+    formatSupportedActionLabel(locale, action.name)
+  );
 }
