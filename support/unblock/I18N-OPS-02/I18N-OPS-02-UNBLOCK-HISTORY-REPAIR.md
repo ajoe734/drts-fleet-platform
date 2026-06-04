@@ -25,8 +25,10 @@ instead of the already-pushed parent branch.
    with `codex2/i18n-ops-02` is only `94c3aa2d`, which is also current
    `origin/dev`, so the helper branch omits all three parent commits:
    `3f825e70`, `e86ee5f2`, and `5f7e103b`.
-4. The helper branch has no remote ref and no PR. The only pushed canonical
-   owner rail remains `origin/codex2/i18n-ops-02 @ 5f7e103b`.
+4. The helper branch now also exists on origin as
+   `origin/codex2/i18n-ops-02-unblock-history-repair @ fa867106`, but that ref
+   only publishes this audit on top of the stale helper lineage. The only
+   canonical owner delivery rail remains `origin/codex2/i18n-ops-02 @ 5f7e103b`.
 5. A similarly named reviewer-lane branch also exists as
    `codex/i18n-ops-02 @ 94c3aa2d [origin/dev]`, which reinforces that the
    contamination is branch-routing ambiguity, not missing product work.
@@ -38,8 +40,8 @@ instead of the already-pushed parent branch.
 - `origin/dev @ 94c3aa2d5000846b5a582a7c7eb8cd43e2de9a25`
 - local + remote parent branch
   `codex2/i18n-ops-02 @ 5f7e103ba8d83c73b8c5f81f30feed7e2e984b6b`
-- local helper branch only
-  `codex2/i18n-ops-02-unblock-history-repair @ 94c3aa2d5000846b5a582a7c7eb8cd43e2de9a25`
+- local + remote helper branch
+  `codex2/i18n-ops-02-unblock-history-repair @ fa8671068f43f15086efdb4e096f89959222bd80`
 - parent worktree:
   `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-i18n-ops-02`
 - helper worktree:
@@ -55,7 +57,7 @@ instead of the already-pushed parent branch.
   reports `branch: Created from origin/dev`.
 - `git ls-remote --heads origin` confirms:
   - `refs/heads/codex2/i18n-ops-02 @ 5f7e103b`
-  - no `refs/heads/codex2/i18n-ops-02-unblock-history-repair`
+  - `refs/heads/codex2/i18n-ops-02-unblock-history-repair @ fa867106`
 
 ### Parent provenance
 
@@ -83,7 +85,8 @@ The contamination is a three-part mismatch:
 
 1. The parent task already has a pushed owner branch and closeout commit.
 2. The helper branch with the `-unblock-history-repair` stem was auto-created
-   from `origin/dev` and tracks `origin/dev`, not the pushed parent branch.
+   from `origin/dev`, not from the pushed parent branch, and still carries that
+   stale ancestry even after the audit commit was pushed to origin.
 3. The helper branch therefore excludes the canonical parent delivery commits
    and cannot be used as the branch of record for review, resume, or closeout.
 
