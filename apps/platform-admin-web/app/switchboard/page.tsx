@@ -426,12 +426,11 @@ export default function SwitchboardPage() {
     return formatText(`switchboard.status.${status}`);
   }
 
-  function assistantText(
-    key: string,
-    params?: Record<string, string | number>,
-  ): string {
-    return formatText(`switchboard.assistant.${key}`, params);
-  }
+  const assistantText = useCallback(
+    (key: string, params?: Record<string, string | number>): string =>
+      formatText(`switchboard.assistant.${key}`, params),
+    [t],
+  );
 
   function formatPlacardSourceOptionLabel(
     version: Pick<PublicInfoVersionRecord, "status" | "title">,
@@ -680,7 +679,7 @@ export default function SwitchboardPage() {
         },
       },
     }),
-    [],
+    [assistantText],
   );
 
   usePlatformAdminAssistantPage(assistantBridge);
