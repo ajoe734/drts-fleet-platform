@@ -1,9 +1,14 @@
-import { Metadata } from "next";
+"use client";
 
-export const metadata: Metadata = {
-  title: "Platform Adapter Registry",
-};
+import { useEffect, type ReactNode } from "react";
+import { useTranslation } from "@/lib/i18n";
 
-export default function Layout({ children }: { children: React.ReactNode }) {
+export default function Layout({ children }: { children: ReactNode }) {
+  const { locale, t } = useTranslation();
+
+  useEffect(() => {
+    document.title = t("adapterRegistry.meta.title");
+  }, [locale, t]);
+
   return <>{children}</>;
 }
