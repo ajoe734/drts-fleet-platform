@@ -1168,14 +1168,10 @@ export default async function DashboardPage() {
   const headerSubtitle = [
     formatTimestamp(health.timestamp, locale),
     t("dashboard.header.mode", locale, {
-      value:
-        locale === "en" ? health.mode : formatOpsCodeLabel(locale, health.mode),
+      value: formatOpsCodeLabel(locale, health.mode),
     }),
     t("dashboard.header.execution", locale, {
-      value:
-        locale === "en"
-          ? health.execution_mode
-          : formatOpsCodeLabel(locale, health.execution_mode),
+      value: formatOpsCodeLabel(locale, health.execution_mode),
     }),
   ].join(" · ");
 
@@ -1202,7 +1198,7 @@ export default async function DashboardPage() {
             {
               descriptor: buildAction("open_incidents", "medium"),
               label: t("dashboard.quicklink.incidents", locale),
-              en: "incidents",
+              en: t("dashboard.quicklink.incidents.short", "en"),
               href: "/incidents",
             },
           ],
@@ -1223,7 +1219,7 @@ export default async function DashboardPage() {
             {
               descriptor: buildAction("open_dispatch", "low"),
               label: t("dashboard.section.queue.openDispatch", locale),
-              en: "dispatch",
+              en: t("dashboard.section.queue.openDispatch.short", "en"),
               href: buildDashboardDispatchHref("no_eligible_supply"),
             },
           ],
@@ -1243,7 +1239,7 @@ export default async function DashboardPage() {
             {
               descriptor: buildAction("open_forwarded_dispatch", "low"),
               label: t("dashboard.dispatchBoards.openForwarded", locale),
-              en: "forwarded",
+              en: t("dashboard.dispatchBoards.openForwarded.short", "en"),
               icon: "ext",
               href: buildDashboardDispatchHref("forwarded_mirror"),
             },
@@ -1773,7 +1769,7 @@ export default async function DashboardPage() {
                 action={{
                   descriptor: buildAction("open_dispatch", "low"),
                   label: t("dashboard.section.queue.openDispatch", locale),
-                  en: "dispatch",
+                  en: t("dashboard.section.queue.openDispatch.short", "en"),
                   href: buildDashboardDispatchHref("ready_queue"),
                 }}
                 locale={locale}
@@ -1849,7 +1845,7 @@ export default async function DashboardPage() {
               action={{
                 descriptor: buildAction("open_dispatch", "low"),
                 label: t("dashboard.section.queue.openDispatch", locale),
-                en: "dispatch",
+                en: t("dashboard.section.queue.openDispatch.short", "en"),
                 href: buildDashboardDispatchHref("ready_queue"),
               }}
               locale={locale}
