@@ -328,6 +328,114 @@ const en = {
   "flags.registryFooter":
     "Feature flags stay read-only here and mirror the shared management registry table pattern.",
   "flags.empty": "No flags found.",
+  "flags.titleReadOnly": "Feature Flags · read only",
+  "flags.subtitleReadOnly":
+    "Read-only operational visibility with deep links to the owner app.",
+  "flags.platformAdminLink": "Open Platform Admin",
+  "flags.platformAdminLinkUnavailable": "Platform Admin unavailable",
+  "flags.staleBanner.title": "Feature flag snapshot may be stale",
+  "flags.staleBanner.body":
+    "Current data is {freshness}. Snapshot generated at {generatedAt} UTC.",
+  "flags.registryTitle": "Feature flag registry",
+  "flags.registrySubtitle":
+    "Filter the shared registry snapshot by scope and key.",
+  "flags.scope.all": "All scopes",
+  "flags.scope.global": "Global",
+  "flags.scope.tenant": "Tenant",
+  "flags.searchPlaceholder": "Search by flag key",
+  "flags.clearFilters": "Clear filters",
+  "flags.kpi.visible.label": "Visible flags",
+  "flags.kpi.visible.sub": "Current snapshot total",
+  "flags.kpi.partial.label": "Mid-rollout",
+  "flags.kpi.partial.sub": "Tenant values diverge",
+  "flags.kpi.enabled.label": "Enabled",
+  "flags.kpi.enabled.sub": "Operationally enabled",
+  "flags.kpi.tenant.label": "Tenant-scoped",
+  "flags.kpi.tenant.sub": "Overrides are present",
+  "flags.registryFooterV2":
+    "Ops keeps this registry read-only and relies on the owner app for mutations and governance.",
+  "flags.boundary.title": "Governance boundary",
+  "flags.boundary.subtitle":
+    "Ops stays read-only and links to the owner app for governance.",
+  "flags.boundary.readOnly":
+    "Read-only visibility only; changes happen in the source management surface.",
+  "flags.boundary.deepLink":
+    "Cross-app deep links open the owning workflow without duplicating controls.",
+  "flags.boundary.availableActions": "availableActions",
+  "flags.boundary.emptyReasons": "EmptyReason x6",
+  "flags.boundary.crossAppLinks": "cross-app deep links",
+  "flags.registryTableTitle": "Operational flag registry",
+  "flags.registrySummaryV2":
+    "{total} total · {enabled} enabled · {partial} mid-rollout · {tenant} tenant-scoped",
+  "flags.refreshTier.manual": "Manual refresh",
+  "flags.freshness.fresh": "fresh",
+  "flags.freshness.stale": "stale",
+  "flags.freshness.degraded": "degraded",
+  "flags.freshness.unknown": "unknown",
+  "flags.midRollout": "Mid-rollout",
+  "flags.tenantOverrideCount": "{count} tenant override(s)",
+  "flags.opsReadOnly": "Ops read-only",
+  "flags.state.enabled": "Enabled",
+  "flags.state.disabled": "Disabled",
+  "flags.state.partial": "Partial",
+  "flags.partialStateHelp": "Some tenant values differ from the global value.",
+  "flags.crossAppHint": "Cross-app history available",
+  "flags.readOnly": "Read only",
+  "flags.action.view_change_history": "View change history",
+  "flags.disabledReason.read_only": "Read-only in ops console",
+  "flags.description.driver-app.earnings":
+    "Enable the driver app earnings read model",
+  "flags.description.driver-app.incidents":
+    "Enable incident reporting in the driver app",
+  "flags.description.driver-app.shift":
+    "Enable shift and attendance tracking in the driver app",
+  "flags.description.driver-app.tasks":
+    "Enable task lifecycle tracking in the driver app",
+  "flags.description.ops-console.callcenter":
+    "Enable call center session visibility in ops console",
+  "flags.description.ops-console.complaint":
+    "Enable complaint case management in ops console",
+  "flags.description.ops-console.dispatch":
+    "Enable the dispatch board in ops console",
+  "flags.description.ops-console.reports":
+    "Enable report job management in ops console",
+  "flags.description.phase1.read-models":
+    "Enable the Phase 1 read-model surfaces",
+  "flags.description.phase1.smoke-paths": "Enable Phase 1 smoke test endpoints",
+  "flags.description.tenant-portal.billing":
+    "Enable billing visibility in the tenant portal",
+  "flags.description.tenant-portal.booking":
+    "Enable booking management in the tenant portal",
+  "flags.description.tenant-portal.reports":
+    "Enable report job submission in the tenant portal",
+  "flags.description.tenant-portal.webhooks":
+    "Enable webhook management in the tenant portal",
+  "flags.emptyState.notProvisioned.title":
+    "Feature flag service not provisioned",
+  "flags.emptyState.notProvisioned.body":
+    "Provision the shared registry in Platform Admin before using this view.",
+  "flags.emptyState.label.notProvisioned": "NOT PROVISIONED",
+  "flags.emptyState.permissionDenied.title": "Feature flag access denied",
+  "flags.emptyState.permissionDenied.body":
+    "Your current session cannot read the shared feature flag registry.",
+  "flags.emptyState.label.permissionDenied": "PERMISSION DENIED",
+  "flags.emptyState.externalUnavailable.title":
+    "Feature flag service is temporarily unavailable",
+  "flags.emptyState.externalUnavailable.body":
+    "The upstream feature flag dependency is unavailable. Refresh when it recovers.",
+  "flags.emptyState.label.externalUnavailable": "EXTERNAL UNAVAILABLE",
+  "flags.emptyState.filteredEmpty.title": "No flags match the current filters",
+  "flags.emptyState.filteredEmpty.body":
+    "Adjust the scope or search query to expand the result set.",
+  "flags.emptyState.label.filteredEmpty": "FILTERED EMPTY",
+  "flags.emptyState.fetchFailed.title": "Feature flags could not be loaded",
+  "flags.emptyState.fetchFailed.body":
+    "Refreshing may recover from transient network or upstream errors.",
+  "flags.emptyState.label.fetchFailed": "FETCH FAILED",
+  "flags.emptyState.noData.title": "No feature flags found",
+  "flags.emptyState.noData.body":
+    "The shared registry returned no feature flag records for this environment.",
+  "flags.emptyState.label.noData": "NO DATA",
 
   // ── Attendance ──
   "attendance.title": "Shift & Attendance",
@@ -349,6 +457,24 @@ const en = {
   "attendance.emptyAttendance": "No attendance records.",
   "attendance.emptyCompleted": "No completed shifts.",
   "attendance.hours": "{h}h",
+  "attendance.noRecords": "No records",
+  "attendance.tab.today": "Today",
+  "attendance.tab.week": "This week",
+  "attendance.tab.exceptions": "Exceptions",
+  "attendance.export": "Export",
+  "attendance.loadErrorTitle": "Attendance data is temporarily unavailable",
+  "attendance.exceptions.bannerTitle":
+    "{count} attendance exceptions need follow-up",
+  "attendance.exceptions.bannerBody":
+    "{absent} absent, {partial} partial attendance in the current service day.",
+  "attendance.scheduledDrivers": "Scheduled drivers",
+  "attendance.exceptionLate": "Exception / late",
+  "attendance.absentCount": "{count} absent",
+  "attendance.partialCount": "{count} partial",
+  "attendance.gantt.title": "On-duty gantt",
+  "attendance.gantt.legend.active": "active",
+  "attendance.gantt.legend.completed": "completed",
+  "attendance.gantt.legend.abandoned": "abandoned",
 
   // ── Dispatch ──
   "dispatch.title": "Dispatch Console",
@@ -1903,6 +2029,97 @@ const zh: Record<keyof typeof en, string> = {
   "flags.registryFooter":
     "此處維持唯讀檢視，並與共享 management registry table pattern 對齊。",
   "flags.empty": "未找到旗標。",
+  "flags.titleReadOnly": "功能旗標 · 唯讀",
+  "flags.subtitleReadOnly": "提供唯讀營運可見性，並深連結到 owner app。",
+  "flags.platformAdminLink": "前往 Platform Admin",
+  "flags.platformAdminLinkUnavailable": "Platform Admin 無法使用",
+  "flags.staleBanner.title": "功能旗標快照可能已過期",
+  "flags.staleBanner.body":
+    "目前資料狀態為 {freshness}。快照產生時間為 {generatedAt} UTC。",
+  "flags.registryTitle": "功能旗標註冊表",
+  "flags.registrySubtitle": "依 scope 與 key 篩選共享註冊表快照。",
+  "flags.scope.all": "全部 scope",
+  "flags.scope.global": "全域",
+  "flags.scope.tenant": "租戶",
+  "flags.searchPlaceholder": "依旗標 key 搜尋",
+  "flags.clearFilters": "清除篩選",
+  "flags.kpi.visible.label": "可見旗標",
+  "flags.kpi.visible.sub": "目前快照總數",
+  "flags.kpi.partial.label": "進行中 rollout",
+  "flags.kpi.partial.sub": "跨租戶值不一致",
+  "flags.kpi.enabled.label": "已啟用",
+  "flags.kpi.enabled.sub": "營運可見 enabled",
+  "flags.kpi.tenant.label": "租戶層級",
+  "flags.kpi.tenant.sub": "有 override 足跡",
+  "flags.registryFooterV2":
+    "Ops 在此維持 read-only，所有變更與治理仍回到 owner app。",
+  "flags.boundary.title": "治理邊界",
+  "flags.boundary.subtitle": "ops 只做 read-only 可見性與交叉 app 深連結。",
+  "flags.boundary.readOnly":
+    "這裡只提供唯讀可見性；實際修改仍在來源管理介面進行。",
+  "flags.boundary.deepLink":
+    "交叉 app 深連結可開啟擁有者工作流，而不重複提供控制入口。",
+  "flags.boundary.availableActions": "availableActions",
+  "flags.boundary.emptyReasons": "EmptyReason x6",
+  "flags.boundary.crossAppLinks": "cross-app deep links",
+  "flags.registryTableTitle": "營運旗標註冊表",
+  "flags.registrySummaryV2":
+    "共 {total} 個 · {enabled} 個已啟用 · {partial} 個 rollout 中 · {tenant} 個租戶層級",
+  "flags.refreshTier.manual": "手動刷新",
+  "flags.freshness.fresh": "新鮮",
+  "flags.freshness.stale": "過期",
+  "flags.freshness.degraded": "降級",
+  "flags.freshness.unknown": "未知",
+  "flags.midRollout": "rollout 中",
+  "flags.tenantOverrideCount": "{count} 個租戶 override",
+  "flags.opsReadOnly": "Ops 唯讀",
+  "flags.state.enabled": "已啟用",
+  "flags.state.disabled": "已停用",
+  "flags.state.partial": "部分啟用",
+  "flags.partialStateHelp": "部分租戶值與全域值不同。",
+  "flags.crossAppHint": "可跨 app 查看歷史",
+  "flags.readOnly": "唯讀",
+  "flags.action.view_change_history": "查看變更歷史",
+  "flags.disabledReason.read_only": "Ops Console 僅提供唯讀",
+  "flags.description.driver-app.earnings": "啟用司機 App 收益讀模型",
+  "flags.description.driver-app.incidents": "啟用司機 App 事故回報",
+  "flags.description.driver-app.shift": "啟用司機 App 班次與出勤追蹤",
+  "flags.description.driver-app.tasks": "啟用司機 App 任務生命週期",
+  "flags.description.ops-console.callcenter":
+    "啟用營運後台客服中心工作階段檢視",
+  "flags.description.ops-console.complaint": "啟用營運後台客訴案件管理",
+  "flags.description.ops-console.dispatch": "啟用營運後台派車調度板",
+  "flags.description.ops-console.reports": "啟用營運後台報表任務管理",
+  "flags.description.phase1.read-models": "啟用 Phase 1 讀模型介面",
+  "flags.description.phase1.smoke-paths": "啟用 Phase 1 smoke test 端點",
+  "flags.description.tenant-portal.billing": "啟用租戶入口帳務檢視",
+  "flags.description.tenant-portal.booking": "啟用租戶入口訂車管理",
+  "flags.description.tenant-portal.reports": "啟用租戶入口報表任務提交",
+  "flags.description.tenant-portal.webhooks": "啟用租戶入口 Webhook 管理",
+  "flags.emptyState.notProvisioned.title": "功能旗標服務尚未佈建",
+  "flags.emptyState.notProvisioned.body":
+    "請先在 Platform Admin 佈建共享註冊表，再使用此檢視。",
+  "flags.emptyState.label.notProvisioned": "尚未佈建",
+  "flags.emptyState.permissionDenied.title": "無法存取功能旗標",
+  "flags.emptyState.permissionDenied.body":
+    "目前工作階段沒有讀取共享功能旗標註冊表的權限。",
+  "flags.emptyState.label.permissionDenied": "權限不足",
+  "flags.emptyState.externalUnavailable.title": "功能旗標服務暫時不可用",
+  "flags.emptyState.externalUnavailable.body":
+    "上游功能旗標依賴目前不可用，恢復後可再重新整理。",
+  "flags.emptyState.label.externalUnavailable": "外部服務不可用",
+  "flags.emptyState.filteredEmpty.title": "目前篩選條件沒有符合的旗標",
+  "flags.emptyState.filteredEmpty.body":
+    "請調整 scope 或搜尋條件以擴大結果集。",
+  "flags.emptyState.label.filteredEmpty": "篩選後無結果",
+  "flags.emptyState.fetchFailed.title": "無法載入功能旗標",
+  "flags.emptyState.fetchFailed.body":
+    "重新整理可能可恢復暫時性的網路或上游錯誤。",
+  "flags.emptyState.label.fetchFailed": "載入失敗",
+  "flags.emptyState.noData.title": "沒有功能旗標資料",
+  "flags.emptyState.noData.body":
+    "此環境的共享註冊表目前沒有回傳任何功能旗標紀錄。",
+  "flags.emptyState.label.noData": "無資料",
 
   // ── Attendance ──
   "attendance.title": "班次與出勤",
@@ -1924,6 +2141,23 @@ const zh: Record<keyof typeof en, string> = {
   "attendance.emptyAttendance": "無出勤記錄。",
   "attendance.emptyCompleted": "無已完成班次。",
   "attendance.hours": "{h} 小時",
+  "attendance.noRecords": "無記錄",
+  "attendance.tab.today": "今日",
+  "attendance.tab.week": "本週",
+  "attendance.tab.exceptions": "異常",
+  "attendance.export": "匯出",
+  "attendance.loadErrorTitle": "出勤資料暫時無法載入",
+  "attendance.exceptions.bannerTitle": "{count} 筆出勤異常待追蹤",
+  "attendance.exceptions.bannerBody":
+    "目前服務日有 {absent} 筆未到、{partial} 筆部分出勤。",
+  "attendance.scheduledDrivers": "排班司機",
+  "attendance.exceptionLate": "異常 / 遲到",
+  "attendance.absentCount": "{count} 未到",
+  "attendance.partialCount": "{count} 部分出勤",
+  "attendance.gantt.title": "當班甘特",
+  "attendance.gantt.legend.active": "進行中",
+  "attendance.gantt.legend.completed": "已完成",
+  "attendance.gantt.legend.abandoned": "中止",
 
   // ── Dispatch ──
   "dispatch.title": "派車調度",
