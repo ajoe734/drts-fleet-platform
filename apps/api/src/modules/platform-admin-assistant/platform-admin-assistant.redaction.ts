@@ -252,6 +252,10 @@ export function findResidualSecrets(input: unknown, basePath = ""): string[] {
   const offenders: string[] = [];
 
   const visit = (value: unknown, path: string, keyHint?: string): void => {
+    if (typeof keyHint === "string" && SAFE_KEY_SUFFIX_PATTERN.test(keyHint)) {
+      return;
+    }
+
     if (typeof keyHint === "string" && isSecretObjectKey(keyHint)) {
       if (
         value !== undefined &&

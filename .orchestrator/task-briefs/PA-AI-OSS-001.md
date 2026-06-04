@@ -1,23 +1,23 @@
 # Task Brief: PA-AI-OSS-001
 
-OpenClaw-style OSS agent runtime evaluation
+OpenClaw direct runtime adoption plan
 
-- Status: `backlog`
-- Owner: `Gemini2`
-- Reviewer: `Codex`
+- Status: `in_progress`
+- Owner: `Codex2`
+- Reviewer: `Claude`
 - Planning Ref: `docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md`
-- Last Update: `2026-06-03T00:00:00Z`
+- Last Update: `2026-06-03T13:41:55Z`
 
 ## 中文說明
 
-評估是否導入 OpenClaw 或 OpenClaw-style runtime 作為 dev-side worker/agent
-sidecar。這個 task 不阻塞 DRTS-owned assistant gateway；重點是做安全邊界、
-整合模式、POC 與採用建議。
+把 OpenClaw 作為 Platform Admin assistant 與 dev worker 的主 agent runtime，
+定義 direct adoption 下的安全邊界、整合模式、落地順序與 adoption plan。
 
 ## Short Summary
 
-Evaluate OpenClaw-style architecture for a sandboxed development-side agent
-runner behind the DRTS orchestrator bridge.
+Reset the decision and define OpenClaw-first runtime adoption with DRTS-owned
+guardrails around credentials, tooling, audit, filesystem scope, and task
+control-plane mapping.
 
 ## Dependencies
 
@@ -25,12 +25,15 @@ runner behind the DRTS orchestrator bridge.
 
 ## Acceptance
 
-- Compare direct adoption, sidecar adoption, and no adoption / pattern-only options.
-- Document installation/runtime footprint, provider/key storage, channel/session model, CLI invocation, and tool permission model.
-- Produce a security threat model for local files, shell, cloud credentials, Platform Admin API tokens, and prompt injection.
-- If POC is feasible, run only in an isolated worktree with no DRTS production/dev secrets.
-- Recommendation states whether `PA-AI-ORCH-001` should use OpenClaw directly, wrap it as an optional runner, or avoid it.
-- Findings are archived in `docs/02-architecture/` or `docs/05-ui/` with citations.
+- Architecture docs clearly switch to direct OpenClaw adoption and remove
+  pattern-only as the default recommendation.
+- Document credential, tooling, audit, and filesystem boundaries for direct
+  adoption.
+- Define pilot and phase ordering for dev workers, assistant runtime, and
+  orchestrator bridge integration.
+- Map OpenClaw runtime concerns onto DRTS control-plane owners and guardrails.
+- Align task briefs and board-facing summaries to the OpenClaw-first direction.
+- Findings are archived in `docs/02-architecture/` or `docs/05-ui/`.
 
 ## Artifacts
 
@@ -40,6 +43,8 @@ runner behind the DRTS orchestrator bridge.
 
 ## Guardrails
 
-- Do not store DRTS secrets in an OSS agent config.
-- Do not give OSS runtime direct Platform Admin write tokens.
-- Do not make this evaluation a dependency for real provider or read-only assistant work.
+- Do not store DRTS secrets in OpenClaw config, plugin bundles, or persistent
+  runtime homes.
+- Do not let OpenClaw mutate canonical task truth except through approved
+  status scripts.
+- Do not give OpenClaw direct unrestricted Platform Admin write authority.

@@ -30,7 +30,9 @@ Harden the assistant before broad tool execution and worker dispatch.
 - Budget/rate limits are enforced and surfaced as degraded state.
 - Assistant audit entries include session id, run id, actor id, tool name, risk level, and receipt id when applicable.
 - Dev/staging/prod environment policies are explicit and tested.
-- Security docs include OpenClaw-style sidecar risk boundaries and why direct unrestricted embedding is forbidden.
+- Security docs define direct OpenClaw runtime guardrails, including credential,
+  tooling, audit, plugin/skill, and filesystem boundaries, and why unrestricted
+  runtime authority is forbidden.
 
 ## Artifacts
 
