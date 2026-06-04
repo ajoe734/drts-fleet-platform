@@ -1,0 +1,263 @@
+{
+  "_comment": "Per-file ERROR-signature baseline for scripts/i18n-guard.mjs. Each file maps a violation signature ('rule\\u0001normalized text', line-independent) to the number of allowed occurrences. The guard fails when a file holds a signature beyond its allowance (a new or extra violation) — this catches a swap that keeps the per-file count identical. Lower/remove entries as i18n remediation WPs clean each route; regenerate with --update-baseline.",
+  "generated": "i18n remediation 20260604",
+  "files": {
+    "apps/ops-console-web/app/attendance/page.tsx": {
+      "helper\u0001const weekday = new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 1,
+      "helper\u0001weekday: locale === \"zh\" ? \"short\" : \"short\",": 1
+    },
+    "apps/ops-console-web/app/callcenter/page.tsx": {
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 1
+    },
+    "apps/ops-console-web/app/complaints/[caseNo]/page.tsx": {
+      "cjk\u0001\"將客訴升級為事故會產生不可變更的稽核軌跡，且必須填寫原因。\",": 1,
+      "cjk\u0001\"案件已進入客訴專員與營運主管的處理佇列。\",": 1,
+      "cjk\u0001\"高風險動作必須填寫原因\",": 1,
+      "cjk\u0001: copy(locale, \"No\", \"否\"),": 1,
+      "cjk\u0001<Card theme={theme} title={copy(locale, \"Activity feed\", \"活動紀錄\")}>": 1,
+      "cjk\u0001<Card theme={theme} title={copy(locale, \"Case progress\", \"案件進度\")}>": 1,
+      "cjk\u0001<Card theme={theme} title={copy(locale, \"Export view\", \"匯出視圖\")}>": 1,
+      "cjk\u0001? copy(locale, \"Yes\", \"是\")": 1,
+      "cjk\u0001copy(locale, \"No additional note.\", \"沒有補充說明。\"),": 1,
+      "cjk\u0001title: copy(locale, \"Assigned to compliance queue\", \"轉入合規佇列\"),": 1,
+      "cjk\u0001title: copy(locale, \"Case opened\", \"案件建立\"),": 1,
+      "cjk\u0001title: copy(locale, \"Closure\", \"結案\"),": 1,
+      "cjk\u0001title: copy(locale, \"Investigation\", \"調查\"),": 1,
+      "cjk\u0001title: copy(locale, \"Opened\", \"建立\"),": 1,
+      "cjk\u0001title: copy(locale, \"Triage\", \"分派\"),": 1,
+      "cjk\u0001title={copy(locale, \"Linked entities\", \"關聯實體\")}": 1,
+      "cjk\u0001{copy(locale, \"Escalate to incident\", \"升級事故\")}": 1,
+      "cjk\u0001{copy(locale, \"Open list context\", \"回到客訴列表\")}": 1,
+      "helper\u0001function copy(locale: Locale, en: string, zh: string) {": 1,
+      "helper\u0001return locale === \"zh\" ? zh : en;": 1,
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 1
+    },
+    "apps/ops-console-web/app/contracts/[contractId]/page.tsx": {
+      "cjk\u0001\"Mutation 留在 Platform Admin\",": 1,
+      "cjk\u0001\"ops 僅鏡像顯示；修改仍在 owner app。\",": 1,
+      "cjk\u0001\"read model 未帶出核准人\",": 1,
+      "cjk\u0001\"以目前鏡像合約記錄組出的生命週期節點。\",": 1,
+      "cjk\u0001\"列出目前 ops 可見欄位；缺的項目會明確標示為現行 read model 未提供。\",": 1,
+      "cjk\u0001\"合約名冊讀取失敗\",": 1,
+      "cjk\u0001\"合約有效期間結束\",": 1,
+      "cjk\u0001\"合約編輯、版本調整與終止流程都留在 owner app；ops 這邊維持唯讀鏡像。\",": 1,
+      "cjk\u0001\"合約詳情仍可瀏覽，但本次快照中的夥伴方案上下文只有部分可用。\",": 1,
+      "cjk\u0001\"合約進入 ops 可見核准狀態\",": 1,
+      "cjk\u0001\"夥伴目錄服務降級\",": 1,
+      "cjk\u0001\"營運條款 · ops 範圍\",": 1,
+      "cjk\u0001\"目前 read model 沒有獨立欄位\",": 1,
+      "cjk\u0001`期間起點 ${formatDate(locale, contract.startAt)}`,": 1,
+      "cjk\u0001copy(locale, \"Open owner app\", \"開啟 owner app\")}": 1,
+      "cjk\u0001detail: `${copy(locale, \"Lifecycle\", \"生命週期\")} · ${formatOpsCodeLabel(": 1,
+      "cjk\u0001eyebrow: copy(locale, \"Approved\", \"核准\"),": 1,
+      "cjk\u0001eyebrow: copy(locale, \"Created\", \"建立\"),": 1,
+      "cjk\u0001eyebrow: copy(locale, \"Term end\", \"期間結束\"),": 1,
+      "cjk\u0001eyebrow: copy(locale, \"Updated\", \"更新\"),": 1,
+      "cjk\u0001k: copy(locale, \"AUTH MODE\", \"授權模式\"),": 1,
+      "cjk\u0001k: copy(locale, \"CURRENT EFFECTIVE VERSION\", \"目前生效版本\"),": 1,
+      "cjk\u0001k: copy(locale, \"MODIFIABLE WINDOW\", \"可修改時窗\"),": 1,
+      "cjk\u0001k: copy(locale, \"NO-SHOW RULE\", \"No-show 規則\"),": 1,
+      "cjk\u0001k: copy(locale, \"PARTNER ENTRY\", \"夥伴渠道\"),": 1,
+      "cjk\u0001k: copy(locale, \"PARTNER PROGRAM\", \"合作方案\"),": 1,
+      "cjk\u0001k: copy(locale, \"PROGRAM ID\", \"方案編號\"),": 1,
+      "cjk\u0001k: copy(locale, \"PROOF REQUIREMENTS\", \"憑證要求\"),": 1,
+      "cjk\u0001k: copy(locale, \"SLA PROFILE\", \"SLA 設定檔\"),": 1,
+      "cjk\u0001k: copy(locale, \"TENANT\", \"租戶\"),": 1,
+      "cjk\u0001k: copy(locale, \"VEHICLE\", \"車輛\"),": 1,
+      "cjk\u0001k: copy(locale, \"WAITING RULE\", \"等候規則\"),": 1,
+      "cjk\u0001label: copy(locale, \"Active\", \"生效中\"),": 1,
+      "cjk\u0001label: copy(locale, \"Draft\", \"草稿\"),": 1,
+      "cjk\u0001label: copy(locale, \"Driver\", \"司機合約\"),": 1,
+      "cjk\u0001label: copy(locale, \"Expired\", \"已到期\"),": 1,
+      "cjk\u0001label: copy(locale, \"Expiring soon\", \"即將到期\"),": 1,
+      "cjk\u0001label: copy(locale, \"Fleet governance\", \"車隊治理\"),": 1,
+      "cjk\u0001label: copy(locale, \"Forwarder\", \"轉派合作\"),": 1,
+      "cjk\u0001label: copy(locale, \"Partner governance\", \"夥伴治理\"),": 1,
+      "cjk\u0001label: copy(locale, \"Partner program\", \"夥伴方案\"),": 1,
+      "cjk\u0001label: copy(locale, \"Terminated\", \"已終止\"),": 1,
+      "cjk\u0001label: copy(locale, \"Vehicle / fleet\", \"車輛 / 車隊\"),": 1,
+      "cjk\u0001return copy(locale, \"open-ended\", \"未設定\");": 1,
+      "cjk\u0001return copy(locale, \"unknown\", \"未知\");": 1,
+      "cjk\u0001title: copy(locale, \"Contract record created\", \"合約記錄已建立\"),": 1,
+      "cjk\u0001title: copy(locale, \"Latest mirrored snapshot\", \"最新鏡像快照\"),": 1,
+      "cjk\u0001title={copy(locale, \"Authority redirect\", \"治理轉向\")}": 1,
+      "cjk\u0001title={copy(locale, \"Contract detail\", \"合約詳情\")}": 1,
+      "cjk\u0001title={copy(locale, \"Contract snapshot failed\", \"合約快照讀取失敗\")}": 1,
+      "cjk\u0001title={copy(locale, \"Linked tenant / partner\", \"關聯租戶 / 夥伴\")}": 1,
+      "cjk\u0001title={copy(locale, \"Version history\", \"版本歷程\")}": 1,
+      "cjk\u0001{copy(locale, \"Back to contracts\", \"回到合約列表\")}": 1,
+      "cjk\u0001{copy(locale, \"Back\", \"返回\")}": 1,
+      "cjk\u0001{copy(locale, \"Open in new tab\", \"新分頁開啟\")}": 1,
+      "cjk\u0001{copy(locale, \"Retry from registry\", \"回到列表重試\")}": 1,
+      "cjk\u0001{copy(locale, \"counterparty\", \"交易對手\")} ·{\" \"}": 1,
+      "cjk\u0001{copy(locale, \"read-only · ops scope\", \"唯讀 · ops 範圍\")}": 1,
+      "helper\u0001function copy(locale: Locale, en: string, zh: string) {": 1,
+      "helper\u0001return locale === \"zh\" ? zh : en;": 1,
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 2
+    },
+    "apps/ops-console-web/app/contracts/page.tsx": {
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 2
+    },
+    "apps/ops-console-web/app/dashboard/page.tsx": {
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 1
+    },
+    "apps/ops-console-web/app/dispatch/[dispatchId]/page.tsx": {
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 2
+    },
+    "apps/ops-console-web/app/dispatch/dispatch-workflow.tsx": {
+      "helper\u0001return new Date(value).toLocaleString(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 1
+    },
+    "apps/ops-console-web/app/dispatch/forwarded-order-board.tsx": {
+      "helper\u0001locale === \"zh\" ? \"zh-TW\" : \"en-US\",": 1,
+      "helper\u0001return new Date(iso).toLocaleString(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 1
+    },
+    "apps/ops-console-web/app/dispatch/page.tsx": {
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 1
+    },
+    "apps/ops-console-web/app/feature-flags/page.tsx": {
+      "helper\u0001return new Date(value).toLocaleString(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 1
+    },
+    "apps/ops-console-web/app/incidents/[incidentId]/page.tsx": {
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 2
+    },
+    "apps/ops-console-web/app/incidents/[incidentId]/refresh-tier.tsx": {
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 1
+    },
+    "apps/ops-console-web/app/incidents/page.tsx": {
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 2
+    },
+    "apps/ops-console-web/app/maintenance/page.tsx": {
+      "helper\u0001return new Intl.NumberFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 1
+    },
+    "apps/ops-console-web/app/reports/page.tsx": {
+      "helper\u0001locale === \"zh\" ? \"zh-TW\" : \"en-US\",": 1
+    },
+    "apps/ops-console-web/app/revenue/page.tsx": {
+      "jsxText\u0001aria-label=\"mismatch-drawer\"": 1,
+      "jsxText\u0001aria-label=\"mismatch-drawer-notfound\"": 1
+    },
+    "apps/ops-console-web/app/vehicles/[vehicleId]/page.tsx": {
+      "helper\u0001.join(locale === \"zh\" ? \"、\" : \", \");": 1,
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 2,
+      "helper\u0001sections: degradedSections.join(locale === \"zh\" ? \"、\" : \", \"),": 1
+    },
+    "apps/ops-console-web/app/vehicles/page.tsx": {
+      "helper\u0001return new Intl.DateTimeFormat(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 2
+    },
+    "apps/platform-admin-web/app/payments/page.tsx": {
+      "cjk\u0001zh: `Payments 資料載入異常：${error}`,": 1,
+      "cjk\u0001zh: `Reopen 率 ${reopenRate.toFixed(1)}% 超過警戒值。`,": 1
+    },
+    "apps/platform-admin-web/app/payments/reimbursements/[batchId]/page.tsx": {
+      "jsxText\u0001placeholder=\"wire_20260602_001\"": 1
+    },
+    "apps/platform-admin-web/app/switchboard/page.tsx": {
+      "cjk\u0001\"route name 保留為 /switchboard · 1 個公開資訊版本可產生多個車牌貼 (Q-ADM14)\",": 1,
+      "cjk\u0001\"高風險 · 發佈會替換目前生效的揭露資訊；需填寫原因以產生稽核憑據。\",": 1,
+      "cjk\u0001`目前發行牌貼 · ${code} (source ${src})`,": 1,
+      "cjk\u0001`稽核憑據：已發佈公開資訊 ${id}。原因：${reason}`,": 1,
+      "cjk\u0001`稽核憑據：已發佈牌貼 ${code}。`,": 1,
+      "cjk\u0001already_published: \"已發佈（不可變）。\",": 1,
+      "cjk\u0001cancel: \"取消\",": 1,
+      "cjk\u0001colActions: \"操作\",": 1,
+      "cjk\u0001colArtifact: \"成品\",": 1,
+      "cjk\u0001colCall: \"叫車電話\",": 1,
+      "cjk\u0001colComplaint: \"客訴電話\",": 1,
+      "cjk\u0001colPlacard: \"牌貼\",": 1,
+      "cjk\u0001colPublishedAt: \"發佈時間\",": 1,
+      "cjk\u0001colPublishedBy: \"發佈者\",": 1,
+      "cjk\u0001colSource: \"來源版本\",": 1,
+      "cjk\u0001colStatus: \"狀態\",": 1,
+      "cjk\u0001colTemplate: \"範本\",": 1,
+      "cjk\u0001colUpdated: \"更新\",": 1,
+      "cjk\u0001colVersion: \"版本\",": 1,
+      "cjk\u0001confirmGenerate: \"產生牌貼\",": 1,
+      "cjk\u0001confirmPublish: \"確認發佈\",": 1,
+      "cjk\u0001createDraft: \"建立草稿\",": 1,
+      "cjk\u0001createSubtitle: \"中度風險 · 發佈前皆為草稿。\",": 1,
+      "cjk\u0001createTitle: \"建立公開資訊草稿\",": 1,
+      "cjk\u0001deleteDraft: \"刪除\",": 1,
+      "cjk\u0001deleting: \"刪除中...\",": 1,
+      "cjk\u0001downloadPdf: \"下載 PDF\",": 1,
+      "cjk\u0001fArtifact: \"成品檔 id（選填）\",": 1,
+      "cjk\u0001fCallPhone: \"叫車電話\",": 1,
+      "cjk\u0001fCallRate: \"叫車費率說明\",": 1,
+      "cjk\u0001fComplaintPhone: \"客訴電話\",": 1,
+      "cjk\u0001fEffectiveFrom: \"生效起\",": 1,
+      "cjk\u0001fEffectiveTo: \"生效迄（選填）\",": 1,
+      "cjk\u0001fFare: \"計費說明\",": 1,
+      "cjk\u0001fPayment: \"支付方式說明\",": 1,
+      "cjk\u0001fSource: \"來源公開資訊版本\",": 1,
+      "cjk\u0001fTemplate: \"範本\",": 1,
+      "cjk\u0001fTitle: \"標題\",": 1,
+      "cjk\u0001fVersionCode: \"版本代碼\",": 1,
+      "cjk\u0001generatePlacard: \"產生新 placard\",": 1,
+      "cjk\u0001generateSubtitle: \"中度風險 · 牌貼會綁定所選的來源公開資訊版本。\",": 1,
+      "cjk\u0001generateTitle: \"產生新牌貼\",": 1,
+      "cjk\u0001generating: \"產生中...\",": 1,
+      "cjk\u0001historyPlacardsSubtitle: \"已發行牌貼及其來源公開資訊版本。\",": 1,
+      "cjk\u0001historyPlacardsTitle: \"牌貼沿革\",": 1,
+      "cjk\u0001historyVersionsSubtitle: \"已發佈版本為不可變的揭露紀錄。\",": 1,
+      "cjk\u0001historyVersionsTitle: \"公開資訊版本歷史\",": 1,
+      "cjk\u0001immutable: \"不可變\",": 1,
+      "cjk\u0001loading: \"載入交換台中...\",": 1,
+      "cjk\u0001noHistory: \"目前尚無已發佈歷史。\",": 1,
+      "cjk\u0001noPlacards: \"目前沒有牌貼版本。\",": 1,
+      "cjk\u0001noVersions: \"目前沒有公開資訊版本。\",": 1,
+      "cjk\u0001no_draft_selected: \"請選擇要發佈的草稿版本。\",": 1,
+      "cjk\u0001no_draft_versions: \"目前沒有可發佈的草稿版本。\",": 1,
+      "cjk\u0001no_public_info_version: \"請先建立公開資訊版本再產生牌貼。\",": 1,
+      "cjk\u0001no_source_version: \"請選擇來源公開資訊版本。\",": 1,
+      "cjk\u0001placardListSubtitle: \"每張牌貼皆可追溯到來源公開資訊版本\",": 1,
+      "cjk\u0001placardListTitle: \"牌貼版本\",": 1,
+      "cjk\u0001placardPreviewEmpty: \"目前尚未產生牌貼。\",": 1,
+      "cjk\u0001publish: \"發佈\",": 1,
+      "cjk\u0001publishNoDrafts: \"目前沒有可發佈的草稿版本。\",": 1,
+      "cjk\u0001publishPick: \"選擇草稿版本\",": 1,
+      "cjk\u0001publishReasonLabel: \"原因（必填）\",": 1,
+      "cjk\u0001publishReasonPh: \"為何現在發佈此版本？\",": 1,
+      "cjk\u0001publishTitle: \"發佈公開資訊版本\",": 1,
+      "cjk\u0001publishVersion: \"發佈版本\",": 1,
+      "cjk\u0001publishing: \"發佈中...\",": 1,
+      "cjk\u0001reason_required: \"發佈需填寫原因。\",": 1,
+      "cjk\u0001receiptCreate: \"稽核憑據：已建立公開資訊草稿。\",": 1,
+      "cjk\u0001receiptGenerate: (code: string) => `稽核憑據：已產生牌貼 ${code}。`,": 1,
+      "cjk\u0001refresh: \"重新整理\",": 1,
+      "cjk\u0001source_retired: \"所選來源版本已停用。\",": 1,
+      "cjk\u0001tabHistory: \"歷史\",": 1,
+      "cjk\u0001tabPlacards: \"牌貼\",": 1,
+      "cjk\u0001tabVersions: \"版本\",": 1,
+      "cjk\u0001title_required: \"需填寫標題。\",": 1,
+      "cjk\u0001version_code_conflict: \"此版本代碼已被使用。\",": 1,
+      "cjk\u0001versionsSubtitle: \"effective from / to · 公開電話 · 狀態\",": 1,
+      "cjk\u0001{locale === \"en\" ? \"Call\" : \"叫車\"}{\" \"}": 1,
+      "cjk\u0001{locale === \"en\" ? \"Complaint\" : \"客訴\"}{\" \"}": 1,
+      "helper\u0001{locale === \"en\" ? \"Call\" : \"叫車\"}{\" \"}": 1,
+      "helper\u0001{locale === \"en\" ? \"Complaint\" : \"客訴\"}{\" \"}": 1,
+      "jsxText\u0001placeholder=\"2026-07-01T00:00:00.000Z\"": 1,
+      "jsxText\u0001placeholder=\"placard-2026-q3\"": 1,
+      "jsxText\u0001placeholder=\"seatback-default\"": 1
+    },
+    "apps/platform-admin-web/app/tenants/[tenantId]/page.tsx": {
+      "helper\u0001v: `${tenant.quotas.monthlyBookings.toLocaleString(locale === \"en\" ? \"en-US\" : \"zh-TW\")} ${t(\"tenants.list.kpi.bookingsS": 1
+    },
+    "apps/platform-admin-web/app/tenants/page.tsx": {
+      "helper\u0001return value.toLocaleString(locale === \"en\" ? \"en-US\" : \"zh-TW\");": 1
+    },
+    "apps/platform-admin-web/components/admin-shell.tsx": {
+      "helper\u0001onClick={() => setLocale(locale === \"en\" ? \"zh\" : \"en\")}": 1,
+      "helper\u0001return date.toLocaleTimeString(locale === \"zh\" ? \"zh-TW\" : \"en-US\", {": 1
+    },
+    "apps/platform-admin-web/components/partner-governance-shared.tsx": {
+      "jsxText\u0001placeholder=\"#0b7285\"": 1,
+      "jsxText\u0001placeholder=\"/partner/bank-demo-alpha-airport\"": 1,
+      "jsxText\u0001placeholder=\"partner.example\"": 1
+    },
+    "apps/platform-admin-web/components/tenant-governance-shared.tsx": {
+      "jsxText\u0001placeholder=\"Acme Mobility\"": 1,
+      "jsxText\u0001placeholder=\"acme_dispatch\"": 1,
+      "jsxText\u0001placeholder=\"admin@acme.example\"": 1,
+      "jsxText\u0001placeholder=\"https://sandbox.acme.example\"": 1
+    }
+  }
+}

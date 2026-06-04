@@ -3,6 +3,7 @@ import {
   crossAppHref,
   platformAdminPaymentsLink,
 } from "@/lib/ops-cross-app-links";
+import { t } from "@/lib/translations";
 import type {
   AssistantSelection,
   OpsAssistantContext,
@@ -112,6 +113,7 @@ function buildSelectedEntityHref(selection: AssistantSelection): string | null {
 
 function buildSelectionAction(
   selection: AssistantSelection | undefined,
+  locale: OpsAssistantContext["locale"],
 ): AssistantNavigationAction | null {
   if (!selection) {
     return null;
@@ -124,8 +126,12 @@ function buildSelectionAction(
 
   return {
     kind: "navigate",
-    label: `Open ${selection.kind}`,
-    description: `Jump to the selected ${selection.kind} detail view.`,
+    label: t("opsAssistant.nav.openSelection", locale, {
+      kind: selection.kind,
+    }),
+    description: t("opsAssistant.nav.openSelectionDescription", locale, {
+      kind: selection.kind,
+    }),
     route: href,
   };
 }
@@ -138,8 +144,11 @@ function buildRouteSpecificActions(
       return [
         {
           kind: "navigate",
-          label: "Open no-supply board",
-          description: "Switch to the dispatch board filtered to no-supply.",
+          label: t("opsAssistant.nav.dispatch.noSupply", context.locale),
+          description: t(
+            "opsAssistant.nav.dispatch.noSupplyDescription",
+            context.locale,
+          ),
           route: "/dispatch",
           board: "no_supply",
           ...(context.visibleFilters
@@ -148,8 +157,11 @@ function buildRouteSpecificActions(
         },
         {
           kind: "navigate",
-          label: "Open assigned board",
-          description: "Review active driver assignments without leaving ops.",
+          label: t("opsAssistant.nav.dispatch.assigned", context.locale),
+          description: t(
+            "opsAssistant.nav.dispatch.assignedDescription",
+            context.locale,
+          ),
           route: "/dispatch",
           board: "assigned",
           ...(context.visibleFilters
@@ -158,16 +170,21 @@ function buildRouteSpecificActions(
         },
         {
           kind: "cross_app",
-          label: "Open adapter registry",
-          description:
-            "Investigate forwarded-order adapter ownership in Platform Admin.",
+          label: t("opsAssistant.nav.dispatch.adapterRegistry", context.locale),
+          description: t(
+            "opsAssistant.nav.dispatch.adapterRegistryDescription",
+            context.locale,
+          ),
           link: {
             targetApp: "platform-admin",
             route: "/adapter-registry",
             resourceType: "adapter_registry",
             resourceId: "",
             openMode: "new_tab",
-            label: "Adapter registry",
+            label: t(
+              "opsAssistant.nav.dispatch.adapterRegistryLink",
+              context.locale,
+            ),
           },
         },
       ];
@@ -175,8 +192,11 @@ function buildRouteSpecificActions(
       return [
         {
           kind: "navigate",
-          label: "Show suppressed drivers",
-          description: "Prefill the drivers list to the suppression view.",
+          label: t("opsAssistant.nav.drivers.suppressed", context.locale),
+          description: t(
+            "opsAssistant.nav.drivers.suppressedDescription",
+            context.locale,
+          ),
           route: "/drivers",
           activeTab: "suppression",
           ...(context.visibleFilters
@@ -188,8 +208,11 @@ function buildRouteSpecificActions(
       return [
         {
           kind: "navigate",
-          label: "Open offboarding tab",
-          description: "Prefill the vehicles page to the offboarding queue.",
+          label: t("opsAssistant.nav.vehicles.offboarding", context.locale),
+          description: t(
+            "opsAssistant.nav.vehicles.offboardingDescription",
+            context.locale,
+          ),
           route: "/vehicles",
           activeTab: "offboarding",
           ...(context.visibleFilters
@@ -198,15 +221,21 @@ function buildRouteSpecificActions(
         },
         {
           kind: "cross_app",
-          label: "Open fleet governance",
-          description: "Continue vehicle lifecycle actions in Platform Admin.",
+          label: t("opsAssistant.nav.vehicles.governance", context.locale),
+          description: t(
+            "opsAssistant.nav.vehicles.governanceDescription",
+            context.locale,
+          ),
           link: {
             targetApp: "platform-admin",
             route: "/fleet?tab=offboarding",
             resourceType: "fleet_offboarding",
             resourceId: "",
             openMode: "new_tab",
-            label: "Fleet governance",
+            label: t(
+              "opsAssistant.nav.vehicles.governanceLink",
+              context.locale,
+            ),
           },
         },
       ];
@@ -214,24 +243,35 @@ function buildRouteSpecificActions(
       return [
         {
           kind: "cross_app",
-          label: "Open payments queue",
-          description: "Continue reconciliation in Platform Admin payments.",
-          link: platformAdminPaymentsLink("Payments queue"),
+          label: t("opsAssistant.nav.revenue.payments", context.locale),
+          description: t(
+            "opsAssistant.nav.revenue.paymentsDescription",
+            context.locale,
+          ),
+          link: platformAdminPaymentsLink(
+            t("opsAssistant.nav.revenue.payments", context.locale),
+          ),
         },
       ];
     case "/contracts":
       return [
         {
           kind: "cross_app",
-          label: "Open partner governance",
-          description: "Continue contract ownership review in Platform Admin.",
+          label: t("opsAssistant.nav.contracts.governance", context.locale),
+          description: t(
+            "opsAssistant.nav.contracts.governanceDescription",
+            context.locale,
+          ),
           link: {
             targetApp: "platform-admin",
             route: "/partners",
             resourceType: "partner_registry",
             resourceId: "",
             openMode: "new_tab",
-            label: "Partner governance",
+            label: t(
+              "opsAssistant.nav.contracts.governanceLink",
+              context.locale,
+            ),
           },
         },
       ];
@@ -257,9 +297,11 @@ export function buildAssistantActions(
   const actions: AssistantAction[] = [
     {
       kind: "navigate",
-      label: "Resume current view",
-      description:
-        "Re-open this route with the current board, tab, and filters.",
+      label: t("opsAssistant.nav.resumeCurrentView", context.locale),
+      description: t(
+        "opsAssistant.nav.resumeCurrentViewDescription",
+        context.locale,
+      ),
       route: context.route,
       ...(context.board ? { board: context.board } : {}),
       ...(context.activeTab ? { activeTab: context.activeTab } : {}),
@@ -268,7 +310,10 @@ export function buildAssistantActions(
     ...buildRouteSpecificActions(context),
   ];
 
-  const selectionAction = buildSelectionAction(context.selectedEntity);
+  const selectionAction = buildSelectionAction(
+    context.selectedEntity,
+    context.locale,
+  );
   if (selectionAction) {
     actions.splice(1, 0, selectionAction);
   }

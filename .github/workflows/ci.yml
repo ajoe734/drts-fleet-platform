@@ -93,6 +93,20 @@ jobs:
           git fetch origin "${{ github.event.pull_request.base.ref || 'main' }}" --quiet
           python3 scripts/git/check_staged_generated_files.py --range ${{ steps.base.outputs.ref }} HEAD
 
+  i18n-guard:
+    name: i18n bilingual guard
+    runs-on: ubuntu-latest
+    # Enforce docs/05-ui/i18n-multilingual-spec-20260604.md §6: no NEW hard-coded
+    # copy / inline bilingual machinery in Ops Console + Platform Admin source.
+    # Dependency-free pure-node check; baseline-gated so known debt drains
+    # without red-lining CI. See scripts/i18n-guard.mjs.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: i18n guard (file:line worklist + baseline gate)
+        run: node scripts/i18n-guard.mjs
+
   smoke-acceptance:
     name: Smoke acceptance
     runs-on: ubuntu-latest

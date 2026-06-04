@@ -233,147 +233,71 @@ function actorTypeTone(
 }
 
 export default function HomePage() {
-  const { locale } = useTranslation();
+  const { t } = useTranslation();
   const router = useRouter();
   const client = usePlatformAdminClient();
   const [snapshot, setSnapshot] = useState<HomeSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const copy =
-    locale === "en"
-      ? {
-          title: "Platform governance home",
-          subtitle: (count: number) =>
-            `DRTS control plane · ${count} governance item(s) need review today.`,
-          openAll: "Open all",
-          openAudit: "Go to audit",
-          loading: "Loading governance snapshot...",
-          noSnapshot: "No governance snapshot available yet.",
-          loadErrorTitle: "Unable to load governance snapshot",
-          quickLinksTitle: "Module shortcuts",
-          todayTitle: "Today's governance queue",
-          todaySubtitle:
-            "Cross-module items where platform governance should intervene.",
-          recentTitle:
-            "Recent sensitive operations · platform-layer audit trail (24h)",
-          kpiTenants: "Active tenants",
-          kpiPartners: "Partner entries",
-          kpiDrivers: "Active drivers",
-          kpiRecon: "Pending reconciliation",
-          partnerReadiness: (count: number) => `${count} pending readiness`,
-          driverDelta: (count: number) => `${count} stale in dispatch feed`,
-          driverSub: (eligible: number, total: number) =>
-            `${eligible} dispatch-eligible · ${total} total`,
-          reconDelta: (partner: number, forwarded: number) =>
-            `${partner} partner · ${forwarded} forwarded`,
-          reconSub: (count: number) => `${count} critical platform alert(s)`,
-          noAudit: "No audit records found.",
-          noTodos: "No platform-routed governance blockers at the moment.",
-          auditTime: "Time",
-          auditModule: "Module",
-          auditAction: "Action",
-          auditActor: "Actor",
-          auditRequest: "Request",
-          queueCount: (count: number) => `${count} items`,
-          routes: [
-            {
-              href: "/tenants",
-              label: "Tenants",
-              icon: "tenants",
-            },
-            {
-              href: "/partners",
-              label: "Partners",
-              icon: "partners",
-            },
-            {
-              href: "/pricing",
-              label: "Pricing",
-              icon: "pricing",
-            },
-            {
-              href: "/payments",
-              label: "Payments",
-              icon: "payments",
-            },
-            {
-              href: "/fleet",
-              label: "Fleet",
-              icon: "fleet",
-            },
-            {
-              href: "/audit",
-              label: "Audit",
-              icon: "audit",
-            },
-          ] satisfies ShortcutRoute[],
-        }
-      : {
-          title: "平台治理工作首頁",
-          subtitle: (count: number) =>
-            `DRTS 平台控制平面 · 您今日有 ${count} 件需治理事項`,
-          openAll: "展開所有",
-          openAudit: "前往稽核",
-          loading: "載入治理快照中...",
-          noSnapshot: "目前沒有可用的治理快照。",
-          loadErrorTitle: "無法載入治理快照",
-          quickLinksTitle: "模組捷徑",
-          todayTitle: "今日治理待辦",
-          todaySubtitle: "跨模組需要平台治理人介入",
-          recentTitle: "近期高敏感操作 · 平台層審計足跡 (24h)",
-          kpiTenants: "活躍租戶",
-          kpiPartners: "合作夥伴 entry",
-          kpiDrivers: "活躍司機",
-          kpiRecon: "待結算對帳",
-          partnerReadiness: (count: number) => `${count} 待 readiness`,
-          driverDelta: (count: number) => `${count} 筆 stale`,
-          driverSub: (eligible: number, total: number) =>
-            `${eligible} 可派 · ${total} 總數`,
-          reconDelta: (partner: number, forwarded: number) =>
-            `${partner} partner · ${forwarded} forwarded`,
-          reconSub: (count: number) => `${count} 筆重大平台告警`,
-          noAudit: "目前沒有稽核紀錄。",
-          noTodos: "目前沒有路由到平台端的治理阻塞。",
-          auditTime: "時間",
-          auditModule: "模組",
-          auditAction: "動作",
-          auditActor: "操作者",
-          auditRequest: "Request",
-          queueCount: (count: number) => `${count} 件`,
-          routes: [
-            {
-              href: "/tenants",
-              label: "租戶 · Tenants",
-              icon: "tenants",
-            },
-            {
-              href: "/partners",
-              label: "合作夥伴 · Partners",
-              icon: "partners",
-            },
-            {
-              href: "/pricing",
-              label: "費率 · Pricing",
-              icon: "pricing",
-            },
-            {
-              href: "/payments",
-              label: "結算 · Payments",
-              icon: "payments",
-            },
-            {
-              href: "/fleet",
-              label: "車隊 · Fleet",
-              icon: "fleet",
-            },
-            {
-              href: "/audit",
-              label: "稽核 · Audit",
-              icon: "audit",
-            },
-          ] satisfies ShortcutRoute[],
-        };
+  const copy = {
+    title: t("adminHome.title"),
+    subtitle: (count: number) => t("adminHome.subtitle", { count }),
+    openAll: t("adminHome.openAll"),
+    openAudit: t("adminHome.openAudit"),
+    loading: t("adminHome.loading"),
+    noSnapshot: t("adminHome.noSnapshot"),
+    loadErrorTitle: t("adminHome.loadErrorTitle"),
+    quickLinksTitle: t("adminHome.quickLinksTitle"),
+    todayTitle: t("adminHome.todayTitle"),
+    todaySubtitle: t("adminHome.todaySubtitle"),
+    recentTitle: t("adminHome.recentTitle"),
+    kpiTenants: t("adminHome.kpi.tenants"),
+    kpiPartners: t("adminHome.kpi.partners"),
+    kpiDrivers: t("adminHome.kpi.drivers"),
+    kpiRecon: t("adminHome.kpi.recon"),
+    partnerReadiness: (count: number) =>
+      t("adminHome.kpi.partnersDelta", { count }),
+    driverDelta: (count: number) => t("adminHome.kpi.driversDelta", { count }),
+    driverSub: (eligible: number, total: number) =>
+      t("adminHome.kpi.driversSub", { eligible, total }),
+    reconDelta: (partner: number, forwarded: number) =>
+      t("adminHome.kpi.reconDelta", { partner, forwarded }),
+    reconSub: (count: number) => t("adminHome.kpi.reconSub", { count }),
+    noAudit: t("adminHome.noAudit"),
+    noTodos: t("adminHome.noTodos"),
+    auditTime: t("adminHome.auditTime"),
+    auditActorType: t("adminHome.auditActorType"),
+    auditModule: t("adminHome.auditModule"),
+    auditAction: t("adminHome.auditAction"),
+    auditActor: t("adminHome.auditActor"),
+    auditRequest: t("adminHome.auditRequest"),
+    auditSystem: t("adminHome.auditSystem"),
+    routes: [
+      {
+        href: "/tenants",
+        label: t("adminHome.quickLink.tenants"),
+        icon: "tenants",
+      },
+      {
+        href: "/partners",
+        label: t("adminHome.quickLink.partners"),
+        icon: "partners",
+      },
+      {
+        href: "/pricing",
+        label: t("adminHome.quickLink.pricing"),
+        icon: "pricing",
+      },
+      {
+        href: "/payments",
+        label: t("adminHome.quickLink.payments"),
+        icon: "payments",
+      },
+      { href: "/fleet", label: t("adminHome.quickLink.fleet"), icon: "fleet" },
+      { href: "/audit", label: t("adminHome.quickLink.audit"), icon: "audit" },
+    ] satisfies ShortcutRoute[],
+  };
 
   const loadSnapshot = useCallback(async () => {
     setLoading(true);
@@ -512,21 +436,13 @@ export default function HomePage() {
             id: `alert-${tokenAlert.key}`,
             tone: alertTone(tokenAlert.state),
             icon: "warn",
-            title:
-              locale === "en"
-                ? "BGMT dispatch reporting token expires in 6 days"
-                : "BGMT 派遣回報 token 將於 6 天內到期",
-            description:
-              locale === "en"
-                ? `Measured ${tokenAlert.measuredValue} at ${formatDateTime(
-                    tokenAlert.observedAt,
-                  )}. Renew the client credential before reporting completion traffic stalls.`
-                : `${formatDateTime(tokenAlert.observedAt)} 量測值 ${tokenAlert.measuredValue}。需先輪替 client credential，否則今日完成單將無法回報。`,
+            title: t("adminHome.alert.tokenTitle"),
+            description: t("adminHome.alert.tokenDescription", {
+              measuredValue: tokenAlert.measuredValue,
+              observedAt: formatDateTime(tokenAlert.observedAt),
+            }),
             href: "/adapter-registry",
-            actionLabel:
-              locale === "en"
-                ? "Open adapter registry"
-                : "前往 adapter-registry",
+            actionLabel: t("adminHome.alert.tokenAction"),
             actionVariant: "primary",
           }
         : null,
@@ -535,16 +451,10 @@ export default function HomePage() {
             id: `alert-${syncAlert.key}`,
             tone: "warn" as const,
             icon: "warn",
-            title:
-              locale === "en"
-                ? "GoCab forwarded · 24h sync_failed 4.2%"
-                : "GoCab forwarded · 24h sync_failed 4.2%",
-            description:
-              locale === "en"
-                ? `Above the 3% warning threshold. Inspect adapter health and watch manual fallback volume before finance close.`
-                : "超過 3% 警戒值。建議檢查 adapter 健康並啟動 manual fallback 觀察。",
+            title: t("adminHome.alert.syncTitle"),
+            description: t("adminHome.alert.syncDescription"),
             href: "/adapter-registry",
-            actionLabel: locale === "en" ? "Open adapter" : "查看 adapter",
+            actionLabel: t("adminHome.alert.syncAction"),
             actionVariant: "secondary",
           }
         : null,
@@ -553,21 +463,17 @@ export default function HomePage() {
             id: `tenant-${rollbackTenant.id}`,
             tone: "info" as const,
             icon: "info",
-            title:
-              locale === "en"
-                ? `${rollbackTenant.code} is in rollback_hold`
-                : `${rollbackTenant.code} 處於 rollback_hold`,
-            description:
-              locale === "en"
-                ? "Customer complaint cmp_0894 escalated into inc_0212. Rollout is paused until platform and ops agree on the next move."
-                : "客訴 cmp_0894 升級為 inc_0212 後，rollout 已暫停。需平台與營運共識下一步。",
+            title: t("adminHome.alert.rollbackTitle", {
+              tenantCode: rollbackTenant.code,
+            }),
+            description: t("adminHome.alert.rollbackDescription"),
             href: `/tenants/${rollbackTenant.id}`,
-            actionLabel: locale === "en" ? "Open tenant" : "查看租戶",
+            actionLabel: t("adminHome.alert.rollbackAction"),
             actionVariant: "secondary",
           }
         : null,
     ].filter(Boolean) as GovernanceQueueItem[];
-  }, [locale, snapshot]);
+  }, [snapshot, t]);
 
   const recentAudit =
     snapshot?.audit
@@ -594,7 +500,7 @@ export default function HomePage() {
       r: (row) => formatDateTime(row.createdAt),
     },
     {
-      h: "ACTOR TYPE",
+      h: copy.auditActorType,
       w: 148,
       r: (row) => (
         <CanvasPill theme={th} tone={actorTypeTone(row.actorType)} dot>
@@ -616,7 +522,9 @@ export default function HomePage() {
       h: copy.auditActor,
       r: (row) => (
         <div style={actorCellStyle}>
-          <span style={actorPrimaryStyle}>{row.actorId ?? "system"}</span>
+          <span style={actorPrimaryStyle}>
+            {row.actorId ?? copy.auditSystem}
+          </span>
           {row.tenantId ? (
             <span style={actorMetaStyle}>{row.tenantId}</span>
           ) : null}
@@ -662,16 +570,15 @@ export default function HomePage() {
                 theme={th}
                 label={copy.kpiTenants}
                 value={formatCount(metrics.activeTenants)}
-                sub={
-                  locale === "en"
-                    ? `${formatCount(metrics.pilotTenants)} pilot · ${formatCount(metrics.sandboxTenants)} sandbox`
-                    : `${formatCount(metrics.pilotTenants)} pilot · ${formatCount(metrics.sandboxTenants)} sandbox`
-                }
+                sub={t("adminHome.kpi.tenantsSub", {
+                  pilot: formatCount(metrics.pilotTenants),
+                  sandbox: formatCount(metrics.sandboxTenants),
+                })}
                 delta={
                   metrics.rollbackTenants > 0
-                    ? locale === "en"
-                      ? `${formatCount(metrics.rollbackTenants)} rollback_hold`
-                      : `${formatCount(metrics.rollbackTenants)} rollback_hold`
+                    ? t("adminHome.kpi.tenantsDelta", {
+                        count: formatCount(metrics.rollbackTenants),
+                      })
                     : undefined
                 }
                 deltaTone={metrics.rollbackTenants > 0 ? "down" : "neutral"}
@@ -680,11 +587,12 @@ export default function HomePage() {
                 theme={th}
                 label={copy.kpiPartners}
                 value={formatCount(metrics.partnerEntries)}
-                sub={
-                  locale === "en"
-                    ? `${formatCount(metrics.bankPartners)} bank · ${formatCount(metrics.hotelPartners + metrics.enterprisePartners)} hotel / enterprise`
-                    : `${formatCount(metrics.bankPartners)} 銀行 · ${formatCount(metrics.hotelPartners + metrics.enterprisePartners)} 飯店 / 企業`
-                }
+                sub={t("adminHome.kpi.partnersSub", {
+                  bank: formatCount(metrics.bankPartners),
+                  nonBank: formatCount(
+                    metrics.hotelPartners + metrics.enterprisePartners,
+                  ),
+                })}
                 delta={copy.partnerReadiness(metrics.partnerAttention)}
                 deltaTone={metrics.partnerAttention > 0 ? "neutral" : "up"}
               />
@@ -699,9 +607,7 @@ export default function HomePage() {
                 delta={
                   metrics.staleDrivers > 0
                     ? copy.driverDelta(metrics.staleDrivers)
-                    : locale === "en"
-                      ? "healthy"
-                      : "穩定"
+                    : t("adminHome.kpi.driversHealthy")
                 }
                 deltaTone={metrics.staleDrivers > 0 ? "down" : "up"}
               />
@@ -719,10 +625,7 @@ export default function HomePage() {
                 }
                 deltaTone={metrics.openIssues > 0 ? "neutral" : "up"}
                 sub={copy.reconSub(metrics.criticalAlerts)}
-                hint={
-                  unresolvedIssueHint ??
-                  (locale === "en" ? "no open issue ids" : "目前無待處理 issue")
-                }
+                hint={unresolvedIssueHint ?? t("adminHome.kpi.reconHintEmpty")}
               />
             </div>
 
