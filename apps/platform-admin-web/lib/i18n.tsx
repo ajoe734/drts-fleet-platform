@@ -6,6 +6,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -43,15 +44,26 @@ export function LanguageProvider({
     }
   }, [defaultLocale]);
 
-  function setLocale(next: Locale) {
-    setLocaleState(next);
-    localStorage.setItem(STORAGE_KEY, next);
-    document.cookie = `${COOKIE_KEY}=${next};path=/;max-age=31536000;SameSite=Lax`;
-    router.refresh();
-  }
+  const setLocale = useCallback(
+    (next: Locale) => {
+      setLocaleState((current) => {
+        if (current === next) {
+          return current;
+        }
+
+        localStorage.setItem(STORAGE_KEY, next);
+        document.cookie = `${COOKIE_KEY}=${next};path=/;max-age=31536000;SameSite=Lax`;
+        router.refresh();
+        return next;
+      });
+    },
+    [router],
+  );
+
+  const value = useMemo(() => ({ locale, setLocale }), [locale, setLocale]);
 
   return (
-    <LanguageContext.Provider value={{ locale, setLocale }}>
+    <LanguageContext.Provider value={value}>
       {children}
     </LanguageContext.Provider>
   );
@@ -66,5 +78,5 @@ export function useTranslation() {
     [locale],
   );
 
-  return { locale, setLocale, t };
+  return useMemo(() => ({ locale, setLocale, t }), [locale, setLocale, t]);
 }
