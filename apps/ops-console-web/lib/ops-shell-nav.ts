@@ -36,14 +36,14 @@ export function buildOpsShellNav(
   );
 
   return compactNav([
-    { divider: locale === "en" ? "Workspaces" : "工作面" },
+    { divider: t("nav.group.workspaces", locale) },
     {
       key: "dashboard",
       href: "/dashboard",
       icon: "dashboard",
       label: t("nav.dashboard", locale),
     },
-    { divider: locale === "en" ? "Live Ops" : "即時派遣" },
+    { divider: t("nav.group.liveOps", locale) },
     {
       key: "dispatch",
       href: "/dispatch",
@@ -57,7 +57,7 @@ export function buildOpsShellNav(
       icon: "callcenter",
       label: t("nav.callcenter", locale),
     },
-    { divider: locale === "en" ? "Casework" : "案件處理" },
+    { divider: t("nav.group.casework", locale) },
     {
       key: "complaints",
       href: "/complaints",
@@ -81,7 +81,7 @@ export function buildOpsShellNav(
           } satisfies CanvasShellNavItem,
         ]
       : []),
-    { divider: locale === "en" ? "Monitoring" : "營運監控" },
+    { divider: t("nav.group.monitoring", locale) },
     {
       key: "reports",
       href: "/reports",
@@ -106,7 +106,7 @@ export function buildOpsShellNav(
       icon: "maintenance",
       label: t("nav.maintenance", locale),
     },
-    { divider: locale === "en" ? "Registry" : "主資料" },
+    { divider: t("nav.group.registry", locale) },
     {
       key: "drivers",
       href: "/drivers",
