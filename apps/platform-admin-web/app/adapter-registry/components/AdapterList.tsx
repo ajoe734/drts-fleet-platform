@@ -3,6 +3,7 @@ import { PlatformAdapter, UpdatePlatformAdapterCommand } from "@drts/contracts";
 import { EditAdapterModal } from "./EditAdapterModal";
 import { ApiClient } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
+import { t as translate } from "@/lib/translations";
 import {
   formatPlatformCodeLabel,
   getPlatformLabel,
@@ -113,7 +114,10 @@ export function AdapterList() {
         setAdapters(fetchedAdapters);
       } catch (err: any) {
         console.error("Error fetching adapters:", err);
-        setError(err?.message || t("adapterRegistry.errors.fetchFailed"));
+        setError(
+          err?.message ||
+            translate("adapterRegistry.errors.fetchFailed", locale),
+        );
       } finally {
         setIsLoading(false);
       }
