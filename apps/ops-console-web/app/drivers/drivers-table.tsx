@@ -101,6 +101,11 @@ const actionsWrapStyle: CSSProperties = {
   gap: 6,
 };
 
+const LIST_FORMAT_LOCALE: Record<Locale, string> = {
+  en: "en-US",
+  zh: "zh-TW",
+};
+
 function presenceTone(presence: PlatformPresenceRecord): CanvasTone {
   if (presence.reauthRequired) return "warn";
   if (presence.status === "online" && presence.eligibility === "eligible") {
@@ -212,6 +217,16 @@ function getStatusTone(
   }
   if (workState === "offline") return "neutral";
   return "warn";
+}
+
+function formatLabelList(locale: Locale, values: readonly string[]) {
+  if (values.length === 0) {
+    return "";
+  }
+  return new Intl.ListFormat(LIST_FORMAT_LOCALE[locale], {
+    style: "short",
+    type: "unit",
+  }).format(values);
 }
 
 function buttonLinkStyle(
@@ -401,9 +416,12 @@ function buildColumns(
             >
               {row.driver.dispatchEligible
                 ? t("drivers.list.eligibilityClear", locale)
-                : row.driver.eligibilityBlockedReasons
-                    .map((reason) => formatOpsCodeLabel(locale, reason))
-                    .join("、")}
+                : formatLabelList(
+                    locale,
+                    row.driver.eligibilityBlockedReasons.map((reason) =>
+                      formatOpsCodeLabel(locale, reason),
+                    ),
+                  )}
             </Pill>
             <span style={signalDetailStyle}>
               {row.driver.supportedServiceBuckets

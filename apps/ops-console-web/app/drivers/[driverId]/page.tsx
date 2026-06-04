@@ -144,10 +144,6 @@ const DATE_TIME_LOCALE: Record<Locale, string> = {
   en: "en-US",
   zh: "zh-TW",
 };
-const LIST_SEPARATOR: Record<Locale, string> = {
-  en: ", ",
-  zh: "、",
-};
 
 const ACTIVE_DRIVER_TASK_STATUSES = new Set<DriverTaskRecord["status"]>([
   "pending_acceptance",
@@ -238,9 +234,20 @@ function formatList(locale: Locale, values: readonly string[]) {
   if (values.length === 0) {
     return "—";
   }
-  return values
-    .map((value) => formatOpsCodeLabel(locale, value))
-    .join(LIST_SEPARATOR[locale]);
+  return new Intl.ListFormat(DATE_TIME_LOCALE[locale], {
+    style: "short",
+    type: "unit",
+  }).format(values.map((value) => formatOpsCodeLabel(locale, value)));
+}
+
+function formatDisplayList(locale: Locale, values: readonly string[]) {
+  if (values.length === 0) {
+    return "—";
+  }
+  return new Intl.ListFormat(DATE_TIME_LOCALE[locale], {
+    style: "short",
+    type: "unit",
+  }).format([...values]);
 }
 
 function taskDomainLabel(locale: Locale, domain: TaskRow["domain"]) {
@@ -258,9 +265,7 @@ async function loadWithError<T>(
     return {
       data: fallback,
       error:
-        error instanceof Error
-          ? error.message
-          : t("common.unknown", locale),
+        error instanceof Error ? error.message : t("common.unknown", locale),
     };
   }
 }
@@ -600,7 +605,7 @@ function buildRefreshBannerBody(
   const sectionSummary =
     degradedSections.length > 0
       ? detailT(locale, "refresh.degradedSections", {
-          sections: degradedSections.join(LIST_SEPARATOR[locale]),
+          sections: formatDisplayList(locale, degradedSections),
         })
       : detailT(locale, "refresh.allSectionsLoaded");
   const snapshotSummary = metadata.generatedAt
@@ -1175,9 +1180,7 @@ export default async function DriverDetailPage({
 
   const tabs: ReactNode[] = [
     <span key="overview">{detailT(locale, "tab.overview")}</span>,
-    <span key="platforms">
-      {detailT(locale, "tab.platformBindings")}
-    </span>,
+    <span key="platforms">{detailT(locale, "tab.platformBindings")}</span>,
     <span key="tasks">{detailT(locale, "tab.activeTasks")}</span>,
     <span key="earnings">{detailT(locale, "tab.earnings")}</span>,
     <span key="shifts">{detailT(locale, "tab.shifts")}</span>,
@@ -1880,9 +1883,7 @@ export default async function DriverDetailPage({
                 </div>
                 {driver.eligibilityBlockedReasons.length > 0 ? (
                   <div style={{ color: theme.textMuted }}>
-                    <strong>
-                      {detailT(locale, "eligibilityBlocked")}:
-                    </strong>{" "}
+                    <strong>{detailT(locale, "eligibilityBlocked")}:</strong>{" "}
                     {formatList(locale, driver.eligibilityBlockedReasons)}
                   </div>
                 ) : null}
