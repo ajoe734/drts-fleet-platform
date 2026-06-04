@@ -101,6 +101,22 @@ export interface PlatformAdminAssistantActionPreview {
   confirmationRequired: boolean;
 }
 
+export interface PlatformAdminAssistantGovernedActionRequest {
+  toolName: PlatformAdminAssistantActionToolName;
+  payload: PlatformAdminAssistantActionCommand["payload"];
+  descriptor: ResourceActionDescriptor;
+  confirmationRequired: boolean;
+  title: string;
+  message: string;
+  resourceLabel?: string | undefined;
+  confirmLabel?: string | undefined;
+  cancelLabel?: string | undefined;
+  reasonLabel?: string | undefined;
+  reasonPlaceholder?: string | undefined;
+  reasonHint?: string | undefined;
+  disabledReason?: string | null;
+}
+
 export interface PlatformAdminAssistantActionExecutionResult {
   receipt: ActionReceipt;
   assistantAuditId: string;
@@ -130,6 +146,7 @@ export interface PlatformAdminAssistantProviderResponse {
   citations: PlatformAdminAssistantCitation[];
   suggestedPrompts: string[];
   actionPlan: PlatformAdminAssistantActionPlan | null;
+  governedAction: PlatformAdminAssistantActionCommand | null;
 }
 
 export type PlatformAdminAssistantDevelopmentArtifactKind =
@@ -157,7 +174,14 @@ export interface PlatformAdminAssistantDevelopmentArtifactRecord {
   tasks: PlatformAdminAssistantDevelopmentTaskCommand[];
 }
 
-export interface PlatformAdminAssistantMessageRecord extends PlatformAdminAssistantProviderResponse {
+export interface PlatformAdminAssistantMessageResponse extends Omit<
+  PlatformAdminAssistantProviderResponse,
+  "governedAction"
+> {
+  governedAction: PlatformAdminAssistantGovernedActionRequest | null;
+}
+
+export interface PlatformAdminAssistantMessageRecord extends PlatformAdminAssistantMessageResponse {
   messageId: string;
   sessionId: string;
   role: "user" | "assistant";

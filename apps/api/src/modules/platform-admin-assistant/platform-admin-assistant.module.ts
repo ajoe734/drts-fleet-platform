@@ -5,11 +5,11 @@ import { AuditNotificationModule } from "../audit-notification/audit-notificatio
 import { FeatureFlagsModule } from "../feature-flags/feature-flags.module";
 import { ForwarderModule } from "../forwarder/forwarder.module";
 import { PlatformAdminModule } from "../platform-admin/platform-admin.module";
+import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { PlatformAdminAssistantKnowledgeModule } from "./knowledge";
 import { PlatformAdminAssistantAuditRecorder } from "./platform-admin-assistant.audit";
 import { PlatformAdminAssistantController } from "./platform-admin-assistant.controller";
 import { LlmGatewayPlatformAdminAssistantProvider } from "./platform-admin-assistant.provider";
-import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { PlatformAdminAssistantReadToolService } from "./platform-admin-assistant-read-tools.service";
 import { PlatformAdminAssistantOrchestratorBridgeService } from "./platform-admin-assistant.orchestrator-bridge";
 import { PlatformAdminAssistantService } from "./platform-admin-assistant.service";

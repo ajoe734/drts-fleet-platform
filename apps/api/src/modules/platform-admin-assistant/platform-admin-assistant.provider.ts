@@ -3,6 +3,7 @@ import { Injectable } from "@nestjs/common";
 import { LlmGatewayService } from "../../common/llm-gateway";
 import { getApprovedSource } from "./knowledge";
 import type {
+  PlatformAdminAssistantActionCommand,
   PlatformAdminAssistantProvider,
   PlatformAdminAssistantCitation,
   PlatformAdminAssistantProviderRequest,
@@ -44,6 +45,56 @@ function formatHistory(request: PlatformAdminAssistantProviderRequest) {
     .join("\n");
 }
 
+function extractGovernedAction(
+  message: string,
+): PlatformAdminAssistantActionCommand | null {
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("maintenance mode") || message.includes("維護模式")) {
+    const enable =
+      normalized.includes("enable") ||
+      normalized.includes("turn on") ||
+      normalized.includes("start maintenance") ||
+      message.includes("開啟") ||
+      message.includes("啟用");
+    const disable =
+      normalized.includes("disable") ||
+      normalized.includes("turn off") ||
+      normalized.includes("end maintenance") ||
+      message.includes("關閉") ||
+      message.includes("停用");
+
+    return {
+      toolName: "action.set_maintenance_mode",
+      payload: {
+        enabled: enable || !disable,
+      },
+    };
+  }
+
+  if (
+    normalized.includes("notice") ||
+    normalized.includes("announcement") ||
+    message.includes("公告")
+  ) {
+    return {
+      toolName: "action.create_platform_notice",
+      payload: {
+        title: "Platform assistant drafted notice",
+        body: "Please review the assisted notice draft before execution.",
+        severity: normalized.includes("critical") ? "critical" : "warning",
+        targetAudience: message.includes("司機")
+          ? "drivers"
+          : normalized.includes("ops")
+            ? "ops"
+            : "all",
+      },
+    };
+  }
+
+  return null;
+}
+
 @Injectable()
 export class MockPlatformAdminAssistantProvider implements PlatformAdminAssistantProvider {
   readonly kind = "mock" as const;
@@ -63,11 +114,13 @@ export class MockPlatformAdminAssistantProvider implements PlatformAdminAssistan
           "Request the closest approved documents for manual review.",
         ],
         actionPlan: null,
+        governedAction: null,
       };
     }
 
     const primaryHit = request.retrieval.hits[0];
     const normalizedMessage = request.message.trim();
+    const governedAction = extractGovernedAction(normalizedMessage);
     const summary =
       normalizedMessage.length > 96
         ? `${normalizedMessage.slice(0, 93)}...`
@@ -111,6 +164,7 @@ export class MockPlatformAdminAssistantProvider implements PlatformAdminAssistan
           },
         ],
       },
+      governedAction,
     };
   }
 }
@@ -223,6 +277,7 @@ export class LlmGatewayPlatformAdminAssistantProvider implements PlatformAdminAs
           ? suggestedPrompts
           : this.defaultSuggestedPrompts(),
       actionPlan: this.normalizeActionPlan(parsed.actionPlan),
+      governedAction: null,
     };
   }
 
@@ -238,6 +293,7 @@ export class LlmGatewayPlatformAdminAssistantProvider implements PlatformAdminAs
       citations: toAssistantCitations(request),
       suggestedPrompts: this.defaultSuggestedPrompts(),
       actionPlan: null,
+      governedAction: null,
     };
   }
 

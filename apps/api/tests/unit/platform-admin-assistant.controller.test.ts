@@ -41,6 +41,24 @@ describe("PlatformAdminAssistantController", () => {
             },
           ],
         },
+        governedAction: {
+          toolName: "action.create_platform_notice",
+          payload: {
+            title: "Assistant drafted notice",
+            body: "Review before execution.",
+            severity: "warning",
+            targetAudience: "all",
+          },
+          descriptor: {
+            action: "create_platform_notice",
+            enabled: true,
+            riskLevel: "medium",
+            requiresReason: false,
+          },
+          confirmationRequired: true,
+          title: "Confirm platform notice creation",
+          message: "This will publish a warning notice for all.",
+        },
       })),
     };
     const controller = new PlatformAdminAssistantController(service as never);
@@ -59,6 +77,15 @@ describe("PlatformAdminAssistantController", () => {
     );
     expect(response.meta.requestId).toBe("req-assistant-msg-001");
     expect(response.data.answer).toContain("current platform admin identity");
+    expect(response.data.governedAction).toMatchObject({
+      toolName: "action.create_platform_notice",
+      confirmationRequired: true,
+      descriptor: {
+        action: "create_platform_notice",
+        enabled: true,
+        riskLevel: "medium",
+      },
+    });
   });
 
   it("wraps read-tool execution responses", async () => {

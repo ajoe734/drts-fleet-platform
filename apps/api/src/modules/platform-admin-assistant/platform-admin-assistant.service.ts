@@ -34,10 +34,12 @@ import type {
   ExecutePlatformAdminAssistantActionCommand,
   PlatformAdminAssistantActionCommand,
   PlatformAdminAssistantActionExecutionResult,
+  PlatformAdminAssistantGovernedActionRequest,
   PlatformAdminAssistantActionPreview,
   CreatePlatformAdminAssistantSessionCommand,
   PlatformAdminAssistantControlPlaneIdentity,
   PlatformAdminAssistantMessageRecord,
+  PlatformAdminAssistantMessageResponse,
   PlatformAdminAssistantPlanRecord,
   PlatformAdminAssistantProvider,
   PlatformAdminAssistantProviderResponse,
@@ -67,6 +69,7 @@ export class PlatformAdminAssistantService {
     string,
     PlatformAdminAssistantDevelopmentArtifactRecord[]
   >();
+  private readonly sessionRoutes = new Map<string, string>();
 
   constructor(
     @Inject(PLATFORM_ADMIN_ASSISTANT_PROVIDER)
@@ -114,6 +117,7 @@ export class PlatformAdminAssistantService {
     this.sessions.set(sessionId, session);
     this.messages.set(sessionId, []);
     this.plans.set(sessionId, []);
+    this.sessionRoutes.set(sessionId, "/platform-admin/assistant");
 
     return { ...session, actor: this.cloneActor(session.actor) };
   }
@@ -150,7 +154,7 @@ export class PlatformAdminAssistantService {
     sessionId: string,
     identity: BootstrapRequestIdentity | null,
     command: CreatePlatformAdminAssistantMessageCommand,
-  ): Promise<PlatformAdminAssistantProviderResponse> {
+  ): Promise<PlatformAdminAssistantMessageResponse> {
     const session = this.requireOwnedSession(sessionId, identity);
     const trimmedMessage = command.message?.trim();
 
@@ -173,6 +177,7 @@ export class PlatformAdminAssistantService {
       citations: [],
       suggestedPrompts: [],
       actionPlan: null,
+      governedAction: null,
       createdAt: new Date().toISOString(),
     };
     sessionMessages.push(userMessage);
@@ -208,6 +213,17 @@ export class PlatformAdminAssistantService {
 
     const safeProviderResponse =
       this.sanitizeProviderResponse(providerResponse);
+    const route = this.extractRoutePath(trimmedMessage);
+    if (route) {
+      this.sessionRoutes.set(sessionId, route);
+    }
+    const governedAction = safeProviderResponse.governedAction
+      ? this.buildGovernedActionRequest(
+          sessionId,
+          identity,
+          safeProviderResponse.governedAction,
+        )
+      : null;
 
     const assistantMessage: PlatformAdminAssistantMessageRecord = {
       messageId: `paas_msg_${randomUUID()}`,
@@ -225,6 +241,23 @@ export class PlatformAdminAssistantService {
             steps: safeProviderResponse.actionPlan.steps.map((step) => ({
               ...step,
             })),
+          }
+        : null,
+      governedAction: governedAction
+        ? {
+            toolName: governedAction.toolName,
+            payload: { ...governedAction.payload },
+            descriptor: { ...governedAction.descriptor },
+            confirmationRequired: governedAction.confirmationRequired,
+            title: governedAction.title,
+            message: governedAction.message,
+            resourceLabel: governedAction.resourceLabel,
+            confirmLabel: governedAction.confirmLabel,
+            cancelLabel: governedAction.cancelLabel,
+            reasonLabel: governedAction.reasonLabel,
+            reasonPlaceholder: governedAction.reasonPlaceholder,
+            reasonHint: governedAction.reasonHint,
+            disabledReason: governedAction.disabledReason ?? null,
           }
         : null,
       createdAt: new Date().toISOString(),
@@ -271,6 +304,44 @@ export class PlatformAdminAssistantService {
       });
     }
 
+    if (governedAction) {
+      const auditRoute =
+        route ??
+        this.sessionRoutes.get(sessionId) ??
+        "/platform-admin/assistant";
+      if (governedAction.descriptor.enabled) {
+        this.assistantAuditRecorder.recordPlanCreated({
+          actorId: session.actor.actorId,
+          sessionId,
+          route: auditRoute,
+          resourceType: governedAction.descriptor.action,
+          ...(governedAction.resourceLabel !== undefined
+            ? { resourceId: governedAction.resourceLabel }
+            : {}),
+          metadata: {
+            toolName: governedAction.toolName,
+            riskLevel: governedAction.descriptor.riskLevel,
+            confirmationRequired: governedAction.confirmationRequired,
+          },
+        });
+      } else {
+        this.assistantAuditRecorder.recordActionBlocked({
+          actorId: session.actor.actorId,
+          sessionId,
+          route: auditRoute,
+          resourceType: governedAction.descriptor.action,
+          ...(governedAction.resourceLabel !== undefined
+            ? { resourceId: governedAction.resourceLabel }
+            : {}),
+          metadata: {
+            toolName: governedAction.toolName,
+            disabledReasonCode:
+              governedAction.descriptor.disabledReasonCode ?? null,
+          },
+        });
+      }
+    }
+
     const nextTitle =
       session.title === "New Platform Admin Assistant Session"
         ? this.deriveSessionTitle(trimmedMessage)
@@ -294,6 +365,23 @@ export class PlatformAdminAssistantService {
             steps: assistantMessage.actionPlan.steps.map((step) => ({
               ...step,
             })),
+          }
+        : null,
+      governedAction: governedAction
+        ? {
+            toolName: governedAction.toolName,
+            payload: { ...governedAction.payload },
+            descriptor: { ...governedAction.descriptor },
+            confirmationRequired: governedAction.confirmationRequired,
+            title: governedAction.title,
+            message: governedAction.message,
+            resourceLabel: governedAction.resourceLabel,
+            confirmLabel: governedAction.confirmLabel,
+            cancelLabel: governedAction.cancelLabel,
+            reasonLabel: governedAction.reasonLabel,
+            reasonPlaceholder: governedAction.reasonPlaceholder,
+            reasonHint: governedAction.reasonHint,
+            disabledReason: governedAction.disabledReason ?? null,
           }
         : null,
     };
@@ -420,6 +508,8 @@ export class PlatformAdminAssistantService {
     }
 
     const normalizedReason = command.reason?.trim() ?? "";
+    const auditRoute =
+      this.sessionRoutes.get(sessionId) ?? "/platform-admin/assistant";
     if (resolvedAction.descriptor.riskLevel === "high" && !normalizedReason) {
       this.assistantAuditRecorder.recordActionBlocked({
         actorId: actor.actorId,
@@ -443,9 +533,12 @@ export class PlatformAdminAssistantService {
     this.assistantAuditRecorder.recordActionConfirmed({
       actorId: actor.actorId,
       sessionId,
-      route: this.assistantActionRoute(sessionId, resolvedAction.toolName),
-      actionId: resolvedAction.toolName,
+      route: auditRoute,
+      resourceType: resolvedAction.descriptor.action,
+      resourceId: resolvedAction.toolName,
+      ...(requestId !== undefined ? { actionId: requestId } : {}),
       metadata: {
+        toolName: resolvedAction.toolName,
         riskLevel: resolvedAction.descriptor.riskLevel,
         reason: normalizedReason || null,
       },
@@ -481,12 +574,13 @@ export class PlatformAdminAssistantService {
     this.assistantAuditRecorder.recordActionExecuted({
       actorId: actor.actorId,
       sessionId,
-      route: this.assistantActionRoute(sessionId, resolvedAction.toolName),
-      actionId: resolvedAction.toolName,
+      route: auditRoute,
       resourceType: receipt.resourceType,
       resourceId: receipt.resourceId,
+      actionId: receipt.actionId,
       domainAuditId: receipt.auditId,
       metadata: {
+        toolName: resolvedAction.toolName,
         assistantAuditId: assistantAudit.auditId,
         riskLevel: resolvedAction.descriptor.riskLevel,
         reason: normalizedReason || null,
@@ -673,6 +767,7 @@ export class PlatformAdminAssistantService {
         "Explain the safest manual follow-up while the provider is degraded.",
       ],
       actionPlan: null,
+      governedAction: null,
     };
   }
 
@@ -773,6 +868,12 @@ export class PlatformAdminAssistantService {
             })),
           }
         : null,
+      governedAction: response.governedAction
+        ? {
+            toolName: response.governedAction.toolName,
+            payload: { ...response.governedAction.payload },
+          }
+        : null,
     };
   }
 
@@ -803,7 +904,10 @@ export class PlatformAdminAssistantService {
   }
 
   private assistantSessionRoute(sessionId: string): string {
-    return `/platform-admin/assistant/sessions/${sessionId}`;
+    return (
+      this.sessionRoutes.get(sessionId) ??
+      `/platform-admin/assistant/sessions/${sessionId}`
+    );
   }
 
   private assistantActionRoute(sessionId: string, toolName: string): string {
@@ -847,6 +951,56 @@ export class PlatformAdminAssistantService {
             steps: message.actionPlan.steps.map((step) => ({ ...step })),
           }
         : null,
+      governedAction: message.governedAction
+        ? {
+            ...message.governedAction,
+            payload: { ...message.governedAction.payload },
+            descriptor: { ...message.governedAction.descriptor },
+          }
+        : null,
     };
+  }
+
+  private buildGovernedActionRequest(
+    sessionId: string,
+    identity: BootstrapRequestIdentity | null,
+    command: PlatformAdminAssistantActionCommand,
+  ): PlatformAdminAssistantGovernedActionRequest {
+    const preview = this.previewAction(sessionId, identity, command);
+    const resolvedAction = this.requireResolvedAction(command);
+
+    return {
+      toolName: preview.toolName,
+      payload: { ...command.payload },
+      descriptor: { ...preview.descriptor },
+      confirmationRequired: preview.confirmationRequired,
+      title: resolvedAction.confirmationTitle,
+      message: resolvedAction.confirmationMessage,
+      resourceLabel: resolvedAction.resourceLabel,
+      confirmLabel: resolvedAction.confirmLabel,
+      cancelLabel: resolvedAction.cancelLabel,
+      reasonLabel: resolvedAction.reasonLabel,
+      reasonPlaceholder: resolvedAction.reasonPlaceholder,
+      reasonHint: resolvedAction.reasonHint,
+      disabledReason: preview.descriptor.enabled
+        ? null
+        : this.describeDisabledReason(preview.descriptor.disabledReasonCode),
+    };
+  }
+
+  private describeDisabledReason(code?: string) {
+    switch (code) {
+      case "maintenance_mode_already_enabled":
+        return "Maintenance mode is already enabled.";
+      case "maintenance_mode_already_disabled":
+        return "Maintenance mode is already disabled.";
+      default:
+        return code ? `Action is unavailable: ${code}.` : null;
+    }
+  }
+
+  private extractRoutePath(message: string) {
+    const match = message.match(/^Path:\s*(.+)$/m);
+    return match?.[1]?.trim() || null;
   }
 }
