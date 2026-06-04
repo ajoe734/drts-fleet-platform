@@ -1,9 +1,16 @@
-import { Metadata } from "next";
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
-export const metadata: Metadata = {
-  title: "Platform Adapter Registry",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getServerLocale();
 
-export default function Layout({ children }: { children: React.ReactNode }) {
+  return {
+    title: t("adapterRegistry.metadata.title", locale),
+  };
+}
+
+export default function Layout({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
