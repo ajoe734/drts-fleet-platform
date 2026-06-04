@@ -1552,6 +1552,127 @@ const en = {
   "payments.reimbursementsTitle": "Driver reimbursements",
   "payments.generateInvoiceTitle": "Generate tenant invoice",
   "payments.generateStatementsTitle": "Generate driver statements",
+  "payments.reimbursements.queue.filter.all": "All",
+  "payments.reimbursements.queue.filter.pendingApproval": "Pending approval",
+  "payments.reimbursements.queue.filter.exported": "Exported",
+  "payments.reimbursements.queue.filter.done": "Done",
+  "payments.reimbursements.queue.submitter.platformFinance": "Platform Finance",
+  "payments.reimbursements.queue.headerTitle": "Reimbursement batches",
+  "payments.reimbursements.queue.headerSubtitle":
+    "draft → pending_approval → approved → exported → paid → reconciled (Q-ADM12 6-state state machine)",
+  "payments.reimbursements.queue.empty":
+    "No reimbursement batches match this queue state.",
+  "payments.reimbursements.queue.loadError":
+    "Unable to load reimbursement batches",
+  "payments.reimbursements.queue.loading": "Loading reimbursement batches...",
+  "payments.reimbursements.queue.col.batch": "BATCH",
+  "payments.reimbursements.queue.col.scope": "SCOPE",
+  "payments.reimbursements.queue.col.amount": "AMOUNT",
+  "payments.reimbursements.queue.col.state": "STATE",
+  "payments.reimbursements.queue.col.submitter": "SUBMITTER",
+  "payments.reimbursements.queue.col.submitted": "SUBMITTED",
+  "payments.reimbursements.queue.col.updated": "UPDATED",
+  "payments.reimbursements.status.draft": "draft",
+  "payments.reimbursements.status.pendingApproval": "pending_approval",
+  "payments.reimbursements.status.approved": "approved",
+  "payments.reimbursements.status.exported": "exported",
+  "payments.reimbursements.status.paid": "paid",
+  "payments.reimbursements.status.reconciled": "reconciled",
+  "payments.reimbursements.detail.fallbackWarning":
+    "API reimbursement detail is unavailable, so the page is rendering route-local fallback data aligned to the canvas artboard.",
+  "payments.reimbursements.detail.loading": "Loading...",
+  "payments.reimbursements.detail.pageTitle": "Reimbursement batch",
+  "payments.reimbursements.detail.backToPayments": "Back to payments",
+  "payments.reimbursements.detail.batchUnavailable": "Batch unavailable",
+  "payments.reimbursements.detail.batchUnavailableBody":
+    "The reimbursement batch route resolves, but the batch was not found.",
+  "payments.reimbursements.detail.lineItemsFallbackNote": "Line item {index}",
+  "payments.reimbursements.detail.approvalReasonRequired":
+    "Approval reason is required for this high-risk action.",
+  "payments.reimbursements.detail.approvalRecorded":
+    "Approval recorded with reason: {reason}",
+  "payments.reimbursements.detail.markedPaid":
+    "Batch marked paid and remittance proof captured.",
+  "payments.reimbursements.detail.queueLink": "Queue",
+  "payments.reimbursements.detail.copyBatchId": "Copy batch ID",
+  "payments.reimbursements.detail.refreshFailed": "Refresh failed",
+  "payments.reimbursements.detail.fallbackTitle":
+    "Fallback reimbursement detail",
+  "payments.reimbursements.detail.auditViewTitle":
+    "Audit-derived workflow view",
+  "payments.reimbursements.detail.auditViewBody":
+    "The six-state stepper matches the canvas while underlying contract data is derived from batch approval, remittance, and payment timestamps.",
+  "payments.reimbursements.detail.auditReceipt": "Audit receipt",
+  "payments.reimbursements.detail.stateMachineTitle": "State machine · Q-ADM12",
+  "payments.reimbursements.detail.stateMachineSubtitle":
+    "draft → pending approval → approved → exported → paid → reconciled",
+  "payments.reimbursements.detail.headerCardTitle": "Header",
+  "payments.reimbursements.detail.summary.batchId": "BATCH ID",
+  "payments.reimbursements.detail.summary.driver": "DRIVER",
+  "payments.reimbursements.detail.summary.statement": "STATEMENT",
+  "payments.reimbursements.detail.summary.period": "PERIOD",
+  "payments.reimbursements.detail.summary.totalAmount": "TOTAL AMOUNT",
+  "payments.reimbursements.detail.summary.state": "STATE",
+  "payments.reimbursements.detail.summary.approvedAt": "APPROVED AT",
+  "payments.reimbursements.detail.summary.paidAt": "PAID AT",
+  "payments.reimbursements.detail.summary.remittanceProof": "REMITTANCE PROOF",
+  "payments.reimbursements.detail.summary.lineItems": "LINE ITEMS",
+  "payments.reimbursements.detail.approveFlowTitle": "Approve reason flow",
+  "payments.reimbursements.detail.approveFlowSubtitle":
+    "High-risk action requires a reason before approval.",
+  "payments.reimbursements.detail.approvalReason": "Approval reason",
+  "payments.reimbursements.detail.approvalReasonPlaceholder":
+    "Explain sponsor exposure, evidence, or audit context.",
+  "payments.reimbursements.detail.remittanceProof": "Remittance proof",
+  "payments.reimbursements.detail.actionFailed": "Action failed",
+  "payments.reimbursements.detail.markPaid": "Mark paid",
+  "payments.reimbursements.detail.timelineTitle":
+    "State timeline · audit-derived",
+  "payments.reimbursements.detail.batchSummaryTitle": "Batch summary",
+  "payments.reimbursements.detail.batchSummarySubtitle.fallback":
+    "Canvas body density rendered from route-local fallback finance context.",
+  "payments.reimbursements.detail.batchSummarySubtitle.live":
+    "Canvas body density with route-local finance context.",
+  "payments.reimbursements.detail.approvalGate": "Approval gate:",
+  "payments.reimbursements.detail.approvalGateCompleted": "Completed",
+  "payments.reimbursements.detail.approvalGatePending":
+    "Pending super-admin signoff",
+  "payments.reimbursements.detail.exportPosture": "Export posture:",
+  "payments.reimbursements.detail.exportPostureAttached": "Proof attached",
+  "payments.reimbursements.detail.exportPosturePending": "Not exported yet",
+  "payments.reimbursements.detail.settlementTarget": "Settlement target:",
+  "payments.reimbursements.detail.evidenceScope": "Evidence scope:",
+  "payments.reimbursements.detail.evidenceScopeCount": "{count} line items",
+  "payments.reimbursements.detail.lineItemsTitle": "Line items",
+  "payments.reimbursements.detail.lineItemsSubtitle":
+    "{count} sources contributing to the batch total.",
+  "payments.reimbursements.detail.lineItemsEmpty":
+    "No reimbursement line items were returned for this batch.",
+  "payments.reimbursements.detail.lineItems.col.recipient": "RECIPIENT",
+  "payments.reimbursements.detail.lineItems.col.amount": "AMOUNT",
+  "payments.reimbursements.detail.lineItems.col.sourceReference":
+    "SOURCE REFERENCE",
+  "payments.reimbursements.detail.lineItems.col.note": "NOTE",
+  "payments.reimbursements.timeline.batchCreated": "Batch created",
+  "payments.reimbursements.timeline.batchCreatedBody":
+    "Generated for statement {statementId} and driver {driverId}.",
+  "payments.reimbursements.timeline.submittedForApproval":
+    "Submitted for approval",
+  "payments.reimbursements.timeline.submittedForApprovalBody":
+    "{count} reimbursement line items queued for finance review.",
+  "payments.reimbursements.timeline.approved": "Approved",
+  "payments.reimbursements.timeline.approvedBody":
+    "Batch approved and ready for export/remittance handling.",
+  "payments.reimbursements.timeline.remittanceProofAttached":
+    "Remittance proof attached",
+  "payments.reimbursements.timeline.remittanceProofAttachedBody":
+    "Proof ID {proofId} recorded on the batch.",
+  "payments.reimbursements.timeline.markedPaid": "Marked paid",
+  "payments.reimbursements.timeline.markedPaidBody":
+    "Driver reimbursement has been marked paid in the finance console.",
+  "payments.reimbursements.timeline.waitingApproval": "Waiting approval",
+  "payments.reimbursements.timeline.waitingApprovalBody":
+    "High-risk approval still requires reason capture before state can advance.",
 
   // ── Pricing (additional) ──
   "pricing.platformFunded": "Platform funded",
@@ -2934,6 +3055,118 @@ const zh: typeof en = {
   "payments.reimbursementsTitle": "司機報銷",
   "payments.generateInvoiceTitle": "產生租戶發票",
   "payments.generateStatementsTitle": "產生司機結算單",
+  "payments.reimbursements.queue.filter.all": "全部",
+  "payments.reimbursements.queue.filter.pendingApproval": "待核准",
+  "payments.reimbursements.queue.filter.exported": "已匯出",
+  "payments.reimbursements.queue.filter.done": "已完成",
+  "payments.reimbursements.queue.submitter.platformFinance": "平台財務",
+  "payments.reimbursements.queue.headerTitle": "代墊批次",
+  "payments.reimbursements.queue.headerSubtitle":
+    "draft → pending_approval → approved → exported → paid → reconciled（Q-ADM12 六狀態 state machine）",
+  "payments.reimbursements.queue.empty": "目前沒有符合此狀態的代墊批次。",
+  "payments.reimbursements.queue.loadError": "無法載入代墊批次",
+  "payments.reimbursements.queue.loading": "正在載入代墊批次…",
+  "payments.reimbursements.queue.col.batch": "批次",
+  "payments.reimbursements.queue.col.scope": "範圍",
+  "payments.reimbursements.queue.col.amount": "金額",
+  "payments.reimbursements.queue.col.state": "狀態",
+  "payments.reimbursements.queue.col.submitter": "提交者",
+  "payments.reimbursements.queue.col.submitted": "提交時間",
+  "payments.reimbursements.queue.col.updated": "更新時間",
+  "payments.reimbursements.status.draft": "draft",
+  "payments.reimbursements.status.pendingApproval": "pending_approval",
+  "payments.reimbursements.status.approved": "approved",
+  "payments.reimbursements.status.exported": "exported",
+  "payments.reimbursements.status.paid": "paid",
+  "payments.reimbursements.status.reconciled": "reconciled",
+  "payments.reimbursements.detail.fallbackWarning":
+    "目前代墊詳情 API 無法使用，頁面改以 route-local fallback 資料渲染 canvas 對齊內容。",
+  "payments.reimbursements.detail.loading": "載入中…",
+  "payments.reimbursements.detail.pageTitle": "代墊批次",
+  "payments.reimbursements.detail.backToPayments": "返回結算治理",
+  "payments.reimbursements.detail.batchUnavailable": "找不到批次",
+  "payments.reimbursements.detail.batchUnavailableBody":
+    "Route 已建立，但找不到對應的代墊批次資料。",
+  "payments.reimbursements.detail.lineItemsFallbackNote": "項目 {index}",
+  "payments.reimbursements.detail.approvalReasonRequired":
+    "高風險核准操作必須填寫原因。",
+  "payments.reimbursements.detail.approvalRecorded": "已記錄核准原因：{reason}",
+  "payments.reimbursements.detail.markedPaid":
+    "批次已標記為已付款，且已記錄匯款憑證。",
+  "payments.reimbursements.detail.queueLink": "批次佇列",
+  "payments.reimbursements.detail.copyBatchId": "複製批次 ID",
+  "payments.reimbursements.detail.refreshFailed": "重新整理失敗",
+  "payments.reimbursements.detail.fallbackTitle": "Fallback 代墊批次詳情",
+  "payments.reimbursements.detail.auditViewTitle":
+    "Audit-derived workflow 視圖",
+  "payments.reimbursements.detail.auditViewBody":
+    "六狀態 stepper 對齊 canvas；目前狀態由 batch 的核准、匯款憑證與付款時間推導呈現。",
+  "payments.reimbursements.detail.auditReceipt": "稽核收據",
+  "payments.reimbursements.detail.stateMachineTitle": "狀態機 · Q-ADM12",
+  "payments.reimbursements.detail.stateMachineSubtitle":
+    "draft → pending approval → approved → exported → paid → reconciled",
+  "payments.reimbursements.detail.headerCardTitle": "摘要",
+  "payments.reimbursements.detail.summary.batchId": "批次 ID",
+  "payments.reimbursements.detail.summary.driver": "司機",
+  "payments.reimbursements.detail.summary.statement": "結算單",
+  "payments.reimbursements.detail.summary.period": "期間",
+  "payments.reimbursements.detail.summary.totalAmount": "總金額",
+  "payments.reimbursements.detail.summary.state": "狀態",
+  "payments.reimbursements.detail.summary.approvedAt": "核准時間",
+  "payments.reimbursements.detail.summary.paidAt": "付款時間",
+  "payments.reimbursements.detail.summary.remittanceProof": "匯款憑證",
+  "payments.reimbursements.detail.summary.lineItems": "項目數",
+  "payments.reimbursements.detail.approveFlowTitle": "核准原因流程",
+  "payments.reimbursements.detail.approveFlowSubtitle":
+    "高風險操作在核准前必須填寫原因。",
+  "payments.reimbursements.detail.approvalReason": "核准原因",
+  "payments.reimbursements.detail.approvalReasonPlaceholder":
+    "說明 sponsor exposure、佐證或 audit context。",
+  "payments.reimbursements.detail.remittanceProof": "匯款憑證",
+  "payments.reimbursements.detail.actionFailed": "操作失敗",
+  "payments.reimbursements.detail.markPaid": "標記已付款",
+  "payments.reimbursements.detail.timelineTitle": "狀態時間軸 · audit-derived",
+  "payments.reimbursements.detail.batchSummaryTitle": "批次摘要",
+  "payments.reimbursements.detail.batchSummarySubtitle.fallback":
+    "以 route-local fallback finance context 補齊 canvas body 密度。",
+  "payments.reimbursements.detail.batchSummarySubtitle.live":
+    "以 route-local finance context 補齊 canvas body 密度。",
+  "payments.reimbursements.detail.approvalGate": "核准關卡：",
+  "payments.reimbursements.detail.approvalGateCompleted": "已完成",
+  "payments.reimbursements.detail.approvalGatePending": "待 super-admin 簽核",
+  "payments.reimbursements.detail.exportPosture": "匯出姿態：",
+  "payments.reimbursements.detail.exportPostureAttached": "已附憑證",
+  "payments.reimbursements.detail.exportPosturePending": "尚未匯出",
+  "payments.reimbursements.detail.settlementTarget": "結算對象：",
+  "payments.reimbursements.detail.evidenceScope": "佐證範圍：",
+  "payments.reimbursements.detail.evidenceScopeCount": "{count} 筆項目",
+  "payments.reimbursements.detail.lineItemsTitle": "項目明細",
+  "payments.reimbursements.detail.lineItemsSubtitle":
+    "{count} 筆來源構成此批次總額。",
+  "payments.reimbursements.detail.lineItemsEmpty":
+    "此批次目前沒有可顯示的代墊項目。",
+  "payments.reimbursements.detail.lineItems.col.recipient": "收款對象",
+  "payments.reimbursements.detail.lineItems.col.amount": "金額",
+  "payments.reimbursements.detail.lineItems.col.sourceReference": "來源參考",
+  "payments.reimbursements.detail.lineItems.col.note": "備註",
+  "payments.reimbursements.timeline.batchCreated": "批次建立",
+  "payments.reimbursements.timeline.batchCreatedBody":
+    "此批次依結算單 {statementId} 與司機 {driverId} 產生。",
+  "payments.reimbursements.timeline.submittedForApproval": "送交核准",
+  "payments.reimbursements.timeline.submittedForApprovalBody":
+    "{count} 筆代墊項目已排入財務審核。",
+  "payments.reimbursements.timeline.approved": "已核准",
+  "payments.reimbursements.timeline.approvedBody":
+    "批次已核准，可進入匯出與匯款處理。",
+  "payments.reimbursements.timeline.remittanceProofAttached": "已附匯款憑證",
+  "payments.reimbursements.timeline.remittanceProofAttachedBody":
+    "批次已記錄憑證 ID {proofId}。",
+  "payments.reimbursements.timeline.markedPaid": "已標記付款",
+  "payments.reimbursements.timeline.markedPaidBody":
+    "司機代墊已於財務主控台標記為已付款。",
+  "payments.reimbursements.timeline.waitingApproval": "等待核准",
+  "payments.reimbursements.timeline.waitingApprovalBody":
+    "高風險核准仍需補上原因，狀態才能繼續推進。",
 
   // ── Tenant Governance (20260606 UI presentation) ──
   "tenantGovernance.title": "跨租戶治理",
