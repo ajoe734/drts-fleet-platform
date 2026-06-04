@@ -363,10 +363,6 @@ jobs:
           secret_prefix="${{ needs.prepare.outputs.secret_prefix }}"
           project_id="${{ needs.prepare.outputs.project_id }}"
           secret_args="DATABASE_URL=${secret_prefix}-db-url:latest,API_KEY_SALT=${secret_prefix}-api-key-salt:latest,JWT_SECRET=${secret_prefix}-jwt-secret:latest"
-          llm_provider="mock"
-          llm_chat_model="mock-chat-v1"
-          llm_summarizer_model="mock-summary-v1"
-          llm_base_url=""
 
           controlled_download_secret="${secret_prefix}-controlled-download-signing-secret"
           if ! gcloud secrets describe "$controlled_download_secret" --project "$project_id" >/dev/null 2>&1; then
@@ -379,32 +375,7 @@ jobs:
             secret_args="${secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
           fi
 
-          llm_secret="${secret_prefix}-llm-gateway-api-key"
-          if gcloud secrets describe "$llm_secret" --project "$project_id" >/dev/null 2>&1; then
-            secret_args="${secret_args},LLM_GATEWAY_API_KEY=${llm_secret}:latest"
-            llm_provider="${DEV_LLM_GATEWAY_PROVIDER:-openai}"
-            llm_chat_model="${DEV_LLM_GATEWAY_CHAT_MODEL:-gpt-4.1-mini}"
-            llm_summarizer_model="${DEV_LLM_GATEWAY_SUMMARIZER_MODEL:-gpt-4.1-mini}"
-            llm_base_url="${DEV_LLM_GATEWAY_BASE_URL:-}"
-          fi
-
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
-          echo "llm_provider=${llm_provider}" >> "$GITHUB_OUTPUT"
-          echo "llm_chat_model=${llm_chat_model}" >> "$GITHUB_OUTPUT"
-          echo "llm_summarizer_model=${llm_summarizer_model}" >> "$GITHUB_OUTPUT"
-          echo "llm_base_url=${llm_base_url}" >> "$GITHUB_OUTPUT"
-
-      - name: Build API env vars
-        id: api_env
-        run: |
-          set -euo pipefail
-
-          env_vars="NODE_ENV=production,API_PORT=3001,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}"
-          if [[ -n "${{ steps.api_secrets.outputs.llm_base_url }}" ]]; then
-            env_vars="${env_vars},LLM_GATEWAY_BASE_URL=${{ steps.api_secrets.outputs.llm_base_url }}"
-          fi
-
-          echo "vars=${env_vars}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy — api
         run: |
@@ -418,7 +389,7 @@ jobs:
             --set-cloudsql-instances "${{ needs.prepare.outputs.cloudsql }}" \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "${{ steps.api_env.outputs.vars }}" \
+            --set-env-vars "NODE_ENV=production,API_PORT=3001,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=mock,LLM_GATEWAY_CHAT_MODEL=mock-chat-v1,LLM_GATEWAY_SUMMARIZER_MODEL=mock-summary-v1" \
             ${{ needs.prepare.outputs.api_exposure_flag }} \
             --min-instances 0 \
             --max-instances 3 \

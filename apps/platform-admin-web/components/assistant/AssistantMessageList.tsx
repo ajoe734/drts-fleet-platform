@@ -9,11 +9,11 @@ import {
   User,
 } from "lucide-react";
 import { CanvasPill as Pill } from "@drts/ui-web";
-import { useTranslation } from "@/lib/i18n";
 import { AssistantActionPlanCard } from "./AssistantActionPlanCard";
 import { AssistantConfirmationPanel } from "./AssistantConfirmationPanel";
 import { AssistantReceiptCard } from "./AssistantReceiptCard";
 import {
+  assistantStateLabel,
   assistantCardStyle,
   assistantMutedTextStyle,
   assistantStatusTone,
@@ -33,21 +33,18 @@ const bubbleStyle: CSSProperties = {
   gap: 12,
 };
 
-function roleMeta(
-  role: AssistantMessageRecord["role"],
-  t: (key: string) => string,
-) {
+function roleMeta(role: AssistantMessageRecord["role"]) {
   switch (role) {
     case "user":
       return {
-        label: t("assistant.message.role.user"),
+        label: "Operator",
         icon: <User size={16} color={assistantTheme.text} />,
         align: "end" as const,
         background: assistantTheme.accentBg,
       };
     case "system":
       return {
-        label: t("assistant.message.role.system"),
+        label: "System",
         icon: <CheckCircle2 size={16} color={assistantTheme.info} />,
         align: "start" as const,
         background: assistantTheme.surfaceLo,
@@ -55,7 +52,7 @@ function roleMeta(
     case "assistant":
     default:
       return {
-        label: t("assistant.message.role.assistant"),
+        label: "Assistant",
         icon: <Bot size={16} color={assistantTheme.accent} />,
         align: "start" as const,
         background: assistantTheme.surface,
@@ -63,53 +60,50 @@ function roleMeta(
   }
 }
 
-function stateBanner(
-  message: AssistantMessageRecord,
-  t: (key: string) => string,
-) {
+function stateBanner(message: AssistantMessageRecord) {
   switch (message.state) {
     case "thinking":
       return {
         tone: "info" as const,
         icon: <LoaderCircle size={15} className="animate-spin" />,
-        text: t("assistant.message.banner.thinking"),
+        text: "Assistant is analyzing current platform context.",
       };
     case "planning":
       return {
         tone: "info" as const,
         icon: <LoaderCircle size={15} className="animate-spin" />,
-        text: t("assistant.message.banner.planning"),
+        text: "Assistant is preparing a governed action plan for review.",
       };
     case "awaiting_confirmation":
       return {
         tone: "warn" as const,
         icon: <AlertTriangle size={15} />,
-        text: t("assistant.message.banner.awaitingConfirmation"),
+        text: "Execution is paused until an operator confirms the action.",
       };
     case "executing":
       return {
         tone: "accent" as const,
         icon: <LoaderCircle size={15} className="animate-spin" />,
-        text: t("assistant.message.banner.executing"),
+        text: "Assistant is executing the approved action.",
       };
     case "receipt":
       return {
         tone: "success" as const,
         icon: <CheckCircle2 size={15} />,
-        text: t("assistant.message.banner.receipt"),
+        text: "Execution completed and a receipt has been recorded.",
       };
     case "error":
       if (!message.error) {
         return {
           tone: "danger" as const,
           icon: <AlertTriangle size={15} />,
-          text: t("assistant.message.banner.error"),
+          text: "Execution error",
         };
       }
       return {
         tone: "danger" as const,
         icon: <AlertTriangle size={15} />,
-        text: message.error.title ?? t("assistant.message.banner.error"),
+        text: message.error.title ?? "Execution error",
       };
     case "idle":
     default:
@@ -122,8 +116,8 @@ export function AssistantMessageList({
   isConfirming = false,
   onConfirmAction,
   onCancelConfirmation,
-  emptyTitle,
-  emptyBody,
+  emptyTitle = "Platform Admin assistant is ready",
+  emptyBody = "Ask for an analysis, review a plan, or approve a governed action to start the conversation.",
 }: {
   messages: AssistantMessageRecord[];
   isConfirming?: boolean;
@@ -132,8 +126,6 @@ export function AssistantMessageList({
   emptyTitle?: string;
   emptyBody?: string;
 }) {
-  const { t } = useTranslation();
-
   if (messages.length === 0) {
     return (
       <section
@@ -148,10 +140,10 @@ export function AssistantMessageList({
       >
         <Bot size={28} color={assistantTheme.accent} />
         <strong style={{ color: assistantTheme.text, fontSize: 17 }}>
-          {emptyTitle ?? t("assistant.message.empty.title")}
+          {emptyTitle}
         </strong>
         <div style={{ ...assistantMutedTextStyle, maxWidth: 560 }}>
-          {emptyBody ?? t("assistant.message.empty.body")}
+          {emptyBody}
         </div>
       </section>
     );
@@ -160,8 +152,8 @@ export function AssistantMessageList({
   return (
     <div style={stackStyle}>
       {messages.map((message) => {
-        const meta = roleMeta(message.role, t);
-        const banner = stateBanner(message, t);
+        const meta = roleMeta(message.role);
+        const banner = stateBanner(message);
 
         return (
           <article
@@ -199,7 +191,7 @@ export function AssistantMessageList({
                     theme={assistantTheme}
                     tone={assistantStatusTone(message.state)}
                   >
-                    {t(`assistant.state.${message.state}`)}
+                    {assistantStateLabel(message.state)}
                   </Pill>
                 ) : null}
               </div>
@@ -295,7 +287,7 @@ export function AssistantMessageList({
                   }}
                 >
                   <strong style={{ fontSize: 13.5 }}>
-                    {message.error.title ?? t("assistant.message.error.title")}
+                    {message.error.title ?? "Assistant error"}
                   </strong>
                   <div style={{ fontSize: 12.5, lineHeight: 1.45 }}>
                     {message.error.message}

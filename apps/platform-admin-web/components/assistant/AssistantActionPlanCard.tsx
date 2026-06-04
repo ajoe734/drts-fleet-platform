@@ -3,7 +3,6 @@
 import type { CSSProperties } from "react";
 import { CheckCircle2, Circle, Clock3, ShieldAlert } from "lucide-react";
 import { CanvasPill as Pill } from "@drts/ui-web";
-import { useTranslation } from "@/lib/i18n";
 import {
   assistantCardStyle,
   assistantInsetStyle,
@@ -100,13 +99,8 @@ export function AssistantActionPlanCard({
 }: {
   plan: AssistantActionPlan;
 }) {
-  const { t } = useTranslation();
-
   return (
-    <section
-      style={assistantCardStyle}
-      aria-label={t("assistant.plan.ariaLabel")}
-    >
+    <section style={assistantCardStyle} aria-label="Assistant action plan">
       <div style={bodyStyle}>
         <div style={headerStyle}>
           <div style={{ minWidth: 0 }}>
@@ -118,7 +112,7 @@ export function AssistantActionPlanCard({
               theme={assistantTheme}
               tone={assistantRiskTone(plan.riskLevel)}
             >
-              {t(`assistant.risk.${plan.riskLevel}`)}
+              {plan.riskLevel.toUpperCase()} RISK
             </Pill>
           ) : null}
         </div>
@@ -127,15 +121,13 @@ export function AssistantActionPlanCard({
           <div style={metaGridStyle}>
             {plan.resourceLabel ? (
               <div style={metaItemStyle}>
-                <div style={labelStyle}>
-                  {t("assistant.plan.field.resource")}
-                </div>
+                <div style={labelStyle}>Resource</div>
                 <div style={valueStyle}>{plan.resourceLabel}</div>
               </div>
             ) : null}
             {plan.rationale ? (
               <div style={metaItemStyle}>
-                <div style={labelStyle}>{t("assistant.plan.field.whyNow")}</div>
+                <div style={labelStyle}>Why now</div>
                 <div style={valueStyle}>{plan.rationale}</div>
               </div>
             ) : null}
@@ -179,7 +171,7 @@ export function AssistantActionPlanCard({
                   theme={assistantTheme}
                   tone={assistantStepTone(step.status)}
                 >
-                  {t(`assistant.stepStatus.${step.status}`)}
+                  {step.status.replace("_", " ")}
                 </Pill>
               </div>
               {step.detail ? (
@@ -201,7 +193,7 @@ export function AssistantActionPlanCard({
             }}
           >
             <div style={{ ...labelStyle, color: assistantTheme.warn }}>
-              {t("assistant.plan.attention")}
+              Attention
             </div>
             {plan.warnings.map((warning) => (
               <div

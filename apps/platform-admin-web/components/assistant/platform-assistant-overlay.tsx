@@ -27,22 +27,13 @@ import {
   isPlatformAdminAssistantEnabled,
 } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
-import { platformAdminAssistantSuggestedPrompts } from "@/lib/translations";
 import { AssistantMessageList } from "./AssistantMessageList";
-import {
-  buildRouteContext,
-  usePlatformAdminAssistantRouteContext,
-} from "./route-context";
+import { buildRouteContext } from "./route-context";
 import type {
   AssistantActionPlan,
-  AssistantFormSummary,
   AssistantMessageRecord,
-  AssistantPageActionSummary,
-  AssistantReceipt,
   AssistantRouteContext,
   AssistantStepStatus,
-  AssistantTableSummary,
-  AssistantEntityRef,
 } from "./assistant-types";
 
 const PANEL_WIDTH = 430;
@@ -86,80 +77,13 @@ type AssistantApiMessageResponse = {
   citations: AssistantApiCitation[];
   suggestedPrompts: string[];
   actionPlan: AssistantApiActionPlan | null;
-  governedAction: AssistantApiGovernedAction | null;
 };
 
-type AssistantApiActionDescriptor = {
-  action: string;
-  enabled: boolean;
-  disabledReasonCode?: string;
-  requiresReason?: boolean;
-  riskLevel: "low" | "medium" | "high";
-};
-
-type AssistantApiGovernedAction = {
-  toolName: string;
-  payload: Record<string, unknown>;
-  descriptor: AssistantApiActionDescriptor;
-  confirmationRequired: boolean;
-  title: string;
-  message: string;
-  resourceLabel?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  reasonLabel?: string;
-  reasonPlaceholder?: string;
-  reasonHint?: string;
-  disabledReason?: string | null;
-};
-
-type AssistantApiActionExecutionResponse = {
-  receipt: {
-    actionId: string;
-    auditId: string;
-    resourceType: string;
-    resourceId: string;
-    status: AssistantReceipt["status"];
-    message: string;
-  };
-  assistantAuditId: string;
-};
-
-type ContextTableSummaryParams = {
-  tableId: string;
-  title: string;
-  rowCount: number;
-  visibleRows: string;
-  selectedRows: string;
-  actions: string;
-};
-
-type ContextAvailableActionSummaryParams = {
-  actionId: string;
-  riskLevel: string;
-  disabled: string;
-};
-
-type ContextValidationErrorWithFieldParams = {
-  fieldId: string;
-  code: string;
-  message: string;
-};
-
-type ContextValidationErrorParams = {
-  code: string;
-  message: string;
-};
-
-type ContextFormSummaryParams = {
-  formId: string;
-  title: string;
-  dirtyLabel: string;
-  dirtyValue: string;
-  fields: string;
-  validationErrors: string;
-  actions: string;
-};
+const DEFAULT_SUGGESTED_PROMPTS = [
+  "Summarize what I should check on this page.",
+  "Draft an operator checklist for the current route.",
+  "What risks should I review before changing platform state?",
+];
 
 function nextMessageId(prefix = "paas-ui") {
   if (
@@ -268,26 +192,20 @@ function formatCitation(citation: AssistantApiCitation) {
   return [citation.title, citation.section].filter(Boolean).join(" ");
 }
 
-function formatAssistantContent(
-  response: AssistantApiMessageResponse,
-  copy: {
-    sourcesHeading: string;
-    suggestedHeading: string;
-  },
-) {
+function formatAssistantContent(response: AssistantApiMessageResponse) {
   const citations = response.citations.map(formatCitation);
   const suggestedPrompts = response.suggestedPrompts.slice(0, 3);
   const sections = [response.answer.trim()];
 
   if (citations.length > 0) {
     sections.push(
-      `${copy.sourcesHeading}\n${citations.map((item) => `- ${item}`).join("\n")}`,
+      `Sources:\n${citations.map((item) => `- ${item}`).join("\n")}`,
     );
   }
 
   if (suggestedPrompts.length > 0) {
     sections.push(
-      `${copy.suggestedHeading}\n${suggestedPrompts
+      `Suggested next prompts:\n${suggestedPrompts
         .map((item) => `- ${item}`)
         .join("\n")}`,
     );
@@ -296,82 +214,10 @@ function formatAssistantContent(
   return sections.join("\n\n");
 }
 
-function mapReceipt(
-  response: AssistantApiActionExecutionResponse,
-  receiptTitle: string,
-): AssistantReceipt {
-  return {
-    title: receiptTitle,
-    message: response.receipt.message,
-    actionId: response.receipt.actionId,
-    requestId: response.receipt.actionId,
-    auditId: response.receipt.auditId,
-    resourceType: response.receipt.resourceType,
-    resourceId: response.receipt.resourceId,
-    resourceLabel: [response.receipt.resourceType, response.receipt.resourceId]
-      .filter(Boolean)
-      .join(" · "),
-    status: response.receipt.status,
-  };
-}
-
 function buildContextPrompt(
   message: string,
   routeContext: AssistantRouteContext,
-  pageContext: {
-    visibleTables?: AssistantTableSummary[];
-    selectedRecords?: AssistantEntityRef[];
-    availableActions?: AssistantPageActionSummary[];
-    forms?: AssistantFormSummary[];
-  },
   locale: "zh" | "en",
-  copy: {
-    routeHeading: string;
-    pageHeading: string;
-    questionHeading: string;
-    none: string;
-    emptyList: string;
-    empty: string;
-    required: string;
-    dirty: string;
-    yes: string;
-    no: string;
-    pathLabel: string;
-    pageLabel: string;
-    activeTabLabel: string;
-    refreshTierLabel: string;
-    visibleEntitiesLabel: string;
-    warningsLabel: string;
-    visibleTablesLabel: string;
-    selectedRecordsLabel: string;
-    availableActionsLabel: string;
-    formsLabel: string;
-    rowsLabel: string;
-    visibleLabel: string;
-    selectedLabel: string;
-    actionsLabel: string;
-    disabledLabel: string;
-    fieldsLabel: string;
-    validationErrorsLabel: string;
-    routeLine: (label: string, value: string) => string;
-    pageSectionLine: (label: string, value: string) => string;
-    tableSelectedSegment: (label: string, value: string) => string;
-    tableActionsSegment: (label: string, value: string) => string;
-    tableSummary: (params: ContextTableSummaryParams) => string;
-    availableActionSummary: (
-      params: ContextAvailableActionSummaryParams,
-    ) => string;
-    availableActionRiskLevel: (riskLevel: string) => string;
-    availableActionDisabled: (label: string) => string;
-    formFieldSummary: (fieldId: string, valueSummary: string) => string;
-    formFieldRequiredSegment: (label: string) => string;
-    formFieldDirtySegment: (label: string) => string;
-    formValidationErrorWithField: (
-      params: ContextValidationErrorWithFieldParams,
-    ) => string;
-    formValidationError: (params: ContextValidationErrorParams) => string;
-    formSummary: (params: ContextFormSummaryParams) => string;
-  },
 ) {
   const routeTitle = routeContext.title[locale];
   const warnings =
@@ -379,147 +225,24 @@ function buildContextPrompt(
       ? routeContext.warnings
           .map((warning) => `${warning.code}: ${warning.message[locale]}`)
           .join("; ")
-      : copy.none;
+      : "none";
   const entityRefs =
     routeContext.visibleEntityRefs.length > 0
       ? routeContext.visibleEntityRefs
           .map((entity) => `${entity.kind}:${entity.id}`)
           .join(", ")
-      : copy.none;
-  const visibleTables =
-    pageContext.visibleTables && pageContext.visibleTables.length > 0
-      ? pageContext.visibleTables
-          .map((table) => {
-            const selectedRows =
-              table.selectedRowIds && table.selectedRowIds.length > 0
-                ? copy.tableSelectedSegment(
-                    copy.selectedLabel,
-                    table.selectedRowIds.join(", "),
-                  )
-                : "";
-            const actions =
-              table.availableActions && table.availableActions.length > 0
-                ? copy.tableActionsSegment(
-                    copy.actionsLabel,
-                    table.availableActions
-                      .map((action) => action.actionId)
-                      .join(", "),
-                  )
-                : "";
-            return copy.tableSummary({
-              tableId: table.tableId,
-              title: table.title,
-              rowCount: table.visibleRowCount,
-              visibleRows: table.visibleRowIds.join(", ") || copy.none,
-              selectedRows,
-              actions,
-            });
-          })
-          .join("\n")
-      : copy.emptyList;
-  const selectedRecords =
-    pageContext.selectedRecords && pageContext.selectedRecords.length > 0
-      ? pageContext.selectedRecords
-          .map((record) => `${record.kind}:${record.id}`)
-          .join(", ")
-      : copy.none;
-  const availableActions =
-    pageContext.availableActions && pageContext.availableActions.length > 0
-      ? pageContext.availableActions
-          .map((action) =>
-            copy.availableActionSummary({
-              actionId: action.actionId,
-              riskLevel: action.riskLevel
-                ? copy.availableActionRiskLevel(action.riskLevel)
-                : "",
-              disabled: action.disabled
-                ? copy.availableActionDisabled(copy.disabledLabel)
-                : "",
-            }),
-          )
-          .join(", ")
-      : copy.none;
-  const forms =
-    pageContext.forms && pageContext.forms.length > 0
-      ? pageContext.forms
-          .map((form) => {
-            const fields =
-              form.fields.length > 0
-                ? form.fields
-                    .map((field) => {
-                      const parts = [
-                        copy.formFieldSummary(
-                          field.fieldId,
-                          field.valueSummary === null ||
-                            typeof field.valueSummary === "undefined"
-                            ? copy.empty
-                            : JSON.stringify(field.valueSummary),
-                        ),
-                      ];
-                      if (field.required) {
-                        parts.push(
-                          copy.formFieldRequiredSegment(copy.required),
-                        );
-                      }
-                      if (field.dirty) {
-                        parts.push(copy.formFieldDirtySegment(copy.dirty));
-                      }
-                      return parts.join("");
-                    })
-                    .join("; ")
-                : copy.none;
-            const validationErrors =
-              form.validationErrors.length > 0
-                ? form.validationErrors
-                    .map((error) =>
-                      error.fieldId
-                        ? copy.formValidationErrorWithField({
-                            fieldId: error.fieldId,
-                            code: error.code,
-                            message: error.message,
-                          })
-                        : copy.formValidationError({
-                            code: error.code,
-                            message: error.message,
-                          }),
-                    )
-                    .join("; ")
-                : copy.none;
-            const actions =
-              form.availableActions && form.availableActions.length > 0
-                ? form.availableActions
-                    .map((action) => action.actionId)
-                    .join(", ")
-                : copy.none;
-            return copy.formSummary({
-              formId: form.formId,
-              title: form.title,
-              dirtyLabel: copy.dirty,
-              dirtyValue: form.dirty ? copy.yes : copy.no,
-              fields,
-              validationErrors,
-              actions,
-            });
-          })
-          .join("\n")
-      : copy.emptyList;
+      : "none";
 
   return [
-    copy.routeHeading,
-    copy.routeLine(copy.pathLabel, routeContext.pathname),
-    copy.routeLine(copy.pageLabel, routeTitle),
-    copy.routeLine(copy.activeTabLabel, routeContext.activeTab ?? copy.none),
-    copy.routeLine(copy.refreshTierLabel, routeContext.refreshTier),
-    copy.routeLine(copy.visibleEntitiesLabel, entityRefs),
-    copy.routeLine(copy.warningsLabel, warnings),
+    "[Platform Admin route context]",
+    `Path: ${routeContext.pathname}`,
+    `Page: ${routeTitle}`,
+    `Active tab: ${routeContext.activeTab ?? "none"}`,
+    `Refresh tier: ${routeContext.refreshTier}`,
+    `Visible entities: ${entityRefs}`,
+    `Warnings: ${warnings}`,
     "",
-    copy.pageHeading,
-    copy.pageSectionLine(copy.visibleTablesLabel, visibleTables),
-    copy.routeLine(copy.selectedRecordsLabel, selectedRecords),
-    copy.routeLine(copy.availableActionsLabel, availableActions),
-    copy.pageSectionLine(copy.formsLabel, forms),
-    "",
-    copy.questionHeading,
+    "[Operator question]",
     message,
   ].join("\n");
 }
@@ -532,8 +255,7 @@ export function PlatformAssistantOverlay() {
   const enabled = isPlatformAdminAssistantEnabled();
   const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
-  const { locale, t } = useTranslation();
-  const { pageBridge } = usePlatformAdminAssistantRouteContext();
+  const { locale } = useTranslation();
   const titleId = useId();
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const [isMounted, setIsMounted] = useState(false);
@@ -547,153 +269,9 @@ export function PlatformAssistantOverlay() {
   const [messages, setMessages] = useState<AssistantMessageRecord[]>([]);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
-  const defaultSuggestedPrompts =
-    platformAdminAssistantSuggestedPrompts[locale];
-  const copy = {
-    sourcesHeading: t("assistantOverlay.sourcesHeading"),
-    suggestedHeading: t("assistantOverlay.suggestedHeading"),
-    receiptTitle: t("assistantOverlay.receiptTitle"),
-    routeHeading: t("assistantOverlay.context.routeHeading"),
-    pageHeading: t("assistantOverlay.context.pageHeading"),
-    questionHeading: t("assistantOverlay.context.questionHeading"),
-    none: t("assistantOverlay.context.none"),
-    emptyList: t("assistantOverlay.context.emptyList"),
-    empty: t("assistantOverlay.context.empty"),
-    required: t("assistantOverlay.context.required"),
-    dirty: t("assistantOverlay.context.dirty"),
-    yes: t("assistantOverlay.context.yes"),
-    no: t("assistantOverlay.context.no"),
-    pathLabel: t("assistantOverlay.context.pathLabel"),
-    pageLabel: t("assistantOverlay.context.pageLabel"),
-    activeTabLabel: t("assistantOverlay.context.activeTabLabel"),
-    refreshTierLabel: t("assistantOverlay.context.refreshTierLabel"),
-    visibleEntitiesLabel: t("assistantOverlay.context.visibleEntitiesLabel"),
-    warningsLabel: t("assistantOverlay.context.warningsLabel"),
-    visibleTablesLabel: t("assistantOverlay.context.visibleTablesLabel"),
-    selectedRecordsLabel: t("assistantOverlay.context.selectedRecordsLabel"),
-    availableActionsLabel: t("assistantOverlay.context.availableActionsLabel"),
-    formsLabel: t("assistantOverlay.context.formsLabel"),
-    rowsLabel: t("assistantOverlay.context.rowsLabel"),
-    visibleLabel: t("assistantOverlay.context.visibleLabel"),
-    selectedLabel: t("assistantOverlay.context.selectedLabel"),
-    actionsLabel: t("assistantOverlay.context.actionsLabel"),
-    disabledLabel: t("assistantOverlay.context.disabledLabel"),
-    fieldsLabel: t("assistantOverlay.context.fieldsLabel"),
-    validationErrorsLabel: t("assistantOverlay.context.validationErrorsLabel"),
-    routeLine: (label: string, value: string) =>
-      t("assistantOverlay.context.routeLine", { label, value }),
-    pageSectionLine: (label: string, value: string) =>
-      t("assistantOverlay.context.pageSectionLine", { label, value }),
-    tableSelectedSegment: (label: string, value: string) =>
-      t("assistantOverlay.context.tableSelectedSegment", { label, value }),
-    tableActionsSegment: (label: string, value: string) =>
-      t("assistantOverlay.context.tableActionsSegment", { label, value }),
-    tableSummary: ({
-      tableId,
-      title,
-      rowCount,
-      visibleRows,
-      selectedRows,
-      actions,
-    }: ContextTableSummaryParams) =>
-      t("assistantOverlay.context.tableSummary", {
-        tableId,
-        title,
-        rowCount,
-        visibleLabel: t("assistantOverlay.context.visibleLabel"),
-        rowsLabel: t("assistantOverlay.context.rowsLabel"),
-        visibleRows,
-        selectedRows,
-        actions,
-      }),
-    availableActionSummary: ({
-      actionId,
-      riskLevel,
-      disabled,
-    }: ContextAvailableActionSummaryParams) =>
-      t("assistantOverlay.context.availableActionSummary", {
-        actionId,
-        riskLevel,
-        disabled,
-      }),
-    availableActionRiskLevel: (riskLevel: string) =>
-      t("assistantOverlay.context.availableActionRiskLevel", { riskLevel }),
-    availableActionDisabled: (label: string) =>
-      t("assistantOverlay.context.availableActionDisabled", { label }),
-    formFieldSummary: (fieldId: string, valueSummary: string) =>
-      t("assistantOverlay.context.formFieldSummary", { fieldId, valueSummary }),
-    formFieldRequiredSegment: (label: string) =>
-      t("assistantOverlay.context.formFieldRequiredSegment", { label }),
-    formFieldDirtySegment: (label: string) =>
-      t("assistantOverlay.context.formFieldDirtySegment", { label }),
-    formValidationErrorWithField: ({
-      fieldId,
-      code,
-      message,
-    }: ContextValidationErrorWithFieldParams) =>
-      t("assistantOverlay.context.formValidationErrorWithField", {
-        fieldId,
-        code,
-        message,
-      }),
-    formValidationError: ({ code, message }: ContextValidationErrorParams) =>
-      t("assistantOverlay.context.formValidationError", {
-        code,
-        message,
-      }),
-    formSummary: ({
-      formId,
-      title,
-      dirtyLabel,
-      dirtyValue,
-      fields,
-      validationErrors,
-      actions,
-    }: ContextFormSummaryParams) =>
-      t("assistantOverlay.context.formSummary", {
-        formId,
-        title,
-        dirtyLabel,
-        dirtyValue,
-        fieldsLabel: t("assistantOverlay.context.fieldsLabel"),
-        fields,
-        validationErrorsLabel: t(
-          "assistantOverlay.context.validationErrorsLabel",
-        ),
-        validationErrors,
-        actionsLabel: t("assistantOverlay.context.actionsLabel"),
-        actions,
-      }),
-    launcher: t("assistantOverlay.launcher"),
-    badge: t("assistantOverlay.badge"),
-    label: t("assistantOverlay.label"),
-    subtitle: t("assistantOverlay.subtitle"),
-    heading: t("assistantOverlay.heading"),
-    status: t("assistantOverlay.status"),
-    inputLabel: t("assistantOverlay.inputLabel"),
-    inputPlaceholder: t("assistantOverlay.inputPlaceholder"),
-    send: t("assistantOverlay.send"),
-    sending: t("assistantOverlay.sending"),
-    newSession: t("assistantOverlay.newSession"),
-    minimize: t("assistantOverlay.minimize"),
-    close: t("assistantOverlay.close"),
-    reset: t("assistantOverlay.reset"),
-    emptyTitle: t("assistantOverlay.emptyTitle"),
-    emptyBody: t("assistantOverlay.emptyBody"),
-    thinking: t("assistantOverlay.thinking"),
-    sessionTitle: t("assistantOverlay.sessionTitle"),
-    requestFailedTitle: t("assistantOverlay.requestFailedTitle"),
-    requestFailedBody: t("assistantOverlay.requestFailedBody"),
-    requestFailedHint: t("assistantOverlay.requestFailedHint"),
-    actionFailedTitle: t("assistantOverlay.actionFailedTitle"),
-    actionFailedHint: t("assistantOverlay.actionFailedHint"),
-    suggestedPromptsAria: t("assistantOverlay.suggestedPromptsAria"),
-    footnote: t("assistantOverlay.footnote"),
-  };
-  const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>([
-    ...defaultSuggestedPrompts,
-  ]);
+  const [suggestedPrompts, setSuggestedPrompts] = useState(
+    DEFAULT_SUGGESTED_PROMPTS,
+  );
   const dragRef = useRef<{
     pointerId: number;
     startPointerX: number;
@@ -744,15 +322,57 @@ export function PlatformAssistantOverlay() {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [isOpen, messages]);
 
-  useEffect(() => {
-    if (messages.length === 0) {
-      setSuggestedPrompts([...defaultSuggestedPrompts]);
-    }
-  }, [defaultSuggestedPrompts, messages.length]);
-
   if (!enabled || !isMounted) {
     return null;
   }
+
+  const copy =
+    locale === "zh"
+      ? {
+          launcher: "開啟平台助理",
+          badge: "Beta",
+          label: "平台助理",
+          subtitle: "治理操作輔助",
+          heading: "Platform Admin Assistant",
+          status: "已連接 dev mock gateway，可回答操作問題與產生行動計畫。",
+          inputLabel: "輸入平台助理問題",
+          inputPlaceholder: "問我這頁該怎麼操作、風險在哪、下一步怎麼做...",
+          send: "送出",
+          sending: "分析中",
+          newSession: "新對話",
+          minimize: "最小化",
+          close: "關閉",
+          reset: "重設位置",
+          emptyTitle: "平台助理已就緒",
+          emptyBody:
+            "詢問目前頁面的操作方式、治理風險，或請我產生一份平台操作檢查清單。",
+          thinking: "我正在讀取目前 Platform Admin route context 並整理回答...",
+          sessionTitle: "Platform Admin assistant",
+        }
+      : {
+          launcher: "Open platform assistant",
+          badge: "Beta",
+          label: "Assistant",
+          subtitle: "governance copilot",
+          heading: "Platform Admin Assistant",
+          status:
+            "Connected to the dev mock gateway for operation Q&A and action planning.",
+          inputLabel: "Ask the platform assistant",
+          inputPlaceholder:
+            "Ask how to operate this page, what risks matter, or what to do next...",
+          send: "Send",
+          sending: "Thinking",
+          newSession: "New chat",
+          minimize: "Minimize",
+          close: "Close",
+          reset: "Reset position",
+          emptyTitle: "Platform Admin assistant is ready",
+          emptyBody:
+            "Ask about the current page, governance risks, or request an operator checklist.",
+          thinking:
+            "Reading the current Platform Admin route context and preparing an answer...",
+          sessionTitle: "Platform Admin assistant",
+        };
 
   const panelStyle: CSSProperties = isMobile
     ? {
@@ -820,11 +440,9 @@ export function PlatformAssistantOverlay() {
 
     try {
       const activeSession = await ensureSession();
-      const pageContext = pageBridge?.contextSnapshot;
       const routeContext = buildRouteContext(
         pathname,
         searchParams?.toString() ?? "",
-        pageContext,
       );
       const response = await client().post<AssistantApiMessageResponse>(
         `/api/platform-admin/assistant/sessions/${encodeURIComponent(
@@ -832,67 +450,24 @@ export function PlatformAssistantOverlay() {
         )}/messages`,
         {
           body: {
-            message: buildContextPrompt(
-              trimmed,
-              routeContext,
-              pageContext ?? {},
-              locale,
-              copy,
-            ),
+            message: buildContextPrompt(trimmed, routeContext, locale),
           },
         },
       );
       const plan = mapActionPlan(response.actionPlan);
-      const governedAction = response.governedAction;
       const assistantMessage: AssistantMessageRecord = {
         id: nextMessageId("paas-assistant"),
         role: "assistant",
-        content: formatAssistantContent(response, copy),
+        content: formatAssistantContent(response),
         createdAt: new Date().toISOString(),
-        state: governedAction
-          ? "awaiting_confirmation"
-          : plan
-            ? "planning"
-            : "idle",
+        state: plan ? "planning" : "idle",
         plan,
-        pendingAction: governedAction
-          ? {
-              toolName: governedAction.toolName,
-              payload: governedAction.payload,
-            }
-          : null,
-        confirmation: governedAction
-          ? {
-              title: governedAction.title,
-              message: governedAction.message,
-              riskLevel: governedAction.descriptor.riskLevel,
-              resourceLabel: governedAction.resourceLabel ?? null,
-              ...(governedAction.confirmLabel !== undefined
-                ? { confirmLabel: governedAction.confirmLabel }
-                : {}),
-              ...(governedAction.cancelLabel !== undefined
-                ? { cancelLabel: governedAction.cancelLabel }
-                : {}),
-              ...(governedAction.reasonLabel !== undefined
-                ? { reasonLabel: governedAction.reasonLabel }
-                : {}),
-              ...(governedAction.reasonPlaceholder !== undefined
-                ? { reasonPlaceholder: governedAction.reasonPlaceholder }
-                : {}),
-              reasonHint: governedAction.reasonHint ?? null,
-              requiresReason:
-                governedAction.descriptor.requiresReason ??
-                governedAction.descriptor.riskLevel === "high",
-              disabled: !governedAction.descriptor.enabled,
-              disabledReason: governedAction.disabledReason ?? null,
-            }
-          : null,
       };
 
       setSuggestedPrompts(
         response.suggestedPrompts.length > 0
           ? response.suggestedPrompts.slice(0, 3)
-          : [...defaultSuggestedPrompts],
+          : DEFAULT_SUGGESTED_PROMPTS,
       );
       setMessages((current) =>
         current.map((message) =>
@@ -903,13 +478,13 @@ export function PlatformAssistantOverlay() {
       const failedMessage: AssistantMessageRecord = {
         id: nextMessageId("paas-error"),
         role: "assistant",
-        content: copy.requestFailedBody,
+        content: "The assistant could not complete this request.",
         createdAt: new Date().toISOString(),
         state: "error",
         error: {
-          title: copy.requestFailedTitle,
+          title: "Assistant request failed",
           message: errorMessage(error),
-          hint: copy.requestFailedHint,
+          hint: "Check the dev API assistant flag, control-plane proxy, and Cloud Run logs.",
         },
       };
       setMessages((current) =>
@@ -927,88 +502,6 @@ export function PlatformAssistantOverlay() {
     void submitPrompt(draft);
   }
 
-  async function handleConfirmAction(messageId: string, reason: string) {
-    const message = messages.find((entry) => entry.id === messageId);
-    if (!message?.pendingAction || !session) {
-      return;
-    }
-
-    setIsConfirming(true);
-    setMessages((current) =>
-      current.map((entry) =>
-        entry.id === messageId
-          ? {
-              ...entry,
-              state: "executing",
-              error: null,
-            }
-          : entry,
-      ),
-    );
-
-    try {
-      const response = await client().post<AssistantApiActionExecutionResponse>(
-        `/api/platform-admin/assistant/sessions/${encodeURIComponent(
-          session.sessionId,
-        )}/actions/execute`,
-        {
-          body: {
-            toolName: message.pendingAction.toolName,
-            payload: message.pendingAction.payload,
-            reason,
-          },
-        },
-      );
-
-      setMessages((current) =>
-        current.map((entry) =>
-          entry.id === messageId
-            ? {
-                ...entry,
-                state: "receipt",
-                confirmation: null,
-                pendingAction: null,
-                receipt: mapReceipt(response, copy.receiptTitle),
-              }
-            : entry,
-        ),
-      );
-    } catch (error) {
-      setMessages((current) =>
-        current.map((entry) =>
-          entry.id === messageId
-            ? {
-                ...entry,
-                state: "error",
-                error: {
-                  title: copy.actionFailedTitle,
-                  message: errorMessage(error),
-                  hint: copy.actionFailedHint,
-                },
-              }
-            : entry,
-        ),
-      );
-    } finally {
-      setIsConfirming(false);
-    }
-  }
-
-  function handleCancelConfirmation(messageId: string) {
-    setMessages((current) =>
-      current.map((entry) =>
-        entry.id === messageId
-          ? {
-              ...entry,
-              state: "idle",
-              confirmation: null,
-              pendingAction: null,
-            }
-          : entry,
-      ),
-    );
-  }
-
   function handleResetPosition() {
     const nextPosition = getDefaultDesktopPosition();
     setPosition(nextPosition);
@@ -1019,8 +512,7 @@ export function PlatformAssistantOverlay() {
     setSession(null);
     setMessages([]);
     setDraft("");
-    setIsConfirming(false);
-    setSuggestedPrompts([...defaultSuggestedPrompts]);
+    setSuggestedPrompts(DEFAULT_SUGGESTED_PROMPTS);
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -1167,17 +659,12 @@ export function PlatformAssistantOverlay() {
           <div style={panelBodyStyle}>
             <AssistantMessageList
               messages={messages}
-              isConfirming={isConfirming}
-              onConfirmAction={(messageId, reason) =>
-                handleConfirmAction(messageId, reason)
-              }
-              onCancelConfirmation={handleCancelConfirmation}
               emptyTitle={copy.emptyTitle}
               emptyBody={copy.emptyBody}
             />
             <div ref={messagesEndRef} />
           </div>
-          <div style={promptRailStyle} aria-label={copy.suggestedPromptsAria}>
+          <div style={promptRailStyle} aria-label="Assistant suggested prompts">
             {suggestedPrompts.map((prompt) => (
               <button
                 key={prompt}
@@ -1225,7 +712,10 @@ export function PlatformAssistantOverlay() {
           </form>
           <div style={panelFootnoteStyle}>
             <Bot size={13} />
-            <span>{copy.footnote}</span>
+            <span>
+              Mock provider in dev. Actions still require governed backend
+              gates.
+            </span>
           </div>
         </section>
       ) : null}

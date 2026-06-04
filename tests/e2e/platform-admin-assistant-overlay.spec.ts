@@ -15,7 +15,6 @@ const routeSmokeTargets = [
 
 type AssistantMockState = {
   lastMessage: string | null;
-  lastActionReason: string | null;
 };
 
 function isEnabledProject(testInfo: TestInfo) {
@@ -27,10 +26,7 @@ function isDisabledProject(testInfo: TestInfo) {
 }
 
 async function mockAssistantApi(page: Page): Promise<AssistantMockState> {
-  const state: AssistantMockState = {
-    lastMessage: null,
-    lastActionReason: null,
-  };
+  const state: AssistantMockState = { lastMessage: null };
 
   await page.route(
     "**/control-plane-proxy/platform-admin/assistant/sessions",
@@ -117,65 +113,10 @@ async function mockAssistantApi(page: Page): Promise<AssistantMockState> {
                 },
               ],
             },
-            governed_action: body.message?.includes("公告")
-              ? {
-                  tool_name: "action.create_platform_notice",
-                  payload: {
-                    title: "Assistant drafted notice",
-                    body: "Review before execution.",
-                    severity: "warning",
-                    target_audience: "all",
-                  },
-                  descriptor: {
-                    action: "create_platform_notice",
-                    enabled: true,
-                    risk_level: "medium",
-                    requires_reason: false,
-                  },
-                  confirmation_required: true,
-                  title: "Confirm platform notice creation",
-                  message: "This will publish a warning notice for all.",
-                  resource_label: "Assistant drafted notice · warning · all",
-                  confirm_label: "Create notice",
-                  cancel_label: "Keep draft",
-                  reason_label: "Operator note",
-                  reason_placeholder: "Optional note for the audit trail.",
-                }
-              : null,
           },
           meta: {
             request_id: "req-e2e-message",
             timestamp: "2026-06-03T09:30:01.000Z",
-          },
-        }),
-      });
-    },
-  );
-
-  await page.route(
-    "**/control-plane-proxy/platform-admin/assistant/sessions/*/actions/execute",
-    async (route) => {
-      const body = route.request().postDataJSON() as { reason?: string };
-      state.lastActionReason = body.reason ?? null;
-
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          data: {
-            receipt: {
-              action_id: "req-e2e-action-001",
-              audit_id: "audit-e2e-action-001",
-              resource_type: "platform_notice",
-              resource_id: "notice_e2e_001",
-              status: "completed",
-              message: "Platform notice created.",
-            },
-            assistant_audit_id: "assistant-audit-e2e-001",
-          },
-          meta: {
-            request_id: "req-e2e-action-001",
-            timestamp: "2026-06-03T09:30:02.000Z",
           },
         }),
       });
@@ -338,8 +279,6 @@ test.describe("platform admin assistant overlay", () => {
 
     await gotoShellRoute(page, "/payments", { assistantEnabled: true });
 
-    await page.getByRole("button", { name: /Open issue|開立 issue/ }).click();
-
     await page.getByTestId("platform-assistant-launcher").click();
     const panel = page.getByTestId("platform-assistant-panel");
     await expect(panel).toBeVisible();
@@ -364,47 +303,6 @@ test.describe("platform admin assistant overlay", () => {
     ).toBeVisible();
     expect(mockState.lastMessage).toContain("[Platform Admin route context]");
     expect(mockState.lastMessage).toContain("Path: /payments");
-    expect(mockState.lastMessage).toContain("Active tab: recon");
-    expect(mockState.lastMessage).toContain("[Platform Admin page context]");
-    expect(mockState.lastMessage).toContain("reconciliation-issues");
-    expect(mockState.lastMessage).toContain("reconciliation-issue-create");
-    expect(mockState.lastMessage).toContain(
-      "validationErrors=summary:required",
-    );
-    expect(mockState.lastMessage).toContain(
-      "Available actions: refresh_payments",
-    );
-  });
-
-  test("renders governed action confirmation and receipt for assistant-authored write proposals", async ({
-    page,
-  }, testInfo) => {
-    test.skip(!isEnabledProject(testInfo));
-    test.setTimeout(90_000);
-
-    const mockState = await mockAssistantApi(page);
-
-    await gotoShellRoute(page, "/notices", { assistantEnabled: true });
-
-    await page.getByTestId("platform-assistant-launcher").click();
-    const panel = page.getByTestId("platform-assistant-panel");
-    await expect(panel).toBeVisible();
-
-    await panel
-      .getByLabel(/Ask the platform assistant|輸入平台助理問題/)
-      .fill("請幫我建立公告");
-    await panel.getByTestId("platform-assistant-send").click();
-
-    await expect(
-      panel.getByText("Confirm platform notice creation"),
-    ).toBeVisible();
-    await panel.getByLabel("Operator note").fill("Operator approved copy.");
-    await panel.getByRole("button", { name: "Create notice" }).click();
-
-    await expect(panel.getByText("Action receipt")).toBeVisible();
-    await expect(panel.getByText("Platform notice created.")).toBeVisible();
-    expect(mockState.lastMessage).toContain("Path: /notices");
-    expect(mockState.lastActionReason).toBe("Operator approved copy.");
   });
 
   test("route-context smoke keeps one shell/sidebar across key routes", async ({

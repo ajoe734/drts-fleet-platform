@@ -354,76 +354,161 @@ export default function TenantsPage() {
               return {
                 ok: false,
                 code: "invalid_filter_value",
-                message: t("tenants.list.assistant.invalidFilter"),
+                message:
+                  "Tenants filter accepts only all, sandbox, pilot, production, or rollback_hold.",
               } as const;
             }
             setFilter(value as TenantFilter);
             return {
               ok: true,
               code: "filter_applied",
-              message: t("tenants.list.assistant.filterApplied", { value }),
+              message: `Applied tenants filter ${value}.`,
               payload: { filterId: "rollout_stage", value },
             } as const;
           },
         },
       },
     }),
-    [t],
+    [],
   );
 
   usePlatformAdminAssistantPage(assistantBridge);
 
-  const copy = useMemo(
-    () => ({
-      title: t("tenants.list.pageTitle"),
-      subtitle: t("tenants.list.pageSubtitle"),
-      filterAction: t("tenants.list.filterAction"),
-      exportAction: t("tenants.list.exportAction"),
-      createTitle: t("tenants.list.createTitle"),
-      createSubtitle: t("tenants.list.createSubtitle"),
-      createSummaryTitle: t("tenants.list.createSummaryTitle"),
-      createSummarySubtitle: t("tenants.list.createSummarySubtitle"),
-      errorTitle: t("tenants.list.errorTitle"),
-      columns: {
-        tenant: t("tenants.list.col.tenant"),
-        stage: t("tenants.list.col.stage"),
-        gate: t("tenants.list.col.gate"),
-        modules: t("tenants.list.col.modules"),
-        quotas: t("tenants.list.col.quotasPerMonth"),
-        integration: t("tenants.list.col.integration"),
-        updated: t("tenants.list.col.updated"),
-      },
-      filters: {
-        all: t("common.all"),
-        production: t("tenants.list.filter.production"),
-        pilot: t("tenants.list.filter.pilot"),
-        sandbox: t("tenants.list.filter.sandbox"),
-        rollback_hold: t("tenants.list.filter.rollbackHold"),
-      },
-      moduleState: {
-        enabled: t("tenants.list.moduleState.enabled"),
-        disabled: t("tenants.list.moduleState.disabled"),
-      },
-      bootstrap: {
-        modules: t("tenants.list.bootstrap.modules"),
-        quota: t("tenants.list.bootstrap.quota"),
-        api: t("tenants.list.bootstrap.api"),
-        status: t("tenants.list.bootstrap.status"),
-        integration: t("tenants.list.bootstrap.integration"),
-        admin: t("tenants.list.bootstrap.admin"),
-        sandbox: t("tenants.list.bootstrap.sandbox"),
-        empty: "—",
-        apiSub: t("tenants.list.kpi.apiSub"),
-      },
-      placeholders: {
-        name: t("tenants.list.placeholder.name"),
-        code: t("tenants.list.placeholder.code"),
-        adminEmail: t("tenants.list.placeholder.adminEmail"),
-        sandboxBaseUrl: t("tenants.list.placeholder.sandboxBaseUrl"),
-      },
-    }),
-    [t],
-  );
+  const copy =
+    locale === "en"
+      ? {
+          title: "Tenants",
+          subtitle:
+            "Manage the full tenant lifecycle from creation through production rollout.",
+          filterAction: "Filter",
+          exportAction: "Export",
+          createTitle: "Create tenant",
+          createSubtitle:
+            "Bootstrap tenant identity, quotas, enabled modules, and onboarding defaults before the first promotion.",
+          createSummaryTitle: "Bootstrap snapshot",
+          createSummarySubtitle:
+            "Keep the initial rollout package explicit before this tenant joins the live roster.",
+          errorTitle: "Unable to load tenant governance",
+          filterPill: "last 30 days",
+          columns: {
+            tenant: "TENANT",
+            stage: "STAGE",
+            gate: "GATE",
+            modules: "MODULES",
+            quotas: "配額/月",
+            integration: "介接",
+            updated: "更新",
+          },
+          filters: {
+            all: "All",
+            production: "Production",
+            pilot: "Pilot",
+            sandbox: "Sandbox",
+            rollback_hold: "Rollback hold",
+          },
+          moduleState: {
+            enabled: "enabled",
+            disabled: "optional",
+          },
+          bootstrap: {
+            modules: "Selected modules",
+            quota: "Bookings / month",
+            api: "API calls / month",
+            status: "STATUS",
+            integration: "INTEGRATION",
+            admin: "BOOTSTRAP ADMIN",
+            sandbox: "SANDBOX BASE URL",
+            empty: "—",
+          },
+          searchPlaceholder: "Search tenants, users, adapters…",
+          breadcrumb: ["Tenant Governance", "Tenants"],
+          nav: {
+            workspace: "Workspace",
+            governance: "Tenant Governance",
+            fleet: "Fleet & Compliance",
+            pricing: "Pricing & Settlement",
+            platform: "Platform Layer",
+            home: "Home",
+            health: "Platform Health",
+            tenants: "Tenants",
+            partners: "Partner Entry",
+            users: "Platform Staff",
+            fleetPage: "Fleet & Compliance",
+            switchboard: "Public Info & Placards",
+            pricingPage: "Pricing",
+            payments: "Settlement Governance",
+            notices: "Notices & Maintenance",
+            audit: "Audit & Evidence",
+            flags: "Feature Flags",
+            adapters: "Adapter Registry",
+          },
+        }
+      : {
+          title: "租戶",
+          subtitle: "管理 tenant 從建立到 production rollout 的完整生命週期。",
+          filterAction: "篩選",
+          exportAction: "匯出",
+          createTitle: "建立租戶",
+          createSubtitle:
+            "在第一次 promotion 前，先補齊租戶主檔、配額、模組與 onboarding defaults。",
+          createSummaryTitle: "Bootstrap 摘要",
+          createSummarySubtitle:
+            "在租戶進入 live roster 之前，先把初始 rollout package 固定下來。",
+          errorTitle: "無法載入租戶治理資料",
+          filterPill: "最近 30 天",
+          columns: {
+            tenant: "TENANT",
+            stage: "STAGE",
+            gate: "GATE",
+            modules: "MODULES",
+            quotas: "配額/月",
+            integration: "介接",
+            updated: "更新",
+          },
+          filters: {
+            all: "全部",
+            production: "Production",
+            pilot: "Pilot",
+            sandbox: "Sandbox",
+            rollback_hold: "Rollback hold",
+          },
+          moduleState: {
+            enabled: "已啟用",
+            disabled: "可選",
+          },
+          bootstrap: {
+            modules: "已選模組",
+            quota: "每月 bookings",
+            api: "每月 API 呼叫",
+            status: "狀態",
+            integration: "介接模式",
+            admin: "Bootstrap 管理員",
+            sandbox: "Sandbox Base URL",
+            empty: "—",
+          },
+          searchPlaceholder: "搜尋租戶、平台人員、介接…",
+          breadcrumb: ["租戶治理", "租戶"],
+          nav: {
+            workspace: "工作面",
+            governance: "租戶治理",
+            fleet: "車隊與法遵",
+            pricing: "計價與結算",
+            platform: "平台層",
+            home: "工作首頁",
+            health: "平台健康",
+            tenants: "租戶",
+            partners: "合作夥伴 entry",
+            users: "平台人員",
+            fleetPage: "車隊與合規",
+            switchboard: "法定資訊與牌貼",
+            pricingPage: "計價",
+            payments: "結算治理",
+            notices: "公告與維護",
+            audit: "稽核與證據",
+            flags: "功能旗標",
+            adapters: "介接登錄",
+          },
+        };
 
   const moduleLabels = useMemo(() => createTenantModuleLabels(t), [t]);
 
@@ -614,10 +699,7 @@ export default function TenantsPage() {
         mono: true,
         r: (tenant) => (
           <span
-            title={t("tenants.list.quotasTooltip", {
-              drivers: formatLocaleNumber(locale, tenant.quotas.activeDrivers),
-              api: formatLocaleNumber(locale, tenant.quotas.monthlyApiCalls),
-            })}
+            title={`${formatLocaleNumber(locale, tenant.quotas.activeDrivers)} drivers · ${formatLocaleNumber(locale, tenant.quotas.monthlyApiCalls)} API`}
           >
             {formatQuotaSummary(locale, tenant)}
           </span>
@@ -640,7 +722,7 @@ export default function TenantsPage() {
         r: (tenant) => formatShortDate(tenant.updatedAt),
       },
     ],
-    [copy.columns, locale, moduleLabels, t],
+    [copy.columns, locale, moduleLabels],
   );
 
   const filterOptions = [
@@ -784,7 +866,7 @@ export default function TenantsPage() {
                               }))
                             }
                             required
-                            placeholder={copy.placeholders.name}
+                            placeholder="Acme Mobility"
                             style={inputStyle}
                           />
                         </CanvasField>
@@ -802,7 +884,7 @@ export default function TenantsPage() {
                               }))
                             }
                             required
-                            placeholder={copy.placeholders.code}
+                            placeholder="acme_dispatch"
                             style={monoInputStyle}
                           />
                         </CanvasField>
@@ -835,7 +917,9 @@ export default function TenantsPage() {
                           {t("tenants.quotaAllocation")}
                         </h3>
                         <p style={sectionHintStyle}>
-                          {t("tenants.list.quotaHint")}
+                          {locale === "en"
+                            ? "Set the initial monthly quota envelope before enabling traffic."
+                            : "在正式啟用前先設定初始月配額範圍。"}
                         </p>
                         <div style={quotaGridStyle}>
                           <CanvasField
@@ -897,7 +981,9 @@ export default function TenantsPage() {
                           {t("tenants.form.modules")}
                         </h3>
                         <p style={sectionHintStyle}>
-                          {t("tenants.list.modulesHint")}
+                          {locale === "en"
+                            ? "Keep the initial module footprint explicit."
+                            : "把首批啟用模組明確列出。"}
                         </p>
                         <div style={moduleGridStyle}>
                           {PLATFORM_TENANT_MODULES.map((moduleCode) => {
@@ -957,7 +1043,9 @@ export default function TenantsPage() {
                           {t("tenants.section.onboarding")}
                         </h3>
                         <p style={sectionHintStyle}>
-                          {t("tenants.list.onboardingHint")}
+                          {locale === "en"
+                            ? "Seed integration posture and bootstrap ownership from the platform side."
+                            : "由平台端預先補齊 integration posture 與 bootstrap owner。"}
                         </p>
                         <div style={fieldGridStyle}>
                           <CanvasField
@@ -994,7 +1082,7 @@ export default function TenantsPage() {
                                   bootstrapAdminEmail: event.target.value,
                                 }))
                               }
-                              placeholder={copy.placeholders.adminEmail}
+                              placeholder="admin@acme.example"
                               style={inputStyle}
                             />
                           </CanvasField>
@@ -1010,7 +1098,7 @@ export default function TenantsPage() {
                                   sandboxBaseUrl: event.target.value,
                                 }))
                               }
-                              placeholder={copy.placeholders.sandboxBaseUrl}
+                              placeholder="https://sandbox.acme.example"
                               style={monoInputStyle}
                             />
                           </CanvasField>
@@ -1050,19 +1138,21 @@ export default function TenantsPage() {
                         theme={th}
                         label={copy.bootstrap.modules}
                         value={`${createForm.enabledModules.length}/${PLATFORM_TENANT_MODULES.length}`}
-                        sub={t("tenants.list.kpi.modulesSub")}
+                        sub={
+                          locale === "en" ? "tenant modules" : "tenant modules"
+                        }
                       />
                       <CanvasKPI
                         theme={th}
                         label={copy.bootstrap.quota}
                         value={createForm.monthlyBookings || "0"}
-                        sub={t("tenants.list.kpi.bookingsSub")}
+                        sub={locale === "en" ? "bookings" : "bookings"}
                       />
                       <CanvasKPI
                         theme={th}
                         label={copy.bootstrap.api}
                         value={createForm.monthlyApiCalls || "0"}
-                        sub={copy.bootstrap.apiSub}
+                        sub="API"
                       />
                     </div>
                     <CanvasDL

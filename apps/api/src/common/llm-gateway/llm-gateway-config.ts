@@ -1,16 +1,10 @@
-export type LlmGatewayProvider =
-  | "mock"
-  | "openai"
-  | "anthropic"
-  | "openrouter"
-  | "ollama";
+export type LlmGatewayProvider = string;
 
 export type LlmGatewayConfig = {
   enabled: boolean;
   provider: LlmGatewayProvider;
   requestedProvider: LlmGatewayProvider;
   apiKey?: string;
-  baseUrl?: string;
   chatModel: string;
   summarizerModel: string;
   dailyBudgetUsd: number;
@@ -30,13 +24,6 @@ const DEFAULT_REQUESTS_PER_MINUTE = 30;
 const DEFAULT_INPUT_TOKENS_PER_MINUTE = 120_000;
 const DEFAULT_OUTPUT_TOKENS_PER_MINUTE = 16_000;
 const DEFAULT_TRANSCRIPT_RETENTION_DAYS = 30;
-const SUPPORTED_PROVIDERS: readonly LlmGatewayProvider[] = [
-  "mock",
-  "openai",
-  "anthropic",
-  "openrouter",
-  "ollama",
-];
 
 function normalizeString(value: string | undefined): string | undefined {
   const normalized = value?.trim();
@@ -82,24 +69,6 @@ function parsePositiveNumber(
   return parsed;
 }
 
-function parseProvider(
-  value: string | undefined,
-  defaultValue: LlmGatewayProvider,
-): LlmGatewayProvider {
-  const normalized = normalizeString(value)?.toLowerCase();
-  if (!normalized) {
-    return defaultValue;
-  }
-
-  if (SUPPORTED_PROVIDERS.includes(normalized as LlmGatewayProvider)) {
-    return normalized as LlmGatewayProvider;
-  }
-
-  throw new Error(
-    `LLM_GATEWAY_PROVIDER must be one of: ${SUPPORTED_PROVIDERS.join(", ")}`,
-  );
-}
-
 function isLocalOrCiRuntime(env: EnvLike): boolean {
   return env.NODE_ENV !== "production" || env.CI === "true";
 }
@@ -112,12 +81,10 @@ export function resolveLlmGatewayConfig(
     false,
     "PLATFORM_ADMIN_ASSISTANT_ENABLED",
   );
-  const requestedProvider = parseProvider(
-    env.LLM_GATEWAY_PROVIDER,
-    DEFAULT_PROVIDER,
-  );
+  const requestedProvider =
+    normalizeString(env.LLM_GATEWAY_PROVIDER)?.toLowerCase() ||
+    DEFAULT_PROVIDER;
   const apiKey = normalizeString(env.LLM_GATEWAY_API_KEY);
-  const baseUrl = normalizeString(env.LLM_GATEWAY_BASE_URL);
   const allowMockFallback = !enabled || isLocalOrCiRuntime(env);
 
   let provider = requestedProvider;
@@ -137,7 +104,6 @@ export function resolveLlmGatewayConfig(
     provider,
     requestedProvider,
     ...(apiKey ? { apiKey } : {}),
-    ...(baseUrl ? { baseUrl } : {}),
     chatModel:
       normalizeString(env.LLM_GATEWAY_CHAT_MODEL) || DEFAULT_CHAT_MODEL,
     summarizerModel:

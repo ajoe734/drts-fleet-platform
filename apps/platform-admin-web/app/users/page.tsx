@@ -258,44 +258,82 @@ export default function UsersPage() {
   );
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
 
-  const copy = useMemo(
-    () => ({
-      title: t("users.page.title"),
-      subtitle: t("users.page.subtitle"),
-      refresh: t("common.refresh"),
-      refreshing: t("users.page.refreshing"),
-      invite: t("users.page.invite"),
-      inviteTitle: t("users.page.inviteTitle"),
-      inviteSubtitle: t("users.page.inviteSubtitle"),
-      colName: t("users.page.col.name"),
-      colEmail: t("users.page.col.email"),
-      colRole: t("users.page.col.role"),
-      colStatus: t("users.page.col.status"),
-      colUpdated: t("users.page.col.updated"),
-      colActions: t("users.page.col.actions"),
-      actionRole: t("users.page.action.role"),
-      actionSuspend: t("users.page.action.suspend"),
-      actionActivate: t("users.page.action.activate"),
-      alreadySuspended: t("users.page.alreadySuspended"),
-      roleTitle: t("users.page.roleTitle"),
-      roleSubtitle: t("users.page.roleSubtitle"),
-      roleField: t("users.page.roleField"),
-      suspendTitle: t("users.page.suspendTitle"),
-      suspendSubtitle: t("users.page.suspendSubtitle"),
-      reasonField: t("users.page.reasonField"),
-      reasonHint: t("users.page.reasonHint"),
-      reasonPlaceholder: t("users.page.reasonPlaceholder"),
-      activateTitle: t("users.page.activateTitle"),
-      activateSubtitle: t("users.page.activateSubtitle"),
-      confirmSuspend: t("users.page.confirmSuspend"),
-      confirmActivate: t("users.page.confirmActivate"),
-      save: t("common.save"),
-      empty: t("users.empty"),
-      loading: t("users.loading"),
-      emailPlaceholder: t("users.page.emailPlaceholder"),
-    }),
-    [t],
-  );
+  const copy =
+    locale === "en"
+      ? {
+          title: "Platform staff",
+          subtitle: "6 roles · RBAC gatekeeping stays backend-authoritative",
+          refresh: t("common.refresh"),
+          refreshing: "Refreshing…",
+          invite: "Invite",
+          inviteTitle: "Invite platform staff",
+          inviteSubtitle:
+            "Create an internal user record and assign the initial role before the user enters any tenant or ops workflow.",
+          colName: "NAME",
+          colEmail: "EMAIL",
+          colRole: "ROLE",
+          colStatus: "STATUS",
+          colUpdated: "UPDATED",
+          colActions: "ACTIONS",
+          actionRole: "Role",
+          actionSuspend: "Suspend",
+          actionActivate: "Activate",
+          alreadySuspended: "already suspended",
+          roleTitle: "Update role",
+          roleSubtitle:
+            "Medium-risk change. The new role takes effect immediately and is recorded to the audit trail.",
+          roleField: "Role",
+          suspendTitle: "Suspend platform staff",
+          suspendSubtitle:
+            "High-risk change. A confirmation reason is required before the user loses platform access. Access is revoked immediately on confirm.",
+          reasonField: "Reason",
+          reasonHint: "Required to confirm this high-risk suspension.",
+          reasonPlaceholder: "e.g. Offboarding / suspected credential leak",
+          activateTitle: "Reactivate platform staff",
+          activateSubtitle:
+            "Restore platform access for this user. Access is granted immediately on confirm.",
+          confirmSuspend: "Confirm suspend",
+          confirmActivate: "Confirm activate",
+          save: "Save",
+          empty: t("users.empty"),
+          loading: t("users.loading"),
+        }
+      : {
+          title: "平台人員",
+          subtitle: "6 個角色 · RBAC 守門以後端為準",
+          refresh: t("common.refresh"),
+          refreshing: "重新整理中…",
+          invite: "邀請",
+          inviteTitle: "邀請平台人員",
+          inviteSubtitle:
+            "先建立內部使用者主檔與初始角色，再讓該使用者進入 tenant 或 ops workflow。",
+          colName: "NAME",
+          colEmail: "EMAIL",
+          colRole: "ROLE",
+          colStatus: "STATUS",
+          colUpdated: "更新",
+          colActions: "ACTIONS",
+          actionRole: "更新角色",
+          actionSuspend: "停用",
+          actionActivate: "啟用",
+          alreadySuspended: "已停用",
+          roleTitle: "更新角色",
+          roleSubtitle: "中風險變更，套用後立即生效並寫入稽核軌跡。",
+          roleField: "角色",
+          suspendTitle: "停用平台人員",
+          suspendSubtitle:
+            "高風險變更，需填寫原因確認後才停用；確認後使用者隨即失去平台存取權限。",
+          reasonField: "原因",
+          reasonHint: "高風險停用確認必填。",
+          reasonPlaceholder: "例如：離職 / 疑似憑證外洩",
+          activateTitle: "重新啟用平台人員",
+          activateSubtitle: "恢復此使用者的平台存取權限；確認後立即生效。",
+          confirmSuspend: "確認停用",
+          confirmActivate: "確認啟用",
+          save: "儲存",
+          empty: t("users.empty"),
+          loading: t("users.loading"),
+        };
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -528,7 +566,7 @@ export default function UsersPage() {
                     value={formEmail}
                     onChange={(event) => setFormEmail(event.target.value)}
                     required
-                    placeholder={copy.emailPlaceholder}
+                    placeholder="staff@platform.drts"
                     style={controlStyle(theme)}
                   />
                 </CanvasField>

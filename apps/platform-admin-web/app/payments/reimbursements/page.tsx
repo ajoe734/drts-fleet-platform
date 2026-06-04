@@ -47,11 +47,6 @@ type QueueRow = {
   detailHref: string;
 };
 
-type TranslateFn = (
-  key: string,
-  params?: Record<string, string | number>,
-) => string;
-
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
 const pageBodyStyle = {
@@ -127,29 +122,13 @@ const badgeStyle = (
 
 const FILTERS: Array<{
   id: QueueFilter;
-  labelKey: string;
+  label: string;
   tone: "neutral" | "warn" | "info" | "success";
 }> = [
-  {
-    id: "all",
-    labelKey: "payments.reimbursements.queue.filter.all",
-    tone: "neutral",
-  },
-  {
-    id: "pending_approval",
-    labelKey: "payments.reimbursements.queue.filter.pendingApproval",
-    tone: "warn",
-  },
-  {
-    id: "exported",
-    labelKey: "payments.reimbursements.queue.filter.exported",
-    tone: "info",
-  },
-  {
-    id: "done",
-    labelKey: "payments.reimbursements.queue.filter.done",
-    tone: "success",
-  },
+  { id: "all", label: "全部", tone: "neutral" },
+  { id: "pending_approval", label: "Pending approval", tone: "warn" },
+  { id: "exported", label: "Exported", tone: "info" },
+  { id: "done", label: "Done", tone: "success" },
 ];
 
 function formatMoney(
@@ -244,28 +223,27 @@ function statusTone(
   }
 }
 
-function statusLabel(status: QueueStatus, t: TranslateFn): string {
+function statusLabel(status: QueueStatus): string {
   switch (status) {
     case "pending_approval":
-      return t("payments.reimbursements.status.pendingApproval");
+      return "pending_approval";
     case "approved":
-      return t("payments.reimbursements.status.approved");
+      return "approved";
     case "exported":
-      return t("payments.reimbursements.status.exported");
+      return "exported";
     case "paid":
-      return t("payments.reimbursements.status.paid");
+      return "paid";
     case "reconciled":
-      return t("payments.reimbursements.status.reconciled");
+      return "reconciled";
     case "draft":
     default:
-      return t("payments.reimbursements.status.draft");
+      return "draft";
   }
 }
 
 function buildRow(
   batch: ReimbursementBatchRecord,
   statement: DriverStatementRecord | undefined,
-  t: TranslateFn,
 ): QueueRow {
   const submittedAt = getSubmittedAt(batch, statement);
   const updatedAt = getUpdatedAt(batch, statement);
@@ -275,7 +253,7 @@ function buildRow(
     scope: getScopeLabel(batch),
     amountLabel: formatMoney(batch.totalAmount),
     status: deriveQueueStatus(batch),
-    submitter: t("payments.reimbursements.queue.submitter.platformFinance"),
+    submitter: "平台財務 / Platform Finance",
     submittedAt,
     updatedAt,
     periodMonth: batch.periodMonth,
@@ -284,7 +262,7 @@ function buildRow(
 }
 
 export default function ReimbursementsPage() {
-  const { t } = useTranslation();
+  const { locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [batches, setBatches] = useState<ReimbursementBatchRecord[]>([]);
   const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
@@ -319,13 +297,13 @@ export default function ReimbursementsPage() {
     );
 
     return batches
-      .map((batch) => buildRow(batch, statementMap.get(batch.statementId), t))
+      .map((batch) => buildRow(batch, statementMap.get(batch.statementId)))
       .sort(
         (left, right) =>
           Date.parse(right.updatedAt || right.submittedAt) -
           Date.parse(left.updatedAt || left.submittedAt),
       );
-  }, [batches, statements, t]);
+  }, [batches, statements]);
 
   const counts = useMemo(() => {
     return rows.reduce<Record<QueueStatus, number>>(
@@ -389,14 +367,14 @@ export default function ReimbursementsPage() {
               }}
             >
               <span style={tabLabelStyle}>
-                <span>{t(filter.labelKey)}</span>
+                <span>{filter.label}</span>
                 <span style={badgeStyle(filter.tone)}>{count}</span>
               </span>
             </button>
           ),
         };
       }),
-    [counts, rows.length, t],
+    [counts, rows.length],
   );
 
   const activeTab =
@@ -404,7 +382,7 @@ export default function ReimbursementsPage() {
 
   const columns: CanvasTableColumn<QueueRow>[] = [
     {
-      h: t("payments.reimbursements.queue.col.batch"),
+      h: "BATCH",
       w: 208,
       mono: true,
       r: (row) => (
@@ -417,57 +395,62 @@ export default function ReimbursementsPage() {
       ),
     },
     {
-      h: t("payments.reimbursements.queue.col.scope"),
+      h: "SCOPE",
       w: 180,
       mono: true,
       r: (row) => row.scope,
     },
     {
-      h: t("payments.reimbursements.queue.col.amount"),
+      h: "AMOUNT",
       w: 160,
       mono: true,
       r: (row) => row.amountLabel,
     },
     {
-      h: t("payments.reimbursements.queue.col.state"),
+      h: "STATE",
       w: 172,
       r: (row) => (
         <CanvasPill theme={theme} tone={statusTone(row.status)} dot>
-          {statusLabel(row.status, t)}
+          {statusLabel(row.status)}
         </CanvasPill>
       ),
     },
     {
-      h: t("payments.reimbursements.queue.col.submitter"),
+      h: "SUBMITTER",
       w: 192,
       r: (row) => row.submitter,
     },
     {
-      h: t("payments.reimbursements.queue.col.submitted"),
+      h: "SUBMITTED",
       w: 164,
       mono: true,
       r: (row) => formatDateTime(row.submittedAt),
     },
     {
-      h: t("payments.reimbursements.queue.col.updated"),
+      h: "UPDATED",
       w: 164,
       mono: true,
       r: (row) => formatDateTime(row.updatedAt),
     },
   ];
 
-  const emptyState: ReactNode = (
-    <div style={{ padding: 24, color: theme.textMuted, fontSize: 12.5 }}>
-      {t("payments.reimbursements.queue.empty")}
-    </div>
-  );
+  const emptyState: ReactNode =
+    locale === "zh" ? (
+      <div style={{ padding: 24, color: theme.textMuted, fontSize: 12.5 }}>
+        目前沒有符合此狀態的代墊批次。
+      </div>
+    ) : (
+      <div style={{ padding: 24, color: theme.textMuted, fontSize: 12.5 }}>
+        No reimbursement batches match this queue state.
+      </div>
+    );
 
   return (
     <div style={{ minHeight: "100%", background: theme.bg }}>
       <CanvasPageHeader
         theme={theme}
-        title={t("payments.reimbursements.queue.headerTitle")}
-        subtitle={t("payments.reimbursements.queue.headerSubtitle")}
+        title="代墊批次 · Reimbursement batches"
+        subtitle="draft → pending_approval → approved → exported → paid → reconciled (Q-ADM12 6 狀態 state machine)"
         tabs={tabs.map((tab) => tab.node)}
         activeTab={activeTab}
       />
@@ -477,7 +460,11 @@ export default function ReimbursementsPage() {
           <CanvasBanner
             theme={theme}
             tone="danger"
-            title={t("payments.reimbursements.queue.loadError")}
+            title={
+              locale === "zh"
+                ? "無法載入代墊批次"
+                : "Unable to load reimbursement batches"
+            }
             body={error}
           />
         ) : null}
@@ -487,7 +474,9 @@ export default function ReimbursementsPage() {
             <div
               style={{ padding: 24, color: theme.textMuted, fontSize: 12.5 }}
             >
-              {t("payments.reimbursements.queue.loading")}
+              {locale === "zh"
+                ? "正在載入代墊批次…"
+                : "Loading reimbursement batches..."}
             </div>
           ) : filteredRows.length > 0 ? (
             <CanvasTable theme={theme} columns={columns} rows={filteredRows} />

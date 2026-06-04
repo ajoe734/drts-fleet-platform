@@ -1,6 +1,4 @@
 import React from "react";
-import type { TFn } from "@/components/platform-ui";
-import { getSwitchAriaLabel } from "@/components/platform-ui";
 
 // Design Tokens (based on mgmt-screens.jsx)
 export const TYPE = {
@@ -210,18 +208,13 @@ export function PlatformIcon({
 export function Switch({
   on,
   onChange,
-  translate,
 }: {
   on: boolean;
   onChange?: (on: boolean) => void;
-  translate?: TFn;
 }) {
   return (
     <div
       onClick={() => onChange?.(!on)}
-      role="switch"
-      aria-checked={on}
-      aria-label={translate ? getSwitchAriaLabel(translate, on) : undefined}
       style={{
         width: 32,
         height: 18,

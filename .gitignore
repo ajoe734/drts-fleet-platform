@@ -39,12 +39,7 @@ ai-task-archive.jsonl
 
 # orchestrator runtime
 .llm-inbox/
-.orchestrator/bin/*
-!.orchestrator/bin/
-!.orchestrator/bin/openclaw-bootstrap.sh
-!.orchestrator/bin/openclaw-launch.sh
-!.orchestrator/bin/openclaw-smoke.sh
-!.orchestrator/bin/openclaw-prepare-auth-bridge.sh
+.orchestrator/bin/
 .orchestrator/logs/
 .orchestrator/supervisor.pid
 .orchestrator/event-queue.jsonl
@@ -61,13 +56,6 @@ ai-task-archive.jsonl
 .orchestrator/chair-reviews/
 .orchestrator/evidence/
 .orchestrator/task-briefs/
-.openclaw/
-AGENTS.md
-HEARTBEAT.md
-IDENTITY.md
-SOUL.md
-TOOLS.md
-USER.md
 docs-site/approval-queue.json
 docs-site/ai-activity-log.jsonl
 docs-site/orchestrator-state.json

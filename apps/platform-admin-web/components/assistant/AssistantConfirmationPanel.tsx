@@ -4,7 +4,6 @@ import { useId, useState } from "react";
 import type { CSSProperties } from "react";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { CanvasPill as Pill } from "@drts/ui-web";
-import { useTranslation } from "@/lib/i18n";
 import {
   assistantCardStyle,
   assistantInsetStyle,
@@ -73,27 +72,19 @@ export function AssistantConfirmationPanel({
   onConfirm: (reason: string) => void | Promise<void>;
   onCancel?: () => void;
 }) {
-  const { t } = useTranslation();
   const reasonFieldId = useId();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const requiresReason = Boolean(
     request.requiresReason || request.riskLevel === "high",
   );
-  const disabled = Boolean(request.disabled);
   const trimmedReason = reason.trim();
   const canSubmit =
-    !disabled && !isSubmitting && (!requiresReason || trimmedReason.length > 0);
+    !isSubmitting && (!requiresReason || trimmedReason.length > 0);
 
   async function handleConfirm() {
     if (requiresReason && trimmedReason.length === 0) {
-      setError(t("assistant.confirmation.error.reasonRequired"));
-      return;
-    }
-    if (disabled) {
-      setError(
-        request.disabledReason ?? t("assistant.confirmation.error.unavailable"),
-      );
+      setError("Reason is required before this action can run.");
       return;
     }
 
@@ -104,7 +95,7 @@ export function AssistantConfirmationPanel({
   return (
     <section
       style={assistantCardStyle}
-      aria-label={t("assistant.confirmation.ariaLabel")}
+      aria-label="Assistant confirmation panel"
     >
       <div style={bodyStyle}>
         <div
@@ -129,7 +120,7 @@ export function AssistantConfirmationPanel({
             theme={assistantTheme}
             tone={assistantRiskTone(request.riskLevel)}
           >
-            {t(`assistant.risk.${request.riskLevel}`)}
+            {request.riskLevel.toUpperCase()} RISK
           </Pill>
         </div>
 
@@ -145,7 +136,7 @@ export function AssistantConfirmationPanel({
                 marginBottom: 4,
               }}
             >
-              {t("assistant.confirmation.targetResource")}
+              Target resource
             </div>
             <div style={{ color: assistantTheme.text, fontSize: 13.5 }}>
               {request.resourceLabel}
@@ -162,7 +153,7 @@ export function AssistantConfirmationPanel({
               color: assistantTheme.text,
             }}
           >
-            {request.reasonLabel ?? t("assistant.confirmation.reasonLabel")}
+            {request.reasonLabel ?? "Execution reason"}
           </label>
           <textarea
             id={reasonFieldId}
@@ -176,8 +167,8 @@ export function AssistantConfirmationPanel({
             placeholder={
               request.reasonPlaceholder ??
               (requiresReason
-                ? t("assistant.confirmation.reasonPlaceholder.required")
-                : t("assistant.confirmation.reasonPlaceholder.optional"))
+                ? "Required for high-risk execution."
+                : "Optional operator note.")
             }
             rows={4}
             style={{
@@ -198,8 +189,8 @@ export function AssistantConfirmationPanel({
           <div style={assistantMutedTextStyle}>
             {request.reasonHint ??
               (requiresReason
-                ? t("assistant.confirmation.reasonHint.required")
-                : t("assistant.confirmation.reasonHint.optional"))}
+                ? "This action cannot execute until a non-empty reason is supplied."
+                : "Reason will be attached to the audit trail when provided.")}
           </div>
         </div>
 
@@ -221,22 +212,6 @@ export function AssistantConfirmationPanel({
           </div>
         ) : null}
 
-        {!error && request.disabledReason ? (
-          <div
-            style={{
-              ...assistantInsetStyle,
-              borderColor: assistantTheme.warnBorder,
-              background: assistantTheme.warnBg,
-              color: assistantTheme.warn,
-              padding: "10px 12px",
-              fontSize: 12.5,
-              lineHeight: 1.45,
-            }}
-          >
-            {request.disabledReason}
-          </div>
-        ) : null}
-
         <div style={buttonRowStyle}>
           {onCancel ? (
             <button
@@ -245,7 +220,7 @@ export function AssistantConfirmationPanel({
               disabled={isSubmitting}
               style={buttonStyle("secondary", isSubmitting)}
             >
-              {request.cancelLabel ?? t("assistant.confirmation.cancel")}
+              {request.cancelLabel ?? "Cancel"}
             </button>
           ) : null}
           <button
@@ -258,8 +233,8 @@ export function AssistantConfirmationPanel({
             )}
           >
             {isSubmitting
-              ? t("assistant.confirmation.executing")
-              : (request.confirmLabel ?? t("assistant.confirmation.confirm"))}
+              ? "Executing..."
+              : (request.confirmLabel ?? "Confirm and execute")}
           </button>
         </div>
       </div>

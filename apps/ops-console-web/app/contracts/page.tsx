@@ -14,7 +14,7 @@ import type {
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
-import { t, type Locale } from "@/lib/translations";
+import type { Locale } from "@/lib/translations";
 import { ContractsTable, PartnerRelationsTable } from "./contracts-tables";
 import {
   CanvasBanner as Banner,
@@ -97,7 +97,6 @@ type ContractRow = Record<string, unknown> & {
   partnerId: string;
   partnerDisplayName: string;
   partnerType: string;
-  partnerTypeLabel: string;
   partnerEntrySlug: string | null;
   vehicleId: string;
   statusKey: ContractFilterStatus;
@@ -240,6 +239,10 @@ const EMPTY_OVERRIDE_REASON_CODES: Record<EmptyReason, string> = {
   filtered_empty: "contract_registry_filtered_empty",
   driver_not_eligible: "driver_not_eligible",
 };
+
+function copy(locale: Locale, en: string, zh: string) {
+  return locale === "zh" ? zh : en;
+}
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -430,7 +433,7 @@ function toneColor(tone: CanvasTone) {
 
 function formatDate(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return t("contracts.status.openEnded", locale);
+    return copy(locale, "open-ended", "未設定");
   }
 
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
@@ -445,7 +448,7 @@ function formatDate(locale: Locale, value: string | null | undefined) {
 
 function formatLongDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return t("contracts.status.unknown", locale);
+    return copy(locale, "unknown", "未知");
   }
 
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
@@ -469,87 +472,25 @@ function deriveKind(contract: ContractRuntimeRecord): {
   if (raw.includes("partner") || raw.includes("program")) {
     return {
       key: "partner",
-      label: (currentLocale) =>
-        t("contracts.kind.partnerProgram", currentLocale),
+      label: (locale) => copy(locale, "Partner program", "夥伴方案"),
     };
   }
   if (raw.includes("forward")) {
     return {
       key: "forwarder",
-      label: (currentLocale) => t("contracts.kind.forwarded", currentLocale),
+      label: (locale) => copy(locale, "Forwarder", "轉派合作"),
     };
   }
   if (raw.includes("driver")) {
     return {
       key: "driver",
-      label: (currentLocale) => t("contracts.kind.driver", currentLocale),
+      label: (locale) => copy(locale, "Driver", "司機合約"),
     };
   }
   return {
     key: "vehicle",
-    label: (currentLocale) => t("contracts.kind.vehicleFleet", currentLocale),
+    label: (locale) => copy(locale, "Vehicle / fleet", "車輛 / 車隊"),
   };
-}
-
-function formatContractKindKey(locale: Locale, kindKey: string) {
-  switch (kindKey) {
-    case "partner":
-      return t("contracts.kind.partnerProgram", locale);
-    case "forwarder":
-      return t("contracts.kind.forwarded", locale);
-    case "driver":
-      return t("contracts.kind.driver", locale);
-    case "vehicle":
-      return t("contracts.kind.vehicleFleet", locale);
-    default:
-      return formatOpsCodeLabel(locale, kindKey);
-  }
-}
-
-function formatContractPartnerType(locale: Locale, partnerType: string) {
-  const normalized = partnerType.trim().toLowerCase();
-
-  if (normalized.includes("forward")) {
-    return t("contracts.kind.forwarded", locale);
-  }
-  if (normalized.includes("partner") || normalized.includes("program")) {
-    return t("contracts.kind.partnerProgram", locale);
-  }
-  if (normalized.includes("driver")) {
-    return t("contracts.kind.driver", locale);
-  }
-  if (normalized.includes("vehicle") || normalized.includes("fleet")) {
-    return t("contracts.kind.vehicleFleet", locale);
-  }
-
-  return formatOpsCodeLabel(locale, partnerType);
-}
-
-function formatContractEligibilityMode(
-  locale: Locale,
-  eligibilityMode: string,
-) {
-  switch (eligibilityMode.trim().toLowerCase()) {
-    case "none":
-      return t("contracts.eligibility.none", locale);
-    case "bank_card_inline":
-      return t("contracts.eligibility.bankCardInline", locale);
-    case "reference_required":
-      return t("contracts.eligibility.referenceRequired", locale);
-    default:
-      return formatOpsCodeLabel(locale, eligibilityMode);
-  }
-}
-
-function formatContractAuthMode(locale: Locale, authMode: string) {
-  switch (authMode.trim().toLowerCase()) {
-    case "tenant_portal_bearer":
-      return t("contracts.auth.tenantPortalBearer", locale);
-    case "partner_api_key":
-      return t("contracts.auth.partnerApiKey", locale);
-    default:
-      return formatOpsCodeLabel(locale, authMode);
-  }
 }
 
 function daysBetween(fromIso: string, toIso: string | null): number | null {
@@ -573,34 +514,34 @@ function deriveContractStatus(
   if (contract.status === "terminated") {
     return {
       key: "terminated",
-      label: t("contracts.status.terminated", locale),
+      label: copy(locale, "Terminated", "已終止"),
       tone: "neutral",
     };
   }
   if (expired || contract.lifecycleStatus === "expired") {
     return {
       key: "terminated",
-      label: t("contracts.status.expired", locale),
+      label: copy(locale, "Expired", "已到期"),
       tone: "danger",
     };
   }
   if (contract.status === "draft") {
     return {
       key: "draft",
-      label: t("contracts.status.draft", locale),
+      label: copy(locale, "Draft", "草稿"),
       tone: "warn",
     };
   }
   if (expiringSoon) {
     return {
       key: "expiring",
-      label: t("contracts.status.expiringSoon", locale),
+      label: copy(locale, "Expiring soon", "即將到期"),
       tone: "warn",
     };
   }
   return {
     key: "active",
-    label: t("contracts.status.active", locale),
+    label: copy(locale, "Active", "生效中"),
     tone: "success",
   };
 }
@@ -616,16 +557,16 @@ function deriveKeyTerms(
 
   const parts: string[] = [];
   parts.push(
-    `${t("contracts.keyTerms.scope", locale)}: ${contract.serviceScope || formatOpsCodeLabel(locale, contract.contractType)}`,
+    `${copy(locale, "Scope", "服務範圍")}: ${contract.serviceScope || formatOpsCodeLabel(locale, contract.contractType)}`,
   );
   if (contract.operatingAreaId) {
     parts.push(
-      `${t("contracts.keyTerms.area", locale)}: ${contract.operatingAreaId}`,
+      `${copy(locale, "Area", "營運區")}: ${contract.operatingAreaId}`,
     );
   }
   if (partnerEntry) {
     parts.push(
-      `${t("contracts.keyTerms.eligibilityMode", locale)}: ${formatContractEligibilityMode(locale, partnerEntry.eligibilityMode)}`,
+      `${copy(locale, "Eligibility", "資格模式")}: ${formatOpsCodeLabel(locale, partnerEntry.eligibilityMode)}`,
     );
   }
   return parts.join(" · ");
@@ -683,7 +624,7 @@ function synthesizeCrossAppLinks(
         resourceType: "partner_program",
         resourceId: contract.partnerId,
         openMode: "new_tab",
-        label: t("contracts.link.partnerGovernance", locale),
+        label: copy(locale, "Partner governance", "夥伴治理"),
       },
     ];
   }
@@ -695,7 +636,7 @@ function synthesizeCrossAppLinks(
       resourceType: "vehicle_contract",
       resourceId: contract.contractId,
       openMode: "new_tab",
-      label: t("contracts.link.fleetGovernance", locale),
+      label: copy(locale, "Fleet governance", "車隊治理"),
     },
   ];
 }
@@ -731,22 +672,21 @@ function synthesizeAvailableActions(
 }
 
 function refreshBadgeLabel(refresh: UiRefreshMetadata, locale: Locale) {
-  const freshness =
-    locale === "zh"
-      ? formatOpsCodeLabel(locale, refresh.dataFreshness)
-      : refresh.dataFreshness.toUpperCase();
+  const freshness = copy(
+    locale,
+    refresh.dataFreshness.toUpperCase(),
+    formatOpsCodeLabel(locale, refresh.dataFreshness),
+  );
 
-  return t("contracts.refresh.badge", locale, { freshness });
+  return `${freshness} · T3 · 15s`;
 }
 
 function refreshBody(refresh: UiRefreshMetadata, locale: Locale) {
-  return t("contracts.refresh.body", locale, {
-    generatedAt: formatLongDateTime(locale, refresh.generatedAt),
-    source:
-      locale === "zh"
-        ? formatOpsCodeLabel(locale, refresh.source)
-        : refresh.source,
-  });
+  return copy(
+    locale,
+    `Snapshot ${formatLongDateTime(locale, refresh.generatedAt)} UTC from ${refresh.source}.`,
+    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} UTC 產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
+  );
 }
 
 function synthesizeRefreshMetadata(
@@ -967,12 +907,17 @@ function buildEmptyStateViewModel(
       return {
         tone: "info" as const,
         icon: "partners" as const,
-        title: t("contracts.emptyState.notProvisioned.title", locale),
-        description: t(
-          "contracts.emptyState.notProvisioned.description",
+        title: copy(
           locale,
+          "Contract registry not provisioned",
+          "合約主檔尚未開通",
         ),
-        actionLabel: t("contracts.emptyState.notProvisioned.action", locale),
+        description: copy(
+          locale,
+          "Partner and fleet contracts are still bootstrapped from Platform Admin governance for this environment.",
+          "本環境的夥伴與車隊合約仍由 Platform Admin 治理面建立。",
+        ),
+        actionLabel: copy(locale, "Open partner governance", "開啟夥伴治理"),
         actionHref: `${resolveAppOrigin("platform-admin")}/partners`,
         actionNewTab: true,
       };
@@ -980,11 +925,15 @@ function buildEmptyStateViewModel(
       return {
         tone: "danger" as const,
         icon: "warn" as const,
-        title: t("contracts.emptyState.fetchFailed.title", locale),
+        title: copy(locale, "Contract snapshot failed", "合約快照讀取失敗"),
         description:
           rawMessage ??
-          t("contracts.emptyState.fetchFailed.description", locale),
-        actionLabel: t("contracts.emptyState.fetchFailed.action", locale),
+          copy(
+            locale,
+            "The registry endpoint did not return a usable payload.",
+            "登記資料端點未回傳可用內容。",
+          ),
+        actionLabel: copy(locale, "Retry", "重新整理"),
         actionHref: buildHref(filters, {}),
         actionNewTab: false,
       };
@@ -992,12 +941,13 @@ function buildEmptyStateViewModel(
       return {
         tone: "warn" as const,
         icon: "users" as const,
-        title: t("contracts.emptyState.permissionDenied.title", locale),
-        description: t(
-          "contracts.emptyState.permissionDenied.description",
+        title: copy(locale, "Contract scope denied", "無法存取合約範圍"),
+        description: copy(
           locale,
+          "This actor can enter the shell but lacks contract registry read scope.",
+          "目前帳號可進入殼層，但沒有合約登記讀取權限。",
         ),
-        actionLabel: t("contracts.emptyState.permissionDenied.action", locale),
+        actionLabel: copy(locale, "Open ops dashboard", "返回儀表板"),
         actionHref: "/dashboard",
         actionNewTab: false,
       };
@@ -1005,15 +955,13 @@ function buildEmptyStateViewModel(
       return {
         tone: "warn" as const,
         icon: "health" as const,
-        title: t("contracts.emptyState.externalUnavailable.title", locale),
-        description: t(
-          "contracts.emptyState.externalUnavailable.description",
+        title: copy(locale, "Partner directory unavailable", "夥伴目錄不可用"),
+        description: copy(
           locale,
+          "Partner-entry augmentation is degraded. Counterparty names may be missing; use partner governance for the latest relationship state.",
+          "夥伴渠道補充資料降級，交易對手名稱可能缺漏；請改用夥伴治理確認最新關係狀態。",
         ),
-        actionLabel: t(
-          "contracts.emptyState.externalUnavailable.action",
-          locale,
-        ),
+        actionLabel: copy(locale, "Open platform admin", "開啟 Platform Admin"),
         actionHref: `${resolveAppOrigin("platform-admin")}/partners`,
         actionNewTab: true,
       };
@@ -1021,12 +969,17 @@ function buildEmptyStateViewModel(
       return {
         tone: "accent" as const,
         icon: "filter" as const,
-        title: t("contracts.emptyState.filteredEmpty.title", locale),
-        description: t(
-          "contracts.emptyState.filteredEmpty.description",
+        title: copy(
           locale,
+          "No contracts match this slice",
+          "目前條件沒有符合的合約",
         ),
-        actionLabel: t("contracts.emptyState.filteredEmpty.action", locale),
+        description: copy(
+          locale,
+          "Widen status, kind, or expiring filters to restore results.",
+          "放寬狀態、類型或即將到期條件即可恢復結果。",
+        ),
+        actionLabel: copy(locale, "Clear filters", "清除條件"),
         actionHref: "/contracts",
         actionNewTab: false,
       };
@@ -1035,9 +988,13 @@ function buildEmptyStateViewModel(
       return {
         tone: "neutral" as const,
         icon: "contracts" as const,
-        title: t("contracts.emptyState.noData.title", locale),
-        description: t("contracts.emptyState.noData.description", locale),
-        actionLabel: t("contracts.emptyState.noData.action", locale),
+        title: copy(locale, "No contracts registered", "尚未登記合約"),
+        description: copy(
+          locale,
+          "The registry is healthy but there are no contract records in this environment yet.",
+          "登記資料健康，但此環境目前還沒有任何合約紀錄。",
+        ),
+        actionLabel: copy(locale, "Open revenue review", "前往收益審視"),
         actionHref: "/revenue",
         actionNewTab: false,
       };
@@ -1165,7 +1122,6 @@ export default async function ContractsPage({
         partnerEntry?.displayName ??
         contract.partnerId,
       partnerType: contract.partnerType,
-      partnerTypeLabel: formatContractPartnerType(locale, contract.partnerType),
       partnerEntrySlug:
         contract.partnerEntrySlug ?? partnerEntry?.entrySlug ?? null,
       vehicleId: contract.vehicleId,
@@ -1199,9 +1155,9 @@ export default async function ContractsPage({
     return nextRow;
   });
 
-  const typeOptions = Array.from(
-    new Map(rows.map((row) => [row.kindKey, row.kindLabel])).entries(),
-  ).sort(([left], [right]) => left.localeCompare(right));
+  const typeOptions = Array.from(new Set(rows.map((row) => row.kindKey))).sort(
+    (left, right) => left.localeCompare(right),
+  );
 
   const filteredRows = rows.filter((row) => {
     if (filters.tab === "expiring" && !(row.expiringSoon || row.expired)) {
@@ -1318,7 +1274,7 @@ export default async function ContractsPage({
             gap: 6,
           }}
         >
-          {t("contracts.tab.all", locale)}
+          {copy(locale, "All", "全部")}
           <span style={tinyMetaStyle()}>{tabCounts.all}</span>
         </Link>
       ),
@@ -1336,7 +1292,7 @@ export default async function ContractsPage({
             gap: 6,
           }}
         >
-          {t("contracts.tab.expiring", locale)}
+          {copy(locale, "Expiring", "即將到期")}
           <span style={tinyMetaStyle("warn")}>{tabCounts.expiring}</span>
         </Link>
       ),
@@ -1354,7 +1310,7 @@ export default async function ContractsPage({
             gap: 6,
           }}
         >
-          {t("contracts.tab.partner", locale)}
+          {copy(locale, "Partner programs", "夥伴方案")}
           <span style={tinyMetaStyle("info")}>{tabCounts.partner}</span>
         </Link>
       ),
@@ -1377,12 +1333,9 @@ export default async function ContractsPage({
       displayName: entry.displayName,
       entrySlug: entry.entrySlug,
       programId: entry.programId,
-      partnerTypeLabel: formatContractPartnerType(locale, entry.partnerType),
-      eligibilityLabel: formatContractEligibilityMode(
-        locale,
-        entry.eligibilityMode,
-      ),
-      authLabel: formatContractAuthMode(locale, entry.authMode),
+      partnerTypeLabel: formatOpsCodeLabel(locale, entry.partnerType),
+      eligibilityLabel: formatOpsCodeLabel(locale, entry.eligibilityMode),
+      authLabel: formatOpsCodeLabel(locale, entry.authMode),
       statusLabel: formatOpsCodeLabel(locale, entry.status),
       statusTone:
         entry.status === "active" && entry.activeFlag
@@ -1397,8 +1350,12 @@ export default async function ContractsPage({
     <>
       <PageHeader
         theme={theme}
-        title={t("contracts.title", locale)}
-        subtitle={t("contracts.page.subtitle", locale)}
+        title={copy(locale, "Contracts", "合約")}
+        subtitle={copy(
+          locale,
+          "ops read-only · mutation runs via Platform Admin / Tenant governance",
+          "ops 只讀；mutation 走 Platform Admin / Tenant Governance",
+        )}
         tabs={tabs.map((tab) => tab.node)}
         activeTab={activeTab}
         actions={
@@ -1411,7 +1368,7 @@ export default async function ContractsPage({
             </Pill>
             <a href={refreshHref} style={buttonStyle("secondary")}>
               <CanvasIcon name="arrow" size={12} />
-              {t("common.refresh", locale)}
+              {copy(locale, "Refresh", "重新整理")}
             </a>
           </>
         }
@@ -1423,18 +1380,30 @@ export default async function ContractsPage({
             theme={theme}
             tone={health.status === "down" ? "danger" : "warn"}
             icon={health.status === "down" ? "warn" : "health"}
-            title={t("contracts.banner.degraded.title", locale)}
-            body={t("contracts.banner.degraded.body", locale, {
-              details:
+            title={copy(
+              locale,
+              "Contracts page is running degraded",
+              "合約頁面目前為降級模式",
+            )}
+            body={copy(
+              locale,
+              `${
                 health.degradedServices
                   .map(
                     (service: UiHealthEnvelope["degradedServices"][number]) =>
                       `${service.service}: ${service.impact}`,
                   )
-                  .join(" · ") ||
-                t("contracts.banner.degraded.unknown", locale),
-              checkedAt: formatLongDateTime(locale, health.lastCheckedAt),
-            })}
+                  .join(" · ") || "health unknown"
+              } · checked ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
+              `${
+                health.degradedServices
+                  .map(
+                    (service: UiHealthEnvelope["degradedServices"][number]) =>
+                      `${service.service}: ${service.impact}`,
+                  )
+                  .join(" · ") || "health unknown"
+              } · 檢查時間 ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
+            )}
           />
         ) : null}
 
@@ -1443,7 +1412,11 @@ export default async function ContractsPage({
             theme={theme}
             tone={refresh.dataFreshness === "degraded" ? "warn" : "info"}
             icon={refresh.dataFreshness === "degraded" ? "warn" : "clock"}
-            title={t("contracts.banner.snapshotNotFresh", locale)}
+            title={copy(
+              locale,
+              "Snapshot is not fresh",
+              "目前顯示的快照非最新",
+            )}
             body={refreshBody(refresh, locale)}
           />
         ) : null}
@@ -1453,17 +1426,22 @@ export default async function ContractsPage({
             theme={theme}
             tone="warn"
             icon="clock"
-            title={t("contracts.banner.expiring.title", locale)}
-            body={t("contracts.banner.expiring.body", locale, {
-              count: expiringCount,
-              days: EXPIRING_SOON_DAYS,
-            })}
+            title={copy(
+              locale,
+              "Contracts approaching expiry",
+              "有合約即將到期",
+            )}
+            body={copy(
+              locale,
+              `${expiringCount} contract(s) expire within ${EXPIRING_SOON_DAYS} days. Confirm renewal terms with Platform Admin before dispatch / billing impact.`,
+              `${expiringCount} 份合約將於 ${EXPIRING_SOON_DAYS} 天內到期；請於影響派車 / 帳務前，向 Platform Admin 確認續約條款。`,
+            )}
             actions={
               <Link
                 href={buildHref(filters, { tab: "expiring" })}
                 style={linkButtonStyle("warn")}
               >
-                {t("contracts.banner.expiring.action", locale)}
+                {copy(locale, "View expiring", "檢視即將到期")}
               </Link>
             }
           />
@@ -1472,27 +1450,27 @@ export default async function ContractsPage({
         <div style={summaryGridStyle}>
           <div style={summaryCardStyle}>
             <span style={summaryLabelStyle}>
-              {t("contracts.summary.registered", locale)}
+              {copy(locale, "Registered", "已登記")}
             </span>
             <span style={summaryValueStyle}>{rows.length}</span>
             <span style={summaryFootStyle}>
-              {t("contracts.summary.registeredSub", locale)}
+              {copy(locale, "contract master rows", "合約主檔筆數")}
             </span>
           </div>
           <div style={summaryCardStyle}>
             <span style={summaryLabelStyle}>
-              {t("contracts.summary.active", locale)}
+              {copy(locale, "Active", "生效中")}
             </span>
             <span style={{ ...summaryValueStyle, color: theme.success }}>
               {activeCount}
             </span>
             <span style={summaryFootStyle}>
-              {t("contracts.summary.activeSub", locale)}
+              {copy(locale, "currently effective", "目前有效")}
             </span>
           </div>
           <div style={summaryCardStyle}>
             <span style={summaryLabelStyle}>
-              {t("contracts.summary.expiring", locale)}
+              {copy(locale, "Expiring soon", "即將到期")}
             </span>
             <span
               style={{
@@ -1503,32 +1481,40 @@ export default async function ContractsPage({
               {expiringCount}
             </span>
             <span style={summaryFootStyle}>
-              {t("contracts.summary.withinDays", locale, {
-                days: EXPIRING_SOON_DAYS,
-              })}
+              {copy(
+                locale,
+                `within ${EXPIRING_SOON_DAYS} days`,
+                `${EXPIRING_SOON_DAYS} 天內`,
+              )}
             </span>
           </div>
           <div style={summaryCardStyle}>
             <span style={summaryLabelStyle}>
-              {t("contracts.summary.partnerEntries", locale)}
+              {copy(locale, "Partner entries", "夥伴渠道")}
             </span>
             <span style={{ ...summaryValueStyle, color: theme.info }}>
               {partnerEntries.length}
             </span>
             <span style={summaryFootStyle}>
               {manualReviewCount > 0
-                ? t("contracts.summary.manualReviewPending", locale, {
-                    count: manualReviewCount,
-                  })
-                : t("contracts.summary.noReviewBacklog", locale)}
+                ? copy(
+                    locale,
+                    `${manualReviewCount} manual review pending`,
+                    `${manualReviewCount} 筆待人工審核`,
+                  )
+                : copy(locale, "no review backlog", "無審核積壓")}
             </span>
           </div>
         </div>
 
         <Card
           theme={theme}
-          title={t("contracts.filters.title", locale)}
-          subtitle={t("contracts.filters.subtitle", locale)}
+          title={copy(locale, "Filters", "篩選")}
+          subtitle={copy(
+            locale,
+            "Status, kind, and expiring views run on the same snapshot.",
+            "狀態、類型與即將到期條件都套用同一份快照。",
+          )}
         >
           <form method="get" style={{ display: "grid", gap: 0 }}>
             <input type="hidden" name="tab" value={filters.tab} />
@@ -1542,54 +1528,56 @@ export default async function ContractsPage({
             <div style={filterGridStyle}>
               <label style={fieldStackStyle}>
                 <span style={fieldLabelStyle}>
-                  {t("contracts.filters.searchLabel", locale)}
+                  {copy(locale, "Search", "搜尋")}
                 </span>
                 <input
                   name="q"
                   defaultValue={filters.q}
-                  placeholder={t("contracts.filters.searchPlaceholder", locale)}
+                  placeholder={copy(
+                    locale,
+                    "contract id, partner, vehicle",
+                    "合約編號、夥伴、車輛",
+                  )}
                   style={fieldStyle}
                 />
               </label>
 
               <label style={fieldStackStyle}>
                 <span style={fieldLabelStyle}>
-                  {t("contracts.filters.statusLabel", locale)}
+                  {copy(locale, "Status", "狀態")}
                 </span>
                 <select
                   name="status"
                   defaultValue={filters.status}
                   style={fieldStyle}
                 >
-                  <option value="all">{t("common.all", locale)}</option>
+                  <option value="all">{copy(locale, "All", "全部")}</option>
                   <option value="active">
-                    {t("contracts.status.active", locale)}
+                    {copy(locale, "Active", "生效中")}
                   </option>
-                  <option value="draft">
-                    {t("contracts.status.draft", locale)}
-                  </option>
+                  <option value="draft">{copy(locale, "Draft", "草稿")}</option>
                   <option value="expiring">
-                    {t("contracts.status.expiringSoon", locale)}
+                    {copy(locale, "Expiring soon", "即將到期")}
                   </option>
                   <option value="terminated">
-                    {t("contracts.filters.option.terminated", locale)}
+                    {copy(locale, "Terminated / expired", "終止 / 到期")}
                   </option>
                 </select>
               </label>
 
               <label style={fieldStackStyle}>
                 <span style={fieldLabelStyle}>
-                  {t("contracts.filters.kindLabel", locale)}
+                  {copy(locale, "Kind", "類型")}
                 </span>
                 <select
                   name="type"
                   defaultValue={filters.type}
                   style={fieldStyle}
                 >
-                  <option value="all">{t("common.all", locale)}</option>
-                  {typeOptions.map(([value, label]) => (
+                  <option value="all">{copy(locale, "All", "全部")}</option>
+                  {typeOptions.map((value) => (
                     <option key={value} value={value}>
-                      {label || formatContractKindKey(locale, value)}
+                      {formatOpsCodeLabel(locale, value)}
                     </option>
                   ))}
                 </select>
@@ -1597,26 +1585,26 @@ export default async function ContractsPage({
 
               <label style={fieldStackStyle}>
                 <span style={fieldLabelStyle}>
-                  {t("contracts.filters.expiringLabel", locale)}
+                  {copy(locale, "Expiring", "即將到期")}
                 </span>
                 <select
                   name="expiring"
                   defaultValue={filters.expiring}
                   style={fieldStyle}
                 >
-                  <option value="all">{t("common.all", locale)}</option>
-                  <option value="yes">{t("common.yes", locale)}</option>
-                  <option value="no">{t("common.no", locale)}</option>
+                  <option value="all">{copy(locale, "All", "全部")}</option>
+                  <option value="yes">{copy(locale, "Yes", "是")}</option>
+                  <option value="no">{copy(locale, "No", "否")}</option>
                 </select>
               </label>
 
               <div style={{ display: "flex", gap: 8 }}>
                 <button type="submit" style={buttonStyle("primary")}>
                   <CanvasIcon name="search" size={12} />
-                  {t("contracts.filters.apply", locale)}
+                  {copy(locale, "Apply", "套用")}
                 </button>
                 <Link href="/contracts" style={buttonStyle("ghost")}>
-                  {t("contracts.filters.reset", locale)}
+                  {copy(locale, "Reset", "重設")}
                 </Link>
               </div>
             </div>
@@ -1624,25 +1612,34 @@ export default async function ContractsPage({
 
           <div style={helperRowStyle}>
             <span style={helperTextStyle}>
-              {t("contracts.filters.visibleSummary", locale, {
-                visible: displayedRows.length,
-                total: rows.length,
-              })}
+              {copy(
+                locale,
+                `${displayedRows.length} visible / ${rows.length} total`,
+                `目前顯示 ${displayedRows.length} / 總數 ${rows.length}`,
+              )}
             </span>
             <span style={{ ...helperTextStyle, ...monoTextStyle }}>
-              {t("contracts.filters.generatedAt", locale)} ·{" "}
+              {copy(locale, "generated", "生成時間")} ·{" "}
               {formatLongDateTime(locale, refresh.generatedAt)} UTC
             </span>
             <span style={helperTextStyle}>
-              {t("contracts.filters.availableActionsHint", locale)}
+              {copy(
+                locale,
+                "supporting actions come from availableActions",
+                "畫面 CTA 以 availableActions 為準",
+              )}
             </span>
           </div>
         </Card>
 
         <Card
           theme={theme}
-          title={t("contracts.registry.title", locale)}
-          subtitle={t("contracts.registry.subtitle", locale)}
+          title={copy(locale, "Contract registry", "合約登記清單")}
+          subtitle={copy(
+            locale,
+            "Counterparty, kind, term, and key operating terms feeding dispatch and billing — read-only at ops scope.",
+            "在同一張表整合交易對手、類型、合約期間與關鍵營運條款，提供派車與帳務參考；ops 端僅可讀。",
+          )}
         >
           {emptyView ? (
             <div style={emptyStateStyle}>
@@ -1676,7 +1673,7 @@ export default async function ContractsPage({
                 ) : null}
               </Link>
               <span style={tinyMetaStyle(emptyView.tone)}>
-                {t("contracts.registry.emptyReason", locale)} ·{" "}
+                {copy(locale, "emptyReason", "空狀態")} ·{" "}
                 {EMPTY_OVERRIDE_REASON_CODES[emptyReason ?? "no_data"]}
               </span>
             </div>
@@ -1691,8 +1688,12 @@ export default async function ContractsPage({
 
         <Card
           theme={theme}
-          title={t("contracts.partnerRelations.title", locale)}
-          subtitle={t("contracts.partnerRelations.subtitle", locale)}
+          title={copy(locale, "Partner relations", "夥伴關係")}
+          subtitle={copy(
+            locale,
+            "Partner entry slug, program id, status, and eligibility mode behind partner contracts.",
+            "夥伴合約背後的渠道 slug、方案 id、狀態與資格模式。",
+          )}
         >
           {partnerRelationRows.length === 0 ? (
             <div style={emptyStateStyle}>
@@ -1702,7 +1703,11 @@ export default async function ContractsPage({
                 style={{ color: theme.textMuted }}
               />
               <strong style={{ color: theme.text, fontSize: 14 }}>
-                {t("contracts.partnerRelations.empty.title", locale)}
+                {copy(
+                  locale,
+                  "No partner entries in scope",
+                  "範圍內沒有夥伴渠道",
+                )}
               </strong>
               <span
                 style={{
@@ -1712,8 +1717,16 @@ export default async function ContractsPage({
                 }}
               >
                 {partnerEntriesResult.error
-                  ? t("contracts.partnerRelations.empty.degraded", locale)
-                  : t("contracts.partnerRelations.empty.provisioned", locale)}
+                  ? copy(
+                      locale,
+                      "Partner directory is degraded; relationship context is temporarily unavailable.",
+                      "夥伴目錄降級，關係內容暫時不可用。",
+                    )
+                  : copy(
+                      locale,
+                      "Partner programs are provisioned from Platform Admin governance.",
+                      "夥伴方案由 Platform Admin 治理面建立。",
+                    )}
               </span>
             </div>
           ) : (

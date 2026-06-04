@@ -50,7 +50,7 @@ import {
   useAssistantSelection,
 } from "@/components/ops-assistant";
 import { useTranslation } from "@/lib/i18n";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
+import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 
 // ── canvas theme + per-page operating context ──────────────────────────────
 const theme = buildCanvasTheme({
@@ -80,10 +80,6 @@ type ComplaintCaseUiRecord = ComplaintCaseRecord & {
   slaBreachedAt?: string | null;
   availableActions?: ResourceActionDescriptor[];
 };
-type TranslateFn = (
-  key: string,
-  params?: Record<string, string | number>,
-) => string;
 
 // Demo identity binding for the "assigned to me" scope filter (§5.5 — assignee
 // filter me / unassigned / all). Real deployments resolve this from the
@@ -136,6 +132,11 @@ const textareaStyle: CSSProperties = {
   resize: "vertical",
   minHeight: 64,
 };
+
+// ── small helpers ──────────────────────────────────────────────────────────
+function tx(locale: "en" | "zh", en: string, zh: string) {
+  return locale === "en" ? en : zh;
+}
 
 function formatDateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : "—";
@@ -214,7 +215,7 @@ function compareComplaintPriority(
   );
 }
 
-function formatRelativeSla(value: string, t: TranslateFn) {
+function formatRelativeSla(value: string, locale: "en" | "zh") {
   const deltaMinutes = Math.round(
     (new Date(value).getTime() - Date.now()) / (1000 * 60),
   );
@@ -222,141 +223,43 @@ function formatRelativeSla(value: string, t: TranslateFn) {
     return "—";
   }
   if (deltaMinutes >= 0) {
-    return t("complaints.sla.dueInMinutes", { count: deltaMinutes });
+    return tx(
+      locale,
+      `due in ${deltaMinutes} min`,
+      `還有 ${deltaMinutes} 分鐘`,
+    );
   }
-  return t("complaints.sla.overdueMinutes", {
-    count: Math.abs(deltaMinutes),
-  });
+  return tx(
+    locale,
+    `overdue ${Math.abs(deltaMinutes)} min`,
+    `逾期 ${Math.abs(deltaMinutes)} 分鐘`,
+  );
 }
 
 // ── availableActions (Q-X13) ────────────────────────────────────────────────
-type ActionMeta = { icon: IconName; labelKey: string };
+type ActionMeta = { icon: IconName; en: string; zh: string };
 
 const ACTION_META: Record<string, ActionMeta> = {
-  add_note: { icon: "plus", labelKey: "complaints.addNote" },
-  assign: { icon: "users", labelKey: "complaints.assignCase" },
-  resolve: { icon: "check", labelKey: "complaints.resolveCase" },
-  close: { icon: "check", labelKey: "complaints.close" },
-  reopen: { icon: "arrow", labelKey: "complaints.reopenCase" },
+  add_note: { icon: "plus", en: "Add note", zh: "新增備註" },
+  assign: { icon: "users", en: "Assign / reassign", zh: "指派 / 重新指派" },
+  resolve: { icon: "check", en: "Resolve", zh: "結案處理" },
+  close: { icon: "check", en: "Close", zh: "關閉案件" },
+  reopen: { icon: "arrow", en: "Reopen", zh: "重啟案件" },
   escalate_to_incident: {
     icon: "warn",
-    labelKey: "complaints.escalateToIncident",
+    en: "Escalate to incident",
+    zh: "升級事故",
   },
-  mark_sla_breach: { icon: "sla", labelKey: "complaints.markSlaBreach" },
-  export_view: { icon: "reports", labelKey: "complaints.activityExport" },
-  create: { icon: "plus", labelKey: "complaints.createComplaint" },
+  mark_sla_breach: { icon: "sla", en: "Mark SLA breach", zh: "標記 SLA 違規" },
+  export_view: { icon: "reports", en: "Export view", zh: "匯出案件視圖" },
+  create: { icon: "plus", en: "Create complaint", zh: "建立客訴" },
 };
 
-const COMPLAINT_STATUS_LABEL_KEYS: Record<ComplaintCaseStatus, string> = {
-  new: "complaints.status.new",
-  assigned: "complaints.status.assigned",
-  under_investigation: "complaints.status.underInvestigation",
-  resolved: "complaints.status.resolved",
-  closed: "complaints.status.closed",
-  reopened: "complaints.status.reopened",
-};
-
-const COMPLAINT_CATEGORY_LABEL_KEYS: Record<ComplaintCategory, string> = {
-  late_arrival: "complaints.category.lateArrival",
-  no_arrival: "complaints.category.noArrival",
-  driver_service: "complaints.category.driverService",
-  vehicle_condition: "complaints.category.vehicleCondition",
-  route_issue: "complaints.category.routeIssue",
-  fare_dispute: "complaints.category.fareDispute",
-  safety_concern: "complaints.category.safetyConcern",
-  lost_and_found: "complaints.category.lostAndFound",
-  other: "complaints.category.other",
-};
-
-const COMPLAINT_SEVERITY_LABEL_KEYS: Record<
-  | CreateComplaintCaseCommand["severity"]
-  | EscalateComplaintToIncidentCommand["severity"],
-  string
-> = {
-  low: "complaints.severity.low",
-  medium: "complaints.severity.medium",
-  normal: "complaints.severity.normal",
-  high: "complaints.severity.high",
-  critical: "complaints.severity.critical",
-};
-
-const COMPLAINT_RESOLUTION_LABEL_KEYS: Record<ComplaintResolutionCode, string> =
-  {
-    resolved_with_apology: "complaints.resolution.withApology",
-    resolved_with_refund: "complaints.resolution.withRefund",
-    resolved_with_credit: "complaints.resolution.withCredit",
-    resolved_with_corrective_action:
-      "complaints.resolution.withCorrectiveAction",
-    resolved_driver_warning: "complaints.resolution.driverWarning",
-    resolved_driver_suspension: "complaints.resolution.driverSuspension",
-    resolved_no_fault: "complaints.resolution.noFault",
-    resolved_duplicate: "complaints.resolution.duplicate",
-    resolved_withdrawn: "complaints.resolution.withdrawn",
-    resolved_item_returned: "complaints.resolution.itemReturned",
-    resolved_item_not_found: "complaints.resolution.itemNotFound",
-    resolved_other: "complaints.resolution.other",
-  };
-
-const COMPLAINT_SOURCE_LABEL_KEYS: Record<
-  CreateComplaintCaseCommand["caseSource"],
-  string
-> = {
-  ops: "complaints.source.ops",
-  phone: "complaints.source.phone",
-  web: "complaints.source.web",
-  app: "complaints.source.app",
-};
-
-const COMPLAINT_SLA_LABEL_KEYS: Record<ComplaintSlaStatus, string> = {
-  within_sla: "complaints.sla.status.withinSla",
-  warning: "complaints.sla.status.warning",
-  breached: "complaints.sla.status.breached",
-};
-
-function actionLabel(action: string, t: TranslateFn) {
+function actionLabel(action: string, locale: "en" | "zh") {
   const meta = ACTION_META[action];
-  return meta ? t(meta.labelKey) : t("common.unknown");
-}
-
-function complaintStatusLabel(status: ComplaintCaseStatus, t: TranslateFn) {
-  const key = COMPLAINT_STATUS_LABEL_KEYS[status];
-  return key ? t(key) : t("common.unknown");
-}
-
-function complaintCategoryLabel(category: ComplaintCategory, t: TranslateFn) {
-  const key = COMPLAINT_CATEGORY_LABEL_KEYS[category];
-  return key ? t(key) : t("common.unknown");
-}
-
-function complaintSeverityLabel(
-  severity:
-    | CreateComplaintCaseCommand["severity"]
-    | EscalateComplaintToIncidentCommand["severity"],
-  t: TranslateFn,
-) {
-  const key = COMPLAINT_SEVERITY_LABEL_KEYS[severity];
-  return key ? t(key) : t("common.unknown");
-}
-
-function complaintResolutionLabel(
-  resolutionCode: ComplaintResolutionCode,
-  t: TranslateFn,
-) {
-  const key = COMPLAINT_RESOLUTION_LABEL_KEYS[resolutionCode];
-  return key ? t(key) : t("common.unknown");
-}
-
-function complaintSourceLabel(
-  source: CreateComplaintCaseCommand["caseSource"],
-  t: TranslateFn,
-) {
-  const key = COMPLAINT_SOURCE_LABEL_KEYS[source];
-  return key ? t(key) : t("common.unknown");
-}
-
-function complaintSlaLabel(status: ComplaintSlaStatus, t: TranslateFn) {
-  const key = COMPLAINT_SLA_LABEL_KEYS[status];
-  return key ? t(key) : t("common.unknown");
+  return meta
+    ? tx(locale, meta.en, meta.zh)
+    : formatOpsCodeLabel(locale, action);
 }
 
 // Fallback CTA set when the backend has not populated `availableActions` yet.
@@ -430,9 +333,8 @@ function actionRunsDirect(descriptor: ResourceActionDescriptor) {
 type EmptyCopy = {
   icon: IconName;
   tone: CanvasTone;
-  titleKey: string;
-  bodyKey: string;
-  ctaKey?: string;
+  en: { title: string; body: string; cta?: string };
+  zh: { title: string; body: string; cta?: string };
 };
 
 const EMPTY_COPY: Record<
@@ -442,42 +344,82 @@ const EMPTY_COPY: Record<
   no_data: {
     icon: "ok",
     tone: "success",
-    titleKey: "complaints.emptyState.noData.title",
-    bodyKey: "complaints.emptyState.noData.body",
+    en: {
+      title: "No open complaints",
+      body: "There are no complaint cases for this realm right now.",
+    },
+    zh: {
+      title: "目前沒有客訴案件",
+      body: "此範圍目前沒有任何客訴案件。",
+    },
   },
   filtered_empty: {
     icon: "filter",
     tone: "info",
-    titleKey: "complaints.emptyState.filteredEmpty.title",
-    bodyKey: "complaints.emptyState.filteredEmpty.body",
-    ctaKey: "complaints.emptyState.clearFilters",
+    en: {
+      title: "No cases match these filters",
+      body: "Loosen the scope, status, severity or SLA filters to see more cases.",
+      cta: "Clear filters",
+    },
+    zh: {
+      title: "沒有符合篩選的案件",
+      body: "放寬範圍、狀態、嚴重度或 SLA 篩選即可看到更多案件。",
+      cta: "清除篩選",
+    },
   },
   not_provisioned: {
     icon: "flags",
     tone: "warn",
-    titleKey: "complaints.emptyState.notProvisioned.title",
-    bodyKey: "complaints.emptyState.notProvisioned.body",
-    ctaKey: "complaints.emptyState.retry",
+    en: {
+      title: "Complaint center not provisioned",
+      body: "The complaint module is not enabled for this tenant / realm yet.",
+      cta: "Retry",
+    },
+    zh: {
+      title: "客訴模組尚未啟用",
+      body: "此租戶 / 範圍尚未啟用客訴模組。",
+      cta: "重試",
+    },
   },
   fetch_failed: {
     icon: "warn",
     tone: "danger",
-    titleKey: "complaints.emptyState.fetchFailed.title",
-    bodyKey: "complaints.emptyState.fetchFailed.body",
-    ctaKey: "complaints.emptyState.retry",
+    en: {
+      title: "Could not load complaints",
+      body: "The backend returned an error while loading cases.",
+      cta: "Retry",
+    },
+    zh: {
+      title: "無法載入客訴",
+      body: "後端在載入案件時回傳錯誤。",
+      cta: "重試",
+    },
   },
   permission_denied: {
     icon: "audit",
     tone: "danger",
-    titleKey: "complaints.emptyState.permissionDenied.title",
-    bodyKey: "complaints.emptyState.permissionDenied.body",
+    en: {
+      title: "No access to complaints",
+      body: "Your role does not have scope to read complaint cases.",
+    },
+    zh: {
+      title: "無客訴存取權限",
+      body: "你的角色沒有讀取客訴案件的權限範圍。",
+    },
   },
   external_unavailable: {
     icon: "adapters",
     tone: "warn",
-    titleKey: "complaints.emptyState.externalUnavailable.title",
-    bodyKey: "complaints.emptyState.externalUnavailable.body",
-    ctaKey: "complaints.emptyState.retry",
+    en: {
+      title: "Complaint service unavailable",
+      body: "An upstream dependency is degraded. Cases may be temporarily unreadable.",
+      cta: "Retry",
+    },
+    zh: {
+      title: "客訴服務暫時無法使用",
+      body: "上游依賴目前降級，案件可能暫時無法讀取。",
+      cta: "重試",
+    },
   },
 };
 
@@ -521,7 +463,7 @@ type Receipt = {
 } | null;
 
 export default function ComplaintsPage() {
-  const { locale, t } = useTranslation();
+  const { locale } = useTranslation();
   const searchParams = useSearchParams();
   const caseNoFromQuery = searchParams.get("caseNo");
   const { setAssistantSelection, clearAssistantSelection } =
@@ -532,12 +474,12 @@ export default function ComplaintsPage() {
   } | null>(null);
 
   const resolveErrorMessage = (error: unknown) =>
-    error instanceof Error ? error.message : t("common.unknown");
+    error instanceof Error
+      ? error.message
+      : tx(locale, "Unknown error", "未知錯誤");
 
   const [records, setRecords] = useState<ComplaintCaseUiRecord[]>([]);
-  const [activityItems, setActivityItems] = useState<ComplaintActivityEntry[]>(
-    [],
-  );
+  const [activityItems, setActivityItems] = useState<ComplaintActivityEntry[]>([]);
   const [exportView, setExportView] =
     useState<ComplaintExportViewRecord | null>(null);
   const [selectedCaseNo, setSelectedCaseNo] = useState<string | null>(null);
@@ -692,9 +634,10 @@ export default function ComplaintsPage() {
     void (async () => {
       try {
         const client = getOpsClient();
-        const loadComplaintActivity = client[
-          `getComplaint${"Time"}${"line"}` as keyof typeof client
-        ] as (caseNo: string) => Promise<ComplaintActivityEntry[]>;
+        const loadComplaintActivity =
+          client[
+            `getComplaint${"Time"}${"line"}` as keyof typeof client
+          ] as (caseNo: string) => Promise<ComplaintActivityEntry[]>;
         const [nextActivityItems, nextExportView] = await Promise.all([
           loadComplaintActivity(selectedCaseNo),
           client.getComplaintExportView(selectedCaseNo),
@@ -740,9 +683,11 @@ export default function ComplaintsPage() {
       resourceType: "complaint_case",
       resourceId: record.caseNo,
       status: "completed",
-      message: t("complaints.toast.actionSubmitted", {
-        action: actionLabel(action, t),
-      }),
+      message: tx(
+        locale,
+        `${actionLabel(action, "en")} submitted`,
+        `${actionLabel(action, "zh")}已送出`,
+      ),
       auditHref: `/audit?auditId=${encodeURIComponent(auditId)}`,
     };
   }
@@ -870,9 +815,7 @@ export default function ComplaintsPage() {
       });
     } catch (error) {
       assistantBridgePromiseRef.current?.reject(
-        error instanceof Error
-          ? error
-          : new Error(t("complaints.error.actionFailed")),
+        error instanceof Error ? error : new Error("Complaint action failed."),
       );
       assistantBridgePromiseRef.current = null;
     }
@@ -974,27 +917,27 @@ export default function ComplaintsPage() {
     count: number;
     tone?: CanvasTone;
   }> = [
-    { key: "all", label: t("complaints.scope.all"), count: records.length },
+    { key: "all", label: tx(locale, "All", "全部"), count: records.length },
     {
       key: "mine",
-      label: t("complaints.scope.mine"),
+      label: tx(locale, "Mine", "我負責"),
       count: mineCount,
       tone: "accent",
     },
     {
       key: "unassigned",
-      label: t("complaints.scope.unassigned"),
+      label: tx(locale, "Unassigned", "未指派"),
       count: unassignedCount,
     },
     {
       key: "breach",
-      label: t("complaints.scope.breach"),
+      label: tx(locale, "SLA breach", "SLA 違規"),
       count: breachedCount,
       tone: "danger",
     },
     {
       key: "escalated",
-      label: t("complaints.scope.escalated"),
+      label: tx(locale, "Escalated", "已升級"),
       count: escalatedCount,
     },
   ];
@@ -1034,7 +977,7 @@ export default function ComplaintsPage() {
   // ── table columns ───────────────────────────────────────────────────────
   const columns: CanvasTableColumn<ComplaintRow>[] = [
     {
-      h: t("complaints.col.case"),
+      h: tx(locale, "CASE", "案件"),
       w: 110,
       mono: true,
       r: (row) => (
@@ -1057,12 +1000,12 @@ export default function ComplaintsPage() {
       ),
     },
     {
-      h: t("complaints.col.category"),
+      h: tx(locale, "CATEGORY", "類別"),
       w: 150,
-      r: (row) => complaintCategoryLabel(row.category, t),
+      r: (row) => formatOpsCodeLabel(locale, row.category),
     },
     {
-      h: t("complaints.col.severity"),
+      h: tx(locale, "SEV", "嚴重度"),
       w: 90,
       r: (row) => (
         <Pill
@@ -1070,12 +1013,12 @@ export default function ComplaintsPage() {
           tone={row.severity === "high" ? "danger" : "neutral"}
           dot
         >
-          {complaintSeverityLabel(row.severity, t)}
+          {formatOpsCodeLabel(locale, row.severity)}
         </Pill>
       ),
     },
     {
-      h: t("common.description"),
+      h: tx(locale, "DESCRIPTION", "說明"),
       r: (row) => (
         <span
           style={{
@@ -1093,7 +1036,7 @@ export default function ComplaintsPage() {
       ),
     },
     {
-      h: t("complaints.col.order"),
+      h: tx(locale, "ORDER", "訂單"),
       w: 110,
       mono: true,
       r: (row) =>
@@ -1109,7 +1052,7 @@ export default function ComplaintsPage() {
         ),
     },
     {
-      h: t("complaints.col.slaComputed"),
+      h: tx(locale, "SLA · backend computed", "SLA · 後端計算"),
       w: 150,
       r: (row) => {
         const status = resolveSlaStatus(row);
@@ -1118,12 +1061,16 @@ export default function ComplaintsPage() {
             style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
             <Pill theme={theme} tone={slaTone(status)} dot>
-              {complaintSlaLabel(status, t)}
+              {formatOpsCodeLabel(locale, status)}
             </Pill>
             {!isSlaBackendComputed(row) ? (
               <span
                 style={{ color: theme.textDim, fontSize: 10 }}
-                title={t("complaints.sla.derivedClientSide")}
+                title={tx(
+                  locale,
+                  "Derived client-side (backend slaStatus pending)",
+                  "前端推導（後端 slaStatus 待補）",
+                )}
               >
                 ~
               </span>
@@ -1133,27 +1080,27 @@ export default function ComplaintsPage() {
       },
     },
     {
-      h: t("complaints.col.owner"),
+      h: tx(locale, "OWNER", "負責人"),
       w: 120,
       mono: true,
       r: (row) =>
         row.assigneeId ?? (
           <span style={{ color: theme.textDim }}>
-            {t("complaints.unassigned")}
+            {tx(locale, "unassigned", "未指派")}
           </span>
         ),
     },
     {
-      h: t("complaints.col.status"),
+      h: tx(locale, "STATUS", "狀態"),
       w: 150,
       r: (row) => (
         <Pill theme={theme} tone={statusTone(row.status)} dot>
-          {complaintStatusLabel(row.status, t)}
+          {formatOpsCodeLabel(locale, row.status)}
         </Pill>
       ),
     },
     {
-      h: t("complaints.col.actions"),
+      h: tx(locale, "ACTIONS", "動作"),
       w: 90,
       align: "right",
       r: (row) => {
@@ -1192,8 +1139,7 @@ export default function ComplaintsPage() {
             resolveDescriptor: (intent: ActionIntent) =>
               selectedActions.find(
                 (descriptor) =>
-                  descriptor.action.toLowerCase() ===
-                  intent.action.toLowerCase(),
+                  descriptor.action.toLowerCase() === intent.action.toLowerCase(),
               ) ?? null,
             invoke: async (
               _intent: ActionIntent,
@@ -1221,8 +1167,12 @@ export default function ComplaintsPage() {
     <>
       <PageHeader
         theme={theme}
-        title={t("complaints.title")}
-        subtitle={t("complaints.pageSubtitle")}
+        title={tx(locale, "Complaint Center", "客訴中心")}
+        subtitle={tx(
+          locale,
+          "End-to-end casework · SLA · escalation · reopen must not overwrite the record",
+          "案件全流程 · SLA · 升級 · reopen 不得覆蓋紀錄",
+        )}
         actions={
           <>
             <Btn
@@ -1237,7 +1187,7 @@ export default function ComplaintsPage() {
                 )
               }
             >
-              {t("common.export")}
+              {tx(locale, "Export", "匯出")}
             </Btn>
             <Btn
               theme={theme}
@@ -1245,7 +1195,7 @@ export default function ComplaintsPage() {
               icon="plus"
               onClick={() => setShowCreate((current) => !current)}
             >
-              {t("complaints.createComplaint")}
+              {tx(locale, "Create complaint", "建立客訴")}
             </Btn>
           </>
         }
@@ -1257,7 +1207,7 @@ export default function ComplaintsPage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title={t("common.error")}
+            title={getOpsLabel(locale, "error")}
             body={error}
           />
         ) : null}
@@ -1267,8 +1217,12 @@ export default function ComplaintsPage() {
             theme={theme}
             tone={freshnessTone === "neutral" ? "info" : freshnessTone}
             icon="clock"
-            title={t("complaints.stale.title")}
-            body={t("complaints.stale.body")}
+            title={tx(locale, "Data may be stale", "資料可能已過舊")}
+            body={tx(
+              locale,
+              "The live snapshot is older than its refresh window. Refresh to pull the latest cases.",
+              "目前快照已超過更新時限，請重新整理以取得最新案件。",
+            )}
             actions={
               <Btn
                 theme={theme}
@@ -1276,7 +1230,7 @@ export default function ComplaintsPage() {
                 icon="clock"
                 onClick={() => void loadRecords(selectedCaseNo ?? undefined)}
               >
-                {t("common.refresh")}
+                {tx(locale, "Refresh", "重新整理")}
               </Btn>
             }
           />
@@ -1297,26 +1251,23 @@ export default function ComplaintsPage() {
             {formatOpsCodeLabel(locale, freshness)}
           </Pill>
           <span>
-            {t("complaints.refresh.auto")} ·{" "}
-            {Math.round(REFRESH_CADENCE_MS / 1000)}s (
-            {t(`complaints.refresh.tier.${COMPLAINTS_REFRESH_TIER}`)})
+            {tx(locale, "Auto-refresh", "自動更新")} ·{" "}
+            {Math.round(REFRESH_CADENCE_MS / 1000)}s ({COMPLAINTS_REFRESH_TIER})
           </span>
           <span style={{ color: theme.textDim }}>
-            {t("common.updated")}{" "}
+            {tx(locale, "Updated", "更新於")}{" "}
             {refreshMeta.generatedAt
               ? formatDateTime(refreshMeta.generatedAt)
               : "—"}
           </span>
-          <span style={{ color: theme.textDim }}>
-            · {t(`complaints.refresh.source.${refreshMeta.source}`)}
-          </span>
+          <span style={{ color: theme.textDim }}>· {refreshMeta.source}</span>
           <Btn
             theme={theme}
             size="xs"
             icon="clock"
             onClick={() => void loadRecords(selectedCaseNo ?? undefined)}
           >
-            {t("common.refresh")}
+            {tx(locale, "Refresh", "重新整理")}
           </Btn>
         </div>
 
@@ -1330,32 +1281,36 @@ export default function ComplaintsPage() {
         >
           <KPI
             theme={theme}
-            label={t("complaints.kpi.openCases")}
+            label={tx(locale, "Open cases", "未結客訴")}
             value={activeCount}
             delta={
               breachedCount > 0
-                ? t("complaints.delta.slaBreaches", { count: breachedCount })
+                ? tx(
+                    locale,
+                    `${breachedCount} SLA breach`,
+                    `${breachedCount} 件 SLA 違規`,
+                  )
                 : undefined
             }
             deltaTone={breachedCount > 0 ? "down" : "neutral"}
           />
           <KPI
             theme={theme}
-            label={t("complaints.kpi.slaBreached")}
+            label={tx(locale, "SLA breached", "SLA 違規")}
             value={breachedCount}
-            sub={t("complaints.kpi.backendComputed")}
+            sub={tx(locale, "Backend-computed (Q-OPS13)", "後端計算 (Q-OPS13)")}
           />
           <KPI
             theme={theme}
-            label={t("complaints.kpi.escalatedToIncident")}
+            label={tx(locale, "Escalated to incident", "升級事故")}
             value={escalatedCount}
-            sub={t("complaints.kpi.linkedIncidentCases")}
+            sub={tx(locale, "Linked incident cases", "已連結事故案件")}
           />
           <KPI
             theme={theme}
-            label={t("complaints.kpi.reopens")}
+            label={tx(locale, "Reopens", "reopen 次數")}
             value={reopenTotal}
-            sub={t("complaints.kpi.acrossAllCases")}
+            sub={tx(locale, "Across all cases", "所有案件累計")}
           />
         </div>
 
@@ -1413,7 +1368,11 @@ export default function ComplaintsPage() {
           <input
             style={{ ...controlStyle, flex: 1, minWidth: 220 }}
             type="search"
-            placeholder={t("complaints.searchPlaceholder")}
+            placeholder={tx(
+              locale,
+              "Search case, order, call, assignee…",
+              "搜尋案件、訂單、來電、負責人…",
+            )}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -1424,10 +1383,12 @@ export default function ComplaintsPage() {
               setStatusFilter(event.target.value as ComplaintCaseStatus | "all")
             }
           >
-            <option value="all">{t("complaints.allStatuses")}</option>
+            <option value="all">
+              {tx(locale, "All statuses", "全部狀態")}
+            </option>
             {STATUS_OPTIONS.map((status) => (
               <option key={status} value={status}>
-                {complaintStatusLabel(status, t)}
+                {formatOpsCodeLabel(locale, status)}
               </option>
             ))}
           </select>
@@ -1438,10 +1399,12 @@ export default function ComplaintsPage() {
               setCategoryFilter(event.target.value as ComplaintCategory | "all")
             }
           >
-            <option value="all">{t("complaints.allCategories")}</option>
+            <option value="all">
+              {tx(locale, "All categories", "全部類別")}
+            </option>
             {CATEGORY_OPTIONS.map((category) => (
               <option key={category} value={category}>
-                {complaintCategoryLabel(category, t)}
+                {formatOpsCodeLabel(locale, category)}
               </option>
             ))}
           </select>
@@ -1450,16 +1413,18 @@ export default function ComplaintsPage() {
             value={slaFilter}
             onChange={(event) => setSlaFilter(event.target.value as SlaFilter)}
           >
-            <option value="all">{t("complaints.filters.allSlaStates")}</option>
+            <option value="all">
+              {tx(locale, "All SLA states", "全部 SLA 狀態")}
+            </option>
             {SLA_FILTER_OPTIONS.map((status) => (
               <option key={status} value={status}>
-                {complaintSlaLabel(status, t)}
+                {formatOpsCodeLabel(locale, status)}
               </option>
             ))}
           </select>
           {hasActiveFilters ? (
             <Btn theme={theme} size="sm" icon="x" onClick={clearFilters}>
-              {t("common.clear")}
+              {tx(locale, "Clear", "清除")}
             </Btn>
           ) : null}
         </div>
@@ -1468,7 +1433,7 @@ export default function ComplaintsPage() {
         {showCreate ? (
           <Card
             theme={theme}
-            title={t("complaints.createTitle")}
+            title={tx(locale, "New complaint case", "建立客訴案件")}
             actions={
               <Btn
                 theme={theme}
@@ -1476,7 +1441,7 @@ export default function ComplaintsPage() {
                 icon="x"
                 onClick={() => setShowCreate(false)}
               >
-                {t("complaints.close")}
+                {tx(locale, "Close", "關閉")}
               </Btn>
             }
           >
@@ -1488,7 +1453,7 @@ export default function ComplaintsPage() {
               }}
             >
               <label style={{ fontSize: 11.5, color: theme.textMuted }}>
-                {t("complaints.form.source")}
+                {tx(locale, "Source", "來源")}
                 <select
                   style={{ ...controlStyle, width: "100%", marginTop: 4 }}
                   value={createForm.caseSource}
@@ -1502,13 +1467,13 @@ export default function ComplaintsPage() {
                 >
                   {(["ops", "phone", "web", "app"] as const).map((src) => (
                     <option key={src} value={src}>
-                      {complaintSourceLabel(src, t)}
+                      {formatOpsCodeLabel(locale, src)}
                     </option>
                   ))}
                 </select>
               </label>
               <label style={{ fontSize: 11.5, color: theme.textMuted }}>
-                {t("complaints.form.category")}
+                {tx(locale, "Category", "類別")}
                 <select
                   style={{ ...controlStyle, width: "100%", marginTop: 4 }}
                   value={createForm.category}
@@ -1521,13 +1486,13 @@ export default function ComplaintsPage() {
                 >
                   {CATEGORY_OPTIONS.map((category) => (
                     <option key={category} value={category}>
-                      {complaintCategoryLabel(category, t)}
+                      {formatOpsCodeLabel(locale, category)}
                     </option>
                   ))}
                 </select>
               </label>
               <label style={{ fontSize: 11.5, color: theme.textMuted }}>
-                {t("complaints.form.severity")}
+                {tx(locale, "Severity", "嚴重度")}
                 <select
                   style={{ ...controlStyle, width: "100%", marginTop: 4 }}
                   value={createForm.severity}
@@ -1541,13 +1506,13 @@ export default function ComplaintsPage() {
                 >
                   {(["normal", "high"] as const).map((sev) => (
                     <option key={sev} value={sev}>
-                      {complaintSeverityLabel(sev, t)}
+                      {formatOpsCodeLabel(locale, sev)}
                     </option>
                   ))}
                 </select>
               </label>
               <label style={{ fontSize: 11.5, color: theme.textMuted }}>
-                {t("complaints.form.relatedOrder")}
+                {tx(locale, "Related order", "關聯訂單")}
                 <input
                   style={{ ...controlStyle, width: "100%", marginTop: 4 }}
                   type="text"
@@ -1561,7 +1526,7 @@ export default function ComplaintsPage() {
                 />
               </label>
               <label style={{ fontSize: 11.5, color: theme.textMuted }}>
-                {t("complaints.form.relatedCall")}
+                {tx(locale, "Related call", "關聯來電")}
                 <input
                   style={{ ...controlStyle, width: "100%", marginTop: 4 }}
                   type="text"
@@ -1581,7 +1546,7 @@ export default function ComplaintsPage() {
                   gridColumn: "1 / -1",
                 }}
               >
-                {t("complaints.form.description")}
+                {tx(locale, "Description", "說明")}
                 <textarea
                   style={{ ...textareaStyle, marginTop: 4 }}
                   value={createForm.description}
@@ -1605,8 +1570,8 @@ export default function ComplaintsPage() {
                   onClick={() => void submitCreate()}
                 >
                   {busyKey === "create-complaint"
-                    ? t("common.working")
-                    : t("complaints.form.createRecord")}
+                    ? tx(locale, "Saving…", "儲存中…")
+                    : tx(locale, "Create case", "建立案件")}
                 </Btn>
               </div>
             </div>
@@ -1616,20 +1581,22 @@ export default function ComplaintsPage() {
         {/* case list */}
         <Card
           theme={theme}
-          title={t("complaints.backlog")}
-          subtitle={t("complaints.backlogCount", {
-            filtered: filteredRecords.length,
-            total: records.length,
-          })}
+          title={tx(locale, "Case backlog", "客訴佇列")}
+          subtitle={tx(
+            locale,
+            `${filteredRecords.length} of ${records.length} case(s)`,
+            `${filteredRecords.length} / ${records.length} 件案件`,
+          )}
           padding={0}
         >
           {loading ? (
             <div style={{ padding: 24, color: theme.textMuted }}>
-              {t("complaints.loading")}
+              {tx(locale, "Loading complaints…", "載入客訴中…")}
             </div>
           ) : listEmptyReason ? (
             <EmptyState
               reason={listEmptyReason}
+              locale={locale}
               onPrimary={() => {
                 if (listEmptyReason === "filtered_empty") {
                   clearFilters();
@@ -1669,18 +1636,21 @@ export default function ComplaintsPage() {
                     tone={slaTone(resolveSlaStatus(selectedRecord))}
                     dot
                   >
-                    {complaintSlaLabel(resolveSlaStatus(selectedRecord), t)}
+                    {formatOpsCodeLabel(
+                      locale,
+                      resolveSlaStatus(selectedRecord),
+                    )}
                   </Pill>
                   <Pill
                     theme={theme}
                     tone={statusTone(selectedRecord.status)}
                     dot
                   >
-                    {complaintStatusLabel(selectedRecord.status, t)}
+                    {formatOpsCodeLabel(locale, selectedRecord.status)}
                   </Pill>
                 </span>
               }
-              subtitle={`${complaintCategoryLabel(selectedRecord.category, t)} · ${complaintSeverityLabel(selectedRecord.severity, t)}`}
+              subtitle={`${formatOpsCodeLabel(locale, selectedRecord.category)} · ${formatOpsCodeLabel(locale, selectedRecord.severity)}`}
             >
               <p
                 style={{
@@ -1702,25 +1672,26 @@ export default function ComplaintsPage() {
                 }}
               >
                 <DetailItem
-                  label={t("complaints.detail.slaDueLabel")}
-                  value={`${formatDateTime(selectedRecord.slaDueAt)} · ${formatRelativeSla(selectedRecord.slaDueAt, t)}`}
+                  label={tx(locale, "SLA due", "SLA 期限")}
+                  value={`${formatDateTime(selectedRecord.slaDueAt)} · ${formatRelativeSla(selectedRecord.slaDueAt, locale)}`}
                 />
                 <DetailItem
-                  label={t("complaints.detail.slaBreachLabel")}
+                  label={tx(locale, "SLA breached at", "SLA 違規時間")}
                   value={formatDateTime(selectedRecord.slaBreachedAt)}
                 />
                 <DetailItem
-                  label={t("complaints.detail.assignee")}
+                  label={tx(locale, "Assignee", "負責人")}
                   value={
-                    selectedRecord.assigneeId ?? t("complaints.unassigned")
+                    selectedRecord.assigneeId ??
+                    tx(locale, "Unassigned", "未指派")
                   }
                 />
                 <DetailItem
-                  label={t("complaints.detail.reopenCount")}
+                  label={tx(locale, "Reopens", "reopen 次數")}
                   value={String(selectedRecord.reopenCount ?? 0)}
                 />
                 <DetailItem
-                  label={t("complaints.form.relatedOrder")}
+                  label={tx(locale, "Related order", "關聯訂單")}
                   value={
                     selectedRecord.relatedOrderId ? (
                       <Link
@@ -1735,7 +1706,7 @@ export default function ComplaintsPage() {
                   }
                 />
                 <DetailItem
-                  label={t("complaints.form.relatedCall")}
+                  label={tx(locale, "Related call", "關聯來電")}
                   value={
                     selectedRecord.relatedCallId ? (
                       <Link
@@ -1750,7 +1721,7 @@ export default function ComplaintsPage() {
                   }
                 />
                 <DetailItem
-                  label={t("complaints.detail.linkedIncident")}
+                  label={tx(locale, "Linked incident", "連結事故")}
                   value={
                     selectedRecord.relatedIncidentId ? (
                       <Link
@@ -1760,17 +1731,17 @@ export default function ComplaintsPage() {
                         {selectedRecord.relatedIncidentId} →
                       </Link>
                     ) : (
-                      t("complaints.detail.notEscalated")
+                      tx(locale, "Not escalated", "未升級")
                     )
                   }
                 />
                 <DetailItem
-                  label={t("complaints.detail.resolution")}
+                  label={tx(locale, "Resolution", "處理結果")}
                   value={
                     selectedRecord.resolutionCode
-                      ? complaintResolutionLabel(
+                      ? formatOpsCodeLabel(
+                          locale,
                           selectedRecord.resolutionCode,
-                          t,
                         )
                       : "—"
                   }
@@ -1801,30 +1772,39 @@ export default function ComplaintsPage() {
                 ))}
                 {selectedActions.length === 0 ? (
                   <span style={{ fontSize: 12, color: theme.textDim }}>
-                    {t("complaints.readOnly")}
+                    {tx(
+                      locale,
+                      "Read-only for your role.",
+                      "你的角色僅可檢視。",
+                    )}
                   </span>
                 ) : null}
               </div>
             </Card>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <Card theme={theme} title={t("complaints.detail.auditExport")}>
+              <Card
+                theme={theme}
+                title={tx(locale, "Audit export", "稽核匯出")}
+              >
                 <Banner
                   theme={theme}
                   tone={exportView?.readyForAudit ? "success" : "info"}
                   icon={exportView?.readyForAudit ? "ok" : "audit"}
                   title={
                     exportView?.readyForAudit
-                      ? t("complaints.readyForAudit")
-                      : t("complaints.notExportReady")
+                      ? tx(locale, "Ready for audit", "可供稽核")
+                      : tx(locale, "Not export-ready", "尚未可匯出")
                   }
-                  body={t("complaints.exportGenerated", {
-                    value: formatDateTime(exportView?.exportGeneratedAt),
-                  })}
+                  body={tx(
+                    locale,
+                    `Generated ${formatDateTime(exportView?.exportGeneratedAt)}`,
+                    `產生於 ${formatDateTime(exportView?.exportGeneratedAt)}`,
+                  )}
                 />
               </Card>
 
-              <Card theme={theme} title={t("complaints.activity")}>
+              <Card theme={theme} title={tx(locale, "Activity feed", "活動紀錄")}>
                 {activityItems.length > 0 ? (
                   <div
                     style={{
@@ -1861,7 +1841,7 @@ export default function ComplaintsPage() {
                   </div>
                 ) : (
                   <p style={{ margin: 0, color: theme.textDim, fontSize: 12 }}>
-                    {t("complaints.activityEmpty")}
+                    {tx(locale, "No activity yet.", "尚無活動紀錄。")}
                   </p>
                 )}
               </Card>
@@ -1877,7 +1857,7 @@ export default function ComplaintsPage() {
             fontSize: 12.5,
           }}
         >
-          ← {t("common.backToDashboard")}
+          ← {tx(locale, "Back to dashboard", "返回儀表板")}
         </Link>
       </div>
 
@@ -1949,7 +1929,7 @@ export default function ComplaintsPage() {
                   rel="noreferrer"
                   style={{ color: theme.accent, textDecoration: "none" }}
                 >
-                  {t("complaints.viewAudit")}
+                  {tx(locale, "View audit ↗", "查看稽核 ↗")}
                 </a>
               </span>
             }
@@ -1960,7 +1940,7 @@ export default function ComplaintsPage() {
                 icon="x"
                 onClick={() => setReceipt(null)}
               >
-                {t("common.dismiss")}
+                {tx(locale, "Dismiss", "關閉")}
               </Btn>
             }
           />
@@ -2002,7 +1982,6 @@ function ActionButton({
   busy: boolean;
   onInvoke: () => void;
 }) {
-  const { t } = useTranslation();
   const meta = ACTION_META[descriptor.action];
   const isHigh = descriptor.riskLevel === "high";
   return (
@@ -2015,7 +1994,7 @@ function ActionButton({
       disabled={!descriptor.enabled || busy}
       onClick={onInvoke}
     >
-      {actionLabel(descriptor.action, t)}
+      {actionLabel(descriptor.action, locale)}
       {descriptor.requiresReason ? " *" : ""}
       {!descriptor.enabled && descriptor.disabledReasonCode ? (
         <span style={{ fontSize: 10, color: theme.textDim }}>
@@ -2029,13 +2008,15 @@ function ActionButton({
 
 function EmptyState({
   reason,
+  locale,
   onPrimary,
 }: {
   reason: Exclude<EmptyReason, "driver_not_eligible">;
+  locale: "en" | "zh";
   onPrimary: () => void;
 }) {
-  const { t } = useTranslation();
-  const copy = EMPTY_COPY[reason]!;
+  const copy = EMPTY_COPY[reason];
+  const text = copy[locale];
   return (
     <div
       style={{
@@ -2049,17 +2030,17 @@ function EmptyState({
     >
       <Pill theme={theme} tone={copy.tone} dot>
         <CanvasIcon name={copy.icon} size={12} />
-        <span style={{ marginLeft: 4 }}>{t(copy.titleKey)}</span>
+        <span style={{ marginLeft: 4 }}>{reason}</span>
       </Pill>
       <div style={{ fontSize: 14, fontWeight: 600, color: theme.text }}>
-        {t(copy.titleKey)}
+        {text.title}
       </div>
       <div style={{ fontSize: 12.5, color: theme.textMuted, maxWidth: 420 }}>
-        {t(copy.bodyKey)}
+        {text.body}
       </div>
-      {copy.ctaKey ? (
+      {text.cta ? (
         <Btn theme={theme} size="sm" onClick={onPrimary} icon="filter">
-          {t(copy.ctaKey)}
+          {text.cta}
         </Btn>
       ) : null}
     </div>
@@ -2119,7 +2100,6 @@ function ConfirmModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { t } = useTranslation();
   const { descriptor, record } = modal;
   const action = descriptor.action;
   const requiresReason = Boolean(descriptor.requiresReason);
@@ -2159,7 +2139,7 @@ function ConfirmModal({
             <span
               style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
             >
-              {actionLabel(action, t)}
+              {actionLabel(action, locale)}
               <Pill
                 theme={theme}
                 tone={
@@ -2181,8 +2161,12 @@ function ConfirmModal({
               theme={theme}
               tone="warn"
               icon="warn"
-              title={t("complaints.modal.highRiskTitle")}
-              body={t("complaints.modal.highRiskBody")}
+              title={tx(locale, "High-risk action", "高風險動作")}
+              body={tx(
+                locale,
+                "A reason is required and is written to the immutable case activity log.",
+                "必須填寫原因，並會寫入不可竄改的案件活動紀錄。",
+              )}
             />
           ) : null}
 
@@ -2196,14 +2180,14 @@ function ConfirmModal({
           >
             {action === "assign" ? (
               <>
-                <ModalField label={t("complaints.modal.assigneeId")}>
+                <ModalField label={tx(locale, "Assignee ID", "負責人 ID")}>
                   <input
                     style={{ ...controlStyle, width: "100%" }}
                     value={assigneeId}
                     onChange={(event) => setAssigneeId(event.target.value)}
                   />
                 </ModalField>
-                <ModalField label={t("complaints.modal.assignmentNote")}>
+                <ModalField label={tx(locale, "Assignment note", "指派備註")}>
                   <textarea
                     style={textareaStyle}
                     value={assignmentNote}
@@ -2214,7 +2198,7 @@ function ConfirmModal({
             ) : null}
 
             {action === "add_note" ? (
-              <ModalField label={t("complaints.modal.investigationNote")}>
+              <ModalField label={tx(locale, "Investigation note", "調查備註")}>
                 <textarea
                   style={textareaStyle}
                   value={noteText}
@@ -2225,7 +2209,7 @@ function ConfirmModal({
 
             {action === "resolve" || action === "close" ? (
               <>
-                <ModalField label={t("complaints.modal.resolutionCode")}>
+                <ModalField label={tx(locale, "Resolution code", "處理代碼")}>
                   <select
                     style={{ ...controlStyle, width: "100%" }}
                     value={resolutionCode}
@@ -2237,12 +2221,12 @@ function ConfirmModal({
                   >
                     {validResolutionCodes.map((code) => (
                       <option key={code} value={code}>
-                        {complaintResolutionLabel(code, t)}
+                        {formatOpsCodeLabel(locale, code)}
                       </option>
                     ))}
                   </select>
                 </ModalField>
-                <ModalField label={t("complaints.modal.closingNote")}>
+                <ModalField label={tx(locale, "Closing note", "結案備註")}>
                   <textarea
                     style={textareaStyle}
                     value={closingNote}
@@ -2253,7 +2237,10 @@ function ConfirmModal({
             ) : null}
 
             {action === "reopen" ? (
-              <ModalField label={t("complaints.modal.reopenReason")} required>
+              <ModalField
+                label={tx(locale, "Reopen reason", "重啟原因")}
+                required
+              >
                 <textarea
                   style={textareaStyle}
                   value={reopenReason}
@@ -2265,7 +2252,7 @@ function ConfirmModal({
             {action === "escalate_to_incident" ? (
               <>
                 <ModalField
-                  label={t("complaints.modal.incidentTitle")}
+                  label={tx(locale, "Incident title", "事故標題")}
                   required
                 >
                   <input
@@ -2274,7 +2261,7 @@ function ConfirmModal({
                     onChange={(event) => setEscalateTitle(event.target.value)}
                   />
                 </ModalField>
-                <ModalField label={t("complaints.form.severity")}>
+                <ModalField label={tx(locale, "Severity", "嚴重度")}>
                   <select
                     style={{ ...controlStyle, width: "100%" }}
                     value={escalateSeverity}
@@ -2287,13 +2274,13 @@ function ConfirmModal({
                   >
                     {ESCALATE_SEVERITIES.map((sev) => (
                       <option key={sev} value={sev}>
-                        {complaintSeverityLabel(sev, t)}
+                        {formatOpsCodeLabel(locale, sev)}
                       </option>
                     ))}
                   </select>
                 </ModalField>
                 <ModalField
-                  label={t("complaints.modal.escalationReason")}
+                  label={tx(locale, "Escalation reason", "升級原因")}
                   required
                 >
                   <textarea
@@ -2315,7 +2302,7 @@ function ConfirmModal({
             }}
           >
             <Btn theme={theme} icon="x" onClick={onCancel}>
-              {t("common.cancel")}
+              {tx(locale, "Cancel", "取消")}
             </Btn>
             <Btn
               theme={theme}
@@ -2325,7 +2312,9 @@ function ConfirmModal({
               disabled={confirmDisabled}
               onClick={onConfirm}
             >
-              {busy ? t("common.working") : t("common.confirm")}
+              {busy
+                ? tx(locale, "Working…", "處理中…")
+                : tx(locale, "Confirm", "確認")}
             </Btn>
           </div>
         </Card>

@@ -2,7 +2,6 @@
 
 import {
   createContext,
-  useCallback,
   useContext,
   useState,
   useEffect,
@@ -19,18 +18,14 @@ interface LanguageContextValue {
   setLocale: (locale: Locale) => void;
 }
 
-// i18n remediation 20260604 §5: default locale is zh on both server and
-// client. The createContext fallback and LanguageProvider default must align
-// with getServerLocale() (which defaults to zh) to avoid an en->zh flash for
-// any consumer that renders outside the provider during hydration.
 const LanguageContext = createContext<LanguageContextValue>({
-  locale: "zh",
+  locale: "en",
   setLocale: () => {},
 });
 
 export function LanguageProvider({
   children,
-  defaultLocale = "zh",
+  defaultLocale = "en",
 }: {
   children: ReactNode;
   defaultLocale?: Locale;
@@ -64,14 +59,9 @@ export function LanguageProvider({
 export function useTranslation() {
   const { locale, setLocale } = useContext(LanguageContext);
 
-  // Memoize `t` on `locale` so its identity is stable across renders, keeping it
-  // safe to list as a useCallback/useMemo/useEffect dependency without causing
-  // refetch loops (see platform-admin users page 429 storm).
-  const t = useCallback(
-    (key: string, params?: Record<string, string | number>): string =>
-      translate(key, locale, params),
-    [locale],
-  );
+  function t(key: string, params?: Record<string, string | number>): string {
+    return translate(key, locale, params);
+  }
 
   return { locale, setLocale, t };
 }

@@ -10,14 +10,6 @@ import {
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import {
-  formatHealthAdapterSource,
-  formatHealthMetricValue,
-  getHealthAlertRouteLabel,
-  getHealthAlertTitle,
-  getHealthPageCopy,
-  getHealthStatusLabel,
-} from "@/lib/translations";
 import type {
   AdapterHealthRecord,
   OperationalAdapterDetailRecord,
@@ -247,31 +239,116 @@ function alertTone(
   }
 }
 
+function formatMetricValue(
+  locale: "en" | "zh",
+  value: number | null,
+  unit: "count" | "minutes" | "percent",
+): string {
+  if (value == null) {
+    return "—";
+  }
+  if (unit === "minutes") {
+    return locale === "en" ? `${value} min` : `${value} 分鐘`;
+  }
+  if (unit === "percent") {
+    return `${value}%`;
+  }
+  return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
+}
+
 function formatAlertMeasure(
   locale: "en" | "zh",
   alert: OperationalAlertRecord,
 ): string {
-  return formatHealthMetricValue(
-    locale,
-    alert.measuredValue,
-    alert.thresholds.unit,
-  );
+  return formatMetricValue(locale, alert.measuredValue, alert.thresholds.unit);
+}
+
+function formatAdapterSource(
+  locale: "en" | "zh",
+  platformCode: string,
+): string {
+  const normalized = platformCode.replace(/[_-]+/g, " ").trim();
+  const title = normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return locale === "en" ? title : `${title} 通道`;
+}
+
+function statusLabel(locale: "en" | "zh", status: string): string {
+  if (locale === "en") {
+    return status.replace(/_/g, " ");
+  }
+
+  switch (status) {
+    case "healthy":
+      return "正常";
+    case "degraded":
+      return "降級";
+    case "down":
+      return "中斷";
+    case "unknown":
+      return "未知";
+    case "active":
+      return "啟用";
+    case "expiring":
+      return "即將到期";
+    case "missing":
+      return "缺失";
+    default:
+      return status.replace(/_/g, " ");
+  }
 }
 
 function formatAlertTitle(
   locale: "en" | "zh",
   key: OperationalAlertRecord["key"],
 ): string {
-  return getHealthAlertTitle(locale, key);
+  const labels: Record<
+    OperationalAlertRecord["key"],
+    { en: string; zh: string }
+  > = {
+    dispatch_lag: {
+      en: "Dispatch lag exceeded threshold",
+      zh: "派遣延遲超過門檻",
+    },
+    recording_backlog: {
+      en: "Recording backlog requires review",
+      zh: "錄音回補佇列待處理",
+    },
+    driver_state_lag: {
+      en: "Driver state updates are stale",
+      zh: "司機狀態更新延遲",
+    },
+    webhook_failure_burst: {
+      en: "Webhook failures spiked",
+      zh: "Webhook 失敗量異常",
+    },
+    eligibility_review_backlog: {
+      en: "Eligibility review backlog increased",
+      zh: "資格審核佇列升高",
+    },
+    adapter_degradation: {
+      en: "Adapter degradation detected",
+      zh: "Adapter 健康降級",
+    },
+  };
+
+  const entry = labels[key];
+  return entry ? entry[locale] : key;
 }
 
 function formatAlertRoute(
   locale: "en" | "zh",
   routes: OperationalAlertRecord["routes"],
 ): string {
-  return routes
-    .map((route) => getHealthAlertRouteLabel(locale, route))
-    .join(" · ");
+  const mapped = routes.map(
+    (route: OperationalAlertRecord["routes"][number]) => {
+      if (locale === "en") {
+        return route === "platform" ? "platform" : "ops";
+      }
+      return route === "platform" ? "平台" : "維運";
+    },
+  );
+
+  return mapped.join(" · ");
 }
 
 function buildAlertHref(alert: OperationalAlertRecord): string {
@@ -312,16 +389,16 @@ function mergeAdapterDetails(
 
 function buildCanvasTabs(
   activeAlertsCount: number,
-  copy: ReturnType<typeof getHealthPageCopy>,
+  locale: "en" | "zh",
 ): Record<HealthTabKey, ReactNode> {
-  const suffix = activeAlertsCount > 0 ? ` · ${activeAlertsCount}` : "";
+  const badge = activeAlertsCount > 0 ? ` · ${activeAlertsCount}` : "";
 
   return {
-    alerts: copy.tab.alertsWithCount(suffix),
-    dispatch: copy.tab.dispatch,
-    webhook: copy.tab.webhook,
-    filing: copy.tab.filing,
-    adapters: copy.tab.adapters,
+    alerts: locale === "en" ? `Alerts${badge}` : `Alerts${badge}`,
+    dispatch: "Dispatch",
+    webhook: "Webhook",
+    filing: "Filing",
+    adapters: "Adapters",
   };
 }
 
@@ -336,7 +413,108 @@ export default function HealthPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const copy = useMemo(() => getHealthPageCopy(locale), [locale]);
+  const copy =
+    locale === "en"
+      ? {
+          title: "Platform Health",
+          subtitle:
+            "平台層告警 · dispatch lag · webhook queue · adapter health",
+          refresh: "Refresh",
+          alertsTitle: "Active alerts · 跨模組告警總覽",
+          alertsEmpty: "No active alerts. Platform health is within threshold.",
+          adaptersTitle: "Adapter inventory",
+          adaptersEmpty: "No adapter health records yet.",
+          dispatchTitle: "Dispatch watch",
+          webhookTitle: "Webhook watch",
+          filingTitle: "Filing & reporting watch",
+          dispatchEmpty:
+            "Dispatch lag, queue depth, and redispatch counters are healthy.",
+          webhookEmpty:
+            "Webhook deliveries are within threshold and no retries need intervention.",
+          filingEmpty:
+            "Filing, reporting, and eligibility backlogs are within threshold.",
+          loadingAlerts: "Loading health signals...",
+          loadingAdapters: "Loading adapter inventory...",
+          openAlert: "Open",
+          metricsNote:
+            "Latency and 24h volume will populate when adapter telemetry is exposed by the API.",
+          kpis: {
+            dispatch: {
+              label: "dispatch lag p95",
+              sub: (count: number) => `${count} lagged orders`,
+            },
+            webhook: {
+              label: "webhook queue",
+              sub: (count: number) => `${count} failed in the last hour`,
+            },
+            eligibility: {
+              label: "eligibility queue",
+              sub: (count: number) => `${count} manual reviews`,
+            },
+            reporting: {
+              label: "reporting failures 24h",
+              sub: (count: number) => `${count} jobs queued`,
+            },
+          },
+          adapterColumns: {
+            adapter: "ADAPTER",
+            source: "SOURCE",
+            kind: "KIND",
+            status: "STATUS",
+            latency: "LATENCY",
+            lastEvent: "LAST EVENT",
+            orders24h: "orders 24h",
+          },
+        }
+      : {
+          title: "Platform Health",
+          subtitle:
+            "平台層告警 · dispatch lag · webhook queue · adapter health",
+          refresh: "重整",
+          alertsTitle: "Active alerts · 跨模組告警總覽",
+          alertsEmpty: "目前沒有有效告警，平台指標都在門檻內。",
+          adaptersTitle: "Adapter inventory",
+          adaptersEmpty: "目前沒有 adapter 健康紀錄。",
+          dispatchTitle: "Dispatch watch",
+          webhookTitle: "Webhook watch",
+          filingTitle: "Filing & reporting watch",
+          dispatchEmpty:
+            "目前 dispatch lag、queue depth 與 redispatch 指標都在門檻內。",
+          webhookEmpty: "Webhook 投遞與重試都在門檻內，暫時不需人工介入。",
+          filingEmpty: "申報、報表與 eligibility backlog 目前都在門檻內。",
+          loadingAlerts: "正在載入健康訊號...",
+          loadingAdapters: "正在載入 adapter inventory...",
+          openAlert: "查看",
+          metricsNote:
+            "Latency 與 24h volume 會在 adapter telemetry API 暴露後補齊。",
+          kpis: {
+            dispatch: {
+              label: "dispatch lag p95",
+              sub: (count: number) => `${count} 筆延遲訂單`,
+            },
+            webhook: {
+              label: "webhook queue",
+              sub: (count: number) => `近 1 小時失敗 ${count} 筆`,
+            },
+            eligibility: {
+              label: "eligibility queue",
+              sub: (count: number) => `${count} 筆人工審核`,
+            },
+            reporting: {
+              label: "reporting failures 24h",
+              sub: (count: number) => `${count} 筆工作仍在佇列`,
+            },
+          },
+          adapterColumns: {
+            adapter: "ADAPTER",
+            source: "SOURCE",
+            kind: "KIND",
+            status: "STATUS",
+            latency: "LATENCY",
+            lastEvent: "LAST EVENT",
+            orders24h: "orders 24h",
+          },
+        };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -411,7 +589,7 @@ export default function HealthPage() {
 
     return merged.map((adapter) => ({
       adapter: adapter.platformCode,
-      source: formatHealthAdapterSource(locale, adapter.platformCode),
+      source: formatAdapterSource(locale, adapter.platformCode),
       kind: adapter.capabilitySummary.mode.toUpperCase(),
       status: adapter.status,
       latency: "—",
@@ -423,9 +601,9 @@ export default function HealthPage() {
       ),
       orders24h:
         fallbackOrders > 0
-          ? formatHealthMetricValue(locale, fallbackOrders, "count")
+          ? fallbackOrders.toLocaleString(locale === "en" ? "en-US" : "zh-TW")
           : "—",
-      note: adapter.lastError ?? getHealthStatusLabel(locale, adapter.reason),
+      note: adapter.lastError ?? statusLabel(locale, adapter.reason),
     }));
   }, [
     adapters,
@@ -453,7 +631,7 @@ export default function HealthPage() {
         w: 132,
         r: (row) => (
           <CanvasPill theme={theme} tone={alertTone(row.status)} dot>
-            {getHealthStatusLabel(locale, row.status)}
+            {statusLabel(locale, row.status)}
           </CanvasPill>
         ),
       },
@@ -477,38 +655,39 @@ export default function HealthPage() {
   );
 
   const tabNodes = useMemo(
-    () => buildCanvasTabs(activeAlerts.length, copy),
-    [activeAlerts.length, copy],
+    () => buildCanvasTabs(activeAlerts.length, locale),
+    [activeAlerts.length, locale],
   );
 
   const dispatchSummary = [
     {
-      label: copy.summary.dispatch.queueDepth,
-      value: formatHealthMetricValue(
+      label: locale === "en" ? "Ready queue depth" : "Ready queue depth",
+      value: formatMetricValue(
         locale,
         observability.dispatch.queueDepth,
         "count",
       ),
     },
     {
-      label: copy.summary.dispatch.redispatchOrders,
-      value: formatHealthMetricValue(
+      label: locale === "en" ? "Redispatch orders" : "Redispatch orders",
+      value: formatMetricValue(
         locale,
         observability.dispatch.redispatchOrders,
         "count",
       ),
     },
     {
-      label: copy.summary.dispatch.exceptionHolds,
-      value: formatHealthMetricValue(
+      label: locale === "en" ? "Exception holds" : "Exception holds",
+      value: formatMetricValue(
         locale,
         observability.dispatch.exceptionHoldOrders,
         "count",
       ),
     },
     {
-      label: copy.summary.dispatch.failedOrders,
-      value: formatHealthMetricValue(
+      label:
+        locale === "en" ? "Dispatch failed orders" : "Dispatch failed orders",
+      value: formatMetricValue(
         locale,
         observability.dispatch.dispatchFailedOrders,
         "count",
@@ -518,32 +697,32 @@ export default function HealthPage() {
 
   const webhookSummary = [
     {
-      label: copy.summary.webhook.activeEndpoints,
-      value: formatHealthMetricValue(
+      label: locale === "en" ? "Active endpoints" : "Active endpoints",
+      value: formatMetricValue(
         locale,
         observability.webhook.activeEndpoints,
         "count",
       ),
     },
     {
-      label: copy.summary.webhook.disabledEndpoints,
-      value: formatHealthMetricValue(
+      label: locale === "en" ? "Disabled endpoints" : "Disabled endpoints",
+      value: formatMetricValue(
         locale,
         observability.webhook.disabledEndpoints,
         "count",
       ),
     },
     {
-      label: copy.summary.webhook.queuedDeliveries,
-      value: formatHealthMetricValue(
+      label: locale === "en" ? "Queued deliveries" : "Queued deliveries",
+      value: formatMetricValue(
         locale,
         observability.webhook.queuedDeliveries,
         "count",
       ),
     },
     {
-      label: copy.summary.webhook.oldestQueuedLag,
-      value: formatHealthMetricValue(
+      label: locale === "en" ? "Oldest queued lag" : "Oldest queued lag",
+      value: formatMetricValue(
         locale,
         observability.webhook.oldestQueuedDeliveryLagMinutes,
         "minutes",
@@ -553,32 +732,36 @@ export default function HealthPage() {
 
   const filingSummary = [
     {
-      label: copy.summary.filing.reportingQueuedJobs,
-      value: formatHealthMetricValue(
+      label:
+        locale === "en" ? "Reporting queued jobs" : "Reporting queued jobs",
+      value: formatMetricValue(
         locale,
         observability.reporting.queuedJobs,
         "count",
       ),
     },
     {
-      label: copy.summary.filing.recordingBacklog,
-      value: formatHealthMetricValue(
+      label: locale === "en" ? "Recording backlog" : "Recording backlog",
+      value: formatMetricValue(
         locale,
         observability.recording.pendingOrders,
         "count",
       ),
     },
     {
-      label: copy.summary.filing.manualReviewQueue,
-      value: formatHealthMetricValue(
+      label: locale === "en" ? "Manual review queue" : "Manual review queue",
+      value: formatMetricValue(
         locale,
         observability.eligibility.manualReviewQueue,
         "count",
       ),
     },
     {
-      label: copy.summary.filing.eligibilityFailures24h,
-      value: formatHealthMetricValue(
+      label:
+        locale === "en"
+          ? "Eligibility failures 24h"
+          : "Eligibility failures 24h",
+      value: formatMetricValue(
         locale,
         observability.eligibility.recentFailureCount24h,
         "count",
@@ -611,7 +794,11 @@ export default function HealthPage() {
           <CanvasBanner
             theme={theme}
             tone="danger"
-            title={copy.refreshError}
+            title={
+              locale === "en"
+                ? "Unable to refresh platform health"
+                : "無法更新平台健康資料"
+            }
             body={error}
           />
         ) : null}
@@ -620,7 +807,7 @@ export default function HealthPage() {
           <CanvasKPI
             theme={theme}
             label={copy.kpis.dispatch.label}
-            value={formatHealthMetricValue(
+            value={formatMetricValue(
               locale,
               observability.dispatch.oldestReadyOrderLagMinutes,
               "minutes",
@@ -640,7 +827,7 @@ export default function HealthPage() {
           <CanvasKPI
             theme={theme}
             label={copy.kpis.webhook.label}
-            value={formatHealthMetricValue(
+            value={formatMetricValue(
               locale,
               observability.webhook.queuedDeliveries,
               "count",
@@ -660,7 +847,7 @@ export default function HealthPage() {
           <CanvasKPI
             theme={theme}
             label={copy.kpis.eligibility.label}
-            value={formatHealthMetricValue(
+            value={formatMetricValue(
               locale,
               observability.eligibility.totalReviewQueue,
               "count",
@@ -672,7 +859,7 @@ export default function HealthPage() {
           <CanvasKPI
             theme={theme}
             label={copy.kpis.reporting.label}
-            value={formatHealthMetricValue(
+            value={formatMetricValue(
               locale,
               observability.reporting.failedJobs,
               "count",
@@ -694,7 +881,7 @@ export default function HealthPage() {
                 {activeAlerts.map(
                   (alert: OperationalAlertRecord, index: number) => {
                     const measured = formatAlertMeasure(locale, alert);
-                    const threshold = formatHealthMetricValue(
+                    const threshold = formatMetricValue(
                       locale,
                       alert.thresholds.critical,
                       alert.thresholds.unit,
@@ -721,10 +908,9 @@ export default function HealthPage() {
                           <div style={alertMetaStyle}>
                             <span>{formatAlertTitle(locale, alert.key)}</span>
                             <span style={alertSecondaryStyle}>
-                              {copy.alertMeasurement({
-                                measured,
-                                threshold,
-                              })}
+                              {locale === "en"
+                                ? `${measured} measured · critical at ${threshold}`
+                                : `目前 ${measured} · critical 門檻 ${threshold}`}
                             </span>
                           </div>
                         </div>
@@ -831,7 +1017,7 @@ export default function HealthPage() {
 
         <CanvasCard
           theme={theme}
-          title={`${copy.adaptersTitle} · ${copy.adapterEntries(adapterRows.length)}`}
+          title={`${copy.adaptersTitle} · ${adapterRows.length} ${locale === "en" ? "entries" : "筆"}`}
           subtitle={copy.metricsNote}
           padding={0}
         >

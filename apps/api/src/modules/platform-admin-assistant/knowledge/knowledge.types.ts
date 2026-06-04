@@ -14,14 +14,11 @@
  */
 export type KnowledgeSourceCategory =
   | "assistant_plan"
-  | "architecture_plan"
   | "design_handoff"
   | "design_canvas"
   | "ui_contract"
   | "topology"
-  | "audit"
-  | "runbook"
-  | "state_machine";
+  | "audit";
 
 /** A single approved source path the retrieval layer is allowed to index. */
 export interface ApprovedSource {

@@ -407,36 +407,49 @@ function buildDispatchDetailHref({
 }
 
 function getBoardMeta(board: DispatchBoard, locale: Locale) {
+  const zh = locale === "zh";
   switch (board) {
     case "ready":
       return {
-        label: t("dispatch.page.board.ready.label", locale),
-        description: t("dispatch.page.board.ready.description", locale),
+        label: zh ? "Ready queue" : "Ready queue",
+        description: zh
+          ? "待派送與廣播中的自營訂單。"
+          : "Owned orders waiting for assignment or active matching.",
       };
     case "assigned":
       return {
-        label: t("dispatch.page.board.assigned.label", locale),
-        description: t("dispatch.page.board.assigned.description", locale),
+        label: zh ? "Assigned" : "Assigned",
+        description: zh
+          ? "已指派司機、進行中的工作項目。"
+          : "Driver-assigned and in-trip work items.",
       };
     case "exception":
       return {
-        label: t("dispatch.page.board.exception.label", locale),
-        description: t("dispatch.page.board.exception.description", locale),
+        label: zh ? "Exception hold" : "Exception hold",
+        description: zh
+          ? "例外保留，需要先清除 gate 才能回到 queue。"
+          : "Held work items that must clear an exception before requeue.",
       };
     case "no_supply":
       return {
-        label: t("dispatch.page.board.noSupply.label", locale),
-        description: t("dispatch.page.board.noSupply.description", locale),
+        label: zh ? "No eligible supply" : "No eligible supply",
+        description: zh
+          ? "無合格供給，需要人工延展或升級。"
+          : "Orders with no eligible supply and active intervention.",
       };
     case "governance":
       return {
-        label: t("dispatch.page.board.governance.label", locale),
-        description: t("dispatch.page.board.governance.description", locale),
+        label: zh ? "Governance blocked" : "Governance blocked",
+        description: zh
+          ? "等待 override / approval request 的治理阻塞。"
+          : "Override requests blocked on governance approvals.",
       };
     case "forwarded":
       return {
-        label: t("dispatch.page.board.forwarded.label", locale),
-        description: t("dispatch.page.board.forwarded.description", locale),
+        label: zh ? "Forwarded mirror" : "Forwarded mirror",
+        description: zh
+          ? "外部平台鏡像、adapter 與 reconciliation 觀察。"
+          : "Forwarded order mirrors with adapter and reconciliation context.",
       };
   }
 }
@@ -468,21 +481,18 @@ function formatDurationSince(locale: Locale, value: string | null | undefined) {
   }
   const totalMinutes = Math.max(0, Math.floor(diffMs / 60000));
   if (totalMinutes < 60) {
-    return t("dispatch.page.duration.minutes", locale, {
-      count: totalMinutes,
-    });
+    return locale === "zh" ? `${totalMinutes} 分` : `${totalMinutes}m`;
   }
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  return t("dispatch.page.duration.hoursMinutes", locale, {
-    hours,
-    minutes,
-  });
+  return locale === "zh"
+    ? `${hours} 小時 ${minutes} 分`
+    : `${hours}h ${minutes}m`;
 }
 
 function formatWindow(order: OwnedOrderRecord, locale: Locale) {
   if (!order.reservationWindowStart || !order.reservationWindowEnd) {
-    return t("dispatch.page.realtime", locale);
+    return locale === "zh" ? "即時" : "realtime";
   }
   return `${formatDateTime(locale, order.reservationWindowStart)} → ${formatDateTime(locale, order.reservationWindowEnd)}`;
 }
@@ -622,7 +632,7 @@ function formatForwardedWindow(order: ForwardedOrderRecord, locale: Locale) {
     return formatDateTime(locale, start);
   }
 
-  return t("dispatch.page.realtime", locale);
+  return locale === "zh" ? "即時" : "realtime";
 }
 
 function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
@@ -763,9 +773,10 @@ function getMismatchSummary(
     0;
   if (mismatchCount > 0) {
     return {
-      label: t("dispatch.page.mismatchCount", locale, {
-        count: mismatchCount,
-      }),
+      label:
+        locale === "zh"
+          ? `${mismatchCount} 筆不一致`
+          : `${mismatchCount} mismatch`,
       tone: "warn" as CanvasTone,
     };
   }
@@ -797,57 +808,58 @@ function getMismatchSummary(
 }
 
 function resolveActionLabel(action: string, locale: Locale) {
+  const zh = locale === "zh";
   switch (action) {
     case "assign":
     case "assign_dispatch":
     case "dispatch_order":
-      return t("dispatch.page.action.assignCandidate", locale);
+      return zh ? "指派候選司機" : "Assign candidate";
     case "release":
     case "release_driver":
     case "reassign_dispatch":
-      return t("dispatch.page.action.releaseReassign", locale);
+      return zh ? "釋放 / 改派司機" : "Release / reassign driver";
     case "redispatch":
     case "redispatch_order":
     case "redispatch_with_reason":
-      return t("dispatch.page.action.redispatch", locale);
+      return zh ? "重新派送" : "Redispatch";
     case "cancel":
     case "cancel_owned_order":
-      return t("dispatch.page.action.cancelOrder", locale);
+      return zh ? "取消訂單" : "Cancel order";
     case "manual_fare_override":
     case "fare_override":
     case "request_fare_override":
-      return t("dispatch.page.action.requestFareOverride", locale);
+      return zh ? "申請車資覆寫" : "Request fare override";
     case "resolve_hold":
     case "resolve_exception_hold":
-      return t("dispatch.page.action.resolveHold", locale);
+      return zh ? "解除保留" : "Resolve hold";
     case "request_exception_override":
-      return t("dispatch.page.action.requestOverride", locale);
+      return zh ? "申請例外覆核" : "Request override";
     case "approve_exception_override":
-      return t("dispatch.page.action.approveOverride", locale);
+      return zh ? "核准 override" : "Approve override";
     case "reject_exception_override":
-      return t("dispatch.page.action.rejectOverride", locale);
+      return zh ? "拒絕 override" : "Reject override";
     case "escalate_incident":
     case "createIncidentFromDispatchException":
-      return t("dispatch.page.action.escalateIncident", locale);
+      return zh ? "升級為事件" : "Escalate to incident";
     case "extend_search":
-      return t("dispatch.page.action.extendSearch", locale);
+      return zh ? "延展搜尋" : "Extend search";
     case "cancel_no_supply":
-      return t("dispatch.page.action.cancelNoSupply", locale);
+      return zh ? "取消 no-supply 訂單" : "Cancel no-supply order";
     case "resolve_no_supply":
-      return t("dispatch.page.action.resolveNoSupply", locale);
+      return zh ? "人工處理 no-supply" : "Resolve no-supply";
     case "jump_approval_request":
-      return t("dispatch.page.action.openApprovalRequest", locale);
+      return zh ? "前往 approval request" : "Open approval request";
     case "trigger_reconciliation":
     case "complete_forwarder_reconciliation":
-      return t("dispatch.page.action.triggerReconciliation", locale);
+      return zh ? "觸發 reconciliation" : "Trigger reconciliation";
     case "engage_manual_fallback":
-      return t("dispatch.page.action.engageManualFallback", locale);
+      return zh ? "啟動 manual fallback" : "Engage manual fallback";
     case "force_refresh":
     case "sync_forwarded_order_status":
     case "mark_forwarder_sync_failed":
-      return t("dispatch.page.action.forceRefresh", locale);
+      return zh ? "強制刷新" : "Force refresh";
     case "inspect_adapter":
-      return t("dispatch.page.action.inspectAdapter", locale);
+      return zh ? "查看 adapter ↗" : "Inspect adapter ↗";
     default:
       return action.replace(/_/g, " ");
   }
@@ -1071,58 +1083,64 @@ function renderEmptyState(
   selectedService: OwnedServiceFilter,
   selectedFacet: ForwardedFacetFilter,
 ) {
+  const zh = locale === "zh";
   const mapping: Record<
     EmptyReason,
     { title: string; description: string; tone: CanvasTone; icon: string }
   > = {
     no_data: {
-      title: t("dispatch.page.empty.noData.title", locale),
-      description: t("dispatch.page.empty.noData.description", locale),
+      title: zh ? "目前沒有工作項目" : "No work items yet",
+      description: zh
+        ? "這個 board 目前沒有資料，等待新的 dispatch 狀態流入。"
+        : "This board is currently empty and waiting for new dispatch activity.",
       tone: "neutral",
       icon: "○",
     },
     not_provisioned: {
-      title: t("dispatch.page.empty.notProvisioned.title", locale),
-      description: t("dispatch.page.empty.notProvisioned.description", locale),
+      title: zh ? "尚未完成佈建" : "Not provisioned",
+      description: zh
+        ? "此 board 需要先完成 adapter / integration 設定後才會有資料。"
+        : "This board requires provisioning before it can return live data.",
       tone: "info",
       icon: "◇",
     },
     fetch_failed: {
-      title: t("dispatch.page.empty.fetchFailed.title", locale),
-      description: t("dispatch.page.empty.fetchFailed.description", locale),
+      title: zh ? "讀取失敗" : "Failed to load",
+      description: zh
+        ? "資料請求失敗。請使用 refresh，或查看 degraded banner。"
+        : "The data request failed. Refresh the board or inspect degraded services.",
       tone: "danger",
       icon: "!",
     },
     permission_denied: {
-      title: t("dispatch.page.empty.permissionDenied.title", locale),
-      description: t(
-        "dispatch.page.empty.permissionDenied.description",
-        locale,
-      ),
+      title: zh ? "沒有權限" : "Permission denied",
+      description: zh
+        ? "目前角色沒有此 board 所需的權限。"
+        : "The current role does not have access to this board.",
       tone: "warn",
       icon: "⛔",
     },
     external_unavailable: {
-      title: t("dispatch.page.empty.externalUnavailable.title", locale),
-      description: t(
-        "dispatch.page.empty.externalUnavailable.description",
-        locale,
-      ),
+      title: zh ? "外部系統不可用" : "External platform unavailable",
+      description: zh
+        ? "外部 adapter / callback 無法提供資料，請改走 manual fallback。"
+        : "External adapter data is unavailable. Use fallback paths while recovery is in progress.",
       tone: "warn",
       icon: "↗",
     },
     driver_not_eligible: {
-      title: t("dispatch.page.empty.driverNotEligible.title", locale),
-      description: t(
-        "dispatch.page.empty.driverNotEligible.description",
-        locale,
-      ),
+      title: zh ? "目前不可派送" : "Not eligible right now",
+      description: zh
+        ? "此狀態通常不適用於 ops console，但後端回傳了 driver eligibility 限制。"
+        : "This reason is usually driver-specific, but the backend reported an eligibility restriction.",
       tone: "info",
       icon: "△",
     },
     filtered_empty: {
-      title: t("dispatch.page.empty.filteredEmpty.title", locale),
-      description: t("dispatch.page.empty.filteredEmpty.description", locale),
+      title: zh ? "篩選後無結果" : "No matches for current filters",
+      description: zh
+        ? "這個 board 有資料，但目前的 service / facet 篩選沒有命中。"
+        : "The board has data, but nothing matches the current filters.",
       tone: "accent",
       icon: "⌕",
     },
@@ -1155,7 +1173,9 @@ function renderEmptyState(
       title={content.title}
       description={`${content.description} ${
         board === "forwarded" && emptyState.reason === "external_unavailable"
-          ? t("dispatch.page.empty.externalUnavailable.followup", locale)
+          ? zh
+            ? "請改查 adapter health 與 reconciliation queue。"
+            : "Check adapter health and the reconciliation queue."
           : ""
       }`.trim()}
       icon={<span style={{ fontSize: 22 }}>{content.icon}</span>}
@@ -1171,7 +1191,7 @@ function renderEmptyState(
             style={{ textDecoration: "none" }}
           >
             <Btn theme={theme} variant="secondary" icon="arrow">
-              {t("dispatch.page.resetBoard", locale)}
+              {zh ? "重設 board" : "Reset board"}
             </Btn>
           </Link>
         </div>
@@ -1211,7 +1231,7 @@ function renderActionButton(
       <Btn theme={theme} variant="secondary">
         {action.label ??
           fallbackLabel ??
-          t("dispatch.page.action.unavailable", locale)}
+          (locale === "zh" ? "目前不可用" : "Unavailable")}
       </Btn>
     );
   }
@@ -1228,7 +1248,7 @@ function renderActionButton(
         variant={action.riskLevel === "high" ? "primary" : "secondary"}
         icon={action.external ? "ext" : "arrow"}
       >
-        {action.label ?? t("dispatch.page.action.open", locale)}
+        {action.label ?? (locale === "zh" ? "前往處理" : "Open")}
       </Btn>
     </Link>
   );
@@ -1251,13 +1271,15 @@ function renderBoardSignalBanner({
   boardCount: number;
   visibleCount: number;
 }) {
+  const zh = locale === "zh";
+
   if (board === "forwarded" && degradedAdapters.length > 0) {
     const inspectAdapter =
       pickPrimaryAction(selectedActions, ["inspect_adapter"]) ??
       ({
         action: "inspect_adapter",
         href: buildPlatformAdminHref("/adapter-registry"),
-        label: resolveActionLabel("inspect_adapter", locale),
+        label: zh ? "查看 adapter ↗" : "Inspect adapter ↗",
         riskLevel: "low",
         disabled: false,
         external: true,
@@ -1267,17 +1289,16 @@ function renderBoardSignalBanner({
         theme={theme}
         tone="warn"
         icon="warn"
-        title={t("dispatch.page.banner.forwardedDegraded.title", locale, {
-          platform: formatDispatchCode(
-            locale,
-            degradedAdapters[0]?.platformCode,
-            "Adapter",
-          ),
-        })}
-        body={t("dispatch.page.banner.forwardedDegraded.body", locale, {
-          visibleCount,
-          boardCount,
-        })}
+        title={
+          zh
+            ? `${formatDispatchCode(locale, degradedAdapters[0]?.platformCode, "Adapter")} 降級 · Forwarded mirror 受影響`
+            : `${formatDispatchCode(locale, degradedAdapters[0]?.platformCode, "Adapter")} degraded · forwarded mirror impacted`
+        }
+        body={
+          zh
+            ? `目前可見 ${visibleCount} / ${boardCount} 筆鏡像單；優先走 reconciliation / manual fallback。`
+            : `Showing ${visibleCount} / ${boardCount} mirror rows. Prioritize reconciliation and manual fallback.`
+        }
         actions={renderActionButton(inspectAdapter, locale)}
       />
     );
@@ -1304,10 +1325,11 @@ function renderBoardSignalBanner({
         tone={selectedRecord.status === "sync_failed" ? "danger" : "warn"}
         icon="warn"
         title={`${selectedRecord.mirrorOrderId} · ${formatDispatchCode(locale, selectedRecord.platformCode)}`}
-        body={t("dispatch.page.banner.forwardedSelected.body", locale, {
-          status: formatDispatchCode(locale, selectedRecord.status),
-          externalOrderId: selectedRecord.externalOrderId,
-        })}
+        body={
+          zh
+            ? `狀態 ${formatDispatchCode(locale, selectedRecord.status)}；外部單號 ${selectedRecord.externalOrderId}。`
+            : `Status ${formatDispatchCode(locale, selectedRecord.status)}; external order ${selectedRecord.externalOrderId}.`
+        }
         actions={renderActionButton(primary, locale)}
       />
     );
@@ -1320,8 +1342,16 @@ function renderBoardSignalBanner({
         theme={theme}
         tone="warn"
         icon="warn"
-        title={t("dispatch.page.banner.governance.title", locale)}
-        body={t("dispatch.page.banner.governance.body", locale, { title })}
+        title={
+          zh
+            ? "需平台審批 · /approval-requests"
+            : "Governance hold · /approval-requests"
+        }
+        body={
+          zh
+            ? `${title} 正等待 override / approval request。`
+            : `${title} is blocked on an override / approval request.`
+        }
         actions={renderActionButton(
           pickPrimaryAction(selectedActions, ["jump_approval_request"]),
           locale,
@@ -1334,18 +1364,19 @@ function renderBoardSignalBanner({
     const holdReason = formatDispatchCode(
       locale,
       selectedRecord.exceptionHold?.reasonCode,
-      t("common.unknown", locale),
+      locale === "zh" ? "未知" : "unknown",
     );
     return (
       <Banner
         theme={theme}
         tone="warn"
         icon="warn"
-        title={t("dispatch.page.banner.exception.title", locale)}
-        body={t("dispatch.page.banner.exception.body", locale, {
-          title,
-          reason: holdReason,
-        })}
+        title={zh ? "例外保留需先清除" : "Exception hold must be cleared"}
+        body={
+          zh
+            ? `${title} · hold 原因 ${holdReason}`
+            : `${title} · hold reason ${holdReason}`
+        }
         actions={renderActionButton(
           pickPrimaryAction(selectedActions, [
             "resolve_exception_hold",
@@ -1365,15 +1396,16 @@ function renderBoardSignalBanner({
         theme={theme}
         tone="danger"
         icon="warn"
-        title={t("dispatch.page.banner.noSupply.title", locale)}
-        body={t("dispatch.page.banner.noSupply.body", locale, {
-          title,
-          attempts: selectedRecord.dispatchAttemptCount,
-          reason: formatDispatchCode(
-            locale,
-            selectedRecord.lastDispatchFailureReason ?? "unknown",
-          ),
-        })}
+        title={
+          zh
+            ? "No eligible supply 需要人工介入"
+            : "No eligible supply needs intervention"
+        }
+        body={
+          zh
+            ? `${title} · 已嘗試 ${selectedRecord.dispatchAttemptCount} 次，最後原因 ${formatDispatchCode(locale, selectedRecord.lastDispatchFailureReason ?? "unknown")}。`
+            : `${title} · ${selectedRecord.dispatchAttemptCount} attempts, last reason ${formatDispatchCode(locale, selectedRecord.lastDispatchFailureReason ?? "unknown")}.`
+        }
         actions={renderActionButton(
           pickPrimaryAction(selectedActions, [
             "extend_search",
@@ -1407,12 +1439,15 @@ function renderBoardSignalBanner({
       tone={board === "assigned" ? "info" : "warn"}
       icon="warn"
       title={title}
-      body={t(
-        board === "assigned"
-          ? "dispatch.page.banner.default.assigned"
-          : "dispatch.page.banner.default.ready",
-        locale,
-      )}
+      body={
+        zh
+          ? board === "assigned"
+            ? "目前為已指派 / 行程進行中工作項目。"
+            : "目前為 ready queue 焦點工作項目。"
+          : board === "assigned"
+            ? "Current driver-assigned / in-trip work item."
+            : "Current ready-queue focus item."
+      }
       actions={renderActionButton(primary, locale)}
     />
   );
@@ -1424,8 +1459,12 @@ function renderActionList(actions: BoardActionContext[], locale: Locale) {
       <CanvasEmptyPanel
         theme={theme}
         density="compact"
-        title={t("dispatch.page.actions.emptyTitle", locale)}
-        description={t("dispatch.page.actions.emptyDescription", locale)}
+        title={locale === "zh" ? "目前沒有可用動作" : "No available actions"}
+        description={
+          locale === "zh"
+            ? "這個 work item 目前是 read-only，或後端尚未提供 `availableActions`。"
+            : "This work item is read-only, or the backend has not emitted `availableActions` yet."
+        }
       />
     );
   }
@@ -1470,7 +1509,9 @@ function renderActionList(actions: BoardActionContext[], locale: Locale) {
                     locale,
                     action.disabledReason ?? "disabled",
                   )
-                : t("dispatch.page.actions.available", locale)}
+                : locale === "zh"
+                  ? "由 availableActions 驅動的可執行 CTA。"
+                  : "CTA emitted from availableActions."}
             </div>
           </div>
         );
@@ -1502,7 +1543,7 @@ function renderInlineActionPills(
   if (actions.length === 0) {
     return (
       <span style={{ color: theme.textDim, fontSize: 11 }}>
-        {t("dispatch.page.actions.none", locale)}
+        {locale === "zh" ? "無動作" : "No actions"}
       </span>
     );
   }
@@ -1552,21 +1593,27 @@ function freshnessBanner(refresh: UiRefreshMetadata, locale: Locale) {
   if (refresh.dataFreshness === "fresh") {
     return null;
   }
+  const zh = locale === "zh";
   const tone = refresh.dataFreshness === "degraded" ? "warn" : "info";
   const title =
     refresh.dataFreshness === "stale"
-      ? t("dispatch.page.freshness.stale", locale)
-      : t("dispatch.page.freshness.degraded", locale);
+      ? zh
+        ? "資料已過期"
+        : "Dispatch snapshot is stale"
+      : zh
+        ? "資料新鮮度未知"
+        : "Dispatch freshness is degraded";
   return (
     <Banner
       theme={theme}
       tone={tone}
       icon="warn"
       title={title}
-      body={t("dispatch.page.freshness.body", locale, {
-        generatedAt: formatDateTime(locale, refresh.generatedAt),
-        source: formatDispatchCode(locale, refresh.source),
-      })}
+      body={
+        zh
+          ? `generatedAt ${formatDateTime(locale, refresh.generatedAt)} · source ${formatDispatchCode(locale, refresh.source)}`
+          : `generatedAt ${formatDateTime(locale, refresh.generatedAt)} · source ${formatDispatchCode(locale, refresh.source)}`
+      }
     />
   );
 }
@@ -1575,6 +1622,7 @@ function healthBanner(health: UiHealthEnvelope | null, locale: Locale) {
   if (!health || health.status === "healthy") {
     return null;
   }
+  const zh = locale === "zh";
   const firstService = health.degradedServices[0];
   return (
     <Banner
@@ -1583,8 +1631,12 @@ function healthBanner(health: UiHealthEnvelope | null, locale: Locale) {
       icon="warn"
       title={
         health.status === "down"
-          ? t("dispatch.page.health.down", locale)
-          : t("dispatch.page.health.degraded", locale)
+          ? zh
+            ? "Dispatch 依賴服務中斷"
+            : "Dispatch dependency is down"
+          : zh
+            ? "Dispatch 依賴服務降級"
+            : "Dispatch dependency is degraded"
       }
       body={
         firstService
@@ -1811,6 +1863,8 @@ export default async function DispatchPage({
         });
 
   const boardMeta = getBoardMeta(board, locale);
+  const zh = locale === "zh";
+
   const selectedRecord: BoardRecord | null =
     board === "forwarded"
       ? (visibleForwardedOrders.find(
@@ -1925,30 +1979,15 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      {
-        h: t("dispatch.page.table.mirror", locale),
-        k: "mirror",
-        w: 170,
-        mono: true,
-      },
-      { h: t("dispatch.page.table.source", locale), k: "source", w: 140 },
-      {
-        h: t("dispatch.page.table.externalOrder", locale),
-        k: "externalOrderId",
-        w: 170,
-        mono: true,
-      },
-      { h: t("dispatch.page.table.route", locale), k: "route", w: 360 },
-      {
-        h: t("dispatch.page.table.window", locale),
-        k: "window",
-        w: 132,
-        mono: true,
-      },
-      { h: t("dispatch.page.table.status", locale), k: "status", w: 160 },
-      { h: t("dispatch.page.table.adapter", locale), k: "adapter", w: 170 },
-      { h: t("dispatch.page.table.mismatch", locale), k: "mismatch", w: 190 },
-      { h: t("dispatch.page.table.actions", locale), k: "actions", w: 260 },
+      { h: "MIRROR", k: "mirror", w: 170, mono: true },
+      { h: "SOURCE", k: "source", w: 140 },
+      { h: "EXTERNAL ORDER", k: "externalOrderId", w: 170, mono: true },
+      { h: "PICKUP → DROP", k: "route", w: 360 },
+      { h: "WINDOW", k: "window", w: 132, mono: true },
+      { h: "STATUS", k: "status", w: 160 },
+      { h: "ADAPTER", k: "adapter", w: 170 },
+      { h: "MISMATCH", k: "mismatch", w: 190 },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "assigned") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2015,28 +2054,13 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      {
-        h: t("dispatch.page.table.order", locale),
-        k: "order",
-        w: 150,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.tenant", locale),
-        k: "tenant",
-        w: 160,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.driverVehicle", locale),
-        k: "driver",
-        w: 170,
-        mono: true,
-      },
-      { h: t("dispatch.page.table.taskState", locale), k: "taskState", w: 150 },
-      { h: t("dispatch.page.table.eta", locale), k: "eta", w: 90, mono: true },
-      { h: t("dispatch.page.table.gate", locale), k: "gate", w: 180 },
-      { h: t("dispatch.page.table.actions", locale), k: "actions", w: 260 },
+      { h: "ORDER", k: "order", w: 150, mono: true },
+      { h: "TENANT", k: "tenant", w: 160, mono: true },
+      { h: "DRIVER / VEHICLE", k: "driver", w: 170, mono: true },
+      { h: "TASK STATE", k: "taskState", w: 150 },
+      { h: "ETA", k: "eta", w: 90, mono: true },
+      { h: "GATE", k: "gate", w: 180 },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "exception") {
     boardRows = visibleOwnedByBoard.map((order) => ({
@@ -2083,38 +2107,13 @@ export default async function DispatchPage({
     }));
 
     boardColumns = [
-      {
-        h: t("dispatch.page.table.order", locale),
-        k: "order",
-        w: 150,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.tenant", locale),
-        k: "tenant",
-        w: 160,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.holdReason", locale),
-        k: "reason",
-        w: 180,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.holdOwner", locale),
-        k: "owner",
-        w: 150,
-        mono: true,
-      },
-      { h: t("dispatch.page.table.age", locale), k: "age", w: 120, mono: true },
-      {
-        h: t("dispatch.page.table.related", locale),
-        k: "related",
-        w: 160,
-        mono: true,
-      },
-      { h: t("dispatch.page.table.actions", locale), k: "actions", w: 260 },
+      { h: "ORDER", k: "order", w: 150, mono: true },
+      { h: "TENANT", k: "tenant", w: 160, mono: true },
+      { h: "HOLD REASON", k: "reason", w: 180, mono: true },
+      { h: "HOLD OWNER", k: "owner", w: 150, mono: true },
+      { h: "AGE", k: "age", w: 120, mono: true },
+      { h: "RELATED", k: "related", w: 160, mono: true },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "no_supply") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2168,38 +2167,12 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      {
-        h: t("dispatch.page.table.order", locale),
-        k: "order",
-        w: 150,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.tenant", locale),
-        k: "tenant",
-        w: 160,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.attempts", locale),
-        k: "attempts",
-        w: 120,
-        mono: true,
-        align: "right",
-      },
-      {
-        h: t("dispatch.page.table.reasonCode", locale),
-        k: "reason",
-        w: 180,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.timeInState", locale),
-        k: "age",
-        w: 140,
-        mono: true,
-      },
-      { h: t("dispatch.page.table.actions", locale), k: "actions", w: 260 },
+      { h: "ORDER", k: "order", w: 150, mono: true },
+      { h: "TENANT", k: "tenant", w: 160, mono: true },
+      { h: "ATTEMPTS", k: "attempts", w: 120, mono: true, align: "right" },
+      { h: "REASON CODE", k: "reason", w: 180, mono: true },
+      { h: "TIME IN STATE", k: "age", w: 140, mono: true },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "governance") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2248,7 +2221,7 @@ export default async function DispatchPage({
             style={{ color: theme.accent, textDecoration: "none" }}
           >
             {order.approvalRequestIds[0] ??
-              t("dispatch.page.action.openApproval", locale)}
+              (zh ? "前往 approval" : "Open approval")}
           </Link>
         ),
         _selected: selectedRecord === order,
@@ -2256,38 +2229,13 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      {
-        h: t("dispatch.page.table.order", locale),
-        k: "order",
-        w: 150,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.tenant", locale),
-        k: "tenant",
-        w: 160,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.override", locale),
-        k: "overrideType",
-        w: 150,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.requester", locale),
-        k: "requester",
-        w: 150,
-        mono: true,
-      },
-      { h: t("dispatch.page.table.age", locale), k: "age", w: 120, mono: true },
-      {
-        h: t("dispatch.page.table.approval", locale),
-        k: "approval",
-        w: 180,
-        mono: true,
-      },
-      { h: t("dispatch.page.table.actions", locale), k: "actions", w: 260 },
+      { h: "ORDER", k: "order", w: 150, mono: true },
+      { h: "TENANT", k: "tenant", w: 160, mono: true },
+      { h: "OVERRIDE", k: "overrideType", w: 150, mono: true },
+      { h: "REQUESTER", k: "requester", w: 150, mono: true },
+      { h: "AGE", k: "age", w: 120, mono: true },
+      { h: "APPROVAL", k: "approval", w: 180, mono: true },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   } else {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2357,41 +2305,15 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      {
-        h: t("dispatch.page.table.order", locale),
-        k: "order",
-        w: 150,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.tenant", locale),
-        k: "tenant",
-        w: 150,
-        mono: true,
-      },
-      { h: t("dispatch.page.table.route", locale), k: "route", w: 340 },
-      {
-        h: t("dispatch.page.table.window", locale),
-        k: "window",
-        w: 132,
-        mono: true,
-      },
-      {
-        h: t("dispatch.page.table.service", locale),
-        k: "service",
-        w: 130,
-        mono: true,
-      },
-      { h: t("dispatch.page.table.eta", locale), k: "eta", w: 80, mono: true },
-      {
-        h: t("dispatch.page.table.candidates", locale),
-        k: "candidates",
-        w: 70,
-        mono: true,
-        align: "right",
-      },
-      { h: t("dispatch.page.table.gate", locale), k: "gate", w: 210 },
-      { h: t("dispatch.page.table.actions", locale), k: "actions", w: 260 },
+      { h: "ORDER", k: "order", w: 150, mono: true },
+      { h: "TENANT", k: "tenant", w: 150, mono: true },
+      { h: "PICKUP → DROP", k: "route", w: 340 },
+      { h: "WINDOW", k: "window", w: 132, mono: true },
+      { h: "SERVICE", k: "service", w: 130, mono: true },
+      { h: "ETA", k: "eta", w: 80, mono: true },
+      { h: "CAND", k: "candidates", w: 70, mono: true, align: "right" },
+      { h: "GATE", k: "gate", w: 210 },
+      { h: "ACTIONS", k: "actions", w: 260 },
     ];
   }
 
@@ -2411,11 +2333,15 @@ export default async function DispatchPage({
       <PageHeader
         theme={theme}
         title={t("dispatch.title", locale)}
-        subtitle={t("dispatch.page.headerSubtitle", locale)}
+        subtitle={
+          zh
+            ? "即時派車工作流 · 6 個子看板 · queue / candidates / ETA / override"
+            : "Live dispatch workflow · 6 sub-boards · queue / candidates / ETA / override"
+        }
         actions={
           <>
             <Pill theme={theme} tone="accent">
-              {t("dispatch.page.refreshTierBadge", locale)}
+              T2 dispatch / 5s
             </Pill>
             <Pill theme={theme} tone="neutral">
               {boardMeta.label}
@@ -2518,19 +2444,10 @@ export default async function DispatchPage({
                 {board === "forwarded"
                   ? (
                       [
-                        [
-                          "all",
-                          t("dispatch.page.filter.all", locale, {
-                            count: forwardedBaseCount,
-                          }),
-                        ],
+                        ["all", `${zh ? "全部" : "All"} ${forwardedBaseCount}`],
                         [
                           "attention",
-                          t("dispatch.page.filter.attention", locale, {
-                            count: sortedForwardedOrders.filter(
-                              needsForwardedAttention,
-                            ).length,
-                          }),
+                          `${zh ? "需注意" : "Attention"} ${sortedForwardedOrders.filter(needsForwardedAttention).length}`,
                         ],
                         [
                           "sync_failed",
@@ -2542,11 +2459,7 @@ export default async function DispatchPage({
                         ],
                         [
                           "terminal",
-                          t("dispatch.page.filter.terminal", locale, {
-                            count:
-                              sortedForwardedOrders.filter(isForwardedTerminal)
-                                .length,
-                          }),
+                          `${zh ? "終態" : "Terminal"} ${sortedForwardedOrders.filter(isForwardedTerminal).length}`,
                         ],
                       ] as const
                     ).map(([facetKey, label]) => (
@@ -2570,7 +2483,7 @@ export default async function DispatchPage({
                       </Link>
                     ))
                   : [
-                      ["all", t("dispatch.page.filter.allServices", locale)],
+                      ["all", zh ? "全部服務" : "All services"],
                       ...serviceBuckets.map((item) => [
                         item,
                         formatDispatchCode(locale, item),
@@ -2610,16 +2523,9 @@ export default async function DispatchPage({
                 }}
               >
                 <span>
-                  {t("dispatch.page.showing", locale, {
-                    visible:
-                      board === "forwarded"
-                        ? visibleForwardedOrders.length
-                        : visibleOwnedByBoard.length,
-                    total:
-                      board === "forwarded"
-                        ? forwardedBaseCount
-                        : boardCounts[board],
-                  })}
+                  {board === "forwarded"
+                    ? `${zh ? "顯示" : "Showing"} ${visibleForwardedOrders.length} / ${forwardedBaseCount}`
+                    : `${zh ? "顯示" : "Showing"} ${visibleOwnedByBoard.length} / ${boardCounts[board]}`}
                 </span>
                 <span>{formatRefreshSummary(currentRefresh, locale)}</span>
               </div>
@@ -2644,7 +2550,7 @@ export default async function DispatchPage({
                       <div style={selectedMetaStyle}>
                         <div style={selectedMetaCellStyle}>
                           <span style={{ fontSize: 11, color: theme.textDim }}>
-                            {t("dispatch.page.focusedWorkItem", locale)}
+                            {zh ? "焦點 work item" : "Focused work item"}
                           </span>
                           <strong
                             style={{
@@ -2659,7 +2565,7 @@ export default async function DispatchPage({
                         </div>
                         <div style={selectedMetaCellStyle}>
                           <span style={{ fontSize: 11, color: theme.textDim }}>
-                            {t("dispatch.page.crossAppDeepLinks", locale)}
+                            {zh ? "跨 app deep links" : "Cross-app deep links"}
                           </span>
                           <div
                             style={{
@@ -2737,11 +2643,12 @@ export default async function DispatchPage({
                     <CanvasEmptyPanel
                       theme={theme}
                       density="compact"
-                      title={t("dispatch.page.noFocusedWorkItem.title", locale)}
-                      description={t(
-                        "dispatch.page.noFocusedWorkItem.description",
-                        locale,
-                      )}
+                      title={zh ? "沒有焦點 work item" : "No focused work item"}
+                      description={
+                        zh
+                          ? "目前 board 沒有可選擇的列。"
+                          : "There is no selected row on the current board."
+                      }
                     />
                   )}
                 </div>
