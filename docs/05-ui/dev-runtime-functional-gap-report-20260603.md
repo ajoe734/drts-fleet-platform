@@ -1,6 +1,6 @@
 # Dev Runtime + Functional Gap Report (browser-verified)
 
-- **Last re-run:** 2026-06-04T07:40:08Z
+- **Last re-run:** 2026-06-04T08:25:59Z
 - **Auditor:** Codex2
 - **Environment:** live dev Cloud Run
   - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
@@ -8,7 +8,7 @@
 - **Method:** headless Chromium route census over all 39 routes (Platform Admin 18 + Ops Console 21), fixed `1440x950` screenshots, shell-count checks, and manual tab round-trip checks for `/pricing`, `/payments`, `/attendance`.
 - **Artifacts:** `.artifacts/func-audit/dev-gap-audit-results.json`, `.artifacts/func-audit/dev-gap-audit-summary.md`, and route screenshots under `.artifacts/func-audit/*.png`.
 
-## 1. Scoreboard (2026-06-04T07:40:08Z re-run)
+## 1. Scoreboard (2026-06-04T08:25:59Z re-run)
 
 | App            | Routes | Fully working | Broken                            |
 | -------------- | -----: | ------------: | --------------------------------- |
@@ -18,7 +18,7 @@
 **Current total:** 38 / 39 routes fully working.  
 **Acceptance target (`0 broken`, `0 HTTP 500`) is still not met.**
 
-This 2026-06-04T07:40:08Z re-run reconfirms the current dev state: the shell fix remains live, but acceptance is still blocked by one remaining HTTP 500 and two manual tab-strip regressions:
+This 2026-06-04T08:25:59Z re-run reconfirms the current dev state: the shell fix remains live, but acceptance is still blocked by one remaining HTTP 500 and two manual tab-strip regressions:
 
 - OPS `/vehicles/veh-demo-001` still returns HTTP 500.
 - PA `/pricing` tab switching still fails to push `/pricing?tab=driver`.
@@ -83,7 +83,7 @@ This 2026-06-04T07:40:08Z re-run reconfirms the current dev state: the shell fix
 
 This task cannot be closed as `done` yet.
 
-- **Why:** live dev still has 1 confirmed HTTP 500 route and 2 confirmed tab-strip regressions in the 2026-06-04T07:40:08Z rerun.
+- **Why:** live dev still has 1 confirmed HTTP 500 route and 2 confirmed tab-strip regressions in the 2026-06-04T08:25:59Z rerun.
 - **Acceptance not met:**
   - all 39 routes verified on dev: **failed** (`1` HTTP 500 remains)
   - single shell everywhere: **passed**
