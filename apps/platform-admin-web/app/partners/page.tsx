@@ -171,7 +171,7 @@ function partnerNeedsAttention(entry: PartnerChannelEntryRecord) {
 
 function readinessState(
   entry: PartnerChannelEntryRecord,
-  t: (key: string) => string,
+  t: (key: string, params?: Record<string, string | number>) => string,
 ): {
   missingCount: number;
   label: string;
@@ -184,8 +184,13 @@ function readinessState(
     missingCount,
     label:
       missingCount === 0
-        ? "ok"
-        : `${missingCount} ${missingCount === 1 ? "gap" : "gaps"}`,
+        ? t("partners.page.readiness.ok")
+        : t(
+            missingCount === 1
+              ? "partners.page.readiness.gap_one"
+              : "partners.page.readiness.gap_other",
+            { count: missingCount },
+          ),
     tone: missingCount === 0 ? "success" : "warn",
   };
 }
@@ -202,53 +207,6 @@ export default function PartnersPage() {
   const [filter, setFilter] = useState<PartnerFilter>("all");
   const [createForm, setCreateForm] =
     useState<EntryFormState>(EMPTY_ENTRY_FORM);
-
-  const copy =
-    locale === "en"
-      ? {
-          title: "Partner entry",
-          subtitle:
-            "Bank / hotel / enterprise partner entry routing, auth, eligibility, and branding.",
-          searchPlaceholder: "Search entries, tenants, credentials...",
-          filterAction: "Filter",
-          createAction: "Create entry",
-          createTitle: "Create partner entry",
-          createSubtitle:
-            "Provision routing, auth mode, eligibility mode, and brand metadata before traffic goes live.",
-          refresh: "Refresh",
-          last30Days: "last 30 days",
-          errorTitle: "Unable to load partner entries",
-          filters: {
-            all: "all",
-            active: "active",
-            inactive: "inactive",
-            attention: "attention",
-            revoked: "revoked",
-          },
-          openDetail: "Open entry detail",
-        }
-      : {
-          title: "合作夥伴 entry",
-          subtitle:
-            "銀行 / 飯店 / 企業 partner 入口、auth 模式、eligibility、品牌",
-          searchPlaceholder: "搜尋 entry、租戶、憑證...",
-          filterAction: "篩選",
-          createAction: "建立 entry",
-          createTitle: "建立 partner entry",
-          createSubtitle:
-            "在正式導流前先補齊 routing、auth mode、eligibility mode 與品牌 metadata。",
-          refresh: "重新整理",
-          last30Days: "近 30 天",
-          errorTitle: "無法載入 partner entries",
-          filters: {
-            all: "全部",
-            active: "active",
-            inactive: "inactive",
-            attention: "待處理",
-            revoked: "revoked",
-          },
-          openDetail: "查看 entry 詳情",
-        };
 
   const loadEntries = useCallback(async () => {
     setLoading(true);
@@ -316,27 +274,27 @@ export default function PartnersPage() {
       [
         {
           value: "all" as const,
-          label: `${copy.filters.all} ${counts.all}`,
+          label: `${t("partners.page.filter.all")} ${counts.all}`,
           tone: "neutral" as const,
         },
         {
           value: "active" as const,
-          label: `${copy.filters.active} ${counts.active}`,
+          label: `${t("partners.page.filter.active")} ${counts.active}`,
           tone: "success" as const,
         },
         {
           value: "inactive" as const,
-          label: `${copy.filters.inactive} ${counts.inactive}`,
+          label: `${t("partners.page.filter.inactive")} ${counts.inactive}`,
           tone: "warn" as const,
         },
         {
           value: "attention" as const,
-          label: `${copy.filters.attention} ${counts.attention}`,
+          label: `${t("partners.page.filter.attention")} ${counts.attention}`,
           tone: "warn" as const,
         },
         {
           value: "revoked" as const,
-          label: `${copy.filters.revoked} ${counts.revoked}`,
+          label: `${t("partners.page.filter.revoked")} ${counts.revoked}`,
           tone: "danger" as const,
         },
       ] satisfies Array<{
@@ -344,7 +302,7 @@ export default function PartnersPage() {
         label: string;
         tone: "neutral" | "success" | "warn" | "danger";
       }>,
-    [copy.filters, counts],
+    [counts, t],
   );
 
   const handleCreate = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -376,8 +334,8 @@ export default function PartnersPage() {
     <>
       <CanvasPageHeader
         theme={theme}
-        title={copy.title}
-        subtitle={copy.subtitle}
+        title={t("partners.page.title")}
+        subtitle={t("partners.page.subtitle")}
         sticky={false}
         actions={
           <>
@@ -386,7 +344,7 @@ export default function PartnersPage() {
               icon="filter"
               onClick={() => setShowFilters((current) => !current)}
             >
-              {copy.filterAction}
+              {t("partners.page.filterAction")}
             </CanvasBtn>
             <CanvasBtn
               theme={theme}
@@ -394,7 +352,7 @@ export default function PartnersPage() {
               icon="plus"
               onClick={() => setShowCreate(true)}
             >
-              {copy.createAction}
+              {t("partners.page.createAction")}
             </CanvasBtn>
           </>
         }
@@ -405,7 +363,7 @@ export default function PartnersPage() {
           <CanvasBanner
             theme={theme}
             tone="danger"
-            title={copy.errorTitle}
+            title={t("partners.page.errorTitle")}
             body={error}
           />
         ) : null}
@@ -430,10 +388,10 @@ export default function PartnersPage() {
             ))}
             <span style={{ flex: 1 }} />
             <CanvasPill theme={theme} tone="neutral">
-              {copy.last30Days}
+              {t("partners.page.last30Days")}
             </CanvasPill>
             <CanvasBtn theme={theme} onClick={() => void loadEntries()}>
-              {copy.refresh}
+              {t("common.refresh")}
             </CanvasBtn>
           </div>
         ) : null}
@@ -465,7 +423,7 @@ export default function PartnersPage() {
               rows={tableRows}
               columns={[
                 {
-                  h: "ENTRY",
+                  h: t("partners.page.table.entry"),
                   w: 220,
                   r: (entry) => (
                     <div style={entryCellStyle}>
@@ -480,7 +438,7 @@ export default function PartnersPage() {
                         <Link
                           href={`/partners/${entry.entrySlug}`}
                           style={entryLinkStyle}
-                          aria-label={copy.openDetail}
+                          aria-label={t("partners.page.openDetail")}
                         >
                           {entry.displayName}
                         </Link>
@@ -490,7 +448,7 @@ export default function PartnersPage() {
                   ),
                 },
                 {
-                  h: "PROGRAM",
+                  h: t("partners.page.table.program"),
                   w: 140,
                   r: (entry) =>
                     entry.programCode
@@ -498,7 +456,7 @@ export default function PartnersPage() {
                       : entry.programId,
                 },
                 {
-                  h: "SUBTYPE",
+                  h: t("partners.page.table.subtype"),
                   w: 150,
                   mono: true,
                   r: (entry) => (
@@ -508,19 +466,19 @@ export default function PartnersPage() {
                   ),
                 },
                 {
-                  h: "AUTH",
+                  h: t("partners.page.table.auth"),
                   w: 130,
                   mono: true,
                   k: "authMode",
                 },
                 {
-                  h: "ELIGIBILITY",
+                  h: t("partners.page.table.eligibility"),
                   w: 110,
                   mono: true,
                   k: "eligibilityMode",
                 },
                 {
-                  h: "STATUS",
+                  h: t("partners.page.table.status"),
                   w: 100,
                   r: (entry) => (
                     <CanvasPill
@@ -533,7 +491,7 @@ export default function PartnersPage() {
                   ),
                 },
                 {
-                  h: "READINESS",
+                  h: t("partners.page.table.readiness"),
                   w: 180,
                   r: (entry) => {
                     const readiness = readinessState(entry, t);
@@ -559,7 +517,7 @@ export default function PartnersPage() {
           style={modalOverlayStyle}
           role="dialog"
           aria-modal="true"
-          aria-label={copy.createTitle}
+          aria-label={t("partners.page.createTitle")}
           onClick={() => setShowCreate(false)}
         >
           <div
@@ -568,8 +526,8 @@ export default function PartnersPage() {
           >
             <CanvasCard
               theme={theme}
-              title={copy.createTitle}
-              subtitle={copy.createSubtitle}
+              title={t("partners.page.createTitle")}
+              subtitle={t("partners.page.createSubtitle")}
               actions={
                 <CanvasBtn
                   theme={theme}
