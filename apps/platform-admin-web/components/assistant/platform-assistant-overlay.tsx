@@ -27,6 +27,7 @@ import {
   isPlatformAdminAssistantEnabled,
 } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
+import { platformAdminAssistantSuggestedPrompts } from "@/lib/translations";
 import { AssistantMessageList } from "./AssistantMessageList";
 import {
   buildRouteContext,
@@ -123,12 +124,6 @@ type AssistantApiActionExecutionResponse = {
   };
   assistantAuditId: string;
 };
-
-const DEFAULT_SUGGESTED_PROMPTS = [
-  "Summarize what I should check on this page.",
-  "Draft an operator checklist for the current route.",
-  "What risks should I review before changing platform state?",
-];
 
 function nextMessageId(prefix = "paas-ui") {
   if (
@@ -237,20 +232,26 @@ function formatCitation(citation: AssistantApiCitation) {
   return [citation.title, citation.section].filter(Boolean).join(" ");
 }
 
-function formatAssistantContent(response: AssistantApiMessageResponse) {
+function formatAssistantContent(
+  response: AssistantApiMessageResponse,
+  copy: {
+    sourcesHeading: string;
+    suggestedHeading: string;
+  },
+) {
   const citations = response.citations.map(formatCitation);
   const suggestedPrompts = response.suggestedPrompts.slice(0, 3);
   const sections = [response.answer.trim()];
 
   if (citations.length > 0) {
     sections.push(
-      `Sources:\n${citations.map((item) => `- ${item}`).join("\n")}`,
+      `${copy.sourcesHeading}\n${citations.map((item) => `- ${item}`).join("\n")}`,
     );
   }
 
   if (suggestedPrompts.length > 0) {
     sections.push(
-      `Suggested next prompts:\n${suggestedPrompts
+      `${copy.suggestedHeading}\n${suggestedPrompts
         .map((item) => `- ${item}`)
         .join("\n")}`,
     );
@@ -261,9 +262,10 @@ function formatAssistantContent(response: AssistantApiMessageResponse) {
 
 function mapReceipt(
   response: AssistantApiActionExecutionResponse,
+  receiptTitle: string,
 ): AssistantReceipt {
   return {
-    title: "Action receipt",
+    title: receiptTitle,
     message: response.receipt.message,
     actionId: response.receipt.actionId,
     requestId: response.receipt.actionId,
@@ -287,6 +289,18 @@ function buildContextPrompt(
     forms?: AssistantFormSummary[];
   },
   locale: "zh" | "en",
+  copy: {
+    routeHeading: string;
+    pageHeading: string;
+    questionHeading: string;
+    none: string;
+    emptyList: string;
+    empty: string;
+    required: string;
+    dirty: string;
+    yes: string;
+    no: string;
+  },
 ) {
   const routeTitle = routeContext.title[locale];
   const warnings =
@@ -294,13 +308,13 @@ function buildContextPrompt(
       ? routeContext.warnings
           .map((warning) => `${warning.code}: ${warning.message[locale]}`)
           .join("; ")
-      : "none";
+      : copy.none;
   const entityRefs =
     routeContext.visibleEntityRefs.length > 0
       ? routeContext.visibleEntityRefs
           .map((entity) => `${entity.kind}:${entity.id}`)
           .join(", ")
-      : "none";
+      : copy.none;
   const visibleTables =
     pageContext.visibleTables && pageContext.visibleTables.length > 0
       ? pageContext.visibleTables
@@ -315,16 +329,16 @@ function buildContextPrompt(
                     .map((action) => action.actionId)
                     .join(", ")}`
                 : "";
-            return `- ${table.tableId} (${table.title}): rows=${table.visibleRowCount}; visible=${table.visibleRowIds.join(", ") || "none"}${selectedRows}${actions}`;
+            return `- ${table.tableId} (${table.title}): rows=${table.visibleRowCount}; visible=${table.visibleRowIds.join(", ") || copy.none}${selectedRows}${actions}`;
           })
           .join("\n")
-      : "- none";
+      : copy.emptyList;
   const selectedRecords =
     pageContext.selectedRecords && pageContext.selectedRecords.length > 0
       ? pageContext.selectedRecords
           .map((record) => `${record.kind}:${record.id}`)
           .join(", ")
-      : "none";
+      : copy.none;
   const availableActions =
     pageContext.availableActions && pageContext.availableActions.length > 0
       ? pageContext.availableActions
@@ -333,7 +347,7 @@ function buildContextPrompt(
               `${action.actionId}${action.riskLevel ? `(${action.riskLevel})` : ""}${action.disabled ? "[disabled]" : ""}`,
           )
           .join(", ")
-      : "none";
+      : copy.none;
   const forms =
     pageContext.forms && pageContext.forms.length > 0
       ? pageContext.forms
@@ -346,19 +360,19 @@ function buildContextPrompt(
                         field.fieldId,
                         field.valueSummary === null ||
                         typeof field.valueSummary === "undefined"
-                          ? "empty"
+                          ? copy.empty
                           : JSON.stringify(field.valueSummary),
                       ];
                       if (field.required) {
-                        parts.push("required");
+                        parts.push(copy.required);
                       }
                       if (field.dirty) {
-                        parts.push("dirty");
+                        parts.push(copy.dirty);
                       }
                       return parts.join("=");
                     })
                     .join("; ")
-                : "none";
+                : copy.none;
             const validationErrors =
               form.validationErrors.length > 0
                 ? form.validationErrors
@@ -368,34 +382,34 @@ function buildContextPrompt(
                         : `${error.code}:${error.message}`,
                     )
                     .join("; ")
-                : "none";
+                : copy.none;
             const actions =
               form.availableActions && form.availableActions.length > 0
                 ? form.availableActions
                     .map((action) => action.actionId)
                     .join(", ")
-                : "none";
-            return `- ${form.formId} (${form.title}): dirty=${form.dirty ? "yes" : "no"}; fields=${fields}; validationErrors=${validationErrors}; actions=${actions}`;
+                : copy.none;
+            return `- ${form.formId} (${form.title}): dirty=${form.dirty ? copy.yes : copy.no}; fields=${fields}; validationErrors=${validationErrors}; actions=${actions}`;
           })
           .join("\n")
-      : "- none";
+      : copy.emptyList;
 
   return [
-    "[Platform Admin route context]",
+    copy.routeHeading,
     `Path: ${routeContext.pathname}`,
     `Page: ${routeTitle}`,
-    `Active tab: ${routeContext.activeTab ?? "none"}`,
+    `Active tab: ${routeContext.activeTab ?? copy.none}`,
     `Refresh tier: ${routeContext.refreshTier}`,
     `Visible entities: ${entityRefs}`,
     `Warnings: ${warnings}`,
     "",
-    "[Platform Admin page context]",
+    copy.pageHeading,
     `Visible tables:\n${visibleTables}`,
     `Selected records: ${selectedRecords}`,
     `Available actions: ${availableActions}`,
     `Forms:\n${forms}`,
     "",
-    "[Operator question]",
+    copy.questionHeading,
     message,
   ].join("\n");
 }
@@ -408,7 +422,7 @@ export function PlatformAssistantOverlay() {
   const enabled = isPlatformAdminAssistantEnabled();
   const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const { pageBridge } = usePlatformAdminAssistantRouteContext();
   const titleId = useId();
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -424,9 +438,51 @@ export function PlatformAssistantOverlay() {
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
-  const [suggestedPrompts, setSuggestedPrompts] = useState(
-    DEFAULT_SUGGESTED_PROMPTS,
-  );
+  const defaultSuggestedPrompts =
+    platformAdminAssistantSuggestedPrompts[locale];
+  const copy = {
+    sourcesHeading: t("assistantOverlay.sourcesHeading"),
+    suggestedHeading: t("assistantOverlay.suggestedHeading"),
+    receiptTitle: t("assistantOverlay.receiptTitle"),
+    routeHeading: t("assistantOverlay.context.routeHeading"),
+    pageHeading: t("assistantOverlay.context.pageHeading"),
+    questionHeading: t("assistantOverlay.context.questionHeading"),
+    none: t("assistantOverlay.context.none"),
+    emptyList: t("assistantOverlay.context.emptyList"),
+    empty: t("assistantOverlay.context.empty"),
+    required: t("assistantOverlay.context.required"),
+    dirty: t("assistantOverlay.context.dirty"),
+    yes: t("assistantOverlay.context.yes"),
+    no: t("assistantOverlay.context.no"),
+    launcher: t("assistantOverlay.launcher"),
+    badge: t("assistantOverlay.badge"),
+    label: t("assistantOverlay.label"),
+    subtitle: t("assistantOverlay.subtitle"),
+    heading: t("assistantOverlay.heading"),
+    status: t("assistantOverlay.status"),
+    inputLabel: t("assistantOverlay.inputLabel"),
+    inputPlaceholder: t("assistantOverlay.inputPlaceholder"),
+    send: t("assistantOverlay.send"),
+    sending: t("assistantOverlay.sending"),
+    newSession: t("assistantOverlay.newSession"),
+    minimize: t("assistantOverlay.minimize"),
+    close: t("assistantOverlay.close"),
+    reset: t("assistantOverlay.reset"),
+    emptyTitle: t("assistantOverlay.emptyTitle"),
+    emptyBody: t("assistantOverlay.emptyBody"),
+    thinking: t("assistantOverlay.thinking"),
+    sessionTitle: t("assistantOverlay.sessionTitle"),
+    requestFailedTitle: t("assistantOverlay.requestFailedTitle"),
+    requestFailedBody: t("assistantOverlay.requestFailedBody"),
+    requestFailedHint: t("assistantOverlay.requestFailedHint"),
+    actionFailedTitle: t("assistantOverlay.actionFailedTitle"),
+    actionFailedHint: t("assistantOverlay.actionFailedHint"),
+    suggestedPromptsAria: t("assistantOverlay.suggestedPromptsAria"),
+    footnote: t("assistantOverlay.footnote"),
+  };
+  const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>([
+    ...defaultSuggestedPrompts,
+  ]);
   const dragRef = useRef<{
     pointerId: number;
     startPointerX: number;
@@ -477,57 +533,15 @@ export function PlatformAssistantOverlay() {
     messagesEndRef.current?.scrollIntoView({ block: "end" });
   }, [isOpen, messages]);
 
+  useEffect(() => {
+    if (messages.length === 0) {
+      setSuggestedPrompts([...defaultSuggestedPrompts]);
+    }
+  }, [defaultSuggestedPrompts, messages.length]);
+
   if (!enabled || !isMounted) {
     return null;
   }
-
-  const copy =
-    locale === "zh"
-      ? {
-          launcher: "開啟平台助理",
-          badge: "Beta",
-          label: "平台助理",
-          subtitle: "治理操作輔助",
-          heading: "Platform Admin Assistant",
-          status: "已連接 dev mock gateway，可回答操作問題與產生行動計畫。",
-          inputLabel: "輸入平台助理問題",
-          inputPlaceholder: "問我這頁該怎麼操作、風險在哪、下一步怎麼做...",
-          send: "送出",
-          sending: "分析中",
-          newSession: "新對話",
-          minimize: "最小化",
-          close: "關閉",
-          reset: "重設位置",
-          emptyTitle: "平台助理已就緒",
-          emptyBody:
-            "詢問目前頁面的操作方式、治理風險，或請我產生一份平台操作檢查清單。",
-          thinking: "我正在讀取目前 Platform Admin route context 並整理回答...",
-          sessionTitle: "Platform Admin assistant",
-        }
-      : {
-          launcher: "Open platform assistant",
-          badge: "Beta",
-          label: "Assistant",
-          subtitle: "governance copilot",
-          heading: "Platform Admin Assistant",
-          status:
-            "Connected to the dev mock gateway for operation Q&A and action planning.",
-          inputLabel: "Ask the platform assistant",
-          inputPlaceholder:
-            "Ask how to operate this page, what risks matter, or what to do next...",
-          send: "Send",
-          sending: "Thinking",
-          newSession: "New chat",
-          minimize: "Minimize",
-          close: "Close",
-          reset: "Reset position",
-          emptyTitle: "Platform Admin assistant is ready",
-          emptyBody:
-            "Ask about the current page, governance risks, or request an operator checklist.",
-          thinking:
-            "Reading the current Platform Admin route context and preparing an answer...",
-          sessionTitle: "Platform Admin assistant",
-        };
 
   const panelStyle: CSSProperties = isMobile
     ? {
@@ -612,6 +626,7 @@ export function PlatformAssistantOverlay() {
               routeContext,
               pageContext ?? {},
               locale,
+              copy,
             ),
           },
         },
@@ -621,7 +636,7 @@ export function PlatformAssistantOverlay() {
       const assistantMessage: AssistantMessageRecord = {
         id: nextMessageId("paas-assistant"),
         role: "assistant",
-        content: formatAssistantContent(response),
+        content: formatAssistantContent(response, copy),
         createdAt: new Date().toISOString(),
         state: governedAction
           ? "awaiting_confirmation"
@@ -666,7 +681,7 @@ export function PlatformAssistantOverlay() {
       setSuggestedPrompts(
         response.suggestedPrompts.length > 0
           ? response.suggestedPrompts.slice(0, 3)
-          : DEFAULT_SUGGESTED_PROMPTS,
+          : [...defaultSuggestedPrompts],
       );
       setMessages((current) =>
         current.map((message) =>
@@ -677,13 +692,13 @@ export function PlatformAssistantOverlay() {
       const failedMessage: AssistantMessageRecord = {
         id: nextMessageId("paas-error"),
         role: "assistant",
-        content: "The assistant could not complete this request.",
+        content: copy.requestFailedBody,
         createdAt: new Date().toISOString(),
         state: "error",
         error: {
-          title: "Assistant request failed",
+          title: copy.requestFailedTitle,
           message: errorMessage(error),
-          hint: "Check the dev API assistant flag, control-plane proxy, and Cloud Run logs.",
+          hint: copy.requestFailedHint,
         },
       };
       setMessages((current) =>
@@ -742,7 +757,7 @@ export function PlatformAssistantOverlay() {
                 state: "receipt",
                 confirmation: null,
                 pendingAction: null,
-                receipt: mapReceipt(response),
+                receipt: mapReceipt(response, copy.receiptTitle),
               }
             : entry,
         ),
@@ -755,9 +770,9 @@ export function PlatformAssistantOverlay() {
                 ...entry,
                 state: "error",
                 error: {
-                  title: "Action execution failed",
+                  title: copy.actionFailedTitle,
                   message: errorMessage(error),
-                  hint: "Review the governed action payload, confirmation reason, and backend audit logs.",
+                  hint: copy.actionFailedHint,
                 },
               }
             : entry,
@@ -794,7 +809,7 @@ export function PlatformAssistantOverlay() {
     setMessages([]);
     setDraft("");
     setIsConfirming(false);
-    setSuggestedPrompts(DEFAULT_SUGGESTED_PROMPTS);
+    setSuggestedPrompts([...defaultSuggestedPrompts]);
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -951,7 +966,7 @@ export function PlatformAssistantOverlay() {
             />
             <div ref={messagesEndRef} />
           </div>
-          <div style={promptRailStyle} aria-label="Assistant suggested prompts">
+          <div style={promptRailStyle} aria-label={copy.suggestedPromptsAria}>
             {suggestedPrompts.map((prompt) => (
               <button
                 key={prompt}
@@ -999,10 +1014,7 @@ export function PlatformAssistantOverlay() {
           </form>
           <div style={panelFootnoteStyle}>
             <Bot size={13} />
-            <span>
-              Mock provider in dev. Actions still require governed backend
-              gates.
-            </span>
+            <span>{copy.footnote}</span>
           </div>
         </section>
       ) : null}

@@ -776,6 +776,136 @@ const en = {
   "audit.exceptions.reason": "Reason",
   "audit.exceptions.expiresAt": "Expires At",
 
+  // ── Admin Home ──
+  "adminHome.title": "Platform governance home",
+  "adminHome.subtitle":
+    "DRTS control plane · {count} governance item(s) need review today.",
+  "adminHome.openAll": "Open all",
+  "adminHome.openAudit": "Go to audit",
+  "adminHome.loading": "Loading governance snapshot...",
+  "adminHome.noSnapshot": "No governance snapshot available yet.",
+  "adminHome.loadErrorTitle": "Unable to load governance snapshot",
+  "adminHome.quickLinksTitle": "Module shortcuts",
+  "adminHome.todayTitle": "Today's governance queue",
+  "adminHome.todaySubtitle":
+    "Cross-module items where platform governance should intervene.",
+  "adminHome.recentTitle":
+    "Recent sensitive operations · platform-layer audit trail (24h)",
+  "adminHome.kpi.tenants": "Active tenants",
+  "adminHome.kpi.tenantsSub": "{pilot} pilot · {sandbox} sandbox",
+  "adminHome.kpi.tenantsDelta": "{count} rollback_hold",
+  "adminHome.kpi.partners": "Partner entries",
+  "adminHome.kpi.partnersSub": "{bank} bank · {nonBank} hotel / enterprise",
+  "adminHome.kpi.partnersDelta": "{count} pending readiness",
+  "adminHome.kpi.drivers": "Active drivers",
+  "adminHome.kpi.driversSub": "{eligible} dispatch-eligible · {total} total",
+  "adminHome.kpi.driversDelta": "{count} stale in dispatch feed",
+  "adminHome.kpi.driversHealthy": "healthy",
+  "adminHome.kpi.recon": "Pending reconciliation",
+  "adminHome.kpi.reconDelta": "{partner} partner · {forwarded} forwarded",
+  "adminHome.kpi.reconSub": "{count} critical platform alert(s)",
+  "adminHome.kpi.reconHintEmpty": "no open issue ids",
+  "adminHome.noAudit": "No audit records found.",
+  "adminHome.noTodos": "No platform-routed governance blockers at the moment.",
+  "adminHome.auditTime": "Time",
+  "adminHome.auditActorType": "ACTOR TYPE",
+  "adminHome.auditModule": "Module",
+  "adminHome.auditAction": "Action",
+  "adminHome.auditActor": "Actor",
+  "adminHome.auditRequest": "Request",
+  "adminHome.auditSystem": "system",
+  "adminHome.quickLink.tenants": "Tenants",
+  "adminHome.quickLink.partners": "Partners",
+  "adminHome.quickLink.pricing": "Pricing",
+  "adminHome.quickLink.payments": "Payments",
+  "adminHome.quickLink.fleet": "Fleet",
+  "adminHome.quickLink.audit": "Audit",
+  "adminHome.alert.tokenTitle":
+    "BGMT dispatch reporting token expires in 6 days",
+  "adminHome.alert.tokenDescription":
+    "Measured {measuredValue} at {observedAt}. Renew the client credential before reporting completion traffic stalls.",
+  "adminHome.alert.tokenAction": "Open adapter registry",
+  "adminHome.alert.syncTitle": "GoCab forwarded · 24h sync_failed 4.2%",
+  "adminHome.alert.syncDescription":
+    "Above the 3% warning threshold. Inspect adapter health and watch manual fallback volume before finance close.",
+  "adminHome.alert.syncAction": "Open adapter",
+  "adminHome.alert.rollbackTitle": "{tenantCode} is in rollback_hold",
+  "adminHome.alert.rollbackDescription":
+    "Customer complaint cmp_0894 escalated into inc_0212. Rollout is paused until platform and ops agree on the next move.",
+  "adminHome.alert.rollbackAction": "Open tenant",
+
+  // ── Admin Shell ──
+  "adminShell.brandSub": "Platform Admin",
+  "adminShell.api.notChecked": "not checked",
+  "adminShell.api.checking": "API checking",
+  "adminShell.api.healthy": "API healthy",
+  "adminShell.api.degraded": "API degraded",
+  "adminShell.api.down": "API down",
+  "adminShell.api.short.checking": "checking",
+  "adminShell.api.short.healthy": "healthy",
+  "adminShell.api.short.degraded": "degraded",
+  "adminShell.api.short.down": "down",
+  "adminShell.lastChecked": "last checked",
+  "adminShell.searchAria": "Search",
+  "adminShell.searchPlaceholder":
+    "Search tenants, partner entries, audit events...",
+  "adminShell.identityRole": "Platform Admin",
+  "adminShell.breadcrumbRoot": "Platform Admin",
+  "adminShell.breadcrumbDetail": "Detail",
+  "adminShell.notifications": "Notifications",
+  "adminShell.navAria": "Platform Admin navigation",
+  "adminShell.environmentProduction": "production",
+  "adminShell.refresh.audit": "manual · audit evidence",
+  "adminShell.refresh.governance": "medium_slow · governance",
+
+  // ── Assistant Overlay ──
+  "assistantOverlay.sourcesHeading": "Sources:",
+  "assistantOverlay.suggestedHeading": "Suggested next prompts:",
+  "assistantOverlay.receiptTitle": "Action receipt",
+  "assistantOverlay.context.routeHeading": "[Platform Admin route context]",
+  "assistantOverlay.context.pageHeading": "[Platform Admin page context]",
+  "assistantOverlay.context.questionHeading": "[Operator question]",
+  "assistantOverlay.context.none": "none",
+  "assistantOverlay.context.emptyList": "- none",
+  "assistantOverlay.context.empty": "empty",
+  "assistantOverlay.context.required": "required",
+  "assistantOverlay.context.dirty": "dirty",
+  "assistantOverlay.context.yes": "yes",
+  "assistantOverlay.context.no": "no",
+  "assistantOverlay.launcher": "Open platform assistant",
+  "assistantOverlay.badge": "Beta",
+  "assistantOverlay.label": "Assistant",
+  "assistantOverlay.subtitle": "governance copilot",
+  "assistantOverlay.heading": "Platform Admin Assistant",
+  "assistantOverlay.status":
+    "Connected to the dev mock gateway for operation Q&A and action planning.",
+  "assistantOverlay.inputLabel": "Ask the platform assistant",
+  "assistantOverlay.inputPlaceholder":
+    "Ask how to operate this page, what risks matter, or what to do next...",
+  "assistantOverlay.send": "Send",
+  "assistantOverlay.sending": "Thinking",
+  "assistantOverlay.newSession": "New chat",
+  "assistantOverlay.minimize": "Minimize",
+  "assistantOverlay.close": "Close",
+  "assistantOverlay.reset": "Reset position",
+  "assistantOverlay.emptyTitle": "Platform Admin assistant is ready",
+  "assistantOverlay.emptyBody":
+    "Ask about the current page, governance risks, or request an operator checklist.",
+  "assistantOverlay.thinking":
+    "Reading the current Platform Admin route context and preparing an answer...",
+  "assistantOverlay.sessionTitle": "Platform Admin assistant",
+  "assistantOverlay.requestFailedTitle": "Assistant request failed",
+  "assistantOverlay.requestFailedBody":
+    "The assistant could not complete this request.",
+  "assistantOverlay.requestFailedHint":
+    "Check the dev API assistant flag, control-plane proxy, and Cloud Run logs.",
+  "assistantOverlay.actionFailedTitle": "Action execution failed",
+  "assistantOverlay.actionFailedHint":
+    "Review the governed action payload, confirmation reason, and backend audit logs.",
+  "assistantOverlay.suggestedPromptsAria": "Assistant suggested prompts",
+  "assistantOverlay.footnote":
+    "Mock provider in dev. Actions still require governed backend gates.",
+
   // ── Common (more) ──
   "common.noValues": "No values",
 };
@@ -1524,11 +1654,217 @@ const zh: typeof en = {
   "audit.exceptions.reason": "原因",
   "audit.exceptions.expiresAt": "到期時間",
 
+  // ── Admin Home ──
+  "adminHome.title": "平台治理工作首頁",
+  "adminHome.subtitle": "DRTS 平台控制平面 · 您今日有 {count} 件需治理事項",
+  "adminHome.openAll": "展開所有",
+  "adminHome.openAudit": "前往稽核",
+  "adminHome.loading": "載入治理快照中...",
+  "adminHome.noSnapshot": "目前沒有可用的治理快照。",
+  "adminHome.loadErrorTitle": "無法載入治理快照",
+  "adminHome.quickLinksTitle": "模組捷徑",
+  "adminHome.todayTitle": "今日治理待辦",
+  "adminHome.todaySubtitle": "跨模組需要平台治理人介入",
+  "adminHome.recentTitle": "近期高敏感操作 · 平台層審計足跡 (24h)",
+  "adminHome.kpi.tenants": "活躍租戶",
+  "adminHome.kpi.tenantsSub": "{pilot} pilot · {sandbox} sandbox",
+  "adminHome.kpi.tenantsDelta": "{count} rollback_hold",
+  "adminHome.kpi.partners": "合作夥伴 entry",
+  "adminHome.kpi.partnersSub": "{bank} 銀行 · {nonBank} 飯店 / 企業",
+  "adminHome.kpi.partnersDelta": "{count} 待 readiness",
+  "adminHome.kpi.drivers": "活躍司機",
+  "adminHome.kpi.driversSub": "{eligible} 可派 · {total} 總數",
+  "adminHome.kpi.driversDelta": "{count} 筆 stale",
+  "adminHome.kpi.driversHealthy": "穩定",
+  "adminHome.kpi.recon": "待結算對帳",
+  "adminHome.kpi.reconDelta": "{partner} partner · {forwarded} forwarded",
+  "adminHome.kpi.reconSub": "{count} 筆重大平台告警",
+  "adminHome.kpi.reconHintEmpty": "目前無待處理 issue",
+  "adminHome.noAudit": "目前沒有稽核紀錄。",
+  "adminHome.noTodos": "目前沒有路由到平台端的治理阻塞。",
+  "adminHome.auditTime": "時間",
+  "adminHome.auditActorType": "操作者類型",
+  "adminHome.auditModule": "模組",
+  "adminHome.auditAction": "動作",
+  "adminHome.auditActor": "操作者",
+  "adminHome.auditRequest": "Request",
+  "adminHome.auditSystem": "system",
+  "adminHome.quickLink.tenants": "租戶 · Tenants",
+  "adminHome.quickLink.partners": "合作夥伴 · Partners",
+  "adminHome.quickLink.pricing": "費率 · Pricing",
+  "adminHome.quickLink.payments": "結算 · Payments",
+  "adminHome.quickLink.fleet": "車隊 · Fleet",
+  "adminHome.quickLink.audit": "稽核 · Audit",
+  "adminHome.alert.tokenTitle": "BGMT 派遣回報 token 將於 6 天內到期",
+  "adminHome.alert.tokenDescription":
+    "{observedAt} 量測值 {measuredValue}。需先輪替 client credential，否則今日完成單將無法回報。",
+  "adminHome.alert.tokenAction": "前往 adapter-registry",
+  "adminHome.alert.syncTitle": "GoCab forwarded · 24h sync_failed 4.2%",
+  "adminHome.alert.syncDescription":
+    "超過 3% 警戒值。建議檢查 adapter 健康並啟動 manual fallback 觀察。",
+  "adminHome.alert.syncAction": "查看 adapter",
+  "adminHome.alert.rollbackTitle": "{tenantCode} 處於 rollback_hold",
+  "adminHome.alert.rollbackDescription":
+    "客訴 cmp_0894 升級為 inc_0212 後，rollout 已暫停。需平台與營運共識下一步。",
+  "adminHome.alert.rollbackAction": "查看租戶",
+
+  // ── Admin Shell ──
+  "adminShell.brandSub": "Platform Admin",
+  "adminShell.api.notChecked": "尚未檢查",
+  "adminShell.api.checking": "API 檢查中",
+  "adminShell.api.healthy": "API 健康",
+  "adminShell.api.degraded": "API 降級",
+  "adminShell.api.down": "API 失聯",
+  "adminShell.api.short.checking": "checking",
+  "adminShell.api.short.healthy": "healthy",
+  "adminShell.api.short.degraded": "degraded",
+  "adminShell.api.short.down": "down",
+  "adminShell.lastChecked": "最後檢查",
+  "adminShell.searchAria": "搜尋",
+  "adminShell.searchPlaceholder": "搜尋租戶、合作夥伴、稽核事件…",
+  "adminShell.identityRole": "平台管理員",
+  "adminShell.breadcrumbRoot": "平台管理",
+  "adminShell.breadcrumbDetail": "詳情",
+  "adminShell.notifications": "通知",
+  "adminShell.navAria": "平台管理導覽",
+  "adminShell.environmentProduction": "production",
+  "adminShell.refresh.audit": "手動 · 稽核證據",
+  "adminShell.refresh.governance": "medium_slow · 治理",
+
+  // ── Assistant Overlay ──
+  "assistantOverlay.sourcesHeading": "來源：",
+  "assistantOverlay.suggestedHeading": "建議下一步提示：",
+  "assistantOverlay.receiptTitle": "操作憑證",
+  "assistantOverlay.context.routeHeading": "[Platform Admin 路由 context]",
+  "assistantOverlay.context.pageHeading": "[Platform Admin 頁面 context]",
+  "assistantOverlay.context.questionHeading": "[操作員問題]",
+  "assistantOverlay.context.none": "無",
+  "assistantOverlay.context.emptyList": "- 無",
+  "assistantOverlay.context.empty": "空白",
+  "assistantOverlay.context.required": "必填",
+  "assistantOverlay.context.dirty": "已修改",
+  "assistantOverlay.context.yes": "是",
+  "assistantOverlay.context.no": "否",
+  "assistantOverlay.launcher": "開啟平台助理",
+  "assistantOverlay.badge": "Beta",
+  "assistantOverlay.label": "平台助理",
+  "assistantOverlay.subtitle": "治理操作輔助",
+  "assistantOverlay.heading": "Platform Admin Assistant",
+  "assistantOverlay.status":
+    "已連接 dev mock gateway，可回答操作問題與產生行動計畫。",
+  "assistantOverlay.inputLabel": "輸入平台助理問題",
+  "assistantOverlay.inputPlaceholder":
+    "問我這頁該怎麼操作、風險在哪、下一步怎麼做...",
+  "assistantOverlay.send": "送出",
+  "assistantOverlay.sending": "分析中",
+  "assistantOverlay.newSession": "新對話",
+  "assistantOverlay.minimize": "最小化",
+  "assistantOverlay.close": "關閉",
+  "assistantOverlay.reset": "重設位置",
+  "assistantOverlay.emptyTitle": "平台助理已就緒",
+  "assistantOverlay.emptyBody":
+    "詢問目前頁面的操作方式、治理風險，或請我產生一份平台操作檢查清單。",
+  "assistantOverlay.thinking":
+    "我正在讀取目前 Platform Admin route context 並整理回答...",
+  "assistantOverlay.sessionTitle": "Platform Admin assistant",
+  "assistantOverlay.requestFailedTitle": "助理請求失敗",
+  "assistantOverlay.requestFailedBody": "助理目前無法完成這次請求。",
+  "assistantOverlay.requestFailedHint":
+    "請檢查 dev API assistant flag、control-plane proxy 與 Cloud Run logs。",
+  "assistantOverlay.actionFailedTitle": "動作執行失敗",
+  "assistantOverlay.actionFailedHint":
+    "請檢查受治理動作 payload、確認原因與後端稽核紀錄。",
+  "assistantOverlay.suggestedPromptsAria": "助理建議提示",
+  "assistantOverlay.footnote":
+    "開發環境目前使用 mock provider；實際動作仍需通過受治理後端閘門。",
+
   // ── Common (more) ──
   "common.noValues": "無資料",
 };
 
+export type LocalizedText = { en: string; zh: string };
+
+export const platformAdminNavSectionLabels = {
+  workspace: { zh: "工作面", en: "Workspace" },
+  tenant: { zh: "租戶治理", en: "Tenant Governance" },
+  fleet: { zh: "人員與車隊", en: "People & Fleet" },
+  commerce: { zh: "平台與商務", en: "Platform & Commerce" },
+  ops: { zh: "平台維運", en: "Platform Ops & Risk" },
+} as const satisfies Record<string, LocalizedText>;
+
+export const platformAdminRouteLabels = {
+  home: { zh: "工作首頁", en: "Home" },
+  tenants: { zh: "租戶", en: "Tenants" },
+  "tenant-detail": { zh: "租戶詳情", en: "Tenant Detail" },
+  "tenant-governance": { zh: "跨租戶治理", en: "Tenant Governance" },
+  partners: { zh: "合作夥伴", en: "Partner Entries" },
+  "partner-detail": { zh: "合作夥伴詳情", en: "Partner Entry Detail" },
+  users: { zh: "平台人員", en: "Platform Staff" },
+  fleet: { zh: "車隊與法遵", en: "Fleet & Compliance" },
+  switchboard: { zh: "公開資訊", en: "Public Info & Placards" },
+  pricing: { zh: "費率治理", en: "Pricing" },
+  payments: { zh: "結算與帳務", en: "Payments" },
+  reimbursements: { zh: "代墊批次", en: "Reimbursements" },
+  "reimbursement-batch-detail": {
+    zh: "代墊批次詳情",
+    en: "Reimbursement Batch Detail",
+  },
+  "adapter-registry": { zh: "平台 Adapter", en: "Adapter Registry" },
+  health: { zh: "平台健康", en: "Platform Health" },
+  notices: { zh: "公告與維護", en: "Notices & Maintenance" },
+  audit: { zh: "稽核與證據", en: "Audit & Evidence" },
+  "feature-flags": { zh: "功能旗標", en: "Feature Flags" },
+} as const satisfies Record<string, LocalizedText>;
+
+export const platformAdminAssistantWarningMessages = {
+  highRiskActionsPresent: {
+    zh: "本頁含高風險操作，需 modal 確認、填寫原因並產生稽核紀錄。",
+    en: "This route exposes high-risk actions requiring modal confirmation, a reason, and an audit receipt.",
+  },
+  platformWriteAuthority: {
+    zh: "本頁具平台寫入權限（唯一可寫旗標的 App），變更會即時影響其他 App。",
+    en: "This route holds platform write authority (the only app that can write flags); changes propagate to other apps.",
+  },
+  plaintextSecretOnce: {
+    zh: "憑證/密鑰僅在發行或輪替當下以明文顯示一次，之後不可再檢視。",
+    en: "Credentials/secrets are shown in plaintext only once at issue/rotation and cannot be viewed again.",
+  },
+  maintenanceModeSurface: {
+    zh: "維護模式為高風險操作，啟用會跨 App 推送橫幅到 ops/tenant/driver。",
+    en: "Maintenance mode is high-risk; enabling it pushes a cross-app banner to ops/tenant/driver.",
+  },
+  legalHoldEvidenceGovernance: {
+    zh: "稽核證據治理：法律保留與刪除例外為高風險操作，需原因並記錄擁有者。",
+    en: "Evidence governance: legal holds and deletion exceptions are high-risk and require a reason plus a recorded owner.",
+  },
+  routeBodyParityPending: {
+    zh: "此路由的頁面實作由 body-parity 工作項負責，可能尚未上線；metadata 已就緒。",
+    en: "This route's page body is owned by a body-parity work item and may not be live yet; metadata is ready.",
+  },
+  unknownRoute: {
+    zh: "未在 Platform Admin 路由註冊表中找到此路徑，已退回首頁 context。",
+    en: "Path is not in the Platform Admin route registry; falling back to home context.",
+  },
+} as const satisfies Record<string, LocalizedText>;
+
+export const platformAdminAssistantSuggestedPrompts = {
+  en: [
+    "Summarize what I should check on this page.",
+    "Draft an operator checklist for the current route.",
+    "What risks should I review before changing platform state?",
+  ],
+  zh: [
+    "整理這個頁面目前需要我檢查的重點。",
+    "幫我為目前路由產出一份操作檢查清單。",
+    "變更平台狀態前，我該先檢查哪些風險？",
+  ],
+} as const satisfies Record<Locale, readonly string[]>;
+
 export const translations: Record<Locale, typeof en> = { en, zh };
+
+export function getLocalizedText(locale: Locale, text: LocalizedText) {
+  return text[locale];
+}
 
 export function t(
   key: string,
