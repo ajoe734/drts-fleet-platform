@@ -19,11 +19,13 @@ import {
 
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: "Operations Console",
-  description:
-    "Protected operations workspace for dispatch, reporting, revenue, and registry workflows.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getServerLocale();
+  return {
+    title: t("app.metadata.title", locale),
+    description: t("app.metadata.description", locale),
+  };
+}
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +59,9 @@ export default async function RootLayout({
               brandLabel={t("app.name", locale)}
               brandSubLabel={t("app.sub", locale)}
               searchPlaceholder={t("common.search", locale)}
+              avatarLabel={t("app.shell.avatar", locale)}
+              versionLabel={t("app.shell.version", locale)}
+              env={t("app.env", locale)}
             >
               {children}
             </OpsShell>

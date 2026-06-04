@@ -3,6 +3,7 @@ import {
   crossAppHref,
   platformAdminPaymentsLink,
 } from "@/lib/ops-cross-app-links";
+import { t } from "@/lib/translations";
 import type {
   AssistantSelection,
   OpsAssistantContext,
@@ -112,6 +113,7 @@ function buildSelectedEntityHref(selection: AssistantSelection): string | null {
 
 function buildSelectionAction(
   selection: AssistantSelection | undefined,
+  locale: OpsAssistantContext["locale"],
 ): AssistantNavigationAction | null {
   if (!selection) {
     return null;
@@ -124,8 +126,12 @@ function buildSelectionAction(
 
   return {
     kind: "navigate",
-    label: `Open ${selection.kind}`,
-    description: `Jump to the selected ${selection.kind} detail view.`,
+    label: t("assistant.action.selection.label", locale, {
+      kind: selection.kind,
+    }),
+    description: t("assistant.action.selection.description", locale, {
+      kind: selection.kind,
+    }),
     route: href,
   };
 }
@@ -133,13 +139,18 @@ function buildSelectionAction(
 function buildRouteSpecificActions(
   context: OpsAssistantContext,
 ): AssistantAction[] {
+  const locale = context.locale;
+
   switch (context.route) {
     case "/dispatch":
       return [
         {
           kind: "navigate",
-          label: "Open no-supply board",
-          description: "Switch to the dispatch board filtered to no-supply.",
+          label: t("assistant.action.dispatch.noSupply.label", locale),
+          description: t(
+            "assistant.action.dispatch.noSupply.description",
+            locale,
+          ),
           route: "/dispatch",
           board: "no_supply",
           ...(context.visibleFilters
@@ -148,8 +159,11 @@ function buildRouteSpecificActions(
         },
         {
           kind: "navigate",
-          label: "Open assigned board",
-          description: "Review active driver assignments without leaving ops.",
+          label: t("assistant.action.dispatch.assigned.label", locale),
+          description: t(
+            "assistant.action.dispatch.assigned.description",
+            locale,
+          ),
           route: "/dispatch",
           board: "assigned",
           ...(context.visibleFilters
@@ -158,16 +172,18 @@ function buildRouteSpecificActions(
         },
         {
           kind: "cross_app",
-          label: "Open adapter registry",
-          description:
-            "Investigate forwarded-order adapter ownership in Platform Admin.",
+          label: t("assistant.action.dispatch.adapterRegistry.label", locale),
+          description: t(
+            "assistant.action.dispatch.adapterRegistry.description",
+            locale,
+          ),
           link: {
             targetApp: "platform-admin",
             route: "/adapter-registry",
             resourceType: "adapter_registry",
             resourceId: "",
             openMode: "new_tab",
-            label: "Adapter registry",
+            label: t("assistant.action.dispatch.adapterRegistry.label", locale),
           },
         },
       ];
@@ -175,8 +191,11 @@ function buildRouteSpecificActions(
       return [
         {
           kind: "navigate",
-          label: "Show suppressed drivers",
-          description: "Prefill the drivers list to the suppression view.",
+          label: t("assistant.action.drivers.suppressed.label", locale),
+          description: t(
+            "assistant.action.drivers.suppressed.description",
+            locale,
+          ),
           route: "/drivers",
           activeTab: "suppression",
           ...(context.visibleFilters
@@ -188,8 +207,11 @@ function buildRouteSpecificActions(
       return [
         {
           kind: "navigate",
-          label: "Open offboarding tab",
-          description: "Prefill the vehicles page to the offboarding queue.",
+          label: t("assistant.action.vehicles.offboarding.label", locale),
+          description: t(
+            "assistant.action.vehicles.offboarding.description",
+            locale,
+          ),
           route: "/vehicles",
           activeTab: "offboarding",
           ...(context.visibleFilters
@@ -198,15 +220,18 @@ function buildRouteSpecificActions(
         },
         {
           kind: "cross_app",
-          label: "Open fleet governance",
-          description: "Continue vehicle lifecycle actions in Platform Admin.",
+          label: t("assistant.action.vehicles.governance.label", locale),
+          description: t(
+            "assistant.action.vehicles.governance.description",
+            locale,
+          ),
           link: {
             targetApp: "platform-admin",
             route: "/fleet?tab=offboarding",
             resourceType: "fleet_offboarding",
             resourceId: "",
             openMode: "new_tab",
-            label: "Fleet governance",
+            label: t("assistant.action.vehicles.governance.label", locale),
           },
         },
       ];
@@ -214,24 +239,32 @@ function buildRouteSpecificActions(
       return [
         {
           kind: "cross_app",
-          label: "Open payments queue",
-          description: "Continue reconciliation in Platform Admin payments.",
-          link: platformAdminPaymentsLink("Payments queue"),
+          label: t("assistant.action.revenue.payments.label", locale),
+          description: t(
+            "assistant.action.revenue.payments.description",
+            locale,
+          ),
+          link: platformAdminPaymentsLink(
+            t("assistant.action.revenue.payments.label", locale),
+          ),
         },
       ];
     case "/contracts":
       return [
         {
           kind: "cross_app",
-          label: "Open partner governance",
-          description: "Continue contract ownership review in Platform Admin.",
+          label: t("assistant.action.contracts.governance.label", locale),
+          description: t(
+            "assistant.action.contracts.governance.description",
+            locale,
+          ),
           link: {
             targetApp: "platform-admin",
             route: "/partners",
             resourceType: "partner_registry",
             resourceId: "",
             openMode: "new_tab",
-            label: "Partner governance",
+            label: t("assistant.action.contracts.governance.label", locale),
           },
         },
       ];
@@ -257,9 +290,8 @@ export function buildAssistantActions(
   const actions: AssistantAction[] = [
     {
       kind: "navigate",
-      label: "Resume current view",
-      description:
-        "Re-open this route with the current board, tab, and filters.",
+      label: t("assistant.action.resume.label", context.locale),
+      description: t("assistant.action.resume.description", context.locale),
       route: context.route,
       ...(context.board ? { board: context.board } : {}),
       ...(context.activeTab ? { activeTab: context.activeTab } : {}),
@@ -268,7 +300,10 @@ export function buildAssistantActions(
     ...buildRouteSpecificActions(context),
   ];
 
-  const selectionAction = buildSelectionAction(context.selectedEntity);
+  const selectionAction = buildSelectionAction(
+    context.selectedEntity,
+    context.locale,
+  );
   if (selectionAction) {
     actions.splice(1, 0, selectionAction);
   }

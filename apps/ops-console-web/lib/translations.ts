@@ -6,6 +6,11 @@ const en = {
   "app.sub": "Ops Console",
   "app.env": "Staging Environment",
   "app.lang.toggle": "中文",
+  "app.metadata.title": "Operations Console",
+  "app.metadata.description":
+    "Protected operations workspace for dispatch, reporting, revenue, and registry workflows.",
+  "app.shell.avatar": "OC",
+  "app.shell.version": "Canvas",
 
   // ── Navigation ──
   "nav.dashboard": "Dashboard",
@@ -22,6 +27,11 @@ const en = {
   "nav.drivers": "Drivers",
   "nav.contracts": "Contracts",
   "nav.featureFlags": "Feature Flags",
+  "nav.section.workspaces": "Workspaces",
+  "nav.section.liveOps": "Live Ops",
+  "nav.section.casework": "Casework",
+  "nav.section.monitoring": "Monitoring",
+  "nav.section.registry": "Registry",
 
   // ── Common ──
   "common.loading": "Loading...",
@@ -30,12 +40,15 @@ const en = {
   "common.noData": "No data",
   "common.refresh": "Refresh",
   "common.search": "Search",
+  "common.open": "Open",
   "common.create": "Create",
   "common.edit": "Edit",
   "common.delete": "Delete",
   "common.save": "Save",
   "common.cancel": "Cancel",
+  "common.dismiss": "Dismiss",
   "common.back": "Back",
+  "common.restore": "Restore",
   "common.backToDashboard": "Back to dashboard",
   "common.backToDashboardSub": "Return to the operations overview.",
   "common.tryAgain": "Try again",
@@ -58,10 +71,132 @@ const en = {
   "common.enabled": "Enabled",
   "common.disabled": "Disabled",
   "common.complete": "Complete",
+  "common.working": "Working...",
   "common.visible": "{count} visible",
   "common.scheduledAt": "Scheduled: {value}",
   "common.completedAt": "Completed: {value}",
   "common.dash": "-",
+
+  // ── Ops Assistant ──
+  "assistant.launcher.openAria": "Open operations assistant",
+  "assistant.launcher.label": "Assistant",
+  "assistant.header.title": "Operations Assistant",
+  "assistant.header.subtitle":
+    "Floating shell · mock stream · persistent layout",
+  "assistant.header.dragHandleAria":
+    "Assistant widget header. Use arrow keys to move, Home or End to dock, Escape to close.",
+  "assistant.header.expand": "Expand assistant",
+  "assistant.header.minimize": "Minimize assistant",
+  "assistant.header.dockLeft": "Dock assistant to left edge",
+  "assistant.header.dockRight": "Dock assistant to right edge",
+  "assistant.header.close": "Close assistant",
+  "assistant.stream.online":
+    "Assistant shell online. Monitoring dispatch exceptions, handoff notes, and queue pressure.",
+  "assistant.stream.mockTransport":
+    "Mock stream active. Replace this source with the real assistant transport when the API contract lands.",
+  "assistant.stream.persistentLayout":
+    "Widget state persists locally so operators keep position, dock choice, and density across route changes.",
+  "assistant.session.label": "Session",
+  "assistant.session.online": "online",
+  "assistant.message.system": "System",
+  "assistant.message.assistant": "Assistant",
+  "assistant.message.operator": "Operator",
+  "assistant.message.queueScan":
+    "Queue scan complete. No active blocking incidents in the shell frame.",
+  "assistant.actionBridge.title": "Action bridge",
+  "assistant.actionBridge.requiresReason":
+    "Existing confirmation flow requires a reason.",
+  "assistant.actionBridge.usesPageFlow":
+    "Resolve via availableActions, then reuse the existing page action flow.",
+  "assistant.actionBridge.disabled": "Disabled: {reason}",
+  "assistant.actionBridge.pendingIntent": "Pending intent · {action}",
+  "assistant.actionBridge.confirm": "Open confirmation",
+  "assistant.actionBridge.empty":
+    "Focus a supported detail view to let the assistant resolve `ActionIntent` against that resource's available actions.",
+  "assistant.actions.title": "Assistant actions",
+  "assistant.actions.askLabel": "Ask assistant",
+  "assistant.actions.placeholder":
+    "Ask about refresh tiers, current scope, or available actions",
+  "assistant.actions.ask": "Ask",
+  "assistant.actions.empty":
+    "Open a board or detail page to let the assistant emit route-aware actions and deep links.",
+  "assistant.conversation.title": "Conversation",
+  "assistant.conversation.empty":
+    "Proposed actions, disabled refusals, and action receipts will be written back here.",
+  "assistant.context.title": "Context envelope",
+  "assistant.context.route": "Route",
+  "assistant.context.board": "Board",
+  "assistant.context.tab": "Tab",
+  "assistant.context.selection": "Selection",
+  "assistant.context.filters": "Filters",
+  "assistant.footer.instructions":
+    "Header arrows move. Resize handle arrows resize. Layout persists in local storage.",
+  "assistant.footer.resizeAria": "Resize assistant widget",
+  "assistant.minimized.note":
+    "Minimized. Expand to resume the live mock stream.",
+  "assistant.minimized.restoreAria": "Restore assistant widget",
+  "assistant.audit.view": "View audit",
+  "assistant.prompt.degraded":
+    "LLM degraded. Showing curated help-search fallback.\n\n{message}",
+  "assistant.intent.alternatives": "Available: {actions}",
+  "assistant.intent.noAlternatives": "No enabled alternatives.",
+  "assistant.intent.proposed":
+    "Proposed {action} for {resourceKind} {resourceId}.",
+  "assistant.intent.proposeFailed": "Assistant action proposal failed.",
+  "assistant.intent.unavailable": "Unavailable action: {action}.",
+  "assistant.intent.blocked": "Action blocked: {action}.",
+  "assistant.intent.executing": "Executing {action}.",
+  "assistant.intent.openingConfirmation":
+    "Opening {riskLevel}-risk confirmation for {action}.",
+  "assistant.intent.reasonMayBeRequired":
+    "Reason may be required by the existing page confirmation UI.",
+  "assistant.intent.failed": "Assistant action failed.",
+  "assistant.intent.cancelled": "Action cancelled.",
+  "assistant.intent.completed": "{action} completed.",
+  "assistant.help.dashboard.title": "Dashboard refresh tier",
+  "assistant.help.dashboard.answer":
+    "The dashboard is a T3 surface with refresh-tier and stale-data affordances surfaced in the shell summary.",
+  "assistant.help.complaint.title": "Complaint action bridge",
+  "assistant.help.complaint.answer":
+    "Complaint assistant actions are scoped to the selected case and reuse the page's existing action descriptors instead of inventing new writes.",
+  "assistant.help.incident.title": "Incident confirmation flow",
+  "assistant.help.incident.answer":
+    "Incident actions remain confirmation-gated: the assistant resolves to the page action flow, which keeps risk and reason requirements intact.",
+  "assistant.help.citation": "Citation: {citation}",
+  "assistant.scope.noActions": "No registered page actions for this scope.",
+  "assistant.scope.message":
+    "Scoped to {kind}:{id}. The assistant is constrained to this visible resource and can only reuse the page's registered actions.",
+  "assistant.scope.meta": "Scope: {kind}:{id} | availableActions: {actions}",
+  "assistant.action.resume.label": "Resume current view",
+  "assistant.action.resume.description":
+    "Re-open this route with the current board, tab, and filters.",
+  "assistant.action.selection.label": "Open {kind}",
+  "assistant.action.selection.description":
+    "Jump to the selected {kind} detail view.",
+  "assistant.action.dispatch.noSupply.label": "Open no-supply board",
+  "assistant.action.dispatch.noSupply.description":
+    "Switch to the dispatch board filtered to no-supply.",
+  "assistant.action.dispatch.assigned.label": "Open assigned board",
+  "assistant.action.dispatch.assigned.description":
+    "Review active driver assignments without leaving ops.",
+  "assistant.action.dispatch.adapterRegistry.label": "Open adapter registry",
+  "assistant.action.dispatch.adapterRegistry.description":
+    "Investigate forwarded-order adapter ownership in Platform Admin.",
+  "assistant.action.drivers.suppressed.label": "Show suppressed drivers",
+  "assistant.action.drivers.suppressed.description":
+    "Prefill the drivers list to the suppression view.",
+  "assistant.action.vehicles.offboarding.label": "Open offboarding tab",
+  "assistant.action.vehicles.offboarding.description":
+    "Prefill the vehicles page to the offboarding queue.",
+  "assistant.action.vehicles.governance.label": "Open fleet governance",
+  "assistant.action.vehicles.governance.description":
+    "Continue vehicle lifecycle actions in Platform Admin.",
+  "assistant.action.revenue.payments.label": "Open payments queue",
+  "assistant.action.revenue.payments.description":
+    "Continue reconciliation in Platform Admin payments.",
+  "assistant.action.contracts.governance.label": "Open partner governance",
+  "assistant.action.contracts.governance.description":
+    "Continue contract ownership review in Platform Admin.",
 
   // ── Dashboard ──
   "dashboard.title": "Operations Overview",
@@ -1593,6 +1728,11 @@ const zh: Record<keyof typeof en, string> = {
   "app.sub": "營運控制台",
   "app.env": "測試環境",
   "app.lang.toggle": "English",
+  "app.metadata.title": "營運控制台",
+  "app.metadata.description":
+    "受保護的營運工作區，涵蓋派遣、報表、收益與主資料流程。",
+  "app.shell.avatar": "營運",
+  "app.shell.version": "Canvas",
 
   // ── Navigation ──
   "nav.dashboard": "營運總覽",
@@ -1609,6 +1749,11 @@ const zh: Record<keyof typeof en, string> = {
   "nav.drivers": "司機",
   "nav.contracts": "合約",
   "nav.featureFlags": "功能旗標",
+  "nav.section.workspaces": "工作面",
+  "nav.section.liveOps": "即時派遣",
+  "nav.section.casework": "案件處理",
+  "nav.section.monitoring": "營運監控",
+  "nav.section.registry": "主資料",
 
   // ── Common ──
   "common.loading": "載入中...",
@@ -1617,12 +1762,15 @@ const zh: Record<keyof typeof en, string> = {
   "common.noData": "無資料",
   "common.refresh": "重新整理",
   "common.search": "搜尋",
+  "common.open": "開啟",
   "common.create": "新增",
   "common.edit": "編輯",
   "common.delete": "刪除",
   "common.save": "儲存",
   "common.cancel": "取消",
+  "common.dismiss": "關閉",
   "common.back": "返回",
+  "common.restore": "還原",
   "common.backToDashboard": "返回儀表板",
   "common.backToDashboardSub": "回到營運概覽。",
   "common.tryAgain": "重試",
@@ -1645,10 +1793,126 @@ const zh: Record<keyof typeof en, string> = {
   "common.enabled": "已啟用",
   "common.disabled": "已停用",
   "common.complete": "完成",
+  "common.working": "處理中...",
   "common.visible": "{count} 筆顯示中",
   "common.scheduledAt": "排程：{value}",
   "common.completedAt": "完成：{value}",
   "common.dash": "—",
+
+  // ── Ops Assistant ──
+  "assistant.launcher.openAria": "開啟營運助理",
+  "assistant.launcher.label": "助理",
+  "assistant.header.title": "營運助理",
+  "assistant.header.subtitle": "浮動面板 · 模擬串流 · 版面持久化",
+  "assistant.header.dragHandleAria":
+    "助理元件標頭。可用方向鍵移動，Home 或 End 靠邊停駐，Escape 關閉。",
+  "assistant.header.expand": "展開助理",
+  "assistant.header.minimize": "最小化助理",
+  "assistant.header.dockLeft": "將助理停駐在左側",
+  "assistant.header.dockRight": "將助理停駐在右側",
+  "assistant.header.close": "關閉助理",
+  "assistant.stream.online":
+    "助理面板已上線，正在監看派遣異常、交接備註與佇列壓力。",
+  "assistant.stream.mockTransport":
+    "目前為模擬串流。待 API 契約落地後，請以真實助理傳輸來源替換。",
+  "assistant.stream.persistentLayout":
+    "元件狀態會保存在本機，讓營運人員跨路由保留位置、停駐方向與密度設定。",
+  "assistant.session.label": "工作階段",
+  "assistant.session.online": "連線中",
+  "assistant.message.system": "系統",
+  "assistant.message.assistant": "助理",
+  "assistant.message.operator": "操作員",
+  "assistant.message.queueScan":
+    "佇列掃描完成。殼層範圍內沒有活動中的阻塞事件。",
+  "assistant.actionBridge.title": "動作橋接",
+  "assistant.actionBridge.requiresReason": "現有確認流程需要填寫原因。",
+  "assistant.actionBridge.usesPageFlow":
+    "先解析 availableActions，再沿用既有頁面動作流程。",
+  "assistant.actionBridge.disabled": "已停用：{reason}",
+  "assistant.actionBridge.pendingIntent": "待處理意圖 · {action}",
+  "assistant.actionBridge.confirm": "開啟確認流程",
+  "assistant.actionBridge.empty":
+    "聚焦到支援的明細頁後，助理才能把 `ActionIntent` 解析到該資源的 available actions。",
+  "assistant.actions.title": "助理動作",
+  "assistant.actions.askLabel": "詢問助理",
+  "assistant.actions.placeholder": "可詢問 refresh tier、目前 scope 或可用動作",
+  "assistant.actions.ask": "送出問題",
+  "assistant.actions.empty":
+    "開啟 board 或 detail page 後，助理才能提供依路由感知的動作與深連結。",
+  "assistant.conversation.title": "對話",
+  "assistant.conversation.empty":
+    "提議動作、停用拒絕與動作收據都會回寫到這裡。",
+  "assistant.context.title": "內容信封",
+  "assistant.context.route": "路由",
+  "assistant.context.board": "看板",
+  "assistant.context.tab": "分頁",
+  "assistant.context.selection": "選取項目",
+  "assistant.context.filters": "篩選",
+  "assistant.footer.instructions":
+    "標頭方向鍵可移動，尺寸控制方向鍵可調整大小，版面會保存在本機儲存。",
+  "assistant.footer.resizeAria": "調整助理元件大小",
+  "assistant.minimized.note": "已最小化。展開即可恢復即時模擬串流。",
+  "assistant.minimized.restoreAria": "還原助理元件",
+  "assistant.audit.view": "查看稽核",
+  "assistant.prompt.degraded":
+    "LLM 已降級，改顯示整理過的 help-search 備援。\n\n{message}",
+  "assistant.intent.alternatives": "可用選項：{actions}",
+  "assistant.intent.noAlternatives": "沒有可啟用的替代動作。",
+  "assistant.intent.proposed":
+    "已為 {resourceKind} {resourceId} 提議 {action}。",
+  "assistant.intent.proposeFailed": "助理動作提議失敗。",
+  "assistant.intent.unavailable": "無法使用的動作：{action}。",
+  "assistant.intent.blocked": "動作遭阻擋：{action}。",
+  "assistant.intent.executing": "正在執行 {action}。",
+  "assistant.intent.openingConfirmation":
+    "正在為 {action} 開啟 {riskLevel} 風險確認流程。",
+  "assistant.intent.reasonMayBeRequired": "現有頁面確認 UI 可能要求填寫原因。",
+  "assistant.intent.failed": "助理動作執行失敗。",
+  "assistant.intent.cancelled": "已取消動作。",
+  "assistant.intent.completed": "{action} 已完成。",
+  "assistant.help.dashboard.title": "儀表板 refresh tier",
+  "assistant.help.dashboard.answer":
+    "儀表板屬於 T3 surface，refresh-tier 與 stale-data 提示會顯示在 shell 摘要中。",
+  "assistant.help.complaint.title": "申訴動作橋接",
+  "assistant.help.complaint.answer":
+    "申訴助理動作會以選取中的案件為 scope，並沿用頁面既有的 action descriptor，而不是自行發明新的寫入操作。",
+  "assistant.help.incident.title": "事件確認流程",
+  "assistant.help.incident.answer":
+    "事件動作仍受確認流程保護：助理只會解析到頁面動作流程，保留風險與原因要求。",
+  "assistant.help.citation": "引用：{citation}",
+  "assistant.scope.noActions": "此 scope 沒有註冊頁面動作。",
+  "assistant.scope.message":
+    "目前 scope 為 {kind}:{id}。助理受限於這個可見資源，只能沿用該頁已註冊的動作。",
+  "assistant.scope.meta": "Scope：{kind}:{id} | availableActions：{actions}",
+  "assistant.action.resume.label": "回到目前檢視",
+  "assistant.action.resume.description":
+    "以目前的 board、tab 與篩選重新開啟此路由。",
+  "assistant.action.selection.label": "開啟 {kind}",
+  "assistant.action.selection.description": "跳到目前選取的 {kind} 明細頁。",
+  "assistant.action.dispatch.noSupply.label": "開啟無供給看板",
+  "assistant.action.dispatch.noSupply.description":
+    "切換到已篩成 no-supply 的派遣看板。",
+  "assistant.action.dispatch.assigned.label": "開啟已指派看板",
+  "assistant.action.dispatch.assigned.description":
+    "不離開營運視角即可查看目前司機指派。",
+  "assistant.action.dispatch.adapterRegistry.label": "開啟 adapter registry",
+  "assistant.action.dispatch.adapterRegistry.description":
+    "到 Platform Admin 調查 forwarded-order adapter 的責任歸屬。",
+  "assistant.action.drivers.suppressed.label": "顯示被抑制的司機",
+  "assistant.action.drivers.suppressed.description":
+    "將司機列表預設切到 suppression 檢視。",
+  "assistant.action.vehicles.offboarding.label": "開啟 offboarding 分頁",
+  "assistant.action.vehicles.offboarding.description":
+    "將車輛頁預設切到 offboarding 佇列。",
+  "assistant.action.vehicles.governance.label": "開啟車隊治理",
+  "assistant.action.vehicles.governance.description":
+    "到 Platform Admin 繼續處理車輛生命週期動作。",
+  "assistant.action.revenue.payments.label": "開啟付款佇列",
+  "assistant.action.revenue.payments.description":
+    "到 Platform Admin payments 繼續進行對帳。",
+  "assistant.action.contracts.governance.label": "開啟夥伴治理",
+  "assistant.action.contracts.governance.description":
+    "到 Platform Admin 繼續審查合約責任歸屬。",
 
   // ── Dashboard ──
   "dashboard.title": "營運總覽",

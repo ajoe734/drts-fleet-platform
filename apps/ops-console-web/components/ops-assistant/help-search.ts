@@ -1,6 +1,7 @@
 "use client";
 
 import type { ResourceActionDescriptor } from "@drts/contracts";
+import { t, type Locale } from "@/lib/translations";
 import type {
   AssistantActionBridge,
   OpsAssistantContext,
@@ -12,34 +13,27 @@ export type AssistantHelpResult = {
 };
 
 type HelpDoc = {
-  title: string;
   citation: string;
   keywords: string[];
-  answer: string;
+  answerKey: string;
 };
 
 const HELP_DOCS: HelpDoc[] = [
   {
-    title: "Dashboard refresh tier",
     citation: "apps/ops-console-web/app/dashboard/page.tsx:1645",
     keywords: ["dashboard", "refresh", "tier", "stale", "cadence"],
-    answer:
-      "The dashboard is a T3 surface with refresh-tier and stale-data affordances surfaced in the shell summary.",
+    answerKey: "assistant.help.dashboard.answer",
   },
   {
-    title: "Complaint action bridge",
     citation: "apps/ops-console-web/app/complaints/page.tsx:1122",
     keywords: ["complaint", "case", "action", "scope", "available"],
-    answer:
-      "Complaint assistant actions are scoped to the selected case and reuse the page's existing action descriptors instead of inventing new writes.",
+    answerKey: "assistant.help.complaint.answer",
   },
   {
-    title: "Incident confirmation flow",
     citation:
       "apps/ops-console-web/app/incidents/[incidentId]/incident-detail-action-panel.tsx:257",
     keywords: ["incident", "confirm", "risk", "audit", "reason"],
-    answer:
-      "Incident actions remain confirmation-gated: the assistant resolves to the page action flow, which keeps risk and reason requirements intact.",
+    answerKey: "assistant.help.incident.answer",
   },
 ];
 
@@ -55,29 +49,35 @@ function scoreDoc(query: string, doc: HelpDoc) {
   );
 }
 
-function summarizeActions(descriptors: ResourceActionDescriptor[]) {
+function summarizeActions(
+  descriptors: ResourceActionDescriptor[],
+  locale: Locale,
+) {
   return descriptors
     .map((descriptor) => {
       const risk = descriptor.requiresReason
         ? `${descriptor.riskLevel} / reason`
         : descriptor.riskLevel;
       const enabled = descriptor.enabled
-        ? "enabled"
-        : `disabled:${descriptor.disabledReasonCode ?? "unavailable"}`;
+        ? t("common.enabled", locale)
+        : `${t("common.disabled", locale)}:${descriptor.disabledReasonCode ?? t("common.unknown", locale)}`;
       return `${descriptor.action} (${risk}, ${enabled})`;
     })
     .join(", ");
 }
 
-export function buildTier0HelpResult(query: string): AssistantHelpResult {
+export function buildTier0HelpResult(
+  query: string,
+  locale: Locale,
+): AssistantHelpResult {
   const ranked = [...HELP_DOCS]
     .map((doc) => ({ doc, score: scoreDoc(query, doc) }))
     .sort((left, right) => right.score - left.score);
 
   const best = ranked[0]?.doc ?? HELP_DOCS[0]!;
   return {
-    message: best.answer,
-    meta: `Citation: ${best.citation}`,
+    message: t(best.answerKey, locale),
+    meta: t("assistant.help.citation", locale, { citation: best.citation }),
   };
 }
 
@@ -88,6 +88,8 @@ export function buildTier1ScopedResult(
   if (!context?.selectedEntity && !actionBridge) {
     return null;
   }
+
+  const locale = context?.locale ?? "en";
 
   const scope =
     context?.selectedEntity ??
@@ -104,11 +106,18 @@ export function buildTier1ScopedResult(
 
   const actionSummary =
     actionBridge && actionBridge.availableActions.length > 0
-      ? summarizeActions(actionBridge.availableActions)
-      : "No registered page actions for this scope.";
+      ? summarizeActions(actionBridge.availableActions, locale)
+      : t("assistant.scope.noActions", locale);
 
   return {
-    message: `Scoped to ${scope.kind}:${scope.id}. The assistant is constrained to this visible resource and can only reuse the page's registered actions.`,
-    meta: `Scope: ${scope.kind}:${scope.id} | availableActions: ${actionSummary}`,
+    message: t("assistant.scope.message", locale, {
+      kind: scope.kind,
+      id: scope.id,
+    }),
+    meta: t("assistant.scope.meta", locale, {
+      kind: scope.kind,
+      id: scope.id,
+      actions: actionSummary,
+    }),
   };
 }
