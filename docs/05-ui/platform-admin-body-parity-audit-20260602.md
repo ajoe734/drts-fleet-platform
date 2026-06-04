@@ -706,7 +706,7 @@ Minimum remote smoke assertions:
 These should be resolved before coding large P1 bodies:
 
 - Whether to keep extra operational forms currently embedded in runtime pages. Recommendation: move them into modals/drawers behind canvas actions unless design explicitly approves inline forms.
-- Whether `Platform Admin.html` bilingual labels should be rendered as bilingual in zh locale or split by locale. Current shell uses zh primary only to avoid truncation; body audit should follow design/product decision.
+- Resolved 2026-06-04: `Platform Admin.html` mock `BiLabel` treatments do not require bilingual `zh · en` production labels in zh locale. Follow `docs/05-ui/system-design-answers-all-apps-20260524.md` `Q-X17` and `docs/05-ui/platform-admin-design-handoff-packet-20260525.md` §3.1: split by locale for primary labels (`zh` shows zh-TW label, `en` shows en label), keep raw/domain codes only in translation maps and optional detail/drawer/tooling surfaces, and do not ship raw code or bilingual duplicate labels as the primary body copy.
 - Whether missing backend contracts should be stubbed with fixtures first or implemented with backend work in the same slice. Recommendation: UI can use fixtures for visual parity, but CTA state must be shaped like `availableActions[]` from day one.
 
 ## 11. Current Status
