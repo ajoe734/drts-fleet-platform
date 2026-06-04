@@ -606,6 +606,7 @@ const en = {
   "dispatch.forwarded.filter.accept_pending": "Awaiting platform",
   "dispatch.forwarded.filter.sync_failed": "Sync failed",
   "dispatch.forwarded.filter.terminal": "Terminal",
+  "dispatch.forwarded.badge": "FORWARDED",
   "dispatch.forwarded.table.col.mirror": "Mirror",
   "dispatch.forwarded.table.col.platform": "Platform",
   "dispatch.forwarded.table.col.external": "External ID",
@@ -870,6 +871,7 @@ const en = {
     "Only force refresh is offered; reconciliation and finance settle at the owner platform.",
   "dispatch.forwarded.authority.title": "Authority chain · finance",
   "dispatch.forwarded.authority.domain": "Domain",
+  "dispatch.forwarded.authority.domainValue": "Forwarded mirror · {semantics}",
   "dispatch.forwarded.authority.sourcePlatform": "Source platform",
   "dispatch.forwarded.authority.routeLocked": "Route locked",
   "dispatch.forwarded.authority.fareAuthority": "Fare authority",
@@ -2580,7 +2582,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.forwarded.activity.reconciliation.body":
     "對帳 {status} · {mismatchCount} 筆不符 · 原因 {reason}。",
   "dispatch.forwarded.banner.notOwned.title":
-    "此訂單為 forwarded mirror · 不可視為 owned",
+    "此訂單為轉送鏡像 Forwarded mirror，非本地 owned 派遣",
   "dispatch.forwarded.banner.notOwned.body":
     "本地沒有 owned 指派。所有變更都必須透過對帳問題交給平台財務權責方，本地僅同步外部狀態。",
   "dispatch.forwarded.banner.adapterDegraded.title": "轉接器相依降級",
@@ -2591,6 +2593,7 @@ const zh: Record<keyof typeof en, string> = {
     "僅提供強制刷新；對帳與金流於來源平台結算。",
   "dispatch.forwarded.authority.title": "權責鏈 · 財務",
   "dispatch.forwarded.authority.domain": "領域",
+  "dispatch.forwarded.authority.domainValue": "轉送鏡像 · {semantics}",
   "dispatch.forwarded.authority.sourcePlatform": "來源平台",
   "dispatch.forwarded.authority.routeLocked": "路線鎖定",
   "dispatch.forwarded.authority.fareAuthority": "車資權責",
@@ -2600,6 +2603,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.forwarded.authority.reconciliation": "對帳",
   "dispatch.forwarded.authority.reconciliationValue":
     "{status} · {mismatchCount} 筆不符",
+  "dispatch.forwarded.badge": "轉送鏡像",
 
   // ── Maintenance ──
   "maintenance.title": "車輛保修",
