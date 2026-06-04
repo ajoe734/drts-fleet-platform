@@ -25,28 +25,36 @@ already moved forward.
    `codex/gap-verify-sidecar-acceptance` were all created later from
    `origin/dev @ 48ac41edff64f0fa0b02d1d10a6d0bdb7b9cb187`, after the parent had
    already diverged by two commits.
-4. None of those helper branches has a task-specific remote ref. `git ls-remote
-   --heads origin` resolves only `refs/heads/codex/gap-verify` and
-   `refs/heads/claude/gap-verify-sidecar-acceptance`.
+4. The earlier review failure is real: the helper-remote diagnosis in this
+   artifact went stale. `git ls-remote --heads origin 'codex/gap-verify*'` now
+   shows task-scoped remote refs for
+   `origin/codex/gap-verify-unblock-history-repair @ 88e9bbf0` and
+   `origin/codex/gap-verify-unblock-planning-decision @ e1cb2f3e`.
 5. The chair already created `GAP-VERIFY-UNBLOCK-PLANNING-DECISION` with an
    explicit note that this is not a branch/commit pollution on the parent
    branch itself. The history problem is narrower: the unblock helpers were
-   spawned from stale `origin/dev`, so they point away from the only canonical
-   replay branch.
+   spawned from stale `origin/dev`, so they still point away from the only
+   canonical replay branch even after some of them got their own remotes.
 
 ## Exact Contamination
 
-The contamination is unblock-route mismatch, not missing parent-branch history.
+The contamination is unblock-route mismatch plus stale unblock evidence, not
+missing parent-branch history.
 
 1. `codex/gap-verify` is the canonical replay branch and is already pushed at
    `a6de0eae`.
 2. The helper worktrees for planning decision, history repair, and Codex-owned
    sidecar acceptance were created from `origin/dev @ 48ac41ed`, not from the
    parent branch head.
-3. Because those helper branches still look like plain `origin/dev` aliases and
-   have no task-scoped remotes, a later resume could mistakenly treat a stale
-   helper branch as the replay surface instead of the real parent branch.
-4. The parent is therefore blocked by product/runtime failures, but the helper
+3. Two helper branches were later pushed to their own task-scoped remotes, but
+   that did not change their ancestry: `origin/codex/gap-verify-unblock-history-repair`
+   and `origin/codex/gap-verify-unblock-planning-decision` still fork from the
+   stale `origin/dev` base rather than from `origin/codex/gap-verify`.
+4. The previous version of this artifact incorrectly said every helper still
+   tracked `origin/dev` and none had task-scoped remotes. That stale diagnosis
+   is itself part of the contamination, because it contradicts live refs and
+   obscures the real issue.
+5. The parent is therefore blocked by product/runtime failures, but the helper
    branch topology needed repair so machine truth can point future work back to
    `origin/codex/gap-verify` without ambiguity.
 
@@ -75,9 +83,24 @@ The contamination is unblock-route mismatch, not missing parent-branch history.
   `2026-06-04 03:03:52 +0000`
 - `git reflog show refs/heads/codex/gap-verify-sidecar-acceptance --date=iso`
   shows branch creation from `origin/dev` at `2026-06-04 02:41:28 +0000`
-- `git branch -vv | grep 'gap-verify'` shows all three helper branches still
-  tracking `origin/dev`, while only `codex/gap-verify` tracks
-  `origin/codex/gap-verify`
+- `git branch -vv | grep 'gap-verify'` shows the current split state:
+  - `codex/gap-verify` tracks `origin/codex/gap-verify`
+  - `codex/gap-verify-unblock-history-repair` tracks
+    `origin/codex/gap-verify-unblock-history-repair`
+  - `codex/gap-verify-unblock-planning-decision` tracks
+    `origin/codex/gap-verify-unblock-planning-decision`
+  - `codex/gap-verify-sidecar-acceptance` still tracks `origin/dev`
+- `git ls-remote --heads origin 'codex/gap-verify*'` resolves:
+  - `a6de0eae refs/heads/codex/gap-verify`
+  - `88e9bbf0 refs/heads/codex/gap-verify-unblock-history-repair`
+  - `e1cb2f3e refs/heads/codex/gap-verify-unblock-planning-decision`
+- `git rev-list --left-right --count origin/codex/gap-verify...codex/gap-verify-unblock-history-repair`
+  is `2 left / 2 right`; the helper contains only its own doc commits and none
+  of the parent-only audit commits
+- `git rev-list --left-right --count origin/codex/gap-verify...codex/gap-verify-unblock-planning-decision`
+  is `2 left / 1 right`
+- `git rev-list --left-right --count origin/codex/gap-verify...codex/gap-verify-sidecar-acceptance`
+  is `2 left / 0 right`
 - `git worktree list --porcelain` confirms separate worktrees exist for all four
   branch names, so stale helper checkout reuse is a real risk
 
@@ -102,16 +125,21 @@ Do not force-push, rename, or rewrite any existing branch.
 2. Treat `codex/gap-verify-unblock-planning-decision`,
    `codex/gap-verify-unblock-history-repair`, and
    `codex/gap-verify-sidecar-acceptance` as helper/audit branches only. They do
-   not contain parent-only commits and should not be used to resume the parent.
-3. Keep the parent in `blocked`, but narrow the blocker to the runtime/planning
+   not contain the parent-only audit commits and should not be used to resume
+   the parent.
+3. Keep the helper remote refs as-is. No force-push, rename, or ancestry repair
+   is required because the safe repair is documentary and control-plane scoped:
+   classify those refs as helper-only and point all resume instructions back to
+   `origin/codex/gap-verify`.
+4. Keep the parent in `blocked`, but narrow the blocker to the runtime/planning
    gaps already identified by the live audit and by
    `GAP-VERIFY-UNBLOCK-PLANNING-DECISION`.
-4. Resume all future `GAP-VERIFY` owner work from
+5. Resume all future `GAP-VERIFY` owner work from
    `origin/codex/gap-verify @ a6de0eae`, then either:
    - reopen/fix the four residual runtime failures as follow-up tasks, or
    - merge the appropriate fix branches to `dev` and rerun the audit on the same
      parent branch after deploy evidence exists.
-5. Push this repair artifact on its own helper branch so the control plane has
+6. Push this repair artifact on its own helper branch so the control plane has
    durable git evidence that the canonical replay surface is the already-pushed
    parent branch, not any stale helper branch.
 
@@ -164,13 +192,16 @@ Do not force-push, rename, or rewrite any existing branch.
   - `git status --short`
   - `git branch -vv | grep 'gap-verify'`
   - `git worktree list --porcelain`
-  - `git ls-remote --heads origin 'refs/heads/codex/gap-verify' 'refs/heads/codex/gap-verify-unblock-history-repair' 'refs/heads/codex/gap-verify-unblock-planning-decision' 'refs/heads/codex/gap-verify-sidecar-acceptance' 'refs/heads/claude/gap-verify-sidecar-acceptance'`
+  - `git ls-remote --heads origin 'codex/gap-verify*'`
   - `git reflog show refs/heads/codex/gap-verify --date=iso`
   - `git reflog show refs/heads/codex/gap-verify-unblock-history-repair --date=iso`
   - `git reflog show refs/heads/codex/gap-verify-unblock-planning-decision --date=iso`
   - `git reflog show refs/heads/codex/gap-verify-sidecar-acceptance --date=iso`
 - Compared parent reachability:
   - `git rev-list --left-right --count origin/dev...origin/codex/gap-verify`
+  - `git rev-list --left-right --count origin/codex/gap-verify...codex/gap-verify-unblock-history-repair`
+  - `git rev-list --left-right --count origin/codex/gap-verify...codex/gap-verify-unblock-planning-decision`
+  - `git rev-list --left-right --count origin/codex/gap-verify...codex/gap-verify-sidecar-acceptance`
   - `git diff --name-only origin/dev..origin/codex/gap-verify`
   - `git branch -r --contains a6de0eae`
 - Checked activity and PR state:
