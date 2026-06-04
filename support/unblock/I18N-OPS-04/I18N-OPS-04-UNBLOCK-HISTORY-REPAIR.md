@@ -36,7 +36,9 @@ The stale unblock note was diagnosing the wrong problem.
    parent alias `I18N-OPS-04`, but `scripts/ai-status.sh show I18N-OPS-04`
    returns `Task not found: I18N-OPS-04`. Even after the rail choice is clear,
    auto-resume cannot target the parent until that alias is mapped to a real
-   task ID.
+   task ID. A narrow grep over `ai-task-archive.json`, `ai-task-archive.jsonl`,
+   and `ai-activity-log.jsonl` also returns no `I18N-OPS-04` entry, so the gap
+   is not just a stale active-task pointer.
 
 ## Exact Contamination
 
@@ -63,7 +65,7 @@ identity, not by WP0 ancestry.
 - `origin/codex2/i18n-ops-04 @ 4f5e71c92c9a8c6d7c303a45ef465876de54976c`
 - `origin/codex/i18n-ops-04 @ 3ea01e2dee5c7e5c294ab0be826b47b0b53de645`
 - task branch
-  `origin/codex/i18n-ops-04-unblock-history-repair @ 86072889`
+  `origin/codex/i18n-ops-04-unblock-history-repair @ b5bb03a7`
 - earlier helper rail
   `origin/codex2/i18n-ops-04-unblock-history-repair @ 52f0d654`
 
@@ -105,6 +107,9 @@ identity, not by WP0 ancestry.
 
 - `AI_NAME=Codex scripts/ai-status.sh show I18N-OPS-04` returns
   `Task not found: I18N-OPS-04`.
+- `grep -n 'I18N-OPS-04' ai-task-archive.json ai-task-archive.jsonl ai-activity-log.jsonl`
+  returns no matches, so no archived or logged canonical task ID can be
+  recovered from the local machine-truth side files.
 - This helper task therefore cannot automatically advance the canonical parent
   task on `done` unless the supervisor maps that alias to the real task ID.
 
@@ -168,6 +173,8 @@ The supervisor or parent owner should do two things:
     `I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: document owner-rail ancestry contamination`
   - `8607288995298d5a85f2f1114482f0ddf1b33bea`
     `I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: add branch push and PR evidence`
+  - `b5bb03a7b52886ef2a44b03baf8aac75e6adbe06`
+    `I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: refresh current-rail diagnosis`
 - push target:
   `origin/codex/i18n-ops-04-unblock-history-repair`
 - task PR:
@@ -186,6 +193,7 @@ The supervisor or parent owner should do two things:
   - `AI_NAME=Codex scripts/ai-status.sh list --status blocked`
 - Confirmed parent alias gap:
   - `AI_NAME=Codex scripts/ai-status.sh show I18N-OPS-04`
+  - `grep -n 'I18N-OPS-04' ai-task-archive.json ai-task-archive.jsonl ai-activity-log.jsonl`
 - Refreshed refs and inspected branch state:
   - `git fetch origin --prune`
   - `git branch --show-current`
@@ -206,3 +214,4 @@ The supervisor or parent owner should do two things:
   - `git range-diff origin/dev...origin/codex2/i18n-ops-04 origin/dev...origin/codex/i18n-ops-04`
 - Confirmed task branch publish evidence:
   - `gh pr list --head codex/i18n-ops-04-unblock-history-repair --state all --json number,title,url,headRefName,baseRefName,state,isDraft`
+  - `git log --oneline --decorate -5 origin/codex/i18n-ops-04-unblock-history-repair`
