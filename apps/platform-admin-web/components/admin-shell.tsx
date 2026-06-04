@@ -36,6 +36,7 @@ import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
 import {
   getLocalizedText,
+  platformAdminShellMessages,
   platformAdminNavSectionLabels,
   platformAdminRouteLabels,
   type Locale,
@@ -189,7 +190,7 @@ function pathMatchesRoute(route: NavRoute, pathname: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function getActiveRoute(pathname: string): NavRoute {
+function getActiveRoute(pathname: string, locale: Locale): NavRoute {
   const matchedRoutes = routes.filter((route) =>
     pathMatchesRoute(route, pathname),
   );
@@ -204,7 +205,9 @@ function getActiveRoute(pathname: string): NavRoute {
 
   const [homeRoute] = routes;
   if (!homeRoute) {
-    throw new Error("Platform Admin routes are not configured.");
+    throw new Error(
+      getLocalizedText(locale, platformAdminShellMessages.routeConfigMissing),
+    );
   }
   return homeRoute;
 }
@@ -507,7 +510,7 @@ function IdentityChip() {
     <div style={identityChipStyle}>
       <div style={realmChipStyle}>
         <span style={accentDotStyle} />
-        PLATFORM
+        {t("adminShell.identityRealm")}
       </div>
       <div style={envChipStyle}>
         <span style={envDotStyle} />
@@ -586,7 +589,10 @@ export function AdminShell({ children }: AdminShellProps) {
   const rawPathname = usePathname();
   const pathname = rawPathname || "/";
   const { locale, setLocale } = useTranslation();
-  const activeRoute = useMemo(() => getActiveRoute(pathname), [pathname]);
+  const activeRoute = useMemo(
+    () => getActiveRoute(pathname, locale),
+    [locale, pathname],
+  );
 
   return (
     <PlatformAdminAssistantProvider>

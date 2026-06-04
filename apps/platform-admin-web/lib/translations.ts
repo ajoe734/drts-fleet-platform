@@ -850,6 +850,7 @@ const en = {
   "adminShell.searchPlaceholder":
     "Search tenants, partner entries, audit events...",
   "adminShell.identityRole": "Platform Admin",
+  "adminShell.identityRealm": "PLATFORM",
   "adminShell.breadcrumbRoot": "Platform Admin",
   "adminShell.breadcrumbDetail": "Detail",
   "adminShell.notifications": "Notifications",
@@ -857,6 +858,8 @@ const en = {
   "adminShell.environmentProduction": "production",
   "adminShell.refresh.audit": "manual · audit evidence",
   "adminShell.refresh.governance": "medium_slow · governance",
+  "adminShell.error.routeConfigMissing":
+    "Platform Admin routes are not configured.",
 
   // ── Assistant Overlay ──
   "assistantOverlay.sourcesHeading": "Sources:",
@@ -872,6 +875,23 @@ const en = {
   "assistantOverlay.context.dirty": "dirty",
   "assistantOverlay.context.yes": "yes",
   "assistantOverlay.context.no": "no",
+  "assistantOverlay.context.pathLabel": "Path",
+  "assistantOverlay.context.pageLabel": "Page",
+  "assistantOverlay.context.activeTabLabel": "Active tab",
+  "assistantOverlay.context.refreshTierLabel": "Refresh tier",
+  "assistantOverlay.context.visibleEntitiesLabel": "Visible entities",
+  "assistantOverlay.context.warningsLabel": "Warnings",
+  "assistantOverlay.context.visibleTablesLabel": "Visible tables",
+  "assistantOverlay.context.selectedRecordsLabel": "Selected records",
+  "assistantOverlay.context.availableActionsLabel": "Available actions",
+  "assistantOverlay.context.formsLabel": "Forms",
+  "assistantOverlay.context.rowsLabel": "rows",
+  "assistantOverlay.context.visibleLabel": "visible",
+  "assistantOverlay.context.selectedLabel": "selected",
+  "assistantOverlay.context.actionsLabel": "actions",
+  "assistantOverlay.context.disabledLabel": "disabled",
+  "assistantOverlay.context.fieldsLabel": "fields",
+  "assistantOverlay.context.validationErrorsLabel": "validationErrors",
   "assistantOverlay.launcher": "Open platform assistant",
   "assistantOverlay.badge": "Beta",
   "assistantOverlay.label": "Assistant",
@@ -1723,6 +1743,7 @@ const zh: typeof en = {
   "adminShell.searchAria": "搜尋",
   "adminShell.searchPlaceholder": "搜尋租戶、合作夥伴、稽核事件…",
   "adminShell.identityRole": "平台管理員",
+  "adminShell.identityRealm": "平台",
   "adminShell.breadcrumbRoot": "平台管理",
   "adminShell.breadcrumbDetail": "詳情",
   "adminShell.notifications": "通知",
@@ -1730,6 +1751,7 @@ const zh: typeof en = {
   "adminShell.environmentProduction": "production",
   "adminShell.refresh.audit": "手動 · 稽核證據",
   "adminShell.refresh.governance": "medium_slow · 治理",
+  "adminShell.error.routeConfigMissing": "Platform Admin 路由尚未正確設定。",
 
   // ── Assistant Overlay ──
   "assistantOverlay.sourcesHeading": "來源：",
@@ -1745,6 +1767,23 @@ const zh: typeof en = {
   "assistantOverlay.context.dirty": "已修改",
   "assistantOverlay.context.yes": "是",
   "assistantOverlay.context.no": "否",
+  "assistantOverlay.context.pathLabel": "路徑",
+  "assistantOverlay.context.pageLabel": "頁面",
+  "assistantOverlay.context.activeTabLabel": "作用中分頁",
+  "assistantOverlay.context.refreshTierLabel": "更新層級",
+  "assistantOverlay.context.visibleEntitiesLabel": "可見實體",
+  "assistantOverlay.context.warningsLabel": "警示",
+  "assistantOverlay.context.visibleTablesLabel": "可見表格",
+  "assistantOverlay.context.selectedRecordsLabel": "已選記錄",
+  "assistantOverlay.context.availableActionsLabel": "可用動作",
+  "assistantOverlay.context.formsLabel": "表單",
+  "assistantOverlay.context.rowsLabel": "列數",
+  "assistantOverlay.context.visibleLabel": "可見",
+  "assistantOverlay.context.selectedLabel": "已選",
+  "assistantOverlay.context.actionsLabel": "動作",
+  "assistantOverlay.context.disabledLabel": "停用",
+  "assistantOverlay.context.fieldsLabel": "欄位",
+  "assistantOverlay.context.validationErrorsLabel": "驗證錯誤",
   "assistantOverlay.launcher": "開啟平台助理",
   "assistantOverlay.badge": "Beta",
   "assistantOverlay.label": "平台助理",
@@ -1859,6 +1898,13 @@ export const platformAdminAssistantSuggestedPrompts = {
     "變更平台狀態前，我該先檢查哪些風險？",
   ],
 } as const satisfies Record<Locale, readonly string[]>;
+
+export const platformAdminShellMessages = {
+  routeConfigMissing: {
+    zh: "Platform Admin 路由尚未正確設定。",
+    en: "Platform Admin routes are not configured.",
+  },
+} as const satisfies Record<string, LocalizedText>;
 
 export const translations: Record<Locale, typeof en> = { en, zh };
 

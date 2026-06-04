@@ -300,6 +300,23 @@ function buildContextPrompt(
     dirty: string;
     yes: string;
     no: string;
+    pathLabel: string;
+    pageLabel: string;
+    activeTabLabel: string;
+    refreshTierLabel: string;
+    visibleEntitiesLabel: string;
+    warningsLabel: string;
+    visibleTablesLabel: string;
+    selectedRecordsLabel: string;
+    availableActionsLabel: string;
+    formsLabel: string;
+    rowsLabel: string;
+    visibleLabel: string;
+    selectedLabel: string;
+    actionsLabel: string;
+    disabledLabel: string;
+    fieldsLabel: string;
+    validationErrorsLabel: string;
   },
 ) {
   const routeTitle = routeContext.title[locale];
@@ -321,15 +338,15 @@ function buildContextPrompt(
           .map((table) => {
             const selectedRows =
               table.selectedRowIds && table.selectedRowIds.length > 0
-                ? ` selected=${table.selectedRowIds.join(", ")}`
+                ? ` ${copy.selectedLabel}=${table.selectedRowIds.join(", ")}`
                 : "";
             const actions =
               table.availableActions && table.availableActions.length > 0
-                ? ` actions=${table.availableActions
+                ? ` ${copy.actionsLabel}=${table.availableActions
                     .map((action) => action.actionId)
                     .join(", ")}`
                 : "";
-            return `- ${table.tableId} (${table.title}): rows=${table.visibleRowCount}; visible=${table.visibleRowIds.join(", ") || copy.none}${selectedRows}${actions}`;
+            return `- ${table.tableId} (${table.title}): ${copy.rowsLabel}=${table.visibleRowCount}; ${copy.visibleLabel}=${table.visibleRowIds.join(", ") || copy.none}${selectedRows}${actions}`;
           })
           .join("\n")
       : copy.emptyList;
@@ -344,7 +361,7 @@ function buildContextPrompt(
       ? pageContext.availableActions
           .map(
             (action) =>
-              `${action.actionId}${action.riskLevel ? `(${action.riskLevel})` : ""}${action.disabled ? "[disabled]" : ""}`,
+              `${action.actionId}${action.riskLevel ? `(${action.riskLevel})` : ""}${action.disabled ? `[${copy.disabledLabel}]` : ""}`,
           )
           .join(", ")
       : copy.none;
@@ -389,25 +406,25 @@ function buildContextPrompt(
                     .map((action) => action.actionId)
                     .join(", ")
                 : copy.none;
-            return `- ${form.formId} (${form.title}): dirty=${form.dirty ? copy.yes : copy.no}; fields=${fields}; validationErrors=${validationErrors}; actions=${actions}`;
+            return `- ${form.formId} (${form.title}): ${copy.dirty}=${form.dirty ? copy.yes : copy.no}; ${copy.fieldsLabel}=${fields}; ${copy.validationErrorsLabel}=${validationErrors}; ${copy.actionsLabel}=${actions}`;
           })
           .join("\n")
       : copy.emptyList;
 
   return [
     copy.routeHeading,
-    `Path: ${routeContext.pathname}`,
-    `Page: ${routeTitle}`,
-    `Active tab: ${routeContext.activeTab ?? copy.none}`,
-    `Refresh tier: ${routeContext.refreshTier}`,
-    `Visible entities: ${entityRefs}`,
-    `Warnings: ${warnings}`,
+    `${copy.pathLabel}: ${routeContext.pathname}`,
+    `${copy.pageLabel}: ${routeTitle}`,
+    `${copy.activeTabLabel}: ${routeContext.activeTab ?? copy.none}`,
+    `${copy.refreshTierLabel}: ${routeContext.refreshTier}`,
+    `${copy.visibleEntitiesLabel}: ${entityRefs}`,
+    `${copy.warningsLabel}: ${warnings}`,
     "",
     copy.pageHeading,
-    `Visible tables:\n${visibleTables}`,
-    `Selected records: ${selectedRecords}`,
-    `Available actions: ${availableActions}`,
-    `Forms:\n${forms}`,
+    `${copy.visibleTablesLabel}:\n${visibleTables}`,
+    `${copy.selectedRecordsLabel}: ${selectedRecords}`,
+    `${copy.availableActionsLabel}: ${availableActions}`,
+    `${copy.formsLabel}:\n${forms}`,
     "",
     copy.questionHeading,
     message,
@@ -454,6 +471,23 @@ export function PlatformAssistantOverlay() {
     dirty: t("assistantOverlay.context.dirty"),
     yes: t("assistantOverlay.context.yes"),
     no: t("assistantOverlay.context.no"),
+    pathLabel: t("assistantOverlay.context.pathLabel"),
+    pageLabel: t("assistantOverlay.context.pageLabel"),
+    activeTabLabel: t("assistantOverlay.context.activeTabLabel"),
+    refreshTierLabel: t("assistantOverlay.context.refreshTierLabel"),
+    visibleEntitiesLabel: t("assistantOverlay.context.visibleEntitiesLabel"),
+    warningsLabel: t("assistantOverlay.context.warningsLabel"),
+    visibleTablesLabel: t("assistantOverlay.context.visibleTablesLabel"),
+    selectedRecordsLabel: t("assistantOverlay.context.selectedRecordsLabel"),
+    availableActionsLabel: t("assistantOverlay.context.availableActionsLabel"),
+    formsLabel: t("assistantOverlay.context.formsLabel"),
+    rowsLabel: t("assistantOverlay.context.rowsLabel"),
+    visibleLabel: t("assistantOverlay.context.visibleLabel"),
+    selectedLabel: t("assistantOverlay.context.selectedLabel"),
+    actionsLabel: t("assistantOverlay.context.actionsLabel"),
+    disabledLabel: t("assistantOverlay.context.disabledLabel"),
+    fieldsLabel: t("assistantOverlay.context.fieldsLabel"),
+    validationErrorsLabel: t("assistantOverlay.context.validationErrorsLabel"),
     launcher: t("assistantOverlay.launcher"),
     badge: t("assistantOverlay.badge"),
     label: t("assistantOverlay.label"),
