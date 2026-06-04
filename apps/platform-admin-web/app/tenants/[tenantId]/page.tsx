@@ -859,7 +859,9 @@ export default function TenantDetailPage() {
               tone={tenant.rollout.rollbackPrepared ? "success" : "warn"}
               icon={tenant.rollout.rollbackPrepared ? "ok" : "warn"}
               title={t("tenants.detail.rollbackPreparedTitle", {
-                value: tenant.rollout.rollbackPrepared ? "true" : "false",
+                value: tenant.rollout.rollbackPrepared
+                  ? t("common.true")
+                  : t("common.false"),
               })}
               body={
                 tenant.rollout.rollbackPrepared

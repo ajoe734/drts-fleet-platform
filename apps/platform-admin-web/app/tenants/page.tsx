@@ -354,22 +354,21 @@ export default function TenantsPage() {
               return {
                 ok: false,
                 code: "invalid_filter_value",
-                message:
-                  "Tenants filter accepts only all, sandbox, pilot, production, or rollback_hold.",
+                message: t("tenants.list.assistant.invalidFilter"),
               } as const;
             }
             setFilter(value as TenantFilter);
             return {
               ok: true,
               code: "filter_applied",
-              message: `Applied tenants filter ${value}.`,
+              message: t("tenants.list.assistant.filterApplied", { value }),
               payload: { filterId: "rollout_stage", value },
             } as const;
           },
         },
       },
     }),
-    [],
+    [t],
   );
 
   usePlatformAdminAssistantPage(assistantBridge);
