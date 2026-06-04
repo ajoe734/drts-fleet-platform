@@ -698,7 +698,7 @@ function SecretRevealModal({
           {t("partners.detail.secret.title")}
         </>
       }
-      subtitle="PLAINTEXT-ONCE · Q-ADM07"
+      subtitle={t("partners.detail.secret.subtitle")}
       onClose={onClose}
       footer={
         <>
@@ -1630,7 +1630,9 @@ export default function PartnerDetailPage() {
     const url = window.URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${entrySlug || "partner-entry"}-credential.txt`;
+    anchor.download = t("partners.detail.secret.downloadFilename", {
+      entrySlug: entrySlug || "partner-entry",
+    });
     anchor.click();
     window.URL.revokeObjectURL(url);
   }, [entrySlug, issuedCredential]);
@@ -1786,7 +1788,10 @@ export default function PartnerDetailPage() {
       <PageHeader
         theme={theme}
         title={titleNode}
-        subtitle={`/${entry.entrySlug} · partner_id ${entry.partnerId}`}
+        subtitle={t("partners.detail.headerSubtitle", {
+          entrySlug: entry.entrySlug,
+          partnerId: entry.partnerId,
+        })}
         tabs={tabDefs.map((definition) => definition.node)}
         activeTab={activeTabNode}
         actions={headerActions}
@@ -2040,14 +2045,14 @@ export default function PartnerDetailPage() {
                   label={t("partners.form.entryHost")}
                   value={editForm.entryHost}
                   onChange={(value) => updateFormField("entryHost", value)}
-                  placeholder="partner.example"
+                  placeholder={t("partners.detail.placeholder.entryHost")}
                   mono
                 />
                 <TextField
                   label={t("partners.form.entryPath")}
                   value={editForm.entryPath}
                   onChange={(value) => updateFormField("entryPath", value)}
-                  placeholder="/partner/world-elite"
+                  placeholder={t("partners.detail.placeholder.entryPath")}
                   mono
                   hint={
                     previewUrl
@@ -2059,7 +2064,7 @@ export default function PartnerDetailPage() {
                   label={t("partners.form.themeAccent")}
                   value={editForm.themeAccent}
                   onChange={(value) => updateFormField("themeAccent", value)}
-                  placeholder="#0b7285"
+                  placeholder={t("partners.detail.placeholder.themeAccent")}
                   mono
                   hint={t("partners.detail.accentHint")}
                 />

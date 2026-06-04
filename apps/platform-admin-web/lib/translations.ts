@@ -229,6 +229,7 @@ const en = {
   "partners.detail.previewNotice":
     "Platform Admin API data is unavailable in this workspace. Showing the canvas-aligned preview fixture for local verification.",
   "partners.detail.previewModeTitle": "Preview fixture mode",
+  "partners.detail.headerSubtitle": "/{entrySlug} · partner_id {partnerId}",
   "partners.detail.tabs.overview": "Overview",
   "partners.detail.tabs.branding": "Branding",
   "partners.detail.tabs.auth": "Auth",
@@ -291,10 +292,14 @@ const en = {
     "Creation, updates, credential events, and request lineage for platform review.",
   "partners.detail.routeHint": "Public route preview",
   "partners.detail.accentHint": "Brand accent delivered to the partner skin",
+  "partners.detail.placeholder.entryHost": "partner.example",
+  "partners.detail.placeholder.entryPath": "/partner/world-elite",
+  "partners.detail.placeholder.themeAccent": "#0b7285",
   "partners.detail.contractEmpty":
     "No eligibility contract snapshot is currently linked to this entry.",
   "partners.detail.secret.title":
     "Ingress credential generated · only shown once",
+  "partners.detail.secret.subtitle": "PLAINTEXT-ONCE · Q-ADM07",
   "partners.detail.secret.warningTitle":
     "Closing this window permanently hides the full secret",
   "partners.detail.secret.warningBody":
@@ -313,6 +318,7 @@ const en = {
   "partners.detail.secret.complete": "Complete · I stored this key",
   "partners.detail.secret.copy": "Copy",
   "partners.detail.secret.download": ".txt",
+  "partners.detail.secret.downloadFilename": "{entrySlug}-credential.txt",
   "partners.detail.credentialAction.issueTitle": "Issue ingress credential",
   "partners.detail.credentialAction.rotateTitle": "Rotate ingress credential",
   "partners.detail.credentialAction.subtitle":
@@ -1223,6 +1229,7 @@ const zh: typeof en = {
   "partners.detail.previewNotice":
     "目前無法從 Platform Admin API 取得資料；此頁改用符合畫布的預覽假資料供本地驗證。",
   "partners.detail.previewModeTitle": "預覽假資料模式",
+  "partners.detail.headerSubtitle": "/{entrySlug} · partner_id {partnerId}",
   "partners.detail.tabs.overview": "總覽",
   "partners.detail.tabs.branding": "品牌",
   "partners.detail.tabs.auth": "驗證",
@@ -1282,8 +1289,12 @@ const zh: typeof en = {
   "partners.detail.auditSubtitle": "供平台檢視建立、更新、憑證事件與請求脈絡。",
   "partners.detail.routeHint": "公開入口預覽",
   "partners.detail.accentHint": "套用於合作夥伴介面的品牌主色",
+  "partners.detail.placeholder.entryHost": "partner.example",
+  "partners.detail.placeholder.entryPath": "/partner/world-elite",
+  "partners.detail.placeholder.themeAccent": "#0b7285",
   "partners.detail.contractEmpty": "此入口尚未綁定資格驗證契約快照。",
   "partners.detail.secret.title": "入口憑證已產生 · 明文只顯示一次",
+  "partners.detail.secret.subtitle": "PLAINTEXT-ONCE · Q-ADM07",
   "partners.detail.secret.warningTitle": "關閉此視窗後將永久隱藏完整密鑰",
   "partners.detail.secret.warningBody":
     "若遺失密鑰，必須重新建立憑證並立即輪替。之後平台只保留遮罩後綴。",
@@ -1299,6 +1310,7 @@ const zh: typeof en = {
   "partners.detail.secret.complete": "完成 · 我已保存此密鑰",
   "partners.detail.secret.copy": "複製",
   "partners.detail.secret.download": ".txt",
+  "partners.detail.secret.downloadFilename": "{entrySlug}-credential.txt",
   "partners.detail.credentialAction.issueTitle": "核發入口憑證",
   "partners.detail.credentialAction.rotateTitle": "輪替入口憑證",
   "partners.detail.credentialAction.subtitle": "高風險操作 · 必填稽核原因",
