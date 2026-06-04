@@ -1,6 +1,6 @@
 # Dev Runtime + Functional Gap Report (browser-verified)
 
-- **Last re-run:** 2026-06-04T05:08:27Z
+- **Last re-run:** 2026-06-04T05:16:42Z
 - **Auditor:** Codex2
 - **Environment:** live dev Cloud Run
   - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
@@ -18,7 +18,7 @@
 **Current total:** 38 / 39 routes fully working.  
 **Acceptance target (`0 broken`, `0 HTTP 500`) is not met.**
 
-This 2026-06-04T05:08:27Z re-run confirms two prior fixes are now live on dev, but acceptance is still blocked by one remaining HTTP 500 and one manual tab-strip regression:
+This 2026-06-04T05:16:42Z re-run confirms two prior fixes are now live on dev, but acceptance is still blocked by one remaining HTTP 500 and one manual tab-strip regression:
 
 - OPS `/vehicles/veh-demo-001` still returns HTTP 500.
 - PA `/pricing` tab switching still fails to push `/pricing?tab=driver`.
