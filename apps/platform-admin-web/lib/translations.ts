@@ -317,6 +317,7 @@ const en = {
   "switchboard.preview.currentPlacard":
     "Current placard · {code} (source {source})",
   "switchboard.preview.emptyPlacard": "No placard generated yet.",
+  "switchboard.preview.pendingArtifactId": "pending-artifact-id",
   "switchboard.preview.callLabel": "Call",
   "switchboard.preview.complaintLabel": "Complaint",
   "switchboard.preview.sourceLabel": "Source",
@@ -416,6 +417,20 @@ const en = {
   "switchboard.form.artifactFileId": "Artifact File ID",
   "switchboard.form.artifactHint": "Optional external asset reference",
   "switchboard.form.effectiveToHint": "Optional sunset timestamp",
+  "switchboard.form.sourceHint.none":
+    "Select a source public info version to keep placard lineage traceable.",
+  "switchboard.form.sourceHint.published":
+    "Published source selected: generated placards will inherit the live disclosure timestamp.",
+  "switchboard.form.sourceHint.retired":
+    "Retired source selected: generation is blocked because placards must link to an active draft or published disclosure version.",
+  "switchboard.form.sourceHint.draft":
+    "Draft source selected: generated placards stay draft until the linked public info is published.",
+  "switchboard.form.sourceRetiredAuditNote":
+    "Retired public info versions remain visible for audit history, but cannot be used to generate new placards.",
+  "switchboard.form.versionCodeConflict":
+    "Version code already exists in placard {placardId}. Choose a unique code before generating.",
+  "switchboard.option.retiredSourceUnavailable":
+    "{title} (retired source unavailable)",
   "switchboard.assistant.invalidWorkspaceTab":
     "Switchboard tab filter accepts only versions, placards, or history.",
   "switchboard.assistant.appliedWorkspaceTab":
@@ -1163,6 +1178,7 @@ const zh: typeof en = {
   "switchboard.versionsSubtitle": "生效起迄 · 公開電話 · 狀態",
   "switchboard.preview.currentPlacard": "目前牌貼 · {code}（來源 {source}）",
   "switchboard.preview.emptyPlacard": "目前尚未產生牌貼。",
+  "switchboard.preview.pendingArtifactId": "待產生成品 ID",
   "switchboard.preview.callLabel": "叫車",
   "switchboard.preview.complaintLabel": "客訴",
   "switchboard.preview.sourceLabel": "來源",
@@ -1255,6 +1271,20 @@ const zh: typeof en = {
   "switchboard.form.artifactFileId": "成品檔案 ID",
   "switchboard.form.artifactHint": "選填外部資源參照",
   "switchboard.form.effectiveToHint": "選填下架時間",
+  "switchboard.form.sourceHint.none":
+    "請選擇公開資訊來源版本，以保持牌貼沿革可追溯。",
+  "switchboard.form.sourceHint.published":
+    "已選擇已發布來源：新產生的牌貼會沿用正式公開揭露時間戳。",
+  "switchboard.form.sourceHint.retired":
+    "已選擇退役來源：目前禁止產生，因為牌貼必須連結到有效草稿或已發布揭露版本。",
+  "switchboard.form.sourceHint.draft":
+    "已選擇草稿來源：產生的牌貼會維持草稿，直到關聯的公開資訊發布。",
+  "switchboard.form.sourceRetiredAuditNote":
+    "已退役的公開資訊版本仍會保留於稽核歷史中，但不可再用來產生新牌貼。",
+  "switchboard.form.versionCodeConflict":
+    "版本代碼已存在於牌貼 {placardId}。請改用唯一代碼後再產生。",
+  "switchboard.option.retiredSourceUnavailable":
+    "{title}（已退役來源，不可使用）",
   "switchboard.assistant.invalidWorkspaceTab":
     "交換台分頁篩選僅接受 versions、placards 或 history。",
   "switchboard.assistant.appliedWorkspaceTab": "已套用交換台分頁 {value}。",

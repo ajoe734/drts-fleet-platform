@@ -30,7 +30,6 @@ const UI_LABELS: Record<string, LocalizedText> = {
   applicableTo: { en: "Applicable To", zh: "適用對象" },
   call: { en: "Call", zh: "客服" },
   complaint: { en: "Complaint", zh: "客訴" },
-  pendingArtifactId: { en: "pending-artifact-id", zh: "待產生成品 ID" },
   defaultPlanName: {
     en: "Phase 1 Driver Fee Plan",
     zh: "Phase 1 司機費用方案",
@@ -38,34 +37,6 @@ const UI_LABELS: Record<string, LocalizedText> = {
   maintenanceReasonExample: {
     en: "e.g. Scheduled upgrade window",
     zh: "例如：排定的升級維護時段",
-  },
-  placardSourceNone: {
-    en: "Select a source public info version to keep placard lineage traceable.",
-    zh: "請選擇公開資訊來源版本，以保持立牌沿革可追溯。",
-  },
-  placardSourcePublished: {
-    en: "Published source selected: generated placard will inherit the live disclosure timestamp.",
-    zh: "已選擇已發布來源：新產生的立牌會沿用正式公開揭露時間戳。",
-  },
-  placardSourceRetired: {
-    en: "Retired source selected: generate is blocked because placards must be linked to an active draft or published disclosure version.",
-    zh: "已選擇退役來源：目前禁止產生，因為立牌必須連結到有效草稿或已發布揭露版本。",
-  },
-  placardSourceDraft: {
-    en: "Draft source selected: generated placard stays draft until the linked public info is published.",
-    zh: "已選擇草稿來源：產生的立牌會維持草稿，直到關聯的公開資訊發布。",
-  },
-  placardRetiredSourceUnavailable: {
-    en: "{title} (retired source unavailable)",
-    zh: "{title}（已退役來源，不可使用）",
-  },
-  placardRetiredSourceAuditNote: {
-    en: "Retired public info versions remain visible for audit history, but cannot be used to generate new placards.",
-    zh: "已退役的公開資訊版本仍會保留於稽核歷史中，但不可再用來產生新立牌。",
-  },
-  placardVersionCodeConflict: {
-    en: "Version code already exists in placard {placardId}. Choose a unique code before generating.",
-    zh: "版本代碼已存在於立牌 {placardId}。請改用唯一代碼後再產生。",
   },
 };
 

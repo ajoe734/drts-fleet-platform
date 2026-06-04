@@ -44,12 +44,9 @@ import type {
   PublicInfoVersionRecord,
   ResourceActionDescriptor,
 } from "@drts/contracts";
-import { getPlacardVersionCodePrecheckMessage } from "./placard-version-code";
+import { findPlacardVersionCodeConflict } from "./placard-version-code";
 import {
-  formatPlacardSourceOptionLabel,
-  getPlacardSourceSelectionHint,
   getPreferredPlacardSourceVersion,
-  getPlacardRetiredSourceAuditNote,
   isPlacardSourceSelectionBlocked,
 } from "./placard-source";
 
@@ -436,6 +433,40 @@ export default function SwitchboardPage() {
     return formatText(`switchboard.assistant.${key}`, params);
   }
 
+  function formatPlacardSourceOptionLabel(
+    version: Pick<PublicInfoVersionRecord, "status" | "title">,
+  ): string {
+    if (version.status === "retired") {
+      return switchboardText("option.retiredSourceUnavailable", {
+        title: version.title,
+      });
+    }
+
+    return `${version.title} (${publicInfoStatusLabel(version.status)})`;
+  }
+
+  function getPlacardSourceSelectionHint(
+    version: Pick<PublicInfoVersionRecord, "status"> | null | undefined,
+  ): string {
+    if (!version) {
+      return switchboardText("form.sourceHint.none");
+    }
+
+    if (version.status === "published") {
+      return switchboardText("form.sourceHint.published");
+    }
+
+    if (version.status === "retired") {
+      return switchboardText("form.sourceHint.retired");
+    }
+
+    return switchboardText("form.sourceHint.draft");
+  }
+
+  function getPlacardRetiredSourceAuditNote(): string {
+    return switchboardText("form.sourceRetiredAuditNote");
+  }
+
   function disabledReasonText(
     code: string | null | undefined,
   ): string | undefined {
@@ -528,15 +559,19 @@ export default function SwitchboardPage() {
 
   const selectedPlacardSource =
     publicInfoById[placardForm.publicInfoVersionId] ?? null;
-  const versionCodePrecheckMessage = useMemo(
-    () =>
-      getPlacardVersionCodePrecheckMessage(
-        placardForm.versionCode,
-        placards,
-        locale,
-      ),
-    [locale, placardForm.versionCode, placards],
-  );
+  const versionCodePrecheckMessage = useMemo(() => {
+    const conflict = findPlacardVersionCodeConflict(
+      placardForm.versionCode,
+      placards,
+    );
+    if (!conflict) {
+      return null;
+    }
+
+    return switchboardText("form.versionCodeConflict", {
+      placardId: conflict.placardVersionId,
+    });
+  }, [locale, placardForm.versionCode, placards]);
   const placardSourceBlocked = isPlacardSourceSelectionBlocked(
     selectedPlacardSource,
   );
@@ -894,8 +929,7 @@ export default function SwitchboardPage() {
       r: (row) => (
         <div style={cellStackStyle}>
           <span style={monoCellStyle}>
-            {row.artifactFileId ??
-              getPlatformLabel(locale, "pendingArtifactId")}
+            {row.artifactFileId ?? switchboardText("preview.pendingArtifactId")}
           </span>
           {row.artifactDownloadUrl ? (
             <a
@@ -1647,7 +1681,7 @@ export default function SwitchboardPage() {
                     value={version.versionId}
                     disabled={isPlacardSourceSelectionBlocked(version)}
                   >
-                    {formatPlacardSourceOptionLabel(version, locale)}
+                    {formatPlacardSourceOptionLabel(version)}
                   </option>
                 ))}
               </select>
@@ -1701,7 +1735,7 @@ export default function SwitchboardPage() {
             </label>
           </div>
           <p style={{ ...subcopyStyle, marginTop: 12, marginBottom: 0 }}>
-            {getPlacardSourceSelectionHint(selectedPlacardSource, locale)}
+            {getPlacardSourceSelectionHint(selectedPlacardSource)}
           </p>
           {placardSourceBlocked ? (
             <p
@@ -1712,7 +1746,7 @@ export default function SwitchboardPage() {
                 fontSize: 11.5,
               }}
             >
-              {getPlacardRetiredSourceAuditNote(locale)}
+              {getPlacardRetiredSourceAuditNote()}
             </p>
           ) : null}
           {versionCodePrecheckMessage ? (
