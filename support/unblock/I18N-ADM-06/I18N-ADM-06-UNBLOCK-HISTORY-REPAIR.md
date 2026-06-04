@@ -168,3 +168,16 @@ branch.
   - `gh pr list --head codex2/i18n-adm-06 --state all --json number,title,headRefName,baseRefName,state,url,isDraft`
 
 No runtime tests were run. This task is branch/history evidence repair only.
+
+## Owner Closeout Evidence
+
+- Closeout timestamp: `2026-06-04T10:12:05Z`
+- Approved helper branch head:
+  `origin/codex2/i18n-adm-06-unblock-history-repair @ 02014bc067a8e85c1d0ce090426ae343d2bbbf7c`
+- `git rev-list --left-right --count origin/codex2/i18n-adm-06-unblock-history-repair...HEAD`
+  returns `0 0`
+- `git status --branch --short` at closeout shows only the task artifact change on
+  `codex2/i18n-adm-06-unblock-history-repair`
+- Closeout integration level for this helper task is `branch_pushed`; this task
+  only repairs shared branch/history evidence and does not represent a dev
+  deployment
