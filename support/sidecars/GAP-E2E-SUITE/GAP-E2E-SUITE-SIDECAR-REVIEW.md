@@ -4,7 +4,7 @@
 **Parent Task:** `GAP-E2E-SUITE`  
 **Helper Kind:** `review_packet`  
 **Current Owner:** `Codex`  
-**Assigned Reviewer:** `Claude`  
+**Assigned Reviewer:** `Codex2`  
 **Parent Owner / Reviewer:** `Claude` / `Codex2`  
 **Last Revised:** `2026-06-04 (UTC)`  
 **Status:** `REVIEW APPROVED / OWNER CLOSEOUT READY`
@@ -21,7 +21,7 @@ This sidecar is support-only.
 Important shared-truth note:
 
 - The parent task `GAP-E2E-SUITE` is already `done` in machine truth.
-- This helper task exists only to hand the review packet to `Claude` with the accepted evidence summarized in one place.
+- This helper task exists only to hand the review packet to `Codex2` with the accepted evidence summarized in one place.
 
 Owner closeout note:
 
@@ -144,13 +144,13 @@ That means:
 - evidence anchors for the parent suite must be read from the recorded parent commits / machine-truth metadata, not from the local filesystem on this sidecar branch
 - this is expected for a support-only helper slice and is not evidence of missing parent delivery
 
-Reviewer `Claude` should judge packet accuracy against the parent branch evidence and machine truth, not against the local file presence of this helper branch.
+Reviewer `Codex2` should judge packet accuracy against the parent branch evidence and machine truth, not against the local file presence of this helper branch.
 
 ---
 
 ## 6. Reviewer Focus
 
-Reviewer `Claude` should confirm:
+Reviewer `Codex2` should confirm:
 
 1. This artifact stays support-only and does not change canonical truth.
 2. The packet matches current machine truth where parent `GAP-E2E-SUITE` is already `done` with commit `1a9571ea15058ea33c9aa9339191dbfbff60f0ab`.
@@ -172,22 +172,22 @@ Suggested reopen wording:
 
 ## 7. Handoff Command
 
-Owner handoff to `Claude`:
+Owner handoff to `Codex2`:
 
 ```bash
-AI_NAME=Codex scripts/ai-status.sh handoff GAP-E2E-SUITE-SIDECAR-REVIEW Claude "Review packet ready at support/sidecars/GAP-E2E-SUITE/GAP-E2E-SUITE-SIDECAR-REVIEW.md. It summarizes the current machine-truth snapshot for parent GAP-E2E-SUITE (done at commit 1a9571ea on origin/claude/gap-e2e-suite, integration_status=branch_pushed), the 39-route deterministic Playwright suite anchors from commit 9ac4c54d, the CI seeded-Postgres wiring from f710c964, and the final /payments stateful-verb guard from 1a9571ea. Support artifact only; no canonical truth changed."
+AI_NAME=Codex scripts/ai-status.sh handoff GAP-E2E-SUITE-SIDECAR-REVIEW Codex2 "Review packet ready at support/sidecars/GAP-E2E-SUITE/GAP-E2E-SUITE-SIDECAR-REVIEW.md. It summarizes the current machine-truth snapshot for parent GAP-E2E-SUITE (done at commit 1a9571ea on origin/claude/gap-e2e-suite, integration_status=branch_pushed), the 39-route deterministic Playwright suite anchors from commit 9ac4c54d, the CI seeded-Postgres wiring from f710c964, and the final /payments stateful-verb guard from 1a9571ea. Support artifact only; no canonical truth changed."
 ```
 
 Reviewer approval:
 
 ```bash
-AI_NAME=Claude scripts/ai-status.sh approve GAP-E2E-SUITE-SIDECAR-REVIEW "Review approved. The packet matches current machine truth for parent GAP-E2E-SUITE, cites the accepted route-suite/CI/payments guard evidence, and stays support-only."
+AI_NAME=Codex2 scripts/ai-status.sh approve GAP-E2E-SUITE-SIDECAR-REVIEW "Review approved. The packet matches current machine truth for parent GAP-E2E-SUITE, cites the accepted route-suite/CI/payments guard evidence, and stays support-only."
 ```
 
 Reviewer reopen:
 
 ```bash
-AI_NAME=Claude scripts/ai-status.sh reopen GAP-E2E-SUITE-SIDECAR-REVIEW "packet needs refresh: [machine-truth mismatch / wrong commit anchor / CI evidence mismatch / support-scope violation]"
+AI_NAME=Codex2 scripts/ai-status.sh reopen GAP-E2E-SUITE-SIDECAR-REVIEW "packet needs refresh: [machine-truth mismatch / wrong commit anchor / CI evidence mismatch / support-scope violation]"
 ```
 
 ---
