@@ -422,6 +422,12 @@ export default function SwitchboardPage() {
     return formatText("switchboard.receipt.publishPlacard", { code });
   }
 
+  function publicInfoStatusLabel(
+    status: PublicInfoVersionRecord["status"],
+  ): string {
+    return formatText(`switchboard.status.${status}`);
+  }
+
   function assistantText(
     key: string,
     params?: Record<string, string | number>,
@@ -846,7 +852,7 @@ export default function SwitchboardPage() {
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={publicInfoStatusTone(row.status)} dot>
-          {row.status}
+          {publicInfoStatusLabel(row.status)}
         </CanvasPill>
       ),
     },
@@ -974,7 +980,7 @@ export default function SwitchboardPage() {
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={publicInfoStatusTone(row.status)} dot>
-          {row.status}
+          {publicInfoStatusLabel(row.status)}
         </CanvasPill>
       ),
     },
