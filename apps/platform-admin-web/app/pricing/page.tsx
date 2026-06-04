@@ -70,6 +70,22 @@ type HistoryRow = Record<string, unknown> & {
   status: "published" | "retired";
 };
 
+type TranslateFn = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
+
+type SubsidySeed = {
+  version: string;
+  nameKey: string;
+  status: "published" | "draft";
+  triggerKey: string;
+  amountKey: string;
+  scope: string;
+  from: string;
+  to: string;
+};
+
 const PRICING_TAB_VALUES = new Set<TabId>([
   "passenger",
   "driver",
@@ -332,23 +348,23 @@ const emptyStateStyle = {
   fontSize: 12.5,
 } satisfies CSSProperties;
 
-const FALLBACK_SUBSIDY_ROWS: SubsidyRow[] = [
+const FALLBACK_SUBSIDY_ROWS: SubsidySeed[] = [
   {
     version: "sb_v04",
-    name: "輪椅服務補助",
+    nameKey: "pricing.subsidy.wheelchair.name",
     status: "published",
-    trigger: "service=wheelchair",
-    amount: "NT$ 180 / trip",
+    triggerKey: "pricing.subsidy.wheelchair.trigger",
+    amountKey: "pricing.subsidy.wheelchair.amount",
     scope: "wheelchair",
     from: "2026-01-01",
     to: "open",
   },
   {
     version: "sb_v05",
-    name: "夜間機場接送補助",
+    nameKey: "pricing.subsidy.airportNight.name",
     status: "published",
-    trigger: "service=airport && hour∈[22,5]",
-    amount: "12% fare top-up",
+    triggerKey: "pricing.subsidy.airportNight.trigger",
+    amountKey: "pricing.subsidy.airportNight.amount",
     scope: "airport_transfer",
     from: "2026-04-01",
     to: "2026-06-30",
@@ -357,44 +373,53 @@ const FALLBACK_SUBSIDY_ROWS: SubsidyRow[] = [
 
 const SERVICE_BUCKET_META: Record<
   string,
-  { label: string; base: string; continuation: string; fee: string }
+  {
+    labelKey: string;
+    baseKey: string;
+    continuationKey: string;
+    feeKey: string;
+  }
 > = {
   standard_taxi: {
-    label: "standard",
-    base: "NT$ 85 / 起",
-    continuation: "NT$ 5 / 250m",
-    fee: "1800 bps",
+    labelKey: "pricing.bucket.standard.label",
+    baseKey: "pricing.bucket.standard.base",
+    continuationKey: "pricing.bucket.standard.continuation",
+    feeKey: "pricing.bucket.standard.fee",
   },
   business_dispatch: {
-    label: "business",
-    base: "NT$ 120 / 起",
-    continuation: "NT$ 6 / 200m",
-    fee: "2200 bps",
+    labelKey: "pricing.bucket.business.label",
+    baseKey: "pricing.bucket.business.base",
+    continuationKey: "pricing.bucket.business.continuation",
+    feeKey: "pricing.bucket.business.fee",
   },
   airport_transfer: {
-    label: "airport",
-    base: "NT$ 180 / 起",
-    continuation: "flat by zone",
-    fee: "2500 bps",
+    labelKey: "pricing.bucket.airport.label",
+    baseKey: "pricing.bucket.airport.base",
+    continuationKey: "pricing.bucket.airport.continuation",
+    feeKey: "pricing.bucket.airport.fee",
   },
   wheelchair: {
-    label: "wheelchair",
-    base: "NT$ 95 / 起",
-    continuation: "NT$ 5 / 250m",
-    fee: "900 bps · subsidy",
+    labelKey: "pricing.bucket.wheelchair.label",
+    baseKey: "pricing.bucket.wheelchair.base",
+    continuationKey: "pricing.bucket.wheelchair.continuation",
+    feeKey: "pricing.bucket.wheelchair.fee",
   },
 };
 
-function formatRange(from: string, to: string | null) {
-  return `${from || "—"} → ${to || "open"}`;
+function formatRange(t: TranslateFn, from: string, to: string | null) {
+  return t("pricing.range", {
+    from: from || "—",
+    to: to || t("pricing.openEnded"),
+  });
 }
 
 function pricingStatusLabel(
+  t: TranslateFn,
   status: PlatformPricingRuleRecord["status"],
-): "draft" | "published" | "retired" {
-  if (status === "active") return "published";
-  if (status === "draft") return "draft";
-  return "retired";
+): string {
+  if (status === "active") return t("pricing.status.published");
+  if (status === "draft") return t("pricing.status.draft");
+  return t("pricing.status.retired");
 }
 
 function ruleTone(status: PlatformPricingRuleRecord["status"]): CanvasTone {
@@ -431,9 +456,23 @@ function buildFeePlanRows(plans: DriverFeePlanRecord[]): FeePlanRow[] {
   }));
 }
 
+function buildSubsidyRows(t: TranslateFn): SubsidyRow[] {
+  return FALLBACK_SUBSIDY_ROWS.map((row) => ({
+    version: row.version,
+    name: t(row.nameKey),
+    status: row.status,
+    trigger: t(row.triggerKey),
+    amount: t(row.amountKey),
+    scope: row.scope,
+    from: row.from,
+    to: row.to,
+  }));
+}
+
 function buildHistoryRows(
   rules: PlatformPricingRuleRecord[],
   plans: DriverFeePlanRecord[],
+  subsidyRows: SubsidyRow[],
 ): HistoryRow[] {
   return [
     ...rules
@@ -458,19 +497,20 @@ function buildHistoryRows(
       publishedBy: "platform_admin",
       status: "published",
     })),
-    ...FALLBACK_SUBSIDY_ROWS.map<HistoryRow>((row) => ({
+    ...subsidyRows.map<HistoryRow>((row) => ({
       version: row.version,
       type: "subsidy",
       name: row.name,
       scope: row.scope,
       publishedAt: `${row.from} 00:00`,
-      publishedBy: "張薇",
+      publishedBy: "platform_ops",
       status: row.status === "draft" ? "retired" : "published",
     })),
   ].sort((left, right) => right.publishedAt.localeCompare(left.publishedAt));
 }
 
 function ReasonModal({
+  t,
   selectedDraft,
   reason,
   onReasonChange,
@@ -484,6 +524,7 @@ function ReasonModal({
   onClose,
   onSubmit,
 }: {
+  t: TranslateFn;
   selectedDraft: PlatformPricingRuleRecord | null;
   reason: string;
   onReasonChange: (value: string) => void;
@@ -506,12 +547,9 @@ function ReasonModal({
       <form style={modalCardStyle} onSubmit={onSubmit}>
         <div style={{ display: "grid", gap: 6 }}>
           <h2 style={{ margin: 0, fontSize: 18, color: theme.text }}>
-            發佈版本
+            {t("pricing.modal.title")}
           </h2>
-          <p style={helperStyle}>
-            high-risk action 需要填寫原因，並在 audit receipt 中保留
-            actor、reason 與 trace evidence。
-          </p>
+          <p style={helperStyle}>{t("pricing.modal.subtitle")}</p>
         </div>
 
         <CanvasBanner
@@ -520,6 +558,7 @@ function ReasonModal({
           icon="warn"
           title={selectedDraft.version}
           body={`${selectedDraft.ruleName} · ${formatRange(
+            t,
             selectedDraft.effectiveFrom,
             selectedDraft.effectiveTo,
           )}`}
@@ -530,13 +569,17 @@ function ReasonModal({
             theme={theme}
             tone="warn"
             icon="warn"
-            title="scope conflict check"
+            title={t("pricing.modal.conflictTitle")}
             body={conflictWarning}
           />
         ) : null}
 
         <div style={fieldGridStyle}>
-          <CanvasField theme={theme} label="生效開始" required>
+          <CanvasField
+            theme={theme}
+            label={t("pricing.modal.effectiveFrom")}
+            required
+          >
             <input
               type="datetime-local"
               value={windowFrom}
@@ -545,7 +588,7 @@ function ReasonModal({
               required
             />
           </CanvasField>
-          <CanvasField theme={theme} label="生效結束">
+          <CanvasField theme={theme} label={t("pricing.modal.effectiveTo")}>
             <input
               type="datetime-local"
               value={windowTo}
@@ -555,12 +598,12 @@ function ReasonModal({
           </CanvasField>
         </div>
 
-        <CanvasField theme={theme} label="高風險原因" required>
+        <CanvasField theme={theme} label={t("pricing.modal.reason")} required>
           <textarea
             value={reason}
             onChange={(event) => onReasonChange(event.target.value)}
             style={textareaStyle}
-            placeholder="請描述 pricing publish 的治理原因、影響範圍與核准依據。"
+            placeholder={t("pricing.modal.reasonPlaceholder")}
             required
           />
         </CanvasField>
@@ -570,14 +613,14 @@ function ReasonModal({
             theme={theme}
             tone="danger"
             icon="warn"
-            title="無法發佈草稿"
+            title={t("pricing.modal.errorTitle")}
             body={error}
           />
         ) : null}
 
         <div style={buttonRowStyle}>
           <CanvasBtn theme={theme} onClick={onClose} disabled={publishing}>
-            取消
+            {t("common.cancel")}
           </CanvasBtn>
           <button
             type="submit"
@@ -602,7 +645,9 @@ function ReasonModal({
               fontFamily: theme.fontFamily,
             }}
           >
-            {publishing ? "發佈中…" : "確認發佈"}
+            {publishing
+              ? t("pricing.modal.submitting")
+              : t("pricing.modal.submit")}
           </button>
         </div>
       </form>
@@ -611,7 +656,7 @@ function ReasonModal({
 }
 
 export default function PricingPage() {
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const router = useRouter();
   const pathname = usePathname();
@@ -673,11 +718,11 @@ export default function PricingPage() {
 
   const pricingRows = useMemo(() => buildPricingRows(rules), [rules]);
   const feePlanRows = useMemo(() => buildFeePlanRows(plans), [plans]);
+  const subsidyRows = useMemo(() => buildSubsidyRows(t), [t]);
   const historyRows = useMemo(
-    () => buildHistoryRows(rules, plans),
-    [plans, rules],
+    () => buildHistoryRows(rules, plans, subsidyRows),
+    [plans, rules, subsidyRows],
   );
-  const subsidyRows = useMemo(() => FALLBACK_SUBSIDY_ROWS, []);
 
   const activeRule =
     rules.find((rule) => rule.status === "active") ??
@@ -723,26 +768,33 @@ export default function PricingPage() {
   );
   const publishConflictBody =
     conflictingDrafts.length > 1
-      ? `${conflictingDrafts.length} drafts share scope ${selectedDraft?.applicableTo ?? "—"}; publish should confirm the intended winner before atomic replace.`
+      ? t("pricing.publishConflict.multipleDrafts", {
+          count: conflictingDrafts.length,
+          scope: selectedDraft?.applicableTo ?? "—",
+        })
       : activeRule &&
           selectedDraft &&
           activeRule.applicableTo === selectedDraft.applicableTo
-        ? `${activeRule.version} will be retired for scope ${selectedDraft.applicableTo} when ${selectedDraft.version} publishes.`
+        ? t("pricing.publishConflict.activeRetires", {
+            activeVersion: activeRule.version,
+            scope: selectedDraft.applicableTo,
+            draftVersion: selectedDraft.version,
+          })
         : null;
   const createDraftLabel =
     activeTab === "passenger"
-      ? "建立 passenger 草稿"
+      ? t("pricing.action.createPassengerDraft")
       : activeTab === "driver"
-        ? "建立 driver plan 草稿"
+        ? t("pricing.action.createDriverDraft")
         : activeTab === "subsidy"
-          ? "建立 subsidy 草稿"
-          : "檢視版本歷史";
+          ? t("pricing.action.createSubsidyDraft")
+          : t("pricing.action.viewHistory");
   const publishButtonLabel =
     activeTab === "driver"
-      ? "發佈 driver fee plan"
+      ? t("pricing.action.publishDriverPlan")
       : activeTab === "subsidy"
-        ? "發佈 subsidy rule"
-        : "發佈";
+        ? t("pricing.action.publishSubsidyRule")
+        : t("common.publish");
   const publishSupported = activeTab === "passenger";
 
   useEffect(() => {
@@ -767,15 +819,14 @@ export default function PricingPage() {
               return {
                 ok: false,
                 code: "invalid_filter_value",
-                message:
-                  "Pricing tab filter accepts only passenger, driver, subsidy, or history.",
+                message: t("pricing.assistant.invalidTabFilter"),
               } as const;
             }
             handleTabChange(value as TabId);
             return {
               ok: true,
               code: "filter_applied",
-              message: `Applied pricing tab ${value}.`,
+              message: t("pricing.assistant.appliedTabFilter", { value }),
               payload: { filterId: "active_tab", value },
             } as const;
           },
@@ -793,8 +844,7 @@ export default function PricingPage() {
                 return {
                   ok: false,
                   code: "draft_rule_not_found",
-                  message:
-                    "Publish window draft requires a known draft pricing rule id.",
+                  message: t("pricing.assistant.draftRuleNotFound"),
                 } as const;
               }
               setSelectedDraftId(matchedRule.ruleId);
@@ -815,70 +865,79 @@ export default function PricingPage() {
             return {
               ok: true,
               code: "draft_filled",
-              message:
-                "Filled pricing publish window draft without submitting.",
+              message: t("pricing.assistant.draftFilled"),
             } as const;
           },
         },
       },
     }),
-    [draftRules],
+    [draftRules, t],
   );
 
   usePlatformAdminAssistantPage(assistantBridge);
 
   const passengerColumns: CanvasTableColumn<PricingRow>[] = [
-    { h: "VERSION", k: "version", mono: true, w: 108 },
-    { h: "名稱", k: "ruleName", w: 220 },
+    { h: t("pricing.table.version"), k: "version", mono: true, w: 108 },
+    { h: t("pricing.table.name"), k: "ruleName", w: 220 },
     {
-      h: "STATUS",
+      h: t("pricing.table.status"),
       w: 108,
       r: (row) => (
         <CanvasPill theme={theme} tone={ruleTone(row.status)} dot>
-          {pricingStatusLabel(row.status)}
+          {pricingStatusLabel(t, row.status)}
         </CanvasPill>
       ),
     },
-    { h: "SERVICE FEE bps", k: "serviceFeeBps", mono: true, align: "right" },
-    { h: "REIMBURSE", k: "reimburse", mono: true, w: 180 },
-    { h: "SCOPE", k: "scope", mono: true, w: 180 },
     {
-      h: "EFFECTIVE",
+      h: t("pricing.table.serviceFeeBps"),
+      k: "serviceFeeBps",
+      mono: true,
+      align: "right",
+    },
+    { h: t("pricing.table.reimburse"), k: "reimburse", mono: true, w: 180 },
+    { h: t("pricing.table.scope"), k: "scope", mono: true, w: 180 },
+    {
+      h: t("pricing.table.effective"),
       w: 210,
       r: (row) => (
-        <span style={monoTextStyle}>{formatRange(row.from, row.to)}</span>
+        <span style={monoTextStyle}>{formatRange(t, row.from, row.to)}</span>
       ),
     },
   ];
 
   const driverColumns: CanvasTableColumn<FeePlanRow>[] = [
-    { h: "VERSION", k: "version", mono: true, w: 108 },
-    { h: "名稱", k: "planName", w: 240 },
+    { h: t("pricing.table.version"), k: "version", mono: true, w: 108 },
+    { h: t("pricing.table.name"), k: "planName", w: 240 },
     {
-      h: "STATUS",
+      h: t("pricing.table.status"),
       w: 108,
       r: () => (
         <CanvasPill theme={theme} tone="success" dot>
-          published
+          {t("pricing.status.published")}
         </CanvasPill>
       ),
     },
-    { h: "SCOPE", k: "scope", mono: true, w: 160 },
-    { h: "SERVICE FEE bps", k: "serviceFeeBps", mono: true, align: "right" },
+    { h: t("pricing.table.scope"), k: "scope", mono: true, w: 160 },
     {
-      h: "EFFECTIVE",
+      h: t("pricing.table.serviceFeeBps"),
+      k: "serviceFeeBps",
+      mono: true,
+      align: "right",
+    },
+    {
+      h: t("pricing.table.effective"),
       w: 210,
       r: (row) => (
-        <span style={monoTextStyle}>{formatRange(row.from, row.to)}</span>
+        <span style={monoTextStyle}>{formatRange(t, row.from, row.to)}</span>
       ),
     },
   ];
 
   const subsidyColumns: CanvasTableColumn<SubsidyRow>[] = [
-    { h: "VERSION", k: "version", mono: true, w: 108 },
-    { h: "名稱", k: "name", w: 220 },
+    { h: t("pricing.table.version"), k: "version", mono: true, w: 108 },
+    { h: t("pricing.table.name"), k: "name", w: 220 },
     {
-      h: "STATUS",
+      h: t("pricing.table.status"),
       w: 108,
       r: (row) => (
         <CanvasPill
@@ -886,39 +945,43 @@ export default function PricingPage() {
           tone={row.status === "published" ? "success" : "warn"}
           dot
         >
-          {row.status}
+          {row.status === "published"
+            ? t("pricing.status.published")
+            : t("pricing.status.draft")}
         </CanvasPill>
       ),
     },
-    { h: "TRIGGER", k: "trigger", mono: true, w: 300 },
-    { h: "AMOUNT / PCT", k: "amount", mono: true, w: 160 },
-    { h: "SCOPE", k: "scope", mono: true, w: 140 },
+    { h: t("pricing.table.trigger"), k: "trigger", mono: true, w: 300 },
+    { h: t("pricing.table.amount"), k: "amount", mono: true, w: 160 },
+    { h: t("pricing.table.scope"), k: "scope", mono: true, w: 140 },
     {
-      h: "EFFECTIVE",
+      h: t("pricing.table.effective"),
       w: 210,
       r: (row) => (
-        <span style={monoTextStyle}>{formatRange(row.from, row.to)}</span>
+        <span style={monoTextStyle}>{formatRange(t, row.from, row.to)}</span>
       ),
     },
   ];
 
   const historyColumns: CanvasTableColumn<HistoryRow>[] = [
-    { h: "VERSION", k: "version", mono: true, w: 108 },
-    { h: "TYPE", k: "type", mono: true, w: 132 },
-    { h: "SCOPE", k: "scope", mono: true, w: 132 },
-    { h: "NAME", k: "name", w: 240 },
+    { h: t("pricing.table.version"), k: "version", mono: true, w: 108 },
+    { h: t("pricing.table.type"), k: "type", mono: true, w: 132 },
+    { h: t("pricing.table.scope"), k: "scope", mono: true, w: 132 },
+    { h: t("pricing.table.name"), k: "name", w: 240 },
     {
-      h: "PUBLISHED AT",
+      h: t("pricing.table.publishedAt"),
       w: 170,
       r: (row) => <span style={monoTextStyle}>{row.publishedAt}</span>,
     },
-    { h: "PUBLISHED BY", k: "publishedBy", w: 180 },
+    { h: t("pricing.table.publishedBy"), k: "publishedBy", w: 180 },
     {
-      h: "STATUS",
+      h: t("pricing.table.status"),
       w: 108,
       r: (row) => (
         <CanvasPill theme={theme} tone={historyTone(row.status)} dot>
-          {row.status}
+          {row.status === "published"
+            ? t("pricing.status.published")
+            : t("pricing.status.retired")}
         </CanvasPill>
       ),
     },
@@ -928,11 +991,11 @@ export default function PricingPage() {
     event.preventDefault();
 
     if (!selectedDraft) {
-      setPublishError("沒有可發佈的 draft pricing rule。");
+      setPublishError(t("pricing.error.noPublishableDraft"));
       return;
     }
     if (publishReason.trim().length < 12) {
-      setPublishError("高風險原因至少需要 12 個字。");
+      setPublishError(t("pricing.error.reasonTooShort"));
       return;
     }
 
@@ -957,7 +1020,11 @@ export default function PricingPage() {
       setCatalog(nextCatalog);
       setPublishModalOpen(false);
       setPublishReceipt(
-        `${selectedDraft.version} published with reason "${publishReason.trim()}" at ${new Date().toISOString()}`,
+        t("pricing.receipt.published", {
+          version: selectedDraft.version,
+          reason: publishReason.trim(),
+          timestamp: new Date().toISOString(),
+        }),
       );
       setPublishReason("");
     } catch (publishFailure) {
@@ -972,15 +1039,15 @@ export default function PricingPage() {
   }
 
   if (loading) {
-    return <div style={loadingStyle}>Loading pricing workspace…</div>;
+    return <div style={loadingStyle}>{t("pricing.loadingWorkspace")}</div>;
   }
 
   return (
     <>
       <CanvasPageHeader
         theme={theme}
-        title="Pricing"
-        subtitle="draft → published → retired · 發佈為 atomic replace (Q-ADM10)"
+        title={t("pricing.title")}
+        subtitle={t("pricing.pageSubtitle")}
         actions={
           <>
             <CanvasBtn
@@ -1018,8 +1085,8 @@ export default function PricingPage() {
           theme={theme}
           tone="info"
           icon="info"
-          title="canonical quoted fare authority"
-          body="後端為唯一計價真值；前端任何 manual override 必須走 override governance 並保留 actor type 與必填欄位。"
+          title={t("pricing.banner.canonicalTitle")}
+          body={t("pricing.banner.canonicalBody")}
         />
 
         {error ? (
@@ -1027,7 +1094,7 @@ export default function PricingPage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title="pricing workspace 載入失敗"
+            title={t("pricing.banner.loadFailedTitle")}
             body={error}
           />
         ) : null}
@@ -1037,7 +1104,7 @@ export default function PricingPage() {
             theme={theme}
             tone="success"
             icon="check"
-            title="audit receipt"
+            title={t("pricing.banner.receiptTitle")}
             body={publishReceipt}
           />
         ) : null}
@@ -1047,17 +1114,19 @@ export default function PricingPage() {
             theme={theme}
             tone="warn"
             icon="warn"
-            title={`${publishButtonLabel} 尚未接上 mutation`}
-            body="目前高風險 publish modal 與 atomic replace 流程只接在 passenger pricing；driver / subsidy 先保留 parity 結構與治理提示。"
+            title={t("pricing.banner.publishNotConnectedTitle", {
+              action: publishButtonLabel,
+            })}
+            body={t("pricing.banner.publishNotConnectedBody")}
           />
         ) : null}
 
         <div style={tabRowStyle}>
           {[
-            { id: "passenger" as const, label: "Passenger Pricing" },
-            { id: "driver" as const, label: "Driver Fee Plans" },
-            { id: "subsidy" as const, label: "Subsidy / Reimbursement Rules" },
-            { id: "history" as const, label: "Published Versions" },
+            { id: "passenger" as const, label: t("pricing.tab.passenger") },
+            { id: "driver" as const, label: t("pricing.tab.driver") },
+            { id: "subsidy" as const, label: t("pricing.tab.subsidy") },
+            { id: "history" as const, label: t("pricing.tab.history") },
           ].map((tab) => (
             <Link
               key={tab.id}
@@ -1065,7 +1134,12 @@ export default function PricingPage() {
               replace
               scroll={false}
               prefetch={false}
-              style={{ ...tabButtonStyle(activeTab === tab.id), textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+              style={{
+                ...tabButtonStyle(activeTab === tab.id),
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+              }}
             >
               {tab.label}
             </Link>
@@ -1078,7 +1152,7 @@ export default function PricingPage() {
               <CanvasCard theme={theme} padding={0}>
                 {pricingRows.length === 0 ? (
                   <div style={emptyStateStyle}>
-                    目前沒有 passenger pricing 版本。
+                    {t("pricing.empty.passenger")}
                   </div>
                 ) : (
                   <CanvasTable<PricingRow>
@@ -1091,21 +1165,22 @@ export default function PricingPage() {
 
               <CanvasCard
                 theme={theme}
-                title={`服務 bucket fee 拆解 · ${
-                  activeRule?.version ??
-                  catalog?.pricingAuthority.canonicalPricingRuleVersion ??
-                  "pr_v23"
-                }`}
+                title={t("pricing.bucket.title", {
+                  version:
+                    activeRule?.version ??
+                    catalog?.pricingAuthority.canonicalPricingRuleVersion ??
+                    "pr_v23",
+                })}
               >
                 <div style={bucketGridStyle}>
                   {(catalog?.phase1ServiceBuckets ?? [])
                     .slice(0, 4)
                     .map((bucket: string) => {
                       const meta = SERVICE_BUCKET_META[bucket] ?? {
-                        label: bucket,
-                        base: "canonical backend rule",
-                        continuation: "see pricing rule",
-                        fee: `${activeRule?.serviceFeeBps ?? 1800} bps`,
+                        labelKey: "pricing.bucket.fallback.label",
+                        baseKey: "pricing.bucket.fallback.base",
+                        continuationKey: "pricing.bucket.fallback.continuation",
+                        feeKey: "pricing.bucket.fallback.fee",
                       };
 
                       return (
@@ -1121,12 +1196,19 @@ export default function PricingPage() {
                                 fontFamily: theme.monoFamily,
                               }}
                             >
-                              {meta.label}
+                              {meta.labelKey === "pricing.bucket.fallback.label"
+                                ? bucket
+                                : t(meta.labelKey)}
                             </div>
                             <div style={helperStyle}>
-                              {meta.base}
+                              {meta.baseKey === "pricing.bucket.fallback.base"
+                                ? t(meta.baseKey)
+                                : t(meta.baseKey)}
                               <br />
-                              {meta.continuation}
+                              {meta.continuationKey ===
+                              "pricing.bucket.fallback.continuation"
+                                ? t(meta.continuationKey)
+                                : t(meta.continuationKey)}
                             </div>
                           </div>
                           <div
@@ -1136,7 +1218,11 @@ export default function PricingPage() {
                               fontWeight: 600,
                             }}
                           >
-                            {meta.fee}
+                            {meta.feeKey === "pricing.bucket.fallback.fee"
+                              ? t(meta.feeKey, {
+                                  fee: activeRule?.serviceFeeBps ?? 1800,
+                                })
+                              : t(meta.feeKey)}
                           </div>
                         </div>
                       );
@@ -1146,27 +1232,27 @@ export default function PricingPage() {
                       {[
                         {
                           key: "standard",
-                          base: "NT$ 85 / 起",
-                          cont: "NT$ 5 / 250m",
-                          fee: "1800 bps",
+                          base: t("pricing.bucket.standard.base"),
+                          cont: t("pricing.bucket.standard.continuation"),
+                          fee: t("pricing.bucket.standard.fee"),
                         },
                         {
                           key: "business",
-                          base: "NT$ 120 / 起",
-                          cont: "NT$ 6 / 200m",
-                          fee: "2200 bps",
+                          base: t("pricing.bucket.business.base"),
+                          cont: t("pricing.bucket.business.continuation"),
+                          fee: t("pricing.bucket.business.fee"),
                         },
                         {
                           key: "airport",
-                          base: "NT$ 180 / 起",
-                          cont: "flat by zone",
-                          fee: "2500 bps",
+                          base: t("pricing.bucket.airport.base"),
+                          cont: t("pricing.bucket.airport.continuation"),
+                          fee: t("pricing.bucket.airport.fee"),
                         },
                         {
                           key: "wheelchair",
-                          base: "NT$ 95 / 起",
-                          cont: "NT$ 5 / 250m",
-                          fee: "900 bps · subsidy",
+                          base: t("pricing.bucket.wheelchair.base"),
+                          cont: t("pricing.bucket.wheelchair.continuation"),
+                          fee: t("pricing.bucket.wheelchair.fee"),
                         },
                       ].map((bucket) => (
                         <div
@@ -1207,8 +1293,8 @@ export default function PricingPage() {
             <div style={{ display: "grid", gap: 16 }}>
               <CanvasCard
                 theme={theme}
-                title="Active / Draft comparison"
-                subtitle="version model · 發佈前比對 canonical active 與候選 draft"
+                title={t("pricing.compare.title")}
+                subtitle={t("pricing.compare.subtitle")}
               >
                 <div style={comparisonGridStyle}>
                   <div style={comparisonPanelStyle("success")}>
@@ -1219,24 +1305,33 @@ export default function PricingPage() {
                         gap: 8,
                       }}
                     >
-                      <h3 style={sectionTitleStyle}>Active</h3>
+                      <h3 style={sectionTitleStyle}>
+                        {t("pricing.compare.active")}
+                      </h3>
                       <CanvasPill theme={theme} tone="success" dot>
-                        current
+                        {t("pricing.compare.current")}
                       </CanvasPill>
                     </div>
                     {activeRule ? (
                       <CanvasDL
                         theme={theme}
                         items={[
-                          { label: "VERSION", value: activeRule.version },
-                          { label: "NAME", value: activeRule.ruleName },
                           {
-                            label: "SERVICE FEE",
+                            label: t("pricing.table.version"),
+                            value: activeRule.version,
+                          },
+                          {
+                            label: t("pricing.table.name"),
+                            value: activeRule.ruleName,
+                          },
+                          {
+                            label: t("pricing.table.serviceFee"),
                             value: `${activeRule.serviceFeeBps} bps`,
                           },
                           {
-                            label: "EFFECTIVE",
+                            label: t("pricing.table.effective"),
                             value: formatRange(
+                              t,
                               activeRule.effectiveFrom,
                               activeRule.effectiveTo,
                             ),
@@ -1244,7 +1339,9 @@ export default function PricingPage() {
                         ]}
                       />
                     ) : (
-                      <p style={helperStyle}>沒有 active pricing rule。</p>
+                      <p style={helperStyle}>
+                        {t("pricing.empty.noActiveRule")}
+                      </p>
                     )}
                   </div>
 
@@ -1260,13 +1357,17 @@ export default function PricingPage() {
                         gap: 8,
                       }}
                     >
-                      <h3 style={sectionTitleStyle}>Draft</h3>
+                      <h3 style={sectionTitleStyle}>
+                        {t("pricing.compare.draft")}
+                      </h3>
                       <CanvasPill
                         theme={theme}
                         tone={selectedDraft ? "warn" : "neutral"}
                         dot
                       >
-                        {selectedDraft ? "publish candidate" : "empty"}
+                        {selectedDraft
+                          ? t("pricing.compare.publishCandidate")
+                          : t("pricing.compare.empty")}
                       </CanvasPill>
                     </div>
                     {selectedDraft ? (
@@ -1274,15 +1375,22 @@ export default function PricingPage() {
                         <CanvasDL
                           theme={theme}
                           items={[
-                            { label: "VERSION", value: selectedDraft.version },
-                            { label: "NAME", value: selectedDraft.ruleName },
                             {
-                              label: "SERVICE FEE",
+                              label: t("pricing.table.version"),
+                              value: selectedDraft.version,
+                            },
+                            {
+                              label: t("pricing.table.name"),
+                              value: selectedDraft.ruleName,
+                            },
+                            {
+                              label: t("pricing.table.serviceFee"),
                               value: `${selectedDraft.serviceFeeBps} bps`,
                             },
                             {
-                              label: "EFFECTIVE",
+                              label: t("pricing.table.effective"),
                               value: formatRange(
+                                t,
                                 selectedDraft.effectiveFrom,
                                 selectedDraft.effectiveTo,
                               ),
@@ -1307,9 +1415,7 @@ export default function PricingPage() {
                         </div>
                       </>
                     ) : (
-                      <p style={helperStyle}>
-                        目前沒有待發佈的 pricing draft。
-                      </p>
+                      <p style={helperStyle}>{t("pricing.empty.noDraft")}</p>
                     )}
                   </div>
                 </div>
@@ -1317,48 +1423,53 @@ export default function PricingPage() {
 
               <CanvasCard
                 theme={theme}
-                title="Publish stepper"
-                subtitle="select draft → compare → reason capture → atomic replace"
+                title={t("pricing.stepper.title")}
+                subtitle={t("pricing.stepper.subtitle")}
               >
                 {publishConflictBody ? (
                   <CanvasBanner
                     theme={theme}
                     tone="warn"
                     icon="warn"
-                    title="conflict check"
+                    title={t("pricing.stepper.conflictTitle")}
                     body={publishConflictBody}
                   />
                 ) : null}
                 <div style={stepperStyle}>
                   {[
                     {
-                      title: "1. Select draft",
+                      title: t("pricing.stepper.selectDraftTitle"),
                       body: selectedDraft
-                        ? `${selectedDraft.version} 已進入 publish queue`
-                        : "目前沒有可發佈的 draft",
+                        ? t("pricing.stepper.selectDraftReady", {
+                            version: selectedDraft.version,
+                          })
+                        : t("pricing.stepper.selectDraftEmpty"),
                       active: !selectedDraft,
                       complete: Boolean(selectedDraft),
                     },
                     {
-                      title: "2. Compare active/draft",
+                      title: t("pricing.stepper.compareTitle"),
                       body:
                         activeRule && selectedDraft
-                          ? `${activeRule.version} → ${selectedDraft.version}`
-                          : "需要 active 與 draft 才能比對",
+                          ? t("pricing.stepper.compareReady", {
+                              activeVersion: activeRule.version,
+                              draftVersion: selectedDraft.version,
+                            })
+                          : t("pricing.stepper.compareEmpty"),
                       active: Boolean(selectedDraft) && !publishModalOpen,
                       complete: Boolean(selectedDraft),
                     },
                     {
-                      title: "3. High-risk reason",
+                      title: t("pricing.stepper.reasonTitle"),
                       body: publishReason.trim()
                         ? publishReason.trim()
-                        : "開啟 modal 並填寫必填 reason",
+                        : t("pricing.stepper.reasonEmpty"),
                       active: publishModalOpen,
                       complete: publishReason.trim().length >= 12,
                     },
                     {
-                      title: "4. Audit receipt",
-                      body: publishReceipt ?? "發佈後會在此留下 receipt 摘要",
+                      title: t("pricing.stepper.receiptTitle"),
+                      body: publishReceipt ?? t("pricing.stepper.receiptEmpty"),
                       active: false,
                       complete: Boolean(publishReceipt),
                     },
@@ -1381,31 +1492,31 @@ export default function PricingPage() {
 
               <CanvasCard
                 theme={theme}
-                title="Override governance"
-                subtitle="manual override 只允許記錄式治理，不得覆蓋 canonical quoted fare authority"
+                title={t("pricing.override.title")}
+                subtitle={t("pricing.override.subtitle")}
               >
                 <CanvasDL
                   theme={theme}
                   items={[
                     {
-                      label: "CANONICAL",
+                      label: t("pricing.override.canonical"),
                       value:
                         catalog?.pricingAuthority.canonicalQuotedFareSource ??
                         "platform_pricing_rule",
                     },
                     {
-                      label: "VERSION",
+                      label: t("pricing.table.version"),
                       value:
                         catalog?.pricingAuthority.canonicalPricingRuleVersion ??
                         activeRule?.version ??
                         "—",
                     },
                     {
-                      label: "ACTOR TYPES",
+                      label: t("pricing.override.actorTypes"),
                       value: manualOverrideActors.join(", "),
                     },
                     {
-                      label: "REQUIRED FIELDS",
+                      label: t("pricing.override.requiredFields"),
                       value: requiredFields.join(", "),
                     },
                   ]}
@@ -1420,7 +1531,7 @@ export default function PricingPage() {
             <CanvasCard theme={theme} padding={0}>
               {feePlanRows.length === 0 ? (
                 <div style={emptyStateStyle}>
-                  目前沒有 driver fee plan 版本。
+                  {t("pricing.empty.driverPlans")}
                 </div>
               ) : (
                 <CanvasTable<FeePlanRow>
@@ -1434,53 +1545,73 @@ export default function PricingPage() {
             <div style={{ display: "grid", gap: 16 }}>
               <CanvasCard
                 theme={theme}
-                title="Active / Draft comparison"
-                subtitle="driver settlement plans remain immutable after publish"
+                title={t("pricing.compare.title")}
+                subtitle={t("pricing.driver.compareSubtitle")}
               >
                 <div style={comparisonGridStyle}>
                   <div style={comparisonPanelStyle("success")}>
-                    <h3 style={sectionTitleStyle}>Published</h3>
+                    <h3 style={sectionTitleStyle}>
+                      {t("pricing.driver.published")}
+                    </h3>
                     {activePlan ? (
                       <CanvasDL
                         theme={theme}
                         items={[
-                          { label: "VERSION", value: activePlan.version },
-                          { label: "PLAN", value: activePlan.planName },
                           {
-                            label: "SERVICE FEE",
+                            label: t("pricing.table.version"),
+                            value: activePlan.version,
+                          },
+                          {
+                            label: t("pricing.table.plan"),
+                            value: activePlan.planName,
+                          },
+                          {
+                            label: t("pricing.table.serviceFee"),
                             value: `${activePlan.serviceFeeBps} bps`,
                           },
                           {
-                            label: "PUBLISHED",
+                            label: t("pricing.table.publishedAt"),
                             value: formatDateTime(activePlan.publishedAt),
                           },
                         ]}
                       />
                     ) : (
-                      <p style={helperStyle}>目前沒有已發佈司機費用方案。</p>
+                      <p style={helperStyle}>
+                        {t("pricing.empty.noPublishedDriverPlan")}
+                      </p>
                     )}
                   </div>
                   <div
                     style={comparisonPanelStyle(draftPlan ? "warn" : "neutral")}
                   >
-                    <h3 style={sectionTitleStyle}>Draft queue</h3>
+                    <h3 style={sectionTitleStyle}>
+                      {t("pricing.driver.draftQueue")}
+                    </h3>
                     {draftPlan ? (
                       <CanvasDL
                         theme={theme}
                         items={[
-                          { label: "VERSION", value: draftPlan.version },
-                          { label: "PLAN", value: draftPlan.planName },
                           {
-                            label: "SERVICE FEE",
+                            label: t("pricing.table.version"),
+                            value: draftPlan.version,
+                          },
+                          {
+                            label: t("pricing.table.plan"),
+                            value: draftPlan.planName,
+                          },
+                          {
+                            label: t("pricing.table.serviceFee"),
                             value: `${draftPlan.serviceFeeBps} bps`,
                           },
-                          { label: "SCOPE", value: draftPlan.scope },
+                          {
+                            label: t("pricing.table.scope"),
+                            value: draftPlan.scope,
+                          },
                         ]}
                       />
                     ) : (
                       <p style={helperStyle}>
-                        現有後端僅回傳 published fee plan；draft
-                        比對區先保留治理空位。
+                        {t("pricing.driver.noDraftPlanHint")}
                       </p>
                     )}
                   </div>
@@ -1489,33 +1620,39 @@ export default function PricingPage() {
 
               <CanvasCard
                 theme={theme}
-                title="Per-trip fee structure"
-                subtitle="must-show fee structure + subsidy linkage"
+                title={t("pricing.driver.feeStructureTitle")}
+                subtitle={t("pricing.driver.feeStructureSubtitle")}
               >
                 {selectedFeePlan ? (
                   <CanvasDL
                     theme={theme}
                     items={[
-                      { label: "PLAN", value: selectedFeePlan.planName },
                       {
-                        label: "SERVICE FEE",
+                        label: t("pricing.table.plan"),
+                        value: selectedFeePlan.planName,
+                      },
+                      {
+                        label: t("pricing.table.serviceFee"),
                         value: `${selectedFeePlan.serviceFeeBps} bps / trip`,
                       },
                       {
-                        label: "REIMBURSEMENT MODE",
-                        value: selectedFeePlan.reimbursementMode,
-                      },
-                      {
-                        label: "SUBSIDY LINKAGE",
+                        label: t("pricing.driver.reimbursementMode"),
                         value:
                           selectedFeePlan.reimbursementMode === "mixed"
-                            ? "mixed reimbursement requires subsidy reconciliation"
-                            : "platform_funded only",
+                            ? t("pricing.mixed")
+                            : t("pricing.platformFunded"),
+                      },
+                      {
+                        label: t("pricing.driver.subsidyLinkage"),
+                        value:
+                          selectedFeePlan.reimbursementMode === "mixed"
+                            ? t("pricing.driver.subsidyLinkageMixed")
+                            : t("pricing.driver.subsidyLinkagePlatformFunded"),
                       },
                     ]}
                   />
                 ) : (
-                  <p style={helperStyle}>目前沒有可展示的 fee structure。</p>
+                  <p style={helperStyle}>{t("pricing.empty.noFeeStructure")}</p>
                 )}
               </CanvasCard>
             </div>
@@ -1535,30 +1672,33 @@ export default function PricingPage() {
             <div style={{ display: "grid", gap: 16 }}>
               <CanvasCard
                 theme={theme}
-                title="Subsidy / reimbursement linkage"
-                subtitle="補助規則與 reimbursement queue 採獨立治理，但共用 quoted fare authority"
+                title={t("pricing.subsidy.linkageTitle")}
+                subtitle={t("pricing.subsidy.linkageSubtitle")}
               >
                 <CanvasDL
                   theme={theme}
                   items={[
                     {
-                      label: "QUEUE",
+                      label: t("pricing.subsidy.queue"),
                       value: "/payments/reimbursements",
                     },
                     {
-                      label: "TRIGGER COUNT",
+                      label: t("pricing.subsidy.triggerCount"),
                       value: String(subsidyRows.length),
                     },
                     {
-                      label: "CANONICAL VERSION",
+                      label: t("pricing.subsidy.canonicalVersion"),
                       value:
                         catalog?.pricingAuthority.canonicalPricingRuleVersion ??
                         activeRule?.version ??
                         "—",
                     },
                     {
-                      label: "REIMBURSEMENT MODE",
-                      value: activeRule?.reimbursementMode ?? "platform_funded",
+                      label: t("pricing.driver.reimbursementMode"),
+                      value:
+                        activeRule?.reimbursementMode === "mixed"
+                          ? t("pricing.mixed")
+                          : t("pricing.platformFunded"),
                     },
                   ]}
                 />
@@ -1566,33 +1706,35 @@ export default function PricingPage() {
 
               <CanvasCard
                 theme={theme}
-                title="Override governance"
-                subtitle="manual override actor 與 evidence obligations"
+                title={t("pricing.override.title")}
+                subtitle={t("pricing.subsidy.overrideSubtitle")}
               >
                 <CanvasDL
                   theme={theme}
                   items={[
                     {
-                      label: "MANUAL OVERRIDE",
+                      label: t("pricing.override.manualOverride"),
                       value: manualOverrideActors.join(", "),
                     },
                     {
-                      label: "REQUIRED FIELDS",
+                      label: t("pricing.override.requiredFields"),
                       value: requiredFields.join(", "),
                     },
                     {
-                      label: "TENANT CAN SET QUOTED FARE",
-                      value: String(
-                        catalog?.pricingAuthority.tenantCanSetQuotedFare ??
-                          false,
-                      ),
+                      label: t("pricing.override.tenantCanSetQuotedFare"),
+                      value:
+                        (catalog?.pricingAuthority.tenantCanSetQuotedFare ??
+                        false)
+                          ? t("pricing.boolean.yes")
+                          : t("pricing.boolean.no"),
                     },
                     {
-                      label: "PARTNER CAN SET QUOTED FARE",
-                      value: String(
-                        catalog?.pricingAuthority.partnerCanSetQuotedFare ??
-                          false,
-                      ),
+                      label: t("pricing.override.partnerCanSetQuotedFare"),
+                      value:
+                        (catalog?.pricingAuthority.partnerCanSetQuotedFare ??
+                        false)
+                          ? t("pricing.boolean.yes")
+                          : t("pricing.boolean.no"),
                     },
                   ]}
                 />
@@ -1605,16 +1747,18 @@ export default function PricingPage() {
           <div style={{ display: "grid", gap: 16 }}>
             <CanvasCard
               theme={theme}
-              title="Published version filters"
-              subtitle="cross-tab history 可依 type、scope、period 篩選"
+              title={t("pricing.history.filtersTitle")}
+              subtitle={t("pricing.history.filtersSubtitle")}
             >
               <div style={filterRowStyle}>
-                <span style={inlineLabelStyle}>Type</span>
+                <span style={inlineLabelStyle}>
+                  {t("pricing.history.type")}
+                </span>
                 {[
-                  ["all", "All"],
-                  ["passenger", "Passenger"],
-                  ["driver_fee", "Driver"],
-                  ["subsidy", "Subsidy"],
+                  ["all", t("pricing.filter.all")],
+                  ["passenger", t("pricing.filter.passenger")],
+                  ["driver_fee", t("pricing.filter.driver")],
+                  ["subsidy", t("pricing.filter.subsidy")],
                 ].map(([value, label]) => (
                   <button
                     key={value}
@@ -1629,7 +1773,9 @@ export default function PricingPage() {
                 ))}
               </div>
               <div style={filterRowStyle}>
-                <span style={inlineLabelStyle}>Scope</span>
+                <span style={inlineLabelStyle}>
+                  {t("pricing.history.scope")}
+                </span>
                 {historyScopeOptions.map((scope) => (
                   <button
                     key={scope}
@@ -1642,11 +1788,13 @@ export default function PricingPage() {
                 ))}
               </div>
               <div style={filterRowStyle}>
-                <span style={inlineLabelStyle}>Period</span>
+                <span style={inlineLabelStyle}>
+                  {t("pricing.history.period")}
+                </span>
                 {[
-                  ["all", "All"],
-                  ["90d", "Last 90d"],
-                  ["30d", "Last 30d"],
+                  ["all", t("pricing.filter.all")],
+                  ["90d", t("pricing.filter.last90d")],
+                  ["30d", t("pricing.filter.last30d")],
                 ].map(([value, label]) => (
                   <button
                     key={value}
@@ -1665,12 +1813,10 @@ export default function PricingPage() {
             <CanvasCard
               theme={theme}
               padding={0}
-              title="所有已發佈版本 · 跨 tab 歷史"
+              title={t("pricing.history.title")}
             >
               {filteredHistoryRows.length === 0 ? (
-                <div style={emptyStateStyle}>
-                  目前篩選條件下沒有可顯示的版本歷史。
-                </div>
+                <div style={emptyStateStyle}>{t("pricing.empty.history")}</div>
               ) : (
                 <CanvasTable<HistoryRow>
                   theme={theme}
@@ -1685,6 +1831,7 @@ export default function PricingPage() {
 
       {publishModalOpen ? (
         <ReasonModal
+          t={t}
           selectedDraft={selectedDraft}
           reason={publishReason}
           onReasonChange={setPublishReason}
