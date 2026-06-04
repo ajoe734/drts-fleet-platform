@@ -447,6 +447,7 @@ const en = {
   "dispatch.workflow.actionFieldsRequired":
     "Reason and audit trace ID are required.",
   "dispatch.workflow.invalidFare": "Enter a valid override fare amount.",
+  "dispatch.workflow.etaUnavailable": "ETA unavailable",
   "dispatch.workflow.queue.pending": "Pending",
   "dispatch.workflow.queue.reserved": "Reserved",
   "dispatch.workflow.queue.exception": "Exception Hold",
@@ -566,6 +567,31 @@ const en = {
   "dispatch.workflow.candidateLocation.no_location": "No location",
   "dispatch.workflow.candidateLocationSummary":
     "{count} candidate(s) are currently {state}.",
+  "dispatch.workflow.activity.orderCreated.title": "Order created",
+  "dispatch.workflow.activity.orderCreated.body":
+    "Order {orderNo} entered the dispatch queue.",
+  "dispatch.workflow.activity.dispatchJob.title": "Dispatch job updated",
+  "dispatch.workflow.activity.dispatchJob.body":
+    "Dispatch job {dispatchJobId} is currently {status}.",
+  "dispatch.workflow.activity.timeout.title": "Dispatch timeout",
+  "dispatch.workflow.activity.timeout.body":
+    "Timeout escalation action: {action}.",
+  "dispatch.workflow.activity.noSupply.title": "No-supply escalation",
+  "dispatch.workflow.activity.noSupply.body":
+    "No-supply reached after {count} attempts. Escalation: {action}.",
+  "dispatch.workflow.activity.exceptionHold.title": "Exception hold raised",
+  "dispatch.workflow.activity.exceptionHold.body":
+    "Order entered exception hold because {reason}.",
+  "dispatch.workflow.activity.overrideRequest.title":
+    "Override request submitted",
+  "dispatch.workflow.activity.overrideRequest.body":
+    "Override request is {status}. Requested by {actor}.",
+  "dispatch.workflow.activity.exceptionResolved.title": "Exception resolved",
+  "dispatch.workflow.activity.exceptionResolved.body":
+    "{actor} resolved the exception with {resolution}.",
+  "dispatch.workflow.activity.fareOverride.title": "Fare override recorded",
+  "dispatch.workflow.activity.fareOverride.body":
+    "{actor} recorded a manual fare override.",
   "dispatch.workflow.loadCandidatesFailed": "Failed to fetch candidates",
   "dispatch.workflow.refreshFailed": "Failed to refresh dispatch board",
   "dispatch.workflow.actionFailed": "Dispatch action failed",
@@ -585,6 +611,141 @@ const en = {
   "dispatch.page.forwardedSummary":
     "{count} forwarded sync failures are currently visible from the owned console.",
   "dispatch.page.forwardedAuthority": "Platform-owned mirror lane",
+  "dispatch.page.headerSubtitle":
+    "Queue triage, assignment actions, and forwarded mirror follow-up in one operator workspace.",
+  "dispatch.page.realtime": "Realtime",
+  "dispatch.page.duration.minutes": "{minutes} min",
+  "dispatch.page.duration.hoursMinutes": "{hours}h {minutes}m",
+  "dispatch.page.board.ready.label": "Ready",
+  "dispatch.page.board.ready.description":
+    "Orders waiting for local dispatch assignment.",
+  "dispatch.page.board.assigned.label": "Assigned",
+  "dispatch.page.board.assigned.description":
+    "Orders already paired with a driver or active task.",
+  "dispatch.page.board.exception.label": "Exceptions",
+  "dispatch.page.board.exception.description":
+    "Orders requiring override, hold, or manual review.",
+  "dispatch.page.board.noSupply.label": "No supply",
+  "dispatch.page.board.noSupply.description":
+    "Orders blocked by timeout or missing supply.",
+  "dispatch.page.board.governance.label": "Governance",
+  "dispatch.page.board.governance.description":
+    "Orders waiting on approval-request or policy review.",
+  "dispatch.page.board.forwarded.label": "Forwarded",
+  "dispatch.page.board.forwarded.description":
+    "Mirror orders tracked through reconciliation-safe follow-up.",
+  "dispatch.page.mismatchCount": "{count} mismatch(es)",
+  "dispatch.page.action.assignCandidate": "Assign candidate",
+  "dispatch.page.action.releaseReassign": "Release / reassign",
+  "dispatch.page.action.redispatch": "Redispatch",
+  "dispatch.page.action.cancelOrder": "Cancel order",
+  "dispatch.page.action.requestFareOverride": "Request fare override",
+  "dispatch.page.action.resolveHold": "Resolve hold",
+  "dispatch.page.action.requestOverride": "Request override",
+  "dispatch.page.action.approveOverride": "Approve override",
+  "dispatch.page.action.rejectOverride": "Reject override",
+  "dispatch.page.action.escalateIncident": "Escalate incident",
+  "dispatch.page.action.extendSearch": "Extend search",
+  "dispatch.page.action.cancelNoSupply": "Cancel no-supply order",
+  "dispatch.page.action.resolveNoSupply": "Resolve no-supply",
+  "dispatch.page.action.openApprovalRequest": "Open approval request",
+  "dispatch.page.action.triggerReconciliation": "Trigger reconciliation",
+  "dispatch.page.action.engageManualFallback": "Engage manual fallback",
+  "dispatch.page.action.forceRefresh": "Force refresh",
+  "dispatch.page.action.inspectAdapter": "Inspect adapter",
+  "dispatch.page.action.unavailable": "Unavailable",
+  "dispatch.page.action.open": "Open",
+  "dispatch.page.action.openApproval": "Open approval",
+  "dispatch.page.banner.forwardedDegraded.title":
+    "{platform} degraded; forwarded mirrors impacted",
+  "dispatch.page.banner.forwardedDegraded.body":
+    "Showing {visibleCount} / {boardCount} mirror rows. Prioritize reconciliation and manual fallback.",
+  "dispatch.page.banner.forwardedSelected.body":
+    "Status {status}; external order {externalOrderId}.",
+  "dispatch.page.banner.governance.title":
+    "Governance hold · /approval-requests",
+  "dispatch.page.banner.governance.body":
+    "{title} is waiting for approval flow before returning to local dispatch handling.",
+  "dispatch.page.banner.exception.title": "Exception hold focus",
+  "dispatch.page.banner.exception.body":
+    "{title} requires exception review before assignment can continue.",
+  "dispatch.page.banner.noSupply.title": "No-supply escalation",
+  "dispatch.page.banner.noSupply.body":
+    "{title} is blocked by missing supply or timeout escalation.",
+  "dispatch.page.freshness.stale": "Dispatch snapshot is stale",
+  "dispatch.page.freshness.degraded": "Dispatch snapshot is degraded",
+  "dispatch.page.freshness.body":
+    "Latest snapshot from {source} was generated at {generatedAt} UTC.",
+  "dispatch.page.health.down": "Dispatch dependencies are down",
+  "dispatch.page.health.degraded": "Dispatch dependencies are degraded",
+  "dispatch.page.empty.noData.title": "No dispatch records available",
+  "dispatch.page.empty.noData.description":
+    "No orders are currently available for this board.",
+  "dispatch.page.empty.notProvisioned.title": "Board not provisioned",
+  "dispatch.page.empty.notProvisioned.description":
+    "This board is not provisioned yet for the current environment.",
+  "dispatch.page.empty.fetchFailed.title": "Failed to load dispatch board",
+  "dispatch.page.empty.fetchFailed.description":
+    "The board could not be loaded from the ops APIs.",
+  "dispatch.page.empty.permissionDenied.title": "Permission denied",
+  "dispatch.page.empty.permissionDenied.description":
+    "Your current role cannot access this dispatch board.",
+  "dispatch.page.empty.externalUnavailable.title":
+    "External platform is unavailable",
+  "dispatch.page.empty.externalUnavailable.description":
+    "Forwarded mirror data is currently unavailable from the external platform.",
+  "dispatch.page.empty.externalUnavailable.followup":
+    "Inspect adapter health before continuing reconciliation or fallback work.",
+  "dispatch.page.empty.driverNotEligible.title":
+    "Selected driver is not eligible",
+  "dispatch.page.empty.driverNotEligible.description":
+    "Compliance or eligibility checks block this driver from local dispatch assignment.",
+  "dispatch.page.empty.filteredEmpty.title": "No rows match current filters",
+  "dispatch.page.empty.filteredEmpty.description":
+    "Adjust board, service, or facet filters to widen the result set.",
+  "dispatch.page.resetBoard": "Reset board",
+  "dispatch.page.actions.emptyTitle": "No actions available",
+  "dispatch.page.actions.emptyDescription":
+    "Select a work item with an available next step to see actions here.",
+  "dispatch.page.actions.available": "Available",
+  "dispatch.page.actions.none": "No actions",
+  "dispatch.page.table.mirror": "Mirror",
+  "dispatch.page.table.source": "Source",
+  "dispatch.page.table.externalOrder": "External order",
+  "dispatch.page.table.route": "Route",
+  "dispatch.page.table.window": "Window",
+  "dispatch.page.table.status": "Status",
+  "dispatch.page.table.adapter": "Adapter",
+  "dispatch.page.table.mismatch": "Mismatch",
+  "dispatch.page.table.actions": "Actions",
+  "dispatch.page.table.order": "Order",
+  "dispatch.page.table.tenant": "Tenant",
+  "dispatch.page.table.driverVehicle": "Driver / vehicle",
+  "dispatch.page.table.taskState": "Task state",
+  "dispatch.page.table.eta": "ETA",
+  "dispatch.page.table.gate": "Compliance gate",
+  "dispatch.page.table.holdReason": "Hold reason",
+  "dispatch.page.table.holdOwner": "Hold owner",
+  "dispatch.page.table.age": "Age",
+  "dispatch.page.table.related": "Related",
+  "dispatch.page.table.attempts": "Attempts",
+  "dispatch.page.table.reasonCode": "Reason code",
+  "dispatch.page.table.timeInState": "Time in state",
+  "dispatch.page.table.override": "Override",
+  "dispatch.page.table.requester": "Requester",
+  "dispatch.page.table.approval": "Approval",
+  "dispatch.page.table.service": "Service",
+  "dispatch.page.table.candidates": "Candidates",
+  "dispatch.page.filter.all": "All ({count})",
+  "dispatch.page.filter.attention": "Needs attention ({count})",
+  "dispatch.page.filter.terminal": "Terminal ({count})",
+  "dispatch.page.filter.allServices": "All services",
+  "dispatch.page.showing": "Showing {visible} of {total} rows.",
+  "dispatch.page.focusedWorkItem": "Focused work item",
+  "dispatch.page.crossAppDeepLinks": "Cross-app deep links",
+  "dispatch.page.noFocusedWorkItem.title": "No focused work item",
+  "dispatch.page.noFocusedWorkItem.description":
+    "Choose a row to inspect authority, status, and available actions.",
   "dispatch.forwarded.title": "External Platform Orders",
   "dispatch.forwarded.subtitle":
     "Mirror-order board for platform sync, manual fallback, and reconciliation",
@@ -1926,8 +2087,8 @@ const zh: Record<keyof typeof en, string> = {
   "attendance.hours": "{h} 小時",
 
   // ── Dispatch ──
-  "dispatch.title": "派車調度",
-  "dispatch.subtitle": "排隊分流、候選人選取與重新派車處理",
+  "dispatch.title": "派遣控制台",
+  "dispatch.subtitle": "佇列分流、候選供給選取與重新派遣處理",
   "dispatch.queueDepth": "排隊深度",
   "dispatch.queueDepthSub": "平均 ETA {eta} 分鐘",
   "dispatch.queueDepthSubPending": "ETA 待確認",
@@ -2018,6 +2179,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.actionDismiss": "收起",
   "dispatch.workflow.actionFieldsRequired": "原因與稽核 trace ID 為必填。",
   "dispatch.workflow.invalidFare": "請輸入有效的覆寫價格。",
+  "dispatch.workflow.etaUnavailable": "ETA 尚不可用",
   "dispatch.workflow.queue.pending": "待派",
   "dispatch.workflow.queue.reserved": "已預留",
   "dispatch.workflow.queue.exception": "例外保留",
@@ -2129,6 +2291,28 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.detail.activeWorkspace": "工作區焦點",
   "dispatch.workflow.detail.selectCandidateHint":
     "先在列表挑選候選人，再回到明細工作區完成指派。",
+  "dispatch.workflow.activity.orderCreated.title": "訂單已建立",
+  "dispatch.workflow.activity.orderCreated.body":
+    "訂單 {orderNo} 已進入派遣佇列。",
+  "dispatch.workflow.activity.dispatchJob.title": "派遣任務已更新",
+  "dispatch.workflow.activity.dispatchJob.body":
+    "派遣任務 {dispatchJobId} 目前狀態為 {status}。",
+  "dispatch.workflow.activity.timeout.title": "派遣逾時",
+  "dispatch.workflow.activity.timeout.body": "逾時升級動作：{action}。",
+  "dispatch.workflow.activity.noSupply.title": "無供給升級",
+  "dispatch.workflow.activity.noSupply.body":
+    "經過 {count} 次嘗試後仍無供給。升級動作：{action}。",
+  "dispatch.workflow.activity.exceptionHold.title": "已進入例外保留",
+  "dispatch.workflow.activity.exceptionHold.body":
+    "訂單因 {reason} 進入例外保留。",
+  "dispatch.workflow.activity.overrideRequest.title": "已提出 override 申請",
+  "dispatch.workflow.activity.overrideRequest.body":
+    "Override 申請目前為 {status}，提出人為 {actor}。",
+  "dispatch.workflow.activity.exceptionResolved.title": "例外已解除",
+  "dispatch.workflow.activity.exceptionResolved.body":
+    "{actor} 以 {resolution} 解除了例外。",
+  "dispatch.workflow.activity.fareOverride.title": "已記錄人工覆價",
+  "dispatch.workflow.activity.fareOverride.body": "{actor} 已記錄人工覆價。",
   "dispatch.workflow.loadCandidatesFailed": "載入候選人失敗",
   "dispatch.workflow.refreshFailed": "重新整理派車看板失敗",
   "dispatch.workflow.candidateLocation.live": "即時位置",
@@ -2143,16 +2327,142 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.view.owned": "本地派車",
   "dispatch.view.revenue": "收益 / 對帳",
   "dispatch.view.contracts": "人工審查",
-  "dispatch.page.ownedHeadline":
-    "本地派車看板維持在本地 dispatch authority 內處理。",
+  "dispatch.page.ownedHeadline": "本地派遣看板維持在本地派遣權責內處理。",
   "dispatch.page.ownedSummary":
     "{count} 筆例外保留 / 無供給訂單需要搭配即時候選供給一起檢查。",
-  "dispatch.page.ownedAuthority": "營運自有派車 lane",
-  "dispatch.page.forwardedHeadline":
-    "Forwarded 工作維持在鏡像訂單分流與 reconciliation 流程中。",
+  "dispatch.page.ownedAuthority": "營運自有派遣處理線",
+  "dispatch.page.forwardedHeadline": "轉派工作維持在鏡像訂單分流與對帳流程中。",
   "dispatch.page.forwardedSummary":
-    "目前從本地 console 可見 {count} 筆 forwarded sync failure。",
-  "dispatch.page.forwardedAuthority": "平台鏡像派單 lane",
+    "目前從本地控制台可見 {count} 筆轉派同步失敗。",
+  "dispatch.page.forwardedAuthority": "平台鏡像轉派線",
+  "dispatch.page.headerSubtitle":
+    "在同一個營運工作區處理佇列分流、指派操作與轉派鏡像 follow-up。",
+  "dispatch.page.realtime": "即時",
+  "dispatch.page.duration.minutes": "{minutes} 分鐘",
+  "dispatch.page.duration.hoursMinutes": "{hours} 小時 {minutes} 分",
+  "dispatch.page.board.ready.label": "待派遣",
+  "dispatch.page.board.ready.description": "等待本地派遣指派的訂單。",
+  "dispatch.page.board.assigned.label": "已指派",
+  "dispatch.page.board.assigned.description":
+    "已配對司機或已有進行中任務的訂單。",
+  "dispatch.page.board.exception.label": "例外",
+  "dispatch.page.board.exception.description":
+    "需要 override、保留或人工審查的訂單。",
+  "dispatch.page.board.noSupply.label": "無供給",
+  "dispatch.page.board.noSupply.description": "因逾時或缺少供給而卡住的訂單。",
+  "dispatch.page.board.governance.label": "治理",
+  "dispatch.page.board.governance.description":
+    "等待審批申請或政策審查的訂單。",
+  "dispatch.page.board.forwarded.label": "轉派",
+  "dispatch.page.board.forwarded.description":
+    "以對帳安全方式追蹤 follow-up 的鏡像訂單。",
+  "dispatch.page.mismatchCount": "{count} 筆差異",
+  "dispatch.page.action.assignCandidate": "指派候選人",
+  "dispatch.page.action.releaseReassign": "釋放 / 重新指派",
+  "dispatch.page.action.redispatch": "重新派遣",
+  "dispatch.page.action.cancelOrder": "取消訂單",
+  "dispatch.page.action.requestFareOverride": "申請人工覆價",
+  "dispatch.page.action.resolveHold": "解除保留",
+  "dispatch.page.action.requestOverride": "提出 override",
+  "dispatch.page.action.approveOverride": "核准 override",
+  "dispatch.page.action.rejectOverride": "駁回 override",
+  "dispatch.page.action.escalateIncident": "升級為事故",
+  "dispatch.page.action.extendSearch": "延長搜尋",
+  "dispatch.page.action.cancelNoSupply": "取消無供給訂單",
+  "dispatch.page.action.resolveNoSupply": "處理無供給",
+  "dispatch.page.action.openApprovalRequest": "開啟審批申請",
+  "dispatch.page.action.triggerReconciliation": "觸發對帳",
+  "dispatch.page.action.engageManualFallback": "啟用人工 fallback",
+  "dispatch.page.action.forceRefresh": "強制重新整理",
+  "dispatch.page.action.inspectAdapter": "檢查 adapter",
+  "dispatch.page.action.unavailable": "目前不可用",
+  "dispatch.page.action.open": "開啟",
+  "dispatch.page.action.openApproval": "開啟審批",
+  "dispatch.page.banner.forwardedDegraded.title":
+    "{platform} 已降級，轉派鏡像受影響",
+  "dispatch.page.banner.forwardedDegraded.body":
+    "目前顯示 {visibleCount} / {boardCount} 筆鏡像列；請優先處理對帳與人工 fallback。",
+  "dispatch.page.banner.forwardedSelected.body":
+    "狀態 {status}；外部訂單 {externalOrderId}。",
+  "dispatch.page.banner.governance.title": "治理保留 · /approval-requests",
+  "dispatch.page.banner.governance.body":
+    "{title} 在回到本地派遣處理前，需先完成審批流程。",
+  "dispatch.page.banner.exception.title": "例外保留焦點",
+  "dispatch.page.banner.exception.body":
+    "{title} 需先完成例外審查，才可繼續指派。",
+  "dispatch.page.banner.noSupply.title": "無供給升級",
+  "dispatch.page.banner.noSupply.body": "{title} 因缺少供給或逾時升級而受阻。",
+  "dispatch.page.freshness.stale": "派遣快照已過舊",
+  "dispatch.page.freshness.degraded": "派遣快照已降級",
+  "dispatch.page.freshness.body":
+    "最新快照來自 {source}，產生時間為 {generatedAt} UTC。",
+  "dispatch.page.health.down": "派遣相依服務中斷",
+  "dispatch.page.health.degraded": "派遣相依服務降級",
+  "dispatch.page.empty.noData.title": "目前沒有派遣資料",
+  "dispatch.page.empty.noData.description": "這個看板目前沒有可顯示的訂單。",
+  "dispatch.page.empty.notProvisioned.title": "看板尚未配置",
+  "dispatch.page.empty.notProvisioned.description":
+    "目前環境尚未配置這個看板。",
+  "dispatch.page.empty.fetchFailed.title": "載入派遣看板失敗",
+  "dispatch.page.empty.fetchFailed.description":
+    "無法從營運 API 載入這個看板。",
+  "dispatch.page.empty.permissionDenied.title": "沒有存取權限",
+  "dispatch.page.empty.permissionDenied.description":
+    "你目前的角色無法存取這個派遣看板。",
+  "dispatch.page.empty.externalUnavailable.title": "外部平台目前不可用",
+  "dispatch.page.empty.externalUnavailable.description":
+    "暫時無法從外部平台取得轉派鏡像資料。",
+  "dispatch.page.empty.externalUnavailable.followup":
+    "繼續處理對帳或人工 fallback 前，請先檢查 adapter 健康度。",
+  "dispatch.page.empty.driverNotEligible.title": "所選司機不具資格",
+  "dispatch.page.empty.driverNotEligible.description":
+    "合規或資格檢查阻擋這位司機進入本地派遣指派。",
+  "dispatch.page.empty.filteredEmpty.title": "目前篩選條件沒有結果",
+  "dispatch.page.empty.filteredEmpty.description":
+    "請調整看板、服務或 facet 篩選條件以擴大結果集。",
+  "dispatch.page.resetBoard": "重設看板",
+  "dispatch.page.actions.emptyTitle": "目前沒有可用操作",
+  "dispatch.page.actions.emptyDescription":
+    "選取一筆具有下一步的工作項目後，這裡才會顯示操作。",
+  "dispatch.page.actions.available": "可用",
+  "dispatch.page.actions.none": "無操作",
+  "dispatch.page.table.mirror": "鏡像",
+  "dispatch.page.table.source": "來源",
+  "dispatch.page.table.externalOrder": "外部訂單",
+  "dispatch.page.table.route": "路線",
+  "dispatch.page.table.window": "時窗",
+  "dispatch.page.table.status": "狀態",
+  "dispatch.page.table.adapter": "Adapter",
+  "dispatch.page.table.mismatch": "差異",
+  "dispatch.page.table.actions": "操作",
+  "dispatch.page.table.order": "訂單",
+  "dispatch.page.table.tenant": "租戶",
+  "dispatch.page.table.driverVehicle": "司機 / 車輛",
+  "dispatch.page.table.taskState": "任務狀態",
+  "dispatch.page.table.eta": "ETA",
+  "dispatch.page.table.gate": "合規 gate",
+  "dispatch.page.table.holdReason": "保留原因",
+  "dispatch.page.table.holdOwner": "保留責任",
+  "dispatch.page.table.age": "停留時間",
+  "dispatch.page.table.related": "相關項目",
+  "dispatch.page.table.attempts": "嘗試次數",
+  "dispatch.page.table.reasonCode": "原因代碼",
+  "dispatch.page.table.timeInState": "狀態停留時間",
+  "dispatch.page.table.override": "Override",
+  "dispatch.page.table.requester": "申請人",
+  "dispatch.page.table.approval": "審批",
+  "dispatch.page.table.service": "服務",
+  "dispatch.page.table.candidates": "候選人",
+  "dispatch.page.filter.all": "全部（{count}）",
+  "dispatch.page.filter.attention": "需注意（{count}）",
+  "dispatch.page.filter.terminal": "已結束（{count}）",
+  "dispatch.page.filter.allServices": "全部服務",
+  "dispatch.page.showing": "顯示 {visible} / {total} 筆資料。",
+  "dispatch.page.focusedWorkItem": "焦點工作項目",
+  "dispatch.page.crossAppDeepLinks": "跨應用 deep link",
+  "dispatch.page.noFocusedWorkItem.title": "尚未選取焦點工作項目",
+  "dispatch.page.noFocusedWorkItem.description":
+    "請選取一列以檢視權責、狀態與可用操作。",
   "dispatch.forwarded.title": "外部平台訂單",
   "dispatch.forwarded.subtitle": "鏡像訂單看板、人工 fallback 與對帳處理",
   "dispatch.forwarded.roleBoundaryText":
