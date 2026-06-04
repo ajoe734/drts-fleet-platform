@@ -260,15 +260,16 @@ function defaultClosedMonth() {
 function formatDateTime(
   locale: "en" | "zh",
   value: string | null | undefined,
+  emptyLabel: string,
   variant: "short" | "long" = "short",
 ) {
   if (!value) {
-    return "—";
+    return emptyLabel;
   }
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return "—";
+    return emptyLabel;
   }
 
   const formatted = new Intl.DateTimeFormat(
@@ -296,9 +297,9 @@ function formatDateTime(
   return formatted.replace(",", "");
 }
 
-function shortHash(value: string | null | undefined) {
+function shortHash(value: string | null | undefined, emptyLabel: string) {
   if (!value) {
-    return "—";
+    return emptyLabel;
   }
   return `${value.slice(0, 12)}...`;
 }
@@ -396,7 +397,10 @@ function readFilterString(
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function summarizeJobPeriod(filters: Record<string, unknown>) {
+function summarizeJobPeriod(
+  filters: Record<string, unknown>,
+  t: (key: string, params?: Record<string, string | number>) => string,
+) {
   const period = readFilterString(filters, "period");
   if (period) {
     return period;
@@ -410,7 +414,10 @@ function summarizeJobPeriod(filters: Record<string, unknown>) {
   const from = readFilterString(filters, "from");
   const to = readFilterString(filters, "to");
   if (from || to) {
-    return `${from ?? "…"} → ${to ?? "…"}`;
+    return t("reports.periodRange", {
+      from: from ?? t("reports.rangeOpen"),
+      to: to ?? t("reports.rangeOpen"),
+    });
   }
 
   const vehicleId = readFilterString(filters, "vehicleId");
@@ -418,7 +425,7 @@ function summarizeJobPeriod(filters: Record<string, unknown>) {
     return vehicleId;
   }
 
-  return "—";
+  return t("common.dash");
 }
 
 function reportStatusTone(status: ReportJobStatus): CanvasTone {
@@ -930,7 +937,7 @@ export default function ReportsPage() {
       h: t("reports.form.periodTag"),
       w: 140,
       mono: true,
-      r: (row) => summarizeJobPeriod(row.filters),
+      r: (row) => summarizeJobPeriod(row.filters, t),
     },
     {
       h: t("reports.col.format"),
@@ -954,7 +961,7 @@ export default function ReportsPage() {
       r: (row) => (
         <div style={rowStackStyle}>
           <span style={rowTitleStyle}>
-            {formatDateTime(locale, row.artifact?.expiresAt)}
+            {formatDateTime(locale, row.artifact?.expiresAt, t("common.dash"))}
           </span>
           {artifactExpired(row) ? (
             <span style={{ ...rowMetaStyle, color: th.warn }}>
@@ -967,7 +974,7 @@ export default function ReportsPage() {
     {
       h: t("reports.col.created"),
       mono: true,
-      r: (row) => formatDateTime(locale, row.createdAt),
+      r: (row) => formatDateTime(locale, row.createdAt, t("common.dash")),
     },
     {
       h: t("reports.col.actions"),
@@ -1030,7 +1037,7 @@ export default function ReportsPage() {
       h: t("reports.col.manifest"),
       w: 136,
       mono: true,
-      r: (row) => shortHash(row.manifestHash),
+      r: (row) => shortHash(row.manifestHash, t("common.dash")),
     },
     {
       h: t("reports.col.items"),
@@ -1042,7 +1049,7 @@ export default function ReportsPage() {
       h: t("reports.col.generated"),
       w: 132,
       mono: true,
-      r: (row) => formatDateTime(locale, row.generatedAt),
+      r: (row) => formatDateTime(locale, row.generatedAt, t("common.dash")),
     },
     {
       h: t("reports.col.artifacts"),
@@ -1056,7 +1063,7 @@ export default function ReportsPage() {
                 target="_blank"
                 style={actionLinkStyle}
               >
-                ZIP
+                {t("reports.short.zip")}
               </a>
             ) : null}
             {row.artifactPdfUrl ? (
@@ -1066,12 +1073,12 @@ export default function ReportsPage() {
                 target="_blank"
                 style={mutedLinkStyle}
               >
-                PDF
+                {t("reports.short.pdf")}
               </a>
             ) : null}
           </div>
         ) : (
-          "—"
+          t("common.dash")
         ),
     },
   ];
@@ -1098,7 +1105,7 @@ export default function ReportsPage() {
   const packageTypeSummary =
     Object.entries(packageTypeCounts)
       .map(([type, count]) => `${formatOpsCodeLabel(locale, type)} × ${count}`)
-      .join(" · ") || "—";
+      .join(" · ") || t("common.dash");
 
   return (
     <div style={pageStyle}>
@@ -1364,6 +1371,7 @@ export default function ReportsPage() {
                         value: formatDateTime(
                           locale,
                           jobDetail.createdAt,
+                          t("common.dash"),
                           "long",
                         ),
                         mono: true,
@@ -1373,18 +1381,22 @@ export default function ReportsPage() {
                         value: formatDateTime(
                           locale,
                           jobDetail.updatedAt,
+                          t("common.dash"),
                           "long",
                         ),
                         mono: true,
                       },
                       {
                         label: t("reports.form.periodTag"),
-                        value: summarizeJobPeriod(jobDetail.filters),
+                        value: summarizeJobPeriod(jobDetail.filters, t),
                         mono: true,
                       },
                       {
                         label: t("reports.detail.manifest"),
-                        value: shortHash(jobDetail.artifact?.manifestHash),
+                        value: shortHash(
+                          jobDetail.artifact?.manifestHash,
+                          t("common.dash"),
+                        ),
                         mono: true,
                       },
                       {
@@ -1393,6 +1405,7 @@ export default function ReportsPage() {
                           locale,
                           jobDetail.artifact?.downloadMetadata.expiresAt ??
                             jobDetail.artifact?.expiresAt,
+                          t("common.dash"),
                           "long",
                         ),
                         mono: true,
@@ -1542,12 +1555,12 @@ export default function ReportsPage() {
                           <span style={rowTitleStyle}>
                             {row.eligibilityVerificationId
                               ? String(row.eligibilityVerificationId)
-                              : "—"}
+                              : t("common.dash")}
                           </span>
                           <span style={rowMetaStyle}>
                             {row.issuerAuthorizationRef
                               ? String(row.issuerAuthorizationRef)
-                              : "—"}
+                              : t("common.dash")}
                           </span>
                         </div>
                       ),
@@ -1560,12 +1573,12 @@ export default function ReportsPage() {
                           <span style={rowTitleStyle}>
                             {row.benefitReference
                               ? String(row.benefitReference)
-                              : "—"}
+                              : t("common.dash")}
                           </span>
                           <span style={rowMetaStyle}>
                             {row.partnerProgramId
                               ? String(row.partnerProgramId)
-                              : "—"}
+                              : t("common.dash")}
                           </span>
                         </div>
                       ),
@@ -1654,13 +1667,17 @@ export default function ReportsPage() {
                         value: formatDateTime(
                           locale,
                           packageDetail.generatedAt,
+                          t("common.dash"),
                           "long",
                         ),
                         mono: true,
                       },
                       {
                         label: t("reports.detail.checksum"),
-                        value: shortHash(packageDetail.manifest?.checksum),
+                        value: shortHash(
+                          packageDetail.manifest?.checksum,
+                          t("common.dash"),
+                        ),
                         mono: true,
                       },
                       {
@@ -1676,7 +1693,10 @@ export default function ReportsPage() {
                       },
                       {
                         label: t("reports.detail.manifest"),
-                        value: shortHash(packageDetail.manifestHash),
+                        value: shortHash(
+                          packageDetail.manifestHash,
+                          t("common.dash"),
+                        ),
                         mono: true,
                       },
                       {
@@ -1730,6 +1750,7 @@ export default function ReportsPage() {
                           value: formatDateTime(
                             locale,
                             packageDetail.downloadMetadata.zip.expiresAt,
+                            t("common.dash"),
                             "long",
                           ),
                           mono: true,
@@ -1739,6 +1760,7 @@ export default function ReportsPage() {
                           value: formatDateTime(
                             locale,
                             packageDetail.downloadMetadata.pdf.expiresAt,
+                            t("common.dash"),
                             "long",
                           ),
                           mono: true,
@@ -1787,7 +1809,8 @@ export default function ReportsPage() {
                     {
                       h: t("reports.col.manifestHash"),
                       mono: true,
-                      r: (row) => shortHash(String(row.manifestHash)),
+                      r: (row) =>
+                        shortHash(String(row.manifestHash), t("common.dash")),
                     },
                   ]}
                   rows={packageDetail.manifest.entries.map((row) => ({

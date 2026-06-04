@@ -107,13 +107,13 @@ type IncidentFormInitialValues = {
   location?: string;
 };
 
-function formatDateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : "—";
+function formatDateTime(value: string | null | undefined, emptyLabel: string) {
+  return value ? new Date(value).toLocaleString() : emptyLabel;
 }
 
-function formatTableDateTime(value: string | null | undefined) {
+function formatTableDateTime(value: string | null | undefined, emptyLabel: string) {
   if (!value) {
-    return "—";
+    return emptyLabel;
   }
 
   return new Date(value).toISOString().slice(0, 16).replace("T", " ");
@@ -299,18 +299,21 @@ function actionRiskTone(riskLevel: ResourceActionDescriptor["riskLevel"]) {
   return "neutral" as const;
 }
 
-function renderSeverityPill(severity: IncidentSeverity) {
+function renderSeverityPill(
+  locale: "en" | "zh",
+  severity: IncidentSeverity,
+) {
   return (
     <Pill theme={theme} tone={incidentSeverityTone(severity)} dot>
-      {severity}
+      {formatOpsCodeLabel(locale, severity)}
     </Pill>
   );
 }
 
-function renderStatusPill(status: IncidentStatus) {
+function renderStatusPill(locale: "en" | "zh", status: IncidentStatus) {
   return (
     <Pill theme={theme} tone={incidentStatusTone(status)} dot>
-      {status}
+      {formatOpsCodeLabel(locale, status)}
     </Pill>
   );
 }
@@ -654,19 +657,19 @@ export default function IncidentsPage() {
     },
     {
       h: t("incidents.col.category"),
-      k: "category",
       w: 132,
       mono: true,
+      r: (row) => formatOpsCodeLabel(locale, row.category),
     },
     {
       h: t("incidents.col.severity"),
       w: 110,
-      r: (row) => renderSeverityPill(row.severity),
+      r: (row) => renderSeverityPill(locale, row.severity),
     },
     {
       h: t("incidents.col.status"),
       w: 130,
-      r: (row) => renderStatusPill(row.status),
+      r: (row) => renderStatusPill(locale, row.status),
     },
     {
       h: t("incidents.col.driver"),
@@ -683,14 +686,15 @@ export default function IncidentsPage() {
             ) : null}
           </div>
         ) : (
-          "—"
+          t("common.dash")
         ),
     },
     {
       h: t("incidents.col.occurred"),
       w: 168,
       mono: true,
-      r: (row) => formatTableDateTime(row.occurredAt ?? row.createdAt),
+      r: (row) =>
+        formatTableDateTime(row.occurredAt ?? row.createdAt, t("common.dash")),
     },
     {
       h: t("incidents.col.recoveryActions"),
@@ -1064,7 +1068,10 @@ export default function IncidentsPage() {
                           )
                         : t("incidents.form.escalationNone")
                     }
-                    delta={formatDateTime(selectedIncident.updatedAt)}
+                    delta={formatDateTime(
+                      selectedIncident.updatedAt,
+                      t("common.dash"),
+                    )}
                     deltaTone="neutral"
                   />
                   <KPI
@@ -1086,17 +1093,18 @@ export default function IncidentsPage() {
                       v: formatDateTime(
                         selectedIncident.occurredAt ??
                           selectedIncident.createdAt,
+                        t("common.dash"),
                       ),
                       mono: true,
                     },
                     {
                       k: "DRIVER",
-                      v: selectedIncident.relatedDriverId ?? "—",
+                      v: selectedIncident.relatedDriverId ?? t("common.dash"),
                       mono: true,
                     },
                     {
                       k: "VEHICLE",
-                      v: selectedIncident.relatedVehicleId ?? "—",
+                      v: selectedIncident.relatedVehicleId ?? t("common.dash"),
                       mono: true,
                     },
                     {
@@ -1109,7 +1117,7 @@ export default function IncidentsPage() {
                           {selectedIncident.relatedOrderId}
                         </Link>
                       ) : (
-                        "—"
+                        t("common.dash")
                       ),
                       mono: true,
                     },
@@ -1123,13 +1131,13 @@ export default function IncidentsPage() {
                           {selectedIncident.relatedComplaintCaseNo}
                         </Link>
                       ) : (
-                        "—"
+                        t("common.dash")
                       ),
                       mono: true,
                     },
                     {
                       k: "LOCATION",
-                      v: selectedIncident.location ?? "—",
+                      v: selectedIncident.location ?? t("common.dash"),
                     },
                     {
                       k: "REPORTED BY",
@@ -1179,7 +1187,7 @@ export default function IncidentsPage() {
                               fontFamily: theme.monoFamily,
                             }}
                           >
-                            {formatDateTime(entry.createdAt)}
+                            {formatDateTime(entry.createdAt, t("common.dash"))}
                           </span>
                         </div>
                         <div style={{ color: theme.text, lineHeight: 1.45 }}>
@@ -1223,11 +1231,11 @@ export default function IncidentsPage() {
                   items={[
                     {
                       k: "STATUS",
-                      v: renderStatusPill(selectedIncident.status),
+                      v: renderStatusPill(locale, selectedIncident.status),
                     },
                     {
                       k: "SEVERITY",
-                      v: renderSeverityPill(selectedIncident.severity),
+                      v: renderSeverityPill(locale, selectedIncident.severity),
                     },
                     {
                       k: "ESCALATION",
@@ -1334,7 +1342,10 @@ export default function IncidentsPage() {
                               fontFamily: theme.monoFamily,
                             }}
                           >
-                            {formatDateTime(action.createdAt)}
+                            {formatDateTime(
+                              action.createdAt,
+                              t("common.dash"),
+                            )}
                           </span>
                         </div>
                         <div style={{ color: theme.text, lineHeight: 1.45 }}>
