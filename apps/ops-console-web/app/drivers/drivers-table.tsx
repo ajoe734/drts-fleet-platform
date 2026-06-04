@@ -410,7 +410,9 @@ function buildColumns(
                     .join("、")}
             </Pill>
             <span style={signalDetailStyle}>
-              {row.driver.supportedServiceBuckets.join(" · ")}
+              {row.driver.supportedServiceBuckets
+                .map((bucket) => formatOpsCodeLabel(locale, bucket))
+                .join(" · ")}
             </span>
           </div>
         );
