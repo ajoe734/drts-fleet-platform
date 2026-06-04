@@ -122,49 +122,6 @@ export function AdapterList() {
     fetchAdapters();
   }, []);
 
-  const copy =
-    locale === "en"
-      ? {
-          subtitle:
-            "Shared data-view baseline for adapter readiness, rollout posture, and finance authority ownership.",
-          summary:
-            "Compact rows, pill filters, status chips, and owned/forwarded authority badges all come from shared ui-web primitives.",
-          showing: "Showing",
-          ownedTag: "owned",
-          forwardedTag: "forwarded",
-          financeTag: "finance",
-          health: "Health",
-          enabled: "Enabled",
-          webhook: "Webhook",
-          authority: "Authority",
-          rollout: "Rollout",
-          all: "All",
-          forwarded: "Forwarded",
-          enabledFilter: "Enabled",
-          attention: "Attention",
-          actions: "Actions",
-        }
-      : {
-          subtitle:
-            "以共享 data-view primitive 呈現 adapter readiness、rollout posture 與財務 authority 歸屬。",
-          summary:
-            "這裡的 compact table、filter pills、status chips、owned/forwarded authority badges 都直接走 ui-web 共用層。",
-          showing: "目前顯示",
-          ownedTag: "owned",
-          forwardedTag: "forwarded",
-          financeTag: "finance",
-          health: "健康",
-          enabled: "啟用",
-          webhook: "Webhook",
-          authority: "Authority",
-          rollout: "Rollout",
-          all: "全部",
-          forwarded: "轉派",
-          enabledFilter: "已啟用",
-          attention: "需關注",
-          actions: "操作",
-        };
-
   const filteredAdapters = adapters.filter((adapter) => {
     switch (filter) {
       case "forwarded":
@@ -180,22 +137,27 @@ export function AdapterList() {
   });
 
   const filters = [
-    { value: "all", label: copy.all, count: adapters.length, tone: "neutral" },
+    {
+      value: "all",
+      label: t("common.all"),
+      count: adapters.length,
+      tone: "neutral",
+    },
     {
       value: "forwarded",
-      label: copy.forwarded,
+      label: t("adapterRegistry.list.filter.forwarded"),
       count: adapters.filter((adapter) => adapter.isForwarded).length,
       tone: "warning",
     },
     {
       value: "enabled",
-      label: copy.enabledFilter,
+      label: t("adapterRegistry.list.filter.enabled"),
       count: adapters.filter((adapter) => adapter.config.isEnabled).length,
       tone: "success",
     },
     {
       value: "attention",
-      label: copy.attention,
+      label: t("adapterRegistry.list.filter.attention"),
       count: adapters.filter(isAttentionAdapter).length,
       tone: "danger",
     },
@@ -240,10 +202,10 @@ export function AdapterList() {
   return (
     <DataViewCard
       title={t("adapterRegistry.title")}
-      subtitle={copy.subtitle}
+      subtitle={t("adapterRegistry.list.subtitle")}
       tone="warning"
       density="compact"
-      summary={copy.summary}
+      summary={t("adapterRegistry.list.summary")}
       filters={
         <DataFilterBar
           value={filter}
@@ -252,7 +214,10 @@ export function AdapterList() {
           ariaLabel={t("adapterRegistry.title")}
         />
       }
-      footer={`${copy.showing} ${filteredAdapters.length} / ${adapters.length}`}
+      footer={t("adapterRegistry.list.footer", {
+        shown: filteredAdapters.length,
+        total: adapters.length,
+      })}
     >
       {isLoading && (
         <div className="admin-empty">{t("adapterRegistry.loading")}</div>
@@ -276,11 +241,11 @@ export function AdapterList() {
           columns={[
             { label: t("adapterRegistry.col.name"), width: "22%" },
             { label: t("adapterRegistry.col.environment"), width: "14%" },
-            { label: copy.enabled, width: "18%" },
-            { label: copy.authority, width: "16%" },
-            { label: copy.rollout, width: "20%" },
+            { label: t("adapterRegistry.list.metric.enabled"), width: "18%" },
+            { label: t("adapterRegistry.list.metric.authority"), width: "16%" },
+            { label: t("adapterRegistry.list.metric.rollout"), width: "20%" },
             {
-              label: copy.actions,
+              label: t("common.actions"),
               width: "10%",
               align: "right",
             },
@@ -319,7 +284,7 @@ export function AdapterList() {
                         ? t("common.enabled")
                         : t("common.disabled")
                     }
-                    authorityLabel={copy.enabled}
+                    authorityLabel={t("adapterRegistry.list.metric.enabled")}
                   />
                   <StatusChip
                     tone={statusToneForHealth(adapter.healthStatus.status)}
@@ -327,7 +292,7 @@ export function AdapterList() {
                       locale,
                       adapter.healthStatus.status,
                     )}
-                    authorityLabel={copy.health}
+                    authorityLabel={t("adapterRegistry.list.metric.health")}
                   />
                   <StatusChip
                     tone={statusToneForBoolean(
@@ -340,7 +305,7 @@ export function AdapterList() {
                           ? t("common.disabled")
                           : t("common.na")
                     }
-                    authorityLabel={copy.webhook}
+                    authorityLabel={t("adapterRegistry.list.metric.webhook")}
                   />
                 </div>
               </Td>
@@ -348,7 +313,9 @@ export function AdapterList() {
                 <AuthorityBadge
                   tone={authorityTone(adapter.policies.financeAuthorityMode)}
                   category={
-                    adapter.isForwarded ? copy.forwardedTag : copy.ownedTag
+                    adapter.isForwarded
+                      ? t("adapterRegistry.list.badge.forwarded")
+                      : t("adapterRegistry.list.badge.owned")
                   }
                   label={formatPlatformCodeLabel(
                     locale,
@@ -364,7 +331,7 @@ export function AdapterList() {
                       locale,
                       adapter.rolloutStatus,
                     )}
-                    authorityLabel={copy.rollout}
+                    authorityLabel={t("adapterRegistry.list.metric.rollout")}
                   />
                   <StatusChip
                     tone={statusToneForCredential(adapter.credentialStatus)}
@@ -372,7 +339,7 @@ export function AdapterList() {
                       locale,
                       adapter.credentialStatus,
                     )}
-                    authorityLabel={copy.financeTag}
+                    authorityLabel={t("adapterRegistry.list.metric.credential")}
                   />
                 </div>
               </Td>
