@@ -1164,13 +1164,21 @@ export default function FleetPage() {
         h: t("fleet.col.contract"),
         w: 140,
         r: (row) =>
-          renderStackedCell(row.contractId, row.contractType, row.status),
+          renderStackedCell(
+            row.contractId,
+            formatPlatformCodeLabel(locale, row.contractType),
+            formatPlatformCodeLabel(locale, row.status),
+          ),
       },
       {
         h: t("fleet.col.counterparty"),
         w: 220,
         r: (row) =>
-          renderStackedCell(row.partnerId, row.partnerType, row.serviceScope),
+          renderStackedCell(
+            row.partnerId,
+            formatPlatformCodeLabel(locale, row.partnerType),
+            formatPlatformCodeLabel(locale, row.serviceScope),
+          ),
       },
       {
         h: t("fleet.col.vehicle"),
@@ -1184,7 +1192,7 @@ export default function FleetPage() {
         r: (row) =>
           renderStackedCell(
             `${row.startAt} → ${row.endAt}`,
-            row.lifecycleStatus,
+            formatPlatformCodeLabel(locale, row.lifecycleStatus),
           ),
       },
       {
@@ -1270,7 +1278,7 @@ export default function FleetPage() {
         r: (row) =>
           renderStackedCell(
             row.vehicleId,
-            row.declarationStatus,
+            formatPlatformCodeLabel(locale, row.declarationStatus),
             row.updatedAt,
           ),
       },
@@ -1369,7 +1377,12 @@ export default function FleetPage() {
         r: (row) =>
           renderStackedCell(
             row.supplyLifecycle.offboarding.debrandingTicketId ?? "—",
-            row.supplyLifecycle.offboarding.reason ?? "—",
+            row.supplyLifecycle.offboarding.reason
+              ? formatPlatformCodeLabel(
+                  locale,
+                  row.supplyLifecycle.offboarding.reason,
+                )
+              : "—",
             row.supplyLifecycle.offboarding.debrandingDueAt ?? "—",
           ),
       },
@@ -1677,14 +1690,17 @@ export default function FleetPage() {
               </div>
               <div style={actionRowStyle}>
                 <CanvasPill theme={theme} tone={emptyConfig.tone}>
-                  {activeEmptyReason}
+                  {formatPlatformCodeLabel(locale, activeEmptyReason)}
                 </CanvasPill>
                 <CanvasPill
                   theme={theme}
                   tone={refreshTone(activeRefreshMetadata, loading)}
                   dot
                 >
-                  {activeRefreshMetadata?.dataFreshness ?? "fresh"}
+                  {formatPlatformCodeLabel(
+                    locale,
+                    activeRefreshMetadata?.dataFreshness ?? "fresh",
+                  )}
                 </CanvasPill>
                 <CanvasBtn theme={theme} onClick={() => void loadFleet()}>
                   {t("common.refresh")}
