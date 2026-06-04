@@ -53,8 +53,6 @@ const theme = buildCanvasTheme({
 const STATUSES: MaintenanceStatus[] = [...MAINTENANCE_STATUSES];
 const TYPES: MaintenanceType[] = [...MAINTENANCE_TYPES];
 
-// Refresh tier — packet §3.2 / §5.13: T3 Ops medium (15s polling) for /maintenance.
-const REFRESH_TIER_LABEL = "T3 · 15s";
 const REFRESH_STALE_AFTER_MS = 15_000;
 const REFRESH_POLL_MS = 15_000;
 
@@ -955,7 +953,7 @@ export default function MaintenancePage() {
               theme={theme}
               tone={freshness === "fresh" ? "success" : "warn"}
             >
-              {`${formatOpsCodeLabel(locale, freshness)} · ${REFRESH_TIER_LABEL}`}
+              {`${formatOpsCodeLabel(locale, freshness)} · ${t("maintenance.refreshTierLabel")}`}
             </Pill>
             <Btn
               theme={theme}

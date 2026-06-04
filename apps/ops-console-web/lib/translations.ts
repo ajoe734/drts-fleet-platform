@@ -806,6 +806,7 @@ const en = {
   "maintenance.banner.overdueBody":
     "Decide whether overdue maintenance should remove these vehicles from the dispatchable pool.",
   "maintenance.banner.viewOverdue": "View overdue",
+  "maintenance.refreshTierLabel": "T3 · 15s",
   "maintenance.kpi.activeOrdersDelta": "scheduled + in progress",
   "maintenance.kpi.dispatchRisk": "dispatch risk",
   "maintenance.kpi.clear": "clear",
@@ -2446,6 +2447,7 @@ const zh: Record<keyof typeof en, string> = {
   "maintenance.banner.overdueBody":
     "請評估逾期維修是否應將相關車輛移出可派遣車隊。",
   "maintenance.banner.viewOverdue": "檢視逾期",
+  "maintenance.refreshTierLabel": "T3 · 15s",
   "maintenance.kpi.activeOrdersDelta": "排程 + 進行中",
   "maintenance.kpi.dispatchRisk": "派車風險",
   "maintenance.kpi.clear": "正常",
