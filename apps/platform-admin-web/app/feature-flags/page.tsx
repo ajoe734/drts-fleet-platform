@@ -643,7 +643,9 @@ export default function FeatureFlagsPage() {
           </CanvasPill>
           <button
             type="button"
-            aria-label={`${t("featureFlagsAdmin.toggle")} ${row.key}`}
+            aria-label={t("featureFlagsAdmin.toggleAriaLabel", {
+              key: row.key,
+            })}
             onClick={() => {
               setActionError(null);
               setActionReason("");
@@ -787,8 +789,15 @@ export default function FeatureFlagsPage() {
             });
       const summary =
         pendingAction.intent === "toggle"
-          ? `${pendingAction.nextEnabled ? t("featureFlagsAdmin.confirmEnable") : t("featureFlagsAdmin.confirmDisable")} ${pendingAction.key}`
-          : `${t("featureFlagsAdmin.confirmCreate")} ${pendingAction.key}`;
+          ? t("featureFlagsAdmin.receiptToggleSummary", {
+              action: pendingAction.nextEnabled
+                ? t("featureFlagsAdmin.confirmEnable")
+                : t("featureFlagsAdmin.confirmDisable"),
+              key: pendingAction.key,
+            })
+          : t("featureFlagsAdmin.receiptCreateSummary", {
+              key: pendingAction.key,
+            });
 
       setAuditReceipts((previous) => [
         {
@@ -1198,11 +1207,13 @@ export default function FeatureFlagsPage() {
                             </>
                           ) : (
                             <div style={secondaryTextStyle}>
-                              <strong>{pendingAction.key}</strong> ·{" "}
-                              {pendingAction.scopeLabel} ·{" "}
-                              {pendingAction.currentEnabled
-                                ? t("featureFlagsAdmin.confirmDisable")
-                                : t("featureFlagsAdmin.confirmEnable")}
+                              {t("featureFlagsAdmin.pendingToggleSummary", {
+                                key: pendingAction.key,
+                                scope: pendingAction.scopeLabel,
+                                action: pendingAction.currentEnabled
+                                  ? t("featureFlagsAdmin.confirmDisable")
+                                  : t("featureFlagsAdmin.confirmEnable"),
+                              })}
                             </div>
                           )}
 
