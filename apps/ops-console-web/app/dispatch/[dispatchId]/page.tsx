@@ -20,7 +20,7 @@ import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
-import type { Locale } from "@/lib/translations";
+import { t, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
@@ -76,13 +76,13 @@ const REFRESH_TIER_LABEL = "T2 · 5s";
 const REFRESH_STALE_AFTER_MS = 5_000;
 const SMOKE_DISPATCH_ID = "OPS-SMOKE-DISPATCH";
 
-const WORKFLOW_STEPS = [
-  "建立",
-  "queued",
-  "broadcasting",
-  "assigned",
-  "on_trip",
-  "completed",
+const WORKFLOW_STEP_KEYS = [
+  "dispatch.detail.workflow.created",
+  "dispatch.detail.workflow.queued",
+  "dispatch.detail.workflow.broadcasting",
+  "dispatch.detail.workflow.assigned",
+  "dispatch.detail.workflow.onTrip",
+  "dispatch.detail.workflow.completed",
 ] as const;
 
 const DRIVER_TASK_PRIORITY: Record<string, number> = {
@@ -126,6 +126,14 @@ async function resolveOrFallback<T>(
 
 function copy(locale: Locale, en: string, zh: string) {
   return locale === "zh" ? zh : en;
+}
+
+function text(
+  locale: Locale,
+  key: string,
+  params?: Record<string, string | number>,
+) {
+  return t(key, locale, params);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -412,9 +420,7 @@ function getCandidateGate(
       label:
         driver.eligibilityBlockedReasons[0] !== undefined
           ? formatOpsCodeLabel(locale, driver.eligibilityBlockedReasons[0])
-          : locale === "zh"
-            ? "人工覆核"
-            : "manual review",
+          : text(locale, "dispatch.detail.manualReview"),
       tone: "warn" as const,
     };
   }
@@ -603,14 +609,11 @@ function buildFallbackActivity(
   const entries: ActivityEntry[] = [
     {
       id: `${order.orderId}:created`,
-      title: locale === "zh" ? "進入 queue" : "Entered queue",
-      body:
-        locale === "zh"
-          ? `${formatOpsCodeLabel(locale, getTenantLabel(order))} 透過 ${formatOpsCodeLabel(
-              locale,
-              order.orderSource,
-            )} 建立訂單。`
-          : `${getTenantLabel(order)} created this owned order via ${order.orderSource}.`,
+      title: text(locale, "dispatch.detail.activity.enteredQueue"),
+      body: text(locale, "dispatch.detail.activity.enteredQueueBody", {
+        tenant: formatOpsCodeLabel(locale, getTenantLabel(order)),
+        source: formatOpsCodeLabel(locale, order.orderSource),
+      }),
       at: order.createdAt,
       tone: "accent",
       actor: order.orderSource,
@@ -620,17 +623,14 @@ function buildFallbackActivity(
   if (order.quotedFare) {
     entries.push({
       id: `${order.orderId}:fare`,
-      title: locale === "zh" ? "計價" : "Pricing",
-      body:
-        locale === "zh"
-          ? `套用 ${order.quotedFareRuleVersion ?? "manual"}：${formatMinorCurrency(
-              order.quotedFare.amountMinor,
-              order.quotedFare.currency,
-            )}。`
-          : `${order.quotedFareRuleVersion ?? "manual"} quoted ${formatMinorCurrency(
-              order.quotedFare.amountMinor,
-              order.quotedFare.currency,
-            )}.`,
+      title: text(locale, "dispatch.detail.activity.pricing"),
+      body: text(locale, "dispatch.detail.activity.pricingBody", {
+        rule: order.quotedFareRuleVersion ?? "manual",
+        amount: formatMinorCurrency(
+          order.quotedFare.amountMinor,
+          order.quotedFare.currency,
+        ),
+      }),
       at: order.updatedAt,
       tone: "accent",
       actor: "pricing.engine",
@@ -640,11 +640,11 @@ function buildFallbackActivity(
   if (job) {
     entries.push({
       id: `${job.dispatchJobId}:job`,
-      title: locale === "zh" ? "派遣評估" : "Dispatch evaluation",
-      body:
-        locale === "zh"
-          ? `job ${job.dispatchJobId} 目前為 ${formatOpsCodeLabel(locale, job.status)}。`
-          : `Job ${job.dispatchJobId} is ${job.status}.`,
+      title: text(locale, "dispatch.detail.activity.dispatchEvaluation"),
+      body: text(locale, "dispatch.detail.activity.dispatchEvaluationBody", {
+        jobId: job.dispatchJobId,
+        status: formatOpsCodeLabel(locale, job.status),
+      }),
       at: job.updatedAt,
       tone: getActivityTone(job.status),
       actor: "dispatch.scorer",
@@ -654,14 +654,14 @@ function buildFallbackActivity(
   if (order.noSupplyEscalation) {
     entries.push({
       id: `${order.orderId}:no-supply`,
-      title: locale === "zh" ? "No-supply escalation" : "No-supply escalation",
-      body:
-        locale === "zh"
-          ? `第 ${order.noSupplyEscalation.attemptCount} 次嘗試後，執行 ${formatOpsCodeLabel(
-              locale,
-              order.noSupplyEscalation.escalationAction,
-            )}。`
-          : `Attempt ${order.noSupplyEscalation.attemptCount} escalated via ${order.noSupplyEscalation.escalationAction}.`,
+      title: text(locale, "dispatch.detail.activity.noSupplyEscalation"),
+      body: text(locale, "dispatch.detail.activity.noSupplyEscalationBody", {
+        count: order.noSupplyEscalation.attemptCount,
+        action: formatOpsCodeLabel(
+          locale,
+          order.noSupplyEscalation.escalationAction,
+        ),
+      }),
       at: order.noSupplyEscalation.escalatedAt,
       tone: "warn",
       actor: "dispatch.recovery",
@@ -671,11 +671,10 @@ function buildFallbackActivity(
   if (order.exceptionHold) {
     entries.push({
       id: `${order.orderId}:hold`,
-      title: locale === "zh" ? "人工覆核觸發" : "Exception hold raised",
-      body:
-        locale === "zh"
-          ? `原因：${formatOpsCodeLabel(locale, order.exceptionHold.reasonCode)}。`
-          : `Reason: ${order.exceptionHold.reasonCode}.`,
+      title: text(locale, "dispatch.detail.activity.exceptionReviewRaised"),
+      body: text(locale, "dispatch.detail.activity.exceptionReviewRaisedBody", {
+        reason: formatOpsCodeLabel(locale, order.exceptionHold.reasonCode),
+      }),
       at: order.exceptionHold.raisedAt,
       tone: "danger",
       actor: "compliance",
@@ -685,14 +684,18 @@ function buildFallbackActivity(
   if (order.exceptionHold?.overrideRequest) {
     entries.push({
       id: order.exceptionHold.overrideRequest.overrideRequestId,
-      title: locale === "zh" ? "Override request" : "Override request",
-      body:
-        locale === "zh"
-          ? `${formatOpsCodeLabel(
-              locale,
-              order.exceptionHold.overrideRequest.status,
-            )}，申請人 ${order.exceptionHold.overrideRequest.requestedBy.actorId}。`
-          : `${order.exceptionHold.overrideRequest.status} by ${order.exceptionHold.overrideRequest.requestedBy.actorId}.`,
+      title: text(locale, "dispatch.detail.activity.exceptionReviewRequest"),
+      body: text(
+        locale,
+        "dispatch.detail.activity.exceptionReviewRequestBody",
+        {
+          status: formatOpsCodeLabel(
+            locale,
+            order.exceptionHold.overrideRequest.status,
+          ),
+          actor: order.exceptionHold.overrideRequest.requestedBy.actorId,
+        },
+      ),
       at: order.exceptionHold.overrideRequest.requestedAt,
       tone: "warn",
       actor: order.exceptionHold.overrideRequest.requestedBy.actorId,
@@ -702,14 +705,14 @@ function buildFallbackActivity(
   if (order.exceptionHold?.resolution) {
     entries.push({
       id: `${order.orderId}:resolution`,
-      title: locale === "zh" ? "覆核完成" : "Exception resolved",
-      body:
-        locale === "zh"
-          ? `${order.exceptionHold.resolution.actorId} 記錄 ${formatOpsCodeLabel(
-              locale,
-              order.exceptionHold.resolution.resolution,
-            )}。`
-          : `${order.exceptionHold.resolution.actorId} recorded ${order.exceptionHold.resolution.resolution}.`,
+      title: text(locale, "dispatch.detail.activity.exceptionResolved"),
+      body: text(locale, "dispatch.detail.activity.exceptionResolvedBody", {
+        actor: order.exceptionHold.resolution.actorId,
+        resolution: formatOpsCodeLabel(
+          locale,
+          order.exceptionHold.resolution.resolution,
+        ),
+      }),
       at: order.exceptionHold.resolution.resolvedAt,
       tone: "info",
       actor: order.exceptionHold.resolution.actorId,
@@ -719,11 +722,11 @@ function buildFallbackActivity(
   if (order.manualFareOverride) {
     entries.push({
       id: `${order.orderId}:fare-override`,
-      title: locale === "zh" ? "人工車資覆寫" : "Manual fare override",
-      body:
-        locale === "zh"
-          ? `${order.manualFareOverride.actorId} 套用人工車資，原因：${order.manualFareOverride.reason}。`
-          : `${order.manualFareOverride.actorId} applied a fare override.`,
+      title: text(locale, "dispatch.detail.activity.manualFareOverride"),
+      body: text(locale, "dispatch.detail.activity.manualFareOverrideBody", {
+        actor: order.manualFareOverride.actorId,
+        reason: order.manualFareOverride.reason,
+      }),
       at: order.manualFareOverride.overriddenAt,
       tone: "warn",
       actor: order.manualFareOverride.actorId,
@@ -733,11 +736,11 @@ function buildFallbackActivity(
   if (task?.acceptedAt) {
     entries.push({
       id: `${task.taskId}:accepted`,
-      title: locale === "zh" ? "司機已接單" : "Driver accepted",
-      body:
-        locale === "zh"
-          ? `${task.driverId} 已接受 ${task.vehicleId} 的任務。`
-          : `${task.driverId} accepted ${task.vehicleId}.`,
+      title: text(locale, "dispatch.detail.activity.driverAccepted"),
+      body: text(locale, "dispatch.detail.activity.driverAcceptedBody", {
+        driverId: task.driverId,
+        vehicleId: task.vehicleId,
+      }),
       at: task.acceptedAt,
       tone: "info",
       actor: task.driverId,
@@ -747,11 +750,10 @@ function buildFallbackActivity(
   if (task?.departedAt) {
     entries.push({
       id: `${task.taskId}:departed`,
-      title: locale === "zh" ? "前往接送點" : "Departed to pickup",
-      body:
-        locale === "zh"
-          ? `${task.vehicleId} 已開始前往接送點。`
-          : `${task.vehicleId} departed toward pickup.`,
+      title: text(locale, "dispatch.detail.activity.departedToPickup"),
+      body: text(locale, "dispatch.detail.activity.departedToPickupBody", {
+        vehicleId: task.vehicleId,
+      }),
       at: task.departedAt,
       tone: "info",
       actor: task.driverId,
@@ -761,11 +763,10 @@ function buildFallbackActivity(
   if (task?.arrivedPickupAt) {
     entries.push({
       id: `${task.taskId}:arrived`,
-      title: locale === "zh" ? "到達接送點" : "Arrived at pickup",
-      body:
-        locale === "zh"
-          ? `${task.vehicleId} 已到達接送點。`
-          : `${task.vehicleId} arrived at pickup.`,
+      title: text(locale, "dispatch.detail.activity.arrivedPickup"),
+      body: text(locale, "dispatch.detail.activity.arrivedPickupBody", {
+        vehicleId: task.vehicleId,
+      }),
       at: task.arrivedPickupAt,
       tone: "info",
       actor: task.driverId,
@@ -775,11 +776,10 @@ function buildFallbackActivity(
   if (task?.startedAt) {
     entries.push({
       id: `${task.taskId}:started`,
-      title: locale === "zh" ? "開始行程" : "Trip started",
-      body:
-        locale === "zh"
-          ? `${task.driverId} 已開始載客。`
-          : `${task.driverId} started the trip.`,
+      title: text(locale, "dispatch.detail.activity.tripStarted"),
+      body: text(locale, "dispatch.detail.activity.tripStartedBody", {
+        driverId: task.driverId,
+      }),
       at: task.startedAt,
       tone: "accent",
       actor: task.driverId,
@@ -789,11 +789,10 @@ function buildFallbackActivity(
   if (task?.completedAt) {
     entries.push({
       id: `${task.taskId}:completed`,
-      title: locale === "zh" ? "完成任務" : "Task completed",
-      body:
-        locale === "zh"
-          ? `${task.vehicleId} 已完成任務。`
-          : `${task.vehicleId} completed the task.`,
+      title: text(locale, "dispatch.detail.activity.taskCompleted"),
+      body: text(locale, "dispatch.detail.activity.taskCompletedBody", {
+        vehicleId: task.vehicleId,
+      }),
       at: task.completedAt,
       tone: "accent",
       actor: task.driverId,
@@ -840,11 +839,15 @@ function buildForwardedActivity(
   const entries: ActivityEntry[] = [
     {
       id: `${order.mirrorOrderId}:received`,
-      title: copy(locale, "Mirror received", "鏡像建立"),
-      body: copy(
+      title: text(locale, "dispatch.detail.forwardedActivity.mirrorReceived"),
+      body: text(
         locale,
-        `Forwarded mirror ${order.mirrorOrderId} created for ${order.platformCode} order ${order.externalOrderId}.`,
-        `為 ${formatOpsCodeLabel(locale, order.platformCode)} 訂單 ${order.externalOrderId} 建立 forwarded 鏡像 ${order.mirrorOrderId}。`,
+        "dispatch.detail.forwardedActivity.mirrorReceivedBody",
+        {
+          mirrorOrderId: order.mirrorOrderId,
+          platform: formatOpsCodeLabel(locale, order.platformCode),
+          externalOrderId: order.externalOrderId,
+        },
       ),
       at: order.createdAt,
       tone: "accent",
@@ -852,12 +855,11 @@ function buildForwardedActivity(
     },
     {
       id: `${order.mirrorOrderId}:status`,
-      title: copy(locale, "Status sync", "狀態同步"),
-      body: copy(
-        locale,
-        `Local mirror status is ${formatOpsCodeLabel(locale, order.status)}; last native status ${order.lastNativeStatus ?? "unknown"}.`,
-        `本地鏡像狀態為 ${formatOpsCodeLabel(locale, order.status)}；最後外部狀態 ${order.lastNativeStatus ?? "未知"}。`,
-      ),
+      title: text(locale, "dispatch.detail.forwardedActivity.statusSync"),
+      body: text(locale, "dispatch.detail.forwardedActivity.statusSyncBody", {
+        status: formatOpsCodeLabel(locale, order.status),
+        nativeStatus: order.lastNativeStatus ?? text(locale, "common.unknown"),
+      }),
       at: order.updatedAt,
       tone: getActivityTone(order.status),
       actor: "forwarder.sync",
@@ -867,7 +869,7 @@ function buildForwardedActivity(
   if (order.lastSyncError) {
     entries.push({
       id: `${order.mirrorOrderId}:sync-error`,
-      title: copy(locale, "Sync failure", "同步失敗"),
+      title: text(locale, "dispatch.detail.forwardedActivity.syncFailure"),
       body: `${formatOpsCodeLabel(locale, order.lastSyncError.code)} · ${order.lastSyncError.message}`,
       at: order.lastSyncError.failedAt,
       tone: "danger",
@@ -878,10 +880,10 @@ function buildForwardedActivity(
   if (order.manualFallback.required) {
     entries.push({
       id: `${order.mirrorOrderId}:fallback`,
-      title: copy(locale, "Manual fallback engaged", "啟動人工 fallback"),
+      title: text(locale, "dispatch.detail.forwardedActivity.manualFallback"),
       body:
         order.manualFallback.reason ??
-        copy(locale, "Manual fallback required.", "需要人工 fallback。"),
+        text(locale, "dispatch.detail.forwardedActivity.manualFallbackBody"),
       at: order.manualFallback.requestedAt ?? order.updatedAt,
       tone: "warn",
       actor: order.manualFallback.requestedBy ?? "ops",
@@ -891,11 +893,15 @@ function buildForwardedActivity(
   if (order.reconciliationJob) {
     entries.push({
       id: order.reconciliationJob.reconciliationJobId,
-      title: copy(locale, "Reconciliation", "對帳"),
-      body: copy(
+      title: text(locale, "dispatch.detail.forwardedActivity.reconciliation"),
+      body: text(
         locale,
-        `Reconciliation ${order.reconciliationJob.status} · ${order.reconciliationJob.mismatchCount} mismatch · reason ${order.reconciliationJob.reason}.`,
-        `對帳 ${formatOpsCodeLabel(locale, order.reconciliationJob.status)} · ${order.reconciliationJob.mismatchCount} 筆不符 · 原因 ${formatOpsCodeLabel(locale, order.reconciliationJob.reason)}。`,
+        "dispatch.detail.forwardedActivity.reconciliationBody",
+        {
+          status: formatOpsCodeLabel(locale, order.reconciliationJob.status),
+          mismatchCount: order.reconciliationJob.mismatchCount,
+          reason: formatOpsCodeLabel(locale, order.reconciliationJob.reason),
+        },
       ),
       at:
         order.reconciliationJob.completedAt ??
@@ -933,40 +939,32 @@ function buildOverrideSummary(locale: Locale, order: OwnedOrderRecord) {
       note: formatOpsCodeLabel(locale, order.exceptionHold?.reasonCode ?? null),
       nextAction:
         order.exceptionHold?.overrideAllowed === true
-          ? locale === "zh"
-            ? "可由 reviewer 放行"
-            : "reviewer can release"
-          : locale === "zh"
-            ? "需維持人工覆核"
-            : "keep in manual review",
+          ? text(locale, "dispatch.detail.override.reviewerCanRelease")
+          : text(locale, "dispatch.detail.override.keepExceptionReview"),
     };
   }
 
   if (order.manualFareOverride) {
     return {
-      type: locale === "zh" ? "fare override" : "fare override",
-      status: locale === "zh" ? "已套用" : "applied",
+      type: text(locale, "dispatch.detail.override.fareOverride"),
+      status: text(locale, "dispatch.detail.override.applied"),
       actor: order.manualFareOverride.actorId,
       note: order.manualFareOverride.reason,
-      nextAction:
-        locale === "zh" ? "確認後回到一般派遣" : "return to normal dispatch",
+      nextAction: text(locale, "dispatch.detail.override.returnToDispatch"),
     };
   }
 
   return {
-    type: locale === "zh" ? "—" : "—",
-    status: locale === "zh" ? "未申請" : "not requested",
+    type: "—",
+    status: text(locale, "dispatch.detail.override.notRequested"),
     actor: "—",
     note:
       order.noSupplyEscalation !== null
         ? formatOpsCodeLabel(locale, order.noSupplyEscalation.escalationAction)
         : order.dispatchTimeout !== null
           ? formatOpsCodeLabel(locale, order.dispatchTimeout.escalationAction)
-          : locale === "zh"
-            ? "目前沒有手動 override"
-            : "no manual override",
-    nextAction:
-      locale === "zh" ? "可直接指派或重派候選" : "candidate can be assigned",
+          : text(locale, "dispatch.detail.override.none"),
+    nextAction: text(locale, "dispatch.detail.override.candidateAssignable"),
   };
 }
 
@@ -985,7 +983,7 @@ function renderSequenceRail(
           minWidth: "640px",
         }}
       >
-        {WORKFLOW_STEPS.map((step, index) => {
+        {WORKFLOW_STEP_KEYS.map((stepKey, index) => {
           const complete = index < currentIndex;
           const current = index === currentIndex;
           const idle = index > currentIndex;
@@ -1002,7 +1000,7 @@ function renderSequenceRail(
 
           return (
             <div
-              key={step}
+              key={stepKey}
               style={{
                 display: "grid",
                 gap: "8px",
@@ -1044,7 +1042,7 @@ function renderSequenceRail(
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {step}
+                  {text(locale, stepKey)}
                 </strong>
                 <span
                   style={{
@@ -1055,12 +1053,8 @@ function renderSequenceRail(
                   {timestampByStep[index]
                     ? formatDateTime(locale, timestampByStep[index])
                     : idle
-                      ? locale === "zh"
-                        ? "waiting"
-                        : "waiting"
-                      : locale === "zh"
-                        ? "active"
-                        : "active"}
+                      ? text(locale, "dispatch.detail.workflow.waiting")
+                      : text(locale, "dispatch.detail.workflow.active")}
                 </span>
               </div>
             </div>
@@ -1075,9 +1069,7 @@ function renderActivityFeed(locale: Locale, entries: ActivityEntry[]) {
   if (entries.length === 0) {
     return (
       <div style={{ color: theme.textMuted, fontSize: "12.5px" }}>
-        {locale === "zh"
-          ? "目前沒有 dispatch activity。"
-          : "No dispatch activity yet."}
+        {text(locale, "dispatch.detail.activity.empty")}
       </div>
     );
   }
@@ -1296,7 +1288,7 @@ function actionVisual(
     case "engage_manual_fallback":
       return {
         icon: "switchboard",
-        label: copy(locale, "Manual fallback", "人工 fallback"),
+        label: copy(locale, "Manual fallback", "人工備援"),
         variant,
         danger,
       };
@@ -1859,7 +1851,7 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
         subtitle={copy(
           locale,
           "Smoke fallback workspace for route parity verification.",
-          "供 smoke parity 驗證使用的 fallback 工作區。",
+          "供 smoke parity 驗證使用的備援工作區。",
         )}
       />
       <div
@@ -1883,7 +1875,7 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
               { k: "eta", v: "6m", mono: true },
               {
                 k: "override",
-                v: copy(locale, "Request override", "提出 override"),
+                v: copy(locale, "Request override", "提出例外覆核"),
               },
             ]}
           />
@@ -1891,7 +1883,7 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
         <div style={{ display: "grid", gap: 16 }}>
           <Card
             theme={theme}
-            title={copy(locale, "Delivery sequence", "訂單狀態")}
+            title={text(locale, "dispatch.workflow.detail.timeline")}
           >
             <div>
               {copy(
@@ -1901,7 +1893,10 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
               )}
             </div>
           </Card>
-          <Card theme={theme} title={copy(locale, "Recent activity", "活動")}>
+          <Card
+            theme={theme}
+            title={text(locale, "dispatch.workflow.detail.activityEvents")}
+          >
             <div>
               {copy(
                 locale,
@@ -1918,7 +1913,7 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
             body={copy(
               locale,
               "Override and cancellation require explicit confirmation in the production flow.",
-              "Override 與取消在正式流程中都需要明確確認。",
+              "覆寫與取消在正式流程中都需要明確確認。",
             )}
           />
         </div>
@@ -2417,7 +2412,7 @@ async function renderOwnedWorkspace({
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card
             theme={theme}
-            title={copy(locale, "Delivery sequence", "訂單狀態")}
+            title={text(locale, "dispatch.workflow.detail.timeline")}
           >
             {renderSequenceRail(
               locale,
@@ -2426,7 +2421,10 @@ async function renderOwnedWorkspace({
             )}
           </Card>
 
-          <Card theme={theme} title={copy(locale, "Recent activity", "活動")}>
+          <Card
+            theme={theme}
+            title={text(locale, "dispatch.workflow.detail.activityEvents")}
+          >
             {renderActivityFeed(locale, activityEntries)}
           </Card>
         </div>
@@ -2735,7 +2733,7 @@ function renderForwardedWorkspace({
                   v: order.reconciliationJob
                     ? `${formatOpsCodeLabel(locale, order.reconciliationJob.status)} · ${mismatchCount} mismatch`
                     : order.manualFallback.required
-                      ? copy(locale, "manual fallback", "人工 fallback")
+                      ? copy(locale, "manual fallback", "人工備援")
                       : "—",
                   mono: true,
                 },
@@ -2747,7 +2745,7 @@ function renderForwardedWorkspace({
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card
             theme={theme}
-            title={copy(locale, "Delivery sequence", "訂單狀態")}
+            title={text(locale, "dispatch.workflow.detail.timeline")}
           >
             {renderSequenceRail(locale, getForwardedStepIndex(order), [
               order.createdAt,
@@ -2763,7 +2761,10 @@ function renderForwardedWorkspace({
             ])}
           </Card>
 
-          <Card theme={theme} title={copy(locale, "Recent activity", "活動")}>
+          <Card
+            theme={theme}
+            title={text(locale, "dispatch.workflow.detail.activityEvents")}
+          >
             {renderActivityFeed(locale, activityEntries)}
           </Card>
         </div>
