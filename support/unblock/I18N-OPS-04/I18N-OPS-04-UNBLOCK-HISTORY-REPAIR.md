@@ -48,6 +48,18 @@ driver i18n edits.
 - prior helper audit rail
   `origin/codex2/i18n-ops-04-unblock-history-repair @ 464e9bc985bd3207c7e49dcf4aa6f93092091d10`
 
+### Canonical change evidence
+
+- task commit
+  `6a32c1d578b1e9f4dc1b1c3a081794dedc979c13`
+  `I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: document owner-rail ancestry contamination`
+- push target
+  `origin/codex/i18n-ops-04-unblock-history-repair`
+- task PR
+  `https://github.com/ajoe734/drts-fleet-platform/pull/525`
+- prior related audit PR
+  `https://github.com/ajoe734/drts-fleet-platform/pull/522`
+
 - `git rev-list --left-right --count origin/dev...codex2/i18n-ops-04`
   returns `0 3`, confirming the owner rail is only three commits ahead of dev.
 - `git rev-list --left-right --count codex2/i18n-wp0...codex2/i18n-ops-04`
@@ -175,3 +187,7 @@ parent without rewriting any shared branch history.
   - `git show --stat --summary --name-only c6a726eb`
   - `git show --stat --summary --name-only 4570b055`
   - `git show --stat --summary --name-only 6f8e506c`
+- Recorded task-scoped publish evidence:
+  - `git push -u origin codex/i18n-ops-04-unblock-history-repair`
+  - `gh pr list --head codex/i18n-ops-04-unblock-history-repair --state all --json number,title,url,headRefName,baseRefName,state,isDraft`
+  - `gh pr create --base dev --head codex/i18n-ops-04-unblock-history-repair --title "I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: document owner-rail ancestry contamination" --draft`
