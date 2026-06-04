@@ -138,6 +138,18 @@ Do not force-push, rename, or rewrite any existing branch.
 - The stale helper branches remain available as audit evidence
 - The repair documents the right replay branch without moving commits across refs
 
+## Closeout Evidence
+
+- Task-scoped artifact commit:
+  `2de2eb393a43f5813452651f783f24b8668fb1df`
+  (`docs(GAP-VERIFY-UNBLOCK-HISTORY-REPAIR): document canonical replay branch`)
+- Task-scoped remote branch:
+  `origin/codex/gap-verify-unblock-history-repair`
+- Task-scoped draft PR to `dev`:
+  `#513 https://github.com/ajoe734/drts-fleet-platform/pull/513`
+- Canonical parent replay branch remains:
+  `origin/codex/gap-verify @ a6de0eae466e665a2e9f36d79d7c99d199be3608`
+
 ## Verification Performed
 
 - Read `AI_COLLABORATION_GUIDE.md`
