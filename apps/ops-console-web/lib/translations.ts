@@ -1273,6 +1273,10 @@ const en = {
     "Manifest pending. The package has not completed generation.",
   "reports.detail.selectPackageDetail":
     "Select a filing package to inspect its immutable manifest and backend-issued signed downloads.",
+  "reports.period.range": "{from} to {to}",
+  "reports.period.unknownBoundary": "...",
+  "reports.file.zip": "ZIP",
+  "reports.file.pdf": "PDF",
   "reports.col.item": "Item",
   "reports.col.artifactCol": "Artifact",
   "reports.col.manifestHash": "Manifest hash",
@@ -2944,6 +2948,10 @@ const zh: Record<keyof typeof en, string> = {
   "reports.detail.manifestPending": "清單待處理。申報包尚未完成生成。",
   "reports.detail.selectPackageDetail":
     "選擇申報包以查看其不可變清單和後端發行的已簽章下載。",
+  "reports.period.range": "{from} 至 {to}",
+  "reports.period.unknownBoundary": "...",
+  "reports.file.zip": "ZIP",
+  "reports.file.pdf": "PDF",
   "reports.col.item": "項目",
   "reports.col.artifactCol": "產物",
   "reports.col.manifestHash": "清單雜湊",

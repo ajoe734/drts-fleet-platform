@@ -304,10 +304,10 @@ function shortHash(locale: Locale, value: string | null | undefined) {
   return `${value.slice(0, 12)}...`;
 }
 
-function jobCategory(jobType: string) {
+function jobCategoryKey(jobType: string) {
   return REGULATORY_JOB_TYPE_SET.has(jobType as ReportJobType)
-    ? "Regulatory"
-    : "Operational";
+    ? "reports.category.regulatory"
+    : "reports.category.operational";
 }
 
 function expiresSoon(value: string | null | undefined, hours = 12) {
@@ -397,7 +397,7 @@ function readFilterString(
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function summarizeJobPeriod(filters: Record<string, unknown>) {
+function summarizeJobPeriod(locale: Locale, filters: Record<string, unknown>) {
   const period = readFilterString(filters, "period");
   if (period) {
     return period;
@@ -411,7 +411,10 @@ function summarizeJobPeriod(filters: Record<string, unknown>) {
   const from = readFilterString(filters, "from");
   const to = readFilterString(filters, "to");
   if (from || to) {
-    return `${from ?? "…"} → ${to ?? "…"}`;
+    return translate("reports.period.range", locale, {
+      from: from ?? translate("reports.period.unknownBoundary", locale),
+      to: to ?? translate("reports.period.unknownBoundary", locale),
+    });
   }
 
   const vehicleId = readFilterString(filters, "vehicleId");
@@ -419,7 +422,7 @@ function summarizeJobPeriod(filters: Record<string, unknown>) {
     return vehicleId;
   }
 
-  return translate("common.dash", "en");
+  return translate("common.dash", locale);
 }
 
 function reportStatusTone(status: ReportJobStatus): CanvasTone {
@@ -858,9 +861,7 @@ export default function ReportsPage() {
     value,
     label: t(`reports.type.${value}`),
   }));
-  const selectedJobCategoryLabel = t(
-    `reports.category.${jobCategory(jobType).toLowerCase()}`,
-  );
+  const selectedJobCategoryLabel = t(jobCategoryKey(jobType));
   const selectedJobTypeHint = `${t(`reports.type.${jobType}.desc`)} ${t(
     "reports.categoryLabel",
     {
@@ -925,9 +926,7 @@ export default function ReportsPage() {
       r: (row) => (
         <div style={rowStackStyle}>
           <span style={rowTitleStyle}>{t(`reports.type.${row.jobType}`)}</span>
-          <span style={rowMetaStyle}>
-            {t(`reports.category.${jobCategory(row.jobType).toLowerCase()}`)}
-          </span>
+          <span style={rowMetaStyle}>{t(jobCategoryKey(row.jobType))}</span>
         </div>
       ),
     },
@@ -935,7 +934,7 @@ export default function ReportsPage() {
       h: t("reports.table.period"),
       w: 140,
       mono: true,
-      r: (row) => summarizeJobPeriod(row.filters),
+      r: (row) => summarizeJobPeriod(locale, row.filters),
     },
     {
       h: t("reports.table.format"),
@@ -1061,7 +1060,7 @@ export default function ReportsPage() {
                 target="_blank"
                 style={actionLinkStyle}
               >
-                ZIP
+                {t("reports.file.zip")}
               </a>
             ) : null}
             {row.artifactPdfUrl ? (
@@ -1071,7 +1070,7 @@ export default function ReportsPage() {
                 target="_blank"
                 style={mutedLinkStyle}
               >
-                PDF
+                {t("reports.file.pdf")}
               </a>
             ) : null}
           </div>
@@ -1386,7 +1385,7 @@ export default function ReportsPage() {
                       },
                       {
                         label: t("reports.detail.periodLabel"),
-                        value: summarizeJobPeriod(jobDetail.filters),
+                        value: summarizeJobPeriod(locale, jobDetail.filters),
                         mono: true,
                       },
                       {

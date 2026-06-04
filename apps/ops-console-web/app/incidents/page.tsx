@@ -689,9 +689,9 @@ export default function IncidentsPage() {
     },
     {
       h: t("incidents.table.category"),
-      k: "category",
       w: 132,
       mono: true,
+      r: (row) => formatOpsCodeLabel(locale, row.category),
     },
     {
       h: t("incidents.table.severity"),
@@ -1125,7 +1125,7 @@ export default function IncidentsPage() {
                   items={[
                     {
                       k: t("incidents.detail.category"),
-                      v: selectedIncident.category,
+                      v: formatOpsCodeLabel(locale, selectedIncident.category),
                       mono: true,
                     },
                     {
