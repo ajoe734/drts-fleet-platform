@@ -1,6 +1,6 @@
 # Dev Runtime + Functional Gap Report (browser-verified)
 
-- **Last re-run:** 2026-06-04T08:25:59Z
+- **Last re-run:** 2026-06-04T08:53:33Z
 - **Auditor:** Codex2
 - **Environment:** live dev Cloud Run
   - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
@@ -8,7 +8,7 @@
 - **Method:** headless Chromium route census over all 39 routes (Platform Admin 18 + Ops Console 21), fixed `1440x950` screenshots, shell-count checks, and manual tab round-trip checks for `/pricing`, `/payments`, `/attendance`.
 - **Artifacts:** `.artifacts/func-audit/dev-gap-audit-results.json`, `.artifacts/func-audit/dev-gap-audit-summary.md`, and route screenshots under `.artifacts/func-audit/*.png`.
 
-## 1. Scoreboard (2026-06-04T08:25:59Z re-run)
+## 1. Scoreboard (2026-06-04T08:53:33Z re-run)
 
 | App            | Routes | Fully working | Broken                            |
 | -------------- | -----: | ------------: | --------------------------------- |
@@ -18,7 +18,7 @@
 **Current total:** 38 / 39 routes fully working.  
 **Acceptance target (`0 broken`, `0 HTTP 500`) is still not met.**
 
-This 2026-06-04T08:25:59Z re-run reconfirms the current dev state: the shell fix remains live, but acceptance is still blocked by one remaining HTTP 500 and two manual tab-strip regressions:
+This 2026-06-04T08:53:33Z re-run reconfirms the current dev state: the shell fix remains live, but acceptance is still blocked by one remaining HTTP 500 and two manual tab-strip regressions:
 
 - OPS `/vehicles/veh-demo-001` still returns HTTP 500.
 - PA `/pricing` tab switching still fails to push `/pricing?tab=driver`.
@@ -62,13 +62,13 @@ This 2026-06-04T08:25:59Z re-run reconfirms the current dev state: the shell fix
 - Clicking `Driver Fee Plans` left the URL pinned at `/pricing`; expected `/pricing?tab=driver`.
 - The browser never reached the driver-tab state, so the remainder of the pricing round-trip is still blocked on the same regression.
 - Evidence:
-  - `.artifacts/func-audit/platform-admin-pricing.png`
+  - `.artifacts/func-audit/pricing-tab-driver-failed.png`
   - `.artifacts/func-audit/dev-gap-audit-results.json` (`checks.pricingTabs`)
 
 3. **PA `/payments` tab strip still does not round-trip into the reimbursement route.**
    - Clicking `發票` and `司機結算單` leaves the URL pinned at `/payments`, and clicking `報銷` still does not transition into `/payments/reimbursements`.
    - Evidence:
-     - `.artifacts/func-audit/payments-tab-roundtrip.png`
+     - `.artifacts/func-audit/payments-tab-roundtrip-failed.png`
      - `.artifacts/func-audit/dev-gap-audit-results.json` (`checks.paymentsTabs`)
 
 ## 4. Raw audit outputs
@@ -83,7 +83,7 @@ This 2026-06-04T08:25:59Z re-run reconfirms the current dev state: the shell fix
 
 This task cannot be closed as `done` yet.
 
-- **Why:** live dev still has 1 confirmed HTTP 500 route and 2 confirmed tab-strip regressions in the 2026-06-04T08:25:59Z rerun.
+- **Why:** live dev still has 1 confirmed HTTP 500 route and 2 confirmed tab-strip regressions in the 2026-06-04T08:53:33Z rerun.
 - **Acceptance not met:**
   - all 39 routes verified on dev: **failed** (`1` HTTP 500 remains)
   - single shell everywhere: **passed**
