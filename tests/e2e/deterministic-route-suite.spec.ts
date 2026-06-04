@@ -146,7 +146,11 @@ const ADMIN_ROUTES: RouteSpec[] = [
     modalTrigger: /Create|新增|建立/i,
     buttonLabel: /Filter|Export|Create|篩選|匯出|建立/i,
   },
-  { name: "tenant detail", path: "/tenants/tnt-1", surface: "admin" },
+  {
+    name: "tenant detail",
+    path: "/tenants/tenant-demo-001",
+    surface: "admin",
+  },
   {
     name: "tenant governance",
     path: "/tenant-governance",

@@ -96,6 +96,25 @@ jobs:
   smoke-acceptance:
     name: Smoke acceptance
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The deterministic route suite drives repository-backed ops/admin pages.
+      # apps/api (started by playwright.config.ts) inherits this so its Postgres
+      # pool is live; the ops + admin web servers inherit it transitively.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_fleet_platform
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -115,6 +134,12 @@ jobs:
         run: pnpm run typecheck
       - name: Unit tests
         run: pnpm run test:unit
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Apply migrations and seed demo data
+        run: |
+          pnpm run db:migrate
+          pnpm run db:seed
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
       - name: E2E route suite
