@@ -1838,6 +1838,178 @@ const en = {
   "dispatch.forwarded.status.lost_race": "Lost race",
   "dispatch.forwarded.status.cancelled_by_platform": "Cancelled by platform",
   "dispatch.forwarded.status.sync_failed": "Sync failed",
+  "dispatch.detail.manualReview": "Manual review",
+  "dispatch.detail.gate.serviceBucketGap": "Service bucket gap",
+  "dispatch.detail.gate.locationStale": "Location stale",
+  "dispatch.detail.sequence.created": "Created",
+  "dispatch.detail.sequence.waiting": "Waiting",
+  "dispatch.detail.sequence.active": "Active",
+  "dispatch.detail.sequence.title": "Delivery sequence",
+  "dispatch.detail.activity.title": "Recent activity",
+  "dispatch.detail.activity.empty": "No dispatch activity yet.",
+  "dispatch.detail.activity.enteredQueue.title": "Entered queue",
+  "dispatch.detail.activity.enteredQueue.body":
+    "{tenant} created this order via {source}.",
+  "dispatch.detail.activity.pricing.title": "Pricing",
+  "dispatch.detail.activity.pricing.body": "{rule} quoted {amount}.",
+  "dispatch.detail.activity.dispatchEvaluation.title": "Dispatch evaluation",
+  "dispatch.detail.activity.dispatchEvaluation.body":
+    "Job {jobId} is {status}.",
+  "dispatch.detail.activity.noSupplyEscalation.title": "No-supply escalation",
+  "dispatch.detail.activity.noSupplyEscalation.body":
+    "Attempt {count} escalated via {action}.",
+  "dispatch.detail.activity.exceptionHoldRaised.title": "Exception hold raised",
+  "dispatch.detail.activity.exceptionHoldRaised.body": "Reason: {reason}.",
+  "dispatch.detail.activity.overrideRequest.title": "Override review requested",
+  "dispatch.detail.activity.overrideRequest.body": "{status} by {actor}.",
+  "dispatch.detail.activity.exceptionResolved.title": "Exception resolved",
+  "dispatch.detail.activity.exceptionResolved.body":
+    "{actor} recorded {resolution}.",
+  "dispatch.detail.activity.manualFareOverride.title": "Manual fare override",
+  "dispatch.detail.activity.manualFareOverride.body":
+    "{actor} applied a fare override. Reason: {reason}.",
+  "dispatch.detail.activity.driverAccepted.title": "Driver accepted",
+  "dispatch.detail.activity.driverAccepted.body":
+    "{driverId} accepted {vehicleId}.",
+  "dispatch.detail.activity.departedToPickup.title": "Departed to pickup",
+  "dispatch.detail.activity.departedToPickup.body":
+    "{vehicleId} departed toward pickup.",
+  "dispatch.detail.activity.arrivedAtPickup.title": "Arrived at pickup",
+  "dispatch.detail.activity.arrivedAtPickup.body":
+    "{vehicleId} arrived at pickup.",
+  "dispatch.detail.activity.tripStarted.title": "Trip started",
+  "dispatch.detail.activity.tripStarted.body": "{driverId} started the trip.",
+  "dispatch.detail.activity.taskCompleted.title": "Task completed",
+  "dispatch.detail.activity.taskCompleted.body":
+    "{vehicleId} completed the task.",
+  "dispatch.detail.overrideSummary.reviewerCanRelease": "Reviewer can release",
+  "dispatch.detail.overrideSummary.keepManualReview": "Keep in manual review",
+  "dispatch.detail.overrideSummary.fareOverrideType": "Fare override",
+  "dispatch.detail.overrideSummary.applied": "Applied",
+  "dispatch.detail.overrideSummary.returnToNormalDispatch":
+    "Return to normal dispatch",
+  "dispatch.detail.overrideSummary.notRequested": "Not requested",
+  "dispatch.detail.overrideSummary.noManualOverride": "No manual override",
+  "dispatch.detail.overrideSummary.candidateCanBeAssigned":
+    "Candidate can be assigned",
+  "dispatch.detail.headerAction.contactRider": "Contact rider",
+  "dispatch.detail.headerAction.assignTopCandidate": "Assign #1",
+  "dispatch.detail.headerAction.releaseDriver": "Release driver",
+  "dispatch.detail.headerAction.fareOverride": "Fare override",
+  "dispatch.detail.headerAction.forceRefresh": "Force refresh",
+  "dispatch.detail.headerAction.broadcast": "Broadcast",
+  "dispatch.detail.headerAction.reportSyncFailure": "Report sync failure",
+  "dispatch.detail.action.unavailable": "Unavailable",
+  "dispatch.detail.action.risk": "Risk: {level}",
+  "dispatch.detail.action.reasonRequired": "Reason required",
+  "dispatch.detail.action.readOnlyTerminal": "Read-only · terminal",
+  "dispatch.detail.emptyState.noJob.title": "Dispatch job not started",
+  "dispatch.detail.emptyState.noJob.body":
+    "No dispatch job exists for this order yet. Candidate scoring begins once it enters matching.",
+  "dispatch.detail.emptyState.fetchFailed.title": "Candidate snapshot failed",
+  "dispatch.detail.emptyState.fetchFailed.body":
+    "The candidate endpoint did not return a usable payload. Retry the snapshot.",
+  "dispatch.detail.emptyState.permissionDenied.title": "Candidate scope denied",
+  "dispatch.detail.emptyState.permissionDenied.body":
+    "This actor can open the workspace but lacks supply read scope for candidate scoring.",
+  "dispatch.detail.emptyState.noSupply.title": "No eligible supply",
+  "dispatch.detail.emptyState.noSupply.body":
+    "Supply is exhausted or the no-supply lane is active. Hand off via the no-supply or governance lane.",
+  "dispatch.detail.emptyState.filteredEmpty.title":
+    "No candidates match the gate filter",
+  "dispatch.detail.emptyState.filteredEmpty.body":
+    "Every scored candidate is filtered out by the current gate slice. Widen the gate view.",
+  "dispatch.detail.emptyState.ineligible.title":
+    "Candidates blocked by eligibility",
+  "dispatch.detail.emptyState.ineligible.body":
+    "All nearby drivers failed an eligibility or license gate. Resolve compliance before assignment.",
+  "dispatch.detail.emptyState.noCandidates.title": "No candidates yet",
+  "dispatch.detail.emptyState.noCandidates.body":
+    "Matching is healthy but no candidate has surfaced for this work item yet.",
+  "dispatch.detail.emptyState.openDispatchBoard": "Open dispatch board",
+  "dispatch.detail.emptyState.noSupplyBoard": "No-supply board",
+  "dispatch.detail.emptyState.clearGateFilter": "Clear gate filter",
+  "dispatch.detail.emptyState.openFleetGovernance": "Open fleet governance",
+  "dispatch.detail.emptyState.label": "Empty state",
+  "dispatch.detail.refresh.snapshot":
+    "Snapshot {generatedAt} UTC from {source}.",
+  "dispatch.detail.refresh.generatedAt": "Generated",
+  "dispatch.detail.refresh.ctaSource": "CTAs come from availableActions",
+  "dispatch.detail.smoke.subtitle":
+    "Smoke fallback workspace for route parity verification.",
+  "dispatch.detail.smoke.candidateBoard": "Candidate board",
+  "dispatch.detail.smoke.dispatchId": "Dispatch ID",
+  "dispatch.detail.smoke.state": "State",
+  "dispatch.detail.smoke.eta": "ETA",
+  "dispatch.detail.smoke.override": "Override",
+  "dispatch.detail.smoke.sequence": "queued → broadcasting → assigned",
+  "dispatch.detail.smoke.activity": "Dispatch smoke activity log",
+  "dispatch.detail.smoke.highRiskCtaTitle": "High-risk CTA present",
+  "dispatch.detail.smoke.highRiskCtaBody":
+    "Override and cancellation require explicit confirmation in the production flow.",
+  "dispatch.detail.candidateCount": "{count} candidates",
+  "dispatch.detail.candidatesRanked": "Candidates · ranked",
+  "dispatch.detail.eta": "ETA",
+  "dispatch.detail.gate": "Gate",
+  "dispatch.detail.score": "Score",
+  "dispatch.detail.compliance.candidatesClear": "candidates clear",
+  "dispatch.detail.compliance.licenseValid": "License valid",
+  "dispatch.detail.compliance.serviceBucket": "Service bucket",
+  "dispatch.detail.compliance.review": "Review",
+  "dispatch.detail.compliance.dispatchState": "Dispatch state",
+  "dispatch.detail.compliance.deviceBinding": "Device binding",
+  "dispatch.detail.compliance.deviceBindingValue":
+    "{live}/{total} live · {eligible}/{total} eligible",
+  "dispatch.detail.compliance.fareQuoted": "Fare quoted",
+  "dispatch.detail.compliance.overrideAllowed": "Override allowed",
+  "dispatch.detail.compliance.notNeeded": "Not needed",
+  "dispatch.detail.banner.degraded": "Some dispatch data is degraded",
+  "dispatch.detail.banner.terminal.title":
+    "Work item is in a terminal state · read-only",
+  "dispatch.detail.banner.terminal.body":
+    "No dispatch CTAs are offered; review the timeline and compliance record below.",
+  "dispatch.detail.link.inspectAdapter": "Inspect adapter",
+  "dispatch.detail.link.openReconciliation": "Open reconciliation",
+  "dispatch.detail.platformState": "Platform state",
+  "dispatch.detail.adapter": "Adapter",
+  "dispatch.detail.broadcastCandidates": "Broadcast candidates",
+  "dispatch.detail.waypoints": "waypoints",
+  "dispatch.forwarded.activity.mirrorReceived.title": "Mirror received",
+  "dispatch.forwarded.activity.mirrorReceived.body":
+    "Forwarded mirror {mirrorOrderId} created for {platform} order {externalOrderId}.",
+  "dispatch.forwarded.activity.statusSync.title": "Status sync",
+  "dispatch.forwarded.activity.statusSync.body":
+    "Local mirror status is {status}; last native status {nativeStatus}.",
+  "dispatch.forwarded.activity.syncFailure.title": "Sync failure",
+  "dispatch.forwarded.activity.manualFallback.title": "Manual fallback engaged",
+  "dispatch.forwarded.activity.manualFallback.defaultBody":
+    "Manual fallback required.",
+  "dispatch.forwarded.activity.reconciliation.title": "Reconciliation",
+  "dispatch.forwarded.activity.reconciliation.body":
+    "Reconciliation {status} · {mismatchCount} mismatch · reason {reason}.",
+  "dispatch.forwarded.banner.notOwned.title":
+    "Forwarded mirror · not owned dispatch",
+  "dispatch.forwarded.banner.notOwned.body":
+    "No owned assignment exists. Every mutation must flow through a reconciliation issue to the platform finance owner; locally we only sync external state.",
+  "dispatch.forwarded.banner.adapterDegraded.title":
+    "Adapter dependency is degraded",
+  "dispatch.forwarded.banner.adapterDegraded.body":
+    "{platform} adapter is {status}{lastError}. Broadcast and live sync may be unavailable.",
+  "dispatch.forwarded.banner.terminal.title":
+    "Mirror reached a terminal state · read-only",
+  "dispatch.forwarded.banner.terminal.body":
+    "Only force refresh is offered; reconciliation and finance settle at the owner platform.",
+  "dispatch.forwarded.authority.title": "Authority chain · finance",
+  "dispatch.forwarded.authority.domain": "Domain",
+  "dispatch.forwarded.authority.sourcePlatform": "Source platform",
+  "dispatch.forwarded.authority.routeLocked": "Route locked",
+  "dispatch.forwarded.authority.fareAuthority": "Fare authority",
+  "dispatch.forwarded.authority.settlement": "Settlement",
+  "dispatch.forwarded.authority.syncState": "Sync state",
+  "dispatch.forwarded.authority.lastCallback": "Last callback",
+  "dispatch.forwarded.authority.reconciliation": "Reconciliation",
+  "dispatch.forwarded.authority.reconciliationValue":
+    "{status} · {mismatchCount} mismatch",
 
   // ── Maintenance ──
   "maintenance.title": "Vehicle Maintenance",
@@ -5002,6 +5174,169 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.forwarded.status.lost_race": "失去訂單",
   "dispatch.forwarded.status.cancelled_by_platform": "平台取消",
   "dispatch.forwarded.status.sync_failed": "同步失敗",
+  "dispatch.detail.manualReview": "人工覆核",
+  "dispatch.detail.gate.serviceBucketGap": "服務桶不符",
+  "dispatch.detail.gate.locationStale": "位置過舊",
+  "dispatch.detail.sequence.created": "建立",
+  "dispatch.detail.sequence.waiting": "等待中",
+  "dispatch.detail.sequence.active": "進行中",
+  "dispatch.detail.sequence.title": "訂單狀態",
+  "dispatch.detail.activity.title": "活動",
+  "dispatch.detail.activity.empty": "目前沒有派車活動。",
+  "dispatch.detail.activity.enteredQueue.title": "進入佇列",
+  "dispatch.detail.activity.enteredQueue.body":
+    "{tenant} 透過 {source} 建立此訂單。",
+  "dispatch.detail.activity.pricing.title": "計價",
+  "dispatch.detail.activity.pricing.body": "套用 {rule}：{amount}。",
+  "dispatch.detail.activity.dispatchEvaluation.title": "派遣評估",
+  "dispatch.detail.activity.dispatchEvaluation.body":
+    "工作 {jobId} 目前為 {status}。",
+  "dispatch.detail.activity.noSupplyEscalation.title": "無供給升級",
+  "dispatch.detail.activity.noSupplyEscalation.body":
+    "第 {count} 次嘗試後，執行 {action}。",
+  "dispatch.detail.activity.exceptionHoldRaised.title": "人工覆核觸發",
+  "dispatch.detail.activity.exceptionHoldRaised.body": "原因：{reason}。",
+  "dispatch.detail.activity.overrideRequest.title": "例外覆核申請",
+  "dispatch.detail.activity.overrideRequest.body": "{status}，申請人 {actor}。",
+  "dispatch.detail.activity.exceptionResolved.title": "覆核完成",
+  "dispatch.detail.activity.exceptionResolved.body":
+    "{actor} 記錄 {resolution}。",
+  "dispatch.detail.activity.manualFareOverride.title": "車資覆寫",
+  "dispatch.detail.activity.manualFareOverride.body":
+    "{actor} 套用人工車資，原因：{reason}。",
+  "dispatch.detail.activity.driverAccepted.title": "司機已接單",
+  "dispatch.detail.activity.driverAccepted.body":
+    "{driverId} 已接受 {vehicleId} 的任務。",
+  "dispatch.detail.activity.departedToPickup.title": "前往接送點",
+  "dispatch.detail.activity.departedToPickup.body":
+    "{vehicleId} 已開始前往接送點。",
+  "dispatch.detail.activity.arrivedAtPickup.title": "到達接送點",
+  "dispatch.detail.activity.arrivedAtPickup.body": "{vehicleId} 已到達接送點。",
+  "dispatch.detail.activity.tripStarted.title": "開始行程",
+  "dispatch.detail.activity.tripStarted.body": "{driverId} 已開始載客。",
+  "dispatch.detail.activity.taskCompleted.title": "完成任務",
+  "dispatch.detail.activity.taskCompleted.body": "{vehicleId} 已完成任務。",
+  "dispatch.detail.overrideSummary.reviewerCanRelease": "可由 reviewer 放行",
+  "dispatch.detail.overrideSummary.keepManualReview": "需維持人工覆核",
+  "dispatch.detail.overrideSummary.fareOverrideType": "車資覆寫",
+  "dispatch.detail.overrideSummary.applied": "已套用",
+  "dispatch.detail.overrideSummary.returnToNormalDispatch":
+    "確認後回到一般派遣",
+  "dispatch.detail.overrideSummary.notRequested": "未申請",
+  "dispatch.detail.overrideSummary.noManualOverride": "目前沒有手動覆寫",
+  "dispatch.detail.overrideSummary.candidateCanBeAssigned":
+    "可直接指派或重派候選",
+  "dispatch.detail.headerAction.contactRider": "聯絡乘客",
+  "dispatch.detail.headerAction.assignTopCandidate": "指派候選 #1",
+  "dispatch.detail.headerAction.releaseDriver": "釋放司機",
+  "dispatch.detail.headerAction.fareOverride": "車資覆寫",
+  "dispatch.detail.headerAction.forceRefresh": "強制刷新",
+  "dispatch.detail.headerAction.broadcast": "廣播候選",
+  "dispatch.detail.headerAction.reportSyncFailure": "回報同步失敗",
+  "dispatch.detail.action.unavailable": "目前不可用",
+  "dispatch.detail.action.risk": "風險：{level}",
+  "dispatch.detail.action.reasonRequired": "需填原因",
+  "dispatch.detail.action.readOnlyTerminal": "唯讀 · 終態",
+  "dispatch.detail.emptyState.noJob.title": "派遣工作尚未啟動",
+  "dispatch.detail.emptyState.noJob.body":
+    "此訂單尚未建立派遣工作，進入 matching 後才會開始評分候選。",
+  "dispatch.detail.emptyState.fetchFailed.title": "候選快照讀取失敗",
+  "dispatch.detail.emptyState.fetchFailed.body":
+    "候選端點未回傳可用內容，請重新整理快照。",
+  "dispatch.detail.emptyState.permissionDenied.title": "無候選讀取權限",
+  "dispatch.detail.emptyState.permissionDenied.body":
+    "目前帳號可進入工作區，但缺少候選評分的供給讀取權限。",
+  "dispatch.detail.emptyState.noSupply.title": "目前無可用供給",
+  "dispatch.detail.emptyState.noSupply.body":
+    "供給耗盡或無供給流程啟動中，請改由無供給或治理流程接手。",
+  "dispatch.detail.emptyState.filteredEmpty.title": "目前篩選沒有候選",
+  "dispatch.detail.emptyState.filteredEmpty.body":
+    "目前 gate 篩選把所有評分候選都排除了，請放寬 gate 檢視。",
+  "dispatch.detail.emptyState.ineligible.title": "候選因資格被擋",
+  "dispatch.detail.emptyState.ineligible.body":
+    "附近司機皆未通過資格或證照 gate，指派前請先處理法遵。",
+  "dispatch.detail.emptyState.noCandidates.title": "目前沒有候選",
+  "dispatch.detail.emptyState.noCandidates.body":
+    "matching 正常，但此工作項目目前還沒有評分出候選。",
+  "dispatch.detail.emptyState.openDispatchBoard": "回派車看板",
+  "dispatch.detail.emptyState.noSupplyBoard": "無供給看板",
+  "dispatch.detail.emptyState.clearGateFilter": "清除 gate 篩選",
+  "dispatch.detail.emptyState.openFleetGovernance": "開啟車隊治理",
+  "dispatch.detail.emptyState.label": "空狀態",
+  "dispatch.detail.refresh.snapshot":
+    "快照於 {generatedAt} UTC 產生，來源 {source}。",
+  "dispatch.detail.refresh.generatedAt": "生成時間",
+  "dispatch.detail.refresh.ctaSource": "畫面 CTA 以 availableActions 為準",
+  "dispatch.detail.smoke.subtitle": "供 smoke parity 驗證使用的備援工作區。",
+  "dispatch.detail.smoke.candidateBoard": "候選面板",
+  "dispatch.detail.smoke.dispatchId": "派遣編號",
+  "dispatch.detail.smoke.state": "狀態",
+  "dispatch.detail.smoke.eta": "ETA",
+  "dispatch.detail.smoke.override": "覆核",
+  "dispatch.detail.smoke.sequence": "queued → broadcasting → assigned",
+  "dispatch.detail.smoke.activity": "派遣 smoke 活動紀錄",
+  "dispatch.detail.smoke.highRiskCtaTitle": "高風險 CTA 已呈現",
+  "dispatch.detail.smoke.highRiskCtaBody":
+    "覆核與取消在正式流程中都需要明確確認。",
+  "dispatch.detail.candidateCount": "{count} 候選",
+  "dispatch.detail.candidatesRanked": "候選司機 · ranked",
+  "dispatch.detail.eta": "ETA",
+  "dispatch.detail.gate": "Gate",
+  "dispatch.detail.score": "分數",
+  "dispatch.detail.compliance.candidatesClear": "候選通過",
+  "dispatch.detail.compliance.licenseValid": "證照有效",
+  "dispatch.detail.compliance.serviceBucket": "服務桶",
+  "dispatch.detail.compliance.review": "覆核",
+  "dispatch.detail.compliance.dispatchState": "派遣狀態",
+  "dispatch.detail.compliance.deviceBinding": "裝置綁定",
+  "dispatch.detail.compliance.deviceBindingValue":
+    "{live}/{total} 即時 · {eligible}/{total} 符合資格",
+  "dispatch.detail.compliance.fareQuoted": "已報價車資",
+  "dispatch.detail.compliance.overrideAllowed": "可否覆核",
+  "dispatch.detail.compliance.notNeeded": "不需要",
+  "dispatch.detail.banner.degraded": "部分派遣資料降級",
+  "dispatch.detail.banner.terminal.title": "工作項目已進入終態 · 唯讀",
+  "dispatch.detail.banner.terminal.body":
+    "不提供派遣 CTA；可檢視下方時間軸與法遵紀錄。",
+  "dispatch.detail.link.inspectAdapter": "檢視 adapter",
+  "dispatch.detail.link.openReconciliation": "開啟對帳",
+  "dispatch.detail.platformState": "平台狀態",
+  "dispatch.detail.adapter": "轉接器",
+  "dispatch.detail.broadcastCandidates": "廣播候選",
+  "dispatch.detail.waypoints": "途經點",
+  "dispatch.forwarded.activity.mirrorReceived.title": "鏡像建立",
+  "dispatch.forwarded.activity.mirrorReceived.body":
+    "為 {platform} 訂單 {externalOrderId} 建立鏡像 {mirrorOrderId}。",
+  "dispatch.forwarded.activity.statusSync.title": "狀態同步",
+  "dispatch.forwarded.activity.statusSync.body":
+    "本地鏡像狀態為 {status}；最後外部狀態 {nativeStatus}。",
+  "dispatch.forwarded.activity.syncFailure.title": "同步失敗",
+  "dispatch.forwarded.activity.manualFallback.title": "啟動人工備援",
+  "dispatch.forwarded.activity.manualFallback.defaultBody": "需要人工備援。",
+  "dispatch.forwarded.activity.reconciliation.title": "對帳",
+  "dispatch.forwarded.activity.reconciliation.body":
+    "對帳 {status} · {mismatchCount} 筆不符 · 原因 {reason}。",
+  "dispatch.forwarded.banner.notOwned.title":
+    "此訂單為 forwarded mirror · 不可視為 owned",
+  "dispatch.forwarded.banner.notOwned.body":
+    "本地沒有 owned 指派。所有變更都必須透過對帳問題交給平台財務權責方，本地僅同步外部狀態。",
+  "dispatch.forwarded.banner.adapterDegraded.title": "轉接器相依降級",
+  "dispatch.forwarded.banner.adapterDegraded.body":
+    "{platform} 轉接器為 {status}{lastError}；廣播與即時同步可能不可用。",
+  "dispatch.forwarded.banner.terminal.title": "鏡像已進入終態 · 唯讀",
+  "dispatch.forwarded.banner.terminal.body":
+    "僅提供強制刷新；對帳與金流於來源平台結算。",
+  "dispatch.forwarded.authority.title": "權責鏈 · 財務",
+  "dispatch.forwarded.authority.domain": "領域",
+  "dispatch.forwarded.authority.sourcePlatform": "來源平台",
+  "dispatch.forwarded.authority.routeLocked": "路線鎖定",
+  "dispatch.forwarded.authority.fareAuthority": "車資權責",
+  "dispatch.forwarded.authority.settlement": "結算",
+  "dispatch.forwarded.authority.syncState": "同步狀態",
+  "dispatch.forwarded.authority.lastCallback": "最近回呼",
+  "dispatch.forwarded.authority.reconciliation": "對帳",
+  "dispatch.forwarded.authority.reconciliationValue":
+    "{status} · {mismatchCount} 筆不符",
 
   // ── Maintenance ──
   "maintenance.title": "車輛維修",
