@@ -125,8 +125,11 @@ function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
 
 function sortReconciliationIssues(rows: ReconciliationIssueRecord[]) {
   return [...rows].sort((left, right) => {
-    const statusDelta =
-      ISSUE_STATUS_PRIORITY[left.status] - ISSUE_STATUS_PRIORITY[right.status];
+    const leftPriority =
+      ISSUE_STATUS_PRIORITY[left.status] ?? Number.MAX_SAFE_INTEGER;
+    const rightPriority =
+      ISSUE_STATUS_PRIORITY[right.status] ?? Number.MAX_SAFE_INTEGER;
+    const statusDelta = leftPriority - rightPriority;
     if (statusDelta !== 0) {
       return statusDelta;
     }
@@ -718,13 +721,13 @@ export default function PaymentsPage() {
 
   const describeInvoiceChannelMix = (invoice: TenantInvoiceRecord) =>
     summarizeChannelMix(
-      invoice.lines.map((line) => line.channelKey),
+      invoice.lines?.map((line) => line.channelKey) ?? [],
       describeMatrixChannel,
     );
 
   const describeStatementChannelMix = (statement: DriverStatementRecord) =>
     summarizeChannelMix(
-      statement.lines.map((line) => line.channelKey),
+      statement.lines?.map((line) => line.channelKey) ?? [],
       describeMatrixChannel,
     );
 
