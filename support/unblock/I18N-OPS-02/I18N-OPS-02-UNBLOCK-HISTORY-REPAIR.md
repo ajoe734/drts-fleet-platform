@@ -152,6 +152,19 @@ AI_NAME=Codex2 scripts/ai-status.sh handoff I18N-OPS-02 Codex \
   diagnosis on the currently assigned `codex/...` helper branch with normal
   commit/push evidence.
 
+## Review Approval And Closeout Notes
+
+- Reviewer approval was recorded at `2026-06-04T11:18:07Z` with the conclusion
+  that the helper branch remains only a stale audit rail while the canonical
+  parent closeout stays on `origin/codex2/i18n-ops-02 @ 5f7e103b`.
+- The first pushed helper-rail evidence commit is
+  `af546c437bb3f192402c9033b1464c14d03ebc7e`
+  (`I18N-OPS-02-UNBLOCK-HISTORY-REPAIR: document reassigned helper rail contamination`).
+- This owner closeout adds no product-code delta and does not alter the parent
+  branch choice. It exists only to satisfy the formal `review_approved -> done`
+  protocol on the currently assigned `codex/...` helper rail with an explicit
+  verification trailer and machine-truth finalization.
+
 ## Why This Is Safe
 
 - No shared branch is rewritten.
