@@ -18,19 +18,17 @@ import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { PublishAssistantScope } from "@/components/ops-assistant";
 import { RefreshOnInterval } from "@/components/refresh-on-interval";
 import { getServerOpsClient } from "@/lib/api-client.server";
-import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getRefreshIntervalMs } from "@/lib/refresh-tier";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
+import { DriversTable } from "./drivers-table";
 import {
   CanvasCard as Card,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasTable as Table,
   buildCanvasTheme,
-  type CanvasTableColumn,
   type CanvasTheme,
-  type CanvasTone,
 } from "@drts/ui-web";
 
 const STALE_LOCATION_THRESHOLD_MS = 5 * 60 * 1000;
@@ -203,42 +201,6 @@ const filterActionsStyle: CSSProperties = {
   justifyContent: "flex-end",
 };
 
-const chipRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-};
-
-const driverPrimaryStyle: CSSProperties = {
-  color: theme.text,
-  textDecoration: "none",
-  fontWeight: 700,
-};
-
-const driverSecondaryStyle: CSSProperties = {
-  fontSize: 11.5,
-  color: theme.textDim,
-  fontFamily: theme.monoFamily,
-};
-
-const stackStyle: CSSProperties = {
-  display: "grid",
-  gap: 4,
-  minWidth: 0,
-};
-
-const inlineLinkStyle: CSSProperties = {
-  color: theme.accent,
-  textDecoration: "none",
-  fontWeight: 600,
-};
-
-const actionsWrapStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-};
-
 const footerStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -334,33 +296,6 @@ function resolveLocationState(
     return "missing";
   }
   return isLocationStale(snapshot) ? "stale" : "live";
-}
-
-function presenceTone(presence: PlatformPresenceRecord): CanvasTone {
-  if (presence.reauthRequired) return "warn";
-  if (presence.status === "online" && presence.eligibility === "eligible") {
-    return "success";
-  }
-  if (presence.status === "online") return "info";
-  return "neutral";
-}
-
-function presenceLabel(
-  presence: PlatformPresenceRecord,
-  locale: Locale,
-): string {
-  const name = PLATFORM_CODE_REGISTRY[presence.platformCode]?.displayName;
-  const binding = presence.accountId
-    ? locale === "zh"
-      ? "已綁定"
-      : "bound"
-    : locale === "zh"
-      ? "未綁定"
-      : "unbound";
-  const status = presence.reauthRequired
-    ? "reauth"
-    : formatOpsCodeLabel(locale, presence.status);
-  return `${name ?? presence.platformCode} · ${status} · ${binding}`;
 }
 
 function matchesView(row: DriverRowModel, view: DriversViewKey): boolean {
@@ -605,88 +540,6 @@ function getRefreshBannerModel(
     };
   }
   return null;
-}
-
-function getDriverActionPresentation(
-  row: DriverRowModel,
-  action: ResourceActionDescriptor,
-  locale: Locale,
-) {
-  if (
-    action.action === "open_driver_detail" ||
-    action.action === "open_driver" ||
-    action.action === "view_driver_detail"
-  ) {
-    return {
-      href: `/drivers/${encodeURIComponent(row.driver.driverId)}`,
-      label: t("drivers.list.openDetail", locale),
-      ariaLabel: getOpsLabel(locale, "openDriverDetail", {
-        driverId: row.driver.driverId,
-      }),
-    };
-  }
-  if (
-    action.action === "open_active_dispatch" ||
-    action.action === "open_dispatch" ||
-    action.action === "view_dispatch_detail"
-  ) {
-    return row.activeForwardedOrders[0]
-      ? {
-          href: `/dispatch/${encodeURIComponent(row.activeForwardedOrders[0].mirrorOrderId)}`,
-          label: t("drivers.list.openDispatch", locale),
-        }
-      : { label: t("drivers.list.openDispatch", locale) };
-  }
-  if (
-    action.action === "open_adapter_registry" ||
-    action.action === "inspect_adapter_registry" ||
-    action.action === "open_platform_admin_adapter_registry"
-  ) {
-    const href = buildPlatformAdminHref(PLATFORM_ADMIN_ADAPTER_REGISTRY_ROUTE);
-    return href
-      ? {
-          href,
-          target: "_blank" as const,
-          label: t("drivers.list.openAdapterRegistry", locale),
-        }
-      : { label: t("drivers.list.openAdapterRegistry", locale) };
-  }
-  return {
-    label: formatOpsCodeLabel(locale, action.action),
-  };
-}
-
-function getPrimaryDriverDetailPresentation(
-  row: DriverRowModel,
-  locale: Locale,
-) {
-  const action = row.availableActions.find(
-    (candidate) =>
-      candidate.enabled &&
-      (candidate.action === "open_driver_detail" ||
-        candidate.action === "open_driver" ||
-        candidate.action === "view_driver_detail"),
-  );
-
-  return action ? getDriverActionPresentation(row, action, locale) : null;
-}
-
-function getLocationTone(state: DriverRowModel["locationState"]): CanvasTone {
-  if (state === "live") return "success";
-  if (state === "unknown") return "neutral";
-  return "warn";
-}
-
-function getStatusTone(
-  workState: DriverRegistryRecord["workState"],
-): CanvasTone {
-  if (workState === "available") return "success";
-  if (workState === "on_trip") return "info";
-  if (workState === "incident_hold" || workState === "suspended") {
-    return "danger";
-  }
-  if (workState === "offline") return "neutral";
-  return "warn";
 }
 
 function buttonLinkStyle(
@@ -996,264 +849,9 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
     row,
     _selected: row.suppressionActive,
   }));
-
-  const tableColumns: CanvasTableColumn<DriverTableRow>[] = [
-    {
-      h: t("drivers.col.driver", locale),
-      w: 250,
-      r: ({ row }) => {
-        const detailPresentation = getPrimaryDriverDetailPresentation(
-          row,
-          locale,
-        );
-
-        return (
-          <div style={stackStyle}>
-            {detailPresentation?.href ? (
-              <Link
-                href={detailPresentation.href}
-                target={detailPresentation.target}
-                rel={
-                  detailPresentation.target === "_blank"
-                    ? "noreferrer"
-                    : undefined
-                }
-                style={driverPrimaryStyle}
-              >
-                {row.driver.name}
-              </Link>
-            ) : (
-              <span style={driverPrimaryStyle}>{row.driver.name}</span>
-            )}
-            <span style={driverSecondaryStyle}>
-              {row.driver.driverId}
-              {row.driver.phone ? ` · ${row.driver.phone}` : ""}
-            </span>
-            <div style={chipRowStyle}>
-              <Pill
-                theme={theme}
-                tone={getStatusTone(row.driver.workState)}
-                dot
-              >
-                {formatOpsCodeLabel(locale, row.driver.workState)}
-              </Pill>
-              <Pill
-                theme={theme}
-                tone={row.driver.licensesValid ? "success" : "warn"}
-              >
-                {row.driver.licensesValid
-                  ? t("common.valid", locale)
-                  : t("common.invalid", locale)}
-              </Pill>
-              {row.suppressionActive ? (
-                <Pill theme={theme} tone="danger">
-                  {t("drivers.list.suppressionActive", locale)}
-                </Pill>
-              ) : null}
-            </div>
-          </div>
-        );
-      },
-    },
-    {
-      h: t("drivers.col.shift", locale),
-      w: 150,
-      r: ({ row }) => (
-        <div style={stackStyle}>
-          <Pill theme={theme} tone={getStatusTone(row.driver.workState)} dot>
-            {formatOpsCodeLabel(locale, row.driver.workState)}
-          </Pill>
-          <span style={signalDetailStyle}>
-            {formatOpsCodeLabel(locale, row.driver.lifecycleStatus)}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: t("drivers.col.platformsOnline", locale),
-      w: 270,
-      r: ({ row }) =>
-        row.presences.length > 0 ? (
-          <div style={stackStyle}>
-            <div style={chipRowStyle}>
-              {row.presences.map((presence) => (
-                <Pill
-                  key={`${row.driver.driverId}:${presence.platformCode}`}
-                  theme={theme}
-                  tone={presenceTone(presence)}
-                  dot
-                >
-                  {PLATFORM_CODE_REGISTRY[presence.platformCode]?.displayName ??
-                    presence.platformCode}
-                </Pill>
-              ))}
-            </div>
-            <span style={signalDetailStyle}>
-              {row.presences
-                .map((presence) => presenceLabel(presence, locale))
-                .join(" · ")}
-            </span>
-            {row.presenceLoadFailed ? (
-              <span style={{ ...signalDetailStyle, color: "#b45309" }}>
-                {t("drivers.list.platformStatusPartial", locale)}
-              </span>
-            ) : null}
-          </div>
-        ) : row.presenceLoadFailed ? (
-          <div style={stackStyle}>
-            <span style={{ fontWeight: 600, color: theme.text }}>
-              {t("drivers.list.platformStatusUnknown", locale)}
-            </span>
-            <span style={signalDetailStyle}>
-              {t("drivers.list.platformStatusUnknownBody", locale)}
-            </span>
-          </div>
-        ) : (
-          <div style={stackStyle}>
-            <span style={{ fontWeight: 600, color: theme.text }}>
-              {t("drivers.list.noPlatformBindings", locale)}
-            </span>
-            <span style={signalDetailStyle}>
-              {t("drivers.list.bindingMissing", locale)}
-            </span>
-          </div>
-        ),
-    },
-    {
-      h: t("drivers.col.eligibilityBuckets", locale),
-      w: 230,
-      r: ({ row }) => (
-        <div style={stackStyle}>
-          <Pill
-            theme={theme}
-            tone={row.driver.dispatchEligible ? "success" : "warn"}
-          >
-            {row.driver.dispatchEligible
-              ? t("drivers.list.eligibilityClear", locale)
-              : row.driver.eligibilityBlockedReasons
-                  .map((reason) => formatOpsCodeLabel(locale, reason))
-                  .join("、")}
-          </Pill>
-          <span style={signalDetailStyle}>
-            {row.driver.supportedServiceBuckets.join(" · ")}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: t("drivers.col.activeOrders", locale),
-      w: 220,
-      r: ({ row }) =>
-        row.activeForwardedOrders.length > 0 ? (
-          <div style={stackStyle}>
-            {row.activeForwardedOrders.slice(0, 2).map((order) => (
-              <Link
-                key={order.mirrorOrderId}
-                href={`/dispatch/${encodeURIComponent(order.mirrorOrderId)}`}
-                style={inlineLinkStyle}
-              >
-                {PLATFORM_CODE_REGISTRY[order.platformCode]?.displayName ??
-                  order.platformCode}
-                {" · "}
-                {order.mirrorOrderId}
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <div style={stackStyle}>
-            <span style={{ fontWeight: 600, color: theme.text }}>
-              {t("drivers.list.noActiveOrders", locale)}
-            </span>
-            <span style={signalDetailStyle}>
-              {t("drivers.list.activeOrdersFallback", locale)}
-            </span>
-          </div>
-        ),
-    },
-    {
-      h: t("drivers.col.locationSignal", locale),
-      w: 170,
-      r: ({ row }) => {
-        const locationLabel =
-          row.locationState === "unknown"
-            ? t("drivers.list.locationUnknown", locale)
-            : row.locationState === "missing"
-              ? t("drivers.list.locationMissing", locale)
-              : row.locationState === "stale"
-                ? t("drivers.list.locationStale", locale)
-                : t("drivers.list.locationLive", locale);
-
-        return (
-          <div style={stackStyle}>
-            <Pill theme={theme} tone={getLocationTone(row.locationState)} dot>
-              {locationLabel}
-            </Pill>
-            <span style={signalDetailStyle}>
-              {row.location?.recordedAt
-                ? t("driverDetail.summary.locationRecordedAt", locale, {
-                    recordedAt: row.location.recordedAt,
-                  })
-                : t("driverDetail.summary.locationNoSample", locale)}
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      h: t("common.actions", locale),
-      w: 230,
-      r: ({ row }) => (
-        <div style={actionsWrapStyle}>
-          {row.availableActions.length === 0 ? (
-            <span style={signalDetailStyle}>{t("common.dash", locale)}</span>
-          ) : (
-            row.availableActions.map((action) => {
-              const presentation = getDriverActionPresentation(
-                row,
-                action,
-                locale,
-              );
-
-              if (action.enabled && presentation.href) {
-                return (
-                  <Link
-                    key={action.action}
-                    href={presentation.href}
-                    target={presentation.target}
-                    rel={
-                      presentation.target === "_blank"
-                        ? "noreferrer"
-                        : undefined
-                    }
-                    style={buttonLinkStyle(theme)}
-                    aria-label={presentation.ariaLabel}
-                  >
-                    {presentation.label}
-                  </Link>
-                );
-              }
-
-              return (
-                <span
-                  key={action.action}
-                  style={buttonLinkStyle(theme, "secondary", true)}
-                  title={
-                    action.disabledReasonCode
-                      ? formatOpsCodeLabel(locale, action.disabledReasonCode)
-                      : action.enabled
-                        ? action.action
-                        : undefined
-                  }
-                >
-                  {presentation.label}
-                </span>
-              );
-            })
-          )}
-        </div>
-      ),
-    },
-  ];
+  const platformAdminAdapterRegistryHref = buildPlatformAdminHref(
+    PLATFORM_ADMIN_ADAPTER_REGISTRY_ROUTE,
+  );
 
   const headerTabDefs: Array<[DriversViewKey, string]> = [
     ["all", "drivers.tabs.all"],
@@ -1525,7 +1123,13 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
             renderEmptyState(emptyStateModel, locale)
           ) : (
             <div style={{ display: "grid", gap: 14 }}>
-              <Table theme={theme} columns={tableColumns} rows={tableRows} />
+              <DriversTable
+                locale={locale}
+                rows={tableRows}
+                platformAdminAdapterRegistryHref={
+                  platformAdminAdapterRegistryHref
+                }
+              />
 
               <div style={footerStyle}>
                 <span style={footerTextStyle}>

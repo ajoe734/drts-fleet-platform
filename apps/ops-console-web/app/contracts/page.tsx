@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
 import type {
   CrossAppResourceLink,
   EmptyReason,
@@ -15,15 +15,14 @@ import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
+import { ContractsTable, PartnerRelationsTable } from "./contracts-tables";
 import {
   CanvasBanner as Banner,
   CanvasCard as Card,
   CanvasIcon,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasTable as Table,
   buildCanvasTheme,
-  type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
 
@@ -212,38 +211,6 @@ const helperTextStyle: CSSProperties = {
 
 const monoTextStyle: CSSProperties = {
   fontFamily: theme.monoFamily,
-};
-
-const stackStyle: CSSProperties = {
-  display: "grid",
-  gap: 4,
-  minWidth: 0,
-  whiteSpace: "normal",
-};
-
-const primaryTextStyle: CSSProperties = {
-  color: theme.text,
-  fontWeight: 600,
-  minWidth: 0,
-};
-
-const secondaryTextStyle: CSSProperties = {
-  color: theme.textDim,
-  fontSize: 11.5,
-  minWidth: 0,
-};
-
-const mutedTextStyle: CSSProperties = {
-  color: theme.textMuted,
-  fontSize: 11.5,
-  minWidth: 0,
-};
-
-const actionStackStyle: CSSProperties = {
-  display: "grid",
-  gap: 6,
-  minWidth: 0,
-  whiteSpace: "normal",
 };
 
 const emptyStateStyle: CSSProperties = {
@@ -640,14 +607,6 @@ function resolveAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
   return "http://localhost:3003";
 }
 
-function buildCrossAppHref(link: CrossAppResourceLink) {
-  if (link.route.startsWith("http://") || link.route.startsWith("https://")) {
-    return link.route;
-  }
-
-  return `${resolveAppOrigin(link.targetApp)}${link.route.startsWith("/") ? link.route : `/${link.route}`}`;
-}
-
 function synthesizeCrossAppLinks(
   contract: ContractRuntimeRecord,
   kindKey: string,
@@ -682,44 +641,6 @@ function synthesizeCrossAppLinks(
   ];
 }
 
-function actionTone(action: ResourceActionDescriptor): CanvasTone {
-  if (!action.enabled) {
-    return "neutral";
-  }
-  if (action.riskLevel === "high") return "danger";
-  if (action.riskLevel === "medium") return "warn";
-  return "accent";
-}
-
-function actionLabel(action: ResourceActionDescriptor, locale: Locale) {
-  switch (action.action) {
-    case "open_contract_detail":
-      return copy(locale, "Contract detail", "合約詳情");
-    case "open_partner_governance":
-      return copy(locale, "Partner governance", "夥伴治理");
-    case "open_fleet_governance":
-      return copy(locale, "Fleet governance", "車隊治理");
-    default:
-      return formatOpsCodeLabel(locale, action.action);
-  }
-}
-
-function actionReason(action: ResourceActionDescriptor, locale: Locale) {
-  if (!action.disabledReasonCode) {
-    return null;
-  }
-
-  if (action.disabledReasonCode === "contract_detail_pending") {
-    return copy(
-      locale,
-      "Read-only detail route ships in a follow-up ops leaf (Q-OPS03).",
-      "唯讀詳情路由將由後續 ops 子任務交付（Q-OPS03）。",
-    );
-  }
-
-  return formatOpsCodeLabel(locale, action.disabledReasonCode);
-}
-
 function synthesizeAvailableActions(
   contract: ContractRuntimeRecord,
   seed: {
@@ -748,34 +669,6 @@ function synthesizeAvailableActions(
   }
 
   return actions;
-}
-
-function buildActionHref(
-  action: ResourceActionDescriptor,
-  row: ContractRow,
-): string | null {
-  switch (action.action) {
-    case "open_contract_detail":
-      return `/contracts/${encodeURIComponent(row.contractId)}`;
-    case "open_partner_governance":
-    case "open_fleet_governance":
-      return row.crossAppLinks[0]
-        ? buildCrossAppHref(row.crossAppLinks[0])
-        : null;
-    default:
-      return null;
-  }
-}
-
-function isActionNewTab(action: ResourceActionDescriptor, row: ContractRow) {
-  if (
-    action.action === "open_partner_governance" ||
-    action.action === "open_fleet_governance"
-  ) {
-    return row.crossAppLinks[0]?.openMode === "new_tab";
-  }
-
-  return false;
 }
 
 function refreshBadgeLabel(refresh: UiRefreshMetadata, locale: Locale) {
@@ -1108,184 +1001,6 @@ function buildEmptyStateViewModel(
   }
 }
 
-function renderAction(
-  action: ResourceActionDescriptor,
-  row: ContractRow,
-  locale: Locale,
-  key: string,
-): ReactNode {
-  const label = actionLabel(action, locale);
-  const href = action.enabled ? buildActionHref(action, row) : null;
-  const reason = actionReason(action, locale);
-
-  return (
-    <div key={key} style={{ display: "grid", gap: 4 }}>
-      {href ? (
-        <Link
-          href={href}
-          target={isActionNewTab(action, row) ? "_blank" : undefined}
-          rel={isActionNewTab(action, row) ? "noreferrer" : undefined}
-          style={linkButtonStyle(actionTone(action))}
-        >
-          {label}
-          {isActionNewTab(action, row) ? (
-            <CanvasIcon name="ext" size={11} />
-          ) : null}
-        </Link>
-      ) : (
-        <span
-          style={linkButtonStyle(actionTone(action), !action.enabled)}
-          title={reason ?? undefined}
-        >
-          {label}
-        </span>
-      )}
-      <span style={tinyMetaStyle(actionTone(action))}>
-        {copy(locale, `risk:${action.riskLevel}`, `風險:${action.riskLevel}`)}
-        {action.requiresReason
-          ? copy(locale, " · reason required", " · 需填原因")
-          : ""}
-      </span>
-      {!action.enabled && reason ? (
-        <span style={mutedTextStyle}>{reason}</span>
-      ) : null}
-    </div>
-  );
-}
-
-function buildColumns(locale: Locale): CanvasTableColumn<ContractRow>[] {
-  return [
-    {
-      h: copy(locale, "CONTRACT", "合約"),
-      w: 200,
-      r: (row) => (
-        <div style={stackStyle}>
-          <span style={{ ...primaryTextStyle, ...monoTextStyle }}>
-            {row.contractId}
-          </span>
-          <span style={secondaryTextStyle}>{row.serviceScope}</span>
-          <span style={{ ...mutedTextStyle, ...monoTextStyle }}>
-            {row.operatingAreaId ?? copy(locale, "no area", "無營運區")}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: copy(locale, "KIND", "類型"),
-      w: 130,
-      r: (row) => (
-        <div style={stackStyle}>
-          <span style={primaryTextStyle}>{row.kindLabel}</span>
-          <span style={{ ...secondaryTextStyle, ...monoTextStyle }}>
-            {row.vehicleId}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: copy(locale, "COUNTERPARTY", "交易對手"),
-      w: 220,
-      r: (row) => (
-        <div style={stackStyle}>
-          <span style={primaryTextStyle}>{row.partnerDisplayName}</span>
-          <span style={{ ...secondaryTextStyle, ...monoTextStyle }}>
-            {row.partnerId} · {formatOpsCodeLabel(locale, row.partnerType)}
-          </span>
-          {row.partnerEntrySlug ? (
-            <span style={mutedTextStyle}>{row.partnerEntrySlug}</span>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      h: copy(locale, "TERM", "合約期間"),
-      w: 210,
-      r: (row) => (
-        <div style={stackStyle}>
-          <span style={{ ...primaryTextStyle, ...monoTextStyle }}>
-            {row.termLabel}
-          </span>
-          <span
-            style={{
-              ...secondaryTextStyle,
-              color: row.expiringSoon
-                ? theme.warn
-                : row.expired
-                  ? theme.danger
-                  : theme.textDim,
-            }}
-          >
-            {row.expired
-              ? copy(locale, "Expired", "已到期")
-              : row.daysToExpiry === null
-                ? copy(locale, "Open-ended", "無到期日")
-                : row.expiringSoon
-                  ? copy(
-                      locale,
-                      `Expires in ${row.daysToExpiry}d`,
-                      `${row.daysToExpiry} 天後到期`,
-                    )
-                  : copy(
-                      locale,
-                      `${row.daysToExpiry}d remaining`,
-                      `剩 ${row.daysToExpiry} 天`,
-                    )}
-          </span>
-        </div>
-      ),
-    },
-    {
-      h: copy(locale, "STATUS / TERMS", "狀態 / 條款"),
-      w: 230,
-      r: (row) => (
-        <div style={stackStyle}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            <Pill theme={theme} tone={row.statusTone} dot>
-              {row.statusLabel}
-            </Pill>
-            <Pill theme={theme} tone="neutral">
-              {row.lifecycleLabel}
-            </Pill>
-          </div>
-          <span style={secondaryTextStyle}>{row.keyTermsLabel}</span>
-        </div>
-      ),
-    },
-    {
-      h: copy(locale, "ACTIONS", "操作"),
-      w: 220,
-      r: (row) => (
-        <div style={actionStackStyle}>
-          {row.availableActions
-            .slice(0, 2)
-            .map((action, index) =>
-              renderAction(
-                action,
-                row,
-                locale,
-                `${row.contractId}-${action.action}-${index}`,
-              ),
-            )}
-          {row.crossAppLinks.slice(0, 1).map((link) => (
-            <Link
-              key={`${row.contractId}-${link.label}`}
-              href={buildCrossAppHref(link)}
-              target={link.openMode === "new_tab" ? "_blank" : undefined}
-              rel={link.openMode === "new_tab" ? "noreferrer" : undefined}
-              style={linkButtonStyle("info")}
-            >
-              {link.label}
-              {link.openMode === "new_tab" ? (
-                <CanvasIcon name="ext" size={11} />
-              ) : null}
-            </Link>
-          ))}
-        </div>
-      ),
-    },
-  ];
-}
-
 export default async function ContractsPage({
   searchParams,
 }: ContractsPageProps) {
@@ -1605,7 +1320,11 @@ export default async function ContractsPage({
   const activeTab = (tabs.find((tab) => tab.key === filters.tab) ?? defaultTab)
     .node;
 
-  const columns = buildColumns(locale);
+  const appOrigins = {
+    opsConsole: resolveAppOrigin("ops-console"),
+    platformAdmin: resolveAppOrigin("platform-admin"),
+    tenantConsole: resolveAppOrigin("tenant-console"),
+  };
 
   const partnerRelationRows: PartnerRelationRow[] = partnerEntries
     .slice(0, 8)
@@ -1959,7 +1678,11 @@ export default async function ContractsPage({
               </span>
             </div>
           ) : (
-            <Table theme={theme} columns={columns} rows={displayedRows} />
+            <ContractsTable
+              locale={locale}
+              rows={displayedRows}
+              appOrigins={appOrigins}
+            />
           )}
         </Card>
 
@@ -2007,82 +1730,7 @@ export default async function ContractsPage({
               </span>
             </div>
           ) : (
-            <Table
-              theme={theme}
-              columns={
-                [
-                  {
-                    h: copy(locale, "PARTNER ENTRY", "夥伴渠道"),
-                    w: 240,
-                    r: (row) => (
-                      <div style={stackStyle}>
-                        <span style={primaryTextStyle}>{row.displayName}</span>
-                        <span
-                          style={{ ...secondaryTextStyle, ...monoTextStyle }}
-                        >
-                          {row.entrySlug}
-                        </span>
-                      </div>
-                    ),
-                  },
-                  {
-                    h: copy(locale, "PROGRAM", "方案"),
-                    w: 180,
-                    r: (row) => (
-                      <div style={stackStyle}>
-                        <span style={{ ...primaryTextStyle, ...monoTextStyle }}>
-                          {row.programId}
-                        </span>
-                        <span style={secondaryTextStyle}>
-                          {row.partnerTypeLabel}
-                        </span>
-                      </div>
-                    ),
-                  },
-                  {
-                    h: copy(locale, "ELIGIBILITY", "資格模式"),
-                    w: 180,
-                    r: (row) => (
-                      <div style={stackStyle}>
-                        <span style={primaryTextStyle}>
-                          {row.eligibilityLabel}
-                        </span>
-                        <span
-                          style={{ ...secondaryTextStyle, ...monoTextStyle }}
-                        >
-                          {row.authLabel}
-                        </span>
-                      </div>
-                    ),
-                  },
-                  {
-                    h: copy(locale, "STATUS", "狀態"),
-                    w: 130,
-                    r: (row) => (
-                      <Pill theme={theme} tone={row.statusTone} dot>
-                        {row.statusLabel}
-                      </Pill>
-                    ),
-                  },
-                  {
-                    h: copy(locale, "GOVERNANCE", "治理"),
-                    w: 160,
-                    r: (row) => (
-                      <Link
-                        href={row.governanceHref}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={linkButtonStyle("info")}
-                      >
-                        {copy(locale, "Partner admin", "夥伴管理")}
-                        <CanvasIcon name="ext" size={11} />
-                      </Link>
-                    ),
-                  },
-                ] satisfies CanvasTableColumn<PartnerRelationRow>[]
-              }
-              rows={partnerRelationRows}
-            />
+            <PartnerRelationsTable locale={locale} rows={partnerRelationRows} />
           )}
         </Card>
       </div>
