@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useState,
   useEffect,
@@ -59,9 +60,14 @@ export function LanguageProvider({
 export function useTranslation() {
   const { locale, setLocale } = useContext(LanguageContext);
 
-  function t(key: string, params?: Record<string, string | number>): string {
-    return translate(key, locale, params);
-  }
+  // Memoize `t` on `locale` so its identity is stable across renders, keeping it
+  // safe to list as a useCallback/useMemo/useEffect dependency without causing
+  // refetch loops (see platform-admin users page 429 storm).
+  const t = useCallback(
+    (key: string, params?: Record<string, string | number>): string =>
+      translate(key, locale, params),
+    [locale],
+  );
 
   return { locale, setLocale, t };
 }
