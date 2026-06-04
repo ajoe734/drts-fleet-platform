@@ -54,7 +54,6 @@ const en = {
   "common.tryAgain": "Try again",
   "common.somethingWrong": "Something went wrong",
   "common.errorMessage": "An unexpected error occurred loading this page.",
-  "common.errorDigest": "Error reference: {digest}",
   "common.allStatuses": "All statuses",
   "common.all": "All",
   "common.actions": "Actions",
@@ -129,7 +128,6 @@ const en = {
   "assistant.context.board": "Board",
   "assistant.context.tab": "Tab",
   "assistant.context.selection": "Selection",
-  "assistant.context.selectionValue": "{kind}:{id}",
   "assistant.context.filters": "Filters",
   "assistant.footer.instructions":
     "Header arrows move. Resize handle arrows resize. Layout persists in local storage.",
@@ -144,11 +142,9 @@ const en = {
   "assistant.intent.noAlternatives": "No enabled alternatives.",
   "assistant.intent.proposed":
     "Proposed {action} for {resourceKind} {resourceId}.",
-  "assistant.intent.describe": "{resourceKind}:{resourceId} · {action}",
   "assistant.intent.proposeFailed": "Assistant action proposal failed.",
   "assistant.intent.unavailable": "Unavailable action: {action}.",
   "assistant.intent.blocked": "Action blocked: {action}.",
-  "assistant.intent.blockedMeta": "reasonCode {reasonCode} · {alternatives}",
   "assistant.intent.executing": "Executing {action}.",
   "assistant.intent.openingConfirmation":
     "Opening {riskLevel}-risk confirmation for {action}.",
@@ -157,7 +153,6 @@ const en = {
   "assistant.intent.failed": "Assistant action failed.",
   "assistant.intent.cancelled": "Action cancelled.",
   "assistant.intent.completed": "{action} completed.",
-  "assistant.intent.receiptMeta": "Action ID {actionId} · Audit ID {auditId}",
   "assistant.help.dashboard.title": "Dashboard refresh tier",
   "assistant.help.dashboard.answer":
     "The dashboard is a T3 surface with refresh-tier and stale-data affordances surfaced in the shell summary.",
@@ -168,9 +163,6 @@ const en = {
   "assistant.help.incident.answer":
     "Incident actions remain confirmation-gated: the assistant resolves to the page action flow, which keeps risk and reason requirements intact.",
   "assistant.help.citation": "Citation: {citation}",
-  "assistant.help.actionRiskReason": "{riskLevel} / reason required",
-  "assistant.help.actionDisabled": "{status}:{reason}",
-  "assistant.help.actionSummary": "{action} ({risk}, {enabledState})",
   "assistant.scope.noActions": "No registered page actions for this scope.",
   "assistant.scope.message":
     "Scoped to {kind}:{id}. The assistant is constrained to this visible resource and can only reuse the page's registered actions.",
@@ -1784,7 +1776,6 @@ const zh: Record<keyof typeof en, string> = {
   "common.tryAgain": "重試",
   "common.somethingWrong": "發生錯誤",
   "common.errorMessage": "載入此頁面時發生未預期的錯誤。",
-  "common.errorDigest": "錯誤參考碼：{digest}",
   "common.allStatuses": "所有狀態",
   "common.all": "全部",
   "common.actions": "操作",
@@ -1856,7 +1847,6 @@ const zh: Record<keyof typeof en, string> = {
   "assistant.context.board": "看板",
   "assistant.context.tab": "分頁",
   "assistant.context.selection": "選取項目",
-  "assistant.context.selectionValue": "{kind}:{id}",
   "assistant.context.filters": "篩選",
   "assistant.footer.instructions":
     "標頭方向鍵可移動，尺寸控制方向鍵可調整大小，版面會保存在本機儲存。",
@@ -1870,11 +1860,9 @@ const zh: Record<keyof typeof en, string> = {
   "assistant.intent.noAlternatives": "沒有可啟用的替代動作。",
   "assistant.intent.proposed":
     "已為 {resourceKind} {resourceId} 提議 {action}。",
-  "assistant.intent.describe": "{resourceKind}:{resourceId} · {action}",
   "assistant.intent.proposeFailed": "助理動作提議失敗。",
   "assistant.intent.unavailable": "無法使用的動作：{action}。",
   "assistant.intent.blocked": "動作遭阻擋：{action}。",
-  "assistant.intent.blockedMeta": "原因代碼 {reasonCode} · {alternatives}",
   "assistant.intent.executing": "正在執行 {action}。",
   "assistant.intent.openingConfirmation":
     "正在為 {action} 開啟 {riskLevel} 風險確認流程。",
@@ -1882,7 +1870,6 @@ const zh: Record<keyof typeof en, string> = {
   "assistant.intent.failed": "助理動作執行失敗。",
   "assistant.intent.cancelled": "已取消動作。",
   "assistant.intent.completed": "{action} 已完成。",
-  "assistant.intent.receiptMeta": "動作 ID {actionId} · 稽核 ID {auditId}",
   "assistant.help.dashboard.title": "儀表板 refresh tier",
   "assistant.help.dashboard.answer":
     "儀表板屬於 T3 surface，refresh-tier 與 stale-data 提示會顯示在 shell 摘要中。",
@@ -1893,9 +1880,6 @@ const zh: Record<keyof typeof en, string> = {
   "assistant.help.incident.answer":
     "事件動作仍受確認流程保護：助理只會解析到頁面動作流程，保留風險與原因要求。",
   "assistant.help.citation": "引用：{citation}",
-  "assistant.help.actionRiskReason": "{riskLevel} / 需填原因",
-  "assistant.help.actionDisabled": "{status}:{reason}",
-  "assistant.help.actionSummary": "{action}（{risk}，{enabledState}）",
   "assistant.scope.noActions": "此 scope 沒有註冊頁面動作。",
   "assistant.scope.message":
     "目前 scope 為 {kind}:{id}。助理受限於這個可見資源，只能沿用該頁已註冊的動作。",

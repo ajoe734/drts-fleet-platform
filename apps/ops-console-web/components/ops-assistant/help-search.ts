@@ -56,22 +56,12 @@ function summarizeActions(
   return descriptors
     .map((descriptor) => {
       const risk = descriptor.requiresReason
-        ? t("assistant.help.actionRiskReason", locale, {
-            riskLevel: descriptor.riskLevel,
-          })
+        ? `${descriptor.riskLevel} / reason`
         : descriptor.riskLevel;
       const enabled = descriptor.enabled
         ? t("common.enabled", locale)
-        : t("assistant.help.actionDisabled", locale, {
-            status: t("common.disabled", locale),
-            reason:
-              descriptor.disabledReasonCode ?? t("common.unknown", locale),
-          });
-      return t("assistant.help.actionSummary", locale, {
-        action: descriptor.action,
-        risk,
-        enabledState: enabled,
-      });
+        : `${t("common.disabled", locale)}:${descriptor.disabledReasonCode ?? t("common.unknown", locale)}`;
+      return `${descriptor.action} (${risk}, ${enabled})`;
     })
     .join(", ");
 }

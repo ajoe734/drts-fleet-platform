@@ -594,11 +594,7 @@ export function OpsAssistantWidget() {
   };
 
   const describeIntent = (intent: ActionIntent) =>
-    t("assistant.intent.describe", {
-      resourceKind: intent.resourceKind,
-      resourceId: intent.resourceId,
-      action: intent.action,
-    });
+    `${intent.resourceKind}:${intent.resourceId} · ${intent.action}`;
 
   const buildAlternatives = (descriptors: ResourceActionDescriptor[]) => {
     const alternatives = descriptors
@@ -686,12 +682,15 @@ export function OpsAssistantWidget() {
         }),
         meta: describeIntent(intent),
       });
-    } catch {
+    } catch (error) {
       appendConversation({
         id: `${Date.now()}-propose-error`,
         author: "system",
         tone: "danger",
-        message: t("assistant.intent.proposeFailed"),
+        message:
+          error instanceof Error
+            ? error.message
+            : t("assistant.intent.proposeFailed"),
       });
     } finally {
       setIsProposing(false);
@@ -727,10 +726,7 @@ export function OpsAssistantWidget() {
           action: descriptor.action,
         }),
         meta: descriptor.disabledReasonCode
-          ? t("assistant.intent.blockedMeta", {
-              reasonCode: descriptor.disabledReasonCode,
-              alternatives: buildAlternatives(actionBridge.availableActions),
-            })
+          ? `${descriptor.disabledReasonCode} · ${buildAlternatives(actionBridge.availableActions)}`
           : buildAlternatives(actionBridge.availableActions),
       });
       setPendingIntent(null);
@@ -761,9 +757,7 @@ export function OpsAssistantWidget() {
       appendReceipt(receipt, descriptor.action);
     } catch (error) {
       const message =
-        error instanceof Error && error.message === "ASSISTANT_ACTION_CANCELLED"
-          ? error.message
-          : t("assistant.intent.failed");
+        error instanceof Error ? error.message : t("assistant.intent.failed");
       appendConversation({
         id: `${Date.now()}-execute-error`,
         author: "system",
@@ -786,10 +780,7 @@ export function OpsAssistantWidget() {
         author: "assistant",
         tone: "success",
         message: receipt.message || t("assistant.intent.completed", { action }),
-        meta: t("assistant.intent.receiptMeta", {
-          actionId: receipt.actionId,
-          auditId: receipt.auditId,
-        }),
+        meta: `actionId ${receipt.actionId} · auditId ${receipt.auditId}`,
         auditHref:
           receipt.auditHref ??
           `/audit?auditId=${encodeURIComponent(receipt.auditId)}`,
@@ -1338,31 +1329,22 @@ export function OpsAssistantWidget() {
                   <dt style={{ color: theme.textDim }}>
                     {t("assistant.context.route")}
                   </dt>
-                  <dd style={contextValueStyle}>
-                    {context?.route ?? t("common.dash")}
-                  </dd>
+                  <dd style={contextValueStyle}>{context?.route ?? "—"}</dd>
                   <dt style={{ color: theme.textDim }}>
                     {t("assistant.context.board")}
                   </dt>
-                  <dd style={contextValueStyle}>
-                    {context?.board ?? t("common.dash")}
-                  </dd>
+                  <dd style={contextValueStyle}>{context?.board ?? "—"}</dd>
                   <dt style={{ color: theme.textDim }}>
                     {t("assistant.context.tab")}
                   </dt>
-                  <dd style={contextValueStyle}>
-                    {context?.activeTab ?? t("common.dash")}
-                  </dd>
+                  <dd style={contextValueStyle}>{context?.activeTab ?? "—"}</dd>
                   <dt style={{ color: theme.textDim }}>
                     {t("assistant.context.selection")}
                   </dt>
                   <dd style={contextValueStyle}>
                     {context?.selectedEntity
-                      ? t("assistant.context.selectionValue", {
-                          kind: context.selectedEntity.kind,
-                          id: context.selectedEntity.id,
-                        })
-                      : t("common.dash")}
+                      ? `${context.selectedEntity.kind}:${context.selectedEntity.id}`
+                      : "—"}
                   </dd>
                   <dt style={{ color: theme.textDim }}>
                     {t("assistant.context.filters")}
@@ -1370,7 +1352,7 @@ export function OpsAssistantWidget() {
                   <dd style={contextValueStyle}>
                     {context?.visibleFilters
                       ? JSON.stringify(context.visibleFilters)
-                      : t("common.dash")}
+                      : "—"}
                   </dd>
                 </dl>
               </div>

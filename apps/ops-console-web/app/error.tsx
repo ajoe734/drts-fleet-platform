@@ -52,20 +52,8 @@ export default function Error({
           lineHeight: 1.6,
         }}
       >
-        {t("common.errorMessage")}
+        {error.message || t("common.errorMessage")}
       </p>
-      {error.digest ? (
-        <p
-          style={{
-            fontSize: "12px",
-            color: "#94a3b8",
-            margin: "0 0 24px",
-            lineHeight: 1.5,
-          }}
-        >
-          {t("common.errorDigest", { digest: error.digest })}
-        </p>
-      ) : null}
       <button
         onClick={reset}
         style={{
