@@ -5,9 +5,20 @@ const en = {
   "app.name": "DRTS Fleet",
   "app.sub": "Ops Console",
   "app.env": "Staging Environment",
+  "app.metadata.title": "Operations Console",
+  "app.metadata.description":
+    "Protected operations workspace for dispatch, reporting, revenue, and registry workflows.",
+  "app.avatarLabel": "OC",
+  "app.versionLabel": "canvas",
+  "app.environment.production": "production",
   "app.lang.toggle": "中文",
 
   // ── Navigation ──
+  "nav.group.workspaces": "Workspaces",
+  "nav.group.liveOps": "Live Ops",
+  "nav.group.casework": "Casework",
+  "nav.group.monitoring": "Monitoring",
+  "nav.group.registry": "Registry",
   "nav.dashboard": "Dashboard",
   "nav.dispatch": "Dispatch",
   "nav.complaints": "Complaints",
@@ -62,6 +73,135 @@ const en = {
   "common.scheduledAt": "Scheduled: {value}",
   "common.completedAt": "Completed: {value}",
   "common.dash": "-",
+
+  // ── Ops Assistant ──
+  "opsAssistant.launcher.open": "Open operations assistant",
+  "opsAssistant.launcher.label": "Assistant",
+  "opsAssistant.header.aria":
+    "Assistant widget header. Use arrow keys to move, Home or End to dock, Escape to close.",
+  "opsAssistant.header.title": "Operations Assistant",
+  "opsAssistant.header.subtitle":
+    "Floating shell · mock stream · persistent layout",
+  "opsAssistant.header.expand": "Expand assistant",
+  "opsAssistant.header.minimize": "Minimize assistant",
+  "opsAssistant.header.dockLeft": "Dock assistant to left edge",
+  "opsAssistant.header.dockRight": "Dock assistant to right edge",
+  "opsAssistant.header.close": "Close assistant",
+  "opsAssistant.session.title": "Session",
+  "opsAssistant.session.online": "online",
+  "opsAssistant.session.systemAuthor": "System",
+  "opsAssistant.session.assistantAuthor": "Assistant",
+  "opsAssistant.session.operatorAuthor": "Operator",
+  "opsAssistant.session.initialMessage":
+    "Queue scan complete. No active blocking incidents in the shell frame.",
+  "opsAssistant.stream.0":
+    "Assistant shell online. Monitoring dispatch exceptions, handoff notes, and queue pressure.",
+  "opsAssistant.stream.1":
+    "Mock stream active. Replace this source with the real assistant transport when the API contract lands.",
+  "opsAssistant.stream.2":
+    "Widget state persists locally so operators keep position, dock choice, and density across route changes.",
+  "opsAssistant.bridge.title": "Action bridge",
+  "opsAssistant.bridge.reasonRequired":
+    "Existing confirmation flow requires a reason.",
+  "opsAssistant.bridge.availableFlow":
+    "Resolve via availableActions, then reuse the existing page action flow.",
+  "opsAssistant.bridge.disabled": "Disabled: {reason}",
+  "opsAssistant.bridge.disabledFallback": "unavailable",
+  "opsAssistant.bridge.pendingIntent": "Pending intent · {action}",
+  "opsAssistant.bridge.working": "Working...",
+  "opsAssistant.bridge.openConfirmation": "Open confirmation",
+  "opsAssistant.bridge.dismiss": "Dismiss",
+  "opsAssistant.bridge.empty":
+    "Focus a supported detail view to let the assistant resolve `ActionIntent` against that resource's available actions.",
+  "opsAssistant.actions.title": "Assistant actions",
+  "opsAssistant.actions.askLabel": "Ask assistant",
+  "opsAssistant.actions.placeholder":
+    "Ask about refresh tiers, current scope, or available actions",
+  "opsAssistant.actions.ask": "Ask",
+  "opsAssistant.actions.empty":
+    "Open a board or detail page to let the assistant emit route-aware actions and deep links.",
+  "opsAssistant.conversation.title": "Conversation",
+  "opsAssistant.conversation.empty":
+    "Proposed actions, disabled refusals, and action receipts will be written back here.",
+  "opsAssistant.context.title": "Context envelope",
+  "opsAssistant.context.route": "Route",
+  "opsAssistant.context.board": "Board",
+  "opsAssistant.context.tab": "Tab",
+  "opsAssistant.context.selection": "Selection",
+  "opsAssistant.context.filters": "Filters",
+  "opsAssistant.footer.instructions":
+    "Header arrows move. Resize handle arrows resize. Layout persists in local storage.",
+  "opsAssistant.footer.resize": "Resize assistant widget",
+  "opsAssistant.minimized.message":
+    "Minimized. Expand to resume the live mock stream.",
+  "opsAssistant.minimized.restore": "Restore",
+  "opsAssistant.audit.view": "View audit",
+  "opsAssistant.meta.available": "Available: {actions}",
+  "opsAssistant.meta.noAlternatives": "No enabled alternatives.",
+  "opsAssistant.meta.receiptIds": "actionId {actionId} · auditId {auditId}",
+  "opsAssistant.message.degradedFallback":
+    "LLM degraded. Showing curated help-search fallback.\n\n{message}",
+  "opsAssistant.message.proposed":
+    "Proposed {action} for {resourceKind} {resourceId}.",
+  "opsAssistant.message.proposeFailed": "Assistant action proposal failed.",
+  "opsAssistant.message.unavailableAction": "Unavailable action: {action}.",
+  "opsAssistant.message.blockedAction": "Action blocked: {action}.",
+  "opsAssistant.message.executingAction": "Executing {action}.",
+  "opsAssistant.message.openingRiskConfirmation":
+    "Opening {riskLevel}-risk confirmation for {action}.",
+  "opsAssistant.message.reasonMayBeRequired":
+    "Reason may be required by the existing page confirmation UI.",
+  "opsAssistant.message.actionFailed": "Assistant action failed.",
+  "opsAssistant.message.actionCancelled": "Action cancelled.",
+  "opsAssistant.message.completed": "{action} completed.",
+  "opsAssistant.help.dashboard.answer":
+    "The dashboard is a T3 surface with refresh-tier and stale-data affordances surfaced in the shell summary.",
+  "opsAssistant.help.complaint.answer":
+    "Complaint assistant actions are scoped to the selected case and reuse the page's existing action descriptors instead of inventing new writes.",
+  "opsAssistant.help.incident.answer":
+    "Incident actions remain confirmation-gated: the assistant resolves to the page action flow, which keeps risk and reason requirements intact.",
+  "opsAssistant.help.citation": "Citation: {citation}",
+  "opsAssistant.help.scope.none": "No registered page actions for this scope.",
+  "opsAssistant.help.scope.message":
+    "Scoped to {kind}:{id}. The assistant is constrained to this visible resource and can only reuse the page's registered actions.",
+  "opsAssistant.help.scope.meta":
+    "Scope: {kind}:{id} | availableActions: {actions}",
+  "opsAssistant.help.scope.riskRequiresReason": "{riskLevel} / reason",
+  "opsAssistant.help.scope.disabled": "disabled:{reason}",
+  "opsAssistant.help.scope.actionSummary": "{action} ({risk}, {availability})",
+  "opsAssistant.nav.openSelection": "Open {kind}",
+  "opsAssistant.nav.openSelectionDescription":
+    "Jump to the selected {kind} detail view.",
+  "opsAssistant.nav.resumeCurrentView": "Resume current view",
+  "opsAssistant.nav.resumeCurrentViewDescription":
+    "Re-open this route with the current board, tab, and filters.",
+  "opsAssistant.nav.dispatch.noSupply": "Open no-supply board",
+  "opsAssistant.nav.dispatch.noSupplyDescription":
+    "Switch to the dispatch board filtered to no-supply.",
+  "opsAssistant.nav.dispatch.assigned": "Open assigned board",
+  "opsAssistant.nav.dispatch.assignedDescription":
+    "Review active driver assignments without leaving ops.",
+  "opsAssistant.nav.dispatch.adapterRegistry": "Open adapter registry",
+  "opsAssistant.nav.dispatch.adapterRegistryDescription":
+    "Investigate forwarded-order adapter ownership in Platform Admin.",
+  "opsAssistant.nav.dispatch.adapterRegistryLink": "Adapter registry",
+  "opsAssistant.nav.drivers.suppressed": "Show suppressed drivers",
+  "opsAssistant.nav.drivers.suppressedDescription":
+    "Prefill the drivers list to the suppression view.",
+  "opsAssistant.nav.vehicles.offboarding": "Open offboarding tab",
+  "opsAssistant.nav.vehicles.offboardingDescription":
+    "Prefill the vehicles page to the offboarding queue.",
+  "opsAssistant.nav.vehicles.governance": "Open fleet governance",
+  "opsAssistant.nav.vehicles.governanceDescription":
+    "Continue vehicle lifecycle actions in Platform Admin.",
+  "opsAssistant.nav.vehicles.governanceLink": "Fleet governance",
+  "opsAssistant.nav.revenue.payments": "Open payments queue",
+  "opsAssistant.nav.revenue.paymentsDescription":
+    "Continue reconciliation in Platform Admin payments.",
+  "opsAssistant.nav.contracts.governance": "Open partner governance",
+  "opsAssistant.nav.contracts.governanceDescription":
+    "Continue contract ownership review in Platform Admin.",
+  "opsAssistant.nav.contracts.governanceLink": "Partner governance",
 
   // ── Dashboard ──
   "dashboard.title": "Operations Overview",
@@ -1592,9 +1732,20 @@ const zh: Record<keyof typeof en, string> = {
   "app.name": "DRTS 車隊",
   "app.sub": "營運控制台",
   "app.env": "測試環境",
+  "app.metadata.title": "營運控制台",
+  "app.metadata.description":
+    "受保護的營運工作區，涵蓋派遣、報表、收益與名冊流程。",
+  "app.avatarLabel": "OC",
+  "app.versionLabel": "canvas",
+  "app.environment.production": "正式環境",
   "app.lang.toggle": "English",
 
   // ── Navigation ──
+  "nav.group.workspaces": "工作面",
+  "nav.group.liveOps": "即時派遣",
+  "nav.group.casework": "案件處理",
+  "nav.group.monitoring": "營運監控",
+  "nav.group.registry": "主資料",
   "nav.dashboard": "營運總覽",
   "nav.dispatch": "派車調度",
   "nav.complaints": "客訴中心",
@@ -1649,6 +1800,132 @@ const zh: Record<keyof typeof en, string> = {
   "common.scheduledAt": "排程：{value}",
   "common.completedAt": "完成：{value}",
   "common.dash": "—",
+
+  // ── Ops Assistant ──
+  "opsAssistant.launcher.open": "開啟營運助理",
+  "opsAssistant.launcher.label": "助理",
+  "opsAssistant.header.aria":
+    "助理小工具標頭。使用方向鍵移動，Home 或 End 停靠，Escape 關閉。",
+  "opsAssistant.header.title": "營運助理",
+  "opsAssistant.header.subtitle": "浮動面板 · 模擬串流 · 持久化版面",
+  "opsAssistant.header.expand": "展開助理",
+  "opsAssistant.header.minimize": "最小化助理",
+  "opsAssistant.header.dockLeft": "將助理停靠到左側",
+  "opsAssistant.header.dockRight": "將助理停靠到右側",
+  "opsAssistant.header.close": "關閉助理",
+  "opsAssistant.session.title": "工作階段",
+  "opsAssistant.session.online": "連線中",
+  "opsAssistant.session.systemAuthor": "系統",
+  "opsAssistant.session.assistantAuthor": "助理",
+  "opsAssistant.session.operatorAuthor": "操作員",
+  "opsAssistant.session.initialMessage":
+    "佇列掃描完成。目前 shell frame 內沒有阻塞中的事故。",
+  "opsAssistant.stream.0":
+    "助理外殼已上線。持續監看派遣例外、交接備註與佇列壓力。",
+  "opsAssistant.stream.1":
+    "目前為模擬串流。待 API 契約到位後，請以真實助理傳輸來源取代。",
+  "opsAssistant.stream.2":
+    "Widget 狀態會保存在本機，讓操作員跨路由保留位置、停靠方式與密度設定。",
+  "opsAssistant.bridge.title": "動作橋接",
+  "opsAssistant.bridge.reasonRequired": "現有確認流程需要填寫原因。",
+  "opsAssistant.bridge.availableFlow":
+    "先透過 availableActions 判定，再重用現有頁面動作流程。",
+  "opsAssistant.bridge.disabled": "已停用：{reason}",
+  "opsAssistant.bridge.disabledFallback": "不可用",
+  "opsAssistant.bridge.pendingIntent": "待處理意圖 · {action}",
+  "opsAssistant.bridge.working": "處理中...",
+  "opsAssistant.bridge.openConfirmation": "開啟確認流程",
+  "opsAssistant.bridge.dismiss": "關閉",
+  "opsAssistant.bridge.empty":
+    "聚焦到支援的詳情頁後，助理才能針對該資源的可用動作解析 `ActionIntent`。",
+  "opsAssistant.actions.title": "助理動作",
+  "opsAssistant.actions.askLabel": "詢問助理",
+  "opsAssistant.actions.placeholder":
+    "可詢問 refresh tier、目前 scope 或可用動作",
+  "opsAssistant.actions.ask": "送出",
+  "opsAssistant.actions.empty":
+    "開啟 board 或 detail page 後，助理才能提供帶有路由上下文的動作與 deep link。",
+  "opsAssistant.conversation.title": "對話紀錄",
+  "opsAssistant.conversation.empty":
+    "提議動作、停用拒絕與動作收據都會回寫到這裡。",
+  "opsAssistant.context.title": "上下文信封",
+  "opsAssistant.context.route": "路由",
+  "opsAssistant.context.board": "看板",
+  "opsAssistant.context.tab": "分頁",
+  "opsAssistant.context.selection": "選取項",
+  "opsAssistant.context.filters": "篩選",
+  "opsAssistant.footer.instructions":
+    "標頭方向鍵可移動，縮放把手方向鍵可調整大小。版面會保存在本機儲存。",
+  "opsAssistant.footer.resize": "調整助理小工具大小",
+  "opsAssistant.minimized.message": "已最小化。展開即可恢復即時模擬串流。",
+  "opsAssistant.minimized.restore": "還原",
+  "opsAssistant.audit.view": "檢視稽核",
+  "opsAssistant.meta.available": "可用：{actions}",
+  "opsAssistant.meta.noAlternatives": "沒有可用的替代動作。",
+  "opsAssistant.meta.receiptIds": "actionId {actionId} · auditId {auditId}",
+  "opsAssistant.message.degradedFallback":
+    "LLM 已降級。顯示策展式 help-search 備援。\n\n{message}",
+  "opsAssistant.message.proposed":
+    "已為 {resourceKind} {resourceId} 提議 {action} 動作。",
+  "opsAssistant.message.proposeFailed": "助理動作提議失敗。",
+  "opsAssistant.message.unavailableAction": "不可用動作：{action}。",
+  "opsAssistant.message.blockedAction": "動作遭阻擋：{action}。",
+  "opsAssistant.message.executingAction": "正在執行 {action}。",
+  "opsAssistant.message.openingRiskConfirmation":
+    "正在開啟 {riskLevel} 風險的 {action} 確認流程。",
+  "opsAssistant.message.reasonMayBeRequired":
+    "現有頁面的確認 UI 可能要求填寫原因。",
+  "opsAssistant.message.actionFailed": "助理動作失敗。",
+  "opsAssistant.message.actionCancelled": "動作已取消。",
+  "opsAssistant.message.completed": "{action} 已完成。",
+  "opsAssistant.help.dashboard.answer":
+    "Dashboard 屬於 T3 surface，refresh-tier 與 stale-data 提示會顯示在 shell 摘要中。",
+  "opsAssistant.help.complaint.answer":
+    "Complaint 助理動作會限定在目前選取的 case，並重用頁面既有的 action descriptor，而不是發明新的寫入。",
+  "opsAssistant.help.incident.answer":
+    "Incident 動作仍受確認流程保護：助理只會解析到頁面動作流程，保留 risk 與 reason 要求。",
+  "opsAssistant.help.citation": "引用：{citation}",
+  "opsAssistant.help.scope.none": "此範圍沒有已註冊的頁面動作。",
+  "opsAssistant.help.scope.message":
+    "目前範圍為 {kind}:{id}。助理僅限於這個可見資源，且只能重用頁面已註冊的動作。",
+  "opsAssistant.help.scope.meta":
+    "範圍：{kind}:{id} | availableActions：{actions}",
+  "opsAssistant.help.scope.riskRequiresReason": "{riskLevel} / 需原因",
+  "opsAssistant.help.scope.disabled": "已停用：{reason}",
+  "opsAssistant.help.scope.actionSummary": "{action}（{risk}，{availability}）",
+  "opsAssistant.nav.openSelection": "開啟 {kind}",
+  "opsAssistant.nav.openSelectionDescription":
+    "跳轉到目前選取的 {kind} 詳情頁。",
+  "opsAssistant.nav.resumeCurrentView": "返回目前檢視",
+  "opsAssistant.nav.resumeCurrentViewDescription":
+    "以目前的 board、tab 與 filters 重新開啟此路由。",
+  "opsAssistant.nav.dispatch.noSupply": "開啟無供給看板",
+  "opsAssistant.nav.dispatch.noSupplyDescription":
+    "切換到 no-supply 篩選的派遣看板。",
+  "opsAssistant.nav.dispatch.assigned": "開啟已指派看板",
+  "opsAssistant.nav.dispatch.assignedDescription":
+    "不離開 ops 即可檢視目前司機指派。",
+  "opsAssistant.nav.dispatch.adapterRegistry": "開啟 adapter 名冊",
+  "opsAssistant.nav.dispatch.adapterRegistryDescription":
+    "到 Platform Admin 調查 forwarded-order adapter 的歸屬。",
+  "opsAssistant.nav.dispatch.adapterRegistryLink": "Adapter 名冊",
+  "opsAssistant.nav.drivers.suppressed": "顯示受抑制司機",
+  "opsAssistant.nav.drivers.suppressedDescription":
+    "預先套用司機列表的 suppression 檢視。",
+  "opsAssistant.nav.vehicles.offboarding": "開啟退場分頁",
+  "opsAssistant.nav.vehicles.offboardingDescription":
+    "預先套用車輛頁面的 offboarding 佇列。",
+  "opsAssistant.nav.vehicles.governance": "開啟車隊治理",
+  "opsAssistant.nav.vehicles.governanceDescription":
+    "在 Platform Admin 繼續處理車輛生命週期動作。",
+  "opsAssistant.nav.vehicles.governanceLink": "車隊治理",
+  "opsAssistant.nav.revenue.payments": "開啟付款佇列",
+  "opsAssistant.nav.revenue.paymentsDescription":
+    "到 Platform Admin payments 繼續處理對帳。",
+  "opsAssistant.nav.contracts.governance": "開啟合作方治理",
+  "opsAssistant.nav.contracts.governanceDescription":
+    "在 Platform Admin 繼續檢視合約歸屬。",
+  "opsAssistant.nav.contracts.governanceLink": "合作方治理",
 
   // ── Dashboard ──
   "dashboard.title": "營運總覽",
