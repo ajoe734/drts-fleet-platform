@@ -106,15 +106,17 @@ missing parent-branch history.
 
 ### Machine truth
 
-- Parent task `GAP-VERIFY` is `blocked`
-- Parent blocker message at `2026-06-04T02:59:52Z` points to live runtime
-  failures and branch pushed at `a6de0eae`
+- Parent task `GAP-VERIFY` was blocked at `2026-06-04T02:59:52Z`; that blocker
+  message points to live runtime failures and branch pushed at `a6de0eae`
 - `ai-activity-log.jsonl` then records two helper children:
   - `GAP-VERIFY-UNBLOCK-PLANNING-DECISION` created at `2026-06-04T03:02:11Z`
     with the chair note that this is a product/runtime functional gap, not
     branch pollution on the parent branch
   - `GAP-VERIFY-UNBLOCK-HISTORY-REPAIR` created at `2026-06-04T03:03:52Z`
     because the unblock route remained mismatched and needed explicit repair
+- Current machine truth now shows `GAP-VERIFY` back in `in_progress` at
+  `2026-06-04T03:16:26Z` with next step: re-run the live dev browser gap audit
+  and collect the updated scoreboard/evidence from the canonical replay branch
 
 ## Non-Destructive Repair Path
 
@@ -131,9 +133,9 @@ Do not force-push, rename, or rewrite any existing branch.
    is required because the safe repair is documentary and control-plane scoped:
    classify those refs as helper-only and point all resume instructions back to
    `origin/codex/gap-verify`.
-4. Keep the parent in `blocked`, but narrow the blocker to the runtime/planning
-   gaps already identified by the live audit and by
-   `GAP-VERIFY-UNBLOCK-PLANNING-DECISION`.
+4. Keep the parent replay guidance pointed at `origin/codex/gap-verify`, and
+   treat the remaining work as the runtime/planning gaps already identified by
+   the live audit and by `GAP-VERIFY-UNBLOCK-PLANNING-DECISION`.
 5. Resume all future `GAP-VERIFY` owner work from
    `origin/codex/gap-verify @ a6de0eae`, then either:
    - reopen/fix the four residual runtime failures as follow-up tasks, or
@@ -145,14 +147,14 @@ Do not force-push, rename, or rewrite any existing branch.
 
 ## Concrete Parent Next Step
 
-`GAP-VERIFY` should remain `blocked` with this next step:
+`GAP-VERIFY` should resume from `origin/codex/gap-verify` with this next step:
 
 > History repair complete on `GAP-VERIFY-UNBLOCK-HISTORY-REPAIR`: resume only
 > from `origin/codex/gap-verify @ a6de0eae466e665a2e9f36d79d7c99d199be3608`.
 > Do not resume from `codex/gap-verify-unblock-planning-decision`,
 > `codex/gap-verify-unblock-history-repair`, or
 > `codex/gap-verify-sidecar-acceptance`, because all three were created from
-> stale `origin/dev @ 48ac41ed`. The remaining blocker is product/runtime work:
+> stale `origin/dev @ 48ac41ed`. The remaining work is product/runtime work:
 > triage and land fixes for ops `/revenue` HTTP 500, ops
 > `/vehicles/veh-demo-001` HTTP 500, platform-admin `/pricing` tab sync, and
 > ops `/attendance` tab routing, then rerun the dev audit from the canonical
@@ -168,7 +170,12 @@ Do not force-push, rename, or rewrite any existing branch.
 
 ## Closeout Evidence
 
-- Review correction commit:
+- Latest review correction commit:
+  `4d57ab1f49e7c0b683c35b561c8febac96e5f3e4`
+  (`docs(GAP-VERIFY-UNBLOCK-HISTORY-REPAIR): record review correction commit`)
+- Live parent status after unblock handoff:
+  `AI_NAME=Codex scripts/ai-status.sh show GAP-VERIFY`
+- Prior evidence refresh commit:
   `a75a7a9d6f99b671440fd30a41254c60f9cb9a61`
   (`docs(GAP-VERIFY-UNBLOCK-HISTORY-REPAIR): refresh live helper ref evidence`)
 - Task-scoped artifact commit:
