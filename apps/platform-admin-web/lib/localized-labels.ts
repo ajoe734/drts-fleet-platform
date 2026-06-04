@@ -171,6 +171,20 @@ export function getPlatformLabel(
   return formatTemplate(labels ? labels[locale] : String(key), params);
 }
 
+/**
+ * CAVEAT (i18n remediation 20260604, spec §1 + §E):
+ * This is the sanctioned path for turning enum/code values into display text,
+ * but it does NOT yet read from the central `translations.ts` dictionary — it
+ * resolves against the local `CODE_LABELS` map and, on a miss, falls back to
+ * `humanizeCode()`, which emits a title-cased *English* string regardless of
+ * `locale`. So in zh mode any code not present in `CODE_LABELS` leaks English.
+ * The shared `CODE_LABELS` map is also reused across domains, so a generic code
+ * can bleed an unrelated domain's label.
+ * TODO(i18n): migrate `CODE_LABELS` lookups to `t()` keys in `translations.ts`
+ * (key shape `<domain>.code.<value>`) so every displayed code is dictionary-
+ * backed in both locales. Tracked as a WP-0 caveat; the first WP to touch a
+ * surface that displays raw codes should fold its codes into the dictionary.
+ */
 export function formatPlatformCodeLabel(
   locale: Locale,
   value: string | null | undefined,

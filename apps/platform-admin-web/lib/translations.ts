@@ -778,6 +778,30 @@ const en = {
 
   // ── Common (more) ──
   "common.noValues": "No values",
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // i18n remediation 20260604 — per-domain key-block skeletons.
+  // Each parallel WP appends ITS domain's new keys under the matching header
+  // below (en side here, zh side in the zh block). Only add keys under your
+  // own domain header; do not touch another WP's block. See
+  // docs/05-ui/i18n-remediation-implementation-20260604.md §A "共享檔協調".
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── home (i18n remediation 20260604) ──
+  // ── tenants (i18n remediation 20260604) ──
+  // ── tenantGov (i18n remediation 20260604) ──
+  // ── partners (i18n remediation 20260604) ──
+  // ── users (i18n remediation 20260604) ──
+  // ── fleet (i18n remediation 20260604) ──
+  // ── switchboard (i18n remediation 20260604) ──
+  // ── pricing (i18n remediation 20260604) ──
+  // ── payments (i18n remediation 20260604) ──
+  // ── reimbursements (i18n remediation 20260604) ──
+  // ── health (i18n remediation 20260604) ──
+  // ── notices (i18n remediation 20260604) ──
+  // ── audit (i18n remediation 20260604) ──
+  // ── adapters (i18n remediation 20260604) ──
+  // ── adminShell (i18n remediation 20260604) ──
+  // ── adminAssistant (i18n remediation 20260604) ──
 };
 
 const zh: typeof en = {
@@ -1506,7 +1530,7 @@ const zh: typeof en = {
   "audit.policies.authority": "權威模組",
   "audit.policies.retention": "保存期",
   "audit.policies.download": "下載",
-  "audit.policies.legalHold": "Legal Hold",
+  "audit.policies.legalHold": "法務保留",
   "audit.policies.signedDownloadTtl": "簽名網址（{minutes} 分鐘）",
   "audit.policies.noDownload": "不提供直接下載",
   "audit.policies.holdEnabled": "支援",
@@ -1526,6 +1550,28 @@ const zh: typeof en = {
 
   // ── Common (more) ──
   "common.noValues": "無資料",
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // i18n remediation 20260604 — per-domain key-block skeletons (zh side).
+  // Mirror of the en block above. Append the zh value for every key you add to
+  // the matching en header; TS `typeof en` enforces key parity.
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── home (i18n remediation 20260604) ──
+  // ── tenants (i18n remediation 20260604) ──
+  // ── tenantGov (i18n remediation 20260604) ──
+  // ── partners (i18n remediation 20260604) ──
+  // ── users (i18n remediation 20260604) ──
+  // ── fleet (i18n remediation 20260604) ──
+  // ── switchboard (i18n remediation 20260604) ──
+  // ── pricing (i18n remediation 20260604) ──
+  // ── payments (i18n remediation 20260604) ──
+  // ── reimbursements (i18n remediation 20260604) ──
+  // ── health (i18n remediation 20260604) ──
+  // ── notices (i18n remediation 20260604) ──
+  // ── audit (i18n remediation 20260604) ──
+  // ── adapters (i18n remediation 20260604) ──
+  // ── adminShell (i18n remediation 20260604) ──
+  // ── adminAssistant (i18n remediation 20260604) ──
 };
 
 export const translations: Record<Locale, typeof en> = { en, zh };

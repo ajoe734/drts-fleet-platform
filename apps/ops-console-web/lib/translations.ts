@@ -1585,6 +1585,31 @@ const en = {
   "driverEarnings.revenueBeforeFees": "Revenue before fees and subsidy",
   "driverEarnings.platformFee": "Platform fee retained from gross",
   "driverEarnings.supportPrograms": "Support programs credited to driver",
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // i18n remediation 20260604 — per-domain key-block skeletons.
+  // Each parallel WP appends ITS domain's new keys under the matching header
+  // below (en side here, zh side in the zh block). Only add keys under your
+  // own domain header; do not touch another WP's block. See
+  // docs/05-ui/i18n-remediation-implementation-20260604.md §A "共享檔協調".
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── dashboard (i18n remediation 20260604) ──
+  // ── dispatch (i18n remediation 20260604) ──
+  // ── complaints (i18n remediation 20260604) ──
+  // ── callcenter (i18n remediation 20260604) ──
+  // ── reports (i18n remediation 20260604) ──
+  // ── revenue (i18n remediation 20260604) ──
+  // ── attendance (i18n remediation 20260604) ──
+  // ── incidents (i18n remediation 20260604) ──
+  // ── maintenance (i18n remediation 20260604) ──
+  // ── vehicles (i18n remediation 20260604) ──
+  // ── drivers (i18n remediation 20260604) ──
+  // ── driverDetail (i18n remediation 20260604) ──
+  // ── contracts (i18n remediation 20260604) ──
+  // ── approvals (i18n remediation 20260604) ──
+  // ── featureFlags (i18n remediation 20260604) ──
+  // ── opsShell (i18n remediation 20260604) ──
+  // ── opsAssistant (i18n remediation 20260604) ──
 };
 
 const zh: Record<keyof typeof en, string> = {
@@ -1731,9 +1756,9 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.platformOps.metrics.adapters": "需關注的 adapter",
   "dashboard.platformOps.metrics.adaptersSub":
     "{healthy} 個健康 · {down} 個停擺 · 共 {total} 個",
-  "dashboard.platformOps.metrics.syncFailed": "Sync failed",
-  "dashboard.platformOps.metrics.acceptPending": "Accept pending",
-  "dashboard.platformOps.metrics.manualFallback": "Manual fallback",
+  "dashboard.platformOps.metrics.syncFailed": "同步失敗",
+  "dashboard.platformOps.metrics.acceptPending": "待接受",
+  "dashboard.platformOps.metrics.manualFallback": "人工備援",
   "dashboard.platformOps.metrics.reconciliation": "Reconciliation 佇列",
   "dashboard.platformOps.signal.credential": "Credential",
   "dashboard.platformOps.signal.auth": "Auth",
@@ -2933,10 +2958,10 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.canvas.title": "收益審視",
   "revenue.canvas.subtitle":
     "期別 · 服務 · 車輛 · channel mix · settlement matrix — mismatch 修改在 Platform Admin 完成",
-  "revenue.tab.insight": "Insight",
-  "revenue.tab.channelMix": "Channel mix",
-  "revenue.tab.matrix": "Settlement matrix",
-  "revenue.tab.mismatch": "Mismatch review",
+  "revenue.tab.insight": "洞察",
+  "revenue.tab.channelMix": "通路組合",
+  "revenue.tab.matrix": "結算矩陣",
+  "revenue.tab.mismatch": "差異覆核",
   "revenue.kpi.billed": "當期 billed (MTD)",
   "revenue.kpi.billedSub": "完成行程已確認收入",
   "revenue.kpi.ownedShare": "自營佔比",
@@ -2951,7 +2976,7 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.banner.readOnlyTitle": "此頁為 read-only mirror · Q-OPS14",
   "revenue.banner.readOnlyBody":
     "ops_finance_reviewer 可開啟 mismatch drawer 但 mutation 必須 deep-link 到 Platform Admin /payments 處理。",
-  "revenue.channelMix.title": "Channel mix",
+  "revenue.channelMix.title": "通路組合",
   "revenue.channelMix.subtitle":
     "自營行程通道：platform / partner / phone / tenant",
   "revenue.channelMix.channel.platform": "Platform 自營派遣",
@@ -2962,7 +2987,7 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.channelMix.col.trips": "趟次",
   "revenue.channelMix.col.share": "占比",
   "revenue.channelMix.col.revenue": "營收",
-  "revenue.mismatch.title": "Mismatch review (Q-OPS14)",
+  "revenue.mismatch.title": "差異覆核（Q-OPS14）",
   "revenue.mismatch.subtitle":
     "Forwarded 鏡像 sync_failed / manual fallback — drawer 為唯讀，mutation 在 Platform Admin。",
   "revenue.mismatch.col.issueId": "問題 / 任務",
@@ -2982,7 +3007,7 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.mismatch.openDrawer": "開啟 mismatch drawer",
   "revenue.mismatch.escalatePlatformAdmin": "於 Platform Admin 處理",
   "revenue.mismatch.drawer.eyebrow": "Mismatch · 唯讀",
-  "revenue.mismatch.drawer.title": "Forwarded reconciliation",
+  "revenue.mismatch.drawer.title": "轉派對帳",
   "revenue.mismatch.drawer.subtitle":
     "所有 mutation 與後續處理皆於 Platform Admin /payments 完成。",
   "revenue.mismatch.drawer.platform": "平台",
@@ -3087,6 +3112,29 @@ const zh: Record<keyof typeof en, string> = {
   "driverEarnings.revenueBeforeFees": "扣除費用與補助前的收益",
   "driverEarnings.platformFee": "從總收入保留的平台費用",
   "driverEarnings.supportPrograms": "計入司機的支持計畫",
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // i18n remediation 20260604 — per-domain key-block skeletons (zh side).
+  // Mirror of the en block above. Append the zh value for every key you add to
+  // the matching en header; TS Record<keyof typeof en, string> enforces parity.
+  // ─────────────────────────────────────────────────────────────────────────
+  // ── dashboard (i18n remediation 20260604) ──
+  // ── dispatch (i18n remediation 20260604) ──
+  // ── complaints (i18n remediation 20260604) ──
+  // ── callcenter (i18n remediation 20260604) ──
+  // ── reports (i18n remediation 20260604) ──
+  // ── revenue (i18n remediation 20260604) ──
+  // ── attendance (i18n remediation 20260604) ──
+  // ── incidents (i18n remediation 20260604) ──
+  // ── maintenance (i18n remediation 20260604) ──
+  // ── vehicles (i18n remediation 20260604) ──
+  // ── drivers (i18n remediation 20260604) ──
+  // ── driverDetail (i18n remediation 20260604) ──
+  // ── contracts (i18n remediation 20260604) ──
+  // ── approvals (i18n remediation 20260604) ──
+  // ── featureFlags (i18n remediation 20260604) ──
+  // ── opsShell (i18n remediation 20260604) ──
+  // ── opsAssistant (i18n remediation 20260604) ──
 };
 
 export const translations: Record<Locale, Record<string, string>> = { en, zh };
