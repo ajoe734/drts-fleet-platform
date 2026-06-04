@@ -78,11 +78,16 @@ Its remaining work is owner execution plus shared validation-surface recovery.
 | Record the decision | Recorded here: no new product/contract decision is needed; resume against existing adapter-registry authority and vocabulary. |
 | scope cut | Not needed. `EditAdapterModal` and `layout.tsx` remain in scope for localization wiring. |
 | or explicit follow-up needed by the parent task | Recorded in §4 as resume-on-existing-contract plus rerun validation after shared workspace blockers clear. |
-| Produce task-scoped commit/push/PR evidence for any canonical change | To be filled with branch, commit, push, and PR evidence on this task branch. |
+| Produce task-scoped commit/push/PR evidence for any canonical change | Delivered on `origin/codex/i18n-adm-11-unblock-planning-decision`; closeout commits `d98a92e6809e1dd48c0b28162e6f5c6f2e8e2b51` and `TBD-after-evidence-refresh`; draft PR [#527](https://github.com/ajoe734/drts-fleet-platform/pull/527). |
 | Update the parent task with the concrete unblocked next step | The parent should point at the resume guidance in §4 instead of waiting on a new planning decision. |
 
 ## 6. Review And Verification Evidence
 
+- Task-scoped git/PR evidence:
+  - pushed branch: `origin/codex/i18n-adm-11-unblock-planning-decision`
+  - planning-resolution commit: `d98a92e6809e1dd48c0b28162e6f5c6f2e8e2b51`
+    (`I18N-ADM-11-UNBLOCK-PLANNING-DECISION: record adapter-registry planning resolution`)
+  - draft PR: [#527](https://github.com/ajoe734/drts-fleet-platform/pull/527)
 - `AI_COLLABORATION_GUIDE.md` reviewed for machine-truth and unblock-closeout
   rules.
 - Canonical planning sources inspected:
