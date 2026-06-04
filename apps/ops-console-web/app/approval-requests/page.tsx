@@ -7,6 +7,7 @@ import type {
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import { ApprovalActions } from "./approval-actions";
 import {
   CanvasBanner as Banner,
@@ -63,10 +64,6 @@ const tabLinkStyle: CSSProperties = {
   color: "inherit",
   font: "inherit",
 };
-
-function copy(locale: Locale, en: string, zh: string): string {
-  return locale === "en" ? en : zh;
-}
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -172,7 +169,7 @@ export default async function ApprovalRequestsPage({
 
   const columns: CanvasTableColumn<ApprovalRow>[] = [
     {
-      h: copy(locale, "REQUEST", "請求"),
+      h: t("approvalRequests.col.request", locale),
       w: 130,
       r: (row) => (
         <span style={{ color: theme.accent, fontWeight: 600 }}>
@@ -181,7 +178,7 @@ export default async function ApprovalRequestsPage({
       ),
     },
     {
-      h: copy(locale, "TENANT", "租戶"),
+      h: t("approvalRequests.col.tenant", locale),
       w: 140,
       r: (row) => (
         <Pill
@@ -199,7 +196,7 @@ export default async function ApprovalRequestsPage({
       ),
     },
     {
-      h: copy(locale, "STATUS", "狀態"),
+      h: t("approvalRequests.col.status", locale),
       w: 130,
       r: (row) => (
         <Pill theme={theme} tone={statusTone(row.status)} dot>
@@ -208,12 +205,12 @@ export default async function ApprovalRequestsPage({
       ),
     },
     {
-      h: copy(locale, "MODE", "模式"),
+      h: t("approvalRequests.col.mode", locale),
       w: 130,
       r: (row) => row.mode,
     },
     {
-      h: copy(locale, "ORDER", "訂單"),
+      h: t("approvalRequests.col.order", locale),
       w: 130,
       r: (row) =>
         row.orderId ? (
@@ -228,40 +225,40 @@ export default async function ApprovalRequestsPage({
         ),
     },
     {
-      h: copy(locale, "APPROVERS", "審批人"),
+      h: t("approvalRequests.col.approvers", locale),
       w: 100,
       r: (row) => String(row.approvers),
     },
     {
-      h: copy(locale, "CREATED", "建立時間"),
+      h: t("approvalRequests.col.created", locale),
       w: 150,
       r: (row) => formatStamp(row.created),
     },
     {
-      h: copy(locale, "TIMEOUT", "逾時"),
+      h: t("approvalRequests.col.timeout", locale),
       w: 130,
       r: (row) =>
         row.slaBreached ? (
           <Pill theme={theme} tone="danger" dot>
-            {copy(locale, "breached", "已逾時")}
+            {t("approvalRequests.timeout.breached", locale)}
           </Pill>
         ) : row.timeoutWarning ? (
           <Pill theme={theme} tone="danger" dot>
-            {copy(locale, "warning", "即將逾時")} ·{" "}
+            {t("approvalRequests.timeout.warning", locale)} ·{" "}
             {formatRemaining(row.timeoutAt)}
           </Pill>
         ) : (
           <Pill theme={theme} tone="success" dot>
-            {copy(locale, "on track", "正常")}
+            {t("approvalRequests.timeout.onTrack", locale)}
           </Pill>
         ),
     },
     {
-      h: copy(locale, "ACTIONS", "操作"),
+      h: t("approvalRequests.col.actions", locale),
       w: 240,
       r: (row) => {
         if (row.actions.length === 0) {
-          return "—";
+          return t("common.dash", locale);
         }
         return (
           <ApprovalActions
@@ -277,10 +274,10 @@ export default async function ApprovalRequestsPage({
   const tabNodes: ReactNode[] = TAB_ORDER.map((tab) => {
     const label =
       tab === "pending"
-        ? "Pending"
+        ? t("approvalRequests.tab.pending", locale)
         : tab === "approved"
-          ? "Approved"
-          : "Rejected";
+          ? t("approvalRequests.tab.approved", locale)
+          : t("approvalRequests.tab.rejected", locale);
     return (
       <Link
         key={tab}
@@ -298,16 +295,8 @@ export default async function ApprovalRequestsPage({
     <>
       <PageHeader
         theme={theme}
-        title={copy(
-          locale,
-          "Approval Requests · cross-tenant",
-          "審批佇列 · 跨租戶",
-        )}
-        subtitle={copy(
-          locale,
-          "Visible only to ops_approval_triage / ops_manager / ops_compliance. Approve, reject, or escalate each request with an audit reason.",
-          "僅 ops_approval_triage / ops_manager / ops_compliance 可見。可逐筆核准、退回或升級，並留下稽核理由。",
-        )}
+        title={t("approvalRequests.title", locale)}
+        subtitle={t("approvalRequests.subtitle", locale)}
         tabs={tabNodes}
         activeTab={activeTabNode}
       />
@@ -318,16 +307,8 @@ export default async function ApprovalRequestsPage({
             theme={theme}
             tone="danger"
             icon="warn"
-            title={copy(
-              locale,
-              "Could not load approval requests",
-              "無法載入審批請求",
-            )}
-            body={copy(
-              locale,
-              "You may lack scope, or the service is unavailable.",
-              "可能是權限不足，或服務暫時無法使用。",
-            )}
+            title={t("approvalRequests.banner.loadFailed.title", locale)}
+            body={t("approvalRequests.banner.loadFailed.body", locale)}
           />
         ) : null}
 
@@ -344,12 +325,8 @@ export default async function ApprovalRequestsPage({
               }}
             >
               {loadFailed
-                ? copy(locale, "No data to display.", "沒有可顯示的資料。")
-                : copy(
-                    locale,
-                    "No approval requests in this view.",
-                    "此檢視目前沒有審批請求。",
-                  )}
+                ? t("approvalRequests.empty.loadFailed", locale)
+                : t("approvalRequests.empty.noResults", locale)}
             </div>
           )}
         </Card>
