@@ -111,6 +111,27 @@ git commit --allow-empty -m "I18N-OPS-04: finalize drivers i18n centralization c
 git push -u origin codex2/i18n-ops-04-repair
 ```
 
+## Parent Machine-Truth Note
+
+- `AI_NAME=Codex2 scripts/ai-status.sh show I18N-OPS-04` currently returns
+  `Task not found: I18N-OPS-04`.
+- This helper task therefore cannot auto-resume a canonical parent task on
+  `done`, because `scripts/ai_status.py` only applies unblock parent resolution
+  when `helper_parent` matches an existing task ID.
+- The unblock result is still actionable: the clean recovery rail and exact next
+  step are fully defined below, but the supervisor or owner must point that next
+  step at the actual parent task ID if machine-truth parent status needs to move
+  automatically.
+
+## Concrete Unblocked Next Step
+
+The parent owner should stop advancing `origin/codex2/i18n-ops-04`, create
+`codex2/i18n-ops-04-repair` from `origin/dev`, cherry-pick `c6a726eb` and
+`4570b055`, add the formal owner closeout commit, and push that new clean rail
+normally. If the supervisor wants this helper task to auto-update the parent
+status on `done`, it must first repoint `helper_parent` from the shorthand
+`I18N-OPS-04` to the actual canonical task ID.
+
 ## Why This Is Safe
 
 - No remote ref is rewritten.
@@ -124,6 +145,8 @@ git push -u origin codex2/i18n-ops-04-repair
 ## Verification Performed For This Repair
 
 - Read `AI_COLLABORATION_GUIDE.md` and `docs/ops/branch-strategy.md`
+- Queried machine truth for the helper parent alias:
+  - `AI_NAME=Codex2 scripts/ai-status.sh show I18N-OPS-04`
 - Compared related branch and worktree state:
   - `git branch -vv | grep 'i18n-ops-04\\|i18n-wp0'`
   - `git worktree list --porcelain`
