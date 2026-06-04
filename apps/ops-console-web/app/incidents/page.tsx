@@ -121,23 +121,21 @@ function formatTableDateTime(value: string | null | undefined) {
 
 function formatIncidentAge(
   value: string | null | undefined,
-  locale: "en" | "zh",
+  t: (key: string, params?: Record<string, string | number>) => string,
 ) {
   if (!value) {
-    return locale === "en" ? "Time not recorded" : "尚未記錄時間";
+    return t("incidents.time.unrecorded");
   }
 
   const deltaMinutes = Math.round(
     (Date.now() - new Date(value).getTime()) / (1000 * 60),
   );
   if (deltaMinutes < 60) {
-    return locale === "en"
-      ? `${deltaMinutes} min ago`
-      : `${deltaMinutes} 分鐘前`;
+    return t("incidents.time.minutesAgo", { count: deltaMinutes });
   }
 
   const deltaHours = Math.round(deltaMinutes / 60);
-  return locale === "en" ? `${deltaHours} hr ago` : `${deltaHours} 小時前`;
+  return t("incidents.time.hoursAgo", { count: deltaHours });
 }
 
 function controlStyle(themeToken: CanvasTheme, mono = false): CSSProperties {
@@ -317,28 +315,21 @@ function renderStatusPill(status: IncidentStatus) {
   );
 }
 
-function buildCriticalBannerBody(record: IncidentRecord, locale: "en" | "zh") {
+function buildCriticalBannerBody(
+  record: IncidentRecord,
+  t: (key: string, params?: Record<string, string | number>) => string,
+) {
   const driverLabel = record.relatedDriverId
-    ? locale === "en"
-      ? `Driver ${record.relatedDriverId}`
-      : `司機 ${record.relatedDriverId}`
-    : locale === "en"
-      ? "Driver not linked"
-      : "未連結司機";
+    ? t("incidents.critical.driverLinked", {
+        driverId: record.relatedDriverId,
+      })
+    : t("incidents.critical.driverMissing");
   const locationLabel = record.location
-    ? locale === "en"
-      ? `at ${record.location}`
-      : `於 ${record.location}`
-    : locale === "en"
-      ? "location pending"
-      : "地點待補";
+    ? t("incidents.critical.locationKnown", { location: record.location })
+    : t("incidents.critical.locationPending");
   const ownerLabel = record.assignedTo
-    ? locale === "en"
-      ? `${record.assignedTo} now owns the response.`
-      : `目前由 ${record.assignedTo} 接手處理。`
-    : locale === "en"
-      ? "Ownership not assigned yet."
-      : "目前尚未指派 owner。";
+    ? t("incidents.critical.ownerAssigned", { owner: record.assignedTo })
+    : t("incidents.critical.ownerPending");
 
   return `${driverLabel} ${locationLabel}. ${record.description} ${ownerLabel}`;
 }
@@ -622,7 +613,7 @@ export default function IncidentsPage() {
 
   const columns: CanvasTableColumn<IncidentTableRow>[] = [
     {
-      h: "INC",
+      h: t("incidents.col.incident"),
       w: 104,
       mono: true,
       r: (row) => (
@@ -636,7 +627,7 @@ export default function IncidentsPage() {
       ),
     },
     {
-      h: "TITLE",
+      h: t("common.title"),
       w: 300,
       r: (row) => (
         <div
@@ -662,23 +653,23 @@ export default function IncidentsPage() {
       ),
     },
     {
-      h: "CAT",
+      h: t("incidents.col.category"),
       k: "category",
       w: 132,
       mono: true,
     },
     {
-      h: "SEV",
+      h: t("incidents.col.severity"),
       w: 110,
       r: (row) => renderSeverityPill(row.severity),
     },
     {
-      h: "STATUS",
+      h: t("incidents.col.status"),
       w: 130,
       r: (row) => renderStatusPill(row.status),
     },
     {
-      h: "DRIVER",
+      h: t("incidents.col.driver"),
       w: 110,
       mono: true,
       r: (row) =>
@@ -696,23 +687,24 @@ export default function IncidentsPage() {
         ),
     },
     {
-      h: "OCCURRED",
+      h: t("incidents.col.occurred"),
       w: 168,
       mono: true,
       r: (row) => formatTableDateTime(row.occurredAt ?? row.createdAt),
     },
     {
-      h: "RECOVERY",
+      h: t("incidents.col.recoveryActions"),
       w: 108,
       mono: true,
-      r: (row) => `${row.serviceRecoveryActions.length} actions`,
+      r: (row) =>
+        `${row.serviceRecoveryActions.length} ${t("incidents.detail.actionsRecorded")}`,
     },
   ];
 
   const tabConfig: Array<{ key: IncidentTab; label: string }> = [
-    { key: "active", label: `Active ${activeCount}` },
-    { key: "resolved", label: "Resolved" },
-    { key: "closed", label: "Closed" },
+    { key: "active", label: t("incidents.tab.active", { count: activeCount }) },
+    { key: "resolved", label: t("incidents.tab.resolved") },
+    { key: "closed", label: t("incidents.tab.closed") },
   ];
   const tabNodes = tabConfig.map((tab) => (
     <button
@@ -739,12 +731,8 @@ export default function IncidentsPage() {
     <>
       <PageHeader
         theme={theme}
-        title={locale === "en" ? "Incident hub" : "事故中心"}
-        subtitle={
-          locale === "en"
-            ? "safety · collision · property · service recovery — driver SOS / dispatch exception stays ops-owned"
-            : "安全 · 碰撞 · 財損 · 服務補償 — driver SOS / dispatch exception 一律由 ops 接手"
-        }
+        title={t("incidents.hubTitle")}
+        subtitle={t("incidents.hubSubtitle")}
         tabs={tabNodes}
         activeTab={activeTabNode}
         actions={
@@ -755,7 +743,7 @@ export default function IncidentsPage() {
               variant={showFilters ? "primary" : "secondary"}
               onClick={() => setShowFilters((value) => !value)}
             >
-              {locale === "en" ? "Filters" : "類別"}
+              {t("incidents.filters")}
             </Btn>
             <CanvasActionButton
               descriptor={CREATE_INCIDENT_ACTION}
@@ -792,16 +780,14 @@ export default function IncidentsPage() {
             tone="danger"
             icon="warn"
             title={
-              locale === "en"
-                ? `SOS critical response active · ${criticalBannerRecord.incidentId}`
-                : `SOS 緊急事件處理中 · ${criticalBannerRecord.incidentId}`
+              `${t("incidents.banner.sosActive")} · ${criticalBannerRecord.incidentId}`
             }
             body={`${criticalBannerRecord.title} · ${formatOpsCodeLabel(
               locale,
               criticalBannerRecord.severity,
             )} · ${formatOpsCodeLabel(locale, criticalBannerRecord.status)} · ${buildCriticalBannerBody(
               criticalBannerRecord,
-              locale,
+              t,
             )}`}
             actions={
               <Btn
@@ -811,7 +797,7 @@ export default function IncidentsPage() {
                   void inspectIncident(criticalBannerRecord.incidentId)
                 }
               >
-                {locale === "en" ? "Open incident" : "前往事件"}
+                {t("incidents.banner.openIncident")}
               </Btn>
             }
           />
@@ -821,49 +807,27 @@ export default function IncidentsPage() {
             tone="info"
             icon="ok"
             title={getOpsLabel(locale, "incidentsAllClear")}
-            body={
-              locale === "en"
-                ? "No critical incidents are waiting in the active queue."
-                : "目前沒有重大事故待處理。"
-            }
+            body={t("incidents.banner.allClearBody")}
           />
         )}
 
         <Card
           theme={theme}
-          title={
-            locale === "en"
-              ? "Governance guardrail · Three iron laws"
-              : "治理護欄 · 三條鐵律"
-          }
-          subtitle={
-            locale === "en"
-              ? "Ops-owned constraints from the design canvas. Frontend affordances do not override them."
-              : "設計畫布定下的 ops 約束；前端操作不可以覆蓋。"
-          }
+          title={t("incidents.guardrailTitle")}
+          subtitle={t("incidents.guardrailSubtitle")}
         >
           <div style={{ display: "grid", gap: 10 }}>
             {[
-              locale === "en"
-                ? "Driver SOS and dispatch-exception incidents stay ops-owned even after they link to an order or complaint."
-                : "Driver SOS 與 dispatch-exception incident 即使後續連到 order / complaint，仍然維持 ops-owned。",
-              locale === "en"
-                ? "Service recovery action, timeline update, and formal resolution are separate records and must never be conflated."
-                : "Service recovery action、timeline update、formal resolution 是三種不同紀錄，不可混用。",
-              locale === "en"
-                ? "Escalation target is not an owner transfer. Handoff remains incomplete until the receiving side acknowledges it."
-                : "Escalation target 不等於 owner transfer；接手方完成 acknowledgment 前，不算真正轉手。",
+              t("incidents.guardrail.rule1"),
+              t("incidents.guardrail.rule2"),
+              t("incidents.guardrail.rule3"),
             ].map((rule, index) => (
               <Banner
                 key={index}
                 theme={theme}
                 tone="info"
                 icon="audit"
-                title={
-                  locale === "en"
-                    ? `Rule ${index + 1}`
-                    : `鐵律 ${index + 1}`
-                }
+                title={t("incidents.guardrail.ruleLabel", { count: index + 1 })}
                 body={rule}
               />
             ))}
@@ -924,7 +888,7 @@ export default function IncidentsPage() {
         {showFilters ? (
           <Card
             theme={theme}
-            title={locale === "en" ? "Filter incidents" : "篩選事故"}
+            title={t("incidents.filterTitle")}
             subtitle={t("incidents.visible", { count: filteredRecords.length })}
           >
             <div
@@ -1009,7 +973,7 @@ export default function IncidentsPage() {
               title={`${selectedIncident.incidentId} · ${selectedIncident.title}`}
               subtitle={formatIncidentAge(
                 selectedIncident.occurredAt ?? selectedIncident.createdAt,
-                locale,
+                t,
               )}
               actions={
                 <>
@@ -1017,7 +981,7 @@ export default function IncidentsPage() {
                     href={`/incidents/${encodeURIComponent(selectedIncident.incidentId)}`}
                     style={inlineLinkStyle(theme)}
                   >
-                    {locale === "en" ? "Open detail" : "詳細頁"}
+                    {t("incidents.detail.open")}
                   </Link>
                   <Btn
                     theme={theme}
@@ -1048,7 +1012,7 @@ export default function IncidentsPage() {
                       setShowRecoveryForm(false);
                     }}
                   >
-                    {locale === "en" ? "Hide" : "收起"}
+                    {t("incidents.detail.hide")}
                   </Btn>
                 </>
               }
@@ -1068,7 +1032,7 @@ export default function IncidentsPage() {
                     value={formatOpsCodeLabel(locale, selectedIncident.status)}
                     delta={formatIncidentAge(
                       selectedIncident.occurredAt ?? selectedIncident.createdAt,
-                      locale,
+                      t,
                     )}
                     deltaTone="neutral"
                   />
@@ -1081,7 +1045,7 @@ export default function IncidentsPage() {
                     )}
                     delta={
                       selectedIncident.assignedTo ??
-                      (locale === "en" ? "Unassigned" : "未指派")
+                      t("incidents.detail.unassigned")
                     }
                     deltaTone={
                       selectedIncident.severity === "critical" ||
@@ -1107,9 +1071,7 @@ export default function IncidentsPage() {
                     theme={theme}
                     label={t("incidents.serviceRecovery")}
                     value={String(visibleRecoveryCount)}
-                    delta={
-                      locale === "en" ? "actions recorded" : "筆行動已記錄"
-                    }
+                    delta={t("incidents.detail.actionsRecorded")}
                     deltaTone="neutral"
                   />
                 </div>
@@ -1397,7 +1359,6 @@ export default function IncidentsPage() {
 
       {showCreate ? (
         <CreateIncidentModal
-          locale={locale}
           complaintCaseNo={complaintCaseNoFromQuery}
           initialValues={createDefaults}
           onCancel={() => {
@@ -1436,6 +1397,7 @@ function CanvasActionButton({
   locale: "en" | "zh";
   onInvoke: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Btn
       theme={theme}
@@ -1445,7 +1407,7 @@ function CanvasActionButton({
       disabled={!descriptor.enabled}
       onClick={onInvoke}
     >
-      {locale === "en" ? "Create incident" : "新增事故"}
+      {t("incidents.createBtn")}
       {descriptor.requiresReason ? " *" : ""}
       {!descriptor.enabled && descriptor.disabledReasonCode ? (
         <span style={{ fontSize: 10, color: theme.textDim }}>
@@ -1458,18 +1420,17 @@ function CanvasActionButton({
 }
 
 function CreateIncidentModal({
-  locale,
   complaintCaseNo,
   initialValues,
   onCancel,
   onSubmit,
 }: {
-  locale: "en" | "zh";
   complaintCaseNo: string;
   initialValues: IncidentFormInitialValues;
   onCancel: () => void;
   onSubmit: (command: CreateIncidentCommand) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   return (
     <div style={modalScrimStyle()} onClick={onCancel}>
       <div
@@ -1482,37 +1443,27 @@ function CreateIncidentModal({
             <span
               style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
             >
-              {locale === "en" ? "Create incident" : "新增事故"}
+              {t("incidents.createBtn")}
               <Pill
                 theme={theme}
                 tone={actionRiskTone(CREATE_INCIDENT_ACTION.riskLevel)}
               >
-                {locale === "en" ? "medium-risk" : "中風險"}
+                {t("incidents.modal.risk")}
               </Pill>
             </span>
           }
           subtitle={
             complaintCaseNo
-              ? `${locale === "en" ? "Linked complaint" : "關聯客訴"} · ${complaintCaseNo}`
-              : locale === "en"
-                ? "Start from a governed modal action, then return to the table."
-                : "由受治理的 modal action 建立，完成後回到列表。"
+              ? `${t("incidents.modal.linkedComplaint")} · ${complaintCaseNo}`
+              : t("incidents.modal.subtitle")
           }
         >
           <Banner
             theme={theme}
             tone="info"
             icon="audit"
-            title={
-              locale === "en"
-                ? "Descriptor action: create incident"
-                : "描述動作：新增事故"
-            }
-            body={
-              locale === "en"
-                ? "Use this modal to create new records without displacing the incidents table."
-                : "透過此 modal 建立新紀錄，避免把 incidents 主列表擠出主要視線。"
-            }
+            title={t("incidents.modal.descriptorTitle")}
+            body={t("incidents.modal.descriptorBody")}
           />
           <div style={{ marginTop: 12 }}>
             <IncidentForm
