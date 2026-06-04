@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 
 import { ApiRequestError } from "../api-envelope";
 import {
@@ -82,6 +82,8 @@ export interface LlmGatewayServiceOptions {
   fetchImpl?: LlmGatewayFetch;
 }
 
+export const LLM_GATEWAY_SERVICE_OPTIONS = "LLM_GATEWAY_SERVICE_OPTIONS";
+
 interface LlmGatewayActorUsage {
   requestHits: number[];
   inputTokenEvents: Array<{ timestamp: number; tokens: number }>;
@@ -110,7 +112,11 @@ export class LlmGatewayService {
   private readonly fetchImpl: LlmGatewayFetch;
   private readonly usageByActor = new Map<string, LlmGatewayActorUsage>();
 
-  constructor(arg?: LlmGatewayFetch | LlmGatewayServiceOptions) {
+  constructor(
+    @Optional()
+    @Inject(LLM_GATEWAY_SERVICE_OPTIONS)
+    arg?: LlmGatewayFetch | LlmGatewayServiceOptions,
+  ) {
     const options = resolveConstructorOptions(arg);
     this.config = resolveLlmGatewayConfig(options.env);
     this.now = options.now ?? (() => Date.now());
