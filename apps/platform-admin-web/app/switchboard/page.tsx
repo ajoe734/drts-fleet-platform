@@ -855,7 +855,9 @@ export default function SwitchboardPage() {
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={row.publishedAt ? "success" : "warn"} dot>
-          {row.publishedAt ? "published" : "draft"}
+          {row.publishedAt
+            ? t("switchboard.status.published")
+            : t("switchboard.status.draft")}
         </CanvasPill>
       ),
     },
@@ -1351,7 +1353,7 @@ export default function SwitchboardPage() {
               <input
                 style={fieldInputStyle}
                 value={publicInfoForm.effectiveFrom ?? ""}
-                placeholder="2026-07-01T00:00:00.000Z"
+                placeholder={t("switchboard.form.effectiveFromExample")}
                 onChange={(event) =>
                   setPublicInfoForm((current) => ({
                     ...current,
@@ -1588,7 +1590,7 @@ export default function SwitchboardPage() {
               <input
                 style={fieldInputStyle}
                 value={placardForm.versionCode}
-                placeholder="placard-2026-q3"
+                placeholder={t("switchboard.form.versionCodeExample")}
                 onChange={(event) =>
                   setPlacardForm((current) => ({
                     ...current,
@@ -1604,7 +1606,7 @@ export default function SwitchboardPage() {
               <input
                 style={fieldInputStyle}
                 value={placardForm.templateName}
-                placeholder="seatback-default"
+                placeholder={t("switchboard.form.templateExample")}
                 onChange={(event) =>
                   setPlacardForm((current) => ({
                     ...current,
