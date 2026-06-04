@@ -1174,7 +1174,7 @@ export default function PartnerDetailPage() {
     if (isPreviewMode) {
       const now = new Date().toISOString();
       if (entryActionMode === "activate") {
-        setEntry((current) =>
+        setEntry((current: PartnerChannelEntryRecord | null) =>
           current
             ? {
                 ...current,
@@ -1188,7 +1188,7 @@ export default function PartnerDetailPage() {
             : current,
         );
       } else if (entryActionMode === "deactivate") {
-        setEntry((current) =>
+        setEntry((current: PartnerChannelEntryRecord | null) =>
           current
             ? {
                 ...current,
@@ -1199,7 +1199,7 @@ export default function PartnerDetailPage() {
             : current,
         );
       } else if (entryActionMode === "revoke") {
-        setEntry((current) =>
+        setEntry((current: PartnerChannelEntryRecord | null) =>
           current
             ? {
                 ...current,

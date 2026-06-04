@@ -688,11 +688,13 @@ export default function PartnersPage() {
                       }
                       style={inputBaseStyle(true)}
                     >
-                      {BUSINESS_DISPATCH_SUBTYPES.map((value) => (
-                        <option key={value} value={value}>
-                          {formatPlatformCodeLabel(locale, value)}
-                        </option>
-                      ))}
+                      {BUSINESS_DISPATCH_SUBTYPES.map(
+                        (value: EntryFormState["businessDispatchSubtype"]) => (
+                          <option key={value} value={value}>
+                            {formatPlatformCodeLabel(locale, value)}
+                          </option>
+                        ),
+                      )}
                     </select>
                   </CanvasField>
 
@@ -711,11 +713,13 @@ export default function PartnersPage() {
                       }
                       style={inputBaseStyle(true)}
                     >
-                      {PARTNER_ENTRY_AUTH_MODES.map((value) => (
-                        <option key={value} value={value}>
-                          {formatPlatformCodeLabel(locale, value)}
-                        </option>
-                      ))}
+                      {PARTNER_ENTRY_AUTH_MODES.map(
+                        (value: EntryFormState["authMode"]) => (
+                          <option key={value} value={value}>
+                            {formatPlatformCodeLabel(locale, value)}
+                          </option>
+                        ),
+                      )}
                     </select>
                   </CanvasField>
 
@@ -734,11 +738,13 @@ export default function PartnersPage() {
                       }
                       style={inputBaseStyle(true)}
                     >
-                      {PARTNER_ELIGIBILITY_MODES.map((value) => (
-                        <option key={value} value={value}>
-                          {formatPlatformCodeLabel(locale, value)}
-                        </option>
-                      ))}
+                      {PARTNER_ELIGIBILITY_MODES.map(
+                        (value: EntryFormState["eligibilityMode"]) => (
+                          <option key={value} value={value}>
+                            {formatPlatformCodeLabel(locale, value)}
+                          </option>
+                        ),
+                      )}
                     </select>
                   </CanvasField>
 
@@ -836,11 +842,13 @@ export default function PartnersPage() {
                       }
                       style={inputBaseStyle(true)}
                     >
-                      {PARTNER_ENTRY_STATUSES.map((value) => (
-                        <option key={value} value={value}>
-                          {formatPlatformCodeLabel(locale, value)}
-                        </option>
-                      ))}
+                      {PARTNER_ENTRY_STATUSES.map(
+                        (value: EntryFormState["status"]) => (
+                          <option key={value} value={value}>
+                            {formatPlatformCodeLabel(locale, value)}
+                          </option>
+                        ),
+                      )}
                     </select>
                   </CanvasField>
                 </div>
