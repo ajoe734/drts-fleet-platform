@@ -1587,6 +1587,10 @@ const en = {
   "payments.reimbursements.detail.batchUnavailableBody":
     "The reimbursement batch route resolves, but the batch was not found.",
   "payments.reimbursements.detail.lineItemsFallbackNote": "Line item {index}",
+  "payments.reimbursements.detail.fallbackReason.sponsorQ2Apr":
+    "Sponsor reimbursement Q2-Apr",
+  "payments.reimbursements.detail.fallbackReason.reconciliationAdjustment":
+    "Variance adjustment TWD 1,820 × 99 entries",
   "payments.reimbursements.detail.approvalReasonRequired":
     "Approval reason is required for this high-risk action.",
   "payments.reimbursements.detail.approvalRecorded":
@@ -3088,6 +3092,10 @@ const zh: typeof en = {
   "payments.reimbursements.detail.batchUnavailableBody":
     "Route 已建立，但找不到對應的代墊批次資料。",
   "payments.reimbursements.detail.lineItemsFallbackNote": "項目 {index}",
+  "payments.reimbursements.detail.fallbackReason.sponsorQ2Apr":
+    "贊助代墊 Q2-Apr",
+  "payments.reimbursements.detail.fallbackReason.reconciliationAdjustment":
+    "差額調整 TWD 1,820 × 99 筆",
   "payments.reimbursements.detail.approvalReasonRequired":
     "高風險核准操作必須填寫原因。",
   "payments.reimbursements.detail.approvalRecorded": "已記錄核准原因：{reason}",

@@ -257,7 +257,9 @@ function buildFallbackBatch(
             amountMinor: 994560,
             currency: "TWD",
           },
-          reason: "sponsor reimbursement Q2-Apr",
+          reason: t(
+            "payments.reimbursements.detail.fallbackReason.sponsorQ2Apr",
+          ),
           channelKey: "World Elite",
         },
         {
@@ -267,7 +269,9 @@ function buildFallbackBatch(
             amountMinor: 246240,
             currency: "TWD",
           },
-          reason: "sponsor reimbursement Q2-Apr",
+          reason: t(
+            "payments.reimbursements.detail.fallbackReason.sponsorQ2Apr",
+          ),
           channelKey: "Infinite",
         },
         {
@@ -277,7 +281,9 @@ function buildFallbackBatch(
             amountMinor: 180000,
             currency: "TWD",
           },
-          reason: "差額 TWD 1,820 × 99 筆",
+          reason: t(
+            "payments.reimbursements.detail.fallbackReason.reconciliationAdjustment",
+          ),
           channelKey: "reconciliation_adjustment",
         },
       ],
