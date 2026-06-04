@@ -368,7 +368,8 @@ export default function SwitchboardPage() {
   const [activeTab, setActiveTab] = useState<TabId>("versions");
   const [modal, setModal] = useState<ModalId | null>(null);
 
-  const [publicInfoForm, setPublicInfoForm] = useState(EMPTY_PUBLIC_INFO_FORM);
+  const [publicInfoForm, setPublicInfoForm] =
+    useState<CreatePublicInfoVersionCommand>(EMPTY_PUBLIC_INFO_FORM);
   const [placardForm, setPlacardForm] = useState(EMPTY_PLACARD_FORM);
   const [publishTargetId, setPublishTargetId] = useState<string>("");
   const [publishReason, setPublishReason] = useState<string>("");
