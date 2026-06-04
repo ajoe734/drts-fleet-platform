@@ -674,7 +674,7 @@ function SecretRevealModal({
   onCopy: () => void;
   onDownload: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const credential = issuedCredential.credential;
 
   return (
@@ -751,7 +751,7 @@ function SecretRevealModal({
         items={[
           {
             k: t("partners.detail.secret.scope"),
-            v: credential.source,
+            v: formatPlatformCodeLabel(locale, credential.source),
             mono: true,
           },
           {
@@ -1503,7 +1503,7 @@ export default function PartnerDetailPage() {
         )
         .map((credential) => ({
           keyId: credential.keyId,
-          kind: credential.source,
+          kind: formatPlatformCodeLabel(locale, credential.source),
           masked: `${credential.keyPrefix}${credential.maskedSuffix}`,
           rotatedAt: formatDateTime(credential.createdAt),
           lastUsedAt: credential.lastUsedAt
@@ -1511,7 +1511,7 @@ export default function PartnerDetailPage() {
             : "—",
           status: credential.revokedAt ? "revoked" : "active",
         })),
-    [credentials],
+    [credentials, locale],
   );
 
   const credentialColumns = useMemo<CanvasTableColumn<CredentialRow>[]>(

@@ -100,6 +100,12 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   platform_funded: { en: "Platform Funded", zh: "平台資助" },
   published: { en: "Published", zh: "已發布" },
   pending_review: { en: "Pending Review", zh: "待審核" },
+  partner_api_key: { en: "Partner API Key", zh: "合作夥伴 API 金鑰" },
+  bank_card_inline: { en: "Bank Card Inline", zh: "銀行卡即時驗證" },
+  credit_card_airport_transfer: {
+    en: "Credit Card Airport Transfer",
+    zh: "信用卡機場接送",
+  },
   resolved: { en: "Resolved", zh: "已解決" },
   retired: { en: "Retired", zh: "已退役" },
   rollback_hold: { en: "Rollback Hold", zh: "回滾保留" },

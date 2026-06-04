@@ -461,7 +461,10 @@ export default function PartnersPage() {
                   mono: true,
                   r: (entry) => (
                     <span style={{ fontSize: 11 }}>
-                      {entry.businessDispatchSubtype}
+                      {formatPlatformCodeLabel(
+                        locale,
+                        entry.businessDispatchSubtype,
+                      )}
                     </span>
                   ),
                 },
@@ -469,13 +472,14 @@ export default function PartnersPage() {
                   h: t("partners.page.table.auth"),
                   w: 130,
                   mono: true,
-                  k: "authMode",
+                  r: (entry) => formatPlatformCodeLabel(locale, entry.authMode),
                 },
                 {
                   h: t("partners.page.table.eligibility"),
                   w: 110,
                   mono: true,
-                  k: "eligibilityMode",
+                  r: (entry) =>
+                    formatPlatformCodeLabel(locale, entry.eligibilityMode),
                 },
                 {
                   h: t("partners.page.table.status"),
@@ -486,7 +490,7 @@ export default function PartnersPage() {
                       tone={statusTone(entry.status)}
                       dot
                     >
-                      {entry.status}
+                      {formatPlatformCodeLabel(locale, entry.status)}
                     </CanvasPill>
                   ),
                 },
