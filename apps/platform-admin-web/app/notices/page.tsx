@@ -6,10 +6,10 @@ import { usePlatformAdminAssistantPage } from "@/components/assistant/route-cont
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
+  formatNoticeWindow,
   getNoticeHistoryDeliveryLabel,
   getNoticeSeverityLabel,
   getNoticeStatusLabel,
-  getNoticeWindowNotScheduled,
   getNoticesAudienceLabel,
   getNoticesPageCopy,
 } from "@/lib/translations";
@@ -172,20 +172,6 @@ function toStatusLabel(
   return getNoticeStatusLabel(locale, status);
 }
 
-function formatWindow(
-  start: string | null,
-  end: string | null,
-  locale: "en" | "zh",
-) {
-  if (!start && !end) {
-    return getNoticeWindowNotScheduled(locale);
-  }
-  if (start && end) {
-    return `${formatDateTime(start)} - ${formatDateTime(end)}`;
-  }
-  return formatDateTime(start ?? end ?? "");
-}
-
 function toDatetimeLocalValue(value: string | null) {
   if (!value) return "";
   const date = new Date(value);
@@ -202,7 +188,7 @@ function fromDatetimeLocalValue(value: string) {
 }
 
 export default function NoticesPage() {
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
 
   const copy = useMemo(() => getNoticesPageCopy(locale), [locale]);
@@ -285,10 +271,12 @@ export default function NoticesPage() {
   );
 
   const maintenancePreview = useMemo(() => {
-    const windowLabel = formatWindow(
-      fromDatetimeLocalValue(maintStart),
-      fromDatetimeLocalValue(maintEnd),
-      locale,
+    const scheduledStart = fromDatetimeLocalValue(maintStart);
+    const scheduledEnd = fromDatetimeLocalValue(maintEnd);
+    const windowLabel = formatNoticeWindow(
+      scheduledStart ? formatDateTime(scheduledStart) : null,
+      scheduledEnd ? formatDateTime(scheduledEnd) : null,
+      t,
     );
     if (!maintEnabled && !maintReason.trim()) {
       return copy.previewFallback;
@@ -297,11 +285,11 @@ export default function NoticesPage() {
   }, [
     copy.maintenanceSummary,
     copy.previewFallback,
-    locale,
     maintEnabled,
     maintEnd,
     maintReason,
     maintStart,
+    t,
   ]);
 
   const noticeRows = useMemo<NoticeRow[]>(
@@ -680,7 +668,9 @@ export default function NoticesPage() {
                 {
                   fieldId: "enabled",
                   label: copy.currentMaintenance,
-                  valueSummary: maintEnabled ? "enabled" : "disabled",
+                  valueSummary: maintEnabled
+                    ? copy.maintenanceEnabled
+                    : copy.maintenanceDisabled,
                 },
                 {
                   fieldId: "reason",
@@ -1202,10 +1192,14 @@ export default function NoticesPage() {
                     <CanvasInput
                       theme={theme}
                       mono
-                      value={formatWindow(
-                        maintenance?.scheduledStart ?? null,
-                        maintenance?.scheduledEnd ?? null,
-                        locale,
+                      value={formatNoticeWindow(
+                        maintenance?.scheduledStart
+                          ? formatDateTime(maintenance.scheduledStart)
+                          : null,
+                        maintenance?.scheduledEnd
+                          ? formatDateTime(maintenance.scheduledEnd)
+                          : null,
+                        t,
                       )}
                     />
                   </CanvasField>

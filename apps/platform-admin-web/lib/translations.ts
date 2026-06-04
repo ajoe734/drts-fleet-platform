@@ -625,6 +625,7 @@ const en = {
     "Health status, adapter mode, and latest operational signal",
   "health.refreshError": "Unable to refresh platform health",
   "health.alert.measurement": "{measured} measured · critical at {threshold}",
+  "health.metric.minutes": "{value} min",
   "health.tab.alertsWithCount": "Alerts{suffix}",
   "health.tab.dispatch": "Dispatch",
   "health.tab.webhook": "Webhook",
@@ -1498,6 +1499,7 @@ const zh: typeof en = {
   "health.metricsNote": "健康狀態、轉接模式與最新營運訊號",
   "health.refreshError": "無法更新平台健康資料",
   "health.alert.measurement": "目前 {measured} · 重大門檻為 {threshold}",
+  "health.metric.minutes": "{value} 分鐘",
   "health.tab.alertsWithCount": "警示{suffix}",
   "health.tab.dispatch": "派車",
   "health.tab.webhook": "Webhook",
@@ -1782,6 +1784,7 @@ const zh: typeof en = {
 export const translations: Record<Locale, typeof en> = { en, zh };
 
 type TranslationParams = Record<string, string | number>;
+export type TranslateFn = (key: string, params?: TranslationParams) => string;
 
 function translateKey(
   locale: Locale,
@@ -1832,6 +1835,41 @@ export function getHealthAdapterSourceLabel(
   source: string,
 ): string {
   return translateKey(locale, "health.adapter.sourceSuffix", { source });
+}
+
+export function formatLocaleNumber(locale: Locale, value: number): string {
+  return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
+}
+
+export function formatHealthMetricValue(
+  locale: Locale,
+  value: number | null,
+  unit: "count" | "minutes" | "percent",
+): string {
+  if (value == null) {
+    return "—";
+  }
+
+  if (unit === "minutes") {
+    return translateKey(locale, "health.metric.minutes", {
+      value: formatLocaleNumber(locale, value),
+    });
+  }
+
+  if (unit === "percent") {
+    return `${value}%`;
+  }
+
+  return formatLocaleNumber(locale, value);
+}
+
+export function formatHealthAdapterSource(
+  locale: Locale,
+  platformCode: string,
+): string {
+  const normalized = platformCode.replace(/[_-]+/g, " ").trim();
+  const title = normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return getHealthAdapterSourceLabel(locale, title);
 }
 
 export function getHealthPageCopy(locale: Locale) {
@@ -1989,6 +2027,20 @@ export function getNoticeStatusLabel(
 
 export function getNoticeWindowNotScheduled(locale: Locale): string {
   return translateKey(locale, "notices.window.notScheduled");
+}
+
+export function formatNoticeWindow(
+  start: string | null,
+  end: string | null,
+  t: TranslateFn,
+): string {
+  if (!start && !end) {
+    return t("notices.window.notScheduled");
+  }
+  if (start && end) {
+    return `${start} - ${end}`;
+  }
+  return start ?? end ?? "";
 }
 
 export function getNoticeHistoryDeliveryLabel(

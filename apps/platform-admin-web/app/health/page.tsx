@@ -11,7 +11,8 @@ import {
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
-  getHealthAdapterSourceLabel,
+  formatHealthAdapterSource,
+  formatHealthMetricValue,
   getHealthAlertRouteLabel,
   getHealthAlertTitle,
   getHealthPageCopy,
@@ -246,37 +247,15 @@ function alertTone(
   }
 }
 
-function formatMetricValue(
-  locale: "en" | "zh",
-  value: number | null,
-  unit: "count" | "minutes" | "percent",
-): string {
-  if (value == null) {
-    return "—";
-  }
-  if (unit === "minutes") {
-    return locale === "en" ? `${value} min` : `${value} 分鐘`;
-  }
-  if (unit === "percent") {
-    return `${value}%`;
-  }
-  return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
-}
-
 function formatAlertMeasure(
   locale: "en" | "zh",
   alert: OperationalAlertRecord,
 ): string {
-  return formatMetricValue(locale, alert.measuredValue, alert.thresholds.unit);
-}
-
-function formatAdapterSource(
-  locale: "en" | "zh",
-  platformCode: string,
-): string {
-  const normalized = platformCode.replace(/[_-]+/g, " ").trim();
-  const title = normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
-  return locale === "en" ? title : getHealthAdapterSourceLabel(locale, title);
+  return formatHealthMetricValue(
+    locale,
+    alert.measuredValue,
+    alert.thresholds.unit,
+  );
 }
 
 function formatAlertTitle(
@@ -432,7 +411,7 @@ export default function HealthPage() {
 
     return merged.map((adapter) => ({
       adapter: adapter.platformCode,
-      source: formatAdapterSource(locale, adapter.platformCode),
+      source: formatHealthAdapterSource(locale, adapter.platformCode),
       kind: adapter.capabilitySummary.mode.toUpperCase(),
       status: adapter.status,
       latency: "—",
@@ -444,7 +423,7 @@ export default function HealthPage() {
       ),
       orders24h:
         fallbackOrders > 0
-          ? fallbackOrders.toLocaleString(locale === "en" ? "en-US" : "zh-TW")
+          ? formatHealthMetricValue(locale, fallbackOrders, "count")
           : "—",
       note: adapter.lastError ?? getHealthStatusLabel(locale, adapter.reason),
     }));
@@ -505,7 +484,7 @@ export default function HealthPage() {
   const dispatchSummary = [
     {
       label: copy.summary.dispatch.queueDepth,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.dispatch.queueDepth,
         "count",
@@ -513,7 +492,7 @@ export default function HealthPage() {
     },
     {
       label: copy.summary.dispatch.redispatchOrders,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.dispatch.redispatchOrders,
         "count",
@@ -521,7 +500,7 @@ export default function HealthPage() {
     },
     {
       label: copy.summary.dispatch.exceptionHolds,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.dispatch.exceptionHoldOrders,
         "count",
@@ -529,7 +508,7 @@ export default function HealthPage() {
     },
     {
       label: copy.summary.dispatch.failedOrders,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.dispatch.dispatchFailedOrders,
         "count",
@@ -540,7 +519,7 @@ export default function HealthPage() {
   const webhookSummary = [
     {
       label: copy.summary.webhook.activeEndpoints,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.webhook.activeEndpoints,
         "count",
@@ -548,7 +527,7 @@ export default function HealthPage() {
     },
     {
       label: copy.summary.webhook.disabledEndpoints,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.webhook.disabledEndpoints,
         "count",
@@ -556,7 +535,7 @@ export default function HealthPage() {
     },
     {
       label: copy.summary.webhook.queuedDeliveries,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.webhook.queuedDeliveries,
         "count",
@@ -564,7 +543,7 @@ export default function HealthPage() {
     },
     {
       label: copy.summary.webhook.oldestQueuedLag,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.webhook.oldestQueuedDeliveryLagMinutes,
         "minutes",
@@ -575,7 +554,7 @@ export default function HealthPage() {
   const filingSummary = [
     {
       label: copy.summary.filing.reportingQueuedJobs,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.reporting.queuedJobs,
         "count",
@@ -583,7 +562,7 @@ export default function HealthPage() {
     },
     {
       label: copy.summary.filing.recordingBacklog,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.recording.pendingOrders,
         "count",
@@ -591,7 +570,7 @@ export default function HealthPage() {
     },
     {
       label: copy.summary.filing.manualReviewQueue,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.eligibility.manualReviewQueue,
         "count",
@@ -599,7 +578,7 @@ export default function HealthPage() {
     },
     {
       label: copy.summary.filing.eligibilityFailures24h,
-      value: formatMetricValue(
+      value: formatHealthMetricValue(
         locale,
         observability.eligibility.recentFailureCount24h,
         "count",
@@ -641,7 +620,7 @@ export default function HealthPage() {
           <CanvasKPI
             theme={theme}
             label={copy.kpis.dispatch.label}
-            value={formatMetricValue(
+            value={formatHealthMetricValue(
               locale,
               observability.dispatch.oldestReadyOrderLagMinutes,
               "minutes",
@@ -661,7 +640,7 @@ export default function HealthPage() {
           <CanvasKPI
             theme={theme}
             label={copy.kpis.webhook.label}
-            value={formatMetricValue(
+            value={formatHealthMetricValue(
               locale,
               observability.webhook.queuedDeliveries,
               "count",
@@ -681,7 +660,7 @@ export default function HealthPage() {
           <CanvasKPI
             theme={theme}
             label={copy.kpis.eligibility.label}
-            value={formatMetricValue(
+            value={formatHealthMetricValue(
               locale,
               observability.eligibility.totalReviewQueue,
               "count",
@@ -693,7 +672,7 @@ export default function HealthPage() {
           <CanvasKPI
             theme={theme}
             label={copy.kpis.reporting.label}
-            value={formatMetricValue(
+            value={formatHealthMetricValue(
               locale,
               observability.reporting.failedJobs,
               "count",
@@ -715,7 +694,7 @@ export default function HealthPage() {
                 {activeAlerts.map(
                   (alert: OperationalAlertRecord, index: number) => {
                     const measured = formatAlertMeasure(locale, alert);
-                    const threshold = formatMetricValue(
+                    const threshold = formatHealthMetricValue(
                       locale,
                       alert.thresholds.critical,
                       alert.thresholds.unit,
