@@ -613,6 +613,7 @@ const en = {
   "dispatch.page.forwardedAuthority": "Platform-owned mirror lane",
   "dispatch.page.headerSubtitle":
     "Queue triage, assignment actions, and forwarded mirror follow-up in one operator workspace.",
+  "dispatch.page.refreshTierBadge": "T2 dispatch / 5s",
   "dispatch.page.realtime": "Realtime",
   "dispatch.page.duration.minutes": "{minutes} min",
   "dispatch.page.duration.hoursMinutes": "{hours}h {minutes}m",
@@ -2337,6 +2338,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.page.forwardedAuthority": "平台鏡像轉派線",
   "dispatch.page.headerSubtitle":
     "在同一個營運工作區處理佇列分流、指派操作與轉派鏡像 follow-up。",
+  "dispatch.page.refreshTierBadge": "T2 派遣 / 5秒",
   "dispatch.page.realtime": "即時",
   "dispatch.page.duration.minutes": "{minutes} 分鐘",
   "dispatch.page.duration.hoursMinutes": "{hours} 小時 {minutes} 分",

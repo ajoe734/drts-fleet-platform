@@ -2415,7 +2415,7 @@ export default async function DispatchPage({
         actions={
           <>
             <Pill theme={theme} tone="accent">
-              T2 dispatch / 5s
+              {t("dispatch.page.refreshTierBadge", locale)}
             </Pill>
             <Pill theme={theme} tone="neutral">
               {boardMeta.label}
