@@ -168,6 +168,9 @@ Do not force-push, rename, or rewrite any existing branch.
 
 ## Closeout Evidence
 
+- Review correction commit:
+  `a75a7a9d6f99b671440fd30a41254c60f9cb9a61`
+  (`docs(GAP-VERIFY-UNBLOCK-HISTORY-REPAIR): refresh live helper ref evidence`)
 - Task-scoped artifact commit:
   `2de2eb393a43f5813452651f783f24b8668fb1df`
   (`docs(GAP-VERIFY-UNBLOCK-HISTORY-REPAIR): document canonical replay branch`)
