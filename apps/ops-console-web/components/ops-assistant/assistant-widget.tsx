@@ -260,7 +260,7 @@ export function OpsAssistantWidget() {
   }
 
   const router = useRouter();
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const context = useOpsAssistantContext();
   const actionBridge = useOpsAssistantActionBridge();
   const titleId = useId();
@@ -640,7 +640,7 @@ export function OpsAssistantWidget() {
       return;
     }
 
-    const help = buildTier0HelpResult(query);
+    const help = buildTier0HelpResult(query, context?.locale ?? locale);
     appendConversation({
       id: `${Date.now()}-tier0-answer`,
       author: "assistant",
@@ -787,7 +787,10 @@ export function OpsAssistantWidget() {
         tone: "success",
         message:
           receipt.message || t("opsAssistant.message.completed", { action }),
-        meta: `actionId ${receipt.actionId} · auditId ${receipt.auditId}`,
+        meta: t("opsAssistant.meta.receiptIds", {
+          actionId: receipt.actionId,
+          auditId: receipt.auditId,
+        }),
         auditHref:
           receipt.auditHref ??
           `/audit?auditId=${encodeURIComponent(receipt.auditId)}`,
