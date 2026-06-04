@@ -121,11 +121,27 @@ export function assistantStatusTone(state: AssistantViewState) {
 
 export function assistantStateLabel(state: AssistantViewState) {
   switch (state) {
+    case "idle":
+      return "assistant.state.idle";
+    case "thinking":
+      return "assistant.state.thinking";
+    case "planning":
+      return "assistant.state.planning";
     case "awaiting_confirmation":
-      return "awaiting confirmation";
+      return "assistant.state.awaitingConfirmation";
+    case "executing":
+      return "assistant.state.executing";
+    case "receipt":
+      return "assistant.state.receipt";
+    case "error":
+      return "assistant.state.error";
     default:
-      return state.replaceAll("_", " ");
+      return "assistant.state.idle";
   }
+}
+
+export function assistantRiskLabel(risk: AssistantRiskLevel) {
+  return `assistant.risk.${risk}` as const;
 }
 
 export function assistantRiskTone(risk: AssistantRiskLevel) {
@@ -153,6 +169,10 @@ export function assistantReceiptTone(status: AssistantReceiptStatus) {
   }
 }
 
+export function assistantReceiptStatusLabel(status: AssistantReceiptStatus) {
+  return `assistant.receipt.status.${status}` as const;
+}
+
 export function assistantStepTone(status: AssistantStepStatus) {
   switch (status) {
     case "completed":
@@ -165,6 +185,10 @@ export function assistantStepTone(status: AssistantStepStatus) {
     default:
       return "neutral";
   }
+}
+
+export function assistantStepStatusLabel(status: AssistantStepStatus) {
+  return `assistant.step.status.${status}` as const;
 }
 
 export const assistantCardStyle: CSSProperties = {

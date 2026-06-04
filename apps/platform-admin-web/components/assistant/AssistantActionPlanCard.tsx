@@ -7,12 +7,15 @@ import {
   assistantCardStyle,
   assistantInsetStyle,
   assistantMutedTextStyle,
+  assistantRiskLabel,
   assistantRiskTone,
+  assistantStepStatusLabel,
   assistantStepTone,
   assistantTheme,
   type AssistantActionPlan,
   type AssistantActionPlanStep,
 } from "./assistant-types";
+import { useTranslation } from "@/lib/i18n";
 
 const bodyStyle: CSSProperties = {
   display: "grid",
@@ -99,8 +102,9 @@ export function AssistantActionPlanCard({
 }: {
   plan: AssistantActionPlan;
 }) {
+  const { t } = useTranslation();
   return (
-    <section style={assistantCardStyle} aria-label="Assistant action plan">
+    <section style={assistantCardStyle} aria-label={t("assistant.plan.aria")}>
       <div style={bodyStyle}>
         <div style={headerStyle}>
           <div style={{ minWidth: 0 }}>
@@ -112,7 +116,7 @@ export function AssistantActionPlanCard({
               theme={assistantTheme}
               tone={assistantRiskTone(plan.riskLevel)}
             >
-              {plan.riskLevel.toUpperCase()} RISK
+              {t(assistantRiskLabel(plan.riskLevel))}
             </Pill>
           ) : null}
         </div>
@@ -121,13 +125,15 @@ export function AssistantActionPlanCard({
           <div style={metaGridStyle}>
             {plan.resourceLabel ? (
               <div style={metaItemStyle}>
-                <div style={labelStyle}>Resource</div>
+                <div style={labelStyle}>
+                  {t("assistant.plan.label.resource")}
+                </div>
                 <div style={valueStyle}>{plan.resourceLabel}</div>
               </div>
             ) : null}
             {plan.rationale ? (
               <div style={metaItemStyle}>
-                <div style={labelStyle}>Why now</div>
+                <div style={labelStyle}>{t("assistant.plan.label.whyNow")}</div>
                 <div style={valueStyle}>{plan.rationale}</div>
               </div>
             ) : null}
@@ -171,7 +177,7 @@ export function AssistantActionPlanCard({
                   theme={assistantTheme}
                   tone={assistantStepTone(step.status)}
                 >
-                  {step.status.replace("_", " ")}
+                  {t(assistantStepStatusLabel(step.status))}
                 </Pill>
               </div>
               {step.detail ? (
@@ -193,7 +199,7 @@ export function AssistantActionPlanCard({
             }}
           >
             <div style={{ ...labelStyle, color: assistantTheme.warn }}>
-              Attention
+              {t("assistant.plan.warnings.title")}
             </div>
             {plan.warnings.map((warning) => (
               <div

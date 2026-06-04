@@ -8,10 +8,12 @@ import {
   assistantCardStyle,
   assistantInsetStyle,
   assistantMutedTextStyle,
+  assistantRiskLabel,
   assistantRiskTone,
   assistantTheme,
   type AssistantConfirmationRequest,
 } from "./assistant-types";
+import { useTranslation } from "@/lib/i18n";
 
 const bodyStyle: CSSProperties = {
   display: "grid",
@@ -72,6 +74,7 @@ export function AssistantConfirmationPanel({
   onConfirm: (reason: string) => void | Promise<void>;
   onCancel?: () => void;
 }) {
+  const { t } = useTranslation();
   const reasonFieldId = useId();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -85,12 +88,12 @@ export function AssistantConfirmationPanel({
 
   async function handleConfirm() {
     if (requiresReason && trimmedReason.length === 0) {
-      setError("Reason is required before this action can run.");
+      setError(t("assistant.confirmation.error.reasonRequired"));
       return;
     }
     if (disabled) {
       setError(
-        request.disabledReason ?? "This action is currently unavailable.",
+        request.disabledReason ?? t("assistant.confirmation.error.unavailable"),
       );
       return;
     }
@@ -102,7 +105,7 @@ export function AssistantConfirmationPanel({
   return (
     <section
       style={assistantCardStyle}
-      aria-label="Assistant confirmation panel"
+      aria-label={t("assistant.confirmation.aria")}
     >
       <div style={bodyStyle}>
         <div
@@ -127,7 +130,7 @@ export function AssistantConfirmationPanel({
             theme={assistantTheme}
             tone={assistantRiskTone(request.riskLevel)}
           >
-            {request.riskLevel.toUpperCase()} RISK
+            {t(assistantRiskLabel(request.riskLevel))}
           </Pill>
         </div>
 
@@ -143,7 +146,7 @@ export function AssistantConfirmationPanel({
                 marginBottom: 4,
               }}
             >
-              Target resource
+              {t("assistant.confirmation.targetResource")}
             </div>
             <div style={{ color: assistantTheme.text, fontSize: 13.5 }}>
               {request.resourceLabel}
@@ -160,7 +163,7 @@ export function AssistantConfirmationPanel({
               color: assistantTheme.text,
             }}
           >
-            {request.reasonLabel ?? "Execution reason"}
+            {request.reasonLabel ?? t("assistant.confirmation.reasonLabel")}
           </label>
           <textarea
             id={reasonFieldId}
@@ -174,8 +177,8 @@ export function AssistantConfirmationPanel({
             placeholder={
               request.reasonPlaceholder ??
               (requiresReason
-                ? "Required for high-risk execution."
-                : "Optional operator note.")
+                ? t("assistant.confirmation.reasonPlaceholder.required")
+                : t("assistant.confirmation.reasonPlaceholder.optional"))
             }
             rows={4}
             style={{
@@ -196,8 +199,8 @@ export function AssistantConfirmationPanel({
           <div style={assistantMutedTextStyle}>
             {request.reasonHint ??
               (requiresReason
-                ? "This action cannot execute until a non-empty reason is supplied."
-                : "Reason will be attached to the audit trail when provided.")}
+                ? t("assistant.confirmation.reasonHint.required")
+                : t("assistant.confirmation.reasonHint.optional"))}
           </div>
         </div>
 
@@ -243,7 +246,7 @@ export function AssistantConfirmationPanel({
               disabled={isSubmitting}
               style={buttonStyle("secondary", isSubmitting)}
             >
-              {request.cancelLabel ?? "Cancel"}
+              {request.cancelLabel ?? t("assistant.confirmation.cancel")}
             </button>
           ) : null}
           <button
@@ -256,8 +259,9 @@ export function AssistantConfirmationPanel({
             )}
           >
             {isSubmitting
-              ? "Executing..."
-              : (request.confirmLabel ?? "Confirm and execute")}
+              ? t("assistant.confirmation.executing")
+              : (request.confirmLabel ??
+                t("assistant.confirmation.confirmExecute"))}
           </button>
         </div>
       </div>

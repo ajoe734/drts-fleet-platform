@@ -20,6 +20,7 @@ import {
   assistantTheme,
   type AssistantMessageRecord,
 } from "./assistant-types";
+import { useTranslation } from "@/lib/i18n";
 
 const stackStyle: CSSProperties = {
   display: "grid",
@@ -33,18 +34,21 @@ const bubbleStyle: CSSProperties = {
   gap: 12,
 };
 
-function roleMeta(role: AssistantMessageRecord["role"]) {
+function roleMeta(
+  role: AssistantMessageRecord["role"],
+  t: (key: string) => string,
+) {
   switch (role) {
     case "user":
       return {
-        label: "Operator",
+        label: t("assistant.message.role.operator"),
         icon: <User size={16} color={assistantTheme.text} />,
         align: "end" as const,
         background: assistantTheme.accentBg,
       };
     case "system":
       return {
-        label: "System",
+        label: t("assistant.message.role.system"),
         icon: <CheckCircle2 size={16} color={assistantTheme.info} />,
         align: "start" as const,
         background: assistantTheme.surfaceLo,
@@ -52,7 +56,7 @@ function roleMeta(role: AssistantMessageRecord["role"]) {
     case "assistant":
     default:
       return {
-        label: "Assistant",
+        label: t("assistant.message.role.assistant"),
         icon: <Bot size={16} color={assistantTheme.accent} />,
         align: "start" as const,
         background: assistantTheme.surface,
@@ -60,50 +64,53 @@ function roleMeta(role: AssistantMessageRecord["role"]) {
   }
 }
 
-function stateBanner(message: AssistantMessageRecord) {
+function stateBanner(
+  message: AssistantMessageRecord,
+  t: (key: string) => string,
+) {
   switch (message.state) {
     case "thinking":
       return {
         tone: "info" as const,
         icon: <LoaderCircle size={15} className="animate-spin" />,
-        text: "Assistant is analyzing current platform context.",
+        text: t("assistant.message.banner.thinking"),
       };
     case "planning":
       return {
         tone: "info" as const,
         icon: <LoaderCircle size={15} className="animate-spin" />,
-        text: "Assistant is preparing a governed action plan for review.",
+        text: t("assistant.message.banner.planning"),
       };
     case "awaiting_confirmation":
       return {
         tone: "warn" as const,
         icon: <AlertTriangle size={15} />,
-        text: "Execution is paused until an operator confirms the action.",
+        text: t("assistant.message.banner.awaitingConfirmation"),
       };
     case "executing":
       return {
         tone: "accent" as const,
         icon: <LoaderCircle size={15} className="animate-spin" />,
-        text: "Assistant is executing the approved action.",
+        text: t("assistant.message.banner.executing"),
       };
     case "receipt":
       return {
         tone: "success" as const,
         icon: <CheckCircle2 size={15} />,
-        text: "Execution completed and a receipt has been recorded.",
+        text: t("assistant.message.banner.receipt"),
       };
     case "error":
       if (!message.error) {
         return {
           tone: "danger" as const,
           icon: <AlertTriangle size={15} />,
-          text: "Execution error",
+          text: t("assistant.message.banner.error"),
         };
       }
       return {
         tone: "danger" as const,
         icon: <AlertTriangle size={15} />,
-        text: message.error.title ?? "Execution error",
+        text: message.error.title ?? t("assistant.message.banner.error"),
       };
     case "idle":
     default:
@@ -116,8 +123,8 @@ export function AssistantMessageList({
   isConfirming = false,
   onConfirmAction,
   onCancelConfirmation,
-  emptyTitle = "Platform Admin assistant is ready",
-  emptyBody = "Ask for an analysis, review a plan, or approve a governed action to start the conversation.",
+  emptyTitle,
+  emptyBody,
 }: {
   messages: AssistantMessageRecord[];
   isConfirming?: boolean;
@@ -126,6 +133,9 @@ export function AssistantMessageList({
   emptyTitle?: string;
   emptyBody?: string;
 }) {
+  const { t } = useTranslation();
+  const resolvedEmptyTitle = emptyTitle ?? t("assistant.message.emptyTitle");
+  const resolvedEmptyBody = emptyBody ?? t("assistant.message.emptyBody");
   if (messages.length === 0) {
     return (
       <section
@@ -140,10 +150,10 @@ export function AssistantMessageList({
       >
         <Bot size={28} color={assistantTheme.accent} />
         <strong style={{ color: assistantTheme.text, fontSize: 17 }}>
-          {emptyTitle}
+          {resolvedEmptyTitle}
         </strong>
         <div style={{ ...assistantMutedTextStyle, maxWidth: 560 }}>
-          {emptyBody}
+          {resolvedEmptyBody}
         </div>
       </section>
     );
@@ -152,8 +162,8 @@ export function AssistantMessageList({
   return (
     <div style={stackStyle}>
       {messages.map((message) => {
-        const meta = roleMeta(message.role);
-        const banner = stateBanner(message);
+        const meta = roleMeta(message.role, t);
+        const banner = stateBanner(message, t);
 
         return (
           <article
@@ -191,7 +201,7 @@ export function AssistantMessageList({
                     theme={assistantTheme}
                     tone={assistantStatusTone(message.state)}
                   >
-                    {assistantStateLabel(message.state)}
+                    {t(assistantStateLabel(message.state))}
                   </Pill>
                 ) : null}
               </div>
@@ -287,7 +297,7 @@ export function AssistantMessageList({
                   }}
                 >
                   <strong style={{ fontSize: 13.5 }}>
-                    {message.error.title ?? "Assistant error"}
+                    {message.error.title ?? t("assistant.message.errorTitle")}
                   </strong>
                   <div style={{ fontSize: 12.5, lineHeight: 1.45 }}>
                     {message.error.message}

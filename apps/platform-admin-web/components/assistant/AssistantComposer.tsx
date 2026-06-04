@@ -11,6 +11,7 @@ import {
   type AssistantViewState,
 } from "./assistant-types";
 import { CanvasPill as Pill } from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 
 const busyStates: AssistantViewState[] = [
   "thinking",
@@ -19,23 +20,23 @@ const busyStates: AssistantViewState[] = [
   "executing",
 ];
 
-function helperCopy(state: AssistantViewState) {
+function helperCopy(state: AssistantViewState, t: (key: string) => string) {
   switch (state) {
     case "thinking":
-      return "Assistant is drafting the next response.";
+      return t("assistant.composer.helper.thinking");
     case "planning":
-      return "Plan is being prepared for review.";
+      return t("assistant.composer.helper.planning");
     case "awaiting_confirmation":
-      return "Execution is paused until you confirm.";
+      return t("assistant.composer.helper.awaitingConfirmation");
     case "executing":
-      return "Command is running; avoid duplicate submissions.";
+      return t("assistant.composer.helper.executing");
     case "receipt":
-      return "Last action completed. You can continue the conversation.";
+      return t("assistant.composer.helper.receipt");
     case "error":
-      return "The last turn failed. Adjust the request or retry.";
+      return t("assistant.composer.helper.error");
     case "idle":
     default:
-      return "Use Enter to submit or Shift+Enter for a new line.";
+      return t("assistant.composer.helper.idle");
   }
 }
 
@@ -45,8 +46,8 @@ export function AssistantComposer({
   onSubmit,
   state = "idle",
   disabled = false,
-  placeholder = "Ask Platform Admin to inspect, plan, or execute a governed action...",
-  submitLabel = "Send",
+  placeholder,
+  submitLabel,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -56,8 +57,12 @@ export function AssistantComposer({
   placeholder?: string;
   submitLabel?: string;
 }) {
+  const { t } = useTranslation();
   const isBusy = busyStates.includes(state);
   const submitDisabled = disabled || isBusy || value.trim().length === 0;
+  const resolvedPlaceholder =
+    placeholder ?? t("assistant.composer.placeholder");
+  const resolvedSubmitLabel = submitLabel ?? t("assistant.composer.submit");
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -83,11 +88,11 @@ export function AssistantComposer({
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Sparkles size={16} color={assistantTheme.accent} />
             <strong style={{ color: assistantTheme.text, fontSize: 15.5 }}>
-              Platform Admin assistant
+              {t("assistant.composer.title")}
             </strong>
           </div>
           <Pill theme={assistantTheme} tone={assistantStatusTone(state)}>
-            {assistantStateLabel(state)}
+            {t(assistantStateLabel(state))}
           </Pill>
         </div>
 
@@ -95,7 +100,7 @@ export function AssistantComposer({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           rows={4}
           disabled={disabled}
           style={{
@@ -125,7 +130,7 @@ export function AssistantComposer({
             flexWrap: "wrap",
           }}
         >
-          <div style={assistantMutedTextStyle}>{helperCopy(state)}</div>
+          <div style={assistantMutedTextStyle}>{helperCopy(state, t)}</div>
           <button
             type="button"
             onClick={onSubmit}
@@ -148,7 +153,7 @@ export function AssistantComposer({
             }}
           >
             <SendHorizontal size={15} />
-            {isBusy ? "Waiting..." : submitLabel}
+            {isBusy ? t("assistant.composer.waiting") : resolvedSubmitLabel}
           </button>
         </div>
       </div>
