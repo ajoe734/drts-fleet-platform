@@ -797,6 +797,7 @@ const en = {
   "maintenance.tab.inProgress": "In progress",
   "maintenance.tab.overdue": "Overdue",
   "maintenance.banner.degraded": "Maintenance page is running degraded",
+  "maintenance.banner.degradedBody": "maintenance: {message}",
   "maintenance.banner.snapshotStale": "Snapshot is not fresh",
   "maintenance.banner.snapshotStaleBody":
     "Last refreshed {time} UTC. Auto-refresh runs every 15s (T3).",
@@ -819,6 +820,8 @@ const en = {
     "Supporting actions come from availableActions · ",
   "maintenance.meta.emptyReason": "emptyReason",
   "maintenance.meta.generated": "generated",
+  "maintenance.meta.generatedAt": "generated {time} UTC",
+  "maintenance.meta.auditTrail": "actionId {actionId} · auditId {auditId}",
   "maintenance.confirm.completeTitle": "Complete work order",
   "maintenance.confirm.mediumRisk": "medium risk",
   "maintenance.confirm.body":
@@ -2435,6 +2438,7 @@ const zh: Record<keyof typeof en, string> = {
   "maintenance.tab.inProgress": "進行中",
   "maintenance.tab.overdue": "逾期",
   "maintenance.banner.degraded": "維修頁面目前為降級模式",
+  "maintenance.banner.degradedBody": "maintenance: {message}",
   "maintenance.banner.snapshotStale": "目前顯示的快照非最新",
   "maintenance.banner.snapshotStaleBody":
     "最後更新 {time} UTC，每 15 秒自動刷新（T3）。",
@@ -2456,6 +2460,8 @@ const zh: Record<keyof typeof en, string> = {
     "畫面 CTA 以 availableActions 為準 · ",
   "maintenance.meta.emptyReason": "空狀態",
   "maintenance.meta.generated": "生成時間",
+  "maintenance.meta.generatedAt": "生成時間 {time} UTC",
+  "maintenance.meta.auditTrail": "actionId {actionId} · auditId {auditId}",
   "maintenance.confirm.completeTitle": "完成工單",
   "maintenance.confirm.mediumRisk": "中度風險",
   "maintenance.confirm.body":

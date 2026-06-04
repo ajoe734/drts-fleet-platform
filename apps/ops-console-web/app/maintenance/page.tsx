@@ -1001,7 +1001,9 @@ export default function MaintenancePage() {
             tone="danger"
             icon="warn"
             title={t("maintenance.banner.degraded")}
-            body={`maintenance: ${loadError}`}
+            body={t("maintenance.banner.degradedBody", {
+              message: loadError,
+            })}
           />
         ) : null}
 
@@ -1188,7 +1190,9 @@ export default function MaintenancePage() {
           {t("maintenance.meta.actionsFromAvailableActions")}
           {t("maintenance.meta.generated")} ·{" "}
           {generatedAtMs > 0
-            ? `${formatLongDateTime(new Date(generatedAtMs).toISOString())} UTC`
+            ? t("maintenance.meta.generatedAt", {
+                time: formatLongDateTime(new Date(generatedAtMs).toISOString()),
+              })
             : "—"}
         </div>
       </div>
@@ -1289,7 +1293,10 @@ export default function MaintenancePage() {
               fontFamily: theme.monoFamily,
             }}
           >
-            {`actionId ${toast.actionId} · auditId ${toast.auditId}`}
+            {t("maintenance.meta.auditTrail", {
+              actionId: toast.actionId,
+              auditId: toast.auditId,
+            })}
           </span>
         </div>
       ) : null}
