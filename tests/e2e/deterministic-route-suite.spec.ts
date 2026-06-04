@@ -191,7 +191,7 @@ const ADMIN_ROUTES: RouteSpec[] = [
     surface: "admin",
     tabLabels: [/^(?:Versions|版本)/i, /^(?:Placards|牌貼)/i],
     modalTrigger: /Create|Draft|建立|草稿/i,
-    buttonLabel: /Create|Draft|建立|Publish|發佈|Placard/i,
+    buttonLabel: /Create|Draft|建立|草稿/i,
   },
   {
     name: "pricing",
@@ -208,7 +208,7 @@ const ADMIN_ROUTES: RouteSpec[] = [
       /Settlement matrix|Matrix|結算矩陣/i,
       /Tenant invoices|Invoices|租戶發票/i,
     ],
-    buttonLabel: /Assign|Resolve|Reopen|Filter|指派|處理/i,
+    buttonLabel: /Filter|Refresh|篩選|重新整理/i,
   },
   {
     name: "reimbursements",
@@ -220,7 +220,7 @@ const ADMIN_ROUTES: RouteSpec[] = [
     name: "reimbursement detail",
     path: "/payments/reimbursements/batch-001",
     surface: "admin",
-    buttonLabel: /Approve|Export|Mark|核准|匯出|付款/i,
+    buttonLabel: /Export|匯出/i,
   },
   {
     name: "adapter registry",
@@ -466,21 +466,37 @@ async function exerciseModal(page: Page, spec: RouteSpec) {
 
 async function exerciseNonDestructiveButton(page: Page, spec: RouteSpec) {
   const mainButtons = page.locator("main button");
+  // Any of these tokens in a button's text marks it as state-mutating, so the
+  // suite must never click it as the "non-destructive action" probe. Includes
+  // stateful workflow verbs (approve/assign/resolve/reopen/mark) alongside the
+  // hard-destructive ones, in both English and Chinese.
   const destructiveName =
-    /delete|remove|deactivate|archive|revoke|disable|terminate|reject|publish|rollback|close|刪除|停用|終止|退回|駁回|發佈|關閉/i;
+    /delete|remove|deactivate|archive|revoke|disable|terminate|reject|publish|rollback|close|approve|assign|resolve|reopen|mark|刪除|停用|終止|退回|駁回|發佈|關閉|核准|付款|指派|處理/i;
   const tabNames = spec.tabLabels ?? [];
   const candidates: Locator[] = [];
+
+  const isSafeButtonName = (name: string) =>
+    Boolean(name) &&
+    !destructiveName.test(name) &&
+    !tabNames.some((pattern) => pattern.test(name));
 
   if (spec.buttonLabel) {
     const preferred = page
       .getByRole("button", { name: spec.buttonLabel })
       .first();
-    if (
-      (await preferred.count()) > 0 &&
-      (await preferred.isVisible().catch(() => false)) &&
-      (await preferred.isEnabled().catch(() => false))
-    ) {
-      candidates.push(preferred);
+    // The preferred (regex-matched) button must pass the SAME destructive/tab
+    // filters as the generic fallback below — otherwise a route regex that
+    // happens to match e.g. Publish/Assign/Approve would click a destructive
+    // control and bypass the non-destructive-button acceptance.
+    if ((await preferred.count()) > 0) {
+      const name = (await preferred.innerText().catch(() => "")).trim();
+      if (
+        isSafeButtonName(name) &&
+        (await preferred.isVisible().catch(() => false)) &&
+        (await preferred.isEnabled().catch(() => false))
+      ) {
+        candidates.push(preferred);
+      }
     }
   }
 
@@ -488,13 +504,7 @@ async function exerciseNonDestructiveButton(page: Page, spec: RouteSpec) {
   for (let index = 0; index < count; index += 1) {
     const button = mainButtons.nth(index);
     const name = (await button.innerText().catch(() => "")).trim();
-    if (!name) {
-      continue;
-    }
-    if (destructiveName.test(name)) {
-      continue;
-    }
-    if (tabNames.some((pattern) => pattern.test(name))) {
+    if (!isSafeButtonName(name)) {
       continue;
     }
     if (!(await button.isVisible()) || !(await button.isEnabled())) {
