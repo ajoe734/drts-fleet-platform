@@ -23,6 +23,7 @@ The API runtime owns these env vars:
 | `PLATFORM_ADMIN_ASSISTANT_ENABLED`      | master feature flag for assistant backend routes/services | `false`           |
 | `LLM_GATEWAY_PROVIDER`                  | requested provider slug (`mock`, `openai`, etc.)          | `mock`            |
 | `LLM_GATEWAY_API_KEY`                   | provider credential from Secret Manager                   | unset             |
+| `LLM_GATEWAY_BASE_URL`                  | optional provider-compatible base URL override            | unset             |
 | `LLM_GATEWAY_CHAT_MODEL`                | primary assistant response model                          | `mock-chat-v1`    |
 | `LLM_GATEWAY_SUMMARIZER_MODEL`          | cheaper summarization / compression model                 | `mock-summary-v1` |
 | `LLM_GATEWAY_DAILY_BUDGET_USD`          | soft daily budget ceiling                                 | `25`              |
@@ -36,6 +37,7 @@ The API runtime owns these env vars:
 - `mock` is the default provider.
 - If a real provider is requested without `LLM_GATEWAY_API_KEY`, the runtime falls back to `mock` in local development and CI.
 - If production enables the assistant with a non-`mock` provider and no key, startup must fail fast.
+- `LLM_GATEWAY_BASE_URL` may point at an OpenAI-compatible gateway such as OpenRouter or a local Ollama bridge.
 
 This keeps local/CI test surfaces deterministic while still making production misconfiguration visible.
 
@@ -89,6 +91,7 @@ Only the API Cloud Run service account should receive `roles/secretmanager.secre
 3. Set `PLATFORM_ADMIN_ASSISTANT_ENABLED=false` plus `LLM_GATEWAY_PROVIDER=mock` by default until a real provider rollout is approved.
 4. When enabling a real provider, set the requested provider slug and model names in the API service env, then store the real API key only in the API secret.
 5. Propagate only `NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED` to `platform-admin-web`.
-6. Keep `NEXT_PUBLIC_API_URL` unchanged so the frontend continues talking to the normal control-plane API origin.
+6. `deploy-dev.yml` may auto-switch dev API runtime from `mock` to the configured real provider when `drts-dev-llm-gateway-api-key` exists; without that secret it stays on `mock`.
+7. Keep `NEXT_PUBLIC_API_URL` unchanged so the frontend continues talking to the normal control-plane API origin.
 
 This section is the deployment baseline for dev, staging, and prod until a later task introduces real assistant routes and persistence.

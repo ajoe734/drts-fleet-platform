@@ -279,6 +279,8 @@ test.describe("platform admin assistant overlay", () => {
 
     await gotoShellRoute(page, "/payments", { assistantEnabled: true });
 
+    await page.getByRole("button", { name: /Open issue|開立 issue/ }).click();
+
     await page.getByTestId("platform-assistant-launcher").click();
     const panel = page.getByTestId("platform-assistant-panel");
     await expect(panel).toBeVisible();
@@ -303,6 +305,16 @@ test.describe("platform admin assistant overlay", () => {
     ).toBeVisible();
     expect(mockState.lastMessage).toContain("[Platform Admin route context]");
     expect(mockState.lastMessage).toContain("Path: /payments");
+    expect(mockState.lastMessage).toContain("Active tab: recon");
+    expect(mockState.lastMessage).toContain("[Platform Admin page context]");
+    expect(mockState.lastMessage).toContain("reconciliation-issues");
+    expect(mockState.lastMessage).toContain("reconciliation-issue-create");
+    expect(mockState.lastMessage).toContain(
+      "validationErrors=summary:required",
+    );
+    expect(mockState.lastMessage).toContain(
+      "Available actions: refresh_payments",
+    );
   });
 
   test("route-context smoke keeps one shell/sidebar across key routes", async ({
