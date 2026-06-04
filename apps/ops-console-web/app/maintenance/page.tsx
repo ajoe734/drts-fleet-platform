@@ -805,7 +805,7 @@ export default function MaintenancePage() {
       ),
     },
     {
-      h: "STATUS",
+      h: t("maintenance.col.status"),
       w: 130,
       r: (row) => (
         <Pill theme={theme} tone={statusTone(row.effectiveStatus)} dot>
