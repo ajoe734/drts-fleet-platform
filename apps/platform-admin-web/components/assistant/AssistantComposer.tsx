@@ -2,10 +2,10 @@
 
 import type { KeyboardEvent } from "react";
 import { SendHorizontal, Sparkles } from "lucide-react";
+import { useTranslation } from "@/lib/i18n";
 import {
   assistantCardStyle,
   assistantMutedTextStyle,
-  assistantStateLabel,
   assistantStatusTone,
   assistantTheme,
   type AssistantViewState,
@@ -19,23 +19,23 @@ const busyStates: AssistantViewState[] = [
   "executing",
 ];
 
-function helperCopy(state: AssistantViewState) {
+function helperCopyKey(state: AssistantViewState) {
   switch (state) {
     case "thinking":
-      return "Assistant is drafting the next response.";
+      return "assistant.composer.helper.thinking";
     case "planning":
-      return "Plan is being prepared for review.";
+      return "assistant.composer.helper.planning";
     case "awaiting_confirmation":
-      return "Execution is paused until you confirm.";
+      return "assistant.composer.helper.awaitingConfirmation";
     case "executing":
-      return "Command is running; avoid duplicate submissions.";
+      return "assistant.composer.helper.executing";
     case "receipt":
-      return "Last action completed. You can continue the conversation.";
+      return "assistant.composer.helper.receipt";
     case "error":
-      return "The last turn failed. Adjust the request or retry.";
+      return "assistant.composer.helper.error";
     case "idle":
     default:
-      return "Use Enter to submit or Shift+Enter for a new line.";
+      return "assistant.composer.helper.idle";
   }
 }
 
@@ -56,6 +56,7 @@ export function AssistantComposer({
   placeholder?: string;
   submitLabel?: string;
 }) {
+  const { t } = useTranslation();
   const isBusy = busyStates.includes(state);
   const submitDisabled = disabled || isBusy || value.trim().length === 0;
 
@@ -83,11 +84,11 @@ export function AssistantComposer({
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Sparkles size={16} color={assistantTheme.accent} />
             <strong style={{ color: assistantTheme.text, fontSize: 15.5 }}>
-              Platform Admin assistant
+              {t("assistant.common.name")}
             </strong>
           </div>
           <Pill theme={assistantTheme} tone={assistantStatusTone(state)}>
-            {assistantStateLabel(state)}
+            {t(`assistant.state.${state}`)}
           </Pill>
         </div>
 
@@ -95,7 +96,12 @@ export function AssistantComposer({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={
+            placeholder ===
+            "Ask Platform Admin to inspect, plan, or execute a governed action..."
+              ? t("assistant.composer.placeholder")
+              : placeholder
+          }
           rows={4}
           disabled={disabled}
           style={{
@@ -125,7 +131,7 @@ export function AssistantComposer({
             flexWrap: "wrap",
           }}
         >
-          <div style={assistantMutedTextStyle}>{helperCopy(state)}</div>
+          <div style={assistantMutedTextStyle}>{t(helperCopyKey(state))}</div>
           <button
             type="button"
             onClick={onSubmit}
@@ -148,7 +154,11 @@ export function AssistantComposer({
             }}
           >
             <SendHorizontal size={15} />
-            {isBusy ? "Waiting..." : submitLabel}
+            {isBusy
+              ? t("assistant.composer.waiting")
+              : submitLabel === "Send"
+                ? t("assistant.composer.submit")
+                : submitLabel}
           </button>
         </div>
       </div>

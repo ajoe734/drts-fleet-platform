@@ -121,10 +121,20 @@ export function assistantStatusTone(state: AssistantViewState) {
 
 export function assistantStateLabel(state: AssistantViewState) {
   switch (state) {
+    case "idle":
+      return "Idle";
+    case "thinking":
+      return "Thinking";
+    case "planning":
+      return "Planning";
     case "awaiting_confirmation":
-      return "awaiting confirmation";
-    default:
-      return state.replaceAll("_", " ");
+      return "Awaiting confirmation";
+    case "executing":
+      return "Executing";
+    case "receipt":
+      return "Receipt";
+    case "error":
+      return "Error";
   }
 }
 

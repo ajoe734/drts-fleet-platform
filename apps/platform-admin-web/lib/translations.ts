@@ -62,6 +62,92 @@ const en = {
   "common.deleteDraft": "Delete draft",
   "common.cancelDraft": "Cancel draft",
 
+  // ── Assistant ──
+  "assistant.common.name": "Platform Admin assistant",
+  "assistant.state.idle": "Idle",
+  "assistant.state.thinking": "Thinking",
+  "assistant.state.planning": "Planning",
+  "assistant.state.awaiting_confirmation": "Awaiting confirmation",
+  "assistant.state.executing": "Executing",
+  "assistant.state.receipt": "Receipt",
+  "assistant.state.error": "Error",
+  "assistant.risk.low": "Low risk",
+  "assistant.risk.medium": "Medium risk",
+  "assistant.risk.high": "High risk",
+  "assistant.stepStatus.pending": "Pending",
+  "assistant.stepStatus.in_progress": "In progress",
+  "assistant.stepStatus.completed": "Completed",
+  "assistant.stepStatus.blocked": "Blocked",
+  "assistant.composer.placeholder":
+    "Ask Platform Admin to inspect, plan, or execute a governed action...",
+  "assistant.composer.submit": "Send",
+  "assistant.composer.waiting": "Waiting...",
+  "assistant.composer.helper.idle":
+    "Use Enter to submit or Shift+Enter for a new line.",
+  "assistant.composer.helper.thinking":
+    "Assistant is drafting the next response.",
+  "assistant.composer.helper.planning": "Plan is being prepared for review.",
+  "assistant.composer.helper.awaitingConfirmation":
+    "Execution is paused until you confirm.",
+  "assistant.composer.helper.executing":
+    "Command is running; avoid duplicate submissions.",
+  "assistant.composer.helper.receipt":
+    "Last action completed. You can continue the conversation.",
+  "assistant.composer.helper.error":
+    "The last turn failed. Adjust the request or retry.",
+  "assistant.message.role.user": "Operator",
+  "assistant.message.role.system": "System",
+  "assistant.message.role.assistant": "Assistant",
+  "assistant.message.empty.title": "Platform Admin assistant is ready",
+  "assistant.message.empty.body":
+    "Ask for an analysis, review a plan, or approve a governed action to start the conversation.",
+  "assistant.message.banner.thinking":
+    "Assistant is analyzing current platform context.",
+  "assistant.message.banner.planning":
+    "Assistant is preparing a governed action plan for review.",
+  "assistant.message.banner.awaitingConfirmation":
+    "Execution is paused until an operator confirms the action.",
+  "assistant.message.banner.executing":
+    "Assistant is executing the approved action.",
+  "assistant.message.banner.receipt":
+    "Execution completed and a receipt has been recorded.",
+  "assistant.message.banner.error": "Execution error",
+  "assistant.message.error.title": "Assistant error",
+  "assistant.plan.ariaLabel": "Assistant action plan",
+  "assistant.plan.field.resource": "Resource",
+  "assistant.plan.field.whyNow": "Why now",
+  "assistant.plan.attention": "Attention",
+  "assistant.confirmation.ariaLabel": "Assistant confirmation panel",
+  "assistant.confirmation.targetResource": "Target resource",
+  "assistant.confirmation.reasonLabel": "Execution reason",
+  "assistant.confirmation.reasonPlaceholder.required":
+    "Required for high-risk execution.",
+  "assistant.confirmation.reasonPlaceholder.optional":
+    "Optional operator note.",
+  "assistant.confirmation.reasonHint.required":
+    "This action cannot execute until a non-empty reason is supplied.",
+  "assistant.confirmation.reasonHint.optional":
+    "Reason will be attached to the audit trail when provided.",
+  "assistant.confirmation.error.reasonRequired":
+    "Reason is required before this action can run.",
+  "assistant.confirmation.error.unavailable":
+    "This action is currently unavailable.",
+  "assistant.confirmation.cancel": "Cancel",
+  "assistant.confirmation.confirm": "Confirm and execute",
+  "assistant.confirmation.executing": "Executing...",
+  "assistant.receipt.ariaLabel": "Assistant action receipt",
+  "assistant.receipt.title": "Action receipt",
+  "assistant.receipt.field.actionId": "Action ID",
+  "assistant.receipt.field.requestId": "Request ID",
+  "assistant.receipt.field.auditId": "Audit ID",
+  "assistant.receipt.field.resource": "Resource",
+  "assistant.receipt.field.status": "Status",
+  "assistant.receipt.status.accepted": "Accepted",
+  "assistant.receipt.status.completed": "Completed",
+  "assistant.receipt.status.failed": "Failed",
+  "assistant.receipt.status.queued": "Queued",
+  "assistant.receipt.viewAuditEvidence": "View audit evidence",
+
   // ── Home ──
   "home.title": "Platform Administration",
   "home.subtitle": "Full control plane for platform-wide operations",
@@ -841,6 +927,78 @@ const zh: typeof en = {
   "common.confirmPublish": "確認發布",
   "common.deleteDraft": "刪除草稿",
   "common.cancelDraft": "取消草稿",
+
+  // ── Assistant ──
+  "assistant.common.name": "平台管理助手",
+  "assistant.state.idle": "待命",
+  "assistant.state.thinking": "分析中",
+  "assistant.state.planning": "規劃中",
+  "assistant.state.awaiting_confirmation": "等待確認",
+  "assistant.state.executing": "執行中",
+  "assistant.state.receipt": "收據",
+  "assistant.state.error": "錯誤",
+  "assistant.risk.low": "低風險",
+  "assistant.risk.medium": "中風險",
+  "assistant.risk.high": "高風險",
+  "assistant.stepStatus.pending": "待處理",
+  "assistant.stepStatus.in_progress": "進行中",
+  "assistant.stepStatus.completed": "已完成",
+  "assistant.stepStatus.blocked": "已阻塞",
+  "assistant.composer.placeholder":
+    "請要求平台管理助手檢查、規劃或執行受治理動作……",
+  "assistant.composer.submit": "送出",
+  "assistant.composer.waiting": "等待中...",
+  "assistant.composer.helper.idle": "按 Enter 送出，按 Shift+Enter 換行。",
+  "assistant.composer.helper.thinking": "助手正在草擬下一則回覆。",
+  "assistant.composer.helper.planning": "正在準備供審閱的執行計畫。",
+  "assistant.composer.helper.awaitingConfirmation": "執行已暫停，等待你確認。",
+  "assistant.composer.helper.executing": "指令正在執行中，請避免重複送出。",
+  "assistant.composer.helper.receipt": "上一個動作已完成，你可以繼續對話。",
+  "assistant.composer.helper.error": "上一輪失敗，請調整請求或重試。",
+  "assistant.message.role.user": "操作員",
+  "assistant.message.role.system": "系統",
+  "assistant.message.role.assistant": "助手",
+  "assistant.message.empty.title": "平台管理助手已就緒",
+  "assistant.message.empty.body":
+    "請要求分析、審閱計畫，或核准受治理動作以開始對話。",
+  "assistant.message.banner.thinking": "助手正在分析目前的平台內容脈絡。",
+  "assistant.message.banner.planning": "助手正在準備供審閱的受治理動作計畫。",
+  "assistant.message.banner.awaitingConfirmation":
+    "執行已暫停，等待操作員確認此動作。",
+  "assistant.message.banner.executing": "助手正在執行已核准的動作。",
+  "assistant.message.banner.receipt": "執行已完成，且已記錄收據。",
+  "assistant.message.banner.error": "執行錯誤",
+  "assistant.message.error.title": "助手錯誤",
+  "assistant.plan.ariaLabel": "助手動作計畫",
+  "assistant.plan.field.resource": "資源",
+  "assistant.plan.field.whyNow": "現在執行原因",
+  "assistant.plan.attention": "注意",
+  "assistant.confirmation.ariaLabel": "助手確認面板",
+  "assistant.confirmation.targetResource": "目標資源",
+  "assistant.confirmation.reasonLabel": "執行原因",
+  "assistant.confirmation.reasonPlaceholder.required": "高風險執行必填。",
+  "assistant.confirmation.reasonPlaceholder.optional": "可選填操作員備註。",
+  "assistant.confirmation.reasonHint.required":
+    "提供非空白原因前，無法執行此動作。",
+  "assistant.confirmation.reasonHint.optional":
+    "若有提供原因，將附加到稽核軌跡中。",
+  "assistant.confirmation.error.reasonRequired": "執行此動作前必須提供原因。",
+  "assistant.confirmation.error.unavailable": "此動作目前無法使用。",
+  "assistant.confirmation.cancel": "取消",
+  "assistant.confirmation.confirm": "確認並執行",
+  "assistant.confirmation.executing": "執行中...",
+  "assistant.receipt.ariaLabel": "助手動作收據",
+  "assistant.receipt.title": "動作收據",
+  "assistant.receipt.field.actionId": "動作 ID",
+  "assistant.receipt.field.requestId": "請求 ID",
+  "assistant.receipt.field.auditId": "稽核 ID",
+  "assistant.receipt.field.resource": "資源",
+  "assistant.receipt.field.status": "狀態",
+  "assistant.receipt.status.accepted": "已接受",
+  "assistant.receipt.status.completed": "已完成",
+  "assistant.receipt.status.failed": "失敗",
+  "assistant.receipt.status.queued": "已排隊",
+  "assistant.receipt.viewAuditEvidence": "查看稽核證據",
 
   // ── Home ──
   "home.title": "平台管理",
