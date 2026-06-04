@@ -10,6 +10,13 @@ import {
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  getHealthAdapterSourceLabel,
+  getHealthAlertRouteLabel,
+  getHealthAlertTitle,
+  getHealthPageCopy,
+  getHealthStatusLabel,
+} from "@/lib/translations";
 import type {
   AdapterHealthRecord,
   OperationalAdapterDetailRecord,
@@ -266,47 +273,26 @@ function formatAlertMeasure(
 function formatAdapterSource(
   locale: "en" | "zh",
   platformCode: string,
-  t: (key: string, params?: Record<string, string | number>) => string,
 ): string {
   const normalized = platformCode.replace(/[_-]+/g, " ").trim();
   const title = normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
-  return locale === "en"
-    ? title
-    : t("health.adapter.sourceSuffix", { source: title });
-}
-
-function statusLabel(
-  t: (key: string) => string,
-  status: string,
-): string {
-  const key = `health.status.${status}`;
-  const value = t(key);
-  return value === key ? status.replace(/_/g, " ") : value;
+  return locale === "en" ? title : getHealthAdapterSourceLabel(locale, title);
 }
 
 function formatAlertTitle(
-  t: (key: string) => string,
+  locale: "en" | "zh",
   key: OperationalAlertRecord["key"],
 ): string {
-  const entry = t(`health.alert.${key}.title`);
-  return entry === `health.alert.${key}.title` ? key : entry;
+  return getHealthAlertTitle(locale, key);
 }
 
 function formatAlertRoute(
-  t: (key: string) => string,
+  locale: "en" | "zh",
   routes: OperationalAlertRecord["routes"],
 ): string {
-  const mapped = routes.map(
-    (route: OperationalAlertRecord["routes"][number]) => {
-      return t(
-        route === "platform"
-          ? "health.routeLabel.platform"
-          : "health.routeLabel.ops",
-      );
-    },
-  );
-
-  return mapped.join(" · ");
+  return routes
+    .map((route) => getHealthAlertRouteLabel(locale, route))
+    .join(" · ");
 }
 
 function buildAlertHref(alert: OperationalAlertRecord): string {
@@ -347,21 +333,21 @@ function mergeAdapterDetails(
 
 function buildCanvasTabs(
   activeAlertsCount: number,
-  t: (key: string, params?: Record<string, string | number>) => string,
+  copy: ReturnType<typeof getHealthPageCopy>,
 ): Record<HealthTabKey, ReactNode> {
   const suffix = activeAlertsCount > 0 ? ` · ${activeAlertsCount}` : "";
 
   return {
-    alerts: t("health.tab.alertsWithCount", { suffix }),
-    dispatch: t("health.tab.dispatch"),
-    webhook: t("health.tab.webhook"),
-    filing: t("health.tab.filing"),
-    adapters: t("health.tab.adaptersInventory"),
+    alerts: copy.tab.alertsWithCount(suffix),
+    dispatch: copy.tab.dispatch,
+    webhook: copy.tab.webhook,
+    filing: copy.tab.filing,
+    adapters: copy.tab.adapters,
   };
 }
 
 export default function HealthPage() {
-  const { locale, t } = useTranslation();
+  const { locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [adapters, setAdapters] = useState<AdapterHealthRecord[]>([]);
   const [observability, setObservability] =
@@ -371,57 +357,7 @@ export default function HealthPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const copy = useMemo(
-    () => ({
-      title: t("health.title"),
-      subtitle: t("health.subtitle"),
-      refresh: t("common.refresh"),
-      alertsTitle: t("health.alertsTitle"),
-      alertsEmpty: t("health.alertsEmpty"),
-      adaptersTitle: t("health.adaptersTitle"),
-      adaptersEmpty: t("health.adaptersEmpty"),
-      dispatchTitle: t("health.dispatchTitle"),
-      webhookTitle: t("health.webhookTitle"),
-      filingTitle: t("health.filingTitle"),
-      dispatchEmpty: t("health.dispatchEmpty"),
-      webhookEmpty: t("health.webhookEmpty"),
-      filingEmpty: t("health.filingEmpty"),
-      loadingAlerts: t("health.loadingAlerts"),
-      loadingAdapters: t("health.loadingAdapters"),
-      openAlert: t("health.openAlert"),
-      metricsNote: t("health.metricsNote"),
-      refreshError: t("health.refreshError"),
-      kpis: {
-        dispatch: {
-          label: t("health.metric.dispatch.title"),
-          sub: (count: number) => t("health.metric.dispatch.note", { count }),
-        },
-        webhook: {
-          label: t("health.metric.webhook.title"),
-          sub: (count: number) => t("health.metric.webhook.note", { count }),
-        },
-        eligibility: {
-          label: t("health.metric.eligibility.title"),
-          sub: (count: number) =>
-            t("health.metric.eligibility.note", { count }),
-        },
-        reporting: {
-          label: t("health.metric.reporting.title"),
-          sub: (count: number) => t("health.metric.reporting.note", { count }),
-        },
-      },
-      adapterColumns: {
-        adapter: t("health.adapterColumns.adapter"),
-        source: t("health.adapterColumns.source"),
-        kind: t("health.adapterColumns.kind"),
-        status: t("health.adapterColumns.status"),
-        latency: t("health.adapterColumns.latency"),
-        lastEvent: t("health.adapterColumns.lastEvent"),
-        orders24h: t("health.adapterColumns.orders24h"),
-      },
-    }),
-    [t],
-  );
+  const copy = useMemo(() => getHealthPageCopy(locale), [locale]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -496,7 +432,7 @@ export default function HealthPage() {
 
     return merged.map((adapter) => ({
       adapter: adapter.platformCode,
-      source: formatAdapterSource(locale, adapter.platformCode, t),
+      source: formatAdapterSource(locale, adapter.platformCode),
       kind: adapter.capabilitySummary.mode.toUpperCase(),
       status: adapter.status,
       latency: "—",
@@ -510,14 +446,13 @@ export default function HealthPage() {
         fallbackOrders > 0
           ? fallbackOrders.toLocaleString(locale === "en" ? "en-US" : "zh-TW")
           : "—",
-      note: adapter.lastError ?? statusLabel(t, adapter.reason),
+      note: adapter.lastError ?? getHealthStatusLabel(locale, adapter.reason),
     }));
   }, [
     adapters,
     locale,
     observability.adapterDetails,
     observability.forwarderOps.totalForwardedOrders,
-    t,
   ]);
 
   const adapterColumns = useMemo<CanvasTableColumn<AdapterInventoryRow>[]>(
@@ -539,7 +474,7 @@ export default function HealthPage() {
         w: 132,
         r: (row) => (
           <CanvasPill theme={theme} tone={alertTone(row.status)} dot>
-            {statusLabel(t, row.status)}
+            {getHealthStatusLabel(locale, row.status)}
           </CanvasPill>
         ),
       },
@@ -559,17 +494,17 @@ export default function HealthPage() {
         w: 110,
       },
     ],
-    [copy.adapterColumns, t],
+    [copy.adapterColumns, locale],
   );
 
   const tabNodes = useMemo(
-    () => buildCanvasTabs(activeAlerts.length, t),
-    [activeAlerts.length, t],
+    () => buildCanvasTabs(activeAlerts.length, copy),
+    [activeAlerts.length, copy],
   );
 
   const dispatchSummary = [
     {
-      label: t("health.summary.dispatch.queueDepth"),
+      label: copy.summary.dispatch.queueDepth,
       value: formatMetricValue(
         locale,
         observability.dispatch.queueDepth,
@@ -577,7 +512,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: t("health.summary.dispatch.redispatchOrders"),
+      label: copy.summary.dispatch.redispatchOrders,
       value: formatMetricValue(
         locale,
         observability.dispatch.redispatchOrders,
@@ -585,7 +520,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: t("health.summary.dispatch.exceptionHolds"),
+      label: copy.summary.dispatch.exceptionHolds,
       value: formatMetricValue(
         locale,
         observability.dispatch.exceptionHoldOrders,
@@ -593,7 +528,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: t("health.summary.dispatch.failedOrders"),
+      label: copy.summary.dispatch.failedOrders,
       value: formatMetricValue(
         locale,
         observability.dispatch.dispatchFailedOrders,
@@ -604,7 +539,7 @@ export default function HealthPage() {
 
   const webhookSummary = [
     {
-      label: t("health.summary.webhook.activeEndpoints"),
+      label: copy.summary.webhook.activeEndpoints,
       value: formatMetricValue(
         locale,
         observability.webhook.activeEndpoints,
@@ -612,7 +547,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: t("health.summary.webhook.disabledEndpoints"),
+      label: copy.summary.webhook.disabledEndpoints,
       value: formatMetricValue(
         locale,
         observability.webhook.disabledEndpoints,
@@ -620,7 +555,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: t("health.summary.webhook.queuedDeliveries"),
+      label: copy.summary.webhook.queuedDeliveries,
       value: formatMetricValue(
         locale,
         observability.webhook.queuedDeliveries,
@@ -628,7 +563,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: t("health.summary.webhook.oldestQueuedLag"),
+      label: copy.summary.webhook.oldestQueuedLag,
       value: formatMetricValue(
         locale,
         observability.webhook.oldestQueuedDeliveryLagMinutes,
@@ -639,7 +574,7 @@ export default function HealthPage() {
 
   const filingSummary = [
     {
-      label: t("health.summary.filing.reportingQueuedJobs"),
+      label: copy.summary.filing.reportingQueuedJobs,
       value: formatMetricValue(
         locale,
         observability.reporting.queuedJobs,
@@ -647,7 +582,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: t("health.summary.filing.recordingBacklog"),
+      label: copy.summary.filing.recordingBacklog,
       value: formatMetricValue(
         locale,
         observability.recording.pendingOrders,
@@ -655,7 +590,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: t("health.summary.filing.manualReviewQueue"),
+      label: copy.summary.filing.manualReviewQueue,
       value: formatMetricValue(
         locale,
         observability.eligibility.manualReviewQueue,
@@ -663,7 +598,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: t("health.summary.filing.eligibilityFailures24h"),
+      label: copy.summary.filing.eligibilityFailures24h,
       value: formatMetricValue(
         locale,
         observability.eligibility.recentFailureCount24h,
@@ -801,13 +736,13 @@ export default function HealthPage() {
                           tone={alertTone(alert.state)}
                           dot
                         >
-                          {formatAlertRoute(t, alert.routes)}
+                          {formatAlertRoute(locale, alert.routes)}
                         </CanvasPill>
                         <div style={alertTextStyle}>
                           <div style={alertMetaStyle}>
-                            <span>{formatAlertTitle(t, alert.key)}</span>
+                            <span>{formatAlertTitle(locale, alert.key)}</span>
                             <span style={alertSecondaryStyle}>
-                              {t("health.alert.measurement", {
+                              {copy.alertMeasurement({
                                 measured,
                                 threshold,
                               })}
@@ -917,9 +852,7 @@ export default function HealthPage() {
 
         <CanvasCard
           theme={theme}
-          title={`${copy.adaptersTitle} · ${t("health.adapter.entries", {
-            count: adapterRows.length,
-          })}`}
+          title={`${copy.adaptersTitle} · ${copy.adapterEntries(adapterRows.length)}`}
           subtitle={copy.metricsNote}
           padding={0}
         >

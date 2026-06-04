@@ -5,7 +5,14 @@ import type { AssistantEntityRef } from "@/components/assistant/assistant-types"
 import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import { t as translate } from "@/lib/translations";
+import {
+  getNoticeHistoryDeliveryLabel,
+  getNoticeSeverityLabel,
+  getNoticeStatusLabel,
+  getNoticeWindowNotScheduled,
+  getNoticesAudienceLabel,
+  getNoticesPageCopy,
+} from "@/lib/translations";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -146,45 +153,32 @@ function statusTone(status: PlatformNoticeStatus): CanvasTone {
 
 function audienceTargets(
   audience: PlatformNoticeRecord["targetAudience"],
-  t: (key: string) => string,
+  locale: "en" | "zh",
 ) {
-  switch (audience) {
-    case "all":
-      return t("notices.maintenance.previewTargets")
-        .replace(/^Target surfaces:\s*/u, "")
-        .replace(/^目標對象：/u, "");
-    case "tenants":
-      return t("notices.audience.tenants");
-    case "ops":
-      return t("notices.audience.ops");
-    case "drivers":
-      return t("notices.audience.drivers");
-    default:
-      return audience;
-  }
+  return getNoticesAudienceLabel(locale, audience);
 }
 
 function toSeverityLabel(
   severity: PlatformNoticeSeverity,
-  t: (key: string) => string,
+  locale: "en" | "zh",
 ): string {
-  return t(`notices.severity.${severity}`);
+  return getNoticeSeverityLabel(locale, severity);
 }
 
 function toStatusLabel(
   status: PlatformNoticeStatus,
-  t: (key: string) => string,
+  locale: "en" | "zh",
 ): string {
-  return t(`notices.status.${status}`);
+  return getNoticeStatusLabel(locale, status);
 }
 
 function formatWindow(
   start: string | null,
   end: string | null,
-  t: (key: string) => string,
+  locale: "en" | "zh",
 ) {
   if (!start && !end) {
-    return t("notices.window.notScheduled");
+    return getNoticeWindowNotScheduled(locale);
   }
   if (start && end) {
     return `${formatDateTime(start)} - ${formatDateTime(end)}`;
@@ -208,75 +202,10 @@ function fromDatetimeLocalValue(value: string) {
 }
 
 export default function NoticesPage() {
-  const { t } = useTranslation();
+  const { locale } = useTranslation();
   const client = usePlatformAdminClient();
 
-  const copy = useMemo(
-    () => ({
-      title: t("notices.title"),
-      subtitle: t("notices.subtitle.detail"),
-      notices: t("notices.tab.notices"),
-      maintenance: t("notices.tab.maintenance"),
-      history: t("notices.tab.history"),
-      createNotice: t("notices.createNotice"),
-      enterMaintenance: t("notices.enterMaintenance"),
-      refresh: t("common.refresh"),
-      refreshing: t("notices.refreshing"),
-      emptyNotices: t("notices.emptyDetailed"),
-      emptyHistory: t("notices.emptyHistory"),
-      noticeComposerTitle: t("notices.composer.title"),
-      noticeComposerSubtitle: t("notices.composer.subtitle"),
-      noticeTitle: t("notices.col.title"),
-      noticeBody: t("notices.form.body"),
-      noticeAudience: t("notices.col.audience"),
-      noticeSeverity: t("notices.col.severity"),
-      publishNotice: t("notices.publishNotice"),
-      publishing: t("notices.publishing"),
-      activeNoticeGuardrailTitle: t("notices.guardrail.title"),
-      activeNoticeGuardrailBody: t("notices.guardrail.body"),
-      currentMaintenance: t("notices.maintenance.currentTitle"),
-      currentMaintenanceSubtitle: t("notices.maintenance.currentSubtitle"),
-      internalReason: t("notices.maintenance.internalReason"),
-      scheduledStart: t("notices.maintenance.scheduledStart"),
-      scheduledEnd: t("notices.maintenance.scheduledEnd"),
-      saveMaintenance: t("notices.maintenance.save"),
-      previewTitle: t("notices.maintenance.previewTitle"),
-      previewFallback: t("notices.maintenance.previewFallback"),
-      previewTargets: t("notices.maintenance.previewTargets"),
-      reasonRequired: t("notices.maintenance.reasonRequired"),
-      confirmTitle: t("notices.maintenance.confirmTitle"),
-      confirmBody: t("notices.maintenance.confirmBody"),
-      confirmReasonLabel: t("notices.maintenance.confirmReasonLabel"),
-      confirmCancel: t("common.cancel"),
-      confirmApply: t("notices.maintenance.confirmApply"),
-      resolving: t("notices.updating"),
-      resolve: t("notices.resolve"),
-      maintenanceEnabled: t("notices.maintEnabled"),
-      maintenanceDisabled: t("notices.maintDisabled"),
-      maintenanceSummary: t("notices.maintenance.summary"),
-      reasonPlaceholder: t("notices.maintenance.reasonPlaceholder"),
-      startPlaceholder: t("notices.maintenance.startPlaceholder"),
-      endPlaceholder: t("notices.maintenance.endPlaceholder"),
-      createdAt: t("notices.col.updated"),
-      audience: t("notices.col.targets"),
-      status: t("common.status"),
-      severity: t("notices.col.severityShort"),
-      delivery: t("notices.col.delivery"),
-      broadcastAt: t("notices.col.broadcastAt"),
-      updatedBy: t("notices.col.updatedBy"),
-      window: t("notices.col.window"),
-      action: t("notices.col.action"),
-      notice: t("notices.col.notice"),
-      id: t("notices.col.id"),
-      historySubtitle: t("notices.history.subtitle"),
-      archived: t("notices.status.archived"),
-      noticeTitleRequired: t("notices.noticeTitleRequired"),
-      noticeBodyRequired: t("notices.noticeBodyRequired"),
-      maintenanceRisk: t("notices.risk.high"),
-      systemUser: t("notices.systemUser"),
-    }),
-    [t],
-  );
+  const copy = useMemo(() => getNoticesPageCopy(locale), [locale]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -359,7 +288,7 @@ export default function NoticesPage() {
     const windowLabel = formatWindow(
       fromDatetimeLocalValue(maintStart),
       fromDatetimeLocalValue(maintEnd),
-      t,
+      locale,
     );
     if (!maintEnabled && !maintReason.trim()) {
       return copy.previewFallback;
@@ -368,11 +297,11 @@ export default function NoticesPage() {
   }, [
     copy.maintenanceSummary,
     copy.previewFallback,
+    locale,
     maintEnabled,
     maintEnd,
     maintReason,
     maintStart,
-    t,
   ]);
 
   const noticeRows = useMemo<NoticeRow[]>(
@@ -382,11 +311,11 @@ export default function NoticesPage() {
         title: notice.title,
         severity: notice.severity,
         status: notice.status,
-        audience: audienceTargets(notice.targetAudience, t),
+        audience: audienceTargets(notice.targetAudience, locale),
         updated: formatDateTime(notice.updatedAt),
         source: notice,
       })),
-    [sortedNotices, t],
+    [locale, sortedNotices],
   );
 
   const historyRows = useMemo<BroadcastRow[]>(
@@ -395,18 +324,17 @@ export default function NoticesPage() {
         id: notice.noticeId.slice(0, 12),
         title: notice.title,
         severity: notice.severity,
-        targets: audienceTargets(notice.targetAudience, t),
-        delivery:
-          notice.status === "resolved"
-            ? t("notices.history.delivery.archived")
-            : notice.targetAudience === "all"
-              ? t("notices.history.delivery.all")
-              : t("notices.history.delivery.single"),
+        targets: audienceTargets(notice.targetAudience, locale),
+        delivery: getNoticeHistoryDeliveryLabel(
+          locale,
+          notice.status,
+          notice.targetAudience,
+        ),
         broadcastAt: formatDateTime(
           notice.scheduledAt ?? notice.updatedAt ?? notice.createdAt,
         ),
       })),
-    [sortedNotices, t],
+    [locale, sortedNotices],
   );
 
   const noticeColumns = useMemo<CanvasTableColumn<NoticeRow>[]>(
@@ -436,7 +364,7 @@ export default function NoticesPage() {
         w: 90,
         r: (row: NoticeRow) => (
           <CanvasPill theme={theme} tone={severityTone(row.severity)} dot>
-            {toSeverityLabel(row.severity, t)}
+            {toSeverityLabel(row.severity, locale)}
           </CanvasPill>
         ),
       },
@@ -446,7 +374,7 @@ export default function NoticesPage() {
         w: 110,
         r: (row: NoticeRow) => (
           <CanvasPill theme={theme} tone={statusTone(row.status)} dot>
-            {toStatusLabel(row.status, t)}
+            {toStatusLabel(row.status, locale)}
           </CanvasPill>
         ),
       },
@@ -484,7 +412,7 @@ export default function NoticesPage() {
       copy.resolving,
       copy.severity,
       copy.status,
-      t,
+      locale,
       resolvingNoticeId,
     ],
   );
@@ -498,7 +426,7 @@ export default function NoticesPage() {
         w: 90,
         r: (row: BroadcastRow) => (
           <CanvasPill theme={theme} tone={severityTone(row.severity)} dot>
-            {toSeverityLabel(row.severity, t)}
+            {toSeverityLabel(row.severity, locale)}
           </CanvasPill>
         ),
       },
@@ -521,7 +449,7 @@ export default function NoticesPage() {
       copy.notice,
       copy.noticeTitle,
       copy.severity,
-      t,
+      locale,
     ],
   );
 
@@ -807,14 +735,7 @@ export default function NoticesPage() {
                 {
                   code: "notices_error",
                   severity: "warning" as const,
-                  message: {
-                    zh: translate("notices.warning.operationError", "zh", {
-                      error,
-                    }),
-                    en: translate("notices.warning.operationError", "en", {
-                      error,
-                    }),
-                  },
+                  message: copy.warning.operationError(error),
                 },
               ]
             : []),
@@ -823,10 +744,7 @@ export default function NoticesPage() {
                 {
                   code: "maintenance_mode_enabled",
                   severity: "critical" as const,
-                  message: {
-                    zh: translate("notices.warning.maintenanceEnabled", "zh"),
-                    en: translate("notices.warning.maintenanceEnabled", "en"),
-                  },
+                  message: copy.warning.maintenanceEnabled(),
                 },
               ]
             : []),
@@ -912,7 +830,6 @@ export default function NoticesPage() {
     resolvingNoticeId,
     showComposer,
     showMaintenanceConfirm,
-    t,
   ]);
 
   usePlatformAdminAssistantPage(assistantBridge);
@@ -1009,12 +926,14 @@ export default function NoticesPage() {
                         }
                         style={selectStyle}
                       >
-                        <option value="info">{t("notices.severity.info")}</option>
+                        <option value="info">
+                          {copy.severityOptions.info}
+                        </option>
                         <option value="warning">
-                          {t("notices.severity.warning")}
+                          {copy.severityOptions.warning}
                         </option>
                         <option value="critical">
-                          {t("notices.severity.critical")}
+                          {copy.severityOptions.critical}
                         </option>
                       </select>
                     </CanvasField>
@@ -1034,14 +953,14 @@ export default function NoticesPage() {
                         style={selectStyle}
                       >
                         <option value="all">
-                          {audienceTargets("all", t)}
+                          {audienceTargets("all", locale)}
                         </option>
-                        <option value="ops">{t("notices.audience.ops")}</option>
+                        <option value="ops">{copy.audienceOptions.ops}</option>
                         <option value="tenants">
-                          {t("notices.audience.tenants")}
+                          {copy.audienceOptions.tenants}
                         </option>
                         <option value="drivers">
-                          {t("notices.audience.drivers")}
+                          {copy.audienceOptions.drivers}
                         </option>
                       </select>
                     </CanvasField>
@@ -1286,7 +1205,7 @@ export default function NoticesPage() {
                       value={formatWindow(
                         maintenance?.scheduledStart ?? null,
                         maintenance?.scheduledEnd ?? null,
-                        t,
+                        locale,
                       )}
                     />
                   </CanvasField>
