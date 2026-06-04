@@ -3,191 +3,206 @@
 ## Scope
 
 - Task: `I18N-OPS-04-UNBLOCK-HISTORY-REPAIR`
-- Parent: `I18N-OPS-04`
+- Parent alias in machine truth: `I18N-OPS-04`
 - Owner: `Codex`
 - Reviewer: `Codex2`
 - Audit timestamp: `2026-06-04`
 
-## Diagnosis
+## Current Diagnosis
 
-The parent is blocked by published branch ancestry contamination, not by missing
-driver i18n edits.
+The stale unblock note was diagnosing the wrong problem.
 
-1. `origin/dev` is currently at `94c3aa2d5000846b5a582a7c7eb8cd43e2de9a25`.
-2. The current owner rail for the parent is `origin/codex2/i18n-ops-04 @
-   4f5e71c92c9a8c6d7c303a45ef465876de54976c`.
-3. That owner rail does not fork directly from `origin/dev`. Its merge-base
-   with both `origin/dev` and `codex2/i18n-wp0` is the same
-   `94c3aa2d5000846b5a582a7c7eb8cd43e2de9a25`, and
-   `git rev-list --left-right --count codex2/i18n-wp0...codex2/i18n-ops-04`
-   returns `1 3`, proving the branch is stacked on top of the private WP0
-   commit `4e925b0df2073e8eccfb868b49dbc8bd7213db6a`.
-4. That inherited WP0 commit carries unrelated guard, CI, and shared
-   translation-foundation changes in `.github/workflows/ci.yml`,
-   `.husky/pre-commit`, `scripts/i18n-guard.mjs`,
-   `scripts/i18n-guard-baseline.json`, `apps/ops-console-web/lib/i18n.tsx`,
-   `apps/ops-console-web/lib/localized-labels.ts`,
-   `apps/platform-admin-web/lib/localized-labels.ts`, and both app translation
-   modules. Those surfaces are outside `I18N-OPS-04` acceptance.
-5. The reviewer rail `origin/codex/i18n-ops-04 @
-   6f8e506cfb63b022b4f52f2d45aa75ad93ad2c77` lands the same task on top of
-   clean `origin/dev` ancestry, proving the task implementation is valid while
-   the published owner ancestry is not.
-
-## Evidence
-
-### Branch and worktree state
-
-- `origin/dev @ 94c3aa2d5000846b5a582a7c7eb8cd43e2de9a25`
-- local-only reviewer worktree branch
-  `codex/i18n-ops-04-unblock-history-repair @ 94c3aa2d5000846b5a582a7c7eb8cd43e2de9a25`
-- published owner parent rail
-  `origin/codex2/i18n-ops-04 @ 4f5e71c92c9a8c6d7c303a45ef465876de54976c`
-- published reviewer parent rail
-  `origin/codex/i18n-ops-04 @ 6f8e506cfb63b022b4f52f2d45aa75ad93ad2c77`
-- prior helper audit rail
-  `origin/codex2/i18n-ops-04-unblock-history-repair @ 464e9bc985bd3207c7e49dcf4aa6f93092091d10`
-
-### Canonical change evidence
-
-- task commit
-  `6a32c1d578b1e9f4dc1b1c3a081794dedc979c13`
-  `I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: document owner-rail ancestry contamination`
-- push target
-  `origin/codex/i18n-ops-04-unblock-history-repair`
-- task PR
-  `https://github.com/ajoe734/drts-fleet-platform/pull/525`
-- prior related audit PR
-  `https://github.com/ajoe734/drts-fleet-platform/pull/522`
-
-- `git rev-list --left-right --count origin/dev...codex2/i18n-ops-04`
-  returns `0 3`, confirming the owner rail is only three commits ahead of dev.
-- `git rev-list --left-right --count codex2/i18n-wp0...codex2/i18n-ops-04`
-  returns `1 3`, confirming the owner rail is stacked on top of WP0's private
-  commit instead of branching directly from dev.
-- `git diff --stat origin/dev..codex2/i18n-ops-04` shows only the five driver
-  i18n task files:
-  `app/drivers/[driverId]/page.tsx`, `app/drivers/drivers-table.tsx`,
-  `app/drivers/page.tsx`, `components/driver-platform-actions.tsx`, and
-  `lib/translations.ts`.
-- `git diff --stat 4e925b0d..codex2/i18n-ops-04` still includes the unrelated
-  WP0 foundation footprint beneath those five task files, proving the final tree
-  is acceptable but the ancestry is contaminated.
-- `git diff --stat codex2/i18n-ops-04..origin/codex/i18n-ops-04` shows only a
-  10-line glossary delta in `apps/ops-console-web/lib/translations.ts`. This is
-  a clean-rail review refinement, not evidence that the owner branch needs the
-  WP0 foundation commit.
-
-### Parent provenance
-
-- `git show --stat --summary --name-only 4e925b0d` confirms the inherited WP0
-  dependency commit touched CI, husky, guard scripts, and shared translation
-  infrastructure outside the parent task scope.
-- `git log --oneline origin/dev..codex2/i18n-ops-04` confirms the owner rail is
-  exactly three task commits:
-  `47f4d479`, `a1dfe85f`, and `4f5e71c9`.
-- `git log --oneline origin/dev..origin/codex/i18n-ops-04` confirms the clean
-  reviewer rail is `c6a726eb`, `4570b055`, and formal closeout
-  `6f8e506c`.
-- `git show --stat --summary --name-only 6f8e506c` confirms the reviewer rail
-  already closes out successfully on top of `origin/dev`.
+1. `origin/codex2/i18n-ops-04 @ 4f5e71c9` does fork directly from
+   `origin/dev @ 94c3aa2d`. Its first task commit `47f4d479` has parent
+   `94c3aa2d`, so the current owner rail is not stacked on top of
+   `4e925b0d`.
+2. The real contamination is lane/history divergence after the shared middle
+   state. `origin/codex2/i18n-ops-04` and `origin/codex/i18n-ops-04` share the
+   same base `94c3aa2d`, but they diverge into different task trees:
+   `git rev-list --left-right --count origin/codex2/i18n-ops-04...origin/codex/i18n-ops-04`
+   returns `3 5`.
+3. The two rails briefly converge on the same content tree:
+   `a1dfe85f` on `codex2/i18n-ops-04` and `4570b055` on `codex/i18n-ops-04`
+   both resolve to tree `7ac1b5874e3382cf3c0f0bd285fbdbf7de33599c`.
+4. After that shared tree, the owner rail adds only
+   `4f5e71c9 "normalize driver i18n glossary"`, while the reviewer rail carries
+   formal closeout `6f8e506c`, then an extra content commit `c1dc37c4`, then
+   closeout `3ea01e2d`.
+5. Because both tails mutate the same three files
+   (`app/drivers/[driverId]/page.tsx`, `app/drivers/drivers-table.tsx`,
+   `lib/translations.ts`), the published owner rail is not the accepted final
+   tree and cannot be repaired by pretending both branches already match.
+6. There is a second unblock gap in machine truth: this helper task points to
+   parent alias `I18N-OPS-04`, but `scripts/ai-status.sh show I18N-OPS-04`
+   returns `Task not found: I18N-OPS-04`. Even after the rail choice is clear,
+   auto-resume cannot target the parent until that alias is mapped to a real
+   task ID.
 
 ## Exact Contamination
 
-The contamination is the published owner rail, not the task diff itself:
+The blocking contamination is a crossed-lane history:
 
-1. `codex2/i18n-ops-04` was branched from `codex2/i18n-wp0` after WP0's private
-   commit `4e925b0d`, not from `origin/dev`.
-2. The branch therefore appears to depend on unrelated guard, CI, and shared
-   translation-foundation edits outside `I18N-OPS-04` acceptance.
-3. Because `origin/codex2/i18n-ops-04` is already published and referenced by
-   the parent machine-truth status, repairing that ancestry in place would
-   require rewriting shared history.
+1. Owner work started on `codex2/i18n-ops-04` with commits `47f4d479`,
+   `a1dfe85f`, and `4f5e71c9`.
+2. Reviewer work recreated the same mid-state on `codex/i18n-ops-04` as
+   `c6a726eb` and `4570b055`, then closed that state at `6f8e506c`.
+3. Additional accepted content was later committed only on the reviewer rail as
+   `c1dc37c4`, followed by passing closeout `3ea01e2d`.
+4. The result is that the accepted branch state lives on the reviewer namespace
+   (`origin/codex/i18n-ops-04`), while the original owner namespace
+   (`origin/codex2/i18n-ops-04`) remains a divergent WIP rail.
 
-This is branch/worktree/commit contamination. The blocking issue is the owner
-rail's ancestry, not missing task implementation.
+This is branch/commit contamination by mixed ownership and stale closeout
+identity, not by WP0 ancestry.
+
+## Evidence
+
+### Branch state
+
+- `origin/dev @ 94c3aa2d5000846b5a582a7c7eb8cd43e2de9a25`
+- `origin/codex2/i18n-ops-04 @ 4f5e71c92c9a8c6d7c303a45ef465876de54976c`
+- `origin/codex/i18n-ops-04 @ 3ea01e2dee5c7e5c294ab0be826b47b0b53de645`
+- task branch
+  `origin/codex/i18n-ops-04-unblock-history-repair @ 86072889`
+- earlier helper rail
+  `origin/codex2/i18n-ops-04-unblock-history-repair @ 52f0d654`
+
+### Commit graph facts
+
+- `47f4d479^ == 94c3aa2d`, so the current owner rail starts from `origin/dev`.
+- `c6a726eb^ == 94c3aa2d`, so the reviewer rail also starts from `origin/dev`.
+- `git merge-base origin/codex2/i18n-ops-04 origin/codex/i18n-ops-04`
+  returns `94c3aa2d`.
+- `git rev-list --left-right --count origin/codex2/i18n-ops-04...origin/codex/i18n-ops-04`
+  returns `3 5`.
+- `a1dfe85f` and `4570b055` have the same tree object
+  `7ac1b5874e3382cf3c0f0bd285fbdbf7de33599c`.
+- `6f8e506c` has the same tree as `4570b055`, so it is a formal closeout of the
+  shared middle state, not a content delta.
+- `c1dc37c4` and `3ea01e2d` have the same tree object
+  `7884656941fd63513585462ac2aef105934f1b88`.
+- `4f5e71c9` has a different tree object
+  `2717f16dad8596dca4eae2954c392a3fdd1c8feb`.
+
+### File-level divergence
+
+- `git diff --name-status origin/codex2/i18n-ops-04..origin/codex/i18n-ops-04`
+  reports changes in exactly three files:
+  `apps/ops-console-web/app/drivers/[driverId]/page.tsx`,
+  `apps/ops-console-web/app/drivers/drivers-table.tsx`, and
+  `apps/ops-console-web/lib/translations.ts`.
+- `git diff --stat origin/dev..origin/codex2/i18n-ops-04` shows the expected
+  five driver-scope task files, but with a smaller patch than the accepted rail.
+- `git diff --stat origin/dev..origin/codex/i18n-ops-04` shows the same task
+  surface, with the additional accepted content now present only on the codex
+  rail.
+- `git range-diff origin/dev...origin/codex2/i18n-ops-04 origin/dev...origin/codex/i18n-ops-04`
+  shows the two rails share the same middle state conceptually, then diverge
+  into unmatched tails: owner-only `4f5e71c9` versus reviewer-side
+  `c1dc37c4` and `3ea01e2d`.
+
+### Parent alias gap
+
+- `AI_NAME=Codex scripts/ai-status.sh show I18N-OPS-04` returns
+  `Task not found: I18N-OPS-04`.
+- This helper task therefore cannot automatically advance the canonical parent
+  task on `done` unless the supervisor maps that alias to the real task ID.
 
 ## Non-Destructive Repair Path
 
-Do not force-push or rewrite `origin/codex2/i18n-ops-04`.
+Do not force-push `origin/codex2/i18n-ops-04`.
 
-1. Leave `origin/codex2/i18n-ops-04 @ 4f5e71c9...` in place as contamination
-   evidence only.
-2. Reuse `origin/codex/i18n-ops-04 @ 6f8e506c...` as proof that the driver i18n
-   tree can close out directly on top of `origin/dev`.
-3. Create a fresh owner recovery rail from `origin/dev`, then cherry-pick only
-   the task commits from the clean reviewer rail:
-   `c6a726eb`, `4570b055`, and, if the glossary wording should match the latest
-   owner branch exactly, manually port the `4f5e71c9` glossary delta as a final
-   clean commit on top.
-4. Create a formal owner closeout commit on that fresh rail with
-   `LLM-Agent: Codex2`, `Task-ID: I18N-OPS-04`, and `Reviewer: Codex`, then push
-   the new branch normally.
-5. Resume the parent task from that fresh clean rail instead of from the
-   contaminated published branch.
+### Canonical interpretation
 
-Concrete command sequence for the parent owner:
+Treat `origin/codex/i18n-ops-04 @ 3ea01e2d` as the only currently published
+clean closeout rail. It already carries the accepted final tree and passing
+verification.
+
+### Owner-namespace recovery option
+
+If the parent must resume on a Codex2-owned branch, create a fresh owner repair
+rail from `origin/dev` and replay the accepted branch, not the stale owner
+tail.
 
 ```bash
 git fetch origin
 git switch -c codex2/i18n-ops-04-repair origin/dev
 git cherry-pick c6a726eb
 git cherry-pick 4570b055
-# Port the 4f5e71c9 glossary-only wording if the owner wants the same final copy.
-git commit --allow-empty -m "I18N-OPS-04: finalize drivers i18n centralization closeout" \
+git cherry-pick c1dc37c4
+git commit --allow-empty -m "I18N-OPS-04: owner closeout after review approval" \
   -m "LLM-Agent: Codex2" \
-  -m "Task-ID: I18N-OPS-04" \
-  -m "Reviewer: Codex"
+  -m "Task-ID: <actual-parent-task-id>" \
+  -m "Reviewer: Codex" \
+  -m "Verification: grep -RInE 'locale\\s*===\\s*\"zh\"|locale\\s*===\\s*'\"'\"'zh'\"'\"'|copy\\(' apps/ops-console-web/app/drivers apps/ops-console-web/components --include='*.ts' --include='*.tsx' => clean; pnpm --filter @drts/contracts build PASS; pnpm --filter @drts/ops-console-web build PASS; pnpm --filter @drts/ops-console-web typecheck PASS"
 git push -u origin codex2/i18n-ops-04-repair
 ```
 
+Do not cherry-pick `4f5e71c9` onto the repair rail. That commit is the stale
+owner-only tail that diverged from the accepted closeout path.
+
 ## Why This Is Safe
 
-- No remote ref is rewritten.
-- No force-push is required.
-- The contaminated owner rail remains available as audit evidence.
-- The clean reviewer rail already proves the task can close on top of
-  `origin/dev`.
-- The parent can resume from a fresh branch with correct ancestry and the same
-  task-scoped file tree.
+- No shared remote history is rewritten.
+- The divergent owner rail remains available as audit evidence.
+- The accepted closeout rail already exists on origin.
+- If owner identity must be restored, the repair branch can be created with
+  ordinary cherry-picks and a normal push.
 
 ## Concrete Unblocked Next Step
 
-The parent owner should stop advancing `origin/codex2/i18n-ops-04` and instead
-create `codex2/i18n-ops-04-repair` from `origin/dev`, cherry-pick the clean
-reviewer task commits, then hand that new rail back to review. That unblocks the
-parent without rewriting any shared branch history.
+The supervisor or parent owner should do two things:
 
-## Verification Performed For This Repair
+1. Point the parent task at the real accepted rail:
+   `origin/codex/i18n-ops-04 @ 3ea01e2d`, or create
+   `codex2/i18n-ops-04-repair` from that accepted content if owner namespace is
+   required.
+2. Replace helper parent alias `I18N-OPS-04` with the actual canonical parent
+   task ID in machine truth, so unblock completion can resume the correct task
+   instead of a nonexistent alias.
+
+## Canonical Change Evidence
+
+- task commits on this branch:
+  - `6a32c1d578b1e9f4dc1b1c3a081794dedc979c13`
+    `I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: document owner-rail ancestry contamination`
+  - `8607288995298d5a85f2f1114482f0ddf1b33bea`
+    `I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: add branch push and PR evidence`
+- push target:
+  `origin/codex/i18n-ops-04-unblock-history-repair`
+- task PR:
+  `https://github.com/ajoe734/drts-fleet-platform/pull/525`
+
+## Verification Performed
 
 - Read `AI_COLLABORATION_GUIDE.md`
-- Read `docs/ops/branch-strategy.md`
 - Read `.orchestrator/skills/worker-anchor-commit.md`
-- Queried machine-truth task slices:
-  - `AI_NAME=Codex scripts/ai-status.sh show I18N-OPS-04`
+- Queried helper task machine truth:
   - `AI_NAME=Codex scripts/ai-status.sh show I18N-OPS-04-UNBLOCK-HISTORY-REPAIR`
-- Compared related branch and worktree state:
+  - `AI_NAME=Codex scripts/ai-status.sh progress I18N-OPS-04-UNBLOCK-HISTORY-REPAIR "..."`
+- Checked current task lists:
+  - `AI_NAME=Codex scripts/ai-status.sh list --status in_progress`
+  - `AI_NAME=Codex scripts/ai-status.sh list --status review`
+  - `AI_NAME=Codex scripts/ai-status.sh list --status blocked`
+- Confirmed parent alias gap:
+  - `AI_NAME=Codex scripts/ai-status.sh show I18N-OPS-04`
+- Refreshed refs and inspected branch state:
+  - `git fetch origin --prune`
   - `git branch --show-current`
   - `git status --short`
-  - `git worktree list --porcelain`
-  - `git branch -r | grep 'codex/i18n-ops-04\\|codex2/i18n-ops-04' | sort`
-  - `git log --graph --oneline --decorate --boundary origin/dev..codex/i18n-ops-04 origin/dev..codex/i18n-ops-04-unblock-history-repair origin/dev..codex2/i18n-ops-04-unblock-history-repair origin/dev..codex2/i18n-ops-04 --`
-  - `git merge-base origin/dev codex2/i18n-ops-04`
-  - `git merge-base origin/dev codex2/i18n-wp0`
-  - `git rev-list --left-right --count origin/dev...codex2/i18n-ops-04`
-  - `git rev-list --left-right --count codex2/i18n-wp0...codex2/i18n-ops-04`
-  - `git diff --stat origin/dev..codex2/i18n-ops-04`
-  - `git diff --stat 4e925b0d..codex2/i18n-ops-04`
-  - `git diff --stat codex2/i18n-ops-04..origin/codex/i18n-ops-04`
-- Confirmed parent provenance:
-  - `git show --stat --summary --name-only 4e925b0d`
-  - `git show --stat --summary --name-only 47f4d479`
-  - `git show --stat --summary --name-only a1dfe85f`
-  - `git show --stat --summary --name-only 4f5e71c9`
-  - `git show --stat --summary --name-only c6a726eb`
-  - `git show --stat --summary --name-only 4570b055`
-  - `git show --stat --summary --name-only 6f8e506c`
-- Recorded task-scoped publish evidence:
-  - `git push -u origin codex/i18n-ops-04-unblock-history-repair`
+  - `git for-each-ref --format='%(refname:short) %(objectname:short)' ...`
+  - `git log --graph --oneline --decorate --boundary 94c3aa2d..origin/codex2/i18n-ops-04 94c3aa2d..origin/codex/i18n-ops-04 --`
+- Verified commit ancestry and tree identity:
+  - `git rev-parse 47f4d479^ 47f4d479 ... 3ea01e2d`
+  - `git show --no-patch --pretty=raw 47f4d479 a1dfe85f 4f5e71c9 c6a726eb 4570b055 6f8e506c c1dc37c4 3ea01e2d`
+  - `git merge-base origin/codex2/i18n-ops-04 origin/codex/i18n-ops-04`
+  - `git rev-list --left-right --count origin/codex2/i18n-ops-04...origin/codex/i18n-ops-04`
+- Verified file-level divergence:
+  - `git diff --stat origin/dev..origin/codex2/i18n-ops-04`
+  - `git diff --stat origin/dev..origin/codex/i18n-ops-04`
+  - `git diff --stat origin/codex2/i18n-ops-04..origin/codex/i18n-ops-04`
+  - `git diff --name-status origin/codex2/i18n-ops-04..origin/codex/i18n-ops-04`
+  - `git diff --unified=20 origin/codex2/i18n-ops-04..origin/codex/i18n-ops-04 -- apps/ops-console-web/app/drivers/[driverId]/page.tsx apps/ops-console-web/app/drivers/drivers-table.tsx apps/ops-console-web/lib/translations.ts`
+  - `git range-diff origin/dev...origin/codex2/i18n-ops-04 origin/dev...origin/codex/i18n-ops-04`
+- Confirmed task branch publish evidence:
   - `gh pr list --head codex/i18n-ops-04-unblock-history-repair --state all --json number,title,url,headRefName,baseRefName,state,isDraft`
-  - `gh pr create --base dev --head codex/i18n-ops-04-unblock-history-repair --title "I18N-OPS-04-UNBLOCK-HISTORY-REPAIR: document owner-rail ancestry contamination" --draft`
