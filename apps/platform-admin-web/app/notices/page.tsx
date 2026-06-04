@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import type { AssistantEntityRef } from "@/components/assistant/assistant-types";
+import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -709,6 +711,275 @@ export default function NoticesPage() {
 
     setShowComposer((current) => !current);
   }
+
+  const assistantBridge = useMemo(() => {
+    const selectedRecords: AssistantEntityRef[] =
+      resolvingNoticeId && activeTab === "notices"
+        ? [
+            {
+              kind: "notice",
+              id: resolvingNoticeId,
+              source: "page-selection",
+            },
+          ]
+        : showMaintenanceConfirm
+          ? [
+              {
+                kind: "maintenance-mode",
+                id: "platform-maintenance",
+                source: "page-selection",
+              },
+            ]
+          : [];
+    const forms = [
+      ...(showComposer
+        ? [
+            {
+              formId: "platform-notice-composer",
+              title: activeTab === "notices" ? copy.createNotice : copy.title,
+              dirty:
+                noticeTitle.trim().length > 0 ||
+                noticeBody.trim().length > 0 ||
+                noticeSeverity !== "info" ||
+                noticeAudience !== "all",
+              fields: [
+                {
+                  fieldId: "noticeTitle",
+                  label: copy.noticeTitle,
+                  valueSummary: noticeTitle,
+                  required: true,
+                  dirty: noticeTitle.trim().length > 0,
+                },
+                {
+                  fieldId: "noticeBody",
+                  label: copy.noticeBody,
+                  valueSummary: noticeBody,
+                  required: true,
+                  dirty: noticeBody.trim().length > 0,
+                },
+                {
+                  fieldId: "noticeSeverity",
+                  label: copy.noticeSeverity,
+                  valueSummary: noticeSeverity,
+                },
+                {
+                  fieldId: "noticeAudience",
+                  label: copy.noticeAudience,
+                  valueSummary: noticeAudience,
+                },
+              ],
+              validationErrors: [
+                ...(noticeTitle.trim()
+                  ? []
+                  : [
+                      {
+                        fieldId: "noticeTitle",
+                        code: "required",
+                        message:
+                          locale === "en"
+                            ? "Notice title is required."
+                            : "公告標題為必填。",
+                      },
+                    ]),
+                ...(noticeBody.trim()
+                  ? []
+                  : [
+                      {
+                        fieldId: "noticeBody",
+                        code: "required",
+                        message:
+                          locale === "en"
+                            ? "Notice body is required."
+                            : "公告內容為必填。",
+                      },
+                    ]),
+              ],
+              availableActions: [
+                {
+                  actionId: "submit_notice",
+                  label: copy.createNotice,
+                  riskLevel: "medium" as const,
+                },
+              ],
+            },
+          ]
+        : []),
+      ...(activeTab === "maint"
+        ? [
+            {
+              formId: "maintenance-mode-form",
+              title: copy.maintenance,
+              dirty:
+                maintEnabled !== Boolean(maintenance?.enabled) ||
+                maintReason !== (maintenance?.reason ?? "") ||
+                maintStart !==
+                  toDatetimeLocalValue(maintenance?.scheduledStart ?? null) ||
+                maintEnd !==
+                  toDatetimeLocalValue(maintenance?.scheduledEnd ?? null),
+              fields: [
+                {
+                  fieldId: "enabled",
+                  label: copy.currentMaintenance,
+                  valueSummary: maintEnabled ? "enabled" : "disabled",
+                },
+                {
+                  fieldId: "reason",
+                  label: copy.internalReason,
+                  valueSummary: maintReason,
+                  required: true,
+                  dirty: maintReason.trim().length > 0,
+                },
+                {
+                  fieldId: "scheduledStart",
+                  label: copy.scheduledStart,
+                  valueSummary: maintStart,
+                  dirty: maintStart.trim().length > 0,
+                },
+                {
+                  fieldId: "scheduledEnd",
+                  label: copy.scheduledEnd,
+                  valueSummary: maintEnd,
+                  dirty: maintEnd.trim().length > 0,
+                },
+              ],
+              validationErrors: maintReason.trim()
+                ? []
+                : [
+                    {
+                      fieldId: "reason",
+                      code: "required",
+                      message: copy.reasonRequired,
+                    },
+                  ],
+              availableActions: [
+                {
+                  actionId: "confirm_maintenance_mode",
+                  label: copy.enterMaintenance,
+                  riskLevel: "high" as const,
+                },
+              ],
+            },
+          ]
+        : []),
+    ];
+
+    return {
+      pageId: "notices",
+      contextSnapshot: {
+        activeTab,
+        selection: selectedRecords,
+        selectedRecords,
+        warnings: [
+          ...(error
+            ? [
+                {
+                  code: "notices_error",
+                  severity: "warning" as const,
+                  message: {
+                    zh: `公告/維護模式操作異常：${error}`,
+                    en: `Notice or maintenance operation error: ${error}`,
+                  },
+                },
+              ]
+            : []),
+          ...(maintenance?.enabled
+            ? [
+                {
+                  code: "maintenance_mode_enabled",
+                  severity: "critical" as const,
+                  message: {
+                    zh: "目前平台維護模式為啟用狀態。",
+                    en: "Platform maintenance mode is currently enabled.",
+                  },
+                },
+              ]
+            : []),
+        ],
+        visibleTables:
+          activeTab === "notices"
+            ? [
+                {
+                  tableId: "platform-notices",
+                  title: copy.notices,
+                  visibleRowCount: noticeRows.length,
+                  visibleRowIds: noticeRows.slice(0, 5).map((row) => row.id),
+                  selectedRowIds: resolvingNoticeId ? [resolvingNoticeId] : [],
+                  availableActions: [
+                    {
+                      actionId: "create_notice",
+                      label: copy.createNotice,
+                      riskLevel: "medium" as const,
+                    },
+                    {
+                      actionId: "resolve_notice",
+                      label: copy.resolve,
+                      riskLevel: "medium" as const,
+                    },
+                  ],
+                },
+              ]
+            : activeTab === "history"
+              ? [
+                  {
+                    tableId: "notice-history",
+                    title: copy.history,
+                    visibleRowCount: historyRows.length,
+                    visibleRowIds: historyRows.slice(0, 5).map((row) => row.id),
+                  },
+                ]
+              : [],
+        availableActions: [
+          {
+            actionId:
+              activeTab === "maint" ? "enter_maintenance" : "create_notice",
+            label:
+              activeTab === "maint" ? copy.enterMaintenance : copy.createNotice,
+            riskLevel:
+              activeTab === "maint" ? ("high" as const) : ("medium" as const),
+          },
+          { actionId: "refresh_notices", label: copy.refresh },
+        ],
+        forms,
+      },
+    };
+  }, [
+    activeTab,
+    copy.createNotice,
+    copy.currentMaintenance,
+    copy.enterMaintenance,
+    copy.history,
+    copy.internalReason,
+    copy.maintenance,
+    copy.noticeAudience,
+    copy.noticeBody,
+    copy.noticeSeverity,
+    copy.noticeTitle,
+    copy.notices,
+    copy.reasonRequired,
+    copy.refresh,
+    copy.resolve,
+    copy.scheduledEnd,
+    copy.scheduledStart,
+    copy.title,
+    error,
+    historyRows,
+    locale,
+    maintEnabled,
+    maintEnd,
+    maintReason,
+    maintStart,
+    maintenance,
+    noticeAudience,
+    noticeBody,
+    noticeRows,
+    noticeSeverity,
+    noticeTitle,
+    resolvingNoticeId,
+    showComposer,
+    showMaintenanceConfirm,
+  ]);
+
+  usePlatformAdminAssistantPage(assistantBridge);
 
   if (loading && notices.length === 0 && !maintenance) {
     return (

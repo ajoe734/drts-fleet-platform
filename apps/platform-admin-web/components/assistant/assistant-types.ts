@@ -59,6 +59,13 @@ export interface AssistantConfirmationRequest {
   reasonPlaceholder?: string;
   reasonHint?: string | null;
   requiresReason?: boolean;
+  disabled?: boolean;
+  disabledReason?: string | null;
+}
+
+export interface AssistantPendingAction {
+  toolName: string;
+  payload: Record<string, unknown>;
 }
 
 export interface AssistantReceipt {
@@ -87,6 +94,7 @@ export interface AssistantMessageRecord {
   createdAt?: string | null;
   state?: AssistantViewState;
   plan?: AssistantActionPlan | null;
+  pendingAction?: AssistantPendingAction | null;
   confirmation?: AssistantConfirmationRequest | null;
   receipt?: AssistantReceipt | null;
   error?: AssistantErrorState | null;
@@ -253,6 +261,7 @@ export type AssistantEntityKind =
   | "feature-flag"
   | "audit-record"
   | "notice"
+  | "maintenance-mode"
   | "public-info-version"
   | "placard";
 
@@ -267,6 +276,45 @@ export interface AssistantEntityRef {
   label?: string;
   /** Where this reference was derived from. */
   source: EntityRefSource;
+}
+
+export interface AssistantPageActionSummary {
+  actionId: string;
+  label: string;
+  riskLevel?: AssistantRiskLevel;
+  disabled?: boolean;
+}
+
+export interface AssistantTableSummary {
+  tableId: string;
+  title: string;
+  visibleRowCount: number;
+  visibleRowIds: string[];
+  selectedRowIds?: string[];
+  availableActions?: AssistantPageActionSummary[];
+}
+
+export interface AssistantFormFieldSummary {
+  fieldId: string;
+  label: string;
+  valueSummary?: string | number | boolean | null;
+  required?: boolean;
+  dirty?: boolean;
+}
+
+export interface AssistantValidationErrorSummary {
+  code: string;
+  message: string;
+  fieldId?: string;
+}
+
+export interface AssistantFormSummary {
+  formId: string;
+  title: string;
+  dirty: boolean;
+  fields: AssistantFormFieldSummary[];
+  validationErrors: AssistantValidationErrorSummary[];
+  availableActions?: AssistantPageActionSummary[];
 }
 
 export type RouteContextWarningSeverity = "info" | "warning" | "critical";
@@ -291,6 +339,14 @@ export interface PageContextSnapshot {
   selection?: AssistantEntityRef[];
   /** Page-derived advisory warnings (e.g. "maintenance mode is ON"). */
   warnings?: RouteContextWarning[];
+  /** Page-owned visible table summaries for the current canvas state. */
+  visibleTables?: AssistantTableSummary[];
+  /** Page-owned selected rows/records if the page exposes them. */
+  selectedRecords?: AssistantEntityRef[];
+  /** Page-owned action list the operator can currently trigger. */
+  availableActions?: AssistantPageActionSummary[];
+  /** Controlled form snapshot for assistant-readable drafts and errors. */
+  forms?: AssistantFormSummary[];
 }
 
 /** Static, compile-time registry entry describing one Platform Admin route. */
