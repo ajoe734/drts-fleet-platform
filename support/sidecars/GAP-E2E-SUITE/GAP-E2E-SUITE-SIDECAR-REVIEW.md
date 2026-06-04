@@ -7,7 +7,7 @@
 **Assigned Reviewer:** `Claude`  
 **Parent Owner / Reviewer:** `Claude` / `Codex2`  
 **Last Revised:** `2026-06-04 (UTC)`  
-**Status:** `READY FOR REVIEW HANDOFF`
+**Status:** `REVIEW APPROVED / OWNER CLOSEOUT READY`
 
 ---
 
@@ -22,6 +22,11 @@ Important shared-truth note:
 
 - The parent task `GAP-E2E-SUITE` is already `done` in machine truth.
 - This helper task exists only to hand the review packet to `Claude` with the accepted evidence summarized in one place.
+
+Owner closeout note:
+
+- reviewer approval is already recorded in machine truth for `GAP-E2E-SUITE-SIDECAR-REVIEW`
+- this packet revision exists only to align the artifact status text with that review outcome and capture the branch closeout metadata below
 
 ---
 
@@ -205,3 +210,15 @@ Not performed in this helper slice:
 - editing or revalidating parent runtime code on `claude/gap-e2e-suite`
 
 This omission is intentional because the parent task is already closed in machine truth and this sidecar is restricted to support artifacts only.
+
+---
+
+## 9. Owner Closeout Metadata
+
+- Sidecar closeout commit branch: `codex/gap-e2e-suite-sidecar-review`
+- Parent implementation branch remains: `claude/gap-e2e-suite`
+- Parent integration status remains: `branch_pushed`
+- Required owner finalize action for this helper slice:
+  - create a task-scoped closeout commit on the sidecar branch
+  - push that commit to `origin/codex/gap-e2e-suite-sidecar-review`
+  - mark helper task `done` with sidecar `COMMIT_HASH` / `COMMIT_SUBJECT` / push metadata and `INTEGRATION_STATUS=branch_pushed`
