@@ -2352,7 +2352,10 @@ async function renderOwnedWorkspace({
                     ? `${formatMinorCurrency(
                         order.quotedFare.amountMinor,
                         order.quotedFare.currency,
-                      )} · ${order.quotedFareRuleVersion ?? "manual"}`
+                      )} · ${
+                        order.quotedFareRuleVersion ??
+                        formatOpsCodeLabel(locale, "manual")
+                      }`
                     : "—",
                   mono: true,
                 },
@@ -2520,7 +2523,7 @@ function renderForwardedWorkspace({
           >
             <span>{order.mirrorOrderId}</span>
             <Pill theme={theme} tone="info">
-              FORWARDED
+              {tr(locale, "dispatch.forwarded.badge")}
             </Pill>
             <Pill theme={theme} tone={stateTone} dot>
               {formatOpsCodeLabel(locale, order.status)}
@@ -2624,7 +2627,12 @@ function renderForwardedWorkspace({
               items={[
                 {
                   k: tr(locale, "dispatch.forwarded.authority.domain"),
-                  v: `forwarded · ${order.dispatchSemantics}`,
+                  v: tr(locale, "dispatch.forwarded.authority.domainValue", {
+                    semantics: formatOpsCodeLabel(
+                      locale,
+                      order.dispatchSemantics,
+                    ),
+                  }),
                   mono: true,
                 },
                 {
