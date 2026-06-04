@@ -95,6 +95,26 @@ The concrete next step for `GAP-VERIFY` is:
 > scoreboard and findings, and treat any remaining failures as implementation /
 > integration bugs rather than missing product semantics.
 
+## 5.1 Machine-Truth Update Applied
+
+Canonical task state was updated via `scripts/ai-status.sh` on 2026-06-04 so
+the parent task no longer advertises the stale failure-summary text in its
+`next` field.
+
+Updated parent `GAP-VERIFY.next`:
+
+> Planning blocker resolved by `GAP-VERIFY-UNBLOCK-PLANNING-DECISION`: resume
+> execution on the current dev deployment, re-run the live browser gap audit,
+> refresh `docs/05-ui/dev-runtime-functional-gap-report-20260603.md` with the
+> new scoreboard and findings, and route any remaining failures as
+> implementation or integration defects rather than missing product semantics.
+
+Remaining control-plane step:
+
+- finalize this unblock task through review and `done` so the helper closeout
+  can also clear the parent's `blocked` status and hand execution back to the
+  parent owner in machine truth
+
 ## 6. Acceptance Mapping
 
 | Acceptance item | Result |
@@ -103,5 +123,5 @@ The concrete next step for `GAP-VERIFY` is:
 | Record the decision | Recorded here as a routing decision with no new L1/L2 semantic change. |
 | scope cut | Not needed. Parent scope remains the same. |
 | or explicit follow-up needed by the parent task | Recorded in §4 and §5: resume dev re-audit, refresh scoreboard, route any remaining failures as concrete defects. |
-| Produce task-scoped commit/push/PR evidence for any canonical change | Delivered on branch `codex/gap-verify-unblock-planning-decision` with this unblock artifact. |
-| Update the parent task with the concrete unblocked next step | The parent should point to the live dev re-audit + scoreboard refresh step above. |
+| Produce task-scoped commit/push/PR evidence for any canonical change | Delivered on branch `codex/gap-verify-unblock-planning-decision` with this unblock artifact and machine-truth update evidence. |
+| Update the parent task with the concrete unblocked next step | Applied via `scripts/ai-status.sh note GAP-VERIFY ...`; parent `next` now points to the live dev re-audit + scoreboard refresh step above. |
