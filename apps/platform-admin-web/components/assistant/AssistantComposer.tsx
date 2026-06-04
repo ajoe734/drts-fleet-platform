@@ -45,8 +45,8 @@ export function AssistantComposer({
   onSubmit,
   state = "idle",
   disabled = false,
-  placeholder = "Ask Platform Admin to inspect, plan, or execute a governed action...",
-  submitLabel = "Send",
+  placeholder,
+  submitLabel,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -96,12 +96,7 @@ export function AssistantComposer({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={
-            placeholder ===
-            "Ask Platform Admin to inspect, plan, or execute a governed action..."
-              ? t("assistant.composer.placeholder")
-              : placeholder
-          }
+          placeholder={placeholder ?? t("assistant.composer.placeholder")}
           rows={4}
           disabled={disabled}
           style={{
@@ -156,9 +151,7 @@ export function AssistantComposer({
             <SendHorizontal size={15} />
             {isBusy
               ? t("assistant.composer.waiting")
-              : submitLabel === "Send"
-                ? t("assistant.composer.submit")
-                : submitLabel}
+              : (submitLabel ?? t("assistant.composer.submit"))}
           </button>
         </div>
       </div>

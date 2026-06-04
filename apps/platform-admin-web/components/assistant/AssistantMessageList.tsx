@@ -122,8 +122,8 @@ export function AssistantMessageList({
   isConfirming = false,
   onConfirmAction,
   onCancelConfirmation,
-  emptyTitle = "Platform Admin assistant is ready",
-  emptyBody = "Ask for an analysis, review a plan, or approve a governed action to start the conversation.",
+  emptyTitle,
+  emptyBody,
 }: {
   messages: AssistantMessageRecord[];
   isConfirming?: boolean;
@@ -135,16 +135,6 @@ export function AssistantMessageList({
   const { t } = useTranslation();
 
   if (messages.length === 0) {
-    const resolvedEmptyTitle =
-      emptyTitle === "Platform Admin assistant is ready"
-        ? t("assistant.message.empty.title")
-        : emptyTitle;
-    const resolvedEmptyBody =
-      emptyBody ===
-      "Ask for an analysis, review a plan, or approve a governed action to start the conversation."
-        ? t("assistant.message.empty.body")
-        : emptyBody;
-
     return (
       <section
         style={{
@@ -158,10 +148,10 @@ export function AssistantMessageList({
       >
         <Bot size={28} color={assistantTheme.accent} />
         <strong style={{ color: assistantTheme.text, fontSize: 17 }}>
-          {resolvedEmptyTitle}
+          {emptyTitle ?? t("assistant.message.empty.title")}
         </strong>
         <div style={{ ...assistantMutedTextStyle, maxWidth: 560 }}>
-          {resolvedEmptyBody}
+          {emptyBody ?? t("assistant.message.empty.body")}
         </div>
       </section>
     );
