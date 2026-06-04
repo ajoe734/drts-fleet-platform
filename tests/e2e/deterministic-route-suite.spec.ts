@@ -468,10 +468,11 @@ async function exerciseNonDestructiveButton(page: Page, spec: RouteSpec) {
   const mainButtons = page.locator("main button");
   // Any of these tokens in a button's text marks it as state-mutating, so the
   // suite must never click it as the "non-destructive action" probe. Includes
-  // stateful workflow verbs (approve/assign/resolve/reopen/mark) alongside the
-  // hard-destructive ones, in both English and Chinese.
+  // stateful workflow verbs (approve/assign/resolve/reopen/mark/issue/settle —
+  // 開立 a payment issue / 結案 settle a case) alongside the hard-destructive
+  // ones, in both English and Chinese.
   const destructiveName =
-    /delete|remove|deactivate|archive|revoke|disable|terminate|reject|publish|rollback|close|approve|assign|resolve|reopen|mark|刪除|停用|終止|退回|駁回|發佈|關閉|核准|付款|指派|處理/i;
+    /delete|remove|deactivate|archive|revoke|disable|terminate|reject|publish|rollback|close|approve|assign|resolve|reopen|mark|issue|settle|刪除|停用|終止|退回|駁回|發佈|關閉|核准|付款|指派|處理|開立|結案/i;
   const tabNames = spec.tabLabels ?? [];
   const candidates: Locator[] = [];
 
