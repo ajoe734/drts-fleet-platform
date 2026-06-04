@@ -106,6 +106,10 @@ function mt(
   return translate(key, locale, params);
 }
 
+function dash(locale: Locale) {
+  return mt(locale, "common.dash");
+}
+
 function controlStyle(themeToken: CanvasTheme, mono = false): CSSProperties {
   return {
     width: "100%",
@@ -210,7 +214,7 @@ function toneColor(themeToken: CanvasTheme, tone: CanvasTone) {
 
 function formatCost(locale: Locale, value: number | null): string {
   if (value === null || value === undefined) {
-    return "—";
+    return dash(locale);
   }
   return new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
     style: "currency",
@@ -219,16 +223,22 @@ function formatCost(locale: Locale, value: number | null): string {
   }).format(value);
 }
 
-function formatTableDateTime(value: string | null | undefined): string {
+function formatTableDateTime(
+  locale: Locale,
+  value: string | null | undefined,
+): string {
   if (!value) {
-    return "—";
+    return dash(locale);
   }
   return new Date(value).toISOString().slice(0, 16).replace("T", " ");
 }
 
-function formatLongDateTime(value: string | null | undefined): string {
+function formatLongDateTime(
+  locale: Locale,
+  value: string | null | undefined,
+): string {
   if (!value) {
-    return "—";
+    return dash(locale);
   }
   return new Date(value).toISOString().slice(0, 19).replace("T", " ");
 }
@@ -713,7 +723,7 @@ export default function MaintenancePage() {
           message:
             e instanceof Error ? e.message : getOpsLabel(locale, "unknown"),
           actionId: `act_${record.maintenanceId}`,
-          auditId: "—",
+          auditId: dash(locale),
         });
       } finally {
         setPendingConfirm(null);
@@ -828,7 +838,7 @@ export default function MaintenancePage() {
             background: row.overdue ? theme.dangerBg : "transparent",
           }}
         >
-          <span>{formatTableDateTime(row.scheduledAt)}</span>
+          <span>{formatTableDateTime(locale, row.scheduledAt)}</span>
           {row.overdue ? (
             <span style={{ color: theme.danger, fontSize: 10.5 }}>
               {t("maintenance.overdueForService")}
@@ -837,7 +847,7 @@ export default function MaintenancePage() {
           {row.completedAt ? (
             <span style={{ color: theme.success, fontSize: 10.5 }}>
               {t("maintenance.doneAt", {
-                value: formatTableDateTime(row.completedAt),
+                value: formatTableDateTime(locale, row.completedAt),
               })}
             </span>
           ) : null}
@@ -1014,7 +1024,10 @@ export default function MaintenancePage() {
             icon="clock"
             title={t("maintenance.banner.stale")}
             body={t("maintenance.banner.staleBody", {
-              value: formatLongDateTime(new Date(generatedAtMs).toISOString()),
+              value: formatLongDateTime(
+                locale,
+                new Date(generatedAtMs).toISOString(),
+              ),
             })}
           />
         ) : null}
@@ -1192,10 +1205,11 @@ export default function MaintenancePage() {
           {generatedAtMs > 0
             ? t("maintenance.footer.generatedAt", {
                 value: formatLongDateTime(
+                  locale,
                   new Date(generatedAtMs).toISOString(),
                 ),
               })
-            : "—"}
+            : dash(locale)}
         </div>
       </div>
 
@@ -1259,8 +1273,8 @@ export default function MaintenancePage() {
                   e instanceof Error
                     ? e.message
                     : getOpsLabel(locale, "unknown"),
-                actionId: "—",
-                auditId: "—",
+                actionId: dash(locale),
+                auditId: dash(locale),
               });
             }
           }}
