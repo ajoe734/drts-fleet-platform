@@ -1,3 +1,10 @@
+import type {
+  OperationalAlertRecord,
+  PlatformNoticeRecord,
+  PlatformNoticeSeverity,
+  PlatformNoticeStatus,
+} from "@drts/contracts";
+
 export type Locale = "en" | "zh";
 
 const en = {
@@ -1244,6 +1251,23 @@ const en = {
   "health.metric.reporting.note": "{count} queued/running jobs are still open",
   "health.metric.adapters.title": "Degraded adapter surfaces",
   "health.metric.adapters.note": "{count} adapters are being monitored",
+  "health.alertsTitle": "Active workflow alerts",
+  "health.alertsEmpty": "No active alerts.",
+  "health.adaptersTitle": "Forwarder adapter inventory",
+  "health.adaptersEmpty": "No adapter inventory is reporting yet.",
+  "health.dispatchTitle": "Dispatch operations",
+  "health.webhookTitle": "Webhook delivery",
+  "health.filingTitle": "Filing and review queues",
+  "health.dispatchEmpty": "Queue depth, redispatch load, and dispatch failures",
+  "health.webhookEmpty":
+    "Endpoint availability, queued deliveries, and delivery lag",
+  "health.filingEmpty":
+    "Reporting jobs, recording backlog, and eligibility follow-up",
+  "health.loadingAlerts": "Loading alerts...",
+  "health.loadingAdapters": "Loading adapters...",
+  "health.openAlert": "Open",
+  "health.metricsNote":
+    "Health status, adapter mode, and latest operational signal",
   "health.refreshError": "Unable to refresh platform health",
   "health.alert.measurement": "{measured} measured · critical at {threshold}",
   "health.tab.alertsWithCount": "Alerts{suffix}",
@@ -1262,8 +1286,7 @@ const en = {
   "health.status.active": "Active",
   "health.status.expiring": "Expiring",
   "health.status.missing": "Missing",
-  "health.alert.recording_backlog.title":
-    "Recording backlog requires review",
+  "health.alert.recording_backlog.title": "Recording backlog requires review",
   "health.alert.driver_state_lag.title": "Driver state updates are stale",
   "health.alert.adapter_degradation.title": "Adapter degradation detected",
   "health.summary.dispatch.queueDepth": "Ready queue depth",
@@ -2910,8 +2933,22 @@ const zh: typeof en = {
   "health.metric.reporting.note": "{count} 筆排隊中或執行中的工作仍未關閉",
   "health.metric.adapters.title": "降級中的轉發器面",
   "health.metric.adapters.note": "共監控 {count} 個轉發器",
+  "health.alertsTitle": "目前流程警示",
+  "health.alertsEmpty": "目前沒有需處理的警示。",
+  "health.adaptersTitle": "轉發器盤點",
+  "health.adaptersEmpty": "目前沒有回報中的轉發器盤點資料。",
+  "health.dispatchTitle": "派車營運",
+  "health.webhookTitle": "Webhook 傳遞",
+  "health.filingTitle": "歸檔與審查佇列",
+  "health.dispatchEmpty": "佇列深度、重派負載與派車失敗情況",
+  "health.webhookEmpty": "端點可用性、排隊傳遞與傳遞延遲",
+  "health.filingEmpty": "報表工作、錄音回補與資格追蹤積壓",
+  "health.loadingAlerts": "載入警示中...",
+  "health.loadingAdapters": "載入轉發器中...",
+  "health.openAlert": "查看",
+  "health.metricsNote": "健康狀態、轉接模式與最新營運訊號",
   "health.refreshError": "無法更新平台健康資料",
-  "health.alert.measurement": "目前 {measured} · critical 門檻為 {threshold}",
+  "health.alert.measurement": "目前 {measured} · 重大門檻為 {threshold}",
   "health.tab.alertsWithCount": "警示{suffix}",
   "health.tab.dispatch": "派車",
   "health.tab.webhook": "Webhook",
@@ -3505,11 +3542,9 @@ const zh: typeof en = {
   "notices.emptyDetailed": "目前沒有平台公告。",
   "notices.emptyHistory": "目前沒有跨應用廣播紀錄。",
   "notices.composer.title": "建立公告",
-  "notices.composer.subtitle":
-    "發佈給平台營運、租戶或司機端的跨應用 banner。",
+  "notices.composer.subtitle": "發佈給平台營運、租戶或司機端的跨應用 banner。",
   "notices.guardrail.title": "進入維護前應先發送維護公告",
-  "notices.guardrail.body":
-    "先發佈維護等級公告，再啟用全平台維護模式。",
+  "notices.guardrail.body": "先發佈維護等級公告，再啟用全平台維護模式。",
   "notices.maintenance.currentTitle": "維護模式 · 目前狀態",
   "notices.maintenance.currentSubtitle": "全平台 dispatch 與入站流量控管。",
   "notices.maintenance.internalReason": "原因 · 內部紀錄",
@@ -3601,6 +3636,329 @@ const zh: typeof en = {
 };
 
 export const translations: Record<Locale, typeof en> = { en, zh };
+
+type TranslationParams = Record<string, string | number>;
+
+function translateKey(
+  locale: Locale,
+  key: string,
+  params?: TranslationParams,
+): string {
+  return t(key, locale, params);
+}
+
+export function getBilingualText(
+  key: string,
+  params?: TranslationParams,
+): Record<Locale, string> {
+  return {
+    zh: translateKey("zh", key, params),
+    en: translateKey("en", key, params),
+  };
+}
+
+export function getHealthStatusLabel(locale: Locale, status: string): string {
+  const key = `health.status.${status}`;
+  const value = translateKey(locale, key);
+  return value === key ? status.replace(/_/g, " ") : value;
+}
+
+export function getHealthAlertTitle(
+  locale: Locale,
+  key: OperationalAlertRecord["key"],
+): string {
+  const entry = translateKey(locale, `health.alert.${key}.title`);
+  return entry === `health.alert.${key}.title` ? key : entry;
+}
+
+export function getHealthAlertRouteLabel(
+  locale: Locale,
+  route: OperationalAlertRecord["routes"][number],
+): string {
+  return translateKey(
+    locale,
+    route === "platform"
+      ? "health.routeLabel.platform"
+      : "health.routeLabel.ops",
+  );
+}
+
+export function getHealthAdapterSourceLabel(
+  locale: Locale,
+  source: string,
+): string {
+  return translateKey(locale, "health.adapter.sourceSuffix", { source });
+}
+
+export function getHealthPageCopy(locale: Locale) {
+  return {
+    title: translateKey(locale, "health.title"),
+    subtitle: translateKey(locale, "health.subtitle"),
+    refresh: translateKey(locale, "common.refresh"),
+    alertsTitle: translateKey(locale, "health.alertsTitle"),
+    alertsEmpty: translateKey(locale, "health.alertsEmpty"),
+    adaptersTitle: translateKey(locale, "health.adaptersTitle"),
+    adaptersEmpty: translateKey(locale, "health.adaptersEmpty"),
+    dispatchTitle: translateKey(locale, "health.dispatchTitle"),
+    webhookTitle: translateKey(locale, "health.webhookTitle"),
+    filingTitle: translateKey(locale, "health.filingTitle"),
+    dispatchEmpty: translateKey(locale, "health.dispatchEmpty"),
+    webhookEmpty: translateKey(locale, "health.webhookEmpty"),
+    filingEmpty: translateKey(locale, "health.filingEmpty"),
+    loadingAlerts: translateKey(locale, "health.loadingAlerts"),
+    loadingAdapters: translateKey(locale, "health.loadingAdapters"),
+    openAlert: translateKey(locale, "health.openAlert"),
+    metricsNote: translateKey(locale, "health.metricsNote"),
+    refreshError: translateKey(locale, "health.refreshError"),
+    alertMeasurement: (params: TranslationParams) =>
+      translateKey(locale, "health.alert.measurement", params),
+    adapterEntries: (count: number) =>
+      translateKey(locale, "health.adapter.entries", { count }),
+    tab: {
+      alertsWithCount: (suffix: string) =>
+        translateKey(locale, "health.tab.alertsWithCount", { suffix }),
+      dispatch: translateKey(locale, "health.tab.dispatch"),
+      webhook: translateKey(locale, "health.tab.webhook"),
+      filing: translateKey(locale, "health.tab.filing"),
+      adapters: translateKey(locale, "health.tab.adaptersInventory"),
+    },
+    kpis: {
+      dispatch: {
+        label: translateKey(locale, "health.metric.dispatch.title"),
+        sub: (count: number) =>
+          translateKey(locale, "health.metric.dispatch.note", { count }),
+      },
+      webhook: {
+        label: translateKey(locale, "health.metric.webhook.title"),
+        sub: (count: number) =>
+          translateKey(locale, "health.metric.webhook.note", { count }),
+      },
+      eligibility: {
+        label: translateKey(locale, "health.metric.eligibility.title"),
+        sub: (count: number) =>
+          translateKey(locale, "health.metric.eligibility.note", { count }),
+      },
+      reporting: {
+        label: translateKey(locale, "health.metric.reporting.title"),
+        sub: (count: number) =>
+          translateKey(locale, "health.metric.reporting.note", { count }),
+      },
+    },
+    summary: {
+      dispatch: {
+        queueDepth: translateKey(locale, "health.summary.dispatch.queueDepth"),
+        redispatchOrders: translateKey(
+          locale,
+          "health.summary.dispatch.redispatchOrders",
+        ),
+        exceptionHolds: translateKey(
+          locale,
+          "health.summary.dispatch.exceptionHolds",
+        ),
+        failedOrders: translateKey(
+          locale,
+          "health.summary.dispatch.failedOrders",
+        ),
+      },
+      webhook: {
+        activeEndpoints: translateKey(
+          locale,
+          "health.summary.webhook.activeEndpoints",
+        ),
+        disabledEndpoints: translateKey(
+          locale,
+          "health.summary.webhook.disabledEndpoints",
+        ),
+        queuedDeliveries: translateKey(
+          locale,
+          "health.summary.webhook.queuedDeliveries",
+        ),
+        oldestQueuedLag: translateKey(
+          locale,
+          "health.summary.webhook.oldestQueuedLag",
+        ),
+      },
+      filing: {
+        reportingQueuedJobs: translateKey(
+          locale,
+          "health.summary.filing.reportingQueuedJobs",
+        ),
+        recordingBacklog: translateKey(
+          locale,
+          "health.summary.filing.recordingBacklog",
+        ),
+        manualReviewQueue: translateKey(
+          locale,
+          "health.summary.filing.manualReviewQueue",
+        ),
+        eligibilityFailures24h: translateKey(
+          locale,
+          "health.summary.filing.eligibilityFailures24h",
+        ),
+      },
+    },
+    adapterColumns: {
+      adapter: translateKey(locale, "health.adapterColumns.adapter"),
+      source: translateKey(locale, "health.adapterColumns.source"),
+      kind: translateKey(locale, "health.adapterColumns.kind"),
+      status: translateKey(locale, "health.adapterColumns.status"),
+      latency: translateKey(locale, "health.adapterColumns.latency"),
+      lastEvent: translateKey(locale, "health.adapterColumns.lastEvent"),
+      orders24h: translateKey(locale, "health.adapterColumns.orders24h"),
+    },
+  };
+}
+
+export function getNoticesAudienceLabel(
+  locale: Locale,
+  audience: PlatformNoticeRecord["targetAudience"],
+): string {
+  switch (audience) {
+    case "all":
+      return translateKey(locale, "notices.maintenance.previewTargets")
+        .replace(/^Target surfaces:\s*/u, "")
+        .replace(/^目標對象：/u, "");
+    case "tenants":
+      return translateKey(locale, "notices.audience.tenants");
+    case "ops":
+      return translateKey(locale, "notices.audience.ops");
+    case "drivers":
+      return translateKey(locale, "notices.audience.drivers");
+    default:
+      return audience;
+  }
+}
+
+export function getNoticeSeverityLabel(
+  locale: Locale,
+  severity: PlatformNoticeSeverity,
+): string {
+  return translateKey(locale, `notices.severity.${severity}`);
+}
+
+export function getNoticeStatusLabel(
+  locale: Locale,
+  status: PlatformNoticeStatus,
+): string {
+  return translateKey(locale, `notices.status.${status}`);
+}
+
+export function getNoticeWindowNotScheduled(locale: Locale): string {
+  return translateKey(locale, "notices.window.notScheduled");
+}
+
+export function getNoticeHistoryDeliveryLabel(
+  locale: Locale,
+  status: PlatformNoticeStatus,
+  audience: PlatformNoticeRecord["targetAudience"],
+): string {
+  if (status === "resolved") {
+    return translateKey(locale, "notices.history.delivery.archived");
+  }
+  return audience === "all"
+    ? translateKey(locale, "notices.history.delivery.all")
+    : translateKey(locale, "notices.history.delivery.single");
+}
+
+export function getNoticesPageCopy(locale: Locale) {
+  return {
+    title: translateKey(locale, "notices.title"),
+    subtitle: translateKey(locale, "notices.subtitle.detail"),
+    notices: translateKey(locale, "notices.tab.notices"),
+    maintenance: translateKey(locale, "notices.tab.maintenance"),
+    history: translateKey(locale, "notices.tab.history"),
+    createNotice: translateKey(locale, "notices.createNotice"),
+    enterMaintenance: translateKey(locale, "notices.enterMaintenance"),
+    refresh: translateKey(locale, "common.refresh"),
+    refreshing: translateKey(locale, "notices.refreshing"),
+    emptyNotices: translateKey(locale, "notices.emptyDetailed"),
+    emptyHistory: translateKey(locale, "notices.emptyHistory"),
+    noticeComposerTitle: translateKey(locale, "notices.composer.title"),
+    noticeComposerSubtitle: translateKey(locale, "notices.composer.subtitle"),
+    noticeTitle: translateKey(locale, "notices.col.title"),
+    noticeBody: translateKey(locale, "notices.form.body"),
+    noticeAudience: translateKey(locale, "notices.col.audience"),
+    noticeSeverity: translateKey(locale, "notices.col.severity"),
+    publishNotice: translateKey(locale, "notices.publishNotice"),
+    publishing: translateKey(locale, "notices.publishing"),
+    activeNoticeGuardrailTitle: translateKey(locale, "notices.guardrail.title"),
+    activeNoticeGuardrailBody: translateKey(locale, "notices.guardrail.body"),
+    currentMaintenance: translateKey(
+      locale,
+      "notices.maintenance.currentTitle",
+    ),
+    currentMaintenanceSubtitle: translateKey(
+      locale,
+      "notices.maintenance.currentSubtitle",
+    ),
+    internalReason: translateKey(locale, "notices.maintenance.internalReason"),
+    scheduledStart: translateKey(locale, "notices.maintenance.scheduledStart"),
+    scheduledEnd: translateKey(locale, "notices.maintenance.scheduledEnd"),
+    saveMaintenance: translateKey(locale, "notices.maintenance.save"),
+    previewTitle: translateKey(locale, "notices.maintenance.previewTitle"),
+    previewFallback: translateKey(
+      locale,
+      "notices.maintenance.previewFallback",
+    ),
+    previewTargets: translateKey(locale, "notices.maintenance.previewTargets"),
+    reasonRequired: translateKey(locale, "notices.maintenance.reasonRequired"),
+    confirmTitle: translateKey(locale, "notices.maintenance.confirmTitle"),
+    confirmBody: translateKey(locale, "notices.maintenance.confirmBody"),
+    confirmReasonLabel: translateKey(
+      locale,
+      "notices.maintenance.confirmReasonLabel",
+    ),
+    confirmCancel: translateKey(locale, "common.cancel"),
+    confirmApply: translateKey(locale, "notices.maintenance.confirmApply"),
+    resolving: translateKey(locale, "notices.updating"),
+    resolve: translateKey(locale, "notices.resolve"),
+    maintenanceEnabled: translateKey(locale, "notices.maintEnabled"),
+    maintenanceDisabled: translateKey(locale, "notices.maintDisabled"),
+    maintenanceSummary: translateKey(locale, "notices.maintenance.summary"),
+    reasonPlaceholder: translateKey(
+      locale,
+      "notices.maintenance.reasonPlaceholder",
+    ),
+    startPlaceholder: translateKey(
+      locale,
+      "notices.maintenance.startPlaceholder",
+    ),
+    endPlaceholder: translateKey(locale, "notices.maintenance.endPlaceholder"),
+    createdAt: translateKey(locale, "notices.col.updated"),
+    audience: translateKey(locale, "notices.col.targets"),
+    status: translateKey(locale, "common.status"),
+    severity: translateKey(locale, "notices.col.severityShort"),
+    delivery: translateKey(locale, "notices.col.delivery"),
+    broadcastAt: translateKey(locale, "notices.col.broadcastAt"),
+    updatedBy: translateKey(locale, "notices.col.updatedBy"),
+    window: translateKey(locale, "notices.col.window"),
+    action: translateKey(locale, "notices.col.action"),
+    notice: translateKey(locale, "notices.col.notice"),
+    id: translateKey(locale, "notices.col.id"),
+    historySubtitle: translateKey(locale, "notices.history.subtitle"),
+    archived: translateKey(locale, "notices.status.archived"),
+    noticeTitleRequired: translateKey(locale, "notices.noticeTitleRequired"),
+    noticeBodyRequired: translateKey(locale, "notices.noticeBodyRequired"),
+    maintenanceRisk: translateKey(locale, "notices.risk.high"),
+    systemUser: translateKey(locale, "notices.systemUser"),
+    severityOptions: {
+      info: translateKey(locale, "notices.severity.info"),
+      warning: translateKey(locale, "notices.severity.warning"),
+      critical: translateKey(locale, "notices.severity.critical"),
+    },
+    audienceOptions: {
+      ops: translateKey(locale, "notices.audience.ops"),
+      tenants: translateKey(locale, "notices.audience.tenants"),
+      drivers: translateKey(locale, "notices.audience.drivers"),
+    },
+    warning: {
+      operationError: (error: string) =>
+        getBilingualText("notices.warning.operationError", { error }),
+      maintenanceEnabled: () =>
+        getBilingualText("notices.warning.maintenanceEnabled"),
+    },
+  };
+}
 
 export function t(
   key: string,
