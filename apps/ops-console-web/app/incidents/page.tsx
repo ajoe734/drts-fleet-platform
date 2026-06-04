@@ -155,6 +155,32 @@ function formatTableDateTime(
   return formatDateTime(locale, value, emptyLabel, "short");
 }
 
+function formatIncidentListTime(
+  locale: "en" | "zh",
+  record: Pick<IncidentRecord, "occurredAt" | "createdAt">,
+  emptyLabel: string,
+) {
+  return formatTableDateTime(
+    locale,
+    record.occurredAt ?? record.createdAt,
+    emptyLabel,
+  );
+}
+
+function formatIncidentStatusLabel(
+  locale: "en" | "zh",
+  status: IncidentStatus,
+) {
+  return formatOpsCodeLabel(locale, status);
+}
+
+function formatRecoveryActionCount(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  count: number,
+) {
+  return t("incidents.recoveryCount", { count });
+}
+
 function formatIncidentAge(
   value: string | null | undefined,
   t: (key: string, params?: Record<string, string | number>) => string,
@@ -349,7 +375,7 @@ function renderSeverityPill(
 function renderStatusPill(locale: "en" | "zh", status: IncidentStatus) {
   return (
     <Pill theme={theme} tone={incidentStatusTone(status)} dot>
-      {formatOpsCodeLabel(locale, status)}
+      {formatIncidentStatusLabel(locale, status)}
     </Pill>
   );
 }
@@ -729,19 +755,13 @@ export default function IncidentsPage() {
       h: t("incidents.col.occurred"),
       w: 168,
       mono: true,
-      r: (row) =>
-        formatTableDateTime(
-          locale,
-          row.occurredAt ?? row.createdAt,
-          t("common.dash"),
-        ),
+      r: (row) => formatIncidentListTime(locale, row, t("common.dash")),
     },
     {
       h: t("incidents.col.recoveryActions"),
       w: 108,
       mono: true,
-      r: (row) =>
-        `${row.serviceRecoveryActions.length} ${t("incidents.detail.actionsRecorded")}`,
+      r: (row) => formatRecoveryActionCount(t, row.serviceRecoveryActions.length),
     },
   ];
 

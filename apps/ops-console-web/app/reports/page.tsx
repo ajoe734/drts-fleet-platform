@@ -247,6 +247,19 @@ const sectionCopyStyle: CSSProperties = {
   color: th.textMuted,
 };
 
+type TranslateFn = (
+  key: string,
+  params?: Record<string, string | number>,
+) => string;
+
+function copyText(
+  t: TranslateFn,
+  key: string,
+  params?: Record<string, string | number>,
+) {
+  return t(`reports.${key}`, params);
+}
+
 function defaultClosedMonth() {
   const now = new Date();
   const year = now.getUTCFullYear();
@@ -399,7 +412,7 @@ function readFilterString(
 
 function summarizeJobPeriod(
   filters: Record<string, unknown>,
-  t: (key: string, params?: Record<string, string | number>) => string,
+  t: TranslateFn,
 ) {
   const period = readFilterString(filters, "period");
   if (period) {
@@ -414,9 +427,9 @@ function summarizeJobPeriod(
   const from = readFilterString(filters, "from");
   const to = readFilterString(filters, "to");
   if (from || to) {
-    return t("reports.periodRange", {
-      from: from ?? t("reports.rangeOpen"),
-      to: to ?? t("reports.rangeOpen"),
+    return copyText(t, "periodRange", {
+      from: from ?? copyText(t, "rangeOpen"),
+      to: to ?? copyText(t, "rangeOpen"),
     });
   }
 
@@ -463,16 +476,16 @@ function filingStatusTone(
 function actionDisabledReasonLabel(
   locale: "en" | "zh",
   descriptor: ResourceActionDescriptor,
-  t: (key: string, params?: Record<string, string | number>) => string,
+  t: TranslateFn,
 ) {
   if (!descriptor.disabledReasonCode) {
     return null;
   }
   if (descriptor.disabledReasonCode === "still_running") {
-    return t("reports.action.stillRunning");
+    return copyText(t, "action.stillRunning");
   }
   if (descriptor.disabledReasonCode === "artifact_missing") {
-    return t("reports.action.artifactPending");
+    return copyText(t, "action.artifactPending");
   }
   return formatOpsCodeLabel(locale, descriptor.disabledReasonCode);
 }
@@ -555,8 +568,8 @@ function ReportJobComposerModal({
       <div style={modalFrameStyle} onClick={(event) => event.stopPropagation()}>
         <CanvasCard
           theme={th}
-          title={t("reports.form.createJob")}
-          subtitle={t("reports.form.modalSubtitle")}
+          title={copyText(t, "form.createJob")}
+          subtitle={copyText(t, "form.modalSubtitle")}
           actions={
             <CanvasPill theme={th} tone="info">
               {jobCategoryLabel}
@@ -567,14 +580,14 @@ function ReportJobComposerModal({
             theme={th}
             tone="info"
             icon="reports"
-            title={t("reports.backgroundExport")}
-            body={t("reports.form.modalSubtitle")}
+            title={copyText(t, "backgroundExport")}
+            body={copyText(t, "form.modalSubtitle")}
           />
           <div style={{ height: 14 }} />
           <div style={formGridStyle}>
             <CanvasField
               theme={th}
-              label={t("reports.form.type")}
+              label={copyText(t, "form.type")}
               hint={typeHint}
             >
               <select
@@ -592,7 +605,7 @@ function ReportJobComposerModal({
               </select>
             </CanvasField>
 
-            <CanvasField theme={th} label={t("reports.form.format")}>
+            <CanvasField theme={th} label={copyText(t, "form.format")}>
               <select
                 value={format}
                 onChange={(event) =>
@@ -610,33 +623,33 @@ function ReportJobComposerModal({
 
             <CanvasField
               theme={th}
-              label={t("reports.form.periodTag")}
-              hint={t("reports.form.periodHint")}
+              label={copyText(t, "form.periodTag")}
+              hint={copyText(t, "form.periodHint")}
             >
               <input
                 value={periodLabel}
                 onChange={(event) => setPeriodLabel(event.target.value)}
-                placeholder={t("reports.form.periodHint")}
+                placeholder={copyText(t, "form.periodHint")}
                 style={nativeMonoInputStyle}
               />
             </CanvasField>
 
             <CanvasField
               theme={th}
-              label={t("reports.form.vehicleId")}
-              hint={t("reports.form.vehicleHint")}
+              label={copyText(t, "form.vehicleId")}
+              hint={copyText(t, "form.vehicleHint")}
             >
               <input
                 value={vehicleId}
                 onChange={(event) => setVehicleId(event.target.value)}
-                placeholder={t("reports.form.vehiclePlaceholder")}
+                placeholder={copyText(t, "form.vehiclePlaceholder")}
                 style={nativeMonoInputStyle}
               />
             </CanvasField>
           </div>
 
           <div style={formFooterStyle}>
-            <div style={formNoteStyle}>{t("reports.form.modalNote")}</div>
+            <div style={formNoteStyle}>{copyText(t, "form.modalNote")}</div>
             <div style={actionRowStyle}>
               <CanvasBtn
                 theme={th}
@@ -654,7 +667,9 @@ function ReportJobComposerModal({
                 onClick={onSubmit}
                 disabled={pending}
               >
-                {pending ? t("reports.form.submitting") : t("reports.form.createJob")}
+                {pending
+                  ? copyText(t, "form.submitting")
+                  : copyText(t, "form.createJob")}
               </CanvasBtn>
             </div>
           </div>
@@ -862,11 +877,15 @@ export default function ReportsPage() {
   ).length;
   const reportTypeOptions = REPORT_JOB_TYPES.map((value) => ({
     value,
-    label: t(`reports.type.${value}`),
+    label: copyText(t, `type.${value}`),
   }));
-  const selectedJobCategoryLabel = t(`reports.category.${jobCategory(jobType)}`);
-  const selectedJobTypeHint = `${t(`reports.type.${jobType}.desc`)} ${t(
-    "reports.categoryLabel",
+  const selectedJobCategoryLabel = copyText(
+    t,
+    `category.${jobCategory(jobType)}`,
+  );
+  const selectedJobTypeHint = `${copyText(t, `type.${jobType}.desc`)} ${copyText(
+    t,
+    "categoryLabel",
     {
       value: selectedJobCategoryLabel,
     },
@@ -908,7 +927,7 @@ export default function ReportsPage() {
 
   const jobColumns: CanvasTableColumn<JobRow>[] = [
     {
-      h: t("reports.col.job"),
+      h: copyText(t, "col.job"),
       w: 156,
       mono: true,
       r: (row) => (
@@ -917,36 +936,38 @@ export default function ReportsPage() {
           style={rowButtonStyle}
           onClick={() => void inspectReportJob(row.jobId)}
           disabled={detailLoadingKey === `job:${row.jobId}`}
-          aria-label={t("reports.inspect")}
+          aria-label={copyText(t, "inspect")}
         >
           {row.jobId}
         </button>
       ),
     },
     {
-      h: t("reports.col.type"),
+      h: copyText(t, "col.type"),
       w: 220,
       r: (row) => (
         <div style={rowStackStyle}>
-          <span style={rowTitleStyle}>{t(`reports.type.${row.jobType}`)}</span>
-          <span style={rowMetaStyle}>{t(`reports.category.${jobCategory(row.jobType)}`)}</span>
+          <span style={rowTitleStyle}>{copyText(t, `type.${row.jobType}`)}</span>
+          <span style={rowMetaStyle}>
+            {copyText(t, `category.${jobCategory(row.jobType)}`)}
+          </span>
         </div>
       ),
     },
     {
-      h: t("reports.form.periodTag"),
+      h: copyText(t, "form.periodTag"),
       w: 140,
       mono: true,
       r: (row) => summarizeJobPeriod(row.filters, t),
     },
     {
-      h: t("reports.col.format"),
+      h: copyText(t, "col.format"),
       w: 90,
       mono: true,
       r: (row) => row.format.toUpperCase(),
     },
     {
-      h: t("reports.col.status"),
+      h: copyText(t, "col.status"),
       w: 132,
       r: (row) => (
         <CanvasPill theme={th} tone={reportStatusTone(row.status)} dot>
@@ -955,7 +976,7 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: t("reports.detail.expires"),
+      h: copyText(t, "detail.expires"),
       w: 132,
       mono: true,
       r: (row) => (
@@ -965,19 +986,19 @@ export default function ReportsPage() {
           </span>
           {artifactExpired(row) ? (
             <span style={{ ...rowMetaStyle, color: th.warn }}>
-              {t("reports.banner.artifactExpiredTitle")}
+              {copyText(t, "banner.artifactExpiredTitle")}
             </span>
           ) : null}
         </div>
       ),
     },
     {
-      h: t("reports.col.created"),
+      h: copyText(t, "col.created"),
       mono: true,
       r: (row) => formatDateTime(locale, row.createdAt, t("common.dash")),
     },
     {
-      h: t("reports.col.actions"),
+      h: copyText(t, "col.actions"),
       w: 260,
       r: (row) => (
         <div style={actionRowStyle}>
@@ -985,7 +1006,7 @@ export default function ReportsPage() {
             descriptor={jobDownloadDescriptor(row)}
             locale={locale}
             busy={pending}
-            label={t("reports.download")}
+            label={copyText(t, "download")}
             icon="ext"
             onInvoke={() => void downloadReportJob(row.jobId)}
           />
@@ -993,7 +1014,7 @@ export default function ReportsPage() {
             descriptor={jobRetryDescriptor(row)}
             locale={locale}
             busy={pending}
-            label={t("reports.retry")}
+            label={copyText(t, "retry")}
             icon="arrow"
             onInvoke={() => retryReportJob(row)}
           />
@@ -1004,7 +1025,7 @@ export default function ReportsPage() {
 
   const packageColumns: CanvasTableColumn<PackageRow>[] = [
     {
-      h: t("reports.col.package"),
+      h: copyText(t, "col.package"),
       w: 164,
       mono: true,
       r: (row) => (
@@ -1013,19 +1034,19 @@ export default function ReportsPage() {
           style={rowButtonStyle}
           onClick={() => void inspectFilingPackage(row.packageId)}
           disabled={detailLoadingKey === `package:${row.packageId}`}
-          aria-label={t("reports.inspect")}
+          aria-label={copyText(t, "inspect")}
         >
           {row.packageId}
         </button>
       ),
     },
     {
-      h: t("reports.col.filingType"),
+      h: copyText(t, "col.filingType"),
       w: 180,
       r: (row) => formatOpsCodeLabel(locale, row.packageType),
     },
     {
-      h: t("reports.col.filingStatus"),
+      h: copyText(t, "col.filingStatus"),
       w: 132,
       r: (row) => (
         <CanvasPill theme={th} tone={filingStatusTone(row.status)} dot>
@@ -1034,25 +1055,25 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: t("reports.col.manifest"),
+      h: copyText(t, "col.manifest"),
       w: 136,
       mono: true,
       r: (row) => shortHash(row.manifestHash, t("common.dash")),
     },
     {
-      h: t("reports.col.items"),
+      h: copyText(t, "col.items"),
       w: 90,
       mono: true,
       r: (row) => String(row.items.length),
     },
     {
-      h: t("reports.col.generated"),
+      h: copyText(t, "col.generated"),
       w: 132,
       mono: true,
       r: (row) => formatDateTime(locale, row.generatedAt, t("common.dash")),
     },
     {
-      h: t("reports.col.artifacts"),
+      h: copyText(t, "col.artifacts"),
       r: (row) =>
         row.artifactZipUrl || row.artifactPdfUrl ? (
           <div style={rowStackStyle}>
@@ -1063,7 +1084,7 @@ export default function ReportsPage() {
                 target="_blank"
                 style={actionLinkStyle}
               >
-                {t("reports.short.zip")}
+                {copyText(t, "short.zip")}
               </a>
             ) : null}
             {row.artifactPdfUrl ? (
@@ -1073,7 +1094,7 @@ export default function ReportsPage() {
                 target="_blank"
                 style={mutedLinkStyle}
               >
-                {t("reports.short.pdf")}
+                {copyText(t, "short.pdf")}
               </a>
             ) : null}
           </div>
@@ -1084,9 +1105,9 @@ export default function ReportsPage() {
   ];
 
   const tabItems: Array<{ id: ReportsTab; label: string }> = [
-    { id: "jobs", label: t("reports.tab.jobs") },
-    { id: "packages", label: t("reports.tab.packages") },
-    { id: "schedules", label: t("reports.tab.schedules") },
+    { id: "jobs", label: copyText(t, "tab.jobs") },
+    { id: "packages", label: copyText(t, "tab.packages") },
+    { id: "schedules", label: copyText(t, "tab.schedules") },
   ];
   const renderedTabs = tabItems.map((tab) => (
     <button
@@ -1111,8 +1132,8 @@ export default function ReportsPage() {
     <div style={pageStyle}>
       <CanvasPageHeader
         theme={th}
-        title={t("reports.title")}
-        subtitle={t("reports.header.subtitle")}
+        title={copyText(t, "title")}
+        subtitle={copyText(t, "header.subtitle")}
         tabs={renderedTabs}
         activeTab={activeTabNode}
         actions={
@@ -1124,7 +1145,7 @@ export default function ReportsPage() {
               size="sm"
               onClick={() => setShowJobComposer((value) => !value)}
             >
-              {t("reports.form.createJob")}
+              {copyText(t, "form.createJob")}
             </CanvasBtn>
           ) : activeTab === "packages" ? (
             <CanvasBtn
@@ -1134,7 +1155,7 @@ export default function ReportsPage() {
               size="sm"
               onClick={() => setShowPackageComposer((value) => !value)}
             >
-              {t("reports.form.generatePackage")}
+              {copyText(t, "form.generatePackage")}
             </CanvasBtn>
           ) : undefined
         }
@@ -1173,11 +1194,11 @@ export default function ReportsPage() {
         {showPackageComposer && activeTab === "packages" ? (
           <CanvasCard
             theme={th}
-            title={t("reports.immutableFiling")}
-            subtitle={t("reports.generateFiling")}
+            title={copyText(t, "immutableFiling")}
+            subtitle={copyText(t, "generateFiling")}
             actions={
               <CanvasPill theme={th} tone="accent">
-                {t("reports.complianceBundle")}
+                {copyText(t, "complianceBundle")}
               </CanvasPill>
             }
           >
@@ -1185,12 +1206,12 @@ export default function ReportsPage() {
               theme={th}
               tone="accent"
               icon="reports"
-              title={t("reports.form.generatePackage")}
-              body={t("reports.banner.generatedBundle")}
+              title={copyText(t, "form.generatePackage")}
+              body={copyText(t, "banner.generatedBundle")}
             />
             <div style={{ height: 14 }} />
             <div style={formGridStyle}>
-              <CanvasField theme={th} label={t("reports.form.packageType")}>
+              <CanvasField theme={th} label={copyText(t, "form.packageType")}>
                 <select
                   value={packageType}
                   onChange={(event) =>
@@ -1208,7 +1229,7 @@ export default function ReportsPage() {
 
               <CanvasField
                 theme={th}
-                label={t("reports.form.filingMonth")}
+                label={copyText(t, "form.filingMonth")}
                 hint={getOpsLabel(locale, "reportsClosedMonthExample")}
               >
                 <input
@@ -1221,7 +1242,7 @@ export default function ReportsPage() {
 
               <CanvasField
                 theme={th}
-                label={t("reports.form.scopeChannel")}
+                label={copyText(t, "form.scopeChannel")}
                 hint={getOpsLabel(locale, "reportsRequestedByExample")}
               >
                 <input
@@ -1234,7 +1255,9 @@ export default function ReportsPage() {
             </div>
 
             <div style={formFooterStyle}>
-              <div style={formNoteStyle}>{t("reports.banner.packageComposerNote")}</div>
+              <div style={formNoteStyle}>
+                {copyText(t, "banner.packageComposerNote")}
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <CanvasBtn
                   theme={th}
@@ -1253,8 +1276,8 @@ export default function ReportsPage() {
                   disabled={pending}
                 >
                   {pending
-                    ? t("reports.form.submitting")
-                    : t("reports.form.generatePackage")}
+                    ? copyText(t, "form.submitting")
+                    : copyText(t, "form.generatePackage")}
                 </CanvasBtn>
               </div>
             </div>
@@ -1265,7 +1288,7 @@ export default function ReportsPage() {
           <>
             <CanvasCard theme={th} padding={0}>
               {loading ? (
-                <div style={emptyStateStyle}>{t("reports.loadingJobs")}</div>
+                <div style={emptyStateStyle}>{copyText(t, "loadingJobs")}</div>
               ) : sortedJobRows.length > 0 ? (
                 <CanvasTable<JobRow>
                   theme={th}
@@ -1273,17 +1296,17 @@ export default function ReportsPage() {
                   rows={sortedJobRows}
                 />
               ) : (
-                <div style={emptyStateStyle}>{t("reports.noJobs")}</div>
+                <div style={emptyStateStyle}>{copyText(t, "noJobs")}</div>
               )}
             </CanvasCard>
 
             {selectedJobId && detailLoadingKey === `job:${selectedJobId}` ? (
               <CanvasCard
                 theme={th}
-                title={t("reports.loadingReportDetail")}
+                title={copyText(t, "loadingReportDetail")}
                 subtitle={selectedJobId}
               >
-                <div style={emptyStateStyle}>{t("reports.loading")}</div>
+                <div style={emptyStateStyle}>{copyText(t, "loading")}</div>
               </CanvasCard>
             ) : null}
 
@@ -1291,7 +1314,7 @@ export default function ReportsPage() {
               <div style={twoColumnGridStyle}>
                 <CanvasCard
                   theme={th}
-                  title={t(`reports.type.${jobDetail.jobType}`)}
+                  title={copyText(t, `type.${jobDetail.jobType}`)}
                   subtitle={jobDetail.jobId}
                   actions={
                     <CanvasPill
@@ -1309,8 +1332,8 @@ export default function ReportsPage() {
                         theme={th}
                         tone="danger"
                         icon="warn"
-                        title={t("reports.banner.jobFailedTitle")}
-                        body={t("reports.banner.jobFailedBody")}
+                        title={copyText(t, "banner.jobFailedTitle")}
+                        body={copyText(t, "banner.jobFailedBody")}
                       />
                       <div style={{ height: 14 }} />
                     </>
@@ -1322,8 +1345,8 @@ export default function ReportsPage() {
                         theme={th}
                         tone="warn"
                         icon="warn"
-                        title={t("reports.banner.artifactExpiredTitle")}
-                        body={t("reports.banner.artifactExpiredBody")}
+                        title={copyText(t, "banner.artifactExpiredTitle")}
+                        body={copyText(t, "banner.artifactExpiredBody")}
                       />
                       <div style={{ height: 14 }} />
                     </>
@@ -1337,8 +1360,8 @@ export default function ReportsPage() {
                         theme={th}
                         tone="warn"
                         icon="clock"
-                        title={t("reports.banner.signedUrlExpiringTitle")}
-                        body={t("reports.banner.signedUrlExpiringBody")}
+                        title={copyText(t, "banner.signedUrlExpiringTitle")}
+                        body={copyText(t, "banner.signedUrlExpiringBody")}
                       />
                       <div style={{ height: 14 }} />
                     </>
@@ -1350,8 +1373,8 @@ export default function ReportsPage() {
                         theme={th}
                         tone="info"
                         icon="reports"
-                        title={t("reports.detail.artifactPending")}
-                        body={t("reports.banner.artifactPendingBody")}
+                        title={copyText(t, "detail.artifactPending")}
+                        body={copyText(t, "banner.artifactPendingBody")}
                       />
                       <div style={{ height: 14 }} />
                     </>
@@ -1362,12 +1385,12 @@ export default function ReportsPage() {
                     cols={2}
                     items={[
                       {
-                        label: t("reports.detail.format"),
+                        label: copyText(t, "detail.format"),
                         value: jobDetail.format.toUpperCase(),
                         mono: true,
                       },
                       {
-                        label: t("reports.detail.created"),
+                        label: copyText(t, "detail.created"),
                         value: formatDateTime(
                           locale,
                           jobDetail.createdAt,
@@ -1377,7 +1400,7 @@ export default function ReportsPage() {
                         mono: true,
                       },
                       {
-                        label: t("reports.detail.updatedLabel"),
+                        label: copyText(t, "detail.updatedLabel"),
                         value: formatDateTime(
                           locale,
                           jobDetail.updatedAt,
@@ -1387,12 +1410,12 @@ export default function ReportsPage() {
                         mono: true,
                       },
                       {
-                        label: t("reports.form.periodTag"),
+                        label: copyText(t, "form.periodTag"),
                         value: summarizeJobPeriod(jobDetail.filters, t),
                         mono: true,
                       },
                       {
-                        label: t("reports.detail.manifest"),
+                        label: copyText(t, "detail.manifest"),
                         value: shortHash(
                           jobDetail.artifact?.manifestHash,
                           t("common.dash"),
@@ -1400,7 +1423,7 @@ export default function ReportsPage() {
                         mono: true,
                       },
                       {
-                        label: t("reports.detail.expires"),
+                        label: copyText(t, "detail.expires"),
                         value: formatDateTime(
                           locale,
                           jobDetail.artifact?.downloadMetadata.expiresAt ??
@@ -1418,7 +1441,7 @@ export default function ReportsPage() {
                       descriptor={jobDownloadDescriptor(jobDetail)}
                       locale={locale}
                       busy={pending}
-                      label={t("reports.detail.openSignedArtifact")}
+                      label={copyText(t, "detail.openSignedArtifact")}
                       icon="ext"
                       onInvoke={() =>
                         openDownload(artifactDownloadUrl(jobDetail.artifact))
@@ -1428,7 +1451,7 @@ export default function ReportsPage() {
                       descriptor={jobRetryDescriptor(jobDetail)}
                       locale={locale}
                       busy={pending}
-                      label={t("reports.retryJob")}
+                      label={copyText(t, "retryJob")}
                       icon="arrow"
                       onInvoke={() => retryReportJob(jobDetail)}
                     />
@@ -1437,8 +1460,8 @@ export default function ReportsPage() {
 
                 <CanvasCard
                   theme={th}
-                  title={t("reports.detail.filters")}
-                  subtitle={t("reports.banner.currentRequestPayload")}
+                  title={copyText(t, "detail.filters")}
+                  subtitle={copyText(t, "banner.currentRequestPayload")}
                 >
                   {Object.keys(jobDetail.filters).length > 0 ? (
                     <pre style={jsonBlockStyle}>
@@ -1446,7 +1469,7 @@ export default function ReportsPage() {
                     </pre>
                   ) : (
                     <p style={sectionCopyStyle}>
-                      {t("reports.detail.noFilters")}
+                      {copyText(t, "detail.noFilters")}
                     </p>
                   )}
                 </CanvasCard>
@@ -1456,14 +1479,14 @@ export default function ReportsPage() {
             {jobDetail?.rows && jobDetail.rows.length > 0 ? (
               <CanvasCard
                 theme={th}
-                title={t("reports.detail.dispatchRows")}
+                title={copyText(t, "detail.dispatchRows")}
                 padding={0}
               >
                 <CanvasTable<DispatchRow>
                   theme={th}
                   columns={[
                     {
-                      h: t("reports.col.order"),
+                      h: copyText(t, "col.order"),
                       w: 184,
                       r: (row) => (
                         <div style={rowStackStyle}>
@@ -1477,19 +1500,19 @@ export default function ReportsPage() {
                       ),
                     },
                     {
-                      h: t("reports.col.call"),
+                      h: copyText(t, "col.call"),
                       k: "callId",
                       w: 140,
                       mono: true,
                     },
                     {
-                      h: t("reports.col.recording"),
+                      h: copyText(t, "col.recording"),
                       k: "recordingId",
                       w: 160,
                       mono: true,
                     },
                     {
-                      h: t("reports.col.missing"),
+                      h: copyText(t, "col.missing"),
                       w: 110,
                       r: (row) => (
                         <CanvasPill
@@ -1513,14 +1536,14 @@ export default function ReportsPage() {
             jobDetail.partnerRevenueRows.length > 0 ? (
               <CanvasCard
                 theme={th}
-                title={t("reports.detail.partnerRevenueRows")}
+                title={copyText(t, "detail.partnerRevenueRows")}
                 padding={0}
               >
                 <CanvasTable<PartnerRevenueRow>
                   theme={th}
                   columns={[
                     {
-                      h: t("reports.col.order"),
+                      h: copyText(t, "col.order"),
                       w: 188,
                       r: (row) => (
                         <div style={rowStackStyle}>
@@ -1534,7 +1557,7 @@ export default function ReportsPage() {
                       ),
                     },
                     {
-                      h: t("reports.col.partner"),
+                      h: copyText(t, "col.partner"),
                       w: 180,
                       r: (row) => (
                         <div style={rowStackStyle}>
@@ -1548,7 +1571,7 @@ export default function ReportsPage() {
                       ),
                     },
                     {
-                      h: t("reports.col.eligibility"),
+                      h: copyText(t, "col.eligibility"),
                       w: 164,
                       r: (row) => (
                         <div style={rowStackStyle}>
@@ -1566,7 +1589,7 @@ export default function ReportsPage() {
                       ),
                     },
                     {
-                      h: t("reports.col.benefit"),
+                      h: copyText(t, "col.benefit"),
                       w: 168,
                       r: (row) => (
                         <div style={rowStackStyle}>
@@ -1584,7 +1607,7 @@ export default function ReportsPage() {
                       ),
                     },
                     {
-                      h: t("reports.col.amount"),
+                      h: copyText(t, "col.amount"),
                       align: "right",
                       mono: true,
                       r: (row) =>
@@ -1603,7 +1626,7 @@ export default function ReportsPage() {
             <CanvasCard theme={th} padding={0}>
               {loading ? (
                 <div style={emptyStateStyle}>
-                  {t("reports.loadingPackages")}
+                  {copyText(t, "loadingPackages")}
                 </div>
               ) : sortedPackageRows.length > 0 ? (
                 <CanvasTable<PackageRow>
@@ -1612,7 +1635,7 @@ export default function ReportsPage() {
                   rows={sortedPackageRows}
                 />
               ) : (
-                <div style={emptyStateStyle}>{t("reports.noPackages")}</div>
+                <div style={emptyStateStyle}>{copyText(t, "noPackages")}</div>
               )}
             </CanvasCard>
 
@@ -1620,10 +1643,10 @@ export default function ReportsPage() {
             detailLoadingKey === `package:${selectedPackageId}` ? (
               <CanvasCard
                 theme={th}
-                title={t("reports.loadingPackageDetail")}
+                title={copyText(t, "loadingPackageDetail")}
                 subtitle={selectedPackageId}
               >
-                <div style={emptyStateStyle}>{t("reports.loading")}</div>
+                <div style={emptyStateStyle}>{copyText(t, "loading")}</div>
               </CanvasCard>
             ) : null}
 
@@ -1631,7 +1654,7 @@ export default function ReportsPage() {
               <div style={twoColumnGridStyle}>
                 <CanvasCard
                   theme={th}
-                  title={t("reports.packageManifest", {
+                  title={copyText(t, "packageManifest", {
                     type: formatOpsCodeLabel(locale, packageDetail.packageType),
                   })}
                   subtitle={packageDetail.packageId}
@@ -1648,11 +1671,11 @@ export default function ReportsPage() {
                   {!packageDetail.downloadMetadata ? (
                     <>
                       <CanvasBanner
-                        theme={th}
-                        tone="info"
-                        icon="reports"
-                        title={t("reports.detail.packagePending")}
-                        body={t("reports.banner.packagePendingBody")}
+                      theme={th}
+                      tone="info"
+                      icon="reports"
+                        title={copyText(t, "detail.packagePending")}
+                        body={copyText(t, "banner.packagePendingBody")}
                       />
                       <div style={{ height: 14 }} />
                     </>
@@ -1663,7 +1686,7 @@ export default function ReportsPage() {
                     cols={2}
                     items={[
                       {
-                        label: t("reports.detail.generated"),
+                        label: copyText(t, "detail.generated"),
                         value: formatDateTime(
                           locale,
                           packageDetail.generatedAt,
@@ -1673,7 +1696,7 @@ export default function ReportsPage() {
                         mono: true,
                       },
                       {
-                        label: t("reports.detail.checksum"),
+                        label: copyText(t, "detail.checksum"),
                         value: shortHash(
                           packageDetail.manifest?.checksum,
                           t("common.dash"),
@@ -1681,18 +1704,18 @@ export default function ReportsPage() {
                         mono: true,
                       },
                       {
-                        label: t("reports.detail.packageItems", {
+                        label: copyText(t, "detail.packageItems", {
                           count: packageDetail.items.length,
                         }),
                         value: String(packageDetail.items.length),
                         mono: true,
                       },
                       {
-                        label: t("reports.mutability"),
+                        label: copyText(t, "mutability"),
                         value: formatOpsCodeLabel(locale, "immutable"),
                       },
                       {
-                        label: t("reports.detail.manifest"),
+                        label: copyText(t, "detail.manifest"),
                         value: shortHash(
                           packageDetail.manifestHash,
                           t("common.dash"),
@@ -1700,7 +1723,7 @@ export default function ReportsPage() {
                         mono: true,
                       },
                       {
-                        label: t("reports.detail.status"),
+                        label: copyText(t, "detail.status"),
                         value: formatOpsCodeLabel(locale, packageDetail.status),
                       },
                     ]}
@@ -1721,7 +1744,7 @@ export default function ReportsPage() {
                         target="_blank"
                         style={actionLinkStyle}
                       >
-                        {t("reports.detail.openSignedZip")}
+                        {copyText(t, "detail.openSignedZip")}
                       </a>
                       <a
                         href={packageDetail.downloadMetadata.pdf.downloadUrl}
@@ -1729,7 +1752,7 @@ export default function ReportsPage() {
                         target="_blank"
                         style={mutedLinkStyle}
                       >
-                        {t("reports.detail.openSignedPdf")}
+                        {copyText(t, "detail.openSignedPdf")}
                       </a>
                     </div>
                   ) : null}
@@ -1737,8 +1760,8 @@ export default function ReportsPage() {
 
                 <CanvasCard
                   theme={th}
-                  title={t("reports.detail.signedDownloads")}
-                  subtitle={t("reports.banner.currentPackageDelivery")}
+                  title={copyText(t, "detail.signedDownloads")}
+                  subtitle={copyText(t, "banner.currentPackageDelivery")}
                 >
                   {packageDetail.downloadMetadata ? (
                     <CanvasDL
@@ -1746,7 +1769,7 @@ export default function ReportsPage() {
                       cols={1}
                       items={[
                         {
-                          label: t("reports.detail.zipBundle"),
+                          label: copyText(t, "detail.zipBundle"),
                           value: formatDateTime(
                             locale,
                             packageDetail.downloadMetadata.zip.expiresAt,
@@ -1756,7 +1779,7 @@ export default function ReportsPage() {
                           mono: true,
                         },
                         {
-                          label: t("reports.detail.pdfBundle"),
+                          label: copyText(t, "detail.pdfBundle"),
                           value: formatDateTime(
                             locale,
                             packageDetail.downloadMetadata.pdf.expiresAt,
@@ -1769,7 +1792,7 @@ export default function ReportsPage() {
                     />
                   ) : (
                     <p style={sectionCopyStyle}>
-                      {t("reports.detail.packagePending")}
+                      {copyText(t, "detail.packagePending")}
                     </p>
                   )}
                 </CanvasCard>
@@ -1779,8 +1802,8 @@ export default function ReportsPage() {
             {packageDetail?.manifest ? (
               <CanvasCard
                 theme={th}
-                title={t("reports.detail.manifestEntries")}
-                subtitle={t("reports.detail.manifestId", {
+                title={copyText(t, "detail.manifestEntries")}
+                subtitle={copyText(t, "detail.manifestId", {
                   id: packageDetail.manifest.manifestId,
                 })}
                 padding={0}
@@ -1789,7 +1812,7 @@ export default function ReportsPage() {
                   theme={th}
                   columns={[
                     {
-                      h: t("reports.col.item"),
+                      h: copyText(t, "col.item"),
                       w: 188,
                       r: (row) => (
                         <div style={rowStackStyle}>
@@ -1801,13 +1824,13 @@ export default function ReportsPage() {
                       ),
                     },
                     {
-                      h: t("reports.col.artifactCol"),
+                      h: copyText(t, "col.artifactCol"),
                       k: "artifactId",
                       w: 190,
                       mono: true,
                     },
                     {
-                      h: t("reports.col.manifestHash"),
+                      h: copyText(t, "col.manifestHash"),
                       mono: true,
                       r: (row) =>
                         shortHash(String(row.manifestHash), t("common.dash")),
@@ -1828,52 +1851,56 @@ export default function ReportsPage() {
               theme={th}
               tone="info"
               icon="clock"
-              title={t("reports.banner.schedulesNotConfigured")}
-              body={t("reports.banner.schedulesNotConfiguredBody")}
+              title={copyText(t, "banner.schedulesNotConfigured")}
+              body={copyText(t, "banner.schedulesNotConfiguredBody")}
             />
 
             <div style={kpiGridStyle}>
               <CanvasKPI
                 theme={th}
-                label={t("reports.queuedJobs")}
+                label={copyText(t, "queuedJobs")}
                 value={queuedReports}
-                sub={t("reports.metrics.running", { count: runningReports })}
+                sub={copyText(t, "metrics.running", { count: runningReports })}
               />
               <CanvasKPI
                 theme={th}
-                label={t("reports.artifactsReady")}
+                label={copyText(t, "artifactsReady")}
                 value={readyArtifacts}
-                sub={t("reports.metrics.expiring", { count: expiringArtifacts })}
+                sub={copyText(t, "metrics.expiring", { count: expiringArtifacts })}
               />
               <CanvasKPI
                 theme={th}
-                label={t("reports.packagesGenerated", { count: completedPackages })}
+                label={copyText(t, "packagesGenerated", {
+                  count: completedPackages,
+                })}
                 value={completedPackages}
-                sub={t("reports.metrics.regulatoryJobs", { count: regulatoryJobs })}
+                sub={copyText(t, "metrics.regulatoryJobs", {
+                  count: regulatoryJobs,
+                })}
               />
             </div>
 
-            <CanvasCard theme={th} title={t("reports.currentReportingPosture")}>
+            <CanvasCard theme={th} title={copyText(t, "currentReportingPosture")}>
               <CanvasDL
                 theme={th}
                 cols={2}
                 items={[
                   {
-                    label: t("reports.metrics.reportJobs"),
+                    label: copyText(t, "metrics.reportJobs"),
                     value: String(jobs.length),
                     mono: true,
                   },
                   {
-                    label: t("reports.metrics.completedJobs"),
+                    label: copyText(t, "metrics.completedJobs"),
                     value: String(completedReports),
                     mono: true,
                   },
                   {
-                    label: t("reports.metrics.packageTypes"),
+                    label: copyText(t, "metrics.packageTypes"),
                     value: packageTypeSummary,
                   },
                   {
-                    label: t("reports.metrics.defaultScope"),
+                    label: copyText(t, "metrics.defaultScope"),
                     value: packageScope,
                     mono: true,
                   },

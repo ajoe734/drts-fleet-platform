@@ -859,6 +859,7 @@ const en = {
   "incidents.detail.escalation": "Escalation",
   "incidents.detail.links": "Links",
   "incidents.detail.actionsRecorded": "actions recorded",
+  "incidents.recoveryCount": "{count} actions",
   "incidents.modal.risk": "medium-risk",
   "incidents.modal.linkedComplaint": "Linked complaint",
   "incidents.modal.subtitle":
@@ -2524,6 +2525,7 @@ const zh: Record<keyof typeof en, string> = {
   "incidents.detail.escalation": "升級對象",
   "incidents.detail.links": "連結",
   "incidents.detail.actionsRecorded": "筆行動已記錄",
+  "incidents.recoveryCount": "{count} 項",
   "incidents.modal.risk": "中風險",
   "incidents.modal.linkedComplaint": "關聯客訴",
   "incidents.modal.subtitle": "由受治理的 modal action 建立，完成後回到列表。",
