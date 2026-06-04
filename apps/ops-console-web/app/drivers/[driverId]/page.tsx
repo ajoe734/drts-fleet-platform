@@ -201,6 +201,14 @@ function detailT(
   return t(`drivers.detailPage.${key}`, locale, params);
 }
 
+function driverActionT(
+  locale: Locale,
+  key: string,
+  params?: Record<string, string | number>,
+) {
+  return t(`drivers.actions.${key}`, locale, params);
+}
+
 function normalizeOrigin(value: string | null | undefined) {
   return value ? value.replace(/\/+$/, "") : null;
 }
@@ -233,6 +241,10 @@ function formatList(locale: Locale, values: readonly string[]) {
   return values
     .map((value) => formatOpsCodeLabel(locale, value))
     .join(LIST_SEPARATOR[locale]);
+}
+
+function taskDomainLabel(locale: Locale, domain: TaskRow["domain"]) {
+  return detailT(locale, `domain.${domain}`);
 }
 
 async function loadWithError<T>(
@@ -992,27 +1004,27 @@ export default async function DriverDetailPage({
   const headerActions: DriverAction[] = [
     {
       descriptor: forceOfflineDescriptor,
-      label: detailT(locale, "action.forceOfflinePerPlatform"),
+      label: driverActionT(locale, "takePlatformOffline"),
       icon: "warn",
       href: "#platform-bindings",
       variant: "primary",
     },
     {
       descriptor: requestReauthDescriptor,
-      label: detailT(locale, "action.requestReauth"),
+      label: driverActionT(locale, "requestReauth"),
       icon: "arrow",
       href: "#platform-bindings",
     },
     activeSuppression
       ? {
           descriptor: liftSuppressionDescriptor,
-          label: detailT(locale, "action.liftSuppression"),
+          label: driverActionT(locale, "liftSuppression"),
           icon: "check",
           ...(suppressionIncidentHref ? { href: suppressionIncidentHref } : {}),
         }
       : {
           descriptor: suppressDescriptor,
-          label: detailT(locale, "action.suppressMatching"),
+          label: driverActionT(locale, "suppressMatching"),
           icon: "x",
           ...(sosIncidentHref ? { href: sosIncidentHref } : {}),
         },
@@ -1282,7 +1294,7 @@ export default async function DriverDetailPage({
       w: 110,
       r: (row) => (
         <Pill theme={theme} tone={row.domain === "owned" ? "accent" : "info"}>
-          {row.domain}
+          {taskDomainLabel(locale, row.domain)}
         </Pill>
       ),
     },
