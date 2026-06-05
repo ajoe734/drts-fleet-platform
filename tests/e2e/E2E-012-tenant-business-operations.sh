@@ -134,15 +134,16 @@ require_report_filter() {
 }
 
 record_optional_report_field() {
-  local label="$1"
-  local jq_expr="$2"
+  local surface="$1"
+  local label="$2"
+  local jq_expr="$3"
   local value
   value=$(json_get "$jq_expr")
   if [[ -z "$value" || "$value" == "null" ]]; then
-    save_evidence "$SCENARIO" "report" "$label" "NOT_PRESENT"
+    save_evidence "$SCENARIO" "$surface" "$label" "NOT_PRESENT"
     log_warn "Report evidence field ${label} not present"
   else
-    save_evidence "$SCENARIO" "report" "$label" "$value"
+    save_evidence "$SCENARIO" "$surface" "$label" "$value"
     log_ok "Report evidence field ${label}=${value}"
   fi
 }
@@ -360,8 +361,8 @@ log_surface "Tenant business surfaces — dashboard / payable / statement probes
 switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
 
 if probe_route "dashboard" "/tenant/dashboard"; then
-  record_optional_report_field "dashboard.bookingCount" '.data.bookingCount'
-  record_optional_report_field "dashboard.completedTripCount" '.data.completedTripCount'
+  record_optional_report_field "dashboard" "bookingCount" '.data.bookingCount'
+  record_optional_report_field "dashboard" "completedTripCount" '.data.completedTripCount'
 else
   http_call GET "/tenant/bookings"
   assert_status "200"
@@ -371,7 +372,7 @@ else
 fi
 
 if probe_route "payables" "/tenant/payables/summary"; then
-  record_optional_report_field "payables.estimatedPayableAmountMinor" '.data.estimatedPayableAmountMinor'
+  record_optional_report_field "payables" "estimatedPayableAmountMinor" '.data.estimatedPayableAmountMinor'
 else
   http_call GET "/tenant/invoices"
   assert_status "200"
@@ -382,7 +383,7 @@ fi
 
 if probe_route "statements" "/tenant/statements"; then
   STATEMENTS_ROUTE_AVAILABLE="true"
-  record_optional_report_field "statements.itemCount" '.data.items | length'
+  record_optional_report_field "statements" "itemCount" '.data.items | length'
 else
   STATEMENTS_ROUTE_AVAILABLE="false"
 fi
