@@ -155,11 +155,20 @@ http_call() {
     curl_args+=(--data "@$body_file")
   fi
 
-  local raw
-  raw=$(curl "${curl_args[@]}" "${E2E_API_URL}${E2E_API_PATH_PREFIX}${path}" 2>&1)
+  local raw curl_exit
+  if raw=$(curl "${curl_args[@]}" "${E2E_API_URL}${E2E_API_PATH_PREFIX}${path}" 2>&1); then
+    curl_exit=0
+  else
+    curl_exit=$?
+  fi
 
-  RESP_STATUS=$(echo "$raw" | grep -o '__HTTP_STATUS__[0-9]*' | sed 's/__HTTP_STATUS__//')
+  RESP_STATUS=$(echo "$raw" | grep -o '__HTTP_STATUS__[0-9]*' | sed 's/__HTTP_STATUS__//' || true)
   RESP_BODY=$(echo "$raw" | sed '/^__HTTP_STATUS__/d')
+  if [[ $curl_exit -ne 0 && -z "$RESP_STATUS" ]]; then
+    RESP_STATUS="000"
+    RESP_BODY="curl_exit=${curl_exit}
+${RESP_BODY}"
+  fi
 }
 
 # Assert HTTP status is in the expected set (pipe-separated, e.g. "200|201")
