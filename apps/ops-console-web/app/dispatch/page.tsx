@@ -1893,7 +1893,9 @@ export default async function DispatchPage({
       return false;
     }
     if (board !== "forwarded" && selectedProduct !== "all") {
-      return getServiceProductValue(order) === selectedProduct;
+      if (getServiceProductValue(order) !== selectedProduct) {
+        return false;
+      }
     }
     if (selectedTiming !== "all" && getTimingValue(order) !== selectedTiming) {
       return false;
