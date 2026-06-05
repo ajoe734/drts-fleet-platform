@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-04T12:09:11.629Z",
+  "generatedAt": "2026-06-05T03:20:21.580Z",
   "platformAdminBaseUrl": "https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app",
   "opsBaseUrl": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app",
   "totals": {
@@ -13,8 +13,8 @@
       "message": "expect(received).toBe(expected) // Object.is equality\n\nExpected: \"/pricing?tab=driver\"\nReceived: \"/pricing\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate"
     },
     "paymentsTabs": {
-      "status": "fail",
-      "message": "expect(received).toBe(expected) // Object.is equality\n\nExpected: \"/payments/reimbursements\"\nReceived: \"/payments\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate"
+      "status": "pass",
+      "message": "payments tabs and route handoff work"
     },
     "attendanceTabs": {
       "status": "pass",
@@ -65,9 +65,7 @@
       "shellCount": 1,
       "shellOk": true,
       "bodyOk": true,
-      "consoleErrors": [
-        "Failed to load resource: the server responded with a status of 404 ()"
-      ],
+      "consoleErrors": [],
       "pageErrors": [],
       "screenshot": ".artifacts/func-audit/platform-admin-tenants-tnt-1.png",
       "errors": []

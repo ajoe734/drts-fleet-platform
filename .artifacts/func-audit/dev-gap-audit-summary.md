@@ -1,6 +1,6 @@
 # Dev gap audit summary
 
-- Generated: 2026-06-04T12:09:11.630Z
+- Generated: 2026-06-05T03:20:21.581Z
 - Platform Admin base URL: https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app
 - Ops Console base URL: https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app
 
@@ -21,14 +21,6 @@
 
 Expected: "/pricing?tab=driver"
 Received: "/pricing"
-
-Call Log:
-
-- Timeout 5000ms exceeded while waiting on the predicate
-- paymentsTabs: fail — expect(received).toBe(expected) // Object.is equality
-
-Expected: "/payments/reimbursements"
-Received: "/payments"
 
 Call Log:
 
