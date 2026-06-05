@@ -78,20 +78,13 @@ export function AssistantConfirmationPanel({
   const requiresReason = Boolean(
     request.requiresReason || request.riskLevel === "high",
   );
-  const disabled = Boolean(request.disabled);
   const trimmedReason = reason.trim();
   const canSubmit =
-    !disabled && !isSubmitting && (!requiresReason || trimmedReason.length > 0);
+    !isSubmitting && (!requiresReason || trimmedReason.length > 0);
 
   async function handleConfirm() {
     if (requiresReason && trimmedReason.length === 0) {
       setError("Reason is required before this action can run.");
-      return;
-    }
-    if (disabled) {
-      setError(
-        request.disabledReason ?? "This action is currently unavailable.",
-      );
       return;
     }
 
@@ -216,22 +209,6 @@ export function AssistantConfirmationPanel({
           >
             <AlertTriangle size={16} />
             <span style={{ fontSize: 12.5, lineHeight: 1.45 }}>{error}</span>
-          </div>
-        ) : null}
-
-        {!error && request.disabledReason ? (
-          <div
-            style={{
-              ...assistantInsetStyle,
-              borderColor: assistantTheme.warnBorder,
-              background: assistantTheme.warnBg,
-              color: assistantTheme.warn,
-              padding: "10px 12px",
-              fontSize: 12.5,
-              lineHeight: 1.45,
-            }}
-          >
-            {request.disabledReason}
           </div>
         ) : null}
 

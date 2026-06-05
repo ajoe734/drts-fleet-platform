@@ -100,7 +100,6 @@ export type AssistantDraftAdapter = {
 
 export type PlatformAdminAssistantPageBridge = {
   pageId: string;
-  contextSnapshot?: PageContextSnapshot;
   filters?: Record<string, AssistantFilterAdapter>;
   drafts?: Record<string, AssistantDraftAdapter>;
   crossAppLinks?: Record<string, CrossAppResourceLink>;

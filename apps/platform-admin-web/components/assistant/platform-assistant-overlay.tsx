@@ -28,20 +28,12 @@ import {
 } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
 import { AssistantMessageList } from "./AssistantMessageList";
-import {
-  buildRouteContext,
-  usePlatformAdminAssistantRouteContext,
-} from "./route-context";
+import { buildRouteContext } from "./route-context";
 import type {
   AssistantActionPlan,
-  AssistantFormSummary,
   AssistantMessageRecord,
-  AssistantPageActionSummary,
-  AssistantReceipt,
   AssistantRouteContext,
   AssistantStepStatus,
-  AssistantTableSummary,
-  AssistantEntityRef,
 } from "./assistant-types";
 
 const PANEL_WIDTH = 430;
@@ -85,43 +77,6 @@ type AssistantApiMessageResponse = {
   citations: AssistantApiCitation[];
   suggestedPrompts: string[];
   actionPlan: AssistantApiActionPlan | null;
-  governedAction: AssistantApiGovernedAction | null;
-};
-
-type AssistantApiActionDescriptor = {
-  action: string;
-  enabled: boolean;
-  disabledReasonCode?: string;
-  requiresReason?: boolean;
-  riskLevel: "low" | "medium" | "high";
-};
-
-type AssistantApiGovernedAction = {
-  toolName: string;
-  payload: Record<string, unknown>;
-  descriptor: AssistantApiActionDescriptor;
-  confirmationRequired: boolean;
-  title: string;
-  message: string;
-  resourceLabel?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-  reasonLabel?: string;
-  reasonPlaceholder?: string;
-  reasonHint?: string;
-  disabledReason?: string | null;
-};
-
-type AssistantApiActionExecutionResponse = {
-  receipt: {
-    actionId: string;
-    auditId: string;
-    resourceType: string;
-    resourceId: string;
-    status: AssistantReceipt["status"];
-    message: string;
-  };
-  assistantAuditId: string;
 };
 
 const DEFAULT_SUGGESTED_PROMPTS = [
@@ -259,33 +214,9 @@ function formatAssistantContent(response: AssistantApiMessageResponse) {
   return sections.join("\n\n");
 }
 
-function mapReceipt(
-  response: AssistantApiActionExecutionResponse,
-): AssistantReceipt {
-  return {
-    title: "Action receipt",
-    message: response.receipt.message,
-    actionId: response.receipt.actionId,
-    requestId: response.receipt.actionId,
-    auditId: response.receipt.auditId,
-    resourceType: response.receipt.resourceType,
-    resourceId: response.receipt.resourceId,
-    resourceLabel: [response.receipt.resourceType, response.receipt.resourceId]
-      .filter(Boolean)
-      .join(" · "),
-    status: response.receipt.status,
-  };
-}
-
 function buildContextPrompt(
   message: string,
   routeContext: AssistantRouteContext,
-  pageContext: {
-    visibleTables?: AssistantTableSummary[];
-    selectedRecords?: AssistantEntityRef[];
-    availableActions?: AssistantPageActionSummary[];
-    forms?: AssistantFormSummary[];
-  },
   locale: "zh" | "en",
 ) {
   const routeTitle = routeContext.title[locale];
@@ -301,84 +232,6 @@ function buildContextPrompt(
           .map((entity) => `${entity.kind}:${entity.id}`)
           .join(", ")
       : "none";
-  const visibleTables =
-    pageContext.visibleTables && pageContext.visibleTables.length > 0
-      ? pageContext.visibleTables
-          .map((table) => {
-            const selectedRows =
-              table.selectedRowIds && table.selectedRowIds.length > 0
-                ? ` selected=${table.selectedRowIds.join(", ")}`
-                : "";
-            const actions =
-              table.availableActions && table.availableActions.length > 0
-                ? ` actions=${table.availableActions
-                    .map((action) => action.actionId)
-                    .join(", ")}`
-                : "";
-            return `- ${table.tableId} (${table.title}): rows=${table.visibleRowCount}; visible=${table.visibleRowIds.join(", ") || "none"}${selectedRows}${actions}`;
-          })
-          .join("\n")
-      : "- none";
-  const selectedRecords =
-    pageContext.selectedRecords && pageContext.selectedRecords.length > 0
-      ? pageContext.selectedRecords
-          .map((record) => `${record.kind}:${record.id}`)
-          .join(", ")
-      : "none";
-  const availableActions =
-    pageContext.availableActions && pageContext.availableActions.length > 0
-      ? pageContext.availableActions
-          .map(
-            (action) =>
-              `${action.actionId}${action.riskLevel ? `(${action.riskLevel})` : ""}${action.disabled ? "[disabled]" : ""}`,
-          )
-          .join(", ")
-      : "none";
-  const forms =
-    pageContext.forms && pageContext.forms.length > 0
-      ? pageContext.forms
-          .map((form) => {
-            const fields =
-              form.fields.length > 0
-                ? form.fields
-                    .map((field) => {
-                      const parts = [
-                        field.fieldId,
-                        field.valueSummary === null ||
-                        typeof field.valueSummary === "undefined"
-                          ? "empty"
-                          : JSON.stringify(field.valueSummary),
-                      ];
-                      if (field.required) {
-                        parts.push("required");
-                      }
-                      if (field.dirty) {
-                        parts.push("dirty");
-                      }
-                      return parts.join("=");
-                    })
-                    .join("; ")
-                : "none";
-            const validationErrors =
-              form.validationErrors.length > 0
-                ? form.validationErrors
-                    .map((error) =>
-                      error.fieldId
-                        ? `${error.fieldId}:${error.code}:${error.message}`
-                        : `${error.code}:${error.message}`,
-                    )
-                    .join("; ")
-                : "none";
-            const actions =
-              form.availableActions && form.availableActions.length > 0
-                ? form.availableActions
-                    .map((action) => action.actionId)
-                    .join(", ")
-                : "none";
-            return `- ${form.formId} (${form.title}): dirty=${form.dirty ? "yes" : "no"}; fields=${fields}; validationErrors=${validationErrors}; actions=${actions}`;
-          })
-          .join("\n")
-      : "- none";
 
   return [
     "[Platform Admin route context]",
@@ -388,12 +241,6 @@ function buildContextPrompt(
     `Refresh tier: ${routeContext.refreshTier}`,
     `Visible entities: ${entityRefs}`,
     `Warnings: ${warnings}`,
-    "",
-    "[Platform Admin page context]",
-    `Visible tables:\n${visibleTables}`,
-    `Selected records: ${selectedRecords}`,
-    `Available actions: ${availableActions}`,
-    `Forms:\n${forms}`,
     "",
     "[Operator question]",
     message,
@@ -409,7 +256,6 @@ export function PlatformAssistantOverlay() {
   const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
   const { locale } = useTranslation();
-  const { pageBridge } = usePlatformAdminAssistantRouteContext();
   const titleId = useId();
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const [isMounted, setIsMounted] = useState(false);
@@ -423,7 +269,6 @@ export function PlatformAssistantOverlay() {
   const [messages, setMessages] = useState<AssistantMessageRecord[]>([]);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
   const [suggestedPrompts, setSuggestedPrompts] = useState(
     DEFAULT_SUGGESTED_PROMPTS,
   );
@@ -595,11 +440,9 @@ export function PlatformAssistantOverlay() {
 
     try {
       const activeSession = await ensureSession();
-      const pageContext = pageBridge?.contextSnapshot;
       const routeContext = buildRouteContext(
         pathname,
         searchParams?.toString() ?? "",
-        pageContext,
       );
       const response = await client().post<AssistantApiMessageResponse>(
         `/api/platform-admin/assistant/sessions/${encodeURIComponent(
@@ -607,60 +450,18 @@ export function PlatformAssistantOverlay() {
         )}/messages`,
         {
           body: {
-            message: buildContextPrompt(
-              trimmed,
-              routeContext,
-              pageContext ?? {},
-              locale,
-            ),
+            message: buildContextPrompt(trimmed, routeContext, locale),
           },
         },
       );
       const plan = mapActionPlan(response.actionPlan);
-      const governedAction = response.governedAction;
       const assistantMessage: AssistantMessageRecord = {
         id: nextMessageId("paas-assistant"),
         role: "assistant",
         content: formatAssistantContent(response),
         createdAt: new Date().toISOString(),
-        state: governedAction
-          ? "awaiting_confirmation"
-          : plan
-            ? "planning"
-            : "idle",
+        state: plan ? "planning" : "idle",
         plan,
-        pendingAction: governedAction
-          ? {
-              toolName: governedAction.toolName,
-              payload: governedAction.payload,
-            }
-          : null,
-        confirmation: governedAction
-          ? {
-              title: governedAction.title,
-              message: governedAction.message,
-              riskLevel: governedAction.descriptor.riskLevel,
-              resourceLabel: governedAction.resourceLabel ?? null,
-              ...(governedAction.confirmLabel !== undefined
-                ? { confirmLabel: governedAction.confirmLabel }
-                : {}),
-              ...(governedAction.cancelLabel !== undefined
-                ? { cancelLabel: governedAction.cancelLabel }
-                : {}),
-              ...(governedAction.reasonLabel !== undefined
-                ? { reasonLabel: governedAction.reasonLabel }
-                : {}),
-              ...(governedAction.reasonPlaceholder !== undefined
-                ? { reasonPlaceholder: governedAction.reasonPlaceholder }
-                : {}),
-              reasonHint: governedAction.reasonHint ?? null,
-              requiresReason:
-                governedAction.descriptor.requiresReason ??
-                governedAction.descriptor.riskLevel === "high",
-              disabled: !governedAction.descriptor.enabled,
-              disabledReason: governedAction.disabledReason ?? null,
-            }
-          : null,
       };
 
       setSuggestedPrompts(
@@ -701,88 +502,6 @@ export function PlatformAssistantOverlay() {
     void submitPrompt(draft);
   }
 
-  async function handleConfirmAction(messageId: string, reason: string) {
-    const message = messages.find((entry) => entry.id === messageId);
-    if (!message?.pendingAction || !session) {
-      return;
-    }
-
-    setIsConfirming(true);
-    setMessages((current) =>
-      current.map((entry) =>
-        entry.id === messageId
-          ? {
-              ...entry,
-              state: "executing",
-              error: null,
-            }
-          : entry,
-      ),
-    );
-
-    try {
-      const response = await client().post<AssistantApiActionExecutionResponse>(
-        `/api/platform-admin/assistant/sessions/${encodeURIComponent(
-          session.sessionId,
-        )}/actions/execute`,
-        {
-          body: {
-            toolName: message.pendingAction.toolName,
-            payload: message.pendingAction.payload,
-            reason,
-          },
-        },
-      );
-
-      setMessages((current) =>
-        current.map((entry) =>
-          entry.id === messageId
-            ? {
-                ...entry,
-                state: "receipt",
-                confirmation: null,
-                pendingAction: null,
-                receipt: mapReceipt(response),
-              }
-            : entry,
-        ),
-      );
-    } catch (error) {
-      setMessages((current) =>
-        current.map((entry) =>
-          entry.id === messageId
-            ? {
-                ...entry,
-                state: "error",
-                error: {
-                  title: "Action execution failed",
-                  message: errorMessage(error),
-                  hint: "Review the governed action payload, confirmation reason, and backend audit logs.",
-                },
-              }
-            : entry,
-        ),
-      );
-    } finally {
-      setIsConfirming(false);
-    }
-  }
-
-  function handleCancelConfirmation(messageId: string) {
-    setMessages((current) =>
-      current.map((entry) =>
-        entry.id === messageId
-          ? {
-              ...entry,
-              state: "idle",
-              confirmation: null,
-              pendingAction: null,
-            }
-          : entry,
-      ),
-    );
-  }
-
   function handleResetPosition() {
     const nextPosition = getDefaultDesktopPosition();
     setPosition(nextPosition);
@@ -793,7 +512,6 @@ export function PlatformAssistantOverlay() {
     setSession(null);
     setMessages([]);
     setDraft("");
-    setIsConfirming(false);
     setSuggestedPrompts(DEFAULT_SUGGESTED_PROMPTS);
   }
 
@@ -941,11 +659,6 @@ export function PlatformAssistantOverlay() {
           <div style={panelBodyStyle}>
             <AssistantMessageList
               messages={messages}
-              isConfirming={isConfirming}
-              onConfirmAction={(messageId, reason) =>
-                handleConfirmAction(messageId, reason)
-              }
-              onCancelConfirmation={handleCancelConfirmation}
               emptyTitle={copy.emptyTitle}
               emptyBody={copy.emptyBody}
             />
