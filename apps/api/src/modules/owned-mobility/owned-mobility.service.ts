@@ -76,6 +76,7 @@ import {
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import type { MessageEvent } from "@nestjs/common";
 import { EMPTY, type Observable } from "rxjs";
@@ -183,6 +184,10 @@ export class OwnedMobilityService implements OnModuleInit {
 
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
+    @Optional()
+    private readonly vehicleEligibilityService:
+      | VehicleEligibilityService
+      | undefined,
     private readonly auditNotificationService: AuditNotificationService,
     private readonly callcenterService: CallcenterService,
     private readonly ownedMobilityTaskEventsService: OwnedMobilityTaskEventsService,
@@ -1426,10 +1431,7 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
-    const candidates = this.regulatoryRegistryService.getEligibleCandidates(
-      order.serviceBucket,
-      this.resolvePickupEtaDestination(order),
-    );
+    const candidates = this.listEligibleDispatchCandidates(order);
     const now = new Date().toISOString();
     const isReservation = order.dispatchSemantics === "reservation";
     const initialReservationHoldStatus = order.reservationHoldStatus;
@@ -2312,12 +2314,8 @@ export class OwnedMobilityService implements OnModuleInit {
   listDispatchCandidates(dispatchJobId: string): DispatchCandidate[] {
     const dispatchJob = this.requireDispatchJob(dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
-    return this.regulatoryRegistryService
-      .getEligibleCandidates(
-        order.serviceBucket,
-        this.resolvePickupEtaDestination(order),
-      )
-      .map((candidate) => ({ ...candidate }));
+    const candidates = this.listEligibleDispatchCandidates(order);
+    return candidates.map((candidate) => ({ ...candidate }));
   }
 
   private buildDispatchJobSnapshot(dispatchJob: DispatchJobRecord) {
@@ -2328,10 +2326,7 @@ export class OwnedMobilityService implements OnModuleInit {
       return { ...dispatchJob };
     }
 
-    const liveCandidates = this.regulatoryRegistryService.getEligibleCandidates(
-      order.serviceBucket,
-      this.resolvePickupEtaDestination(order),
-    );
+    const liveCandidates = this.listEligibleDispatchCandidates(order);
 
     return {
       ...dispatchJob,
@@ -2507,36 +2502,44 @@ export class OwnedMobilityService implements OnModuleInit {
     driverId: string,
     requestId?: string,
   ) {
-    if (
-      !this.regulatoryRegistryService.getVehicleDispatchability(
+    if (this.vehicleEligibilityService) {
+      this.vehicleEligibilityService.assertDispatchAssignmentEligible(
+        order,
         vehicleId,
-        order.serviceBucket,
-      )
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VEHICLE_NOT_DISPATCHABLE",
-        "Vehicle is not eligible for dispatch.",
-        {
-          vehicleId,
-        },
-      );
-    }
-
-    if (
-      !this.regulatoryRegistryService.getDriverAvailability(
         driverId,
-        order.serviceBucket,
-      )
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "DRIVER_NOT_AVAILABLE",
-        "Driver is not eligible for dispatch.",
-        {
-          driverId,
-        },
       );
+    } else {
+      if (
+        !this.regulatoryRegistryService.getVehicleDispatchability(
+          vehicleId,
+          order.serviceBucket,
+        )
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VEHICLE_NOT_DISPATCHABLE",
+          "Vehicle is not eligible for dispatch.",
+          {
+            vehicleId,
+          },
+        );
+      }
+
+      if (
+        !this.regulatoryRegistryService.getDriverAvailability(
+          driverId,
+          order.serviceBucket,
+        )
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "DRIVER_NOT_AVAILABLE",
+          "Driver is not eligible for dispatch.",
+          {
+            driverId,
+          },
+        );
+      }
     }
 
     const now = new Date().toISOString();
@@ -4861,6 +4864,21 @@ export class OwnedMobilityService implements OnModuleInit {
       this.driverTasks.find((task) => task.assignmentId === assignmentId) ??
       null
     );
+  }
+
+  private listEligibleDispatchCandidates(order: OwnedOrderRecord) {
+    const destination = this.resolvePickupEtaDestination(order);
+    return this.vehicleEligibilityService
+      ? this.vehicleEligibilityService.listEligibleSupply(
+          this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
+            order,
+          ),
+          { destination },
+        )
+      : this.regulatoryRegistryService.getEligibleCandidates(
+          order.serviceBucket,
+          destination,
+        );
   }
 
   private resolvePickupEtaDestination(order: Pick<OwnedOrderRecord, "pickup">) {

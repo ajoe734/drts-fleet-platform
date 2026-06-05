@@ -13,6 +13,7 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
+import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
 
@@ -24,11 +25,30 @@ function createOwnedMobilityService(options?: {
     operatingArea: string;
     serviceBuckets: string[];
   }>;
+  getEligibleCandidates?: (
+    serviceBucket: string,
+    destination?: { lat: number; lng: number } | null,
+  ) => Array<{
+    driverId: string;
+    vehicleId: string;
+    etaMinutes: number;
+    operatingArea: string;
+    serviceBuckets: string[];
+  }>;
   vehicleDispatchable?: boolean;
+  enableVehicleEligibility?: boolean;
   tenantPartnerService?: TenantPartnerService;
 }) {
   const regulatoryRegistryService = {
-    getEligibleCandidates: vi.fn(() => options?.candidates ?? []),
+    getEligibleCandidates: vi.fn(
+      (
+        serviceBucket: string,
+        destination?: { lat: number; lng: number } | null,
+      ) =>
+        options?.getEligibleCandidates?.(serviceBucket, destination) ??
+        options?.candidates ??
+        [],
+    ),
     getVehicleDispatchability: vi.fn(
       () => options?.vehicleDispatchable ?? true,
     ),
@@ -65,9 +85,13 @@ function createOwnedMobilityService(options?: {
   const opsDispatchEventsService = new OpsDispatchEventsService(
     new EventEmitter2(),
   );
+  const vehicleEligibilityService = options?.enableVehicleEligibility
+    ? new VehicleEligibilityService(regulatoryRegistryService as never)
+    : undefined;
 
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
+    vehicleEligibilityService,
     auditNotificationService as never,
     callcenterService as never,
     taskEventsService,
@@ -137,6 +161,122 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
+  it("rejects enterprise-dispatch assignment when the vehicle is not eligible for the service product", async () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 6,
+          operatingArea: "taichung-port",
+          serviceBuckets: ["standard_taxi", "business_dispatch"],
+        },
+      ],
+      vehicleDispatchable: true,
+      enableVehicleEligibility: true,
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        pickup: { address: "台中市西屯區台灣大道 1 號" },
+        dropoff: { address: "台中市南屯區公益路 2 號" },
+        passenger: { name: "測試乘客", phone: "0911222333" },
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchJob = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    expect(() =>
+      service.assignDispatch({
+        dispatchJobId: dispatchJob.dispatchJobId,
+        vehicleId: "veh-demo-002",
+        driverId: "drv-demo-001",
+      }),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.assignDispatch({
+        dispatchJobId: dispatchJob.dispatchJobId,
+        vehicleId: "veh-demo-002",
+        driverId: "drv-demo-001",
+      });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
+          details: {
+            vehicleId: "veh-demo-002",
+            serviceProduct: "enterprise_dispatch",
+          },
+        },
+      });
+    }
+  });
+
+  it("keeps owned-mobility dispatch candidates order-specific when vehicle eligibility is enabled", async () => {
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      getEligibleCandidates: (_serviceBucket, destination) => {
+        if (destination?.lat === 25.0478 && destination.lng === 121.5319) {
+          return [
+            {
+              driverId: "driver-nearby",
+              vehicleId: "veh-demo-001",
+              etaMinutes: 3,
+              operatingArea: "taipei",
+              serviceBuckets: ["standard_taxi"],
+            },
+          ];
+        }
+
+        return [
+          {
+            driverId: "driver-fallback",
+            vehicleId: "veh-demo-001",
+            etaMinutes: 14,
+            operatingArea: "taipei",
+            serviceBuckets: ["standard_taxi"],
+          },
+        ];
+      },
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: {
+        address: "Taipei Main Station",
+        lat: 25.0478,
+        lng: 121.5319,
+      },
+      dropoff: {
+        address: "Songshan Airport",
+      },
+      passenger: {
+        name: "Rider One",
+        phone: "0912000000",
+      },
+    });
+
+    const dispatchJob = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    expect(service.listDispatchCandidates(dispatchJob.dispatchJobId)).toEqual([
+      expect.objectContaining({
+        driverId: "driver-nearby",
+        etaMinutes: 3,
+      }),
+    ]);
+    expect(service.listDispatchJobs()).toEqual([
+      expect.objectContaining({
+        dispatchJobId: dispatchJob.dispatchJobId,
+        latestEtaMinutes: 3,
+      }),
+    ]);
+  });
   it("resolves tenant booking passenger and addresses from governed master data", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
