@@ -1845,7 +1845,7 @@ const en = {
   "dispatch.detail.sequence.created": "Created",
   "dispatch.detail.sequence.waiting": "Waiting",
   "dispatch.detail.sequence.active": "Active",
-  "dispatch.detail.sequence.title": "Delivery sequence",
+  "dispatch.detail.sequence.title": "Timeline",
   "dispatch.detail.sequence.timelineTitle": "Timeline",
   "dispatch.detail.activity.title": "Recent activity",
   "dispatch.detail.activity.empty": "No dispatch activity yet.",
@@ -1862,7 +1862,8 @@ const en = {
     "Attempt {count} escalated via {action}.",
   "dispatch.detail.activity.exceptionHoldRaised.title": "Exception hold raised",
   "dispatch.detail.activity.exceptionHoldRaised.body": "Reason: {reason}.",
-  "dispatch.detail.activity.overrideRequest.title": "Override review requested",
+  "dispatch.detail.activity.overrideRequest.title":
+    "Exception review requested",
   "dispatch.detail.activity.overrideRequest.body": "{status} by {actor}.",
   "dispatch.detail.activity.exceptionResolved.title": "Exception resolved",
   "dispatch.detail.activity.exceptionResolved.body":
@@ -1885,13 +1886,14 @@ const en = {
   "dispatch.detail.activity.taskCompleted.body":
     "{vehicleId} completed the task.",
   "dispatch.detail.overrideSummary.reviewerCanRelease": "Reviewer can release",
-  "dispatch.detail.overrideSummary.keepManualReview": "Keep in manual review",
+  "dispatch.detail.overrideSummary.keepManualReview":
+    "Keep in exception review",
   "dispatch.detail.overrideSummary.fareOverrideType": "Fare override",
   "dispatch.detail.overrideSummary.applied": "Applied",
   "dispatch.detail.overrideSummary.returnToNormalDispatch":
     "Return to normal dispatch",
   "dispatch.detail.overrideSummary.notRequested": "Not requested",
-  "dispatch.detail.overrideSummary.noManualOverride": "No manual override",
+  "dispatch.detail.overrideSummary.noManualOverride": "No fare override",
   "dispatch.detail.overrideSummary.candidateCanBeAssigned":
     "Candidate can be assigned",
   "dispatch.detail.headerAction.contactRider": "Contact rider",
@@ -1957,7 +1959,7 @@ const en = {
   "dispatch.detail.compliance.candidatesClear": "candidates clear",
   "dispatch.detail.compliance.licenseValid": "License valid",
   "dispatch.detail.compliance.serviceBucket": "Service bucket",
-  "dispatch.detail.compliance.review": "Review",
+  "dispatch.detail.compliance.review": "Manual review",
   "dispatch.detail.compliance.dispatchState": "Dispatch state",
   "dispatch.detail.compliance.deviceBinding": "Device binding",
   "dispatch.detail.compliance.deviceBindingValue":
@@ -1985,7 +1987,7 @@ const en = {
   "dispatch.forwarded.activity.syncFailure.title": "Sync failure",
   "dispatch.forwarded.activity.manualFallback.title": "Manual fallback engaged",
   "dispatch.forwarded.activity.manualFallback.defaultBody":
-    "Manual fallback required.",
+    "Manual fallback is required.",
   "dispatch.forwarded.activity.reconciliation.title": "Reconciliation",
   "dispatch.forwarded.activity.reconciliation.body":
     "Reconciliation {status} · {mismatchCount} mismatch · reason {reason}.",
@@ -5182,7 +5184,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.sequence.created": "建立 Created",
   "dispatch.detail.sequence.waiting": "等待中",
   "dispatch.detail.sequence.active": "進行中",
-  "dispatch.detail.sequence.title": "訂單狀態",
+  "dispatch.detail.sequence.title": "時間軸",
   "dispatch.detail.sequence.timelineTitle": "時間軸",
   "dispatch.detail.activity.title": "活動",
   "dispatch.detail.activity.empty": "目前沒有派車活動。",
@@ -5199,7 +5201,7 @@ const zh: Record<keyof typeof en, string> = {
     "第 {count} 次嘗試後，執行 {action}。",
   "dispatch.detail.activity.exceptionHoldRaised.title": "人工覆核觸發",
   "dispatch.detail.activity.exceptionHoldRaised.body": "原因：{reason}。",
-  "dispatch.detail.activity.overrideRequest.title": "例外覆核申請",
+  "dispatch.detail.activity.overrideRequest.title": "已提出例外覆核",
   "dispatch.detail.activity.overrideRequest.body": "{status}，申請人 {actor}。",
   "dispatch.detail.activity.exceptionResolved.title": "覆核完成",
   "dispatch.detail.activity.exceptionResolved.body":
@@ -5220,13 +5222,13 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.activity.taskCompleted.title": "完成任務",
   "dispatch.detail.activity.taskCompleted.body": "{vehicleId} 已完成任務。",
   "dispatch.detail.overrideSummary.reviewerCanRelease": "可由覆核人員放行",
-  "dispatch.detail.overrideSummary.keepManualReview": "需維持人工覆核",
+  "dispatch.detail.overrideSummary.keepManualReview": "需維持例外覆核",
   "dispatch.detail.overrideSummary.fareOverrideType": "車資覆寫",
   "dispatch.detail.overrideSummary.applied": "已套用",
   "dispatch.detail.overrideSummary.returnToNormalDispatch":
     "確認後回到一般派遣",
   "dispatch.detail.overrideSummary.notRequested": "未申請",
-  "dispatch.detail.overrideSummary.noManualOverride": "目前沒有手動覆寫",
+  "dispatch.detail.overrideSummary.noManualOverride": "目前沒有車資覆寫",
   "dispatch.detail.overrideSummary.candidateCanBeAssigned":
     "可直接指派或重派候選",
   "dispatch.detail.headerAction.contactRider": "聯絡乘客",
@@ -5289,7 +5291,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.compliance.candidatesClear": "候選通過",
   "dispatch.detail.compliance.licenseValid": "證照有效",
   "dispatch.detail.compliance.serviceBucket": "服務桶",
-  "dispatch.detail.compliance.review": "人工覆核",
+  "dispatch.detail.compliance.review": "人工覆核 Manual review",
   "dispatch.detail.compliance.dispatchState": "派遣狀態",
   "dispatch.detail.compliance.deviceBinding": "裝置綁定",
   "dispatch.detail.compliance.deviceBindingValue":
@@ -5314,7 +5316,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.forwarded.activity.statusSync.body":
     "本地鏡像狀態為 {status}；最後外部狀態 {nativeStatus}。",
   "dispatch.forwarded.activity.syncFailure.title": "同步失敗",
-  "dispatch.forwarded.activity.manualFallback.title": "啟動人工備援",
+  "dispatch.forwarded.activity.manualFallback.title": "已啟用人工備援",
   "dispatch.forwarded.activity.manualFallback.defaultBody": "需要人工備援。",
   "dispatch.forwarded.activity.reconciliation.title": "對帳",
   "dispatch.forwarded.activity.reconciliation.body":
