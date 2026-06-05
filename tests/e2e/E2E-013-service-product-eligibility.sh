@@ -42,6 +42,8 @@ ELIGIBLE_VEHICLE_ID=""
 ELIGIBLE_DRIVER_ID=""
 INELIGIBLE_VEHICLE_ID=""
 ELIGIBLE_SUPPLY_MODE="dispatch_candidates"
+REQUIRE_ADMIN_ENDPOINTS="${E2E_REQUIRE_SERVICE_PRODUCT_ADMIN:-false}"
+REQUIRE_ELIGIBLE_SUPPLY_ENDPOINT="${E2E_REQUIRE_ELIGIBLE_SUPPLY_ENDPOINT:-false}"
 
 error_code() {
   echo "$RESP_BODY" | jq -r '.error.code // .code // empty' 2>/dev/null || true
@@ -59,6 +61,14 @@ record_optional_probe() {
   local surface="$1" key="$2" status="$3"
   save_evidence "$SCENARIO" "$surface" "$key" "$status"
   log_info "${surface}.${key}=${status}"
+}
+
+fail_if_required() {
+  local enabled="$1" message="$2"
+  if [[ "$enabled" == "true" ]]; then
+    log_fail "$message"
+    exit 1
+  fi
 }
 
 log_surface "Platform Admin — service product and eligibility setup"
@@ -104,6 +114,9 @@ if [[ "$RESP_STATUS" =~ ^(200)$ ]]; then
   fi
 else
   record_optional_probe "admin" "serviceProductListStatus" "$RESP_STATUS:$(error_code)"
+  fail_if_required \
+    "$REQUIRE_ADMIN_ENDPOINTS" \
+    "Service-product admin endpoint unavailable but E2E_REQUIRE_SERVICE_PRODUCT_ADMIN=true."
   log_warn "Service product admin endpoint unavailable; continuing with dispatch-enforcement fallback."
 fi
 
@@ -135,6 +148,9 @@ log_step "1.3 — PUT /admin/vehicle-eligibility-matrix"
 http_call PUT "/admin/vehicle-eligibility-matrix" "$MATRIX_FIXTURE"
 if [[ ! "$RESP_STATUS" =~ ^(200|201)$ ]]; then
   record_optional_probe "admin" "vehicleEligibilityMatrixStatus" "$RESP_STATUS:$(error_code)"
+  fail_if_required \
+    "$REQUIRE_ADMIN_ENDPOINTS" \
+    "Vehicle eligibility matrix endpoint unavailable but E2E_REQUIRE_SERVICE_PRODUCT_ADMIN=true."
   log_warn "Vehicle eligibility matrix endpoint unavailable or shape-mismatched on this env; falling back to registry-backed dispatch checks."
 else
   save_evidence "$SCENARIO" "admin" "vehicleEligibilityMatrixUpdated" "true"
@@ -237,6 +253,9 @@ if [[ "$RESP_STATUS" =~ ^(200)$ ]]; then
   log_ok "eligible-supply endpoint returned ${ELIGIBLE_SUPPLY_COUNT} candidates"
 else
   record_optional_probe "ops" "eligibleSupplyEndpointStatus" "$RESP_STATUS:$(error_code)"
+  fail_if_required \
+    "$REQUIRE_ELIGIBLE_SUPPLY_ENDPOINT" \
+    "eligible-supply endpoint unavailable but E2E_REQUIRE_ELIGIBLE_SUPPLY_ENDPOINT=true."
   log_warn "eligible-supply endpoint unavailable; using dispatch candidates fallback."
 fi
 
