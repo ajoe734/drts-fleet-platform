@@ -61,6 +61,7 @@ DISPATCH_JOB_ID=""
 TASK_ID=""
 INVOICE_ID=""
 REPORT_JOB_ID=""
+STATEMENTS_ROUTE_AVAILABLE="false"
 
 poll_for_dispatch_job() {
   local attempt=0
@@ -144,6 +145,29 @@ record_optional_report_field() {
     save_evidence "$SCENARIO" "report" "$label" "$value"
     log_ok "Report evidence field ${label}=${value}"
   fi
+}
+
+record_report_binding_mode() {
+  local label="$1"
+  local jq_expr="$2"
+  local expected="$3"
+  local actual
+  actual=$(json_get "$jq_expr")
+
+  if [[ -n "$actual" && "$actual" != "null" ]]; then
+    save_evidence "$SCENARIO" "report" "${label}.bindingMode" "row_level"
+    save_evidence "$SCENARIO" "report" "${label}.value" "$actual"
+    if [[ "$actual" == "$expected" ]]; then
+      log_ok "Report row-level field ${label}=${actual}"
+    else
+      log_warn "Report row-level field ${label} present but expected '${expected}', got '${actual}'"
+    fi
+    return 0
+  fi
+
+  save_evidence "$SCENARIO" "report" "${label}.bindingMode" "filters_only"
+  save_evidence "$SCENARIO" "report" "${label}.value" "NOT_PRESENT"
+  log_warn "Report row-level field ${label} not present; filter-level binding only"
 }
 
 log_surface "Tenant login / actor discovery"
@@ -356,7 +380,12 @@ else
   log_warn "payables fallback recorded via /tenant/invoices"
 fi
 
-probe_route "statements" "/tenant/statements" || true
+if probe_route "statements" "/tenant/statements"; then
+  STATEMENTS_ROUTE_AVAILABLE="true"
+  record_optional_report_field "statements.itemCount" '.data.items | length'
+else
+  STATEMENTS_ROUTE_AVAILABLE="false"
+fi
 
 log_surface "Billing — tenant invoice as payable/statement fallback"
 PERIOD_START=$(date -u -d "-1 day" +"%Y-%m-%dT00:00:00Z" 2>/dev/null || date -u -v-1d +"%Y-%m-%dT00:00:00Z")
@@ -388,6 +417,13 @@ log_ok "invoice line bound to completed order"
 http_call GET "/tenant/invoices/${INVOICE_ID}"
 assert_status "200"
 save_evidence "$SCENARIO" "billing" "invoiceStatus" "$(json_get '.data.status')"
+if [[ "$STATEMENTS_ROUTE_AVAILABLE" != "true" ]]; then
+  save_evidence "$SCENARIO" "statements" "fallback.statementSource" "tenant_invoice"
+  save_evidence "$SCENARIO" "statements" "fallback.statementInvoiceId" "$INVOICE_ID"
+  save_evidence "$SCENARIO" "statements" "fallback.statementAmountMinor" "$(json_get '.data.amount.amountMinor')"
+  save_evidence "$SCENARIO" "statements" "fallback.statementLineCount" "$(json_get '.data.lines | length')"
+  log_warn "tenant statements route unavailable or partial; invoice detail recorded as runnable statement fallback"
+fi
 
 log_surface "Reporting — tenant export job"
 REPORT_FIXTURE="${TMP_DIR}/report-job.json"
@@ -425,6 +461,9 @@ REPORT_ARTIFACT_ID=$(json_get '.data.artifact.artifactId')
 [[ "$REPORT_STATUS" == "completed" ]] || { log_fail "report status not completed"; exit 1; }
 [[ -n "$REPORT_ARTIFACT_ID" ]] || { log_fail "completed report missing artifactId"; exit 1; }
 save_evidence "$SCENARIO" "report" "artifactId" "$REPORT_ARTIFACT_ID"
+save_evidence "$SCENARIO" "report" "artifactUrl" "$(json_get '.data.artifact.downloadUrl')"
+save_evidence "$SCENARIO" "report" "rowCount" "$(json_get '.data.rows | length')"
+save_evidence "$SCENARIO" "report" "settlementMatrixCount" "$(json_get '.data.settlementMatrix | length')"
 log_ok "report artifact ready: ${REPORT_ARTIFACT_ID}"
 
 require_report_filter "tenantId" "$E2E_SEED_TENANT_ID"
@@ -433,10 +472,10 @@ require_report_filter "userId" "$TENANT_ADMIN_USER_ID"
 require_report_filter "costCenterCode" "$CC_CODE"
 require_report_filter "serviceProduct" "enterprise_dispatch"
 
-record_optional_report_field "row.orderId" '.data.rows[0].orderId'
-record_optional_report_field "row.userId" '.data.rows[0].userId'
-record_optional_report_field "row.costCenterCode" '.data.rows[0].costCenterCode'
-record_optional_report_field "row.serviceProduct" '.data.rows[0].serviceProduct'
+record_report_binding_mode "row.orderId" '.data.rows[0].orderId' "$ORDER_ID"
+record_report_binding_mode "row.userId" '.data.rows[0].userId' "$TENANT_ADMIN_USER_ID"
+record_report_binding_mode "row.costCenterCode" '.data.rows[0].costCenterCode' "$CC_CODE"
+record_report_binding_mode "row.serviceProduct" '.data.rows[0].serviceProduct' "enterprise_dispatch"
 
 log_surface "Audit evidence"
 http_call GET "/tenant/audit"
