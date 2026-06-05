@@ -162,3 +162,15 @@ History ambiguity is resolved. The concrete next step for `ADM-SVC-002` is:
   - `git diff --stat origin/dev..origin/codex2/be-svc-002`
   - `git show --stat --summary --no-patch 21189af7`
   - `git show --stat --summary --no-patch b1578b59`
+
+## Owner Closeout Evidence
+
+- Reviewed helper commit on the task branch:
+  - `origin/codex/adm-svc-002-unblock-history-repair @ 16c56c601e3e6efe1032c250ee3e313c9e5d94f1`
+  - subject `ADM-SVC-002-UNBLOCK-HISTORY-REPAIR: document codex2 rail provenance`
+- The task-owned artifact for this unblock decision is:
+  - `support/unblock/ADM-SVC-002/ADM-SVC-002-UNBLOCK-HISTORY-REPAIR.md`
+- Canonical parent next step has already been written back into machine truth:
+  - `ADM-SVC-002.next = use origin/codex2/adm-svc-002 @ 21189af7... with dependency origin/codex2/be-svc-002 @ b1578b59...`
+- This helper task is a support-only history-repair artifact. It has branch-level
+  commit and push evidence, but no deploy target and no separate PR requirement.
