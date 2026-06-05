@@ -2999,6 +2999,8 @@ export interface PublicInfoVersionRecord {
 export * from "./platform-presence";
 // platform earnings contracts
 export * from "./platform-earnings";
+// service product / vehicle eligibility / fleet partner contracts
+export * from "./service-product";
 
 export interface CreatePublicInfoVersionCommand {
   title: string;
