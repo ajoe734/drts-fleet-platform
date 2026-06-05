@@ -94,7 +94,23 @@ This packet does not claim:
 - `scripts/dispatch-phase1-svc-fleet-tenantops.py`
 - machine-truth task `BE-FLEET-002`
 
+## Verification
+
+This unblock is docs-only and does not require runtime execution. Verification
+for owner closeout is limited to:
+
+- confirming the task branch is clean and scoped to this unblock artifact
+- confirming the approved planning-reconciliation commit is present on
+  `origin/codex2/e2e-fleet-014-unblock-planning-decision`
+- confirming machine truth records the parent resume step against
+  `E2E-FLEET-014`
+
 ## Delivery evidence
 
-Closeout commit, push, and review metadata will be appended through the normal
-task lifecycle once the owner hands off this packet for review.
+Canonical delivery evidence for this unblock is recorded in machine truth at
+closeout:
+
+- task-scoped closeout commit + subject
+- normal non-force push target
+- parent-task resume status / next step
+- `INTEGRATION_STATUS=branch_pushed`
