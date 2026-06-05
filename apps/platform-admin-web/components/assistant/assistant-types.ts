@@ -215,7 +215,7 @@ export type RefreshTier =
   | "manual"
   | "push_interrupt";
 
-/** Stable key for each of the 18 Platform Admin canvas routes. */
+/** Stable key for each of the 19 Platform Admin routes. */
 export type PlatformAdminRouteKey =
   | "home"
   | "tenants"
@@ -225,6 +225,10 @@ export type PlatformAdminRouteKey =
   | "partner-detail"
   | "users"
   | "fleet"
+  | "service-products"
+  | "vehicle-eligibility"
+  | "fleet-partners"
+  | "fleet-partner-detail"
   | "switchboard"
   | "pricing"
   | "payments"
@@ -242,6 +246,7 @@ export type LocalizedText = { zh: string; en: string };
 export type AssistantEntityKind =
   | "tenant"
   | "partner-entry"
+  | "fleet-partner"
   | "platform-user"
   | "vehicle"
   | "driver"

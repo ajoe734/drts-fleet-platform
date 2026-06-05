@@ -169,6 +169,7 @@ describe("multi-tenant header controller routing", () => {
     const controller = new TenantPartnerController(
       tenantPartnerService,
       {} as never,
+      {} as never,
     );
 
     let thrown: unknown;
@@ -211,6 +212,7 @@ describe("multi-tenant header controller routing", () => {
     } as unknown as TenantPartnerService;
     const controller = new TenantPartnerController(
       tenantPartnerService,
+      {} as never,
       {} as never,
     );
     const requestId = "req-tenant-partner-alpha";

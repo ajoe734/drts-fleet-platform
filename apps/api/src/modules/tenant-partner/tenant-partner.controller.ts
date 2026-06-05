@@ -45,9 +45,12 @@ import type {
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
   TenantBookingApprovalRequestRecord,
+  TenantDashboardSummary,
   TenantAddressExportViewRecord,
+  TenantOrderListQuery,
   TenantCostCenterRecord,
   TenantCostCenterQuotaSummary,
+  TenantServiceProgramRecord,
   TenantIntegrationGovernancePackage,
   TenantPartnerSummary,
   TenantQuotaLedgerEntry,
@@ -76,6 +79,7 @@ import {
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import { BillingSettlementService } from "../billing-settlement/billing-settlement.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { TenantPartnerService } from "./tenant-partner.service";
 
@@ -83,6 +87,7 @@ import { TenantPartnerService } from "./tenant-partner.service";
 export class TenantPartnerController {
   constructor(
     private readonly tenantPartnerService: TenantPartnerService,
+    private readonly billingSettlementService: BillingSettlementService,
     private readonly ownedMobilityService: OwnedMobilityService,
   ) {}
 
@@ -129,6 +134,103 @@ export class TenantPartnerController {
     };
 
     return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("tenant/dashboard")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getTenantDashboard(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const summary: TenantDashboardSummary =
+      await this.tenantPartnerService.getTenantDashboardSummary(
+        this.requireTenantId(tenantId),
+        this.billingSettlementService,
+      );
+    return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("tenant/orders")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantOrders(
+    @Query() query: TenantOrderListQuery,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        this.tenantPartnerService.listTenantOrders(
+          this.requireTenantId(tenantId),
+          query,
+          this.billingSettlementService,
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Get("tenant/orders/:orderId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getTenantOrder(
+    @Param("orderId") orderId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getTenantOrder(
+        this.requireTenantId(tenantId),
+        orderId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("tenant/trips")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantTrips(
+    @Query() query: TenantOrderListQuery,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        this.tenantPartnerService.listTenantTrips(
+          this.requireTenantId(tenantId),
+          query,
+          this.billingSettlementService,
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Get("tenant/service-programs")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantServicePrograms(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantServiceProgramRecord[] =
+      this.tenantPartnerService.listTenantServicePrograms(
+        this.requireTenantId(tenantId),
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/service-programs/:programId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getTenantServiceProgram(
+    @Param("programId") programId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getTenantServiceProgram(
+        this.requireTenantId(tenantId),
+        programId,
+      ),
+      requestId,
+    );
   }
 
   @Get("partner/entries")

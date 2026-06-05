@@ -53,6 +53,52 @@ export const BUSINESS_DISPATCH_SUBTYPES = [
 export type BusinessDispatchSubtype =
   (typeof BUSINESS_DISPATCH_SUBTYPES)[number];
 
+export const SERVICE_PRODUCT_TYPES = [
+  "taxi_realtime",
+  "taxi_reservation",
+  "enterprise_dispatch",
+  "credit_card_airport_transfer",
+  "insurance_replacement_vehicle",
+  "travel_agency_transfer",
+  "third_party_forwarded_order",
+] as const;
+export type ServiceProductType = (typeof SERVICE_PRODUCT_TYPES)[number];
+
+export const VEHICLE_LICENSE_TYPES = [
+  "taxi",
+  "multi_purpose_taxi",
+  "rental_car",
+  "business_vehicle",
+  "airport_transfer_vehicle",
+] as const;
+export type VehicleLicenseType = (typeof VEHICLE_LICENSE_TYPES)[number];
+
+export interface VehicleEligibilityMatrixRecord {
+  capabilityId: string;
+  licenseType: VehicleLicenseType;
+  supportedProducts: ServiceProductType[];
+  seatCount: number;
+  luggageCapacity: number;
+  airportPermit: boolean;
+  businessDispatchEligible: boolean;
+  taxiMeterRequired: boolean;
+  fixedFareAllowed: boolean;
+  platformForwardingAllowed: boolean;
+  active: boolean;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VehicleServiceCapabilityRecord extends VehicleEligibilityMatrixRecord {
+  vehicleId: string;
+}
+
+export interface UpdateVehicleEligibilityMatrixCommand {
+  items: VehicleEligibilityMatrixRecord[];
+}
+
 export const PARTNER_ENTRY_AUTH_MODES = [
   "tenant_portal_bearer",
   "partner_api_key",
@@ -2389,6 +2435,66 @@ export interface BookingRecord {
   updatedAt: string;
 }
 
+// NOTE(integration 20260605): be-tenbiz-001 originally re-declared
+// `ServiceProductType = BusinessDispatchSubtype` as a stopgap because the
+// canonical SVC contracts were not yet on dev. The canonical 7-value union
+// (see SERVICE_PRODUCT_TYPES above, per SD §6.1) is now authoritative, so the
+// duplicate alias is removed here.
+
+export interface TenantCostCenterQuotaWarning {
+  tenantId: string;
+  costCenterCode: string;
+  costCenterName: string | null;
+  periodKey: string;
+  remainingBookingCount: number | null;
+  remainingAmountMinor: number | null;
+  remainingPercent: number | null;
+  enforcementMode: TenantQuotaEnforcementMode;
+  warningLevel: "warning" | "critical";
+}
+
+export interface TenantBookingSummary {
+  bookingId: string;
+  orderId: string;
+  serviceProduct: ServiceProductType;
+  status: OwnedOrderStatus;
+  reservationWindowStart: string | null;
+  reservationWindowEnd: string | null;
+  passengerName: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  costCenterCode: string | null;
+  tenantServiceProgramId: string | null;
+}
+
+export interface TenantDashboardSummary {
+  tenantId: string;
+  periodMonth: string;
+  bookingCount: number;
+  completedTripCount: number;
+  cancelledTripCount: number;
+  noShowTripCount: number;
+  pendingApprovalCount: number;
+  pendingExceptionCount: number;
+  estimatedPayableAmountMinor: number;
+  issuedInvoiceAmountMinor: number;
+  unpaidInvoiceAmountMinor: number;
+  costCenterWarnings: TenantCostCenterQuotaWarning[];
+  upcomingBookings: TenantBookingSummary[];
+}
+
+export interface TenantOrderListQuery {
+  from?: string;
+  to?: string;
+  serviceProduct?: ServiceProductType;
+  status?: string;
+  costCenterCode?: string;
+  tenantServiceProgramId?: string;
+  riderId?: string;
+  sourcePlatform?: string;
+  invoiceStatus?: string;
+}
+
 export interface DispatchCandidate {
   vehicleId: string;
   driverId: string;
@@ -3445,6 +3551,66 @@ export interface TenantInvoiceRecord {
   updatedAt: string;
 }
 
+export type TenantPayableInvoiceStatus =
+  | "draft"
+  | "issued"
+  | "paid"
+  | "overdue";
+
+export interface TenantPayableSummary {
+  tenantId: string;
+  periodMonth: string;
+  totalTrips: number;
+  completedTrips: number;
+  cancelledTrips: number;
+  noShowTrips: number;
+  grossAmountMinor: number;
+  adjustmentAmountMinor: number;
+  taxAmountMinor: number;
+  payableAmountMinor: number;
+  invoiceStatus: TenantPayableInvoiceStatus;
+}
+
+export interface TenantPayableLineItem {
+  lineItemId: string;
+  orderId: string;
+  tripId: string | null;
+  serviceProduct: ServiceProductType;
+  costCenterCode: string | null;
+  tenantServiceProgramId: string | null;
+  riderId: string | null;
+  baseAmountMinor: number;
+  extraAmountMinor: number;
+  discountAmountMinor: number;
+  taxAmountMinor: number;
+  payableAmountMinor: number;
+}
+
+export type TenantServiceProgramType =
+  | "enterprise_dispatch"
+  | "credit_card_airport_transfer"
+  | "insurance_replacement_vehicle"
+  | "travel_agency_transfer"
+  | "taxi_platform_forwarding";
+
+export type TenantServiceProgramBillingMode =
+  | "monthly_invoice"
+  | "per_trip_invoice"
+  | "partner_settlement";
+
+export interface TenantServiceProgramRecord {
+  programId: string;
+  tenantId: string;
+  programType: TenantServiceProgramType;
+  displayName: string;
+  active: boolean;
+  billingMode: TenantServiceProgramBillingMode;
+  pricingPlanId: string;
+  eligibilityRuleId: string | null;
+  serviceRuleSetId: string;
+  allowedServiceProducts: ServiceProductType[];
+}
+
 export interface IssuePassengerReceiptCommand {
   orderId: string;
 }
@@ -3462,6 +3628,166 @@ export interface PublishDriverFeePlanCommand {
   version: string;
   serviceFeeBps: number;
   reimbursementMode: "platform_funded" | "mixed";
+}
+
+export const FLEET_PARTNERSHIP_TYPES = [
+  "driver_recruitment",
+  "fleet_management",
+  "vehicle_owner_group",
+  "business_dispatch_fleet",
+] as const;
+export type FleetPartnershipType = (typeof FLEET_PARTNERSHIP_TYPES)[number];
+
+export const DRIVER_FLEET_AFFILIATION_TYPES = [
+  "recruited_by",
+  "managed_by",
+  "vehicle_owned_by",
+  "contracted_under",
+] as const;
+export type DriverFleetAffiliationType =
+  (typeof DRIVER_FLEET_AFFILIATION_TYPES)[number];
+
+export const FLEET_REVENUE_SHARE_APPLIES_TO = [
+  "all_trips",
+  "tenant_program",
+  "service_product",
+  "driver_group",
+  "platform_source",
+] as const;
+export type FleetRevenueShareAppliesTo =
+  (typeof FLEET_REVENUE_SHARE_APPLIES_TO)[number];
+
+export const FLEET_REVENUE_SHARE_FORMULAS = [
+  "percent_of_gross",
+  "fixed_per_trip",
+  "monthly_fixed",
+  "tiered_bonus",
+] as const;
+export type FleetRevenueShareFormula =
+  (typeof FLEET_REVENUE_SHARE_FORMULAS)[number];
+
+export interface FleetPartnerRecord {
+  fleetPartnerId: string;
+  legalName: string;
+  displayName: string;
+  businessRegistrationNo: string;
+  contactName: string;
+  contactPhone: string;
+  active: boolean;
+  partnershipType: FleetPartnershipType;
+}
+
+export interface CreateFleetPartnerCommand {
+  legalName: string;
+  displayName: string;
+  businessRegistrationNo: string;
+  contactName: string;
+  contactPhone: string;
+  active?: boolean;
+  partnershipType: FleetPartnershipType;
+}
+
+export interface UpdateFleetPartnerCommand {
+  legalName?: string;
+  displayName?: string;
+  businessRegistrationNo?: string;
+  contactName?: string;
+  contactPhone?: string;
+  active?: boolean;
+  partnershipType?: FleetPartnershipType;
+}
+
+export interface DriverFleetAffiliationRecord {
+  affiliationId: string;
+  driverId: string;
+  fleetPartnerId: string;
+  affiliationType: DriverFleetAffiliationType;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  driverGroupId?: string | null;
+}
+
+export interface CreateDriverFleetAffiliationCommand {
+  fleetPartnerId: string;
+  affiliationType: DriverFleetAffiliationType;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+  driverGroupId?: string | null;
+}
+
+export interface FleetPartnerRevenueShareRuleRecord {
+  ruleId: string;
+  fleetPartnerId: string;
+  appliesTo: FleetRevenueShareAppliesTo;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
+  driverGroupId?: string | null;
+  formula: FleetRevenueShareFormula;
+  rateBps?: number | null;
+  fixedAmountMinor?: number | null;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+}
+
+export interface CreateFleetPartnerRevenueShareRuleCommand {
+  appliesTo: FleetRevenueShareAppliesTo;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
+  driverGroupId?: string | null;
+  formula: FleetRevenueShareFormula;
+  rateBps?: number | null;
+  fixedAmountMinor?: number | null;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+}
+
+export interface UpdateFleetPartnerRevenueShareRuleCommand {
+  appliesTo?: FleetRevenueShareAppliesTo;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
+  driverGroupId?: string | null;
+  formula?: FleetRevenueShareFormula;
+  rateBps?: number | null;
+  fixedAmountMinor?: number | null;
+  effectiveFrom?: string;
+  effectiveUntil?: string | null;
+}
+
+export interface FleetPartnerStatementLineRecord {
+  lineId: string;
+  ruleId: string;
+  formula: FleetRevenueShareFormula;
+  orderId: string | null;
+  driverId: string | null;
+  affiliationId: string | null;
+  grossEarning: MoneyAmount | null;
+  driverNetAmount: MoneyAmount | null;
+  shareAmount: MoneyAmount;
+  completedAt: string | null;
+  metadata: {
+    appliesTo: FleetRevenueShareAppliesTo;
+    serviceProduct: string | null;
+    tenantServiceProgramId: string | null;
+    sourcePlatform: string | null;
+    driverGroupId: string | null;
+    orderSource: OwnedOrderSource | null;
+  };
+}
+
+export interface FleetPartnerStatementRecord {
+  statementId: string;
+  fleetPartnerId: string;
+  periodMonth: string;
+  payoutStatus: DriverPayoutStatus;
+  grossEarningBasis: MoneyAmount;
+  driverNetAmountBasis: MoneyAmount;
+  shareAmount: MoneyAmount;
+  lines: FleetPartnerStatementLineRecord[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface DriverFeePlanRecord {

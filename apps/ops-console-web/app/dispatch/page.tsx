@@ -4,12 +4,14 @@ import type {
   DispatchCandidate,
   DispatchJobRecord,
   DriverTaskRecord,
+  DriverRegistryRecord,
   EmptyReason,
   EmptyStateEnvelope,
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
   IdentityContext,
   OwnedOrderRecord,
+  PartnerEligibilityReviewQueueItem,
   ResourceActionDescriptor,
   UiHealthEnvelope,
   UiRefreshMetadata,
@@ -46,7 +48,12 @@ type DispatchBoard =
   | "no_supply"
   | "governance"
   | "forwarded";
-type OwnedServiceFilter = "all" | string;
+type OwnedProductFilter = "all" | string;
+type TimingFilter = "all" | "reservation" | "realtime";
+type LicenseFilter = "all" | "license_issue" | "license_clear";
+type FleetFilter = "all" | string;
+type ApprovalFilter = "all" | string;
+type EligibilityFilter = "all" | string;
 type ForwardedFacetFilter =
   | "all"
   | "attention"
@@ -159,6 +166,21 @@ const actionGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
   gap: 10,
+};
+
+const summaryGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 10,
+};
+
+const summaryCellStyle = {
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  display: "grid",
+  gap: 4,
 };
 
 const selectedTrayStyle = {
@@ -349,12 +371,22 @@ function resolveBoard(value: string | undefined): DispatchBoard {
 
 function buildDispatchHref({
   board,
-  service,
+  product,
+  timing,
+  license,
+  fleet,
+  approval,
+  eligibility,
   facet,
   workItemId,
 }: {
   board: DispatchBoard;
-  service?: string | undefined;
+  product?: string | undefined;
+  timing?: string | undefined;
+  license?: string | undefined;
+  fleet?: string | undefined;
+  approval?: string | undefined;
+  eligibility?: string | undefined;
   facet?: string | undefined;
   workItemId?: string | undefined;
 }) {
@@ -362,8 +394,23 @@ function buildDispatchHref({
   if (board !== "ready") {
     params.set("board", board);
   }
-  if (service && service !== "all") {
-    params.set("service", service);
+  if (product && product !== "all") {
+    params.set("product", product);
+  }
+  if (timing && timing !== "all") {
+    params.set("timing", timing);
+  }
+  if (license && license !== "all") {
+    params.set("license", license);
+  }
+  if (fleet && fleet !== "all") {
+    params.set("fleet", fleet);
+  }
+  if (approval && approval !== "all") {
+    params.set("approval", approval);
+  }
+  if (eligibility && eligibility !== "all") {
+    params.set("eligibility", eligibility);
   }
   if (facet && facet !== "all") {
     params.set("facet", facet);
@@ -378,13 +425,23 @@ function buildDispatchHref({
 function buildDispatchDetailHref({
   dispatchId,
   board,
-  service,
+  product,
+  timing,
+  license,
+  fleet,
+  approval,
+  eligibility,
   facet,
   action,
 }: {
   dispatchId: string;
   board?: DispatchBoard;
-  service?: string | undefined;
+  product?: string | undefined;
+  timing?: string | undefined;
+  license?: string | undefined;
+  fleet?: string | undefined;
+  approval?: string | undefined;
+  eligibility?: string | undefined;
   facet?: string | undefined;
   action?: string | undefined;
 }) {
@@ -392,8 +449,23 @@ function buildDispatchDetailHref({
   if (board && board !== "ready") {
     params.set("board", board);
   }
-  if (service && service !== "all") {
-    params.set("service", service);
+  if (product && product !== "all") {
+    params.set("product", product);
+  }
+  if (timing && timing !== "all") {
+    params.set("timing", timing);
+  }
+  if (license && license !== "all") {
+    params.set("license", license);
+  }
+  if (fleet && fleet !== "all") {
+    params.set("fleet", fleet);
+  }
+  if (approval && approval !== "all") {
+    params.set("approval", approval);
+  }
+  if (eligibility && eligibility !== "all") {
+    params.set("eligibility", eligibility);
   }
   if (facet && facet !== "all") {
     params.set("facet", facet);
@@ -407,49 +479,36 @@ function buildDispatchDetailHref({
 }
 
 function getBoardMeta(board: DispatchBoard, locale: Locale) {
-  const zh = locale === "zh";
   switch (board) {
     case "ready":
       return {
-        label: zh ? "Ready queue" : "Ready queue",
-        description: zh
-          ? "待派送與廣播中的自營訂單。"
-          : "Owned orders waiting for assignment or active matching.",
+        label: t("dispatch.board.ready.label", locale),
+        description: t("dispatch.board.ready.description", locale),
       };
     case "assigned":
       return {
-        label: zh ? "Assigned" : "Assigned",
-        description: zh
-          ? "已指派司機、進行中的工作項目。"
-          : "Driver-assigned and in-trip work items.",
+        label: t("dispatch.board.assigned.label", locale),
+        description: t("dispatch.board.assigned.description", locale),
       };
     case "exception":
       return {
-        label: zh ? "Exception hold" : "Exception hold",
-        description: zh
-          ? "例外保留，需要先清除 gate 才能回到 queue。"
-          : "Held work items that must clear an exception before requeue.",
+        label: t("dispatch.board.exception.label", locale),
+        description: t("dispatch.board.exception.description", locale),
       };
     case "no_supply":
       return {
-        label: zh ? "No eligible supply" : "No eligible supply",
-        description: zh
-          ? "無合格供給，需要人工延展或升級。"
-          : "Orders with no eligible supply and active intervention.",
+        label: t("dispatch.board.noSupply.label", locale),
+        description: t("dispatch.board.noSupply.description", locale),
       };
     case "governance":
       return {
-        label: zh ? "Governance blocked" : "Governance blocked",
-        description: zh
-          ? "等待 override / approval request 的治理阻塞。"
-          : "Override requests blocked on governance approvals.",
+        label: t("dispatch.board.governance.label", locale),
+        description: t("dispatch.board.governance.description", locale),
       };
     case "forwarded":
       return {
-        label: zh ? "Forwarded mirror" : "Forwarded mirror",
-        description: zh
-          ? "外部平台鏡像、adapter 與 reconciliation 觀察。"
-          : "Forwarded order mirrors with adapter and reconciliation context.",
+        label: t("dispatch.board.forwarded.label", locale),
+        description: t("dispatch.board.forwarded.description", locale),
       };
   }
 }
@@ -481,18 +540,16 @@ function formatDurationSince(locale: Locale, value: string | null | undefined) {
   }
   const totalMinutes = Math.max(0, Math.floor(diffMs / 60000));
   if (totalMinutes < 60) {
-    return locale === "zh" ? `${totalMinutes} 分` : `${totalMinutes}m`;
+    return t("dispatch.duration.minutes", locale, { count: totalMinutes });
   }
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  return locale === "zh"
-    ? `${hours} 小時 ${minutes} 分`
-    : `${hours}h ${minutes}m`;
+  return t("dispatch.duration.hoursMinutes", locale, { hours, minutes });
 }
 
 function formatWindow(order: OwnedOrderRecord, locale: Locale) {
   if (!order.reservationWindowStart || !order.reservationWindowEnd) {
-    return locale === "zh" ? "即時" : "realtime";
+    return t("dispatch.filters.timing.realtime", locale);
   }
   return `${formatDateTime(locale, order.reservationWindowStart)} → ${formatDateTime(locale, order.reservationWindowEnd)}`;
 }
@@ -632,7 +689,66 @@ function formatForwardedWindow(order: ForwardedOrderRecord, locale: Locale) {
     return formatDateTime(locale, start);
   }
 
-  return locale === "zh" ? "即時" : "realtime";
+  return t("dispatch.filters.timing.realtime", locale);
+}
+
+function getServiceProductValue(order: OwnedOrderRecord) {
+  return order.businessDispatchSubtype ?? order.serviceBucket;
+}
+
+function getFleetValue(order: OwnedOrderRecord) {
+  return (
+    order.partnerEntrySlug ??
+    order.partnerId ??
+    order.partnerProgramId ??
+    order.tenantId ??
+    "direct_ops"
+  );
+}
+
+function getFleetLabel(order: OwnedOrderRecord, locale: Locale) {
+  const fleetValue = getFleetValue(order);
+  return fleetValue === "direct_ops"
+    ? t("dispatch.filters.fleet.direct", locale)
+    : formatDispatchCode(locale, fleetValue);
+}
+
+function getTimingValue(order: OwnedOrderRecord): TimingFilter {
+  return order.dispatchSemantics === "reservation" ? "reservation" : "realtime";
+}
+
+function getEligibilityGate(order: OwnedOrderRecord) {
+  return (order.complianceGates ?? []).find(
+    (gate) => gate.gateType === "eligibility",
+  );
+}
+
+function getEligibilityReasonValue(order: OwnedOrderRecord) {
+  const gate = getEligibilityGate(order);
+  if (!gate || gate.state === "clear") {
+    return "clear";
+  }
+  if (order.queueEntryReason === "dispatch_manual_review_required") {
+    return "manual_review";
+  }
+  if (gate.evidenceState === "missing") {
+    return "eligibility_verification_missing";
+  }
+  if (gate.state === "review_required") {
+    return "manual_review";
+  }
+  return order.lastDispatchFailureReason ?? gate.gateType;
+}
+
+function getEligibilityReasonLabel(order: OwnedOrderRecord, locale: Locale) {
+  const value = getEligibilityReasonValue(order);
+  return value === "clear"
+    ? t("dispatch.filters.eligibility.clear", locale)
+    : formatDispatchCode(locale, value);
+}
+
+function getApprovalLabel(value: string, locale: Locale) {
+  return formatDispatchCode(locale, value);
 }
 
 function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
@@ -773,10 +889,7 @@ function getMismatchSummary(
     0;
   if (mismatchCount > 0) {
     return {
-      label:
-        locale === "zh"
-          ? `${mismatchCount} 筆不一致`
-          : `${mismatchCount} mismatch`,
+      label: t("dispatch.mismatch.count", locale, { count: mismatchCount }),
       tone: "warn" as CanvasTone,
     };
   }
@@ -808,58 +921,57 @@ function getMismatchSummary(
 }
 
 function resolveActionLabel(action: string, locale: Locale) {
-  const zh = locale === "zh";
   switch (action) {
     case "assign":
     case "assign_dispatch":
     case "dispatch_order":
-      return zh ? "指派候選司機" : "Assign candidate";
+      return t("dispatch.action.assignCandidate", locale);
     case "release":
     case "release_driver":
     case "reassign_dispatch":
-      return zh ? "釋放 / 改派司機" : "Release / reassign driver";
+      return t("dispatch.action.releaseReassignDriver", locale);
     case "redispatch":
     case "redispatch_order":
     case "redispatch_with_reason":
-      return zh ? "重新派送" : "Redispatch";
+      return t("dispatch.action.redispatch", locale);
     case "cancel":
     case "cancel_owned_order":
-      return zh ? "取消訂單" : "Cancel order";
+      return t("dispatch.action.cancelOrder", locale);
     case "manual_fare_override":
     case "fare_override":
     case "request_fare_override":
-      return zh ? "申請車資覆寫" : "Request fare override";
+      return t("dispatch.action.requestFareOverride", locale);
     case "resolve_hold":
     case "resolve_exception_hold":
-      return zh ? "解除保留" : "Resolve hold";
+      return t("dispatch.action.resolveHold", locale);
     case "request_exception_override":
-      return zh ? "申請例外覆核" : "Request override";
+      return t("dispatch.action.requestOverride", locale);
     case "approve_exception_override":
-      return zh ? "核准 override" : "Approve override";
+      return t("dispatch.action.approveOverride", locale);
     case "reject_exception_override":
-      return zh ? "拒絕 override" : "Reject override";
+      return t("dispatch.action.rejectOverride", locale);
     case "escalate_incident":
     case "createIncidentFromDispatchException":
-      return zh ? "升級為事件" : "Escalate to incident";
+      return t("dispatch.action.escalateIncident", locale);
     case "extend_search":
-      return zh ? "延展搜尋" : "Extend search";
+      return t("dispatch.action.extendSearch", locale);
     case "cancel_no_supply":
-      return zh ? "取消 no-supply 訂單" : "Cancel no-supply order";
+      return t("dispatch.action.cancelNoSupplyOrder", locale);
     case "resolve_no_supply":
-      return zh ? "人工處理 no-supply" : "Resolve no-supply";
+      return t("dispatch.action.resolveNoSupply", locale);
     case "jump_approval_request":
-      return zh ? "前往 approval request" : "Open approval request";
+      return t("dispatch.action.openApprovalRequest", locale);
     case "trigger_reconciliation":
     case "complete_forwarder_reconciliation":
-      return zh ? "觸發 reconciliation" : "Trigger reconciliation";
+      return t("dispatch.action.completeReconciliation", locale);
     case "engage_manual_fallback":
-      return zh ? "啟動 manual fallback" : "Engage manual fallback";
+      return t("dispatch.action.engageManualFallback", locale);
     case "force_refresh":
     case "sync_forwarded_order_status":
     case "mark_forwarder_sync_failed":
-      return zh ? "強制刷新" : "Force refresh";
+      return t("dispatch.action.forceRefresh", locale);
     case "inspect_adapter":
-      return zh ? "查看 adapter ↗" : "Inspect adapter ↗";
+      return t("dispatch.action.inspectAdapter", locale);
     default:
       return action.replace(/_/g, " ");
   }
@@ -899,7 +1011,12 @@ function buildActionHref(
   board: DispatchBoard,
   record: BoardRecord,
   action: ResourceActionDescriptor,
-  selectedService: OwnedServiceFilter,
+  selectedProduct: OwnedProductFilter,
+  selectedTiming: TimingFilter,
+  selectedLicense: LicenseFilter,
+  selectedFleet: FleetFilter,
+  selectedApproval: ApprovalFilter,
+  selectedEligibility: EligibilityFilter,
   selectedFacet: ForwardedFacetFilter,
 ) {
   if ("mirrorOrderId" in record) {
@@ -912,6 +1029,12 @@ function buildActionHref(
         return buildDispatchDetailHref({
           dispatchId: record.mirrorOrderId,
           board,
+          product: selectedProduct,
+          timing: selectedTiming,
+          license: selectedLicense,
+          fleet: selectedFleet,
+          approval: selectedApproval,
+          eligibility: selectedEligibility,
           facet: selectedFacet,
           action: action.action,
         });
@@ -936,7 +1059,12 @@ function buildActionHref(
   return buildDispatchDetailHref({
     dispatchId: record.orderId,
     board,
-    service: selectedService,
+    product: selectedProduct,
+    timing: selectedTiming,
+    license: selectedLicense,
+    fleet: selectedFleet,
+    approval: selectedApproval,
+    eligibility: selectedEligibility,
     action: action.action,
   });
 }
@@ -945,12 +1073,22 @@ function buildEmptyStateActionContext(
   board: DispatchBoard,
   action: ResourceActionDescriptor,
   locale: Locale,
-  selectedService: OwnedServiceFilter,
+  selectedProduct: OwnedProductFilter,
+  selectedTiming: TimingFilter,
+  selectedLicense: LicenseFilter,
+  selectedFleet: FleetFilter,
+  selectedApproval: ApprovalFilter,
+  selectedEligibility: EligibilityFilter,
   selectedFacet: ForwardedFacetFilter,
 ): BoardActionContext {
   let href = buildDispatchHref({
     board,
-    service: selectedService,
+    product: selectedProduct,
+    timing: selectedTiming,
+    license: selectedLicense,
+    fleet: selectedFleet,
+    approval: selectedApproval,
+    eligibility: selectedEligibility,
     facet: selectedFacet,
   });
   let external = false;
@@ -986,7 +1124,12 @@ function buildActionContexts(
   board: DispatchBoard,
   record: BoardRecord,
   locale: Locale,
-  selectedService: OwnedServiceFilter,
+  selectedProduct: OwnedProductFilter,
+  selectedTiming: TimingFilter,
+  selectedLicense: LicenseFilter,
+  selectedFleet: FleetFilter,
+  selectedApproval: ApprovalFilter,
+  selectedEligibility: EligibilityFilter,
   selectedFacet: ForwardedFacetFilter,
 ): BoardActionContext[] {
   return normalizeActions(record).map((action) => {
@@ -994,7 +1137,12 @@ function buildActionContexts(
       board,
       record,
       action,
-      selectedService,
+      selectedProduct,
+      selectedTiming,
+      selectedLicense,
+      selectedFleet,
+      selectedApproval,
+      selectedEligibility,
       selectedFacet,
     );
     const external =
@@ -1080,67 +1228,57 @@ function renderEmptyState(
   board: DispatchBoard,
   emptyState: EmptyStateEnvelope,
   locale: Locale,
-  selectedService: OwnedServiceFilter,
+  selectedProduct: OwnedProductFilter,
+  selectedTiming: TimingFilter,
+  selectedLicense: LicenseFilter,
+  selectedFleet: FleetFilter,
+  selectedApproval: ApprovalFilter,
+  selectedEligibility: EligibilityFilter,
   selectedFacet: ForwardedFacetFilter,
 ) {
-  const zh = locale === "zh";
   const mapping: Record<
     EmptyReason,
     { title: string; description: string; tone: CanvasTone; icon: string }
   > = {
     no_data: {
-      title: zh ? "目前沒有工作項目" : "No work items yet",
-      description: zh
-        ? "這個 board 目前沒有資料，等待新的 dispatch 狀態流入。"
-        : "This board is currently empty and waiting for new dispatch activity.",
+      title: t("dispatch.empty.noData.title", locale),
+      description: t("dispatch.empty.noData.description", locale),
       tone: "neutral",
       icon: "○",
     },
     not_provisioned: {
-      title: zh ? "尚未完成佈建" : "Not provisioned",
-      description: zh
-        ? "此 board 需要先完成 adapter / integration 設定後才會有資料。"
-        : "This board requires provisioning before it can return live data.",
+      title: t("dispatch.empty.notProvisioned.title", locale),
+      description: t("dispatch.empty.notProvisioned.description", locale),
       tone: "info",
       icon: "◇",
     },
     fetch_failed: {
-      title: zh ? "讀取失敗" : "Failed to load",
-      description: zh
-        ? "資料請求失敗。請使用 refresh，或查看 degraded banner。"
-        : "The data request failed. Refresh the board or inspect degraded services.",
+      title: t("dispatch.empty.fetchFailed.title", locale),
+      description: t("dispatch.empty.fetchFailed.description", locale),
       tone: "danger",
       icon: "!",
     },
     permission_denied: {
-      title: zh ? "沒有權限" : "Permission denied",
-      description: zh
-        ? "目前角色沒有此 board 所需的權限。"
-        : "The current role does not have access to this board.",
+      title: t("dispatch.empty.permissionDenied.title", locale),
+      description: t("dispatch.empty.permissionDenied.description", locale),
       tone: "warn",
       icon: "⛔",
     },
     external_unavailable: {
-      title: zh ? "外部系統不可用" : "External platform unavailable",
-      description: zh
-        ? "外部 adapter / callback 無法提供資料，請改走 manual fallback。"
-        : "External adapter data is unavailable. Use fallback paths while recovery is in progress.",
+      title: t("dispatch.empty.externalUnavailable.title", locale),
+      description: t("dispatch.empty.externalUnavailable.description", locale),
       tone: "warn",
       icon: "↗",
     },
     driver_not_eligible: {
-      title: zh ? "目前不可派送" : "Not eligible right now",
-      description: zh
-        ? "此狀態通常不適用於 ops console，但後端回傳了 driver eligibility 限制。"
-        : "This reason is usually driver-specific, but the backend reported an eligibility restriction.",
+      title: t("dispatch.empty.driverNotEligible.title", locale),
+      description: t("dispatch.empty.driverNotEligible.description", locale),
       tone: "info",
       icon: "△",
     },
     filtered_empty: {
-      title: zh ? "篩選後無結果" : "No matches for current filters",
-      description: zh
-        ? "這個 board 有資料，但目前的 service / facet 篩選沒有命中。"
-        : "The board has data, but nothing matches the current filters.",
+      title: t("dispatch.empty.filteredEmpty.title", locale),
+      description: t("dispatch.empty.filteredEmpty.description", locale),
       tone: "accent",
       icon: "⌕",
     },
@@ -1161,7 +1299,12 @@ function renderEmptyState(
         board,
         emptyState.nextAction,
         locale,
-        selectedService,
+        selectedProduct,
+        selectedTiming,
+        selectedLicense,
+        selectedFleet,
+        selectedApproval,
+        selectedEligibility,
         selectedFacet,
       )
     : null;
@@ -1173,9 +1316,7 @@ function renderEmptyState(
       title={content.title}
       description={`${content.description} ${
         board === "forwarded" && emptyState.reason === "external_unavailable"
-          ? zh
-            ? "請改查 adapter health 與 reconciliation queue。"
-            : "Check adapter health and the reconciliation queue."
+          ? t("dispatch.empty.externalUnavailableSuffix", locale)
           : ""
       }`.trim()}
       icon={<span style={{ fontSize: 22 }}>{content.icon}</span>}
@@ -1185,13 +1326,18 @@ function renderEmptyState(
           <Link
             href={buildDispatchHref({
               board,
-              service: selectedService,
+              product: selectedProduct,
+              timing: selectedTiming,
+              license: selectedLicense,
+              fleet: selectedFleet,
+              approval: selectedApproval,
+              eligibility: selectedEligibility,
               facet: selectedFacet,
             })}
             style={{ textDecoration: "none" }}
           >
             <Btn theme={theme} variant="secondary" icon="arrow">
-              {zh ? "重設 board" : "Reset board"}
+              {t("dispatch.empty.resetBoard", locale)}
             </Btn>
           </Link>
         </div>
@@ -1231,7 +1377,7 @@ function renderActionButton(
       <Btn theme={theme} variant="secondary">
         {action.label ??
           fallbackLabel ??
-          (locale === "zh" ? "目前不可用" : "Unavailable")}
+          t("dispatch.action.unavailable", locale)}
       </Btn>
     );
   }
@@ -1248,7 +1394,7 @@ function renderActionButton(
         variant={action.riskLevel === "high" ? "primary" : "secondary"}
         icon={action.external ? "ext" : "arrow"}
       >
-        {action.label ?? (locale === "zh" ? "前往處理" : "Open")}
+        {action.label ?? t("dispatch.action.open", locale)}
       </Btn>
     </Link>
   );
@@ -1271,15 +1417,13 @@ function renderBoardSignalBanner({
   boardCount: number;
   visibleCount: number;
 }) {
-  const zh = locale === "zh";
-
   if (board === "forwarded" && degradedAdapters.length > 0) {
     const inspectAdapter =
       pickPrimaryAction(selectedActions, ["inspect_adapter"]) ??
       ({
         action: "inspect_adapter",
         href: buildPlatformAdminHref("/adapter-registry"),
-        label: zh ? "查看 adapter ↗" : "Inspect adapter ↗",
+        label: t("dispatch.action.inspectAdapter", locale),
         riskLevel: "low",
         disabled: false,
         external: true,
@@ -1289,16 +1433,17 @@ function renderBoardSignalBanner({
         theme={theme}
         tone="warn"
         icon="warn"
-        title={
-          zh
-            ? `${formatDispatchCode(locale, degradedAdapters[0]?.platformCode, "Adapter")} 降級 · Forwarded mirror 受影響`
-            : `${formatDispatchCode(locale, degradedAdapters[0]?.platformCode, "Adapter")} degraded · forwarded mirror impacted`
-        }
-        body={
-          zh
-            ? `目前可見 ${visibleCount} / ${boardCount} 筆鏡像單；優先走 reconciliation / manual fallback。`
-            : `Showing ${visibleCount} / ${boardCount} mirror rows. Prioritize reconciliation and manual fallback.`
-        }
+        title={t("dispatch.banner.forwardedDegraded.title", locale, {
+          platform: formatDispatchCode(
+            locale,
+            degradedAdapters[0]?.platformCode,
+            "Adapter",
+          ),
+        })}
+        body={t("dispatch.banner.forwardedDegraded.body", locale, {
+          visible: visibleCount,
+          total: boardCount,
+        })}
         actions={renderActionButton(inspectAdapter, locale)}
       />
     );
@@ -1325,11 +1470,10 @@ function renderBoardSignalBanner({
         tone={selectedRecord.status === "sync_failed" ? "danger" : "warn"}
         icon="warn"
         title={`${selectedRecord.mirrorOrderId} · ${formatDispatchCode(locale, selectedRecord.platformCode)}`}
-        body={
-          zh
-            ? `狀態 ${formatDispatchCode(locale, selectedRecord.status)}；外部單號 ${selectedRecord.externalOrderId}。`
-            : `Status ${formatDispatchCode(locale, selectedRecord.status)}; external order ${selectedRecord.externalOrderId}.`
-        }
+        body={t("dispatch.banner.forwardedSelected.body", locale, {
+          status: formatDispatchCode(locale, selectedRecord.status),
+          externalOrderId: selectedRecord.externalOrderId,
+        })}
         actions={renderActionButton(primary, locale)}
       />
     );
@@ -1342,16 +1486,8 @@ function renderBoardSignalBanner({
         theme={theme}
         tone="warn"
         icon="warn"
-        title={
-          zh
-            ? "需平台審批 · /approval-requests"
-            : "Governance hold · /approval-requests"
-        }
-        body={
-          zh
-            ? `${title} 正等待 override / approval request。`
-            : `${title} is blocked on an override / approval request.`
-        }
+        title={t("dispatch.banner.governance.title", locale)}
+        body={t("dispatch.banner.governance.body", locale, { title })}
         actions={renderActionButton(
           pickPrimaryAction(selectedActions, ["jump_approval_request"]),
           locale,
@@ -1364,19 +1500,18 @@ function renderBoardSignalBanner({
     const holdReason = formatDispatchCode(
       locale,
       selectedRecord.exceptionHold?.reasonCode,
-      locale === "zh" ? "未知" : "unknown",
+      t("dispatch.banner.exception.unknownReason", locale),
     );
     return (
       <Banner
         theme={theme}
         tone="warn"
         icon="warn"
-        title={zh ? "例外保留需先清除" : "Exception hold must be cleared"}
-        body={
-          zh
-            ? `${title} · hold 原因 ${holdReason}`
-            : `${title} · hold reason ${holdReason}`
-        }
+        title={t("dispatch.banner.exception.title", locale)}
+        body={t("dispatch.banner.exception.body", locale, {
+          title,
+          reason: holdReason,
+        })}
         actions={renderActionButton(
           pickPrimaryAction(selectedActions, [
             "resolve_exception_hold",
@@ -1396,16 +1531,15 @@ function renderBoardSignalBanner({
         theme={theme}
         tone="danger"
         icon="warn"
-        title={
-          zh
-            ? "No eligible supply 需要人工介入"
-            : "No eligible supply needs intervention"
-        }
-        body={
-          zh
-            ? `${title} · 已嘗試 ${selectedRecord.dispatchAttemptCount} 次，最後原因 ${formatDispatchCode(locale, selectedRecord.lastDispatchFailureReason ?? "unknown")}。`
-            : `${title} · ${selectedRecord.dispatchAttemptCount} attempts, last reason ${formatDispatchCode(locale, selectedRecord.lastDispatchFailureReason ?? "unknown")}.`
-        }
+        title={t("dispatch.banner.noSupply.title", locale)}
+        body={t("dispatch.banner.noSupply.body", locale, {
+          title,
+          count: selectedRecord.dispatchAttemptCount,
+          reason: formatDispatchCode(
+            locale,
+            selectedRecord.lastDispatchFailureReason ?? "unknown",
+          ),
+        })}
         actions={renderActionButton(
           pickPrimaryAction(selectedActions, [
             "extend_search",
@@ -1439,15 +1573,12 @@ function renderBoardSignalBanner({
       tone={board === "assigned" ? "info" : "warn"}
       icon="warn"
       title={title}
-      body={
-        zh
-          ? board === "assigned"
-            ? "目前為已指派 / 行程進行中工作項目。"
-            : "目前為 ready queue 焦點工作項目。"
-          : board === "assigned"
-            ? "Current driver-assigned / in-trip work item."
-            : "Current ready-queue focus item."
-      }
+      body={t(
+        board === "assigned"
+          ? "dispatch.banner.selected.assigned"
+          : "dispatch.banner.selected.ready",
+        locale,
+      )}
       actions={renderActionButton(primary, locale)}
     />
   );
@@ -1459,12 +1590,8 @@ function renderActionList(actions: BoardActionContext[], locale: Locale) {
       <CanvasEmptyPanel
         theme={theme}
         density="compact"
-        title={locale === "zh" ? "目前沒有可用動作" : "No available actions"}
-        description={
-          locale === "zh"
-            ? "這個 work item 目前是 read-only，或後端尚未提供 `availableActions`。"
-            : "This work item is read-only, or the backend has not emitted `availableActions` yet."
-        }
+        title={t("dispatch.actions.emptyTitle", locale)}
+        description={t("dispatch.actions.emptyBody", locale)}
       />
     );
   }
@@ -1509,9 +1636,7 @@ function renderActionList(actions: BoardActionContext[], locale: Locale) {
                     locale,
                     action.disabledReason ?? "disabled",
                   )
-                : locale === "zh"
-                  ? "由 availableActions 驅動的可執行 CTA。"
-                  : "CTA emitted from availableActions."}
+                : t("dispatch.actions.availableActionsCta", locale)}
             </div>
           </div>
         );
@@ -1543,7 +1668,7 @@ function renderInlineActionPills(
   if (actions.length === 0) {
     return (
       <span style={{ color: theme.textDim, fontSize: 11 }}>
-        {locale === "zh" ? "無動作" : "No actions"}
+        {t("dispatch.actions.none", locale)}
       </span>
     );
   }
@@ -1593,27 +1718,21 @@ function freshnessBanner(refresh: UiRefreshMetadata, locale: Locale) {
   if (refresh.dataFreshness === "fresh") {
     return null;
   }
-  const zh = locale === "zh";
   const tone = refresh.dataFreshness === "degraded" ? "warn" : "info";
   const title =
     refresh.dataFreshness === "stale"
-      ? zh
-        ? "資料已過期"
-        : "Dispatch snapshot is stale"
-      : zh
-        ? "資料新鮮度未知"
-        : "Dispatch freshness is degraded";
+      ? t("dispatch.freshness.stale", locale)
+      : t("dispatch.freshness.degraded", locale);
   return (
     <Banner
       theme={theme}
       tone={tone}
       icon="warn"
       title={title}
-      body={
-        zh
-          ? `generatedAt ${formatDateTime(locale, refresh.generatedAt)} · source ${formatDispatchCode(locale, refresh.source)}`
-          : `generatedAt ${formatDateTime(locale, refresh.generatedAt)} · source ${formatDispatchCode(locale, refresh.source)}`
-      }
+      body={t("dispatch.freshness.body", locale, {
+        generatedAt: formatDateTime(locale, refresh.generatedAt),
+        source: formatDispatchCode(locale, refresh.source),
+      })}
     />
   );
 }
@@ -1622,7 +1741,6 @@ function healthBanner(health: UiHealthEnvelope | null, locale: Locale) {
   if (!health || health.status === "healthy") {
     return null;
   }
-  const zh = locale === "zh";
   const firstService = health.degradedServices[0];
   return (
     <Banner
@@ -1631,12 +1749,8 @@ function healthBanner(health: UiHealthEnvelope | null, locale: Locale) {
       icon="warn"
       title={
         health.status === "down"
-          ? zh
-            ? "Dispatch 依賴服務中斷"
-            : "Dispatch dependency is down"
-          : zh
-            ? "Dispatch 依賴服務降級"
-            : "Dispatch dependency is degraded"
+          ? t("dispatch.health.down", locale)
+          : t("dispatch.health.degraded", locale)
       }
       body={
         firstService
@@ -1660,7 +1774,18 @@ export default async function DispatchPage({
   ]);
 
   const board = resolveBoard(firstParam(resolvedSearchParams.board));
-  const selectedService = firstParam(resolvedSearchParams.service) ?? "all";
+  const selectedProduct =
+    firstParam(resolvedSearchParams.product) ??
+    firstParam(resolvedSearchParams.service) ??
+    "all";
+  const selectedTiming = (firstParam(resolvedSearchParams.timing) ??
+    "all") as TimingFilter;
+  const selectedLicense = (firstParam(resolvedSearchParams.license) ??
+    "all") as LicenseFilter;
+  const selectedFleet = firstParam(resolvedSearchParams.fleet) ?? "all";
+  const selectedApproval = firstParam(resolvedSearchParams.approval) ?? "all";
+  const selectedEligibility =
+    firstParam(resolvedSearchParams.eligibility) ?? "all";
   const selectedFacet = (firstParam(resolvedSearchParams.facet) ??
     "all") as ForwardedFacetFilter;
   const focusWorkItemId = firstParam(resolvedSearchParams.workItemId) ?? "";
@@ -1669,15 +1794,18 @@ export default async function DispatchPage({
     ownedOrdersResult,
     dispatchJobsResult,
     driverTasksResult,
+    driversResult,
     forwardedOrdersResult,
     adapterHealthResult,
     reconciliationIssuesResult,
+    reviewQueueResult,
     identityResult,
     pageHealth,
   ] = await Promise.all([
     loadListRuntime<RuntimeOwnedOrder>(client, "/api/orders"),
     loadListRuntime<RuntimeDispatchJob>(client, "/api/dispatch/tasks"),
     loadListRuntime<DriverTaskRecord>(client, "/api/driver/tasks"),
+    loadListRuntime<DriverRegistryRecord>(client, "/api/drivers"),
     loadListRuntime<RuntimeForwardedOrder>(client, "/api/forwarder/orders"),
     loadListRuntime<AdapterHealthRecord>(
       client,
@@ -1686,6 +1814,10 @@ export default async function DispatchPage({
     loadListRuntime<ForwarderReconciliationIssue>(
       client,
       "/api/forwarder/reconciliation-issues",
+    ),
+    loadListRuntime<PartnerEligibilityReviewQueueItem>(
+      client,
+      "/api/ops/partner/eligibility/reviews",
     ),
     client
       .get<IdentityContext>("/api/identity/context")
@@ -1696,14 +1828,21 @@ export default async function DispatchPage({
   const ownedOrders = ownedOrdersResult.items;
   const dispatchJobs = dispatchJobsResult.items;
   const driverTasks = driverTasksResult.items;
+  const drivers = driversResult.items;
   const forwardedOrders = forwardedOrdersResult.items;
   const adapterHealth = adapterHealthResult.items;
   const reconciliationIssues = reconciliationIssuesResult.items;
+  const reviewQueue = reviewQueueResult.items;
 
   const jobByOrderId = new Map<string, RuntimeDispatchJob>(
     dispatchJobs.map((job: RuntimeDispatchJob) => [job.orderId, job] as const),
   );
   const tasksByOrderId = new Map<string, DriverTaskRecord[]>();
+  const driverById = new Map<string, DriverRegistryRecord>(
+    drivers.map(
+      (driver: DriverRegistryRecord) => [driver.driverId, driver] as const,
+    ),
+  );
   for (const task of driverTasks) {
     const existing = tasksByOrderId.get(task.orderId);
     if (existing) {
@@ -1748,13 +1887,33 @@ export default async function DispatchPage({
     forwarded: forwardedOrders.length,
   };
 
-  const visibleOwnedByBoard = sortedOwnedOrders.filter((order) => {
+  const preLicenseOwnedByBoard = sortedOwnedOrders.filter((order) => {
     const orderBoard = getOwnedBoard(order, jobByOrderId.get(order.orderId));
     if (orderBoard !== board) {
       return false;
     }
-    if (board !== "forwarded" && selectedService !== "all") {
-      return order.serviceBucket === selectedService;
+    if (board !== "forwarded" && selectedProduct !== "all") {
+      if (getServiceProductValue(order) !== selectedProduct) {
+        return false;
+      }
+    }
+    if (selectedTiming !== "all" && getTimingValue(order) !== selectedTiming) {
+      return false;
+    }
+    if (selectedFleet !== "all" && getFleetValue(order) !== selectedFleet) {
+      return false;
+    }
+    if (
+      selectedApproval !== "all" &&
+      order.approvalState !== selectedApproval
+    ) {
+      return false;
+    }
+    if (
+      selectedEligibility !== "all" &&
+      getEligibilityReasonValue(order) !== selectedEligibility
+    ) {
+      return false;
     }
     return true;
   });
@@ -1785,11 +1944,24 @@ export default async function DispatchPage({
   });
 
   const serviceBuckets = Array.from(
-    new Set(sortedOwnedOrders.map((order) => order.serviceBucket)),
+    new Set(sortedOwnedOrders.map((order) => getServiceProductValue(order))),
+  ).sort();
+  const fleetBuckets = Array.from(
+    new Set(sortedOwnedOrders.map((order) => getFleetValue(order))),
+  ).sort();
+  const approvalStates = Array.from(
+    new Set(sortedOwnedOrders.map((order) => order.approvalState)),
+  ).sort();
+  const eligibilityReasons = Array.from(
+    new Set(
+      sortedOwnedOrders
+        .map((order) => getEligibilityReasonValue(order))
+        .filter((value) => value !== "clear"),
+    ),
   ).sort();
 
   const visibleOwnedRecords: RuntimeOwnedOrder[] =
-    board === "forwarded" ? [] : visibleOwnedByBoard;
+    board === "forwarded" ? [] : preLicenseOwnedByBoard;
   const visibleDispatchJobIds = Array.from(
     new Set(
       visibleOwnedRecords
@@ -1812,6 +1984,48 @@ export default async function DispatchPage({
     ),
   );
 
+  function hasLicenseIssue(order: RuntimeOwnedOrder) {
+    const currentTask = pickCurrentTask(
+      tasksByOrderId.get(order.orderId) ?? [],
+    );
+    const taskDriver = currentTask
+      ? driverById.get(currentTask.driverId)
+      : null;
+    if (
+      taskDriver &&
+      (!taskDriver.licensesValid ||
+        taskDriver.eligibilityBlockedReasons.includes("licenses_invalid"))
+    ) {
+      return true;
+    }
+
+    const job = jobByOrderId.get(order.orderId);
+    const candidates = job
+      ? (candidatesByJobId.get(job.dispatchJobId) ?? [])
+      : [];
+    if (candidates.length > 0) {
+      return candidates.some((candidate) => {
+        const driver = driverById.get(candidate.driverId);
+        return Boolean(
+          driver &&
+          (!driver.licensesValid ||
+            driver.eligibilityBlockedReasons.includes("licenses_invalid")),
+        );
+      });
+    }
+
+    return order.lastDispatchFailureReason?.includes("license") ?? false;
+  }
+
+  const visibleOwnedByBoard =
+    selectedLicense === "all"
+      ? preLicenseOwnedByBoard
+      : preLicenseOwnedByBoard.filter((order) =>
+          selectedLicense === "license_issue"
+            ? hasLicenseIssue(order)
+            : !hasLicenseIssue(order),
+        );
+
   const issueByMirrorId = new Map<string, ForwarderReconciliationIssue>(
     reconciliationIssues.map((issue: ForwarderReconciliationIssue) => [
       issue.mirrorOrderId,
@@ -1827,6 +2041,46 @@ export default async function DispatchPage({
   const degradedAdapters = adapterHealth.filter(
     (record: AdapterHealthRecord) => record.status !== "healthy",
   );
+  const ownedManualReviewOrders = sortedOwnedOrders.filter(
+    (order) => order.queueFamily === "manual_review_queue",
+  );
+  const eligibleSupplyCount = visibleOwnedByBoard.reduce((count, order) => {
+    const job = jobByOrderId.get(order.orderId);
+    const candidates = job
+      ? (candidatesByJobId.get(job.dispatchJobId) ?? [])
+      : [];
+    return (
+      count +
+      candidates.filter((candidate) => {
+        const driver = driverById.get(candidate.driverId);
+        return driver?.dispatchEligible ?? false;
+      }).length
+    );
+  }, 0);
+  const noSupplyReasonCounts = visibleOwnedByBoard.reduce<
+    Record<string, number>
+  >((acc, order) => {
+    if (getOwnedBoard(order, jobByOrderId.get(order.orderId)) !== "no_supply") {
+      return acc;
+    }
+    const key =
+      order.lastDispatchFailureReason ??
+      order.dispatchTimeout?.timeoutReasonCode ??
+      "unknown";
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+  const topNoSupplyReason =
+    Object.entries(noSupplyReasonCounts).sort(
+      (left, right) => right[1] - left[1],
+    )[0] ?? null;
+  const approvalBlockedCount = sortedOwnedOrders.filter(
+    (order) =>
+      order.approvalState === "blocked" || order.approvalState === "pending",
+  ).length;
+  const quotaBlockedCount = sortedOwnedOrders.filter((order) =>
+    order.complianceFlags.some((flag) => flag.includes("quota")),
+  ).length;
 
   const currentRefresh =
     board === "forwarded"
@@ -1857,14 +2111,18 @@ export default async function DispatchPage({
           failed: ownedOrdersResult.failed || dispatchJobsResult.failed,
           baseCount: boardCounts[board],
           visibleCount: visibleOwnedByBoard.length,
-          filtered: selectedService !== "all",
+          filtered:
+            selectedProduct !== "all" ||
+            selectedTiming !== "all" ||
+            selectedLicense !== "all" ||
+            selectedFleet !== "all" ||
+            selectedApproval !== "all" ||
+            selectedEligibility !== "all",
           identity: identityResult,
           adapterHealth,
         });
 
   const boardMeta = getBoardMeta(board, locale);
-  const zh = locale === "zh";
-
   const selectedRecord: BoardRecord | null =
     board === "forwarded"
       ? (visibleForwardedOrders.find(
@@ -1881,7 +2139,12 @@ export default async function DispatchPage({
         board,
         selectedRecord,
         locale,
-        selectedService,
+        selectedProduct,
+        selectedTiming,
+        selectedLicense,
+        selectedFleet,
+        selectedApproval,
+        selectedEligibility,
         selectedFacet,
       )
     : [];
@@ -1900,7 +2163,12 @@ export default async function DispatchPage({
             board,
             order,
             locale,
-            selectedService,
+            selectedProduct,
+            selectedTiming,
+            selectedLicense,
+            selectedFleet,
+            selectedApproval,
+            selectedEligibility,
             selectedFacet,
           ),
           locale,
@@ -1979,15 +2247,38 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      { h: "MIRROR", k: "mirror", w: 170, mono: true },
-      { h: "SOURCE", k: "source", w: 140 },
-      { h: "EXTERNAL ORDER", k: "externalOrderId", w: 170, mono: true },
-      { h: "PICKUP → DROP", k: "route", w: 360 },
-      { h: "WINDOW", k: "window", w: 132, mono: true },
-      { h: "STATUS", k: "status", w: 160 },
-      { h: "ADAPTER", k: "adapter", w: 170 },
-      { h: "MISMATCH", k: "mismatch", w: 190 },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      {
+        h: t("dispatch.table.forwarded.mirror", locale),
+        k: "mirror",
+        w: 170,
+        mono: true,
+      },
+      { h: t("dispatch.table.forwarded.source", locale), k: "source", w: 140 },
+      {
+        h: t("dispatch.table.forwarded.externalOrder", locale),
+        k: "externalOrderId",
+        w: 170,
+        mono: true,
+      },
+      { h: t("dispatch.table.ready.route", locale), k: "route", w: 360 },
+      {
+        h: t("dispatch.table.forwarded.window", locale),
+        k: "window",
+        w: 132,
+        mono: true,
+      },
+      { h: t("dispatch.table.forwarded.status", locale), k: "status", w: 160 },
+      {
+        h: t("dispatch.table.forwarded.adapter", locale),
+        k: "adapter",
+        w: 170,
+      },
+      {
+        h: t("dispatch.table.forwarded.mismatch", locale),
+        k: "mismatch",
+        w: 190,
+      },
+      { h: t("dispatch.table.shared.actions", locale), k: "actions", w: 260 },
     ];
   } else if (board === "assigned") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2000,7 +2291,12 @@ export default async function DispatchPage({
             board,
             order,
             locale,
-            selectedService,
+            selectedProduct,
+            selectedTiming,
+            selectedLicense,
+            selectedFleet,
+            selectedApproval,
+            selectedEligibility,
             selectedFacet,
           ),
           locale,
@@ -2054,13 +2350,37 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      { h: "ORDER", k: "order", w: 150, mono: true },
-      { h: "TENANT", k: "tenant", w: 160, mono: true },
-      { h: "DRIVER / VEHICLE", k: "driver", w: 170, mono: true },
-      { h: "TASK STATE", k: "taskState", w: 150 },
-      { h: "ETA", k: "eta", w: 90, mono: true },
-      { h: "GATE", k: "gate", w: 180 },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      {
+        h: t("dispatch.table.shared.order", locale),
+        k: "order",
+        w: 150,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.shared.tenant", locale),
+        k: "tenant",
+        w: 160,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.assigned.driverVehicle", locale),
+        k: "driver",
+        w: 170,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.assigned.taskState", locale),
+        k: "taskState",
+        w: 150,
+      },
+      {
+        h: t("dispatch.table.shared.eta", locale),
+        k: "eta",
+        w: 90,
+        mono: true,
+      },
+      { h: t("dispatch.table.assigned.gate", locale), k: "gate", w: 180 },
+      { h: t("dispatch.table.shared.actions", locale), k: "actions", w: 260 },
     ];
   } else if (board === "exception") {
     boardRows = visibleOwnedByBoard.map((order) => ({
@@ -2069,7 +2389,12 @@ export default async function DispatchPage({
           board,
           order,
           locale,
-          selectedService,
+          selectedProduct,
+          selectedTiming,
+          selectedLicense,
+          selectedFleet,
+          selectedApproval,
+          selectedEligibility,
           selectedFacet,
         ),
         locale,
@@ -2107,13 +2432,43 @@ export default async function DispatchPage({
     }));
 
     boardColumns = [
-      { h: "ORDER", k: "order", w: 150, mono: true },
-      { h: "TENANT", k: "tenant", w: 160, mono: true },
-      { h: "HOLD REASON", k: "reason", w: 180, mono: true },
-      { h: "HOLD OWNER", k: "owner", w: 150, mono: true },
-      { h: "AGE", k: "age", w: 120, mono: true },
-      { h: "RELATED", k: "related", w: 160, mono: true },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      {
+        h: t("dispatch.table.shared.order", locale),
+        k: "order",
+        w: 150,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.shared.tenant", locale),
+        k: "tenant",
+        w: 160,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.exception.holdReason", locale),
+        k: "reason",
+        w: 180,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.exception.holdOwner", locale),
+        k: "owner",
+        w: 150,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.exception.age", locale),
+        k: "age",
+        w: 120,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.exception.related", locale),
+        k: "related",
+        w: 160,
+        mono: true,
+      },
+      { h: t("dispatch.table.shared.actions", locale), k: "actions", w: 260 },
     ];
   } else if (board === "no_supply") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2127,7 +2482,12 @@ export default async function DispatchPage({
             board,
             order,
             locale,
-            selectedService,
+            selectedProduct,
+            selectedTiming,
+            selectedLicense,
+            selectedFleet,
+            selectedApproval,
+            selectedEligibility,
             selectedFacet,
           ),
           locale,
@@ -2167,12 +2527,38 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      { h: "ORDER", k: "order", w: 150, mono: true },
-      { h: "TENANT", k: "tenant", w: 160, mono: true },
-      { h: "ATTEMPTS", k: "attempts", w: 120, mono: true, align: "right" },
-      { h: "REASON CODE", k: "reason", w: 180, mono: true },
-      { h: "TIME IN STATE", k: "age", w: 140, mono: true },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      {
+        h: t("dispatch.table.shared.order", locale),
+        k: "order",
+        w: 150,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.shared.tenant", locale),
+        k: "tenant",
+        w: 160,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.noSupply.attempts", locale),
+        k: "attempts",
+        w: 120,
+        mono: true,
+        align: "right",
+      },
+      {
+        h: t("dispatch.table.noSupply.reasonCode", locale),
+        k: "reason",
+        w: 180,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.noSupply.timeInState", locale),
+        k: "age",
+        w: 140,
+        mono: true,
+      },
+      { h: t("dispatch.table.shared.actions", locale), k: "actions", w: 260 },
     ];
   } else if (board === "governance") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2186,7 +2572,12 @@ export default async function DispatchPage({
             board,
             order,
             locale,
-            selectedService,
+            selectedProduct,
+            selectedTiming,
+            selectedLicense,
+            selectedFleet,
+            selectedApproval,
+            selectedEligibility,
             selectedFacet,
           ),
           locale,
@@ -2221,7 +2612,7 @@ export default async function DispatchPage({
             style={{ color: theme.accent, textDecoration: "none" }}
           >
             {order.approvalRequestIds[0] ??
-              (zh ? "前往 approval" : "Open approval")}
+              t("dispatch.action.openApprovalRequest", locale)}
           </Link>
         ),
         _selected: selectedRecord === order,
@@ -2229,13 +2620,43 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      { h: "ORDER", k: "order", w: 150, mono: true },
-      { h: "TENANT", k: "tenant", w: 160, mono: true },
-      { h: "OVERRIDE", k: "overrideType", w: 150, mono: true },
-      { h: "REQUESTER", k: "requester", w: 150, mono: true },
-      { h: "AGE", k: "age", w: 120, mono: true },
-      { h: "APPROVAL", k: "approval", w: 180, mono: true },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      {
+        h: t("dispatch.table.shared.order", locale),
+        k: "order",
+        w: 150,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.shared.tenant", locale),
+        k: "tenant",
+        w: 160,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.governance.override", locale),
+        k: "overrideType",
+        w: 150,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.governance.requester", locale),
+        k: "requester",
+        w: 150,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.governance.age", locale),
+        k: "age",
+        w: 120,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.governance.approval", locale),
+        k: "approval",
+        w: 180,
+        mono: true,
+      },
+      { h: t("dispatch.table.shared.actions", locale), k: "actions", w: 260 },
     ];
   } else {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2251,7 +2672,12 @@ export default async function DispatchPage({
             board,
             order,
             locale,
-            selectedService,
+            selectedProduct,
+            selectedTiming,
+            selectedLicense,
+            selectedFleet,
+            selectedApproval,
+            selectedEligibility,
             selectedFacet,
           ),
           locale,
@@ -2283,13 +2709,14 @@ export default async function DispatchPage({
           </div>
         ),
         window: formatWindow(order, locale),
-        service: formatDispatchCode(locale, order.serviceBucket),
+        service: formatDispatchCode(locale, getServiceProductValue(order)),
         eta:
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== null &&
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== undefined
             ? `${job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes}m`
             : "—",
         candidates: String(candidates.length),
+        eligibility: getEligibilityReasonLabel(order, locale),
         gate: (
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <Pill theme={theme} tone={getStateTone(state)} dot>
@@ -2305,15 +2732,52 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      { h: "ORDER", k: "order", w: 150, mono: true },
-      { h: "TENANT", k: "tenant", w: 150, mono: true },
-      { h: "PICKUP → DROP", k: "route", w: 340 },
-      { h: "WINDOW", k: "window", w: 132, mono: true },
-      { h: "SERVICE", k: "service", w: 130, mono: true },
-      { h: "ETA", k: "eta", w: 80, mono: true },
-      { h: "CAND", k: "candidates", w: 70, mono: true, align: "right" },
-      { h: "GATE", k: "gate", w: 210 },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      {
+        h: t("dispatch.table.shared.order", locale),
+        k: "order",
+        w: 150,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.shared.tenant", locale),
+        k: "tenant",
+        w: 150,
+        mono: true,
+      },
+      { h: t("dispatch.table.ready.route", locale), k: "route", w: 340 },
+      {
+        h: t("dispatch.table.ready.window", locale),
+        k: "window",
+        w: 132,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.ready.service", locale),
+        k: "service",
+        w: 130,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.shared.eta", locale),
+        k: "eta",
+        w: 80,
+        mono: true,
+      },
+      {
+        h: t("dispatch.table.ready.candidates", locale),
+        k: "candidates",
+        w: 70,
+        mono: true,
+        align: "right",
+      },
+      {
+        h: t("dispatch.table.ready.eligibility", locale),
+        k: "eligibility",
+        w: 180,
+        mono: true,
+      },
+      { h: t("dispatch.table.assigned.gate", locale), k: "gate", w: 210 },
+      { h: t("dispatch.table.shared.actions", locale), k: "actions", w: 260 },
     ];
   }
 
@@ -2322,7 +2786,12 @@ export default async function DispatchPage({
       <PublishAssistantScope
         board={board}
         visibleFilters={{
-          service: selectedService,
+          product: selectedProduct,
+          timing: selectedTiming,
+          license: selectedLicense,
+          fleet: selectedFleet,
+          approval: selectedApproval,
+          eligibility: selectedEligibility,
           facet: selectedFacet,
           ...(focusWorkItemId ? { workItemId: focusWorkItemId } : {}),
         }}
@@ -2333,11 +2802,7 @@ export default async function DispatchPage({
       <PageHeader
         theme={theme}
         title={t("dispatch.title", locale)}
-        subtitle={
-          zh
-            ? "即時派車工作流 · 6 個子看板 · queue / candidates / ETA / override"
-            : "Live dispatch workflow · 6 sub-boards · queue / candidates / ETA / override"
-        }
+        subtitle={t("dispatch.page.subtitle", locale)}
         actions={
           <>
             <Pill theme={theme} tone="accent">
@@ -2351,13 +2816,23 @@ export default async function DispatchPage({
                 focusWorkItemId
                   ? {
                       board,
-                      service: selectedService,
+                      product: selectedProduct,
+                      timing: selectedTiming,
+                      license: selectedLicense,
+                      fleet: selectedFleet,
+                      approval: selectedApproval,
+                      eligibility: selectedEligibility,
                       facet: selectedFacet,
                       workItemId: focusWorkItemId,
                     }
                   : {
                       board,
-                      service: selectedService,
+                      product: selectedProduct,
+                      timing: selectedTiming,
+                      license: selectedLicense,
+                      fleet: selectedFleet,
+                      approval: selectedApproval,
+                      eligibility: selectedEligibility,
                       facet: selectedFacet,
                     },
               )}
@@ -2440,14 +2915,134 @@ export default async function DispatchPage({
             <div
               style={{ padding: "16px 18px 14px", display: "grid", gap: 12 }}
             >
+              {board !== "forwarded" ? (
+                <>
+                  <div style={summaryGridStyle}>
+                    <div style={summaryCellStyle}>
+                      <span style={{ color: theme.textDim, fontSize: 11 }}>
+                        {t("dispatch.panels.eligibleSupply", locale)}
+                      </span>
+                      <strong>{eligibleSupplyCount}</strong>
+                      <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                        {t("dispatch.panels.eligibleSupplyHint", locale)}
+                      </span>
+                    </div>
+                    <div style={summaryCellStyle}>
+                      <span style={{ color: theme.textDim, fontSize: 11 }}>
+                        {t("dispatch.panels.noSupplyReason", locale)}
+                      </span>
+                      <strong>
+                        {topNoSupplyReason
+                          ? formatDispatchCode(locale, topNoSupplyReason[0])
+                          : "—"}
+                      </strong>
+                      <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                        {topNoSupplyReason
+                          ? t("dispatch.panels.noSupplyReasonCount", locale, {
+                              count: topNoSupplyReason[1],
+                            })
+                          : t("dispatch.panels.noSupplyReasonEmpty", locale)}
+                      </span>
+                    </div>
+                    <div style={summaryCellStyle}>
+                      <span style={{ color: theme.textDim, fontSize: 11 }}>
+                        {t("dispatch.panels.approvalBlocked", locale)}
+                      </span>
+                      <strong>{approvalBlockedCount}</strong>
+                      <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                        {t("dispatch.panels.approvalBlockedHint", locale)}
+                      </span>
+                    </div>
+                    <div style={summaryCellStyle}>
+                      <span style={{ color: theme.textDim, fontSize: 11 }}>
+                        {t("dispatch.panels.quotaBlocked", locale)}
+                      </span>
+                      <strong>{quotaBlockedCount}</strong>
+                      <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                        {t("dispatch.panels.quotaBlockedHint", locale)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={summaryCellStyle}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 8,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <strong>{t("dispatch.reviewQueue.title", locale)}</strong>
+                      <Pill theme={theme} tone="warn" dot>
+                        {ownedManualReviewOrders.length + reviewQueue.length}
+                      </Pill>
+                    </div>
+                    <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                      {t("dispatch.reviewQueue.subtitle", locale)}
+                    </span>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {ownedManualReviewOrders.slice(0, 3).map((order) => (
+                        <div
+                          key={order.orderId}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 8,
+                            fontSize: 12,
+                          }}
+                        >
+                          <span>{`${order.orderNo} · ${getFleetLabel(order, locale)}`}</span>
+                          <span style={{ color: theme.textDim }}>
+                            {formatDispatchCode(
+                              locale,
+                              order.queueEntryReason ?? "manual_review_queue",
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                      {reviewQueue.slice(0, 3).map((item) => (
+                        <div
+                          key={item.eligibilityVerificationId}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 8,
+                            fontSize: 12,
+                          }}
+                        >
+                          <span>{item.partnerEntrySlug}</span>
+                          <span style={{ color: theme.textDim }}>
+                            {formatDispatchCode(
+                              locale,
+                              item.verificationStatus,
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                      {ownedManualReviewOrders.length === 0 &&
+                      reviewQueue.length === 0 ? (
+                        <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                          {t("dispatch.reviewQueue.empty", locale)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
               <div style={filterRowStyle}>
                 {board === "forwarded"
                   ? (
                       [
-                        ["all", `${zh ? "全部" : "All"} ${forwardedBaseCount}`],
+                        [
+                          "all",
+                          `${t("common.all", locale)} ${forwardedBaseCount}`,
+                        ],
                         [
                           "attention",
-                          `${zh ? "需注意" : "Attention"} ${sortedForwardedOrders.filter(needsForwardedAttention).length}`,
+                          `${t("dispatch.workflow.filterAttention", locale)} ${sortedForwardedOrders.filter(needsForwardedAttention).length}`,
                         ],
                         [
                           "sync_failed",
@@ -2459,7 +3054,7 @@ export default async function DispatchPage({
                         ],
                         [
                           "terminal",
-                          `${zh ? "終態" : "Terminal"} ${sortedForwardedOrders.filter(isForwardedTerminal).length}`,
+                          `${t("dispatch.forwarded.filter.terminal", locale)} ${sortedForwardedOrders.filter(isForwardedTerminal).length}`,
                         ],
                       ] as const
                     ).map(([facetKey, label]) => (
@@ -2483,34 +3078,229 @@ export default async function DispatchPage({
                       </Link>
                     ))
                   : [
-                      ["all", zh ? "全部服務" : "All services"],
+                      ["all", t("dispatch.filters.products.all", locale)],
                       ...serviceBuckets.map((item) => [
                         item,
                         formatDispatchCode(locale, item),
                       ]),
-                    ].map(([serviceKey, label]) => (
+                    ].map(([productKey, label]) => (
                       <Link
-                        key={serviceKey}
+                        key={productKey}
                         href={buildDispatchHref({
                           board,
-                          service: serviceKey,
+                          product: productKey,
+                          timing: selectedTiming,
+                          license: selectedLicense,
+                          fleet: selectedFleet,
+                          approval: selectedApproval,
+                          eligibility: selectedEligibility,
                         })}
                         style={{ textDecoration: "none" }}
                       >
                         <Pill
                           theme={theme}
                           tone={
-                            selectedService === serviceKey
+                            selectedProduct === productKey
                               ? "accent"
                               : "neutral"
                           }
-                          dot={serviceKey !== "all"}
+                          dot={productKey !== "all"}
                         >
                           {label}
                         </Pill>
                       </Link>
                     ))}
               </div>
+
+              {board !== "forwarded" ? (
+                <>
+                  <div style={filterRowStyle}>
+                    {(
+                      [
+                        ["all", t("dispatch.filters.timing.all", locale)],
+                        [
+                          "reservation",
+                          t("dispatch.filters.timing.reservation", locale),
+                        ],
+                        [
+                          "realtime",
+                          t("dispatch.filters.timing.realtime", locale),
+                        ],
+                      ] as const
+                    ).map(([timingKey, label]) => (
+                      <Link
+                        key={timingKey}
+                        href={buildDispatchHref({
+                          board,
+                          product: selectedProduct,
+                          timing: timingKey,
+                          license: selectedLicense,
+                          fleet: selectedFleet,
+                          approval: selectedApproval,
+                          eligibility: selectedEligibility,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedTiming === timingKey ? "accent" : "neutral"
+                          }
+                          dot={timingKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))}
+                  </div>
+                  <div style={filterRowStyle}>
+                    {(
+                      [
+                        ["all", t("dispatch.filters.license.all", locale)],
+                        [
+                          "license_issue",
+                          t("dispatch.filters.license.issue", locale),
+                        ],
+                        [
+                          "license_clear",
+                          t("dispatch.filters.license.clear", locale),
+                        ],
+                      ] as const
+                    ).map(([licenseKey, label]) => (
+                      <Link
+                        key={licenseKey}
+                        href={buildDispatchHref({
+                          board,
+                          product: selectedProduct,
+                          timing: selectedTiming,
+                          license: licenseKey,
+                          fleet: selectedFleet,
+                          approval: selectedApproval,
+                          eligibility: selectedEligibility,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedLicense === licenseKey
+                              ? "accent"
+                              : "neutral"
+                          }
+                          dot={licenseKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))}
+                  </div>
+                  <div style={filterRowStyle}>
+                    {[
+                      ["all", t("dispatch.filters.fleet.all", locale)],
+                      ...fleetBuckets.map((item) => [
+                        item,
+                        item === "direct_ops"
+                          ? t("dispatch.filters.fleet.direct", locale)
+                          : formatDispatchCode(locale, item),
+                      ]),
+                    ].map(([fleetKey, label]) => (
+                      <Link
+                        key={fleetKey}
+                        href={buildDispatchHref({
+                          board,
+                          product: selectedProduct,
+                          timing: selectedTiming,
+                          license: selectedLicense,
+                          fleet: fleetKey,
+                          approval: selectedApproval,
+                          eligibility: selectedEligibility,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedFleet === fleetKey ? "accent" : "neutral"
+                          }
+                          dot={fleetKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))}
+                  </div>
+                  <div style={filterRowStyle}>
+                    {[
+                      ["all", t("dispatch.filters.approval.all", locale)],
+                      ...approvalStates.map((item) => [
+                        item,
+                        getApprovalLabel(item, locale),
+                      ]),
+                    ].map(([approvalKey, label]) => (
+                      <Link
+                        key={approvalKey}
+                        href={buildDispatchHref({
+                          board,
+                          product: selectedProduct,
+                          timing: selectedTiming,
+                          license: selectedLicense,
+                          fleet: selectedFleet,
+                          approval: approvalKey,
+                          eligibility: selectedEligibility,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedApproval === approvalKey
+                              ? "accent"
+                              : "neutral"
+                          }
+                          dot={approvalKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))}
+                  </div>
+                  <div style={filterRowStyle}>
+                    {[
+                      ["all", t("dispatch.filters.eligibility.all", locale)],
+                      ...eligibilityReasons.map((item) => [
+                        item,
+                        formatDispatchCode(locale, item),
+                      ]),
+                    ].map(([eligibilityKey, label]) => (
+                      <Link
+                        key={eligibilityKey}
+                        href={buildDispatchHref({
+                          board,
+                          product: selectedProduct,
+                          timing: selectedTiming,
+                          license: selectedLicense,
+                          fleet: selectedFleet,
+                          approval: selectedApproval,
+                          eligibility: eligibilityKey,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedEligibility === eligibilityKey
+                              ? "accent"
+                              : "neutral"
+                          }
+                          dot={eligibilityKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))}
+                  </div>
+                </>
+              ) : null}
 
               <div
                 style={{
@@ -2524,8 +3314,8 @@ export default async function DispatchPage({
               >
                 <span>
                   {board === "forwarded"
-                    ? `${zh ? "顯示" : "Showing"} ${visibleForwardedOrders.length} / ${forwardedBaseCount}`
-                    : `${zh ? "顯示" : "Showing"} ${visibleOwnedByBoard.length} / ${boardCounts[board]}`}
+                    ? `${t("dispatch.filters.showing", locale)} ${visibleForwardedOrders.length} / ${forwardedBaseCount}`
+                    : `${t("dispatch.filters.showing", locale)} ${visibleOwnedByBoard.length} / ${boardCounts[board]}`}
                 </span>
                 <span>{formatRefreshSummary(currentRefresh, locale)}</span>
               </div>
@@ -2537,7 +3327,12 @@ export default async function DispatchPage({
                   board,
                   boardEmptyState,
                   locale,
-                  selectedService,
+                  selectedProduct,
+                  selectedTiming,
+                  selectedLicense,
+                  selectedFleet,
+                  selectedApproval,
+                  selectedEligibility,
                   selectedFacet,
                 )}
               </div>
@@ -2550,7 +3345,7 @@ export default async function DispatchPage({
                       <div style={selectedMetaStyle}>
                         <div style={selectedMetaCellStyle}>
                           <span style={{ fontSize: 11, color: theme.textDim }}>
-                            {zh ? "焦點 work item" : "Focused work item"}
+                            {t("dispatch.selected.focused", locale)}
                           </span>
                           <strong
                             style={{
@@ -2563,9 +3358,26 @@ export default async function DispatchPage({
                               : `${selectedRecord.orderNo} · ${selectedRecord.orderId}`}
                           </strong>
                         </div>
+                        {"mirrorOrderId" in selectedRecord ? null : (
+                          <div style={selectedMetaCellStyle}>
+                            <span
+                              style={{ fontSize: 11, color: theme.textDim }}
+                            >
+                              {t("dispatch.selected.attribution", locale)}
+                            </span>
+                            <strong>
+                              {`${getFleetLabel(selectedRecord, locale)} · ${formatDispatchCode(locale, getServiceProductValue(selectedRecord))}`}
+                            </strong>
+                            <span
+                              style={{ color: theme.textMuted, fontSize: 11 }}
+                            >
+                              {`${getTenantLabel(selectedRecord)} · ${getApprovalLabel(selectedRecord.approvalState, locale)} · ${getEligibilityReasonLabel(selectedRecord, locale)}`}
+                            </span>
+                          </div>
+                        )}
                         <div style={selectedMetaCellStyle}>
                           <span style={{ fontSize: 11, color: theme.textDim }}>
-                            {zh ? "跨 app deep links" : "Cross-app deep links"}
+                            {t("dispatch.selected.links", locale)}
                           </span>
                           <div
                             style={{
@@ -2643,12 +3455,8 @@ export default async function DispatchPage({
                     <CanvasEmptyPanel
                       theme={theme}
                       density="compact"
-                      title={zh ? "沒有焦點 work item" : "No focused work item"}
-                      description={
-                        zh
-                          ? "目前 board 沒有可選擇的列。"
-                          : "There is no selected row on the current board."
-                      }
+                      title={t("dispatch.selected.emptyTitle", locale)}
+                      description={t("dispatch.selected.emptyBody", locale)}
                     />
                   )}
                 </div>

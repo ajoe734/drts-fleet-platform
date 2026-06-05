@@ -37,12 +37,17 @@ export type LiveSettlementTripRecord = {
   orderSource: OwnedOrderRecord["orderSource"];
   serviceBucket: OwnedOrderRecord["serviceBucket"];
   businessDispatchSubtype: OwnedOrderRecord["businessDispatchSubtype"];
+  costCenterCode: string | null;
+  riderId: string | null;
   partnerId: string | null;
   partnerProgramId: string | null;
   partnerEntrySlug: string | null;
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
   benefitReference: string | null;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
 };
 
 export type BillingSettlementState = {
@@ -234,12 +239,17 @@ export class BillingSettlementRepository {
         orderSource: order.orderSource,
         serviceBucket: order.serviceBucket,
         businessDispatchSubtype: order.businessDispatchSubtype,
+        costCenterCode: order.costCenter,
+        riderId: order.passenger?.passengerId ?? null,
         partnerId: order.partnerId,
         partnerProgramId: order.partnerProgramId,
         partnerEntrySlug: order.partnerEntrySlug,
         eligibilityVerificationId: order.eligibilityVerificationId,
         issuerAuthorizationRef: order.issuerAuthorizationRef,
         benefitReference: order.benefitReference,
+        serviceProduct: order.businessDispatchSubtype,
+        tenantServiceProgramId: null,
+        sourcePlatform: order.orderSource,
       };
     });
   }
@@ -552,12 +562,17 @@ export class BillingSettlementRepository {
         orderSource: order.orderSource,
         serviceBucket: order.serviceBucket,
         businessDispatchSubtype: order.businessDispatchSubtype,
+        costCenterCode: order.costCenter,
+        riderId: order.passenger?.passengerId ?? null,
         partnerId: order.partnerId,
         partnerProgramId: order.partnerProgramId,
         partnerEntrySlug: order.partnerEntrySlug,
         eligibilityVerificationId: order.eligibilityVerificationId,
         issuerAuthorizationRef: order.issuerAuthorizationRef,
         benefitReference: order.benefitReference,
+        serviceProduct: order.businessDispatchSubtype,
+        tenantServiceProgramId: null,
+        sourcePlatform: order.orderSource,
       };
     });
   }

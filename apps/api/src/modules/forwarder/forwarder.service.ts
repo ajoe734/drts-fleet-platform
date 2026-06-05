@@ -40,6 +40,7 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
+import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import {
   FORWARDER_ADAPTERS,
   type ForwarderAdapterHealthSnapshot,
@@ -104,6 +105,13 @@ export class ForwarderService implements OnModuleInit {
     private readonly adapters: readonly ForwarderAdapterInterface[] = [],
     @Optional() private readonly forwarderRepository?: ForwarderRepository,
     @Optional() private readonly ownedMobilityService?: OwnedMobilityService,
+    // NOTE(integration 20260605): appended LAST (@Optional) to preserve the
+    // original positional order for unit-test harnesses; e2e-svc-013 had
+    // inserted it at position 2, shifting auditNotificationService/adapters.
+    @Optional()
+    private readonly vehicleEligibilityService?:
+      | VehicleEligibilityService
+      | undefined,
   ) {}
 
   async onModuleInit() {
@@ -454,9 +462,15 @@ export class ForwarderService implements OnModuleInit {
       forwardedOrder.authoritativeSnapshot,
     );
     const eligibleDrivers = new Set(
-      this.regulatoryRegistryService
-        .getEligibleCandidates(serviceBucket)
-        .map((candidate) => candidate.driverId),
+      (this.vehicleEligibilityService
+        ? this.vehicleEligibilityService.listEligibleSupply(
+            "third_party_forwarded_order",
+            {
+              serviceBucketOverride: serviceBucket,
+            },
+          )
+        : this.regulatoryRegistryService.getEligibleCandidates(serviceBucket)
+      ).map((candidate) => candidate.driverId),
     );
     const requestedDrivers =
       command.candidateDriverIds.length > 0

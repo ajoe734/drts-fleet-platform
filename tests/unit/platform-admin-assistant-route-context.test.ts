@@ -22,9 +22,11 @@ import {
 import type { PlatformAdminRouteKey } from "../../apps/platform-admin-web/components/assistant/assistant-types";
 
 describe("Platform Admin route registry", () => {
-  it("registers exactly the 18 canvas routes", () => {
-    expect(PLATFORM_ADMIN_ROUTES).toHaveLength(18);
-    expect(new Set(PLATFORM_ADMIN_ROUTE_KEYS).size).toBe(18);
+  it("registers exactly the 22 canvas routes", () => {
+    // 18 original canvas routes + 4 added by the Phase 1 SVC/Fleet wave:
+    // service-products, vehicle-eligibility, fleet-partners, fleet-partner-detail.
+    expect(PLATFORM_ADMIN_ROUTES).toHaveLength(22);
+    expect(new Set(PLATFORM_ADMIN_ROUTE_KEYS).size).toBe(22);
   });
 
   it("has a unique, valid descriptor per route key", () => {

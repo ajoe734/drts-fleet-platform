@@ -13,12 +13,16 @@ import type {
   ApproveReimbursementBatchCommand,
   AssignReconciliationIssueCommand,
   CreateReconciliationIssueCommand,
+  DriverStatementRecord,
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
   MarkReimbursementPaidCommand,
   ResolveReconciliationIssueCommand,
   ReopenReconciliationIssueCommand,
+  TenantOrderListQuery,
+  TenantPayableLineItem,
   PublishDriverFeePlanCommand,
+  TenantPayableSummary,
   UpdateTenantBillingProfileCommand,
 } from "@drts/contracts";
 
@@ -91,6 +95,48 @@ export class BillingSettlementController {
       ),
       requestId,
     );
+  }
+
+  @Get("tenant/payables/summary")
+  async getTenantPayablesSummary(
+    @Query("periodMonth") periodMonth?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const summary: TenantPayableSummary =
+      await this.billingSettlementService.getTenantPayableSummary(
+        this.requireTenantId(tenantId),
+        periodMonth,
+      );
+    return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("tenant/payables/line-items")
+  async listTenantPayableLineItems(
+    @Query() query: TenantOrderListQuery & { periodMonth?: string },
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantPayableLineItem[] =
+      await this.billingSettlementService.listTenantPayableLineItems(
+        this.requireTenantId(tenantId),
+        query,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/statements")
+  async listTenantStatements(
+    @Query("periodMonth") periodMonth?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: DriverStatementRecord[] =
+      await this.billingSettlementService.listTenantStatements(
+        this.requireTenantId(tenantId),
+        periodMonth,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("tenant/invoices")
