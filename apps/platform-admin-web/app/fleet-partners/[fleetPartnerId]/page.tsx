@@ -103,6 +103,10 @@ function formulaKey(value: string) {
   return `fleetPartners.rule.formula.${value}`;
 }
 
+function payoutStatusKey(value?: string) {
+  return value ? `fleetPartners.statements.status.${value}` : "common.noValues";
+}
+
 export default function FleetPartnerDetailPage() {
   const params = useParams<{ fleetPartnerId: string }>();
   const fleetPartnerId = String(params?.fleetPartnerId ?? "");
@@ -308,7 +312,7 @@ export default function FleetPartnerDetailPage() {
         h: t("fleetPartners.statements.col.status"),
         r: (row: StatementTableRow) => (
           <CanvasPill tone={payoutTone(row.payoutStatus)} dot>
-            {row.payoutStatus || t("common.noValues")}
+            {t(payoutStatusKey(row.payoutStatus))}
           </CanvasPill>
         ),
       },

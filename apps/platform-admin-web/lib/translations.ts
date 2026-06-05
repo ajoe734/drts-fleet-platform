@@ -372,6 +372,11 @@ const en = {
   "fleetPartners.statements.col.gross": "Gross Amount",
   "fleetPartners.statements.col.share": "Partner Share",
   "fleetPartners.statements.col.status": "Payout Status",
+  "fleetPartners.statements.status.pending": "Pending",
+  "fleetPartners.statements.status.pending_approval": "Pending approval",
+  "fleetPartners.statements.status.paid": "Paid",
+  "fleetPartners.statements.status.reconciled": "Reconciled",
+  "fleetPartners.statements.status.failed": "Failed",
   "fleet.form.requestedBy": "Requested By",
   "fleet.form.debrandingTicket": "Debranding Ticket",
   "fleet.form.debrandingDueAt": "Debranding Due At",
@@ -1703,6 +1708,11 @@ const zh: typeof en = {
   "fleetPartners.statements.col.gross": "總金額",
   "fleetPartners.statements.col.share": "夥伴分潤",
   "fleetPartners.statements.col.status": "撥款狀態",
+  "fleetPartners.statements.status.pending": "待處理",
+  "fleetPartners.statements.status.pending_approval": "待核准",
+  "fleetPartners.statements.status.paid": "已撥款",
+  "fleetPartners.statements.status.reconciled": "已對帳",
+  "fleetPartners.statements.status.failed": "失敗",
 
   // ── Notices (additional) ──
   "notices.resolve": "解決",

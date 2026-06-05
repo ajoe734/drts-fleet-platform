@@ -76,8 +76,9 @@ type NavRoute = {
   key: keyof typeof PLATFORM_ADMIN_ROUTE_REGISTRY;
   icon: LucideIcon;
   section: string;
-  zh: string;
-  en: string;
+  zh?: string;
+  en?: string;
+  labelKey?: string;
 };
 
 type NavSection = {
@@ -143,8 +144,7 @@ const routes: NavRoute[] = [
     key: "fleet-partners",
     icon: Handshake,
     section: "fleet",
-    zh: "車隊夥伴",
-    en: "Fleet Partners",
+    labelKey: "nav.fleetPartners",
   },
   {
     key: "switchboard",
@@ -211,8 +211,16 @@ const routes: NavRoute[] = [
   },
 ];
 
-function labelFor(locale: Locale, item: { zh: string; en: string }) {
-  return locale === "zh" ? item.zh : item.en;
+function labelFor(
+  locale: Locale,
+  item: { zh?: string; en?: string; labelKey?: string },
+  t: (key: string, vars?: Record<string, string | number>) => string,
+) {
+  if (item.labelKey) {
+    return t(item.labelKey);
+  }
+
+  return locale === "zh" ? (item.zh ?? "") : (item.en ?? "");
 }
 
 function pathMatchesRoute(route: NavRoute, pathname: string) {
@@ -416,13 +424,15 @@ function SidebarNavItem({
   active: boolean;
   locale: Locale;
 }) {
+  const { t } = useTranslation();
   const Icon = route.icon;
   const href = PLATFORM_ADMIN_ROUTE_REGISTRY[route.key].href;
+  const label = labelFor(locale, route, t);
 
   return (
     <Link
       href={href}
-      title={labelFor(locale, route)}
+      title={label}
       aria-current={active ? "page" : undefined}
       style={{
         display: "flex",
@@ -451,7 +461,7 @@ function SidebarNavItem({
           whiteSpace: "nowrap",
         }}
       >
-        {labelFor(locale, route)}
+        {label}
       </span>
     </Link>
   );
@@ -466,6 +476,8 @@ function Sidebar({
   locale: Locale;
   setLocale: (locale: Locale) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <aside style={sidebarStyle}>
       <div style={brandStyle}>
@@ -478,7 +490,7 @@ function Sidebar({
       <nav aria-label="Platform Admin navigation" style={navStyle}>
         {sections.map((section) => (
           <div key={section.key} style={{ display: "grid", gap: 1 }}>
-            <div style={sectionTitleStyle}>{labelFor(locale, section)}</div>
+            <div style={sectionTitleStyle}>{labelFor(locale, section, t)}</div>
             {routes
               .filter((route) => route.section === section.key)
               .map((route) => (
@@ -552,6 +564,7 @@ function Topbar({
   pathname: string;
   locale: Locale;
 }) {
+  const { t } = useTranslation();
   const activeSection = sections.find(
     (section) => section.key === activeRoute.section,
   );
@@ -561,8 +574,8 @@ function Topbar({
     pathname !== activeHref &&
     pathname.startsWith(`${activeHref}/`);
   const breadcrumbs = [
-    activeSection ? labelFor(locale, activeSection) : "Platform Admin",
-    labelFor(locale, activeRoute),
+    activeSection ? labelFor(locale, activeSection, t) : "Platform Admin",
+    labelFor(locale, activeRoute, t),
     ...(hasDetailCrumb ? [locale === "zh" ? "詳情" : "Detail"] : []),
   ];
 
