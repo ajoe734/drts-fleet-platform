@@ -15,8 +15,16 @@
 | Platform Admin |     18 |            18 | none                              |
 | Ops Console    |     21 |            20 | `/vehicles/veh-demo-001` HTTP 500 |
 
-**Current total:** 38 / 39 routes fully working.  
-**Acceptance target (`0 broken`, `0 HTTP 500`) is still not met.**
+**Current total (live dev, pre-fix):** 38 / 39 routes fully working.  
+**Acceptance target (`0 broken`, `0 HTTP 500`) is not yet met on the deployed dev revision.**
+
+> **Fix status (2026-06-05, Claude2 — `claude2/gap-verify`):** both remaining
+> defects now have code fixes committed on this branch and verified through
+> `typecheck` + `lint` + production `next build` for **both** apps. They are
+> **not yet on the deployed dev revision**, so this scoreboard still reflects
+> pre-fix dev. The acceptance gate (live dev re-audit showing `0 broken`)
+> must be re-run after these fixes are merged and `Deploy - Dev` succeeds.
+> See §3.1 / §3.2 for the fixes and §5 for the integration hand-off.
 
 This 2026-06-05T08:30:59Z re-run (Claude2, full 39-route Playwright census + manual tab checks) reconfirms the current dev state: every Platform Admin shell count is exactly one, single-shell holds on every route, and `/payments` + `/attendance` tab strips round-trip. Acceptance is still blocked by one HTTP 500 and one tab-strip regression:
 
@@ -65,7 +73,9 @@ These are **not** deploy-lag against `origin/dev` — the running dev revision a
 - **Diagnosis notes for the fixing owner:**
   - The page (`apps/ops-console-web/app/vehicles/[vehicleId]/page.tsx`) is an async **server component**; it renders almost the entire tree (curl of the 500 response returns the full regulatory/maintenance/contract/driver/incident/audit layout), so the throw is late in the stream, not an early data failure.
   - **Disproven hypothesis:** that passing `r:`-render functions in `CanvasTableColumn` from a server component to the `"use client"` `CanvasTable` is the cause. `/contracts` (list) is also a server component, also passes `r:` columns to the same client `CanvasTable`, also renders rows — and returns **HTTP 200** with zero error placeholders. So `r:`-columns are fine; the `$NN:E` placeholder seen in the RSC stream is a benign pattern that also appears on healthy 404 pages.
-  - The 500 is therefore **data-specific to `veh-demo-001`'s seeded payload** (the only rendered table on this page is the contracts card, which has one seeded row). Likely candidates worth checking first: an `Intl.DateTimeFormat(...).format(new Date(value))` on an invalid/edge date in a seeded contract/maintenance/audit field, or a non-null field the render path assumes. Requires the digest log or local repro to confirm.
+  - The 500 is therefore **data-specific to `veh-demo-001`'s rendered payload** (the page renders many date fields — insurance expiry, debranding due, contract terms, maintenance schedule, audit timestamps, driver-binding `boundAt`). The static `VEHICLE_SEED`/`CONTRACT_SEED`/`POLICY_SEED` in `apps/api/.../regulatory-registry.service.ts` are all clean ISO dates, but the deployed dev API hydrates **persisted** state (`regulatoryRegistryRepository.loadState()`), so a runtime-mutated record can carry a present-but-unparseable date.
+- **Fix applied (this branch, `apps/ops-console-web/app/vehicles/[vehicleId]/page.tsx`):** `formatDateTime` / `formatDateOnly` previously guarded only `null`/`undefined`, then called `new Intl.DateTimeFormat(...).format(new Date(value))`. For a present-but-unparseable string that raises `RangeError: Invalid time value`, and in a server component an uncaught throw crashes the **entire** render into exactly the masked HTTP 500 we observe. The formatters now also return `"—"` when `Number.isNaN(new Date(value).getTime())` — the same defensive pattern already used by `isContractExpiringSoon`'s `Number.isFinite` guard. This is the highest-coverage fix for the documented top hypothesis (it hardens every date field on the page at once).
+  - **Confidence / caveat:** this is **hypothesis-targeted hardening**, not a digest-confirmed root-cause fix — the production digest message is masked and this no-deploy worktree cannot read the dev Cloud Run log. A bad-date throw is the single most likely cause of a data-specific server-render 500 on this page, and the guard cannot regress valid-date behaviour. Confirmation = the post-deploy dev re-audit returning HTTP 200 for `/vehicles/veh-demo-001`. If the 500 persists, the next suspects are the unguarded `.localeCompare` sort keys (`updatedAt` / `scheduledAt`) on the contract/incident/maintenance lists.
 
 ### 3.2 P1 — PA `/pricing` tab switching: merged fix (#514) is insufficient
 
@@ -75,7 +85,8 @@ These are **not** deploy-lag against `origin/dev` — the running dev revision a
   - **Direct URL navigation works:** loading `https://…/pricing?tab=driver` ends on `/pricing?tab=driver` and highlights the `Driver Fee Plans` tab. So server-side `searchParams`-driven `activeTab` is correct.
   - **Client-side tab click does NOT:** clicking the `<a href="/pricing?tab=driver">` (replace, scroll:false) fires a `framenavigated` event but lands back on `/pricing` with the `?tab=` **query stripped** — with **no console/page errors** (hydration is healthy). The App Router soft-navigation for a same-pathname, query-only change is dropping the search params.
   - Both prior approaches hit this: #510 (`router.replace(pathname?tab=…)`) and #514 (`<Link href=…?tab= replace>`) rely on the same App Router client navigation, so neither updates the URL on click.
-- **Recommended fix (for the fixing owner, unverifiable here — no local app/backend, cannot deploy):** drive `activeTab` from local state seeded from the URL and update the address bar on click via the History API directly (`window.history.replaceState`) instead of `Link`/`router.replace`, bypassing the App Router same-route soft-nav that drops the query. Must be verified by re-running this audit against dev after redeploy.
+- **Fix applied (this branch, `apps/platform-admin-web/app/pricing/page.tsx`):** `activeTab` is now local React state seeded from the URL (`?tab=`), a `useEffect` re-syncs it when the URL changes outside a click (direct `?tab=` nav, browser back/forward), and the tab strip is now `<button onClick={handleTabChange}>` instead of `<Link replace>`. `handleTabChange` updates local state **and** the address bar with `window.history.replaceState(...)` directly, bypassing the App Router same-pathname soft-nav that dropped the query. Removed the now-unused `Link` / `useRouter` imports. Verified by `typecheck` + `lint` + production `next build`.
+  - **Confidence / caveat:** behavioural correctness is confirmed by code review against the isolated root cause (direct `?tab=` already worked server-side; only the client soft-nav dropped the query — local state + History API is the canonical work-around). Full behavioural proof = the post-deploy dev re-audit recording `checks.pricingTabs=pass`; no local browser run was possible in this no-deploy worktree.
 - Evidence: `.artifacts/func-audit/dev-gap-audit-results.json` (`checks.pricingTabs`), live probe transcript summarized above.
 
 ## 4. Raw audit outputs
@@ -88,16 +99,21 @@ These are **not** deploy-lag against `origin/dev` — the running dev revision a
 
 ## 5. Closeout status for `GAP-VERIFY`
 
-This task cannot be closed as `done` yet.
+Per `GAP-VERIFY-UNBLOCK-PLANNING-DECISION` (Codex, approved 2026-06-05T07:06Z),
+the parent task was unblocked to **resume execution** — i.e. fix the two
+defects inline, deploy to dev, and re-run this audit — rather than route them to
+separate fix tasks. Both code fixes are now implemented on `claude2/gap-verify`.
 
-- **Why:** live dev still has 1 confirmed HTTP 500 route and 1 confirmed tab-strip regression in the 2026-06-05T08:30:59Z re-run. Both are confirmed (§1a) to be **genuine code defects on the currently-deployed/`origin/dev` source**, not deploy lag.
-- **Acceptance not met:**
-  - all 39 routes verified on dev `0 HTTP 500`: **failed** (`1` HTTP 500 remains — `/vehicles/veh-demo-001`)
-  - single shell everywhere: **passed**
-  - all tab strips round-trip: **failed** (`/pricing` click does not sync `?tab=`)
-- **Why this verification task is blocked rather than fixed here:**
-  - The two remaining defects are app-code fixes (server-render exception + App-Router query-sync), not verification work.
-  - This worktree has no local app/backend run path (`output: "standalone"`, no pricing tests) and no dev-deploy capability, so any code fix would be **unverifiable** before the acceptance gate (the audit) re-runs against dev. Shipping a blind fix through a verification task is out of scope.
-- **Next required fixes (need dedicated fix task + merge + `Deploy - Dev`, then re-run this audit):**
-  - OPS `/vehicles/[vehicleId]` 500 — resolve via the digest log / local repro (§3.1).
-  - PA `/pricing` tab `?tab=` sync — History-API approach (§3.2); note the merged #514/#510 fixes are insufficient.
+- **Fixes implemented & branch-verified:**
+  - OPS `/vehicles/[vehicleId]` 500 → date-formatter invalid-date hardening (§3.1).
+  - PA `/pricing` `?tab=` sync → local tab state + History API (§3.2).
+  - Gates: `typecheck` ✅, `lint` (`--max-warnings=0`) ✅, production `next build` ✅ for both `@drts/platform-admin-web` and `@drts/ops-console-web`.
+- **Acceptance status (gated on a deploy this worktree cannot perform):**
+  - all 39 routes `0 HTTP 500` on dev: **pending re-audit** (fix committed; vehicle fix is hypothesis-targeted — see §3.1 caveat).
+  - single shell everywhere: **passed** (already green on current dev).
+  - all tab strips round-trip: **pending re-audit** (`/pricing` fix committed).
+- **Integration hand-off (cannot be done from this no-deploy worktree):**
+  1. Merge `claude2/gap-verify` → `dev` via PR + CI.
+  2. Run `Deploy - Dev` and confirm the new revision includes both fixes.
+  3. Re-run this browser audit; expect `/vehicles/veh-demo-001` → HTTP 200 and `checks.pricingTabs=pass`; then update §1 scoreboard to 39/39 and close `GAP-VERIFY` as `done` with `INTEGRATION_STATUS=dev_deployed`.
+  - If the vehicle 500 persists after deploy, pull the dev digest log for `863528574` and check the unguarded `.localeCompare` sort keys called out in §3.1.
