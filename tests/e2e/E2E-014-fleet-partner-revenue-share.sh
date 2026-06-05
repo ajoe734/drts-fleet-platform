@@ -53,6 +53,11 @@ source "${SCRIPT_DIR}/lib/helpers.sh"
 
 SCENARIO="E2E-014"
 
+# The API success envelope serializes response keys in snake_case. This jq
+# prelude recursively re-camelCases object keys so the assertions below can read
+# camelCase fields regardless of the wire casing (already-camel keys are inert).
+CAMEL='def camel: walk(if type == "object" then with_entries(.key |= gsub("_(?<c>[a-z])"; .c | ascii_upcase)) else . end);'
+
 # Seeded, earning-bearing driver + period (see SETTLEMENT_TRIP_SEED in
 # apps/api/src/modules/billing-settlement/billing-settlement.service.ts).
 FLEET_DRIVER_ID="${E2E_FLEET_DRIVER_ID:-drv-demo-001}"
@@ -214,6 +219,28 @@ log_ok "Revenue share rule created: ${RULE_ID} (all_trips, percent_of_gross, ${F
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Platform Admin — driver settlement / earnings"
 
+# Prerequisite: driver settlement statement generation (and, transitively, fleet
+# partner statement generation) requires an active published driver fee plan.
+log_step "4.0 — ensure an active driver fee plan is published"
+http_call GET "/driver-fee-plans"
+assert_status "200"
+FEE_PLAN_COUNT=$(echo "$RESP_BODY" | jq -r '(.data.items // []) | length' 2>/dev/null || echo "0")
+if [[ "${FEE_PLAN_COUNT:-0}" -lt 1 ]]; then
+  FEE_PLAN_FIXTURE=$(mktemp /tmp/drts-e2e-014-fee-plan-XXXXXX.json)
+  jq -n '{
+    planName: "E2E-014 Driver Fee Plan",
+    version: "e2e-014-v1",
+    serviceFeeBps: 1500,
+    reimbursementMode: "platform_funded"
+  }' > "$FEE_PLAN_FIXTURE"
+  http_call POST "/driver-fee-plans/publish" "$FEE_PLAN_FIXTURE"
+  assert_status "200|201"
+  rm -f "$FEE_PLAN_FIXTURE"
+  log_ok "Published driver fee plan e2e-014-v1"
+else
+  log_ok "Active driver fee plan already present (${FEE_PLAN_COUNT})"
+fi
+
 DRIVER_STMT_FIXTURE=$(mktemp /tmp/drts-e2e-014-driver-stmt-XXXXXX.json)
 jq -n \
   --arg periodMonth "$FLEET_PERIOD" \
@@ -228,9 +255,8 @@ log_step "4.2 — GET /driver-statements?periodMonth=${FLEET_PERIOD}"
 http_call GET "/driver-statements?periodMonth=${FLEET_PERIOD}"
 assert_status "200"
 
-DRIVER_STATEMENT=$(echo "$RESP_BODY" | jq -c --arg drv "$FLEET_DRIVER_ID" \
-  'first(.data.items[]? | select((.driverId // .driver_id) == $drv)) // empty' \
-  2>/dev/null || true)
+DRIVER_STATEMENT=$(echo "$RESP_BODY" | jq -c "${CAMEL}"' camel | first(.data.items[]? | select(.driverId == $drv)) // empty' \
+  --arg drv "$FLEET_DRIVER_ID" 2>/dev/null || true)
 if [[ -z "$DRIVER_STATEMENT" ]]; then
   log_fail "No driver statement for ${FLEET_DRIVER_ID} in ${FLEET_PERIOD}: ${RESP_BODY}"
   exit 1
@@ -263,9 +289,8 @@ log_step "5.1 — GET /admin/fleet-partners/:fleetPartnerId/statements?periodMon
 http_call GET "/admin/fleet-partners/${FLEET_PARTNER_ID}/statements?periodMonth=${FLEET_PERIOD}"
 assert_status "200"
 
-FLEET_STATEMENT=$(echo "$RESP_BODY" | jq -c --arg pm "$FLEET_PERIOD" \
-  'first(.data.items[]? | select(.periodMonth == $pm)) // empty' \
-  2>/dev/null || true)
+FLEET_STATEMENT=$(echo "$RESP_BODY" | jq -c "${CAMEL}"' camel | first(.data.items[]? | select(.periodMonth == $pm)) // empty' \
+  --arg pm "$FLEET_PERIOD" 2>/dev/null || true)
 if [[ -z "$FLEET_STATEMENT" ]]; then
   log_fail "No fleet partner statement for ${FLEET_PARTNER_ID} in ${FLEET_PERIOD}: ${RESP_BODY}"
   exit 1
@@ -345,9 +370,8 @@ E2E_EXTRA_SCOPES="billing:read"
 log_step "6.1 — GET /fleet-partner/statements?periodMonth=${FLEET_PERIOD}"
 http_call GET "/fleet-partner/statements?periodMonth=${FLEET_PERIOD}"
 if [[ "${RESP_STATUS}" =~ ^(200|201)$ ]]; then
-  PORTAL_SHARE=$(echo "$RESP_BODY" | jq -r --arg id "$STMT_ID" \
-    'first(.data.items[]? | select(.statementId == $id)) | .shareAmount.amountMinor // empty' \
-    2>/dev/null || true)
+  PORTAL_SHARE=$(echo "$RESP_BODY" | jq -r "${CAMEL}"' camel | first(.data.items[]? | select(.statementId == $id)) | .shareAmount.amountMinor // empty' \
+    --arg id "$STMT_ID" 2>/dev/null || true)
   if [[ -z "$PORTAL_SHARE" ]]; then
     log_fail "Portal statement list does not surface statement ${STMT_ID}: ${RESP_BODY}"
     exit 1
