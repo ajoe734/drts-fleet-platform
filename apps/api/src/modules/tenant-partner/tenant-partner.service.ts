@@ -67,6 +67,9 @@ import type {
   TenantBookingApprovalRequestRecord,
   TenantApprovalEvaluationResult,
   TenantApprovalRuleRecord,
+  TenantBookingSummary,
+  TenantCostCenterQuotaWarning,
+  TenantDashboardSummary,
   TenantApiKeyGovernancePolicy,
   TenantApiKeyIssued,
   OwnedOrderRecord,
@@ -84,11 +87,13 @@ import type {
   TenantPassengerQualityIssue,
   TenantPassengerRecord,
   TenantIntegrationGovernancePackage,
+  TenantOrderListQuery,
   TenantQuotaLedgerEntry,
   TenantQuotaLimit,
   TenantQuotaPolicyRecord,
   TenantQuotaSummary,
   TenantRoleCatalogRecord,
+  TenantServiceProgramRecord,
   TenantSlaProfile,
   TenantSlaProfileView,
   TenantUserRoleRecord,
@@ -116,6 +121,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { BillingSettlementService } from "../billing-settlement/billing-settlement.service";
 import {
   assertEvidenceAccess,
   buildEvidenceAccessAuditSummary,
@@ -179,6 +185,7 @@ import {
 import { evaluateTenantApprovalRules } from "./tenant-approval-rule-evaluator";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
+const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
 
 type WebhookSecretRotationRecord = TenantWebhookSecretRotationRecord;
 
@@ -1035,6 +1042,178 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   isPersistenceEnabled() {
     return this.tenantPartnerRepository?.isEnabled() ?? false;
+  }
+
+  async getTenantDashboardSummary(
+    tenantId: string,
+    billingSettlementService?: Pick<
+      BillingSettlementService,
+      "getTenantPayableSummary" | "listTenantInvoices"
+    >,
+  ): Promise<TenantDashboardSummary> {
+    const tenantOrders = this.listTenantScopedOrders(tenantId);
+    const resolvedOrderPeriodMonth = this.resolveTenantBusinessPeriodMonth(
+      tenantId,
+      tenantOrders,
+      billingSettlementService?.listTenantInvoices(tenantId) ?? [],
+    );
+    const payableSummary = billingSettlementService
+      ? await billingSettlementService.getTenantPayableSummary(
+          tenantId,
+          resolvedOrderPeriodMonth,
+        )
+      : null;
+    const periodMonth = payableSummary?.periodMonth ?? resolvedOrderPeriodMonth;
+    const invoices =
+      billingSettlementService?.listTenantInvoices(tenantId) ?? [];
+
+    return {
+      tenantId,
+      periodMonth,
+      bookingCount: tenantOrders.length,
+      completedTripCount: tenantOrders.filter(
+        (order) => order.status === "completed",
+      ).length,
+      cancelledTripCount: tenantOrders.filter(
+        (order) => order.status === "cancelled",
+      ).length,
+      noShowTripCount: 0,
+      pendingApprovalCount: this.approvalRequests.filter(
+        (request) =>
+          request.tenantId === tenantId && request.status === "pending",
+      ).length,
+      pendingExceptionCount: tenantOrders.filter(
+        (order) => order.exceptionHold && !order.exceptionHold.resolution,
+      ).length,
+      estimatedPayableAmountMinor: payableSummary?.payableAmountMinor ?? 0,
+      issuedInvoiceAmountMinor: invoices
+        .filter((invoice) =>
+          ["issued", "paid", "overdue"].includes(
+            this.deriveInvoiceStatus(invoice),
+          ),
+        )
+        .reduce((sum, invoice) => sum + invoice.amount.amountMinor, 0),
+      unpaidInvoiceAmountMinor: invoices
+        .filter((invoice) =>
+          ["issued", "overdue"].includes(this.deriveInvoiceStatus(invoice)),
+        )
+        .reduce((sum, invoice) => sum + invoice.amount.amountMinor, 0),
+      costCenterWarnings: this.listTenantCostCenterWarnings(tenantId),
+      upcomingBookings: tenantOrders
+        .filter((order) => this.isUpcomingOrder(order))
+        .sort((left, right) =>
+          (left.reservationWindowStart ?? left.createdAt).localeCompare(
+            right.reservationWindowStart ?? right.createdAt,
+          ),
+        )
+        .slice(0, 5)
+        .map((order) => this.toTenantBookingSummary(order)),
+    };
+  }
+
+  listTenantOrders(
+    tenantId: string,
+    query: TenantOrderListQuery = {},
+    billingSettlementService?: Pick<
+      BillingSettlementService,
+      "listTenantInvoices"
+    >,
+  ) {
+    return this.filterTenantOrders(
+      this.listTenantScopedOrders(tenantId),
+      query,
+      this.buildInvoiceStatusByOrder(billingSettlementService, tenantId),
+    );
+  }
+
+  getTenantOrder(tenantId: string, orderId: string) {
+    return this.cloneOwnedOrder(
+      this.listTenantScopedOrders(tenantId).find(
+        (order) => order.orderId === orderId,
+      ) ?? this.requireOrderForTenant(tenantId, orderId),
+    );
+  }
+
+  listTenantTrips(
+    tenantId: string,
+    query: TenantOrderListQuery = {},
+    billingSettlementService?: Pick<
+      BillingSettlementService,
+      "listTenantInvoices"
+    >,
+  ) {
+    return this.filterTenantOrders(
+      this.listTenantScopedOrders(tenantId).filter(
+        (order) => order.bookingId !== null,
+      ),
+      query,
+      this.buildInvoiceStatusByOrder(billingSettlementService, tenantId),
+    );
+  }
+
+  listTenantServicePrograms(tenantId: string): TenantServiceProgramRecord[] {
+    const partnerPrograms = this.partnerEntries
+      .filter((entry) => entry.tenantId === tenantId)
+      .map(
+        (entry): TenantServiceProgramRecord => ({
+          programId: entry.programId,
+          tenantId,
+          programType: entry.businessDispatchSubtype,
+          displayName: entry.displayName,
+          active:
+            entry.activeFlag && entry.status === "active" && !entry.revokedAt,
+          billingMode: "partner_settlement",
+          pricingPlanId: `pricing-plan:${entry.programId}`,
+          eligibilityRuleId:
+            entry.eligibilityMode === "none"
+              ? null
+              : `eligibility-rule:${entry.programId}`,
+          serviceRuleSetId: `service-rule-set:${entry.programId}`,
+          allowedServiceProducts: [entry.businessDispatchSubtype],
+        }),
+      );
+
+    const defaultProgram: TenantServiceProgramRecord = {
+      programId: DEFAULT_TENANT_SERVICE_PROGRAM_ID,
+      tenantId,
+      programType: "enterprise_dispatch",
+      displayName:
+        tenantId === DEMO_TENANT_ID
+          ? "Enterprise Dispatch"
+          : `Enterprise Dispatch (${tenantId})`,
+      active: true,
+      billingMode: "monthly_invoice",
+      pricingPlanId: "pricing-plan:enterprise-dispatch-default",
+      eligibilityRuleId: null,
+      serviceRuleSetId: "service-rule-set:enterprise-dispatch-default",
+      allowedServiceProducts: ["enterprise_dispatch"],
+    };
+
+    return [defaultProgram, ...partnerPrograms].sort((left, right) =>
+      left.displayName.localeCompare(right.displayName),
+    );
+  }
+
+  getTenantServiceProgram(tenantId: string, programId: string) {
+    const program = this.listTenantServicePrograms(tenantId).find(
+      (candidate) => candidate.programId === programId,
+    );
+    if (!program) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "NOT_FOUND",
+        "Tenant service program not found.",
+        {
+          tenantId,
+          programId,
+        },
+      );
+    }
+
+    return {
+      ...program,
+      allowedServiceProducts: [...program.allowedServiceProducts],
+    };
   }
 
   onModuleDestroy() {
@@ -2597,6 +2776,229 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
 
     return report;
+  }
+
+  private listTenantScopedOrders(tenantId: string) {
+    return this.orderFeedProvider()
+      .filter(
+        (order) =>
+          order.tenantId === tenantId &&
+          order.serviceBucket === "business_dispatch",
+      )
+      .map((order) => this.cloneOwnedOrder(order));
+  }
+
+  private filterTenantOrders(
+    orders: OwnedOrderRecord[],
+    query: TenantOrderListQuery,
+    invoiceStatuses: Map<string, string>,
+  ) {
+    return orders.filter((order) => {
+      const from = query.from?.trim();
+      const to = query.to?.trim();
+      const effectiveDate = order.reservationWindowStart ?? order.createdAt;
+      if (from && effectiveDate < from) {
+        return false;
+      }
+      if (to && effectiveDate > to) {
+        return false;
+      }
+      if (
+        query.serviceProduct &&
+        (order.businessDispatchSubtype ?? "enterprise_dispatch") !==
+          query.serviceProduct
+      ) {
+        return false;
+      }
+      if (query.status && order.status !== query.status.trim()) {
+        return false;
+      }
+      if (
+        query.costCenterCode &&
+        (order.costCenter ?? "").toUpperCase() !==
+          query.costCenterCode.trim().toUpperCase()
+      ) {
+        return false;
+      }
+      if (
+        query.tenantServiceProgramId &&
+        this.resolveTenantServiceProgramId(order) !==
+          query.tenantServiceProgramId.trim()
+      ) {
+        return false;
+      }
+      if (
+        query.riderId &&
+        order.passenger.passengerId !== query.riderId.trim()
+      ) {
+        return false;
+      }
+      if (
+        query.sourcePlatform &&
+        order.orderSource !== query.sourcePlatform.trim()
+      ) {
+        return false;
+      }
+      if (
+        query.invoiceStatus &&
+        (invoiceStatuses.get(order.orderId) ?? "draft") !==
+          query.invoiceStatus.trim()
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  private resolveTenantBusinessPeriodMonth(
+    tenantId: string,
+    tenantOrders: readonly OwnedOrderRecord[],
+    invoices: readonly {
+      periodStart: string;
+      amount: { amountMinor: number };
+      status: string;
+      periodEnd: string;
+    }[],
+  ) {
+    const orderMonths = tenantOrders.map((order) =>
+      (order.reservationWindowStart ?? order.createdAt).slice(0, 7),
+    );
+    const approvalMonths = this.approvalRequests
+      .filter((request) => request.tenantId === tenantId)
+      .map((request) => request.createdAt.slice(0, 7));
+    const invoiceMonths = invoices.map((invoice) =>
+      invoice.periodStart.slice(0, 7),
+    );
+
+    return (
+      [...orderMonths, ...approvalMonths, ...invoiceMonths].sort().at(-1) ??
+      new Date().toISOString().slice(0, 7)
+    );
+  }
+
+  private buildInvoiceStatusByOrder(
+    billingSettlementService:
+      | Pick<BillingSettlementService, "listTenantInvoices">
+      | undefined,
+    tenantId: string,
+  ) {
+    const statusByOrder = new Map<string, string>();
+    if (!billingSettlementService) {
+      return statusByOrder;
+    }
+
+    for (const invoice of billingSettlementService.listTenantInvoices(
+      tenantId,
+    )) {
+      const status = this.deriveInvoiceStatus(invoice);
+      for (const line of invoice.lines) {
+        statusByOrder.set(line.orderId, status);
+      }
+    }
+
+    return statusByOrder;
+  }
+
+  private deriveInvoiceStatus(invoice: { status: string; periodEnd: string }) {
+    if (invoice.status === "paid") {
+      return "paid";
+    }
+    if (
+      invoice.status === "issued" &&
+      Date.parse(invoice.periodEnd) + 30 * 24 * 60 * 60 * 1000 < Date.now()
+    ) {
+      return "overdue";
+    }
+    return invoice.status === "issued" ? "issued" : "draft";
+  }
+
+  private listTenantCostCenterWarnings(
+    tenantId: string,
+  ): TenantCostCenterQuotaWarning[] {
+    return this.costCenters
+      .filter(
+        (costCenter) =>
+          costCenter.tenantId === tenantId && costCenter.activeFlag,
+      )
+      .map((costCenter) => {
+        const summary = this.getCostCenterQuotaSummary(
+          tenantId,
+          costCenter.code,
+        );
+        const remainingPercent = summary.usage.remainingPercent;
+        const warningLevel =
+          remainingPercent !== null && remainingPercent <= 10
+            ? "critical"
+            : "warning";
+        return {
+          tenantId,
+          costCenterCode: costCenter.code,
+          costCenterName: costCenter.name,
+          periodKey: summary.periodKey,
+          remainingBookingCount: summary.usage.bookingCountRemaining,
+          remainingAmountMinor: summary.usage.amountMinorRemaining,
+          remainingPercent,
+          enforcementMode: summary.limit.enforcementMode,
+          warningLevel,
+        } satisfies TenantCostCenterQuotaWarning;
+      })
+      .filter(
+        (warning) =>
+          warning.remainingPercent !== null && warning.remainingPercent <= 20,
+      );
+  }
+
+  private isUpcomingOrder(order: OwnedOrderRecord) {
+    const effectiveStart = order.reservationWindowStart;
+    if (!effectiveStart) {
+      return false;
+    }
+
+    return Date.parse(effectiveStart) >= Date.now();
+  }
+
+  private toTenantBookingSummary(
+    order: OwnedOrderRecord,
+  ): TenantBookingSummary {
+    return {
+      bookingId: order.bookingId ?? order.orderId,
+      orderId: order.orderId,
+      serviceProduct: order.businessDispatchSubtype ?? "enterprise_dispatch",
+      status: order.status,
+      reservationWindowStart: order.reservationWindowStart,
+      reservationWindowEnd: order.reservationWindowEnd,
+      passengerName: order.passenger.name,
+      pickupAddress: order.pickup.address,
+      dropoffAddress: order.dropoff.address,
+      costCenterCode: order.costCenter,
+      tenantServiceProgramId: this.resolveTenantServiceProgramId(order),
+    };
+  }
+
+  private resolveTenantServiceProgramId(order: OwnedOrderRecord) {
+    return order.partnerProgramId ?? DEFAULT_TENANT_SERVICE_PROGRAM_ID;
+  }
+
+  private requireOrderForTenant(tenantId: string, orderId: string) {
+    const order = this.listTenantScopedOrders(tenantId).find(
+      (candidate) => candidate.orderId === orderId,
+    );
+    if (!order) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "NOT_FOUND",
+        "Tenant order not found.",
+        {
+          tenantId,
+          orderId,
+        },
+      );
+    }
+    return order;
+  }
+
+  private cloneOwnedOrder(order: OwnedOrderRecord): OwnedOrderRecord {
+    return JSON.parse(JSON.stringify(order)) as OwnedOrderRecord;
   }
 
   upsertCostCenter(

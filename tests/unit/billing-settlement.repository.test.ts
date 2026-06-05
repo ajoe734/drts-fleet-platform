@@ -48,7 +48,7 @@ describe("billing settlement repository", () => {
     expect(sql).toContain("tasks.record->>'completedAt' >= $2");
     expect(sql).not.toContain("::timestamptz");
     expect(trips).toEqual([
-      {
+      expect.objectContaining({
         tenantId: "tenant-demo-001",
         driverId: "drv-demo-001",
         orderId: "order-live-001",
@@ -57,7 +57,9 @@ describe("billing settlement repository", () => {
           currency: "NTD",
           amountMinor: 95000,
         },
-      },
+        serviceProduct: undefined,
+        sourcePlatform: undefined,
+      }),
     ]);
   });
 });

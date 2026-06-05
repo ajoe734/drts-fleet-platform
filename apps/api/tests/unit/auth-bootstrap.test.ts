@@ -226,6 +226,34 @@ describe("bootstrap auth extraction", () => {
       description: "Callcenter phone-order management",
     });
   });
+
+  it("protects fleet partner admin billing routes with billing scopes", () => {
+    const policy = resolveRouteAuthPolicy(
+      "GET",
+      "/api/admin/fleet-partners/fleet-demo-001/statements",
+    );
+
+    expect(policy).toEqual({
+      routeKey: "admin:fleet-partners:billing:GET",
+      requiredScopes: ["billing:read"],
+      allowedRealms: ["system", "platform", "ops"],
+      description: "Fleet partner billing administration",
+    });
+  });
+
+  it("protects fleet partner portal statement routes with partner realm access", () => {
+    const policy = resolveRouteAuthPolicy(
+      "GET",
+      "/api/fleet-partner/statements",
+    );
+
+    expect(policy).toEqual({
+      routeKey: "fleet-partner:statements:GET",
+      requiredScopes: ["billing:read"],
+      allowedRealms: ["system", "partner"],
+      description: "Fleet partner statement self-service access",
+    });
+  });
 });
 
 describe("bootstrap auth guard", () => {
