@@ -33,7 +33,7 @@ type EligibilityRule = {
   supportedLicenseTypes: VehicleLicenseType[];
   minSeatCount: number;
   minLuggageCapacity: number;
-  airportPermitRequired: boolean;
+  airportPermit: boolean;
   businessDispatchEligible: boolean;
   taxiMeterRequired: boolean;
   fixedFareAllowed: boolean;
@@ -282,7 +282,7 @@ function normalizeRule(entry: unknown, index: number): EligibilityRule {
         source.luggageCapacity ??
         source.minimumLuggageCapacity,
     ),
-    airportPermitRequired: asBoolean(
+    airportPermit: asBoolean(
       source.airportPermitRequired ?? source.airportPermit,
     ),
     businessDispatchEligible: asBoolean(source.businessDispatchEligible),
@@ -345,7 +345,7 @@ function toApiRule(rule: EligibilityRule): RawRecord {
     supportedLicenseTypes: [...rule.supportedLicenseTypes],
     minSeatCount: rule.minSeatCount,
     minLuggageCapacity: rule.minLuggageCapacity,
-    airportPermitRequired: rule.airportPermitRequired,
+    airportPermit: rule.airportPermit,
     businessDispatchEligible: rule.businessDispatchEligible,
     taxiMeterRequired: rule.taxiMeterRequired,
     fixedFareAllowed: rule.fixedFareAllowed,
@@ -527,14 +527,10 @@ export default function VehicleEligibilityPage() {
       r: (row) => row.minLuggageCapacity || t("vehicleEligibility.unspecified"),
     },
     {
-      h: t("vehicleEligibility.airportPermitRequired"),
+      h: t("vehicleEligibility.airportPermit"),
       r: (row) => (
-        <CanvasPill
-          theme={theme}
-          tone={booleanTone(row.airportPermitRequired)}
-          dot
-        >
-          {row.airportPermitRequired
+        <CanvasPill theme={theme} tone={booleanTone(row.airportPermit)} dot>
+          {row.airportPermit
             ? t("vehicleEligibility.yes")
             : t("vehicleEligibility.no")}
         </CanvasPill>
@@ -715,10 +711,10 @@ export default function VehicleEligibilityPage() {
                   {t("vehicleEligibility.kpi.airport")}
                 </p>
                 <p style={kpiValueStyle}>
-                  {rules.filter((rule) => rule.airportPermitRequired).length}
+                  {rules.filter((rule) => rule.airportPermit).length}
                 </p>
                 <p style={kpiSubStyle}>
-                  {t("vehicleEligibility.airportPermitRequired")}
+                  {t("vehicleEligibility.airportPermit")}
                 </p>
               </CanvasCard>
               <CanvasCard theme={theme}>
@@ -877,7 +873,7 @@ export default function VehicleEligibilityPage() {
 
                     <div style={checkboxRowStyle}>
                       {[
-                        "airportPermitRequired",
+                        "airportPermit",
                         "businessDispatchEligible",
                         "taxiMeterRequired",
                         "fixedFareAllowed",
