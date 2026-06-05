@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-05T03:20:21.580Z",
+  "generatedAt": "2026-06-05T07:09:50.192Z",
   "platformAdminBaseUrl": "https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app",
   "opsBaseUrl": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app",
   "totals": {
@@ -65,7 +65,9 @@
       "shellCount": 1,
       "shellOk": true,
       "bodyOk": true,
-      "consoleErrors": [],
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 ()"
+      ],
       "pageErrors": [],
       "screenshot": ".artifacts/func-audit/platform-admin-tenants-tnt-1.png",
       "errors": []
