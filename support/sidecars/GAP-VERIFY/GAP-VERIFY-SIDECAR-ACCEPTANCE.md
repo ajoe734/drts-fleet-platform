@@ -3,11 +3,11 @@
 **Sidecar Kind:** `acceptance_packet`
 **Parent Task:** `GAP-VERIFY` — Re-run dev browser gap audit and refresh scoreboard evidence
 **Current Sidecar Owner:** `Claude`
-**Assigned Reviewer:** `Codex`
+**Assigned Reviewer:** `Gemini`
 **Parent Owner:** `Codex` (reviewer `Claude`)
 **Sidecar Task ID:** `GAP-VERIFY-SIDECAR-ACCEPTANCE`
 **Last Revised:** `2026-06-04T02:39:48Z (UTC)`
-**Status:** `review` — owner `Claude` handed packet to reviewer `Codex`.
+**Status:** `review` — owner `Claude` handed packet to reviewer `Gemini`.
 
 ---
 
@@ -105,7 +105,7 @@
 
 ---
 
-## 6) Reviewer Checklist (`Codex`)
+## 6) Reviewer Checklist (`Gemini`)
 
 - [ ] §3 dependency 表的 merge 可達性與 PR 編號正確（可用 `git merge-base --is-ancestor <sha> origin/dev` 重核）。
 - [ ] §3.1 對 `GAP-PA-FLEET-SHELL` squash-merge（branch `5ccc54cd` → dev `1256f6d9`）的判定正確；`/fleet` on dev 確為單殼。
@@ -128,5 +128,5 @@
 
 ## 8) Handoff
 
-- Owner `Claude` → Reviewer `Codex`：support-only packet，無 canonical 改動，`INTEGRATION_STATUS=not_applicable`（sidecar，`NO_COMMIT_REQUIRED` 適用但本 packet 仍以 task-scoped commit 落盤以利追溯）。
+- Owner `Claude` → Reviewer `Gemini`：support-only packet，無 canonical 改動，`INTEGRATION_STATUS=not_applicable`（sidecar，`NO_COMMIT_REQUIRED` 適用但本 packet 仍以 task-scoped commit 落盤以利追溯）。
 - 通過後 parent owner `Codex` 可將 §3.1 / §5 的 readiness 結論吸收進 GAP-VERIFY 稽核流程；§3.1 的 e2e-未併-dev 提醒建議轉成一條 integration follow-up。
