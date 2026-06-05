@@ -41,10 +41,15 @@ const BASE_ITEM = {
 };
 
 describe("vehicle eligibility service", () => {
-  it("returns an empty matrix by default", () => {
+  it("returns the effective default matrix by default", () => {
     const { service } = createService();
 
-    expect(service.listMatrix()).toEqual([]);
+    expect(service.listMatrix()).not.toEqual([]);
+    expect(
+      service
+        .listMatrix()
+        .some((item) => item.licenseType === "multi_purpose_taxi"),
+    ).toBe(true);
   });
 
   it("replaces the matrix and records audit evidence", () => {

@@ -78,6 +78,7 @@ import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-reg
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
+import { ServiceProductService } from "../service-product/service-product.service";
 import type { MessageEvent } from "@nestjs/common";
 import { EMPTY, type Observable } from "rxjs";
 
@@ -197,6 +198,8 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly ownedMobilityRepository?: OwnedMobilityRepository,
     @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
+    @Optional()
+    private readonly serviceProductService?: ServiceProductService,
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
@@ -534,6 +537,7 @@ export class OwnedMobilityService implements OnModuleInit {
       command.direction,
       command.flightNo,
     );
+    this.requireActiveBookingServiceProduct(command.businessDispatchSubtype);
     const partnerContext = this.resolvePartnerBookingContext(command, tenantId);
     const pickup = this.resolveTenantAddressPayload(
       tenantId,
@@ -621,9 +625,6 @@ export class OwnedMobilityService implements OnModuleInit {
       manualFareOverride: null,
       exceptionHold: null,
       proofRequirements: {
-        // Enterprise dispatch keeps a photo proof requirement by default; unlike
-        // the standard createOrder path, omitting minPhotoCount here must still
-        // enforce at least one completion photo.
         minPhotoCount: command.minPhotoCount ?? 1,
         signoffRequired: command.signoffRequired ?? false,
         expenseProofRequired: command.expenseProofRequired ?? false,
@@ -1047,6 +1048,7 @@ export class OwnedMobilityService implements OnModuleInit {
       nextDirection,
       nextFlightNo,
     );
+    this.requireActiveBookingServiceProduct(businessDispatchSubtype);
 
     if (command.pickupAddressId !== undefined || command.pickup) {
       const nextPickupAddressId =
@@ -3758,6 +3760,62 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
+  }
+
+  private requireActiveBookingServiceProduct(
+    businessDispatchSubtype: NonNullable<
+      OwnedOrderRecord["businessDispatchSubtype"]
+    >,
+  ) {
+    const serviceProduct =
+      this.serviceProductService?.getRuntimeServiceProductByType(
+        businessDispatchSubtype,
+      ) ?? null;
+
+    if (serviceProduct) {
+      if (!serviceProduct.active) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "SERVICE_PRODUCT_INACTIVE",
+          "The requested service product is not active.",
+          {
+            serviceProduct: businessDispatchSubtype,
+          },
+        );
+      }
+
+      if (serviceProduct.timing !== "reservation") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "INVALID_SERVICE_PRODUCT_TIMING",
+          "Tenant bookings require a reservation service product.",
+          {
+            serviceProduct: businessDispatchSubtype,
+            timing: serviceProduct.timing,
+          },
+        );
+      }
+
+      return serviceProduct;
+    }
+
+    if (!BOOKING_RULES[businessDispatchSubtype]) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "SERVICE_PRODUCT_INACTIVE",
+        "The requested service product is not active.",
+        {
+          serviceProduct: businessDispatchSubtype,
+        },
+      );
+    }
+
+    return {
+      defaultProofRequirements:
+        businessDispatchSubtype === "credit_card_airport_transfer"
+          ? ["photo", "signoff"]
+          : ["photo"],
+    };
   }
 
   private computeBookingWindows(

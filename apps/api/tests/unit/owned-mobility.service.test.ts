@@ -12,6 +12,7 @@ import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.s
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
@@ -38,6 +39,7 @@ function createOwnedMobilityService(options?: {
   vehicleDispatchable?: boolean;
   enableVehicleEligibility?: boolean;
   tenantPartnerService?: TenantPartnerService;
+  serviceProductOverrides?: Record<string, unknown>;
 }) {
   const regulatoryRegistryService = {
     getEligibleCandidates: vi.fn(
@@ -58,6 +60,15 @@ function createOwnedMobilityService(options?: {
     recordNotification: vi.fn(),
     recordAuditLog: vi.fn(),
   };
+  const serviceProductService = new ServiceProductService(
+    auditNotificationService as never,
+    undefined,
+  );
+  if (options?.serviceProductOverrides) {
+    serviceProductService.createServiceProduct(
+      options.serviceProductOverrides as never,
+    );
+  }
   const callcenterService = {
     registerRecordingAttachmentListener: vi.fn(),
     registerRecordingStateChangeListener: vi.fn(),
@@ -86,7 +97,12 @@ function createOwnedMobilityService(options?: {
     new EventEmitter2(),
   );
   const vehicleEligibilityService = options?.enableVehicleEligibility
-    ? new VehicleEligibilityService(regulatoryRegistryService as never)
+    ? new VehicleEligibilityService(
+        regulatoryRegistryService as never,
+        undefined,
+        undefined,
+        serviceProductService,
+      )
     : undefined;
 
   const service = new OwnedMobilityService(
@@ -98,6 +114,7 @@ function createOwnedMobilityService(options?: {
     opsDispatchEventsService,
     undefined,
     options?.tenantPartnerService,
+    serviceProductService,
   );
 
   return {
@@ -2729,6 +2746,34 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         ([input]) => input.actionName === "complete_trip",
       ),
     ).toHaveLength(0);
+  });
+
+  it("rejects tenant bookings for inactive service products from the registry", async () => {
+    const { service } = createOwnedMobilityService({
+      serviceProductOverrides: {
+        serviceProductType: "credit_card_airport_transfer",
+        displayName: "Airport transfer",
+        timing: "reservation",
+        active: false,
+        defaultBillingMode: "fixed_fare",
+        defaultProofRequirements: ["photo", "signoff"],
+      },
+    });
+
+    expect(() =>
+      service.createTenantBooking(
+        {
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          reservationWindowStart: "2026-06-05T10:00:00.000Z",
+          reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+          pickup: { address: "台中市西屯區台灣大道 1 號" },
+          dropoff: { address: "桃園機場第一航廈" },
+          passenger: { name: "測試乘客", phone: "0911222333" },
+          direction: "dropoff",
+        },
+        "tenant-demo-001",
+      ),
+    ).toThrowError(ApiRequestError);
   });
 });
 

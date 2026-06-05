@@ -19,6 +19,36 @@ function createService() {
 }
 
 describe("ServiceProductService payload validation", () => {
+  it("exposes runtime defaults and lets persisted records override them", () => {
+    const { service } = createService();
+
+    expect(
+      service.getRuntimeServiceProductByType("credit_card_airport_transfer"),
+    ).toMatchObject({
+      serviceProductType: "credit_card_airport_transfer",
+      active: true,
+      timing: "reservation",
+      defaultProofRequirements: ["photo", "signoff"],
+    });
+
+    service.createServiceProduct({
+      serviceProductType: "credit_card_airport_transfer",
+      displayName: "Airport Transfer Override",
+      timing: "reservation",
+      active: false,
+      defaultBillingMode: "fixed_fare",
+      defaultProofRequirements: ["photo"],
+    });
+
+    expect(
+      service.getRuntimeServiceProductByType("credit_card_airport_transfer"),
+    ).toMatchObject({
+      displayName: "Airport Transfer Override",
+      active: false,
+      defaultProofRequirements: ["photo"],
+    });
+  });
+
   it("rejects create payloads when required string fields are missing", () => {
     const { service } = createService();
 

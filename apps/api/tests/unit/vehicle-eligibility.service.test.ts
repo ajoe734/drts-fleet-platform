@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
+import { ServiceProductService } from "../../src/modules/service-product/service-product.service";
 
-function createService() {
+function createService(options?: {
+  serviceProductOverrides?: Record<string, unknown>;
+}) {
   const regulatoryRegistryService = {
     getEligibleCandidates: vi.fn(
       (serviceBucket: string, destination?: unknown) => {
@@ -47,9 +50,26 @@ function createService() {
     getVehicleDispatchability: vi.fn(() => true),
     getDriverAvailability: vi.fn(() => true),
   };
+  const auditNotificationService = {
+    recordAuditLog: vi.fn(),
+  };
+  const serviceProductService = new ServiceProductService(
+    auditNotificationService as never,
+    undefined,
+  );
+  if (options?.serviceProductOverrides) {
+    serviceProductService.createServiceProduct(
+      options.serviceProductOverrides as never,
+    );
+  }
 
   return {
-    service: new VehicleEligibilityService(regulatoryRegistryService as never),
+    service: new VehicleEligibilityService(
+      regulatoryRegistryService as never,
+      undefined,
+      undefined,
+      serviceProductService,
+    ),
     regulatoryRegistryService,
   };
 }
@@ -116,5 +136,27 @@ describe("VehicleEligibilityService", () => {
       vehicleId: "veh-demo-001",
       serviceProduct: "third_party_forwarded_order",
     });
+  });
+
+  it("hides inactive service products from runtime eligibility", () => {
+    const { service } = createService({
+      serviceProductOverrides: {
+        serviceProductType: "credit_card_airport_transfer",
+        displayName: "Airport transfer",
+        timing: "reservation",
+        active: false,
+        defaultBillingMode: "fixed_fare",
+        defaultProofRequirements: ["photo", "signoff"],
+      },
+    });
+
+    expect(() =>
+      service.listEligibleSupply("credit_card_airport_transfer"),
+    ).toThrowError();
+    expect(
+      service
+        .listDriverEligibleProducts("drv-demo-001")
+        .map((entry) => entry.serviceProduct),
+    ).not.toContain("credit_card_airport_transfer");
   });
 });

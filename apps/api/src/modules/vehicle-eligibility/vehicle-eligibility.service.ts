@@ -16,6 +16,7 @@ import { SERVICE_PRODUCT_TYPES, VEHICLE_LICENSE_TYPES } from "@drts/contracts";
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
+import { ServiceProductService } from "../service-product/service-product.service";
 import { VehicleEligibilityRepository } from "./vehicle-eligibility.repository";
 
 type ServiceProductDefinition = {
@@ -253,6 +254,8 @@ export class VehicleEligibilityService implements OnModuleInit {
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
     @Optional() private readonly repository?: VehicleEligibilityRepository,
+    @Optional()
+    private readonly serviceProductService?: ServiceProductService,
   ) {}
 
   async onModuleInit() {
@@ -274,7 +277,7 @@ export class VehicleEligibilityService implements OnModuleInit {
   }
 
   listMatrix() {
-    return this.matrix.map((item) => this.clone(item));
+    return this.getEffectiveMatrix().map((item) => this.clone(item));
   }
 
   updateMatrix(
@@ -371,7 +374,8 @@ export class VehicleEligibilityService implements OnModuleInit {
   }
 
   listDriverEligibleProducts(driverId: string): DriverEligibleProductRecord[] {
-    return SERVICE_PRODUCTS.filter((entry) => entry.active)
+    return this.listKnownServiceProducts()
+      .filter((entry) => entry.active)
       .map((entry) => {
         const vehicleIds = this.listEligibleSupply(entry.serviceProduct)
           .filter((candidate) => candidate.driverId === driverId)
@@ -553,7 +557,7 @@ export class VehicleEligibilityService implements OnModuleInit {
   }
 
   private requireActiveServiceProduct(serviceProduct: ServiceProductType) {
-    const definition = this.serviceProducts.get(serviceProduct);
+    const definition = this.resolveServiceProductDefinition(serviceProduct);
     if (!definition || !definition.active) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -619,6 +623,38 @@ export class VehicleEligibilityService implements OnModuleInit {
 
       return right.effectiveFrom.localeCompare(left.effectiveFrom);
     });
+  }
+
+  private listKnownServiceProducts(): ServiceProductDefinition[] {
+    return SERVICE_PRODUCTS.map(
+      (entry) =>
+        this.resolveServiceProductDefinition(entry.serviceProduct) ?? entry,
+    );
+  }
+
+  private resolveServiceProductDefinition(
+    serviceProduct: ServiceProductType,
+  ): ServiceProductDefinition | null {
+    const definition = this.serviceProducts.get(serviceProduct);
+    if (!definition) {
+      return null;
+    }
+
+    const runtimeProduct =
+      this.serviceProductService?.getRuntimeServiceProductByType(
+        serviceProduct,
+      ) ?? null;
+    if (!runtimeProduct) {
+      return definition;
+    }
+
+    return {
+      ...definition,
+      displayName: runtimeProduct.displayName,
+      timing: runtimeProduct.timing,
+      active: runtimeProduct.active,
+      defaultProofRequirements: [...runtimeProduct.defaultProofRequirements],
+    };
   }
 
   private validateMatrixItem(item: VehicleEligibilityMatrixRecord) {

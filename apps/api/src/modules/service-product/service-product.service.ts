@@ -20,6 +20,93 @@ import {
   SERVICE_TIMING_VALUES,
 } from "./service-product.types";
 
+const DEFAULT_RUNTIME_SERVICE_PRODUCTS: ServiceProductRecord[] = [
+  {
+    serviceProductId: "seed-taxi-realtime",
+    serviceProductType: "taxi_realtime",
+    displayName: "Taxi Realtime",
+    description: null,
+    timing: "realtime",
+    active: true,
+    defaultBillingMode: "meter",
+    defaultProofRequirements: [],
+    createdAt: "2026-06-01T00:00:00.000Z",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  },
+  {
+    serviceProductId: "seed-taxi-reservation",
+    serviceProductType: "taxi_reservation",
+    displayName: "Taxi Reservation",
+    description: null,
+    timing: "reservation",
+    active: false,
+    defaultBillingMode: "meter",
+    defaultProofRequirements: [],
+    createdAt: "2026-06-01T00:00:00.000Z",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  },
+  {
+    serviceProductId: "seed-enterprise-dispatch",
+    serviceProductType: "enterprise_dispatch",
+    displayName: "Enterprise Dispatch",
+    description: null,
+    timing: "reservation",
+    active: true,
+    defaultBillingMode: "tenant_invoice",
+    defaultProofRequirements: ["photo"],
+    createdAt: "2026-06-01T00:00:00.000Z",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  },
+  {
+    serviceProductId: "seed-credit-card-airport-transfer",
+    serviceProductType: "credit_card_airport_transfer",
+    displayName: "Credit Card Airport Transfer",
+    description: null,
+    timing: "reservation",
+    active: true,
+    defaultBillingMode: "fixed_fare",
+    defaultProofRequirements: ["photo", "signoff"],
+    createdAt: "2026-06-01T00:00:00.000Z",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  },
+  {
+    serviceProductId: "seed-insurance-replacement-vehicle",
+    serviceProductType: "insurance_replacement_vehicle",
+    displayName: "Insurance Replacement Vehicle",
+    description: null,
+    timing: "reservation",
+    active: false,
+    defaultBillingMode: "partner_settlement",
+    defaultProofRequirements: ["photo"],
+    createdAt: "2026-06-01T00:00:00.000Z",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  },
+  {
+    serviceProductId: "seed-travel-agency-transfer",
+    serviceProductType: "travel_agency_transfer",
+    displayName: "Travel Agency Transfer",
+    description: null,
+    timing: "reservation",
+    active: false,
+    defaultBillingMode: "partner_settlement",
+    defaultProofRequirements: ["photo", "signoff"],
+    createdAt: "2026-06-01T00:00:00.000Z",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  },
+  {
+    serviceProductId: "seed-third-party-forwarded-order",
+    serviceProductType: "third_party_forwarded_order",
+    displayName: "Third-party Forwarded Order",
+    description: null,
+    timing: "external_defined",
+    active: true,
+    defaultBillingMode: "external_platform_settlement",
+    defaultProofRequirements: [],
+    createdAt: "2026-06-01T00:00:00.000Z",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+  },
+];
+
 type NormalizedCreateServiceProductCommand = {
   serviceProductId?: string;
   serviceProductType: string;
@@ -70,6 +157,28 @@ export class ServiceProductService implements OnModuleInit {
 
   listServiceProducts() {
     return this.records.map((record) => this.cloneRecord(record));
+  }
+
+  listRuntimeServiceProducts() {
+    const recordsByType = new Map(
+      this.records.map((record) => [record.serviceProductType, record]),
+    );
+
+    return DEFAULT_RUNTIME_SERVICE_PRODUCTS.map((record) =>
+      this.cloneRecord(recordsByType.get(record.serviceProductType) ?? record),
+    );
+  }
+
+  getRuntimeServiceProductByType(serviceProductType: ServiceProductType) {
+    const record =
+      this.records.find(
+        (candidate) => candidate.serviceProductType === serviceProductType,
+      ) ??
+      DEFAULT_RUNTIME_SERVICE_PRODUCTS.find(
+        (candidate) => candidate.serviceProductType === serviceProductType,
+      );
+
+    return record ? this.cloneRecord(record) : null;
   }
 
   getServiceProduct(serviceProductId: string) {
