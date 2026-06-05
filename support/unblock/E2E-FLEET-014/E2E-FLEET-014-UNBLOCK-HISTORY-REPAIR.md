@@ -18,10 +18,13 @@ resume rail.
 1. The actual parent owner branch already exists locally and on origin as
    `codex2/e2e-fleet-014 @ b47f4874d5a6876557215d22adf9aefc7cf768c6` with four
    task commits on top of `origin/dev`.
-2. The assigned helper branch
-   `codex2/e2e-fleet-014-unblock-history-repair @ 1a5f8b86f48e9c5cacedd3cf9cbe15964216ede4`
-   is exactly equal to `origin/dev`, not descended from the pushed parent tip.
-3. The helper worktree therefore omits every parent task commit:
+2. The assigned helper branch was created from the then-current
+   `origin/dev @ 1a5f8b86f48e9c5cacedd3cf9cbe15964216ede4` and now only adds the
+   helper audit commit
+   `c6b71b13b17349150149830b63626bb3800dbfa2`; it is still not descended from
+   the pushed parent tip.
+3. The helper worktree therefore omits every parent task commit and carries
+   only the contamination report on top of its old trunk snapshot:
    `e4da426b`, `a6012dda`, `2607ee4b`, and `b47f4874`.
 4. `git worktree list --porcelain` shows separate worktrees for the parent
    branch and this helper branch, but the helper branch points at the wrong
@@ -38,31 +41,37 @@ resume rail.
 
 ### Branch and worktree state
 
-- `origin/dev @ 1a5f8b86f48e9c5cacedd3cf9cbe15964216ede4`
+- current `origin/dev @ 63d2ba58d61e87b731ec9645f4f59785f48d5358`
+- helper branch merge-base with `origin/dev` remains
+  `1a5f8b86f48e9c5cacedd3cf9cbe15964216ede4`, proving the helper rail was
+  created from an older trunk snapshot
 - local + remote parent branch
   `codex2/e2e-fleet-014 @ b47f4874d5a6876557215d22adf9aefc7cf768c6`
 - local helper branch
-  `codex2/e2e-fleet-014-unblock-history-repair @ 1a5f8b86f48e9c5cacedd3cf9cbe15964216ede4`
-  with upstream `origin/dev`
+  `codex2/e2e-fleet-014-unblock-history-repair @ c6b71b13b17349150149830b63626bb3800dbfa2`
+  with upstream `origin/codex2/e2e-fleet-014-unblock-history-repair`
 - local planning helper branch
   `codex2/e2e-fleet-014-unblock-planning-decision @ ec759b8e740e5c9883ce2db2021e5cc8446f6075`
 - `git rev-list --left-right --count origin/dev...codex2/e2e-fleet-014`
-  returns `0 4`, confirming the parent branch contains four commits beyond
-  current trunk.
+  returns `1 4`, confirming the parent branch still contains the same four task
+  commits beyond the old shared base while current trunk has advanced by one
+  unrelated publish commit.
 - `git rev-list --left-right --count origin/dev...codex2/e2e-fleet-014-unblock-history-repair`
-  returns `0 0`, confirming the helper branch is only `origin/dev`.
+  returns `1 1`, confirming the helper branch is just one audit commit on top
+  of the old trunk snapshot and still excludes the four parent task commits.
 - `git merge-base origin/dev codex2/e2e-fleet-014`
-  returns `1a5f8b86f48e9c5cacedd3cf9cbe15964216ede4`, proving the parent branch
-  is a clean descendant of current trunk.
+  returns `1a5f8b86f48e9c5cacedd3cf9cbe15964216ede4`, proving both the parent and
+  helper rails still branch from the same older publish snapshot rather than
+  from the current `origin/dev`.
 - `git rev-parse codex2/e2e-fleet-014-unblock-history-repair`
-  returns the same SHA as `origin/dev`, proving the helper branch is anchored
-  to the wrong history.
+  returns `c6b71b13...`, proving the helper branch now records the audit but is
+  still anchored to the wrong history instead of the parent task branch.
 - `git worktree list --porcelain | grep -nA2 -B1 'codex2/e2e-fleet-014'`
   shows:
   - `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-e2e-fleet-014`
     on `b47f4874`
   - `/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-e2e-fleet-014-unblock-history-repair`
-    on `1a5f8b86`
+    on `c6b71b13`
 
 ### Parent provenance
 
@@ -80,7 +89,7 @@ resume rail.
 
 - `gh pr list --head codex2:codex2/e2e-fleet-014 --state all ...` returns `[]`
 - `gh pr list --head codex2:codex2/e2e-fleet-014-unblock-history-repair --state all ...`
-  returns `[]` before this repair branch is pushed
+  returns `[]`, confirming this audit rail was closed without opening a PR
 
 ## Exact Contamination
 
@@ -89,8 +98,8 @@ The contamination is a four-part mismatch:
 1. The real task history already lives on the pushed parent branch
    `origin/codex2/e2e-fleet-014`.
 2. The helper branch name with the `-unblock-history-repair` stem was created
-   from `origin/dev` and configured to track `origin/dev`, not the parent
-   branch.
+   from an old `origin/dev` snapshot and now contains only a single audit
+   commit, not the parent branch history.
 3. The helper worktree therefore looks legitimate by path and branch name while
    actually omitting all four parent task commits.
 4. If the parent owner resumed from this helper branch, any new commit or push
@@ -123,6 +132,26 @@ Resume `E2E-FLEET-014` from the existing pushed owner branch
 `origin/codex2/e2e-fleet-014 @ b47f4874d5a6876557215d22adf9aefc7cf768c6`
 after the staging GCP Workload Identity Federation provider is corrected.
 Do not resume from `codex2/e2e-fleet-014-unblock-history-repair`.
+
+## Owner Closeout Evidence
+
+- Reviewer state for this helper task is `review_approved`; owner closeout is
+  limited to recording branch evidence and marking the helper task `done`.
+- Parent machine truth now points back to the real owner branch and preserves
+  the actual blocker:
+  `origin/codex2/e2e-fleet-014 @ b47f4874d5a6876557215d22adf9aefc7cf768c6`
+  remains canonical, while Gemini owns the staging WIF `invalid_target`
+  remediation.
+- Helper branch `codex2/e2e-fleet-014-unblock-history-repair` remains a normal
+  non-force pushed audit rail only. It is not a resume or delivery branch for
+  the parent task.
+- Before final `done`, owner re-verified:
+  - helper branch HEAD equals
+    `origin/codex2/e2e-fleet-014-unblock-history-repair`
+  - parent task `next` text explicitly says to resume from the pushed parent
+    branch, not this helper branch
+  - the pushed helper evidence commit is still
+    `c6b71b13b17349150149830b63626bb3800dbfa2`
 
 ## Why This Is Safe
 
