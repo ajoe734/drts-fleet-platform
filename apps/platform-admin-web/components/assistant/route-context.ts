@@ -63,6 +63,7 @@ export const PLATFORM_ADMIN_ROUTE_REGISTRY = {
   partners: { href: "/partners" },
   users: { href: "/users" },
   fleet: { href: "/fleet" },
+  "service-products": { href: "/service-products" },
   switchboard: { href: "/switchboard" },
   pricing: { href: "/pricing" },
   payments: { href: "/payments" },
@@ -173,11 +174,11 @@ const UNKNOWN_ROUTE_WARNING: RouteContextWarning = {
 };
 
 // ---------------------------------------------------------------------------
-// Route registry — all 18 Platform Admin canvas routes
+// Route registry — all 19 Platform Admin routes
 // ---------------------------------------------------------------------------
 
 /**
- * The 18 canvas routes. `bodyParityPending` marks the 3 routes that returned 404
+ * The 19 routes. `bodyParityPending` marks the 3 routes that returned 404
  * on dev as of the 2026-06-02 body parity audit and whose bodies are owned by
  * separate workers; their metadata still resolves here.
  */
@@ -268,6 +269,16 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     ],
     defaultTab: "vehicles",
     refreshTier: "slow",
+  },
+  {
+    routeKey: "service-products",
+    pathTemplate: "/service-products",
+    section: "commerce",
+    title: { zh: "服務產品", en: "Service Products" },
+    tabs: [],
+    defaultTab: null,
+    refreshTier: "slow",
+    baselineWarnings: [HIGH_RISK_ACTIONS_WARNING],
   },
   {
     routeKey: "switchboard",

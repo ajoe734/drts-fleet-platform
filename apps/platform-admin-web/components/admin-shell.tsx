@@ -17,6 +17,7 @@ import {
   Handshake,
   Languages,
   LayoutDashboard,
+  Package,
   Radio,
   Search,
   Shield,
@@ -138,6 +139,13 @@ const routes: NavRoute[] = [
     section: "fleet",
     zh: "車隊與法遵",
     en: "Fleet & Compliance",
+  },
+  {
+    key: "service-products",
+    icon: Package,
+    section: "commerce",
+    zh: "服務產品",
+    en: "Service Products",
   },
   {
     key: "switchboard",
