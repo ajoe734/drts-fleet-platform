@@ -14,11 +14,10 @@
 #   -> report export includes order/user/cost center/service product
 #
 # Current repo reality:
-#   - the booking/dispatch/driver/invoice/report-job chain is implemented
-#   - tenant dashboard / payables / statements routes are not yet present in
-#     this repo's API surface
-#   - tenant report jobs currently preserve filters + artifact lifecycle, but
-#     do not yet emit a tenant-business row schema with all SD columns
+#   - the booking/dispatch/driver/dashboard/payables/invoice/statement chain is
+#     implemented and should hard-pass
+#   - tenant report jobs preserve filters + artifact lifecycle, but do not yet
+#     emit a tenant-business row schema with all SD columns
 #
 # Therefore this shell uses a split gate:
 #   HARD FAIL
@@ -28,9 +27,6 @@
 #     - tenant invoice generation does not include the completed orderId
 #     - tenant report job cannot be queued/completed or loses filter binding
 #   PROBE + RECORD
-#     - GET /tenant/dashboard
-#     - GET /tenant/payables/summary
-#     - GET /tenant/statements
 #     - row-level export fields (order/user/cost center/service product)
 #       until a dedicated tenant-business export schema lands
 set -euo pipefail
@@ -61,6 +57,8 @@ DISPATCH_JOB_ID=""
 TASK_ID=""
 INVOICE_ID=""
 REPORT_JOB_ID=""
+DRIVER_STATEMENT_ID=""
+PERIOD_MONTH=""
 
 poll_for_dispatch_job() {
   local attempt=0
@@ -117,6 +115,21 @@ probe_route() {
   fi
   log_warn "${path} unavailable on this env (HTTP ${RESP_STATUS})"
   return 1
+}
+
+assert_number_ge() {
+  local label="$1"
+  local actual="$2"
+  local minimum="$3"
+  if [[ -z "$actual" || ! "$actual" =~ ^[0-9]+$ ]]; then
+    log_fail "${label} expected integer >= ${minimum}, got '${actual:-<empty>}'"
+    exit 1
+  fi
+  if (( actual < minimum )); then
+    log_fail "${label} expected >= ${minimum}, got ${actual}"
+    exit 1
+  fi
+  log_ok "${label}=${actual} (>= ${minimum})"
 }
 
 require_report_filter() {
@@ -330,35 +343,90 @@ TASK_STATUS=$(json_get '.data.status')
 [[ "$TASK_STATUS" == "completed" ]] || { log_fail "Expected completed task, got '${TASK_STATUS:-<empty>}'"; exit 1; }
 save_evidence "$SCENARIO" "driver" "taskStatus" "$TASK_STATUS"
 save_evidence "$SCENARIO" "driver" "completedAt" "$COMPLETE_AT"
+PERIOD_MONTH="${COMPLETE_AT:0:7}"
+save_evidence "$SCENARIO" "driver" "periodMonth" "$PERIOD_MONTH"
 log_ok "driver lifecycle completed"
 
-log_surface "Tenant business surfaces — dashboard / payable / statement probes"
+log_surface "Billing — generate driver statement for completed trip"
+switch_actor "ops_user" "e2e-ops-012"
+STATEMENT_FIXTURE="${TMP_DIR}/driver-statement.json"
+jq -n \
+  --arg periodMonth "$PERIOD_MONTH" \
+  --arg driverId "$ASSIGN_DRIVER_ID" \
+  '{periodMonth: $periodMonth, driverId: $driverId}' > "$STATEMENT_FIXTURE"
+
+http_call POST "/driver-statements/generate" "$STATEMENT_FIXTURE"
+assert_status "200|201"
+DRIVER_STATEMENT_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(any(.lines[]?; .orderId == $oid)) | .statementId' \
+  2>/dev/null | head -1 || true)
+[[ -n "$DRIVER_STATEMENT_ID" ]] || {
+  log_fail "driver statement generation response missing statement for orderId=${ORDER_ID}"
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
+}
+chain_set "billing" "driverStatementId" "$DRIVER_STATEMENT_ID"
+save_evidence "$SCENARIO" "billing" "driverStatementId" "$DRIVER_STATEMENT_ID"
+log_ok "driver statement generated: ${DRIVER_STATEMENT_ID}"
+
+log_surface "Tenant business surfaces — dashboard / payable / statement"
 switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
 
-if probe_route "dashboard" "/tenant/dashboard"; then
-  record_optional_report_field "dashboard.bookingCount" '.data.bookingCount'
-  record_optional_report_field "dashboard.completedTripCount" '.data.completedTripCount'
-else
-  http_call GET "/tenant/bookings"
-  assert_status "200"
-  BOOKING_LIST_COUNT=$(json_get '.data.items | length')
-  save_evidence "$SCENARIO" "dashboard" "fallback.bookingListCount" "${BOOKING_LIST_COUNT:-0}"
-  log_warn "dashboard fallback recorded via /tenant/bookings"
-fi
+http_call GET "/tenant/dashboard"
+assert_status "200"
+DASHBOARD_BOOKING_COUNT=$(json_get '.data.bookingCount')
+DASHBOARD_COMPLETED_COUNT=$(json_get '.data.completedTripCount')
+DASHBOARD_PAYABLE_MINOR=$(json_get '.data.estimatedPayableAmountMinor')
+assert_number_ge "dashboard.bookingCount" "$DASHBOARD_BOOKING_COUNT" 1
+assert_number_ge "dashboard.completedTripCount" "$DASHBOARD_COMPLETED_COUNT" 1
+assert_number_ge "dashboard.estimatedPayableAmountMinor" "$DASHBOARD_PAYABLE_MINOR" 1
+save_evidence "$SCENARIO" "dashboard" "bookingCount" "$DASHBOARD_BOOKING_COUNT"
+save_evidence "$SCENARIO" "dashboard" "completedTripCount" "$DASHBOARD_COMPLETED_COUNT"
+save_evidence "$SCENARIO" "dashboard" "estimatedPayableAmountMinor" "$DASHBOARD_PAYABLE_MINOR"
 
-if probe_route "payables" "/tenant/payables/summary"; then
-  record_optional_report_field "payables.estimatedPayableAmountMinor" '.data.estimatedPayableAmountMinor'
-else
-  http_call GET "/tenant/invoices"
-  assert_status "200"
-  INVOICE_LIST_COUNT=$(json_get '.data.items | length')
-  save_evidence "$SCENARIO" "payables" "fallback.invoiceListCountPreGenerate" "${INVOICE_LIST_COUNT:-0}"
-  log_warn "payables fallback recorded via /tenant/invoices"
-fi
+http_call GET "/tenant/payables/summary?periodMonth=${PERIOD_MONTH}"
+assert_status "200"
+PAYABLE_TOTAL_TRIPS=$(json_get '.data.totalTrips')
+PAYABLE_COMPLETED_TRIPS=$(json_get '.data.completedTrips')
+PAYABLE_AMOUNT_MINOR=$(json_get '.data.payableAmountMinor')
+assert_number_ge "payables.totalTrips" "$PAYABLE_TOTAL_TRIPS" 1
+assert_number_ge "payables.completedTrips" "$PAYABLE_COMPLETED_TRIPS" 1
+assert_number_ge "payables.payableAmountMinor" "$PAYABLE_AMOUNT_MINOR" 1
+save_evidence "$SCENARIO" "payables" "periodMonth" "$PERIOD_MONTH"
+save_evidence "$SCENARIO" "payables" "totalTrips" "$PAYABLE_TOTAL_TRIPS"
+save_evidence "$SCENARIO" "payables" "completedTrips" "$PAYABLE_COMPLETED_TRIPS"
+save_evidence "$SCENARIO" "payables" "payableAmountMinor" "$PAYABLE_AMOUNT_MINOR"
 
-probe_route "statements" "/tenant/statements" || true
+http_call GET "/tenant/payables/line-items?periodMonth=${PERIOD_MONTH}&serviceProduct=enterprise_dispatch&costCenterCode=${CC_CODE}"
+assert_status "200"
+LINE_ORDER_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .orderId' 2>/dev/null | head -1 || true)
+LINE_SERVICE_PRODUCT=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .serviceProduct' 2>/dev/null | head -1 || true)
+LINE_COST_CENTER=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .costCenterCode' 2>/dev/null | head -1 || true)
+[[ "$LINE_ORDER_ID" == "$ORDER_ID" ]] || { log_fail "payable line item missing orderId=${ORDER_ID}"; exit 1; }
+[[ "$LINE_SERVICE_PRODUCT" == "enterprise_dispatch" ]] || { log_fail "payable line item serviceProduct expected enterprise_dispatch, got '${LINE_SERVICE_PRODUCT:-<empty>}'"; exit 1; }
+[[ "$LINE_COST_CENTER" == "$CC_CODE" ]] || { log_fail "payable line item costCenterCode expected ${CC_CODE}, got '${LINE_COST_CENTER:-<empty>}'"; exit 1; }
+save_evidence "$SCENARIO" "payables" "lineItemOrderId" "$LINE_ORDER_ID"
+save_evidence "$SCENARIO" "payables" "lineItemServiceProduct" "$LINE_SERVICE_PRODUCT"
+save_evidence "$SCENARIO" "payables" "lineItemCostCenterCode" "$LINE_COST_CENTER"
+log_ok "payable line item preserved order/service product/cost center"
 
-log_surface "Billing — tenant invoice as payable/statement fallback"
+http_call GET "/tenant/statements?periodMonth=${PERIOD_MONTH}"
+assert_status "200"
+TENANT_STATEMENT_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(any(.lines[]?; .orderId == $oid)) | .statementId' \
+  2>/dev/null | head -1 || true)
+[[ -n "$TENANT_STATEMENT_ID" ]] || {
+  log_fail "tenant statements response missing statement containing orderId=${ORDER_ID}"
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
+}
+save_evidence "$SCENARIO" "billing" "tenantStatementId" "$TENANT_STATEMENT_ID"
+log_ok "tenant statement surfaced completed order: ${TENANT_STATEMENT_ID}"
+
+log_surface "Billing — tenant invoice"
 PERIOD_START=$(date -u -d "-1 day" +"%Y-%m-%dT00:00:00Z" 2>/dev/null || date -u -v-1d +"%Y-%m-%dT00:00:00Z")
 PERIOD_END=$(date -u -d "-1 minute" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v-1M +"%Y-%m-%dT%H:%M:%SZ")
 INVOICE_FIXTURE="${TMP_DIR}/invoice.json"
@@ -437,6 +505,7 @@ record_optional_report_field "row.orderId" '.data.rows[0].orderId'
 record_optional_report_field "row.userId" '.data.rows[0].userId'
 record_optional_report_field "row.costCenterCode" '.data.rows[0].costCenterCode'
 record_optional_report_field "row.serviceProduct" '.data.rows[0].serviceProduct'
+save_evidence "$SCENARIO" "report" "rowSchemaSupport" "tenant_business_operations rows are not yet populated by reporting-filing.service"
 
 log_surface "Audit evidence"
 http_call GET "/tenant/audit"
@@ -465,12 +534,13 @@ assert_chain "tenant" "bookingId"
 assert_chain "tenant" "orderId"
 assert_chain "ops" "dispatchJobId"
 assert_chain "ops" "taskId"
+assert_chain "billing" "driverStatementId"
 assert_chain "billing" "invoiceId"
 assert_chain "report" "jobId"
 
 print_chain_summary
 
 echo ""
-log_warn "E2E-012 currently records dashboard/payables/statements as live probes because those SD routes are not yet implemented in this repo. Invoice + report-job evidence are used as the runnable fallback for tenant business operations until the dedicated tenant summary/export surfaces land."
-log_ok "E2E-012 complete — tenant booking → trip completion → invoice → report chain passed."
+log_warn "E2E-012 still records report export row fields as soft evidence because tenant_business_operations report rows are not yet populated; dashboard/payables/statements now hard-assert live tenant endpoints."
+log_ok "E2E-012 complete — tenant booking → trip completion → dashboard/payables → statement → invoice → report chain passed."
 echo -e "Evidence log: ${EVIDENCE_FILE}"
