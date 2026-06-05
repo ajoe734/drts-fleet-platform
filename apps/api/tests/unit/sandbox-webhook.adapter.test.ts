@@ -22,6 +22,7 @@ function createOwnedMobilityHarness() {
   const callcenterService = new CallcenterService(auditNotificationService);
   const ownedMobilityService = new OwnedMobilityService(
     regulatoryRegistryService as never,
+    undefined,
     auditNotificationService,
     callcenterService,
     taskEventsService as never,

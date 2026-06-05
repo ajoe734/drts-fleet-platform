@@ -49,6 +49,7 @@ function createOwnedMobilityService(options?: {
 
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
+    undefined,
     auditNotificationService as never,
     callcenterService as never,
     taskEventsService,
@@ -314,6 +315,7 @@ describe("owned mobility task events", () => {
     );
     const service = new OwnedMobilityService(
       regulatoryRegistryService as never,
+      undefined,
       auditNotificationService as never,
       callcenterService as never,
       taskEventsService,
@@ -396,6 +398,7 @@ describe("owned mobility task events", () => {
     );
     const service = new OwnedMobilityService(
       regulatoryRegistryService as never,
+      undefined,
       auditNotificationService as never,
       callcenterService as never,
       taskEventsService,

@@ -114,6 +114,7 @@ function createService(options?: {
 
   const service = new ForwarderService(
     regulatoryRegistryService as never,
+    undefined,
     auditNotificationService as never,
     [adapter],
     forwarderRepository as never,
@@ -158,6 +159,7 @@ describe("ForwarderService", () => {
     };
     const service = new ForwarderService(
       regulatoryRegistryService as never,
+      undefined,
       auditNotificationService as never,
       [new GrabTaiwanAdapter()],
     );
@@ -189,6 +191,7 @@ describe("ForwarderService", () => {
     };
     const service = new ForwarderService(
       regulatoryRegistryService as never,
+      undefined,
       auditNotificationService as never,
       [new SandboxAdapter()],
     );

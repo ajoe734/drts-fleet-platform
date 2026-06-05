@@ -31,6 +31,7 @@ function createHarness() {
       getVehicleDispatchability: vi.fn(() => true),
       getDriverAvailability: vi.fn(() => true),
     } as never,
+    undefined,
     auditNotificationService as never,
     {
       registerRecordingAttachmentListener: vi.fn(),

@@ -259,6 +259,7 @@ async function createHarness(tenantId: string) {
   );
   const ownedMobilityService = new OwnedMobilityService(
     regulatoryRegistryService as never,
+    undefined,
     auditNotificationService as never,
     callcenterService as never,
     taskEventsService,

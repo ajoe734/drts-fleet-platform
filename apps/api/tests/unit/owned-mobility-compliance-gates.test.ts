@@ -59,6 +59,7 @@ function createService(options?: {
 
   return new OwnedMobilityService(
     regulatoryRegistryService as never,
+    undefined,
     new AuditNotificationService(),
     callcenterService as never,
     taskEventsService as never,
@@ -115,6 +116,7 @@ describe("OwnedMobilityService compliance gates", () => {
     };
     const service = new OwnedMobilityService(
       regulatoryRegistryService as never,
+      undefined,
       auditNotificationService,
       callcenterService,
       taskEventsService as never,
@@ -163,6 +165,7 @@ describe("OwnedMobilityService compliance gates", () => {
     };
     const service = new OwnedMobilityService(
       regulatoryRegistryService as never,
+      undefined,
       auditNotificationService,
       callcenterService,
       taskEventsService as never,
@@ -224,6 +227,7 @@ describe("OwnedMobilityService compliance gates", () => {
     };
     const service = new OwnedMobilityService(
       regulatoryRegistryService as never,
+      undefined,
       auditNotificationService,
       callcenterService,
       taskEventsService as never,
