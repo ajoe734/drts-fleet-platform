@@ -8,7 +8,7 @@
 > environment blocker clears.
 >
 > - **Sidecar task:** `E2E-FLEET-014-SIDECAR-ACCEPTANCE` (owner `Claude`, reviewer `Codex2`)
-> - **Parent:** `E2E-FLEET-014` (owner `Codex2`, reviewer `Codex`, status `todo`)
+> - **Parent:** `E2E-FLEET-014` (owner `Codex2`, reviewer `Codex`, status `blocked`, `waiting_for: Gemini`)
 > - **Helper kind:** `acceptance_packet` · `mutates_canonical: false`
 > - **Compiled:** 2026-06-05 · base branch `claude/e2e-fleet-014-sidecar-acceptance` ← `dev`
 
@@ -83,7 +83,7 @@ P1NEW-WP0 (workspace baseline)
              ├─ BE-FLEET-003  FleetPartnerRevenueShareRule ......... integrated on dev
              ├─ BE-FLEET-004  FleetPartnerStatement ................ integrated on dev
              └─ billing-settlement seam (driver earning reuse) ..... present on dev
-                  └─ E2E-FLEET-014  (this gate) .................... TODO, blocked (staging auth)
+                  └─ E2E-FLEET-014  (this gate) .................... BLOCKED (staging auth; waiting_for Gemini)
 ```
 
 | Dependency | Declared in | Status | Integration evidence |
@@ -111,7 +111,10 @@ not implementation-blocked:
 - Unblock helper **`E2E-FLEET-014-UNBLOCK-HISTORY-REPAIR`** is **done** (`e03885cf`,
   `origin/codex2/e2e-fleet-014-unblock-history-repair`) and recorded the
   **non-destructive resume path**: return the parent to `todo` for rerun *once staging
-  auth is repaired* — which is the current parent state.
+  auth is repaired*. The parent is **not** at that resume point yet — machine truth
+  (`scripts/ai-status.sh show E2E-FLEET-014`, last_update `2026-06-05T09:23:31Z`)
+  currently reports parent `status: blocked`, `waiting_for: Gemini` on the staging
+  Deploy WIF gap, so the `todo` rerun state is reached only after §4 step 1 lands.
 
 **Resume path (for parent owner `Codex2`):**
 1. Repair staging Deploy WIF provider (`invalid_target`) so GCP/IAP auth succeeds — infra/CI lane (`Gemini`/`Gemini2`).
@@ -128,5 +131,7 @@ not implementation-blocked:
 - **This sidecar:** support packet complete; no canonical truth touched; handed to reviewer `Codex2`.
 
 > Integration note (branch-strategy §11): this sidecar's deliverable is a support
-> document only. `done` on the sidecar ≠ E2E-014 acceptance. The parent gate remains
-> `todo` and reaches green only via the §4 resume path under the parent owner.
+> document only. `done` on the sidecar ≠ E2E-014 acceptance. The parent gate is
+> currently `blocked` (`waiting_for: Gemini`) on the staging Deploy WIF gap and reaches
+> green only via the §4 resume path under the parent owner (repair staging auth → the
+> recorded `todo` rerun state → staging pass).
