@@ -4,12 +4,14 @@ import type {
   DispatchCandidate,
   DispatchJobRecord,
   DriverTaskRecord,
+  DriverRegistryRecord,
   EmptyReason,
   EmptyStateEnvelope,
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
   IdentityContext,
   OwnedOrderRecord,
+  PartnerEligibilityReviewQueueItem,
   ResourceActionDescriptor,
   UiHealthEnvelope,
   UiRefreshMetadata,
@@ -46,7 +48,12 @@ type DispatchBoard =
   | "no_supply"
   | "governance"
   | "forwarded";
-type OwnedServiceFilter = "all" | string;
+type OwnedProductFilter = "all" | string;
+type TimingFilter = "all" | "reservation" | "realtime";
+type LicenseFilter = "all" | "license_issue" | "license_clear";
+type FleetFilter = "all" | string;
+type ApprovalFilter = "all" | string;
+type EligibilityFilter = "all" | string;
 type ForwardedFacetFilter =
   | "all"
   | "attention"
@@ -159,6 +166,21 @@ const actionGridStyle = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
   gap: 10,
+};
+
+const summaryGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 10,
+};
+
+const summaryCellStyle = {
+  padding: "12px 14px",
+  borderRadius: 12,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  display: "grid",
+  gap: 4,
 };
 
 const selectedTrayStyle = {
@@ -349,12 +371,22 @@ function resolveBoard(value: string | undefined): DispatchBoard {
 
 function buildDispatchHref({
   board,
-  service,
+  product,
+  timing,
+  license,
+  fleet,
+  approval,
+  eligibility,
   facet,
   workItemId,
 }: {
   board: DispatchBoard;
-  service?: string | undefined;
+  product?: string | undefined;
+  timing?: string | undefined;
+  license?: string | undefined;
+  fleet?: string | undefined;
+  approval?: string | undefined;
+  eligibility?: string | undefined;
   facet?: string | undefined;
   workItemId?: string | undefined;
 }) {
@@ -362,8 +394,23 @@ function buildDispatchHref({
   if (board !== "ready") {
     params.set("board", board);
   }
-  if (service && service !== "all") {
-    params.set("service", service);
+  if (product && product !== "all") {
+    params.set("product", product);
+  }
+  if (timing && timing !== "all") {
+    params.set("timing", timing);
+  }
+  if (license && license !== "all") {
+    params.set("license", license);
+  }
+  if (fleet && fleet !== "all") {
+    params.set("fleet", fleet);
+  }
+  if (approval && approval !== "all") {
+    params.set("approval", approval);
+  }
+  if (eligibility && eligibility !== "all") {
+    params.set("eligibility", eligibility);
   }
   if (facet && facet !== "all") {
     params.set("facet", facet);
@@ -378,13 +425,23 @@ function buildDispatchHref({
 function buildDispatchDetailHref({
   dispatchId,
   board,
-  service,
+  product,
+  timing,
+  license,
+  fleet,
+  approval,
+  eligibility,
   facet,
   action,
 }: {
   dispatchId: string;
   board?: DispatchBoard;
-  service?: string | undefined;
+  product?: string | undefined;
+  timing?: string | undefined;
+  license?: string | undefined;
+  fleet?: string | undefined;
+  approval?: string | undefined;
+  eligibility?: string | undefined;
   facet?: string | undefined;
   action?: string | undefined;
 }) {
@@ -392,8 +449,23 @@ function buildDispatchDetailHref({
   if (board && board !== "ready") {
     params.set("board", board);
   }
-  if (service && service !== "all") {
-    params.set("service", service);
+  if (product && product !== "all") {
+    params.set("product", product);
+  }
+  if (timing && timing !== "all") {
+    params.set("timing", timing);
+  }
+  if (license && license !== "all") {
+    params.set("license", license);
+  }
+  if (fleet && fleet !== "all") {
+    params.set("fleet", fleet);
+  }
+  if (approval && approval !== "all") {
+    params.set("approval", approval);
+  }
+  if (eligibility && eligibility !== "all") {
+    params.set("eligibility", eligibility);
   }
   if (facet && facet !== "all") {
     params.set("facet", facet);
@@ -492,7 +564,7 @@ function formatDurationSince(locale: Locale, value: string | null | undefined) {
 
 function formatWindow(order: OwnedOrderRecord, locale: Locale) {
   if (!order.reservationWindowStart || !order.reservationWindowEnd) {
-    return locale === "zh" ? "即時" : "realtime";
+    return t("dispatch.filters.timing.realtime", locale);
   }
   return `${formatDateTime(locale, order.reservationWindowStart)} → ${formatDateTime(locale, order.reservationWindowEnd)}`;
 }
@@ -632,7 +704,64 @@ function formatForwardedWindow(order: ForwardedOrderRecord, locale: Locale) {
     return formatDateTime(locale, start);
   }
 
-  return locale === "zh" ? "即時" : "realtime";
+  return t("dispatch.filters.timing.realtime", locale);
+}
+
+function getServiceProductValue(order: OwnedOrderRecord) {
+  return order.businessDispatchSubtype ?? order.serviceBucket;
+}
+
+function getFleetValue(order: OwnedOrderRecord) {
+  return (
+    order.partnerEntrySlug ??
+    order.partnerId ??
+    order.partnerProgramId ??
+    order.tenantId ??
+    "direct_ops"
+  );
+}
+
+function getFleetLabel(order: OwnedOrderRecord, locale: Locale) {
+  const fleetValue = getFleetValue(order);
+  return fleetValue === "direct_ops"
+    ? t("dispatch.filters.fleet.direct", locale)
+    : formatDispatchCode(locale, fleetValue);
+}
+
+function getTimingValue(order: OwnedOrderRecord): TimingFilter {
+  return order.dispatchSemantics === "reservation" ? "reservation" : "realtime";
+}
+
+function getEligibilityGate(order: OwnedOrderRecord) {
+  return (order.complianceGates ?? []).find((gate) => gate.gateType === "eligibility");
+}
+
+function getEligibilityReasonValue(order: OwnedOrderRecord) {
+  const gate = getEligibilityGate(order);
+  if (!gate || gate.state === "clear") {
+    return "clear";
+  }
+  if (order.queueEntryReason === "dispatch_manual_review_required") {
+    return "manual_review";
+  }
+  if (gate.evidenceState === "missing") {
+    return "eligibility_verification_missing";
+  }
+  if (gate.state === "review_required") {
+    return "manual_review";
+  }
+  return order.lastDispatchFailureReason ?? gate.gateType;
+}
+
+function getEligibilityReasonLabel(order: OwnedOrderRecord, locale: Locale) {
+  const value = getEligibilityReasonValue(order);
+  return value === "clear"
+    ? t("dispatch.filters.eligibility.clear", locale)
+    : formatDispatchCode(locale, value);
+}
+
+function getApprovalLabel(value: string, locale: Locale) {
+  return formatDispatchCode(locale, value);
 }
 
 function getVisibleStateCode(order: OwnedOrderRecord, job?: DispatchJobRecord) {
@@ -899,7 +1028,12 @@ function buildActionHref(
   board: DispatchBoard,
   record: BoardRecord,
   action: ResourceActionDescriptor,
-  selectedService: OwnedServiceFilter,
+  selectedProduct: OwnedProductFilter,
+  selectedTiming: TimingFilter,
+  selectedLicense: LicenseFilter,
+  selectedFleet: FleetFilter,
+  selectedApproval: ApprovalFilter,
+  selectedEligibility: EligibilityFilter,
   selectedFacet: ForwardedFacetFilter,
 ) {
   if ("mirrorOrderId" in record) {
@@ -912,6 +1046,12 @@ function buildActionHref(
         return buildDispatchDetailHref({
           dispatchId: record.mirrorOrderId,
           board,
+          product: selectedProduct,
+          timing: selectedTiming,
+          license: selectedLicense,
+          fleet: selectedFleet,
+          approval: selectedApproval,
+          eligibility: selectedEligibility,
           facet: selectedFacet,
           action: action.action,
         });
@@ -936,7 +1076,12 @@ function buildActionHref(
   return buildDispatchDetailHref({
     dispatchId: record.orderId,
     board,
-    service: selectedService,
+    product: selectedProduct,
+    timing: selectedTiming,
+    license: selectedLicense,
+    fleet: selectedFleet,
+    approval: selectedApproval,
+    eligibility: selectedEligibility,
     action: action.action,
   });
 }
@@ -945,12 +1090,22 @@ function buildEmptyStateActionContext(
   board: DispatchBoard,
   action: ResourceActionDescriptor,
   locale: Locale,
-  selectedService: OwnedServiceFilter,
+  selectedProduct: OwnedProductFilter,
+  selectedTiming: TimingFilter,
+  selectedLicense: LicenseFilter,
+  selectedFleet: FleetFilter,
+  selectedApproval: ApprovalFilter,
+  selectedEligibility: EligibilityFilter,
   selectedFacet: ForwardedFacetFilter,
 ): BoardActionContext {
   let href = buildDispatchHref({
     board,
-    service: selectedService,
+    product: selectedProduct,
+    timing: selectedTiming,
+    license: selectedLicense,
+    fleet: selectedFleet,
+    approval: selectedApproval,
+    eligibility: selectedEligibility,
     facet: selectedFacet,
   });
   let external = false;
@@ -986,7 +1141,12 @@ function buildActionContexts(
   board: DispatchBoard,
   record: BoardRecord,
   locale: Locale,
-  selectedService: OwnedServiceFilter,
+  selectedProduct: OwnedProductFilter,
+  selectedTiming: TimingFilter,
+  selectedLicense: LicenseFilter,
+  selectedFleet: FleetFilter,
+  selectedApproval: ApprovalFilter,
+  selectedEligibility: EligibilityFilter,
   selectedFacet: ForwardedFacetFilter,
 ): BoardActionContext[] {
   return normalizeActions(record).map((action) => {
@@ -994,7 +1154,12 @@ function buildActionContexts(
       board,
       record,
       action,
-      selectedService,
+      selectedProduct,
+      selectedTiming,
+      selectedLicense,
+      selectedFleet,
+      selectedApproval,
+      selectedEligibility,
       selectedFacet,
     );
     const external =
@@ -1080,7 +1245,12 @@ function renderEmptyState(
   board: DispatchBoard,
   emptyState: EmptyStateEnvelope,
   locale: Locale,
-  selectedService: OwnedServiceFilter,
+  selectedProduct: OwnedProductFilter,
+  selectedTiming: TimingFilter,
+  selectedLicense: LicenseFilter,
+  selectedFleet: FleetFilter,
+  selectedApproval: ApprovalFilter,
+  selectedEligibility: EligibilityFilter,
   selectedFacet: ForwardedFacetFilter,
 ) {
   const zh = locale === "zh";
@@ -1161,7 +1331,12 @@ function renderEmptyState(
         board,
         emptyState.nextAction,
         locale,
-        selectedService,
+        selectedProduct,
+        selectedTiming,
+        selectedLicense,
+        selectedFleet,
+        selectedApproval,
+        selectedEligibility,
         selectedFacet,
       )
     : null;
@@ -1185,7 +1360,12 @@ function renderEmptyState(
           <Link
             href={buildDispatchHref({
               board,
-              service: selectedService,
+              product: selectedProduct,
+              timing: selectedTiming,
+              license: selectedLicense,
+              fleet: selectedFleet,
+              approval: selectedApproval,
+              eligibility: selectedEligibility,
               facet: selectedFacet,
             })}
             style={{ textDecoration: "none" }}
@@ -1660,7 +1840,18 @@ export default async function DispatchPage({
   ]);
 
   const board = resolveBoard(firstParam(resolvedSearchParams.board));
-  const selectedService = firstParam(resolvedSearchParams.service) ?? "all";
+  const selectedProduct =
+    firstParam(resolvedSearchParams.product) ??
+    firstParam(resolvedSearchParams.service) ??
+    "all";
+  const selectedTiming = ((firstParam(resolvedSearchParams.timing) ??
+    "all") as TimingFilter);
+  const selectedLicense = ((firstParam(resolvedSearchParams.license) ??
+    "all") as LicenseFilter);
+  const selectedFleet = firstParam(resolvedSearchParams.fleet) ?? "all";
+  const selectedApproval = firstParam(resolvedSearchParams.approval) ?? "all";
+  const selectedEligibility =
+    firstParam(resolvedSearchParams.eligibility) ?? "all";
   const selectedFacet = (firstParam(resolvedSearchParams.facet) ??
     "all") as ForwardedFacetFilter;
   const focusWorkItemId = firstParam(resolvedSearchParams.workItemId) ?? "";
@@ -1669,15 +1860,18 @@ export default async function DispatchPage({
     ownedOrdersResult,
     dispatchJobsResult,
     driverTasksResult,
+    driversResult,
     forwardedOrdersResult,
     adapterHealthResult,
     reconciliationIssuesResult,
+    reviewQueueResult,
     identityResult,
     pageHealth,
   ] = await Promise.all([
     loadListRuntime<RuntimeOwnedOrder>(client, "/api/orders"),
     loadListRuntime<RuntimeDispatchJob>(client, "/api/dispatch/tasks"),
     loadListRuntime<DriverTaskRecord>(client, "/api/driver/tasks"),
+    loadListRuntime<DriverRegistryRecord>(client, "/api/drivers"),
     loadListRuntime<RuntimeForwardedOrder>(client, "/api/forwarder/orders"),
     loadListRuntime<AdapterHealthRecord>(
       client,
@@ -1686,6 +1880,10 @@ export default async function DispatchPage({
     loadListRuntime<ForwarderReconciliationIssue>(
       client,
       "/api/forwarder/reconciliation-issues",
+    ),
+    loadListRuntime<PartnerEligibilityReviewQueueItem>(
+      client,
+      "/api/ops/partner/eligibility/reviews",
     ),
     client
       .get<IdentityContext>("/api/identity/context")
@@ -1696,14 +1894,19 @@ export default async function DispatchPage({
   const ownedOrders = ownedOrdersResult.items;
   const dispatchJobs = dispatchJobsResult.items;
   const driverTasks = driverTasksResult.items;
+  const drivers = driversResult.items;
   const forwardedOrders = forwardedOrdersResult.items;
   const adapterHealth = adapterHealthResult.items;
   const reconciliationIssues = reconciliationIssuesResult.items;
+  const reviewQueue = reviewQueueResult.items;
 
   const jobByOrderId = new Map<string, RuntimeDispatchJob>(
     dispatchJobs.map((job: RuntimeDispatchJob) => [job.orderId, job] as const),
   );
   const tasksByOrderId = new Map<string, DriverTaskRecord[]>();
+  const driverById = new Map<string, DriverRegistryRecord>(
+    drivers.map((driver: DriverRegistryRecord) => [driver.driverId, driver] as const),
+  );
   for (const task of driverTasks) {
     const existing = tasksByOrderId.get(task.orderId);
     if (existing) {
@@ -1748,13 +1951,31 @@ export default async function DispatchPage({
     forwarded: forwardedOrders.length,
   };
 
-  const visibleOwnedByBoard = sortedOwnedOrders.filter((order) => {
+  const preLicenseOwnedByBoard = sortedOwnedOrders.filter((order) => {
     const orderBoard = getOwnedBoard(order, jobByOrderId.get(order.orderId));
     if (orderBoard !== board) {
       return false;
     }
-    if (board !== "forwarded" && selectedService !== "all") {
-      return order.serviceBucket === selectedService;
+    if (board !== "forwarded" && selectedProduct !== "all") {
+      return getServiceProductValue(order) === selectedProduct;
+    }
+    if (selectedTiming !== "all" && getTimingValue(order) !== selectedTiming) {
+      return false;
+    }
+    if (selectedFleet !== "all" && getFleetValue(order) !== selectedFleet) {
+      return false;
+    }
+    if (
+      selectedApproval !== "all" &&
+      order.approvalState !== selectedApproval
+    ) {
+      return false;
+    }
+    if (
+      selectedEligibility !== "all" &&
+      getEligibilityReasonValue(order) !== selectedEligibility
+    ) {
+      return false;
     }
     return true;
   });
@@ -1785,11 +2006,24 @@ export default async function DispatchPage({
   });
 
   const serviceBuckets = Array.from(
-    new Set(sortedOwnedOrders.map((order) => order.serviceBucket)),
+    new Set(sortedOwnedOrders.map((order) => getServiceProductValue(order))),
+  ).sort();
+  const fleetBuckets = Array.from(
+    new Set(sortedOwnedOrders.map((order) => getFleetValue(order))),
+  ).sort();
+  const approvalStates = Array.from(
+    new Set(sortedOwnedOrders.map((order) => order.approvalState)),
+  ).sort();
+  const eligibilityReasons = Array.from(
+    new Set(
+      sortedOwnedOrders
+        .map((order) => getEligibilityReasonValue(order))
+        .filter((value) => value !== "clear"),
+    ),
   ).sort();
 
   const visibleOwnedRecords: RuntimeOwnedOrder[] =
-    board === "forwarded" ? [] : visibleOwnedByBoard;
+    board === "forwarded" ? [] : preLicenseOwnedByBoard;
   const visibleDispatchJobIds = Array.from(
     new Set(
       visibleOwnedRecords
@@ -1812,6 +2046,42 @@ export default async function DispatchPage({
     ),
   );
 
+  function hasLicenseIssue(order: RuntimeOwnedOrder) {
+    const currentTask = pickCurrentTask(tasksByOrderId.get(order.orderId) ?? []);
+    const taskDriver = currentTask ? driverById.get(currentTask.driverId) : null;
+    if (
+      taskDriver &&
+      (!taskDriver.licensesValid ||
+        taskDriver.eligibilityBlockedReasons.includes("licenses_invalid"))
+    ) {
+      return true;
+    }
+
+    const job = jobByOrderId.get(order.orderId);
+    const candidates = job ? (candidatesByJobId.get(job.dispatchJobId) ?? []) : [];
+    if (candidates.length > 0) {
+      return candidates.some((candidate) => {
+        const driver = driverById.get(candidate.driverId);
+        return Boolean(
+          driver &&
+            (!driver.licensesValid ||
+              driver.eligibilityBlockedReasons.includes("licenses_invalid")),
+        );
+      });
+    }
+
+    return order.lastDispatchFailureReason?.includes("license") ?? false;
+  }
+
+  const visibleOwnedByBoard =
+    selectedLicense === "all"
+      ? preLicenseOwnedByBoard
+      : preLicenseOwnedByBoard.filter((order) =>
+          selectedLicense === "license_issue"
+            ? hasLicenseIssue(order)
+            : !hasLicenseIssue(order),
+        );
+
   const issueByMirrorId = new Map<string, ForwarderReconciliationIssue>(
     reconciliationIssues.map((issue: ForwarderReconciliationIssue) => [
       issue.mirrorOrderId,
@@ -1827,6 +2097,40 @@ export default async function DispatchPage({
   const degradedAdapters = adapterHealth.filter(
     (record: AdapterHealthRecord) => record.status !== "healthy",
   );
+  const ownedManualReviewOrders = sortedOwnedOrders.filter(
+    (order) => order.queueFamily === "manual_review_queue",
+  );
+  const eligibleSupplyCount = visibleOwnedByBoard.reduce((count, order) => {
+    const job = jobByOrderId.get(order.orderId);
+    const candidates = job ? (candidatesByJobId.get(job.dispatchJobId) ?? []) : [];
+    return count + candidates.filter((candidate) => {
+      const driver = driverById.get(candidate.driverId);
+      return driver?.dispatchEligible ?? false;
+    }).length;
+  }, 0);
+  const noSupplyReasonCounts = visibleOwnedByBoard.reduce<Record<string, number>>(
+    (acc, order) => {
+      if (getOwnedBoard(order, jobByOrderId.get(order.orderId)) !== "no_supply") {
+        return acc;
+      }
+      const key =
+        order.lastDispatchFailureReason ??
+        order.dispatchTimeout?.timeoutReasonCode ??
+        "unknown";
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    },
+    {},
+  );
+  const topNoSupplyReason =
+    Object.entries(noSupplyReasonCounts).sort((left, right) => right[1] - left[1])[0] ??
+    null;
+  const approvalBlockedCount = sortedOwnedOrders.filter(
+    (order) => order.approvalState === "blocked" || order.approvalState === "pending",
+  ).length;
+  const quotaBlockedCount = sortedOwnedOrders.filter((order) =>
+    order.complianceFlags.some((flag) => flag.includes("quota")),
+  ).length;
 
   const currentRefresh =
     board === "forwarded"
@@ -1857,7 +2161,13 @@ export default async function DispatchPage({
           failed: ownedOrdersResult.failed || dispatchJobsResult.failed,
           baseCount: boardCounts[board],
           visibleCount: visibleOwnedByBoard.length,
-          filtered: selectedService !== "all",
+          filtered:
+            selectedProduct !== "all" ||
+            selectedTiming !== "all" ||
+            selectedLicense !== "all" ||
+            selectedFleet !== "all" ||
+            selectedApproval !== "all" ||
+            selectedEligibility !== "all",
           identity: identityResult,
           adapterHealth,
         });
@@ -1881,7 +2191,12 @@ export default async function DispatchPage({
         board,
         selectedRecord,
         locale,
-        selectedService,
+        selectedProduct,
+        selectedTiming,
+        selectedLicense,
+        selectedFleet,
+        selectedApproval,
+        selectedEligibility,
         selectedFacet,
       )
     : [];
@@ -1900,7 +2215,12 @@ export default async function DispatchPage({
             board,
             order,
             locale,
-            selectedService,
+            selectedProduct,
+            selectedTiming,
+            selectedLicense,
+            selectedFleet,
+            selectedApproval,
+            selectedEligibility,
             selectedFacet,
           ),
           locale,
@@ -2000,7 +2320,12 @@ export default async function DispatchPage({
             board,
             order,
             locale,
-            selectedService,
+            selectedProduct,
+            selectedTiming,
+            selectedLicense,
+            selectedFleet,
+            selectedApproval,
+            selectedEligibility,
             selectedFacet,
           ),
           locale,
@@ -2069,7 +2394,12 @@ export default async function DispatchPage({
           board,
           order,
           locale,
-          selectedService,
+          selectedProduct,
+          selectedTiming,
+          selectedLicense,
+          selectedFleet,
+          selectedApproval,
+          selectedEligibility,
           selectedFacet,
         ),
         locale,
@@ -2127,7 +2457,12 @@ export default async function DispatchPage({
             board,
             order,
             locale,
-            selectedService,
+            selectedProduct,
+            selectedTiming,
+            selectedLicense,
+            selectedFleet,
+            selectedApproval,
+            selectedEligibility,
             selectedFacet,
           ),
           locale,
@@ -2186,7 +2521,12 @@ export default async function DispatchPage({
             board,
             order,
             locale,
-            selectedService,
+            selectedProduct,
+            selectedTiming,
+            selectedLicense,
+            selectedFleet,
+            selectedApproval,
+            selectedEligibility,
             selectedFacet,
           ),
           locale,
@@ -2251,7 +2591,12 @@ export default async function DispatchPage({
             board,
             order,
             locale,
-            selectedService,
+            selectedProduct,
+            selectedTiming,
+            selectedLicense,
+            selectedFleet,
+            selectedApproval,
+            selectedEligibility,
             selectedFacet,
           ),
           locale,
@@ -2283,13 +2628,14 @@ export default async function DispatchPage({
           </div>
         ),
         window: formatWindow(order, locale),
-        service: formatDispatchCode(locale, order.serviceBucket),
+        service: formatDispatchCode(locale, getServiceProductValue(order)),
         eta:
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== null &&
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== undefined
             ? `${job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes}m`
             : "—",
         candidates: String(candidates.length),
+        eligibility: getEligibilityReasonLabel(order, locale),
         gate: (
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <Pill theme={theme} tone={getStateTone(state)} dot>
@@ -2312,6 +2658,7 @@ export default async function DispatchPage({
       { h: "SERVICE", k: "service", w: 130, mono: true },
       { h: "ETA", k: "eta", w: 80, mono: true },
       { h: "CAND", k: "candidates", w: 70, mono: true, align: "right" },
+      { h: "ELIGIBILITY", k: "eligibility", w: 180, mono: true },
       { h: "GATE", k: "gate", w: 210 },
       { h: "ACTIONS", k: "actions", w: 260 },
     ];
@@ -2322,7 +2669,12 @@ export default async function DispatchPage({
       <PublishAssistantScope
         board={board}
         visibleFilters={{
-          service: selectedService,
+          product: selectedProduct,
+          timing: selectedTiming,
+          license: selectedLicense,
+          fleet: selectedFleet,
+          approval: selectedApproval,
+          eligibility: selectedEligibility,
           facet: selectedFacet,
           ...(focusWorkItemId ? { workItemId: focusWorkItemId } : {}),
         }}
@@ -2351,13 +2703,23 @@ export default async function DispatchPage({
                 focusWorkItemId
                   ? {
                       board,
-                      service: selectedService,
+                      product: selectedProduct,
+                      timing: selectedTiming,
+                      license: selectedLicense,
+                      fleet: selectedFleet,
+                      approval: selectedApproval,
+                      eligibility: selectedEligibility,
                       facet: selectedFacet,
                       workItemId: focusWorkItemId,
                     }
                   : {
                       board,
-                      service: selectedService,
+                      product: selectedProduct,
+                      timing: selectedTiming,
+                      license: selectedLicense,
+                      fleet: selectedFleet,
+                      approval: selectedApproval,
+                      eligibility: selectedEligibility,
                       facet: selectedFacet,
                     },
               )}
@@ -2440,14 +2802,131 @@ export default async function DispatchPage({
             <div
               style={{ padding: "16px 18px 14px", display: "grid", gap: 12 }}
             >
+              {board !== "forwarded" ? (
+                <>
+                  <div style={summaryGridStyle}>
+                    <div style={summaryCellStyle}>
+                      <span style={{ color: theme.textDim, fontSize: 11 }}>
+                        {t("dispatch.panels.eligibleSupply", locale)}
+                      </span>
+                      <strong>{eligibleSupplyCount}</strong>
+                      <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                        {t("dispatch.panels.eligibleSupplyHint", locale)}
+                      </span>
+                    </div>
+                    <div style={summaryCellStyle}>
+                      <span style={{ color: theme.textDim, fontSize: 11 }}>
+                        {t("dispatch.panels.noSupplyReason", locale)}
+                      </span>
+                      <strong>
+                        {topNoSupplyReason
+                          ? formatDispatchCode(locale, topNoSupplyReason[0])
+                          : "—"}
+                      </strong>
+                      <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                        {topNoSupplyReason
+                          ? t("dispatch.panels.noSupplyReasonCount", locale, {
+                              count: topNoSupplyReason[1],
+                            })
+                          : t("dispatch.panels.noSupplyReasonEmpty", locale)}
+                      </span>
+                    </div>
+                    <div style={summaryCellStyle}>
+                      <span style={{ color: theme.textDim, fontSize: 11 }}>
+                        {t("dispatch.panels.approvalBlocked", locale)}
+                      </span>
+                      <strong>{approvalBlockedCount}</strong>
+                      <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                        {t("dispatch.panels.approvalBlockedHint", locale)}
+                      </span>
+                    </div>
+                    <div style={summaryCellStyle}>
+                      <span style={{ color: theme.textDim, fontSize: 11 }}>
+                        {t("dispatch.panels.quotaBlocked", locale)}
+                      </span>
+                      <strong>{quotaBlockedCount}</strong>
+                      <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                        {t("dispatch.panels.quotaBlockedHint", locale)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={summaryCellStyle}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 8,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <strong>{t("dispatch.reviewQueue.title", locale)}</strong>
+                      <Pill theme={theme} tone="warn" dot>
+                        {ownedManualReviewOrders.length + reviewQueue.length}
+                      </Pill>
+                    </div>
+                    <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                      {t("dispatch.reviewQueue.subtitle", locale)}
+                    </span>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {ownedManualReviewOrders.slice(0, 3).map((order) => (
+                        <div
+                          key={order.orderId}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 8,
+                            fontSize: 12,
+                          }}
+                        >
+                          <span>{`${order.orderNo} · ${getFleetLabel(order, locale)}`}</span>
+                          <span style={{ color: theme.textDim }}>
+                            {formatDispatchCode(
+                              locale,
+                              order.queueEntryReason ?? "manual_review_queue",
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                      {reviewQueue.slice(0, 3).map((item) => (
+                        <div
+                          key={item.eligibilityVerificationId}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 8,
+                            fontSize: 12,
+                          }}
+                        >
+                          <span>{item.partnerEntrySlug}</span>
+                          <span style={{ color: theme.textDim }}>
+                            {formatDispatchCode(locale, item.verificationStatus)}
+                          </span>
+                        </div>
+                      ))}
+                      {ownedManualReviewOrders.length === 0 &&
+                      reviewQueue.length === 0 ? (
+                        <span style={{ color: theme.textMuted, fontSize: 12 }}>
+                          {t("dispatch.reviewQueue.empty", locale)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
               <div style={filterRowStyle}>
                 {board === "forwarded"
                   ? (
                       [
-                        ["all", `${zh ? "全部" : "All"} ${forwardedBaseCount}`],
+                        [
+                          "all",
+                          `${t("common.all", locale)} ${forwardedBaseCount}`,
+                        ],
                         [
                           "attention",
-                          `${zh ? "需注意" : "Attention"} ${sortedForwardedOrders.filter(needsForwardedAttention).length}`,
+                          `${t("dispatch.workflow.filterAttention", locale)} ${sortedForwardedOrders.filter(needsForwardedAttention).length}`,
                         ],
                         [
                           "sync_failed",
@@ -2459,7 +2938,7 @@ export default async function DispatchPage({
                         ],
                         [
                           "terminal",
-                          `${zh ? "終態" : "Terminal"} ${sortedForwardedOrders.filter(isForwardedTerminal).length}`,
+                          `${t("dispatch.forwarded.filter.terminal", locale)} ${sortedForwardedOrders.filter(isForwardedTerminal).length}`,
                         ],
                       ] as const
                     ).map(([facetKey, label]) => (
@@ -2483,33 +2962,226 @@ export default async function DispatchPage({
                       </Link>
                     ))
                   : [
-                      ["all", zh ? "全部服務" : "All services"],
+                      ["all", t("dispatch.filters.products.all", locale)],
                       ...serviceBuckets.map((item) => [
                         item,
                         formatDispatchCode(locale, item),
                       ]),
-                    ].map(([serviceKey, label]) => (
+                    ].map(([productKey, label]) => (
                       <Link
-                        key={serviceKey}
+                        key={productKey}
                         href={buildDispatchHref({
                           board,
-                          service: serviceKey,
+                          product: productKey,
+                          timing: selectedTiming,
+                          license: selectedLicense,
+                          fleet: selectedFleet,
+                          approval: selectedApproval,
+                          eligibility: selectedEligibility,
                         })}
                         style={{ textDecoration: "none" }}
                       >
                         <Pill
                           theme={theme}
                           tone={
-                            selectedService === serviceKey
+                            selectedProduct === productKey
                               ? "accent"
                               : "neutral"
                           }
-                          dot={serviceKey !== "all"}
+                          dot={productKey !== "all"}
                         >
                           {label}
                         </Pill>
                       </Link>
                     ))}
+              </div>
+
+              {board !== "forwarded" ? (
+                <>
+                  <div style={filterRowStyle}>
+                    {(
+                      [
+                        ["all", t("dispatch.filters.timing.all", locale)],
+                        [
+                          "reservation",
+                          t("dispatch.filters.timing.reservation", locale),
+                        ],
+                        ["realtime", t("dispatch.filters.timing.realtime", locale)],
+                      ] as const
+                    ).map(([timingKey, label]) => (
+                      <Link
+                        key={timingKey}
+                        href={buildDispatchHref({
+                          board,
+                          product: selectedProduct,
+                          timing: timingKey,
+                          license: selectedLicense,
+                          fleet: selectedFleet,
+                          approval: selectedApproval,
+                          eligibility: selectedEligibility,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedTiming === timingKey ? "accent" : "neutral"
+                          }
+                          dot={timingKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))}
+                  </div>
+                  <div style={filterRowStyle}>
+                    {(
+                      [
+                        ["all", t("dispatch.filters.license.all", locale)],
+                        [
+                          "license_issue",
+                          t("dispatch.filters.license.issue", locale),
+                        ],
+                        [
+                          "license_clear",
+                          t("dispatch.filters.license.clear", locale),
+                        ],
+                      ] as const
+                    ).map(([licenseKey, label]) => (
+                      <Link
+                        key={licenseKey}
+                        href={buildDispatchHref({
+                          board,
+                          product: selectedProduct,
+                          timing: selectedTiming,
+                          license: licenseKey,
+                          fleet: selectedFleet,
+                          approval: selectedApproval,
+                          eligibility: selectedEligibility,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedLicense === licenseKey
+                              ? "accent"
+                              : "neutral"
+                          }
+                          dot={licenseKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))}
+                  </div>
+                  <div style={filterRowStyle}>
+                    {[
+                      ["all", t("dispatch.filters.fleet.all", locale)],
+                      ...fleetBuckets.map((item) => [
+                        item,
+                        item === "direct_ops"
+                          ? t("dispatch.filters.fleet.direct", locale)
+                          : formatDispatchCode(locale, item),
+                      ]),
+                    ].map(([fleetKey, label]) => (
+                      <Link
+                        key={fleetKey}
+                        href={buildDispatchHref({
+                          board,
+                          product: selectedProduct,
+                          timing: selectedTiming,
+                          license: selectedLicense,
+                          fleet: fleetKey,
+                          approval: selectedApproval,
+                          eligibility: selectedEligibility,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedFleet === fleetKey ? "accent" : "neutral"
+                          }
+                          dot={fleetKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))}
+                  </div>
+                  <div style={filterRowStyle}>
+                    {[
+                      ["all", t("dispatch.filters.approval.all", locale)],
+                      ...approvalStates.map((item) => [
+                        item,
+                        getApprovalLabel(item, locale),
+                      ]),
+                    ].map(([approvalKey, label]) => (
+                      <Link
+                        key={approvalKey}
+                        href={buildDispatchHref({
+                          board,
+                          product: selectedProduct,
+                          timing: selectedTiming,
+                          license: selectedLicense,
+                          fleet: selectedFleet,
+                          approval: approvalKey,
+                          eligibility: selectedEligibility,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedApproval === approvalKey
+                              ? "accent"
+                              : "neutral"
+                          }
+                          dot={approvalKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))}
+                  </div>
+                  <div style={filterRowStyle}>
+                    {[
+                      ["all", t("dispatch.filters.eligibility.all", locale)],
+                      ...eligibilityReasons.map((item) => [
+                        item,
+                        formatDispatchCode(locale, item),
+                      ]),
+                    ].map(([eligibilityKey, label]) => (
+                      <Link
+                        key={eligibilityKey}
+                        href={buildDispatchHref({
+                          board,
+                          product: selectedProduct,
+                          timing: selectedTiming,
+                          license: selectedLicense,
+                          fleet: selectedFleet,
+                          approval: selectedApproval,
+                          eligibility: eligibilityKey,
+                        })}
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Pill
+                          theme={theme}
+                          tone={
+                            selectedEligibility === eligibilityKey
+                              ? "accent"
+                              : "neutral"
+                          }
+                          dot={eligibilityKey !== "all"}
+                        >
+                          {label}
+                        </Pill>
+                      </Link>
+                    ))}
+                  </div>
+                </>
+              ) : null}
               </div>
 
               <div
@@ -2524,8 +3196,8 @@ export default async function DispatchPage({
               >
                 <span>
                   {board === "forwarded"
-                    ? `${zh ? "顯示" : "Showing"} ${visibleForwardedOrders.length} / ${forwardedBaseCount}`
-                    : `${zh ? "顯示" : "Showing"} ${visibleOwnedByBoard.length} / ${boardCounts[board]}`}
+                    ? `${t("dispatch.filters.showing", locale)} ${visibleForwardedOrders.length} / ${forwardedBaseCount}`
+                    : `${t("dispatch.filters.showing", locale)} ${visibleOwnedByBoard.length} / ${boardCounts[board]}`}
                 </span>
                 <span>{formatRefreshSummary(currentRefresh, locale)}</span>
               </div>
@@ -2537,7 +3209,12 @@ export default async function DispatchPage({
                   board,
                   boardEmptyState,
                   locale,
-                  selectedService,
+                  selectedProduct,
+                  selectedTiming,
+                  selectedLicense,
+                  selectedFleet,
+                  selectedApproval,
+                  selectedEligibility,
                   selectedFacet,
                 )}
               </div>
@@ -2550,7 +3227,7 @@ export default async function DispatchPage({
                       <div style={selectedMetaStyle}>
                         <div style={selectedMetaCellStyle}>
                           <span style={{ fontSize: 11, color: theme.textDim }}>
-                            {zh ? "焦點 work item" : "Focused work item"}
+                            {t("dispatch.selected.focused", locale)}
                           </span>
                           <strong
                             style={{
@@ -2563,9 +3240,22 @@ export default async function DispatchPage({
                               : `${selectedRecord.orderNo} · ${selectedRecord.orderId}`}
                           </strong>
                         </div>
+                        {"mirrorOrderId" in selectedRecord ? null : (
+                          <div style={selectedMetaCellStyle}>
+                            <span style={{ fontSize: 11, color: theme.textDim }}>
+                              {t("dispatch.selected.attribution", locale)}
+                            </span>
+                            <strong>
+                              {`${getFleetLabel(selectedRecord, locale)} · ${formatDispatchCode(locale, getServiceProductValue(selectedRecord))}`}
+                            </strong>
+                            <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                              {`${getTenantLabel(selectedRecord)} · ${getApprovalLabel(selectedRecord.approvalState, locale)} · ${getEligibilityReasonLabel(selectedRecord, locale)}`}
+                            </span>
+                          </div>
+                        )}
                         <div style={selectedMetaCellStyle}>
                           <span style={{ fontSize: 11, color: theme.textDim }}>
-                            {zh ? "跨 app deep links" : "Cross-app deep links"}
+                            {t("dispatch.selected.links", locale)}
                           </span>
                           <div
                             style={{
@@ -2643,12 +3333,8 @@ export default async function DispatchPage({
                     <CanvasEmptyPanel
                       theme={theme}
                       density="compact"
-                      title={zh ? "沒有焦點 work item" : "No focused work item"}
-                      description={
-                        zh
-                          ? "目前 board 沒有可選擇的列。"
-                          : "There is no selected row on the current board."
-                      }
+                      title={t("dispatch.selected.emptyTitle", locale)}
+                      description={t("dispatch.selected.emptyBody", locale)}
                     />
                   )}
                 </div>
