@@ -389,6 +389,7 @@ function AdminHealthFooter({
       </div>
       <button
         type="button"
+        data-testid="app-locale-toggle"
         onClick={() => setLocale(locale === "en" ? "zh" : "en")}
         title={getPlatformLabel(locale, "switchLanguage")}
         style={languageButtonStyle}

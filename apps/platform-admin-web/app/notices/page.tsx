@@ -289,12 +289,12 @@ export default function NoticesPage() {
           window: "Window",
         }
       : {
-          title: "Notices & Maintenance",
+          title: "公告與維護",
           subtitle:
             "critical / maintenance severity 會推 cross-app banner 到 ops / tenant / driver (Q-ADM15)。",
-          notices: "Notices",
-          maintenance: "Maintenance Mode",
-          history: "Broadcast History",
+          notices: "公告",
+          maintenance: "維護模式",
+          history: "廣播紀錄",
           createNotice: "建立公告",
           enterMaintenance: "進入維護",
           refresh: "重新整理",
@@ -307,13 +307,13 @@ export default function NoticesPage() {
           noticeTitle: "標題",
           noticeBody: "內容",
           noticeAudience: "對象",
-          noticeSeverity: "Severity",
+          noticeSeverity: "嚴重度",
           publishNotice: "發佈公告",
           publishing: "發佈中",
           activeNoticeGuardrailTitle: "進入維護前應先發 maintenance notice",
           activeNoticeGuardrailBody:
             "先發佈 maintenance severity notice，再啟用全平台 maintenance mode。",
-          currentMaintenance: "Maintenance mode · 目前狀態",
+          currentMaintenance: "維護模式 · 目前狀態",
           currentMaintenanceSubtitle: "全平台 dispatch 與入站流量控管。",
           internalReason: "原因 · 內部紀錄",
           scheduledStart: "預定起始",

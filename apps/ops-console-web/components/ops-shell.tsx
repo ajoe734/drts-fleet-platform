@@ -7,6 +7,7 @@ import {
   buildCanvasTheme,
   type CanvasShellNavItem,
 } from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 
 type OpsShellProps = {
   nav: CanvasShellNavItem[];
@@ -54,6 +55,33 @@ export function OpsShell({
 }: OpsShellProps) {
   const pathname = usePathname() ?? "";
   const breadcrumb = deriveBreadcrumb(nav, pathname);
+  const { locale, setLocale, t } = useTranslation();
+
+  const localeToggle = (
+    <button
+      type="button"
+      data-testid="app-locale-toggle"
+      title={t("app.lang.toggle")}
+      onClick={() => setLocale(locale === "en" ? "zh" : "en")}
+      style={{
+        minWidth: 68,
+        height: 28,
+        borderRadius: 7,
+        border: `1px solid ${theme.accentBorder}`,
+        background: theme.accentBg,
+        color: theme.accent,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "0 10px",
+        fontSize: 11.5,
+        fontWeight: 700,
+        cursor: "pointer",
+      }}
+    >
+      {t("app.lang.toggle")}
+    </button>
+  );
 
   return (
     <CanvasShell
@@ -66,6 +94,7 @@ export function OpsShell({
       env={env}
       versionLabel={versionLabel}
       avatarLabel={avatarLabel}
+      topRight={localeToggle}
       style={{ minHeight: "100vh", height: "100vh" }}
       {...(searchPlaceholder !== undefined ? { searchPlaceholder } : {})}
     >
