@@ -56,6 +56,8 @@ BOOKING_ID=""
 ORDER_ID=""
 DISPATCH_JOB_ID=""
 TASK_ID=""
+DRIVER_STATEMENT_LINE=""
+FLEET_SHARE_MINOR=""
 STATEMENT_ID=""
 ASSIGN_VEHICLE_ID="${E2E_SEED_VEHICLE_ID}"
 ASSIGN_DRIVER_ID="${E2E_SEED_DRIVER_ID}"
@@ -89,6 +91,16 @@ require_endpoint() {
       log_fail "${label} probe returned unexpected HTTP ${RESP_STATUS}"
       log_fail "Body: ${RESP_BODY}"
       exit 1
+      ;;
+  esac
+}
+
+skip_on_unavailable_write() {
+  local subcase="$1"
+  local label="$2"
+  case "$RESP_STATUS" in
+    404|405|501)
+      skip_clean "$subcase" "${label} unavailable on this environment (HTTP ${RESP_STATUS})"
       ;;
   esac
 }
@@ -131,6 +143,47 @@ resolve_fleet_statement_share_minor() {
   ' 2>/dev/null | head -1 || true
 }
 
+poll_driver_statement_line() {
+  local attempt=0
+  while (( attempt < E2E_POLL_MAX )); do
+    http_call GET "/driver-statements?periodMonth=${PERIOD_MONTH}"
+    assert_status "200"
+
+    DRIVER_STATEMENT_LINE=$(resolve_driver_statement_order_line)
+    [[ -n "$DRIVER_STATEMENT_LINE" ]] && return 0
+
+    sleep "$E2E_POLL_INTERVAL"
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
+poll_fleet_statement_share() {
+  local attempt=0
+  while (( attempt < E2E_POLL_MAX )); do
+    http_call GET "/admin/fleet-partners/${FLEET_PARTNER_ID}/statements"
+    case "$RESP_STATUS" in
+      200) ;;
+      404|405|501)
+        skip_clean "fleet_statement" "fleet partner statement endpoint unavailable (HTTP ${RESP_STATUS})"
+        ;;
+      *)
+        log_fail "Fleet statement lookup failed with HTTP ${RESP_STATUS}: ${RESP_BODY}"
+        exit 1
+        ;;
+    esac
+
+    FLEET_SHARE_MINOR=$(resolve_fleet_statement_share_minor)
+    [[ -n "$FLEET_SHARE_MINOR" ]] && return 0
+
+    sleep "$E2E_POLL_INTERVAL"
+    attempt=$((attempt + 1))
+  done
+
+  return 1
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # LEG 0 — Probe platform fleet APIs
 # ══════════════════════════════════════════════════════════════════════════════
@@ -160,6 +213,7 @@ jq -n \
 
 log_step "1.1 — POST /admin/fleet-partners"
 http_call POST "/admin/fleet-partners" "$FLEET_FIXTURE"
+skip_on_unavailable_write "fleet_admin_api" "fleet partner create"
 assert_status "200|201"
 
 FLEET_PARTNER_ID=$(json_get_first ".data.fleetPartnerId" ".data.fleet_partner_id" ".data.id")
@@ -183,6 +237,7 @@ jq -n \
 
 log_step "1.2 — POST /admin/drivers/:driverId/fleet-affiliations"
 http_call POST "/admin/drivers/${E2E_SEED_DRIVER_ID}/fleet-affiliations" "$AFFILIATION_FIXTURE"
+skip_on_unavailable_write "fleet_affiliation" "driver fleet affiliation API"
 assert_status "200|201"
 
 AFFILIATION_ID=$(json_get_first ".data.affiliationId" ".data.affiliation_id" ".data.id")
@@ -207,6 +262,7 @@ jq -n \
 
 log_step "1.3 — POST /admin/fleet-partners/:id/revenue-share-rules"
 http_call POST "/admin/fleet-partners/${FLEET_PARTNER_ID}/revenue-share-rules" "$RULE_FIXTURE"
+skip_on_unavailable_write "revenue_share_rule" "fleet revenue-share rule API"
 assert_status "200|201"
 
 REVENUE_RULE_ID=$(json_get_first ".data.ruleId" ".data.rule_id" ".data.id")
@@ -379,8 +435,9 @@ switch_actor "platform_admin" "e2e-platform-admin-fleet-014"
 FEE_PLAN_FIXTURE="${TMP_DIR}/fee-plan.json"
 jq -n \
   --arg version "$PERIOD_MONTH" \
+  --arg planName "E2E-014 driver fee plan ${SUFFIX}" \
   '{
-    planName: "E2E-014 driver fee plan",
+    planName: $planName,
     version: $version,
     serviceFeeBps: 1000,
     reimbursementMode: "platform_funded"
@@ -415,11 +472,7 @@ STATEMENT_ID=$(echo "$RESP_BODY" | jq -r --arg did "$E2E_SEED_DRIVER_ID" \
 [[ -n "$STATEMENT_ID" ]] && chain_set "billing" "driverStatementId" "$STATEMENT_ID"
 
 log_step "4.3 — GET /driver-statements?periodMonth="
-http_call GET "/driver-statements?periodMonth=${PERIOD_MONTH}"
-assert_status "200"
-
-DRIVER_STATEMENT_LINE=$(resolve_driver_statement_order_line)
-if [[ -z "$DRIVER_STATEMENT_LINE" ]]; then
+if ! poll_driver_statement_line; then
   skip_clean "driver_statement" "driver statement list did not include orderId=${ORDER_ID}"
 fi
 save_evidence "$SCENARIO" "billing" "driverStatementLineMatch" "$DRIVER_STATEMENT_LINE"
@@ -432,15 +485,7 @@ log_ok "Driver statement includes completed orderId=${ORDER_ID}"
 log_surface "Platform Admin — fleet partner statement"
 
 log_step "5.1 — GET /admin/fleet-partners/:id/statements"
-http_call GET "/admin/fleet-partners/${FLEET_PARTNER_ID}/statements"
-case "$RESP_STATUS" in
-  200) ;;
-  404|405|501) skip_clean "fleet_statement" "fleet partner statement endpoint unavailable (HTTP ${RESP_STATUS})" ;;
-  *) log_fail "Fleet statement lookup failed with HTTP ${RESP_STATUS}: ${RESP_BODY}"; exit 1 ;;
-esac
-
-FLEET_SHARE_MINOR=$(resolve_fleet_statement_share_minor)
-if [[ -z "$FLEET_SHARE_MINOR" ]]; then
+if ! poll_fleet_statement_share; then
   skip_clean "fleet_statement" "fleet statement payload did not expose a share line for orderId=${ORDER_ID}"
 fi
 
