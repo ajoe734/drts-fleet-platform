@@ -546,6 +546,7 @@ const en = {
     "Selected candidate is ready for assignment from the action panel.",
   "dispatch.workflow.detail.locationStatus": "Location status",
   "dispatch.workflow.detail.timeline": "Dispatch timeline",
+  "dispatch.workflow.detail.timelineBilingual": "Dispatch timeline",
   "dispatch.workflow.detail.activityEvents": "Activity events",
   "dispatch.workflow.detail.timelineLatest": "Latest event",
   "dispatch.workflow.detail.timelineHint":
@@ -2314,19 +2315,21 @@ const zh: Record<keyof typeof en, string> = {
     "已選定候選人，可直接在操作面板完成指派。",
   "dispatch.workflow.detail.locationStatus": "位置狀態",
   "dispatch.workflow.detail.timeline": "派車時間軸",
+  "dispatch.workflow.detail.timelineBilingual":
+    "派車時間軸 / Dispatch timeline",
   "dispatch.workflow.detail.activityEvents": "時間軸事件",
   "dispatch.workflow.detail.timelineLatest": "最新事件",
   "dispatch.workflow.detail.timelineHint":
     "時間軸把操作、gate 決策與稽核紀錄維持在同一個工作區內。",
   "dispatch.workflow.detail.timelineEmpty":
     "此訂單目前尚無可顯示的 dispatch trace。",
-  "dispatch.detail.manualReview": "人工覆核",
+  "dispatch.detail.manualReview": "人工覆核 / Manual review",
   "dispatch.detail.gate.licenseInvalid": "證照無效",
   "dispatch.detail.gate.serviceBucketGap": "服務桶不符",
   "dispatch.detail.gate.noLocation": "無位置回報",
   "dispatch.detail.gate.locationStale": "位置過舊",
   "dispatch.detail.gate.ok": "正常",
-  "dispatch.detail.workflow.created": "建立",
+  "dispatch.detail.workflow.created": "建立 / Created",
   "dispatch.detail.workflow.queued": "待派遣",
   "dispatch.detail.workflow.broadcasting": "廣播中",
   "dispatch.detail.workflow.assigned": "已指派",

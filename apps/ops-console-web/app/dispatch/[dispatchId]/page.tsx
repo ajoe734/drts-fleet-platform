@@ -1063,6 +1063,12 @@ function renderSequenceRail(
   );
 }
 
+function getTimelineTitle(locale: Locale) {
+  return locale === "zh"
+    ? text(locale, "dispatch.workflow.detail.timelineBilingual")
+    : text(locale, "dispatch.workflow.detail.timeline");
+}
+
 function renderActivityFeed(locale: Locale, entries: ActivityEntry[]) {
   if (entries.length === 0) {
     return (
@@ -1875,10 +1881,7 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
           />
         </Card>
         <div style={{ display: "grid", gap: 16 }}>
-          <Card
-            theme={theme}
-            title={text(locale, "dispatch.workflow.detail.timeline")}
-          >
+          <Card theme={theme} title={getTimelineTitle(locale)}>
             <div>{text(locale, "dispatch.detail.smoke.sequence")}</div>
           </Card>
           <Card
@@ -2437,10 +2440,7 @@ async function renderOwnedWorkspace({
         </div>
 
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
-          <Card
-            theme={theme}
-            title={text(locale, "dispatch.workflow.detail.timeline")}
-          >
+          <Card theme={theme} title={getTimelineTitle(locale)}>
             {renderSequenceRail(
               locale,
               getWorkflowStepIndex(order, dispatchJob, currentTask),
@@ -2786,10 +2786,7 @@ function renderForwardedWorkspace({
         </div>
 
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
-          <Card
-            theme={theme}
-            title={text(locale, "dispatch.workflow.detail.timeline")}
-          >
+          <Card theme={theme} title={getTimelineTitle(locale)}>
             {renderSequenceRail(locale, getForwardedStepIndex(order), [
               order.createdAt,
               order.createdAt,
