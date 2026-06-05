@@ -62,7 +62,7 @@ const DEFAULT_CURRENCY = "NTD";
 const LIVE_SETTLEMENT_PRICING_VERSION = "tenant-pricing-live";
 const TENANT_REFRESH_INTERVAL_MS = 30_000;
 
-type SettlementTripSnapshot = {
+export type BillingSettlementTripRecord = {
   settlementId: string;
   tenantId: string;
   driverId: string;
@@ -85,6 +85,9 @@ type SettlementTripSnapshot = {
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
   benefitReference: string | null;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
 };
 
 type StoredTenantInvoice = TenantInvoiceRecord & {
@@ -149,7 +152,7 @@ const PARTNER_SPONSOR_MISMATCH_SEED: ReconciliationIssueRecord[] = [
   },
 ];
 
-const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
+const SETTLEMENT_TRIP_SEED: BillingSettlementTripRecord[] = [
   {
     settlementId: "settlement-202603-001",
     tenantId: DEMO_TENANT_ID,
@@ -180,6 +183,9 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     eligibilityVerificationId: null,
     issuerAuthorizationRef: null,
     benefitReference: null,
+    serviceProduct: "enterprise_dispatch",
+    tenantServiceProgramId: null,
+    sourcePlatform: "portal",
   },
   {
     settlementId: "settlement-202603-002",
@@ -211,6 +217,9 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     eligibilityVerificationId: "elig-demo-032",
     issuerAuthorizationRef: "issuer-auth-bank-demo-032",
     benefitReference: "benefit-bank-demo-032",
+    serviceProduct: "credit_card_airport_transfer",
+    tenantServiceProgramId: null,
+    sourcePlatform: "api",
   },
   {
     settlementId: "settlement-202603-003",
@@ -242,6 +251,9 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     eligibilityVerificationId: null,
     issuerAuthorizationRef: null,
     benefitReference: null,
+    serviceProduct: "enterprise_dispatch",
+    tenantServiceProgramId: null,
+    sourcePlatform: "portal",
   },
 ];
 
@@ -529,7 +541,7 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneInvoice(invoice);
   }
 
-  private buildInvoiceLineDescription(trip: SettlementTripSnapshot) {
+  private buildInvoiceLineDescription(trip: BillingSettlementTripRecord) {
     if (
       trip.businessDispatchSubtype === "credit_card_airport_transfer" &&
       trip.partnerEntrySlug
@@ -865,7 +877,7 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
 
-    const statementsByDriver = new Map<string, SettlementTripSnapshot[]>();
+    const statementsByDriver = new Map<string, BillingSettlementTripRecord[]>();
     for (const trip of eligibleTrips) {
       const currentTrips = statementsByDriver.get(trip.driverId) ?? [];
       statementsByDriver.set(trip.driverId, [...currentTrips, trip]);
@@ -1020,6 +1032,17 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
     return this.cloneStatement(statement);
+  }
+
+  async listSettlementTripsForPeriodMonth(
+    periodMonth: string,
+    driverId?: string,
+  ): Promise<BillingSettlementTripRecord[]> {
+    const trips = await this.listDriverStatementTripsInPeriod(
+      periodMonth,
+      driverId,
+    );
+    return trips.map((trip) => this.cloneSettlementTrip(trip));
   }
 
   listReimbursementBatches(filters: ReimbursementBatchFilters = {}) {
@@ -1532,7 +1555,7 @@ export class BillingSettlementService implements OnModuleInit {
   }
 
   private createStatementLine(
-    trip: SettlementTripSnapshot,
+    trip: BillingSettlementTripRecord,
     serviceFeeBps: number,
   ): DriverStatementLineRecord {
     const serviceFeeMinor = Math.round(
@@ -1557,7 +1580,7 @@ export class BillingSettlementService implements OnModuleInit {
   }
 
   private createReimbursementItems(
-    trips: SettlementTripSnapshot[],
+    trips: BillingSettlementTripRecord[],
     reimbursementMode: DriverFeePlanRecord["reimbursementMode"],
   ) {
     if (reimbursementMode !== "platform_funded") {
@@ -1592,7 +1615,7 @@ export class BillingSettlementService implements OnModuleInit {
       periodStart,
       periodEnd,
     );
-    const tripMap = new Map<string, SettlementTripSnapshot>();
+    const tripMap = new Map<string, BillingSettlementTripRecord>();
 
     for (const trip of seededTrips) {
       tripMap.set(trip.orderId, trip);
@@ -1621,7 +1644,7 @@ export class BillingSettlementService implements OnModuleInit {
       periodEnd,
       driverId,
     );
-    const tripMap = new Map<string, SettlementTripSnapshot>();
+    const tripMap = new Map<string, BillingSettlementTripRecord>();
 
     for (const trip of seededTrips) {
       tripMap.set(trip.orderId, trip);
@@ -1711,7 +1734,7 @@ export class BillingSettlementService implements OnModuleInit {
 
   private mapLiveTripToSettlementSnapshot(
     trip: LiveSettlementTripRecord,
-  ): SettlementTripSnapshot {
+  ): BillingSettlementTripRecord {
     return {
       settlementId: `settlement-live-${trip.orderId}`,
       tenantId: trip.tenantId,
@@ -1734,6 +1757,9 @@ export class BillingSettlementService implements OnModuleInit {
       eligibilityVerificationId: trip.eligibilityVerificationId,
       issuerAuthorizationRef: trip.issuerAuthorizationRef,
       benefitReference: trip.benefitReference,
+      serviceProduct: trip.serviceProduct ?? null,
+      tenantServiceProgramId: trip.tenantServiceProgramId ?? null,
+      sourcePlatform: trip.sourcePlatform ?? null,
     };
   }
 
@@ -1884,7 +1910,7 @@ export class BillingSettlementService implements OnModuleInit {
 
   private getSettlementChannelKey(
     trip: Pick<
-      SettlementTripSnapshot,
+      BillingSettlementTripRecord,
       "businessDispatchSubtype" | "orderSource" | "partnerId"
     >,
   ) {
@@ -1956,6 +1982,17 @@ export class BillingSettlementService implements OnModuleInit {
       artifactDownloadMetadata: {
         ...invoice.artifactDownloadMetadata,
       },
+    };
+  }
+
+  private cloneSettlementTrip(
+    trip: BillingSettlementTripRecord,
+  ): BillingSettlementTripRecord {
+    return {
+      ...trip,
+      grossEarning: { ...trip.grossEarning },
+      subsidy: { ...trip.subsidy },
+      platformFundedDiscount: { ...trip.platformFundedDiscount },
     };
   }
 

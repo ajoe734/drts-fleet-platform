@@ -3464,6 +3464,166 @@ export interface PublishDriverFeePlanCommand {
   reimbursementMode: "platform_funded" | "mixed";
 }
 
+export const FLEET_PARTNERSHIP_TYPES = [
+  "driver_recruitment",
+  "fleet_management",
+  "vehicle_owner_group",
+  "business_dispatch_fleet",
+] as const;
+export type FleetPartnershipType = (typeof FLEET_PARTNERSHIP_TYPES)[number];
+
+export const DRIVER_FLEET_AFFILIATION_TYPES = [
+  "recruited_by",
+  "managed_by",
+  "vehicle_owned_by",
+  "contracted_under",
+] as const;
+export type DriverFleetAffiliationType =
+  (typeof DRIVER_FLEET_AFFILIATION_TYPES)[number];
+
+export const FLEET_REVENUE_SHARE_APPLIES_TO = [
+  "all_trips",
+  "tenant_program",
+  "service_product",
+  "driver_group",
+  "platform_source",
+] as const;
+export type FleetRevenueShareAppliesTo =
+  (typeof FLEET_REVENUE_SHARE_APPLIES_TO)[number];
+
+export const FLEET_REVENUE_SHARE_FORMULAS = [
+  "percent_of_gross",
+  "fixed_per_trip",
+  "monthly_fixed",
+  "tiered_bonus",
+] as const;
+export type FleetRevenueShareFormula =
+  (typeof FLEET_REVENUE_SHARE_FORMULAS)[number];
+
+export interface FleetPartnerRecord {
+  fleetPartnerId: string;
+  legalName: string;
+  displayName: string;
+  businessRegistrationNo: string;
+  contactName: string;
+  contactPhone: string;
+  active: boolean;
+  partnershipType: FleetPartnershipType;
+}
+
+export interface CreateFleetPartnerCommand {
+  legalName: string;
+  displayName: string;
+  businessRegistrationNo: string;
+  contactName: string;
+  contactPhone: string;
+  active?: boolean;
+  partnershipType: FleetPartnershipType;
+}
+
+export interface UpdateFleetPartnerCommand {
+  legalName?: string;
+  displayName?: string;
+  businessRegistrationNo?: string;
+  contactName?: string;
+  contactPhone?: string;
+  active?: boolean;
+  partnershipType?: FleetPartnershipType;
+}
+
+export interface DriverFleetAffiliationRecord {
+  affiliationId: string;
+  driverId: string;
+  fleetPartnerId: string;
+  affiliationType: DriverFleetAffiliationType;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  driverGroupId?: string | null;
+}
+
+export interface CreateDriverFleetAffiliationCommand {
+  fleetPartnerId: string;
+  affiliationType: DriverFleetAffiliationType;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+  driverGroupId?: string | null;
+}
+
+export interface FleetPartnerRevenueShareRuleRecord {
+  ruleId: string;
+  fleetPartnerId: string;
+  appliesTo: FleetRevenueShareAppliesTo;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
+  driverGroupId?: string | null;
+  formula: FleetRevenueShareFormula;
+  rateBps?: number | null;
+  fixedAmountMinor?: number | null;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+}
+
+export interface CreateFleetPartnerRevenueShareRuleCommand {
+  appliesTo: FleetRevenueShareAppliesTo;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
+  driverGroupId?: string | null;
+  formula: FleetRevenueShareFormula;
+  rateBps?: number | null;
+  fixedAmountMinor?: number | null;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+}
+
+export interface UpdateFleetPartnerRevenueShareRuleCommand {
+  appliesTo?: FleetRevenueShareAppliesTo;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
+  driverGroupId?: string | null;
+  formula?: FleetRevenueShareFormula;
+  rateBps?: number | null;
+  fixedAmountMinor?: number | null;
+  effectiveFrom?: string;
+  effectiveUntil?: string | null;
+}
+
+export interface FleetPartnerStatementLineRecord {
+  lineId: string;
+  ruleId: string;
+  formula: FleetRevenueShareFormula;
+  orderId: string | null;
+  driverId: string | null;
+  affiliationId: string | null;
+  grossEarning: MoneyAmount | null;
+  driverNetAmount: MoneyAmount | null;
+  shareAmount: MoneyAmount;
+  completedAt: string | null;
+  metadata: {
+    appliesTo: FleetRevenueShareAppliesTo;
+    serviceProduct: string | null;
+    tenantServiceProgramId: string | null;
+    sourcePlatform: string | null;
+    driverGroupId: string | null;
+    orderSource: OwnedOrderSource | null;
+  };
+}
+
+export interface FleetPartnerStatementRecord {
+  statementId: string;
+  fleetPartnerId: string;
+  periodMonth: string;
+  payoutStatus: DriverPayoutStatus;
+  grossEarningBasis: MoneyAmount;
+  driverNetAmountBasis: MoneyAmount;
+  shareAmount: MoneyAmount;
+  lines: FleetPartnerStatementLineRecord[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DriverFeePlanRecord {
   feePlanId: string;
   planName: string;

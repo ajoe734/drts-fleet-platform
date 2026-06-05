@@ -28,6 +28,7 @@ import { ComplaintModule } from "./modules/complaint/complaint.module";
 import { DriverProfileModule } from "./modules/driver-profile/driver-profile.module";
 import { DriverSettingsModule } from "./modules/driver-settings/driver-settings.module";
 import { FeatureFlagsModule } from "./modules/feature-flags/feature-flags.module";
+import { FleetPartnerModule } from "./modules/fleet-partner/fleet-partner.module";
 import { FoundationModule } from "./modules/foundation/foundation.module";
 import { ForwarderModule } from "./modules/forwarder/forwarder.module";
 import { IdentityModule } from "./modules/identity/identity.module";
@@ -71,6 +72,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     ReportingFilingModule,
     ForwarderModule,
     FeatureFlagsModule,
+    FleetPartnerModule,
     IncidentModule,
     MaintenanceModule,
     ShiftAttendanceModule,

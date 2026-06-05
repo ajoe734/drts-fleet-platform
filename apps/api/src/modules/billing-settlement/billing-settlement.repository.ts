@@ -43,6 +43,9 @@ export type LiveSettlementTripRecord = {
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
   benefitReference: string | null;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
 };
 
 export type BillingSettlementState = {
@@ -240,6 +243,9 @@ export class BillingSettlementRepository {
         eligibilityVerificationId: order.eligibilityVerificationId,
         issuerAuthorizationRef: order.issuerAuthorizationRef,
         benefitReference: order.benefitReference,
+        serviceProduct: order.businessDispatchSubtype,
+        tenantServiceProgramId: null,
+        sourcePlatform: order.orderSource,
       };
     });
   }
@@ -558,6 +564,9 @@ export class BillingSettlementRepository {
         eligibilityVerificationId: order.eligibilityVerificationId,
         issuerAuthorizationRef: order.issuerAuthorizationRef,
         benefitReference: order.benefitReference,
+        serviceProduct: order.businessDispatchSubtype,
+        tenantServiceProgramId: null,
+        sourcePlatform: order.orderSource,
       };
     });
   }
