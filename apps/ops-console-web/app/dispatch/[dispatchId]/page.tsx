@@ -1069,7 +1069,9 @@ function renderSequenceRail(
 }
 
 function getSequenceTitle(locale: Locale) {
-  return tr(locale, "dispatch.detail.sequence.title");
+  return locale === "zh"
+    ? tr(locale, "dispatch.detail.sequence.timelineTitle")
+    : tr(locale, "dispatch.detail.sequence.title");
 }
 
 function renderActivityFeed(locale: Locale, entries: ActivityEntry[]) {
@@ -2322,7 +2324,7 @@ async function renderOwnedWorkspace({
                       ),
                     )
                       ? formatOpsCodeLabel(locale, "ok")
-                      : tr(locale, "dispatch.detail.compliance.review")
+                      : tr(locale, "dispatch.detail.manualReview")
                   }`,
                   mono: true,
                 },
