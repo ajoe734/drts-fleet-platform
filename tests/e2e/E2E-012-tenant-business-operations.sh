@@ -439,7 +439,7 @@ record_optional_report_field "row.costCenterCode" '.data.rows[0].costCenterCode'
 record_optional_report_field "row.serviceProduct" '.data.rows[0].serviceProduct'
 
 log_surface "Audit evidence"
-http_call GET "/audit"
+http_call GET "/tenant/audit"
 assert_status "200"
 INVOICE_AUDIT_ID=$(echo "$RESP_BODY" | jq -r --arg invoiceId "$INVOICE_ID" \
   '.data.items[] | select(.resourceType == "tenant_invoice" and .resourceId == $invoiceId and .actionName == "generate_tenant_invoice") | .auditId' \
