@@ -29,6 +29,17 @@ function createService() {
   };
 }
 
+function createFleetPartner(service: FleetPartnerService) {
+  return service.createFleetPartner({
+    legalName: "North Route Fleet Ltd.",
+    displayName: "North Route",
+    businessRegistrationNo: "nr-001",
+    contactName: "Admin North",
+    contactPhone: "+886-2-7700-2001",
+    partnershipType: "business_dispatch_fleet",
+  });
+}
+
 describe("FleetPartnerService", () => {
   it("creates a fleet partner, persists it, and records an audit log", () => {
     const { service, repository, auditSpy } = createService();
@@ -70,11 +81,12 @@ describe("FleetPartnerService", () => {
 
   it("updates an existing fleet partner and returns the stored record", () => {
     const { service, repository, auditSpy } = createService();
+    const created = createFleetPartner(service);
 
     const updated = service.updateFleetPartner(
-      "fleet-demo-001",
+      created.fleetPartnerId,
       {
-        displayName: "Demo Fleet Prime",
+        displayName: "North Route Prime",
         active: false,
       },
       {
@@ -85,30 +97,31 @@ describe("FleetPartnerService", () => {
       "req-fleet-update-001",
     );
 
-    expect(updated.displayName).toBe("Demo Fleet Prime");
+    expect(updated.displayName).toBe("North Route Prime");
     expect(updated.active).toBe(false);
-    expect(repository.upsertFleetPartner).toHaveBeenCalledWith(
+    expect(repository.upsertFleetPartner).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        fleetPartnerId: "fleet-demo-001",
-        displayName: "Demo Fleet Prime",
+        fleetPartnerId: created.fleetPartnerId,
+        displayName: "North Route Prime",
         active: false,
       }),
     );
     expect(auditSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         actionName: "update_fleet_partner",
-        resourceId: "fleet-demo-001",
+        resourceId: created.fleetPartnerId,
       }),
     );
   });
 
   it("creates driver fleet affiliations and exposes them through the partner driver list", () => {
     const { service, repository, auditSpy } = createService();
+    const partner = createFleetPartner(service);
 
     const affiliation = service.createDriverFleetAffiliation(
       "drv-demo-003",
       {
-        fleetPartnerId: "fleet-demo-001",
+        fleetPartnerId: partner.fleetPartnerId,
         affiliationType: "contracted_under",
         effectiveFrom: "2026-06-01T00:00:00.000Z",
       },
@@ -119,7 +132,7 @@ describe("FleetPartnerService", () => {
       },
       "req-affiliation-create-001",
     );
-    const drivers = service.listFleetPartnerDrivers("fleet-demo-001");
+    const drivers = service.listFleetPartnerDrivers(partner.fleetPartnerId);
 
     expect(affiliation.driverId).toBe("drv-demo-003");
     expect(repository.upsertDriverFleetAffiliation).toHaveBeenCalledWith(
@@ -128,15 +141,13 @@ describe("FleetPartnerService", () => {
         driverId: "drv-demo-003",
       }),
     );
-    expect(drivers).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          driverId: "drv-demo-003",
-          driverName: "Driver Demo Three",
-          affiliationType: "contracted_under",
-        }),
-      ]),
-    );
+    expect(drivers).toEqual([
+      expect.objectContaining({
+        driverId: "drv-demo-003",
+        driverName: "Driver Demo Three",
+        affiliationType: "contracted_under",
+      }),
+    ]);
     expect(auditSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         actionName: "create_driver_fleet_affiliation",
@@ -147,23 +158,54 @@ describe("FleetPartnerService", () => {
 
   it("rejects overlapping affiliations for the same driver and affiliation type", () => {
     const { service, repository } = createService();
+    const firstPartner = createFleetPartner(service);
+    const secondPartner = service.createFleetPartner({
+      legalName: "Second Fleet Ltd.",
+      displayName: "Second Fleet",
+      businessRegistrationNo: "nr-002",
+      contactName: "Admin Second",
+      contactPhone: "+886-2-7700-2002",
+      partnershipType: "fleet_management",
+    });
+
+    service.createDriverFleetAffiliation("drv-demo-001", {
+      fleetPartnerId: firstPartner.fleetPartnerId,
+      affiliationType: "managed_by",
+      effectiveFrom: "2026-05-01T00:00:00.000Z",
+    });
 
     expect(() =>
       service.createDriverFleetAffiliation("drv-demo-001", {
-        fleetPartnerId: "fleet-demo-002",
+        fleetPartnerId: secondPartner.fleetPartnerId,
         affiliationType: "managed_by",
         effectiveFrom: "2026-06-01T00:00:00.000Z",
       }),
     ).toThrowError(ApiRequestError);
-    expect(repository.upsertDriverFleetAffiliation).not.toHaveBeenCalled();
+    expect(repository.upsertDriverFleetAffiliation).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not treat removed demo seed registration numbers as conflicts", () => {
+    const { service } = createService();
+
+    const created = service.createFleetPartner({
+      legalName: "Demo Registration Reuse Ltd.",
+      displayName: "Registration Reuse",
+      businessRegistrationNo: "demo-fleet-001",
+      contactName: "Admin Reuse",
+      contactPhone: "+886-2-7700-2003",
+      partnershipType: "fleet_management",
+    });
+
+    expect(created.businessRegistrationNo).toBe("DEMO-FLEET-001");
   });
 
   it("rejects affiliations for unknown drivers", () => {
     const { service } = createService();
+    const partner = createFleetPartner(service);
 
     try {
       service.createDriverFleetAffiliation("drv-missing-001", {
-        fleetPartnerId: "fleet-demo-001",
+        fleetPartnerId: partner.fleetPartnerId,
         affiliationType: "managed_by",
         effectiveFrom: "2026-06-01T00:00:00.000Z",
       });
@@ -179,5 +221,20 @@ describe("FleetPartnerService", () => {
         }),
       );
     }
+  });
+
+  it("returns 400 for malformed create payloads instead of throwing type errors", () => {
+    const { service } = createService();
+
+    expect(() => service.createFleetPartner(undefined as never)).toThrowError(
+      ApiRequestError,
+    );
+    expect(() =>
+      service.createDriverFleetAffiliation("drv-demo-001", {
+        fleetPartnerId: undefined,
+        affiliationType: "managed_by",
+        effectiveFrom: "2026-06-01T00:00:00.000Z",
+      } as never),
+    ).toThrowError(ApiRequestError);
   });
 });

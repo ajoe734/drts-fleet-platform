@@ -24,56 +24,6 @@ import { AuditNotificationService } from "../audit-notification/audit-notificati
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import { FleetPartnerRepository } from "./fleet-partner.repository";
 
-const FLEET_PARTNER_SEED: FleetPartnerRecord[] = [
-  {
-    fleetPartnerId: "fleet-demo-001",
-    legalName: "Demo Fleet Management Co., Ltd.",
-    displayName: "Demo Fleet One",
-    businessRegistrationNo: "DEMO-FLEET-001",
-    contactName: "Fleet Ops One",
-    contactPhone: "+886-2-7700-1001",
-    active: true,
-    partnershipType: "fleet_management",
-    createdAt: "2026-05-01T00:00:00.000Z",
-    updatedAt: "2026-05-01T00:00:00.000Z",
-  },
-  {
-    fleetPartnerId: "fleet-demo-002",
-    legalName: "Demo Recruitment Partners Inc.",
-    displayName: "Recruitment Fleet Two",
-    businessRegistrationNo: "DEMO-FLEET-002",
-    contactName: "Fleet Ops Two",
-    contactPhone: "+886-2-7700-1002",
-    active: true,
-    partnershipType: "driver_recruitment",
-    createdAt: "2026-05-02T00:00:00.000Z",
-    updatedAt: "2026-05-02T00:00:00.000Z",
-  },
-];
-
-const DRIVER_FLEET_AFFILIATION_SEED: DriverFleetAffiliationRecord[] = [
-  {
-    affiliationId: "dfa-demo-001",
-    driverId: "drv-demo-001",
-    fleetPartnerId: "fleet-demo-001",
-    affiliationType: "managed_by",
-    effectiveFrom: "2026-05-01T00:00:00.000Z",
-    effectiveUntil: null,
-    createdAt: "2026-05-01T00:00:00.000Z",
-    updatedAt: "2026-05-01T00:00:00.000Z",
-  },
-  {
-    affiliationId: "dfa-demo-002",
-    driverId: "drv-demo-002",
-    fleetPartnerId: "fleet-demo-002",
-    affiliationType: "recruited_by",
-    effectiveFrom: "2026-05-03T00:00:00.000Z",
-    effectiveUntil: null,
-    createdAt: "2026-05-03T00:00:00.000Z",
-    updatedAt: "2026-05-03T00:00:00.000Z",
-  },
-];
-
 type FleetPartnerAuditActor = Pick<
   AuditLogRecord,
   "actorId" | "actorType" | "tenantId"
@@ -81,15 +31,6 @@ type FleetPartnerAuditActor = Pick<
 
 @Injectable()
 export class FleetPartnerService implements OnModuleInit {
-  private readonly seedPartners = new Map(
-    FLEET_PARTNER_SEED.map((partner) => [partner.fleetPartnerId, partner]),
-  );
-  private readonly seedAffiliations = new Map(
-    DRIVER_FLEET_AFFILIATION_SEED.map((affiliation) => [
-      affiliation.affiliationId,
-      affiliation,
-    ]),
-  );
   private readonly partners = new Map<string, FleetPartnerRecord>();
   private readonly affiliations = new Map<
     string,
@@ -141,22 +82,27 @@ export class FleetPartnerService implements OnModuleInit {
     actor: FleetPartnerAuditActor = this.defaultAuditActor(),
     requestId?: string,
   ) {
-    this.assertPartnershipType(command.partnershipType);
+    const payload = this.requireCommand(command, "fleet partner");
+    const partnershipType = this.requireNonBlank(
+      payload.partnershipType,
+      "partnershipType",
+    );
+    this.assertPartnershipType(partnershipType);
     const businessRegistrationNo = this.normalizeRegistrationNumber(
-      command.businessRegistrationNo,
+      payload.businessRegistrationNo,
     );
     this.assertBusinessRegistrationAvailable(businessRegistrationNo);
 
     const now = new Date().toISOString();
     const created: FleetPartnerRecord = {
       fleetPartnerId: `fleet-${randomUUID().slice(0, 8)}`,
-      legalName: this.requireNonBlank(command.legalName, "legalName"),
-      displayName: this.requireNonBlank(command.displayName, "displayName"),
+      legalName: this.requireNonBlank(payload.legalName, "legalName"),
+      displayName: this.requireNonBlank(payload.displayName, "displayName"),
       businessRegistrationNo,
-      contactName: this.requireNonBlank(command.contactName, "contactName"),
-      contactPhone: this.requireNonBlank(command.contactPhone, "contactPhone"),
-      active: command.active ?? true,
-      partnershipType: command.partnershipType,
+      contactName: this.requireNonBlank(payload.contactName, "contactName"),
+      contactPhone: this.requireNonBlank(payload.contactPhone, "contactPhone"),
+      active: payload.active ?? true,
+      partnershipType,
       createdAt: now,
       updatedAt: now,
     };
@@ -184,44 +130,45 @@ export class FleetPartnerService implements OnModuleInit {
     actor: FleetPartnerAuditActor = this.defaultAuditActor(),
     requestId?: string,
   ) {
+    const payload = this.requireCommand(command, "fleet partner update");
     const current = this.requireFleetPartner(fleetPartnerId);
     const nextRegistrationNo =
-      command.businessRegistrationNo === undefined
+      payload.businessRegistrationNo === undefined
         ? current.businessRegistrationNo
-        : this.normalizeRegistrationNumber(command.businessRegistrationNo);
+        : this.normalizeRegistrationNumber(payload.businessRegistrationNo);
     this.assertBusinessRegistrationAvailable(
       nextRegistrationNo,
       fleetPartnerId,
     );
-    if (command.partnershipType !== undefined) {
-      this.assertPartnershipType(command.partnershipType);
+    if (payload.partnershipType !== undefined) {
+      this.assertPartnershipType(payload.partnershipType);
     }
 
     const updated: FleetPartnerRecord = {
       ...current,
-      ...(command.legalName !== undefined && {
-        legalName: this.requireNonBlank(command.legalName, "legalName"),
+      ...(payload.legalName !== undefined && {
+        legalName: this.requireNonBlank(payload.legalName, "legalName"),
       }),
-      ...(command.displayName !== undefined && {
-        displayName: this.requireNonBlank(command.displayName, "displayName"),
+      ...(payload.displayName !== undefined && {
+        displayName: this.requireNonBlank(payload.displayName, "displayName"),
       }),
-      ...(command.businessRegistrationNo !== undefined && {
+      ...(payload.businessRegistrationNo !== undefined && {
         businessRegistrationNo: nextRegistrationNo,
       }),
-      ...(command.contactName !== undefined && {
-        contactName: this.requireNonBlank(command.contactName, "contactName"),
+      ...(payload.contactName !== undefined && {
+        contactName: this.requireNonBlank(payload.contactName, "contactName"),
       }),
-      ...(command.contactPhone !== undefined && {
+      ...(payload.contactPhone !== undefined && {
         contactPhone: this.requireNonBlank(
-          command.contactPhone,
+          payload.contactPhone,
           "contactPhone",
         ),
       }),
-      ...(command.active !== undefined && {
-        active: command.active,
+      ...(payload.active !== undefined && {
+        active: payload.active,
       }),
-      ...(command.partnershipType !== undefined && {
-        partnershipType: command.partnershipType,
+      ...(payload.partnershipType !== undefined && {
+        partnershipType: payload.partnershipType,
       }),
       updatedAt: new Date().toISOString(),
     };
@@ -280,6 +227,7 @@ export class FleetPartnerService implements OnModuleInit {
     actor: FleetPartnerAuditActor = this.defaultAuditActor(),
     requestId?: string,
   ) {
+    const payload = this.requireCommand(command, "driver fleet affiliation");
     const normalizedDriverId = this.requireNonBlank(driverId, "driverId");
     const driverProfile =
       this.driverProfileService.findProfileForDriver(normalizedDriverId);
@@ -292,16 +240,20 @@ export class FleetPartnerService implements OnModuleInit {
       );
     }
 
-    this.assertAffiliationType(command.affiliationType);
-    const fleetPartner = this.requireFleetPartner(command.fleetPartnerId);
+    const affiliationType = this.requireNonBlank(
+      payload.affiliationType,
+      "affiliationType",
+    );
+    this.assertAffiliationType(affiliationType);
+    const fleetPartner = this.requireFleetPartner(payload.fleetPartnerId);
     const effectiveFrom = this.normalizeIsoDate(
-      command.effectiveFrom,
+      payload.effectiveFrom,
       "effectiveFrom",
     );
     const effectiveUntil =
-      command.effectiveUntil === undefined || command.effectiveUntil === null
+      payload.effectiveUntil === undefined || payload.effectiveUntil === null
         ? null
-        : this.normalizeIsoDate(command.effectiveUntil, "effectiveUntil");
+        : this.normalizeIsoDate(payload.effectiveUntil, "effectiveUntil");
 
     if (effectiveUntil !== null && effectiveUntil <= effectiveFrom) {
       throw new ApiRequestError(
@@ -314,7 +266,7 @@ export class FleetPartnerService implements OnModuleInit {
 
     this.assertAffiliationDoesNotOverlap(
       normalizedDriverId,
-      command.affiliationType,
+      affiliationType,
       effectiveFrom,
       effectiveUntil,
     );
@@ -324,7 +276,7 @@ export class FleetPartnerService implements OnModuleInit {
       affiliationId: `dfa-${randomUUID().slice(0, 8)}`,
       driverId: normalizedDriverId,
       fleetPartnerId: fleetPartner.fleetPartnerId,
-      affiliationType: command.affiliationType,
+      affiliationType,
       effectiveFrom,
       effectiveUntil,
       createdAt: now,
@@ -360,25 +312,15 @@ export class FleetPartnerService implements OnModuleInit {
   }
 
   private getAllPartners() {
-    const merged = new Map<string, FleetPartnerRecord>();
-    for (const partner of this.seedPartners.values()) {
-      merged.set(partner.fleetPartnerId, this.clonePartner(partner));
-    }
-    for (const partner of this.partners.values()) {
-      merged.set(partner.fleetPartnerId, this.clonePartner(partner));
-    }
-    return [...merged.values()];
+    return [...this.partners.values()].map((partner) =>
+      this.clonePartner(partner),
+    );
   }
 
   private getAllAffiliations() {
-    const merged = new Map<string, DriverFleetAffiliationRecord>();
-    for (const affiliation of this.seedAffiliations.values()) {
-      merged.set(affiliation.affiliationId, this.cloneAffiliation(affiliation));
-    }
-    for (const affiliation of this.affiliations.values()) {
-      merged.set(affiliation.affiliationId, this.cloneAffiliation(affiliation));
-    }
-    return [...merged.values()];
+    return [...this.affiliations.values()].map((affiliation) =>
+      this.cloneAffiliation(affiliation),
+    );
   }
 
   private requireFleetPartner(fleetPartnerId: string) {
@@ -386,9 +328,7 @@ export class FleetPartnerService implements OnModuleInit {
       fleetPartnerId,
       "fleetPartnerId",
     );
-    const existing =
-      this.partners.get(normalizedFleetPartnerId) ??
-      this.seedPartners.get(normalizedFleetPartnerId);
+    const existing = this.partners.get(normalizedFleetPartnerId);
     if (!existing) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -506,11 +446,11 @@ export class FleetPartnerService implements OnModuleInit {
     };
   }
 
-  private normalizeRegistrationNumber(value: string) {
+  private normalizeRegistrationNumber(value: unknown) {
     return this.requireNonBlank(value, "businessRegistrationNo").toUpperCase();
   }
 
-  private normalizeIsoDate(value: string, field: string) {
+  private normalizeIsoDate(value: unknown, field: string) {
     const normalized = this.requireNonBlank(value, field);
     const date = new Date(normalized);
     if (Number.isNaN(date.getTime())) {
@@ -524,7 +464,29 @@ export class FleetPartnerService implements OnModuleInit {
     return date.toISOString();
   }
 
-  private requireNonBlank(value: string, field: string) {
+  private requireCommand<T extends object>(
+    command: T | null | undefined,
+    resourceName: string,
+  ): T {
+    if (!command || typeof command !== "object" || Array.isArray(command)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_REQUEST_BODY",
+        `The ${resourceName} payload must be a JSON object.`,
+      );
+    }
+    return command;
+  }
+
+  private requireNonBlank(value: unknown, field: string) {
+    if (typeof value !== "string") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIELD_REQUIRED",
+        `${field} is required.`,
+        { field },
+      );
+    }
     const normalized = value.trim();
     if (!normalized) {
       throw new ApiRequestError(
