@@ -124,8 +124,8 @@ The canonical delivery tuple for this unblock task is:
 | --- | --- |
 | owner branch | `codex/gap-verify-unblock-planning-decision` |
 | pushed remote | `origin` |
-| pushed commit | `47601623b318394a076cff36ceb27fb2cca7836b` |
-| commit subject | `docs(GAP-VERIFY-UNBLOCK-PLANNING-DECISION): record delivery evidence` |
+| canonical content commit | `3a53159ad29e0bc741e70ac15efbee7cf2b07fc4` |
+| canonical content subject | `docs(GAP-VERIFY-UNBLOCK-PLANNING-DECISION): align artifact with machine truth` |
 | owner | `Codex` |
 | reviewer | `Codex2` |
 
@@ -135,8 +135,12 @@ Clarification for the failed review:
   `c2623617dc0e49107a10b4451b380a279cc91cee` is a separate worker branch and is
   **not** the assigned owner branch for this task.
 - Review and closeout evidence for `GAP-VERIFY-UNBLOCK-PLANNING-DECISION` must
-  therefore be checked against `origin/codex/gap-verify-unblock-planning-decision`
-  at `47601623b318394a076cff36ceb27fb2cca7836b`.
+  therefore be checked against the assigned owner branch
+  `origin/codex/gap-verify-unblock-planning-decision`, not a sibling lane
+  branch. The branch head may advance with evidence-only commits after the
+  canonical content commit above; reviewers should confirm the live head with
+  `git rev-parse origin/codex/gap-verify-unblock-planning-decision` when
+  replaying review.
 
 ## 7. Acceptance Mapping
 
