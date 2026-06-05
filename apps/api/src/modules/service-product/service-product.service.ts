@@ -20,6 +20,26 @@ import {
   SERVICE_TIMING_VALUES,
 } from "./service-product.types";
 
+type NormalizedCreateServiceProductCommand = {
+  serviceProductId?: string;
+  serviceProductType: string;
+  displayName: string;
+  description?: string | null;
+  timing: string;
+  active?: boolean;
+  defaultBillingMode: string;
+  defaultProofRequirements?: string[];
+};
+
+type NormalizedUpdateServiceProductCommand = {
+  displayName?: string;
+  description?: string | null;
+  timing?: string;
+  active?: boolean;
+  defaultBillingMode?: string;
+  defaultProofRequirements?: string[];
+};
+
 @Injectable()
 export class ServiceProductService implements OnModuleInit {
   private sequence = 1;
@@ -71,11 +91,12 @@ export class ServiceProductService implements OnModuleInit {
     requestId?: string,
     options?: { captureAudit?: boolean },
   ) {
-    this.assertValidType(command.serviceProductType);
-    this.assertValidTiming(command.timing);
-    this.assertValidBillingMode(command.defaultBillingMode);
+    const normalizedCommand = this.normalizeCreateCommand(command);
+    this.assertValidType(normalizedCommand.serviceProductType);
+    this.assertValidTiming(normalizedCommand.timing);
+    this.assertValidBillingMode(normalizedCommand.defaultBillingMode);
 
-    const serviceProductId = this.resolveServiceProductId(command);
+    const serviceProductId = this.resolveServiceProductId(normalizedCommand);
     if (
       this.records.some(
         (record) => record.serviceProductId === serviceProductId,
@@ -90,31 +111,32 @@ export class ServiceProductService implements OnModuleInit {
     }
     if (
       this.records.some(
-        (record) => record.serviceProductType === command.serviceProductType,
+        (record) =>
+          record.serviceProductType === normalizedCommand.serviceProductType,
       )
     ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "CONFLICT",
         "Service product type already exists.",
-        { serviceProductType: command.serviceProductType },
+        { serviceProductType: normalizedCommand.serviceProductType },
       );
     }
 
     const now = new Date().toISOString();
     const record: ServiceProductRecord = {
       serviceProductId,
-      serviceProductType: command.serviceProductType,
+      serviceProductType: normalizedCommand.serviceProductType,
       displayName: this.normalizeRequiredString(
-        command.displayName,
+        normalizedCommand.displayName,
         "displayName",
       ),
-      description: this.normalizeOptionalString(command.description),
-      timing: command.timing,
-      active: command.active ?? true,
-      defaultBillingMode: command.defaultBillingMode,
+      description: this.normalizeOptionalString(normalizedCommand.description),
+      timing: normalizedCommand.timing,
+      active: normalizedCommand.active ?? true,
+      defaultBillingMode: normalizedCommand.defaultBillingMode,
       defaultProofRequirements: this.normalizeProofRequirements(
-        command.defaultProofRequirements,
+        normalizedCommand.defaultProofRequirements,
       ),
       createdAt: now,
       updatedAt: now,
@@ -168,32 +190,38 @@ export class ServiceProductService implements OnModuleInit {
     requestId?: string,
     options?: { captureAudit?: boolean },
   ) {
+    const normalizedCommand = this.normalizeUpdateCommand(command);
     const record = this.require(serviceProductId);
 
-    if (command.timing !== undefined) {
-      this.assertValidTiming(command.timing);
+    if (normalizedCommand.timing !== undefined) {
+      this.assertValidTiming(normalizedCommand.timing);
     }
-    if (command.defaultBillingMode !== undefined) {
-      this.assertValidBillingMode(command.defaultBillingMode);
+    if (normalizedCommand.defaultBillingMode !== undefined) {
+      this.assertValidBillingMode(normalizedCommand.defaultBillingMode);
     }
 
     const updated: ServiceProductRecord = {
       ...record,
       displayName:
-        command.displayName !== undefined
-          ? this.normalizeRequiredString(command.displayName, "displayName")
+        normalizedCommand.displayName !== undefined
+          ? this.normalizeRequiredString(
+              normalizedCommand.displayName,
+              "displayName",
+            )
           : record.displayName,
       description:
-        command.description !== undefined
-          ? this.normalizeOptionalString(command.description)
+        normalizedCommand.description !== undefined
+          ? this.normalizeOptionalString(normalizedCommand.description)
           : record.description,
-      timing: command.timing ?? record.timing,
-      active: command.active ?? record.active,
+      timing: normalizedCommand.timing ?? record.timing,
+      active: normalizedCommand.active ?? record.active,
       defaultBillingMode:
-        command.defaultBillingMode ?? record.defaultBillingMode,
+        normalizedCommand.defaultBillingMode ?? record.defaultBillingMode,
       defaultProofRequirements:
-        command.defaultProofRequirements !== undefined
-          ? this.normalizeProofRequirements(command.defaultProofRequirements)
+        normalizedCommand.defaultProofRequirements !== undefined
+          ? this.normalizeProofRequirements(
+              normalizedCommand.defaultProofRequirements,
+            )
           : [...record.defaultProofRequirements],
       updatedAt: new Date().toISOString(),
     };
@@ -258,7 +286,9 @@ export class ServiceProductService implements OnModuleInit {
     return maxSeq + 1;
   }
 
-  private resolveServiceProductId(command: CreateServiceProductCommand) {
+  private resolveServiceProductId(
+    command: NormalizedCreateServiceProductCommand,
+  ) {
     const providedId = this.normalizeOptionalString(command.serviceProductId);
     if (providedId) {
       return providedId;
@@ -304,6 +334,119 @@ export class ServiceProductService implements OnModuleInit {
     };
   }
 
+  private normalizeCreateCommand(
+    command: CreateServiceProductCommand,
+  ): NormalizedCreateServiceProductCommand {
+    const payload = this.requireObject(command, "body");
+    const normalized: NormalizedCreateServiceProductCommand = {
+      serviceProductType: this.readRequiredString(
+        payload,
+        "serviceProductType",
+        "serviceProductType",
+      ),
+      displayName: this.readRequiredString(
+        payload,
+        "displayName",
+        "displayName",
+      ),
+      timing: this.readRequiredString(payload, "timing", "timing"),
+      defaultBillingMode: this.readRequiredString(
+        payload,
+        "defaultBillingMode",
+        "defaultBillingMode",
+      ),
+    };
+
+    const serviceProductId = this.readOptionalString(
+      payload,
+      "serviceProductId",
+      "serviceProductId",
+    );
+    if (serviceProductId !== undefined) {
+      normalized.serviceProductId = serviceProductId;
+    }
+
+    const description = this.readOptionalNullableString(
+      payload,
+      "description",
+      "description",
+    );
+    if (description !== undefined) {
+      normalized.description = description;
+    }
+
+    const active = this.readOptionalBoolean(payload, "active", "active");
+    if (active !== undefined) {
+      normalized.active = active;
+    }
+
+    const defaultProofRequirements = this.readOptionalStringArray(
+      payload,
+      "defaultProofRequirements",
+      "defaultProofRequirements",
+    );
+    if (defaultProofRequirements !== undefined) {
+      normalized.defaultProofRequirements = defaultProofRequirements;
+    }
+
+    return normalized;
+  }
+
+  private normalizeUpdateCommand(
+    command: UpdateServiceProductCommand,
+  ): NormalizedUpdateServiceProductCommand {
+    const payload = this.requireObject(command, "body");
+    const normalized: NormalizedUpdateServiceProductCommand = {};
+
+    const displayName = this.readOptionalString(
+      payload,
+      "displayName",
+      "displayName",
+    );
+    if (displayName !== undefined) {
+      normalized.displayName = displayName;
+    }
+
+    const description = this.readOptionalNullableString(
+      payload,
+      "description",
+      "description",
+    );
+    if (description !== undefined) {
+      normalized.description = description;
+    }
+
+    const timing = this.readOptionalString(payload, "timing", "timing");
+    if (timing !== undefined) {
+      normalized.timing = timing;
+    }
+
+    const active = this.readOptionalBoolean(payload, "active", "active");
+    if (active !== undefined) {
+      normalized.active = active;
+    }
+
+    const defaultBillingMode = this.readOptionalString(
+      payload,
+      "defaultBillingMode",
+      "defaultBillingMode",
+    );
+    if (defaultBillingMode !== undefined) {
+      normalized.defaultBillingMode = defaultBillingMode;
+    }
+
+    const defaultProofRequirements = this.readOptionalStringArray(
+      payload,
+      "defaultProofRequirements",
+      "defaultProofRequirements",
+    );
+    if (defaultProofRequirements !== undefined) {
+      normalized.defaultProofRequirements = defaultProofRequirements;
+    }
+
+    return normalized;
+  }
+
   private normalizeRequiredString(value: string, field: string) {
     const normalized = value.trim();
     if (!normalized) {
@@ -337,6 +480,116 @@ export class ServiceProductService implements OnModuleInit {
     }
 
     return [...unique];
+  }
+
+  private requireObject(value: unknown, field: string) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        `${field} must be an object.`,
+        { field },
+      );
+    }
+
+    return value as Record<string, unknown>;
+  }
+
+  private readRequiredString(
+    payload: Record<string, unknown>,
+    key: string,
+    field: string,
+  ) {
+    const value = payload[key];
+    if (value === undefined) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        `${field} is required.`,
+        { field },
+      );
+    }
+    if (typeof value !== "string") {
+      this.throwTypeError(field, "string");
+    }
+    return value;
+  }
+
+  private readOptionalString(
+    payload: Record<string, unknown>,
+    key: string,
+    field: string,
+  ) {
+    const value = payload[key];
+    if (value === undefined) {
+      return undefined;
+    }
+    if (typeof value !== "string") {
+      this.throwTypeError(field, "string");
+    }
+    return value;
+  }
+
+  private readOptionalNullableString(
+    payload: Record<string, unknown>,
+    key: string,
+    field: string,
+  ) {
+    const value = payload[key];
+    if (value === undefined) {
+      return undefined;
+    }
+    if (value === null) {
+      return null;
+    }
+    if (typeof value !== "string") {
+      this.throwTypeError(field, "string or null");
+    }
+    return value;
+  }
+
+  private readOptionalBoolean(
+    payload: Record<string, unknown>,
+    key: string,
+    field: string,
+  ) {
+    const value = payload[key];
+    if (value === undefined) {
+      return undefined;
+    }
+    if (typeof value !== "boolean") {
+      this.throwTypeError(field, "boolean");
+    }
+    return value;
+  }
+
+  private readOptionalStringArray(
+    payload: Record<string, unknown>,
+    key: string,
+    field: string,
+  ) {
+    const value = payload[key];
+    if (value === undefined) {
+      return undefined;
+    }
+    if (!Array.isArray(value)) {
+      this.throwTypeError(field, "string array");
+    }
+    for (const item of value) {
+      if (typeof item !== "string") {
+        this.throwTypeError(field, "string array");
+      }
+    }
+    return value;
+  }
+
+  private throwTypeError(field: string, expected: string): never {
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "VALIDATION_ERROR",
+      `${field} must be ${expected}.`,
+      { field, expected },
+    );
   }
 
   private assertValidType(type: string): asserts type is ServiceProductType {
