@@ -225,6 +225,8 @@ export type PlatformAdminRouteKey =
   | "partner-detail"
   | "users"
   | "fleet"
+  | "fleet-partners"
+  | "fleet-partner-detail"
   | "switchboard"
   | "pricing"
   | "payments"
@@ -242,6 +244,7 @@ export type LocalizedText = { zh: string; en: string };
 export type AssistantEntityKind =
   | "tenant"
   | "partner-entry"
+  | "fleet-partner"
   | "platform-user"
   | "vehicle"
   | "driver"

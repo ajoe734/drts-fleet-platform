@@ -140,6 +140,13 @@ const routes: NavRoute[] = [
     en: "Fleet & Compliance",
   },
   {
+    key: "fleet-partners",
+    icon: Handshake,
+    section: "fleet",
+    zh: "車隊夥伴",
+    en: "Fleet Partners",
+  },
+  {
     key: "switchboard",
     icon: Radio,
     section: "commerce",
