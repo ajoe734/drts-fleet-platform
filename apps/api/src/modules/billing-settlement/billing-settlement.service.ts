@@ -83,6 +83,8 @@ type SettlementTripSnapshot = {
   businessDispatchSubtype:
     | "enterprise_dispatch"
     | "credit_card_airport_transfer";
+  costCenterCode: string | null;
+  riderId: string | null;
   partnerId: string | null;
   partnerProgramId: string | null;
   partnerEntrySlug: string | null;
@@ -178,6 +180,8 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     eligibleForDriverStatement: true,
     serviceBucket: "business_dispatch",
     businessDispatchSubtype: "enterprise_dispatch",
+    costCenterCode: "CC-SALES",
+    riderId: "rider-demo-001",
     partnerId: null,
     partnerProgramId: null,
     partnerEntrySlug: null,
@@ -209,6 +213,8 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     eligibleForDriverStatement: true,
     serviceBucket: "business_dispatch",
     businessDispatchSubtype: "credit_card_airport_transfer",
+    costCenterCode: "CC-TRAVEL",
+    riderId: "rider-demo-002",
     partnerId: "partner-bank-demo-001",
     partnerProgramId: "program-airport-alpha",
     partnerEntrySlug: "bank-demo-alpha-airport",
@@ -240,6 +246,8 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     eligibleForDriverStatement: true,
     serviceBucket: "business_dispatch",
     businessDispatchSubtype: "enterprise_dispatch",
+    costCenterCode: "CC-FINANCE",
+    riderId: "rider-demo-003",
     partnerId: null,
     partnerProgramId: null,
     partnerEntrySlug: null,
@@ -782,10 +790,10 @@ export class BillingSettlementService implements OnModuleInit {
         orderId: trip.orderId,
         tripId: trip.settlementId,
         serviceProduct: trip.businessDispatchSubtype ?? "enterprise_dispatch",
-        costCenterCode: null,
+        costCenterCode: trip.costCenterCode,
         tenantServiceProgramId:
           trip.partnerProgramId ?? DEFAULT_TENANT_SERVICE_PROGRAM_ID,
-        riderId: null,
+        riderId: trip.riderId,
         baseAmountMinor: trip.grossEarning.amountMinor,
         extraAmountMinor: trip.subsidy.amountMinor,
         discountAmountMinor: trip.platformFundedDiscount.amountMinor,
@@ -1952,6 +1960,8 @@ export class BillingSettlementService implements OnModuleInit {
       serviceBucket: "business_dispatch",
       businessDispatchSubtype:
         trip.businessDispatchSubtype ?? "enterprise_dispatch",
+      costCenterCode: trip.costCenterCode,
+      riderId: trip.riderId,
       partnerId: trip.partnerId,
       partnerProgramId: trip.partnerProgramId,
       partnerEntrySlug: trip.partnerEntrySlug,

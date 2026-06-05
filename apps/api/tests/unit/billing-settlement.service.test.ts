@@ -313,6 +313,8 @@ describe("BillingSettlementService settlement matrix", () => {
       {
         periodMonth: "2026-03",
         serviceProduct: "credit_card_airport_transfer",
+        costCenterCode: "cc-travel",
+        riderId: "rider-demo-002",
         tenantServiceProgramId: "program-airport-alpha",
       },
     );
@@ -320,6 +322,8 @@ describe("BillingSettlementService settlement matrix", () => {
       expect.objectContaining({
         orderId: "order-demo-032",
         serviceProduct: "credit_card_airport_transfer",
+        costCenterCode: "CC-TRAVEL",
+        riderId: "rider-demo-002",
         tenantServiceProgramId: "program-airport-alpha",
         discountAmountMinor: 20000,
         payableAmountMinor: 60000,

@@ -37,6 +37,8 @@ export type LiveSettlementTripRecord = {
   orderSource: OwnedOrderRecord["orderSource"];
   serviceBucket: OwnedOrderRecord["serviceBucket"];
   businessDispatchSubtype: OwnedOrderRecord["businessDispatchSubtype"];
+  costCenterCode: string | null;
+  riderId: string | null;
   partnerId: string | null;
   partnerProgramId: string | null;
   partnerEntrySlug: string | null;
@@ -234,6 +236,8 @@ export class BillingSettlementRepository {
         orderSource: order.orderSource,
         serviceBucket: order.serviceBucket,
         businessDispatchSubtype: order.businessDispatchSubtype,
+        costCenterCode: order.costCenter,
+        riderId: order.passenger.passengerId ?? null,
         partnerId: order.partnerId,
         partnerProgramId: order.partnerProgramId,
         partnerEntrySlug: order.partnerEntrySlug,
@@ -552,6 +556,8 @@ export class BillingSettlementRepository {
         orderSource: order.orderSource,
         serviceBucket: order.serviceBucket,
         businessDispatchSubtype: order.businessDispatchSubtype,
+        costCenterCode: order.costCenter,
+        riderId: order.passenger.passengerId ?? null,
         partnerId: order.partnerId,
         partnerProgramId: order.partnerProgramId,
         partnerEntrySlug: order.partnerEntrySlug,
