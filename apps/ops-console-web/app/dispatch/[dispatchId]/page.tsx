@@ -406,7 +406,7 @@ function getCandidateGate(
 
   if (driver && !driver.licensesValid) {
     return {
-      label: "license_invalid",
+      label: text(locale, "dispatch.detail.gate.licenseInvalid"),
       tone: "danger" as const,
     };
   }
@@ -423,27 +423,27 @@ function getCandidateGate(
 
   if (!candidate.serviceBuckets.includes(order.serviceBucket)) {
     return {
-      label: "service bucket gap",
+      label: text(locale, "dispatch.detail.gate.serviceBucketGap"),
       tone: "warn" as const,
     };
   }
 
   if (locationState === "no_location") {
     return {
-      label: "no location",
+      label: text(locale, "dispatch.detail.gate.noLocation"),
       tone: "warn" as const,
     };
   }
 
   if (locationState === "stale") {
     return {
-      label: "location stale",
+      label: text(locale, "dispatch.detail.gate.locationStale"),
       tone: "warn" as const,
     };
   }
 
   return {
-    label: "ok",
+    label: text(locale, "dispatch.detail.gate.ok"),
     tone: "success" as const,
   };
 }
@@ -2162,7 +2162,7 @@ async function renderOwnedWorkspace({
         gateTone: gate.tone,
         gateCell: (
           <Pill theme={theme} tone={gate.tone} dot>
-            {formatOpsCodeLabel(locale, gate.label)}
+            {gate.label}
           </Pill>
         ),
         score: getCandidateScore(candidate, order, driver),

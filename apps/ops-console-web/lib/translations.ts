@@ -553,6 +553,11 @@ const en = {
   "dispatch.workflow.detail.timelineEmpty":
     "No dispatch trace entries are available for this order yet.",
   "dispatch.detail.manualReview": "Manual review",
+  "dispatch.detail.gate.licenseInvalid": "License invalid",
+  "dispatch.detail.gate.serviceBucketGap": "Service bucket gap",
+  "dispatch.detail.gate.noLocation": "No location",
+  "dispatch.detail.gate.locationStale": "Location stale",
+  "dispatch.detail.gate.ok": "OK",
   "dispatch.detail.workflow.created": "Created",
   "dispatch.detail.workflow.queued": "Queued",
   "dispatch.detail.workflow.broadcasting": "Broadcasting",
@@ -2291,7 +2296,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.detail.notes": "營運備註",
   "dispatch.workflow.detail.actionPanel": "操作面板",
   "dispatch.workflow.detail.actionPanelHint":
-    "在此工作區完成指派、override、重派與例外決策，並留下稽核脈絡。",
+    "在此工作區完成指派、車資覆寫、重派與例外決策，並留下稽核脈絡。",
   "dispatch.workflow.detail.ownedAuthorityHint":
     "這筆訂單的指派權責維持在本地派車工作區內處理。",
   "dispatch.workflow.detail.forwardedAuthorityHint":
@@ -2316,6 +2321,11 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.detail.timelineEmpty":
     "此訂單目前尚無可顯示的 dispatch trace。",
   "dispatch.detail.manualReview": "人工覆核",
+  "dispatch.detail.gate.licenseInvalid": "證照無效",
+  "dispatch.detail.gate.serviceBucketGap": "服務桶不符",
+  "dispatch.detail.gate.noLocation": "無位置回報",
+  "dispatch.detail.gate.locationStale": "位置過舊",
+  "dispatch.detail.gate.ok": "正常",
   "dispatch.detail.workflow.created": "建立",
   "dispatch.detail.workflow.queued": "待派遣",
   "dispatch.detail.workflow.broadcasting": "廣播中",
@@ -2371,7 +2381,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.forwardedActivity.reconciliation": "對帳",
   "dispatch.detail.forwardedActivity.reconciliationBody":
     "對帳 {status} · {mismatchCount} 筆不符 · 原因 {reason}。",
-  "dispatch.detail.override.reviewerCanRelease": "reviewer 可放行",
+  "dispatch.detail.override.reviewerCanRelease": "覆核人員可放行",
   "dispatch.detail.override.keepExceptionReview": "需維持例外覆核",
   "dispatch.detail.override.fareOverride": "車資覆寫",
   "dispatch.detail.override.applied": "已套用",
@@ -2433,7 +2443,8 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.refresh.ctaSource": "畫面 CTA 以 availableActions 為準",
   "dispatch.detail.refresh.candidates": "{count} 位候選",
   "dispatch.detail.refresh.adapter": "轉接器 {status}",
-  "dispatch.detail.smoke.subtitle": "供 smoke parity 驗證使用的備援工作區。",
+  "dispatch.detail.smoke.subtitle":
+    "供 smoke parity 驗證使用的人工備援工作區。",
   "dispatch.detail.smoke.candidateBoard": "候選面板",
   "dispatch.detail.smoke.dispatchId": "派遣 ID",
   "dispatch.detail.smoke.state": "狀態",
@@ -2467,7 +2478,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.owned.compliance.deviceBindingValue":
     "{liveCount}/{totalCount} live · {eligibleCount}/{totalCount} eligible",
   "dispatch.detail.owned.compliance.fareQuoted": "fare quoted",
-  "dispatch.detail.owned.compliance.overrideAllowed": "override allowed",
+  "dispatch.detail.owned.compliance.overrideAllowed": "允許車資覆寫",
   "dispatch.detail.owned.compliance.notNeeded": "not needed",
   "dispatch.detail.owned.compliance.manual": "人工",
   "dispatch.detail.forwarded.inspectAdapter": "檢視 adapter",
@@ -2480,7 +2491,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.forwarded.bannerTitle":
     "此訂單為 forwarded mirror · 不可假裝為 owned",
   "dispatch.detail.forwarded.bannerBody":
-    "本地沒有 owned 指派。所有 mutation 必須透過 reconciliation issue 走平台 finance owner，本地僅同步外部狀態。",
+    "本地沒有自有指派。所有異動都必須透過對帳問題交由平台財務權責方處理，本地僅同步外部狀態。",
   "dispatch.detail.forwarded.adapterDegradedTitle": "轉接器相依降級",
   "dispatch.detail.forwarded.adapterDegradedBody":
     "{platformCode} 轉接器為 {status}{errorSuffix}；廣播與即時同步可能不可用。",
@@ -2498,7 +2509,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.forwarded.settlement": "settlement",
   "dispatch.detail.forwarded.syncState": "sync state",
   "dispatch.detail.forwarded.lastCallback": "last callback",
-  "dispatch.detail.forwarded.reconciliation": "reconciliation",
+  "dispatch.detail.forwarded.reconciliation": "對帳",
   "dispatch.detail.forwarded.reconciliationValue":
     "{status} · {count} mismatch",
   "dispatch.detail.forwarded.manualFallback": "人工備援",
