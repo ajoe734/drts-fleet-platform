@@ -225,6 +225,7 @@ export type PlatformAdminRouteKey =
   | "partner-detail"
   | "users"
   | "fleet"
+  | "vehicle-eligibility"
   | "switchboard"
   | "pricing"
   | "payments"

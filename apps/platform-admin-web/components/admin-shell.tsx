@@ -140,6 +140,13 @@ const routes: NavRoute[] = [
     en: "Fleet & Compliance",
   },
   {
+    key: "vehicle-eligibility",
+    icon: Truck,
+    section: "fleet",
+    zh: "車輛資格矩陣",
+    en: "Vehicle Eligibility Matrix",
+  },
+  {
     key: "switchboard",
     icon: Radio,
     section: "commerce",
