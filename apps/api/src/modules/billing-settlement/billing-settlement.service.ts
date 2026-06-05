@@ -31,6 +31,9 @@ import type {
   TenantInvoiceListData,
   TenantInvoiceRecord,
   TenantInvoiceRuntimeRecord,
+  TenantPayableLineItem,
+  TenantPayableSummary,
+  TenantPayableInvoiceStatus,
   UiRefreshMetadata,
   UpdateTenantBillingProfileCommand,
 } from "@drts/contracts";
@@ -61,6 +64,7 @@ const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_CURRENCY = "NTD";
 const LIVE_SETTLEMENT_PRICING_VERSION = "tenant-pricing-live";
 const TENANT_REFRESH_INTERVAL_MS = 30_000;
+const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
 
 type SettlementTripSnapshot = {
   settlementId: string;
@@ -703,6 +707,151 @@ export class BillingSettlementService implements OnModuleInit {
       refresh,
       ...(emptyState ? { emptyState } : {}),
     };
+  }
+
+  async getTenantPayableSummary(
+    tenantId: string,
+    periodMonth?: string,
+  ): Promise<TenantPayableSummary> {
+    const resolvedPeriodMonth = await this.resolveTenantSettlementPeriodMonth(
+      tenantId,
+      periodMonth,
+    );
+    const lineItems = await this.listTenantPayableLineItems(tenantId, {
+      periodMonth: resolvedPeriodMonth,
+    });
+    const summaryInvoiceStatus = this.resolveTenantInvoiceStatusForPeriod(
+      tenantId,
+      resolvedPeriodMonth,
+    );
+
+    return {
+      tenantId,
+      periodMonth: resolvedPeriodMonth,
+      totalTrips: lineItems.length,
+      completedTrips: lineItems.length,
+      cancelledTrips: 0,
+      noShowTrips: 0,
+      grossAmountMinor: lineItems.reduce(
+        (sum, item) => sum + item.baseAmountMinor,
+        0,
+      ),
+      adjustmentAmountMinor: lineItems.reduce(
+        (sum, item) => sum + item.extraAmountMinor - item.discountAmountMinor,
+        0,
+      ),
+      taxAmountMinor: lineItems.reduce(
+        (sum, item) => sum + item.taxAmountMinor,
+        0,
+      ),
+      payableAmountMinor: lineItems.reduce(
+        (sum, item) => sum + item.payableAmountMinor,
+        0,
+      ),
+      invoiceStatus: summaryInvoiceStatus,
+    };
+  }
+
+  async listTenantPayableLineItems(
+    tenantId: string,
+    query: {
+      periodMonth?: string;
+      serviceProduct?: string;
+      costCenterCode?: string;
+      tenantServiceProgramId?: string;
+      riderId?: string;
+      invoiceStatus?: string;
+    } = {},
+  ): Promise<TenantPayableLineItem[]> {
+    const resolvedPeriodMonth = await this.resolveTenantSettlementPeriodMonth(
+      tenantId,
+      query.periodMonth,
+    );
+    const { periodStart, periodEnd } =
+      this.getPeriodMonthRange(resolvedPeriodMonth);
+    const invoiceStatusByOrder = this.buildInvoiceStatusByOrder(tenantId);
+    const lines = (
+      await this.listTenantInvoiceTripsInPeriod(
+        tenantId,
+        periodStart,
+        periodEnd,
+      )
+    ).map(
+      (trip): TenantPayableLineItem => ({
+        lineItemId: `tenant-payable-${trip.settlementId}`,
+        orderId: trip.orderId,
+        tripId: trip.settlementId,
+        serviceProduct: trip.businessDispatchSubtype ?? "enterprise_dispatch",
+        costCenterCode: null,
+        tenantServiceProgramId:
+          trip.partnerProgramId ?? DEFAULT_TENANT_SERVICE_PROGRAM_ID,
+        riderId: null,
+        baseAmountMinor: trip.grossEarning.amountMinor,
+        extraAmountMinor: trip.subsidy.amountMinor,
+        discountAmountMinor: trip.platformFundedDiscount.amountMinor,
+        taxAmountMinor: 0,
+        payableAmountMinor:
+          trip.grossEarning.amountMinor +
+          trip.subsidy.amountMinor -
+          trip.platformFundedDiscount.amountMinor,
+      }),
+    );
+
+    return lines.filter((line) => {
+      if (
+        query.serviceProduct &&
+        line.serviceProduct !== query.serviceProduct.trim()
+      ) {
+        return false;
+      }
+      if (
+        query.costCenterCode &&
+        line.costCenterCode !== query.costCenterCode.trim().toUpperCase()
+      ) {
+        return false;
+      }
+      if (
+        query.tenantServiceProgramId &&
+        line.tenantServiceProgramId !== query.tenantServiceProgramId.trim()
+      ) {
+        return false;
+      }
+      if (query.riderId && line.riderId !== query.riderId.trim()) {
+        return false;
+      }
+      if (
+        query.invoiceStatus &&
+        invoiceStatusByOrder.get(line.orderId) !== query.invoiceStatus.trim()
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  async listTenantStatements(tenantId: string, periodMonth?: string) {
+    const resolvedPeriodMonth = await this.resolveTenantSettlementPeriodMonth(
+      tenantId,
+      periodMonth,
+    );
+    const { periodStart, periodEnd } =
+      this.getPeriodMonthRange(resolvedPeriodMonth);
+    const tenantOrderIds = new Set(
+      (
+        await this.listTenantInvoiceTripsInPeriod(
+          tenantId,
+          periodStart,
+          periodEnd,
+        )
+      ).map((trip) => trip.orderId),
+    );
+
+    return this.driverStatements
+      .filter((statement) => statement.periodMonth === resolvedPeriodMonth)
+      .filter((statement) =>
+        statement.lines.some((line) => tenantOrderIds.has(line.orderId)),
+      )
+      .map((statement) => this.cloneStatement(statement));
   }
 
   listPlatformInvoices() {
@@ -1691,6 +1840,81 @@ export class BillingSettlementService implements OnModuleInit {
       );
       return [];
     }
+  }
+
+  private async resolveTenantSettlementPeriodMonth(
+    tenantId: string,
+    requestedPeriodMonth?: string,
+  ) {
+    if (requestedPeriodMonth?.trim()) {
+      this.getPeriodMonthRange(requestedPeriodMonth.trim());
+      return requestedPeriodMonth.trim();
+    }
+
+    const seededMonths = this.settlementTrips
+      .filter((trip) => trip.tenantId === tenantId)
+      .map((trip) => this.toPeriodMonth(trip.completedAt));
+    const invoiceMonths = this.tenantInvoices
+      .filter((invoice) => invoice.tenantId === tenantId)
+      .map((invoice) => this.toPeriodMonth(invoice.periodStart));
+
+    const latestPeriodMonth = [...seededMonths, ...invoiceMonths].sort().at(-1);
+    return latestPeriodMonth ?? this.toPeriodMonth(new Date().toISOString());
+  }
+
+  private buildInvoiceStatusByOrder(tenantId: string) {
+    const statusByOrder = new Map<string, TenantPayableInvoiceStatus>();
+
+    for (const invoice of this.listTenantInvoices(tenantId)) {
+      const status = this.deriveTenantInvoiceStatus(invoice);
+      for (const line of invoice.lines) {
+        statusByOrder.set(line.orderId, status);
+      }
+    }
+
+    return statusByOrder;
+  }
+
+  private resolveTenantInvoiceStatusForPeriod(
+    tenantId: string,
+    periodMonth: string,
+  ): TenantPayableInvoiceStatus {
+    const invoices = this.listTenantInvoices(tenantId).filter(
+      (invoice) => this.toPeriodMonth(invoice.periodStart) === periodMonth,
+    );
+    if (invoices.length === 0) {
+      return "draft";
+    }
+
+    if (
+      invoices.some(
+        (invoice) => this.deriveTenantInvoiceStatus(invoice) === "overdue",
+      )
+    ) {
+      return "overdue";
+    }
+    if (invoices.every((invoice) => invoice.status === "paid")) {
+      return "paid";
+    }
+    if (invoices.some((invoice) => invoice.status === "issued")) {
+      return "issued";
+    }
+    return "draft";
+  }
+
+  private deriveTenantInvoiceStatus(
+    invoice: TenantInvoiceRecord,
+  ): TenantPayableInvoiceStatus {
+    if (invoice.status === "paid") {
+      return "paid";
+    }
+    if (
+      invoice.status === "issued" &&
+      Date.parse(invoice.periodEnd) + 30 * 24 * 60 * 60 * 1000 < Date.now()
+    ) {
+      return "overdue";
+    }
+    return invoice.status === "issued" ? "issued" : "draft";
   }
 
   private listSeedSettlementTripsInPeriod(

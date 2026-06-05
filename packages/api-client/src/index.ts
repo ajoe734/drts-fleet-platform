@@ -190,6 +190,7 @@ import type {
   TenantCostCenterCoverageReport,
   TenantCostCenterRecord,
   TenantCostCenterQuotaSummary,
+  TenantDashboardSummary,
   TenantFeatureFlagRecord,
   TenantFeatureFlagVisibilityList,
   TenantIntegrationGovernancePackage,
@@ -197,11 +198,15 @@ import type {
   TenantInvoiceListData,
   TenantInvoiceRecord,
   TenantNotificationPreferences,
+  TenantOrderListQuery,
   TenantPassengerRecord,
+  TenantPayableLineItem,
+  TenantPayableSummary,
   TenantQuotaLedgerEntry,
   TenantQuotaPolicyRecord,
   TenantQuotaSummary,
   TenantRoleCatalogRecord,
+  TenantServiceProgramRecord,
   TenantSlaProfileView,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
@@ -761,6 +766,104 @@ export class ApiClient {
     );
   }
 
+  async getTenantDashboardSummary(): Promise<TenantDashboardSummary> {
+    return this.get<TenantDashboardSummary>("/api/tenant/dashboard");
+  }
+
+  async listTenantOrders(
+    query: TenantOrderListQuery = {},
+  ): Promise<OwnedOrderRecord[]> {
+    const params = new URLSearchParams();
+    if (query.from) {
+      params.set("from", query.from);
+    }
+    if (query.to) {
+      params.set("to", query.to);
+    }
+    if (query.serviceProduct) {
+      params.set("serviceProduct", query.serviceProduct);
+    }
+    if (query.status) {
+      params.set("status", query.status);
+    }
+    if (query.costCenterCode) {
+      params.set("costCenterCode", query.costCenterCode);
+    }
+    if (query.tenantServiceProgramId) {
+      params.set("tenantServiceProgramId", query.tenantServiceProgramId);
+    }
+    if (query.riderId) {
+      params.set("riderId", query.riderId);
+    }
+    if (query.sourcePlatform) {
+      params.set("sourcePlatform", query.sourcePlatform);
+    }
+    if (query.invoiceStatus) {
+      params.set("invoiceStatus", query.invoiceStatus);
+    }
+
+    return this.getList<OwnedOrderRecord>(
+      `/api/tenant/orders${params.size > 0 ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  async getTenantOrder(orderId: string): Promise<OwnedOrderRecord> {
+    return this.get<OwnedOrderRecord>(
+      `/api/tenant/orders/${encodeURIComponent(orderId)}`,
+    );
+  }
+
+  async listTenantTrips(
+    query: TenantOrderListQuery = {},
+  ): Promise<OwnedOrderRecord[]> {
+    const params = new URLSearchParams();
+    if (query.from) {
+      params.set("from", query.from);
+    }
+    if (query.to) {
+      params.set("to", query.to);
+    }
+    if (query.serviceProduct) {
+      params.set("serviceProduct", query.serviceProduct);
+    }
+    if (query.status) {
+      params.set("status", query.status);
+    }
+    if (query.costCenterCode) {
+      params.set("costCenterCode", query.costCenterCode);
+    }
+    if (query.tenantServiceProgramId) {
+      params.set("tenantServiceProgramId", query.tenantServiceProgramId);
+    }
+    if (query.riderId) {
+      params.set("riderId", query.riderId);
+    }
+    if (query.sourcePlatform) {
+      params.set("sourcePlatform", query.sourcePlatform);
+    }
+    if (query.invoiceStatus) {
+      params.set("invoiceStatus", query.invoiceStatus);
+    }
+
+    return this.getList<OwnedOrderRecord>(
+      `/api/tenant/trips${params.size > 0 ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  async listTenantServicePrograms(): Promise<TenantServiceProgramRecord[]> {
+    return this.getList<TenantServiceProgramRecord>(
+      "/api/tenant/service-programs",
+    );
+  }
+
+  async getTenantServiceProgram(
+    programId: string,
+  ): Promise<TenantServiceProgramRecord> {
+    return this.get<TenantServiceProgramRecord>(
+      `/api/tenant/service-programs/${encodeURIComponent(programId)}`,
+    );
+  }
+
   // ── Owned Mobility: Dispatch ──
 
   async dispatchOrder(orderId: string) {
@@ -1180,6 +1283,52 @@ export class ApiClient {
 
   async generateInvoice(command: GenerateTenantInvoiceCommand) {
     return this.post("/api/tenant/invoices/generate", { body: command });
+  }
+
+  async getTenantPayablesSummary(
+    periodMonth?: string,
+  ): Promise<TenantPayableSummary> {
+    const url = periodMonth
+      ? `/api/tenant/payables/summary?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "/api/tenant/payables/summary";
+    return this.get<TenantPayableSummary>(url);
+  }
+
+  async listTenantPayableLineItems(
+    query: Partial<TenantOrderListQuery> & { periodMonth?: string } = {},
+  ): Promise<TenantPayableLineItem[]> {
+    const params = new URLSearchParams();
+    if (query.periodMonth) {
+      params.set("periodMonth", query.periodMonth);
+    }
+    if (query.serviceProduct) {
+      params.set("serviceProduct", query.serviceProduct);
+    }
+    if (query.costCenterCode) {
+      params.set("costCenterCode", query.costCenterCode);
+    }
+    if (query.tenantServiceProgramId) {
+      params.set("tenantServiceProgramId", query.tenantServiceProgramId);
+    }
+    if (query.riderId) {
+      params.set("riderId", query.riderId);
+    }
+    if (query.invoiceStatus) {
+      params.set("invoiceStatus", query.invoiceStatus);
+    }
+
+    return this.getList<TenantPayableLineItem>(
+      `/api/tenant/payables/line-items${params.size > 0 ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  async listTenantStatements(
+    periodMonth?: string,
+  ): Promise<DriverStatementRecord[]> {
+    const url = periodMonth
+      ? `/api/tenant/statements?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "/api/tenant/statements";
+    return this.getList<DriverStatementRecord>(url);
   }
 
   async listDriverStatements(

@@ -279,4 +279,68 @@ describe("BillingSettlementService settlement matrix", () => {
       "Issuer reran the export and mismatch reappeared.",
     );
   });
+
+  it("builds tenant payable summaries, line items, and tenant-visible statements", async () => {
+    const service = createService();
+
+    service.publishDriverFeePlan({
+      planName: "Phase 1 demo plan",
+      version: "2026-03",
+      serviceFeeBps: 1000,
+      reimbursementMode: "platform_funded",
+    });
+    await service.generateDriverStatements({
+      periodMonth: "2026-03",
+    });
+
+    const summary = await service.getTenantPayableSummary(
+      "tenant-demo-001",
+      "2026-03",
+    );
+    expect(summary).toMatchObject({
+      tenantId: "tenant-demo-001",
+      periodMonth: "2026-03",
+      totalTrips: 3,
+      completedTrips: 3,
+      grossAmountMinor: 350000,
+      adjustmentAmountMinor: -5000,
+      payableAmountMinor: 345000,
+      invoiceStatus: "draft",
+    });
+
+    const partnerLineItems = await service.listTenantPayableLineItems(
+      "tenant-demo-001",
+      {
+        periodMonth: "2026-03",
+        serviceProduct: "credit_card_airport_transfer",
+        tenantServiceProgramId: "program-airport-alpha",
+      },
+    );
+    expect(partnerLineItems).toEqual([
+      expect.objectContaining({
+        orderId: "order-demo-032",
+        serviceProduct: "credit_card_airport_transfer",
+        tenantServiceProgramId: "program-airport-alpha",
+        discountAmountMinor: 20000,
+        payableAmountMinor: 60000,
+      }),
+    ]);
+
+    const tenantStatements = await service.listTenantStatements(
+      "tenant-demo-001",
+      "2026-03",
+    );
+    expect(tenantStatements).toHaveLength(2);
+    expect(
+      tenantStatements.flatMap((statement) =>
+        statement.lines.map((line) => line.orderId),
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        "order-demo-031",
+        "order-demo-032",
+        "order-demo-033",
+      ]),
+    );
+  });
 });

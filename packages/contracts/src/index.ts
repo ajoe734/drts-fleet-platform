@@ -2389,6 +2389,62 @@ export interface BookingRecord {
   updatedAt: string;
 }
 
+export type ServiceProductType = BusinessDispatchSubtype;
+
+export interface TenantCostCenterQuotaWarning {
+  tenantId: string;
+  costCenterCode: string;
+  costCenterName: string | null;
+  periodKey: string;
+  remainingBookingCount: number | null;
+  remainingAmountMinor: number | null;
+  remainingPercent: number | null;
+  enforcementMode: TenantQuotaEnforcementMode;
+  warningLevel: "warning" | "critical";
+}
+
+export interface TenantBookingSummary {
+  bookingId: string;
+  orderId: string;
+  serviceProduct: ServiceProductType;
+  status: OwnedOrderStatus;
+  reservationWindowStart: string | null;
+  reservationWindowEnd: string | null;
+  passengerName: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  costCenterCode: string | null;
+  tenantServiceProgramId: string | null;
+}
+
+export interface TenantDashboardSummary {
+  tenantId: string;
+  periodMonth: string;
+  bookingCount: number;
+  completedTripCount: number;
+  cancelledTripCount: number;
+  noShowTripCount: number;
+  pendingApprovalCount: number;
+  pendingExceptionCount: number;
+  estimatedPayableAmountMinor: number;
+  issuedInvoiceAmountMinor: number;
+  unpaidInvoiceAmountMinor: number;
+  costCenterWarnings: TenantCostCenterQuotaWarning[];
+  upcomingBookings: TenantBookingSummary[];
+}
+
+export interface TenantOrderListQuery {
+  from?: string;
+  to?: string;
+  serviceProduct?: ServiceProductType;
+  status?: string;
+  costCenterCode?: string;
+  tenantServiceProgramId?: string;
+  riderId?: string;
+  sourcePlatform?: string;
+  invoiceStatus?: string;
+}
+
 export interface DispatchCandidate {
   vehicleId: string;
   driverId: string;
@@ -3443,6 +3499,66 @@ export interface TenantInvoiceRecord {
   lines: InvoiceLineRecord[];
   createdAt: string;
   updatedAt: string;
+}
+
+export type TenantPayableInvoiceStatus =
+  | "draft"
+  | "issued"
+  | "paid"
+  | "overdue";
+
+export interface TenantPayableSummary {
+  tenantId: string;
+  periodMonth: string;
+  totalTrips: number;
+  completedTrips: number;
+  cancelledTrips: number;
+  noShowTrips: number;
+  grossAmountMinor: number;
+  adjustmentAmountMinor: number;
+  taxAmountMinor: number;
+  payableAmountMinor: number;
+  invoiceStatus: TenantPayableInvoiceStatus;
+}
+
+export interface TenantPayableLineItem {
+  lineItemId: string;
+  orderId: string;
+  tripId: string | null;
+  serviceProduct: ServiceProductType;
+  costCenterCode: string | null;
+  tenantServiceProgramId: string | null;
+  riderId: string | null;
+  baseAmountMinor: number;
+  extraAmountMinor: number;
+  discountAmountMinor: number;
+  taxAmountMinor: number;
+  payableAmountMinor: number;
+}
+
+export type TenantServiceProgramType =
+  | "enterprise_dispatch"
+  | "credit_card_airport_transfer"
+  | "insurance_replacement_vehicle"
+  | "travel_agency_transfer"
+  | "taxi_platform_forwarding";
+
+export type TenantServiceProgramBillingMode =
+  | "monthly_invoice"
+  | "per_trip_invoice"
+  | "partner_settlement";
+
+export interface TenantServiceProgramRecord {
+  programId: string;
+  tenantId: string;
+  programType: TenantServiceProgramType;
+  displayName: string;
+  active: boolean;
+  billingMode: TenantServiceProgramBillingMode;
+  pricingPlanId: string;
+  eligibilityRuleId: string | null;
+  serviceRuleSetId: string;
+  allowedServiceProducts: ServiceProductType[];
 }
 
 export interface IssuePassengerReceiptCommand {
