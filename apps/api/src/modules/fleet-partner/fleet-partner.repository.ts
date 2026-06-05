@@ -6,6 +6,7 @@ import type {
   FleetPartnerRevenueShareRuleRecord,
   FleetPartnerStatementRecord,
 } from "@drts/contracts";
+import type { QueryResult, QueryResultRow } from "pg";
 
 import { DatabaseService } from "../../common/db";
 
@@ -25,6 +26,13 @@ export type PersistFleetPartnerChanges = {
   driverAffiliations?: readonly DriverFleetAffiliationRecord[];
   revenueShareRules?: readonly FleetPartnerRevenueShareRuleRecord[];
   statements?: readonly FleetPartnerStatementRecord[];
+};
+
+type Queryable = {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<QueryResult<T>>;
 };
 
 @Injectable()
@@ -223,42 +231,43 @@ export class FleetPartnerRepository {
     }
 
     for (const statement of changes.statements ?? []) {
-      writes.push(
-        this.databaseService!.query(
-          `
-            INSERT INTO billing.phase1_fleet_partner_statements (
-              statement_id,
-              fleet_partner_id,
-              period_month,
-              payout_status,
-              created_at,
-              updated_at,
-              record
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7::jsonb
-            )
-            ON CONFLICT (statement_id) DO UPDATE SET
-              fleet_partner_id = EXCLUDED.fleet_partner_id,
-              period_month = EXCLUDED.period_month,
-              payout_status = EXCLUDED.payout_status,
-              created_at = EXCLUDED.created_at,
-              updated_at = EXCLUDED.updated_at,
-              record = EXCLUDED.record
-          `,
-          [
-            statement.statementId,
-            statement.fleetPartnerId,
-            statement.periodMonth,
-            statement.payoutStatus,
-            statement.createdAt,
-            statement.updatedAt,
-            JSON.stringify(statement),
-          ],
-        ),
-      );
+      writes.push(this.upsertStatement(this.databaseService!, statement));
     }
 
     await Promise.all(writes);
+  }
+
+  async replaceStatementsForPeriodMonth(
+    periodMonth: string,
+    statements: readonly FleetPartnerStatementRecord[],
+    fleetPartnerId?: string,
+  ) {
+    if (!this.isEnabled()) {
+      return;
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      await this.deleteStatementsForPeriodMonth(
+        client,
+        periodMonth,
+        fleetPartnerId,
+      );
+      for (const statement of statements) {
+        await this.upsertStatement(client, statement);
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // Ignore rollback failures and surface the original error.
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async deleteRevenueShareRule(ruleId: string) {
@@ -288,5 +297,68 @@ export class FleetPartnerRepository {
     }
 
     return record as T;
+  }
+
+  private async deleteStatementsForPeriodMonth(
+    queryable: Queryable,
+    periodMonth: string,
+    fleetPartnerId?: string,
+  ) {
+    if (fleetPartnerId) {
+      await queryable.query(
+        `
+          DELETE FROM billing.phase1_fleet_partner_statements
+          WHERE period_month = $1
+            AND fleet_partner_id = $2
+        `,
+        [periodMonth, fleetPartnerId],
+      );
+      return;
+    }
+
+    await queryable.query(
+      `
+        DELETE FROM billing.phase1_fleet_partner_statements
+        WHERE period_month = $1
+      `,
+      [periodMonth],
+    );
+  }
+
+  private upsertStatement(
+    queryable: Queryable,
+    statement: FleetPartnerStatementRecord,
+  ) {
+    return queryable.query(
+      `
+        INSERT INTO billing.phase1_fleet_partner_statements (
+          statement_id,
+          fleet_partner_id,
+          period_month,
+          payout_status,
+          created_at,
+          updated_at,
+          record
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7::jsonb
+        )
+        ON CONFLICT (statement_id) DO UPDATE SET
+          fleet_partner_id = EXCLUDED.fleet_partner_id,
+          period_month = EXCLUDED.period_month,
+          payout_status = EXCLUDED.payout_status,
+          created_at = EXCLUDED.created_at,
+          updated_at = EXCLUDED.updated_at,
+          record = EXCLUDED.record
+      `,
+      [
+        statement.statementId,
+        statement.fleetPartnerId,
+        statement.periodMonth,
+        statement.payoutStatus,
+        statement.createdAt,
+        statement.updatedAt,
+        JSON.stringify(statement),
+      ],
+    );
   }
 }

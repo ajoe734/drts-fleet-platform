@@ -549,13 +549,19 @@ export class FleetPartnerService implements OnModuleInit {
       ...rebuiltStatements,
     ].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 
-    if (rebuiltStatements.length > 0) {
-      this.persistChanges(
-        {
-          statements: rebuiltStatements.map((statement) =>
-            this.cloneStatement(statement),
-          ),
-        },
+    if (!this.fleetPartnerRepository) {
+      return;
+    }
+
+    try {
+      await this.fleetPartnerRepository.replaceStatementsForPeriodMonth(
+        periodMonth,
+        rebuiltStatements.map((statement) => this.cloneStatement(statement)),
+        fleetPartnerId,
+      );
+    } catch (error) {
+      this.fleetPartnerRepository.reportPersistenceFailure(
+        error,
         "rebuild fleet partner statements",
       );
     }

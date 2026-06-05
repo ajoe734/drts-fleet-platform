@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
+import { FleetPartnerRepository } from "../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { FleetPartnerService } from "../../apps/api/src/modules/fleet-partner/fleet-partner.service";
 
-function createService() {
+function createService(repository?: Partial<FleetPartnerRepository>) {
   const billingSettlementService = new BillingSettlementService(
     new AuditNotificationService(),
   );
@@ -15,7 +16,10 @@ function createService() {
     reimbursementMode: "platform_funded",
   });
 
-  const fleetPartnerService = new FleetPartnerService(billingSettlementService);
+  const fleetPartnerService = new FleetPartnerService(
+    billingSettlementService,
+    repository as FleetPartnerRepository | undefined,
+  );
 
   return {
     billingSettlementService,
@@ -96,5 +100,65 @@ describe("FleetPartnerService", () => {
     );
     expect(apiTripLine?.formula).toBe("fixed_per_trip");
     expect(apiTripLine?.shareAmount.amountMinor).toBe(5000);
+  });
+
+  it("replaces persisted statement slices so stale rows are removed on rebuild", async () => {
+    const repository = {
+      replaceStatementsForPeriodMonth: vi.fn(async () => undefined),
+      reportPersistenceFailure: vi.fn(),
+    } satisfies Partial<FleetPartnerRepository>;
+    const { fleetPartnerService } = createService(repository);
+
+    fleetPartnerService.createRevenueShareRule("fleet-demo-001", {
+      appliesTo: "platform_source",
+      sourcePlatform: "api",
+      formula: "fixed_per_trip",
+      fixedAmountMinor: 5000,
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+    });
+
+    await fleetPartnerService.listFleetPartnerStatements(
+      "fleet-demo-001",
+      "2026-03",
+    );
+
+    expect(repository.replaceStatementsForPeriodMonth).toHaveBeenCalledWith(
+      "2026-03",
+      expect.arrayContaining([
+        expect.objectContaining({
+          statementId: "fleet-statement-fleet-demo-001-2026-03",
+          fleetPartnerId: "fleet-demo-001",
+          periodMonth: "2026-03",
+        }),
+      ]),
+      "fleet-demo-001",
+    );
+
+    const createdRule = fleetPartnerService
+      .listRevenueShareRules("fleet-demo-001")
+      .find((rule) => rule.appliesTo === "platform_source");
+    expect(createdRule).toBeDefined();
+    if (!createdRule) {
+      throw new Error("expected created revenue share rule");
+    }
+
+    await fleetPartnerService.deleteRevenueShareRule(
+      "fleet-demo-001",
+      createdRule.ruleId,
+    );
+
+    const rebuiltStatements =
+      await fleetPartnerService.listFleetPartnerStatements(
+        "fleet-demo-001",
+        "2026-03",
+      );
+
+    expect(rebuiltStatements).toHaveLength(0);
+    expect(repository.replaceStatementsForPeriodMonth).toHaveBeenLastCalledWith(
+      "2026-03",
+      [],
+      "fleet-demo-001",
+    );
+    expect(repository.reportPersistenceFailure).not.toHaveBeenCalled();
   });
 });
