@@ -124,8 +124,8 @@ The canonical delivery tuple for this unblock task is:
 | --- | --- |
 | owner branch | `codex/gap-verify-unblock-planning-decision` |
 | pushed remote | `origin` |
-| pushed commit | `3a53159ad29e0bc741e70ac15efbee7cf2b07fc4` |
-| commit subject | `docs(GAP-VERIFY-UNBLOCK-PLANNING-DECISION): align artifact with machine truth` |
+| pushed commit | `47601623b318394a076cff36ceb27fb2cca7836b` |
+| commit subject | `docs(GAP-VERIFY-UNBLOCK-PLANNING-DECISION): record delivery evidence` |
 | owner | `Codex` |
 | reviewer | `Codex2` |
 
@@ -136,7 +136,7 @@ Clarification for the failed review:
   **not** the assigned owner branch for this task.
 - Review and closeout evidence for `GAP-VERIFY-UNBLOCK-PLANNING-DECISION` must
   therefore be checked against `origin/codex/gap-verify-unblock-planning-decision`
-  at `3a53159ad29e0bc741e70ac15efbee7cf2b07fc4`.
+  at `47601623b318394a076cff36ceb27fb2cca7836b`.
 
 ## 7. Acceptance Mapping
 
