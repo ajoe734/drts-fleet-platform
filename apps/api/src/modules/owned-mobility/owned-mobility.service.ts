@@ -185,7 +185,9 @@ export class OwnedMobilityService implements OnModuleInit {
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     @Optional()
-    private readonly vehicleEligibilityService: VehicleEligibilityService | undefined,
+    private readonly vehicleEligibilityService:
+      | VehicleEligibilityService
+      | undefined,
     private readonly auditNotificationService: AuditNotificationService,
     private readonly callcenterService: CallcenterService,
     private readonly ownedMobilityTaskEventsService: OwnedMobilityTaskEventsService,
@@ -1429,16 +1431,7 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
-    const candidates = this.vehicleEligibilityService
-      ? this.vehicleEligibilityService.listEligibleSupply(
-          this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
-            order,
-          ),
-        )
-      : this.regulatoryRegistryService.getEligibleCandidates(
-          order.serviceBucket,
-          this.resolvePickupEtaDestination(order),
-        );
+    const candidates = this.listEligibleDispatchCandidates(order);
     const now = new Date().toISOString();
     const isReservation = order.dispatchSemantics === "reservation";
     const initialReservationHoldStatus = order.reservationHoldStatus;
@@ -2321,16 +2314,7 @@ export class OwnedMobilityService implements OnModuleInit {
   listDispatchCandidates(dispatchJobId: string): DispatchCandidate[] {
     const dispatchJob = this.requireDispatchJob(dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
-    const candidates = this.vehicleEligibilityService
-      ? this.vehicleEligibilityService.listEligibleSupply(
-          this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
-            order,
-          ),
-        )
-      : this.regulatoryRegistryService.getEligibleCandidates(
-          order.serviceBucket,
-          this.resolvePickupEtaDestination(order),
-        );
+    const candidates = this.listEligibleDispatchCandidates(order);
     return candidates.map((candidate) => ({ ...candidate }));
   }
 
@@ -2342,16 +2326,7 @@ export class OwnedMobilityService implements OnModuleInit {
       return { ...dispatchJob };
     }
 
-    const liveCandidates = this.vehicleEligibilityService
-      ? this.vehicleEligibilityService.listEligibleSupply(
-          this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
-            order,
-          ),
-        )
-      : this.regulatoryRegistryService.getEligibleCandidates(
-          order.serviceBucket,
-          this.resolvePickupEtaDestination(order),
-        );
+    const liveCandidates = this.listEligibleDispatchCandidates(order);
 
     return {
       ...dispatchJob,
@@ -4889,6 +4864,21 @@ export class OwnedMobilityService implements OnModuleInit {
       this.driverTasks.find((task) => task.assignmentId === assignmentId) ??
       null
     );
+  }
+
+  private listEligibleDispatchCandidates(order: OwnedOrderRecord) {
+    const destination = this.resolvePickupEtaDestination(order);
+    return this.vehicleEligibilityService
+      ? this.vehicleEligibilityService.listEligibleSupply(
+          this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
+            order,
+          ),
+          { destination },
+        )
+      : this.regulatoryRegistryService.getEligibleCandidates(
+          order.serviceBucket,
+          destination,
+        );
   }
 
   private resolvePickupEtaDestination(order: Pick<OwnedOrderRecord, "pickup">) {

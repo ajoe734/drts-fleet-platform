@@ -459,16 +459,14 @@ export class ForwarderService implements OnModuleInit {
       forwardedOrder.authoritativeSnapshot,
     );
     const eligibleDrivers = new Set(
-      (
-        this.vehicleEligibilityService
-          ? this.vehicleEligibilityService
-              .listEligibleSupply("third_party_forwarded_order")
-              .filter((candidate) =>
-                serviceBucket === "business_dispatch"
-                  ? candidate.serviceBuckets.includes("business_dispatch")
-                  : true,
-              )
-          : this.regulatoryRegistryService.getEligibleCandidates(serviceBucket)
+      (this.vehicleEligibilityService
+        ? this.vehicleEligibilityService.listEligibleSupply(
+            "third_party_forwarded_order",
+            {
+              serviceBucketOverride: serviceBucket,
+            },
+          )
+        : this.regulatoryRegistryService.getEligibleCandidates(serviceBucket)
       ).map((candidate) => candidate.driverId),
     );
     const requestedDrivers =

@@ -11,6 +11,7 @@ import {
   FORWARDER_SANDBOX_PLATFORM_CODE,
 } from "../../src/modules/forwarder/sandbox.fixtures";
 import { SandboxAdapter } from "../../src/modules/forwarder/sandbox.adapter";
+import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
 function createAdapter(
   overrides: Partial<ForwarderAdapterInterface> = {},
@@ -96,13 +97,31 @@ function createForwarderRepositoryMock() {
 function createService(options?: {
   adapter?: ForwarderAdapterInterface;
   eligibleDriverIds?: string[];
+  eligibleCandidatesResolver?: (serviceBucket: string) => Array<{
+    driverId: string;
+    vehicleId: string;
+    etaMinutes: number;
+    operatingArea: string;
+    serviceBuckets: string[];
+    currentLocation?: null;
+  }>;
   ownedMobilityService?: ReturnType<typeof createOwnedMobilityServiceMock>;
   forwarderRepository?: ReturnType<typeof createForwarderRepositoryMock>;
+  enableVehicleEligibility?: boolean;
 }) {
   const eligibleDriverIds = options?.eligibleDriverIds ?? [];
   const regulatoryRegistryService = {
-    getEligibleCandidates: vi.fn(() =>
-      eligibleDriverIds.map((driverId) => ({ driverId })),
+    getEligibleCandidates: vi.fn(
+      (serviceBucket: string) =>
+        options?.eligibleCandidatesResolver?.(serviceBucket) ??
+        eligibleDriverIds.map((driverId) => ({
+          driverId,
+          vehicleId: "veh-demo-001",
+          etaMinutes: 5,
+          operatingArea: "default",
+          serviceBuckets: [serviceBucket],
+          currentLocation: null,
+        })),
     ),
   };
   const auditNotificationService = {
@@ -111,10 +130,13 @@ function createService(options?: {
   const adapter = options?.adapter ?? createAdapter();
   const ownedMobilityService = options?.ownedMobilityService;
   const forwarderRepository = options?.forwarderRepository;
+  const vehicleEligibilityService = options?.enableVehicleEligibility
+    ? new VehicleEligibilityService(regulatoryRegistryService as never)
+    : undefined;
 
   const service = new ForwarderService(
     regulatoryRegistryService as never,
-    undefined,
+    vehicleEligibilityService,
     auditNotificationService as never,
     [adapter],
     forwarderRepository as never,
@@ -127,6 +149,7 @@ function createService(options?: {
     auditNotificationService,
     forwarderRepository,
     ownedMobilityService,
+    regulatoryRegistryService,
   };
 }
 
@@ -414,6 +437,46 @@ describe("ForwarderService", () => {
         }),
       }),
     ]);
+  });
+
+  it("broadcasts business-dispatch forwarded orders against business-dispatch local supply", () => {
+    const { service, regulatoryRegistryService } = createService({
+      enableVehicleEligibility: true,
+      eligibleCandidatesResolver: (serviceBucket) => {
+        if (serviceBucket === "business_dispatch") {
+          return [
+            {
+              driverId: "driver-biz-001",
+              vehicleId: "veh-demo-001",
+              etaMinutes: 6,
+              operatingArea: "taichung-port",
+              serviceBuckets: ["standard_taxi", "business_dispatch"],
+              currentLocation: null,
+            },
+          ];
+        }
+
+        return [];
+      },
+    });
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-biz-001",
+      payload: { serviceBucket: "business_dispatch" },
+    });
+
+    const broadcast = service.broadcastOrder(order.mirrorOrderId, {
+      candidateDriverIds: [],
+    });
+
+    expect(
+      regulatoryRegistryService.getEligibleCandidates,
+    ).toHaveBeenCalledWith("business_dispatch", null);
+    expect(broadcast).toMatchObject({
+      status: "broadcasted",
+      candidateDriverIds: ["driver-biz-001"],
+    });
   });
 
   it("returns a driver-safe accept-pending response for mobile forwarded accept", async () => {

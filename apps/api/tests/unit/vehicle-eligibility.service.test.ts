@@ -4,39 +4,46 @@ import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility
 
 function createService() {
   const regulatoryRegistryService = {
-    getEligibleCandidates: vi.fn((serviceBucket: string) => {
-      if (serviceBucket === "business_dispatch") {
+    getEligibleCandidates: vi.fn(
+      (serviceBucket: string, destination?: unknown) => {
+        if (serviceBucket === "business_dispatch") {
+          return [
+            {
+              vehicleId: "veh-demo-001",
+              driverId: "drv-demo-001",
+              operatingArea: "taichung-port",
+              serviceBuckets: ["standard_taxi", "business_dispatch"],
+              etaMinutes: 5,
+              currentLocation: null,
+            },
+          ];
+        }
+
+        if (destination) {
+          return [
+            {
+              vehicleId: "veh-demo-001",
+              driverId: "drv-demo-001",
+              operatingArea: "taichung-port",
+              serviceBuckets: ["standard_taxi", "business_dispatch"],
+              etaMinutes: 11,
+              currentLocation: null,
+            },
+          ];
+        }
+
         return [
           {
             vehicleId: "veh-demo-001",
             driverId: "drv-demo-001",
             operatingArea: "taichung-port",
             serviceBuckets: ["standard_taxi", "business_dispatch"],
-            etaMinutes: 5,
-            currentLocation: null,
-          },
-          {
-            vehicleId: "veh-demo-002",
-            driverId: "drv-demo-001",
-            operatingArea: "taichung-port",
-            serviceBuckets: ["standard_taxi"],
-            etaMinutes: 7,
+            etaMinutes: 4,
             currentLocation: null,
           },
         ];
-      }
-
-      return [
-        {
-          vehicleId: "veh-demo-001",
-          driverId: "drv-demo-001",
-          operatingArea: "taichung-port",
-          serviceBuckets: ["standard_taxi", "business_dispatch"],
-          etaMinutes: 4,
-          currentLocation: null,
-        },
-      ];
-    }),
+      },
+    ),
     getVehicleDispatchability: vi.fn(() => true),
     getDriverAvailability: vi.fn(() => true),
   };
@@ -72,5 +79,41 @@ describe("VehicleEligibilityService", () => {
       "enterprise_dispatch",
       "third_party_forwarded_order",
     ]);
+  });
+
+  it("passes dispatch destination context through to registry selection", () => {
+    const { service, regulatoryRegistryService } = createService();
+
+    const eligibleSupply = service.listEligibleSupply("taxi_realtime", {
+      destination: { lat: 25.033, lng: 121.5654 },
+    });
+
+    expect(
+      regulatoryRegistryService.getEligibleCandidates,
+    ).toHaveBeenCalledWith("standard_taxi", {
+      lat: 25.033,
+      lng: 121.5654,
+    });
+    expect(eligibleSupply[0]?.etaMinutes).toBe(11);
+  });
+
+  it("supports overriding the regulatory service bucket for forwarded matching", () => {
+    const { service, regulatoryRegistryService } = createService();
+
+    const eligibleSupply = service.listEligibleSupply(
+      "third_party_forwarded_order",
+      {
+        serviceBucketOverride: "business_dispatch",
+      },
+    );
+
+    expect(
+      regulatoryRegistryService.getEligibleCandidates,
+    ).toHaveBeenCalledWith("business_dispatch", null);
+    expect(eligibleSupply).toHaveLength(1);
+    expect(eligibleSupply[0]).toMatchObject({
+      vehicleId: "veh-demo-001",
+      serviceProduct: "third_party_forwarded_order",
+    });
   });
 });

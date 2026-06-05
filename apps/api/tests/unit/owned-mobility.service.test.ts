@@ -25,12 +25,30 @@ function createOwnedMobilityService(options?: {
     operatingArea: string;
     serviceBuckets: string[];
   }>;
+  getEligibleCandidates?: (
+    serviceBucket: string,
+    destination?: { lat: number; lng: number } | null,
+  ) => Array<{
+    driverId: string;
+    vehicleId: string;
+    etaMinutes: number;
+    operatingArea: string;
+    serviceBuckets: string[];
+  }>;
   vehicleDispatchable?: boolean;
   tenantPartnerService?: TenantPartnerService;
   enableVehicleEligibility?: boolean;
 }) {
   const regulatoryRegistryService = {
-    getEligibleCandidates: vi.fn(() => options?.candidates ?? []),
+    getEligibleCandidates: vi.fn(
+      (
+        serviceBucket: string,
+        destination?: { lat: number; lng: number } | null,
+      ) =>
+        options?.getEligibleCandidates?.(serviceBucket, destination) ??
+        options?.candidates ??
+        [],
+    ),
     getVehicleDispatchability: vi.fn(
       () => options?.vehicleDispatchable ?? true,
     ),
@@ -171,7 +189,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "tenant-demo-001",
     );
 
-    const dispatchJob = service.dispatchOrder(booking.orderId, { mode: "auto" });
+    const dispatchJob = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
 
     expect(() =>
       service.assignDispatch({
@@ -198,6 +218,65 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         },
       });
     }
+  });
+
+  it("keeps owned-mobility dispatch candidates order-specific when vehicle eligibility is enabled", async () => {
+    const { service } = createOwnedMobilityService({
+      enableVehicleEligibility: true,
+      getEligibleCandidates: (_serviceBucket, destination) => {
+        if (destination?.lat === 25.0478 && destination.lng === 121.5319) {
+          return [
+            {
+              driverId: "driver-nearby",
+              vehicleId: "veh-demo-001",
+              etaMinutes: 3,
+              operatingArea: "taipei",
+              serviceBuckets: ["standard_taxi"],
+            },
+          ];
+        }
+
+        return [
+          {
+            driverId: "driver-fallback",
+            vehicleId: "veh-demo-001",
+            etaMinutes: 14,
+            operatingArea: "taipei",
+            serviceBuckets: ["standard_taxi"],
+          },
+        ];
+      },
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: {
+        address: "Taipei Main Station",
+        lat: 25.0478,
+        lng: 121.5319,
+      },
+      dropoff: {
+        address: "Songshan Airport",
+      },
+      passenger: {
+        name: "Rider One",
+        phone: "0912000000",
+      },
+    });
+
+    const dispatchJob = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    expect(service.listDispatchCandidates(dispatchJob.dispatchJobId)).toEqual([
+      expect.objectContaining({
+        driverId: "driver-nearby",
+        etaMinutes: 3,
+      }),
+    ]);
+    expect(service.listDispatchJobs()).toEqual([
+      expect.objectContaining({
+        dispatchJobId: dispatchJob.dispatchJobId,
+        latestEtaMinutes: 3,
+      }),
+    ]);
   });
 
   it("resolves tenant booking passenger and addresses from governed master data", async () => {

@@ -2,6 +2,7 @@ import { HttpStatus, Injectable } from "@nestjs/common";
 import type {
   DispatchCandidate,
   OwnedOrderRecord,
+  Phase1ServiceBucket,
   ServiceProductType,
   ServiceTiming,
   VehicleLicenseType,
@@ -48,6 +49,14 @@ export type DriverEligibleProductRecord = {
   timing: ServiceTiming;
   defaultProofRequirements: string[];
   eligibleVehicleIds: string[];
+};
+
+type EligibleSupplyContext = {
+  destination?: {
+    lat: number;
+    lng: number;
+  } | null;
+  serviceBucketOverride?: Phase1ServiceBucket;
 };
 
 const SERVICE_PRODUCTS: ServiceProductDefinition[] = [
@@ -214,10 +223,15 @@ export class VehicleEligibilityService {
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
   ) {}
 
-  listEligibleSupply(serviceProduct: ServiceProductType): EligibleSupplyRecord[] {
+  listEligibleSupply(
+    serviceProduct: ServiceProductType,
+    context?: EligibleSupplyContext,
+  ): EligibleSupplyRecord[] {
     const definition = this.requireActiveServiceProduct(serviceProduct);
+    const serviceBucket =
+      context?.serviceBucketOverride ?? definition.serviceBucket;
     return this.regulatoryRegistryService
-      .getEligibleCandidates(definition.serviceBucket)
+      .getEligibleCandidates(serviceBucket, context?.destination ?? null)
       .filter((candidate) =>
         this.isVehicleEligibleForServiceProduct(
           candidate.vehicleId,
@@ -296,8 +310,15 @@ export class VehicleEligibilityService {
       );
     }
 
-    if (!capability.active || !capability.supportedProducts.includes(serviceProduct)) {
-      this.throwVehicleNotEligible(vehicleId, serviceProduct, "unsupported_product");
+    if (
+      !capability.active ||
+      !capability.supportedProducts.includes(serviceProduct)
+    ) {
+      this.throwVehicleNotEligible(
+        vehicleId,
+        serviceProduct,
+        "unsupported_product",
+      );
     }
 
     if (
@@ -329,10 +350,7 @@ export class VehicleEligibilityService {
       );
     }
 
-    if (
-      definition.requiresFixedFareAllowed &&
-      !capability.fixedFareAllowed
-    ) {
+    if (definition.requiresFixedFareAllowed && !capability.fixedFareAllowed) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "FIXED_FARE_NOT_ALLOWED",
@@ -415,7 +433,11 @@ export class VehicleEligibilityService {
   private requireVehicleCapability(vehicleId: string) {
     const capability = this.vehicleCapabilities.get(vehicleId);
     if (!capability) {
-      this.throwVehicleNotEligible(vehicleId, "taxi_realtime", "missing_capability");
+      this.throwVehicleNotEligible(
+        vehicleId,
+        "taxi_realtime",
+        "missing_capability",
+      );
     }
 
     return capability;
