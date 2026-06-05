@@ -109,6 +109,8 @@ jobs:
           }
       - name: Install
         run: pnpm install --frozen-lockfile
+      - name: i18n guard
+        run: node scripts/i18n-guard.mjs
       - name: Lint
         run: pnpm run lint
       - name: Typecheck

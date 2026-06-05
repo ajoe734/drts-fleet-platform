@@ -1,4 +1,6 @@
 #!/usr/bin/env sh
 set -e
-python3 "$(git rev-parse --show-toplevel)/scripts/git/check_staged_generated_files.py" --staged
+root="$(git rev-parse --show-toplevel)"
+python3 "$root/scripts/git/check_staged_generated_files.py" --staged
 pnpm lint-staged
+node "$root/scripts/i18n-guard.mjs" --staged
