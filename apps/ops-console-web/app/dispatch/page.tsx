@@ -733,7 +733,9 @@ function getTimingValue(order: OwnedOrderRecord): TimingFilter {
 }
 
 function getEligibilityGate(order: OwnedOrderRecord) {
-  return (order.complianceGates ?? []).find((gate) => gate.gateType === "eligibility");
+  return (order.complianceGates ?? []).find(
+    (gate) => gate.gateType === "eligibility",
+  );
 }
 
 function getEligibilityReasonValue(order: OwnedOrderRecord) {
@@ -1844,10 +1846,10 @@ export default async function DispatchPage({
     firstParam(resolvedSearchParams.product) ??
     firstParam(resolvedSearchParams.service) ??
     "all";
-  const selectedTiming = ((firstParam(resolvedSearchParams.timing) ??
-    "all") as TimingFilter);
-  const selectedLicense = ((firstParam(resolvedSearchParams.license) ??
-    "all") as LicenseFilter);
+  const selectedTiming = (firstParam(resolvedSearchParams.timing) ??
+    "all") as TimingFilter;
+  const selectedLicense = (firstParam(resolvedSearchParams.license) ??
+    "all") as LicenseFilter;
   const selectedFleet = firstParam(resolvedSearchParams.fleet) ?? "all";
   const selectedApproval = firstParam(resolvedSearchParams.approval) ?? "all";
   const selectedEligibility =
@@ -1905,7 +1907,9 @@ export default async function DispatchPage({
   );
   const tasksByOrderId = new Map<string, DriverTaskRecord[]>();
   const driverById = new Map<string, DriverRegistryRecord>(
-    drivers.map((driver: DriverRegistryRecord) => [driver.driverId, driver] as const),
+    drivers.map(
+      (driver: DriverRegistryRecord) => [driver.driverId, driver] as const,
+    ),
   );
   for (const task of driverTasks) {
     const existing = tasksByOrderId.get(task.orderId);
@@ -2047,8 +2051,12 @@ export default async function DispatchPage({
   );
 
   function hasLicenseIssue(order: RuntimeOwnedOrder) {
-    const currentTask = pickCurrentTask(tasksByOrderId.get(order.orderId) ?? []);
-    const taskDriver = currentTask ? driverById.get(currentTask.driverId) : null;
+    const currentTask = pickCurrentTask(
+      tasksByOrderId.get(order.orderId) ?? [],
+    );
+    const taskDriver = currentTask
+      ? driverById.get(currentTask.driverId)
+      : null;
     if (
       taskDriver &&
       (!taskDriver.licensesValid ||
@@ -2058,14 +2066,16 @@ export default async function DispatchPage({
     }
 
     const job = jobByOrderId.get(order.orderId);
-    const candidates = job ? (candidatesByJobId.get(job.dispatchJobId) ?? []) : [];
+    const candidates = job
+      ? (candidatesByJobId.get(job.dispatchJobId) ?? [])
+      : [];
     if (candidates.length > 0) {
       return candidates.some((candidate) => {
         const driver = driverById.get(candidate.driverId);
         return Boolean(
           driver &&
-            (!driver.licensesValid ||
-              driver.eligibilityBlockedReasons.includes("licenses_invalid")),
+          (!driver.licensesValid ||
+            driver.eligibilityBlockedReasons.includes("licenses_invalid")),
         );
       });
     }
@@ -2102,31 +2112,37 @@ export default async function DispatchPage({
   );
   const eligibleSupplyCount = visibleOwnedByBoard.reduce((count, order) => {
     const job = jobByOrderId.get(order.orderId);
-    const candidates = job ? (candidatesByJobId.get(job.dispatchJobId) ?? []) : [];
-    return count + candidates.filter((candidate) => {
-      const driver = driverById.get(candidate.driverId);
-      return driver?.dispatchEligible ?? false;
-    }).length;
+    const candidates = job
+      ? (candidatesByJobId.get(job.dispatchJobId) ?? [])
+      : [];
+    return (
+      count +
+      candidates.filter((candidate) => {
+        const driver = driverById.get(candidate.driverId);
+        return driver?.dispatchEligible ?? false;
+      }).length
+    );
   }, 0);
-  const noSupplyReasonCounts = visibleOwnedByBoard.reduce<Record<string, number>>(
-    (acc, order) => {
-      if (getOwnedBoard(order, jobByOrderId.get(order.orderId)) !== "no_supply") {
-        return acc;
-      }
-      const key =
-        order.lastDispatchFailureReason ??
-        order.dispatchTimeout?.timeoutReasonCode ??
-        "unknown";
-      acc[key] = (acc[key] ?? 0) + 1;
+  const noSupplyReasonCounts = visibleOwnedByBoard.reduce<
+    Record<string, number>
+  >((acc, order) => {
+    if (getOwnedBoard(order, jobByOrderId.get(order.orderId)) !== "no_supply") {
       return acc;
-    },
-    {},
-  );
+    }
+    const key =
+      order.lastDispatchFailureReason ??
+      order.dispatchTimeout?.timeoutReasonCode ??
+      "unknown";
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
   const topNoSupplyReason =
-    Object.entries(noSupplyReasonCounts).sort((left, right) => right[1] - left[1])[0] ??
-    null;
+    Object.entries(noSupplyReasonCounts).sort(
+      (left, right) => right[1] - left[1],
+    )[0] ?? null;
   const approvalBlockedCount = sortedOwnedOrders.filter(
-    (order) => order.approvalState === "blocked" || order.approvalState === "pending",
+    (order) =>
+      order.approvalState === "blocked" || order.approvalState === "pending",
   ).length;
   const quotaBlockedCount = sortedOwnedOrders.filter((order) =>
     order.complianceFlags.some((flag) => flag.includes("quota")),
@@ -2901,7 +2917,10 @@ export default async function DispatchPage({
                         >
                           <span>{item.partnerEntrySlug}</span>
                           <span style={{ color: theme.textDim }}>
-                            {formatDispatchCode(locale, item.verificationStatus)}
+                            {formatDispatchCode(
+                              locale,
+                              item.verificationStatus,
+                            )}
                           </span>
                         </div>
                       ))}
@@ -3006,7 +3025,10 @@ export default async function DispatchPage({
                           "reservation",
                           t("dispatch.filters.timing.reservation", locale),
                         ],
-                        ["realtime", t("dispatch.filters.timing.realtime", locale)],
+                        [
+                          "realtime",
+                          t("dispatch.filters.timing.realtime", locale),
+                        ],
                       ] as const
                     ).map(([timingKey, label]) => (
                       <Link
@@ -3182,7 +3204,6 @@ export default async function DispatchPage({
                   </div>
                 </>
               ) : null}
-              </div>
 
               <div
                 style={{
@@ -3242,13 +3263,17 @@ export default async function DispatchPage({
                         </div>
                         {"mirrorOrderId" in selectedRecord ? null : (
                           <div style={selectedMetaCellStyle}>
-                            <span style={{ fontSize: 11, color: theme.textDim }}>
+                            <span
+                              style={{ fontSize: 11, color: theme.textDim }}
+                            >
                               {t("dispatch.selected.attribution", locale)}
                             </span>
                             <strong>
                               {`${getFleetLabel(selectedRecord, locale)} · ${formatDispatchCode(locale, getServiceProductValue(selectedRecord))}`}
                             </strong>
-                            <span style={{ color: theme.textMuted, fontSize: 11 }}>
+                            <span
+                              style={{ color: theme.textMuted, fontSize: 11 }}
+                            >
                               {`${getTenantLabel(selectedRecord)} · ${getApprovalLabel(selectedRecord.approvalState, locale)} · ${getEligibilityReasonLabel(selectedRecord, locale)}`}
                             </span>
                           </div>
