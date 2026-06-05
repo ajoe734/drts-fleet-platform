@@ -1069,9 +1069,7 @@ function renderSequenceRail(
 }
 
 function getSequenceTitle(locale: Locale) {
-  return locale === "zh"
-    ? tr(locale, "dispatch.detail.sequence.timelineTitle")
-    : tr(locale, "dispatch.detail.sequence.title");
+  return tr(locale, "dispatch.detail.sequence.title");
 }
 
 function renderActivityFeed(locale: Locale, entries: ActivityEntry[]) {
