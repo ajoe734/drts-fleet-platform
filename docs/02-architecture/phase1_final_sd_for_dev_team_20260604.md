@@ -715,10 +715,8 @@ BE-SVC-002 VehicleLicenseType / VehicleServiceCapability
 BE-SVC-003 Eligibility matrix admin API
 BE-SVC-004 Dispatch eligibility enforcement
 
-BE-FLEET-001 FleetPartner model
-BE-FLEET-002 DriverFleetAffiliation model
-BE-FLEET-003 FleetPartnerRevenueShareRule
-BE-FLEET-004 FleetPartnerStatement
+BE-FLEET-001 FleetPartner + DriverFleetAffiliation admin API
+BE-FLEET-002 Revenue share rules + Fleet partner statement calculation/API
 
 BE-TEN-BIZ-001 Tenant payable summary
 BE-TEN-BIZ-002 Tenant orders/trips management API
