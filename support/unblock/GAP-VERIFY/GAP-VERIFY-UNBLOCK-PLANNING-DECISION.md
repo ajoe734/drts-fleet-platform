@@ -4,7 +4,7 @@
 **Parent task:** `GAP-VERIFY`
 **Owner:** `Codex`
 **Reviewer:** `Codex2`
-**Decision date:** 2026-06-04
+**Decision date:** 2026-06-05
 **Decision type:** Routing decision (no new product/contract change)
 
 ---
@@ -25,9 +25,9 @@ This unblock task therefore resolves to:
 
 The remaining issue is execution and integration evidence:
 
-- the parent task `GAP-VERIFY` is currently `blocked`, but its machine-truth
-  `next` field already describes live dev verification failures, not an
-  unresolved product rule or API contract
+- the parent task `GAP-VERIFY` is still execution-side blocked, but the real
+  remaining work is live dev verification fallout, not an unresolved product
+  rule or API contract
 - the unresolved work is to re-run the dev audit, refresh evidence, and route
   any still-reproducible failures as concrete implementation or integration
   defects
@@ -38,7 +38,7 @@ The remaining issue is execution and integration evidence:
 | --- | --- |
 | `AI_COLLABORATION_GUIDE.md` §2 | Product semantics must come from higher-precedence canonical truth; unresolved product choices go to `PHASE1_OPEN_QUESTIONS.md`. |
 | `PHASE1_OPEN_QUESTIONS.md` | No open item mentions `GAP-VERIFY`, `/pricing`, `/attendance`, `/revenue`, or an unresolved verification-time product contract that would require a new planning decision. |
-| `scripts/ai-status.sh show GAP-VERIFY` | The parent is explicitly an execution verification task: re-run browser audit on dev, confirm 39 routes, single shell, tab round-trips, and refresh the scoreboard/report artifact. Its current `next` field lists live failures from the last re-run, which is an execution-state report rather than a planning gap. |
+| `scripts/ai-status.sh show GAP-VERIFY` | The parent is explicitly an execution verification task: re-run browser audit on dev, confirm 39 routes, single shell, tab round-trips, and refresh the scoreboard/report artifact. After aligning `next` on 2026-06-05, the parent now points at the two remaining live-dev defects plus the rerun, which is execution routing rather than a planning gap. |
 | `docs/05-ui/ops-console-parity-verification-20260602.md` | The ops route inventory and verification model already exist as execution evidence: route coverage, single-shell expectation, and remote-dev re-run after deploy are framed as verification/integration work, not a product-semantics question. |
 | `docs/05-ui/platform-admin-body-parity-audit-20260602.md` | `/pricing` is already specified as a four-tab body-parity target, so the remaining issue is whether current dev behavior matches the settled UI contract, not what the contract should be. |
 | `docs/05-ui/system-design-answers-all-apps-20260524.md` | Q-ADM10/Q-ADM11 already resolve the `/pricing` behavior: versioned pricing with sibling tabs under `/pricing`. This decision already exists in canonical planning artifacts. |
@@ -95,25 +95,26 @@ The concrete next step for `GAP-VERIFY` is:
 > scoreboard and findings, and treat any remaining failures as implementation /
 > integration bugs rather than missing product semantics.
 
-## 5.1 Machine-Truth Update Applied
+## 5.1 Machine-Truth Alignment
 
-Canonical task state was updated via `scripts/ai-status.sh` on 2026-06-04 so
-the parent task no longer advertises the stale failure-summary text in its
-`next` field.
+Canonical task state was re-aligned via `scripts/ai-status.sh note GAP-VERIFY`
+on 2026-06-05 so the parent task no longer points at the stale
+"planning unblock artifact in review" message.
 
 Updated parent `GAP-VERIFY.next`:
 
-> Planning blocker resolved by `GAP-VERIFY-UNBLOCK-PLANNING-DECISION`: resume
-> execution on the current dev deployment, re-run the live browser gap audit,
-> refresh `docs/05-ui/dev-runtime-functional-gap-report-20260603.md` with the
-> new scoreboard and findings, and route any remaining failures as
-> implementation or integration defects rather than missing product semantics.
+> Planning decision resolved as routing-only: no new product/contract
+> decision is missing. Remaining work is execution on live dev: fix Ops
+> `/vehicles/veh-demo-001` HTTP 500 and Platform Admin `/pricing` URL-tab
+> sync, deploy to dev, then rerun the browser audit and refresh
+> `docs/05-ui/dev-runtime-functional-gap-report-20260603.md` scoreboard
+> evidence.
 
 Remaining control-plane step:
 
 - finalize this unblock task through review and `done` so the helper closeout
-  can also clear the parent's `blocked` status and hand execution back to the
-  parent owner in machine truth
+  can move the parent out of the stale planning-blocker framing and hand the
+  execution follow-up back to the parent owner in machine truth
 
 ## 6. Acceptance Mapping
 
@@ -123,5 +124,5 @@ Remaining control-plane step:
 | Record the decision | Recorded here as a routing decision with no new L1/L2 semantic change. |
 | scope cut | Not needed. Parent scope remains the same. |
 | or explicit follow-up needed by the parent task | Recorded in §4 and §5: resume dev re-audit, refresh scoreboard, route any remaining failures as concrete defects. |
-| Produce task-scoped commit/push/PR evidence for any canonical change | Delivered on branch `codex/gap-verify-unblock-planning-decision` with this unblock artifact and machine-truth update evidence. |
-| Update the parent task with the concrete unblocked next step | Applied via `scripts/ai-status.sh note GAP-VERIFY ...`; parent `next` now points to the live dev re-audit + scoreboard refresh step above. |
+| Produce task-scoped commit/push/PR evidence for any canonical change | Delivered on branch `codex/gap-verify-unblock-planning-decision` with this unblock artifact and machine-truth alignment evidence. |
+| Update the parent task with the concrete unblocked next step | Applied via `scripts/ai-status.sh note GAP-VERIFY ...`; parent `next` now points to the two remaining live-dev defects plus deploy + rerun step above. |
