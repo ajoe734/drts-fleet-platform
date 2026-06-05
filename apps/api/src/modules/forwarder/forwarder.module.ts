@@ -4,6 +4,7 @@ import { DatabaseModule } from "../../common/db";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
+import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
 import { FORWARDER_ADAPTERS } from "./forwarder-adapter.interface";
 import { ForwarderController } from "./forwarder.controller";
 import { ForwarderRepository } from "./forwarder.repository";
@@ -15,6 +16,7 @@ import { SandboxAdapter } from "./sandbox.adapter";
   imports: [
     DatabaseModule,
     RegulatoryRegistryModule,
+    VehicleEligibilityModule,
     AuditNotificationModule,
     forwardRef(() => OwnedMobilityModule),
   ],

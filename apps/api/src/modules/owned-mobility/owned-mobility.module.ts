@@ -7,6 +7,7 @@ import { CallcenterModule } from "../callcenter/callcenter.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
 import { OwnedMobilityController } from "./owned-mobility.controller";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
@@ -19,6 +20,7 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     AuditNotificationModule,
     CallcenterModule,
     forwardRef(() => TenantPartnerModule),
+    VehicleEligibilityModule,
   ],
   controllers: [OwnedMobilityController],
   providers: [

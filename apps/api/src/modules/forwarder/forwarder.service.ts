@@ -40,6 +40,7 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
+import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import {
   FORWARDER_ADAPTERS,
   type ForwarderAdapterHealthSnapshot,
@@ -98,6 +99,10 @@ export class ForwarderService implements OnModuleInit {
 
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
+    @Optional()
+    private readonly vehicleEligibilityService:
+      | VehicleEligibilityService
+      | undefined,
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
     @Inject(FORWARDER_ADAPTERS)
@@ -454,9 +459,17 @@ export class ForwarderService implements OnModuleInit {
       forwardedOrder.authoritativeSnapshot,
     );
     const eligibleDrivers = new Set(
-      this.regulatoryRegistryService
-        .getEligibleCandidates(serviceBucket)
-        .map((candidate) => candidate.driverId),
+      (
+        this.vehicleEligibilityService
+          ? this.vehicleEligibilityService
+              .listEligibleSupply("third_party_forwarded_order")
+              .filter((candidate) =>
+                serviceBucket === "business_dispatch"
+                  ? candidate.serviceBuckets.includes("business_dispatch")
+                  : true,
+              )
+          : this.regulatoryRegistryService.getEligibleCandidates(serviceBucket)
+      ).map((candidate) => candidate.driverId),
     );
     const requestedDrivers =
       command.candidateDriverIds.length > 0

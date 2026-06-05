@@ -13,6 +13,7 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
+import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
 
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
 
@@ -26,6 +27,7 @@ function createOwnedMobilityService(options?: {
   }>;
   vehicleDispatchable?: boolean;
   tenantPartnerService?: TenantPartnerService;
+  enableVehicleEligibility?: boolean;
 }) {
   const regulatoryRegistryService = {
     getEligibleCandidates: vi.fn(() => options?.candidates ?? []),
@@ -65,9 +67,13 @@ function createOwnedMobilityService(options?: {
   const opsDispatchEventsService = new OpsDispatchEventsService(
     new EventEmitter2(),
   );
+  const vehicleEligibilityService = options?.enableVehicleEligibility
+    ? new VehicleEligibilityService(regulatoryRegistryService as never)
+    : undefined;
 
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
+    vehicleEligibilityService,
     auditNotificationService as never,
     callcenterService as never,
     taskEventsService,
@@ -80,6 +86,7 @@ function createOwnedMobilityService(options?: {
     service,
     regulatoryRegistryService,
     auditNotificationService,
+    vehicleEligibilityService,
   };
 }
 
@@ -132,6 +139,62 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
           code: "VEHICLE_NOT_DISPATCHABLE",
+        },
+      });
+    }
+  });
+
+  it("rejects enterprise-dispatch assignment when the vehicle is not eligible for the service product", async () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "drv-demo-001",
+          vehicleId: "veh-demo-001",
+          etaMinutes: 6,
+          operatingArea: "taichung-port",
+          serviceBuckets: ["standard_taxi", "business_dispatch"],
+        },
+      ],
+      vehicleDispatchable: true,
+      enableVehicleEligibility: true,
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-06-05T10:00:00.000Z",
+        reservationWindowEnd: "2026-06-05T11:00:00.000Z",
+        pickup: { address: "台中市西屯區台灣大道 1 號" },
+        dropoff: { address: "台中市南屯區公益路 2 號" },
+        passenger: { name: "測試乘客", phone: "0911222333" },
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchJob = service.dispatchOrder(booking.orderId, { mode: "auto" });
+
+    expect(() =>
+      service.assignDispatch({
+        dispatchJobId: dispatchJob.dispatchJobId,
+        vehicleId: "veh-demo-002",
+        driverId: "drv-demo-001",
+      }),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.assignDispatch({
+        dispatchJobId: dispatchJob.dispatchJobId,
+        vehicleId: "veh-demo-002",
+        driverId: "drv-demo-001",
+      });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
+          details: {
+            vehicleId: "veh-demo-002",
+            serviceProduct: "enterprise_dispatch",
+          },
         },
       });
     }

@@ -45,6 +45,7 @@ import { ReportingFilingModule } from "./modules/reporting-filing/reporting-fili
 import { ShiftAttendanceModule } from "./modules/shift-attendance/shift-attendance.module";
 import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.module";
 import { AuthModule } from "./modules/auth/auth.module";
+import { VehicleEligibilityModule } from "./modules/vehicle-eligibility/vehicle-eligibility.module";
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     DriverSettingsModule,
     PlatformPresenceModule,
     PlatformEarningsModule,
+    VehicleEligibilityModule,
   ],
   providers: [
     JwtAuthService,

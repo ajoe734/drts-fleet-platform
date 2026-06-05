@@ -53,6 +53,33 @@ export const BUSINESS_DISPATCH_SUBTYPES = [
 export type BusinessDispatchSubtype =
   (typeof BUSINESS_DISPATCH_SUBTYPES)[number];
 
+export const SERVICE_PRODUCT_TYPES = [
+  "taxi_realtime",
+  "taxi_reservation",
+  "enterprise_dispatch",
+  "credit_card_airport_transfer",
+  "insurance_replacement_vehicle",
+  "travel_agency_transfer",
+  "third_party_forwarded_order",
+] as const;
+export type ServiceProductType = (typeof SERVICE_PRODUCT_TYPES)[number];
+
+export const SERVICE_TIMINGS = [
+  "realtime",
+  "reservation",
+  "external_defined",
+] as const;
+export type ServiceTiming = (typeof SERVICE_TIMINGS)[number];
+
+export const VEHICLE_LICENSE_TYPES = [
+  "taxi",
+  "multi_purpose_taxi",
+  "rental_car",
+  "business_vehicle",
+  "airport_transfer_vehicle",
+] as const;
+export type VehicleLicenseType = (typeof VEHICLE_LICENSE_TYPES)[number];
+
 export const PARTNER_ENTRY_AUTH_MODES = [
   "tenant_portal_bearer",
   "partner_api_key",
