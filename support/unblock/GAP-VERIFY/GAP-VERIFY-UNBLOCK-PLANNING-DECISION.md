@@ -116,7 +116,29 @@ Remaining control-plane step:
   can move the parent out of the stale planning-blocker framing and hand the
   execution follow-up back to the parent owner in machine truth
 
-## 6. Acceptance Mapping
+## 6. Task-Scoped Delivery Evidence
+
+The canonical delivery tuple for this unblock task is:
+
+| Field | Value |
+| --- | --- |
+| owner branch | `codex/gap-verify-unblock-planning-decision` |
+| pushed remote | `origin` |
+| pushed commit | `3a53159ad29e0bc741e70ac15efbee7cf2b07fc4` |
+| commit subject | `docs(GAP-VERIFY-UNBLOCK-PLANNING-DECISION): align artifact with machine truth` |
+| owner | `Codex` |
+| reviewer | `Codex2` |
+
+Clarification for the failed review:
+
+- `origin/codex2/gap-verify-unblock-planning-decision` at
+  `c2623617dc0e49107a10b4451b380a279cc91cee` is a separate worker branch and is
+  **not** the assigned owner branch for this task.
+- Review and closeout evidence for `GAP-VERIFY-UNBLOCK-PLANNING-DECISION` must
+  therefore be checked against `origin/codex/gap-verify-unblock-planning-decision`
+  at `3a53159ad29e0bc741e70ac15efbee7cf2b07fc4`.
+
+## 7. Acceptance Mapping
 
 | Acceptance item | Result |
 | --- | --- |
