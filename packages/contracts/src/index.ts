@@ -4532,6 +4532,85 @@ export interface UpdateDriverProfileCommand {
   bankAccount?: DriverProfileBankAccount | null;
 }
 
+export const FLEET_PARTNERSHIP_TYPES = [
+  "driver_recruitment",
+  "fleet_management",
+  "vehicle_owner_group",
+  "business_dispatch_fleet",
+] as const;
+export type FleetPartnershipType = (typeof FLEET_PARTNERSHIP_TYPES)[number];
+
+export const DRIVER_FLEET_AFFILIATION_TYPES = [
+  "recruited_by",
+  "managed_by",
+  "vehicle_owned_by",
+  "contracted_under",
+] as const;
+export type DriverFleetAffiliationType =
+  (typeof DRIVER_FLEET_AFFILIATION_TYPES)[number];
+
+export interface FleetPartnerRecord {
+  fleetPartnerId: string;
+  legalName: string;
+  displayName: string;
+  businessRegistrationNo: string;
+  contactName: string;
+  contactPhone: string;
+  active: boolean;
+  partnershipType: FleetPartnershipType;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DriverFleetAffiliationRecord {
+  affiliationId: string;
+  driverId: string;
+  fleetPartnerId: string;
+  affiliationType: DriverFleetAffiliationType;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateFleetPartnerCommand {
+  legalName: string;
+  displayName: string;
+  businessRegistrationNo: string;
+  contactName: string;
+  contactPhone: string;
+  active?: boolean;
+  partnershipType: FleetPartnershipType;
+}
+
+export interface UpdateFleetPartnerCommand {
+  legalName?: string;
+  displayName?: string;
+  businessRegistrationNo?: string;
+  contactName?: string;
+  contactPhone?: string;
+  active?: boolean;
+  partnershipType?: FleetPartnershipType;
+}
+
+export interface CreateDriverFleetAffiliationCommand {
+  fleetPartnerId: string;
+  affiliationType: DriverFleetAffiliationType;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+}
+
+export interface FleetPartnerDriverRecord {
+  affiliationId: string;
+  driverId: string;
+  driverName: string;
+  driverPhone: string | null;
+  fleetPartnerId: string;
+  affiliationType: DriverFleetAffiliationType;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Platform Admin — Control-Plane Authority Types
 // ---------------------------------------------------------------------------
