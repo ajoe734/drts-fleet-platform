@@ -41,6 +41,7 @@ import {
   formatDriverTaskStatusLabel,
   formatDriverTaskTypeLabel,
 } from "@/lib/operational-labels";
+import { buildTaskCardDetailItems } from "@/lib/driver-service-views";
 import {
   driverForwardedTaskStatusLabels,
   driverJobFilterOptions,
@@ -1008,6 +1009,7 @@ function TaskCard({
       : null;
   const nextStepText = buildAllowedActionSummary(task);
   const showFooter = Boolean(fareLabel || deadlineLabel || actionLabel);
+  const detailItems = buildTaskCardDetailItems(task, order);
 
   return (
     <Card
@@ -1058,6 +1060,17 @@ function TaskCard({
             <Pill tone="neutral">{typeLabel}</Pill>
             {task.routeLocked ? <Pill tone="warn">路線鎖定</Pill> : null}
             {order?.fixedPrice ? <Pill tone="info">固定車資</Pill> : null}
+          </View>
+
+          <View style={styles.cardDetailGrid}>
+            {detailItems.map((item) => (
+              <View key={item.key} style={styles.cardDetailItem}>
+                <Text style={styles.cardDetailLabel}>{item.label}</Text>
+                <Text style={styles.cardDetailValue} numberOfLines={2}>
+                  {item.value}
+                </Text>
+              </View>
+            ))}
           </View>
 
           <View style={styles.cardAuthorityWrap}>
@@ -1738,6 +1751,35 @@ const styles = StyleSheet.create({
   },
   taskCard: {
     borderRadius: 14,
+  },
+  cardDetailGrid: {
+    marginTop: 12,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  cardDetailItem: {
+    minWidth: "47%",
+    flexGrow: 1,
+    borderWidth: 1,
+    borderColor: THEME.border,
+    backgroundColor: THEME.surfaceLo,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  cardDetailLabel: {
+    color: THEME.textDim,
+    fontSize: 11,
+    lineHeight: 15,
+    fontFamily: THEME.fontFamily,
+    marginBottom: 4,
+  },
+  cardDetailValue: {
+    color: THEME.text,
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: THEME.fontFamily,
   },
   taskCardForwarded: {
     borderLeftWidth: 3,

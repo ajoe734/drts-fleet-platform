@@ -6,6 +6,7 @@ import {
   type DriverPayoutStatus,
   type DriverStatementRecord,
   type MoneyAmount,
+  type OwnedOrderRecord,
   type PlatformEarningsByPlatformResponse,
   type PlatformEarningsItem,
   type PlatformEarningsSummary,
@@ -26,6 +27,11 @@ import {
 } from "@/components/earnings-by-platform";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
 import {
+  buildGroupedEarningsItems,
+  type EarningsGroupBy,
+  type EarningsGroupedItem,
+} from "@/lib/driver-service-views";
+import {
   formatAmountNumber,
   formatMoney,
   formatSignedAmountNumber,
@@ -40,6 +46,13 @@ type PeriodKey = "today" | "week" | "month";
 const THEME = driverCanvasTheme;
 const PERIOD_OPTIONS = driverEarningsPeriodOptions;
 const DEFAULT_CURRENCY = "TWD";
+const GROUP_OPTIONS: Array<{ label: string; value: EarningsGroupBy }> = [
+  { label: "平台", value: "platform" },
+  { label: "服務", value: "service_product" },
+  { label: "租戶", value: "tenant" },
+  { label: "車隊", value: "fleet" },
+  { label: "總計", value: "total" },
+];
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -126,7 +139,10 @@ function getHeroLabel(period: PeriodKey, latestStatementMonth: string | null) {
     : "淨收入 · 本月";
 }
 
-function getHeroContext(period: PeriodKey, latestStatementMonth: string | null) {
+function getHeroContext(
+  period: PeriodKey,
+  latestStatementMonth: string | null,
+) {
   if (period === "month") {
     return latestStatementMonth ? `月結 ${latestStatementMonth}` : "本月月結";
   }
@@ -347,6 +363,159 @@ function BreakdownRow({
   );
 }
 
+function GroupedBreakdownRow({ item }: { item: EarningsGroupedItem }) {
+  const empty =
+    item.grossEarning.amountMinor === 0 &&
+    item.serviceFee.amountMinor === 0 &&
+    item.subsidy.amountMinor === 0 &&
+    item.netAmount.amountMinor === 0;
+
+  return (
+    <View
+      style={[
+        styles.breakdownRow,
+        {
+          backgroundColor: THEME.surface,
+          borderColor: THEME.border,
+        },
+        empty ? styles.breakdownRowEmpty : null,
+      ]}
+    >
+      <View style={styles.breakdownTopRow}>
+        <View
+          style={[styles.platformMark, { backgroundColor: THEME.accentBg }]}
+        >
+          <Text
+            style={[
+              styles.platformMarkText,
+              { color: THEME.accentHi, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {item.label.slice(0, 4).toUpperCase()}
+          </Text>
+        </View>
+
+        <View style={styles.breakdownMeta}>
+          <View style={styles.breakdownNameRow}>
+            <Text
+              style={[
+                styles.breakdownName,
+                { color: THEME.text, fontFamily: THEME.fontFamily },
+              ]}
+            >
+              {item.label}
+            </Text>
+            <Pill theme={THEME} tone="accent">
+              {item.tripCount > 0 ? `${item.tripCount} 趟` : "聚合"}
+            </Pill>
+          </View>
+          <Text
+            style={[
+              styles.breakdownSubline,
+              { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+            ]}
+          >
+            {item.detail}
+          </Text>
+        </View>
+
+        <View style={styles.breakdownValueWrap}>
+          <Text
+            style={[
+              styles.breakdownValue,
+              { color: THEME.text, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {formatAmountNumber(item.netAmount, { zeroPlaceholder: "—" })}
+          </Text>
+          <Text
+            style={[
+              styles.breakdownCurrency,
+              { color: THEME.textDim, fontFamily: THEME.fontFamily },
+            ]}
+          >
+            {item.netAmount.currency}
+          </Text>
+        </View>
+      </View>
+
+      <View
+        style={[
+          styles.breakdownDetailRow,
+          {
+            borderTopColor: THEME.border,
+          },
+        ]}
+      >
+        <Text
+          style={[
+            styles.breakdownDetailText,
+            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+          ]}
+        >
+          毛收{" "}
+          <Text
+            style={[
+              styles.breakdownDetailValue,
+              { color: THEME.text, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {formatAmountNumber(item.grossEarning)}
+          </Text>
+        </Text>
+        <Text
+          style={[
+            styles.breakdownDetailText,
+            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+          ]}
+        >
+          抽成{" "}
+          <Text
+            style={[
+              styles.breakdownDetailValue,
+              { color: THEME.text, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {item.serviceFee.amountMinor === 0
+              ? "0"
+              : formatSignedAmountNumber({
+                  ...item.serviceFee,
+                  amountMinor: -Math.abs(item.serviceFee.amountMinor),
+                })}
+          </Text>
+        </Text>
+        <Text
+          style={[
+            styles.breakdownDetailText,
+            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+          ]}
+        >
+          補助{" "}
+          <Text
+            style={[
+              styles.breakdownDetailValue,
+              { color: THEME.text, fontFamily: THEME.monoFamily },
+            ]}
+          >
+            {formatSignedAmountNumber(item.subsidy)}
+          </Text>
+        </Text>
+        <Text
+          style={[
+            styles.breakdownAuthority,
+            {
+              color: THEME.accentHi,
+              fontFamily: THEME.fontFamily,
+            },
+          ]}
+        >
+          {item.detail}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function StatementRow({
   statement,
   last,
@@ -379,7 +548,8 @@ function StatementRow({
             { color: THEME.textMuted, fontFamily: THEME.fontFamily },
           ]}
         >
-          {statement.lines.length} 趟 · {formatDriverPayoutStatusLabel(statement.payoutStatus)}
+          {statement.lines.length} 趟 ·{" "}
+          {formatDriverPayoutStatusLabel(statement.payoutStatus)}
         </Text>
       </View>
 
@@ -406,7 +576,12 @@ export default function EarningsScreen() {
     PlatformEarningsByPlatformResponse["items"]
   >([]);
   const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
+  const [statementOrderMap, setStatementOrderMap] = useState<
+    Record<string, OwnedOrderRecord>
+  >({});
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodKey>("today");
+  const [selectedGroup, setSelectedGroup] =
+    useState<EarningsGroupBy>("platform");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [earningsEnabled, setEarningsEnabled] = useState(true);
@@ -435,6 +610,31 @@ export default function EarningsScreen() {
       setStatements(
         [...statementRows].sort((left, right) =>
           right.updatedAt.localeCompare(left.updatedAt),
+        ),
+      );
+      const uniqueOrderIds = [
+        ...new Set(
+          statementRows.flatMap((statement) =>
+            statement.lines.map((line) => line.orderId),
+          ),
+        ),
+      ];
+      const fetchedOrders = await Promise.all(
+        uniqueOrderIds.map(async (orderId) => {
+          try {
+            const order = (await client.getOrder(orderId)) as OwnedOrderRecord;
+            return [orderId, order] as const;
+          } catch {
+            return [orderId, null] as const;
+          }
+        }),
+      );
+      setStatementOrderMap(
+        Object.fromEntries(
+          fetchedOrders.filter(
+            (entry): entry is readonly [string, OwnedOrderRecord] =>
+              entry[1] != null,
+          ),
         ),
       );
       setError(null);
@@ -538,9 +738,7 @@ export default function EarningsScreen() {
           tone="info"
           title="收益儀表板暫停提供"
           body="此功能目前未啟用，請稍後再試或改從設定頁確認帳務通知。"
-          icon={
-            <Ionicons name="wallet-outline" size={16} color={THEME.info} />
-          }
+          icon={<Ionicons name="wallet-outline" size={16} color={THEME.info} />}
         />
       </Shell>
     );
@@ -584,6 +782,12 @@ export default function EarningsScreen() {
     "netAmount",
     (statement) => statement.payoutStatus !== "paid",
   );
+  const groupedItems = buildGroupedEarningsItems({
+    groupBy: selectedGroup,
+    platformItems,
+    statements,
+    orderMap: statementOrderMap,
+  });
   const hasAnyData = platformItems.length > 0 || statements.length > 0;
   const metricAmount =
     selectedPeriod === "month" ? pendingPayoutAmount : forwardedPlatformAmount;
@@ -601,9 +805,7 @@ export default function EarningsScreen() {
               theme={THEME}
               variant="secondary"
               size="sm"
-              icon={
-                <Ionicons name="refresh" size={13} color={THEME.text} />
-              }
+              icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
               onPress={() => void onRefresh()}
             >
               {driverStrings.common.retry}
@@ -615,9 +817,7 @@ export default function EarningsScreen() {
           tone="danger"
           title="收益資料同步失敗"
           body={error}
-          icon={
-            <Ionicons name="alert-circle" size={16} color={THEME.danger} />
-          }
+          icon={<Ionicons name="alert-circle" size={16} color={THEME.danger} />}
         />
       </Shell>
     );
@@ -634,9 +834,7 @@ export default function EarningsScreen() {
             theme={THEME}
             variant="ghost"
             size="xs"
-            icon={
-              <Ionicons name="refresh" size={13} color={THEME.textMuted} />
-            }
+            icon={<Ionicons name="refresh" size={13} color={THEME.textMuted} />}
             onPress={() => void onRefresh()}
             disabled={refreshing}
           >
@@ -651,7 +849,9 @@ export default function EarningsScreen() {
           tone="warn"
           title="資料可能不是最新"
           body={error}
-          icon={<Ionicons name="warning-outline" size={16} color={THEME.warn} />}
+          icon={
+            <Ionicons name="warning-outline" size={16} color={THEME.warn} />
+          }
         />
       ) : null}
 
@@ -675,6 +875,34 @@ export default function EarningsScreen() {
                 size="sm"
                 disabled={refreshing && !active}
                 onPress={() => handleSelectPeriod(option.value as PeriodKey)}
+              >
+                {option.label}
+              </Btn>
+            );
+          })}
+        </View>
+      </View>
+
+      <View style={styles.groupStrip}>
+        <Text
+          style={[
+            styles.periodLabel,
+            { color: THEME.textMuted, fontFamily: THEME.fontFamily },
+          ]}
+        >
+          分組視圖
+        </Text>
+        <View style={styles.groupButtons}>
+          {GROUP_OPTIONS.map((option) => {
+            const active = option.value === selectedGroup;
+            return (
+              <Btn
+                key={option.value}
+                theme={THEME}
+                variant={active ? "primary" : "secondary"}
+                size="sm"
+                disabled={refreshing && !active}
+                onPress={() => setSelectedGroup(option.value)}
               >
                 {option.label}
               </Btn>
@@ -714,7 +942,8 @@ export default function EarningsScreen() {
             style={[
               styles.heroContext,
               {
-                color: selectedPeriod === "month" ? THEME.accentHi : THEME.success,
+                color:
+                  selectedPeriod === "month" ? THEME.accentHi : THEME.success,
                 fontFamily: THEME.fontFamily,
               },
             ]}
@@ -836,25 +1065,47 @@ export default function EarningsScreen() {
 
       <Card
         theme={THEME}
-        title={driverStrings.earnings.sections.platformBreakdown}
-        subtitle="不同平台有不同的結算權威；外部平台金額為參考值。"
+        title={
+          selectedGroup === "platform"
+            ? driverStrings.earnings.sections.platformBreakdown
+            : `收益分組 · ${GROUP_OPTIONS.find((option) => option.value === selectedGroup)?.label ?? ""}`
+        }
+        subtitle={
+          selectedGroup === "platform"
+            ? "不同平台有不同的結算權威；外部平台金額為參考值。"
+            : selectedPeriod === "month"
+              ? "非平台分組目前依月結與訂單 metadata 彙整。"
+              : "非平台分組目前使用最近可用 statement metadata。"
+        }
         padding={14}
       >
-        {platformItems.length > 0 ? (
+        {(selectedGroup === "platform"
+          ? platformItems.length
+          : groupedItems.length) > 0 ? (
           <View style={styles.breakdownList}>
-            {platformItems.map((item) => (
-              <BreakdownRow key={item.platformCode} item={item} />
-            ))}
+            {selectedGroup === "platform"
+              ? platformItems.map((item) => (
+                  <BreakdownRow key={item.platformCode} item={item} />
+                ))
+              : groupedItems.map((item) => (
+                  <GroupedBreakdownRow key={item.key} item={item} />
+                ))}
           </View>
         ) : (
           <Banner
             theme={THEME}
             tone="info"
-            title="這段期間還沒有平台收益"
-            body="切換到其他期間，或稍後再查看最新對帳彙整。"
-            icon={
-              <Ionicons name="cash-outline" size={16} color={THEME.info} />
+            title={
+              selectedGroup === "platform"
+                ? "這段期間還沒有平台收益"
+                : "目前沒有可用的分組收益"
             }
+            body={
+              selectedGroup === "platform"
+                ? "切換到其他期間，或稍後再查看最新對帳彙整。"
+                : "請切換到月結期間，或等待 statement/order metadata 同步完成。"
+            }
+            icon={<Ionicons name="cash-outline" size={16} color={THEME.info} />}
           />
         )}
       </Card>
@@ -926,6 +1177,9 @@ const styles = StyleSheet.create({
   periodStrip: {
     gap: 8,
   },
+  groupStrip: {
+    gap: 8,
+  },
   periodLabel: {
     fontSize: 11,
     fontWeight: "700",
@@ -933,6 +1187,11 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   periodButtons: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  groupButtons: {
     flexDirection: "row",
     gap: 8,
     flexWrap: "wrap",
