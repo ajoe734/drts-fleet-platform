@@ -1,0 +1,112 @@
+name: E2E - Staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch or commit SHA to run against
+        required: false
+        default: dev
+      api_origin:
+        description: Protected staging API origin
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: e2e-staging-${{ github.event.inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT_ID: ${{ vars.STAGING_GCP_PROJECT_ID }}
+  REGION: ${{ vars.STAGING_GCP_REGION || 'us-central1' }}
+  WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER }}
+  DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.STAGING_WIF_SERVICE_ACCOUNT }}
+  CONTROL_PLANE_API_ORIGIN_ENV: ${{ github.event.inputs.api_origin || vars.STAGING_CONTROL_PLANE_API_ORIGIN || 'https://api.staging.drts-fleet.cctech-support.com' }}
+  IAP_CLIENT_ID_ENV: ${{ vars.STAGING_IAP_CLIENT_ID || '1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com' }}
+
+jobs:
+  run-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate staging GitHub config
+        run: |
+          set -euo pipefail
+
+          missing=()
+          [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.STAGING_GCP_PROJECT_ID")
+          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.STAGING_WIF_PROVIDER")
+          [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.STAGING_WIF_SERVICE_ACCOUNT")
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing staging configuration: ${missing[*]}"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Mint IAP token
+        id: iap_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ env.IAP_CLIENT_ID_ENV }}
+          id_token_include_email: true
+
+      - name: Static validation
+        run: |
+          set -euo pipefail
+          bash -n tests/e2e/E2E-014-fleet-partner-revenue-share.sh
+          bash tests/e2e/run-e2e.sh --suite 014 --dry-run
+
+      - name: Run staging scenario
+        env:
+          E2E_API_URL: ${{ env.CONTROL_PLANE_API_ORIGIN_ENV }}
+          E2E_AUTH_BEARER_TOKEN: ${{ steps.iap_token.outputs.id_token }}
+          E2E_TIMEOUT: "60"
+          E2E_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}-014
+          E2E_CHAIN_FILE: ${{ runner.temp }}/e2e-chain-014.json
+          E2E_EVIDENCE_FILE: ${{ runner.temp }}/e2e-evidence-014.log
+        run: |
+          set -euo pipefail
+
+          scenario="tests/e2e/E2E-014-fleet-partner-revenue-share.sh"
+          console_log="${RUNNER_TEMP}/e2e-console-014.log"
+
+          bash "$scenario" | tee "$console_log"
+          status=${PIPESTATUS[0]}
+
+          if [[ $status -ne 0 ]]; then
+            echo "::error::Scenario exited with ${status}"
+            exit "$status"
+          fi
+
+          if grep -q " | E2E-014 | .* | skipped=" "${E2E_EVIDENCE_FILE}"; then
+            echo "::error::Scenario reported skip evidence; acceptance requires a full staging pass."
+            cat "${E2E_EVIDENCE_FILE}"
+            exit 1
+          fi
+
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-staging-014-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/e2e-chain-014.json
+            ${{ runner.temp }}/e2e-evidence-014.log
+            ${{ runner.temp }}/e2e-console-014.log
+          if-no-files-found: warn
