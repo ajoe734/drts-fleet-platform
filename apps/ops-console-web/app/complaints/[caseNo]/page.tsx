@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type {
+  ActionRiskLevel,
   ComplaintCaseRecord,
   ComplaintExportViewRecord,
 } from "@drts/contracts";
@@ -146,6 +147,72 @@ function buildProgressItems(
   ];
 }
 
+type CaseAction = {
+  action: string;
+  labelEn: string;
+  labelZh: string;
+  risk: ActionRiskLevel;
+  enabled: boolean;
+  requiresReason?: boolean;
+  restricted?: boolean;
+};
+
+// §5.6 must-support actions, gated by case status. The complaint detail
+// endpoint returns a bare record (no availableActions[]), so we derive the
+// affordance set from the status machine and §3.5 risk rules here.
+function deriveCaseActions(complaint: ComplaintCaseRecord): CaseAction[] {
+  const open =
+    complaint.status === "new" ||
+    complaint.status === "assigned" ||
+    complaint.status === "under_investigation" ||
+    complaint.status === "reopened";
+  const resolved = complaint.status === "resolved";
+  const closed = complaint.status === "closed";
+  return [
+    { action: "add_note", labelEn: "Add note", labelZh: "新增備註", risk: "low", enabled: !closed },
+    { action: "assign", labelEn: "Assign / reassign", labelZh: "指派 / 改派", risk: "medium", enabled: !closed },
+    { action: "resolve", labelEn: "Resolve", labelZh: "結案處理", risk: "medium", enabled: open },
+    { action: "close", labelEn: "Close", labelZh: "關閉案件", risk: "medium", enabled: resolved },
+    { action: "reopen", labelEn: "Reopen", labelZh: "重啟案件", risk: "high", enabled: resolved || closed, requiresReason: true },
+    {
+      action: "escalate",
+      labelEn: "Escalate to incident",
+      labelZh: "升級為事故",
+      risk: "high",
+      enabled: !closed && !complaint.relatedIncidentId,
+      requiresReason: true,
+    },
+    { action: "export", labelEn: "Export view", labelZh: "匯出視圖", risk: "low", enabled: true },
+    {
+      action: "sla_waiver",
+      labelEn: "Manual SLA waiver",
+      labelZh: "手動 SLA 豁免",
+      risk: "high",
+      enabled: complaint.slaBreach,
+      requiresReason: true,
+      restricted: true,
+    },
+  ];
+}
+
+function riskTone(risk: ActionRiskLevel): "neutral" | "accent" | "warn" {
+  if (risk === "high") return "warn";
+  if (risk === "medium") return "accent";
+  return "neutral";
+}
+
+// SLA visual state per §5.6 state variants: breached vs warning vs on-track.
+function slaState(
+  complaint: ComplaintCaseRecord,
+): "breached" | "warning" | "ok" {
+  if (complaint.slaBreach) return "breached";
+  const due = new Date(complaint.slaDueAt).getTime();
+  if (!Number.isNaN(due) && due - Date.now() <= 4 * 60 * 60 * 1000) {
+    return "warning";
+  }
+  return "ok";
+}
+
 export default async function ComplaintDetailPage({
   params,
 }: ComplaintDetailPageProps) {
@@ -201,6 +268,11 @@ export default async function ComplaintDetailPage({
     }),
   );
 
+  const actions = deriveCaseActions(complaint);
+  const sla = slaState(complaint);
+  const isReadOnly =
+    complaint.status === "closed" || complaint.status === "resolved";
+
   return (
     <div style={{ padding: 24, display: "grid", gap: 16 }}>
       <PageHeader
@@ -251,33 +323,73 @@ export default async function ComplaintDetailPage({
         }
       />
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {["overview", "activity", "export"].map((tab) => (
-          <Pill
-            key={tab}
-            theme={theme}
-            tone={tab === "overview" ? "accent" : "neutral"}
-          >
-            {tab}
-          </Pill>
-        ))}
-      </div>
-
-      <Banner
+      <Card
         theme={theme}
-        tone="danger"
-        icon="warn"
-        title={copy(
-          locale,
-          "High-risk action requires reason",
-          "高風險動作必須填寫原因",
-        )}
-        body={copy(
-          locale,
-          "Escalating a complaint to an incident creates an immutable audit trail and requires a reason.",
-          "將客訴升級為事故會產生不可變更的稽核軌跡，且必須填寫原因。",
-        )}
-      />
+        title={copy(locale, "Available actions", "可用動作")}
+      >
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {actions.map((a) => (
+            <span
+              key={a.action}
+              title={
+                a.enabled
+                  ? undefined
+                  : copy(
+                      locale,
+                      "Not available in the current case status.",
+                      "目前案件狀態下無法執行。",
+                    )
+              }
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: `1px solid ${theme.border}`,
+                background: a.enabled ? theme.bgRaised : "transparent",
+                color: a.enabled ? theme.text : theme.textMuted,
+                opacity: a.enabled ? 1 : 0.5,
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {copy(locale, a.labelEn, a.labelZh)}
+              <Pill theme={theme} tone={riskTone(a.risk)} dot>
+                {formatOpsCodeLabel(locale, a.risk)}
+              </Pill>
+              {a.requiresReason ? (
+                <span style={{ fontSize: 11, color: theme.textMuted }}>
+                  {copy(locale, "reason", "需原因")}
+                </span>
+              ) : null}
+              {a.restricted ? (
+                <span style={{ fontSize: 11, color: theme.danger }}>
+                  {copy(locale, "restricted", "受限角色")}
+                </span>
+              ) : null}
+            </span>
+          ))}
+        </div>
+      </Card>
+
+      {sla === "ok" ? null : (
+        <Banner
+          theme={theme}
+          tone={sla === "breached" ? "danger" : "warn"}
+          icon="warn"
+          title={
+            sla === "breached"
+              ? copy(locale, "SLA breached", "已違反 SLA")
+              : copy(locale, "SLA due soon", "SLA 即將到期")
+          }
+          body={copy(
+            locale,
+            `SLA due ${formatDateTime(locale, complaint.slaDueAt)}. Manual SLA waiver is restricted and requires a reason.`,
+            `SLA 到期時間 ${formatDateTime(locale, complaint.slaDueAt)}。手動 SLA 豁免為受限動作，且必須填寫原因。`,
+          )}
+        />
+      )}
 
       <div
         style={{
@@ -314,20 +426,102 @@ export default async function ComplaintDetailPage({
               theme={theme}
               cols={1}
               items={[
-                { k: "order", v: complaint.relatedOrderId ?? "—", mono: true },
-                { k: "call", v: complaint.relatedCallId ?? "—", mono: true },
                 {
-                  k: "category",
+                  k: copy(locale, "source", "來源"),
+                  v: formatOpsCodeLabel(locale, complaint.caseSource),
+                  mono: true,
+                },
+                {
+                  k: copy(locale, "assignee", "承辦人"),
+                  v: complaint.assigneeId ?? copy(locale, "Unassigned", "未指派"),
+                  mono: true,
+                },
+                {
+                  k: copy(locale, "order", "關聯訂單"),
+                  v: complaint.relatedOrderId ? (
+                    <Link
+                      href={`/dispatch/${encodeURIComponent(complaint.relatedOrderId)}`}
+                      style={{ color: theme.accent }}
+                    >
+                      {complaint.relatedOrderId}
+                    </Link>
+                  ) : (
+                    "—"
+                  ),
+                  mono: true,
+                },
+                {
+                  k: copy(locale, "incident", "關聯事故"),
+                  v: complaint.relatedIncidentId ? (
+                    <Link
+                      href={`/incidents/${encodeURIComponent(complaint.relatedIncidentId)}`}
+                      style={{ color: theme.accent }}
+                    >
+                      {complaint.relatedIncidentId}
+                    </Link>
+                  ) : (
+                    "—"
+                  ),
+                  mono: true,
+                },
+                {
+                  k: copy(locale, "recording", "通話錄音"),
+                  v: complaint.relatedCallId
+                    ? copy(
+                        locale,
+                        `${complaint.relatedCallId} · PII-masked playback`,
+                        `${complaint.relatedCallId} · 去識別化播放`,
+                      )
+                    : "—",
+                  mono: true,
+                },
+                {
+                  k: copy(locale, "category", "分類"),
                   v: formatOpsCodeLabel(locale, complaint.category),
                   mono: true,
                 },
                 {
-                  k: "sla due",
-                  v: formatDateTime(locale, complaint.slaDueAt),
+                  k: copy(locale, "reopened", "重啟次數"),
+                  v: String(complaint.reopenCount),
                   mono: true,
                 },
               ]}
             />
+          </Card>
+
+          <Card
+            theme={theme}
+            title={copy(locale, "Resolution & recovery", "處理結果與補救")}
+          >
+            {isReadOnly ? (
+              <DL
+                theme={theme}
+                cols={1}
+                items={[
+                  {
+                    k: copy(locale, "resolution", "結果代碼"),
+                    v: complaint.resolutionCode
+                      ? formatOpsCodeLabel(locale, complaint.resolutionCode)
+                      : "—",
+                    mono: true,
+                  },
+                  {
+                    k: copy(locale, "recovery note", "補救說明"),
+                    v:
+                      complaint.closingNote ??
+                      copy(locale, "No recovery note recorded.", "尚無補救說明。"),
+                  },
+                ]}
+              />
+            ) : (
+              <span style={{ fontSize: 12, color: theme.textMuted }}>
+                {copy(
+                  locale,
+                  "Pre-resolution — no recovery notes until the case is resolved.",
+                  "尚未結案 — 結案後才會出現補救說明。",
+                )}
+              </span>
+            )}
           </Card>
 
           <Card theme={theme} title={copy(locale, "Export view", "匯出視圖")}>
