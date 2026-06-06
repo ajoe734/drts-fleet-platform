@@ -53,16 +53,22 @@ export {
   CANVAS_DARK_NAVY_PALETTE,
   CANVAS_DENSITY,
   CANVAS_LIGHT_PALETTE,
+  CANVAS_REALM_DARK,
+  CANVAS_REALM_LIGHT,
+  CANVAS_REALM_NAMES,
   CANVAS_SURFACE_ACCENTS,
   CANVAS_TYPE,
 } from "./canvas-tokens";
 export type {
   CanvasDensity,
   CanvasMode,
+  CanvasRealm,
+  CanvasRealmRamp,
   CanvasSurface,
   CanvasTheme,
   CanvasTone,
 } from "./canvas-tokens";
+export type { CanvasPillTone } from "./canvas-primitives";
 export { AppShellCard } from "./app-shell-card";
 export { AppSidebar } from "./app-sidebar";
 export type { AppSidebarProps, SidebarNavItem } from "./app-sidebar";
