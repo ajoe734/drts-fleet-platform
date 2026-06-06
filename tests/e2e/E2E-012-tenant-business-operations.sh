@@ -275,6 +275,22 @@ log_ok "booking read-back preserved cost center + service product binding"
 
 log_surface "Ops console — dispatch assign"
 switch_actor "ops_user" "e2e-ops-012"
+
+log_step "Trigger dispatch for the booking order"
+DISPATCH_FIXTURE="${TMP_DIR}/dispatch.json"
+printf '%s\n' '{"mode":"auto"}' > "$DISPATCH_FIXTURE"
+http_call POST "/orders/${ORDER_ID}/dispatch" "$DISPATCH_FIXTURE"
+assert_status "200|201"
+
+DISPATCH_JOB_ID=$(json_get_first '.data.dispatchJobId' '.data.dispatch_job_id')
+if [[ -n "$DISPATCH_JOB_ID" ]]; then
+  chain_set "ops" "dispatchJobId" "$DISPATCH_JOB_ID"
+  save_evidence "$SCENARIO" "ops" "dispatchJobIdAfterTrigger" "$DISPATCH_JOB_ID"
+  log_ok "dispatch triggered: dispatchJobId=${DISPATCH_JOB_ID}"
+else
+  log_warn "dispatch trigger accepted without dispatchJobId; falling back to queue poll"
+fi
+
 if ! poll_for_dispatch_job; then
   log_fail "No dispatch job found for orderId=${ORDER_ID}"
   exit 1
