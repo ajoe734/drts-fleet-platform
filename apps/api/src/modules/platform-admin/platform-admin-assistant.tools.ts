@@ -112,6 +112,51 @@ const PLATFORM_ADMIN_ASSISTANT_TOOL_REGISTRY: readonly PlatformAdminAssistantToo
       outputKind: "record_set",
     },
     {
+      name: "data.list_partner_entries",
+      family: "data",
+      description:
+        "Read partner entry records visible to the current actor without widening permissions.",
+      accessMode: "read",
+      callerScoped: true,
+      outputKind: "record_set",
+    },
+    {
+      name: "data.list_payment_records",
+      family: "data",
+      description:
+        "Read platform payment and invoice records visible to the current actor.",
+      accessMode: "read",
+      callerScoped: true,
+      outputKind: "record_set",
+    },
+    {
+      name: "data.list_pricing_rules",
+      family: "data",
+      description:
+        "Read pricing-rule records visible to the current actor without broadening scope.",
+      accessMode: "read",
+      callerScoped: true,
+      outputKind: "record_set",
+    },
+    {
+      name: "data.list_feature_flags",
+      family: "data",
+      description:
+        "Read platform and tenant flag state visible to the current actor.",
+      accessMode: "read",
+      callerScoped: true,
+      outputKind: "record_set",
+    },
+    {
+      name: "data.list_adapter_health",
+      family: "data",
+      description:
+        "Read adapter-registry and adapter-health state visible to the current actor.",
+      accessMode: "read",
+      callerScoped: true,
+      outputKind: "record_set",
+    },
+    {
       name: "docs.search_platform_admin_policy",
       family: "docs",
       description:
@@ -152,6 +197,15 @@ const PLATFORM_ADMIN_ASSISTANT_TOOL_REGISTRY: readonly PlatformAdminAssistantToo
       family: "audit",
       description:
         "Read recent audit events already visible to the current actor.",
+      accessMode: "audit",
+      callerScoped: true,
+      outputKind: "audit_entry_set",
+    },
+    {
+      name: "audit.list_platform_audit_entries",
+      family: "audit",
+      description:
+        "Read platform audit events already visible to the current actor without widening permissions.",
       accessMode: "audit",
       callerScoped: true,
       outputKind: "audit_entry_set",
