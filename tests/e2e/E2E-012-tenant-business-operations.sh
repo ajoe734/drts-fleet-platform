@@ -17,8 +17,9 @@
 #   - the booking/dispatch/driver/invoice/report-job chain is implemented
 #   - tenant dashboard / payables / statements routes are not yet present in
 #     this repo's API surface
-#   - tenant report jobs currently preserve filters + artifact lifecycle, but
-#     do not yet emit a tenant-business row schema with all SD columns
+#   - tenant report jobs currently preserve filters + artifact lifecycle via
+#     the existing monthly_trip_report contract, but do not yet emit a
+#     tenant-business row schema with all SD columns
 #
 # Therefore this shell uses a split gate:
 #   HARD FAIL
@@ -457,8 +458,8 @@ jq -n \
   --arg costCenterCode "$CC_CODE" \
   --arg serviceProduct "enterprise_dispatch" \
   '{
-    jobType: "tenant_business_operations",
-    format: "json",
+    jobType: "monthly_trip_report",
+    format: "csv",
     filters: {
       orderId: $orderId,
       userId: $userId,
@@ -484,10 +485,22 @@ REPORT_STATUS=$(json_get '.data.status')
 REPORT_ARTIFACT_ID=$(json_get_first '.data.artifact.artifactId' '.data.artifact.artifact_id')
 [[ "$REPORT_STATUS" == "completed" ]] || { log_fail "report status not completed"; exit 1; }
 [[ -n "$REPORT_ARTIFACT_ID" ]] || { log_fail "completed report missing artifactId"; exit 1; }
+REPORT_JOB_TYPE=$(json_get '.data.jobType')
+REPORT_FORMAT=$(json_get '.data.format')
+if [[ "$REPORT_JOB_TYPE" != "monthly_trip_report" ]]; then
+  log_fail "Expected report jobType monthly_trip_report, got '${REPORT_JOB_TYPE:-<empty>}'"
+  exit 1
+fi
+if [[ "$REPORT_FORMAT" != "csv" ]]; then
+  log_fail "Expected report format csv, got '${REPORT_FORMAT:-<empty>}'"
+  exit 1
+fi
+save_evidence "$SCENARIO" "report" "jobType" "$REPORT_JOB_TYPE"
+save_evidence "$SCENARIO" "report" "format" "$REPORT_FORMAT"
 save_evidence "$SCENARIO" "report" "artifactId" "$REPORT_ARTIFACT_ID"
 save_evidence "$SCENARIO" "report" "artifactUrl" "$(json_get_first '.data.artifact.downloadUrl' '.data.artifact.download_url')"
-save_evidence "$SCENARIO" "report" "rowCount" "$(json_get '.data.rows | length')"
-save_evidence "$SCENARIO" "report" "settlementMatrixCount" "$(json_get '.data.settlementMatrix | length')"
+save_evidence "$SCENARIO" "report" "rowCount" "$(json_get '(.data.rows // []) | length')"
+save_evidence "$SCENARIO" "report" "settlementMatrixCount" "$(json_get '(.data.settlementMatrix // []) | length')"
 log_ok "report artifact ready: ${REPORT_ARTIFACT_ID}"
 
 require_report_filter "tenantId" "$E2E_SEED_TENANT_ID"
@@ -496,10 +509,10 @@ require_report_filter "userId" "$TENANT_ADMIN_USER_ID"
 require_report_filter "costCenterCode" "$CC_CODE"
 require_report_filter "serviceProduct" "enterprise_dispatch"
 
-record_report_binding_mode "row.orderId" '.data.rows[0].orderId' "$ORDER_ID"
-record_report_binding_mode "row.userId" '.data.rows[0].userId' "$TENANT_ADMIN_USER_ID"
-record_report_binding_mode "row.costCenterCode" '.data.rows[0].costCenterCode' "$CC_CODE"
-record_report_binding_mode "row.serviceProduct" '.data.rows[0].serviceProduct' "enterprise_dispatch"
+record_report_binding_mode "row.orderId" '(.data.rows[0].orderId // .data.rows[0].order_id)' "$ORDER_ID"
+record_report_binding_mode "row.userId" '(.data.rows[0].userId // .data.rows[0].user_id)' "$TENANT_ADMIN_USER_ID"
+record_report_binding_mode "row.costCenterCode" '(.data.rows[0].costCenterCode // .data.rows[0].cost_center_code)' "$CC_CODE"
+record_report_binding_mode "row.serviceProduct" '(.data.rows[0].serviceProduct // .data.rows[0].service_product)' "enterprise_dispatch"
 
 log_surface "Audit evidence"
 http_call GET "/tenant/audit"
@@ -534,6 +547,6 @@ assert_chain "report" "jobId"
 print_chain_summary
 
 echo ""
-log_warn "E2E-012 currently records dashboard/payables/statements as live probes because those SD routes are not yet implemented in this repo. Invoice + report-job evidence are used as the runnable fallback for tenant business operations until the dedicated tenant summary/export surfaces land."
+log_warn "E2E-012 currently records dashboard/payables/statements as live probes because those SD routes are not yet implemented in this repo. Invoice + monthly_trip_report evidence are used as the runnable fallback for tenant business operations until the dedicated tenant summary/export surfaces land."
 log_ok "E2E-012 complete — tenant booking → trip completion → invoice → report chain passed."
 echo -e "Evidence log: ${EVIDENCE_FILE}"
