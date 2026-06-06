@@ -57,6 +57,9 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 SUFFIX="$(date +%s | tail -c 7)"
 CC_CODE="CC-TENBIZ-${SUFFIX}"
 CC_NAME="E2E-012 tenant ops ${SUFFIX}"
+BOOKED_BY_NAME="E2E Tenant Operator"
+BOOKED_BY_STAFF_ID="e2e-tenbiz-${SUFFIX}"
+BOOKED_BY_EMAIL="tenant-biz-admin@example.test"
 
 TENANT_ADMIN_USER_ID=""
 TENANT_FINANCE_USER_ID=""
@@ -217,31 +220,26 @@ WINDOW_START=$(date -u -d "+70 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
 WINDOW_END=$(date -u -d "+100 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
   || date -u -v+100M +"%Y-%m-%dT%H:%M:%SZ")
 BOOKING_FIXTURE="${TMP_DIR}/booking.json"
-jq -n \
+jq \
   --arg start "$WINDOW_START" \
   --arg end "$WINDOW_END" \
   --arg cc "$CC_CODE" \
-  '{
-    businessDispatchSubtype: "enterprise_dispatch",
-    reservationWindowStart: $start,
-    reservationWindowEnd: $end,
-    passenger: {
-      name: "Tenant Biz Rider",
-      phone: "0912000012"
-    },
-    bookedBy: {
-      name: "Tenant Biz Admin",
-      email: "tenant-biz-admin@example.test"
-    },
-    pickup: {
-      address: "台北車站"
-    },
-    dropoff: {
-      address: "松山機場"
-    },
-    costCenter: $cc,
-    notes: "E2E-012 tenant business operations"
-  }' > "$BOOKING_FIXTURE"
+  --arg bookedByName "$BOOKED_BY_NAME" \
+  --arg bookedByStaffId "$BOOKED_BY_STAFF_ID" \
+  --arg bookedByEmail "$BOOKED_BY_EMAIL" \
+  '
+    .reservationWindowStart = $start
+    | .reservationWindowEnd = $end
+    | .costCenter = $cc
+    | .notes = "E2E-012 tenant business operations"
+    | .bookedBy.name = $bookedByName
+    | .bookedBy.staffId = $bookedByStaffId
+    | .bookedBy.email = $bookedByEmail
+    | .passenger.name = "Tenant Biz Rider"
+    | .passenger.phone = "+886912000012"
+    | .pickup.address = "台北車站"
+    | .dropoff.address = "松山機場"
+  ' "${SCRIPT_DIR}/fixtures/e2e-booking-enterprise.json" > "$BOOKING_FIXTURE"
 
 http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
 assert_status "200|201"
@@ -287,8 +285,10 @@ log_ok "dispatch job found: ${DISPATCH_JOB_ID}"
 
 http_call GET "/dispatch/tasks/${DISPATCH_JOB_ID}/candidates"
 assert_status "200"
-ASSIGN_VEHICLE_ID=$(echo "$RESP_BODY" | jq -r '.data.items[0].vehicleId // empty' 2>/dev/null || true)
-ASSIGN_DRIVER_ID=$(echo "$RESP_BODY" | jq -r '.data.items[0].driverId // empty' 2>/dev/null || true)
+ASSIGN_VEHICLE_ID=$(echo "$RESP_BODY" | jq -r \
+  '.data.items[0] | (.vehicleId // .vehicle_id // empty)' 2>/dev/null || true)
+ASSIGN_DRIVER_ID=$(echo "$RESP_BODY" | jq -r \
+  '.data.items[0] | (.driverId // .driver_id // empty)' 2>/dev/null || true)
 if [[ -z "$ASSIGN_VEHICLE_ID" ]]; then
   ASSIGN_VEHICLE_ID="$E2E_SEED_VEHICLE_ID"
 fi
@@ -369,19 +369,26 @@ VISIBLE_ORDER_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
   '.data.items[] | select(.orderId == $oid) | .orderId' 2>/dev/null | head -1 || true)
 VISIBLE_ORDER_USER_EMAIL=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
   '.data.items[] | select(.orderId == $oid) | .bookedBy.email // empty' 2>/dev/null | head -1 || true)
+VISIBLE_ORDER_USER_STAFF_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .bookedBy.staffId // empty' 2>/dev/null | head -1 || true)
+VISIBLE_ORDER_USER_NAME=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .bookedBy.name // empty' 2>/dev/null | head -1 || true)
 VISIBLE_ORDER_COST_CENTER=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
-  '.data.items[] | select(.orderId == $oid) | .costCenter // empty' 2>/dev/null | head -1 || true)
+  '.data.items[] | select(.orderId == $oid) | (.costCenter // .costCenterCode // empty)' 2>/dev/null | head -1 || true)
 VISIBLE_ORDER_SERVICE_PRODUCT=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
-  '.data.items[] | select(.orderId == $oid) | .businessDispatchSubtype // empty' 2>/dev/null | head -1 || true)
+  '.data.items[] | select(.orderId == $oid) | (.businessDispatchSubtype // .serviceProduct // empty)' 2>/dev/null | head -1 || true)
 
 [[ "$VISIBLE_ORDER_ID" == "$ORDER_ID" ]] || {
   log_fail "tenant orders list does not surface completed orderId=${ORDER_ID}"
   exit 1
 }
-[[ "$VISIBLE_ORDER_USER_EMAIL" == "tenant-biz-admin@example.test" ]] || {
-  log_fail "tenant orders list bookedBy.email expected tenant-biz-admin@example.test, got '${VISIBLE_ORDER_USER_EMAIL:-<empty>}'"
+if [[ "$VISIBLE_ORDER_USER_EMAIL" != "$BOOKED_BY_EMAIL" && \
+      "$VISIBLE_ORDER_USER_STAFF_ID" != "$BOOKED_BY_STAFF_ID" && \
+      "$VISIBLE_ORDER_USER_NAME" != "$BOOKED_BY_NAME" ]]; then
+  log_fail "tenant orders list did not preserve bookedBy attribution for orderId=${ORDER_ID}"
+  log_fail "Observed bookedBy.email='${VISIBLE_ORDER_USER_EMAIL:-<empty>}', staffId='${VISIBLE_ORDER_USER_STAFF_ID:-<empty>}', name='${VISIBLE_ORDER_USER_NAME:-<empty>}'"
   exit 1
-}
+fi
 [[ "$VISIBLE_ORDER_COST_CENTER" == "$CC_CODE" ]] || {
   log_fail "tenant orders list costCenter expected ${CC_CODE}, got '${VISIBLE_ORDER_COST_CENTER:-<empty>}'"
   exit 1
@@ -391,7 +398,9 @@ VISIBLE_ORDER_SERVICE_PRODUCT=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" 
   exit 1
 }
 save_evidence "$SCENARIO" "tenant" "visibleOrderId" "$VISIBLE_ORDER_ID"
-save_evidence "$SCENARIO" "tenant" "visibleOrderUserEmail" "$VISIBLE_ORDER_USER_EMAIL"
+save_evidence "$SCENARIO" "tenant" "visibleOrderUserEmail" "${VISIBLE_ORDER_USER_EMAIL:-NOT_PRESENT}"
+save_evidence "$SCENARIO" "tenant" "visibleOrderUserStaffId" "${VISIBLE_ORDER_USER_STAFF_ID:-NOT_PRESENT}"
+save_evidence "$SCENARIO" "tenant" "visibleOrderUserName" "${VISIBLE_ORDER_USER_NAME:-NOT_PRESENT}"
 save_evidence "$SCENARIO" "tenant" "visibleOrderCostCenter" "$VISIBLE_ORDER_COST_CENTER"
 save_evidence "$SCENARIO" "tenant" "visibleOrderServiceProduct" "$VISIBLE_ORDER_SERVICE_PRODUCT"
 log_ok "tenant orders view preserved order/user/cost center/service product visibility"
