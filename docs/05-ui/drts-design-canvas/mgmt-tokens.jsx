@@ -26,6 +26,12 @@ const MGMT_ACCENTS = {
     dark:  '#FCD34D', darkHi:  '#FDE68A', darkBg:  '#3A2A0A', darkBorder:  '#5C4218',
     name: 'Partner Booking', tagline: '合作夥伴叫車入口',
   },
+  // Fleet Partner Portal — emerald (車行 / 車隊 supply partner)
+  fleet: {
+    light: '#047857', lightHi: '#059669', lightBg: '#ECFDF5', lightBorder: '#A7F3D0',
+    dark:  '#6EE7B7', darkHi:  '#A7F3D0', darkBg:  '#052E22', darkBorder:  '#0F5132',
+    name: 'Fleet Partner Portal', tagline: '車行供給與分潤後台',
+  },
 };
 
 // ── Actor realm colors — for cross-actor audit chips (Q-TEN13) ──────────────
