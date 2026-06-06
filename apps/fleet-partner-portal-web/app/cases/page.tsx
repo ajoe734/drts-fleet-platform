@@ -7,7 +7,9 @@ import {
   type CanvasTableColumn,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { FX_FLEET_CASES, type FleetCase } from "@/lib/fleet-portal-fixtures";
+import { type FleetCase } from "@/lib/fleet-portal-fixtures";
+import { loadCases } from "@/lib/fleet-portal-data.server";
+import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -16,6 +18,7 @@ export const dynamic = "force-dynamic";
 export default async function FleetCasesPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
+  const { rows, source } = await loadCases();
 
   const columns: CanvasTableColumn<FleetCase>[] = [
     {
@@ -134,9 +137,21 @@ export default async function FleetCasesPage() {
         tabs={["全部 3", "車行責任 1", "共同責任 1", "已結案"]}
         activeTab="全部 3"
       />
-      <div style={{ padding: 24 }}>
+      <div
+        style={{
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <DataSourceNotice
+          theme={theme}
+          source={source}
+          body={t("data.fixtureNotice", locale)}
+        />
         <CanvasCard theme={theme} padding={0}>
-          <CanvasTable theme={theme} columns={columns} rows={FX_FLEET_CASES} />
+          <CanvasTable theme={theme} columns={columns} rows={rows} />
         </CanvasCard>
       </div>
     </>

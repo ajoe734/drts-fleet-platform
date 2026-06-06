@@ -1,7 +1,7 @@
 import { CanvasCard, CanvasKPI, CanvasPageHeader } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { FX_FLEET_TRAINING } from "@/lib/fleet-portal-fixtures";
-import { BiLabel } from "@/lib/fleet-portal-ui";
+import { loadTraining } from "@/lib/fleet-portal-data.server";
+import { BiLabel, DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function FleetTrainingPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
+  const { rows, source } = await loadTraining();
 
   return (
     <>
@@ -26,6 +27,11 @@ export default async function FleetTrainingPage() {
           gap: 16,
         }}
       >
+        <DataSourceNotice
+          theme={theme}
+          source={source}
+          body={t("data.fixtureNotice", locale)}
+        />
         <div
           style={{
             display: "grid",
@@ -51,7 +57,7 @@ export default async function FleetTrainingPage() {
         </div>
         <CanvasCard theme={theme} title={t("training.courses", locale)}>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {FX_FLEET_TRAINING.map((c) => (
+            {rows.map((c) => (
               <div key={c.en}>
                 <div
                   style={{

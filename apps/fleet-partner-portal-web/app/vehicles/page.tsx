@@ -7,11 +7,9 @@ import {
   type CanvasTableColumn,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import {
-  FX_FLEET_VEHICLES,
-  type FleetVehicle,
-} from "@/lib/fleet-portal-fixtures";
-import { SvcChips } from "@/lib/fleet-portal-ui";
+import { type FleetVehicle } from "@/lib/fleet-portal-fixtures";
+import { loadVehicles } from "@/lib/fleet-portal-data.server";
+import { DataSourceNotice, SvcChips } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -20,6 +18,7 @@ export const dynamic = "force-dynamic";
 export default async function FleetVehiclesPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
+  const { rows, source } = await loadVehicles();
 
   const columns: CanvasTableColumn<FleetVehicle>[] = [
     {
@@ -83,13 +82,21 @@ export default async function FleetVehiclesPage() {
           </>
         }
       />
-      <div style={{ padding: 24 }}>
+      <div
+        style={{
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <DataSourceNotice
+          theme={theme}
+          source={source}
+          body={t("data.fixtureNotice", locale)}
+        />
         <CanvasCard theme={theme} padding={0}>
-          <CanvasTable
-            theme={theme}
-            columns={columns}
-            rows={FX_FLEET_VEHICLES}
-          />
+          <CanvasTable theme={theme} columns={columns} rows={rows} />
         </CanvasCard>
       </div>
     </>

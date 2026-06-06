@@ -8,8 +8,9 @@ import {
   type CanvasTableColumn,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { FX_FLEET_DOCS, type FleetDoc } from "@/lib/fleet-portal-fixtures";
-import { BiLabel } from "@/lib/fleet-portal-ui";
+import { type FleetDoc } from "@/lib/fleet-portal-fixtures";
+import { loadDocuments } from "@/lib/fleet-portal-data.server";
+import { BiLabel, DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -18,6 +19,7 @@ export const dynamic = "force-dynamic";
 export default async function FleetDocumentsPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
+  const { rows, source } = await loadDocuments();
 
   const columns: CanvasTableColumn<FleetDoc>[] = [
     {
@@ -122,8 +124,14 @@ export default async function FleetDocumentsPage() {
           body={t("documents.warnBody", locale)}
         />
         <div style={{ height: 12 }} />
+        <DataSourceNotice
+          theme={theme}
+          source={source}
+          body={t("data.fixtureNotice", locale)}
+        />
+        <div style={{ height: 12 }} />
         <CanvasCard theme={theme} padding={0}>
-          <CanvasTable theme={theme} columns={columns} rows={FX_FLEET_DOCS} />
+          <CanvasTable theme={theme} columns={columns} rows={rows} />
         </CanvasCard>
       </div>
     </>

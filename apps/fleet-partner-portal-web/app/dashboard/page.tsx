@@ -9,12 +9,9 @@ import {
   type CanvasTableColumn,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import {
-  FX_DASHBOARD_SUPPLY,
-  FX_FLEET_TRIPS,
-  type FleetTrip,
-} from "@/lib/fleet-portal-fixtures";
-import { SvcChip } from "@/lib/fleet-portal-ui";
+import { type FleetTrip } from "@/lib/fleet-portal-fixtures";
+import { loadDashboard } from "@/lib/fleet-portal-data.server";
+import { DataSourceNotice, SvcChip } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -23,6 +20,7 @@ export const dynamic = "force-dynamic";
 export default async function FleetDashboardPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
+  const dashboard = await loadDashboard();
 
   const tripColumns: CanvasTableColumn<FleetTrip>[] = [
     { h: "ORDER", k: "id", w: 110, mono: true },
@@ -75,10 +73,9 @@ export default async function FleetDashboardPage() {
           gap: 16,
         }}
       >
-        <CanvasBanner
+        <DataSourceNotice
           theme={theme}
-          tone="info"
-          icon="warn"
+          source={dashboard.source}
           body={t("data.fixtureNotice", locale)}
         />
 
@@ -92,27 +89,25 @@ export default async function FleetDashboardPage() {
           <CanvasKPI
             theme={theme}
             label="旗下司機數"
-            value="128"
-            sub="active 96 · offline 32"
+            value={dashboard.driverCount}
+            sub={dashboard.driverSub}
           />
           <CanvasKPI
             theme={theme}
             label="可接單司機"
-            value="96"
-            delta="↑ 4"
+            value={dashboard.dispatchable}
             deltaTone="up"
           />
           <CanvasKPI
             theme={theme}
             label="本月完成趟次"
-            value="14,280"
-            delta="↑ 8.8%"
+            value={dashboard.completedTrips}
             deltaTone="up"
           />
           <CanvasKPI
             theme={theme}
             label="本月車行分潤"
-            value="NT$ 642K"
+            value={dashboard.share}
             delta="待確認"
             deltaTone="neutral"
           />
@@ -142,7 +137,7 @@ export default async function FleetDashboardPage() {
           <CanvasKPI
             theme={theme}
             label="本月總營收"
-            value="NT$ 2.14M"
+            value={dashboard.grossRevenue}
             sub="分潤前"
           />
         </div>
@@ -186,7 +181,7 @@ export default async function FleetDashboardPage() {
             subtitle={t("dashboard.supplySub", locale)}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {FX_DASHBOARD_SUPPLY.map((r) => (
+              {dashboard.supply.map((r) => (
                 <div
                   key={r.svc}
                   style={{ display: "flex", alignItems: "center", gap: 10 }}
@@ -240,7 +235,7 @@ export default async function FleetDashboardPage() {
           <CanvasTable
             theme={theme}
             columns={tripColumns}
-            rows={FX_FLEET_TRIPS.slice(0, 5)}
+            rows={dashboard.recentTrips}
           />
         </CanvasCard>
       </div>

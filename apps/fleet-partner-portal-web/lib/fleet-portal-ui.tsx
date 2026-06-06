@@ -1,6 +1,23 @@
 import type { CanvasTheme } from "@drts/ui-web";
-import { CanvasPill } from "@drts/ui-web";
+import { CanvasBanner, CanvasPill } from "@drts/ui-web";
 import { SVC_LABELS, type ServiceKey } from "./fleet-portal-fixtures";
+
+// Shows the "design data" notice only when a view is rendering fixtures
+// because the live `/api/fleet-partner/*` endpoint was unavailable or empty.
+export function DataSourceNotice({
+  theme,
+  source,
+  body,
+}: {
+  theme: CanvasTheme;
+  source: "live" | "fallback";
+  body: string;
+}) {
+  if (source === "live") {
+    return null;
+  }
+  return <CanvasBanner theme={theme} tone="info" icon="warn" body={body} />;
+}
 
 export function SvcChip({
   theme,
