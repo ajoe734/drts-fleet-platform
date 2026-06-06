@@ -4,7 +4,7 @@ Last updated: 2026-06-06
 Task: `GAP-VERIFY-UNBLOCK-MANUAL-UNBLOCK`
 Parent task: `GAP-VERIFY`
 Owner: `Codex`
-Reviewer: `Gemini`
+Reviewer: `Codex2`
 
 ## Summary
 
@@ -63,6 +63,17 @@ Step 1 is satisfied by this manual-unblock note: the two code changes are
 present on the pushed branch, they are narrowly scoped to the two known
 failures, and the parent's own blocker text already states that live dev is
 still failing because `6927ad26` is not on `origin/dev`.
+
+## Closeout Evidence
+
+- Task branch: `origin/codex/gap-verify-unblock-manual-unblock`
+- Task documentation commit: `bb176991df367e43e113b5bbcfbbfe0a484cade2`
+- Parent next-step update is recorded in machine truth on `GAP-VERIFY`
+  (`last_update=2026-06-06T07:02:48Z`)
+- Review approval for this unblock closeout is recorded on
+  `GAP-VERIFY-UNBLOCK-MANUAL-UNBLOCK` (`status=review_approved`)
+- Related integration follow-up: PR `#542` tracks the task branch evidence, but
+  the parent remains blocked on merge-to-`dev` plus `Deploy-Dev`
 
 ## Concrete Next Step For `GAP-VERIFY`
 
