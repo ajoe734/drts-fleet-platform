@@ -259,8 +259,8 @@ log_ok "booking created: bookingId=${BOOKING_ID}, orderId=${ORDER_ID}"
 log_step "Verify booking read-back"
 http_call GET "/tenant/bookings/${BOOKING_ID}"
 assert_status "200"
-READBACK_CC=$(json_get_first '.data.costCenter' '.data.costCenterCode')
-READBACK_SUBTYPE=$(json_get '.data.businessDispatchSubtype')
+READBACK_CC=$(json_get_first '.data.costCenter' '.data.cost_center' '.data.costCenterCode')
+READBACK_SUBTYPE=$(json_get_first '.data.businessDispatchSubtype' '.data.business_dispatch_subtype')
 if [[ "$READBACK_CC" != "$CC_CODE" ]]; then
   log_fail "Expected booking costCenter ${CC_CODE}, got '${READBACK_CC:-<empty>}'"
   exit 1
@@ -416,14 +416,15 @@ jq -n \
 
 http_call POST "/tenant/invoices/generate" "$INVOICE_FIXTURE"
 assert_status "200|201"
-INVOICE_ID=$(json_get '.data.invoiceId')
+INVOICE_ID=$(json_get_first '.data.invoiceId' '.data.invoice_id')
 [[ -n "$INVOICE_ID" ]] || { log_fail "invoice generation missing invoiceId"; exit 1; }
 chain_set "billing" "invoiceId" "$INVOICE_ID"
 save_evidence "$SCENARIO" "billing" "invoiceId" "$INVOICE_ID"
 log_ok "invoice generated: ${INVOICE_ID}"
 
 ORDER_IN_INVOICE=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
-  '.data.lines[] | select(.orderId == $oid) | .orderId' 2>/dev/null | head -1 || true)
+  '.data.lines[]? | select((.orderId // .order_id) == $oid) | (.orderId // .order_id)' \
+  2>/dev/null | head -1 || true)
 if [[ "$ORDER_IN_INVOICE" != "$ORDER_ID" ]]; then
   log_fail "Generated invoice does not include completed orderId=${ORDER_ID}"
   exit 1
@@ -437,7 +438,7 @@ save_evidence "$SCENARIO" "billing" "invoiceStatus" "$(json_get '.data.status')"
 if [[ "$STATEMENTS_ROUTE_AVAILABLE" != "true" ]]; then
   save_evidence "$SCENARIO" "statements" "fallback.statementSource" "tenant_invoice"
   save_evidence "$SCENARIO" "statements" "fallback.statementInvoiceId" "$INVOICE_ID"
-  save_evidence "$SCENARIO" "statements" "fallback.statementAmountMinor" "$(json_get '.data.amount.amountMinor')"
+  save_evidence "$SCENARIO" "statements" "fallback.statementAmountMinor" "$(json_get_first '.data.amount.amountMinor' '.data.amount.amount_minor')"
   save_evidence "$SCENARIO" "statements" "fallback.statementLineCount" "$(json_get '.data.lines | length')"
   log_warn "tenant statements route unavailable or partial; invoice detail recorded as runnable statement fallback"
 fi
@@ -462,7 +463,7 @@ jq -n \
 
 http_call POST "/tenant/reports/jobs" "$REPORT_FIXTURE"
 assert_status "200|201"
-REPORT_JOB_ID=$(json_get '.data.jobId')
+REPORT_JOB_ID=$(json_get_first '.data.jobId' '.data.job_id')
 [[ -n "$REPORT_JOB_ID" ]] || { log_fail "report job queue response missing jobId"; exit 1; }
 chain_set "report" "jobId" "$REPORT_JOB_ID"
 save_evidence "$SCENARIO" "report" "jobId" "$REPORT_JOB_ID"
@@ -474,11 +475,11 @@ if ! poll_report_job_completed; then
 fi
 
 REPORT_STATUS=$(json_get '.data.status')
-REPORT_ARTIFACT_ID=$(json_get '.data.artifact.artifactId')
+REPORT_ARTIFACT_ID=$(json_get_first '.data.artifact.artifactId' '.data.artifact.artifact_id')
 [[ "$REPORT_STATUS" == "completed" ]] || { log_fail "report status not completed"; exit 1; }
 [[ -n "$REPORT_ARTIFACT_ID" ]] || { log_fail "completed report missing artifactId"; exit 1; }
 save_evidence "$SCENARIO" "report" "artifactId" "$REPORT_ARTIFACT_ID"
-save_evidence "$SCENARIO" "report" "artifactUrl" "$(json_get '.data.artifact.downloadUrl')"
+save_evidence "$SCENARIO" "report" "artifactUrl" "$(json_get_first '.data.artifact.downloadUrl' '.data.artifact.download_url')"
 save_evidence "$SCENARIO" "report" "rowCount" "$(json_get '.data.rows | length')"
 save_evidence "$SCENARIO" "report" "settlementMatrixCount" "$(json_get '.data.settlementMatrix | length')"
 log_ok "report artifact ready: ${REPORT_ARTIFACT_ID}"
