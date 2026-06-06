@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-06T08:42:11.357Z",
+  "generatedAt": "2026-06-06T10:30:30.992Z",
   "platformAdminBaseUrl": "https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app",
   "opsBaseUrl": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app",
   "totals": {
@@ -9,8 +9,8 @@
   },
   "checks": {
     "pricingTabs": {
-      "status": "fail",
-      "message": "expect(received).toBe(expected) // Object.is equality\n\nExpected: \"/pricing?tab=driver\"\nReceived: \"/pricing\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate"
+      "status": "pass",
+      "message": "tab query sync works"
     },
     "paymentsTabs": {
       "status": "pass",
@@ -612,7 +612,9 @@
       ],
       "pageErrors": [],
       "screenshot": ".artifacts/func-audit/ops-console-vehicles-veh-demo-001.png",
-      "errors": ["http_status=500"]
+      "errors": [
+        "http_status=500"
+      ]
     },
     {
       "app": "ops-console",
