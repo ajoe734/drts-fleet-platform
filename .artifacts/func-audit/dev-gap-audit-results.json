@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-06T10:30:30.992Z",
+  "generatedAt": "2026-06-06T10:51:30.853Z",
   "platformAdminBaseUrl": "https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app",
   "opsBaseUrl": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app",
   "totals": {
@@ -600,21 +600,15 @@
       "path": "/vehicles/veh-demo-001",
       "url": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app/vehicles/veh-demo-001",
       "finalUrl": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app/vehicles/veh-demo-001",
-      "httpStatus": 500,
-      "httpOk": false,
+      "httpStatus": 200,
+      "httpOk": true,
       "shellCount": 1,
       "shellOk": true,
       "bodyOk": true,
-      "consoleErrors": [
-        "Failed to load resource: the server responded with a status of 500 ()",
-        "Error: An error occurred in the Server Components render. The specific message is omitted in production builds to avoid leaking sensitive details. A digest property is included on this error instance which may provide additional details about the nature of the error.",
-        "[ops-console] unhandled page error Error: An error occurred in the Server Components render. The specific message is omitted in production builds to avoid leaking sensitive details. A digest property is included on this error instance which may provide additional details about the nature of the error."
-      ],
+      "consoleErrors": [],
       "pageErrors": [],
       "screenshot": ".artifacts/func-audit/ops-console-vehicles-veh-demo-001.png",
-      "errors": [
-        "http_status=500"
-      ]
+      "errors": []
     },
     {
       "app": "ops-console",
