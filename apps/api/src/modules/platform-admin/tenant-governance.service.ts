@@ -2,7 +2,6 @@ import { Injectable } from "@nestjs/common";
 
 import type {
   PlatformAdminTenantRecord,
-  PlatformTenantGateStatus,
   PlatformTenantGovernanceSummaryQuery,
   PlatformTenantGovernanceSummaryResponse,
   PlatformTenantGovernanceSummaryRow,
@@ -100,7 +99,6 @@ export class PlatformTenantGovernanceService {
     const monthlyQuotaPercentUsed = this.computeQuotaPercentUsed(
       quotaSummary.usage.remainingPercent,
     );
-    const tenantRolloutGateStatus = this.resolveRolloutGateStatus(tenant);
     const hasConfiguredApprovers = this.hasConfiguredApproverPool(
       activeRules,
       activeCostCenters,
@@ -115,8 +113,6 @@ export class PlatformTenantGovernanceService {
       oldestPendingApprovalAgeHours > PENDING_APPROVAL_ALERT_THRESHOLD_HOURS
         ? "pending_approval_over_48h"
         : null,
-      tenant.status === "rollback_hold" ? "rollback_hold" : null,
-      tenantRolloutGateStatus === "blocked" ? "blocked_rollout_gate" : null,
     ].filter(
       (
         flag,
@@ -130,7 +126,6 @@ export class PlatformTenantGovernanceService {
       tenantName: tenant.name,
       tenantStatus: tenant.status,
       tenantRolloutStage: tenant.rollout.stage,
-      tenantRolloutGateStatus,
       costCenterCount: costCenters.length,
       activeRuleCount: activeRules.length,
       monthlyQuotaPercentUsed,
@@ -221,24 +216,6 @@ export class PlatformTenantGovernanceService {
           }
         }),
       );
-  }
-
-  private resolveRolloutGateStatus(
-    tenant: PlatformAdminTenantRecord,
-  ): PlatformTenantGateStatus {
-    if (tenant.status === "rollback_hold") {
-      return "blocked";
-    }
-
-    switch (tenant.rollout.stage) {
-      case "production":
-        return tenant.rollout.productionStatus;
-      case "pilot":
-        return tenant.rollout.pilotStatus;
-      case "sandbox":
-      default:
-        return tenant.rollout.sandboxStatus;
-    }
   }
 
   private computeOldestPendingApprovalAgeHours(

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
@@ -57,43 +56,15 @@ const tenantCellStyle: CSSProperties = {
   minWidth: 0,
 };
 
-const tenantLinkStyle: CSSProperties = {
+const tenantNameStyle: CSSProperties = {
   color: theme.text,
   fontWeight: 600,
-  textDecoration: "none",
 };
 
 const tenantCodeStyle: CSSProperties = {
   color: theme.textDim,
   fontFamily: theme.monoFamily,
   fontSize: 11,
-};
-
-const drillLinkRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-  marginTop: 4,
-};
-
-const drillLinkStyle: CSSProperties = {
-  color: theme.accent,
-  fontSize: 11,
-  textDecoration: "none",
-};
-
-const filterRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-};
-
-const filterButtonStyle: CSSProperties = {
-  appearance: "none",
-  border: 0,
-  background: "transparent",
-  padding: 0,
-  cursor: "pointer",
 };
 
 const usageBarTrackStyle: CSSProperties = {
@@ -130,24 +101,6 @@ type GovernanceRow = Record<string, unknown> &
     quotaPlan: number;
     quotaUsed: number;
   };
-
-type GovernanceRiskFilter =
-  | "all"
-  | "quota_warning"
-  | "approval_backlog"
-  | "cost_center_anomaly"
-  | PlatformTenantGovernanceAlertFlag;
-
-const RISK_FILTERS: GovernanceRiskFilter[] = [
-  "all",
-  "quota_warning",
-  "approval_backlog",
-  "cost_center_anomaly",
-  "rollback_hold",
-  "blocked_rollout_gate",
-  "expired_credentials",
-  "expiring_contract",
-];
 
 function formatCount(value: number) {
   return value.toLocaleString();
@@ -186,51 +139,8 @@ function getThresholdLabelKey(value: number) {
   return "tenantGovernance.status.ok";
 }
 
-function hasAlertFlag(
-  row: GovernanceRow,
-  flag: PlatformTenantGovernanceAlertFlag,
-) {
-  return row.alertFlags.includes(flag);
-}
-
-function matchesRiskFilter(row: GovernanceRow, filter: GovernanceRiskFilter) {
-  switch (filter) {
-    case "all":
-      return true;
-    case "quota_warning":
-      return row.monthlyQuotaPercentUsed > 80;
-    case "approval_backlog":
-      return row.pendingApprovalCount > 0;
-    case "cost_center_anomaly":
-      return row.costCenterCount === 0 || row.activeRuleCount === 0;
-    default:
-      return hasAlertFlag(row, filter);
-  }
-}
-
-function riskFilterTone(
-  filter: GovernanceRiskFilter,
-  active: boolean,
-): CanvasTone {
-  if (active) {
-    return "accent";
-  }
-  if (
-    filter === "rollback_hold" ||
-    filter === "blocked_rollout_gate" ||
-    filter === "expired_credentials"
-  ) {
-    return "danger";
-  }
-  if (
-    filter === "quota_warning" ||
-    filter === "approval_backlog" ||
-    filter === "cost_center_anomaly" ||
-    filter === "expiring_contract"
-  ) {
-    return "warn";
-  }
-  return "neutral";
+function hasNoApprovers(flag: PlatformTenantGovernanceAlertFlag) {
+  return flag === "no_approvers_configured";
 }
 
 export default function TenantGovernancePage() {
@@ -241,7 +151,6 @@ export default function TenantGovernancePage() {
   const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [riskFilter, setRiskFilter] = useState<GovernanceRiskFilter>("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -326,29 +235,23 @@ export default function TenantGovernancePage() {
     const costCenterAnomaly = rows.filter(
       (row) => row.costCenterCount === 0 || row.activeRuleCount === 0,
     ).length;
-    const rollbackHoldSignals = rows.filter((row) =>
-      hasAlertFlag(row, "rollback_hold"),
+    const noApproverSignals = rows.filter((row) =>
+      row.alertFlags.some(hasNoApprovers),
     ).length;
-    const blockedGateSignals = rows.filter((row) =>
-      hasAlertFlag(row, "blocked_rollout_gate"),
+    const pendingSignals = rows.filter((row) =>
+      row.alertFlags.includes("pending_approval_over_48h"),
     ).length;
-    const expiredCredentialSignals = rows.filter((row) =>
-      hasAlertFlag(row, "expired_credentials"),
+    const quotaCriticalSignals = rows.filter((row) =>
+      row.alertFlags.includes("quota_above_95_percent"),
     ).length;
-    const expiringContractSignals = rows.filter((row) =>
-      hasAlertFlag(row, "expiring_contract"),
-    ).length;
-    const rowsWithPendingAge = rows.filter(
-      (row) => row.oldestPendingApprovalAgeHours !== null,
-    );
     const averagePendingHours =
-      rowsWithPendingAge.length > 0
+      rows.length > 0
         ? Math.round(
-            (rowsWithPendingAge.reduce(
+            (rows.reduce(
               (sum, row) => sum + (row.oldestPendingApprovalAgeHours ?? 0),
               0,
             ) /
-              rowsWithPendingAge.length) *
+              rows.length) *
               10,
           ) / 10
         : null;
@@ -357,33 +260,13 @@ export default function TenantGovernancePage() {
       quotaWarning,
       approvalBacklog,
       costCenterAnomaly,
-      rollbackHoldSignals,
-      blockedGateSignals,
-      expiredCredentialSignals,
-      expiringContractSignals,
-      riskSignals:
-        rollbackHoldSignals +
-        blockedGateSignals +
-        expiredCredentialSignals +
-        expiringContractSignals,
+      riskSignals: noApproverSignals + pendingSignals + quotaCriticalSignals,
+      noApproverSignals,
+      pendingSignals,
+      quotaCriticalSignals,
       averagePendingHours,
     };
   }, [rows]);
-
-  const visibleRows = useMemo(
-    () => rows.filter((row) => matchesRiskFilter(row, riskFilter)),
-    [riskFilter, rows],
-  );
-
-  const filterOptions = useMemo(
-    () =>
-      RISK_FILTERS.map((filterValue) => ({
-        value: filterValue,
-        label: t(`tenantGovernance.filter.${filterValue}`),
-        count: rows.filter((row) => matchesRiskFilter(row, filterValue)).length,
-      })),
-    [rows, t],
-  );
 
   const columns = useMemo<CanvasTableColumn<GovernanceRow>[]>(
     () => [
@@ -392,27 +275,8 @@ export default function TenantGovernancePage() {
         w: 220,
         r: (row) => (
           <div style={tenantCellStyle}>
-            <Link href={`/tenants/${row.tenantId}`} style={tenantLinkStyle}>
-              {row.tenantName}
-            </Link>
+            <span style={tenantNameStyle}>{row.tenantName}</span>
             <span style={tenantCodeStyle}>{row.tenantCode}</span>
-            <div style={drillLinkRowStyle}>
-              <Link href={`/tenants/${row.tenantId}`} style={drillLinkStyle}>
-                {t("tenantGovernance.drill.tenant")}
-              </Link>
-              <Link
-                href={`/payments?tenantId=${encodeURIComponent(row.tenantId)}`}
-                style={drillLinkStyle}
-              >
-                {t("tenantGovernance.drill.payments")}
-              </Link>
-              <Link
-                href={`/audit?tenantId=${encodeURIComponent(row.tenantId)}`}
-                style={drillLinkStyle}
-              >
-                {t("tenantGovernance.drill.audit")}
-              </Link>
-            </div>
           </div>
         ),
       },
@@ -535,32 +399,11 @@ export default function TenantGovernancePage() {
             }
             deltaTone={metrics.riskSignals > 0 ? "down" : "up"}
             sub={t("tenantGovernance.kpi.riskSignalsSub", {
-              rollbackHoldSignals: metrics.rollbackHoldSignals,
-              blockedGateSignals: metrics.blockedGateSignals,
-              expiredCredentialSignals: metrics.expiredCredentialSignals,
-              expiringContractSignals: metrics.expiringContractSignals,
+              noApproverSignals: metrics.noApproverSignals,
+              quotaCriticalSignals: metrics.quotaCriticalSignals,
+              pendingSignals: metrics.pendingSignals,
             })}
           />
-        </div>
-
-        <div style={filterRowStyle}>
-          {filterOptions.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              style={filterButtonStyle}
-              onClick={() => setRiskFilter(option.value)}
-              aria-pressed={riskFilter === option.value}
-            >
-              <CanvasPill
-                theme={theme}
-                tone={riskFilterTone(option.value, riskFilter === option.value)}
-                dot={riskFilter === option.value}
-              >
-                {option.label}: {option.count}
-              </CanvasPill>
-            </button>
-          ))}
         </div>
 
         <CanvasCard
@@ -570,10 +413,10 @@ export default function TenantGovernancePage() {
         >
           {loading && !summary ? (
             <div style={emptyStateStyle}>{t("tenantGovernance.loading")}</div>
-          ) : visibleRows.length === 0 ? (
+          ) : rows.length === 0 ? (
             <div style={emptyStateStyle}>{t("tenantGovernance.empty")}</div>
           ) : (
-            <CanvasTable theme={theme} columns={columns} rows={visibleRows} />
+            <CanvasTable theme={theme} columns={columns} rows={rows} />
           )}
         </CanvasCard>
       </div>

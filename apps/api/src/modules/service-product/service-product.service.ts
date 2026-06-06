@@ -1,6 +1,10 @@
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
-import type { AuditLogRecord } from "@drts/contracts";
+import {
+  VEHICLE_LICENSE_TYPES,
+  type AuditLogRecord,
+  type VehicleLicenseType,
+} from "@drts/contracts";
 
 import type { AuditedActionResult } from "../../common/action-receipt";
 import { ApiRequestError } from "../../common/api-envelope";
@@ -28,6 +32,9 @@ const DEFAULT_RUNTIME_SERVICE_PRODUCTS: ServiceProductRecord[] = [
     description: null,
     timing: "realtime",
     active: true,
+    allowedLicenseTypes: ["taxi", "multi_purpose_taxi"],
+    meterRequired: true,
+    fixedFareAllowed: false,
     defaultBillingMode: "meter",
     defaultProofRequirements: [],
     createdAt: "2026-06-01T00:00:00.000Z",
@@ -40,6 +47,9 @@ const DEFAULT_RUNTIME_SERVICE_PRODUCTS: ServiceProductRecord[] = [
     description: null,
     timing: "reservation",
     active: false,
+    allowedLicenseTypes: ["taxi", "multi_purpose_taxi"],
+    meterRequired: true,
+    fixedFareAllowed: false,
     defaultBillingMode: "meter",
     defaultProofRequirements: [],
     createdAt: "2026-06-01T00:00:00.000Z",
@@ -52,6 +62,14 @@ const DEFAULT_RUNTIME_SERVICE_PRODUCTS: ServiceProductRecord[] = [
     description: null,
     timing: "reservation",
     active: true,
+    allowedLicenseTypes: [
+      "taxi",
+      "multi_purpose_taxi",
+      "rental_car",
+      "business_vehicle",
+    ],
+    meterRequired: false,
+    fixedFareAllowed: true,
     defaultBillingMode: "tenant_invoice",
     defaultProofRequirements: ["photo"],
     createdAt: "2026-06-01T00:00:00.000Z",
@@ -64,6 +82,14 @@ const DEFAULT_RUNTIME_SERVICE_PRODUCTS: ServiceProductRecord[] = [
     description: null,
     timing: "reservation",
     active: true,
+    allowedLicenseTypes: [
+      "multi_purpose_taxi",
+      "rental_car",
+      "business_vehicle",
+      "airport_transfer_vehicle",
+    ],
+    meterRequired: false,
+    fixedFareAllowed: true,
     defaultBillingMode: "fixed_fare",
     defaultProofRequirements: ["photo", "signoff"],
     createdAt: "2026-06-01T00:00:00.000Z",
@@ -76,6 +102,9 @@ const DEFAULT_RUNTIME_SERVICE_PRODUCTS: ServiceProductRecord[] = [
     description: null,
     timing: "reservation",
     active: false,
+    allowedLicenseTypes: ["rental_car", "business_vehicle"],
+    meterRequired: false,
+    fixedFareAllowed: true,
     defaultBillingMode: "partner_settlement",
     defaultProofRequirements: ["photo"],
     createdAt: "2026-06-01T00:00:00.000Z",
@@ -88,6 +117,9 @@ const DEFAULT_RUNTIME_SERVICE_PRODUCTS: ServiceProductRecord[] = [
     description: null,
     timing: "reservation",
     active: false,
+    allowedLicenseTypes: ["business_vehicle", "airport_transfer_vehicle"],
+    meterRequired: false,
+    fixedFareAllowed: true,
     defaultBillingMode: "partner_settlement",
     defaultProofRequirements: ["photo", "signoff"],
     createdAt: "2026-06-01T00:00:00.000Z",
@@ -100,12 +132,17 @@ const DEFAULT_RUNTIME_SERVICE_PRODUCTS: ServiceProductRecord[] = [
     description: null,
     timing: "external_defined",
     active: true,
+    allowedLicenseTypes: ["taxi", "multi_purpose_taxi"],
+    meterRequired: false,
+    fixedFareAllowed: false,
     defaultBillingMode: "external_platform_settlement",
     defaultProofRequirements: [],
     createdAt: "2026-06-01T00:00:00.000Z",
     updatedAt: "2026-06-01T00:00:00.000Z",
   },
 ];
+
+const VEHICLE_LICENSE_TYPE_SET = new Set<string>(VEHICLE_LICENSE_TYPES);
 
 type NormalizedCreateServiceProductCommand = {
   serviceProductId?: string;
@@ -114,6 +151,9 @@ type NormalizedCreateServiceProductCommand = {
   description?: string | null;
   timing: string;
   active?: boolean;
+  allowedLicenseTypes?: VehicleLicenseType[];
+  meterRequired?: boolean;
+  fixedFareAllowed?: boolean;
   defaultBillingMode: string;
   defaultProofRequirements?: string[];
 };
@@ -123,6 +163,9 @@ type NormalizedUpdateServiceProductCommand = {
   description?: string | null;
   timing?: string;
   active?: boolean;
+  allowedLicenseTypes?: VehicleLicenseType[];
+  meterRequired?: boolean;
+  fixedFareAllowed?: boolean;
   defaultBillingMode?: string;
   defaultProofRequirements?: string[];
 };
@@ -148,7 +191,7 @@ export class ServiceProductService implements OnModuleInit {
         return;
       }
 
-      this.records = state.records.map((record) => this.cloneRecord(record));
+      this.records = state.records.map((record) => this.hydrateRecord(record));
       this.sequence = this.deriveNextSequence(state.records);
     } catch (error) {
       this.repository.reportPersistenceFailure(error, "module init");
@@ -165,7 +208,11 @@ export class ServiceProductService implements OnModuleInit {
     );
 
     return DEFAULT_RUNTIME_SERVICE_PRODUCTS.map((record) =>
-      this.cloneRecord(recordsByType.get(record.serviceProductType) ?? record),
+      this.cloneRecord(
+        this.hydrateRecord(
+          recordsByType.get(record.serviceProductType) ?? record,
+        ),
+      ),
     );
   }
 
@@ -178,7 +225,7 @@ export class ServiceProductService implements OnModuleInit {
         (candidate) => candidate.serviceProductType === serviceProductType,
       );
 
-    return record ? this.cloneRecord(record) : null;
+    return record ? this.cloneRecord(this.hydrateRecord(record)) : null;
   }
 
   getServiceProduct(serviceProductId: string) {
@@ -205,6 +252,8 @@ export class ServiceProductService implements OnModuleInit {
     this.assertValidTiming(normalizedCommand.timing);
     this.assertValidBillingMode(normalizedCommand.defaultBillingMode);
 
+    const serviceProductType =
+      normalizedCommand.serviceProductType as ServiceProductType;
     const serviceProductId = this.resolveServiceProductId(normalizedCommand);
     if (
       this.records.some(
@@ -220,30 +269,38 @@ export class ServiceProductService implements OnModuleInit {
     }
     if (
       this.records.some(
-        (record) =>
-          record.serviceProductType === normalizedCommand.serviceProductType,
+        (record) => record.serviceProductType === serviceProductType,
       )
     ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "CONFLICT",
         "Service product type already exists.",
-        { serviceProductType: normalizedCommand.serviceProductType },
+        { serviceProductType },
       );
     }
 
+    const defaults = this.getDefaultRecord(serviceProductType);
     const now = new Date().toISOString();
     const record: ServiceProductRecord = {
       serviceProductId,
-      serviceProductType: normalizedCommand.serviceProductType,
+      serviceProductType,
       displayName: this.normalizeRequiredString(
         normalizedCommand.displayName,
         "displayName",
       ),
       description: this.normalizeOptionalString(normalizedCommand.description),
-      timing: normalizedCommand.timing,
+      timing: normalizedCommand.timing as ServiceTiming,
       active: normalizedCommand.active ?? true,
-      defaultBillingMode: normalizedCommand.defaultBillingMode,
+      allowedLicenseTypes: this.resolveAllowedLicenseTypes(
+        serviceProductType,
+        normalizedCommand.allowedLicenseTypes ?? defaults.allowedLicenseTypes,
+      ),
+      meterRequired: normalizedCommand.meterRequired ?? defaults.meterRequired,
+      fixedFareAllowed:
+        normalizedCommand.fixedFareAllowed ?? defaults.fixedFareAllowed,
+      defaultBillingMode:
+        normalizedCommand.defaultBillingMode as ServiceProductBillingMode,
       defaultProofRequirements: this.normalizeProofRequirements(
         normalizedCommand.defaultProofRequirements,
       ),
@@ -251,8 +308,9 @@ export class ServiceProductService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.records = [record, ...this.records];
-    this.persist({ records: [record] }, "create_service_product");
+    const hydratedRecord = this.hydrateRecord(record);
+    this.records = [hydratedRecord, ...this.records];
+    this.persist({ records: [hydratedRecord] }, "create_service_product");
     const auditLog = this.recordAudit(
       {
         actorId: null,
@@ -261,19 +319,24 @@ export class ServiceProductService implements OnModuleInit {
         moduleName: "service-product",
         actionName: "create_service_product",
         resourceType: "service_product",
-        resourceId: record.serviceProductId,
+        resourceId: hydratedRecord.serviceProductId,
         newValuesSummary: {
-          serviceProductType: record.serviceProductType,
-          timing: record.timing,
-          active: record.active,
-          defaultBillingMode: record.defaultBillingMode,
-          defaultProofRequirements: [...record.defaultProofRequirements],
+          serviceProductType: hydratedRecord.serviceProductType,
+          timing: hydratedRecord.timing,
+          active: hydratedRecord.active,
+          allowedLicenseTypes: [...hydratedRecord.allowedLicenseTypes],
+          meterRequired: hydratedRecord.meterRequired,
+          fixedFareAllowed: hydratedRecord.fixedFareAllowed,
+          defaultBillingMode: hydratedRecord.defaultBillingMode,
+          defaultProofRequirements: [
+            ...hydratedRecord.defaultProofRequirements,
+          ],
         },
       },
       requestId,
     );
 
-    const snapshot = this.cloneRecord(record);
+    const snapshot = this.cloneRecord(hydratedRecord);
     if (options?.captureAudit) {
       return { data: snapshot, auditLog };
     }
@@ -309,7 +372,7 @@ export class ServiceProductService implements OnModuleInit {
       this.assertValidBillingMode(normalizedCommand.defaultBillingMode);
     }
 
-    const updated: ServiceProductRecord = {
+    const updated: ServiceProductRecord = this.hydrateRecord({
       ...record,
       displayName:
         normalizedCommand.displayName !== undefined
@@ -322,10 +385,24 @@ export class ServiceProductService implements OnModuleInit {
         normalizedCommand.description !== undefined
           ? this.normalizeOptionalString(normalizedCommand.description)
           : record.description,
-      timing: normalizedCommand.timing ?? record.timing,
+      timing:
+        (normalizedCommand.timing as ServiceTiming | undefined) ??
+        record.timing,
       active: normalizedCommand.active ?? record.active,
+      allowedLicenseTypes:
+        normalizedCommand.allowedLicenseTypes !== undefined
+          ? this.resolveAllowedLicenseTypes(
+              record.serviceProductType,
+              normalizedCommand.allowedLicenseTypes,
+            )
+          : [...record.allowedLicenseTypes],
+      meterRequired: normalizedCommand.meterRequired ?? record.meterRequired,
+      fixedFareAllowed:
+        normalizedCommand.fixedFareAllowed ?? record.fixedFareAllowed,
       defaultBillingMode:
-        normalizedCommand.defaultBillingMode ?? record.defaultBillingMode,
+        (normalizedCommand.defaultBillingMode as
+          | ServiceProductBillingMode
+          | undefined) ?? record.defaultBillingMode,
       defaultProofRequirements:
         normalizedCommand.defaultProofRequirements !== undefined
           ? this.normalizeProofRequirements(
@@ -333,7 +410,7 @@ export class ServiceProductService implements OnModuleInit {
             )
           : [...record.defaultProofRequirements],
       updatedAt: new Date().toISOString(),
-    };
+    });
 
     this.records = this.records.map((candidate) =>
       candidate.serviceProductId === serviceProductId ? updated : candidate,
@@ -351,6 +428,9 @@ export class ServiceProductService implements OnModuleInit {
         newValuesSummary: {
           timing: updated.timing,
           active: updated.active,
+          allowedLicenseTypes: [...updated.allowedLicenseTypes],
+          meterRequired: updated.meterRequired,
+          fixedFareAllowed: updated.fixedFareAllowed,
           defaultBillingMode: updated.defaultBillingMode,
           defaultProofRequirements: [...updated.defaultProofRequirements],
         },
@@ -393,6 +473,21 @@ export class ServiceProductService implements OnModuleInit {
       return match ? Math.max(max, Number.parseInt(match[1]!, 10)) : max;
     }, 0);
     return maxSeq + 1;
+  }
+
+  private getDefaultRecord(serviceProductType: ServiceProductType) {
+    const record = DEFAULT_RUNTIME_SERVICE_PRODUCTS.find(
+      (candidate) => candidate.serviceProductType === serviceProductType,
+    );
+    if (!record) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "Invalid service product type.",
+        { serviceProductType },
+      );
+    }
+    return record;
   }
 
   private resolveServiceProductId(
@@ -439,7 +534,33 @@ export class ServiceProductService implements OnModuleInit {
   private cloneRecord(record: ServiceProductRecord): ServiceProductRecord {
     return {
       ...record,
+      allowedLicenseTypes: [...record.allowedLicenseTypes],
       defaultProofRequirements: [...record.defaultProofRequirements],
+    };
+  }
+
+  private hydrateRecord(record: ServiceProductRecord): ServiceProductRecord {
+    const defaults = this.getDefaultRecord(record.serviceProductType);
+
+    return {
+      ...record,
+      allowedLicenseTypes: this.resolveAllowedLicenseTypes(
+        record.serviceProductType,
+        Array.isArray(record.allowedLicenseTypes)
+          ? record.allowedLicenseTypes
+          : defaults.allowedLicenseTypes,
+      ),
+      meterRequired:
+        typeof record.meterRequired === "boolean"
+          ? record.meterRequired
+          : defaults.meterRequired,
+      fixedFareAllowed:
+        typeof record.fixedFareAllowed === "boolean"
+          ? record.fixedFareAllowed
+          : defaults.fixedFareAllowed,
+      defaultProofRequirements: this.normalizeProofRequirements(
+        record.defaultProofRequirements,
+      ),
     };
   }
 
@@ -484,9 +605,41 @@ export class ServiceProductService implements OnModuleInit {
       normalized.description = description;
     }
 
+    const timing = this.readOptionalString(payload, "timing", "timing");
+    if (timing !== undefined) {
+      normalized.timing = timing;
+    }
+
     const active = this.readOptionalBoolean(payload, "active", "active");
     if (active !== undefined) {
       normalized.active = active;
+    }
+
+    const allowedLicenseTypes = this.readOptionalVehicleLicenseTypeArray(
+      payload,
+      "allowedLicenseTypes",
+      "allowedLicenseTypes",
+    );
+    if (allowedLicenseTypes !== undefined) {
+      normalized.allowedLicenseTypes = allowedLicenseTypes;
+    }
+
+    const meterRequired = this.readOptionalBoolean(
+      payload,
+      "meterRequired",
+      "meterRequired",
+    );
+    if (meterRequired !== undefined) {
+      normalized.meterRequired = meterRequired;
+    }
+
+    const fixedFareAllowed = this.readOptionalBoolean(
+      payload,
+      "fixedFareAllowed",
+      "fixedFareAllowed",
+    );
+    if (fixedFareAllowed !== undefined) {
+      normalized.fixedFareAllowed = fixedFareAllowed;
     }
 
     const defaultProofRequirements = this.readOptionalStringArray(
@@ -533,6 +686,33 @@ export class ServiceProductService implements OnModuleInit {
     const active = this.readOptionalBoolean(payload, "active", "active");
     if (active !== undefined) {
       normalized.active = active;
+    }
+
+    const allowedLicenseTypes = this.readOptionalVehicleLicenseTypeArray(
+      payload,
+      "allowedLicenseTypes",
+      "allowedLicenseTypes",
+    );
+    if (allowedLicenseTypes !== undefined) {
+      normalized.allowedLicenseTypes = allowedLicenseTypes;
+    }
+
+    const meterRequired = this.readOptionalBoolean(
+      payload,
+      "meterRequired",
+      "meterRequired",
+    );
+    if (meterRequired !== undefined) {
+      normalized.meterRequired = meterRequired;
+    }
+
+    const fixedFareAllowed = this.readOptionalBoolean(
+      payload,
+      "fixedFareAllowed",
+      "fixedFareAllowed",
+    );
+    if (fixedFareAllowed !== undefined) {
+      normalized.fixedFareAllowed = fixedFareAllowed;
     }
 
     const defaultBillingMode = this.readOptionalString(
@@ -586,6 +766,31 @@ export class ServiceProductService implements OnModuleInit {
       if (normalized) {
         unique.add(normalized);
       }
+    }
+
+    return [...unique];
+  }
+
+  private resolveAllowedLicenseTypes(
+    serviceProductType: ServiceProductType,
+    values: readonly VehicleLicenseType[],
+  ) {
+    const unique = new Set<VehicleLicenseType>();
+
+    for (const value of values) {
+      if (!VEHICLE_LICENSE_TYPE_SET.has(value)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VALIDATION_ERROR",
+          `Unsupported vehicle license type '${value}'.`,
+          { field: "allowedLicenseTypes", vehicleLicenseType: value },
+        );
+      }
+      unique.add(value);
+    }
+
+    if (unique.size === 0) {
+      return [...this.getDefaultRecord(serviceProductType).allowedLicenseTypes];
     }
 
     return [...unique];
@@ -690,6 +895,29 @@ export class ServiceProductService implements OnModuleInit {
       }
     }
     return value;
+  }
+
+  private readOptionalVehicleLicenseTypeArray(
+    payload: Record<string, unknown>,
+    key: string,
+    field: string,
+  ) {
+    const value = this.readOptionalStringArray(payload, key, field);
+    if (value === undefined) {
+      return undefined;
+    }
+
+    return value.map((item) => {
+      if (!VEHICLE_LICENSE_TYPE_SET.has(item)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VALIDATION_ERROR",
+          `Unsupported vehicle license type '${item}'.`,
+          { field, vehicleLicenseType: item },
+        );
+      }
+      return item as VehicleLicenseType;
+    });
   }
 
   private throwTypeError(field: string, expected: string): never {

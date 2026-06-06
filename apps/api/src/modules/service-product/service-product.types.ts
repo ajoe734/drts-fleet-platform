@@ -1,3 +1,5 @@
+import type { VehicleLicenseType } from "@drts/contracts";
+
 export const SERVICE_PRODUCT_TYPE_VALUES = [
   "taxi_realtime",
   "taxi_reservation",
@@ -36,6 +38,9 @@ export interface ServiceProductRecord {
   description: string | null;
   timing: ServiceTiming;
   active: boolean;
+  allowedLicenseTypes: VehicleLicenseType[];
+  meterRequired: boolean;
+  fixedFareAllowed: boolean;
   defaultBillingMode: ServiceProductBillingMode;
   defaultProofRequirements: string[];
   createdAt: string;
@@ -49,6 +54,9 @@ export interface CreateServiceProductCommand {
   description?: string | null;
   timing: ServiceTiming;
   active?: boolean;
+  allowedLicenseTypes?: VehicleLicenseType[];
+  meterRequired?: boolean;
+  fixedFareAllowed?: boolean;
   defaultBillingMode: ServiceProductBillingMode;
   defaultProofRequirements?: string[];
 }
@@ -58,6 +66,9 @@ export interface UpdateServiceProductCommand {
   description?: string | null;
   timing?: ServiceTiming;
   active?: boolean;
+  allowedLicenseTypes?: VehicleLicenseType[];
+  meterRequired?: boolean;
+  fixedFareAllowed?: boolean;
   defaultBillingMode?: ServiceProductBillingMode;
   defaultProofRequirements?: string[];
 }
