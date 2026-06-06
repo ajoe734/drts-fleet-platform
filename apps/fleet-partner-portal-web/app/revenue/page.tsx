@@ -7,8 +7,8 @@ import {
   CanvasPageHeader,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { FX_FLEET_STATEMENT } from "@/lib/fleet-portal-fixtures";
-import { BiLabel } from "@/lib/fleet-portal-ui";
+import { loadRevenue } from "@/lib/fleet-portal-data.server";
+import { BiLabel, DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export default async function FleetRevenuePage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
-  const s = FX_FLEET_STATEMENT;
+  const s = await loadRevenue();
 
   return (
     <>
@@ -36,6 +36,15 @@ export default async function FleetRevenuePage() {
           </>
         }
       />
+      {s.source === "fallback" && (
+        <div style={{ padding: "16px 24px 0" }}>
+          <DataSourceNotice
+            theme={theme}
+            source={s.source}
+            body={t("data.fixtureNotice", locale)}
+          />
+        </div>
+      )}
       <div
         style={{
           padding: 24,

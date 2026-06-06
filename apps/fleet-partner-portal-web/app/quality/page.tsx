@@ -1,6 +1,7 @@
 import { CanvasCard, CanvasKPI, CanvasPageHeader } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { FX_FLEET_QUALITY } from "@/lib/fleet-portal-fixtures";
+import { loadQuality } from "@/lib/fleet-portal-data.server";
+import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -9,6 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function FleetQualityPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
+  const { metrics, source } = await loadQuality();
 
   return (
     <>
@@ -25,6 +27,11 @@ export default async function FleetQualityPage() {
           gap: 16,
         }}
       >
+        <DataSourceNotice
+          theme={theme}
+          source={source}
+          body={t("data.fixtureNotice", locale)}
+        />
         <div
           style={{
             display: "grid",
@@ -32,7 +39,7 @@ export default async function FleetQualityPage() {
             gap: 12,
           }}
         >
-          {FX_FLEET_QUALITY.map((q) => (
+          {metrics.map((q) => (
             <CanvasKPI
               key={q.en}
               theme={theme}

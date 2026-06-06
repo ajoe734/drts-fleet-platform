@@ -7,22 +7,18 @@ import {
   type CanvasTableColumn,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import {
-  FX_FLEET_STATEMENTS,
-  type FleetStatement,
-} from "@/lib/fleet-portal-fixtures";
+import { type FleetStatement } from "@/lib/fleet-portal-fixtures";
+import { loadStatements } from "@/lib/fleet-portal-data.server";
+import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
-// NOTE: `fleet-partner/statements` is the one portal endpoint that already
-// exists on the backend. When a fleet-partner-scoped server api-client is
-// wired (x-fleet-partner-id), replace FX_FLEET_STATEMENTS with
-// `client.listFleetPortalStatements()` — the row shape is compatible.
 export default async function FleetStatementsPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
+  const { rows, source } = await loadStatements();
 
   const columns: CanvasTableColumn<FleetStatement>[] = [
     {
@@ -88,13 +84,21 @@ export default async function FleetStatementsPage() {
         title={t("statements.title", locale)}
         subtitle={t("statements.subtitle", locale)}
       />
-      <div style={{ padding: 24 }}>
+      <div
+        style={{
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <DataSourceNotice
+          theme={theme}
+          source={source}
+          body={t("data.fixtureNotice", locale)}
+        />
         <CanvasCard theme={theme} padding={0}>
-          <CanvasTable
-            theme={theme}
-            columns={columns}
-            rows={FX_FLEET_STATEMENTS}
-          />
+          <CanvasTable theme={theme} columns={columns} rows={rows} />
         </CanvasCard>
       </div>
     </>

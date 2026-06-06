@@ -8,8 +8,9 @@ import {
   type CanvasTableColumn,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { FX_FLEET_DOCS, type FleetDoc } from "@/lib/fleet-portal-fixtures";
-import { BiLabel } from "@/lib/fleet-portal-ui";
+import { type FleetDoc } from "@/lib/fleet-portal-fixtures";
+import { loadDocuments } from "@/lib/fleet-portal-data.server";
+import { BiLabel, DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -18,6 +19,18 @@ export const dynamic = "force-dynamic";
 export default async function FleetDocumentsPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
+  const { rows, source } = await loadDocuments();
+
+  // Tab counts come from the loaded rows (live, or fixtures through the same
+  // seam on fallback) rather than fixed design numbers. Every tracked document
+  // row needs handling, so "需處理" is the full row count; "全部" is a plain
+  // label without a count, matching the design header.
+  const docTabs = [
+    `${t("documents.tabTodo", locale)} ${rows.length}`,
+    t("documents.tabAll", locale),
+    `${t("documents.tabFleet", locale)} ${rows.filter((r) => r.owner === "fleet").length}`,
+    `${t("documents.tabDriver", locale)} ${rows.filter((r) => r.owner === "driver").length}`,
+  ];
 
   const columns: CanvasTableColumn<FleetDoc>[] = [
     {
@@ -110,8 +123,8 @@ export default async function FleetDocumentsPage() {
         theme={theme}
         title={t("documents.title", locale)}
         subtitle={t("documents.subtitle", locale)}
-        tabs={["需處理 4", "全部", "車行責任 3", "司機責任 1"]}
-        activeTab="需處理 4"
+        tabs={docTabs}
+        activeTab={docTabs[0]}
       />
       <div style={{ padding: 24 }}>
         <CanvasBanner
@@ -122,8 +135,14 @@ export default async function FleetDocumentsPage() {
           body={t("documents.warnBody", locale)}
         />
         <div style={{ height: 12 }} />
+        <DataSourceNotice
+          theme={theme}
+          source={source}
+          body={t("data.fixtureNotice", locale)}
+        />
+        <div style={{ height: 12 }} />
         <CanvasCard theme={theme} padding={0}>
-          <CanvasTable theme={theme} columns={columns} rows={FX_FLEET_DOCS} />
+          <CanvasTable theme={theme} columns={columns} rows={rows} />
         </CanvasCard>
       </div>
     </>

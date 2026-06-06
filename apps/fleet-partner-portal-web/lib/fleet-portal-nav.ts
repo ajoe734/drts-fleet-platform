@@ -1,7 +1,17 @@
 import type { CanvasShellNavItem } from "@drts/ui-web";
 import { t, type Locale } from "./translations";
+import type { NavBadges } from "./fleet-portal-data.server";
 
-export function buildFleetPortalNav(locale: Locale): CanvasShellNavItem[] {
+// A nav badge is shown only when its live/seam-derived count is > 0; a zero or
+// absent count renders no badge (rather than a hardcoded design number).
+function badgeFor(count: number | undefined): string | undefined {
+  return count && count > 0 ? String(count) : undefined;
+}
+
+export function buildFleetPortalNav(
+  locale: Locale,
+  badges?: NavBadges,
+): CanvasShellNavItem[] {
   return [
     { divider: t("nav.workspace", locale) },
     {
@@ -16,7 +26,7 @@ export function buildFleetPortalNav(locale: Locale): CanvasShellNavItem[] {
       href: "/drivers",
       icon: "users",
       label: t("nav.drivers", locale),
-      badge: "128",
+      badge: badgeFor(badges?.drivers),
       badgeTone: "accent",
     },
     {
@@ -50,7 +60,7 @@ export function buildFleetPortalNav(locale: Locale): CanvasShellNavItem[] {
       href: "/documents",
       icon: "audit",
       label: t("nav.documents", locale),
-      badge: "4",
+      badge: badgeFor(badges?.documents),
       badgeTone: "warn",
     },
     {
@@ -64,7 +74,7 @@ export function buildFleetPortalNav(locale: Locale): CanvasShellNavItem[] {
       href: "/cases",
       icon: "incidents",
       label: t("nav.cases", locale),
-      badge: "3",
+      badge: badgeFor(badges?.cases),
       badgeTone: "danger",
     },
     {

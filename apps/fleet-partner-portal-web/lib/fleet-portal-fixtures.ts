@@ -425,6 +425,11 @@ export const FX_FLEET_TRAINING: FleetTraining[] = [
   },
 ];
 
+// Overdue-incomplete training headcount. No fleet-partner training endpoint
+// surfaces an "overdue" flag yet, so this stays a supplemental design value
+// behind the seam rather than a literal in the training page render path.
+export const FX_TRAINING_OVERDUE_INCOMPLETE = "6";
+
 export type FleetCase = {
   id: string;
   type: "complaint" | "incident";
@@ -536,4 +541,47 @@ export const FX_DASHBOARD_SUPPLY: {
   { svc: "airport", n: 38, pct: 40 },
   { svc: "insurance", n: 22, pct: 23 },
   { svc: "travel", n: 18, pct: 19 },
+];
+
+// Supplemental dashboard KPIs (compliance / cases / training) have no
+// fleet-partner endpoint yet, so they live behind the seam as design data
+// rather than hardcoded in the dashboard page.
+export type FleetDashboardSupplemental = {
+  missingDocsDrivers: string;
+  missingDocsDelta: string;
+  openCases: string;
+  openCasesDelta: string;
+  trainingCompletion: string;
+};
+
+export const FX_DASHBOARD_SUPPLEMENTAL: FleetDashboardSupplemental = {
+  missingDocsDrivers: "7",
+  missingDocsDelta: "證照 / 保險",
+  openCases: "3",
+  openCasesDelta: "需處理 1",
+  trainingCompletion: "92%",
+};
+
+export type FleetAttentionBanner = {
+  tone: "warn" | "danger";
+  title: string;
+  body: string;
+};
+
+export const FX_DASHBOARD_ATTENTION: FleetAttentionBanner[] = [
+  {
+    tone: "warn",
+    title: "吳鎮宇 缺機場接送資格證 · airport_permit missing",
+    body: "缺件期間無法接機場接送任務。請協助補件。",
+  },
+  {
+    tone: "danger",
+    title: "cmp_0908 · 司機行為申訴 · 車行責任 · SLA breached",
+    body: "黃文豪 言語不當申訴升級，責任歸屬車行。需於 24h 內回覆處理方案。",
+  },
+  {
+    tone: "warn",
+    title: "保險代步流程訓練完成率 55%",
+    body: "22 / 40 司機完成。未完成者無法接保險代步任務。",
+  },
 ];
