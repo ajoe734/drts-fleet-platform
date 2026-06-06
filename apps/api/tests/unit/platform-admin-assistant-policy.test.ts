@@ -63,9 +63,12 @@ describe("platform-admin assistant tool registry", () => {
       expect.arrayContaining([
         expect.objectContaining({ name: "route.list_navigation_nodes" }),
         expect.objectContaining({ name: "data.list_tenant_summaries" }),
+        expect.objectContaining({ name: "data.list_partner_entries" }),
+        expect.objectContaining({ name: "data.list_feature_flags" }),
         expect.objectContaining({ name: "docs.search_platform_admin_policy" }),
         expect.objectContaining({ name: "action.create_platform_notice" }),
         expect.objectContaining({ name: "audit.list_actor_audit_entries" }),
+        expect.objectContaining({ name: "audit.list_platform_audit_entries" }),
       ]),
     );
 
