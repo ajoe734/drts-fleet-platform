@@ -7,6 +7,7 @@ import {
   buildCanvasTheme,
   type CanvasShellNavItem,
 } from "@drts/ui-web";
+import { OpsHealthFooter } from "@/components/ops-health-footer";
 
 type OpsShellProps = {
   nav: CanvasShellNavItem[];
@@ -66,6 +67,7 @@ export function OpsShell({
       env={env}
       versionLabel={versionLabel}
       avatarLabel={avatarLabel}
+      footer={<OpsHealthFooter />}
       style={{ minHeight: "100vh", height: "100vh" }}
       {...(searchPlaceholder !== undefined ? { searchPlaceholder } : {})}
     >
