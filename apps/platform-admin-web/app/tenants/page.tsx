@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import React, {
   useCallback,
   useEffect,
@@ -24,7 +23,6 @@ import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type {
   CreatePlatformTenantCommand,
   PlatformAdminTenantRecord,
-  PlatformTenantGateStatus,
 } from "@drts/contracts";
 import {
   PLATFORM_TENANT_INTEGRATION_MODES,
@@ -230,25 +228,6 @@ const tenantMetaStyle: CSSProperties = {
   fontFamily: th.monoFamily,
 };
 
-const tenantLifecycleMetaStyle: CSSProperties = {
-  fontSize: 11,
-  color: th.textMuted,
-  fontFamily: th.fontFamily,
-};
-
-const tableToolbarStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-end",
-  gap: 12,
-  flexWrap: "wrap",
-};
-
-const searchFieldStyle: CSSProperties = {
-  minWidth: 260,
-  width: "min(420px, 100%)",
-};
-
 const tenantSummaryStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
@@ -290,35 +269,26 @@ function getStageTone(stage: TenantStageValue): CanvasTone {
   return toCanvasTone(tenantStageTone(stage));
 }
 
-function getTenantGateStatus(
-  tenant: PlatformAdminTenantRecord,
-): PlatformTenantGateStatus {
-  if (tenant.status === "rollback_hold") {
-    return "blocked";
-  }
-
-  if (tenant.rollout.stage === "production") {
-    return tenant.rollout.productionStatus;
-  }
-
-  if (tenant.rollout.stage === "pilot") {
-    return tenant.rollout.pilotStatus;
-  }
-
-  return tenant.rollout.sandboxStatus;
-}
-
-function getGateTone(gate: PlatformTenantGateStatus): CanvasTone {
-  if (gate === "approved") {
+function getGateTone(stage: TenantStageValue): CanvasTone {
+  if (stage === "production") {
     return "success";
   }
-  if (gate === "ready") {
-    return "info";
-  }
-  if (gate === "blocked") {
+  if (stage === "rollback_hold") {
     return "danger";
   }
   return "warn";
+}
+
+function getGateLabel(
+  stage: TenantStageValue,
+): "ready" | "blocked" | "pending" {
+  if (stage === "production") {
+    return "ready";
+  }
+  if (stage === "rollback_hold") {
+    return "blocked";
+  }
+  return "pending";
 }
 
 function formatQuotaSummary(locale: string, tenant: PlatformAdminTenantRecord) {
@@ -358,7 +328,6 @@ export default function TenantsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<TenantFilter>("all");
-  const [searchTerm, setSearchTerm] = useState("");
   const [createForm, setCreateForm] =
     useState<TenantFormState>(EMPTY_TENANT_FORM);
 
@@ -422,18 +391,6 @@ export default function TenantsPage() {
         ready: t("tenants.list.gate.ready"),
         pending: t("tenants.list.gate.pending"),
         blocked: t("tenants.list.gate.blocked"),
-        approved: t("tenants.list.gate.approved"),
-      },
-      lifecycle: {
-        status: t("tenants.list.lifecycle.status"),
-        cutover: t("tenants.list.lifecycle.cutover"),
-        rollback: t("tenants.list.lifecycle.rollback"),
-        unassigned: t("tenants.list.lifecycle.unassigned"),
-      },
-      search: {
-        label: t("tenants.list.search.label"),
-        placeholder: t("tenants.list.search.placeholder"),
-        clear: t("tenants.list.search.clear"),
       },
       moduleState: {
         enabled: t("tenants.list.moduleState.enabled"),
@@ -508,7 +465,6 @@ export default function TenantsPage() {
   );
 
   const visibleTenants = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
     const filtered =
       filter === "rollback_hold"
         ? tenants.filter((tenant) => tenant.status === "rollback_hold")
@@ -520,21 +476,12 @@ export default function TenantsPage() {
                 tenant.rollout.stage === filter,
             );
 
-    const searched = query
-      ? filtered.filter((tenant) =>
-          [tenant.name, tenant.code, tenant.id]
-            .join(" ")
-            .toLowerCase()
-            .includes(query),
-        )
-      : filtered;
-
-    return [...searched].sort(
+    return [...filtered].sort(
       (left, right) =>
         new Date(right.updatedAt).getTime() -
         new Date(left.updatedAt).getTime(),
     );
-  }, [filter, searchTerm, tenants]);
+  }, [filter, tenants]);
 
   const exportVisibleTenants = useCallback(() => {
     if (visibleTenants.length === 0) {
@@ -554,7 +501,7 @@ export default function TenantsPage() {
     const rows = visibleTenants.map((tenant) => [
       `${tenant.name} (${tenant.code})`,
       formatPlatformCodeLabel(locale, getTenantStageValue(tenant)),
-      copy.gate[getTenantGateStatus(tenant)],
+      copy.gate[getGateLabel(getTenantStageValue(tenant))],
       `${tenant.enabledModules.length}/${PLATFORM_TENANT_MODULES.length}`,
       formatQuotaSummary(locale, tenant),
       formatPlatformCodeLabel(locale, tenant.integrationPackage.mode),
@@ -614,20 +561,12 @@ export default function TenantsPage() {
         h: copy.columns.tenant,
         w: 240,
         r: (tenant) => (
-          <Link href={`/tenants/${tenant.id}`} style={tenantLinkStyle}>
+          <a href={`/tenants/${tenant.id}`} style={tenantLinkStyle}>
             <span style={tenantNameStyle}>{tenant.name}</span>
             <span style={tenantMetaStyle}>
               {tenant.code} · {tenant.id}
             </span>
-            <span style={tenantLifecycleMetaStyle}>
-              {copy.lifecycle.status}:{" "}
-              {formatPlatformCodeLabel(locale, tenant.status)} ·{" "}
-              {copy.lifecycle.cutover}:{" "}
-              {tenant.rollout.cutoverOwner ?? copy.lifecycle.unassigned} ·{" "}
-              {copy.lifecycle.rollback}:{" "}
-              {tenant.rollout.rollbackOwner ?? copy.lifecycle.unassigned}
-            </span>
-          </Link>
+          </a>
         ),
       },
       {
@@ -647,11 +586,11 @@ export default function TenantsPage() {
         h: copy.columns.gate,
         w: 130,
         r: (tenant) => {
-          const gate = getTenantGateStatus(tenant);
+          const stage = getTenantStageValue(tenant);
 
           return (
-            <CanvasPill theme={th} tone={getGateTone(gate)}>
-              {copy.gate[gate]}
+            <CanvasPill theme={th} tone={getGateTone(stage)}>
+              {copy.gate[getGateLabel(stage)]}
             </CanvasPill>
           );
         },
@@ -702,7 +641,7 @@ export default function TenantsPage() {
         r: (tenant) => formatShortDate(tenant.updatedAt),
       },
     ],
-    [copy.columns, copy.gate, copy.lifecycle, locale, moduleLabels, t],
+    [copy.columns, copy.gate, locale, moduleLabels, t],
   );
 
   const filterOptions = [
@@ -1159,28 +1098,7 @@ export default function TenantsPage() {
           </div>
         ) : null}
 
-        <div ref={tableSectionRef} style={createGridStyle}>
-          <div style={tableToolbarStyle}>
-            <CanvasField theme={th} label={copy.search.label}>
-              <input
-                type="search"
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder={copy.search.placeholder}
-                style={{ ...inputStyle, ...searchFieldStyle }}
-              />
-            </CanvasField>
-            {searchTerm.trim() ? (
-              <CanvasBtn
-                theme={th}
-                variant="secondary"
-                icon="x"
-                onClick={() => setSearchTerm("")}
-              >
-                {copy.search.clear}
-              </CanvasBtn>
-            ) : null}
-          </div>
+        <div ref={tableSectionRef}>
           <CanvasCard theme={th} padding={0}>
             {loading ? (
               <div style={loadingStateStyle}>{t("tenants.loading")}</div>

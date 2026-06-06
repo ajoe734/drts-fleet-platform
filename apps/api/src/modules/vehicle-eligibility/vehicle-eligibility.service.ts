@@ -25,10 +25,11 @@ type ServiceProductDefinition = {
   timing: ServiceTiming;
   active: boolean;
   serviceBucket: "standard_taxi" | "business_dispatch";
-  requiredVehicleLicenseTypes: VehicleLicenseType[];
+  allowedLicenseTypes: VehicleLicenseType[];
+  meterRequired: boolean;
+  fixedFareAllowed: boolean;
   requiresBusinessDispatchEligible: boolean;
   requiresAirportPermit: boolean;
-  requiresFixedFareAllowed: boolean;
   requiresPlatformForwardingAllowed: boolean;
   defaultProofRequirements: string[];
 };
@@ -72,10 +73,11 @@ const SERVICE_PRODUCTS: ServiceProductDefinition[] = [
     timing: "realtime",
     active: true,
     serviceBucket: "standard_taxi",
-    requiredVehicleLicenseTypes: ["taxi", "multi_purpose_taxi"],
+    allowedLicenseTypes: ["taxi", "multi_purpose_taxi"],
+    meterRequired: true,
+    fixedFareAllowed: false,
     requiresBusinessDispatchEligible: false,
     requiresAirportPermit: false,
-    requiresFixedFareAllowed: false,
     requiresPlatformForwardingAllowed: false,
     defaultProofRequirements: [],
   },
@@ -85,10 +87,11 @@ const SERVICE_PRODUCTS: ServiceProductDefinition[] = [
     timing: "reservation",
     active: false,
     serviceBucket: "standard_taxi",
-    requiredVehicleLicenseTypes: ["taxi", "multi_purpose_taxi"],
+    allowedLicenseTypes: ["taxi", "multi_purpose_taxi"],
+    meterRequired: true,
+    fixedFareAllowed: false,
     requiresBusinessDispatchEligible: false,
     requiresAirportPermit: false,
-    requiresFixedFareAllowed: false,
     requiresPlatformForwardingAllowed: false,
     defaultProofRequirements: [],
   },
@@ -98,15 +101,16 @@ const SERVICE_PRODUCTS: ServiceProductDefinition[] = [
     timing: "reservation",
     active: true,
     serviceBucket: "business_dispatch",
-    requiredVehicleLicenseTypes: [
+    allowedLicenseTypes: [
       "taxi",
       "multi_purpose_taxi",
       "rental_car",
       "business_vehicle",
     ],
+    meterRequired: false,
+    fixedFareAllowed: true,
     requiresBusinessDispatchEligible: true,
     requiresAirportPermit: false,
-    requiresFixedFareAllowed: true,
     requiresPlatformForwardingAllowed: false,
     defaultProofRequirements: ["photo"],
   },
@@ -116,15 +120,16 @@ const SERVICE_PRODUCTS: ServiceProductDefinition[] = [
     timing: "reservation",
     active: true,
     serviceBucket: "business_dispatch",
-    requiredVehicleLicenseTypes: [
+    allowedLicenseTypes: [
       "multi_purpose_taxi",
       "rental_car",
       "business_vehicle",
       "airport_transfer_vehicle",
     ],
+    meterRequired: false,
+    fixedFareAllowed: true,
     requiresBusinessDispatchEligible: true,
     requiresAirportPermit: true,
-    requiresFixedFareAllowed: true,
     requiresPlatformForwardingAllowed: false,
     defaultProofRequirements: ["photo", "signoff"],
   },
@@ -134,10 +139,11 @@ const SERVICE_PRODUCTS: ServiceProductDefinition[] = [
     timing: "reservation",
     active: false,
     serviceBucket: "business_dispatch",
-    requiredVehicleLicenseTypes: ["rental_car", "business_vehicle"],
+    allowedLicenseTypes: ["rental_car", "business_vehicle"],
+    meterRequired: false,
+    fixedFareAllowed: true,
     requiresBusinessDispatchEligible: true,
     requiresAirportPermit: false,
-    requiresFixedFareAllowed: true,
     requiresPlatformForwardingAllowed: false,
     defaultProofRequirements: ["photo"],
   },
@@ -147,13 +153,11 @@ const SERVICE_PRODUCTS: ServiceProductDefinition[] = [
     timing: "reservation",
     active: false,
     serviceBucket: "business_dispatch",
-    requiredVehicleLicenseTypes: [
-      "business_vehicle",
-      "airport_transfer_vehicle",
-    ],
+    allowedLicenseTypes: ["business_vehicle", "airport_transfer_vehicle"],
+    meterRequired: false,
+    fixedFareAllowed: true,
     requiresBusinessDispatchEligible: true,
     requiresAirportPermit: true,
-    requiresFixedFareAllowed: true,
     requiresPlatformForwardingAllowed: false,
     defaultProofRequirements: ["photo", "signoff"],
   },
@@ -163,10 +167,11 @@ const SERVICE_PRODUCTS: ServiceProductDefinition[] = [
     timing: "external_defined",
     active: true,
     serviceBucket: "standard_taxi",
-    requiredVehicleLicenseTypes: ["taxi", "multi_purpose_taxi"],
+    allowedLicenseTypes: ["taxi", "multi_purpose_taxi"],
+    meterRequired: false,
+    fixedFareAllowed: false,
     requiresBusinessDispatchEligible: false,
     requiresAirportPermit: false,
-    requiresFixedFareAllowed: false,
     requiresPlatformForwardingAllowed: true,
     defaultProofRequirements: [],
   },
@@ -188,6 +193,10 @@ const DEFAULT_MATRIX: VehicleEligibilityMatrixRecord[] = [
     businessDispatchEligible: true,
     taxiMeterRequired: true,
     fixedFareAllowed: true,
+    conditionallyAllowed: false,
+    requiredDocuments: [],
+    trainingRequired: false,
+    permitRequired: false,
     platformForwardingAllowed: true,
     active: true,
     effectiveFrom: SEED_TIMESTAMP,
@@ -205,6 +214,10 @@ const DEFAULT_MATRIX: VehicleEligibilityMatrixRecord[] = [
     businessDispatchEligible: false,
     taxiMeterRequired: true,
     fixedFareAllowed: false,
+    conditionallyAllowed: false,
+    requiredDocuments: [],
+    trainingRequired: false,
+    permitRequired: false,
     platformForwardingAllowed: true,
     active: true,
     effectiveFrom: SEED_TIMESTAMP,
@@ -227,6 +240,10 @@ const DEFAULT_MATRIX: VehicleEligibilityMatrixRecord[] = [
     businessDispatchEligible: true,
     taxiMeterRequired: false,
     fixedFareAllowed: true,
+    conditionallyAllowed: false,
+    requiredDocuments: [],
+    trainingRequired: false,
+    permitRequired: false,
     platformForwardingAllowed: false,
     active: true,
     effectiveFrom: SEED_TIMESTAMP,
@@ -269,7 +286,7 @@ export class VehicleEligibilityService implements OnModuleInit {
         return;
       }
 
-      this.matrix = items.map((item) => this.clone(item));
+      this.matrix = items.map((item) => this.hydrateMatrixItem(item));
       this.sortMatrix(this.matrix);
     } catch (error) {
       this.repository.reportPersistenceFailure(error, "module init");
@@ -313,7 +330,7 @@ export class VehicleEligibilityService implements OnModuleInit {
         (candidate) => candidate.capabilityId === item.capabilityId,
       );
 
-      return this.clone({
+      return this.hydrateMatrixItem({
         ...item,
         createdAt: previous?.createdAt ?? item.createdAt ?? now,
         updatedAt: now,
@@ -469,9 +486,7 @@ export class VehicleEligibilityService implements OnModuleInit {
       );
     }
 
-    if (
-      !definition.requiredVehicleLicenseTypes.includes(capability.licenseType)
-    ) {
+    if (!definition.allowedLicenseTypes.includes(capability.licenseType)) {
       this.throwVehicleNotEligible(vehicleId, serviceProduct, "license_type");
     }
 
@@ -483,6 +498,18 @@ export class VehicleEligibilityService implements OnModuleInit {
         vehicleId,
         serviceProduct,
         "business_dispatch_eligibility",
+      );
+    }
+
+    if (definition.meterRequired && !capability.taxiMeterRequired) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TAXI_METER_REQUIRED",
+        "Taxi meter is required for the requested service product.",
+        {
+          vehicleId,
+          serviceProduct,
+        },
       );
     }
 
@@ -498,7 +525,7 @@ export class VehicleEligibilityService implements OnModuleInit {
       );
     }
 
-    if (definition.requiresFixedFareAllowed && !capability.fixedFareAllowed) {
+    if (definition.fixedFareAllowed && !capability.fixedFareAllowed) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "FIXED_FARE_NOT_ALLOWED",
@@ -541,13 +568,12 @@ export class VehicleEligibilityService implements OnModuleInit {
 
       return (
         capability.supportedProducts.includes(serviceProduct) &&
-        definition.requiredVehicleLicenseTypes.includes(
-          capability.licenseType,
-        ) &&
+        definition.allowedLicenseTypes.includes(capability.licenseType) &&
         (!definition.requiresBusinessDispatchEligible ||
           capability.businessDispatchEligible) &&
+        (!definition.meterRequired || capability.taxiMeterRequired) &&
         (!definition.requiresAirportPermit || capability.airportPermit) &&
-        (!definition.requiresFixedFareAllowed || capability.fixedFareAllowed) &&
+        (!definition.fixedFareAllowed || capability.fixedFareAllowed) &&
         (!definition.requiresPlatformForwardingAllowed ||
           capability.platformForwardingAllowed)
       );
@@ -653,6 +679,9 @@ export class VehicleEligibilityService implements OnModuleInit {
       displayName: runtimeProduct.displayName,
       timing: runtimeProduct.timing,
       active: runtimeProduct.active,
+      allowedLicenseTypes: [...runtimeProduct.allowedLicenseTypes],
+      meterRequired: runtimeProduct.meterRequired,
+      fixedFareAllowed: runtimeProduct.fixedFareAllowed,
       defaultProofRequirements: [...runtimeProduct.defaultProofRequirements],
     };
   }
@@ -717,6 +746,48 @@ export class VehicleEligibilityService implements OnModuleInit {
       );
     }
 
+    if (typeof item.conditionallyAllowed !== "boolean") {
+      throw new ApiRequestError(
+        400,
+        "INVALID_CONDITIONALLY_ALLOWED",
+        "conditionallyAllowed must be boolean.",
+      );
+    }
+
+    if (!Array.isArray(item.requiredDocuments)) {
+      throw new ApiRequestError(
+        400,
+        "INVALID_REQUIRED_DOCUMENTS",
+        "requiredDocuments must be an array.",
+      );
+    }
+
+    if (
+      item.requiredDocuments.some((document) => typeof document !== "string")
+    ) {
+      throw new ApiRequestError(
+        400,
+        "INVALID_REQUIRED_DOCUMENTS",
+        "requiredDocuments must contain only strings.",
+      );
+    }
+
+    if (typeof item.trainingRequired !== "boolean") {
+      throw new ApiRequestError(
+        400,
+        "INVALID_TRAINING_REQUIRED",
+        "trainingRequired must be boolean.",
+      );
+    }
+
+    if (typeof item.permitRequired !== "boolean") {
+      throw new ApiRequestError(
+        400,
+        "INVALID_PERMIT_REQUIRED",
+        "permitRequired must be boolean.",
+      );
+    }
+
     this.assertIsoTimestamp(item.effectiveFrom, "effectiveFrom");
     if (item.effectiveUntil !== null) {
       this.assertIsoTimestamp(item.effectiveUntil, "effectiveUntil");
@@ -773,6 +844,30 @@ export class VehicleEligibilityService implements OnModuleInit {
   ): VehicleEligibilityMatrixRecord {
     return {
       ...item,
+      supportedProducts: [...item.supportedProducts],
+      requiredDocuments: [...item.requiredDocuments],
+    };
+  }
+
+  private hydrateMatrixItem(
+    item: VehicleEligibilityMatrixRecord,
+  ): VehicleEligibilityMatrixRecord {
+    const requiredDocuments = Array.isArray(item.requiredDocuments)
+      ? [
+          ...new Set(
+            item.requiredDocuments
+              .map((document) => document.trim())
+              .filter(Boolean),
+          ),
+        ]
+      : [];
+
+    return {
+      ...item,
+      conditionallyAllowed: item.conditionallyAllowed ?? false,
+      requiredDocuments,
+      trainingRequired: item.trainingRequired ?? false,
+      permitRequired: item.permitRequired ?? false,
       supportedProducts: [...item.supportedProducts],
     };
   }

@@ -28,6 +28,14 @@ describe("ServiceProductService payload validation", () => {
       serviceProductType: "credit_card_airport_transfer",
       active: true,
       timing: "reservation",
+      allowedLicenseTypes: [
+        "multi_purpose_taxi",
+        "rental_car",
+        "business_vehicle",
+        "airport_transfer_vehicle",
+      ],
+      meterRequired: false,
+      fixedFareAllowed: true,
       defaultProofRequirements: ["photo", "signoff"],
     });
 
@@ -36,6 +44,9 @@ describe("ServiceProductService payload validation", () => {
       displayName: "Airport Transfer Override",
       timing: "reservation",
       active: false,
+      allowedLicenseTypes: ["business_vehicle"],
+      meterRequired: true,
+      fixedFareAllowed: false,
       defaultBillingMode: "fixed_fare",
       defaultProofRequirements: ["photo"],
     });
@@ -45,6 +56,9 @@ describe("ServiceProductService payload validation", () => {
     ).toMatchObject({
       displayName: "Airport Transfer Override",
       active: false,
+      allowedLicenseTypes: ["business_vehicle"],
+      meterRequired: true,
+      fixedFareAllowed: false,
       defaultProofRequirements: ["photo"],
     });
   });
@@ -93,6 +107,7 @@ describe("ServiceProductService payload validation", () => {
           displayName: 123,
           timing: "reservation",
           active: "true",
+          meterRequired: "true",
           defaultBillingMode: "fixed_fare",
           defaultProofRequirements: ["driver_photo", 42],
         } as never,
@@ -108,6 +123,7 @@ describe("ServiceProductService payload validation", () => {
           displayName: 123,
           timing: "reservation",
           active: "true",
+          meterRequired: "true",
           defaultBillingMode: "fixed_fare",
           defaultProofRequirements: ["driver_photo", 42],
         } as never,
@@ -139,6 +155,7 @@ describe("ServiceProductService payload validation", () => {
         created.serviceProductId,
         {
           description: ["unexpected"],
+          allowedLicenseTypes: ["taxi", 12],
           defaultProofRequirements: "receipt_required",
         } as never,
         "req-update-bad-types",
@@ -151,6 +168,7 @@ describe("ServiceProductService payload validation", () => {
         created.serviceProductId,
         {
           description: ["unexpected"],
+          allowedLicenseTypes: ["taxi", 12],
           defaultProofRequirements: "receipt_required",
         } as never,
         "req-update-bad-types",
@@ -176,6 +194,13 @@ describe("ServiceProductService payload validation", () => {
         description: "  Priority riders only  ",
         timing: "external_defined",
         active: false,
+        allowedLicenseTypes: [
+          "rental_car",
+          "business_vehicle",
+          "business_vehicle",
+        ],
+        meterRequired: false,
+        fixedFareAllowed: true,
         defaultBillingMode: "tenant_invoice",
         defaultProofRequirements: [
           " manifest ",
@@ -189,6 +214,12 @@ describe("ServiceProductService payload validation", () => {
 
     expect(created.displayName).toBe("Enterprise Dispatch");
     expect(created.description).toBe("Priority riders only");
+    expect(created.allowedLicenseTypes).toEqual([
+      "rental_car",
+      "business_vehicle",
+    ]);
+    expect(created.meterRequired).toBe(false);
+    expect(created.fixedFareAllowed).toBe(true);
     expect(created.defaultProofRequirements).toEqual([
       "manifest",
       "signed_slip",
@@ -200,6 +231,9 @@ describe("ServiceProductService payload validation", () => {
         displayName: "  Enterprise Dispatch v2 ",
         description: null,
         active: true,
+        allowedLicenseTypes: ["taxi", "multi_purpose_taxi"],
+        meterRequired: true,
+        fixedFareAllowed: false,
         defaultProofRequirements: [" signed_slip ", " proof_of_service "],
       },
       "req-update-valid",
@@ -208,10 +242,30 @@ describe("ServiceProductService payload validation", () => {
     expect(updated.displayName).toBe("Enterprise Dispatch v2");
     expect(updated.description).toBeNull();
     expect(updated.active).toBe(true);
+    expect(updated.allowedLicenseTypes).toEqual(["taxi", "multi_purpose_taxi"]);
+    expect(updated.meterRequired).toBe(true);
+    expect(updated.fixedFareAllowed).toBe(false);
     expect(updated.defaultProofRequirements).toEqual([
       "signed_slip",
       "proof_of_service",
     ]);
     expect(auditNotificationService.recordAuditLog).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects unsupported allowed license types", () => {
+    const { service } = createService();
+
+    expect(() =>
+      service.createServiceProduct(
+        {
+          serviceProductType: "taxi_reservation",
+          displayName: "Taxi Reservation Override",
+          timing: "reservation",
+          defaultBillingMode: "meter",
+          allowedLicenseTypes: ["hovercraft"] as never,
+        },
+        "req-create-invalid-license-type",
+      ),
+    ).toThrowError(ApiRequestError);
   });
 });

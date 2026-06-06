@@ -87,6 +87,12 @@ describe("VehicleEligibilityService", () => {
       serviceProduct: "enterprise_dispatch",
       serviceTiming: "reservation",
     });
+    expect(service.listMatrix()[0]).toMatchObject({
+      conditionallyAllowed: false,
+      requiredDocuments: [],
+      trainingRequired: false,
+      permitRequired: false,
+    });
   });
 
   it("lists only the products a driver can currently serve", () => {
@@ -158,5 +164,23 @@ describe("VehicleEligibilityService", () => {
         .listDriverEligibleProducts("drv-demo-001")
         .map((entry) => entry.serviceProduct),
     ).not.toContain("credit_card_airport_transfer");
+  });
+
+  it("applies runtime service-product license and meter overrides to eligibility", () => {
+    const { service } = createService({
+      serviceProductOverrides: {
+        serviceProductType: "enterprise_dispatch",
+        displayName: "Metered Enterprise Dispatch",
+        timing: "reservation",
+        active: true,
+        allowedLicenseTypes: ["business_vehicle"],
+        meterRequired: true,
+        fixedFareAllowed: true,
+        defaultBillingMode: "tenant_invoice",
+        defaultProofRequirements: ["photo"],
+      },
+    });
+
+    expect(service.listEligibleSupply("enterprise_dispatch")).toEqual([]);
   });
 });

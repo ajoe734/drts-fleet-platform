@@ -58,10 +58,14 @@ export class VehicleEligibilityRepository {
               active,
               effective_from,
               effective_until,
+              conditionally_allowed,
+              required_documents,
+              training_required,
+              permit_required,
               created_at,
               updated_at,
               record
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12::jsonb)
           `,
           [
             item.capabilityId,
@@ -69,6 +73,10 @@ export class VehicleEligibilityRepository {
             item.active,
             item.effectiveFrom,
             item.effectiveUntil,
+            item.conditionallyAllowed,
+            JSON.stringify(item.requiredDocuments),
+            item.trainingRequired,
+            item.permitRequired,
             item.createdAt,
             item.updatedAt,
             JSON.stringify(item),
