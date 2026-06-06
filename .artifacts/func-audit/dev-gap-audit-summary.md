@@ -1,13 +1,13 @@
 # Dev gap audit summary
 
-- Generated: 2026-06-06T06:48:46.603Z
+- Generated: 2026-06-06T08:42:11.358Z
 - Platform Admin base URL: https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app
 - Ops Console base URL: https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app
 
-| App | Routes | Fully working | Broken |
-| --- | ---: | ---: | --- |
-| platform-admin | 18 | 18 | none |
-| ops-console | 21 | 20 | `/vehicles/veh-demo-001` (HTTP 500) |
+| App            | Routes | Fully working | Broken                              |
+| -------------- | -----: | ------------: | ----------------------------------- |
+| platform-admin |     18 |            18 | none                                |
+| ops-console    |     21 |            20 | `/vehicles/veh-demo-001` (HTTP 500) |
 
 - Total broken routes: 1 / 39
 
@@ -23,4 +23,5 @@ Expected: "/pricing?tab=driver"
 Received: "/pricing"
 
 Call Log:
+
 - Timeout 5000ms exceeded while waiting on the predicate

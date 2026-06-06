@@ -1,6 +1,6 @@
 # Dev Runtime + Functional Gap Report (browser-verified)
 
-- **Last re-run:** 2026-06-06T06:48:46Z
+- **Last re-run:** 2026-06-06T08:42:11Z
 - **Auditor:** Claude2 (reassigned owner; prior re-runs by Codex2)
 - **Environment:** live dev Cloud Run
   - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
@@ -8,7 +8,7 @@
 - **Method:** headless Chromium route census over all 39 routes (Platform Admin 18 + Ops Console 21), fixed `1440x950` screenshots, shell-count checks, and manual tab round-trip checks for `/pricing`, `/payments`, `/attendance`.
 - **Artifacts:** `.artifacts/func-audit/dev-gap-audit-results.json`, `.artifacts/func-audit/dev-gap-audit-summary.md`, and route screenshots under `.artifacts/func-audit/*.png`.
 
-## 1. Scoreboard (2026-06-06T06:48:46Z re-run)
+## 1. Scoreboard (2026-06-06T08:42:11Z re-run)
 
 | App            | Routes | Fully working | Broken                            |
 | -------------- | -----: | ------------: | --------------------------------- |
@@ -28,7 +28,7 @@
 > run publishes it. That merge + deploy is the sole remaining blocker — see §5.
 > See §3.1 / §3.2 for the fixes.
 
-This 2026-06-06T06:48:46Z re-run (Claude2, full 39-route Playwright census + manual tab checks) reconfirms the current dev state is materially unchanged from the 2026-06-05T08:30:59Z run: every Platform Admin shell count is exactly one, single-shell holds on every route, and `/payments` + `/attendance` tab strips round-trip. The two `origin/dev` commits that landed since (#538 tenant-governance UI, #540 OpenClaw runtime) touch neither `/vehicles/[vehicleId]` nor `/pricing`. Acceptance is still blocked by one HTTP 500 and one tab-strip regression:
+This 2026-06-06T08:42:11Z re-run (Claude2, full 39-route Playwright census + manual tab checks) reconfirms the current dev state is materially unchanged from the earlier 2026-06-06T06:48:46Z and 2026-06-05T08:30:59Z runs: every Platform Admin shell count is exactly one, single-shell holds on every route, and `/payments` + `/attendance` tab strips round-trip. A live `curl` taken immediately before this census still returned HTTP 500 for `/vehicles/veh-demo-001`, so the failure is current dev state, not transient lag. The two `origin/dev` commits that landed since (#538 tenant-governance UI, #540 OpenClaw runtime) touch neither `/vehicles/[vehicleId]` nor `/pricing`. Acceptance is still blocked by one HTTP 500 and one tab-strip regression:
 
 - OPS `/vehicles/veh-demo-001` still returns HTTP 500 (`checks` census `httpStatus=500`; live `digest=863528574`, matching the error the §3.1 fix hardens).
 - PA `/pricing` tab clicking still fails to push `/pricing?tab=driver` (`checks.pricingTabs=fail`).
