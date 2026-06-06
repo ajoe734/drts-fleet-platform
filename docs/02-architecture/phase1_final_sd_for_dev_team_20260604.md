@@ -243,6 +243,18 @@ GET /api/tenant/statements
 GET /api/tenant/invoices
 ```
 
+Phase 1 routing note for `WF-TEN-BIZ-001`:
+
+- tenant business reporting reuses the existing report-job families
+  `monthly_trip_report` and `revenue_summary`
+- required tenant filters for this workflow are `tenantId`, `orderId`,
+  `userId`, `costCenterCode`, and `serviceProduct`
+- do not introduce a separate `tenant_business_operations` report job type or
+  a JSON-only export contract in Phase 1
+- if a dedicated tenant-business row schema is still needed later, treat it as
+  follow-up execution work; it does not block the accepted Phase 1 summary /
+  payable / statement contracts above
+
 Types:
 
 ```ts
@@ -677,7 +689,8 @@ tenant login
 → tenant dashboard shows counts
 → payable summary updates
 → statement generated
-→ report export includes order/user/cost center/service product
+→ monthly trip report / revenue summary preserve tenantId + orderId + userId +
+  costCenterCode + serviceProduct filters
 ```
 
 ### E2E-013 Service Product Eligibility

@@ -11,26 +11,24 @@
 #   -> tenant dashboard shows counts
 #   -> payable summary updates
 #   -> statement generated
-#   -> report export includes order/user/cost center/service product
+#   -> report export preserves tenantId/orderId/userId/costCenter/serviceProduct
 #
 # Current repo reality:
-#   - the booking/dispatch/driver/invoice/report-job chain is implemented
-#   - tenant dashboard / payables / statements routes are not yet present in
-#     this repo's API surface
-#   - tenant report jobs currently preserve filters + artifact lifecycle, but
-#     do not yet emit a tenant-business row schema with all SD columns
+#   - tenant dashboard / payables / statements routes are implemented
+#   - tenant reporting currently routes through existing report-job contracts
+#     (`monthly_trip_report` / `revenue_summary`)
+#   - there is no dedicated `tenant_business_operations` report job type or
+#     canonical tenant-business row schema in this repo
 #
 # Therefore this shell uses a split gate:
 #   HARD FAIL
 #     - tenant booking creation/read-back loses orderId or costCenter binding
 #     - dispatch assignment cannot produce a driver task
 #     - driver lifecycle cannot reach completed
+#     - tenant dashboard / payables / statements routes are unavailable
 #     - tenant invoice generation does not include the completed orderId
 #     - tenant report job cannot be queued/completed or loses filter binding
 #   PROBE + RECORD
-#     - GET /tenant/dashboard
-#     - GET /tenant/payables/summary
-#     - GET /tenant/statements
 #     - row-level export fields (order/user/cost center/service product)
 #       until a dedicated tenant-business export schema lands
 set -euo pipefail
@@ -335,28 +333,14 @@ log_ok "driver lifecycle completed"
 log_surface "Tenant business surfaces — dashboard / payable / statement probes"
 switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
 
-if probe_route "dashboard" "/tenant/dashboard"; then
-  record_optional_report_field "dashboard.bookingCount" '.data.bookingCount'
-  record_optional_report_field "dashboard.completedTripCount" '.data.completedTripCount'
-else
-  http_call GET "/tenant/bookings"
-  assert_status "200"
-  BOOKING_LIST_COUNT=$(json_get '.data.items | length')
-  save_evidence "$SCENARIO" "dashboard" "fallback.bookingListCount" "${BOOKING_LIST_COUNT:-0}"
-  log_warn "dashboard fallback recorded via /tenant/bookings"
-fi
+probe_route "dashboard" "/tenant/dashboard"
+record_optional_report_field "dashboard.bookingCount" '.data.bookingCount'
+record_optional_report_field "dashboard.completedTripCount" '.data.completedTripCount'
 
-if probe_route "payables" "/tenant/payables/summary"; then
-  record_optional_report_field "payables.estimatedPayableAmountMinor" '.data.estimatedPayableAmountMinor'
-else
-  http_call GET "/tenant/invoices"
-  assert_status "200"
-  INVOICE_LIST_COUNT=$(json_get '.data.items | length')
-  save_evidence "$SCENARIO" "payables" "fallback.invoiceListCountPreGenerate" "${INVOICE_LIST_COUNT:-0}"
-  log_warn "payables fallback recorded via /tenant/invoices"
-fi
+probe_route "payables" "/tenant/payables/summary"
+record_optional_report_field "payables.estimatedPayableAmountMinor" '.data.estimatedPayableAmountMinor'
 
-probe_route "statements" "/tenant/statements" || true
+probe_route "statements" "/tenant/statements"
 
 log_surface "Billing — tenant invoice as payable/statement fallback"
 PERIOD_START=$(date -u -d "-1 day" +"%Y-%m-%dT00:00:00Z" 2>/dev/null || date -u -v-1d +"%Y-%m-%dT00:00:00Z")
@@ -397,8 +381,8 @@ jq -n \
   --arg costCenterCode "$CC_CODE" \
   --arg serviceProduct "enterprise_dispatch" \
   '{
-    jobType: "tenant_business_operations",
-    format: "json",
+    jobType: "monthly_trip_report",
+    format: "xlsx",
     filters: {
       orderId: $orderId,
       userId: $userId,
@@ -471,6 +455,6 @@ assert_chain "report" "jobId"
 print_chain_summary
 
 echo ""
-log_warn "E2E-012 currently records dashboard/payables/statements as live probes because those SD routes are not yet implemented in this repo. Invoice + report-job evidence are used as the runnable fallback for tenant business operations until the dedicated tenant summary/export surfaces land."
+log_warn "E2E-012 currently records row-level export fields as probes because the canonical Phase 1 contract reuses existing report-job families and does not yet define a dedicated tenant-business row schema."
 log_ok "E2E-012 complete — tenant booking → trip completion → invoice → report chain passed."
 echo -e "Evidence log: ${EVIDENCE_FILE}"
