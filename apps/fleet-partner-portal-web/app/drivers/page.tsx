@@ -1,15 +1,8 @@
-import {
-  CanvasBtn,
-  CanvasCard,
-  CanvasPageHeader,
-  CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
-} from "@drts/ui-web";
+import { CanvasBtn, CanvasCard, CanvasPageHeader } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { type FleetDriver } from "@/lib/fleet-portal-fixtures";
 import { loadDrivers } from "@/lib/fleet-portal-data.server";
-import { DataSourceNotice, SvcChips } from "@/lib/fleet-portal-ui";
+import { DataSourceNotice } from "@/lib/fleet-portal-ui";
+import { DriversTable } from "@/components/portal-tables";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -22,9 +15,7 @@ export default async function FleetDriversPage() {
 
   // Header tab counts are derived from the loaded rows (live partner-scoped
   // data, or fixtures via the same seam on fallback) instead of fixed design
-  // numbers. 缺件 / 訓練未完成 reflect whatever the rows carry — when the live
-  // drivers endpoint does not yet surface per-driver doc / training status,
-  // those map to "complete" and the counts read 0 rather than a fabricated value.
+  // numbers.
   const tabCounts = {
     all: rows.length,
     available: rows.filter((r) => r.status === "available").length,
@@ -36,97 +27,6 @@ export default async function FleetDriversPage() {
     `${t("drivers.tabAvailable", locale)} ${tabCounts.available}`,
     `${t("drivers.tabMissingDocs", locale)} ${tabCounts.missingDocs}`,
     `${t("drivers.tabTrainingIncomplete", locale)} ${tabCounts.trainingIncomplete}`,
-  ];
-
-  const columns: CanvasTableColumn<FleetDriver>[] = [
-    {
-      h: "DRIVER",
-      w: 170,
-      r: (r) => (
-        <div>
-          <div style={{ fontWeight: 600 }}>{r.name}</div>
-          <div
-            style={{
-              fontSize: 11,
-              color: theme.textDim,
-              fontFamily: theme.monoFamily,
-            }}
-          >
-            {r.id} · {r.plate}
-          </div>
-        </div>
-      ),
-    },
-    {
-      h: "STATUS",
-      w: 110,
-      r: (r) => (
-        <CanvasPill
-          theme={theme}
-          tone={
-            r.status === "available"
-              ? "success"
-              : r.status === "on_trip"
-                ? "info"
-                : r.status === "break"
-                  ? "warn"
-                  : "neutral"
-          }
-          dot
-        >
-          {r.status}
-        </CanvasPill>
-      ),
-    },
-    {
-      h: "可接服務 · service eligibility",
-      w: 280,
-      r: (r) => <SvcChips theme={theme} list={r.svc} />,
-    },
-    {
-      h: "LICENSE",
-      w: 120,
-      r: (r) =>
-        r.license === "valid" ? (
-          <CanvasPill theme={theme} tone="success">
-            valid
-          </CanvasPill>
-        ) : (
-          <CanvasPill theme={theme} tone="warn" dot>
-            {r.license}
-          </CanvasPill>
-        ),
-    },
-    {
-      h: "DOCS",
-      w: 110,
-      r: (r) =>
-        r.docs === "complete" ? (
-          <CanvasPill theme={theme} tone="success">
-            complete
-          </CanvasPill>
-        ) : (
-          <CanvasPill theme={theme} tone="warn" dot>
-            {r.docs}
-          </CanvasPill>
-        ),
-    },
-    {
-      h: "TRAINING",
-      w: 110,
-      r: (r) =>
-        r.training === "complete" ? (
-          <CanvasPill theme={theme} tone="success">
-            complete
-          </CanvasPill>
-        ) : (
-          <CanvasPill theme={theme} tone="warn" dot>
-            {r.training}
-          </CanvasPill>
-        ),
-    },
-    { h: "30天趟次", k: "trips30", w: 90, mono: true, align: "right" },
-    { h: "評分", k: "rating", w: 70, mono: true, align: "right" },
   ];
 
   return (
@@ -157,7 +57,7 @@ export default async function FleetDriversPage() {
           body={t("data.fixtureNotice", locale)}
         />
         <CanvasCard theme={theme} padding={0}>
-          <CanvasTable theme={theme} columns={columns} rows={rows} />
+          <DriversTable rows={rows} />
         </CanvasCard>
       </div>
     </>

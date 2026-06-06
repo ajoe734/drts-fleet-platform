@@ -4,14 +4,11 @@ import {
   CanvasCard,
   CanvasKPI,
   CanvasPageHeader,
-  CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
 } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { type FleetTrip } from "@/lib/fleet-portal-fixtures";
 import { loadDashboard } from "@/lib/fleet-portal-data.server";
 import { DataSourceNotice, SvcChip } from "@/lib/fleet-portal-ui";
+import { RecentTripsTable } from "@/components/portal-tables";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -21,34 +18,6 @@ export default async function FleetDashboardPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
   const dashboard = await loadDashboard();
-
-  const tripColumns: CanvasTableColumn<FleetTrip>[] = [
-    { h: "ORDER", k: "id", w: 110, mono: true },
-    { h: "SERVICE", w: 120, r: (r) => <SvcChip theme={theme} svc={r.svc} /> },
-    { h: "DRIVER", k: "driver", w: 100 },
-    { h: "TENANT", k: "tenant", w: 130, mono: true },
-    { h: "FARE", k: "fare", w: 110, mono: true, align: "right" },
-    { h: "車行分潤", k: "commission", w: 110, mono: true, align: "right" },
-    {
-      h: "STATUS",
-      w: 120,
-      r: (r) => (
-        <CanvasPill
-          theme={theme}
-          tone={
-            r.status === "completed"
-              ? "success"
-              : r.status === "cancelled"
-                ? "danger"
-                : "info"
-          }
-          dot
-        >
-          {r.status}
-        </CanvasPill>
-      ),
-    },
-  ];
 
   return (
     <>
@@ -119,9 +88,6 @@ export default async function FleetDashboardPage() {
           />
         </div>
 
-        {/* Supplemental KPIs / attention / supply have no endpoint yet, so mark
-            them as design data whenever the headline KPIs are live (when the
-            headline is itself fallback, the top notice already covers them). */}
         {dashboard.source === "live" &&
           dashboard.supplementalSource === "fallback" && (
             <DataSourceNotice
@@ -228,10 +194,6 @@ export default async function FleetDashboardPage() {
           </CanvasCard>
         </div>
 
-        {/* The recent-trips strip loads from its own endpoint and can fall back
-            to fixtures while the headline KPIs are live; mark it as design data
-            in that case (when the headline is itself fallback, the top notice
-            already covers it). */}
         {dashboard.source === "live" &&
           dashboard.recentTripsSource === "fallback" && (
             <DataSourceNotice
@@ -251,11 +213,7 @@ export default async function FleetDashboardPage() {
             </CanvasBtn>
           }
         >
-          <CanvasTable
-            theme={theme}
-            columns={tripColumns}
-            rows={dashboard.recentTrips}
-          />
+          <RecentTripsTable rows={dashboard.recentTrips} />
         </CanvasCard>
       </div>
     </>

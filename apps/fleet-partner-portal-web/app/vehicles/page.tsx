@@ -1,15 +1,8 @@
-import {
-  CanvasBtn,
-  CanvasCard,
-  CanvasPageHeader,
-  CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
-} from "@drts/ui-web";
+import { CanvasBtn, CanvasCard, CanvasPageHeader } from "@drts/ui-web";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
-import { type FleetVehicle } from "@/lib/fleet-portal-fixtures";
 import { loadVehicles } from "@/lib/fleet-portal-data.server";
-import { DataSourceNotice, SvcChips } from "@/lib/fleet-portal-ui";
+import { DataSourceNotice } from "@/lib/fleet-portal-ui";
+import { VehiclesTable } from "@/components/portal-tables";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -19,51 +12,6 @@ export default async function FleetVehiclesPage() {
   const locale = await getServerLocale();
   const theme = buildFleetTheme();
   const { rows, source } = await loadVehicles();
-
-  const columns: CanvasTableColumn<FleetVehicle>[] = [
-    {
-      h: "PLATE",
-      w: 120,
-      mono: true,
-      r: (r) => <span style={{ fontWeight: 600 }}>{r.plate}</span>,
-    },
-    { h: "MODEL", k: "model", w: 160 },
-    { h: "YEAR", k: "year", w: 70, mono: true, align: "right" },
-    { h: "DRIVER", k: "driver", w: 100 },
-    {
-      h: "可接服務 · vehicle eligibility",
-      w: 260,
-      r: (r) => <SvcChips theme={theme} list={r.svc} />,
-    },
-    { h: "INSURANCE", k: "insurance", w: 120, mono: true },
-    {
-      h: "INSPECTION",
-      w: 120,
-      r: (r) =>
-        r.inspection === "ok" ? (
-          <CanvasPill theme={theme} tone="success">
-            ok
-          </CanvasPill>
-        ) : (
-          <CanvasPill theme={theme} tone="warn" dot>
-            {r.inspection}
-          </CanvasPill>
-        ),
-    },
-    {
-      h: "STATUS",
-      w: 120,
-      r: (r) => (
-        <CanvasPill
-          theme={theme}
-          tone={r.status === "active" ? "success" : "warn"}
-          dot
-        >
-          {r.status}
-        </CanvasPill>
-      ),
-    },
-  ];
 
   return (
     <>
@@ -96,7 +44,7 @@ export default async function FleetVehiclesPage() {
           body={t("data.fixtureNotice", locale)}
         />
         <CanvasCard theme={theme} padding={0}>
-          <CanvasTable theme={theme} columns={columns} rows={rows} />
+          <VehiclesTable rows={rows} />
         </CanvasCard>
       </div>
     </>
