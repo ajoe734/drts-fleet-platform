@@ -4,6 +4,8 @@ import { AuditNotificationService } from "../../apps/api/src/modules/audit-notif
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { FleetPartnerRepository } from "../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { FleetPartnerService } from "../../apps/api/src/modules/fleet-partner/fleet-partner.service";
+import type { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import type { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 
 function createService(repository?: Partial<FleetPartnerRepository>) {
   const billingSettlementService = new BillingSettlementService(
@@ -16,8 +18,17 @@ function createService(repository?: Partial<FleetPartnerRepository>) {
     reimbursementMode: "platform_funded",
   });
 
+  // Revenue-share-rule CRUD does not exercise the owned-mobility or
+  // regulatory-registry collaborators, so stub them to keep this root-level
+  // test free of the deep apps/api construction chain (and its
+  // @nestjs/event-emitter dependency, which is not resolvable here).
+  const ownedMobilityService = {} as unknown as OwnedMobilityService;
+  const regulatoryRegistryService = {} as unknown as RegulatoryRegistryService;
+
   const fleetPartnerService = new FleetPartnerService(
     billingSettlementService,
+    ownedMobilityService,
+    regulatoryRegistryService,
     repository as FleetPartnerRepository | undefined,
   );
 
