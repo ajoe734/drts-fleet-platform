@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Fleet Partner Portal · 智慧運輸科技</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#052E22"/>
+  <rect x="14" y="22" width="72" height="56" rx="6" fill="#FFFFFF" stroke="#047857" stroke-width="2"/>
+  <rect x="20" y="30" width="14" height="40" rx="2" fill="#ECFDF5"/>
+  <rect x="40" y="32" width="38" height="3" rx="1.5" fill="#047857"/>
+  <rect x="40" y="40" width="22" height="2.5" rx="1" fill="#6EE7B7"/>
+  <rect x="40" y="48" width="38" height="20" rx="2" fill="#ECFDF5"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="macos-window.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="mgmt-tokens.jsx"></script>
+<script type="text/babel" src="mgmt-primitives.jsx"></script>
+<script type="text/babel" src="mgmt-shell.jsx"></script>
+<script type="text/babel" src="mgmt-auth.jsx"></script>
+<script type="text/babel" src="mgmt-data.jsx"></script>
+<script type="text/babel" src="fleet-data.jsx"></script>
+<script type="text/babel" src="fleet-screens.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": false,
+  "density": "compact"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const th = buildMgmtTheme({ console: 'fleet', dark: tw.dark, density: tw.density });
+  const W = 1440, H = 900;
+  const Frame = ({ children, chrome, url }) => chrome
+    ? <MacWindow title="Fleet Partner Portal · 智慧運輸科技" url={'https://fleet.smarttransport.tw' + (url || '')} variant={tw.dark ? 'dark' : 'light'} width={W} height={H}>{children}</MacWindow>
+    : <div style={{ width: W, height: H, background: th.bg, borderRadius: 10, overflow: 'hidden', border: '1px solid ' + th.border }}>{children}</div>;
+  const Hero = ({ url, children }) => <Frame chrome url={url}>{children}</Frame>;
+  const Bare = ({ children }) => <Frame>{children}</Frame>;
+
+  return (
+    <>
+      <DesignCanvas projectName="Fleet Partner Portal" subtitle="車行 / 車隊合作後台 · 大都會車隊範例 · 10 routes · spec Part E" accent="#047857">
+        <DCSection id="workspace" title="01 · Workspace">
+          <DCArtboard id="dashboard" label="營運總覽 / Dashboard" width={W} height={H}><Hero url="/dashboard"><FLP_Dashboard theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="supply" title="02 · 供給管理 · service-product aware">
+          <DCArtboard id="drivers" label="司機 / Drivers · 服務資格" width={W} height={H}><Hero url="/drivers"><FLP_Drivers theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="vehicles" label="車輛 / Vehicles · 車型資格" width={W} height={H}><Bare><FLP_Vehicles theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="trips" label="趟次 / Trips · 含分潤" width={W} height={H}><Bare><FLP_Trips theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="revenue" title="03 · 分潤 Revenue Share">
+          <DCArtboard id="revenue" label="分潤總覽 · 組成明細" width={W} height={H}><Hero url="/revenue"><FLP_Revenue theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="statements" label="對帳單 / Statements" width={W} height={H}><Bare><FLP_Statements theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="quality" title="04 · 品質與責任 Quality & Responsibility">
+          <DCArtboard id="documents" label="文件 / Documents · owner 區分" width={W} height={H}><Hero url="/documents"><FLP_Documents theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="training" label="訓練 / Training · 完成率" width={W} height={H}><Bare><FLP_Training theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="cases" label="事故 / 申訴 · 責任歸屬" width={W} height={H}><Bare><FLP_Cases theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="quality" label="品質指標 / Quality Metrics" width={W} height={H}><Bare><FLP_Quality theme={th} /></Bare></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="Theme">
+          <TweakToggle label="深色模式" value={tw.dark} onChange={v => setTweak('dark', v)} />
+          <TweakRadio label="密度" value={tw.density} onChange={v => setTweak('density', v)} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfy' }]} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

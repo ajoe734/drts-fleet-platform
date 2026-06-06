@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Partner Booking Web · 智慧運輸科技</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#0A2A6E"/>
+  <rect x="32" y="16" width="36" height="68" rx="6" fill="#FFFFFF"/>
+  <rect x="36" y="22" width="28" height="16" rx="2" fill="#1B4FA0"/>
+  <rect x="56" y="32" width="6" height="4" rx="1" fill="#C9A356"/>
+  <rect x="36" y="44" width="28" height="2.5" fill="#E5E7EB"/>
+  <rect x="36" y="50" width="20" height="2.5" fill="#E5E7EB"/>
+  <rect x="36" y="62" width="28" height="12" rx="2" fill="#C9A356"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="pb-screens.jsx"></script>
+
+<script type="text/babel">
+function App() {
+  const W = 402, H = 874;
+  const Phone = ({ children, p }) => (
+    <IOSDevice width={W} height={H} title={(p && p.brand) + ' App'}>{children}</IOSDevice>
+  );
+
+  return (
+    <DesignCanvas projectName="Partner Booking Web" subtitle="白牌合作入口 · Phase 1 P0 · 3 program flows (信用卡機場 / 保險代步 / 旅行社) · spec Part C" accent="#1B4FA0">
+
+      <DCSection id="card" title="01 · 信用卡機場接送 · Credit-card Airport Transfer" subtitle="中信 World Elite · 嵌入卡片 App webview">
+        <DCArtboard id="card-landing" label="入口 Landing · 權益" width={W} height={H}><Phone p={PROGRAMS.card}><PB_Landing program="card" /></Phone></DCArtboard>
+        <DCArtboard id="card-elig" label="資格驗證 Eligibility" width={W} height={H}><Phone p={PROGRAMS.card}><PB_Eligibility program="card" /></Phone></DCArtboard>
+        <DCArtboard id="card-book" label="預約表單 · airport fields" width={W} height={H}><Phone p={PROGRAMS.card}><PB_BookCard /></Phone></DCArtboard>
+        <DCArtboard id="card-review" label="確認 Review & Confirm" width={W} height={H}><Phone p={PROGRAMS.card}><PB_Review program="card" /></Phone></DCArtboard>
+        <DCArtboard id="card-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.card}><PB_Success program="card" /></Phone></DCArtboard>
+        <DCArtboard id="card-track" label="行程追蹤 Tracking" width={W} height={H}><Phone p={PROGRAMS.card}><PB_Tracking program="card" /></Phone></DCArtboard>
+      </DCSection>
+
+      <DCSection id="insurance" title="02 · 保險代步 · Insurance Replacement" subtitle="富邦產險 · 理賠承辦或使用者">
+        <DCArtboard id="ins-landing" label="入口 · 代步額度" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Landing program="insurance" /></Phone></DCArtboard>
+        <DCArtboard id="ins-elig" label="資格驗證 · 保單/理賠" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Eligibility program="insurance" /></Phone></DCArtboard>
+        <DCArtboard id="ins-book" label="預約表單 · insurance fields" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_BookInsurance /></Phone></DCArtboard>
+        <DCArtboard id="ins-review" label="確認 Review" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Review program="insurance" /></Phone></DCArtboard>
+        <DCArtboard id="ins-error" label="需人工審核 · Manual Review (Part C2-7)" width={W} height={H}><Phone p={PROGRAMS.insurance}><PB_Error program="insurance" /></Phone></DCArtboard>
+      </DCSection>
+
+      <DCSection id="travel" title="03 · 旅行社接送 · Travel Agency Transfer" subtitle="雄獅旅遊 · 團體窗口">
+        <DCArtboard id="trv-landing" label="入口 · 接送額度" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Landing program="travel" /></Phone></DCArtboard>
+        <DCArtboard id="trv-elig" label="資格驗證 · 團號" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Eligibility program="travel" /></Phone></DCArtboard>
+        <DCArtboard id="trv-book" label="預約表單 · travel fields" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_BookTravel /></Phone></DCArtboard>
+        <DCArtboard id="trv-review" label="確認 Review" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Review program="travel" /></Phone></DCArtboard>
+        <DCArtboard id="trv-success" label="預約成功 Success" width={W} height={H}><Phone p={PROGRAMS.travel}><PB_Success program="travel" /></Phone></DCArtboard>
+      </DCSection>
+
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
