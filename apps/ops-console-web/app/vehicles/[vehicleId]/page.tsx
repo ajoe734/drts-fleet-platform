@@ -223,6 +223,29 @@ function formatDateOnly(locale: Locale, value: string | null | undefined) {
   }).format(date);
 }
 
+function sortKey(value: string | null | undefined) {
+  return value ?? "";
+}
+
+function timeKey(value: string | null | undefined) {
+  const time = new Date(value ?? "").getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function compareStringDesc(
+  left: string | null | undefined,
+  right: string | null | undefined,
+) {
+  return sortKey(right).localeCompare(sortKey(left));
+}
+
+function compareTimeDesc(
+  left: string | null | undefined,
+  right: string | null | undefined,
+) {
+  return timeKey(right) - timeKey(left);
+}
+
 function formatList(locale: Locale, values: readonly string[]) {
   if (values.length === 0) {
     return "—";
@@ -654,7 +677,7 @@ function pickCurrentBinding(
         ACTIVE_DRIVER_TASK_STATUSES.has(task.status),
     )
     .sort((left, right) =>
-      latestTaskTimestamp(right).localeCompare(latestTaskTimestamp(left)),
+      compareStringDesc(latestTaskTimestamp(left), latestTaskTimestamp(right)),
     )[0];
 
   if (activeTask) {
@@ -675,7 +698,7 @@ function pickCurrentBinding(
       (shift) => shift.vehicleId === vehicleId && shift.status === "active",
     )
     .sort((left, right) =>
-      right.clockedInAt.localeCompare(left.clockedInAt),
+      compareStringDesc(left.clockedInAt, right.clockedInAt),
     )[0];
 
   if (!activeShift) {
@@ -992,11 +1015,7 @@ function collectVehicleAuditEntries(
       const oldVehicleId = entry.oldValuesSummary?.vehicleId;
       return newVehicleId === vehicleId || oldVehicleId === vehicleId;
     })
-    .sort(
-      (left, right) =>
-        new Date(right.createdAt).getTime() -
-        new Date(left.createdAt).getTime(),
-    )
+    .sort((left, right) => compareTimeDesc(left.createdAt, right.createdAt))
     .slice(0, 8);
 }
 
@@ -1167,16 +1186,17 @@ export default async function VehicleDetailPage({
   }
 
   const relatedMaintenance = [...maintenanceResult.items].sort((left, right) =>
-    (right.scheduledAt ?? right.updatedAt).localeCompare(
+    compareStringDesc(
       left.scheduledAt ?? left.updatedAt,
+      right.scheduledAt ?? right.updatedAt,
     ),
   );
   const relatedContracts = contractsResult.items
     .filter((entry) => entry.vehicleId === vehicleId)
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    .sort((left, right) => compareStringDesc(left.updatedAt, right.updatedAt));
   const relatedIncidents = incidentsResult.items
     .filter((entry) => entry.relatedVehicleId === vehicleId)
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    .sort((left, right) => compareStringDesc(left.updatedAt, right.updatedAt));
   const currentBinding = pickCurrentBinding(
     vehicleId,
     driversResult.data,
