@@ -3,11 +3,11 @@
 **Sidecar Kind:** `acceptance_packet`
 **Parent Task:** `GAP-VERIFY` — Re-run dev browser gap audit and refresh scoreboard evidence
 **Current Sidecar Owner:** `Claude`
-**Assigned Reviewer:** `Gemini`
-**Parent Owner:** `Codex` (reviewer `Claude`)
+**Assigned Reviewer:** `Codex`
+**Parent Owner:** `Codex2` (reviewer `Codex`)
 **Sidecar Task ID:** `GAP-VERIFY-SIDECAR-ACCEPTANCE`
-**Last Revised:** `2026-06-04T02:39:48Z (UTC)`
-**Status:** `review` — owner `Claude` handed packet to reviewer `Gemini`.
+**Last Revised:** `2026-06-06T06:05:00Z (UTC)`
+**Status:** `review` — owner `Claude` handed packet to reviewer `Codex`.
 
 ---
 
@@ -17,15 +17,15 @@
 
 - **In scope:** support-only acceptance framing、dependency 合併/部署狀態核對、per-route / per-bug 驗收矩陣、readiness gate、reviewer checklist。
 - **Out of scope:** 實際在 dev 重跑 39-route 瀏覽器稽核、改寫 `docs/05-ui/dev-runtime-functional-gap-report-20260603.md` 的 §1/§3 scoreboard、修改 L1/L2 真相、改寫 machine truth（`ai-status.json` / `current-work.md` / `ai-activity-log.jsonl`）。
-- 本 packet 為 advisory support material；是否吸收進主線由 parent owner `Codex` 決定。
+- 本 packet 為 advisory support material；是否吸收進主線由 parent owner `Codex2` 決定。
 
 ---
 
 ## 2) Parent Task Framing (from machine truth)
 
-以 `scripts/ai-status.sh show GAP-VERIFY` 為準（讀取於 `2026-06-04T02:39Z`）：
+以 `scripts/ai-status.sh show GAP-VERIFY` 為準（讀取於 `2026-06-06T06:05Z`）：
 
-- 父任務 `GAP-VERIFY`：`status=in_progress`，Owner=`Codex`，Reviewer=`Claude`，phase=`dev-runtime-gap-fixes-202606`。
+- 父任務 `GAP-VERIFY`：`status=in_progress`，Owner=`Codex2`，Reviewer=`Codex`，phase=`dev-runtime-gap-fixes-202606`。
 - Artifacts：`docs/05-ui/dev-runtime-functional-gap-report-20260603.md`、`.artifacts/func-audit/`。
 - `next`：「Re-running dev browser gap audit and refreshing scoreboard evidence」。
 - 報告 §6 意圖（摘 `summary_zh`）：上述修復都 merge + 部署到 dev 後，重跑瀏覽器稽核（HTTP 全 route + 視覺/功能），確認 ops 4 個 500 全清、`/fleet` 單殼、`/pricing` tab 正常、payments/attendance tab 手動覆核，產出更新後的 scoreboard 與截圖對照，覆寫報告 §1/§3。
@@ -105,7 +105,7 @@
 
 ---
 
-## 6) Reviewer Checklist (`Gemini`)
+## 6) Reviewer Checklist (`Codex`)
 
 - [ ] §3 dependency 表的 merge 可達性與 PR 編號正確（可用 `git merge-base --is-ancestor <sha> origin/dev` 重核）。
 - [ ] §3.1 對 `GAP-PA-FLEET-SHELL` squash-merge（branch `5ccc54cd` → dev `1256f6d9`）的判定正確；`/fleet` on dev 確為單殼。
@@ -128,5 +128,5 @@
 
 ## 8) Handoff
 
-- Owner `Claude` → Reviewer `Gemini`：support-only packet，無 canonical 改動，`INTEGRATION_STATUS=not_applicable`（sidecar，`NO_COMMIT_REQUIRED` 適用但本 packet 仍以 task-scoped commit 落盤以利追溯）。
-- 通過後 parent owner `Codex` 可將 §3.1 / §5 的 readiness 結論吸收進 GAP-VERIFY 稽核流程；§3.1 的 e2e-未併-dev 提醒建議轉成一條 integration follow-up。
+- Owner `Claude` → Reviewer `Codex`：support-only packet，無 canonical 改動，`INTEGRATION_STATUS=not_applicable`（sidecar，`NO_COMMIT_REQUIRED` 適用但本 packet 仍以 task-scoped commit 落盤以利追溯）。
+- 通過後 parent owner `Codex2` 可將 §3.1 / §5 的 readiness 結論吸收進 GAP-VERIFY 稽核流程；§3.1 的 e2e-未併-dev 提醒建議轉成一條 integration follow-up。
