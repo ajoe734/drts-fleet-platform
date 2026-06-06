@@ -228,6 +228,19 @@ export default async function FleetDashboardPage() {
           </CanvasCard>
         </div>
 
+        {/* The recent-trips strip loads from its own endpoint and can fall back
+            to fixtures while the headline KPIs are live; mark it as design data
+            in that case (when the headline is itself fallback, the top notice
+            already covers it). */}
+        {dashboard.source === "live" &&
+          dashboard.recentTripsSource === "fallback" && (
+            <DataSourceNotice
+              theme={theme}
+              source={dashboard.recentTripsSource}
+              body={t("data.fixtureNotice", locale)}
+            />
+          )}
+
         <CanvasCard
           theme={theme}
           title={t("dashboard.recentTrips", locale)}

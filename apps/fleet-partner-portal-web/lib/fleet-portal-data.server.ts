@@ -434,6 +434,10 @@ export interface DashboardView {
   grossRevenue: string;
   supply: typeof FX_DASHBOARD_SUPPLY;
   recentTrips: FleetTrip[];
+  // The recent-trips strip is loaded from the trips endpoint independently of
+  // the headline KPIs. It can fall back to fixtures while the KPIs are live, so
+  // it carries its own source flag instead of inheriting `source`.
+  recentTripsSource: DataSource;
   source: DataSource;
   // Compliance / cases / training KPIs, the attention banners, and the
   // supply-by-service breakdown have no fleet-partner endpoint yet, so they are
@@ -448,6 +452,7 @@ const DASHBOARD_FALLBACK: Omit<
   DashboardView,
   | "supply"
   | "recentTrips"
+  | "recentTripsSource"
   | "source"
   | "supplemental"
   | "attention"
@@ -470,14 +475,19 @@ export async function loadDashboard(): Promise<DashboardView> {
   const attention = FX_DASHBOARD_ATTENTION;
   const supplementalSource: DataSource = "fallback";
   let recentTrips: FleetTrip[] = FX_FLEET_TRIPS.slice(0, 5);
+  let recentTripsSource: DataSource = "fallback";
   try {
     const tripsView = await loadTrips();
-    recentTrips =
-      tripsView.source === "live"
-        ? tripsView.rows.slice(0, 5)
-        : FX_FLEET_TRIPS.slice(0, 5);
+    if (tripsView.source === "live") {
+      recentTrips = tripsView.rows.slice(0, 5);
+      recentTripsSource = "live";
+    } else {
+      recentTrips = FX_FLEET_TRIPS.slice(0, 5);
+      recentTripsSource = "fallback";
+    }
   } catch {
     recentTrips = FX_FLEET_TRIPS.slice(0, 5);
+    recentTripsSource = "fallback";
   }
 
   try {
@@ -496,6 +506,7 @@ export async function loadDashboard(): Promise<DashboardView> {
       grossRevenue: formatMoney(record.grossEarningAmount),
       supply: FX_DASHBOARD_SUPPLY,
       recentTrips,
+      recentTripsSource,
       source: "live",
       supplemental,
       attention,
@@ -506,6 +517,7 @@ export async function loadDashboard(): Promise<DashboardView> {
       ...DASHBOARD_FALLBACK,
       supply: FX_DASHBOARD_SUPPLY,
       recentTrips,
+      recentTripsSource,
       source: "fallback",
       supplemental,
       attention,
