@@ -1,6 +1,6 @@
 # Dev Runtime + Functional Gap Report (browser-verified)
 
-- **Last re-run:** 2026-06-05T08:30:59Z
+- **Last re-run:** 2026-06-06T06:48:46Z
 - **Auditor:** Claude2 (reassigned owner; prior re-runs by Codex2)
 - **Environment:** live dev Cloud Run
   - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
@@ -8,35 +8,37 @@
 - **Method:** headless Chromium route census over all 39 routes (Platform Admin 18 + Ops Console 21), fixed `1440x950` screenshots, shell-count checks, and manual tab round-trip checks for `/pricing`, `/payments`, `/attendance`.
 - **Artifacts:** `.artifacts/func-audit/dev-gap-audit-results.json`, `.artifacts/func-audit/dev-gap-audit-summary.md`, and route screenshots under `.artifacts/func-audit/*.png`.
 
-## 1. Scoreboard (2026-06-05T08:30:59Z re-run)
+## 1. Scoreboard (2026-06-06T06:48:46Z re-run)
 
 | App            | Routes | Fully working | Broken                            |
 | -------------- | -----: | ------------: | --------------------------------- |
 | Platform Admin |     18 |            18 | none                              |
 | Ops Console    |     21 |            20 | `/vehicles/veh-demo-001` HTTP 500 |
 
-**Current total (live dev, pre-fix):** 38 / 39 routes fully working.  
+**Current total (live dev, pre-fix-deploy):** 38 / 39 routes fully working.  
 **Acceptance target (`0 broken`, `0 HTTP 500`) is not yet met on the deployed dev revision.**
 
-> **Fix status (2026-06-05, Claude2 — `claude2/gap-verify`):** both remaining
-> defects now have code fixes committed on this branch and verified through
-> `typecheck` + `lint` + production `next build` for **both** apps. They are
-> **not yet on the deployed dev revision**, so this scoreboard still reflects
-> pre-fix dev. The acceptance gate (live dev re-audit showing `0 broken`)
-> must be re-run after these fixes are merged and `Deploy - Dev` succeeds.
-> See §3.1 / §3.2 for the fixes and §5 for the integration hand-off.
+> **Fix status (2026-06-06, Claude2 — `claude2/gap-verify`):** both remaining
+> defects have code fixes committed on this branch (`6927ad26`) and re-verified
+> through `typecheck` for **both** apps after the branch was brought current with
+> `origin/dev` (merge `7fc45d97`, incl. #538/#540). They are **still not on the
+> deployed dev revision**, so this re-audit scoreboard continues to reflect
+> pre-fix-deploy dev. The acceptance gate (live dev re-audit showing `0 broken`)
+> can only pass after `claude2/gap-verify` is merged to `dev` and a `Deploy - Dev`
+> run publishes it. That merge + deploy is the sole remaining blocker — see §5.
+> See §3.1 / §3.2 for the fixes.
 
-This 2026-06-05T08:30:59Z re-run (Claude2, full 39-route Playwright census + manual tab checks) reconfirms the current dev state: every Platform Admin shell count is exactly one, single-shell holds on every route, and `/payments` + `/attendance` tab strips round-trip. Acceptance is still blocked by one HTTP 500 and one tab-strip regression:
+This 2026-06-06T06:48:46Z re-run (Claude2, full 39-route Playwright census + manual tab checks) reconfirms the current dev state is materially unchanged from the 2026-06-05T08:30:59Z run: every Platform Admin shell count is exactly one, single-shell holds on every route, and `/payments` + `/attendance` tab strips round-trip. The two `origin/dev` commits that landed since (#538 tenant-governance UI, #540 OpenClaw runtime) touch neither `/vehicles/[vehicleId]` nor `/pricing`. Acceptance is still blocked by one HTTP 500 and one tab-strip regression:
 
-- OPS `/vehicles/veh-demo-001` still returns HTTP 500 (`checks` census `httpStatus=500`).
+- OPS `/vehicles/veh-demo-001` still returns HTTP 500 (`checks` census `httpStatus=500`; live `digest=863528574`, matching the error the §3.1 fix hardens).
 - PA `/pricing` tab clicking still fails to push `/pricing?tab=driver` (`checks.pricingTabs=fail`).
 
-### 1a. Deploy-currency check (this re-run, NEW)
+### 1a. Deploy-currency check (this re-run)
 
-These are **not** deploy-lag against `origin/dev` — the running dev revision already contains the merged fixes, so the two failures are genuine code defects on current source:
+The two failures are **not** transient lag — the running dev revision is current `origin/dev` source, which genuinely lacks the `claude2/gap-verify` fixes (`6927ad26` is not reachable from `origin/dev`):
 
-- **PA `/pricing` is running the merged `<Link>`-based fix (#514).** A live DOM probe shows the tab renders as `<a href="/pricing?tab=driver">` (not the pre-#514 `<button>`). So the deployed build is current; the fix is simply **insufficient**. See §3.2.
-- **OPS `/vehicles/[vehicleId]`** continues to throw a server-render exception on `origin/dev` source as well (the suspect `r:`-render column theory is **disproven** — see §3.1).
+- **PA `/pricing`** on dev still runs the merged `<Link>`-based fix (#514), which is insufficient; the superseding local-state + `history.replaceState` fix lives only on `claude2/gap-verify`. See §3.2.
+- **OPS `/vehicles/[vehicleId]`** still throws a server-render exception (live `digest=863528574`). Static analysis of the merged page confirms the only `RangeError`-throwing sites in the render path are `formatDateTime`/`formatDateOnly` (`Intl.DateTimeFormat.format(new Date(invalid))`), both now NaN-guarded by `6927ad26`; the other `new Date(...)` sites use `.getTime()` (yields `NaN`, does not throw). See §3.1.
 
 ## 2. What is now confirmed good
 
@@ -108,6 +110,9 @@ separate fix tasks. Both code fixes are now implemented on `claude2/gap-verify`.
   - OPS `/vehicles/[vehicleId]` 500 → date-formatter invalid-date hardening (§3.1).
   - PA `/pricing` `?tab=` sync → local tab state + History API (§3.2).
   - Gates: `typecheck` ✅, `lint` (`--max-warnings=0`) ✅, production `next build` ✅ for both `@drts/platform-admin-web` and `@drts/ops-console-web`.
+  - **Branch brought current with `origin/dev` (2026-06-06):** merge `7fc45d97`
+    pulls in #538/#540 with no conflicts; `typecheck` re-run green for both apps
+    on the combined tree, so the branch is merge-ready from a current base.
 - **Acceptance status (gated on a deploy this worktree cannot perform):**
   - all 39 routes `0 HTTP 500` on dev: **pending re-audit** (fix committed; vehicle fix is hypothesis-targeted — see §3.1 caveat).
   - single shell everywhere: **passed** (already green on current dev).
