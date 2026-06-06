@@ -83,3 +83,10 @@ the SD and aligned in the shell:
 - `apps/tenant-console-web/app/reports/reports-manager.tsx`
 - `apps/api/src/modules/billing-settlement/settlement-matrix.ts`
 - `tests/e2e/E2E-012-tenant-business-operations.sh`
+
+## Closeout Evidence
+
+- Branch: `codex/e2e-tenbiz-012-unblock-planning-decision`
+- Prior routing commit on branch: `e662f9d625db3c82dd8f73548bfb1ed8bde9f552`
+- Scoped verification rerun for closeout: `bash -n tests/e2e/E2E-012-tenant-business-operations.sh`
+- Parent task routing status: `E2E-TENBIZ-012` returned to `in_progress` with the unblock next step recorded in machine truth
