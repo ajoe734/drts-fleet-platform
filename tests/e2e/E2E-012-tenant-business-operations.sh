@@ -14,25 +14,30 @@
 #   -> report export includes order/user/cost center/service product
 #
 # Current repo reality:
-#   - the booking/dispatch/driver/invoice/report-job chain is implemented
-#   - tenant dashboard / payables / statements routes are not yet present in
-#     this repo's API surface
-#   - tenant report jobs currently preserve filters + artifact lifecycle, but
-#     do not yet emit a tenant-business row schema with all SD columns
+#   - the booking/dispatch/driver/invoice/report-job chain is implemented and
+#     must hard-pass
+#   - tenant dashboard / payables / statements endpoints may exist in the
+#     current repo tip or may still be absent on the deployed staging runtime;
+#     when present they must hard-pass, otherwise they are recorded as probes
+#     and invoice/statement evidence remains the runnable fallback
+#   - tenant report jobs preserve filters + artifact lifecycle, but do not yet
+#     emit a tenant-business row schema with all SD columns
 #
 # Therefore this shell uses a split gate:
 #   HARD FAIL
 #     - tenant booking creation/read-back loses orderId or costCenter binding
 #     - dispatch assignment cannot produce a driver task
 #     - driver lifecycle cannot reach completed
+#     - driver statement generation does not include the completed orderId
 #     - tenant invoice generation does not include the completed orderId
 #     - tenant report job cannot be queued/completed or loses filter binding
 #   PROBE + RECORD
-#     - GET /tenant/dashboard
-#     - GET /tenant/payables/summary
-#     - GET /tenant/statements
-#     - row-level export fields (order/user/cost center/service product)
-#       until a dedicated tenant-business export schema lands
+#     - GET /tenant/dashboard when not yet deployed on the target env
+#     - GET /tenant/payables/summary when not yet deployed on the target env
+#     - GET /tenant/payables/line-items when not yet deployed on the target env
+#     - GET /tenant/statements when not yet deployed on the target env
+#     - row-level export fields (order/user/cost center/service product) until
+#       a dedicated tenant-business export schema lands
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -52,6 +57,9 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 SUFFIX="$(date +%s | tail -c 7)"
 CC_CODE="CC-TENBIZ-${SUFFIX}"
 CC_NAME="E2E-012 tenant ops ${SUFFIX}"
+BOOKED_BY_NAME="E2E Tenant Operator"
+BOOKED_BY_STAFF_ID="e2e-tenbiz-${SUFFIX}"
+BOOKED_BY_EMAIL="tenant-biz-admin@example.test"
 
 TENANT_ADMIN_USER_ID=""
 TENANT_FINANCE_USER_ID=""
@@ -61,6 +69,8 @@ DISPATCH_JOB_ID=""
 TASK_ID=""
 INVOICE_ID=""
 REPORT_JOB_ID=""
+DRIVER_STATEMENT_ID=""
+PERIOD_MONTH=""
 
 poll_for_dispatch_job() {
   local attempt=0
@@ -115,8 +125,28 @@ probe_route() {
     log_ok "${path} available"
     return 0
   fi
-  log_warn "${path} unavailable on this env (HTTP ${RESP_STATUS})"
-  return 1
+  if [[ "$RESP_STATUS" =~ ^(404|405)$ ]]; then
+    log_warn "${path} unavailable on this env (HTTP ${RESP_STATUS})"
+    return 1
+  fi
+  log_fail "${path} probe failed with HTTP ${RESP_STATUS}; route exists but did not satisfy the tenant business contract"
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
+}
+
+assert_number_ge() {
+  local label="$1"
+  local actual="$2"
+  local minimum="$3"
+  if [[ -z "$actual" || ! "$actual" =~ ^[0-9]+$ ]]; then
+    log_fail "${label} expected integer >= ${minimum}, got '${actual:-<empty>}'"
+    exit 1
+  fi
+  if (( actual < minimum )); then
+    log_fail "${label} expected >= ${minimum}, got ${actual}"
+    exit 1
+  fi
+  log_ok "${label}=${actual} (>= ${minimum})"
 }
 
 require_report_filter() {
@@ -190,31 +220,26 @@ WINDOW_START=$(date -u -d "+70 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
 WINDOW_END=$(date -u -d "+100 minutes" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
   || date -u -v+100M +"%Y-%m-%dT%H:%M:%SZ")
 BOOKING_FIXTURE="${TMP_DIR}/booking.json"
-jq -n \
+jq \
   --arg start "$WINDOW_START" \
   --arg end "$WINDOW_END" \
   --arg cc "$CC_CODE" \
-  '{
-    businessDispatchSubtype: "enterprise_dispatch",
-    reservationWindowStart: $start,
-    reservationWindowEnd: $end,
-    passenger: {
-      name: "Tenant Biz Rider",
-      phone: "0912000012"
-    },
-    bookedBy: {
-      name: "Tenant Biz Admin",
-      email: "tenant-biz-admin@example.test"
-    },
-    pickup: {
-      address: "台北車站"
-    },
-    dropoff: {
-      address: "松山機場"
-    },
-    costCenter: $cc,
-    notes: "E2E-012 tenant business operations"
-  }' > "$BOOKING_FIXTURE"
+  --arg bookedByName "$BOOKED_BY_NAME" \
+  --arg bookedByStaffId "$BOOKED_BY_STAFF_ID" \
+  --arg bookedByEmail "$BOOKED_BY_EMAIL" \
+  '
+    .reservationWindowStart = $start
+    | .reservationWindowEnd = $end
+    | .costCenter = $cc
+    | .notes = "E2E-012 tenant business operations"
+    | .bookedBy.name = $bookedByName
+    | .bookedBy.staffId = $bookedByStaffId
+    | .bookedBy.email = $bookedByEmail
+    | .passenger.name = "Tenant Biz Rider"
+    | .passenger.phone = "+886912000012"
+    | .pickup.address = "台北車站"
+    | .dropoff.address = "松山機場"
+  ' "${SCRIPT_DIR}/fixtures/e2e-booking-enterprise.json" > "$BOOKING_FIXTURE"
 
 http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
 assert_status "200|201"
@@ -260,8 +285,10 @@ log_ok "dispatch job found: ${DISPATCH_JOB_ID}"
 
 http_call GET "/dispatch/tasks/${DISPATCH_JOB_ID}/candidates"
 assert_status "200"
-ASSIGN_VEHICLE_ID=$(echo "$RESP_BODY" | jq -r '.data.items[0].vehicleId // empty' 2>/dev/null || true)
-ASSIGN_DRIVER_ID=$(echo "$RESP_BODY" | jq -r '.data.items[0].driverId // empty' 2>/dev/null || true)
+ASSIGN_VEHICLE_ID=$(echo "$RESP_BODY" | jq -r \
+  '.data.items[0] | (.vehicleId // .vehicle_id // empty)' 2>/dev/null || true)
+ASSIGN_DRIVER_ID=$(echo "$RESP_BODY" | jq -r \
+  '.data.items[0] | (.driverId // .driver_id // empty)' 2>/dev/null || true)
 if [[ -z "$ASSIGN_VEHICLE_ID" ]]; then
   ASSIGN_VEHICLE_ID="$E2E_SEED_VEHICLE_ID"
 fi
@@ -330,35 +357,149 @@ TASK_STATUS=$(json_get '.data.status')
 [[ "$TASK_STATUS" == "completed" ]] || { log_fail "Expected completed task, got '${TASK_STATUS:-<empty>}'"; exit 1; }
 save_evidence "$SCENARIO" "driver" "taskStatus" "$TASK_STATUS"
 save_evidence "$SCENARIO" "driver" "completedAt" "$COMPLETE_AT"
+PERIOD_MONTH="${COMPLETE_AT:0:7}"
+save_evidence "$SCENARIO" "driver" "periodMonth" "$PERIOD_MONTH"
 log_ok "driver lifecycle completed"
 
-log_surface "Tenant business surfaces — dashboard / payable / statement probes"
+log_surface "Tenant portal — completed order visibility"
+switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
+http_call GET "/tenant/orders?serviceProduct=enterprise_dispatch&costCenterCode=${CC_CODE}&status=completed"
+assert_status "200"
+VISIBLE_ORDER_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .orderId' 2>/dev/null | head -1 || true)
+VISIBLE_ORDER_USER_EMAIL=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .bookedBy.email // empty' 2>/dev/null | head -1 || true)
+VISIBLE_ORDER_USER_STAFF_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .bookedBy.staffId // empty' 2>/dev/null | head -1 || true)
+VISIBLE_ORDER_USER_NAME=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .bookedBy.name // empty' 2>/dev/null | head -1 || true)
+VISIBLE_ORDER_COST_CENTER=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | (.costCenter // .costCenterCode // empty)' 2>/dev/null | head -1 || true)
+VISIBLE_ORDER_SERVICE_PRODUCT=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | (.businessDispatchSubtype // .serviceProduct // empty)' 2>/dev/null | head -1 || true)
+
+[[ "$VISIBLE_ORDER_ID" == "$ORDER_ID" ]] || {
+  log_fail "tenant orders list does not surface completed orderId=${ORDER_ID}"
+  exit 1
+}
+if [[ "$VISIBLE_ORDER_USER_EMAIL" != "$BOOKED_BY_EMAIL" && \
+      "$VISIBLE_ORDER_USER_STAFF_ID" != "$BOOKED_BY_STAFF_ID" && \
+      "$VISIBLE_ORDER_USER_NAME" != "$BOOKED_BY_NAME" ]]; then
+  log_fail "tenant orders list did not preserve bookedBy attribution for orderId=${ORDER_ID}"
+  log_fail "Observed bookedBy.email='${VISIBLE_ORDER_USER_EMAIL:-<empty>}', staffId='${VISIBLE_ORDER_USER_STAFF_ID:-<empty>}', name='${VISIBLE_ORDER_USER_NAME:-<empty>}'"
+  exit 1
+fi
+[[ "$VISIBLE_ORDER_COST_CENTER" == "$CC_CODE" ]] || {
+  log_fail "tenant orders list costCenter expected ${CC_CODE}, got '${VISIBLE_ORDER_COST_CENTER:-<empty>}'"
+  exit 1
+}
+[[ "$VISIBLE_ORDER_SERVICE_PRODUCT" == "enterprise_dispatch" ]] || {
+  log_fail "tenant orders list businessDispatchSubtype expected enterprise_dispatch, got '${VISIBLE_ORDER_SERVICE_PRODUCT:-<empty>}'"
+  exit 1
+}
+save_evidence "$SCENARIO" "tenant" "visibleOrderId" "$VISIBLE_ORDER_ID"
+save_evidence "$SCENARIO" "tenant" "visibleOrderUserEmail" "${VISIBLE_ORDER_USER_EMAIL:-NOT_PRESENT}"
+save_evidence "$SCENARIO" "tenant" "visibleOrderUserStaffId" "${VISIBLE_ORDER_USER_STAFF_ID:-NOT_PRESENT}"
+save_evidence "$SCENARIO" "tenant" "visibleOrderUserName" "${VISIBLE_ORDER_USER_NAME:-NOT_PRESENT}"
+save_evidence "$SCENARIO" "tenant" "visibleOrderCostCenter" "$VISIBLE_ORDER_COST_CENTER"
+save_evidence "$SCENARIO" "tenant" "visibleOrderServiceProduct" "$VISIBLE_ORDER_SERVICE_PRODUCT"
+log_ok "tenant orders view preserved order/user/cost center/service product visibility"
+
+log_surface "Billing — generate driver statement for completed trip"
+switch_actor "ops_user" "e2e-ops-012"
+STATEMENT_FIXTURE="${TMP_DIR}/driver-statement.json"
+jq -n \
+  --arg periodMonth "$PERIOD_MONTH" \
+  --arg driverId "$ASSIGN_DRIVER_ID" \
+  '{periodMonth: $periodMonth, driverId: $driverId}' > "$STATEMENT_FIXTURE"
+
+http_call POST "/driver-statements/generate" "$STATEMENT_FIXTURE"
+assert_status "200|201"
+DRIVER_STATEMENT_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(any(.lines[]?; .orderId == $oid)) | .statementId' \
+  2>/dev/null | head -1 || true)
+[[ -n "$DRIVER_STATEMENT_ID" ]] || {
+  log_fail "driver statement generation response missing statement for orderId=${ORDER_ID}"
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
+}
+chain_set "billing" "driverStatementId" "$DRIVER_STATEMENT_ID"
+save_evidence "$SCENARIO" "billing" "driverStatementId" "$DRIVER_STATEMENT_ID"
+log_ok "driver statement generated: ${DRIVER_STATEMENT_ID}"
+
+log_surface "Tenant business surfaces — dashboard / payable / statement"
 switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
 
 if probe_route "dashboard" "/tenant/dashboard"; then
-  record_optional_report_field "dashboard.bookingCount" '.data.bookingCount'
-  record_optional_report_field "dashboard.completedTripCount" '.data.completedTripCount'
+  DASHBOARD_BOOKING_COUNT=$(json_get '.data.bookingCount')
+  DASHBOARD_COMPLETED_COUNT=$(json_get '.data.completedTripCount')
+  DASHBOARD_PAYABLE_MINOR=$(json_get '.data.estimatedPayableAmountMinor')
+  assert_number_ge "dashboard.bookingCount" "$DASHBOARD_BOOKING_COUNT" 1
+  assert_number_ge "dashboard.completedTripCount" "$DASHBOARD_COMPLETED_COUNT" 1
+  assert_number_ge "dashboard.estimatedPayableAmountMinor" "$DASHBOARD_PAYABLE_MINOR" 1
+  save_evidence "$SCENARIO" "dashboard" "bookingCount" "$DASHBOARD_BOOKING_COUNT"
+  save_evidence "$SCENARIO" "dashboard" "completedTripCount" "$DASHBOARD_COMPLETED_COUNT"
+  save_evidence "$SCENARIO" "dashboard" "estimatedPayableAmountMinor" "$DASHBOARD_PAYABLE_MINOR"
 else
-  http_call GET "/tenant/bookings"
-  assert_status "200"
-  BOOKING_LIST_COUNT=$(json_get '.data.items | length')
-  save_evidence "$SCENARIO" "dashboard" "fallback.bookingListCount" "${BOOKING_LIST_COUNT:-0}"
-  log_warn "dashboard fallback recorded via /tenant/bookings"
+  save_evidence "$SCENARIO" "dashboard" "bookingCount" "PROBE_ONLY"
+  save_evidence "$SCENARIO" "dashboard" "completedTripCount" "PROBE_ONLY"
+  save_evidence "$SCENARIO" "dashboard" "estimatedPayableAmountMinor" "PROBE_ONLY"
 fi
 
-if probe_route "payables" "/tenant/payables/summary"; then
-  record_optional_report_field "payables.estimatedPayableAmountMinor" '.data.estimatedPayableAmountMinor'
+if probe_route "payables" "/tenant/payables/summary?periodMonth=${PERIOD_MONTH}"; then
+  PAYABLE_TOTAL_TRIPS=$(json_get '.data.totalTrips')
+  PAYABLE_COMPLETED_TRIPS=$(json_get '.data.completedTrips')
+  PAYABLE_AMOUNT_MINOR=$(json_get '.data.payableAmountMinor')
+  assert_number_ge "payables.totalTrips" "$PAYABLE_TOTAL_TRIPS" 1
+  assert_number_ge "payables.completedTrips" "$PAYABLE_COMPLETED_TRIPS" 1
+  assert_number_ge "payables.payableAmountMinor" "$PAYABLE_AMOUNT_MINOR" 1
+  save_evidence "$SCENARIO" "payables" "periodMonth" "$PERIOD_MONTH"
+  save_evidence "$SCENARIO" "payables" "totalTrips" "$PAYABLE_TOTAL_TRIPS"
+  save_evidence "$SCENARIO" "payables" "completedTrips" "$PAYABLE_COMPLETED_TRIPS"
+  save_evidence "$SCENARIO" "payables" "payableAmountMinor" "$PAYABLE_AMOUNT_MINOR"
 else
-  http_call GET "/tenant/invoices"
-  assert_status "200"
-  INVOICE_LIST_COUNT=$(json_get '.data.items | length')
-  save_evidence "$SCENARIO" "payables" "fallback.invoiceListCountPreGenerate" "${INVOICE_LIST_COUNT:-0}"
-  log_warn "payables fallback recorded via /tenant/invoices"
+  save_evidence "$SCENARIO" "payables" "periodMonth" "$PERIOD_MONTH"
+  save_evidence "$SCENARIO" "payables" "totalTrips" "PROBE_ONLY"
+  save_evidence "$SCENARIO" "payables" "completedTrips" "PROBE_ONLY"
+  save_evidence "$SCENARIO" "payables" "payableAmountMinor" "PROBE_ONLY"
 fi
 
-probe_route "statements" "/tenant/statements" || true
+if probe_route "payables" "/tenant/payables/line-items?periodMonth=${PERIOD_MONTH}&serviceProduct=enterprise_dispatch&costCenterCode=${CC_CODE}"; then
+  LINE_ORDER_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+    '.data.items[] | select(.orderId == $oid) | .orderId' 2>/dev/null | head -1 || true)
+  LINE_SERVICE_PRODUCT=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+    '.data.items[] | select(.orderId == $oid) | .serviceProduct' 2>/dev/null | head -1 || true)
+  LINE_COST_CENTER=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+    '.data.items[] | select(.orderId == $oid) | .costCenterCode' 2>/dev/null | head -1 || true)
+  [[ "$LINE_ORDER_ID" == "$ORDER_ID" ]] || { log_fail "payable line item missing orderId=${ORDER_ID}"; exit 1; }
+  [[ "$LINE_SERVICE_PRODUCT" == "enterprise_dispatch" ]] || { log_fail "payable line item serviceProduct expected enterprise_dispatch, got '${LINE_SERVICE_PRODUCT:-<empty>}'"; exit 1; }
+  [[ "$LINE_COST_CENTER" == "$CC_CODE" ]] || { log_fail "payable line item costCenterCode expected ${CC_CODE}, got '${LINE_COST_CENTER:-<empty>}'"; exit 1; }
+  save_evidence "$SCENARIO" "payables" "lineItemOrderId" "$LINE_ORDER_ID"
+  save_evidence "$SCENARIO" "payables" "lineItemServiceProduct" "$LINE_SERVICE_PRODUCT"
+  save_evidence "$SCENARIO" "payables" "lineItemCostCenterCode" "$LINE_COST_CENTER"
+  log_ok "payable line item preserved order/service product/cost center"
+else
+  save_evidence "$SCENARIO" "payables" "lineItemOrderId" "PROBE_ONLY"
+  save_evidence "$SCENARIO" "payables" "lineItemServiceProduct" "PROBE_ONLY"
+  save_evidence "$SCENARIO" "payables" "lineItemCostCenterCode" "PROBE_ONLY"
+fi
 
-log_surface "Billing — tenant invoice as payable/statement fallback"
+if probe_route "statements" "/tenant/statements?periodMonth=${PERIOD_MONTH}"; then
+  TENANT_STATEMENT_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+    '.data.items[] | select(any(.lines[]?; .orderId == $oid)) | .statementId' \
+    2>/dev/null | head -1 || true)
+  [[ -n "$TENANT_STATEMENT_ID" ]] || {
+    log_fail "tenant statements response missing statement containing orderId=${ORDER_ID}"
+    log_fail "Body: ${RESP_BODY}"
+    exit 1
+  }
+  save_evidence "$SCENARIO" "billing" "tenantStatementId" "$TENANT_STATEMENT_ID"
+  log_ok "tenant statement surfaced completed order: ${TENANT_STATEMENT_ID}"
+else
+  save_evidence "$SCENARIO" "billing" "tenantStatementId" "PROBE_ONLY"
+fi
+
+log_surface "Billing — tenant invoice"
 PERIOD_START=$(date -u -d "-1 day" +"%Y-%m-%dT00:00:00Z" 2>/dev/null || date -u -v-1d +"%Y-%m-%dT00:00:00Z")
 PERIOD_END=$(date -u -d "-1 minute" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v-1M +"%Y-%m-%dT%H:%M:%SZ")
 INVOICE_FIXTURE="${TMP_DIR}/invoice.json"
@@ -397,7 +538,7 @@ jq -n \
   --arg costCenterCode "$CC_CODE" \
   --arg serviceProduct "enterprise_dispatch" \
   '{
-    jobType: "tenant_business_operations",
+    jobType: "monthly_trip_report",
     format: "json",
     filters: {
       orderId: $orderId,
@@ -437,6 +578,7 @@ record_optional_report_field "row.orderId" '.data.rows[0].orderId'
 record_optional_report_field "row.userId" '.data.rows[0].userId'
 record_optional_report_field "row.costCenterCode" '.data.rows[0].costCenterCode'
 record_optional_report_field "row.serviceProduct" '.data.rows[0].serviceProduct'
+save_evidence "$SCENARIO" "report" "rowSchemaSupport" "tenant_business_operations rows are not yet populated by reporting-filing.service"
 
 log_surface "Audit evidence"
 http_call GET "/tenant/audit"
@@ -465,12 +607,13 @@ assert_chain "tenant" "bookingId"
 assert_chain "tenant" "orderId"
 assert_chain "ops" "dispatchJobId"
 assert_chain "ops" "taskId"
+assert_chain "billing" "driverStatementId"
 assert_chain "billing" "invoiceId"
 assert_chain "report" "jobId"
 
 print_chain_summary
 
 echo ""
-log_warn "E2E-012 currently records dashboard/payables/statements as live probes because those SD routes are not yet implemented in this repo. Invoice + report-job evidence are used as the runnable fallback for tenant business operations until the dedicated tenant summary/export surfaces land."
-log_ok "E2E-012 complete — tenant booking → trip completion → invoice → report chain passed."
+log_warn "E2E-012 still records report export row fields as soft evidence because monthly_trip_report artifacts preserve filters/artifacts but do not yet materialize tenant-business rows for order/user/cost center/service product. Dashboard/payables/statements hard-assert when deployed on the target env and otherwise remain recorded probes backed by driver-statement/invoice evidence."
+log_ok "E2E-012 complete — tenant booking → trip completion → payable/statement evidence → invoice → report chain passed."
 echo -e "Evidence log: ${EVIDENCE_FILE}"

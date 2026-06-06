@@ -28,6 +28,11 @@ E2E_TENANT_ID="${E2E_TENANT_ID:-}"  # set per-leg by switch_actor or caller
 E2E_PARTNER_ID="${E2E_PARTNER_ID:-}"
 E2E_PARTNER_PROGRAM_ID="${E2E_PARTNER_PROGRAM_ID:-}"
 E2E_PARTNER_ENTRY_SLUG="${E2E_PARTNER_ENTRY_SLUG:-}"
+# Fleet partner portal self-service context (x-fleet-partner-id) and an optional
+# explicit scope override (x-scopes). Both default to empty and add no headers
+# unless a scenario opts in, so existing scenarios are unaffected.
+E2E_FLEET_PARTNER_ID="${E2E_FLEET_PARTNER_ID:-}"
+E2E_EXTRA_SCOPES="${E2E_EXTRA_SCOPES:-}"
 
 # ── Seed data IDs — must match infra/seeds/S0002__demo_operational_seed.sql ───
 # TEN_ACME tenant; 張司機 / ABC-1234 driver+vehicle pair.
@@ -75,6 +80,8 @@ switch_actor() {
   E2E_PARTNER_ID=""
   E2E_PARTNER_PROGRAM_ID=""
   E2E_PARTNER_ENTRY_SLUG=""
+  E2E_FLEET_PARTNER_ID=""
+  E2E_EXTRA_SCOPES=""
   log_info "Actor → type=${E2E_ACTOR_TYPE}, id=${E2E_ACTOR_ID}${E2E_TENANT_ID:+, tenantId=${E2E_TENANT_ID}}"
 }
 
@@ -148,6 +155,12 @@ http_call() {
     fi
     if [[ -n "${E2E_PARTNER_ENTRY_SLUG:-}" ]]; then
       curl_args+=(-H "x-partner-entry-slug: ${E2E_PARTNER_ENTRY_SLUG}")
+    fi
+    if [[ -n "${E2E_FLEET_PARTNER_ID:-}" ]]; then
+      curl_args+=(-H "x-fleet-partner-id: ${E2E_FLEET_PARTNER_ID}")
+    fi
+    if [[ -n "${E2E_EXTRA_SCOPES:-}" ]]; then
+      curl_args+=(-H "x-scopes: ${E2E_EXTRA_SCOPES}")
     fi
   fi
 

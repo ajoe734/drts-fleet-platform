@@ -184,6 +184,14 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
     return "—";
   }
 
+  // A present-but-unparseable date string must not throw: `Intl.DateTimeFormat
+  // .format(new Date(invalid))` raises `RangeError: Invalid time value`, which
+  // in a server component crashes the entire render into a masked HTTP 500.
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
     year: "numeric",
     month: "2-digit",
@@ -193,7 +201,7 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
     hour12: false,
     timeZone: "UTC",
   })
-    .format(new Date(value))
+    .format(date)
     .replace(",", "");
 }
 
@@ -202,12 +210,17 @@ function formatDateOnly(locale: Locale, value: string | null | undefined) {
     return "—";
   }
 
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     timeZone: "UTC",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function formatList(locale: Locale, values: readonly string[]) {
