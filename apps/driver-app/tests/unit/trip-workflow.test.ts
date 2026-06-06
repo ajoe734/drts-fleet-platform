@@ -86,4 +86,65 @@ describe("trip forwarded workflow actions", () => {
     expect(getPrimaryTripAction(task)).toBeNull();
     expect(shouldShowTripCompletionProof(task)).toBe(false);
   });
+
+  it("maps terminal forwarded runtime states from the task payload", () => {
+    expect(
+      getTripExperienceState(
+        makeTask({
+          sourcePlatform: "fleet_partner",
+          forwardedStatus: "lost_race",
+        }),
+      ),
+    ).toBe("forwarded_lost");
+    expect(
+      getTripExperienceState(
+        makeTask({
+          sourcePlatform: "fleet_partner",
+          forwardedStatus: "cancelled_by_platform",
+        }),
+      ),
+    ).toBe("forwarded_cancelled");
+    expect(
+      getTripExperienceState(
+        makeTask({
+          sourcePlatform: "fleet_partner",
+          forwardedStatus: "sync_failed",
+        }),
+      ),
+    ).toBe("sync_failed");
+  });
+
+  it("prefers unified task awaiting-platform state for accept-pending relays", () => {
+    const task = makeTask({
+      sourcePlatform: "fleet_partner",
+      status: "pending_acceptance",
+    });
+
+    expect(
+      getTripExperienceState(task, {
+        taskId: task.taskId,
+        orderId: task.orderId,
+        orderDomain: "forwarded",
+        sourcePlatform: "grab",
+        platformDisplayName: "Grab",
+        externalOrderId: "ext-001",
+        nativeStatus: null,
+        localStatus: "accepted",
+        driverActionState: "awaiting_platform",
+        allowedActions: [],
+        routeLocked: true,
+        fareAuthority: "external_platform",
+        settlementAuthority: "external_platform",
+        driverPayoutAuthority: "external_platform",
+        requiresManualFallback: false,
+        requiresReauth: false,
+        syncIssueSummary: null,
+        blockingReason: null,
+        pickupSummary: null,
+        dropoffSummary: null,
+        deadlineAt: null,
+        updatedAt: "2026-05-19T05:00:00.000Z",
+      }),
+    ).toBe("forwarded_pending");
+  });
 });

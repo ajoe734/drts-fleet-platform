@@ -15,6 +15,8 @@ import type {
   ForwardedDriverActionOutcome,
   ForwardedDriverActionResponse,
   OwnedOrderRecord,
+  PlatformPresenceSummary,
+  UnifiedDriverTaskView,
 } from "@drts/contracts";
 import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 
@@ -330,6 +332,19 @@ function formatShortTime(value: string | null | undefined): string | null {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatTimestamp(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
 }
 
 function formatPickupStopTime(order: OwnedOrderRecord | null): string {
@@ -818,6 +833,17 @@ export default function TripScreen() {
   const [submittingAction, setSubmittingAction] = useState<string | null>(null);
   const [forwardedActionResult, setForwardedActionResult] =
     useState<ForwardedDriverActionResponse | null>(null);
+  const [taskViewDetail, setTaskViewDetail] = useState<UnifiedDriverTaskView | null>(
+    null,
+  );
+  const [platformPresenceSummary, setPlatformPresenceSummary] =
+    useState<PlatformPresenceSummary | null>(null);
+  const [queuedCompletionTaskId, setQueuedCompletionTaskId] = useState<
+    string | null
+  >(null);
+  const [queuedCompletionUpdatedAt, setQueuedCompletionUpdatedAt] = useState<
+    string | null
+  >(null);
   const [liveDistanceKm, setLiveDistanceKm] = useState(0);
   const [liveDurationSec, setLiveDurationSec] = useState(0);
   const [locationTrackingState, setLocationTrackingState] =
@@ -869,7 +895,10 @@ export default function TripScreen() {
     proofPhotos.length > 0 ||
     Boolean(normalizeCompletionProofText(signoffReference)) ||
     Boolean(expenseItem);
-  const baseTripExperienceState = getTripExperienceState(taskDetail);
+  const baseTripExperienceState = getTripExperienceState(
+    taskDetail,
+    taskViewDetail,
+  );
   const tripExperienceState = applyForwardedActionExperienceState(
     baseTripExperienceState,
     forwardedActionResult,
@@ -924,6 +953,40 @@ export default function TripScreen() {
   const pickupTimeLabel = formatPickupStopTime(orderDetail);
   const dropoffTimeLabel = formatDropoffStopTime(orderDetail);
   const platformLabel = getPlatformDisplayLabel(taskDetail?.sourcePlatform);
+  const activePresenceRecord =
+    taskDetail?.sourcePlatform && platformPresenceSummary
+      ? platformPresenceSummary.presences.find(
+          (record) => record.platformCode === taskDetail.sourcePlatform,
+        ) ?? null
+      : null;
+  const sourcePlatformOffline = activePresenceRecord?.status === "offline";
+  const queuedCompletionForActiveTask = queuedCompletionTaskId === taskDetail?.taskId;
+  const forwardedAcceptAllowed =
+    tripExperienceState === "forwarded_offered" &&
+    (taskViewDetail?.allowedActions.includes("accept") ?? true);
+  const forwardedRejectAllowed =
+    tripExperienceState === "forwarded_offered" &&
+    (taskViewDetail?.allowedActions.includes("reject") ?? true);
+  const forwardedOfferOfflineBlocked =
+    tripExperienceState === "forwarded_offered" && sourcePlatformOffline;
+  const disabledForwardedAcceptReason = forwardedOfferOfflineBlocked
+    ? "來源平台目前離線，無法離線 relay 接單。"
+    : !forwardedAcceptAllowed
+      ? taskViewDetail?.blockingReason?.trim() ||
+        taskViewDetail?.syncIssueSummary?.trim() ||
+        "此平台目前不支援 relay 接單。"
+      : null;
+  const disabledForwardedRejectReason = forwardedOfferOfflineBlocked
+    ? "來源平台目前離線，無法離線 relay 婉拒。"
+    : !forwardedRejectAllowed
+      ? taskViewDetail?.blockingReason?.trim() ||
+        "此平台目前不支援 relay 婉拒。"
+      : null;
+  const offlineBannerBody = queuedCompletionForActiveTask
+    ? `此行程的完單資料已暫存佇列，待恢復連線後會自動重送。最後排隊時間 ${formatTimestamp(queuedCompletionUpdatedAt) ?? "待同步"}。`
+    : sourcePlatformOffline
+      ? `${platformLabel} 目前為離線模式。來源平台 relay 動作已鎖定，請先回平台健康頁恢復上線。`
+      : null;
   const recordingActive =
     Boolean(orderDetail?.recordingId) ||
     (!isForwardedTrip && locationTrackingState === "active");
@@ -972,6 +1035,10 @@ export default function TripScreen() {
               ? "此行程仍缺少簽收識別資料。"
               : expenseRequirementMissing
                 ? "此行程仍缺少完整費用佐證。"
+                : disabledForwardedAcceptReason
+                  ? disabledForwardedAcceptReason
+                  : disabledForwardedRejectReason
+                    ? disabledForwardedRejectReason
                 : forwardedOutcomeSummary
                   ? (forwardedActionResult?.driverMessage ??
                     forwardedOutcomeSummary.title)
@@ -1014,18 +1081,25 @@ export default function TripScreen() {
           title: "接受平台訂單",
           onPress: () => void handleForwardedAccept(),
           loading: submittingAction === "forwarded_accept",
-          disabled: submittingAction !== null,
+          disabled:
+            submittingAction !== null ||
+            forwardedOfferOfflineBlocked ||
+            !forwardedAcceptAllowed,
         }
       : undefined;
   const bottomSecondaryAction =
     tripExperienceState === "forwarded_offered" &&
-    forwardedActionResult === null
+    forwardedActionResult === null &&
+    (forwardedRejectAllowed || forwardedOfferOfflineBlocked)
       ? {
-          title: "婉拒平台訂單",
+          title: forwardedRejectAllowed ? "婉拒平台訂單" : "平台不支援婉拒",
           onPress: () => void handleForwardedReject(),
           variant: "secondary" as const,
           loading: submittingAction === "forwarded_reject",
-          disabled: submittingAction !== null,
+          disabled:
+            submittingAction !== null ||
+            forwardedOfferOfflineBlocked ||
+            !forwardedRejectAllowed,
         }
       : undefined;
   const statusPillTone = toCanvasTone(tripStatusPresentation.tone);
@@ -1100,6 +1174,25 @@ export default function TripScreen() {
       const tasks = await client.listDriverTasks();
       const firstTask = tasks[0] ?? null;
       setTaskDetail(firstTask);
+      setForwardedActionResult(null);
+
+      const [pendingCompletion, unifiedTasks, presenceSummary] =
+        await Promise.all([
+          getPendingDriverTaskCompletion(),
+          client.listUnifiedDriverTasks().catch(() => null),
+          firstTask?.driverId
+            ? client
+                .getPlatformPresence({ driverId: firstTask.driverId })
+                .catch(() => null)
+            : Promise.resolve(null),
+        ]);
+
+      setQueuedCompletionTaskId(pendingCompletion?.taskId ?? null);
+      setQueuedCompletionUpdatedAt(pendingCompletion?.updatedAt ?? null);
+      setPlatformPresenceSummary(presenceSummary);
+      setTaskViewDetail(
+        unifiedTasks?.find((task) => task.taskId === firstTask?.taskId) ?? null,
+      );
 
       if (!firstTask?.orderId) {
         setOrderDetail(null);
@@ -1117,6 +1210,8 @@ export default function TripScreen() {
     } catch (loadError) {
       setError(getErrorMessage(loadError));
       setTaskDetail(null);
+      setTaskViewDetail(null);
+      setPlatformPresenceSummary(null);
       setOrderDetail(null);
     } finally {
       setLoading(false);
@@ -1450,7 +1545,11 @@ export default function TripScreen() {
   }
 
   async function handleForwardedAccept() {
-    if (!taskDetail?.taskId) {
+    if (
+      !taskDetail?.taskId ||
+      forwardedOfferOfflineBlocked ||
+      !forwardedAcceptAllowed
+    ) {
       return;
     }
 
@@ -1474,7 +1573,11 @@ export default function TripScreen() {
   }
 
   async function handleForwardedReject() {
-    if (!taskDetail?.taskId) {
+    if (
+      !taskDetail?.taskId ||
+      forwardedOfferOfflineBlocked ||
+      !forwardedRejectAllowed
+    ) {
       return;
     }
 
@@ -1586,7 +1689,20 @@ export default function TripScreen() {
               variant="primary"
               size="sm"
               danger
-              onPress={() => router.push("/incident")}
+              onPress={() =>
+                Alert.alert(
+                  "SOS 保護入口",
+                  "進入後仍需長按 2 秒才會送出 SOS。請只在緊急情況下開啟。",
+                  [
+                    { text: "取消", style: "cancel" },
+                    {
+                      text: "前往 SOS",
+                      style: "destructive",
+                      onPress: () => router.push("/incident"),
+                    },
+                  ],
+                )
+              }
               icon={
                 <Ionicons name="warning-outline" size={14} color="#FFFFFF" />
               }
@@ -1610,6 +1726,32 @@ export default function TripScreen() {
           }
           title="資料同步異常"
           body={error}
+        />
+      ) : null}
+
+      {offlineBannerBody ? (
+        <Banner
+          theme={driverCanvasTheme}
+          tone={queuedCompletionForActiveTask ? "info" : "warn"}
+          icon={
+            <Ionicons
+              name={
+                queuedCompletionForActiveTask
+                  ? "cloud-upload-outline"
+                  : "cloud-offline-outline"
+              }
+              size={16}
+              color={
+                queuedCompletionForActiveTask
+                  ? driverCanvasTheme.info
+                  : driverCanvasTheme.warn
+              }
+            />
+          }
+          title={
+            queuedCompletionForActiveTask ? "離線佇列待重送" : "目前為離線模式"
+          }
+          body={offlineBannerBody}
         />
       ) : null}
 
