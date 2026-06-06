@@ -147,6 +147,16 @@ const BOOKING_RULES: Record<
     cancelableMinutes: 60,
     confirmationWindowMinutes: 60,
   },
+  insurance_replacement_vehicle: {
+    modifiableMinutes: 120,
+    cancelableMinutes: 120,
+    confirmationWindowMinutes: 120,
+  },
+  travel_agency_transfer: {
+    modifiableMinutes: 90,
+    cancelableMinutes: 90,
+    confirmationWindowMinutes: 90,
+  },
 };
 
 const MAX_COMPLETION_PROOF_PHOTO_COUNT = 5;

@@ -33,7 +33,12 @@ export const DISPATCH_SEMANTIC_VALUES: readonly DispatchSemantics[] = [
 ];
 
 export const BUSINESS_DISPATCH_SUBTYPE_VALUES: readonly BusinessDispatchSubtype[] =
-  ["credit_card_airport_transfer", "enterprise_dispatch"];
+  [
+    "credit_card_airport_transfer",
+    "enterprise_dispatch",
+    "insurance_replacement_vehicle",
+    "travel_agency_transfer",
+  ];
 
 export const FOUNDATION_MODULE_STATUSES: readonly FoundationModuleStatus[] = [
   {

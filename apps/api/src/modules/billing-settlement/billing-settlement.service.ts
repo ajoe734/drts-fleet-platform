@@ -82,7 +82,9 @@ export type BillingSettlementTripRecord = {
   serviceBucket: "business_dispatch";
   businessDispatchSubtype:
     | "enterprise_dispatch"
-    | "credit_card_airport_transfer";
+    | "credit_card_airport_transfer"
+    | "insurance_replacement_vehicle"
+    | "travel_agency_transfer";
   costCenterCode: string | null;
   riderId: string | null;
   partnerId: string | null;
