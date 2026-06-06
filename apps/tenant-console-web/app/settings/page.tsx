@@ -53,6 +53,7 @@ const APP_BASE_URLS: Record<CrossAppResourceLink["targetApp"], string> = {
   "ops-console": "http://localhost:3003",
   "platform-admin": "http://localhost:3002",
   "tenant-console": "http://localhost:3004",
+  "fleet-partner-portal": "http://localhost:3007",
 };
 const LOCAL_TENANT_ROUTES = new Set([
   "/settings",
