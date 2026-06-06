@@ -309,11 +309,86 @@ export function buildTaskCardDetailItems(
 }
 
 function makeStatementOrderMeta(
-  orderId: string,
+  line: DriverStatementRecord["lines"][number],
   order: OwnedOrderRecord | undefined,
 ): StatementOrderMeta {
+  if (!order) {
+    switch (line.channelKey) {
+      case "forwarded_shadow":
+        return {
+          orderId: line.orderId,
+          tenantId: "external_platform",
+          partnerId: "external_platform",
+          partnerProgramId: null,
+          serviceLabel: formatBilingual({
+            zh: "外部平台轉派",
+            en: "Forwarded Platform",
+          }),
+          tenantLabel: formatBilingual({
+            zh: "外部平台",
+            en: "External Platform",
+          }),
+          fleetLabel: formatBilingual({
+            zh: "外部平台",
+            en: "External Platform",
+          }),
+        };
+      case "partner_airport":
+        return {
+          orderId: line.orderId,
+          tenantId: "partner_program",
+          partnerId: "partner_channel",
+          partnerProgramId: null,
+          serviceLabel: formatBilingual({
+            zh: "合作車隊服務",
+            en: "Partner Fleet Service",
+          }),
+          tenantLabel: formatBilingual({
+            zh: "合作方案",
+            en: "Partner Program",
+          }),
+          fleetLabel: formatBilingual({
+            zh: "合作車隊",
+            en: "Partner Fleet",
+          }),
+        };
+      case "phone_dispatch":
+        return {
+          orderId: line.orderId,
+          tenantId: "phone_dispatch",
+          partnerId: null,
+          partnerProgramId: null,
+          serviceLabel: formatBilingual({
+            zh: "電話派遣",
+            en: "Phone Dispatch",
+          }),
+          tenantLabel: formatBilingual({
+            zh: "電話派遣",
+            en: "Phone Dispatch",
+          }),
+          fleetLabel: "DRTS 直營",
+        };
+      default:
+        return {
+          orderId: line.orderId,
+          tenantId: "tenant_enterprise",
+          partnerId: null,
+          partnerProgramId: null,
+          serviceLabel: formatBilingual({
+            zh: "企業派遣",
+            en: "Enterprise Dispatch",
+          }),
+          tenantLabel: formatBilingual({
+            zh: "租戶方案",
+            en: "Tenant Program",
+          }),
+          fleetLabel: "DRTS 直營",
+        };
+    }
+  }
+
   return {
-    orderId,
+    orderId: line.orderId,
     tenantId: order?.tenantId ?? null,
     partnerId: order?.partnerId ?? null,
     partnerProgramId: order?.partnerProgramId ?? null,
@@ -426,7 +501,7 @@ export function buildGroupedEarningsItems(params: {
   >();
 
   lines.forEach((line) => {
-    const meta = makeStatementOrderMeta(line.orderId, orderMap[line.orderId]);
+    const meta = makeStatementOrderMeta(line, orderMap[line.orderId]);
     let key = meta.orderId;
     let label = `${EMPTY_ZH} / ${EMPTY_EN}`;
     let detail = formatBilingual({

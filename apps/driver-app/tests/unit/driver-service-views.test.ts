@@ -208,4 +208,62 @@ describe("buildGroupedEarningsItems", () => {
     expect(items[0]?.key).toBe("total");
     expect(items[0]?.netAmount.amountMinor).toBe(950);
   });
+
+  it("falls back to statement channel metadata when order lookup is unavailable", () => {
+    const statements = [
+      makeStatement({
+        lines: [
+          {
+            lineId: "line-001",
+            orderId: "forwarded-001",
+            grossEarning: money(800),
+            serviceFee: money(80),
+            subsidy: money(0),
+            netAmount: money(720),
+            reimbursementRequired: false,
+            channelKey: "forwarded_shadow",
+            orderSource: "external_platform" as never,
+          },
+          {
+            lineId: "line-002",
+            orderId: "partner-001",
+            grossEarning: money(900),
+            serviceFee: money(90),
+            subsidy: money(0),
+            netAmount: money(810),
+            reimbursementRequired: false,
+            channelKey: "partner_airport",
+          },
+        ],
+      }),
+    ];
+
+    const fleetItems = buildGroupedEarningsItems({
+      groupBy: "fleet",
+      platformItems: [],
+      statements,
+      orderMap: {},
+    });
+    const serviceItems = buildGroupedEarningsItems({
+      groupBy: "service_product",
+      platformItems: [],
+      statements,
+      orderMap: {},
+    });
+
+    expect(fleetItems.map((item) => item.key)).toEqual([
+      "partner_channel",
+      "external_platform",
+    ]);
+    expect(fleetItems.map((item) => item.label)).toEqual([
+      "合作車隊 / Partner Fleet",
+      "外部平台 / External Platform",
+    ]);
+    expect(serviceItems.map((item) => item.label)).toContain(
+      "外部平台轉派 / Forwarded Platform",
+    );
+    expect(serviceItems.map((item) => item.label)).toContain(
+      "合作車隊服務 / Partner Fleet Service",
+    );
+  });
 });

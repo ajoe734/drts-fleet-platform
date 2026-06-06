@@ -27,6 +27,10 @@ import {
 } from "@/components/earnings-by-platform";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
 import {
+  filterStatementsForGroupedEarnings,
+  type DriverEarningsPeriod,
+} from "@/lib/driver-earnings-period";
+import {
   buildGroupedEarningsItems,
   type EarningsGroupBy,
   type EarningsGroupedItem,
@@ -41,7 +45,7 @@ import {
 import { formatDriverPayoutStatusLabel } from "@/lib/operational-labels";
 import { driverEarningsPeriodOptions, driverStrings } from "@/lib/strings";
 
-type PeriodKey = "today" | "week" | "month";
+type PeriodKey = DriverEarningsPeriod;
 
 const THEME = driverCanvasTheme;
 const PERIOD_OPTIONS = driverEarningsPeriodOptions;
@@ -782,10 +786,14 @@ export default function EarningsScreen() {
     "netAmount",
     (statement) => statement.payoutStatus !== "paid",
   );
+  const groupedStatements = filterStatementsForGroupedEarnings(
+    statements,
+    selectedPeriod,
+  );
   const groupedItems = buildGroupedEarningsItems({
     groupBy: selectedGroup,
     platformItems,
-    statements,
+    statements: groupedStatements,
     orderMap: statementOrderMap,
   });
   const hasAnyData = platformItems.length > 0 || statements.length > 0;
