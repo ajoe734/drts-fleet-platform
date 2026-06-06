@@ -444,6 +444,7 @@ function resolveCrossAppHref(link: CrossAppResourceLink) {
       "ops-console": process.env.NEXT_PUBLIC_OPS_CONSOLE_URL,
       "platform-admin": process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL,
       "tenant-console": process.env.NEXT_PUBLIC_TENANT_CONSOLE_URL,
+      "fleet-partner-portal": process.env.NEXT_PUBLIC_FLEET_PARTNER_PORTAL_URL,
     };
   const baseUrl = origins[link.targetApp]?.replace(/\/$/, "");
   if (!baseUrl) {
