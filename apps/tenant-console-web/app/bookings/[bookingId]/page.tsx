@@ -5,6 +5,7 @@ import type {
   ActionReceipt,
   AuditLogRecord,
   BookingRecord,
+  DriverStatementRecord,
   EmptyReason,
   ResourceActionDescriptor,
   TenantInvoiceRecord,
@@ -22,6 +23,7 @@ import {
   getBookingSourceVisibility,
   getSourceToneClassName,
 } from "@/lib/source-domain";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -391,6 +393,15 @@ function findRelatedInvoices(
   );
 }
 
+function findRelatedStatements(
+  statements: DriverStatementRecord[],
+  orderId: string,
+): DriverStatementRecord[] {
+  return statements.filter((statement) =>
+    statement.lines.some((line) => line.orderId === orderId),
+  );
+}
+
 function deriveTimelineStep(orderStatus: BookingRecord["orderStatus"]) {
   switch (orderStatus) {
     case "created":
@@ -634,10 +645,11 @@ export default async function BookingDetailPage({
   }
 
   const client = getTenantClient();
-  const [bookingResult, invoicesResult, auditLogsResult] =
+  const [bookingResult, invoicesResult, statementsResult, auditLogsResult] =
     await Promise.allSettled([
       client.getTenantBooking(bookingId) as Promise<BookingDetailRecord>,
       client.listInvoices(),
+      client.listTenantStatements(),
       client.listTenantAuditLogs(),
     ]);
 
@@ -653,6 +665,10 @@ export default async function BookingDetailPage({
   const relatedInvoices =
     invoicesResult.status === "fulfilled"
       ? findRelatedInvoices(invoicesResult.value, booking.orderId)
+      : [];
+  const relatedStatements =
+    statementsResult.status === "fulfilled"
+      ? findRelatedStatements(statementsResult.value, booking.orderId)
       : [];
   const recentEvents =
     auditLogsResult.status === "fulfilled"
@@ -705,6 +721,27 @@ export default async function BookingDetailPage({
         description="Booking detail now follows the Tenant Console canvas: editable-until visibility, approval context, driver-assignment state, audit subset, refresh tier, and action descriptors all sit on one tenant-owned screen."
       />
 
+      <div className="chip-row">
+        <Link
+          className="action-button action-button-secondary"
+          href="#overview"
+        >
+          {t("bookingDetail.tab.overview")}
+        </Link>
+        <Link
+          className="action-button action-button-secondary"
+          href="#timeline"
+        >
+          {t("bookingDetail.tab.timeline")}
+        </Link>
+        <Link className="action-button action-button-secondary" href="#billing">
+          {t("bookingDetail.tab.billing")}
+        </Link>
+        <Link className="action-button action-button-secondary" href="#audit">
+          {t("bookingDetail.tab.audit")}
+        </Link>
+      </div>
+
       {bookingView.acceptedPending && bookingView.commandReceipt ? (
         <CalloutPanel
           title={`Command accepted · awaiting external confirmation · ${bookingView.commandReceipt.actionId}`}
@@ -719,7 +756,7 @@ export default async function BookingDetailPage({
         </CalloutPanel>
       ) : null}
 
-      <section className="surface-grid surface-grid-wide">
+      <section className="surface-grid surface-grid-wide" id="overview">
         <SurfaceCard
           kicker="Refresh tier"
           title="Tenant booking detail refreshes on T5"
@@ -818,8 +855,8 @@ export default async function BookingDetailPage({
         <div className="booking-detail-main">
           <SurfaceCard
             kicker="Trip context"
-            title="Booking, rider, and routing detail"
-            description="The page keeps the full tenant-visible booking payload close to the action lane so a user does not need a separate ops-only surface to validate the reservation."
+            title={t("bookingDetail.section.trip")}
+            description={t("bookingDetail.section.tripSub")}
           >
             <div
               className="booking-stepper"
@@ -950,9 +987,10 @@ export default async function BookingDetailPage({
 
           <SurfaceCard
             kicker="Lifecycle"
-            title="Timeline and recent updates"
-            description="Tenant audit visibility includes cross-actor changes on tenant-owned resources, so the recent update lane must not pretend every event came from the tenant actor."
+            title={t("bookingDetail.section.timeline")}
+            description={t("bookingDetail.section.timelineSub")}
           >
+            <div id="timeline" />
             <ol className="booking-event-list">
               {(recentEvents.length > 0
                 ? recentEvents
@@ -986,9 +1024,10 @@ export default async function BookingDetailPage({
 
           <SurfaceCard
             kicker="Finance"
-            title="Fare, invoice, and approval context"
-            description="Quoted fare, approval posture, and invoice linkage remain tenant-visible while dispatch-only mechanics stay out of band."
+            title={t("bookingDetail.section.billing")}
+            description={t("bookingDetail.section.billingSub")}
           >
+            <div id="billing" />
             <dl className="definition-grid">
               <div>
                 <dt>Quoted fare</dt>
@@ -1032,7 +1071,25 @@ export default async function BookingDetailPage({
               </ul>
             ) : (
               <p className="muted-copy">
-                No tenant invoice row is currently linked to this order.
+                {t("bookingDetail.empty.relatedInvoices")}
+              </p>
+            )}
+            <h3>{t("bookingDetail.label.relatedStatements")}</h3>
+            {relatedStatements.length > 0 ? (
+              <ul className="panel-list">
+                {relatedStatements.map((statement) => (
+                  <li key={statement.statementId}>
+                    <strong>{statement.statementId}</strong>
+                    <span className="list-note">
+                      {statement.driverId} · {statement.periodMonth} ·{" "}
+                      {formatMoney(statement.netAmount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted-copy">
+                {t("bookingDetail.empty.relatedStatements")}
               </p>
             )}
           </SurfaceCard>
@@ -1100,9 +1157,10 @@ export default async function BookingDetailPage({
 
           <SurfaceCard
             kicker="Deep links"
-            title="Cross-app and follow-up links"
-            description="Phase 1 keeps the apps separate, so follow-up routes stay explicit instead of masquerading as one runtime shell."
+            title={t("bookingDetail.section.audit")}
+            description={t("bookingDetail.section.auditSub")}
           >
+            <div id="audit" />
             <ul className="panel-list">
               {bookingView.deepLinks.map((link) => (
                 <li key={link.label}>
