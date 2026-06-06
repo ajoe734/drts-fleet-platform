@@ -1,11 +1,11 @@
 # E2E-TENBIZ-012 Acceptance Packet & Dependency Map
 
-**Sidecar Kind:** `acceptance_packet`  
-**Parent Task:** `E2E-TENBIZ-012-UNBLOCK-PLANNING-DECISION`  
-**Current Sidecar Owner:** `Codex`  
-**Assigned Reviewer:** `Codex2`  
-**Primary Upstream Dependency:** `BE-TENBIZ-001`  
-**Last Revised:** `2026-06-06T08:09Z (UTC)`  
+**Sidecar Kind:** `acceptance_packet`
+**Parent Task:** `E2E-TENBIZ-012-UNBLOCK-PLANNING-DECISION`
+**Current Sidecar Owner:** `Codex`
+**Assigned Reviewer:** `Codex2`
+**Primary Upstream Dependency:** `BE-TENBIZ-001`
+**Last Revised:** `2026-06-06T08:09Z (UTC)`
 **Scope:** support-only artifact; no canonical truth or runtime implementation changes.
 
 ---
