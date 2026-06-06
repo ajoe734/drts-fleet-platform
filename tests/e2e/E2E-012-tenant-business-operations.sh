@@ -174,6 +174,37 @@ record_report_binding_mode() {
   log_warn "Report row-level field ${label} not present; filter-level binding only"
 }
 
+preflight_api_reachability() {
+  local url="${E2E_API_URL}${E2E_API_PATH_PREFIX}/tenant/users"
+  local curl_args=(
+    --silent
+    --show-error
+    --max-time "${E2E_TIMEOUT}"
+    --output /dev/null
+    -H "Content-Type: application/json"
+    -H "x-actor-type: tenant_admin"
+    -H "x-actor-id: e2e-bootstrap-tenant-admin"
+    -H "x-realm: tenant"
+    -H "x-tenant-id: ${E2E_SEED_TENANT_ID}"
+  )
+
+  if [[ -n "${E2E_AUTH_BEARER_TOKEN:-}" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${E2E_AUTH_BEARER_TOKEN}")
+  fi
+  if [[ -n "${E2E_INTERNAL_KEY:-}" ]]; then
+    curl_args+=(-H "x-drts-internal-key: ${E2E_INTERNAL_KEY}")
+  fi
+
+  if ! curl "${curl_args[@]}" "$url"; then
+    log_fail "API boundary unreachable: ${url}"
+    log_fail "Set E2E_API_URL to a reachable local/staging origin before running E2E-012."
+    exit 1
+  fi
+}
+
+log_step "Preflight API reachability"
+preflight_api_reachability
+
 log_surface "Tenant login / actor discovery"
 switch_actor "tenant_admin" "e2e-bootstrap-tenant-admin" "$E2E_SEED_TENANT_ID"
 http_call GET "/tenant/users"
