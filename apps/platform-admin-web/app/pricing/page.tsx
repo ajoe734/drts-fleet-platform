@@ -7,8 +7,7 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
-import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
@@ -613,7 +612,6 @@ function ReasonModal({
 export default function PricingPage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -638,12 +636,35 @@ export default function PricingPage() {
   >("all");
 
   const tabParam = searchParams.get("tab");
-  const activeTab: TabId = isTabId(tabParam) ? tabParam : "passenger";
+  const [activeTab, setActiveTab] = useState<TabId>(
+    isTabId(tabParam) ? tabParam : "passenger",
+  );
+
+  // Keep the active tab synced when the URL changes outside of a tab click
+  // (direct `?tab=` navigation, browser back/forward). Tab clicks update both
+  // local state and the address bar through the History API directly: the App
+  // Router soft-navigation drops a query-only, same-pathname change on click,
+  // which is why #510 (`router.replace`) and #514 (`<Link replace>`) both left
+  // the URL on `/pricing` without `?tab=`.
+  useEffect(() => {
+    if (isTabId(tabParam) && tabParam !== activeTab) {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam, activeTab]);
 
   function handleTabChange(nextTab: TabId) {
+    setActiveTab(nextTab);
+    if (typeof window === "undefined") {
+      return;
+    }
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", nextTab);
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    const query = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      query ? `${pathname}?${query}` : pathname,
+    );
   }
 
   useEffect(() => {
@@ -1059,16 +1080,14 @@ export default function PricingPage() {
             { id: "subsidy" as const, label: "Subsidy / Reimbursement Rules" },
             { id: "history" as const, label: "Published Versions" },
           ].map((tab) => (
-            <Link
+            <button
               key={tab.id}
-              href={`${pathname}?tab=${tab.id}`}
-              replace
-              scroll={false}
-              prefetch={false}
-              style={{ ...tabButtonStyle(activeTab === tab.id), textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+              type="button"
+              onClick={() => handleTabChange(tab.id)}
+              style={tabButtonStyle(activeTab === tab.id)}
             >
               {tab.label}
-            </Link>
+            </button>
           ))}
         </div>
 
