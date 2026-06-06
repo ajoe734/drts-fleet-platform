@@ -136,6 +136,26 @@ require_report_filter() {
   log_ok "Report filter preserved: ${key}=${actual}"
 }
 
+require_report_filter_any() {
+  local label="$1"
+  local expected="$2"
+  shift 2
+
+  local key actual
+  for key in "$@"; do
+    actual=$(json_get ".data.filters.${key}")
+    if [[ "$actual" == "$expected" ]]; then
+      save_evidence "$SCENARIO" "report" "filter.${label}" "$actual"
+      save_evidence "$SCENARIO" "report" "filter.${label}.key" "$key"
+      log_ok "Report filter preserved: ${key}=${actual}"
+      return 0
+    fi
+  done
+
+  log_fail "Report filter ${label} expected '${expected}' via one of [$*], but none matched"
+  exit 1
+}
+
 record_optional_report_field() {
   local surface="$1"
   local label="$2"
@@ -485,7 +505,7 @@ log_surface "Reporting — tenant export job"
 REPORT_FIXTURE="${TMP_DIR}/report-job.json"
 jq -n \
   --arg orderId "$ORDER_ID" \
-  --arg userId "$TENANT_ADMIN_USER_ID" \
+  --arg passengerUserId "$TENANT_ADMIN_USER_ID" \
   --arg costCenterCode "$CC_CODE" \
   --arg serviceProduct "enterprise_dispatch" \
   '{
@@ -493,7 +513,7 @@ jq -n \
     format: "csv",
     filters: {
       orderId: $orderId,
-      userId: $userId,
+      passengerUserId: $passengerUserId,
       costCenterCode: $costCenterCode,
       serviceProduct: $serviceProduct
     }
@@ -536,7 +556,7 @@ log_ok "report artifact ready: ${REPORT_ARTIFACT_ID}"
 
 require_report_filter "tenantId" "$E2E_SEED_TENANT_ID"
 require_report_filter "orderId" "$ORDER_ID"
-require_report_filter "userId" "$TENANT_ADMIN_USER_ID"
+require_report_filter_any "userId" "$TENANT_ADMIN_USER_ID" "passengerUserId" "userId"
 require_report_filter "costCenterCode" "$CC_CODE"
 require_report_filter "serviceProduct" "enterprise_dispatch"
 
