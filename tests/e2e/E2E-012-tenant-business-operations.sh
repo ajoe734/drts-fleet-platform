@@ -122,8 +122,13 @@ probe_route() {
     log_ok "${path} available"
     return 0
   fi
-  log_warn "${path} unavailable on this env (HTTP ${RESP_STATUS})"
-  return 1
+  if [[ "$RESP_STATUS" =~ ^(404|405)$ ]]; then
+    log_warn "${path} unavailable on this env (HTTP ${RESP_STATUS})"
+    return 1
+  fi
+  log_fail "${path} probe failed with HTTP ${RESP_STATUS}; route exists but did not satisfy the tenant business contract"
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
 }
 
 assert_number_ge() {
