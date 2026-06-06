@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import type {
+  DriverStatementRecord,
   EmptyReason,
   MoneyAmount,
   ResourceActionDescriptor,
@@ -22,6 +23,7 @@ import {
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { formatDateInput, formatDateTime } from "@/lib/formatters";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
@@ -105,6 +107,7 @@ const actionAnchorStyle: CSSProperties = {
 type BillingData = {
   profile: TenantBillingProfile | null;
   invoices: TenantInvoiceRecord[];
+  statements: DriverStatementRecord[];
   quota: TenantQuotaSummary | null;
   errors: string[];
   emptyReason: EmptyReason | null;
@@ -132,6 +135,7 @@ function parseEmptyReason(value: string | undefined): EmptyReason | null {
 function inferEmptyReason(input: {
   profile: TenantBillingProfile | null;
   invoices: TenantInvoiceRecord[];
+  statements: DriverStatementRecord[];
   quota: TenantQuotaSummary | null;
   profileFailed: boolean;
   errors: string[];
@@ -172,18 +176,20 @@ async function loadBillingData(
   const client = getTenantClient();
   const errors: string[] = [];
 
-  const [profileResult, invoicesResult, quotaResult] = await Promise.allSettled(
-    [
+  const [profileResult, invoicesResult, statementsResult, quotaResult] =
+    await Promise.allSettled([
       client.getBillingProfile() as Promise<TenantBillingProfile>,
       client.listInvoices() as Promise<TenantInvoiceRecord[]>,
+      client.listTenantStatements() as Promise<DriverStatementRecord[]>,
       client.getTenantQuotaSummary() as Promise<TenantQuotaSummary>,
-    ],
-  );
+    ]);
 
   const profile =
     profileResult.status === "fulfilled" ? profileResult.value : null;
   const invoices =
     invoicesResult.status === "fulfilled" ? invoicesResult.value : [];
+  const statements =
+    statementsResult.status === "fulfilled" ? statementsResult.value : [];
   const quota = quotaResult.status === "fulfilled" ? quotaResult.value : null;
 
   if (profileResult.status === "rejected") {
@@ -199,6 +205,14 @@ async function loadBillingData(
       invoicesResult.reason instanceof Error
         ? invoicesResult.reason.message
         : "Unable to load tenant invoices.",
+    );
+  }
+
+  if (statementsResult.status === "rejected") {
+    errors.push(
+      statementsResult.reason instanceof Error
+        ? statementsResult.reason.message
+        : "Unable to load tenant statements.",
     );
   }
 
@@ -219,6 +233,7 @@ async function loadBillingData(
   const inferredEmptyReason = inferEmptyReason({
     profile,
     invoices,
+    statements,
     quota,
     profileFailed: profileResult.status === "rejected",
     errors,
@@ -227,6 +242,7 @@ async function loadBillingData(
   return {
     profile,
     invoices,
+    statements,
     quota,
     errors,
     emptyReason: emptyReasonOverride ?? inferredEmptyReason,
@@ -373,7 +389,7 @@ function getEmptyStateCopy(reason: EmptyReason): {
     case "not_provisioned":
       return {
         icon: "billing",
-        title: "帳務尚未開通",
+        title: t("billing.title"),
         body: "此租戶還沒有計費檔案、當期用量或發票紀錄。請先完成帳務資料設定，再回到此頁查看當期快照。",
       };
     case "fetch_failed":
@@ -565,12 +581,78 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
     },
   ];
 
+  const statementRows = [...data.statements]
+    .sort((left, right) => right.periodMonth.localeCompare(left.periodMonth))
+    .slice(0, 6);
+
+  const statementColumns: CanvasTableColumn<DriverStatementRecord>[] = [
+    {
+      h: t("billing.col.statement"),
+      w: 180,
+      mono: true,
+      r: (row) => row.statementId,
+    },
+    {
+      h: t("dashboard.col.driver"),
+      w: 110,
+      mono: true,
+      r: (row) => row.driverId,
+    },
+    {
+      h: t("dashboard.col.period"),
+      w: 90,
+      mono: true,
+      r: (row) => row.periodMonth,
+    },
+    {
+      h: t("billing.col.gross"),
+      w: 120,
+      mono: true,
+      align: "right",
+      r: (row) => formatCanvasMoney(row.grossEarning),
+    },
+    {
+      h: t("billing.col.serviceFee"),
+      w: 120,
+      mono: true,
+      align: "right",
+      r: (row) => formatCanvasMoney(row.serviceFee),
+    },
+    {
+      h: t("billing.col.subsidy"),
+      w: 120,
+      mono: true,
+      align: "right",
+      r: (row) => formatCanvasMoney(row.subsidy),
+    },
+    {
+      h: t("billing.col.net"),
+      w: 120,
+      mono: true,
+      align: "right",
+      r: (row) => formatCanvasMoney(row.netAmount),
+    },
+    {
+      h: t("billing.col.payoutStatus"),
+      w: 110,
+      r: (row) => (
+        <CanvasPill
+          theme={th}
+          tone={row.payoutStatus === "paid" ? "success" : "info"}
+          dot
+        >
+          {row.payoutStatus}
+        </CanvasPill>
+      ),
+    },
+  ];
+
   return (
     <div>
       <CanvasPageHeader
         theme={th}
-        title="帳務概覽"
-        subtitle="billing profile · 當期使用 · 近期 invoice"
+        title={t("billing.title")}
+        subtitle={t("billing.subtitle")}
         actions={
           <>
             <ActionCta
@@ -680,7 +762,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
 
           <CanvasCard
             theme={th}
-            title="近 6 期 invoice"
+            title={t("billing.section.invoices")}
             padding={0}
             actions={
               <ActionCta
@@ -704,6 +786,24 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
             )}
           </CanvasCard>
         </div>
+
+        <CanvasCard
+          theme={th}
+          title={t("billing.section.statements")}
+          subtitle={t("billing.section.statementsSub")}
+          padding={0}
+        >
+          {statementRows.length > 0 ? (
+            <CanvasTable<DriverStatementRecord>
+              theme={th}
+              rows={statementRows}
+              columns={statementColumns}
+              dense
+            />
+          ) : (
+            <div style={emptyStateStyle}>{t("billing.empty.statements")}</div>
+          )}
+        </CanvasCard>
       </div>
     </div>
   );

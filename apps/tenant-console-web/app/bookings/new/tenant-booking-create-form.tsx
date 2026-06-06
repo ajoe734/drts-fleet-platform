@@ -45,6 +45,7 @@ import {
   type TenantBookingDraftValues,
   type TenantBookingFieldErrors,
 } from "./tenant-booking-create-form-utils";
+import { t } from "@/lib/translations";
 
 type BookingCreateActionMap = {
   submit: ResourceActionDescriptor;
@@ -104,9 +105,9 @@ const BUSINESS_SUBTYPE_OPTIONS: Array<{
 }> = [
   {
     value: "credit_card_airport_transfer",
-    label: "Credit-card airport transfer",
+    label: t("newBooking.program.creditCard"),
   },
-  { value: "enterprise_dispatch", label: "Enterprise dispatch" },
+  { value: "enterprise_dispatch", label: t("newBooking.program.enterprise") },
 ];
 
 const CURRENCY = "TWD";
@@ -1583,10 +1584,21 @@ export function TenantBookingCreateForm({
                 title="關聯與審批"
                 subtitle="cost center、財務欄位與代訂 metadata 都隨 command 一起送出。"
               >
+                <CanvasBanner
+                  theme={th}
+                  tone="info"
+                  icon="spark"
+                  title={t("newBooking.programSection.title")}
+                  body={
+                    businessDispatchSubtype === "credit_card_airport_transfer"
+                      ? t("newBooking.programHint.creditCard")
+                      : t("newBooking.programHint.enterprise")
+                  }
+                />
                 <div style={fieldGridStyle}>
                   <FieldShell
                     error={visibleFieldErrors.costCenter}
-                    label="Cost center"
+                    label={t("newBooking.programField.costCenter")}
                   >
                     <select
                       onChange={(event) => setCostCenter(event.target.value)}
@@ -1628,7 +1640,9 @@ export function TenantBookingCreateForm({
                     />
                   </FieldShell>
 
-                  <FieldShell label="Benefit reference">
+                  <FieldShell
+                    label={t("newBooking.programField.benefitReference")}
+                  >
                     <input
                       onChange={(event) =>
                         setBenefitReference(event.target.value)
@@ -1639,7 +1653,9 @@ export function TenantBookingCreateForm({
                     />
                   </FieldShell>
 
-                  <FieldShell label="Vehicle preference">
+                  <FieldShell
+                    label={t("newBooking.programField.vehiclePreference")}
+                  >
                     <input
                       onChange={(event) =>
                         setVehiclePreference(event.target.value)
@@ -1650,7 +1666,7 @@ export function TenantBookingCreateForm({
                     />
                   </FieldShell>
 
-                  <FieldShell label="Direction">
+                  <FieldShell label={t("newBooking.programField.direction")}>
                     <select
                       onChange={(event) =>
                         setDirection(
@@ -1668,7 +1684,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.flightNo}
-                    label="Flight no."
+                    label={t("newBooking.programField.flightNo")}
                   >
                     <input
                       onChange={(event) => setFlightNo(event.target.value)}
@@ -1683,7 +1699,7 @@ export function TenantBookingCreateForm({
                     />
                   </FieldShell>
 
-                  <FieldShell label="Terminal">
+                  <FieldShell label={t("newBooking.programField.terminal")}>
                     <input
                       onChange={(event) => setTerminal(event.target.value)}
                       style={inputBaseStyle}
@@ -1694,7 +1710,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.luggageCount}
-                    label="Luggage count"
+                    label={t("newBooking.programField.luggageCount")}
                   >
                     <input
                       inputMode="numeric"
@@ -1712,7 +1728,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.bookedByName}
-                    label="Booked by name"
+                    label={t("newBooking.programField.bookedByName")}
                   >
                     <input
                       onChange={(event) => setBookedByName(event.target.value)}
@@ -1729,7 +1745,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.bookedByEmail}
-                    label="Booked by email"
+                    label={t("newBooking.programField.bookedByEmail")}
                   >
                     <input
                       onChange={(event) => setBookedByEmail(event.target.value)}
@@ -1746,7 +1762,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.onsiteContactName}
-                    label="Onsite contact"
+                    label={t("newBooking.programField.onsiteContact")}
                   >
                     <input
                       onChange={(event) =>
@@ -1765,7 +1781,7 @@ export function TenantBookingCreateForm({
 
                   <FieldShell
                     error={visibleFieldErrors.onsiteContactPhone}
-                    label="Onsite phone"
+                    label={t("newBooking.programField.onsitePhone")}
                   >
                     <input
                       onChange={(event) =>

@@ -18,6 +18,7 @@ import {
   findNavItem,
   tenantNavEntries,
 } from "@/lib/navigation";
+import { t } from "@/lib/translations";
 
 const tenantCanvasTheme = buildCanvasTheme({
   surface: "tenant",
@@ -55,7 +56,10 @@ export function TenantShell({ children }: { children: ReactNode }) {
             nav={tenantNavEntries}
             brandLabel={TENANT_CONSOLE_BRAND}
             brandSubLabel={TENANT_CONSOLE_BRAND_SUB}
-            breadcrumb={[TENANT_CONSOLE_CONTEXT, activeItem?.label ?? "首頁"]}
+            breadcrumb={[
+              TENANT_CONSOLE_CONTEXT,
+              activeItem?.label ?? t("shell.breadcrumb.home"),
+            ]}
             env={TENANT_CONSOLE_ENV}
             versionLabel={TENANT_CONSOLE_VERSION}
             searchPlaceholder={TENANT_CONSOLE_SEARCH_PLACEHOLDER}
