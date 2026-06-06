@@ -142,6 +142,7 @@ http_call() {
     fi
     if [[ -n "${E2E_PARTNER_ID:-}" ]]; then
       curl_args+=(-H "x-partner-id: ${E2E_PARTNER_ID}")
+      curl_args+=(-H "x-fleet-partner-id: ${E2E_PARTNER_ID}")
     fi
     if [[ -n "${E2E_PARTNER_PROGRAM_ID:-}" ]]; then
       curl_args+=(-H "x-partner-program-id: ${E2E_PARTNER_PROGRAM_ID}")

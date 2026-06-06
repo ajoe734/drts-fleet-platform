@@ -997,28 +997,6 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
 
-    const existingStatements = this.driverStatements.filter(
-      (statement) =>
-        statement.periodMonth === command.periodMonth &&
-        statement.feePlanVersion === activeFeePlan.version &&
-        (!driverId || statement.driverId === driverId),
-    );
-    if (existingStatements.length > 0) {
-      const reimbursementBatchIds = this.reimbursementBatches
-        .filter(
-          (batch) =>
-            batch.periodMonth === command.periodMonth &&
-            (!driverId || batch.driverId === driverId),
-        )
-        .map((batch) => batch.batchId);
-      return {
-        items: existingStatements.map((statement) =>
-          this.cloneStatement(statement),
-        ),
-        reimbursementBatchIds,
-      };
-    }
-
     const eligibleTrips = (
       await this.listDriverStatementTripsInPeriod(command.periodMonth, driverId)
     ).filter((trip) => trip.eligibleForDriverStatement);
@@ -1040,6 +1018,55 @@ export class BillingSettlementService implements OnModuleInit {
       statementsByDriver.set(trip.driverId, [...currentTrips, trip]);
     }
 
+    const existingStatements = this.driverStatements.filter(
+      (statement) =>
+        statement.periodMonth === command.periodMonth &&
+        statement.feePlanVersion === activeFeePlan.version &&
+        (!driverId || statement.driverId === driverId),
+    );
+    const existingStatementsByDriver = new Map(
+      existingStatements.map((statement) => [statement.driverId, statement]),
+    );
+    const hasFreshExistingStatements =
+      existingStatements.length === statementsByDriver.size &&
+      [...statementsByDriver.entries()].every(([statementDriverId, trips]) => {
+        const existingStatement =
+          existingStatementsByDriver.get(statementDriverId);
+        if (!existingStatement) {
+          return false;
+        }
+
+        const expectedOrderIds = [...new Set(trips.map((trip) => trip.orderId))]
+          .sort()
+          .join("|");
+        const existingOrderIds = [
+          ...new Set(
+            existingStatement.lines
+              .map((line) => line.orderId)
+              .filter((orderId): orderId is string => Boolean(orderId)),
+          ),
+        ]
+          .sort()
+          .join("|");
+
+        return expectedOrderIds === existingOrderIds;
+      });
+    if (hasFreshExistingStatements) {
+      const reimbursementBatchIds = this.reimbursementBatches
+        .filter(
+          (batch) =>
+            batch.periodMonth === command.periodMonth &&
+            (!driverId || batch.driverId === driverId),
+        )
+        .map((batch) => batch.batchId);
+      return {
+        items: existingStatements.map((statement) =>
+          this.cloneStatement(statement),
+        ),
+        reimbursementBatchIds,
+      };
+    }
+
     const generatedStatements: DriverStatementRecord[] = [];
     const generatedReimbursements: ReimbursementBatchRecord[] = [];
 
@@ -1048,9 +1075,10 @@ export class BillingSettlementService implements OnModuleInit {
         this.createStatementLine(trip, activeFeePlan.serviceFeeBps),
       );
       const now = new Date().toISOString();
+      const existingStatement = existingStatementsByDriver.get(driverId);
       const statementId = `statement-${randomUUID()}`;
       const statement: DriverStatementRecord = {
-        statementId,
+        statementId: existingStatement?.statementId ?? statementId,
         driverId,
         periodMonth: command.periodMonth,
         receiptNo: `DRV-${command.periodMonth.replace("-", "")}-${driverId.slice(-3)}`,
@@ -1061,7 +1089,7 @@ export class BillingSettlementService implements OnModuleInit {
         netAmount: this.sumMoney(lines.map((line) => line.netAmount)),
         feePlanVersion: activeFeePlan.version,
         lines,
-        createdAt: now,
+        createdAt: existingStatement?.createdAt ?? now,
         updatedAt: now,
       };
 
@@ -1096,19 +1124,24 @@ export class BillingSettlementService implements OnModuleInit {
         activeFeePlan.reimbursementMode,
       );
       if (reimbursementItems.length > 0) {
+        const existingBatch = this.reimbursementBatches.find(
+          (batch) =>
+            batch.periodMonth === command.periodMonth &&
+            batch.driverId === driverId,
+        );
         const reimbursementBatch: ReimbursementBatchRecord = {
-          batchId: `reimbursement-${randomUUID()}`,
+          batchId: existingBatch?.batchId ?? `reimbursement-${randomUUID()}`,
           driverId,
-          statementId,
+          statementId: statement.statementId,
           periodMonth: command.periodMonth,
-          status: "pending",
+          status: existingBatch?.status ?? "pending",
           totalAmount: this.sumMoney(
             reimbursementItems.map((item) => item.amount),
           ),
-          remittanceProofId: null,
+          remittanceProofId: existingBatch?.remittanceProofId ?? null,
           items: reimbursementItems,
-          approvedAt: null,
-          paidAt: null,
+          approvedAt: existingBatch?.approvedAt ?? null,
+          paidAt: existingBatch?.paidAt ?? null,
         };
         generatedReimbursements.push(reimbursementBatch);
         this.auditNotificationService.recordNotification({
@@ -1138,10 +1171,26 @@ export class BillingSettlementService implements OnModuleInit {
       }
     }
 
-    this.driverStatements = [...generatedStatements, ...this.driverStatements];
+    this.driverStatements = [
+      ...generatedStatements,
+      ...this.driverStatements.filter(
+        (statement) =>
+          !(
+            statement.periodMonth === command.periodMonth &&
+            statement.feePlanVersion === activeFeePlan.version &&
+            (!driverId || statement.driverId === driverId)
+          ),
+      ),
+    ];
     this.reimbursementBatches = [
       ...generatedReimbursements,
-      ...this.reimbursementBatches,
+      ...this.reimbursementBatches.filter(
+        (batch) =>
+          !(
+            batch.periodMonth === command.periodMonth &&
+            (!driverId || batch.driverId === driverId)
+          ),
+      ),
     ];
     this.persistChanges(
       {

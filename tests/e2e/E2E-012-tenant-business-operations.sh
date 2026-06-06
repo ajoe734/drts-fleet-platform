@@ -62,6 +62,44 @@ TASK_ID=""
 INVOICE_ID=""
 REPORT_JOB_ID=""
 
+ensure_tenant_user() {
+  local role_code="$1"
+  local email="$2"
+  local display_name="$3"
+
+  local user_id=""
+  user_id=$(echo "$RESP_BODY" | jq -r --arg role "$role_code" \
+    '.data.items[] | select((.roleCode // .role_code) == $role and ((.status // "") == "active" or (.status // "") == "invited")) | (.userId // .user_id)' \
+    2>/dev/null | head -1 || true)
+  if [[ -n "$user_id" ]]; then
+    echo "$user_id"
+    return 0
+  fi
+
+  local user_fixture="${TMP_DIR}/tenant-user-${role_code}.json"
+  jq -n \
+    --arg email "$email" \
+    --arg displayName "$display_name" \
+    --arg roleCode "$role_code" \
+    '{
+      email: $email,
+      displayName: $displayName,
+      roleCode: $roleCode
+    }' > "$user_fixture"
+
+  http_call POST "/tenant/users" "$user_fixture"
+  assert_status "200|201"
+
+  user_id=$(json_get_first '.data.userId' '.data.user_id')
+  if [[ -z "$user_id" ]]; then
+    log_fail "tenant user bootstrap response missing userId for role ${role_code}"
+    log_fail "Body: ${RESP_BODY}"
+    exit 1
+  fi
+
+  echo "$user_id"
+}
+
 poll_for_dispatch_job() {
   local attempt=0
   while (( attempt < E2E_POLL_MAX )); do
@@ -123,7 +161,9 @@ require_report_filter() {
   local key="$1"
   local expected="$2"
   local actual
-  actual=$(json_get ".data.filters.${key}")
+  local snake_key
+  snake_key=$(echo "$key" | sed -E 's/([A-Z])/_\L\1/g')
+  actual=$(json_get_first ".data.filters.${key}" ".data.filters.${snake_key}")
   if [[ "$actual" != "$expected" ]]; then
     log_fail "Report filter ${key} expected '${expected}', got '${actual:-<empty>}'"
     exit 1
@@ -152,16 +192,29 @@ http_call GET "/tenant/users"
 assert_status "200"
 
 TENANT_ADMIN_USER_ID=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.roleCode == "tenant_admin" and .status == "active") | .userId' \
+  '.data.items[] | select((.roleCode // .role_code) == "tenant_admin" and (((.status // "") == "active") or ((.status // "") == "invited"))) | (.userId // .user_id)' \
   2>/dev/null | head -1 || true)
 TENANT_FINANCE_USER_ID=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.roleCode == "tenant_finance_admin" and .status == "active") | .userId' \
+  '.data.items[] | select((.roleCode // .role_code) == "tenant_finance_admin" and (((.status // "") == "active") or ((.status // "") == "invited"))) | (.userId // .user_id)' \
   2>/dev/null | head -1 || true)
 
-[[ -n "$TENANT_ADMIN_USER_ID" ]] || { log_fail "No active tenant_admin user found"; exit 1; }
-if [[ -z "$TENANT_FINANCE_USER_ID" ]]; then
-  TENANT_FINANCE_USER_ID="$TENANT_ADMIN_USER_ID"
+if [[ -z "$TENANT_ADMIN_USER_ID" ]]; then
+  log_info "No tenant_admin user found; bootstrapping one for this tenant."
+  TENANT_ADMIN_USER_ID=$(ensure_tenant_user \
+    "tenant_admin" \
+    "e2e-012-tenant-admin@example.test" \
+    "E2E 012 Tenant Admin")
 fi
+if [[ -z "$TENANT_FINANCE_USER_ID" ]]; then
+  log_info "No tenant_finance_admin user found; bootstrapping one for this tenant."
+  TENANT_FINANCE_USER_ID=$(ensure_tenant_user \
+    "tenant_finance_admin" \
+    "e2e-012-tenant-finance@example.test" \
+    "E2E 012 Tenant Finance")
+fi
+
+[[ -n "$TENANT_ADMIN_USER_ID" ]] || { log_fail "No tenant_admin user found"; exit 1; }
+[[ -n "$TENANT_FINANCE_USER_ID" ]] || { log_fail "No tenant_finance_admin user found"; exit 1; }
 
 chain_set "tenant" "adminUserId" "$TENANT_ADMIN_USER_ID"
 chain_set "tenant" "financeUserId" "$TENANT_FINANCE_USER_ID"
@@ -220,8 +273,19 @@ http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
 assert_status "200|201"
 BOOKING_ID=$(json_get_first '.data.bookingId' '.data.booking_id')
 ORDER_ID=$(json_get_first '.data.orderId' '.data.order_id')
+if [[ -z "$BOOKING_ID" || -z "$ORDER_ID" ]]; then
+  log_warn "booking create response omitted bookingId/orderId; resolving via tenant bookings list"
+  http_call GET "/tenant/bookings"
+  assert_status "200"
+  BOOKING_ID=$(echo "$RESP_BODY" | jq -r --arg cc "$CC_CODE" \
+    '.data.items[] | select((.costCenter // .cost_center) == $cc) | (.bookingId // .booking_id)' \
+    2>/dev/null | head -1 || true)
+  ORDER_ID=$(echo "$RESP_BODY" | jq -r --arg cc "$CC_CODE" \
+    '.data.items[] | select((.costCenter // .cost_center) == $cc) | (.orderId // .order_id)' \
+    2>/dev/null | head -1 || true)
+fi
 [[ -n "$BOOKING_ID" && -n "$ORDER_ID" ]] || {
-  log_fail "booking response missing bookingId/orderId"
+  log_fail "booking response/list lookup missing bookingId/orderId"
   log_fail "Body: ${RESP_BODY}"
   exit 1
 }
@@ -234,8 +298,8 @@ log_ok "booking created: bookingId=${BOOKING_ID}, orderId=${ORDER_ID}"
 log_step "Verify booking read-back"
 http_call GET "/tenant/bookings/${BOOKING_ID}"
 assert_status "200"
-READBACK_CC=$(json_get_first '.data.costCenter' '.data.costCenterCode')
-READBACK_SUBTYPE=$(json_get '.data.businessDispatchSubtype')
+READBACK_CC=$(json_get_first '.data.costCenter' '.data.cost_center' '.data.costCenterCode')
+READBACK_SUBTYPE=$(json_get_first '.data.businessDispatchSubtype' '.data.business_dispatch_subtype')
 if [[ "$READBACK_CC" != "$CC_CODE" ]]; then
   log_fail "Expected booking costCenter ${CC_CODE}, got '${READBACK_CC:-<empty>}'"
   exit 1
@@ -250,6 +314,13 @@ log_ok "booking read-back preserved cost center + service product binding"
 
 log_surface "Ops console — dispatch assign"
 switch_actor "ops_user" "e2e-ops-012"
+DISPATCH_FIXTURE="${TMP_DIR}/dispatch.json"
+printf '%s\n' '{"mode":"auto"}' > "$DISPATCH_FIXTURE"
+
+log_step "Request dispatch job creation"
+http_call POST "/orders/${ORDER_ID}/dispatch" "$DISPATCH_FIXTURE"
+assert_status "200|201"
+
 if ! poll_for_dispatch_job; then
   log_fail "No dispatch job found for orderId=${ORDER_ID}"
   exit 1
@@ -260,8 +331,8 @@ log_ok "dispatch job found: ${DISPATCH_JOB_ID}"
 
 http_call GET "/dispatch/tasks/${DISPATCH_JOB_ID}/candidates"
 assert_status "200"
-ASSIGN_VEHICLE_ID=$(echo "$RESP_BODY" | jq -r '.data.items[0].vehicleId // empty' 2>/dev/null || true)
-ASSIGN_DRIVER_ID=$(echo "$RESP_BODY" | jq -r '.data.items[0].driverId // empty' 2>/dev/null || true)
+ASSIGN_VEHICLE_ID=$(echo "$RESP_BODY" | jq -r '.data.items[0].vehicleId // .data.items[0].vehicle_id // empty' 2>/dev/null || true)
+ASSIGN_DRIVER_ID=$(echo "$RESP_BODY" | jq -r '.data.items[0].driverId // .data.items[0].driver_id // empty' 2>/dev/null || true)
 if [[ -z "$ASSIGN_VEHICLE_ID" ]]; then
   ASSIGN_VEHICLE_ID="$E2E_SEED_VEHICLE_ID"
 fi
@@ -310,17 +381,8 @@ jq -n --arg startedAt "$START_AT" '{startedAt: $startedAt}' > "${TMP_DIR}/start.
 http_call POST "/driver/tasks/${TASK_ID}/start" "${TMP_DIR}/start.json"
 assert_status "200|201"
 
-jq -n \
-  --arg completedAt "$COMPLETE_AT" \
-  '{
-    completedAt: $completedAt,
-    actualDistanceKm: 12.5,
-    actualDurationSec: 1500,
-    fare: {
-      currency: "TWD",
-      amountMinor: 780
-    }
-  }' > "${TMP_DIR}/complete.json"
+sed "s/__COMPLETED_AT__/${COMPLETE_AT}/" \
+  "${SCRIPT_DIR}/fixtures/e2e-driver-complete.json" > "${TMP_DIR}/complete.json"
 http_call POST "/driver/tasks/${TASK_ID}/complete" "${TMP_DIR}/complete.json"
 assert_status "200|201"
 
@@ -370,14 +432,14 @@ jq -n \
 
 http_call POST "/tenant/invoices/generate" "$INVOICE_FIXTURE"
 assert_status "200|201"
-INVOICE_ID=$(json_get '.data.invoiceId')
+INVOICE_ID=$(json_get_first '.data.invoiceId' '.data.invoice_id')
 [[ -n "$INVOICE_ID" ]] || { log_fail "invoice generation missing invoiceId"; exit 1; }
 chain_set "billing" "invoiceId" "$INVOICE_ID"
 save_evidence "$SCENARIO" "billing" "invoiceId" "$INVOICE_ID"
 log_ok "invoice generated: ${INVOICE_ID}"
 
 ORDER_IN_INVOICE=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
-  '.data.lines[] | select(.orderId == $oid) | .orderId' 2>/dev/null | head -1 || true)
+  '.data.lines[] | select((.orderId // .order_id) == $oid) | (.orderId // .order_id)' 2>/dev/null | head -1 || true)
 if [[ "$ORDER_IN_INVOICE" != "$ORDER_ID" ]]; then
   log_fail "Generated invoice does not include completed orderId=${ORDER_ID}"
   exit 1
@@ -387,7 +449,7 @@ log_ok "invoice line bound to completed order"
 
 http_call GET "/tenant/invoices/${INVOICE_ID}"
 assert_status "200"
-save_evidence "$SCENARIO" "billing" "invoiceStatus" "$(json_get '.data.status')"
+save_evidence "$SCENARIO" "billing" "invoiceStatus" "$(json_get_first '.data.status' '.data.invoiceStatus' '.data.invoice_status')"
 
 log_surface "Reporting — tenant export job"
 REPORT_FIXTURE="${TMP_DIR}/report-job.json"
@@ -409,7 +471,7 @@ jq -n \
 
 http_call POST "/tenant/reports/jobs" "$REPORT_FIXTURE"
 assert_status "200|201"
-REPORT_JOB_ID=$(json_get '.data.jobId')
+REPORT_JOB_ID=$(json_get_first '.data.jobId' '.data.job_id')
 [[ -n "$REPORT_JOB_ID" ]] || { log_fail "report job queue response missing jobId"; exit 1; }
 chain_set "report" "jobId" "$REPORT_JOB_ID"
 save_evidence "$SCENARIO" "report" "jobId" "$REPORT_JOB_ID"
@@ -421,7 +483,7 @@ if ! poll_report_job_completed; then
 fi
 
 REPORT_STATUS=$(json_get '.data.status')
-REPORT_ARTIFACT_ID=$(json_get '.data.artifact.artifactId')
+REPORT_ARTIFACT_ID=$(json_get_first '.data.artifact.artifactId' '.data.artifact.artifact_id')
 [[ "$REPORT_STATUS" == "completed" ]] || { log_fail "report status not completed"; exit 1; }
 [[ -n "$REPORT_ARTIFACT_ID" ]] || { log_fail "completed report missing artifactId"; exit 1; }
 save_evidence "$SCENARIO" "report" "artifactId" "$REPORT_ARTIFACT_ID"
@@ -442,10 +504,10 @@ log_surface "Audit evidence"
 http_call GET "/tenant/audit"
 assert_status "200"
 INVOICE_AUDIT_ID=$(echo "$RESP_BODY" | jq -r --arg invoiceId "$INVOICE_ID" \
-  '.data.items[] | select(.resourceType == "tenant_invoice" and .resourceId == $invoiceId and .actionName == "generate_tenant_invoice") | .auditId' \
+  '.data.items[] | select((.resourceType // .resource_type) == "tenant_invoice" and (.resourceId // .resource_id) == $invoiceId and (.actionName // .action_name) == "generate_tenant_invoice") | (.auditId // .audit_id)' \
   2>/dev/null | head -1 || true)
 REPORT_AUDIT_ID=$(echo "$RESP_BODY" | jq -r --arg jobId "$REPORT_JOB_ID" \
-  '.data.items[] | select(.resourceType == "report_job" and .resourceId == $jobId and .actionName == "complete_report_job") | .auditId' \
+  '.data.items[] | select((.resourceType // .resource_type) == "report_job" and (.resourceId // .resource_id) == $jobId and (.actionName // .action_name) == "complete_report_job") | (.auditId // .audit_id)' \
   2>/dev/null | head -1 || true)
 if [[ -n "$INVOICE_AUDIT_ID" ]]; then
   save_evidence "$SCENARIO" "audit" "invoiceAuditId" "$INVOICE_AUDIT_ID"

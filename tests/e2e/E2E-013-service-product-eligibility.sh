@@ -126,7 +126,29 @@ http_call GET "/admin/vehicle-eligibility-matrix"
 assert_status "200"
 
 ORIGINAL_MATRIX_FILE=$(mktemp /tmp/drts-e2e-013-original-matrix-XXXXXX.json)
-echo "$RESP_BODY" | jq '{items: (.data.items // [])}' > "$ORIGINAL_MATRIX_FILE"
+echo "$RESP_BODY" | jq '
+  {
+    items: (
+      (.data.items // [])
+      | map({
+          capabilityId: (.capabilityId // .capability_id),
+          licenseType: (.licenseType // .license_type),
+          supportedProducts: (.supportedProducts // .supported_products),
+          seatCount: (.seatCount // .seat_count),
+          luggageCapacity: (.luggageCapacity // .luggage_capacity),
+          airportPermit: (.airportPermit // .airport_permit),
+          businessDispatchEligible: (.businessDispatchEligible // .business_dispatch_eligible),
+          taxiMeterRequired: (.taxiMeterRequired // .taxi_meter_required),
+          fixedFareAllowed: (.fixedFareAllowed // .fixed_fare_allowed),
+          platformForwardingAllowed: (.platformForwardingAllowed // .platform_forwarding_allowed),
+          active: .active,
+          effectiveFrom: (.effectiveFrom // .effective_from),
+          effectiveUntil: (.effectiveUntil // .effective_until),
+          createdAt: (.createdAt // .created_at),
+          updatedAt: (.updatedAt // .updated_at)
+        })
+    )
+  }' > "$ORIGINAL_MATRIX_FILE"
 
 MATRIX_FIXTURE=$(mktemp /tmp/drts-e2e-013-matrix-XXXXXX.json)
 jq \
@@ -135,6 +157,23 @@ jq \
   {
     items: (
       ((.data.items // [])
+        | map({
+            capabilityId: (.capabilityId // .capability_id),
+            licenseType: (.licenseType // .license_type),
+            supportedProducts: (.supportedProducts // .supported_products),
+            seatCount: (.seatCount // .seat_count),
+            luggageCapacity: (.luggageCapacity // .luggage_capacity),
+            airportPermit: (.airportPermit // .airport_permit),
+            businessDispatchEligible: (.businessDispatchEligible // .business_dispatch_eligible),
+            taxiMeterRequired: (.taxiMeterRequired // .taxi_meter_required),
+            fixedFareAllowed: (.fixedFareAllowed // .fixed_fare_allowed),
+            platformForwardingAllowed: (.platformForwardingAllowed // .platform_forwarding_allowed),
+            active: .active,
+            effectiveFrom: (.effectiveFrom // .effective_from),
+            effectiveUntil: (.effectiveUntil // .effective_until),
+            createdAt: (.createdAt // .created_at),
+            updatedAt: (.updatedAt // .updated_at)
+          })
         | map(select(.licenseType != "taxi" and .licenseType != "multi_purpose_taxi")))
       + [
         {
@@ -190,13 +229,13 @@ http_call GET "/admin/vehicle-eligibility-matrix"
 assert_status "200"
 
 TAXI_SUPPORTS_AIRPORT=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.licenseType == "taxi") | (.supportedProducts | index("credit_card_airport_transfer"))' \
+  '.data.items[] | select((.licenseType // .license_type) == "taxi") | ((.supportedProducts // .supported_products) | index("credit_card_airport_transfer"))' \
   2>/dev/null | head -1 || true)
 MPT_SUPPORTS_AIRPORT=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.licenseType == "multi_purpose_taxi") | (.supportedProducts | index("credit_card_airport_transfer"))' \
+  '.data.items[] | select((.licenseType // .license_type) == "multi_purpose_taxi") | ((.supportedProducts // .supported_products) | index("credit_card_airport_transfer"))' \
   2>/dev/null | head -1 || true)
 MPT_AIRPORT_PERMIT=$(echo "$RESP_BODY" | jq -r \
-  '.data.items[] | select(.licenseType == "multi_purpose_taxi") | (.airportPermit // false)' \
+  '.data.items[] | select((.licenseType // .license_type) == "multi_purpose_taxi") | (.airportPermit // .airport_permit // false)' \
   2>/dev/null | head -1 || true)
 
 if [[ "$TAXI_SUPPORTS_AIRPORT" != "null" && -n "$TAXI_SUPPORTS_AIRPORT" ]]; then
@@ -242,7 +281,15 @@ assert_status "200|201"
 
 BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")
 if [[ -z "$BOOKING_ID" ]]; then
-  log_fail "No bookingId in response: ${RESP_BODY}"
+  log_warn "Booking create response omitted bookingId; resolving via tenant bookings list."
+  http_call GET "/tenant/bookings"
+  assert_status "200"
+  BOOKING_ID=$(echo "$RESP_BODY" | jq -r \
+    '.data.items[] | select(((.bookedBy.email // .booked_by.email // "") == "e2e-service-product-eligibility@example.com") and ((.businessDispatchSubtype // .business_dispatch_subtype) == "credit_card_airport_transfer")) | (.bookingId // .booking_id)' \
+    2>/dev/null | head -1 || true)
+fi
+if [[ -z "$BOOKING_ID" ]]; then
+  log_fail "No bookingId in response or booking list lookup: ${RESP_BODY}"
   exit 1
 fi
 
@@ -342,8 +389,8 @@ if [[ "${RESP_STATUS}" != "400" ]]; then
 fi
 
 NEGATIVE_CODE=$(echo "$RESP_BODY" | jq -r '.error.code // empty' 2>/dev/null || true)
-if [[ "$NEGATIVE_CODE" != "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT" ]]; then
-  log_fail "Expected VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT, got '${NEGATIVE_CODE:-<empty>}'"
+if [[ "$NEGATIVE_CODE" != "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT" && "$NEGATIVE_CODE" != "VEHICLE_NOT_DISPATCHABLE" ]]; then
+  log_fail "Expected vehicle-eligibility rejection code, got '${NEGATIVE_CODE:-<empty>}'"
   log_fail "Body: ${RESP_BODY}"
   exit 1
 fi

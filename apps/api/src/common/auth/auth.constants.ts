@@ -144,6 +144,7 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "partner:entries:read",
     "partner:eligibility:read",
     "partner:eligibility:write",
+    "billing:read",
   ],
 };
 
