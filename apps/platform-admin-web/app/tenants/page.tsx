@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import React, {
   useCallback,
   useEffect,
@@ -562,12 +561,12 @@ export default function TenantsPage() {
         h: copy.columns.tenant,
         w: 240,
         r: (tenant) => (
-          <Link href={`/tenants/${tenant.id}`} style={tenantLinkStyle}>
+          <a href={`/tenants/${tenant.id}`} style={tenantLinkStyle}>
             <span style={tenantNameStyle}>{tenant.name}</span>
             <span style={tenantMetaStyle}>
               {tenant.code} · {tenant.id}
             </span>
-          </Link>
+          </a>
         ),
       },
       {
