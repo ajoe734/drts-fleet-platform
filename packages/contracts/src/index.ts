@@ -49,6 +49,8 @@ export type DispatchSemantics = (typeof DISPATCH_SEMANTICS)[number];
 export const BUSINESS_DISPATCH_SUBTYPES = [
   "credit_card_airport_transfer",
   "enterprise_dispatch",
+  "insurance_replacement_vehicle",
+  "travel_agency_transfer",
 ] as const;
 export type BusinessDispatchSubtype =
   (typeof BUSINESS_DISPATCH_SUBTYPES)[number];
@@ -3856,7 +3858,9 @@ export interface FleetPartnerPortalTripRecord {
   orderSource: OwnedOrderSource;
   businessDispatchSubtype:
     | "enterprise_dispatch"
-    | "credit_card_airport_transfer";
+    | "credit_card_airport_transfer"
+    | "insurance_replacement_vehicle"
+    | "travel_agency_transfer";
   grossEarning: MoneyAmount;
   subsidy: MoneyAmount;
   serviceProduct: string | null;
