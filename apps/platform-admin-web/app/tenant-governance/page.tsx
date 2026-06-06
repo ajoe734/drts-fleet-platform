@@ -129,24 +129,14 @@ function getThresholdTone(value: number): CanvasTone {
   return "success";
 }
 
-function getThresholdLabel(locale: string, value: number) {
-  if (locale === "en") {
-    if (value > 90) {
-      return "over_threshold";
-    }
-    if (value > 80) {
-      return "warning";
-    }
-    return "ok";
-  }
-
+function getThresholdLabelKey(value: number) {
   if (value > 90) {
-    return "超標";
+    return "tenantGovernance.status.overThreshold";
   }
   if (value > 80) {
-    return "警戒";
+    return "tenantGovernance.status.warning";
   }
-  return "正常";
+  return "tenantGovernance.status.ok";
 }
 
 function hasNoApprovers(flag: PlatformTenantGovernanceAlertFlag) {
@@ -154,7 +144,7 @@ function hasNoApprovers(flag: PlatformTenantGovernanceAlertFlag) {
 }
 
 export default function TenantGovernancePage() {
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [summary, setSummary] =
     useState<PlatformTenantGovernanceSummaryResponse | null>(null);
@@ -278,77 +268,10 @@ export default function TenantGovernancePage() {
     };
   }, [rows]);
 
-  const copy =
-    locale === "en"
-      ? {
-          title: "Cross-tenant Governance",
-          subtitle:
-            "quota usage · approval backlog · cost-center health · governance risk — Q-ADM01",
-          errorTitle: "Unable to load tenant governance heatmap",
-          loading: "Loading cross-tenant governance heatmap…",
-          empty: "No tenant governance rows are available yet.",
-          cardTitle: "Quota usage heatmap · top 8 tenant · current month",
-          columns: {
-            tenant: "TENANT",
-            plan: "PLAN",
-            usage: "USAGE (MTD)",
-            percent: "%",
-            status: "STATUS",
-          },
-          kpis: {
-            quotaWarn: "quota warning (>80%)",
-            approvalBacklog: "cross-tenant approval backlog",
-            costCenterAnomaly: "cost-center anomaly",
-            riskSignals: "governance risk signals",
-          },
-          quotaWarnSub: (count: number) => `across ${count} tenant(s)`,
-          approvalSub: (hours: number | null) =>
-            hours === null ? "no stale approvals" : `average ${hours} h`,
-          costCenterSub: "missing cost center owner or active rule",
-          riskSignalsSub: (
-            noApproverSignals: number,
-            quotaCriticalSignals: number,
-            pendingSignals: number,
-          ) =>
-            `no approver ${noApproverSignals} · quota critical ${quotaCriticalSignals} · stale approval ${pendingSignals}`,
-        }
-      : {
-          title: "跨租戶治理",
-          subtitle:
-            "quota usage · approval backlog · cost-center health · governance risk — Q-ADM01",
-          errorTitle: "無法載入跨租戶治理熱圖",
-          loading: "正在載入跨租戶治理熱圖…",
-          empty: "目前沒有 tenant governance 資料。",
-          cardTitle: "Quota 使用熱圖 · top 8 tenant · 本月",
-          columns: {
-            tenant: "TENANT",
-            plan: "PLAN",
-            usage: "USAGE (MTD)",
-            percent: "%",
-            status: "STATUS",
-          },
-          kpis: {
-            quotaWarn: "quota 警戒 (>80%)",
-            approvalBacklog: "跨租戶審批 backlog",
-            costCenterAnomaly: "cost-center 異常",
-            riskSignals: "治理風險訊號",
-          },
-          quotaWarnSub: (count: number) => `跨 ${count} 個租戶`,
-          approvalSub: (hours: number | null) =>
-            hours === null ? "目前沒有逾時待審" : `平均 ${hours} 小時`,
-          costCenterSub: "缺少 cost center owner 或 active rule",
-          riskSignalsSub: (
-            noApproverSignals: number,
-            quotaCriticalSignals: number,
-            pendingSignals: number,
-          ) =>
-            `approver 缺口 ${noApproverSignals} · quota critical ${quotaCriticalSignals} · stale approval ${pendingSignals}`,
-        };
-
   const columns = useMemo<CanvasTableColumn<GovernanceRow>[]>(
     () => [
       {
-        h: copy.columns.tenant,
+        h: t("tenantGovernance.col.tenant"),
         w: 220,
         r: (row) => (
           <div style={tenantCellStyle}>
@@ -358,20 +281,20 @@ export default function TenantGovernancePage() {
         ),
       },
       {
-        h: copy.columns.plan,
+        h: t("tenantGovernance.col.plan"),
         w: 120,
         mono: true,
         r: (row) => formatMonthlyPlan(row.quotaPlan, locale),
       },
       {
-        h: copy.columns.usage,
+        h: t("tenantGovernance.col.usage"),
         w: 120,
         mono: true,
         align: "right",
         r: (row) => formatCount(row.quotaUsed),
       },
       {
-        h: copy.columns.percent,
+        h: t("tenantGovernance.col.percent"),
         w: 200,
         r: (row) => (
           <div style={usageCellStyle}>
@@ -385,7 +308,7 @@ export default function TenantGovernancePage() {
         ),
       },
       {
-        h: copy.columns.status,
+        h: t("tenantGovernance.col.status"),
         w: 130,
         r: (row) => (
           <CanvasPill
@@ -393,20 +316,20 @@ export default function TenantGovernancePage() {
             tone={getThresholdTone(row.monthlyQuotaPercentUsed)}
             dot
           >
-            {getThresholdLabel(locale, row.monthlyQuotaPercentUsed)}
+            {t(getThresholdLabelKey(row.monthlyQuotaPercentUsed))}
           </CanvasPill>
         ),
       },
     ],
-    [copy.columns, locale],
+    [locale, t],
   );
 
   return (
     <>
       <CanvasPageHeader
         theme={theme}
-        title={copy.title}
-        subtitle={copy.subtitle}
+        title={t("tenantGovernance.title")}
+        subtitle={t("tenantGovernance.subtitle")}
       />
 
       <div style={pageBodyStyle}>
@@ -415,7 +338,7 @@ export default function TenantGovernancePage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title={copy.errorTitle}
+            title={t("tenantGovernance.errorTitle")}
             body={error}
           />
         ) : null}
@@ -423,71 +346,75 @@ export default function TenantGovernancePage() {
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={theme}
-            label={copy.kpis.quotaWarn}
+            label={t("tenantGovernance.kpi.quotaWarn")}
             value={metrics.quotaWarning}
             delta={
               metrics.quotaWarning > 0
-                ? locale === "en"
-                  ? "thresholdWarning"
-                  : "thresholdWarning"
+                ? t("tenantGovernance.delta.thresholdWarning")
                 : undefined
             }
             deltaTone={metrics.quotaWarning > 0 ? "down" : "neutral"}
-            sub={copy.quotaWarnSub(metrics.quotaWarning)}
+            sub={t("tenantGovernance.kpi.quotaWarnSub", {
+              count: metrics.quotaWarning,
+            })}
           />
           <CanvasKPI
             theme={theme}
-            label={copy.kpis.approvalBacklog}
+            label={t("tenantGovernance.kpi.approvalBacklog")}
             value={metrics.approvalBacklog}
             delta={
               metrics.approvalBacklog > 0
-                ? locale === "en"
-                  ? "ops_approval_triage"
-                  : "ops_approval_triage"
+                ? t("tenantGovernance.delta.approvalTriage")
                 : undefined
             }
             deltaTone={metrics.approvalBacklog > 0 ? "neutral" : "up"}
-            sub={copy.approvalSub(metrics.averagePendingHours)}
+            sub={
+              metrics.averagePendingHours === null
+                ? t("tenantGovernance.kpi.approvalSub.none")
+                : t("tenantGovernance.kpi.approvalSub.hours", {
+                    hours: metrics.averagePendingHours,
+                  })
+            }
           />
           <CanvasKPI
             theme={theme}
-            label={copy.kpis.costCenterAnomaly}
+            label={t("tenantGovernance.kpi.costCenterAnomaly")}
             value={metrics.costCenterAnomaly}
             delta={
               metrics.costCenterAnomaly > 0
-                ? locale === "en"
-                  ? "needs_governance_followup"
-                  : "需治理補件"
+                ? t("tenantGovernance.delta.followup")
                 : undefined
             }
             deltaTone={metrics.costCenterAnomaly > 0 ? "down" : "up"}
-            sub={copy.costCenterSub}
+            sub={t("tenantGovernance.kpi.costCenterSub")}
           />
           <CanvasKPI
             theme={theme}
-            label={copy.kpis.riskSignals}
+            label={t("tenantGovernance.kpi.riskSignals")}
             value={metrics.riskSignals}
             delta={
               metrics.riskSignals > 0
-                ? locale === "en"
-                  ? "triage open"
-                  : "待分流"
+                ? t("tenantGovernance.delta.triageOpen")
                 : undefined
             }
             deltaTone={metrics.riskSignals > 0 ? "down" : "up"}
-            sub={copy.riskSignalsSub(
-              metrics.noApproverSignals,
-              metrics.quotaCriticalSignals,
-              metrics.pendingSignals,
-            )}
+            sub={t("tenantGovernance.kpi.riskSignalsSub", {
+              noApproverSignals: metrics.noApproverSignals,
+              quotaCriticalSignals: metrics.quotaCriticalSignals,
+              pendingSignals: metrics.pendingSignals,
+            })}
           />
         </div>
 
-        <CanvasCard theme={theme} title={copy.cardTitle} padding={0}>
+        <CanvasCard
+          theme={theme}
+          title={t("tenantGovernance.cardTitle")}
+          padding={0}
+        >
           {loading && !summary ? (
-            <div style={emptyStateStyle}>{copy.loading}</div>
+            <div style={emptyStateStyle}>{t("tenantGovernance.loading")}</div>
           ) : rows.length === 0 ? (
-            <div style={emptyStateStyle}>{copy.empty}</div>
+            <div style={emptyStateStyle}>{t("tenantGovernance.empty")}</div>
           ) : (
             <CanvasTable theme={theme} columns={columns} rows={rows} />
           )}
