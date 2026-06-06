@@ -4,11 +4,12 @@
 // `/api/fleet-partner/*` endpoints exposed by `@drts/api-client`. Each page
 // calls one `load*()` accessor here; the accessor fetches partner-scoped data
 // through `getServerFleetPartnerClient()`, maps the contract records into the
-// display shapes the pages already render, and — when the endpoint is
-// unavailable, errors, or returns nothing — gracefully falls back to the
-// design fixtures (the ops-detail fallback pattern). The `source` flag lets a
-// page show the "design data" notice only when it is actually showing
-// fixtures.
+// display shapes the pages already render, and — only when the endpoint is
+// unavailable or errors — gracefully falls back to the design fixtures (the
+// ops-detail fallback pattern). A reachable endpoint that returns an empty
+// list is legitimate zero data and is rendered live (empty), not replaced with
+// demo rows. The `source` flag lets a page show the "design data" notice only
+// when it is actually showing fixtures.
 //
 // Endpoint coverage (DH-FLP-BE-CLIENT): dashboard, drivers, vehicles, trips,
 // quality-metrics, statements (+ revenue, derived from the latest statement).
@@ -37,6 +38,8 @@ import type {
 
 import { getServerFleetPartnerClient } from "./api-client.server";
 import {
+  FX_DASHBOARD_ATTENTION,
+  FX_DASHBOARD_SUPPLEMENTAL,
   FX_DASHBOARD_SUPPLY,
   FX_FLEET_CASES,
   FX_FLEET_DOCS,
@@ -47,7 +50,9 @@ import {
   FX_FLEET_TRAINING,
   FX_FLEET_TRIPS,
   FX_FLEET_VEHICLES,
+  type FleetAttentionBanner,
   type FleetCase,
+  type FleetDashboardSupplemental,
   type FleetDoc,
   type FleetDriver,
   type FleetQuality,
@@ -139,9 +144,8 @@ export async function loadDrivers(): Promise<DriversView> {
   try {
     const { client } = await getServerFleetPartnerClient();
     const records = await client.listFleetPortalDrivers();
-    if (records.length === 0) {
-      return { rows: FX_FLEET_DRIVERS, source: "fallback" };
-    }
+    // An empty list from a reachable endpoint is legitimate zero data, not a
+    // failure — render the live (empty) result rather than demo fixtures.
     return { rows: records.map(mapDriver), source: "live" };
   } catch {
     return { rows: FX_FLEET_DRIVERS, source: "fallback" };
@@ -173,9 +177,7 @@ export async function loadVehicles(): Promise<VehiclesView> {
   try {
     const { client } = await getServerFleetPartnerClient();
     const records = await client.listFleetPortalVehicles();
-    if (records.length === 0) {
-      return { rows: FX_FLEET_VEHICLES, source: "fallback" };
-    }
+    // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapVehicle), source: "live" };
   } catch {
     return { rows: FX_FLEET_VEHICLES, source: "fallback" };
@@ -230,9 +232,7 @@ export async function loadTrips(periodMonth?: string): Promise<TripsView> {
   try {
     const { client } = await getServerFleetPartnerClient();
     const records = await client.listFleetPortalTrips(periodMonth);
-    if (records.length === 0) {
-      return { rows: FX_FLEET_TRIPS, source: "fallback" };
-    }
+    // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapTrip), source: "live" };
   } catch {
     return { rows: FX_FLEET_TRIPS, source: "fallback" };
@@ -252,6 +252,13 @@ function mapQualityMetrics(
   const totalTrips = record.totalCompletedTrips + record.cancelledTripCount;
   const cancelRate =
     totalTrips > 0 ? (record.cancelledTripCount / totalTrips) * 100 : 0;
+  // "在線司機" is the online subset, derived from the active roster minus the
+  // offline count — activeDriverCount alone is the full roster and overstates
+  // who is online.
+  const onlineDriverCount = Math.max(
+    record.activeDriverCount - record.offlineDriverCount,
+    0,
+  );
   return [
     {
       zh: "完成趟次",
@@ -276,8 +283,8 @@ function mapQualityMetrics(
     },
     {
       zh: "在線司機",
-      en: "active_drivers",
-      v: record.activeDriverCount.toLocaleString("en-US"),
+      en: "online_drivers",
+      v: onlineDriverCount.toLocaleString("en-US"),
       tone: "neutral",
       delta: "—",
     },
@@ -331,9 +338,7 @@ export async function loadStatements(): Promise<StatementsView> {
   try {
     const { client } = await getServerFleetPartnerClient();
     const records = await client.listFleetPortalStatements();
-    if (records.length === 0) {
-      return { rows: FX_FLEET_STATEMENTS, source: "fallback" };
-    }
+    // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapStatement), source: "live" };
   } catch {
     return { rows: FX_FLEET_STATEMENTS, source: "fallback" };
@@ -396,14 +401,21 @@ export async function loadRevenue(): Promise<RevenueView> {
     const records = await client.listFleetPortalStatements();
     const latest = records[0];
     if (!latest) {
-      return fallback;
+      // Endpoint is reachable but the partner has no statements yet — this is
+      // legitimate zero data, so show an empty live revenue, not the demo one.
+      return {
+        period: "—",
+        status: "—",
+        payable: formatMoney(null),
+        lines: [],
+        source: "live",
+      };
     }
-    const lines = mapStatementLines(latest);
     return {
       period: latest.periodMonth,
       status: latest.payoutStatus === "paid" ? "paid" : "pending_confirm",
       payable: formatMoney(latest.shareAmount),
-      lines: lines.length > 0 ? lines : FX_FLEET_STATEMENT.lines,
+      lines: mapStatementLines(latest),
       source: "live",
     };
   } catch {
@@ -423,11 +435,23 @@ export interface DashboardView {
   supply: typeof FX_DASHBOARD_SUPPLY;
   recentTrips: FleetTrip[];
   source: DataSource;
+  // Compliance / cases / training KPIs, the attention banners, and the
+  // supply-by-service breakdown have no fleet-partner endpoint yet, so they are
+  // always design data. `supplementalSource` lets the page mark them as such
+  // even when the headline KPIs are live.
+  supplemental: FleetDashboardSupplemental;
+  attention: FleetAttentionBanner[];
+  supplementalSource: DataSource;
 }
 
 const DASHBOARD_FALLBACK: Omit<
   DashboardView,
-  "supply" | "recentTrips" | "source"
+  | "supply"
+  | "recentTrips"
+  | "source"
+  | "supplemental"
+  | "attention"
+  | "supplementalSource"
 > = {
   driverCount: "128",
   driverSub: "active 96 · offline 32",
@@ -439,8 +463,12 @@ const DASHBOARD_FALLBACK: Omit<
 
 export async function loadDashboard(): Promise<DashboardView> {
   // The recent-trips strip and the dashboard KPIs come from different
-  // endpoints; the supply-by-service breakdown has no endpoint yet and always
-  // uses the design fixture. `source` reflects the headline KPI record.
+  // endpoints; the supplemental KPIs / attention banners / supply-by-service
+  // breakdown have no endpoint yet and always use design fixtures. `source`
+  // reflects the headline KPI record; `supplementalSource` is always fallback.
+  const supplemental = FX_DASHBOARD_SUPPLEMENTAL;
+  const attention = FX_DASHBOARD_ATTENTION;
+  const supplementalSource: DataSource = "fallback";
   let recentTrips: FleetTrip[] = FX_FLEET_TRIPS.slice(0, 5);
   try {
     const tripsView = await loadTrips();
@@ -469,6 +497,9 @@ export async function loadDashboard(): Promise<DashboardView> {
       supply: FX_DASHBOARD_SUPPLY,
       recentTrips,
       source: "live",
+      supplemental,
+      attention,
+      supplementalSource,
     };
   } catch {
     return {
@@ -476,6 +507,9 @@ export async function loadDashboard(): Promise<DashboardView> {
       supply: FX_DASHBOARD_SUPPLY,
       recentTrips,
       source: "fallback",
+      supplemental,
+      attention,
+      supplementalSource,
     };
   }
 }

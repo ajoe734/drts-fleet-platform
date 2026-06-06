@@ -82,7 +82,7 @@ export default async function FleetDashboardPage() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
             gap: 12,
           }}
         >
@@ -111,34 +111,51 @@ export default async function FleetDashboardPage() {
             delta="待確認"
             deltaTone="neutral"
           />
+          <CanvasKPI
+            theme={theme}
+            label="本月總營收"
+            value={dashboard.grossRevenue}
+            sub="分潤前"
+          />
         </div>
+
+        {/* Supplemental KPIs / attention / supply have no endpoint yet, so mark
+            them as design data whenever the headline KPIs are live (when the
+            headline is itself fallback, the top notice already covers them). */}
+        {dashboard.source === "live" &&
+          dashboard.supplementalSource === "fallback" && (
+            <DataSourceNotice
+              theme={theme}
+              source={dashboard.supplementalSource}
+              body={t("data.fixtureNotice", locale)}
+            />
+          )}
+
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
             gap: 12,
           }}
         >
           <CanvasKPI
             theme={theme}
             label="缺件司機"
-            value="7"
-            delta="證照 / 保險"
+            value={dashboard.supplemental.missingDocsDrivers}
+            delta={dashboard.supplemental.missingDocsDelta}
             deltaTone="down"
           />
           <CanvasKPI
             theme={theme}
             label="事故 / 申訴"
-            value="3"
-            delta="需處理 1"
+            value={dashboard.supplemental.openCases}
+            delta={dashboard.supplemental.openCasesDelta}
             deltaTone="down"
           />
-          <CanvasKPI theme={theme} label="訓練完成率" value="92%" />
           <CanvasKPI
             theme={theme}
-            label="本月總營收"
-            value={dashboard.grossRevenue}
-            sub="分潤前"
+            label="訓練完成率"
+            value={dashboard.supplemental.trainingCompletion}
           />
         </div>
 
@@ -151,27 +168,16 @@ export default async function FleetDashboardPage() {
             subtitle={t("dashboard.attentionSub", locale)}
           >
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <CanvasBanner
-                theme={theme}
-                tone="warn"
-                icon="warn"
-                title="吳鎮宇 缺機場接送資格證 · airport_permit missing"
-                body="缺件期間無法接機場接送任務。請協助補件。"
-              />
-              <CanvasBanner
-                theme={theme}
-                tone="danger"
-                icon="warn"
-                title="cmp_0908 · 司機行為申訴 · 車行責任 · SLA breached"
-                body="黃文豪 言語不當申訴升級，責任歸屬車行。需於 24h 內回覆處理方案。"
-              />
-              <CanvasBanner
-                theme={theme}
-                tone="warn"
-                icon="warn"
-                title="保險代步流程訓練完成率 55%"
-                body="22 / 40 司機完成。未完成者無法接保險代步任務。"
-              />
+              {dashboard.attention.map((banner) => (
+                <CanvasBanner
+                  key={banner.title}
+                  theme={theme}
+                  tone={banner.tone}
+                  icon="warn"
+                  title={banner.title}
+                  body={banner.body}
+                />
+              ))}
             </div>
           </CanvasCard>
 
