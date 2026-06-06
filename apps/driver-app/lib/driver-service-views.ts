@@ -6,6 +6,7 @@ import type {
   UnifiedDriverTaskView,
 } from "@drts/contracts";
 
+import { formatMoney } from "@/lib/money";
 import {
   formatDriverTaskTypeLabel,
   type DriverLocale,
@@ -127,15 +128,21 @@ function resolveTaskServiceLabel(
 function resolveTaskSourceLabel(task: ServiceAwareTaskView) {
   switch (task.sourceType) {
     case "partner":
-      return "合作車隊 / Fleet Partner";
+      return task.platformDisplayName?.trim()
+        ? `${task.platformDisplayName.trim()} / Fleet Partner`
+        : "合作車隊 / Fleet Partner";
     case "forwarded":
-      return "來源平台 / Forwarded";
+      return task.platformDisplayName?.trim()
+        ? `${task.platformDisplayName.trim()} / Forwarded Platform`
+        : "來源平台 / Forwarded Platform";
     case "owned":
       return "自營派單 / Owned";
     default:
       return task.sourcePlatform === "drts"
         ? "自營派單 / Owned"
-        : "來源平台 / Forwarded";
+        : task.platformDisplayName?.trim()
+          ? `${task.platformDisplayName.trim()} / Forwarded Platform`
+          : "來源平台 / Forwarded Platform";
   }
 }
 
@@ -228,6 +235,53 @@ function resolveAuthorityLabel(task: ServiceAwareTaskView) {
   return `${routeCopy} · ${fareCopy}`;
 }
 
+function resolveRouteLabel(
+  task: ServiceAwareTaskView,
+  order: OwnedOrderRecord | null,
+) {
+  const routeLocked =
+    task.routeAuthority === "external" ||
+    task.routeAuthority === "partner" ||
+    task.routeLocked;
+  const routeSummary = [task.pickupSummary, task.dropoffSummary]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(" → ");
+
+  const routeControl = routeLocked
+    ? "路線鎖定 / Locked route"
+    : "路線可調整 / Editable route";
+
+  if (routeSummary) {
+    return `${routeControl} · ${routeSummary}`;
+  }
+
+  if (order?.pickup.address?.trim() && order?.dropoff.address?.trim()) {
+    return `${routeControl} · ${order.pickup.address.trim()} → ${order.dropoff.address.trim()}`;
+  }
+
+  return routeControl;
+}
+
+function resolveFareLabel(
+  task: ServiceAwareTaskView,
+  order: OwnedOrderRecord | null,
+) {
+  const amountLabel = order?.quotedFare ? formatMoney(order.quotedFare) : null;
+  const priceMode = order?.fixedPrice
+    ? "固定車資 / Fixed fare"
+    : "浮動車資 / Variable fare";
+  const authorityLabel =
+    task.fareAuthority === "external_platform"
+      ? "平台計價 / Platform fare"
+      : "DRTS 計價 / DRTS fare";
+
+  if (amountLabel) {
+    return `${priceMode} · ${amountLabel} · ${authorityLabel}`;
+  }
+
+  return `${priceMode} · ${authorityLabel}`;
+}
+
 function resolveProofRequired(
   task: ServiceAwareTaskView,
   order: OwnedOrderRecord | null,
@@ -276,6 +330,16 @@ export function buildTaskCardDetailItems(
       key: "vehicle",
       label: "車格 / Eligibility",
       value: resolveVehicleEligibilityLabel(nextTask, order),
+    },
+    {
+      key: "route",
+      label: "路線 / Route",
+      value: resolveRouteLabel(nextTask, order),
+    },
+    {
+      key: "fare",
+      label: "車資 / Fare",
+      value: resolveFareLabel(nextTask, order),
     },
     {
       key: "authority",

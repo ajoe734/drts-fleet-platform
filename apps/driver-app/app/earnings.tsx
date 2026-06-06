@@ -51,11 +51,11 @@ const THEME = driverCanvasTheme;
 const PERIOD_OPTIONS = driverEarningsPeriodOptions;
 const DEFAULT_CURRENCY = "TWD";
 const GROUP_OPTIONS: Array<{ label: string; value: EarningsGroupBy }> = [
-  { label: "平台", value: "platform" },
-  { label: "服務", value: "service_product" },
-  { label: "租戶", value: "tenant" },
-  { label: "車隊", value: "fleet" },
-  { label: "總計", value: "total" },
+  { label: "平台 / Platform", value: "platform" },
+  { label: "服務 / Service", value: "service_product" },
+  { label: "租戶 / Tenant", value: "tenant" },
+  { label: "車隊 / Fleet", value: "fleet" },
+  { label: "總計 / Total", value: "total" },
 ];
 
 function toErrorMessage(error: unknown): string {

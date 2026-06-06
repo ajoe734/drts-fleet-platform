@@ -151,6 +151,7 @@ describe("buildTaskCardDetailItems", () => {
       tenantServiceProgramName: "Airport Shuttle",
       vehicleEligibilitySummary: "多元計程車可派",
       proofRequired: true,
+      routeLocked: true,
     });
     const order = makeOrder();
 
@@ -159,11 +160,23 @@ describe("buildTaskCardDetailItems", () => {
     expect(items.find((item) => item.key === "service")?.value).toContain(
       "Enterprise Dispatch",
     );
+    expect(items.find((item) => item.key === "source")?.value).toContain(
+      "Owned",
+    );
     expect(items.find((item) => item.key === "tenant")?.value).toBe(
       "Acme Corp",
     );
     expect(items.find((item) => item.key === "program")?.value).toBe(
       "Airport Shuttle",
+    );
+    expect(items.find((item) => item.key === "route")?.value).toContain(
+      "Locked route",
+    );
+    expect(items.find((item) => item.key === "fare")?.value).toContain(
+      "Fixed fare",
+    );
+    expect(items.find((item) => item.key === "fare")?.value).toContain(
+      "DRTS fare",
     );
     expect(items.find((item) => item.key === "fleet")?.value).toContain(
       "Fleet fleet-001",
