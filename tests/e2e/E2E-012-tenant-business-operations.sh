@@ -361,6 +361,41 @@ PERIOD_MONTH="${COMPLETE_AT:0:7}"
 save_evidence "$SCENARIO" "driver" "periodMonth" "$PERIOD_MONTH"
 log_ok "driver lifecycle completed"
 
+log_surface "Tenant portal — completed order visibility"
+switch_actor "tenant_admin" "$TENANT_ADMIN_USER_ID" "$E2E_SEED_TENANT_ID"
+http_call GET "/tenant/orders?serviceProduct=enterprise_dispatch&costCenterCode=${CC_CODE}&status=completed"
+assert_status "200"
+VISIBLE_ORDER_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .orderId' 2>/dev/null | head -1 || true)
+VISIBLE_ORDER_USER_EMAIL=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .bookedBy.email // empty' 2>/dev/null | head -1 || true)
+VISIBLE_ORDER_COST_CENTER=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .costCenter // empty' 2>/dev/null | head -1 || true)
+VISIBLE_ORDER_SERVICE_PRODUCT=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+  '.data.items[] | select(.orderId == $oid) | .businessDispatchSubtype // empty' 2>/dev/null | head -1 || true)
+
+[[ "$VISIBLE_ORDER_ID" == "$ORDER_ID" ]] || {
+  log_fail "tenant orders list does not surface completed orderId=${ORDER_ID}"
+  exit 1
+}
+[[ "$VISIBLE_ORDER_USER_EMAIL" == "tenant-biz-admin@example.test" ]] || {
+  log_fail "tenant orders list bookedBy.email expected tenant-biz-admin@example.test, got '${VISIBLE_ORDER_USER_EMAIL:-<empty>}'"
+  exit 1
+}
+[[ "$VISIBLE_ORDER_COST_CENTER" == "$CC_CODE" ]] || {
+  log_fail "tenant orders list costCenter expected ${CC_CODE}, got '${VISIBLE_ORDER_COST_CENTER:-<empty>}'"
+  exit 1
+}
+[[ "$VISIBLE_ORDER_SERVICE_PRODUCT" == "enterprise_dispatch" ]] || {
+  log_fail "tenant orders list businessDispatchSubtype expected enterprise_dispatch, got '${VISIBLE_ORDER_SERVICE_PRODUCT:-<empty>}'"
+  exit 1
+}
+save_evidence "$SCENARIO" "tenant" "visibleOrderId" "$VISIBLE_ORDER_ID"
+save_evidence "$SCENARIO" "tenant" "visibleOrderUserEmail" "$VISIBLE_ORDER_USER_EMAIL"
+save_evidence "$SCENARIO" "tenant" "visibleOrderCostCenter" "$VISIBLE_ORDER_COST_CENTER"
+save_evidence "$SCENARIO" "tenant" "visibleOrderServiceProduct" "$VISIBLE_ORDER_SERVICE_PRODUCT"
+log_ok "tenant orders view preserved order/user/cost center/service product visibility"
+
 log_surface "Billing — generate driver statement for completed trip"
 switch_actor "ops_user" "e2e-ops-012"
 STATEMENT_FIXTURE="${TMP_DIR}/driver-statement.json"
@@ -494,7 +529,7 @@ jq -n \
   --arg costCenterCode "$CC_CODE" \
   --arg serviceProduct "enterprise_dispatch" \
   '{
-    jobType: "tenant_business_operations",
+    jobType: "monthly_trip_report",
     format: "json",
     filters: {
       orderId: $orderId,
@@ -570,6 +605,6 @@ assert_chain "report" "jobId"
 print_chain_summary
 
 echo ""
-log_warn "E2E-012 still records report export row fields as soft evidence because tenant_business_operations report rows are not yet populated. Dashboard/payables/statements hard-assert when deployed on the target env and otherwise remain recorded probes backed by driver-statement/invoice evidence."
+log_warn "E2E-012 still records report export row fields as soft evidence because monthly_trip_report artifacts preserve filters/artifacts but do not yet materialize tenant-business rows for order/user/cost center/service product. Dashboard/payables/statements hard-assert when deployed on the target env and otherwise remain recorded probes backed by driver-statement/invoice evidence."
 log_ok "E2E-012 complete — tenant booking → trip completion → payable/statement evidence → invoice → report chain passed."
 echo -e "Evidence log: ${EVIDENCE_FILE}"
