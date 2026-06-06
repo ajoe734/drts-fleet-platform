@@ -97,9 +97,8 @@ type VehicleAction = {
 type MaintenanceRow = Record<string, unknown> & {
   id: ReactNode;
   kind: string;
-  status: string;
+  status: ReactNode;
   scheduled: string;
-  overdue: boolean;
 };
 
 type ContractRow = Record<string, unknown> & {
@@ -107,15 +106,14 @@ type ContractRow = Record<string, unknown> & {
   partner: string;
   type: string;
   term: string;
-  status: string;
-  expiringSoon: boolean;
+  status: ReactNode;
 };
 
 type IncidentRow = Record<string, unknown> & {
   id: ReactNode;
   title: string;
-  severity: string;
-  status: string;
+  severity: ReactNode;
+  status: ReactNode;
   updated: string;
 };
 
@@ -1390,24 +1388,45 @@ export default async function VehicleDetailPage({
 
   const maintenanceRows: MaintenanceRow[] = relatedMaintenance
     .slice(0, 5)
-    .map((record) => ({
-      id: (
-        <Link
-          href={`/maintenance?vehicleId=${encodeURIComponent(record.vehicleId)}`}
-          prefetch={false}
-          style={{ color: theme.text, textDecoration: "none", ...monoStyle }}
-        >
-          {record.maintenanceId}
-        </Link>
-      ),
-      kind: formatOpsCodeLabel(locale, record.type),
-      status: formatOpsCodeLabel(
+    .map((record) => {
+      const overdue = isMaintenanceOverdue(record);
+      const statusLabel = formatOpsCodeLabel(
         locale,
-        isMaintenanceOverdue(record) ? "overdue" : record.status,
-      ),
-      scheduled: formatDateTime(locale, record.scheduledAt ?? record.updatedAt),
-      overdue: isMaintenanceOverdue(record),
-    }));
+        overdue ? "overdue" : record.status,
+      );
+
+      return {
+        id: (
+          <Link
+            href={`/maintenance?vehicleId=${encodeURIComponent(record.vehicleId)}`}
+            prefetch={false}
+            style={{ color: theme.text, textDecoration: "none", ...monoStyle }}
+          >
+            {record.maintenanceId}
+          </Link>
+        ),
+        kind: formatOpsCodeLabel(locale, record.type),
+        status: (
+          <Pill
+            theme={theme}
+            tone={getPillTone(
+              overdue
+                ? "danger"
+                : statusLabel === formatOpsCodeLabel(locale, "completed")
+                  ? "success"
+                  : "warn",
+            )}
+            dot
+          >
+            {statusLabel}
+          </Pill>
+        ),
+        scheduled: formatDateTime(
+          locale,
+          record.scheduledAt ?? record.updatedAt,
+        ),
+      };
+    });
 
   const maintenanceColumns: CanvasTableColumn<MaintenanceRow>[] = [
     { h: "WO", k: "id", w: 120, mono: true },
@@ -1418,22 +1437,8 @@ export default async function VehicleDetailPage({
     },
     {
       h: "STATUS",
+      k: "status",
       w: 140,
-      r: (row) => (
-        <Pill
-          theme={theme}
-          tone={getPillTone(
-            row.overdue
-              ? "danger"
-              : row.status === formatOpsCodeLabel(locale, "completed")
-                ? "success"
-                : "warn",
-          )}
-          dot
-        >
-          {row.status}
-        </Pill>
-      ),
     },
     {
       h: copy(locale, "Scheduled", "排定"),
@@ -1442,25 +1447,36 @@ export default async function VehicleDetailPage({
     },
   ];
 
-  const contractRows: ContractRow[] = relatedContracts.map((record) => ({
-    id: (
-      <Link
-        href={`/contracts/${encodeURIComponent(record.contractId)}`}
-        prefetch={false}
-        style={{ color: theme.text, textDecoration: "none", ...monoStyle }}
-      >
-        {record.contractId}
-      </Link>
-    ),
-    partner: formatPartnerLabel(record),
-    type: formatOpsCodeLabel(locale, record.contractType),
-    term: `${formatDateOnly(locale, record.startAt)} → ${formatDateOnly(
-      locale,
-      record.endAt,
-    )}`,
-    status: formatOpsCodeLabel(locale, record.lifecycleStatus),
-    expiringSoon: isContractExpiringSoon(record),
-  }));
+  const contractRows: ContractRow[] = relatedContracts.map((record) => {
+    const statusLabel = formatOpsCodeLabel(locale, record.lifecycleStatus);
+
+    return {
+      id: (
+        <Link
+          href={`/contracts/${encodeURIComponent(record.contractId)}`}
+          prefetch={false}
+          style={{ color: theme.text, textDecoration: "none", ...monoStyle }}
+        >
+          {record.contractId}
+        </Link>
+      ),
+      partner: formatPartnerLabel(record),
+      type: formatOpsCodeLabel(locale, record.contractType),
+      term: `${formatDateOnly(locale, record.startAt)} → ${formatDateOnly(
+        locale,
+        record.endAt,
+      )}`,
+      status: (
+        <Pill
+          theme={theme}
+          tone={isContractExpiringSoon(record) ? "warn" : "success"}
+          dot
+        >
+          {statusLabel}
+        </Pill>
+      ),
+    };
+  });
 
   const contractColumns: CanvasTableColumn<ContractRow>[] = [
     { h: "CONTRACT", k: "id", w: 130, mono: true },
@@ -1469,70 +1485,71 @@ export default async function VehicleDetailPage({
     { h: copy(locale, "Term", "期間"), k: "term", mono: true, w: 200 },
     {
       h: "STATUS",
+      k: "status",
       w: 130,
-      r: (row) => (
-        <Pill theme={theme} tone={row.expiringSoon ? "warn" : "success"} dot>
-          {row.status}
-        </Pill>
-      ),
     },
   ];
 
   const incidentRows: IncidentRow[] = relatedIncidents
     .slice(0, 5)
-    .map((record) => ({
-      id: (
-        <Link
-          href={`/incidents/${encodeURIComponent(record.incidentId)}`}
-          prefetch={false}
-          style={{ color: theme.text, textDecoration: "none", ...monoStyle }}
-        >
-          {record.incidentId}
-        </Link>
-      ),
-      title: record.title,
-      severity: formatOpsCodeLabel(locale, record.severity),
-      status: formatOpsCodeLabel(locale, record.status),
-      updated: formatDateTime(locale, record.updatedAt),
-    }));
+    .map((record) => {
+      const severityLabel = formatOpsCodeLabel(locale, record.severity);
+      const statusLabel = formatOpsCodeLabel(locale, record.status);
+
+      return {
+        id: (
+          <Link
+            href={`/incidents/${encodeURIComponent(record.incidentId)}`}
+            prefetch={false}
+            style={{ color: theme.text, textDecoration: "none", ...monoStyle }}
+          >
+            {record.incidentId}
+          </Link>
+        ),
+        title: record.title,
+        severity: (
+          <Pill
+            theme={theme}
+            tone={
+              severityLabel === formatOpsCodeLabel(locale, "critical") ||
+              severityLabel === formatOpsCodeLabel(locale, "high")
+                ? "danger"
+                : "warn"
+            }
+            dot
+          >
+            {severityLabel}
+          </Pill>
+        ),
+        status: (
+          <Pill
+            theme={theme}
+            tone={
+              statusLabel === formatOpsCodeLabel(locale, "closed")
+                ? "success"
+                : "info"
+            }
+            dot
+          >
+            {statusLabel}
+          </Pill>
+        ),
+        updated: formatDateTime(locale, record.updatedAt),
+      };
+    });
 
   const incidentColumns: CanvasTableColumn<IncidentRow>[] = [
     { h: "INCIDENT", k: "id", w: 120, mono: true },
     { h: copy(locale, "Title", "標題"), k: "title", w: 240 },
     {
       h: copy(locale, "Severity", "嚴重度"),
+      k: "severity",
       w: 120,
-      r: (row) => (
-        <Pill
-          theme={theme}
-          tone={
-            row.severity === formatOpsCodeLabel(locale, "critical") ||
-            row.severity === formatOpsCodeLabel(locale, "high")
-              ? "danger"
-              : "warn"
-          }
-          dot
-        >
-          {row.severity}
-        </Pill>
-      ),
     },
     {
       h: copy(locale, "Status", "狀態"),
+      k: "status",
       w: 120,
-      r: (row) => (
-        <Pill
-          theme={theme}
-          tone={
-            row.status === formatOpsCodeLabel(locale, "closed")
-              ? "success"
-              : "info"
-          }
-          dot
-        >
-          {row.status}
-        </Pill>
-      ),
     },
     { h: copy(locale, "Updated", "更新"), k: "updated", mono: true, w: 180 },
   ];
