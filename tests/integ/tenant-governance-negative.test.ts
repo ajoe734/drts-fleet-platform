@@ -65,6 +65,7 @@ function createHarness() {
     auditNotificationService,
     tenantPartnerService,
     ownedMobilityService,
+    tenantsService,
     platformTenantGovernanceService,
   };
 }
@@ -128,6 +129,40 @@ async function expectApiErrorCode(
 describe("tenant governance negative-path integration", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("surfaces rollout gate authority instead of deriving governance risk from stage", () => {
+    const { tenantsService, platformTenantGovernanceService } = createHarness();
+
+    const created = tenantsService.create({
+      name: "Blocked Rollout Tenant",
+      code: "blocked_rollout",
+    });
+
+    tenantsService.updateOnboarding(created.id, {
+      rollout: {
+        sandboxStatus: "blocked",
+        notes: "Sandbox evidence is incomplete.",
+      },
+    });
+
+    const blockedRow = platformTenantGovernanceService
+      .listSummary()
+      .items.find((row) => row.tenantId === created.id);
+
+    expect(blockedRow).toBeDefined();
+    expect(blockedRow?.tenantRolloutStage).toBe("sandbox");
+    expect(blockedRow?.tenantRolloutGateStatus).toBe("blocked");
+    expect(blockedRow?.alertFlags).toContain("blocked_rollout_gate");
+
+    tenantsService.setRollbackHold(created.id);
+
+    const heldRow = platformTenantGovernanceService
+      .listSummary()
+      .items.find((row) => row.tenantId === created.id);
+
+    expect(heldRow?.tenantRolloutGateStatus).toBe("blocked");
+    expect(heldRow?.alertFlags).toContain("rollback_hold");
   });
 
   it("rejects unknown cost centers and preserves validation audit evidence", async () => {
