@@ -20,6 +20,24 @@ export default async function FleetDriversPage() {
   const theme = buildFleetTheme();
   const { rows, source } = await loadDrivers();
 
+  // Header tab counts are derived from the loaded rows (live partner-scoped
+  // data, or fixtures via the same seam on fallback) instead of fixed design
+  // numbers. 缺件 / 訓練未完成 reflect whatever the rows carry — when the live
+  // drivers endpoint does not yet surface per-driver doc / training status,
+  // those map to "complete" and the counts read 0 rather than a fabricated value.
+  const tabCounts = {
+    all: rows.length,
+    available: rows.filter((r) => r.status === "available").length,
+    missingDocs: rows.filter((r) => r.docs !== "complete").length,
+    trainingIncomplete: rows.filter((r) => r.training !== "complete").length,
+  };
+  const tabs = [
+    `${t("drivers.tabAll", locale)} ${tabCounts.all}`,
+    `${t("drivers.tabAvailable", locale)} ${tabCounts.available}`,
+    `${t("drivers.tabMissingDocs", locale)} ${tabCounts.missingDocs}`,
+    `${t("drivers.tabTrainingIncomplete", locale)} ${tabCounts.trainingIncomplete}`,
+  ];
+
   const columns: CanvasTableColumn<FleetDriver>[] = [
     {
       h: "DRIVER",
@@ -117,8 +135,8 @@ export default async function FleetDriversPage() {
         theme={theme}
         title={t("drivers.title", locale)}
         subtitle={t("drivers.subtitle", locale)}
-        tabs={["全部 128", "可接單 96", "缺件 7", "訓練未完成 12"]}
-        activeTab="全部 128"
+        tabs={tabs}
+        activeTab={tabs[0]}
         actions={
           <CanvasBtn theme={theme} variant="primary" icon="users">
             {t("dashboard.recruit", locale)}

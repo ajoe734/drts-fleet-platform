@@ -50,6 +50,7 @@ import {
   FX_FLEET_TRAINING,
   FX_FLEET_TRIPS,
   FX_FLEET_VEHICLES,
+  FX_TRAINING_OVERDUE_INCOMPLETE,
   type FleetAttentionBanner,
   type FleetCase,
   type FleetDashboardSupplemental,
@@ -550,10 +551,61 @@ export async function loadDocuments(): Promise<DocumentsView> {
 
 export interface TrainingView {
   rows: FleetTraining[];
+  // Header KPIs. `completionPct` and `pendingHeadcount` are derived from the
+  // course rows (the same seam data the page lists). `overdueIncomplete` has no
+  // backing field on any fleet-partner endpoint yet, so it is supplemental
+  // design data carried behind the seam (like the dashboard supplemental KPIs)
+  // rather than a literal in the render path.
+  summary: {
+    completionPct: string;
+    pendingHeadcount: string;
+    overdueIncomplete: string;
+  };
   source: DataSource;
+}
+
+function summariseTraining(rows: FleetTraining[]): TrainingView["summary"] {
+  const completed = rows.reduce((sum, c) => sum + c.completed, 0);
+  const total = rows.reduce((sum, c) => sum + c.total, 0);
+  const completionPct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  return {
+    completionPct: `${completionPct}%`,
+    pendingHeadcount: (total - completed).toLocaleString("en-US"),
+    overdueIncomplete: FX_TRAINING_OVERDUE_INCOMPLETE,
+  };
 }
 
 export async function loadTraining(): Promise<TrainingView> {
   // No /api/fleet-partner/training endpoint in DH-FLP-BE-CLIENT yet.
-  return { rows: FX_FLEET_TRAINING, source: "fallback" };
+  return {
+    rows: FX_FLEET_TRAINING,
+    summary: summariseTraining(FX_FLEET_TRAINING),
+    source: "fallback",
+  };
+}
+
+// --- shell nav badges -------------------------------------------------------
+
+// Counts shown as nav badges in the global shell. Each is derived from the
+// same seam the corresponding page renders from — drivers from the live
+// `/api/fleet-partner/drivers` count, documents / cases from their fixture
+// loaders until a dedicated endpoint ships — so the shell never hardcodes
+// fixture literals. A zero count renders no badge.
+export interface NavBadges {
+  drivers: number;
+  documents: number;
+  cases: number;
+}
+
+export async function loadNavBadges(): Promise<NavBadges> {
+  const [drivers, documents, cases] = await Promise.all([
+    loadDrivers(),
+    loadDocuments(),
+    loadCases(),
+  ]);
+  return {
+    drivers: drivers.rows.length,
+    documents: documents.rows.length,
+    cases: cases.rows.length,
+  };
 }

@@ -41,6 +41,10 @@ const zh: Dict = {
 
   "drivers.title": "司機",
   "drivers.subtitle": "旗下司機歸屬 · 服務資格 · 文件 / 訓練狀態",
+  "drivers.tabAll": "全部",
+  "drivers.tabAvailable": "可接單",
+  "drivers.tabMissingDocs": "缺件",
+  "drivers.tabTrainingIncomplete": "訓練未完成",
   "vehicles.title": "車輛",
   "vehicles.subtitle": "車輛狀態 · 服務資格 · 保險與檢驗",
   "vehicles.add": "新增車輛",
@@ -64,6 +68,10 @@ const zh: Dict = {
   "documents.title": "文件 · Documents",
   "documents.subtitle":
     "缺件追蹤 · 證照 / 保險 / 服務資格 · owner 區分車行與司機",
+  "documents.tabTodo": "需處理",
+  "documents.tabAll": "全部",
+  "documents.tabFleet": "車行責任",
+  "documents.tabDriver": "司機責任",
   "documents.warnTitle": "缺件期間影響派工",
   "documents.warnBody":
     "缺件或過期文件會使司機 / 車輛無法接對應的 service product 任務。請優先處理機場接送與保險代步相關資格。",
@@ -72,6 +80,10 @@ const zh: Dict = {
   "training.courses": "課程完成度",
   "cases.title": "事故 / 申訴",
   "cases.subtitle": "責任歸屬車行 / 共同 / 平台 · 車行需處理屬於車行責任的案件",
+  "cases.tabAll": "全部",
+  "cases.tabFleet": "車行責任",
+  "cases.tabShared": "共同責任",
+  "cases.tabClosed": "已結案",
   "quality.title": "品質指標 · Quality Metrics",
   "quality.subtitle": "車行整體品質 · 影響分潤績效獎金與合作評等",
   "quality.responsibility": "品質責任說明",
@@ -117,6 +129,10 @@ const en: Dict = {
   "drivers.title": "Drivers",
   "drivers.subtitle":
     "Affiliation · service eligibility · document / training status",
+  "drivers.tabAll": "All",
+  "drivers.tabAvailable": "Available",
+  "drivers.tabMissingDocs": "Missing docs",
+  "drivers.tabTrainingIncomplete": "Training incomplete",
   "vehicles.title": "Vehicles",
   "vehicles.subtitle":
     "Vehicle status · service eligibility · insurance & inspection",
@@ -145,6 +161,10 @@ const en: Dict = {
   "documents.title": "Documents",
   "documents.subtitle":
     "Missing-document tracking · license / insurance / eligibility · fleet vs driver owner",
+  "documents.tabTodo": "To handle",
+  "documents.tabAll": "All",
+  "documents.tabFleet": "Fleet-owned",
+  "documents.tabDriver": "Driver-owned",
   "documents.warnTitle": "Missing documents block dispatch",
   "documents.warnBody":
     "Missing or expired documents stop a driver / vehicle from taking the matching service product. Prioritise airport-transfer and insurance-replacement eligibility.",
@@ -155,6 +175,10 @@ const en: Dict = {
   "cases.title": "Incidents / Complaints",
   "cases.subtitle":
     "Responsibility fleet / shared / platform · the fleet handles fleet-owned cases",
+  "cases.tabAll": "All",
+  "cases.tabFleet": "Fleet-owned",
+  "cases.tabShared": "Shared",
+  "cases.tabClosed": "Closed",
   "quality.title": "Quality Metrics",
   "quality.subtitle":
     "Overall fleet quality · drives performance bonus and partnership rating",

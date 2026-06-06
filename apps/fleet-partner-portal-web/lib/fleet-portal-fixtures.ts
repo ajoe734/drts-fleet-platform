@@ -425,6 +425,11 @@ export const FX_FLEET_TRAINING: FleetTraining[] = [
   },
 ];
 
+// Overdue-incomplete training headcount. No fleet-partner training endpoint
+// surfaces an "overdue" flag yet, so this stays a supplemental design value
+// behind the seam rather than a literal in the training page render path.
+export const FX_TRAINING_OVERDUE_INCOMPLETE = "6";
+
 export type FleetCase = {
   id: string;
   type: "complaint" | "incident";

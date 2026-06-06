@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { FleetPortalShell } from "@/components/fleet-portal-shell";
 import { buildFleetPortalNav } from "@/lib/fleet-portal-nav";
+import { loadNavBadges } from "@/lib/fleet-portal-data.server";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -21,7 +22,8 @@ export default async function RootLayout({
   children: ReactNode;
 }) {
   const locale = await getServerLocale();
-  const nav = buildFleetPortalNav(locale);
+  const badges = await loadNavBadges();
+  const nav = buildFleetPortalNav(locale, badges);
 
   return (
     <html lang={locale}>

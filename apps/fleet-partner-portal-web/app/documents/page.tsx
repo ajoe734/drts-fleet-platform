@@ -21,6 +21,17 @@ export default async function FleetDocumentsPage() {
   const theme = buildFleetTheme();
   const { rows, source } = await loadDocuments();
 
+  // Tab counts come from the loaded rows (live, or fixtures through the same
+  // seam on fallback) rather than fixed design numbers. Every tracked document
+  // row needs handling, so "需處理" is the full row count; "全部" is a plain
+  // label without a count, matching the design header.
+  const docTabs = [
+    `${t("documents.tabTodo", locale)} ${rows.length}`,
+    t("documents.tabAll", locale),
+    `${t("documents.tabFleet", locale)} ${rows.filter((r) => r.owner === "fleet").length}`,
+    `${t("documents.tabDriver", locale)} ${rows.filter((r) => r.owner === "driver").length}`,
+  ];
+
   const columns: CanvasTableColumn<FleetDoc>[] = [
     {
       h: "DRIVER",
@@ -112,8 +123,8 @@ export default async function FleetDocumentsPage() {
         theme={theme}
         title={t("documents.title", locale)}
         subtitle={t("documents.subtitle", locale)}
-        tabs={["需處理 4", "全部", "車行責任 3", "司機責任 1"]}
-        activeTab="需處理 4"
+        tabs={docTabs}
+        activeTab={docTabs[0]}
       />
       <div style={{ padding: 24 }}>
         <CanvasBanner

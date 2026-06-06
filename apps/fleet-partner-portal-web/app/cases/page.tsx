@@ -20,6 +20,16 @@ export default async function FleetCasesPage() {
   const theme = buildFleetTheme();
   const { rows, source } = await loadCases();
 
+  // Tab counts come from the loaded rows (live, or fixtures through the same
+  // seam on fallback) rather than fixed design numbers. "已結案" has no count in
+  // the design header, so it stays a plain label.
+  const caseTabs = [
+    `${t("cases.tabAll", locale)} ${rows.length}`,
+    `${t("cases.tabFleet", locale)} ${rows.filter((r) => r.responsibility === "fleet").length}`,
+    `${t("cases.tabShared", locale)} ${rows.filter((r) => r.responsibility === "shared").length}`,
+    t("cases.tabClosed", locale),
+  ];
+
   const columns: CanvasTableColumn<FleetCase>[] = [
     {
       h: "CASE",
@@ -134,8 +144,8 @@ export default async function FleetCasesPage() {
         theme={theme}
         title={t("cases.title", locale)}
         subtitle={t("cases.subtitle", locale)}
-        tabs={["全部 3", "車行責任 1", "共同責任 1", "已結案"]}
-        activeTab="全部 3"
+        tabs={caseTabs}
+        activeTab={caseTabs[0]}
       />
       <div
         style={{
