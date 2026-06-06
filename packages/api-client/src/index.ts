@@ -86,6 +86,11 @@ import type {
   UnifiedDriverTaskView,
   EmptyStateEnvelope,
   FleetPartnerRecord,
+  FleetPartnerPortalDashboardRecord,
+  FleetPartnerPortalDriverRecord,
+  FleetPartnerPortalQualityMetricsRecord,
+  FleetPartnerPortalTripRecord,
+  FleetPartnerPortalVehicleRecord,
   FleetPartnerRevenueShareRuleRecord,
   FleetPartnerStatementRecord,
   ForwardedDriverActionResponse,
@@ -1389,6 +1394,51 @@ export class ApiClient {
       : "";
     return this.getList<FleetPartnerStatementRecord>(
       `/api/fleet-partner/statements${query}`,
+    );
+  }
+
+  async listFleetPortalDashboard(
+    periodMonth?: string,
+  ): Promise<FleetPartnerPortalDashboardRecord> {
+    const query = periodMonth
+      ? `?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "";
+    return this.get<FleetPartnerPortalDashboardRecord>(
+      `/api/fleet-partner/dashboard${query}`,
+    );
+  }
+
+  async listFleetPortalDrivers(): Promise<FleetPartnerPortalDriverRecord[]> {
+    return this.getList<FleetPartnerPortalDriverRecord>(
+      "/api/fleet-partner/drivers",
+    );
+  }
+
+  async listFleetPortalVehicles(): Promise<FleetPartnerPortalVehicleRecord[]> {
+    return this.getList<FleetPartnerPortalVehicleRecord>(
+      "/api/fleet-partner/vehicles",
+    );
+  }
+
+  async listFleetPortalTrips(
+    periodMonth?: string,
+  ): Promise<FleetPartnerPortalTripRecord[]> {
+    const query = periodMonth
+      ? `?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "";
+    return this.getList<FleetPartnerPortalTripRecord>(
+      `/api/fleet-partner/trips${query}`,
+    );
+  }
+
+  async getFleetPortalQualityMetrics(
+    periodMonth?: string,
+  ): Promise<FleetPartnerPortalQualityMetricsRecord> {
+    const query = periodMonth
+      ? `?periodMonth=${encodeURIComponent(periodMonth)}`
+      : "";
+    return this.get<FleetPartnerPortalQualityMetricsRecord>(
+      `/api/fleet-partner/quality-metrics${query}`,
     );
   }
 
@@ -3044,6 +3094,21 @@ export function createTenantBearerClient(
   return createBearerClient(baseUrl, accessToken, {
     "x-tenant-id": tenantId,
     "x-realm": "tenant",
+  });
+}
+
+export function createFleetPartnerPortalClient(
+  baseUrl: string,
+  fleetPartnerId: string,
+  defaultHeaders?: Record<string, string>,
+): ApiClient {
+  return new ApiClient({
+    baseUrl,
+    defaultHeaders: {
+      "x-fleet-partner-id": fleetPartnerId,
+      "x-realm": "partner",
+      ...defaultHeaders,
+    },
   });
 }
 
