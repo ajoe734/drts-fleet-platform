@@ -41,6 +41,13 @@ type BillingMode =
   | "tenant_invoice"
   | "partner_settlement";
 
+type VehicleLicenseType =
+  | "taxi"
+  | "multi_purpose_taxi"
+  | "rental_car"
+  | "business_vehicle"
+  | "airport_transfer_vehicle";
+
 type ServiceProductRecord = {
   serviceProductId: string;
   serviceProductType: ServiceProductType;
@@ -48,6 +55,10 @@ type ServiceProductRecord = {
   description: string;
   timing: ServiceProductTiming;
   active: boolean;
+  // F2 contract fields from DH-ADM-ELIG-MODEL.
+  allowedLicenseTypes: VehicleLicenseType[];
+  meterRequired: boolean;
+  fixedFareAllowed: boolean;
   defaultBillingMode: BillingMode;
   defaultProofRequirements: string[];
   createdAt: string | null;
@@ -68,6 +79,9 @@ type ServiceProductDraft = {
   description: string;
   timing: ServiceProductTiming;
   active: boolean;
+  allowedLicenseTypes: VehicleLicenseType[];
+  meterRequired: boolean;
+  fixedFareAllowed: boolean;
   defaultBillingMode: BillingMode;
   proofRequirementsText: string;
 };
@@ -94,6 +108,31 @@ const BILLING_MODES: BillingMode[] = [
   "tenant_invoice",
   "partner_settlement",
 ];
+
+const VEHICLE_LICENSE_TYPES: VehicleLicenseType[] = [
+  "taxi",
+  "multi_purpose_taxi",
+  "rental_car",
+  "business_vehicle",
+  "airport_transfer_vehicle",
+];
+
+const VEHICLE_LICENSE_TYPE_SET = new Set<string>(VEHICLE_LICENSE_TYPES);
+
+function normalizeLicenseTypes(value: unknown): VehicleLicenseType[] {
+  const candidates = Array.isArray(value) ? value : value ? [value] : [];
+  const result: VehicleLicenseType[] = [];
+  for (const candidate of candidates) {
+    const normalized = String(candidate).trim();
+    if (
+      VEHICLE_LICENSE_TYPE_SET.has(normalized) &&
+      !result.includes(normalized as VehicleLicenseType)
+    ) {
+      result.push(normalized as VehicleLicenseType);
+    }
+  }
+  return result;
+}
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -210,6 +249,24 @@ const headerActionRowStyle = {
   marginTop: 12,
 } satisfies CSSProperties;
 
+const chipRowStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+} satisfies CSSProperties;
+
+const toggleChipStyle = (active: boolean): CSSProperties => ({
+  appearance: "none",
+  borderRadius: 999,
+  border: `1px solid ${active ? theme.accentBorder : theme.border}`,
+  background: active ? theme.accentBg : theme.surface,
+  color: active ? theme.accent : theme.textMuted,
+  padding: "6px 10px",
+  fontSize: 11.5,
+  fontWeight: 600,
+  cursor: "pointer",
+});
+
 function inputStyle(th: CanvasTheme): CSSProperties {
   return {
     width: "100%",
@@ -270,14 +327,15 @@ function normalizeServiceProductRecord(value: unknown): ServiceProductRecord {
     description: String(record.description ?? ""),
     timing,
     active: Boolean(record.active),
+    allowedLicenseTypes: normalizeLicenseTypes(record.allowedLicenseTypes),
+    meterRequired: Boolean(record.meterRequired),
+    fixedFareAllowed: Boolean(record.fixedFareAllowed),
     defaultBillingMode,
     defaultProofRequirements: normalizeProofRequirements(
       record.defaultProofRequirements,
     ),
-    createdAt:
-      typeof record.createdAt === "string" ? record.createdAt : null,
-    updatedAt:
-      typeof record.updatedAt === "string" ? record.updatedAt : null,
+    createdAt: typeof record.createdAt === "string" ? record.createdAt : null,
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : null,
   };
 }
 
@@ -305,6 +363,9 @@ function draftFromRecord(record: ServiceProductRecord): ServiceProductDraft {
     description: record.description,
     timing: record.timing,
     active: record.active,
+    allowedLicenseTypes: [...record.allowedLicenseTypes],
+    meterRequired: record.meterRequired,
+    fixedFareAllowed: record.fixedFareAllowed,
     defaultBillingMode: record.defaultBillingMode,
     proofRequirementsText: record.defaultProofRequirements.join("\n"),
   };
@@ -318,6 +379,9 @@ function createEmptyDraft(): ServiceProductDraft {
     description: "",
     timing: "realtime",
     active: true,
+    allowedLicenseTypes: [],
+    meterRequired: false,
+    fixedFareAllowed: false,
     defaultBillingMode: "meter",
     proofRequirementsText: "",
   };
@@ -331,6 +395,9 @@ function toCommand(draft: ServiceProductDraft) {
     description: draft.description.trim() || undefined,
     timing: draft.timing,
     active: draft.active,
+    allowedLicenseTypes: [...draft.allowedLicenseTypes],
+    meterRequired: draft.meterRequired,
+    fixedFareAllowed: draft.fixedFareAllowed,
     defaultBillingMode: draft.defaultBillingMode,
     defaultProofRequirements: normalizeProofRequirements(
       draft.proofRequirementsText,
@@ -351,7 +418,10 @@ function ServiceProductForm({
 }) {
   return (
     <div style={formGridStyle}>
-      <CanvasField theme={theme} label={t("serviceProducts.form.serviceProductId")}>
+      <CanvasField
+        theme={theme}
+        label={t("serviceProducts.form.serviceProductId")}
+      >
         <input
           value={draft.serviceProductId}
           onChange={(event) =>
@@ -380,7 +450,10 @@ function ServiceProductForm({
         />
       </CanvasField>
 
-      <CanvasField theme={theme} label={t("serviceProducts.form.serviceProductType")}>
+      <CanvasField
+        theme={theme}
+        label={t("serviceProducts.form.serviceProductType")}
+      >
         <select
           value={draft.serviceProductType}
           onChange={(event) =>
@@ -418,7 +491,10 @@ function ServiceProductForm({
         </select>
       </CanvasField>
 
-      <CanvasField theme={theme} label={t("serviceProducts.form.defaultBillingMode")}>
+      <CanvasField
+        theme={theme}
+        label={t("serviceProducts.form.defaultBillingMode")}
+      >
         <select
           value={draft.defaultBillingMode}
           onChange={(event) =>
@@ -450,6 +526,74 @@ function ServiceProductForm({
         >
           <option value="active">{t("common.active")}</option>
           <option value="inactive">{t("common.inactive")}</option>
+        </select>
+      </CanvasField>
+
+      <CanvasField
+        theme={theme}
+        label={t("serviceProducts.form.allowedLicenseTypes")}
+      >
+        <div style={chipRowStyle}>
+          {VEHICLE_LICENSE_TYPES.map((license) => {
+            const active = draft.allowedLicenseTypes.includes(license);
+            return (
+              <button
+                key={license}
+                type="button"
+                style={toggleChipStyle(active)}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    allowedLicenseTypes: active
+                      ? current.allowedLicenseTypes.filter(
+                          (entry) => entry !== license,
+                        )
+                      : [...current.allowedLicenseTypes, license],
+                  }))
+                }
+              >
+                {t(`serviceProducts.license.${license}`)}
+              </button>
+            );
+          })}
+        </div>
+      </CanvasField>
+
+      <CanvasField
+        theme={theme}
+        label={t("serviceProducts.form.meterRequired")}
+      >
+        <select
+          value={draft.meterRequired ? "yes" : "no"}
+          onChange={(event) =>
+            setDraft((current) => ({
+              ...current,
+              meterRequired: event.target.value === "yes",
+            }))
+          }
+          style={inputStyle(theme)}
+        >
+          <option value="yes">{t("common.yes")}</option>
+          <option value="no">{t("common.no")}</option>
+        </select>
+      </CanvasField>
+
+      <CanvasField
+        theme={theme}
+        label={t("serviceProducts.form.fixedFareAllowed")}
+      >
+        <select
+          value={draft.fixedFareAllowed ? "yes" : "no"}
+          onChange={(event) =>
+            setDraft((current) => ({
+              ...current,
+              fixedFareAllowed: event.target.value === "yes",
+            }))
+          }
+          style={inputStyle(theme)}
+        >
+          <option value="yes">{t("common.yes")}</option>
+          <option value="no">{t("common.no")}</option>
         </select>
       </CanvasField>
 
@@ -495,12 +639,10 @@ export default function ServiceProductsPage() {
   const client = usePlatformAdminClient();
   const [products, setProducts] = useState<ServiceProductRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [createDraft, setCreateDraft] = useState<ServiceProductDraft>(
-    createEmptyDraft,
-  );
-  const [editDraft, setEditDraft] = useState<ServiceProductDraft>(
-    createEmptyDraft,
-  );
+  const [createDraft, setCreateDraft] =
+    useState<ServiceProductDraft>(createEmptyDraft);
+  const [editDraft, setEditDraft] =
+    useState<ServiceProductDraft>(createEmptyDraft);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -598,6 +740,35 @@ export default function ServiceProductsPage() {
       r: (row) => t(`serviceProducts.billing.${row.defaultBillingMode}`),
     },
     {
+      h: t("serviceProducts.col.allowedLicenseTypes"),
+      w: 220,
+      r: (row) =>
+        row.allowedLicenseTypes.length > 0 ? (
+          <div style={chipRowStyle}>
+            {row.allowedLicenseTypes.map((license) => (
+              <CanvasPill key={license} theme={theme} tone="info">
+                {t(`serviceProducts.license.${license}`)}
+              </CanvasPill>
+            ))}
+          </div>
+        ) : (
+          t("serviceProducts.none")
+        ),
+    },
+    {
+      h: t("serviceProducts.col.meterRequired"),
+      w: 130,
+      r: (row) => (
+        <CanvasPill
+          theme={theme}
+          tone={row.meterRequired ? "success" : "neutral"}
+          dot
+        >
+          {row.meterRequired ? t("common.yes") : t("common.no")}
+        </CanvasPill>
+      ),
+    },
+    {
       h: t("serviceProducts.col.proofs"),
       w: 160,
       r: (row) =>
@@ -609,11 +780,7 @@ export default function ServiceProductsPage() {
       h: t("common.status"),
       w: 120,
       r: (row) => (
-        <CanvasPill
-          theme={theme}
-          tone={row.active ? "success" : "neutral"}
-          dot
-        >
+        <CanvasPill theme={theme} tone={row.active ? "success" : "neutral"} dot>
           {row.active ? t("common.active") : t("common.inactive")}
         </CanvasPill>
       ),

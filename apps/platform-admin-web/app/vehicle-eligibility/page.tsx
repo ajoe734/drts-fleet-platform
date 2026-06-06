@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -23,32 +23,52 @@ type VehicleLicenseType =
   | "business_vehicle"
   | "airport_transfer_vehicle";
 
+type ServiceProductType =
+  | "taxi_realtime"
+  | "taxi_reservation"
+  | "enterprise_dispatch"
+  | "credit_card_airport_transfer"
+  | "insurance_replacement_vehicle"
+  | "travel_agency_transfer"
+  | "third_party_forwarded_order";
+
+// F3 design canvas cell states. `allowed` / `notAllowed` are the base axis;
+// the remaining four are qualifiers layered on a supported cell, all sourced
+// from the DH-ADM-ELIG-MODEL contract fields (no fabricated data).
+type CellState =
+  | "allowed"
+  | "notAllowed"
+  | "conditionallyAllowed"
+  | "requiredDocuments"
+  | "trainingRequired"
+  | "permitRequired";
+
 type RawRecord = Record<string, unknown>;
 
-type EligibilityRule = {
-  id: string;
-  serviceProductId: string;
-  serviceProductCode: string;
-  serviceProductName: string;
-  supportedLicenseTypes: VehicleLicenseType[];
-  minSeatCount: number;
-  minLuggageCapacity: number;
+type MatrixRecord = {
+  capabilityId: string;
+  licenseType: VehicleLicenseType;
+  supportedProducts: ServiceProductType[];
+  seatCount: number;
+  luggageCapacity: number;
   airportPermit: boolean;
   businessDispatchEligible: boolean;
   taxiMeterRequired: boolean;
   fixedFareAllowed: boolean;
+  conditionallyAllowed: boolean;
+  requiredDocuments: string[];
+  trainingRequired: boolean;
+  permitRequired: boolean;
   platformForwardingAllowed: boolean;
   active: boolean;
-  note: string;
+  effectiveFrom: string | null;
+  effectiveUntil: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 };
 
 type MatrixSnapshot = {
-  raw: RawRecord | null;
-  rules: EligibilityRule[];
-  sourceShape: "rules" | "items" | "matrix" | "serviceProducts" | "array";
-  updatedAt: string | null;
-  updatedBy: string | null;
-  revision: string | null;
+  records: MatrixRecord[];
   requestId: string | null;
   normalizedWarning: boolean;
 };
@@ -60,6 +80,51 @@ const LICENSE_TYPES: VehicleLicenseType[] = [
   "business_vehicle",
   "airport_transfer_vehicle",
 ];
+
+const SERVICE_PRODUCT_TYPES: ServiceProductType[] = [
+  "taxi_realtime",
+  "taxi_reservation",
+  "enterprise_dispatch",
+  "credit_card_airport_transfer",
+  "insurance_replacement_vehicle",
+  "travel_agency_transfer",
+  "third_party_forwarded_order",
+];
+
+const LICENSE_TYPE_SET = new Set<string>(LICENSE_TYPES);
+const SERVICE_PRODUCT_TYPE_SET = new Set<string>(SERVICE_PRODUCT_TYPES);
+
+// Legend / cell ordering. `allowed` and `notAllowed` are mutually exclusive
+// bases; qualifiers only ever stack on top of `allowed`.
+const STATE_ORDER: CellState[] = [
+  "allowed",
+  "conditionallyAllowed",
+  "requiredDocuments",
+  "trainingRequired",
+  "permitRequired",
+  "notAllowed",
+];
+
+const STATE_TONE: Record<CellState, CanvasTone> = {
+  allowed: "success",
+  notAllowed: "neutral",
+  conditionallyAllowed: "warn",
+  requiredDocuments: "info",
+  trainingRequired: "accent",
+  permitRequired: "danger",
+};
+
+const EDITABLE_FLAGS = [
+  "conditionallyAllowed",
+  "trainingRequired",
+  "permitRequired",
+  "airportPermit",
+  "businessDispatchEligible",
+  "taxiMeterRequired",
+  "fixedFareAllowed",
+  "platformForwardingAllowed",
+  "active",
+] as const;
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -102,7 +167,8 @@ const kpiSubStyle = {
 const contentGridStyle = {
   display: "grid",
   gap: 16,
-  gridTemplateColumns: "minmax(0, 1.3fr) minmax(320px, 0.9fr)",
+  gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 0.85fr)",
+  alignItems: "start",
 } satisfies CSSProperties;
 
 const stackedCellStyle = {
@@ -120,6 +186,20 @@ const secondaryCellTextStyle = {
   color: theme.textMuted,
   fontSize: 11.5,
   lineHeight: 1.4,
+} satisfies CSSProperties;
+
+const cellStackStyle = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  alignItems: "flex-start",
+} satisfies CSSProperties;
+
+const legendRowStyle = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+  alignItems: "center",
 } satisfies CSSProperties;
 
 const chipRowStyle = {
@@ -165,6 +245,8 @@ const inputStyle = {
 const checkboxRowStyle = {
   display: "grid",
   gap: 10,
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  marginTop: 12,
 } satisfies CSSProperties;
 
 const checkboxItemStyle = {
@@ -219,209 +301,148 @@ function asBoolean(value: unknown): boolean {
   return false;
 }
 
-function normalizeLicenseTypes(value: unknown): VehicleLicenseType[] {
+function normalizeStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => String(entry).trim())
+      .filter((entry) => entry.length > 0);
+  }
+  if (typeof value === "string") {
+    return value
+      .split(/[,\n]/)
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  }
+  return [];
+}
+
+function normalizeServiceProducts(value: unknown): ServiceProductType[] {
   const candidates = Array.isArray(value) ? value : value ? [value] : [];
-  const result: VehicleLicenseType[] = [];
+  const result: ServiceProductType[] = [];
   for (const candidate of candidates) {
-    const normalized = String(candidate).trim() as VehicleLicenseType;
-    if (LICENSE_TYPES.includes(normalized) && !result.includes(normalized)) {
-      result.push(normalized);
+    const normalized = String(candidate).trim();
+    if (
+      SERVICE_PRODUCT_TYPE_SET.has(normalized) &&
+      !result.includes(normalized as ServiceProductType)
+    ) {
+      result.push(normalized as ServiceProductType);
     }
   }
   return result;
 }
 
-function normalizeRule(entry: unknown, index: number): EligibilityRule {
+function normalizeRecord(entry: unknown, index: number): MatrixRecord {
   const record = asRecord(entry) ?? {};
-  const nested =
-    asRecord(record.eligibility) ??
-    asRecord(record.rule) ??
-    asRecord(record.capability) ??
-    asRecord(record.matrix);
-  const source = nested ?? record;
-  const id =
-    asString(record.ruleId) ||
-    asString(record.capabilityId) ||
-    asString(record.serviceProductId) ||
-    asString(record.productId) ||
-    asString(record.id) ||
-    `rule-${index}`;
-  const serviceProductId =
-    asString(record.serviceProductId) ||
-    asString(record.productId) ||
-    asString(record.serviceProductType) ||
-    asString(record.code) ||
-    id;
-  const serviceProductCode =
-    asString(record.serviceProductCode) ||
-    asString(record.code) ||
-    asString(record.serviceProductType) ||
-    serviceProductId;
-
+  const licenseType = asString(record.licenseType) as VehicleLicenseType;
   return {
-    id,
-    serviceProductId,
-    serviceProductCode,
-    serviceProductName:
-      asString(record.serviceProductName) ||
-      asString(record.displayName) ||
-      asString(record.name) ||
-      serviceProductCode,
-    supportedLicenseTypes: normalizeLicenseTypes(
-      source.supportedLicenseTypes ??
-        source.allowedLicenseTypes ??
-        source.licenseTypes ??
-        source.vehicleLicenseTypes ??
-        source.licenseType,
-    ),
-    minSeatCount: asNumber(
-      source.minSeatCount ?? source.seatCount ?? source.minimumSeatCount,
-    ),
-    minLuggageCapacity: asNumber(
-      source.minLuggageCapacity ??
-        source.luggageCapacity ??
-        source.minimumLuggageCapacity,
-    ),
-    airportPermit: asBoolean(
-      source.airportPermitRequired ?? source.airportPermit,
-    ),
-    businessDispatchEligible: asBoolean(source.businessDispatchEligible),
-    taxiMeterRequired: asBoolean(source.taxiMeterRequired),
-    fixedFareAllowed: asBoolean(source.fixedFareAllowed),
-    platformForwardingAllowed: asBoolean(source.platformForwardingAllowed),
-    active: source.active === undefined ? true : asBoolean(source.active),
-    note: asString(source.note ?? source.notes ?? source.operatorNote),
+    capabilityId:
+      asString(record.capabilityId) ||
+      asString(record.id) ||
+      `capability-${index}`,
+    licenseType,
+    supportedProducts: normalizeServiceProducts(record.supportedProducts),
+    seatCount: asNumber(record.seatCount),
+    luggageCapacity: asNumber(record.luggageCapacity),
+    airportPermit: asBoolean(record.airportPermit),
+    businessDispatchEligible: asBoolean(record.businessDispatchEligible),
+    taxiMeterRequired: asBoolean(record.taxiMeterRequired),
+    fixedFareAllowed: asBoolean(record.fixedFareAllowed),
+    conditionallyAllowed: asBoolean(record.conditionallyAllowed),
+    requiredDocuments: normalizeStringList(record.requiredDocuments),
+    trainingRequired: asBoolean(record.trainingRequired),
+    permitRequired: asBoolean(record.permitRequired),
+    platformForwardingAllowed: asBoolean(record.platformForwardingAllowed),
+    active: record.active === undefined ? true : asBoolean(record.active),
+    effectiveFrom: asNullableString(record.effectiveFrom),
+    effectiveUntil: asNullableString(record.effectiveUntil),
+    createdAt: asNullableString(record.createdAt),
+    updatedAt: asNullableString(record.updatedAt),
   };
 }
 
 function normalizeMatrixResponse(payload: unknown): MatrixSnapshot {
   if (Array.isArray(payload)) {
     return {
-      raw: null,
-      rules: payload.map((entry, index) => normalizeRule(entry, index)),
-      sourceShape: "array",
-      updatedAt: null,
-      updatedBy: null,
-      revision: null,
+      records: payload.map((entry, index) => normalizeRecord(entry, index)),
       requestId: null,
       normalizedWarning: true,
     };
   }
 
   const record = asRecord(payload) ?? {};
-  const sourceBuckets: Array<[MatrixSnapshot["sourceShape"], unknown]> = [
-    ["rules", record.rules],
-    ["items", record.items],
-    ["matrix", record.matrix],
-    ["serviceProducts", record.serviceProducts],
+  const items = Array.isArray(record.items)
+    ? record.items
+    : Array.isArray(record.matrix)
+      ? record.matrix
+      : Array.isArray(record.rules)
+        ? record.rules
+        : [];
+
+  return {
+    records: items.map((entry, index) => normalizeRecord(entry, index)),
+    requestId:
+      asNullableString(record.requestId) ??
+      asNullableString(asRecord(record.meta)?.requestId),
+    normalizedWarning: !Array.isArray(record.items),
+  };
+}
+
+function toApiItem(record: MatrixRecord): RawRecord {
+  return {
+    capabilityId: record.capabilityId,
+    licenseType: record.licenseType,
+    supportedProducts: [...record.supportedProducts],
+    seatCount: record.seatCount,
+    luggageCapacity: record.luggageCapacity,
+    airportPermit: record.airportPermit,
+    businessDispatchEligible: record.businessDispatchEligible,
+    taxiMeterRequired: record.taxiMeterRequired,
+    fixedFareAllowed: record.fixedFareAllowed,
+    conditionallyAllowed: record.conditionallyAllowed,
+    requiredDocuments: [...record.requiredDocuments],
+    trainingRequired: record.trainingRequired,
+    permitRequired: record.permitRequired,
+    platformForwardingAllowed: record.platformForwardingAllowed,
+    active: record.active,
+    effectiveFrom: record.effectiveFrom,
+    effectiveUntil: record.effectiveUntil,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+// Derive the F3 cell states for one (license-type record × service-product)
+// pair, reading only the contract fields on the record.
+function cellStatesFor(
+  product: ServiceProductType,
+  record: MatrixRecord | undefined,
+): CellState[] {
+  if (!record || !record.supportedProducts.includes(product)) {
+    return ["notAllowed"];
+  }
+  const states: CellState[] = [
+    record.conditionallyAllowed ? "conditionallyAllowed" : "allowed",
   ];
-  const bucket = sourceBuckets.find(([, value]) => Array.isArray(value));
-  const entries = Array.isArray(bucket?.[1]) ? bucket[1] : [];
-
-  return {
-    raw: record,
-    rules: entries.map((entry, index) => normalizeRule(entry, index)),
-    sourceShape: bucket?.[0] ?? "rules",
-    updatedAt:
-      asNullableString(record.updatedAt) ??
-      asNullableString(record.lastUpdatedAt) ??
-      asNullableString(record.generatedAt),
-    updatedBy:
-      asNullableString(record.updatedBy) ??
-      asNullableString(record.lastUpdatedBy),
-    revision:
-      asNullableString(record.revision) ?? asNullableString(record.version),
-    requestId: asNullableString(record.requestId),
-    normalizedWarning: bucket?.[0] !== "rules",
-  };
-}
-
-function toApiRule(rule: EligibilityRule): RawRecord {
-  return {
-    ruleId: rule.id,
-    serviceProductId: rule.serviceProductId,
-    serviceProductCode: rule.serviceProductCode,
-    serviceProductName: rule.serviceProductName,
-    supportedLicenseTypes: [...rule.supportedLicenseTypes],
-    minSeatCount: rule.minSeatCount,
-    minLuggageCapacity: rule.minLuggageCapacity,
-    airportPermit: rule.airportPermit,
-    businessDispatchEligible: rule.businessDispatchEligible,
-    taxiMeterRequired: rule.taxiMeterRequired,
-    fixedFareAllowed: rule.fixedFareAllowed,
-    platformForwardingAllowed: rule.platformForwardingAllowed,
-    active: rule.active,
-    note: rule.note,
-  };
-}
-
-function mergeServiceProducts(
-  serviceProducts: unknown,
-  rules: EligibilityRule[],
-): RawRecord[] {
-  const items = Array.isArray(serviceProducts) ? serviceProducts : [];
-  return items.map((entry, index) => {
-    const record = asRecord(entry) ?? {};
-    const match =
-      rules.find(
-        (rule) =>
-          rule.serviceProductId ===
-            (asString(record.serviceProductId) ||
-              asString(record.productId) ||
-              asString(record.id)) ||
-          rule.serviceProductCode === asString(record.code),
-      ) ?? rules[index];
-    if (!match) {
-      return record;
-    }
-    return {
-      ...record,
-      eligibility: {
-        ...(asRecord(record.eligibility) ?? {}),
-        ...toApiRule(match),
-      },
-    };
-  });
-}
-
-function buildSavePayload(
-  snapshot: MatrixSnapshot | null,
-  rules: EligibilityRule[],
-) {
-  if (!snapshot?.raw) {
-    return { rules: rules.map(toApiRule) };
+  if (record.requiredDocuments.length > 0) {
+    states.push("requiredDocuments");
   }
-  if (snapshot.sourceShape === "serviceProducts") {
-    return {
-      ...snapshot.raw,
-      serviceProducts: mergeServiceProducts(
-        snapshot.raw.serviceProducts,
-        rules,
-      ),
-    };
+  if (record.trainingRequired) {
+    states.push("trainingRequired");
   }
-  const key =
-    snapshot.sourceShape === "items"
-      ? "items"
-      : snapshot.sourceShape === "matrix"
-        ? "matrix"
-        : "rules";
-  return {
-    ...snapshot.raw,
-    [key]: rules.map(toApiRule),
-  };
-}
-
-function booleanTone(value: boolean): CanvasTone {
-  return value ? "success" : "neutral";
+  if (record.permitRequired) {
+    states.push("permitRequired");
+  }
+  return states;
 }
 
 export default function VehicleEligibilityPage() {
   const client = usePlatformAdminClient();
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<MatrixSnapshot | null>(null);
-  const [rules, setRules] = useState<EligibilityRule[]>([]);
-  const [selectedRuleId, setSelectedRuleId] = useState<string>("");
+  const [records, setRecords] = useState<MatrixRecord[]>([]);
+  const [selectedLicense, setSelectedLicense] = useState<
+    VehicleLicenseType | ""
+  >("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -429,6 +450,16 @@ export default function VehicleEligibilityPage() {
     tone: "success" | "danger";
     message: string;
   } | null>(null);
+
+  function applySnapshot(normalized: MatrixSnapshot) {
+    setSnapshot(normalized);
+    setRecords(normalized.records);
+    setSelectedLicense((current) =>
+      normalized.records.some((record) => record.licenseType === current)
+        ? current
+        : (normalized.records[0]?.licenseType ?? ""),
+    );
+  }
 
   useEffect(() => {
     let active = true;
@@ -443,10 +474,7 @@ export default function VehicleEligibilityPage() {
         if (!active) {
           return;
         }
-        const normalized = normalizeMatrixResponse(response);
-        setSnapshot(normalized);
-        setRules(normalized.rules);
-        setSelectedRuleId(normalized.rules[0]?.id ?? "");
+        applySnapshot(normalizeMatrixResponse(response));
       } catch (nextError) {
         if (active) {
           setError(
@@ -467,96 +495,88 @@ export default function VehicleEligibilityPage() {
     };
   }, [client]);
 
-  const selectedRule =
-    rules.find((rule) => rule.id === selectedRuleId) ?? rules[0] ?? null;
-  const tableRows = rules.map((rule) => ({
-    ...rule,
-    _selected: rule.id === selectedRule?.id,
-  }));
+  const recordByLicense = useMemo(() => {
+    const map = new Map<VehicleLicenseType, MatrixRecord>();
+    for (const record of records) {
+      if (LICENSE_TYPE_SET.has(record.licenseType)) {
+        map.set(record.licenseType, record);
+      }
+    }
+    return map;
+  }, [records]);
 
-  const columns: CanvasTableColumn<(typeof tableRows)[number]>[] = [
+  const selectedRecord =
+    records.find((record) => record.licenseType === selectedLicense) ?? null;
+
+  const activeLicenseTypes = LICENSE_TYPES.filter((license) =>
+    recordByLicense.has(license),
+  );
+
+  const conditionalCount = records.filter(
+    (record) => record.conditionallyAllowed,
+  ).length;
+  const gatedCount = records.filter(
+    (record) =>
+      record.trainingRequired ||
+      record.permitRequired ||
+      record.requiredDocuments.length > 0,
+  ).length;
+
+  const matrixRows = SERVICE_PRODUCT_TYPES.map((product) => ({ product }));
+
+  const columns: CanvasTableColumn<(typeof matrixRows)[number]>[] = [
     {
-      h: t("vehicleEligibility.product"),
+      h: t("vehicleEligibility.col.serviceProduct"),
+      w: 220,
       r: (row) => (
-        <button
-          type="button"
-          onClick={() => setSelectedRuleId(row.id)}
-          style={{
-            appearance: "none",
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            textAlign: "left",
-            cursor: "pointer",
-            width: "100%",
-          }}
-        >
-          <div style={stackedCellStyle}>
-            <span style={primaryCellTextStyle}>{row.serviceProductName}</span>
-            <span style={secondaryCellTextStyle}>{row.serviceProductCode}</span>
-          </div>
-        </button>
-      ),
-    },
-    {
-      h: t("vehicleEligibility.licenseTypes"),
-      r: (row) => (
-        <div style={chipRowStyle}>
-          {row.supportedLicenseTypes.length > 0 ? (
-            row.supportedLicenseTypes.map((license) => (
-              <CanvasPill key={license} theme={theme} tone="info">
-                {t(`vehicleEligibility.license.${license}`)}
-              </CanvasPill>
-            ))
-          ) : (
-            <CanvasPill theme={theme} tone="neutral">
-              {t("vehicleEligibility.none")}
-            </CanvasPill>
-          )}
+        <div style={stackedCellStyle}>
+          <span style={primaryCellTextStyle}>
+            {t(`serviceProducts.type.${row.product}`)}
+          </span>
+          <span style={secondaryCellTextStyle}>{row.product}</span>
         </div>
       ),
     },
-    {
-      h: t("vehicleEligibility.minSeatCount"),
-      align: "right",
-      r: (row) => row.minSeatCount || t("vehicleEligibility.unspecified"),
-    },
-    {
-      h: t("vehicleEligibility.minLuggageCapacity"),
-      align: "right",
-      r: (row) => row.minLuggageCapacity || t("vehicleEligibility.unspecified"),
-    },
-    {
-      h: t("vehicleEligibility.airportPermit"),
-      r: (row) => (
-        <CanvasPill theme={theme} tone={booleanTone(row.airportPermit)} dot>
-          {row.airportPermit
-            ? t("vehicleEligibility.yes")
-            : t("vehicleEligibility.no")}
-        </CanvasPill>
-      ),
-    },
-    {
-      h: t("common.status"),
-      r: (row) => (
-        <CanvasPill theme={theme} tone={booleanTone(row.active)} dot>
-          {row.active
-            ? t("vehicleEligibility.enabled")
-            : t("vehicleEligibility.disabled")}
-        </CanvasPill>
-      ),
-    },
+    ...activeLicenseTypes.map<CanvasTableColumn<(typeof matrixRows)[number]>>(
+      (license) => ({
+        h: t(`vehicleEligibility.license.${license}`),
+        r: (row) => {
+          const record = recordByLicense.get(license);
+          const states = cellStatesFor(row.product, record);
+          return (
+            <div style={cellStackStyle}>
+              {states.map((state) => (
+                <CanvasPill
+                  key={state}
+                  theme={theme}
+                  tone={STATE_TONE[state]}
+                  dot
+                >
+                  {state === "requiredDocuments" && record
+                    ? t("vehicleEligibility.state.requiredDocumentsCount", {
+                        count: record.requiredDocuments.length,
+                      })
+                    : t(`vehicleEligibility.state.${state}`)}
+                </CanvasPill>
+              ))}
+            </div>
+          );
+        },
+      }),
+    ),
   ];
 
-  function updateSelectedRule(
-    updater: (rule: EligibilityRule) => EligibilityRule,
+  function updateSelectedRecord(
+    updater: (record: MatrixRecord) => MatrixRecord,
   ) {
-    if (!selectedRule) {
+    if (!selectedRecord) {
       return;
     }
-    setRules((current) =>
-      current.map((rule) =>
-        rule.id === selectedRule.id ? updater(rule) : rule,
+    setRecords((current) =>
+      current.map((record) =>
+        record.licenseType === selectedRecord.licenseType
+          ? updater(record)
+          : record,
       ),
     );
   }
@@ -569,10 +589,7 @@ export default function VehicleEligibilityPage() {
       const response = await client.get<unknown>(
         "/api/admin/vehicle-eligibility-matrix",
       );
-      const normalized = normalizeMatrixResponse(response);
-      setSnapshot(normalized);
-      setRules(normalized.rules);
-      setSelectedRuleId(normalized.rules[0]?.id ?? "");
+      applySnapshot(normalizeMatrixResponse(response));
     } catch (nextError) {
       setError(
         nextError instanceof Error ? nextError.message : String(nextError),
@@ -588,16 +605,9 @@ export default function VehicleEligibilityPage() {
     try {
       const response = await client.put<unknown>(
         "/api/admin/vehicle-eligibility-matrix",
-        { body: buildSavePayload(snapshot, rules) },
+        { body: { items: records.map(toApiItem) } },
       );
-      const normalized = normalizeMatrixResponse(response);
-      setSnapshot(normalized);
-      setRules(normalized.rules);
-      setSelectedRuleId((current) =>
-        normalized.rules.some((rule) => rule.id === current)
-          ? current
-          : (normalized.rules[0]?.id ?? ""),
-      );
+      applySnapshot(normalizeMatrixResponse(response));
       setFlash({
         tone: "success",
         message: t("vehicleEligibility.saveSuccess"),
@@ -637,7 +647,7 @@ export default function VehicleEligibilityPage() {
               variant="primary"
               icon="save"
               onClick={() => void saveMatrix()}
-              disabled={loading || saving || rules.length === 0}
+              disabled={loading || saving || records.length === 0}
             >
               {saving ? t("common.saving") : t("vehicleEligibility.save")}
             </CanvasBtn>
@@ -679,7 +689,7 @@ export default function VehicleEligibilityPage() {
           <CanvasCard theme={theme}>
             <div style={kpiSubStyle}>{t("vehicleEligibility.loading")}</div>
           </CanvasCard>
-        ) : rules.length === 0 ? (
+        ) : records.length === 0 ? (
           <CanvasCard theme={theme}>
             <CanvasBanner
               theme={theme}
@@ -693,8 +703,10 @@ export default function VehicleEligibilityPage() {
           <>
             <div style={kpiGridStyle}>
               <CanvasCard theme={theme}>
-                <p style={kpiLabelStyle}>{t("vehicleEligibility.kpi.rules")}</p>
-                <p style={kpiValueStyle}>{rules.length}</p>
+                <p style={kpiLabelStyle}>
+                  {t("vehicleEligibility.kpi.licenses")}
+                </p>
+                <p style={kpiValueStyle}>{records.length}</p>
                 <p style={kpiSubStyle}>{t("vehicleEligibility.tableTitle")}</p>
               </CanvasCard>
               <CanvasCard theme={theme}>
@@ -702,45 +714,59 @@ export default function VehicleEligibilityPage() {
                   {t("vehicleEligibility.kpi.active")}
                 </p>
                 <p style={kpiValueStyle}>
-                  {rules.filter((rule) => rule.active).length}
+                  {records.filter((record) => record.active).length}
                 </p>
                 <p style={kpiSubStyle}>{t("common.status")}</p>
               </CanvasCard>
               <CanvasCard theme={theme}>
                 <p style={kpiLabelStyle}>
-                  {t("vehicleEligibility.kpi.airport")}
+                  {t("vehicleEligibility.kpi.conditional")}
                 </p>
-                <p style={kpiValueStyle}>
-                  {rules.filter((rule) => rule.airportPermit).length}
-                </p>
+                <p style={kpiValueStyle}>{conditionalCount}</p>
                 <p style={kpiSubStyle}>
-                  {t("vehicleEligibility.airportPermit")}
+                  {t("vehicleEligibility.state.conditionallyAllowed")}
                 </p>
               </CanvasCard>
               <CanvasCard theme={theme}>
-                <p style={kpiLabelStyle}>
-                  {t("vehicleEligibility.kpi.updated")}
-                </p>
-                <p style={{ ...kpiValueStyle, fontSize: 18 }}>
-                  {snapshot?.updatedAt
-                    ? formatDateTime(snapshot.updatedAt)
-                    : t("vehicleEligibility.kpi.updatedUnknown")}
-                </p>
+                <p style={kpiLabelStyle}>{t("vehicleEligibility.kpi.gated")}</p>
+                <p style={kpiValueStyle}>{gatedCount}</p>
                 <p style={kpiSubStyle}>
-                  {snapshot?.updatedBy ?? t("vehicleEligibility.unspecified")}
+                  {t("vehicleEligibility.kpi.gatedSub")}
                 </p>
               </CanvasCard>
             </div>
+
+            <CanvasCard
+              theme={theme}
+              title={t("vehicleEligibility.legendTitle")}
+            >
+              <div style={legendRowStyle}>
+                {STATE_ORDER.map((state) => (
+                  <CanvasPill
+                    key={state}
+                    theme={theme}
+                    tone={STATE_TONE[state]}
+                    dot
+                  >
+                    {t(`vehicleEligibility.state.${state}`)}
+                  </CanvasPill>
+                ))}
+              </div>
+            </CanvasCard>
 
             <div style={contentGridStyle}>
               <CanvasCard
                 theme={theme}
                 title={t("vehicleEligibility.tableTitle")}
                 subtitle={t("vehicleEligibility.tableSubtitle", {
-                  count: rules.length,
+                  count: records.length,
                 })}
               >
-                <CanvasTable theme={theme} columns={columns} rows={tableRows} />
+                <CanvasTable
+                  theme={theme}
+                  columns={columns}
+                  rows={matrixRows}
+                />
               </CanvasCard>
 
               <CanvasCard
@@ -748,43 +774,58 @@ export default function VehicleEligibilityPage() {
                 title={t("vehicleEligibility.detailTitle")}
                 subtitle={t("vehicleEligibility.detailSubtitle")}
               >
-                {selectedRule ? (
+                <div style={{ ...chipRowStyle, marginBottom: 12 }}>
+                  {activeLicenseTypes.map((license) => (
+                    <button
+                      key={license}
+                      type="button"
+                      style={toggleChipStyle(license === selectedLicense)}
+                      onClick={() => setSelectedLicense(license)}
+                    >
+                      {t(`vehicleEligibility.license.${license}`)}
+                    </button>
+                  ))}
+                </div>
+
+                {selectedRecord ? (
                   <>
                     <div style={formGridStyle}>
                       <CanvasField
                         theme={theme}
-                        label={t("vehicleEligibility.productCode")}
+                        label={t("vehicleEligibility.capabilityId")}
                       >
                         <input
-                          value={selectedRule.serviceProductCode}
+                          value={selectedRecord.capabilityId}
                           readOnly
                           style={inputStyle}
                         />
                       </CanvasField>
                       <CanvasField
                         theme={theme}
-                        label={t("vehicleEligibility.productName")}
+                        label={t("vehicleEligibility.licenseType")}
                       >
                         <input
-                          value={selectedRule.serviceProductName}
+                          value={t(
+                            `vehicleEligibility.license.${selectedRecord.licenseType}`,
+                          )}
                           readOnly
                           style={inputStyle}
                         />
                       </CanvasField>
                       <CanvasField
                         theme={theme}
-                        label={t("vehicleEligibility.minSeatCount")}
+                        label={t("vehicleEligibility.seatCount")}
                       >
                         <input
                           type="number"
-                          min={0}
-                          value={selectedRule.minSeatCount}
+                          min={1}
+                          value={selectedRecord.seatCount}
                           onChange={(event) =>
-                            updateSelectedRule((rule) => ({
-                              ...rule,
-                              minSeatCount: Math.max(
-                                0,
-                                Number(event.target.value || 0),
+                            updateSelectedRecord((record) => ({
+                              ...record,
+                              seatCount: Math.max(
+                                1,
+                                Math.round(Number(event.target.value || 1)),
                               ),
                             }))
                           }
@@ -793,18 +834,18 @@ export default function VehicleEligibilityPage() {
                       </CanvasField>
                       <CanvasField
                         theme={theme}
-                        label={t("vehicleEligibility.minLuggageCapacity")}
+                        label={t("vehicleEligibility.luggageCapacity")}
                       >
                         <input
                           type="number"
                           min={0}
-                          value={selectedRule.minLuggageCapacity}
+                          value={selectedRecord.luggageCapacity}
                           onChange={(event) =>
-                            updateSelectedRule((rule) => ({
-                              ...rule,
-                              minLuggageCapacity: Math.max(
+                            updateSelectedRecord((record) => ({
+                              ...record,
+                              luggageCapacity: Math.max(
                                 0,
-                                Number(event.target.value || 0),
+                                Math.round(Number(event.target.value || 0)),
                               ),
                             }))
                           }
@@ -814,34 +855,34 @@ export default function VehicleEligibilityPage() {
                       <div style={fullWidthStyle}>
                         <CanvasField
                           theme={theme}
-                          label={t("vehicleEligibility.licenseTypes")}
+                          label={t("vehicleEligibility.supportedProducts")}
                         >
                           <div style={chipRowStyle}>
-                            {LICENSE_TYPES.map((license) => {
+                            {SERVICE_PRODUCT_TYPES.map((product) => {
                               const active =
-                                selectedRule.supportedLicenseTypes.includes(
-                                  license,
+                                selectedRecord.supportedProducts.includes(
+                                  product,
                                 );
                               return (
                                 <button
-                                  key={license}
+                                  key={product}
                                   type="button"
                                   style={toggleChipStyle(active)}
                                   onClick={() =>
-                                    updateSelectedRule((rule) => ({
-                                      ...rule,
-                                      supportedLicenseTypes: active
-                                        ? rule.supportedLicenseTypes.filter(
-                                            (entry) => entry !== license,
+                                    updateSelectedRecord((record) => ({
+                                      ...record,
+                                      supportedProducts: active
+                                        ? record.supportedProducts.filter(
+                                            (entry) => entry !== product,
                                           )
                                         : [
-                                            ...rule.supportedLicenseTypes,
-                                            license,
+                                            ...record.supportedProducts,
+                                            product,
                                           ],
                                     }))
                                   }
                                 >
-                                  {t(`vehicleEligibility.license.${license}`)}
+                                  {t(`serviceProducts.type.${product}`)}
                                 </button>
                               );
                             })}
@@ -851,19 +892,21 @@ export default function VehicleEligibilityPage() {
                       <div style={fullWidthStyle}>
                         <CanvasField
                           theme={theme}
-                          label={t("vehicleEligibility.note")}
+                          label={t("vehicleEligibility.requiredDocuments")}
                         >
                           <textarea
-                            value={selectedRule.note}
+                            value={selectedRecord.requiredDocuments.join("\n")}
                             onChange={(event) =>
-                              updateSelectedRule((rule) => ({
-                                ...rule,
-                                note: event.target.value,
+                              updateSelectedRecord((record) => ({
+                                ...record,
+                                requiredDocuments: normalizeStringList(
+                                  event.target.value,
+                                ),
                               }))
                             }
-                            rows={4}
+                            rows={3}
                             placeholder={t(
-                              "vehicleEligibility.notePlaceholder",
+                              "vehicleEligibility.requiredDocumentsPlaceholder",
                             )}
                             style={{ ...inputStyle, resize: "vertical" }}
                           />
@@ -872,23 +915,14 @@ export default function VehicleEligibilityPage() {
                     </div>
 
                     <div style={checkboxRowStyle}>
-                      {[
-                        "airportPermit",
-                        "businessDispatchEligible",
-                        "taxiMeterRequired",
-                        "fixedFareAllowed",
-                        "platformForwardingAllowed",
-                        "active",
-                      ].map((field) => (
+                      {EDITABLE_FLAGS.map((field) => (
                         <label key={field} style={checkboxItemStyle}>
                           <input
                             type="checkbox"
-                            checked={Boolean(
-                              selectedRule[field as keyof EligibilityRule],
-                            )}
+                            checked={selectedRecord[field]}
                             onChange={(event) =>
-                              updateSelectedRule((rule) => ({
-                                ...rule,
+                              updateSelectedRecord((record) => ({
+                                ...record,
                                 [field]: event.target.checked,
                               }))
                             }
@@ -898,27 +932,17 @@ export default function VehicleEligibilityPage() {
                       ))}
                     </div>
 
-                    <div style={chipRowStyle}>
-                      <CanvasPill theme={theme} tone="neutral">
-                        {t("vehicleEligibility.sourceShape")}:{" "}
-                        {snapshot?.sourceShape ?? "rules"}
-                      </CanvasPill>
-                      {snapshot?.revision ? (
+                    <div style={{ ...chipRowStyle, marginTop: 12 }}>
+                      {selectedRecord.updatedAt ? (
                         <CanvasPill theme={theme} tone="neutral">
-                          {t("vehicleEligibility.revision")}:{" "}
-                          {snapshot.revision}
+                          {t("vehicleEligibility.updatedAt")}:{" "}
+                          {formatDateTime(selectedRecord.updatedAt)}
                         </CanvasPill>
                       ) : null}
                       {snapshot?.requestId ? (
                         <CanvasPill theme={theme} tone="neutral">
                           {t("vehicleEligibility.requestId")}:{" "}
                           {snapshot.requestId}
-                        </CanvasPill>
-                      ) : null}
-                      {snapshot?.updatedBy ? (
-                        <CanvasPill theme={theme} tone="neutral">
-                          {t("vehicleEligibility.updatedBy")}:{" "}
-                          {snapshot.updatedBy}
                         </CanvasPill>
                       ) : null}
                     </div>
