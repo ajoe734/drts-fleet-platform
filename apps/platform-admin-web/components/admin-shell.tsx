@@ -5,7 +5,6 @@ import {
   PlatformAdminAssistantProvider,
 } from "@/components/assistant/route-context";
 import { PlatformAssistantOverlay } from "@/components/assistant/platform-assistant-overlay";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity,
@@ -350,28 +349,28 @@ function AdminHealthFooter({
   const statusCopy = {
     checking: {
       label: locale === "zh" ? "API 檢查中" : "API checking",
-      short: "checking",
+      short: locale === "zh" ? "檢查中" : "checking",
       fg: theme.textMuted,
       bg: theme.neutralBg,
       border: theme.neutralBorder,
     },
     healthy: {
       label: locale === "zh" ? "API 健康" : "API healthy",
-      short: "healthy",
+      short: locale === "zh" ? "正常" : "healthy",
       fg: theme.success,
       bg: theme.successBg,
       border: theme.successBorder,
     },
     degraded: {
       label: locale === "zh" ? "API 降級" : "API degraded",
-      short: "degraded",
+      short: locale === "zh" ? "降級" : "degraded",
       fg: theme.warn,
       bg: theme.warnBg,
       border: theme.warnBorder,
     },
     down: {
       label: locale === "zh" ? "API 失聯" : "API down",
-      short: "down",
+      short: locale === "zh" ? "失聯" : "down",
       fg: theme.danger,
       bg: theme.dangerBg,
       border: theme.dangerBorder,
@@ -446,7 +445,7 @@ function SidebarNavItem({
   const label = labelFor(locale, route, t);
 
   return (
-    <Link
+    <a
       href={href}
       title={label}
       aria-current={active ? "page" : undefined}
@@ -479,7 +478,7 @@ function SidebarNavItem({
       >
         {label}
       </span>
-    </Link>
+    </a>
   );
 }
 
@@ -555,11 +554,11 @@ function IdentityChip({ locale }: { locale: Locale }) {
     <div style={identityChipStyle}>
       <div style={realmChipStyle}>
         <span style={accentDotStyle} />
-        PLATFORM
+        {locale === "zh" ? "平台" : "PLATFORM"}
       </div>
       <div style={envChipStyle}>
         <span style={envDotStyle} />
-        production
+        {locale === "zh" ? "正式環境" : "production"}
       </div>
       <div style={actorChipStyle}>
         <div style={actorAvatarStyle}>PA</div>

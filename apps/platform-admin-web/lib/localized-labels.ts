@@ -73,10 +73,10 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   active: { en: "Active", zh: "啟用中" },
   admin: { en: "Admin", zh: "管理員" },
   all: { en: "All", zh: "全部" },
-  api_key: { en: "API Key", zh: "API Key" },
+  api_key: { en: "API Key", zh: "API 金鑰" },
   api_key_and_webhook: {
     en: "API Key + Webhook",
-    zh: "API Key + Webhook",
+    zh: "API 金鑰 + Webhook",
   },
   approved: { en: "Approved", zh: "已核准" },
   archived: { en: "Archived", zh: "已封存" },
