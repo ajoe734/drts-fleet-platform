@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import {
   buildCanvasTheme,
+  type CanvasRealm,
   type CanvasTheme,
   type CanvasTone,
 } from "../canvas-tokens";
@@ -15,14 +16,37 @@ export {
   CANVAS_DARK_NAVY_PALETTE,
   CANVAS_DENSITY,
   CANVAS_LIGHT_PALETTE,
+  CANVAS_REALM_DARK,
+  CANVAS_REALM_LIGHT,
+  CANVAS_REALM_NAMES,
   CANVAS_SURFACE_ACCENTS,
   CANVAS_TYPE,
   type CanvasDensity,
   type CanvasMode,
+  type CanvasRealm,
+  type CanvasRealmRamp,
   type CanvasSurface,
   type CanvasTheme,
   type CanvasTone,
 } from "../canvas-tokens";
+
+/**
+ * Badge tone vocabulary for {@link Pill} — base canvas tones plus the actor
+ * realm tones (cross-actor audit chips) sourced from the design canvas.
+ */
+export type CanvasPillTone = CanvasTone | CanvasRealm;
+
+const REALM_TONES: ReadonlySet<string> = new Set<CanvasRealm>([
+  "tenant",
+  "ops",
+  "platform",
+  "system",
+  "driver",
+]);
+
+function isRealmTone(tone: CanvasPillTone): tone is CanvasRealm {
+  return REALM_TONES.has(tone);
+}
 
 const DEFAULT_THEME = buildCanvasTheme({
   surface: "tenant",
@@ -44,7 +68,10 @@ function px(value?: string | number) {
   return typeof value === "number" ? `${value}px` : value;
 }
 
-function toneStyles(theme: CanvasTheme, tone: CanvasTone) {
+function toneStyles(theme: CanvasTheme, tone: CanvasPillTone) {
+  if (isRealmTone(tone)) {
+    return theme.realm[tone];
+  }
   switch (tone) {
     case "success":
       return {
@@ -850,7 +877,7 @@ export function CanvasActionButton({
 
 export interface PillProps {
   theme?: CanvasTheme;
-  tone?: CanvasTone;
+  tone?: CanvasPillTone;
   children: ReactNode;
   dot?: boolean;
   style?: CSSProperties;
@@ -1115,6 +1142,7 @@ export interface TableProps<Row extends object> {
   columns: TableColumn<Row>[];
   rows: readonly Row[];
   dense?: boolean;
+  onRowSelect?: (row: Row, index: number) => void;
 }
 
 export function Table<Row extends object>({
@@ -1122,6 +1150,7 @@ export function Table<Row extends object>({
   columns,
   rows,
   dense = true,
+  onRowSelect,
 }: TableProps<Row>) {
   const theme = resolveTheme(providedTheme);
 
@@ -1163,12 +1192,18 @@ export function Table<Row extends object>({
         <tbody>
           {rows.map((row, rowIndex) => {
             const keyedRow = row as Record<string, unknown>;
+            const selectable = onRowSelect !== undefined;
+            const rowSelectProps = selectable
+              ? { onClick: () => onRowSelect(row, rowIndex) }
+              : {};
 
             return (
               <tr
                 key={`row-${rowIndex}`}
+                {...rowSelectProps}
                 style={{
                   borderBottom: `1px solid ${theme.border}`,
+                  cursor: selectable ? "pointer" : "default",
                   background:
                     "_selected" in keyedRow && keyedRow._selected
                       ? theme.rowSelect
