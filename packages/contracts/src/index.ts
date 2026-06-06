@@ -3790,6 +3790,97 @@ export interface FleetPartnerStatementRecord {
   updatedAt: string;
 }
 
+export interface FleetPartnerPortalDashboardRecord {
+  fleetPartnerId: string;
+  periodMonth: string;
+  activeDriverCount: number;
+  onlineDriverCount: number;
+  dispatchEligibleDriverCount: number;
+  totalVehicleCount: number;
+  dispatchableVehicleCount: number;
+  completedTripCount: number;
+  inFlightTripCount: number;
+  proofPendingTripCount: number;
+  pendingStatementCount: number;
+  latestStatementPeriodMonth: string | null;
+  grossEarningAmount: MoneyAmount;
+  shareAmount: MoneyAmount;
+}
+
+export interface FleetPartnerPortalDriverRecord {
+  affiliationId: string;
+  driverId: string;
+  fleetPartnerId: string;
+  driverGroupId: string | null;
+  affiliationType: DriverFleetAffiliationType;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  name: string;
+  workState: DriverWorkState;
+  licensesValid: boolean;
+  lifecycleStatus: DriverMasterLifecycleStatus;
+  dispatchEligible: boolean;
+  supportedServiceBuckets: Phase1ServiceBucket[];
+  currentVehicleId: string | null;
+  currentVehiclePlateNo: string | null;
+}
+
+export interface FleetPartnerPortalVehicleRecord {
+  vehicleId: string;
+  plateNo: string;
+  operatingArea: string;
+  supportedServiceBuckets: Phase1ServiceBucket[];
+  dispatchableFlag: boolean;
+  exclusivityApproved: boolean;
+  insuranceStatus: "valid" | "expired";
+  updatedAt: string;
+  activeDriverIds: string[];
+  activeDriverNames: string[];
+  currentEtaMinutes: number | null;
+}
+
+export interface FleetPartnerPortalTripRecord {
+  orderId: string;
+  fleetPartnerId: string;
+  driverId: string;
+  driverName: string | null;
+  vehicleId: string | null;
+  vehiclePlateNo: string | null;
+  status: OwnedOrderStatus | "completed";
+  completedAt: string;
+  orderSource: OwnedOrderSource;
+  businessDispatchSubtype:
+    | "enterprise_dispatch"
+    | "credit_card_airport_transfer";
+  grossEarning: MoneyAmount;
+  subsidy: MoneyAmount;
+  serviceProduct: string | null;
+  tenantServiceProgramId: string | null;
+  sourcePlatform: string | null;
+  partnerId: string | null;
+  partnerProgramId: string | null;
+  passengerName: string | null;
+  pickupAddress: string | null;
+  dropoffAddress: string | null;
+  reservationWindowStart: string | null;
+  reservationWindowEnd: string | null;
+}
+
+export interface FleetPartnerPortalQualityMetricsRecord {
+  fleetPartnerId: string;
+  periodMonth: string;
+  totalCompletedTrips: number;
+  proofPendingTripCount: number;
+  cancelledTripCount: number;
+  activeDriverCount: number;
+  offlineDriverCount: number;
+  licenseInvalidDriverCount: number;
+  nonDispatchableVehicleCount: number;
+  expiredInsuranceVehicleCount: number;
+  pendingStatementCount: number;
+  shareAmount: MoneyAmount;
+}
+
 export interface DriverFeePlanRecord {
   feePlanId: string;
   planName: string;
