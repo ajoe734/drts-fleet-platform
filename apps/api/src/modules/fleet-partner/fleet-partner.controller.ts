@@ -201,4 +201,81 @@ export class FleetPartnerController {
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
+
+  @Get("fleet-partner/dashboard")
+  async getPortalDashboard(
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Query("periodMonth") periodMonth?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.fleetPartnerService.getPortalDashboard(
+        this.requireFleetPartnerId(fleetPartnerId),
+        periodMonth,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("fleet-partner/drivers")
+  listPortalDrivers(
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        this.fleetPartnerService.listPortalDrivers(
+          this.requireFleetPartnerId(fleetPartnerId),
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Get("fleet-partner/vehicles")
+  listPortalVehicles(
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        this.fleetPartnerService.listPortalVehicles(
+          this.requireFleetPartnerId(fleetPartnerId),
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Get("fleet-partner/trips")
+  async listPortalTrips(
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Query("periodMonth") periodMonth?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        await this.fleetPartnerService.listPortalTrips(
+          this.requireFleetPartnerId(fleetPartnerId),
+          periodMonth,
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Get("fleet-partner/quality-metrics")
+  async getPortalQualityMetrics(
+    @Headers("x-fleet-partner-id") fleetPartnerId?: string,
+    @Query("periodMonth") periodMonth?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.fleetPartnerService.getPortalQualityMetrics(
+        this.requireFleetPartnerId(fleetPartnerId),
+        periodMonth,
+      ),
+      requestId,
+    );
+  }
 }

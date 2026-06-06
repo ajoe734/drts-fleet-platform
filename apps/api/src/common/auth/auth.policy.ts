@@ -155,12 +155,13 @@ export function resolveRouteAuthPolicy(
     };
   }
 
-  if (routePath === "fleet-partner/statements") {
+  if (routePath.startsWith("fleet-partner/")) {
+    const routeSuffix = routePath.slice("fleet-partner/".length) || "root";
     return {
-      routeKey: `fleet-partner:statements:${upperMethod}`,
+      routeKey: `fleet-partner:${routeSuffix}:${upperMethod}`,
       requiredScopes: ["billing:read"],
       allowedRealms: baseAllowedRealms("partner"),
-      description: "Fleet partner statement self-service access",
+      description: "Fleet partner self-service access",
     };
   }
 

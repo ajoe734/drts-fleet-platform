@@ -7,11 +7,19 @@ import type {
   CreateFleetPartnerCommand,
   CreateFleetPartnerRevenueShareRuleCommand,
   DriverFleetAffiliationRecord,
+  DriverRegistryRecord,
   DriverStatementRecord,
   FleetPartnerRecord,
+  FleetPartnerPortalDashboardRecord,
+  FleetPartnerPortalDriverRecord,
+  FleetPartnerPortalQualityMetricsRecord,
+  FleetPartnerPortalTripRecord,
+  FleetPartnerPortalVehicleRecord,
   FleetPartnerRevenueShareRuleRecord,
   FleetPartnerStatementLineRecord,
   FleetPartnerStatementRecord,
+  OwnedOrderRecord,
+  VehicleRegistryRecord,
   UpdateFleetPartnerCommand,
   UpdateFleetPartnerRevenueShareRuleCommand,
 } from "@drts/contracts";
@@ -21,6 +29,8 @@ import {
   BillingSettlementService,
   type BillingSettlementTripRecord,
 } from "../billing-settlement/billing-settlement.service";
+import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
+import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import {
   FleetPartnerRepository,
   type PersistFleetPartnerChanges,
@@ -93,6 +103,8 @@ export class FleetPartnerService implements OnModuleInit {
 
   constructor(
     private readonly billingSettlementService: BillingSettlementService,
+    private readonly ownedMobilityService: OwnedMobilityService,
+    private readonly regulatoryRegistryService: RegulatoryRegistryService,
     @Optional()
     private readonly fleetPartnerRepository?: FleetPartnerRepository,
   ) {}
@@ -416,6 +428,245 @@ export class FleetPartnerService implements OnModuleInit {
       )
       .sort((left, right) => right.periodMonth.localeCompare(left.periodMonth))
       .map((statement) => this.cloneStatement(statement));
+  }
+
+  async getPortalDashboard(
+    fleetPartnerId: string,
+    periodMonth?: string,
+  ): Promise<FleetPartnerPortalDashboardRecord> {
+    const normalizedPeriodMonth = await this.resolvePeriodMonth(periodMonth);
+    const [drivers, vehicles, trips, statements, orders, orderDriverMap] =
+      await Promise.all([
+        this.listPortalDrivers(fleetPartnerId),
+        this.listPortalVehicles(fleetPartnerId),
+        this.listPortalTrips(fleetPartnerId, normalizedPeriodMonth),
+        this.listFleetPartnerStatements(fleetPartnerId, normalizedPeriodMonth),
+        Promise.resolve(this.ownedMobilityService.listOrders()),
+        this.buildOrderDriverMap(normalizedPeriodMonth),
+      ]);
+    const driverIds = new Set(drivers.map((driver) => driver.driverId));
+    const inFlightTripCount = orders.filter((order) =>
+      this.isPartnerInFlightOrder(order, driverIds, orderDriverMap),
+    ).length;
+    const proofPendingTripCount = orders.filter((order) =>
+      this.isPartnerProofPendingOrder(order, driverIds, orderDriverMap),
+    ).length;
+
+    return {
+      fleetPartnerId,
+      periodMonth: normalizedPeriodMonth,
+      activeDriverCount: drivers.length,
+      onlineDriverCount: drivers.filter(
+        (driver) => driver.workState !== "offline",
+      ).length,
+      dispatchEligibleDriverCount: drivers.filter(
+        (driver) => driver.dispatchEligible,
+      ).length,
+      totalVehicleCount: vehicles.length,
+      dispatchableVehicleCount: vehicles.filter(
+        (vehicle) => vehicle.dispatchableFlag,
+      ).length,
+      completedTripCount: trips.length,
+      inFlightTripCount,
+      proofPendingTripCount,
+      pendingStatementCount: statements.filter(
+        (statement) => statement.payoutStatus === "pending",
+      ).length,
+      latestStatementPeriodMonth: statements[0]?.periodMonth ?? null,
+      grossEarningAmount: this.sumMoney(trips.map((trip) => trip.grossEarning)),
+      shareAmount: this.sumMoney(
+        statements.map((statement) => statement.shareAmount),
+      ),
+    };
+  }
+
+  listPortalDrivers(fleetPartnerId: string): FleetPartnerPortalDriverRecord[] {
+    this.requireFleetPartner(fleetPartnerId);
+    const driversById = new Map(
+      this.regulatoryRegistryService
+        .listDrivers()
+        .map((driver) => [driver.driverId, driver] as const),
+    );
+    const vehicleByDriverId = this.buildVehicleByDriverId();
+
+    return this.driverAffiliations
+      .filter((affiliation) => affiliation.fleetPartnerId === fleetPartnerId)
+      .sort((left, right) =>
+        right.effectiveFrom.localeCompare(left.effectiveFrom),
+      )
+      .map((affiliation) => {
+        const driver = driversById.get(affiliation.driverId);
+        const currentVehicle = vehicleByDriverId.get(affiliation.driverId);
+        return {
+          affiliationId: affiliation.affiliationId,
+          driverId: affiliation.driverId,
+          fleetPartnerId: affiliation.fleetPartnerId,
+          driverGroupId: affiliation.driverGroupId ?? null,
+          affiliationType: affiliation.affiliationType,
+          effectiveFrom: affiliation.effectiveFrom,
+          effectiveUntil: affiliation.effectiveUntil ?? null,
+          name: driver?.name ?? affiliation.driverId,
+          workState: driver?.workState ?? "offline",
+          licensesValid: driver?.licensesValid ?? false,
+          lifecycleStatus: driver?.lifecycleStatus ?? "draft",
+          dispatchEligible: driver?.dispatchEligible ?? false,
+          supportedServiceBuckets: [...(driver?.supportedServiceBuckets ?? [])],
+          currentVehicleId: currentVehicle?.vehicle.vehicleId ?? null,
+          currentVehiclePlateNo: currentVehicle?.vehicle.plateNo ?? null,
+        };
+      });
+  }
+
+  listPortalVehicles(
+    fleetPartnerId: string,
+  ): FleetPartnerPortalVehicleRecord[] {
+    this.requireFleetPartner(fleetPartnerId);
+    const activeDriverIds = new Set(
+      this.driverAffiliations
+        .filter((affiliation) => affiliation.fleetPartnerId === fleetPartnerId)
+        .map((affiliation) => affiliation.driverId),
+    );
+    const driversById = new Map(
+      this.regulatoryRegistryService
+        .listDrivers()
+        .map((driver) => [driver.driverId, driver] as const),
+    );
+    const vehiclesById = new Map(
+      this.regulatoryRegistryService
+        .listVehicles()
+        .map((vehicle) => [vehicle.vehicleId, vehicle] as const),
+    );
+
+    const vehicleMap = new Map<string, FleetPartnerPortalVehicleRecord>();
+
+    for (const pair of this.regulatoryRegistryService
+      .listSupplyPairs()
+      .filter((candidate) => activeDriverIds.has(candidate.driverId))) {
+      const vehicle = vehiclesById.get(pair.vehicleId);
+      if (!vehicle) {
+        continue;
+      }
+      const driver = driversById.get(pair.driverId);
+      const existing = vehicleMap.get(vehicle.vehicleId);
+      if (existing) {
+        existing.activeDriverIds.push(pair.driverId);
+        existing.activeDriverNames.push(driver?.name ?? pair.driverId);
+        existing.currentEtaMinutes = Math.min(
+          existing.currentEtaMinutes ?? pair.etaMinutes,
+          pair.etaMinutes,
+        );
+        continue;
+      }
+
+      vehicleMap.set(vehicle.vehicleId, {
+        vehicleId: vehicle.vehicleId,
+        plateNo: vehicle.plateNo,
+        operatingArea: vehicle.operatingArea,
+        supportedServiceBuckets: [...vehicle.supportedServiceBuckets],
+        dispatchableFlag: vehicle.dispatchableFlag,
+        exclusivityApproved: vehicle.exclusivityApproved,
+        insuranceStatus: vehicle.insuranceStatus,
+        updatedAt: vehicle.updatedAt,
+        activeDriverIds: [pair.driverId],
+        activeDriverNames: [driver?.name ?? pair.driverId],
+        currentEtaMinutes: pair.etaMinutes,
+      });
+    }
+
+    return [...vehicleMap.values()].sort((left, right) =>
+      left.plateNo.localeCompare(right.plateNo),
+    );
+  }
+
+  async listPortalTrips(
+    fleetPartnerId: string,
+    periodMonth?: string,
+  ): Promise<FleetPartnerPortalTripRecord[]> {
+    this.requireFleetPartner(fleetPartnerId);
+    const normalizedPeriodMonth = await this.resolvePeriodMonth(periodMonth);
+    const trips =
+      await this.billingSettlementService.listSettlementTripsForPeriodMonth(
+        normalizedPeriodMonth,
+      );
+    const ordersById = new Map(
+      this.ownedMobilityService
+        .listOrders()
+        .map((order) => [order.orderId, order] as const),
+    );
+    const driversById = new Map(
+      this.regulatoryRegistryService
+        .listDrivers()
+        .map((driver) => [driver.driverId, driver] as const),
+    );
+    const vehicleByDriverId = this.buildVehicleByDriverId();
+
+    return trips
+      .filter((trip) => {
+        const affiliation = this.resolveAffiliation(
+          trip.driverId,
+          trip.completedAt,
+          fleetPartnerId,
+        );
+        return affiliation !== undefined;
+      })
+      .sort((left, right) => right.completedAt.localeCompare(left.completedAt))
+      .map((trip) =>
+        this.toPortalTripRecord(
+          fleetPartnerId,
+          trip,
+          ordersById.get(trip.orderId) ?? null,
+          driversById.get(trip.driverId) ?? null,
+          vehicleByDriverId.get(trip.driverId)?.vehicle ?? null,
+        ),
+      );
+  }
+
+  async getPortalQualityMetrics(
+    fleetPartnerId: string,
+    periodMonth?: string,
+  ): Promise<FleetPartnerPortalQualityMetricsRecord> {
+    const normalizedPeriodMonth = await this.resolvePeriodMonth(periodMonth);
+    const [drivers, vehicles, trips, statements, orders, orderDriverMap] =
+      await Promise.all([
+        Promise.resolve(this.listPortalDrivers(fleetPartnerId)),
+        Promise.resolve(this.listPortalVehicles(fleetPartnerId)),
+        this.listPortalTrips(fleetPartnerId, normalizedPeriodMonth),
+        this.listFleetPartnerStatements(fleetPartnerId, normalizedPeriodMonth),
+        Promise.resolve(this.ownedMobilityService.listOrders()),
+        this.buildOrderDriverMap(normalizedPeriodMonth),
+      ]);
+    const driverIds = new Set(drivers.map((driver) => driver.driverId));
+
+    return {
+      fleetPartnerId,
+      periodMonth: normalizedPeriodMonth,
+      totalCompletedTrips: trips.length,
+      proofPendingTripCount: orders.filter((order) =>
+        this.isPartnerProofPendingOrder(order, driverIds, orderDriverMap),
+      ).length,
+      cancelledTripCount: orders.filter((order) =>
+        this.isPartnerCancelledOrder(order, driverIds, orderDriverMap),
+      ).length,
+      activeDriverCount: drivers.length,
+      offlineDriverCount: drivers.filter(
+        (driver) => driver.workState === "offline",
+      ).length,
+      licenseInvalidDriverCount: drivers.filter(
+        (driver) => !driver.licensesValid,
+      ).length,
+      nonDispatchableVehicleCount: vehicles.filter(
+        (vehicle) => !vehicle.dispatchableFlag,
+      ).length,
+      expiredInsuranceVehicleCount: vehicles.filter(
+        (vehicle) => vehicle.insuranceStatus === "expired",
+      ).length,
+      pendingStatementCount: statements.filter(
+        (statement) => statement.payoutStatus === "pending",
+      ).length,
+      shareAmount: this.sumMoney(
+        statements.map((statement) => statement.shareAmount),
+      ),
+    };
   }
 
   private async rebuildStatementsForPeriodMonth(
@@ -944,6 +1195,157 @@ export class FleetPartnerService implements OnModuleInit {
       currency: DEFAULT_CURRENCY,
       amountMinor,
     };
+  }
+
+  private async resolvePeriodMonth(periodMonth?: string) {
+    if (periodMonth?.trim()) {
+      return periodMonth.trim();
+    }
+    const cursor = new Date();
+    cursor.setUTCDate(1);
+    for (let index = 0; index < 12; index += 1) {
+      const candidate = cursor.toISOString().slice(0, 7);
+      const trips =
+        await this.billingSettlementService.listSettlementTripsForPeriodMonth(
+          candidate,
+        );
+      if (trips.length > 0) {
+        return candidate;
+      }
+      cursor.setUTCMonth(cursor.getUTCMonth() - 1);
+    }
+
+    return new Date().toISOString().slice(0, 7);
+  }
+
+  private buildVehicleByDriverId() {
+    const vehiclesById = new Map(
+      this.regulatoryRegistryService
+        .listVehicles()
+        .map((vehicle) => [vehicle.vehicleId, vehicle] as const),
+    );
+    return new Map(
+      this.regulatoryRegistryService
+        .listSupplyPairs()
+        .map((pair) => {
+          const vehicle = vehiclesById.get(pair.vehicleId);
+          if (!vehicle) {
+            return null;
+          }
+          return [
+            pair.driverId,
+            { vehicle, etaMinutes: pair.etaMinutes },
+          ] as const;
+        })
+        .filter(
+          (
+            entry,
+          ): entry is readonly [
+            string,
+            { vehicle: VehicleRegistryRecord; etaMinutes: number },
+          ] => entry !== null,
+        ),
+    );
+  }
+
+  private toPortalTripRecord(
+    fleetPartnerId: string,
+    trip: BillingSettlementTripRecord,
+    order: OwnedOrderRecord | null,
+    driver: DriverRegistryRecord | null,
+    vehicle: VehicleRegistryRecord | null,
+  ): FleetPartnerPortalTripRecord {
+    return {
+      orderId: trip.orderId,
+      fleetPartnerId,
+      driverId: trip.driverId,
+      driverName: driver?.name ?? null,
+      vehicleId: vehicle?.vehicleId ?? null,
+      vehiclePlateNo: vehicle?.plateNo ?? null,
+      status: order?.status ?? "completed",
+      completedAt: trip.completedAt,
+      orderSource: trip.orderSource,
+      businessDispatchSubtype: trip.businessDispatchSubtype,
+      grossEarning: { ...trip.grossEarning },
+      subsidy: { ...trip.subsidy },
+      serviceProduct: trip.serviceProduct ?? null,
+      tenantServiceProgramId: trip.tenantServiceProgramId ?? null,
+      sourcePlatform: trip.sourcePlatform ?? null,
+      partnerId: trip.partnerId ?? null,
+      partnerProgramId: trip.partnerProgramId ?? null,
+      passengerName: order?.passenger.name ?? null,
+      pickupAddress: order?.pickup.address ?? null,
+      dropoffAddress: order?.dropoff.address ?? null,
+      reservationWindowStart: order?.reservationWindowStart ?? null,
+      reservationWindowEnd: order?.reservationWindowEnd ?? null,
+    };
+  }
+
+  private isPartnerInFlightOrder(
+    order: OwnedOrderRecord,
+    driverIds: ReadonlySet<string>,
+    orderDriverMap: ReadonlyMap<string, string>,
+  ) {
+    return (
+      driverIds.has(orderDriverMap.get(order.orderId) ?? "") &&
+      [
+        "assigned",
+        "driver_accepted",
+        "enroute_pickup",
+        "arrived_pickup",
+        "on_trip",
+      ].includes(order.status)
+    );
+  }
+
+  private isPartnerProofPendingOrder(
+    order: OwnedOrderRecord,
+    driverIds: ReadonlySet<string>,
+    orderDriverMap: ReadonlyMap<string, string>,
+  ) {
+    return (
+      driverIds.has(orderDriverMap.get(order.orderId) ?? "") &&
+      order.status === "proof_pending"
+    );
+  }
+
+  private isPartnerCancelledOrder(
+    order: OwnedOrderRecord,
+    driverIds: ReadonlySet<string>,
+    orderDriverMap: ReadonlyMap<string, string>,
+  ) {
+    return (
+      driverIds.has(orderDriverMap.get(order.orderId) ?? "") &&
+      order.status === "cancelled"
+    );
+  }
+
+  private async buildOrderDriverMap(periodMonth: string) {
+    const entries = new Map<string, string>();
+    const tasks = this.ownedMobilityService.listDriverTasks();
+    for (const task of tasks) {
+      entries.set(task.orderId, task.driverId);
+    }
+    const trips =
+      await this.billingSettlementService.listSettlementTripsForPeriodMonth(
+        periodMonth,
+      );
+    for (const trip of trips) {
+      entries.set(trip.orderId, trip.driverId);
+    }
+    return entries;
+  }
+
+  private sumMoney(
+    amounts: ReadonlyArray<{ currency: string; amountMinor: number }>,
+  ) {
+    return amounts.reduce(
+      (total, amount) => ({
+        currency: amount.currency,
+        amountMinor: total.amountMinor + amount.amountMinor,
+      }),
+      this.money(0),
+    );
   }
 
   private toPeriodMonth(value: string) {

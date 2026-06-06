@@ -241,19 +241,26 @@ describe("bootstrap auth extraction", () => {
     });
   });
 
-  it("protects fleet partner portal statement routes with partner realm access", () => {
-    const policy = resolveRouteAuthPolicy(
-      "GET",
-      "/api/fleet-partner/statements",
-    );
+  it.each([
+    ["/api/fleet-partner/dashboard", "fleet-partner:dashboard:GET"],
+    ["/api/fleet-partner/drivers", "fleet-partner:drivers:GET"],
+    ["/api/fleet-partner/vehicles", "fleet-partner:vehicles:GET"],
+    ["/api/fleet-partner/trips", "fleet-partner:trips:GET"],
+    ["/api/fleet-partner/statements", "fleet-partner:statements:GET"],
+    ["/api/fleet-partner/quality-metrics", "fleet-partner:quality-metrics:GET"],
+  ])(
+    "protects fleet partner portal route %s with partner realm access",
+    (path, routeKey) => {
+      const policy = resolveRouteAuthPolicy("GET", path);
 
-    expect(policy).toEqual({
-      routeKey: "fleet-partner:statements:GET",
-      requiredScopes: ["billing:read"],
-      allowedRealms: ["system", "partner"],
-      description: "Fleet partner statement self-service access",
-    });
-  });
+      expect(policy).toEqual({
+        routeKey,
+        requiredScopes: ["billing:read"],
+        allowedRealms: ["system", "partner"],
+        description: "Fleet partner self-service access",
+      });
+    },
+  );
 });
 
 describe("bootstrap auth guard", () => {
