@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-06T08:42:11.357Z",
+  "generatedAt": "2026-06-06T09:18:23.925Z",
   "platformAdminBaseUrl": "https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app",
   "opsBaseUrl": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app",
   "totals": {
@@ -563,19 +563,17 @@
     {
       "app": "ops-console",
       "key": "drivers-detail",
-      "path": "/drivers/DRV-001",
-      "url": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app/drivers/DRV-001",
-      "finalUrl": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app/drivers/DRV-001",
-      "httpStatus": 404,
+      "path": "/drivers/drv-demo-001",
+      "url": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app/drivers/drv-demo-001",
+      "finalUrl": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app/drivers/drv-demo-001",
+      "httpStatus": 200,
       "httpOk": true,
       "shellCount": 1,
       "shellOk": true,
       "bodyOk": true,
-      "consoleErrors": [
-        "Failed to load resource: the server responded with a status of 404 ()"
-      ],
+      "consoleErrors": [],
       "pageErrors": [],
-      "screenshot": ".artifacts/func-audit/ops-console-drivers-DRV-001.png",
+      "screenshot": ".artifacts/func-audit/ops-console-drivers-drv-demo-001.png",
       "errors": []
     },
     {
@@ -633,19 +631,17 @@
     {
       "app": "ops-console",
       "key": "contracts-detail",
-      "path": "/contracts/CTR-310",
-      "url": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app/contracts/CTR-310",
-      "finalUrl": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app/contracts/CTR-310",
-      "httpStatus": 404,
+      "path": "/contracts/contract-demo-001",
+      "url": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app/contracts/contract-demo-001",
+      "finalUrl": "https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app/contracts/contract-demo-001",
+      "httpStatus": 200,
       "httpOk": true,
       "shellCount": 1,
       "shellOk": true,
       "bodyOk": true,
-      "consoleErrors": [
-        "Failed to load resource: the server responded with a status of 404 ()"
-      ],
+      "consoleErrors": [],
       "pageErrors": [],
-      "screenshot": ".artifacts/func-audit/ops-console-contracts-CTR-310.png",
+      "screenshot": ".artifacts/func-audit/ops-console-contracts-contract-demo-001.png",
       "errors": []
     },
     {

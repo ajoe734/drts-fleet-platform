@@ -647,8 +647,12 @@ export default function PricingPage() {
   // which is why #510 (`router.replace`) and #514 (`<Link replace>`) both left
   // the URL on `/pricing` without `?tab=`.
   useEffect(() => {
-    if (isTabId(tabParam) && tabParam !== activeTab) {
-      setActiveTab(tabParam);
+    // Bare `/pricing` (or an unknown `?tab=`) must resync to the default tab,
+    // otherwise browser back/forward from e.g. `?tab=history` to `/pricing`
+    // leaves a stale `activeTab` that disagrees with the address bar.
+    const nextTab: TabId = isTabId(tabParam) ? tabParam : "passenger";
+    if (nextTab !== activeTab) {
+      setActiveTab(nextTab);
     }
   }, [tabParam, activeTab]);
 

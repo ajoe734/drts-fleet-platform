@@ -82,7 +82,10 @@ const opsRoutes = [
   { key: "drivers-list", path: "/drivers", app: "ops-console" },
   {
     key: "drivers-detail",
-    path: "/drivers/DRV-001",
+    // Canonical seeded demo driver (apps/api driver-profile.service.ts). A
+    // bogus id (e.g. DRV-001) resolves to notFound() -> HTTP 404, which the
+    // audit must treat as broken rather than mark the detail route healthy.
+    path: "/drivers/drv-demo-001",
     app: "ops-console",
   },
   { key: "vehicles-list", path: "/vehicles", app: "ops-console" },
@@ -94,7 +97,9 @@ const opsRoutes = [
   { key: "contracts-list", path: "/contracts", app: "ops-console" },
   {
     key: "contracts-detail",
-    path: "/contracts/CTR-310",
+    // Canonical seeded demo contract (apps/api regulatory-registry.service.ts).
+    // CTR-310 is a design-canvas mock label with no backend record, so it 404s.
+    path: "/contracts/contract-demo-001",
     app: "ops-console",
   },
   { key: "feature-flags", path: "/feature-flags", app: "ops-console" },
@@ -174,9 +179,10 @@ async function auditRoute(page, route) {
   const httpStatus = response ? response.status() : null;
   const finalUrl = page.url();
   const bodyText = await page.locator("body").innerText();
-  const bodyOk = !/Application error|Internal Server Error|Unhandled Runtime Error/i.test(
-    bodyText,
-  );
+  const bodyOk =
+    !/Application error|Internal Server Error|Unhandled Runtime Error/i.test(
+      bodyText,
+    );
   if (!bodyOk) {
     errors.push("body_error_text");
   }
@@ -205,12 +211,18 @@ async function auditRoute(page, route) {
     }
   }
 
-  const httpOk = httpStatus !== null && httpStatus < 500;
+  // A route is HTTP-healthy only on a 2xx/3xx final status. The previous
+  // `< 500` threshold treated 404 (notFound) as healthy, which let broken or
+  // mis-seeded detail routes pass the scoreboard (e.g. /drivers/DRV-001 404).
+  const httpOk = httpStatus !== null && httpStatus >= 200 && httpStatus < 400;
   if (!httpOk) {
     errors.push(`http_status=${httpStatus}`);
   }
 
-  const screenshotPath = path.join(ARTIFACT_DIR, screenshotName(route.app, route.path));
+  const screenshotPath = path.join(
+    ARTIFACT_DIR,
+    screenshotName(route.app, route.path),
+  );
   await page.screenshot({ path: screenshotPath, fullPage: true });
 
   return {
@@ -338,7 +350,9 @@ async function writeSummaryWithChecks(results, checks) {
 test.describe("live dev gap audit", () => {
   test.setTimeout(300_000);
 
-  test("re-audits all 39 routes and critical tab strips", async ({ browser }) => {
+  test("re-audits all 39 routes and critical tab strips", async ({
+    browser,
+  }) => {
     ensureArtifactDir();
 
     const context = await browser.newContext({
@@ -382,6 +396,16 @@ test.describe("live dev gap audit", () => {
       };
     }
 
+    // NOTE: the bare-/pricing null-tab resync (URL->state effect, finding #2)
+    // is fixed in app/pricing/page.tsx and is intentionally NOT asserted via a
+    // live browser step. Reproducing it needs an in-place `tab`->null change
+    // while the page stays mounted, but Next App Router drops same-pathname,
+    // query-only soft navigations (the exact quirk the page works around with
+    // history.replaceState for tab clicks), so a Link/back-button repro is
+    // unreliable and would falsely fail even post-fix. The correct check is a
+    // component test, which this app has no harness for. The forward tab-click
+    // sync below (pricingTabs) still exercises the deployed replaceState path.
+
     try {
       await page.goto(`${PLATFORM_ADMIN_BASE_URL}/payments`, {
         waitUntil: "domcontentloaded",
@@ -397,9 +421,9 @@ test.describe("live dev gap audit", () => {
         page.getByRole("tab", { name: "司機結算單" }),
       ).toHaveAttribute("aria-selected", "true");
       await clickTabByText(page, /報銷/);
-      await expect.poll(() => new URL(page.url()).pathname).toBe(
-        "/payments/reimbursements",
-      );
+      await expect
+        .poll(() => new URL(page.url()).pathname)
+        .toBe("/payments/reimbursements");
       await page.screenshot({
         path: path.join(ARTIFACT_DIR, "payments-tab-roundtrip.png"),
         fullPage: true,

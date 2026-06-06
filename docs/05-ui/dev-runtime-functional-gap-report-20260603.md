@@ -1,14 +1,15 @@
 # Dev Runtime + Functional Gap Report (browser-verified)
 
-- **Last re-run:** 2026-06-06T08:42:11Z
+- **Last re-run:** 2026-06-06T09:18:23Z
 - **Auditor:** Claude2 (reassigned owner; prior re-runs by Codex2)
 - **Environment:** live dev Cloud Run
   - Platform Admin: `https://drts-dev-platform-admin-web-waji3fer3a-uc.a.run.app`
   - Ops Console: `https://drts-dev-ops-console-web-waji3fer3a-uc.a.run.app`
 - **Method:** headless Chromium route census over all 39 routes (Platform Admin 18 + Ops Console 21), fixed `1440x950` screenshots, shell-count checks, and manual tab round-trip checks for `/pricing`, `/payments`, `/attendance`.
+- **Audit methodology hardened (2026-06-06, review finding #1):** the route census now treats any non-`2xx`/`3xx` final status as **broken** (was `< 500`, which let HTTP 404 detail routes pass), and the detail-route fixtures now use the canonical seeded ids that actually exist on the dev API — `/drivers/drv-demo-001` (was the bogus `/drivers/DRV-001` → 404) and `/contracts/contract-demo-001` (was the design-mock `/contracts/CTR-310` → 404). Both previously-masked 404s now resolve to HTTP 200, so the only remaining HTTP failure is the genuine `/vehicles` 500. See `scripts/dev-gap-audit.spec.js`.
 - **Artifacts:** `.artifacts/func-audit/dev-gap-audit-results.json`, `.artifacts/func-audit/dev-gap-audit-summary.md`, and route screenshots under `.artifacts/func-audit/*.png`.
 
-## 1. Scoreboard (2026-06-06T08:42:11Z re-run)
+## 1. Scoreboard (2026-06-06T09:18:23Z re-run)
 
 | App            | Routes | Fully working | Broken                            |
 | -------------- | -----: | ------------: | --------------------------------- |
@@ -28,7 +29,7 @@
 > run publishes it. That merge + deploy is the sole remaining blocker — see §5.
 > See §3.1 / §3.2 for the fixes.
 
-This 2026-06-06T08:42:11Z re-run (Claude2, full 39-route Playwright census + manual tab checks) reconfirms the current dev state is materially unchanged from the earlier 2026-06-06T06:48:46Z and 2026-06-05T08:30:59Z runs: every Platform Admin shell count is exactly one, single-shell holds on every route, and `/payments` + `/attendance` tab strips round-trip. A live `curl` taken immediately before this census still returned HTTP 500 for `/vehicles/veh-demo-001`, so the failure is current dev state, not transient lag. The two `origin/dev` commits that landed since (#538 tenant-governance UI, #540 OpenClaw runtime) touch neither `/vehicles/[vehicleId]` nor `/pricing`. Acceptance is still blocked by one HTTP 500 and one tab-strip regression:
+This 2026-06-06T09:18:23Z re-run (Claude2, full 39-route Playwright census + manual tab checks, **first run on the hardened audit methodology** — see the header note and review finding #1) reconfirms the current dev state is materially unchanged from the earlier 2026-06-06T08:42:11Z / 06:48:46Z and 2026-06-05T08:30:59Z runs: every Platform Admin shell count is exactly one, single-shell holds on every route, and `/payments` + `/attendance` tab strips round-trip. The corrected detail-route ids (`/drivers/drv-demo-001`, `/contracts/contract-demo-001`) now return HTTP 200 — confirming the earlier `DRV-001`/`CTR-310` 404s were bad fixtures, not broken routes — and the stricter `httpOk` threshold would now surface any 4xx as broken. A live `curl` taken immediately before this census still returned HTTP 500 for `/vehicles/veh-demo-001`, so the failure is current dev state, not transient lag. The two `origin/dev` commits that landed since (#538 tenant-governance UI, #540 OpenClaw runtime) touch neither `/vehicles/[vehicleId]` nor `/pricing`. Acceptance is still blocked by one HTTP 500 and one tab-strip regression:
 
 - OPS `/vehicles/veh-demo-001` still returns HTTP 500 (`checks` census `httpStatus=500`; live `digest=863528574`, matching the error the §3.1 fix hardens).
 - PA `/pricing` tab clicking still fails to push `/pricing?tab=driver` (`checks.pricingTabs=fail`).
@@ -88,7 +89,9 @@ The two failures are **not** transient lag — the running dev revision is curre
   - **Client-side tab click does NOT:** clicking the `<a href="/pricing?tab=driver">` (replace, scroll:false) fires a `framenavigated` event but lands back on `/pricing` with the `?tab=` **query stripped** — with **no console/page errors** (hydration is healthy). The App Router soft-navigation for a same-pathname, query-only change is dropping the search params.
   - Both prior approaches hit this: #510 (`router.replace(pathname?tab=…)`) and #514 (`<Link href=…?tab= replace>`) rely on the same App Router client navigation, so neither updates the URL on click.
 - **Fix applied (this branch, `apps/platform-admin-web/app/pricing/page.tsx`):** `activeTab` is now local React state seeded from the URL (`?tab=`), a `useEffect` re-syncs it when the URL changes outside a click (direct `?tab=` nav, browser back/forward), and the tab strip is now `<button onClick={handleTabChange}>` instead of `<Link replace>`. `handleTabChange` updates local state **and** the address bar with `window.history.replaceState(...)` directly, bypassing the App Router same-pathname soft-nav that dropped the query. Removed the now-unused `Link` / `useRouter` imports. Verified by `typecheck` + `lint` + production `next build`.
-  - **Confidence / caveat:** behavioural correctness is confirmed by code review against the isolated root cause (direct `?tab=` already worked server-side; only the client soft-nav dropped the query — local state + History API is the canonical work-around). Full behavioural proof = the post-deploy dev re-audit recording `checks.pricingTabs=pass`; no local browser run was possible in this no-deploy worktree.
+- **Follow-up fix (2026-06-06, review finding #2):** the URL→state `useEffect` previously only re-synced **when `?tab=` held a valid tab**, so navigating back/forward to a bare `/pricing` (no `?tab=`, or an unknown value) left the prior `activeTab` stranded, contradicting the claimed browser-nav resync. The effect now computes `const nextTab = isTabId(tabParam) ? tabParam : "passenger"` and applies it whenever it differs from `activeTab`, so a bare/invalid URL resyncs to the default tab. Type-clean (`typecheck` green for `@drts/platform-admin-web`).
+  - **Why no live audit step for this one:** reproducing the resync in a browser needs an in-place `tab`→null change while the page stays mounted, but Next App Router drops same-pathname, query-only soft navigations (the exact quirk this page works around with `history.replaceState`), so a `<Link>`/back-button repro is unreliable and would falsely fail even with the fix deployed. A `page.goto`/`goBack` between hard loads remounts the page and masks the bug via the `useState` initializer (it passes vacuously). The correct check is a component test, which this app has no harness for. The audit spec carries a comment documenting this; the forward tab-click `pricingTabs` check still exercises the deployed `replaceState` path.
+  - **Confidence / caveat:** behavioural correctness is confirmed by code review against the isolated root cause (direct `?tab=` already worked server-side; only the client soft-nav dropped the query — local state + History API is the canonical work-around). Full behavioural proof = the post-deploy dev re-audit recording `checks.pricingTabs=pass`, plus a manual back/forward-to-bare-`/pricing` spot check; no local browser run was possible in this no-deploy worktree.
 - Evidence: `.artifacts/func-audit/dev-gap-audit-results.json` (`checks.pricingTabs`), live probe transcript summarized above.
 
 ## 4. Raw audit outputs
@@ -109,7 +112,9 @@ separate fix tasks. Both code fixes are now implemented on `claude2/gap-verify`.
 - **Fixes implemented & branch-verified:**
   - OPS `/vehicles/[vehicleId]` 500 → date-formatter invalid-date hardening (§3.1).
   - PA `/pricing` `?tab=` sync → local tab state + History API (§3.2).
-  - Gates: `typecheck` ✅, `lint` (`--max-warnings=0`) ✅, production `next build` ✅ for both `@drts/platform-admin-web` and `@drts/ops-console-web`.
+  - PA `/pricing` bare-URL null-tab resync (review finding #2) → effect resyncs to default tab on bare/invalid `?tab=` (§3.2 follow-up).
+  - Audit methodology hardening (review finding #1) → `httpOk` rejects non-2xx/3xx (404 no longer masked) + canonical seeded detail ids (`drv-demo-001`, `contract-demo-001`); header note + `scripts/dev-gap-audit.spec.js`.
+  - Gates: `typecheck` ✅, `lint` (`--max-warnings=0`) ✅, production `next build` ✅ for both `@drts/platform-admin-web` and `@drts/ops-console-web`; audit spec `node --check` ✅ and re-run live on dev.
   - **Branch brought current with `origin/dev` (2026-06-06):** merge `7fc45d97`
     pulls in #538/#540 with no conflicts; `typecheck` re-run green for both apps
     on the combined tree, so the branch is merge-ready from a current base.
