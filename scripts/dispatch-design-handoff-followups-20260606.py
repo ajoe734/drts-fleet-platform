@@ -186,7 +186,7 @@ PORTAL = [
         "PREREQ：PR #541 須已合進 dev。照 apps/ops-console-web 模式為 apps/fleet-partner-portal-web 補 Dockerfile（standalone，port 3007）、"
         "在 .github/workflows/deploy-dev.yml 加 build&push + Cloud Run service（drts-fleet-partner-portal-web）、"
         "在跨 app 連結處註冊 portal（如其他 console 的 cross-app-links）。確認 turbo/workspace 已涵蓋。",
-        "",
+        "DH-FLP-UI-WIRE",
         "apps/fleet-partner-portal-web/Dockerfile,.github/workflows/deploy-dev.yml",
         "Dockerfile builds standalone; deploy-dev builds+pushes+deploys the portal service; cross-app link registered; deploy-dev workflow valid",
     ),
