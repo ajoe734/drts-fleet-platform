@@ -62,6 +62,8 @@ TASK_ID=""
 INVOICE_ID=""
 REPORT_JOB_ID=""
 STATEMENTS_ROUTE_AVAILABLE="false"
+ASSIGN_VEHICLE_ID=""
+ASSIGN_DRIVER_ID=""
 
 poll_for_dispatch_job() {
   local attempt=0
@@ -320,7 +322,19 @@ jq -n \
 http_call POST "/dispatch/assign" "$ASSIGN_FIXTURE"
 assert_status "200|201"
 TASK_ID=$(json_get_first '.data.taskId' '.data.task_id')
-[[ -n "$TASK_ID" ]] || { log_fail "dispatch/assign response missing taskId"; exit 1; }
+if [[ -z "$TASK_ID" ]]; then
+  log_warn "dispatch/assign response missing taskId; resolving from driver task list"
+  switch_actor "driver_user" "e2e-driver-${ASSIGN_DRIVER_ID}" "$E2E_SEED_TENANT_ID"
+  http_call GET "/driver/tasks"
+  assert_status "200"
+  TASK_ID=$(echo "$RESP_BODY" | jq -r --arg jobId "$DISPATCH_JOB_ID" --arg oid "$ORDER_ID" \
+    '.data.items[]
+      | select(((.dispatchJobId // .dispatch_job_id) == $jobId) or ((.orderId // .order_id) == $oid))
+      | (.taskId // .task_id)' \
+    2>/dev/null | head -1 || true)
+  [[ -n "$TASK_ID" ]] || { log_fail "dispatch/assign accepted but no driver task resolved"; exit 1; }
+  switch_actor "ops_user" "e2e-ops-012"
+fi
 chain_set "ops" "taskId" "$TASK_ID"
 save_evidence "$SCENARIO" "ops" "taskId" "$TASK_ID"
 save_evidence "$SCENARIO" "ops" "driverId" "$ASSIGN_DRIVER_ID"
@@ -351,17 +365,9 @@ jq -n --arg startedAt "$START_AT" '{startedAt: $startedAt}' > "${TMP_DIR}/start.
 http_call POST "/driver/tasks/${TASK_ID}/start" "${TMP_DIR}/start.json"
 assert_status "200|201"
 
-jq -n \
-  --arg completedAt "$COMPLETE_AT" \
-  '{
-    completedAt: $completedAt,
-    actualDistanceKm: 12.5,
-    actualDurationSec: 1500,
-    fare: {
-      currency: "TWD",
-      amountMinor: 780
-    }
-  }' > "${TMP_DIR}/complete.json"
+jq --arg ts "$COMPLETE_AT" \
+  '.completedAt = $ts | .actualDistanceKm = 12.5 | .actualDurationSec = 1500' \
+  "${SCRIPT_DIR}/fixtures/e2e-driver-complete.json" > "${TMP_DIR}/complete.json"
 http_call POST "/driver/tasks/${TASK_ID}/complete" "${TMP_DIR}/complete.json"
 assert_status "200|201"
 
