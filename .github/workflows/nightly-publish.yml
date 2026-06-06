@@ -66,7 +66,7 @@ jobs:
         run: |
           today_date=$(date -u +%Y.%m.%d)
           # Find the highest .N already used today; default to .0 if none.
-          existing_nums=$(git ls-remote --tags origin "refs/tags/release/v${today_date}.*" \
+          existing_nums=$(git ls-remote --refs --tags origin "refs/tags/release/v${today_date}.*" \
             | awk '{print $2}' | sed 's|refs/tags/release/v[0-9.]*\.||' | sort -n | tail -1)
           if [ -z "$existing_nums" ]; then
             n=0
