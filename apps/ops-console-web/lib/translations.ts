@@ -1024,6 +1024,179 @@ const en = {
   "incidents.serviceRecovery.driver_reassigned": "Driver reassigned",
   "incidents.serviceRecovery.other": "Other",
   "incidents.fromDispatchException": "Create from dispatch exception",
+  "incidents.detail.emptyReason.no_data.title": "No records yet",
+  "incidents.detail.emptyReason.no_data.body":
+    "This section is valid but empty. Data will appear once the incident flow produces records.",
+  "incidents.detail.emptyReason.not_provisioned.title":
+    "Feature not provisioned",
+  "incidents.detail.emptyReason.not_provisioned.body":
+    "The backing capability is not enabled for this tenant or environment yet.",
+  "incidents.detail.emptyReason.fetch_failed.title": "Fetch failed",
+  "incidents.detail.emptyReason.fetch_failed.body":
+    "The request failed before the page could build a trustworthy section state.",
+  "incidents.detail.emptyReason.permission_denied.title":
+    "Permission denied",
+  "incidents.detail.emptyReason.permission_denied.body":
+    "Your scope can view the incident shell but not this related dataset.",
+  "incidents.detail.emptyReason.external_unavailable.title":
+    "External dependency unavailable",
+  "incidents.detail.emptyReason.external_unavailable.body":
+    "This section depends on another service. The incident stays visible while the dependency is degraded.",
+  "incidents.detail.emptyReason.filtered_empty.title":
+    "No results under current filters",
+  "incidents.detail.emptyReason.filtered_empty.body":
+    "The source has data, but the active filter view excludes it.",
+  "incidents.detail.age.unrecorded": "Time not recorded",
+  "incidents.detail.age.minutes": "{count} min ago",
+  "incidents.detail.age.hours": "{count} hr ago",
+  "incidents.detail.action.update": "Update incident",
+  "incidents.detail.action.resolve": "Resolve",
+  "incidents.detail.action.close": "Close",
+  "incidents.detail.action.recovery": "Add recovery",
+  "incidents.detail.action.acknowledge": "Acknowledge escalation",
+  "incidents.detail.action.lift": "Lift suppression",
+  "incidents.detail.actionSummary.update":
+    "Adjust category, severity, owner, escalation target, status, and resolution note.",
+  "incidents.detail.actionSummary.resolve":
+    "Mark the incident resolved after recovery is complete.",
+  "incidents.detail.actionSummary.close":
+    "Close the incident and record the required closeout reason.",
+  "incidents.detail.actionSummary.serviceRecovery":
+    "Record a passenger or operational recovery action into the timeline.",
+  "incidents.detail.actionSummary.acknowledge":
+    "Record that the escalation target accepted the handoff.",
+  "incidents.detail.actionSummary.default":
+    "This action stays in the incident workspace.",
+  "incidents.detail.actionDisabled": "Disabled: {reason}",
+  "incidents.detail.risk.high": "High-risk confirmation",
+  "incidents.detail.risk.medium": "Medium-risk confirmation",
+  "incidents.detail.risk.low": "Low-risk action",
+  "incidents.detail.reasonRequired": "Reason required",
+  "incidents.detail.staysInWorkspace": "Stays in this incident workspace",
+  "incidents.detail.recorded": "Recorded",
+  "incidents.detail.related.dispatch": "Dispatch",
+  "incidents.detail.related.vehicle": "Vehicle",
+  "incidents.detail.related.driver": "Driver",
+  "incidents.detail.related.complaint": "Complaint",
+  "incidents.detail.related.latestAudit": "Latest audit",
+  "incidents.detail.latestAudit.newTab":
+    "Opens platform-admin audit in a new tab",
+  "incidents.detail.summary.occurred": "Occurred",
+  "incidents.detail.summary.created": "Created",
+  "incidents.detail.summary.assignedTo": "Assigned to",
+  "incidents.detail.summary.acknowledged": "Acknowledged",
+  "incidents.detail.summary.pendingAcknowledgment":
+    "Pending acknowledgment",
+  "incidents.detail.summary.acknowledgedAt": "Acknowledged at",
+  "incidents.detail.summary.severity": "Severity",
+  "incidents.detail.summary.status": "Status",
+  "incidents.detail.summary.escalation": "Escalation",
+  "incidents.detail.summary.location": "Location",
+  "incidents.detail.summary.vehicle": "Vehicle",
+  "incidents.detail.summary.tenant": "Tenant",
+  "incidents.detail.summary.reportedBy": "Reported by",
+  "incidents.detail.banner.dispatchExceptionSource":
+    "Dispatch exception source {orderId}",
+  "incidents.detail.banner.assignedTo": "Assigned to {assignedTo}",
+  "incidents.detail.readOnlyByContract": "Read-only by contract",
+  "incidents.detail.actionHint":
+    "Actions are backend-driven via availableActions. Medium and high-risk actions keep confirmation semantics; high-risk actions require a reason.",
+  "incidents.detail.coordinationActive":
+    "{severity} incident coordination is active",
+  "incidents.detail.refresh.banner.title": "Snapshot is {freshness}",
+  "incidents.detail.refresh.banner.unavailableTitle":
+    "Refresh metadata unavailable",
+  "incidents.detail.refresh.banner.body":
+    "Source {source}. Use refresh before acting if the timeline or assignment state looks out of date.",
+  "incidents.detail.refresh.banner.unavailableBody":
+    "The backend did not return UiRefreshMetadata for this incident snapshot.",
+  "incidents.detail.readOnly.title": "Read-only incident state",
+  "incidents.detail.readOnly.body":
+    "This incident is resolved or closed. Recovery and audit remain visible, while mutation actions should stay disabled.",
+  "incidents.detail.eventSummary": "Event summary",
+  "incidents.detail.auditSubset": "Audit subset",
+  "incidents.detail.preRecoveryHint":
+    "This is the pre-recovery variant. Record the first recovery action from the incident workflow.",
+  "incidents.detail.suppression.title": "Suppression state",
+  "incidents.detail.suppression.activeTitle": "Driver matching suppressed",
+  "incidents.detail.suppression.reason": "Reason {reason}",
+  "incidents.detail.suppression.expires": "Expires {value}",
+  "incidents.detail.suppression.reasonCode": "Reason code",
+  "incidents.detail.suppression.expiresAt": "Expires at",
+  "incidents.detail.suppression.sourceIncident": "Source incident",
+  "incidents.detail.suppression.liftedAt": "Lifted at",
+  "incidents.detail.suppression.noneLinkedDriver":
+    "Linked driver exists, but no active DriverMatchingSuppression is in force.",
+  "incidents.detail.suppression.notApplicable":
+    "This incident is not linked to a driver, so suppression does not apply.",
+  "incidents.detail.linkedEntities": "Linked entities",
+  "incidents.detail.navigation": "Navigation",
+  "incidents.detail.navigation.openDispatch": "Open dispatch",
+  "incidents.detail.navigation.openDriver": "Open driver",
+  "incidents.detail.navigation.openVehicle": "Open vehicle",
+  "incidents.detail.navigation.openComplaint": "Open complaint",
+  "incidents.detail.smoke.subtitle":
+    "Smoke fallback workspace for incident route parity verification.",
+  "incidents.detail.smoke.activity": "Activity feed",
+  "incidents.detail.smoke.sosOpened": "SOS opened",
+  "incidents.detail.smoke.sosDetail": "Driver emergency workflow active.",
+  "incidents.detail.smoke.serviceRecovery": "Service recovery",
+  "incidents.detail.smoke.serviceRecoveryBody":
+    "Recovery actions tracked here.",
+  "incidents.detail.smoke.highRiskTitle": "High-risk CTA present",
+  "incidents.detail.smoke.highRiskBody":
+    "Police notification requires reason.",
+  "incidents.detail.actionPanel.lift": "Lift suppression",
+  "incidents.detail.actionPanel.liftUnavailableTitle":
+    "Driver-side suppression lift is not writable from this incident form",
+  "incidents.detail.actionPanel.liftUnavailableBody":
+    "The deep link now lands correctly. Continue in Driver detail for contextual review, then return here after the driver state is updated.",
+  "incidents.detail.actionPanel.dismiss": "Dismiss",
+  "incidents.detail.actionPanel.reasonRequiredError":
+    "Reason is required for this action.",
+  "incidents.detail.actionPanel.mutationCompleted":
+    "Mutation completed. Refreshing timeline and audit subset.",
+  "incidents.detail.actionPanel.recordedBy":
+    "Recorded {actionType} by {actor}.",
+  "incidents.detail.actionPanel.ackWithNote":
+    "Escalation acknowledged by {actor}: {note}",
+  "incidents.detail.actionPanel.ackWithoutNote":
+    "Escalation acknowledged by {actor}.",
+  "incidents.detail.actionPanel.unknownFailure":
+    "Unknown incident action failure.",
+  "incidents.detail.actionPanel.context": "Action context",
+  "incidents.detail.actionPanel.completedTitle": "{title} completed",
+  "incidents.detail.actionPanel.actionRecorded":
+    "Action {actionId} recorded",
+  "incidents.detail.actionPanel.actionPendingReceipt":
+    "Action recorded · receipt id pending backend",
+  "incidents.detail.actionPanel.openLatestAudit": "Open latest audit",
+  "incidents.detail.actionPanel.auditSnapshotHint":
+    "Audit subset refreshes on the server snapshot.",
+  "incidents.detail.actionPanel.dismissReceipt": "Dismiss receipt",
+  "incidents.detail.actionPanel.confirmationTitle": "{action} confirmation",
+  "incidents.detail.actionPanel.closeReason": "Close reason",
+  "incidents.detail.actionPanel.ackBy": "Acknowledged by",
+  "incidents.detail.actionPanel.ackNote": "Acknowledgment note",
+  "incidents.detail.actionPanel.requiredReason": "Required reason",
+  "incidents.detail.actionPanel.submitting": "Submitting",
+  "incidents.detail.actionPanel.confirmAction": "Confirm {action}",
+  "incidents.detail.actionPanel.unknownIntentTitle":
+    "Unknown action intent",
+  "incidents.detail.actionPanel.unknownIntentBody":
+    "The deep link intent was not recognized for this incident snapshot.",
+  "incidents.detail.refresh.tier.medium": "T3 / 15s",
+  "incidents.detail.refresh.tier.dispatch": "T2 / 5s",
+  "incidents.detail.refresh.tier.manual": "T6 / manual",
+  "incidents.detail.refresh.tier.default": "{tier} / {seconds}s",
+  "incidents.detail.refresh.freshness.fresh": "fresh",
+  "incidents.detail.refresh.freshness.stale": "stale",
+  "incidents.detail.refresh.freshness.degraded": "degraded",
+  "incidents.detail.refresh.freshness.unknown": "unknown",
+  "incidents.detail.refresh.snapshot":
+    "snapshot {time} UTC · {source}",
+  "incidents.detail.refresh.snapshotUnavailable":
+    "snapshot -- · metadata unavailable",
 
   // ── Complaints ──
   "complaints.title": "Complaints Management",
@@ -2836,6 +3009,166 @@ const zh: Record<keyof typeof en, string> = {
   "incidents.serviceRecovery.driver_reassigned": "更換司機",
   "incidents.serviceRecovery.other": "其他",
   "incidents.fromDispatchException": "從派遣異常建立",
+  "incidents.detail.emptyReason.no_data.title": "目前沒有資料",
+  "incidents.detail.emptyReason.no_data.body":
+    "這個區塊目前是合法空白；等事故流程產生資料後會顯示在這裡。",
+  "incidents.detail.emptyReason.not_provisioned.title": "功能尚未開通",
+  "incidents.detail.emptyReason.not_provisioned.body":
+    "這個租戶或環境尚未開通對應能力。",
+  "incidents.detail.emptyReason.fetch_failed.title": "資料讀取失敗",
+  "incidents.detail.emptyReason.fetch_failed.body":
+    "請求失敗，頁面無法建立可信的區塊狀態。",
+  "incidents.detail.emptyReason.permission_denied.title": "沒有檢視權限",
+  "incidents.detail.emptyReason.permission_denied.body":
+    "你可以看到事故頁框架，但沒有此關聯資料的讀取權限。",
+  "incidents.detail.emptyReason.external_unavailable.title":
+    "外部依賴暫時不可用",
+  "incidents.detail.emptyReason.external_unavailable.body":
+    "這個區塊依賴其他服務；事故仍可檢視，但外部依賴目前降級。",
+  "incidents.detail.emptyReason.filtered_empty.title":
+    "目前篩選條件沒有結果",
+  "incidents.detail.emptyReason.filtered_empty.body":
+    "來源有資料，但目前篩選視圖把它排除了。",
+  "incidents.detail.age.unrecorded": "尚未記錄時間",
+  "incidents.detail.age.minutes": "{count} 分鐘前",
+  "incidents.detail.age.hours": "{count} 小時前",
+  "incidents.detail.action.update": "更新事故",
+  "incidents.detail.action.resolve": "標記已處理",
+  "incidents.detail.action.close": "關閉事故",
+  "incidents.detail.action.recovery": "新增補救",
+  "incidents.detail.action.acknowledge": "確認升級",
+  "incidents.detail.action.lift": "解除抑制",
+  "incidents.detail.actionSummary.update":
+    "調整分類、嚴重程度、負責人、升級對象、狀態與結案備註。",
+  "incidents.detail.actionSummary.resolve":
+    "在補救完成後將事故標記為已處理。",
+  "incidents.detail.actionSummary.close":
+    "關閉事故並記錄必填的結案原因。",
+  "incidents.detail.actionSummary.serviceRecovery":
+    "將乘客或營運補救行動記錄進時間線。",
+  "incidents.detail.actionSummary.acknowledge":
+    "記錄升級對象已接受此次 handoff。",
+  "incidents.detail.actionSummary.default":
+    "此動作會停留在 incident 工作區內完成。",
+  "incidents.detail.actionDisabled": "停用：{reason}",
+  "incidents.detail.risk.high": "高風險確認",
+  "incidents.detail.risk.medium": "中風險確認",
+  "incidents.detail.risk.low": "低風險動作",
+  "incidents.detail.reasonRequired": "必填原因",
+  "incidents.detail.staysInWorkspace": "停留在此事故工作區",
+  "incidents.detail.recorded": "已記錄",
+  "incidents.detail.related.dispatch": "派遣單",
+  "incidents.detail.related.vehicle": "車輛",
+  "incidents.detail.related.driver": "司機",
+  "incidents.detail.related.complaint": "客訴",
+  "incidents.detail.related.latestAudit": "最新審計",
+  "incidents.detail.latestAudit.newTab": "於新分頁開啟 platform-admin 審計",
+  "incidents.detail.summary.occurred": "發生時間",
+  "incidents.detail.summary.created": "建立時間",
+  "incidents.detail.summary.assignedTo": "負責人",
+  "incidents.detail.summary.acknowledged": "已確認",
+  "incidents.detail.summary.pendingAcknowledgment": "待確認",
+  "incidents.detail.summary.acknowledgedAt": "確認時間",
+  "incidents.detail.summary.severity": "嚴重程度",
+  "incidents.detail.summary.status": "狀態",
+  "incidents.detail.summary.escalation": "升級對象",
+  "incidents.detail.summary.location": "地點",
+  "incidents.detail.summary.vehicle": "車輛",
+  "incidents.detail.summary.tenant": "租戶",
+  "incidents.detail.summary.reportedBy": "回報來源",
+  "incidents.detail.banner.dispatchExceptionSource":
+    "來自派遣異常 {orderId}",
+  "incidents.detail.banner.assignedTo": "目前由 {assignedTo} 處理",
+  "incidents.detail.readOnlyByContract": "依 contract 唯讀",
+  "incidents.detail.actionHint":
+    "所有 CTA 由 availableActions 驅動；中高風險動作維持確認語意，高風險動作必須填寫原因。",
+  "incidents.detail.coordinationActive": "{severity}事故協調進行中",
+  "incidents.detail.refresh.banner.title": "資料快照目前為 {freshness}",
+  "incidents.detail.refresh.banner.unavailableTitle": "缺少刷新中繼資料",
+  "incidents.detail.refresh.banner.body":
+    "來源 {source}。若時間線或指派狀態看起來過期，請先重新整理再操作。",
+  "incidents.detail.refresh.banner.unavailableBody":
+    "後端沒有為這筆 incident snapshot 回傳 UiRefreshMetadata。",
+  "incidents.detail.readOnly.title": "唯讀事故狀態",
+  "incidents.detail.readOnly.body":
+    "此事故已處理或關閉。補救與審計資訊仍可檢視，但變更動作應維持停用。",
+  "incidents.detail.eventSummary": "事件摘要",
+  "incidents.detail.auditSubset": "事故審計摘要",
+  "incidents.detail.preRecoveryHint":
+    "這是 pre-recovery 狀態；請透過 incident 流程記錄第一筆補救。",
+  "incidents.detail.suppression.title": "配對抑制狀態",
+  "incidents.detail.suppression.activeTitle": "司機配對已被抑制",
+  "incidents.detail.suppression.reason": "原因 {reason}",
+  "incidents.detail.suppression.expires": "到期 {value}",
+  "incidents.detail.suppression.reasonCode": "原因代碼",
+  "incidents.detail.suppression.expiresAt": "到期時間",
+  "incidents.detail.suppression.sourceIncident": "來源事故",
+  "incidents.detail.suppression.liftedAt": "解除時間",
+  "incidents.detail.suppression.noneLinkedDriver":
+    "此事故已有關聯司機，但目前沒有生效中的 DriverMatchingSuppression。",
+  "incidents.detail.suppression.notApplicable":
+    "這筆事故目前沒有關聯司機，因此不適用配對抑制狀態。",
+  "incidents.detail.linkedEntities": "關聯實體",
+  "incidents.detail.navigation": "導覽",
+  "incidents.detail.navigation.openDispatch": "開啟派遣單",
+  "incidents.detail.navigation.openDriver": "開啟司機",
+  "incidents.detail.navigation.openVehicle": "開啟車輛",
+  "incidents.detail.navigation.openComplaint": "開啟客訴",
+  "incidents.detail.smoke.subtitle":
+    "供 incident route parity 驗證使用的 fallback 工作區。",
+  "incidents.detail.smoke.activity": "活動紀錄",
+  "incidents.detail.smoke.sosOpened": "SOS 建立",
+  "incidents.detail.smoke.sosDetail": "司機緊急流程已啟動。",
+  "incidents.detail.smoke.serviceRecovery": "服務補救",
+  "incidents.detail.smoke.serviceRecoveryBody": "此處追蹤補救動作。",
+  "incidents.detail.smoke.highRiskTitle": "高風險 CTA 已呈現",
+  "incidents.detail.smoke.highRiskBody": "通知警方需要填寫原因。",
+  "incidents.detail.actionPanel.lift": "解除抑制",
+  "incidents.detail.actionPanel.liftUnavailableTitle":
+    "這個 incident 表單目前不能直接寫入司機抑制解除",
+  "incidents.detail.actionPanel.liftUnavailableBody":
+    "deep link 現在會正確落點。請先到 Driver detail 做情境確認，再回到此頁追蹤司機狀態更新。",
+  "incidents.detail.actionPanel.dismiss": "關閉",
+  "incidents.detail.actionPanel.reasonRequiredError":
+    "此動作必須填寫原因。",
+  "incidents.detail.actionPanel.mutationCompleted":
+    "動作已送出，正在刷新 timeline 與 audit 摘要。",
+  "incidents.detail.actionPanel.recordedBy":
+    "已由 {actor} 記錄 {actionType}。",
+  "incidents.detail.actionPanel.ackWithNote":
+    "升級已由 {actor} 確認：{note}",
+  "incidents.detail.actionPanel.ackWithoutNote": "升級已由 {actor} 確認。",
+  "incidents.detail.actionPanel.unknownFailure": "incident 動作失敗。",
+  "incidents.detail.actionPanel.context": "動作上下文",
+  "incidents.detail.actionPanel.completedTitle": "{title}已完成",
+  "incidents.detail.actionPanel.actionRecorded": "已記錄動作 {actionId}",
+  "incidents.detail.actionPanel.actionPendingReceipt":
+    "動作已記錄 · 回執編號待後端提供",
+  "incidents.detail.actionPanel.openLatestAudit": "開啟最新審計",
+  "incidents.detail.actionPanel.auditSnapshotHint":
+    "audit 摘要會隨 server snapshot 一起刷新。",
+  "incidents.detail.actionPanel.dismissReceipt": "關閉回執",
+  "incidents.detail.actionPanel.confirmationTitle": "{action}確認",
+  "incidents.detail.actionPanel.closeReason": "關閉原因",
+  "incidents.detail.actionPanel.ackBy": "確認人",
+  "incidents.detail.actionPanel.ackNote": "確認備註",
+  "incidents.detail.actionPanel.requiredReason": "必填原因",
+  "incidents.detail.actionPanel.submitting": "送出中",
+  "incidents.detail.actionPanel.confirmAction": "確認{action}",
+  "incidents.detail.actionPanel.unknownIntentTitle": "未知的動作意圖",
+  "incidents.detail.actionPanel.unknownIntentBody":
+    "這個 incident snapshot 無法識別 deep link 帶來的 intent。",
+  "incidents.detail.refresh.tier.medium": "T3 / 15s",
+  "incidents.detail.refresh.tier.dispatch": "T2 / 5s",
+  "incidents.detail.refresh.tier.manual": "T6 / 手動",
+  "incidents.detail.refresh.tier.default": "{tier} / {seconds}s",
+  "incidents.detail.refresh.freshness.fresh": "最新",
+  "incidents.detail.refresh.freshness.stale": "待刷新",
+  "incidents.detail.refresh.freshness.degraded": "降級",
+  "incidents.detail.refresh.freshness.unknown": "未知",
+  "incidents.detail.refresh.snapshot": "snapshot {time} UTC · {source}",
+  "incidents.detail.refresh.snapshotUnavailable":
+    "snapshot -- · metadata unavailable",
 
   // ── Complaints ──
   "complaints.title": "客訴中心",

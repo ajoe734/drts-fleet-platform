@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, startTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { RefreshTier, UiRefreshMetadata } from "@drts/contracts";
+import { t } from "@/lib/translations";
 import {
   CanvasBtn as Btn,
   CanvasPill as Pill,
@@ -92,25 +93,20 @@ export function IncidentRefreshTier({
 
   const tierLabel =
     tier === "medium"
-      ? "T3 / 15s"
+      ? t("incidents.detail.refresh.tier.medium", locale)
       : tier === "dispatch"
-        ? "T2 / 5s"
+        ? t("incidents.detail.refresh.tier.dispatch", locale)
         : tier === "manual"
-          ? locale === "zh"
-            ? "T6 / 手動"
-            : "T6 / manual"
-          : `${tier}${cadenceMs ? ` / ${Math.round(cadenceMs / 1000)}s` : ""}`;
+          ? t("incidents.detail.refresh.tier.manual", locale)
+          : t("incidents.detail.refresh.tier.default", locale, {
+              tier,
+              seconds: cadenceMs ? Math.round(cadenceMs / 1000) : 0,
+            });
 
-  const freshnessLabel =
-    locale === "zh"
-      ? freshness === "fresh"
-        ? "最新"
-        : freshness === "stale"
-          ? "待刷新"
-          : freshness === "degraded"
-            ? "降級"
-            : "未知"
-      : freshness;
+  const freshnessLabel = t(
+    `incidents.detail.refresh.freshness.${freshness}` as never,
+    locale,
+  );
 
   return (
     <div
@@ -145,10 +141,11 @@ export function IncidentRefreshTier({
         }}
       >
         {metadata
-          ? `${locale === "zh" ? "snapshot" : "snapshot"} ${formatClock(locale, metadata.generatedAt)} UTC · ${metadata.source}`
-          : locale === "zh"
-            ? "snapshot -- · metadata unavailable"
-            : "snapshot -- · metadata unavailable"}
+          ? t("incidents.detail.refresh.snapshot", locale, {
+              time: formatClock(locale, metadata.generatedAt),
+              source: metadata.source,
+            })
+          : t("incidents.detail.refresh.snapshotUnavailable", locale)}
       </span>
       <Btn
         theme={theme}
@@ -162,7 +159,7 @@ export function IncidentRefreshTier({
           });
         }}
       >
-        {locale === "zh" ? "重新整理" : "Refresh"}
+        {t("common.refresh", locale)}
       </Btn>
     </div>
   );
