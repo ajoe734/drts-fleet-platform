@@ -260,13 +260,17 @@ export default async function ApprovalRequestsPage({
       h: copy(locale, "ACTIONS", "操作"),
       w: 240,
       r: (row) => {
-        if (row.actions.length === 0) {
+        const canNudge = row.status === "pending";
+        const canAcknowledge = row.slaBreached;
+        if (row.actions.length === 0 && !canNudge && !canAcknowledge) {
           return "—";
         }
         return (
           <ApprovalActions
             requestId={row.request}
             actions={row.actions}
+            canNudge={canNudge}
+            canAcknowledge={canAcknowledge}
             locale={locale}
           />
         );
