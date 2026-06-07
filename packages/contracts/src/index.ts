@@ -5064,7 +5064,11 @@ export interface PlatformTenantGovernanceSummaryQuery {
 export type PlatformTenantGovernanceAlertFlag =
   | "no_approvers_configured"
   | "quota_above_95_percent"
-  | "pending_approval_over_48h";
+  | "pending_approval_over_48h"
+  | "rollback_hold"
+  | "blocked_rollout_gate"
+  | "expired_credentials"
+  | "expiring_contract";
 
 export interface PlatformTenantGovernanceSummaryRow {
   tenantId: string;
@@ -5072,6 +5076,7 @@ export interface PlatformTenantGovernanceSummaryRow {
   tenantName: string;
   tenantStatus: PlatformAdminTenantRecord["status"];
   tenantRolloutStage: PlatformTenantRolloutStage;
+  tenantRolloutGateStatus: PlatformTenantGateStatus;
   costCenterCount: number;
   activeRuleCount: number;
   monthlyQuotaPercentUsed: number;
