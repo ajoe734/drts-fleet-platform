@@ -34,7 +34,7 @@ import {
 } from "react";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
-import type { Locale } from "@/lib/translations";
+import { t as translate, type Locale } from "@/lib/translations";
 import { getPlatformLabel } from "@/lib/localized-labels";
 
 const SHELL_FONT =
@@ -76,24 +76,22 @@ type NavRoute = {
   key: keyof typeof PLATFORM_ADMIN_ROUTE_REGISTRY;
   icon: LucideIcon;
   section: string;
-  zh: string;
-  en: string;
+  labelKey: string;
 };
 
 type NavSection = {
   key: string;
-  zh: string;
-  en: string;
+  labelKey: string;
 };
 
 type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down";
 
 const sections: NavSection[] = [
-  { key: "workspace", zh: "工作面", en: "Workspace" },
-  { key: "tenant", zh: "租戶治理", en: "Tenant Governance" },
-  { key: "fleet", zh: "人員與車隊", en: "People & Fleet" },
-  { key: "commerce", zh: "平台與商務", en: "Platform & Commerce" },
-  { key: "ops", zh: "平台維運", en: "Platform Ops & Risk" },
+  { key: "workspace", labelKey: "adminShell.section.workspace" },
+  { key: "tenant", labelKey: "adminShell.section.tenant" },
+  { key: "fleet", labelKey: "adminShell.section.fleet" },
+  { key: "commerce", labelKey: "adminShell.section.commerce" },
+  { key: "ops", labelKey: "adminShell.section.ops" },
 ];
 
 const routes: NavRoute[] = [
@@ -101,111 +99,96 @@ const routes: NavRoute[] = [
     key: "home",
     icon: LayoutDashboard,
     section: "workspace",
-    zh: "工作首頁",
-    en: "Home",
+    labelKey: "adminShell.route.home",
   },
   {
     key: "tenants",
     icon: Shield,
     section: "tenant",
-    zh: "租戶",
-    en: "Tenants",
+    labelKey: "adminShell.route.tenants",
   },
   {
     key: "tenant-governance",
     icon: ShieldCheck,
     section: "tenant",
-    zh: "跨租戶治理",
-    en: "Tenant Governance",
+    labelKey: "adminShell.route.tenantGovernance",
   },
   {
     key: "partners",
     icon: Handshake,
     section: "tenant",
-    zh: "合作夥伴",
-    en: "Partner Entries",
+    labelKey: "adminShell.route.partners",
   },
   {
     key: "users",
     icon: Users,
     section: "tenant",
-    zh: "平台人員",
-    en: "Platform Staff",
+    labelKey: "adminShell.route.users",
   },
   {
     key: "fleet",
     icon: Truck,
     section: "fleet",
-    zh: "車隊與法遵",
-    en: "Fleet & Compliance",
+    labelKey: "adminShell.route.fleet",
   },
   {
     key: "switchboard",
     icon: Radio,
     section: "commerce",
-    zh: "公開資訊",
-    en: "Public Info & Placards",
+    labelKey: "adminShell.route.switchboard",
   },
   {
     key: "pricing",
     icon: DollarSign,
     section: "commerce",
-    zh: "費率治理",
-    en: "Pricing",
+    labelKey: "adminShell.route.pricing",
   },
   {
     key: "payments",
     icon: CreditCard,
     section: "commerce",
-    zh: "結算與帳務",
-    en: "Payments",
+    labelKey: "adminShell.route.payments",
   },
   {
     key: "reimbursements",
     icon: CreditCard,
     section: "commerce",
-    zh: "代墊批次",
-    en: "Reimbursements",
+    labelKey: "adminShell.route.reimbursements",
   },
   {
     key: "adapter-registry",
     icon: ShieldCheck,
     section: "commerce",
-    zh: "平台 Adapter",
-    en: "Adapter Registry",
+    labelKey: "adminShell.route.adapterRegistry",
   },
   {
     key: "health",
     icon: Activity,
     section: "ops",
-    zh: "平台健康",
-    en: "Platform Health",
+    labelKey: "adminShell.route.health",
   },
   {
     key: "notices",
     icon: Bell,
     section: "ops",
-    zh: "公告與維護",
-    en: "Notices & Maintenance",
+    labelKey: "adminShell.route.notices",
   },
   {
     key: "audit",
     icon: ClipboardList,
     section: "ops",
-    zh: "稽核與證據",
-    en: "Audit & Evidence",
+    labelKey: "adminShell.route.audit",
   },
   {
     key: "feature-flags",
     icon: Flag,
     section: "ops",
-    zh: "功能旗標",
-    en: "Feature Flags · WRITE",
+    labelKey: "adminShell.route.featureFlags",
   },
 ];
 
-function labelFor(locale: Locale, item: { zh: string; en: string }) {
-  return locale === "zh" ? item.zh : item.en;
+function labelFor(locale: Locale, labelKey: string) {
+  return translate(labelKey, locale);
 }
 
 function pathMatchesRoute(route: NavRoute, pathname: string) {
@@ -239,8 +222,12 @@ function getActiveRoute(pathname: string): NavRoute {
 
 function getRefreshTier(pathname: string) {
   return pathname.startsWith("/audit")
-    ? { code: "T6", cadence: "MANUAL", title: "manual · audit evidence" }
-    : { code: "T4", cadence: "30s", title: "medium_slow · governance" };
+    ? { code: "T6", cadence: "MANUAL", titleKey: "adminShell.refresh.manual" }
+    : {
+        code: "T4",
+        cadence: "30s",
+        titleKey: "adminShell.refresh.governance",
+      };
 }
 
 function normalizeHealthStatus(
@@ -263,7 +250,7 @@ function normalizeHealthStatus(
 
 function formatCheckedAt(date: Date | null, locale: Locale) {
   if (!date) {
-    return locale === "zh" ? "尚未檢查" : "not checked";
+    return labelFor(locale, "adminShell.health.notChecked");
   }
 
   return date.toLocaleTimeString(locale === "zh" ? "zh-TW" : "en-US", {
@@ -318,28 +305,28 @@ function AdminHealthFooter({
   const { status, lastCheckedAt } = useApiHealth();
   const statusCopy = {
     checking: {
-      label: locale === "zh" ? "API 檢查中" : "API checking",
+      label: labelFor(locale, "adminShell.health.checking"),
       short: "checking",
       fg: theme.textMuted,
       bg: theme.neutralBg,
       border: theme.neutralBorder,
     },
     healthy: {
-      label: locale === "zh" ? "API 健康" : "API healthy",
+      label: labelFor(locale, "adminShell.health.healthy"),
       short: "healthy",
       fg: theme.success,
       bg: theme.successBg,
       border: theme.successBorder,
     },
     degraded: {
-      label: locale === "zh" ? "API 降級" : "API degraded",
+      label: labelFor(locale, "adminShell.health.degraded"),
       short: "degraded",
       fg: theme.warn,
       bg: theme.warnBg,
       border: theme.warnBorder,
     },
     down: {
-      label: locale === "zh" ? "API 失聯" : "API down",
+      label: labelFor(locale, "adminShell.health.down"),
       short: "down",
       fg: theme.danger,
       bg: theme.dangerBg,
@@ -382,7 +369,7 @@ function AdminHealthFooter({
         </span>
       </div>
       <div style={footerMetaStyle}>
-        <span>{locale === "zh" ? "最後檢查" : "last checked"}</span>
+        <span>{labelFor(locale, "adminShell.health.lastChecked")}</span>
         <span style={{ fontFamily: SHELL_MONO }}>
           {formatCheckedAt(lastCheckedAt, locale)}
         </span>
@@ -394,7 +381,11 @@ function AdminHealthFooter({
         style={languageButtonStyle}
       >
         <Languages size={13} />
-        <span>{locale === "en" ? "中文" : "English"}</span>
+        <span>
+          {locale === "en"
+            ? labelFor(locale, "adminShell.language.zh")
+            : labelFor(locale, "adminShell.language.en")}
+        </span>
       </button>
     </div>
   );
@@ -415,7 +406,7 @@ function SidebarNavItem({
   return (
     <Link
       href={href}
-      title={labelFor(locale, route)}
+      title={labelFor(locale, route.labelKey)}
       aria-current={active ? "page" : undefined}
       style={{
         display: "flex",
@@ -444,7 +435,7 @@ function SidebarNavItem({
           whiteSpace: "nowrap",
         }}
       >
-        {labelFor(locale, route)}
+        {labelFor(locale, route.labelKey)}
       </span>
     </Link>
   );
@@ -465,13 +456,17 @@ function Sidebar({
         <div style={brandMarkStyle}>D</div>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <div style={brandNameStyle}>DRTS</div>
-          <div style={brandSubStyle}>Platform Admin</div>
+          <div style={brandSubStyle}>
+            {labelFor(locale, "adminShell.brand.sub")}
+          </div>
         </div>
       </div>
-      <nav aria-label="Platform Admin navigation" style={navStyle}>
+      <nav aria-label={labelFor(locale, "adminShell.nav.aria")} style={navStyle}>
         {sections.map((section) => (
           <div key={section.key} style={{ display: "grid", gap: 1 }}>
-            <div style={sectionTitleStyle}>{labelFor(locale, section)}</div>
+            <div style={sectionTitleStyle}>
+              {labelFor(locale, section.labelKey)}
+            </div>
             {routes
               .filter((route) => route.section === section.key)
               .map((route) => (
@@ -494,7 +489,7 @@ function RefreshTierBadge({ pathname }: { pathname: string }) {
   const tier = getRefreshTier(pathname);
 
   return (
-    <div title={tier.title} style={refreshBadgeStyle}>
+    <div title={labelFor("en", tier.titleKey)} style={refreshBadgeStyle}>
       <span style={freshDotStyle} />
       <span style={{ letterSpacing: 0.4 }}>{tier.code}</span>
       <span>{tier.cadence}</span>
@@ -504,12 +499,10 @@ function RefreshTierBadge({ pathname }: { pathname: string }) {
 
 function SearchBox({ locale }: { locale: Locale }) {
   return (
-    <div aria-label="Search" style={searchBoxStyle}>
+    <div aria-label={labelFor(locale, "adminShell.search.aria")} style={searchBoxStyle}>
       <Search size={13} />
       <span style={searchTextStyle}>
-        {locale === "zh"
-          ? "搜尋租戶、合作夥伴、稽核事件…"
-          : "Search tenants, partner entries, audit events..."}
+        {labelFor(locale, "adminShell.search.placeholder")}
       </span>
     </div>
   );
@@ -520,16 +513,16 @@ function IdentityChip({ locale }: { locale: Locale }) {
     <div style={identityChipStyle}>
       <div style={realmChipStyle}>
         <span style={accentDotStyle} />
-        PLATFORM
+        {labelFor(locale, "adminShell.realm")}
       </div>
       <div style={envChipStyle}>
         <span style={envDotStyle} />
-        production
+        {labelFor(locale, "adminShell.environment")}
       </div>
       <div style={actorChipStyle}>
         <div style={actorAvatarStyle}>PA</div>
         <span style={actorNameStyle}>
-          {locale === "zh" ? "平台管理員" : "Platform Admin"}
+          {labelFor(locale, "adminShell.identity.actor")}
         </span>
       </div>
     </div>
@@ -554,9 +547,13 @@ function Topbar({
     pathname !== activeHref &&
     pathname.startsWith(`${activeHref}/`);
   const breadcrumbs = [
-    activeSection ? labelFor(locale, activeSection) : "Platform Admin",
-    labelFor(locale, activeRoute),
-    ...(hasDetailCrumb ? [locale === "zh" ? "詳情" : "Detail"] : []),
+    activeSection
+      ? labelFor(locale, activeSection.labelKey)
+      : labelFor(locale, "adminShell.brand.sub"),
+    labelFor(locale, activeRoute.labelKey),
+    ...(hasDetailCrumb
+      ? [labelFor(locale, "adminShell.breadcrumb.detail")]
+      : []),
   ];
 
   return (
@@ -584,7 +581,7 @@ function Topbar({
       <span style={kbdStyle}>⌘K</span>
       <button
         type="button"
-        title={locale === "zh" ? "通知" : "Notifications"}
+        title={labelFor(locale, "adminShell.notifications")}
         style={iconButtonStyle}
       >
         <Bell size={15} />
