@@ -68,3 +68,41 @@ export async function escalateApprovalRequestAction(
   revalidatePath("/approval-requests");
   return { ok: true };
 }
+
+export async function nudgeApprovalRequestAction(
+  approvalRequestId: string,
+  reasonNote?: string,
+): Promise<ApprovalActionResult> {
+  if (!approvalRequestId.trim()) {
+    return { ok: false, message: "MISSING_REQUEST" };
+  }
+  try {
+    const client = await getServerOpsClient();
+    await client.nudgeOpsApprovalRequest(approvalRequestId, {
+      reasonNote: reasonNote?.trim() ? reasonNote.trim() : null,
+    });
+  } catch (error) {
+    return { ok: false, message: toMessage(error) };
+  }
+  revalidatePath("/approval-requests");
+  return { ok: true };
+}
+
+export async function acknowledgeBreachAction(
+  approvalRequestId: string,
+  reasonNote?: string,
+): Promise<ApprovalActionResult> {
+  if (!approvalRequestId.trim()) {
+    return { ok: false, message: "MISSING_REQUEST" };
+  }
+  try {
+    const client = await getServerOpsClient();
+    await client.acknowledgeOpsBreach(approvalRequestId, {
+      reasonNote: reasonNote?.trim() ? reasonNote.trim() : null,
+    });
+  } catch (error) {
+    return { ok: false, message: toMessage(error) };
+  }
+  revalidatePath("/approval-requests");
+  return { ok: true };
+}

@@ -10,8 +10,10 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import {
+  acknowledgeBreachAction,
   approveApprovalRequestAction,
   escalateApprovalRequestAction,
+  nudgeApprovalRequestAction,
   rejectApprovalRequestAction,
   type ApprovalActionResult,
 } from "./actions";
@@ -36,6 +38,10 @@ function actionLabel(action: string, locale: Locale): string {
       return copy(locale, "Reject", "退回");
     case "escalate":
       return copy(locale, "Escalate", "升級");
+    case "nudge":
+      return copy(locale, "Nudge", "提醒");
+    case "acknowledge_breach":
+      return copy(locale, "Ack breach", "確認違規");
     default:
       return action;
   }
@@ -56,16 +62,44 @@ function actionTone(
 export function ApprovalActions({
   requestId,
   actions,
+  canNudge,
+  canAcknowledge,
   locale,
 }: {
   requestId: string;
   actions: ResourceActionDescriptor[];
+  canNudge: boolean;
+  canAcknowledge: boolean;
   locale: Locale;
 }) {
   const [pending, startTransition] = useTransition();
   const [selectedAction, setSelectedAction] =
     useState<ResourceActionDescriptor | null>(null);
   const [reason, setReason] = useState("");
+
+  const extraActions: ResourceActionDescriptor[] = [
+    ...(canNudge
+      ? [
+          {
+            action: "nudge",
+            enabled: true,
+            requiresReason: false,
+            riskLevel: "medium" as const,
+          },
+        ]
+      : []),
+    ...(canAcknowledge
+      ? [
+          {
+            action: "acknowledge_breach",
+            enabled: true,
+            requiresReason: false,
+            riskLevel: "medium" as const,
+          },
+        ]
+      : []),
+  ];
+  const allActions: ResourceActionDescriptor[] = [...actions, ...extraActions];
 
   function handle(run: () => Promise<ApprovalActionResult>) {
     startTransition(async () => {
@@ -82,9 +116,13 @@ export function ApprovalActions({
   }
 
   function onConfirm() {
-    if (!selectedAction || !reason.trim()) {
+    if (!selectedAction) {
       return;
     }
+    if (selectedAction.requiresReason && !reason.trim()) {
+      return;
+    }
+    const note = reason.trim() ? reason : undefined;
     switch (selectedAction.action) {
       case "approve":
         handle(() => approveApprovalRequestAction(requestId, reason));
@@ -94,6 +132,12 @@ export function ApprovalActions({
         return;
       case "escalate":
         handle(() => escalateApprovalRequestAction(requestId, reason));
+        return;
+      case "nudge":
+        handle(() => nudgeApprovalRequestAction(requestId, note));
+        return;
+      case "acknowledge_breach":
+        handle(() => acknowledgeBreachAction(requestId, note));
         return;
       default:
         window.alert(
@@ -106,7 +150,7 @@ export function ApprovalActions({
   return (
     <>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-        {actions.map((action) => (
+        {allActions.map((action) => (
           <Btn
             key={action.action}
             theme={theme}
@@ -172,17 +216,31 @@ export function ApprovalActions({
               }
               subtitle={requestId}
             >
-              <Banner
-                theme={theme}
-                tone="warn"
-                icon="warn"
-                title={copy(locale, "High-risk action", "高風險操作")}
-                body={copy(
-                  locale,
-                  "A reason is required and will be written to the immutable audit trail.",
-                  "必須填寫理由，且會寫入不可變更的稽核紀錄。",
-                )}
-              />
+              {selectedAction.requiresReason ? (
+                <Banner
+                  theme={theme}
+                  tone="warn"
+                  icon="warn"
+                  title={copy(locale, "High-risk action", "高風險操作")}
+                  body={copy(
+                    locale,
+                    "A reason is required and will be written to the immutable audit trail.",
+                    "必須填寫理由，且會寫入不可變更的稽核紀錄。",
+                  )}
+                />
+              ) : (
+                <Banner
+                  theme={theme}
+                  tone="info"
+                  icon="info"
+                  title={copy(locale, "Optional note", "選填備註")}
+                  body={copy(
+                    locale,
+                    "Add an optional note; it will be written to the audit trail.",
+                    "可填寫備註，將寫入稽核紀錄。",
+                  )}
+                />
+              )}
 
               <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
                 <label
@@ -236,7 +294,10 @@ export function ApprovalActions({
                   theme={theme}
                   variant="primary"
                   danger={selectedAction.riskLevel === "high"}
-                  disabled={pending || !reason.trim()}
+                  disabled={
+                    pending ||
+                    (!!selectedAction.requiresReason && !reason.trim())
+                  }
                   onClick={onConfirm}
                 >
                   {pending
