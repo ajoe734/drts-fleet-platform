@@ -1,23 +1,20 @@
 # Task Brief: PA-AI-OSS-001
 
-OpenClaw-style OSS agent runtime evaluation
+OpenClaw direct runtime adoption plan
 
-- Status: `backlog`
-- Owner: `Gemini2`
-- Reviewer: `Codex`
+- Status: `done`
+- Owner: `Codex2`
+- Reviewer: `Claude`
 - Planning Ref: `docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md`
-- Last Update: `2026-06-03T00:00:00Z`
+- Last Update: `2026-06-03T13:58:36Z`
 
 ## 中文說明
 
-評估是否導入 OpenClaw 或 OpenClaw-style runtime 作為 dev-side worker/agent
-sidecar。這個 task 不阻塞 DRTS-owned assistant gateway；重點是做安全邊界、
-整合模式、POC 與採用建議。
+把 OpenClaw 作為 Platform Admin assistant 與 dev worker 的主 agent runtime，定義直接採用下的安全邊界、整合模式、落地順序與 adoption plan。
 
 ## Short Summary
 
-Evaluate OpenClaw-style architecture for a sandboxed development-side agent
-runner behind the DRTS orchestrator bridge.
+Owner closeout complete after review approval: formal finalize commit pushed on codex2/pa-ai-oss-001; approved direct OpenClaw adoption docs/task-brief alignment verified with diff-check and scoped content grep; integration remains branch-level only, not merged/deployed.
 
 ## Dependencies
 
@@ -25,12 +22,10 @@ runner behind the DRTS orchestrator bridge.
 
 ## Acceptance
 
-- Compare direct adoption, sidecar adoption, and no adoption / pattern-only options.
-- Document installation/runtime footprint, provider/key storage, channel/session model, CLI invocation, and tool permission model.
-- Produce a security threat model for local files, shell, cloud credentials, Platform Admin API tokens, and prompt injection.
-- If POC is feasible, run only in an isolated worktree with no DRTS production/dev secrets.
-- Recommendation states whether `PA-AI-ORCH-001` should use OpenClaw directly, wrap it as an optional runner, or avoid it.
-- Findings are archived in `docs/02-architecture/` or `docs/05-ui/` with citations.
+- 架構文件明確改為 direct OpenClaw adoption，移除 pattern-only 為預設的建議。
+- 已派工 task briefs 與 board summaries 對齊 direct adoption 前提與 guardrails。
+- 定義 direct adoption 下的 credential、tooling、audit、filesystem guard 邊界。
+- 定義 pilot/phase 順序與 OpenClaw-to-DRTS control-plane mapping。
 
 ## Artifacts
 
@@ -40,6 +35,5 @@ runner behind the DRTS orchestrator bridge.
 
 ## Guardrails
 
-- Do not store DRTS secrets in an OSS agent config.
-- Do not give OSS runtime direct Platform Admin write tokens.
-- Do not make this evaluation a dependency for real provider or read-only assistant work.
+- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes.
+- Treat `current-work.md` as a human summary, not canonical machine context.

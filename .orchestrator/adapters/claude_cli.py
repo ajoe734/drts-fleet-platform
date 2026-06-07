@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import time
 from pathlib import Path
 
 from adapters.base import DeliveryCapability, DeliveryRequest, DeliveryResult
@@ -53,7 +54,37 @@ def _claude_auth_ready(cli: str | None, env: dict[str, str] | None = None) -> bo
         payload = json.loads(status.stdout)
     except json.JSONDecodeError:
         return False
-    return bool(payload.get("loggedIn"))
+    if not payload.get("loggedIn"):
+        return False
+    return _claude_credentials_not_expired(env=env)
+
+
+def _claude_credentials_not_expired(*, env: dict[str, str] | None = None) -> bool:
+    source = env or os.environ
+    candidates: list[Path] = []
+    config_dir = source.get("CLAUDE_CONFIG_DIR")
+    if config_dir:
+        candidates.append(Path(os.path.expandvars(os.path.expanduser(config_dir))) / ".credentials.json")
+    home = Path(os.path.expandvars(os.path.expanduser(source.get("HOME") or str(Path.home()))))
+    candidates.extend([home / ".credentials.json", home / ".claude" / ".credentials.json"])
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        expires_at = (payload.get("claudeAiOauth") or {}).get("expiresAt")
+        if expires_at is None:
+            return True
+        try:
+            expiry = float(expires_at)
+        except (TypeError, ValueError):
+            return False
+        if expiry > 10_000_000_000:
+            expiry /= 1000
+        return expiry > time.time() + 60
+    return True
 
 
 class ClaudeCLIAdapter(ClaudeCodeAdapter):

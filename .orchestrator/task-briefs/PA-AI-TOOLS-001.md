@@ -2,21 +2,19 @@
 
 Platform Admin assistant caller-scoped read tools
 
-- Status: `backlog`
-- Owner: `Claude`
-- Reviewer: `Codex2`
+- Status: `done`
+- Owner: `Codex2`
+- Reviewer: `Claude`
 - Planning Ref: `docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md`
-- Last Update: `2026-06-03T00:00:00Z`
+- Last Update: `2026-06-03T14:11:05Z`
 
 ## 中文說明
 
-補齊小幫手「看得到系統內容」所需的 caller-scoped read tools。它可以讀目前
-Platform Admin 使用者有權看的 tenant、partner、payments、pricing、flags、
-adapter、audit 等資料，但不能擴權。
+補齊 caller-scoped read tools，作為 OpenClaw runtime 的 tool registry，讓小幫手能讀目前 Platform Admin 使用者有權看的 tenant、partner、payments、pricing、flags、adapter、audit 資料。
 
 ## Short Summary
 
-Implement executable `route.*`, `data.*`, `docs.*`, and `audit.*` read tools.
+Owner finalized review-approved task with closeout commit and non-force push. Verification: pnpm --filter api exec tsc -p tsconfig.json --noEmit; apps/api vitest policy+read-tools 12/12; root vitest platform-admin-assistant-tools 5/5. Integration status: branch_pushed;…
 
 ## Dependencies
 
@@ -24,12 +22,7 @@ Implement executable `route.*`, `data.*`, `docs.*`, and `audit.*` read tools.
 
 ## Acceptance
 
-- Tool registry exposes executable descriptors for navigation, route detail, tenant summaries, tenant governance, partners, payments/reimbursements, pricing, flags, adapters, and audit lookups.
-- Every tool validates current Platform Admin actor scope before reading.
-- Tool outputs are typed, bounded, redacted, and suitable for LLM context.
-- API endpoint supports assistant tool invocation or internal tool loop invocation.
-- Tests prove forbidden actor scope cannot read Platform Admin data.
-- Tests prove large record sets are summarized/paginated instead of dumped.
+- See task brief acceptance checklist
 
 ## Artifacts
 
@@ -40,6 +33,5 @@ Implement executable `route.*`, `data.*`, `docs.*`, and `audit.*` read tools.
 
 ## Guardrails
 
-- Caller-scoped only; no service-account broad reads for assistant answers.
-- Tool output must not contain secrets, plaintext credentials, or unrestricted PII.
-- Use existing domain services and repositories instead of bypassing business rules.
+- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes.
+- Treat `current-work.md` as a human summary, not canonical machine context.

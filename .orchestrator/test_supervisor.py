@@ -1013,6 +1013,34 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
         self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
 
+    def test_lane_capacity_override_zero_disables_lane(self) -> None:
+        settings = {
+            "max_tasks_per_agent": 4,
+            "max_tasks_per_agent_by_lane": {"gemini": 0},
+        }
+
+        self.assertEqual(supervisor.max_tasks_per_agent_for_lane(settings, "Gemini"), 0)
+
+    def test_first_viable_agent_skips_disabled_lane(self) -> None:
+        config = {
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 2,
+                "max_tasks_per_agent_by_lane": {"gemini": 0, "codex": 2},
+            },
+            "agents": {
+                "gemini": {"display_name": "Gemini", "provider": "gemini"},
+                "codex": {"display_name": "Codex", "provider": "codex"},
+            },
+        }
+
+        result = supervisor.first_viable_agent(
+            config,
+            ["Gemini", "Codex"],
+            exclude=set(),
+        )
+
+        self.assertEqual(result, "Codex")
+
     def test_dispatcher_round_robins_ready_reviews_across_lanes(self) -> None:
         config = {
             "schema": {
@@ -6765,6 +6793,63 @@ class ChairmanFlowTests(unittest.TestCase):
             "Paused explicit owner with no active load must not be reshuffled; "
             "task should wait for the assigned lane to resume.",
         )
+
+    def test_proactive_claim_reassigns_disabled_lane_owner(self) -> None:
+        """A lane disabled via capacity=0 should not keep tasks stuck forever."""
+        config = {
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 2,
+                "max_tasks_per_agent_by_lane": {
+                    "gemini": 0,
+                    "codex": 4,
+                    "codex2": 4,
+                },
+            },
+            "worker_reassignment": {
+                "owner_fallbacks": {"Gemini": ["Codex", "Codex2"]},
+                "reviewer_fallbacks": {"Gemini": ["Codex", "Codex2"]},
+            },
+            "agents": {
+                "gemini": {"display_name": "Gemini", "provider": "gemini"},
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            },
+        }
+        task = {
+            "id": "TENBIZ-012",
+            "status": "todo",
+            "owner": "Gemini",
+            "reviewer": "Codex2",
+            "depends_on": [],
+        }
+
+        plan = supervisor.proactive_claim_plan_for_idle_agent(
+            config,
+            task=task,
+            task_map={"TENBIZ-012": task},
+            idle_agent_name="Codex",
+            idle_agent_names=["Codex", "Codex2"],
+            agent_loads={"Gemini": [3], "Codex": [99], "Codex2": [99]},
+            helper_settings={
+                "enabled": True,
+                "task_statuses": ["backlog", "todo", "in_progress", "review", "review_approved"],
+                "availability_first": False,
+                "allow_any_idle_lane": False,
+                "prefer_assigned_when_idle": True,
+                "require_assigned_agent_busy": True,
+                "require_owner_higher_priority_load": True,
+                "respect_explicit_owner_when_paused": True,
+            },
+            review_statuses={"review"},
+            finalize_statuses={"review_approved"},
+            dependency_done_statuses={"done"},
+            state={"provider_pauses": {}},
+        )
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["claim_agent"], "Codex")
+        self.assertEqual(plan["new_owner"], "Codex")
+        self.assertEqual(plan["new_reviewer"], "Codex2")
 
     def test_proactive_claim_still_reshuffles_when_explicit_owner_busy(self) -> None:
         """The paused-owner guard must not block legitimate busy reshuffling.

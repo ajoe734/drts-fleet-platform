@@ -38,6 +38,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 STATE_FILE = ROOT_DIR / ".orchestrator/state.json"
 SUPERVISOR_LOG = ROOT_DIR / ".orchestrator/logs/supervisor-bg.log"
 LANE_HEALTH_LOG = ROOT_DIR / ".orchestrator/logs/lane-health.jsonl"
+CLAUDE_KEEPALIVE_LOG = ROOT_DIR / ".orchestrator/logs/claude-lane-keepalive.log"
 
 HEARTBEAT_LAG_WARN = int(os.environ.get("HEALTH_HEARTBEAT_LAG_WARN", "300"))
 DONE_GAP_WARN = int(os.environ.get("HEALTH_DONE_GAP_WARN", "1800"))
@@ -47,6 +48,43 @@ SUPERSEDE_RATE_WARN = int(os.environ.get("HEALTH_SUPERSEDE_RATE_WARN", "8"))
 # regardless of host tz (see supervisor.py LOCAL_TZ). Parse with that explicit
 # zone so cutoff math is correct on hosts in UTC (or any other tz).
 SUPERVISOR_LOG_TZ = ZoneInfo("Asia/Taipei") if ZoneInfo else None
+
+
+def latest_keepalive_status(log_path: Path) -> dict[str, dict]:
+    latest: dict[str, dict] = {}
+    if not log_path.exists():
+        return latest
+    try:
+        with open(log_path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 200_000))
+            tail = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return latest
+    pattern = re.compile(r"^(?P<ts>\S+)\s+(?P<result>OK|FAIL)\s+lane=(?P<lane>\S+)(?P<rest>.*)$")
+    for line in tail:
+        match = pattern.match(line.strip())
+        if not match:
+            continue
+        rest = (match.group("rest") or "").strip()
+        rc = None
+        rc_match = re.search(r"\brc=(\d+)\b", rest)
+        if rc_match:
+            rc = int(rc_match.group(1))
+        if "msg=" in rest:
+            message = rest.split("msg=", 1)[1].strip() or None
+        elif rest:
+            message = rest
+        else:
+            message = "refresh ok" if match.group("result") == "OK" else None
+        latest[match.group("lane")] = {
+            "ts": match.group("ts"),
+            "result": match.group("result"),
+            "rc": rc,
+            "message": message,
+        }
+    return latest
 
 
 def collect() -> dict:
@@ -165,8 +203,11 @@ def collect() -> dict:
         result["failures"]["blockers"] = sum(
             1 for t in tasks.values() if t.get("status") == "blocked")
         for lane, p in (s.get("provider_pauses", {}) or {}).items():
+            kind = p.get("kind")
             result["failures"]["provider_pauses"].append(
-                {"lane": lane, "kind": p.get("kind")})
+                {"lane": lane, "kind": kind})
+            if kind == "auth":
+                result["issues"].append(f"WARN: provider {lane} auth paused")
 
         # heartbeat from supervisor field, else fall back to state.json mtime
         sup_state = s.get("supervisor", {}) or {}
@@ -267,6 +308,38 @@ def collect() -> dict:
     except Exception as e:
         result["issues"].append(f"WARN: failed to read lane-health.jsonl: {e}")
 
+    # keepalive probe results are stronger evidence than access-token TTL.
+    try:
+        keepalive = latest_keepalive_status(CLAUDE_KEEPALIVE_LOG)
+        if keepalive:
+            lanes_by_name = {entry.get("lane"): entry for entry in result["lanes"]}
+            for lane, entry in keepalive.items():
+                lane_entry = lanes_by_name.get(lane)
+                if lane_entry is None:
+                    lane_entry = {"lane": lane}
+                    result["lanes"].append(lane_entry)
+                    lanes_by_name[lane] = lane_entry
+                lane_entry["keepalive_result"] = entry.get("result")
+                lane_entry["keepalive_as_of"] = entry.get("ts")
+                if entry.get("message"):
+                    lane_entry["keepalive_message"] = entry.get("message")
+                if entry.get("result") == "FAIL":
+                    result["issues"].append(
+                        f"WARN: lane {lane} keepalive failed"
+                        + (
+                            f" rc={entry.get('rc')}"
+                            if entry.get("rc") is not None
+                            else ""
+                        )
+                        + (
+                            f" msg={entry.get('message')}"
+                            if entry.get("message")
+                            else ""
+                        )
+                    )
+    except Exception as e:
+        result["issues"].append(f"WARN: failed to read keepalive log: {e}")
+
     crit = any(i.startswith("CRITICAL") for i in result["issues"])
     warn = any(i.startswith("WARN") for i in result["issues"])
     result["exit_code"] = 2 if crit else (1 if warn else 0)
@@ -351,7 +424,12 @@ def render_human(s: dict) -> None:
             st = ln.get("status") or "?"
             sc = c(GREEN if st == "ok" else YELLOW if st == "warn" else RED, st)
             ttl = fmt_dur(ln.get("ttl_seconds"))
-            print(f"  {ln.get('lane', '?'):10s} {sc:20s} ttl={ttl}")
+            keepalive = ""
+            if ln.get("keepalive_result"):
+                keepalive_status = str(ln.get("keepalive_result"))
+                keepalive_color = GREEN if keepalive_status == "OK" else RED
+                keepalive = f" keepalive={c(keepalive_color, keepalive_status.lower())}"
+            print(f"  {ln.get('lane', '?'):10s} {sc:20s} ttl={ttl}{keepalive}")
 
     issues = s.get("issues") or []
     if issues:

@@ -14,24 +14,25 @@ understands the current route and visible records, can help fill forms and
 complete governed operations, and can convert requested product changes into
 SA/SD/task packets for the existing supervisor and auto-worker system.
 
-The architecture should use an OpenClaw-style pattern as inspiration: a gateway,
-agent runtime, sessions/runs, tool registry, and channel adapters. It should not
-drop an unrestricted OSS agent directly into the Platform Admin runtime. All
-system reads and writes must stay behind DRTS API authorization, policy gates,
-audit receipts, redaction, and human confirmation for risky actions.
+The architecture should adopt OpenClaw directly as the primary agent runtime for
+dev-side assistant execution: gateway, agent runtime, sessions/runs, tool
+registry, and channel adapters. Direct adoption does not mean unrestricted
+runtime privilege. All system reads and writes must stay behind DRTS API
+authorization, policy gates, audit receipts, redaction, and human confirmation
+for risky actions.
 
 ## 2. Current Baseline
 
 The current committed baseline provides these pieces:
 
-| Area | Current state | Gap |
-| --- | --- | --- |
-| UI overlay | Floating Platform Admin assistant panel exists on dev. | It is still a simple chat client and does not expose rich page/form context or action confirmations. |
-| Provider contract | `LLM_GATEWAY_PROVIDER`, model, budget, and secret env vars are documented. | Provider type is effectively mock-only in code; dev must support a real provider. |
-| Tool registry | Route/data/docs/action/audit tool families are described. | Most read tools and write tools are descriptors, not complete executable tool-call loops. |
-| Knowledge layer | Approved docs retrieval and citation model exist. | It is not yet tied into real LLM tool-use/RAG orchestration. |
-| Action layer | `create_platform_notice` and `set_maintenance_mode` execution paths exist. | It needs preview/confirm/execute UX, more domain tools, and action receipts in the chat flow. |
-| Orchestrator | `.orchestrator` already has supervisor, branch routing, permission broker, tree guard, and worker dispatch primitives. | Platform Admin assistant has no safe bridge to create task packets or dispatch workers. |
+| Area              | Current state                                                                                                          | Gap                                                                                                  |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| UI overlay        | Floating Platform Admin assistant panel exists on dev.                                                                 | It is still a simple chat client and does not expose rich page/form context or action confirmations. |
+| Provider contract | `LLM_GATEWAY_PROVIDER`, model, budget, and secret env vars are documented.                                             | Provider type is effectively mock-only in code; dev must support a real provider.                    |
+| Tool registry     | Route/data/docs/action/audit tool families are described.                                                              | Most read tools and write tools are descriptors, not complete executable tool-call loops.            |
+| Knowledge layer   | Approved docs retrieval and citation model exist.                                                                      | It is not yet tied into real LLM tool-use/RAG orchestration.                                         |
+| Action layer      | `create_platform_notice` and `set_maintenance_mode` execution paths exist.                                             | It needs preview/confirm/execute UX, more domain tools, and action receipts in the chat flow.        |
+| Orchestrator      | `.orchestrator` already has supervisor, branch routing, permission broker, tree guard, and worker dispatch primitives. | Platform Admin assistant has no safe bridge to create task packets or dispatch workers.              |
 
 ## 3. Product Objective
 
@@ -75,14 +76,14 @@ Required capabilities:
 There is no separate LLM user login inside Platform Admin. The assistant is
 bound to the current authenticated Platform Admin actor.
 
-| Concern | Decision |
-| --- | --- |
-| Human identity | Use the current control-plane identity (`platform_admin`) from the API request. |
-| Assistant identity | Assistant sessions are subordinate to the human actor and cannot widen permissions. |
-| Provider credentials | Store only in API runtime Secret Manager, never in `platform-admin-web`. |
-| Dev provider | Dev should use a real provider when `LLM_GATEWAY_API_KEY` is present. Mock is local/CI fallback only. |
-| Production provider | Fail fast if enabled with a real provider but no key. |
-| Audit actor | Audit writes include both the human actor and assistant session/run/tool ids. |
+| Concern              | Decision                                                                                              |
+| -------------------- | ----------------------------------------------------------------------------------------------------- |
+| Human identity       | Use the current control-plane identity (`platform_admin`) from the API request.                       |
+| Assistant identity   | Assistant sessions are subordinate to the human actor and cannot widen permissions.                   |
+| Provider credentials | Store only in API runtime Secret Manager, never in `platform-admin-web`.                              |
+| Dev provider         | Dev should use a real provider when `LLM_GATEWAY_API_KEY` is present. Mock is local/CI fallback only. |
+| Production provider  | Fail fast if enabled with a real provider but no key.                                                 |
+| Audit actor          | Audit writes include both the human actor and assistant session/run/tool ids.                         |
 
 Dev env target:
 
@@ -230,12 +231,12 @@ RAG constraints:
 
 Tool families:
 
-| Family | Mode | Examples |
-| --- | --- | --- |
-| `route.*` | read | list navigation nodes, inspect current route contract |
-| `data.*` | read | tenants, partners, payments, pricing, flags, adapters |
-| `docs.*` | read | search policy, fetch cited plan excerpts |
-| `audit.*` | audit | actor audit entries, action receipt evidence |
+| Family     | Mode  | Examples                                                                |
+| ---------- | ----- | ----------------------------------------------------------------------- |
+| `route.*`  | read  | list navigation nodes, inspect current route contract                   |
+| `data.*`   | read  | tenants, partners, payments, pricing, flags, adapters                   |
+| `docs.*`   | read  | search policy, fetch cited plan excerpts                                |
+| `audit.*`  | audit | actor audit entries, action receipt evidence                            |
 | `action.*` | write | create notice, update flags, approve/nudge queues, set maintenance mode |
 
 Tool-call lifecycle:
@@ -252,12 +253,12 @@ assistant proposes tool call
 
 Risk policy:
 
-| Risk | Confirmation | Reason | Execution |
-| --- | --- | --- | --- |
-| Low | optional | optional | can execute from inline confirmation |
-| Medium | required | optional | confirmation panel |
-| High | required | required | confirmation panel + receipt + rollback note |
-| External/system | required | required | supervisor or human approval gate |
+| Risk            | Confirmation | Reason   | Execution                                    |
+| --------------- | ------------ | -------- | -------------------------------------------- |
+| Low             | optional     | optional | can execute from inline confirmation         |
+| Medium          | required     | optional | confirmation panel                           |
+| High            | required     | required | confirmation panel + receipt + rollback note |
+| External/system | required     | required | supervisor or human approval gate            |
 
 ### 6.5 Form and Workflow Assistant
 
@@ -281,15 +282,15 @@ API responsibilities:
 
 New tool family: `dev.*`
 
-| Tool | Purpose | Write target |
-| --- | --- | --- |
-| `dev.capture_requirement` | Summarize user change request and current system context. | assistant session only |
-| `dev.generate_sa` | Draft system analysis document. | `docs/02-architecture/` |
-| `dev.generate_sd` | Draft system design document. | `docs/02-architecture/` or `docs/05-ui/` |
-| `dev.create_task_briefs` | Generate supervisor-ready task briefs. | `.orchestrator/task-briefs/` |
-| `dev.submit_dispatch_packet` | Ask orchestrator bridge to queue work. | orchestrator event queue |
-| `dev.track_worker_status` | Read worker/PR/CI/deploy status. | read-only |
-| `dev.update_progress` | Update progress/status docs through approved scripts. | guarded docs/status paths |
+| Tool                         | Purpose                                                   | Write target                             |
+| ---------------------------- | --------------------------------------------------------- | ---------------------------------------- |
+| `dev.capture_requirement`    | Summarize user change request and current system context. | assistant session only                   |
+| `dev.generate_sa`            | Draft system analysis document.                           | `docs/02-architecture/`                  |
+| `dev.generate_sd`            | Draft system design document.                             | `docs/02-architecture/` or `docs/05-ui/` |
+| `dev.create_task_briefs`     | Generate supervisor-ready task briefs.                    | `.orchestrator/task-briefs/`             |
+| `dev.submit_dispatch_packet` | Ask orchestrator bridge to queue work.                    | orchestrator event queue                 |
+| `dev.track_worker_status`    | Read worker/PR/CI/deploy status.                          | read-only                                |
+| `dev.update_progress`        | Update progress/status docs through approved scripts.     | guarded docs/status paths                |
 
 The assistant must not execute shell from the web process. Development writes go
 through an orchestrator bridge with isolated worktrees and policy checks.
@@ -330,19 +331,26 @@ Dispatch packet:
 
 ### 6.8 OpenClaw-Style OSS Runtime Fit
 
-OpenClaw-style architecture is useful as a reference for multi-channel agent
-sessions and agent CLI runs. It should be evaluated as a sidecar/runtime option,
-not as a privileged in-process dependency.
+OpenClaw should be adopted directly as the primary OSS runtime for multi-channel
+agent sessions and agent CLI runs. Direct adoption is acceptable only if DRTS
+keeps policy ownership around credentials, API access, audits, filesystem
+execution, and risky actions.
 
 Recommendation:
 
-- Use the pattern: gateway, sessions/runs, tool adapters, channel adapters,
-  watchers.
-- Do not let an OSS agent call Platform Admin APIs directly with broad tokens.
-- Do not store DRTS provider keys inside an OSS agent config.
-- If adopted, run it as a sandboxed dev-side worker behind the orchestrator
-  bridge, using isolated worktrees and command allowlists.
-- Keep production system actions in DRTS API services, not in the OSS runner.
+- Adopt OpenClaw runtime directly for assistant sessions, runs, tool
+  orchestration, and CLI-driven worker execution.
+- Integrate DRTS tools as first-class OpenClaw adapters instead of duplicating
+  runtime logic in `.orchestrator`.
+- Do not let OpenClaw hold broad long-lived Platform Admin tokens; issue
+  caller-scoped bridge credentials or session-bound tool capabilities.
+- Do not store DRTS provider keys inside repo-local OpenClaw config; load them
+  through DRTS gateway and secret-manager controlled injection.
+- Keep production system actions in DRTS API services; OpenClaw can decide and
+  tool-call, but it must not bypass domain services.
+- Wrap direct adoption with DRTS watchers and guards: permission broker, tree
+  guard, isolated worktrees, command allowlists, audit receipts, and explicit
+  human confirmation for risky actions.
 
 External reference points for the evaluation:
 
@@ -371,13 +379,13 @@ Mandatory guardrails:
 
 Environment policy:
 
-| Environment | Provider | Writes | Orchestrator dispatch |
-| --- | --- | --- | --- |
-| local | mock by default, real optional | sandbox/local only | optional |
-| CI | mock only | test fixtures only | no live dispatch |
-| dev | real provider required for acceptance; mock only as degraded | enabled with confirmations | enabled behind bridge |
-| staging | real provider after approval | limited pilot | limited pilot |
-| prod | approved provider only | strict policy | disabled unless separately approved |
+| Environment | Provider                                                     | Writes                     | Orchestrator dispatch               |
+| ----------- | ------------------------------------------------------------ | -------------------------- | ----------------------------------- |
+| local       | mock by default, real optional                               | sandbox/local only         | optional                            |
+| CI          | mock only                                                    | test fixtures only         | no live dispatch                    |
+| dev         | real provider required for acceptance; mock only as degraded | enabled with confirmations | enabled behind bridge               |
+| staging     | real provider after approval                                 | limited pilot              | limited pilot                       |
+| prod        | approved provider only                                       | strict policy              | disabled unless separately approved |
 
 ## 8. Implementation Phases
 
@@ -411,10 +419,11 @@ Environment policy:
 
 ### Phase 4: Supervisor / Auto-Worker Bridge
 
-- Add signed dispatch packet endpoint.
-- Queue work through existing supervisor primitives.
-- Track PR/CI/deploy state in assistant panel.
-- Dev acceptance: assistant creates a task packet and supervisor picks it up.
+- Add signed dispatch packet endpoint and OpenClaw runtime profile handoff.
+- Queue work through supervisor guardrails around OpenClaw-backed runs.
+- Track PR/CI/deploy state and OpenClaw run/session status in assistant panel.
+- Dev acceptance: assistant creates a task packet, launches a governed
+  OpenClaw-backed run, and supervisor picks it up.
 
 ### Phase 5: Hardening and Evaluation
 
@@ -428,31 +437,39 @@ Environment policy:
 These tasks are intentionally split for parallel execution. Dependencies exist
 only when a later task consumes an implemented contract.
 
-| Task | Owner | Reviewer | Can start now | Depends on |
-| --- | --- | --- | --- | --- |
-| `PA-AI-REAL-001` | Gemini | Claude2 | yes | none |
-| `PA-AI-CTX-001` | Claude2 | Codex | yes | none |
-| `PA-AI-RAG-001` | Codex | Claude | yes | none |
-| `PA-AI-TOOLS-001` | Claude | Codex2 | yes | none |
-| `PA-AI-SEC-001` | Codex2 | Claude | yes | none |
-| `PA-AI-OSS-001` | Gemini2 | Codex | yes | none |
-| `PA-AI-ACTION-001` | Codex2 | Claude2 | partial | `PA-AI-TOOLS-001` for full execution |
-| `PA-AI-DEV-001` | Claude | Codex | partial | `PA-AI-RAG-001` for cited generation |
-| `PA-AI-ORCH-001` | Gemini2 | Claude | partial | `PA-AI-DEV-001`, `PA-AI-SEC-001` |
-| `PA-AI-E2E-001` | Gemini | Codex | no | all implementation tasks |
+| Task               | Owner  | Reviewer | Can start now | Depends on                                           |
+| ------------------ | ------ | -------- | ------------- | ---------------------------------------------------- |
+| `PA-AI-REAL-001`   | Codex  | Claude   | yes           | none                                                 |
+| `PA-AI-CTX-001`    | Claude | Codex    | yes           | none                                                 |
+| `PA-AI-RAG-001`    | Codex  | Claude   | yes           | none                                                 |
+| `PA-AI-TOOLS-001`  | Claude | Codex2   | yes           | none                                                 |
+| `PA-AI-SEC-001`    | Codex2 | Claude   | yes           | none                                                 |
+| `PA-AI-OSS-001`    | Claude | Codex2   | yes           | none                                                 |
+| `PA-AI-INTG-001`   | Codex2 | Claude   | yes           | `PA-AI-OSS-001` decision accepted                    |
+| `PA-AI-ACTION-001` | Codex2 | Claude   | partial       | `PA-AI-TOOLS-001` for full execution                 |
+| `PA-AI-DEV-001`    | Claude | Codex    | partial       | `PA-AI-RAG-001` for cited generation                 |
+| `PA-AI-ORCH-001`   | Codex2 | Claude   | partial       | `PA-AI-DEV-001`, `PA-AI-SEC-001`                     |
+| `PA-AI-E2E-001`    | Codex  | Claude   | no            | all implementation tasks, including `PA-AI-INTG-001` |
+
+Runtime note: as of 2026-06-03, `Claude`, `Codex`, and `Codex2` are the
+dispatch-capable lanes in the local supervisor state. `Claude2` is paused for
+auth, while `Gemini`, `Gemini2`, and `Copilot` are paused for quota. The table
+therefore routes immediate execution to healthy lanes and avoids unnecessary
+dispatch failures. When paused lanes are restored, owner/reviewer balance can be
+redistributed by supervisor reassignment without changing task scope.
 
 ## 10. Acceptance Matrix
 
-| Capability | Required evidence |
-| --- | --- |
-| Real provider | Dev runtime reports non-mock provider when key is present; direct prompt returns non-mock response. |
-| Page awareness | Assistant answer includes current route, active tab, form/table context, and visible entity refs. |
-| Data awareness | Assistant can call read tools and summarize current tenant/partner/payment records within caller scope. |
-| Governed writes | Assistant can preview, confirm, execute, and receipt at least two write actions. |
-| SA/SD generation | User request produces archived SA and SD docs with citations and task slicing. |
+| Capability           | Required evidence                                                                                        |
+| -------------------- | -------------------------------------------------------------------------------------------------------- |
+| Real provider        | Dev runtime reports non-mock provider when key is present; direct prompt returns non-mock response.      |
+| Page awareness       | Assistant answer includes current route, active tab, form/table context, and visible entity refs.        |
+| Data awareness       | Assistant can call read tools and summarize current tenant/partner/payment records within caller scope.  |
+| Governed writes      | Assistant can preview, confirm, execute, and receipt at least two write actions.                         |
+| SA/SD generation     | User request produces archived SA and SD docs with citations and task slicing.                           |
 | Worker collaboration | Assistant submits signed dispatch packet and supervisor/auto-worker status is visible in Platform Admin. |
-| Security | Prompt-injection, RBAC, redaction, budget, and confirmation tests pass. |
-| Dev deploy | Latest `origin/dev` deploy passes health check and live assistant smoke. |
+| Security             | Prompt-injection, RBAC, redaction, budget, and confirmation tests pass.                                  |
+| Dev deploy           | Latest `origin/dev` deploy passes health check and live assistant smoke.                                 |
 
 ## 11. Open Questions
 
@@ -460,24 +477,28 @@ only when a later task consumes an implemented contract.
   local Ollama?
 - Should dev allow autonomous low-risk writes without per-action confirmation,
   or require confirmation for every assistant write during pilot?
-- Should OpenClaw-style runtime be adopted directly for dev workers, or should
-  DRTS keep the current `.orchestrator` runtime and only borrow design patterns?
+- How much of the current `.orchestrator` worker flow should be retained as a
+  supervisor and guardrail shell around direct OpenClaw adoption?
 - Which Platform Admin modules are first pilot surfaces for write actions:
   notices/maintenance only, or payments/tenants/pricing too?
 
 ## 12. Decision Recommendation
 
-Proceed with a DRTS-owned agentic assistant architecture:
+Proceed with a DRTS-owned agentic assistant architecture built on direct
+OpenClaw adoption:
 
 - Use real provider gateway in dev.
-- Use OpenClaw-style concepts, not unrestricted OpenClaw embedding.
+- Adopt OpenClaw directly as the primary agent runtime for assistant execution
+  and dev workers.
 - Keep all system actions behind DRTS API policy and audit.
-- Use the existing `.orchestrator` as the worker control plane.
+- Reposition the existing `.orchestrator` as supervisor, dispatch, and
+  guardrail control plane around the OpenClaw runtime.
 - Dispatch the parallel task set in section 9 after this plan is accepted.
 
 ## 13. External References For PA-AI-OSS-001
 
-These references are evaluation inputs, not adopted architecture by themselves:
+These references are adoption inputs and operating references, not architecture
+decisions by themselves:
 
 - OpenClaw repository: `https://github.com/openclaw/openclaw`
 - OpenClaw agent CLI documentation: `https://docs.openclaw.ai/cli/agent`

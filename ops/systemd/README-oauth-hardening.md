@@ -30,20 +30,21 @@ service runs two scripts in sequence:
    OAuth refresh path, keeping the refresh token warm.
 2. `scripts/lane-health.sh` — reads `expiresAt` from each lane's
    `credentials.json` and emits a JSON line to
-   `.orchestrator/logs/lane-health.jsonl`. Exits non-zero if any lane
-   has < 30 minutes of TTL remaining, so the systemd service surfaces
-   degradation in `systemctl --user status` before the supervisor
-   actually hits a 401 in production dispatch.
+   `.orchestrator/logs/lane-health.jsonl`. The script still exits non-zero
+   on warn by default, but the systemd unit invokes it with
+   `LANE_HEALTH_WARN_EXIT_CODE=0` so a low-but-readable TTL snapshot does
+   not mark the keepalive itself failed. Warn / expired lanes still show
+   up in `python3 scripts/health.py` and in the JSONL log.
 
 ## Why systemd timer, not cron?
 
-| | cron | systemd timer |
-|---|---|---|
-| Logging | Caller's stdout/stderr redirect; opaque | `journalctl --user -u drts-claude-keepalive` with timestamps, structured filtering, retention |
-| Failure visibility | Silent unless you read the log | `systemctl --user status` shows last-fail + reason inline |
-| Missed runs | Lost; cron only fires at wall-clock interval | `Persistent=true` catches up after the host is awake |
-| Boot trigger | None — first fire is at the next wall-clock minute matching the pattern | `OnBootSec=60s` exercises lanes before any backend dispatch can use them |
-| Dependencies | None | Can `After=` other units (e.g., the supervisor service) |
+|                    | cron                                                                    | systemd timer                                                                                 |
+| ------------------ | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Logging            | Caller's stdout/stderr redirect; opaque                                 | `journalctl --user -u drts-claude-keepalive` with timestamps, structured filtering, retention |
+| Failure visibility | Silent unless you read the log                                          | `systemctl --user status` shows last-fail + reason inline                                     |
+| Missed runs        | Lost; cron only fires at wall-clock interval                            | `Persistent=true` catches up after the host is awake                                          |
+| Boot trigger       | None — first fire is at the next wall-clock minute matching the pattern | `OnBootSec=60s` exercises lanes before any backend dispatch can use them                      |
+| Dependencies       | None                                                                    | Can `After=` other units (e.g., the supervisor service)                                       |
 
 ## What we do NOT do here
 
@@ -57,7 +58,7 @@ service runs two scripts in sequence:
 - **Reauth automation.** When a refresh token genuinely dies (e.g.,
   user rotated their Anthropic password elsewhere), only an interactive
   `claude auth login` round-trip restores the lane. The keepalive only
-  prevents *idle* decay; it cannot rescue an externally revoked token.
+  prevents _idle_ decay; it cannot rescue an externally revoked token.
 - **Codex/Gemini lane keepalives.** Codex uses a separate OAuth
   (ChatGPT) handled by `repair-codex-symlinks.sh`. Gemini's `gemini2`
   lane uses Google Cloud Application Default Credentials with quota
@@ -80,14 +81,14 @@ The installer is idempotent. It:
 
 ## Operational reference
 
-| What | Command |
-|------|---------|
-| Status | `systemctl --user status drts-claude-keepalive.timer` |
-| Last run | `systemctl --user list-timers drts-claude-keepalive.timer` |
-| Tail logs | `journalctl --user -u drts-claude-keepalive -f` |
-| Exercise now | `systemctl --user start drts-claude-keepalive.service` |
-| Disable | `systemctl --user disable --now drts-claude-keepalive.timer` |
-| Inspect lane TTLs | `tail -10 .orchestrator/logs/lane-health.jsonl` |
+| What              | Command                                                      |
+| ----------------- | ------------------------------------------------------------ |
+| Status            | `systemctl --user status drts-claude-keepalive.timer`        |
+| Last run          | `systemctl --user list-timers drts-claude-keepalive.timer`   |
+| Tail logs         | `journalctl --user -u drts-claude-keepalive -f`              |
+| Exercise now      | `systemctl --user start drts-claude-keepalive.service`       |
+| Disable           | `systemctl --user disable --now drts-claude-keepalive.timer` |
+| Inspect lane TTLs | `tail -10 .orchestrator/logs/lane-health.jsonl`              |
 
 ## Migration from PR #292's cron entry
 

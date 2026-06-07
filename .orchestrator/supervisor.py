@@ -3084,6 +3084,8 @@ def first_viable_agent(
             continue
         seen.add(name)
         if name in known:
+            if lane_dispatch_disabled(config, name):
+                continue
             if state is not None and is_agent_dispatch_paused(
                 config,
                 state,
@@ -3245,7 +3247,7 @@ def proactive_claim_plan_for_idle_agent(
     # to whoever is idle — typically cascading the entire queue onto a
     # single lane. See feedback_supervisor_ignores_explicit_owner.md.
     if helper_settings.get("respect_explicit_owner_when_paused", True) and state is not None:
-        if is_agent_dispatch_paused(config, state, assigned_agent):
+        if not lane_dispatch_disabled(config, assigned_agent) and is_agent_dispatch_paused(config, state, assigned_agent):
             assigned_load = len(agent_loads.get(assigned_agent, []))
             if assigned_load == 0:
                 return None
@@ -3253,6 +3255,11 @@ def proactive_claim_plan_for_idle_agent(
     current_priority = dispatch_reason_priority(reason)
     assigned_loads = agent_loads.get(assigned_agent, [])
     has_higher_priority_load = current_priority is not None and any(priority < current_priority for priority in assigned_loads)
+    if lane_dispatch_disabled(config, assigned_agent):
+        # A lane ban (`max_tasks_per_agent_by_lane = 0`) means the assigned lane
+        # cannot service this task on the current host, so waiting for
+        # higher-priority load on that lane would deadlock dispatch.
+        has_higher_priority_load = True
     assigned_busy = assigned_agent not in idle_agent_names
 
     if helper_settings.get("require_owner_higher_priority_load", False):
@@ -5001,10 +5008,17 @@ def max_tasks_per_agent_for_lane(settings: dict[str, Any], agent_id: str) -> int
         if normalize_agent_id(str(key)) != normalized_agent_id:
             continue
         try:
-            return max(1, int(value))
+            # A lane override of 0 is an intentional operator disable/ban.
+            return max(0, int(value))
         except (TypeError, ValueError):
             return default
     return default
+
+
+def lane_dispatch_disabled(config: dict[str, Any], agent_id: str) -> bool:
+    """True when local dispatcher policy intentionally disables a lane."""
+    settings = ready_dispatch_settings(config)
+    return max_tasks_per_agent_for_lane(settings, agent_id) <= 0
 
 
 def helper_claim_settings(config: dict[str, Any]) -> dict[str, Any]:
@@ -7634,8 +7648,17 @@ def apply_chair_task_action(
     target_agent, dispatch_reason = dispatch_plan
     if requested_target and requested_target != target_agent:
         return False
+    role = task_role_for_dispatch_reason(dispatch_reason)
+    streak_key = failure_streak_key(task_id, role) if role else ""
+    streak_record = failure_streak_registry(state).get(streak_key) if streak_key else None
     if task_waiting_on_chair_reassignment(state, task, reason=dispatch_reason, target_agent=target_agent):
-        return False
+        if not isinstance(streak_record, dict):
+            return False
+        # The chair has explicitly approved this dispatch action. Clear the
+        # task-scoped guard that exists only to wait for that chair decision.
+        streak_record["awaiting_chair"] = False
+        streak_record["chair_cleared_at"] = utc_now()
+        streak_record["chair_clear_reason"] = chair_reason
 
     agent_id = normalize_agent_id(target_agent)
     if agent_id not in (config.get("agents", {}) or {}):

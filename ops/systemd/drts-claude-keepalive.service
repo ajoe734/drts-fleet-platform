@@ -14,9 +14,10 @@ WorkingDirectory=%h/workspace/drts-fleet-platform
 # Keepalive first (warms the refresh tokens), then health check (records
 # remaining TTL per lane to lane-health.jsonl). They run sequentially so
 # the health snapshot reflects any token refresh the keepalive just
-# triggered.
+# triggered. A warn-level TTL snapshot should not mark the keepalive
+# itself failed; only refresh failure or unreadable credentials should.
 ExecStart=%h/workspace/drts-fleet-platform/scripts/claude-lane-keepalive.sh
-ExecStart=%h/workspace/drts-fleet-platform/scripts/lane-health.sh
+ExecStart=/usr/bin/env LANE_HEALTH_WARN_EXIT_CODE=0 %h/workspace/drts-fleet-platform/scripts/lane-health.sh
 
 StandardOutput=journal
 StandardError=journal
