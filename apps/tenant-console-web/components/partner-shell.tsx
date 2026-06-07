@@ -7,6 +7,7 @@ import type {
   PartnerChannelEntryRecord,
   PartnerEligibilityMode,
 } from "@drts/contracts";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 
 export type PartnerNavItem = {
   href: string;
@@ -29,13 +30,52 @@ type PartnerSessionSummary = {
 };
 
 const ELIGIBILITY_NOTE: Record<PartnerEligibilityMode, string> = {
-  none: "No eligibility check required for this entry.",
-  bank_card_inline: "Inline card verification required before booking.",
-  reference_required: "Reference token verification required before booking.",
+  none: "這個入口不需要資格驗證。",
+  bank_card_inline: "建立訂單前需要先完成卡片資格驗證。",
+  reference_required: "建立訂單前需要先完成參考代碼資格驗證。",
 };
+
+function formatPartnerAuthMode(
+  authMode: PartnerChannelEntryRecord["authMode"],
+) {
+  switch (authMode) {
+    case "tenant_portal_bearer":
+      return "租戶入口權杖";
+    case "partner_api_key":
+      return "合作夥伴 API 金鑰";
+    default:
+      return formatTenantCodeLabel(authMode, authMode);
+  }
+}
+
+function formatPartnerActorType(actorType: string) {
+  switch (actorType) {
+    case "partner_api_key":
+      return "合作夥伴 API 金鑰";
+    case "tenant_user":
+      return "租戶使用者";
+    case "tenant_admin":
+      return "租戶管理員";
+    default:
+      return formatTenantCodeLabel(actorType, actorType);
+  }
+}
 
 function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function summarizePartnerBinding(session: PartnerSessionSummary) {
+  if (session.programCode && session.bankCode) {
+    return "已綁定合作方案與銀行識別。";
+  }
+  if (session.programCode) {
+    return "已綁定合作方案。";
+  }
+  if (session.bankCode) {
+    return "已綁定合作銀行識別。";
+  }
+  return "入口識別已由平台管理端確認。";
 }
 
 export function PartnerAuthenticatedShell({
@@ -72,22 +112,12 @@ export function PartnerAuthenticatedShell({
           : undefined
       }
     >
-      <aside className="partner-sidebar" aria-label="Partner navigation">
+      <aside className="partner-sidebar" aria-label="合作夥伴導覽">
         <div className="partner-brand">
-          <span className="partner-badge">Partner mode</span>
+          <span className="partner-badge">合作夥伴模式</span>
           <h1>{session.displayName}</h1>
           <p className="partner-brand-note">
-            Entry slug <code>{session.entrySlug}</code>
-            {session.programCode ? (
-              <>
-                {" · "}program <code>{session.programCode}</code>
-              </>
-            ) : null}
-            {session.bankCode ? (
-              <>
-                {" · "}bank <code>{session.bankCode}</code>
-              </>
-            ) : null}
+            {summarizePartnerBinding(session)}
           </p>
           <p className="partner-brand-note">
             {ELIGIBILITY_NOTE[session.eligibilityMode]}
@@ -112,20 +142,11 @@ export function PartnerAuthenticatedShell({
 
         <div className="partner-sidebar-footer">
           <div className="partner-identity">
-            <strong>Identity</strong>
+            <strong>工作階段身分</strong>
+            <p>身分 {formatPartnerActorType(session.identityActorType)}</p>
+            <p>驗證方式 {formatPartnerAuthMode(session.authMode)}</p>
             <p>
-              Actor <code>{session.identityActorType}</code>
-              {session.identityActorId ? (
-                <>
-                  {" · "}id <code>{session.identityActorId}</code>
-                </>
-              ) : null}
-            </p>
-            <p>
-              Auth mode <code>{session.authMode}</code>
-            </p>
-            <p>
-              Session valid until{" "}
+              有效期限至{" "}
               <time dateTime={session.expiresAt}>
                 {new Date(session.expiresAt).toLocaleString()}
               </time>
@@ -137,7 +158,7 @@ export function PartnerAuthenticatedShell({
             onClick={() => void handleLogout()}
             type="button"
           >
-            {pending ? "Signing out..." : "Sign out partner"}
+            {pending ? "登出中..." : "登出合作夥伴工作階段"}
           </button>
         </div>
       </aside>
@@ -146,16 +167,16 @@ export function PartnerAuthenticatedShell({
         <div className="partner-frame">
           <header className="partner-topbar">
             <div className="partner-topbar-copy">
-              <span className="eyebrow">Constrained partner shell</span>
-              <h2>{activeItem?.label ?? "Partner workspace"}</h2>
+              <span className="eyebrow">受限合作夥伴工作區</span>
+              <h2>{activeItem?.label ?? "合作夥伴工作區"}</h2>
               <p>
                 {activeItem?.note ??
-                  "Partner workspace exposes only entry-scoped eligibility and booking creation."}
+                  "合作夥伴工作區只提供入口範圍內的資格驗證與訂單建立功能。"}
               </p>
             </div>
             <div className="partner-topbar-meta">
-              <span className="meta-pill">Authority: `/api/tenant/*`</span>
-              <span className="meta-pill">No tenant-admin nav exposed</span>
+              <span className="meta-pill">權限來源：合作夥伴受限工作區</span>
+              <span className="meta-pill">不顯示租戶治理導覽</span>
             </div>
           </header>
           {children}
@@ -173,17 +194,17 @@ export function PartnerPublicShell({
   return (
     <div className="partner-public-shell">
       <header className="partner-public-header">
-        <span className="partner-badge">Partner mode</span>
-        <h1>Partner sign-in</h1>
+        <span className="partner-badge">合作夥伴模式</span>
+        <h1>合作夥伴登入</h1>
         <p>
-          Repo-local partner booking entry. Submit your entry slug and partner
-          API key to start a backend-issued bootstrap session.
+          這是平台提供的合作夥伴訂單入口。輸入入口別名與合作夥伴 API
+          金鑰後，系統會向後端要求簽發受限工作階段。
         </p>
       </header>
-      <section className="partner-public-body">{children}</section>
+      <main className="partner-public-body">{children}</main>
       <footer className="partner-public-footer">
-        Partner mode is constrained: it never exposes tenant-admin governance,
-        users, audit, API keys, webhooks, or settings.
+        合作夥伴模式是受限工作區：不會暴露租戶管理治理、人員、稽核、API
+        金鑰、回呼或設定頁。
       </footer>
     </div>
   );

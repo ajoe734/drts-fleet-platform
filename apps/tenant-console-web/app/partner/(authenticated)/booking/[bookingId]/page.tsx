@@ -10,6 +10,7 @@ import {
   buildPartnerClient,
   requirePartnerSession,
 } from "@/lib/partner-session";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ function formatDateTime(value: string | null): string {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return parsed.toLocaleString("zh-TW");
 }
 
 export default async function PartnerBookingConfirmationPage({
@@ -43,61 +44,71 @@ export default async function PartnerBookingConfirmationPage({
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="Booking confirmed"
-        title={`Booking ${booking.bookingId} created.`}
-        description="The partner caller can use this confirmation as proof of intake. Mutations from this surface go through tenant-allowed commands only."
+        eyebrow="訂單已建立"
+        title={`訂單 ${booking.bookingId} 已建立`}
+        description="合作夥伴來電方可使用此確認頁作為受理證明。此頁面不提供後續異動，僅呈現租戶允許的建立結果。"
       />
 
       <SurfaceCard
-        kicker="Identity"
-        title="Partner provenance recorded"
-        description="The booking now carries partner provenance. Downstream audit, billing, and reporting will keep the entry slug attached."
+        kicker="身分脈絡"
+        title="已記錄合作夥伴來源"
+        description="這筆訂單已帶入合作夥伴來源資訊。後續稽核、帳務與報表都會保留對應的合作夥伴入口代碼。"
       >
         <dl className="definition-grid">
           <div>
-            <dt>Booking id</dt>
+            <dt>訂單編號</dt>
             <dd>
               <code>{booking.bookingId}</code>
             </dd>
           </div>
           <div>
-            <dt>Order id</dt>
+            <dt>叫車單編號</dt>
             <dd>
               <code>{booking.orderId}</code>
             </dd>
           </div>
           <div>
-            <dt>Order status</dt>
+            <dt>訂單狀態</dt>
             <dd>
-              <span className="status-badge">{booking.orderStatus}</span>
+              <span className="status-badge">
+                {formatTenantCodeLabel(
+                  booking.orderStatus,
+                  booking.orderStatus,
+                )}
+              </span>
             </dd>
           </div>
           <div>
-            <dt>Service subtype</dt>
+            <dt>服務子類型</dt>
             <dd>
-              <code>{booking.businessDispatchSubtype}</code>
+              <code>
+                {formatTenantCodeLabel(
+                  booking.businessDispatchSubtype,
+                  booking.businessDispatchSubtype,
+                )}
+              </code>
               {!isPartnerBooking ? (
-                <span className="status-chip is-warning">subtype mismatch</span>
+                <span className="status-chip is-warning">子類型不一致</span>
               ) : null}
             </dd>
           </div>
           <div>
-            <dt>Reservation window</dt>
+            <dt>預約時窗</dt>
             <dd>
               {formatDateTime(booking.reservationWindowStart)} →{" "}
               {formatDateTime(booking.reservationWindowEnd)}
             </dd>
           </div>
           <div>
-            <dt>Pickup</dt>
+            <dt>上車地點</dt>
             <dd>{booking.pickup.address}</dd>
           </div>
           <div>
-            <dt>Dropoff</dt>
+            <dt>下車地點</dt>
             <dd>{booking.dropoff.address}</dd>
           </div>
           <div>
-            <dt>Passenger</dt>
+            <dt>乘客</dt>
             <dd>
               {booking.passenger.name}
               <span className="table-secondary">
@@ -110,23 +121,20 @@ export default async function PartnerBookingConfirmationPage({
       </SurfaceCard>
 
       <CalloutPanel
-        title="What partner mode can and cannot do next"
-        description="The partner surface stops at booking creation. Update / cancel commands belong to tenant-admin or ops authority."
+        title="合作夥伴模式接下來可做與不可做的事"
+        description="合作夥伴端在建立訂單後即止步。修改與取消等操作仍屬租戶管理員或營運權限。"
       >
         <ul className="panel-list">
-          <li>Partner can present this confirmation to the rider.</li>
-          <li>
-            Partner cannot edit, cancel, or override the booking from this
-            surface.
-          </li>
-          <li>For changes, contact tenant admin or ops with the booking id.</li>
+          <li>合作夥伴可將此確認頁提供給乘客作為受理證明。</li>
+          <li>合作夥伴無法從這個頁面直接修改、取消或覆寫訂單。</li>
+          <li>若需變更，請攜帶訂單編號聯繫租戶管理員或營運單位。</li>
         </ul>
         <div className="link-row">
           <Link className="text-link" href="/partner/booking/new">
-            Create another booking
+            再建立一筆訂單
           </Link>
           <Link className="text-link" href="/partner/start">
-            Back to partner workspace
+            返回合作夥伴工作區
           </Link>
         </div>
       </CalloutPanel>

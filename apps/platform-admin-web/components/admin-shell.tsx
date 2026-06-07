@@ -27,9 +27,12 @@ import {
 } from "lucide-react";
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
+  type Ref,
   type ReactNode,
 } from "react";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
@@ -88,10 +91,13 @@ type NavSection = {
 
 type ApiHealthStatus = "checking" | "healthy" | "degraded" | "down";
 
+const SIDEBAR_SCROLL_STORAGE_KEY = "platform-admin-sidebar-scroll-top";
+
 const sections: NavSection[] = [
   { key: "workspace", zh: "工作面", en: "Workspace" },
   { key: "tenant", zh: "租戶治理", en: "Tenant Governance" },
-  { key: "fleet", zh: "人員與車隊", en: "People & Fleet" },
+  { key: "partner", zh: "合作夥伴治理", en: "Partner Governance" },
+  { key: "people", zh: "人員與車隊", en: "People & Fleet" },
   { key: "commerce", zh: "平台與商務", en: "Platform & Commerce" },
   { key: "ops", zh: "平台維運", en: "Platform Ops & Risk" },
 ];
@@ -116,26 +122,26 @@ const routes: NavRoute[] = [
     icon: ShieldCheck,
     section: "tenant",
     zh: "跨租戶治理",
-    en: "Tenant Governance",
+    en: "Cross-tenant Governance",
   },
   {
     key: "partners",
     icon: Handshake,
-    section: "tenant",
+    section: "partner",
     zh: "合作夥伴",
     en: "Partner Entries",
   },
   {
     key: "users",
     icon: Users,
-    section: "tenant",
+    section: "people",
     zh: "平台人員",
     en: "Platform Staff",
   },
   {
     key: "fleet",
     icon: Truck,
-    section: "fleet",
+    section: "people",
     zh: "車隊與法遵",
     en: "Fleet & Compliance",
   },
@@ -171,7 +177,7 @@ const routes: NavRoute[] = [
     key: "adapter-registry",
     icon: ShieldCheck,
     section: "commerce",
-    zh: "平台 Adapter",
+    zh: "平台介接器",
     en: "Adapter Registry",
   },
   {
@@ -237,10 +243,24 @@ function getActiveRoute(pathname: string): NavRoute {
   return homeRoute;
 }
 
-function getRefreshTier(pathname: string) {
+function getRefreshTier(pathname: string, locale: Locale) {
   return pathname.startsWith("/audit")
-    ? { code: "T6", cadence: "MANUAL", title: "manual · audit evidence" }
-    : { code: "T4", cadence: "30s", title: "medium_slow · governance" };
+    ? {
+        code: "T6",
+        cadence: locale === "zh" ? "手動" : "MANUAL",
+        title:
+          locale === "zh"
+            ? "手動更新 · 稽核證據"
+            : "manual refresh · audit evidence",
+      }
+    : {
+        code: "T4",
+        cadence: "30s",
+        title:
+          locale === "zh"
+            ? "中慢更新 · 治理資料"
+            : "medium-slow refresh · governance",
+      };
 }
 
 function normalizeHealthStatus(
@@ -319,28 +339,28 @@ function AdminHealthFooter({
   const statusCopy = {
     checking: {
       label: locale === "zh" ? "API 檢查中" : "API checking",
-      short: "checking",
+      short: locale === "zh" ? "檢查中" : "checking",
       fg: theme.textMuted,
       bg: theme.neutralBg,
       border: theme.neutralBorder,
     },
     healthy: {
       label: locale === "zh" ? "API 健康" : "API healthy",
-      short: "healthy",
+      short: locale === "zh" ? "正常" : "healthy",
       fg: theme.success,
       bg: theme.successBg,
       border: theme.successBorder,
     },
     degraded: {
       label: locale === "zh" ? "API 降級" : "API degraded",
-      short: "degraded",
+      short: locale === "zh" ? "降級" : "degraded",
       fg: theme.warn,
       bg: theme.warnBg,
       border: theme.warnBorder,
     },
     down: {
       label: locale === "zh" ? "API 失聯" : "API down",
-      short: "down",
+      short: locale === "zh" ? "失聯" : "down",
       fg: theme.danger,
       bg: theme.dangerBg,
       border: theme.dangerBorder,
@@ -404,16 +424,19 @@ function SidebarNavItem({
   route,
   active,
   locale,
+  activeRef,
 }: {
   route: NavRoute;
   active: boolean;
   locale: Locale;
+  activeRef?: Ref<HTMLAnchorElement>;
 }) {
   const Icon = route.icon;
   const href = PLATFORM_ADMIN_ROUTE_REGISTRY[route.key].href;
 
   return (
     <Link
+      ref={active ? activeRef : undefined}
       href={href}
       title={labelFor(locale, route)}
       aria-current={active ? "page" : undefined}
@@ -459,16 +482,100 @@ function Sidebar({
   locale: Locale;
   setLocale: (locale: Locale) => void;
 }) {
+  const navRef = useRef<HTMLElement | null>(null);
+  const activeItemRef = useRef<HTMLAnchorElement | null>(null);
+
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    if (!nav) {
+      return;
+    }
+
+    const saved = window.sessionStorage.getItem(SIDEBAR_SCROLL_STORAGE_KEY);
+    if (!saved) {
+      return;
+    }
+
+    const scrollTop = Number(saved);
+    if (!Number.isFinite(scrollTop)) {
+      return;
+    }
+
+    nav.scrollTop = scrollTop;
+
+    const frameId = window.requestAnimationFrame(() => {
+      nav.scrollTop = scrollTop;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
+
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) {
+      return;
+    }
+
+    const persistScrollPosition = () => {
+      window.sessionStorage.setItem(
+        SIDEBAR_SCROLL_STORAGE_KEY,
+        String(nav.scrollTop),
+      );
+    };
+
+    nav.addEventListener("scroll", persistScrollPosition, { passive: true });
+    return () => {
+      nav.removeEventListener("scroll", persistScrollPosition);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const nav = navRef.current;
+    const activeItem = activeItemRef.current;
+    if (!nav || !activeItem) {
+      return;
+    }
+
+    const keepActiveItemVisible = () => {
+      const navRect = nav.getBoundingClientRect();
+      const itemRect = activeItem.getBoundingClientRect();
+      const padding = 12;
+      const itemIsVisible =
+        itemRect.top >= navRect.top + padding &&
+        itemRect.bottom <= navRect.bottom - padding;
+
+      if (!itemIsVisible) {
+        activeItem.scrollIntoView({ block: "nearest" });
+        window.sessionStorage.setItem(
+          SIDEBAR_SCROLL_STORAGE_KEY,
+          String(nav.scrollTop),
+        );
+      }
+    };
+
+    keepActiveItemVisible();
+    const frameId = window.requestAnimationFrame(keepActiveItemVisible);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeRoute.key]);
+
   return (
     <aside style={sidebarStyle}>
       <div style={brandStyle}>
         <div style={brandMarkStyle}>D</div>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <div style={brandNameStyle}>DRTS</div>
-          <div style={brandSubStyle}>Platform Admin</div>
+          <div style={brandSubStyle}>
+            {locale === "zh" ? "平台管理" : "Platform Admin"}
+          </div>
         </div>
       </div>
-      <nav aria-label="Platform Admin navigation" style={navStyle}>
+      <nav
+        ref={navRef}
+        aria-label={
+          locale === "zh" ? "平台管理導覽" : "Platform Admin navigation"
+        }
+        style={navStyle}
+      >
         {sections.map((section) => (
           <div key={section.key} style={{ display: "grid", gap: 1 }}>
             <div style={sectionTitleStyle}>{labelFor(locale, section)}</div>
@@ -480,6 +587,7 @@ function Sidebar({
                   route={route}
                   active={route.key === activeRoute.key}
                   locale={locale}
+                  activeRef={activeItemRef}
                 />
               ))}
           </div>
@@ -490,8 +598,14 @@ function Sidebar({
   );
 }
 
-function RefreshTierBadge({ pathname }: { pathname: string }) {
-  const tier = getRefreshTier(pathname);
+function RefreshTierBadge({
+  pathname,
+  locale,
+}: {
+  pathname: string;
+  locale: Locale;
+}) {
+  const tier = getRefreshTier(pathname, locale);
 
   return (
     <div title={tier.title} style={refreshBadgeStyle}>
@@ -520,11 +634,11 @@ function IdentityChip({ locale }: { locale: Locale }) {
     <div style={identityChipStyle}>
       <div style={realmChipStyle}>
         <span style={accentDotStyle} />
-        PLATFORM
+        {locale === "zh" ? "平台" : "PLATFORM"}
       </div>
       <div style={envChipStyle}>
         <span style={envDotStyle} />
-        production
+        {locale === "zh" ? "正式環境" : "Production"}
       </div>
       <div style={actorChipStyle}>
         <div style={actorAvatarStyle}>PA</div>
@@ -554,7 +668,11 @@ function Topbar({
     pathname !== activeHref &&
     pathname.startsWith(`${activeHref}/`);
   const breadcrumbs = [
-    activeSection ? labelFor(locale, activeSection) : "Platform Admin",
+    activeSection
+      ? labelFor(locale, activeSection)
+      : locale === "zh"
+        ? "平台管理"
+        : "Platform Admin",
     labelFor(locale, activeRoute),
     ...(hasDetailCrumb ? [locale === "zh" ? "詳情" : "Detail"] : []),
   ];
@@ -579,7 +697,7 @@ function Topbar({
           </span>
         ))}
       </div>
-      <RefreshTierBadge pathname={pathname} />
+      <RefreshTierBadge pathname={pathname} locale={locale} />
       <SearchBox locale={locale} />
       <span style={kbdStyle}>⌘K</span>
       <button
@@ -874,7 +992,6 @@ const envChipStyle: CSSProperties = {
   fontSize: 10.5,
   fontWeight: 800,
   letterSpacing: 0.4,
-  textTransform: "uppercase",
   fontFamily: SHELL_MONO,
 };
 

@@ -43,6 +43,32 @@ const ROUTE_CONFIG: Record<string, RouteConfig> = {
   "/incidents": { activeTabParam: "tab", defaultActiveTab: "active" },
 };
 
+function copy(locale: "en" | "zh", en: string, zh: string) {
+  return locale === "zh" ? zh : en;
+}
+
+function selectionKindLabel(
+  locale: "en" | "zh",
+  kind: AssistantSelection["kind"],
+) {
+  switch (kind) {
+    case "order":
+      return copy(locale, "order", "訂單");
+    case "driver":
+      return copy(locale, "driver", "司機");
+    case "vehicle":
+      return copy(locale, "vehicle", "車輛");
+    case "complaint":
+      return copy(locale, "complaint", "客訴");
+    case "incident":
+      return copy(locale, "incident", "事故");
+    case "contract":
+      return copy(locale, "contract", "合約");
+    default:
+      return kind;
+  }
+}
+
 function appendFilterValue(
   params: URLSearchParams,
   key: string,
@@ -111,6 +137,7 @@ function buildSelectedEntityHref(selection: AssistantSelection): string | null {
 }
 
 function buildSelectionAction(
+  locale: "en" | "zh",
   selection: AssistantSelection | undefined,
 ): AssistantNavigationAction | null {
   if (!selection) {
@@ -122,10 +149,16 @@ function buildSelectionAction(
     return null;
   }
 
+  const selectionLabel = selectionKindLabel(locale, selection.kind);
+
   return {
     kind: "navigate",
-    label: `Open ${selection.kind}`,
-    description: `Jump to the selected ${selection.kind} detail view.`,
+    label: copy(locale, `Open ${selection.kind}`, `開啟${selectionLabel}明細`),
+    description: copy(
+      locale,
+      `Jump to the selected ${selection.kind} detail view.`,
+      `前往目前選取的${selectionLabel}明細頁。`,
+    ),
     route: href,
   };
 }
@@ -133,13 +166,18 @@ function buildSelectionAction(
 function buildRouteSpecificActions(
   context: OpsAssistantContext,
 ): AssistantAction[] {
+  const locale = context.locale;
   switch (context.route) {
     case "/dispatch":
       return [
         {
           kind: "navigate",
-          label: "Open no-supply board",
-          description: "Switch to the dispatch board filtered to no-supply.",
+          label: copy(locale, "Open no-supply board", "開啟無供給看板"),
+          description: copy(
+            locale,
+            "Switch to the dispatch board filtered to no-supply.",
+            "切換到已篩選無供給案件的派遣看板。",
+          ),
           route: "/dispatch",
           board: "no_supply",
           ...(context.visibleFilters
@@ -148,8 +186,12 @@ function buildRouteSpecificActions(
         },
         {
           kind: "navigate",
-          label: "Open assigned board",
-          description: "Review active driver assignments without leaving ops.",
+          label: copy(locale, "Open assigned board", "開啟已指派看板"),
+          description: copy(
+            locale,
+            "Review active driver assignments without leaving ops.",
+            "不離開營運後台即可檢視目前進行中的司機指派。",
+          ),
           route: "/dispatch",
           board: "assigned",
           ...(context.visibleFilters
@@ -158,16 +200,19 @@ function buildRouteSpecificActions(
         },
         {
           kind: "cross_app",
-          label: "Open adapter registry",
-          description:
+          label: copy(locale, "Open adapter registry", "開啟介接器名冊"),
+          description: copy(
+            locale,
             "Investigate forwarded-order adapter ownership in Platform Admin.",
+            "前往平台管理後台，查看轉派訂單介接器的歸屬資訊。",
+          ),
           link: {
             targetApp: "platform-admin",
             route: "/adapter-registry",
             resourceType: "adapter_registry",
             resourceId: "",
             openMode: "new_tab",
-            label: "Adapter registry",
+            label: copy(locale, "Adapter registry", "介接器名冊"),
           },
         },
       ];
@@ -175,8 +220,12 @@ function buildRouteSpecificActions(
       return [
         {
           kind: "navigate",
-          label: "Show suppressed drivers",
-          description: "Prefill the drivers list to the suppression view.",
+          label: copy(locale, "Show suppressed drivers", "顯示受抑制司機"),
+          description: copy(
+            locale,
+            "Prefill the drivers list to the suppression view.",
+            "直接切到司機清單的派遣抑制檢視。",
+          ),
           route: "/drivers",
           activeTab: "suppression",
           ...(context.visibleFilters
@@ -188,8 +237,12 @@ function buildRouteSpecificActions(
       return [
         {
           kind: "navigate",
-          label: "Open offboarding tab",
-          description: "Prefill the vehicles page to the offboarding queue.",
+          label: copy(locale, "Open offboarding tab", "開啟退場分頁"),
+          description: copy(
+            locale,
+            "Prefill the vehicles page to the offboarding queue.",
+            "直接切到車輛頁面的退場佇列。",
+          ),
           route: "/vehicles",
           activeTab: "offboarding",
           ...(context.visibleFilters
@@ -198,15 +251,19 @@ function buildRouteSpecificActions(
         },
         {
           kind: "cross_app",
-          label: "Open fleet governance",
-          description: "Continue vehicle lifecycle actions in Platform Admin.",
+          label: copy(locale, "Open fleet governance", "開啟車隊治理"),
+          description: copy(
+            locale,
+            "Continue vehicle lifecycle actions in Platform Admin.",
+            "前往平台管理後台，繼續處理車輛生命週期動作。",
+          ),
           link: {
             targetApp: "platform-admin",
             route: "/fleet?tab=offboarding",
             resourceType: "fleet_offboarding",
             resourceId: "",
             openMode: "new_tab",
-            label: "Fleet governance",
+            label: copy(locale, "Fleet governance", "車隊治理"),
           },
         },
       ];
@@ -214,24 +271,34 @@ function buildRouteSpecificActions(
       return [
         {
           kind: "cross_app",
-          label: "Open payments queue",
-          description: "Continue reconciliation in Platform Admin payments.",
-          link: platformAdminPaymentsLink("Payments queue"),
+          label: copy(locale, "Open payments queue", "開啟付款佇列"),
+          description: copy(
+            locale,
+            "Continue reconciliation in Platform Admin payments.",
+            "前往平台管理後台帳務頁，繼續處理對帳。",
+          ),
+          link: platformAdminPaymentsLink(
+            copy(locale, "Payments queue", "付款佇列"),
+          ),
         },
       ];
     case "/contracts":
       return [
         {
           kind: "cross_app",
-          label: "Open partner governance",
-          description: "Continue contract ownership review in Platform Admin.",
+          label: copy(locale, "Open partner governance", "開啟夥伴治理"),
+          description: copy(
+            locale,
+            "Continue contract ownership review in Platform Admin.",
+            "前往平台管理後台，繼續處理合約歸屬審查。",
+          ),
           link: {
             targetApp: "platform-admin",
             route: "/partners",
             resourceType: "partner_registry",
             resourceId: "",
             openMode: "new_tab",
-            label: "Partner governance",
+            label: copy(locale, "Partner governance", "夥伴治理"),
           },
         },
       ];
@@ -254,12 +321,17 @@ export function buildAssistantActions(
     return [];
   }
 
+  const locale = context.locale;
+
   const actions: AssistantAction[] = [
     {
       kind: "navigate",
-      label: "Resume current view",
-      description:
+      label: copy(locale, "Resume current view", "回到目前檢視"),
+      description: copy(
+        locale,
         "Re-open this route with the current board, tab, and filters.",
+        "以目前的看板、分頁與篩選條件重新開啟此路由。",
+      ),
       route: context.route,
       ...(context.board ? { board: context.board } : {}),
       ...(context.activeTab ? { activeTab: context.activeTab } : {}),
@@ -268,7 +340,7 @@ export function buildAssistantActions(
     ...buildRouteSpecificActions(context),
   ];
 
-  const selectionAction = buildSelectionAction(context.selectedEntity);
+  const selectionAction = buildSelectionAction(locale, context.selectedEntity);
   if (selectionAction) {
     actions.splice(1, 0, selectionAction);
   }

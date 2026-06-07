@@ -24,17 +24,25 @@ import {
   CanvasField,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import {
+  ServerCanvasTable,
+  type ServerCanvasTableColumn,
+} from "@/components/server-canvas-table";
 import {
   API_URL,
   DEMO_ACTOR_ID,
   DEMO_TENANT_ID,
   getTenantClient,
 } from "@/lib/api-client";
+import {
+  formatTenantErrorReasonLabel,
+  formatTenantUiError,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 import { SecretRevealCard } from "./secret-reveal-card";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +53,7 @@ const th = buildCanvasTheme({
   density: "compact",
 });
 
-const REFRESH_TIER_LABEL = "T5 Tenant slow · 30s";
+const REFRESH_TIER_LABEL = "T5 租戶慢速 · 30 秒";
 const OPS_CONSOLE_URL = process.env.NEXT_PUBLIC_OPS_CONSOLE_URL ?? null;
 const PLATFORM_ADMIN_URL = process.env.NEXT_PUBLIC_PLATFORM_ADMIN_URL ?? null;
 const ROTATE_SECRET_RECEIPT_COOKIE = "tenant-webhook-rotate-receipt";
@@ -290,7 +298,7 @@ const shortDateTimeFormatter = new Intl.DateTimeFormat("sv-SE", {
   hour12: false,
 });
 
-const relativeTimeFormatter = new Intl.RelativeTimeFormat("en", {
+const relativeTimeFormatter = new Intl.RelativeTimeFormat("zh-TW", {
   numeric: "auto",
 });
 
@@ -388,10 +396,6 @@ type RotateWebhookSecretResponse = {
     plaintextKey?: string;
   };
 };
-
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "未知錯誤";
-}
 
 function encodeRotateSecretReceipt(receipt: RotateSecretReceipt) {
   return Buffer.from(JSON.stringify(receipt), "utf8").toString("base64url");
@@ -495,21 +499,21 @@ function getEndpointStatusTone(
 }
 
 function getEndpointStatusLabel(status: TenantWebhookEndpointStatus) {
-  if (status === "active") return "active";
-  if (status === "test_pending") return "test_pending";
-  return "disabled";
+  if (status === "active") return "啟用中";
+  if (status === "test_pending") return "待驗證";
+  return "已停用";
 }
 
 function getEndpointLastActivity(endpoint: TenantWebhookEndpoint) {
   const metadata = endpoint.runtimeMetadata;
   if (endpoint.status === "active" && metadata?.lastDeliveredAt) {
-    return `Delivered ${formatRelativeTime(metadata.lastDeliveredAt)}`;
+    return `已送達 ${formatRelativeTime(metadata.lastDeliveredAt)}`;
   }
   if (metadata?.lastAttemptAt) {
-    return `Attempt ${formatRelativeTime(metadata.lastAttemptAt)}`;
+    return `最近嘗試 ${formatRelativeTime(metadata.lastAttemptAt)}`;
   }
   if (endpoint.status === "disabled" && metadata?.disabledAt) {
-    return `Disabled ${formatRelativeTime(metadata.disabledAt)}`;
+    return `已停用 ${formatRelativeTime(metadata.disabledAt)}`;
   }
   return formatDateTime(endpoint.updatedAt);
 }
@@ -523,28 +527,28 @@ function getEndpointHealth(endpoint: TenantWebhookEndpoint) {
     return {
       label:
         runtime?.disableReason === "delivery_failed"
-          ? "disabled after failure cluster"
-          : "manually paused",
+          ? "失敗群聚後停用"
+          : "人工暫停",
       tone: "warn" as CanvasTone,
     };
   }
 
   if (endpoint.status === "test_pending") {
     return {
-      label: "awaiting validation traffic",
+      label: "等待驗證流量",
       tone: "accent" as CanvasTone,
     };
   }
 
   if (failures > 0) {
     return {
-      label: `${failures} failed / ${deliveries} deliveries`,
+      label: `${failures} 筆失敗 / ${deliveries} 筆投遞`,
       tone: "danger" as CanvasTone,
     };
   }
 
   return {
-    label: deliveries > 0 ? `${deliveries} deliveries · healthy` : "healthy",
+    label: deliveries > 0 ? `${deliveries} 筆投遞 · 正常` : "正常",
     tone: "success" as CanvasTone,
   };
 }
@@ -583,10 +587,14 @@ function toDeliveryRow(delivery: WebhookDeliveryRecord): DeliveryRow {
     webhookId: delivery.webhookId,
     eventType: delivery.eventType,
     statusLabel:
-      delivery.status === "delivery_failed" ? "failed" : delivery.status,
+      delivery.status === "delivery_failed"
+        ? "失敗"
+        : delivery.status === "queued"
+          ? "排隊中"
+          : "已送達",
     statusTone: getDeliveryStatusTone(delivery.status),
     codeLabel:
-      delivery.httpStatus === null ? "timeout" : String(delivery.httpStatus),
+      delivery.httpStatus === null ? "逾時" : String(delivery.httpStatus),
     codeTone: getDeliveryCodeTone(delivery.httpStatus),
     tries: delivery.attempt,
     at: formatDateTime(delivery.createdAt),
@@ -653,39 +661,39 @@ function getEmptyStateCopy(reason: EmptyReason): EmptyStateCopy {
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "Webhook engine 尚未開通",
-        body: "此租戶目前沒有啟用 delivery engine。依 Q-TEN08，畫面不會回填任何假 delivery log；請先完成平台側開通，再建立 endpoint。",
+        title: "回呼引擎尚未開通",
+        body: "此租戶目前沒有啟用投遞引擎。畫面不會回填任何假投遞紀錄；請先完成平台側開通，再建立端點。",
         tone: "warn",
       };
     case "permission_denied":
       return {
-        title: "目前身分沒有 webhook 權限",
-        body: "後端拒絕回傳此區塊資料。請改用具 `tc_admin` 或 `tc_integration_mgr` 權限的身分，或請平台/租戶管理員協助。",
+        title: "目前身分沒有回呼權限",
+        body: "後端拒絕回傳此區塊資料。請改用具租戶管理或整合治理權限的身分，或請平台／租戶管理員協助。",
         tone: "danger",
       };
     case "external_unavailable":
       return {
-        title: "Delivery engine 暫時不可用",
-        body: "後端或外部目的端暫時不可用，因此無法取得 webhook 可視資料。保留目前查詢條件，稍後手動 refresh 再試。",
+        title: "投遞引擎暫時不可用",
+        body: "後端或外部目的端暫時不可用，因此無法取得回呼可視資料。保留目前查詢條件，稍後手動重新整理再試。",
         tone: "warn",
       };
     case "fetch_failed":
       return {
         title: "資料抓取失敗",
-        body: "請檢查 API 可用性與目前環境 headers。這不是無資料狀態，而是 read model 讀取失敗。",
+        body: "請檢查服務可用性與目前環境標頭。這不是無資料狀態，而是讀取模型暫時失敗。",
         tone: "danger",
       };
     case "filtered_empty":
       return {
         title: "目前篩選條件下沒有結果",
-        body: "資料源仍可用，但現有 `status` 或 endpoint 篩選沒有命中任何項目。清除篩選即可回到完整檢視。",
+        body: "資料源仍可用，但現有狀態或端點篩選沒有命中任何項目。清除篩選即可回到完整檢視。",
         tone: "info",
       };
     case "no_data":
     default:
       return {
-        title: "尚未建立任何 endpoint",
-        body: "目前沒有 webhook endpoint，因此也不會有 delivery log。先建立第一個 endpoint，系統才會開始產生真實 delivery visibility。",
+        title: "尚未建立任何端點",
+        body: "目前沒有回呼端點，因此也不會有投遞紀錄。先建立第一個端點，系統才會開始產生真實的投遞可視性。",
         tone: "info",
       };
   }
@@ -694,23 +702,23 @@ function getEmptyStateCopy(reason: EmptyReason): EmptyStateCopy {
 function getActionLabel(action: string) {
   switch (action) {
     case "payload_schema":
-      return "payload schema";
+      return "載荷格式";
     case "createWebhookEndpoint":
-      return "新增端點";
+      return "建立端點";
     case "updateWebhookEndpoint":
-      return "更新";
+      return "編輯端點";
     case "disableWebhookEndpoint":
-      return "停用";
+      return "停用端點";
     case "deleteWebhookEndpoint":
-      return "刪除";
+      return "刪除端點";
     case "rotateWebhookSecret":
-      return "rotate secret";
+      return "輪替密鑰";
     case "viewDeliveryLog":
-      return "delivery log";
+      return "查看投遞紀錄";
     case "retryFailedDelivery":
-      return "retry failed";
+      return "重試失敗投遞";
     default:
-      return action;
+      return formatTenantCodeLabel(action, action, { humanizeUnknown: false });
   }
 }
 
@@ -920,10 +928,10 @@ function deriveActiveTab(options: {
   selectedWebhookId?: string;
   selectedDeliveryId?: string;
 }) {
-  if (options.mode === "rotate") return "Replay";
-  if (options.selectedDeliveryId) return "Replay";
-  if (options.selectedWebhookId) return "Deliveries";
-  return "Endpoints";
+  if (options.mode === "rotate") return "重播";
+  if (options.selectedDeliveryId) return "重播";
+  if (options.selectedWebhookId) return "投遞";
+  return "端點";
 }
 
 function getEndpointActions(
@@ -1021,7 +1029,12 @@ function renderAction(
         {descriptor.label}
       </CanvasBtn>
       {descriptor.disabledReasonCode ? (
-        <span style={subtleTextStyle}>{descriptor.disabledReasonCode}</span>
+        <span style={subtleTextStyle}>
+          {formatTenantCodeLabel(
+            descriptor.disabledReasonCode,
+            descriptor.disabledReasonCode,
+          )}
+        </span>
       ) : null}
     </div>
   );
@@ -1085,27 +1098,27 @@ async function loadWebhooksPageData(): Promise<WebhooksPageData> {
         : [],
     endpointError:
       endpointsResult.status === "rejected"
-        ? toErrorMessage(endpointsResult.reason)
+        ? toTenantErrorMessage(endpointsResult.reason)
         : null,
     deliveryError:
       deliveriesResult.status === "rejected"
-        ? toErrorMessage(deliveriesResult.reason)
+        ? toTenantErrorMessage(deliveriesResult.reason)
         : null,
     governanceError:
       governanceResult.status === "rejected"
-        ? toErrorMessage(governanceResult.reason)
+        ? toTenantErrorMessage(governanceResult.reason)
         : null,
     readinessError:
       readinessResult.status === "rejected"
-        ? toErrorMessage(readinessResult.reason)
+        ? toTenantErrorMessage(readinessResult.reason)
         : null,
     identityError:
       identityResult.status === "rejected"
-        ? toErrorMessage(identityResult.reason)
+        ? toTenantErrorMessage(identityResult.reason)
         : null,
     notificationsError:
       notificationsResult.status === "rejected"
-        ? toErrorMessage(notificationsResult.reason)
+        ? toTenantErrorMessage(notificationsResult.reason)
         : null,
     loadedAt: new Date().toISOString(),
   };
@@ -1135,7 +1148,7 @@ function getReadinessTone(
 }
 
 function getReadinessLabel(readiness: TenantIntegrationReadinessItem | null) {
-  return readiness?.status ?? "unknown";
+  return formatTenantCodeLabel(readiness?.status, "未知");
 }
 
 function getReadinessBannerTone(
@@ -1156,11 +1169,11 @@ function EventChecklist({
 
   if (baselineEvents.length === 0) {
     return (
-      <CanvasField theme={th} label="EVENTS">
+      <CanvasField theme={th} label="事件">
         <input
           name="extraEvents"
           defaultValue={(selectedEvents ?? []).join(", ")}
-          placeholder="booking.created, invoice.ready"
+          placeholder="例如：訂單已建立（booking.created）、發票已就緒（invoice.ready）"
           style={controlStyle}
         />
       </CanvasField>
@@ -1170,8 +1183,8 @@ function EventChecklist({
   return (
     <CanvasField
       theme={th}
-      label="BASELINE EVENTS"
-      hint="治理套件提供的 baseline webhook events。可同時勾選多個。"
+      label="基準事件"
+      hint="治理套件提供的基準回呼事件，可同時勾選多個。"
     >
       <div style={checkboxWrapStyle}>
         {baselineEvents.map((eventType) => (
@@ -1182,7 +1195,9 @@ function EventChecklist({
               value={eventType}
               defaultChecked={selected.has(eventType)}
             />
-            <span style={monoStyle}>{eventType}</span>
+            <span style={monoStyle}>
+              {formatTenantCodeLabel(eventType, eventType)}
+            </span>
           </label>
         ))}
       </div>
@@ -1233,7 +1248,9 @@ async function rotateWebhookSecretRequest(
   );
 
   if (!response.ok) {
-    throw new Error(`API error ${response.status}: ${await response.text()}`);
+    throw new Error(
+      `系統回應失敗（狀態碼 ${response.status}）：${await response.text()}`,
+    );
   }
 
   return response.json() as Promise<RotateWebhookSecretResponse>;
@@ -1246,7 +1263,7 @@ async function createWebhookAction(formData: FormData) {
   const events = parseEvents(formData);
   try {
     if (events.length === 0) {
-      throw new Error("請至少選擇一個 event。");
+      throw new Error("請至少選擇一個事件。");
     }
 
     const command: CreateTenantWebhookEndpointCommand = {
@@ -1256,19 +1273,17 @@ async function createWebhookAction(formData: FormData) {
     };
 
     if (!command.url || !command.secret) {
-      throw new Error("Webhook URL 與 secret 為必填。");
+      throw new Error("回呼網址與密鑰為必填。");
     }
 
     await client.createWebhookEndpoint(command);
     revalidatePath("/webhooks");
     redirect(
-      `/webhooks?success=${encodeURIComponent(
-        "Endpoint 已建立，狀態為 test_pending。",
-      )}`,
+      `/webhooks?success=${encodeURIComponent("端點已建立，狀態為待驗證。")}`,
     );
   } catch (error) {
     redirect(
-      `/webhooks?mode=create&error=${encodeURIComponent(toErrorMessage(error))}`,
+      `/webhooks?mode=create&error=${encodeURIComponent(toTenantErrorMessage(error))}`,
     );
   }
 }
@@ -1282,7 +1297,7 @@ async function updateWebhookAction(formData: FormData) {
   const events = parseEvents(formData);
   try {
     if (!webhookId) {
-      throw new Error("缺少 webhookId。");
+      throw new Error("缺少端點編號。");
     }
 
     const currentEndpoints = await client.listWebhooks();
@@ -1290,7 +1305,7 @@ async function updateWebhookAction(formData: FormData) {
       (endpoint) => endpoint.webhookId === webhookId,
     );
     if (!currentEndpoint) {
-      throw new Error("找不到目前的 webhook endpoint。");
+      throw new Error("找不到目前的回呼端點。");
     }
 
     const command: UpdateTenantWebhookEndpointCommand = {
@@ -1302,7 +1317,7 @@ async function updateWebhookAction(formData: FormData) {
     };
 
     if (!command.url || !command.status || events.length === 0) {
-      throw new Error("URL、status 與至少一個 event 為必填。");
+      throw new Error("網址、狀態與至少一個事件為必填。");
     }
     const disableAction = currentEndpoint.availableActions?.find(
       (action) => action.action === "disableWebhookEndpoint",
@@ -1313,11 +1328,11 @@ async function updateWebhookAction(formData: FormData) {
       !disableAction?.enabled
     ) {
       throw new Error(
-        "此 endpoint 目前沒有 disableWebhookEndpoint action，不能透過 update flow 停用。",
+        "此端點目前沒有發布「停用端點」動作，不能透過編輯流程直接停用。",
       );
     }
     if (command.status === "disabled" && !disableReason) {
-      throw new Error("停用 endpoint 時必須填寫 reason。");
+      throw new Error("停用端點時必須填寫原因。");
     }
 
     if (
@@ -1330,7 +1345,7 @@ async function updateWebhookAction(formData: FormData) {
 
       if (urlChanged || eventsChanged) {
         throw new Error(
-          "停用 flow 只允許執行 disableWebhookEndpoint；請先儲存 URL / events 變更，再單獨停用 endpoint。",
+          "停用流程只允許執行「停用端點」。請先儲存網址或事件變更，再單獨停用端點。",
         );
       }
 
@@ -1343,13 +1358,13 @@ async function updateWebhookAction(formData: FormData) {
     revalidatePath("/webhooks");
     redirect(
       `/webhooks?webhookId=${encodeURIComponent(webhookId)}&success=${encodeURIComponent(
-        "Endpoint 已更新。",
+        "端點已更新。",
       )}`,
     );
   } catch (error) {
     redirect(
       `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
-        toErrorMessage(error),
+        toTenantErrorMessage(error),
       )}`,
     );
   }
@@ -1363,21 +1378,21 @@ async function deleteWebhookAction(formData: FormData) {
   const deleteReason = String(formData.get("deleteReason") ?? "").trim();
   try {
     if (!webhookId) {
-      throw new Error("缺少 webhookId。");
+      throw new Error("缺少端點編號。");
     }
     if (!deleteReason) {
-      throw new Error("刪除 endpoint 時必須填寫 reason。");
+      throw new Error("刪除端點時必須填寫原因。");
     }
     const command: DeleteTenantWebhookEndpointCommand = {
       reason: deleteReason,
     };
     await client.deleteWebhookEndpoint(webhookId, command);
     revalidatePath("/webhooks");
-    redirect(`/webhooks?success=${encodeURIComponent("Endpoint 已刪除。")}`);
+    redirect(`/webhooks?success=${encodeURIComponent("端點已刪除。")}`);
   } catch (error) {
     redirect(
       `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
-        toErrorMessage(error),
+        toTenantErrorMessage(error),
       )}`,
     );
   }
@@ -1393,7 +1408,7 @@ async function rotateWebhookSecretAction(formData: FormData) {
 
   try {
     if (!webhookId || !secret) {
-      throw new Error("webhookId 與新 secret 為必填。");
+      throw new Error("端點編號與新密鑰為必填。");
     }
 
     const result = await rotateWebhookSecretRequest(webhookId, {
@@ -1427,13 +1442,13 @@ async function rotateWebhookSecretAction(formData: FormData) {
     revalidatePath("/webhooks");
     redirect(
       `/webhooks?webhookId=${encodeURIComponent(webhookId)}&revealSecret=1&success=${encodeURIComponent(
-        "Secret 已旋轉。依治理規則，endpoint 會重新進入 test_pending，完整值只在本次畫面顯示。",
+        "密鑰已輪替。依治理規則，端點會重新進入待驗證，完整值只在本次畫面顯示。",
       )}`,
     );
   } catch (error) {
     redirect(
       `/webhooks?mode=rotate&webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
-        toErrorMessage(error),
+        toTenantErrorMessage(error),
       )}`,
     );
   }
@@ -1448,20 +1463,20 @@ async function retryFailedDeliveryAction(formData: FormData) {
 
   try {
     if (!webhookId || !deliveryId) {
-      throw new Error("缺少 webhookId 或 deliveryId。");
+      throw new Error("缺少端點編號或投遞編號。");
     }
 
     await client.retryWebhookDelivery(webhookId, deliveryId);
     revalidatePath("/webhooks");
     redirect(
       `/webhooks?webhookId=${encodeURIComponent(webhookId)}&deliveryId=${encodeURIComponent(deliveryId)}&success=${encodeURIComponent(
-        "Failed delivery retry 已送出。",
+        "失敗投遞重試已送出。",
       )}`,
     );
   } catch (error) {
     redirect(
       `/webhooks?webhookId=${encodeURIComponent(webhookId)}&deliveryId=${encodeURIComponent(deliveryId)}&error=${encodeURIComponent(
-        toErrorMessage(error),
+        toTenantErrorMessage(error),
       )}`,
     );
   }
@@ -1482,10 +1497,10 @@ async function clearRotateSecretReceiptAction(formData: FormData) {
   redirect(
     webhookId
       ? `/webhooks?webhookId=${encodeURIComponent(webhookId)}&success=${encodeURIComponent(
-          "Secret receipt 已關閉。主列表恢復為 masked preview。",
+          "密鑰收據已關閉，主列表已恢復為遮罩預覽。",
         )}`
       : `/webhooks?success=${encodeURIComponent(
-          "Secret receipt 已關閉。主列表恢復為 masked preview。",
+          "密鑰收據已關閉，主列表已恢復為遮罩預覽。",
         )}`,
   );
 }
@@ -1519,11 +1534,11 @@ function EndpointForm({
   return (
     <CanvasCard
       theme={th}
-      title={isCreate ? "Create endpoint" : "Update endpoint"}
+      title={isCreate ? "建立端點" : "更新端點"}
       subtitle={
         isCreate
-          ? "Create / update 屬於 medium action；新 endpoint 一律進入 test_pending。"
-          : "Disable / delete 是 high-risk 操作。UI 會強制填寫 reason 後才送出既有 backend contract。"
+          ? "建立與更新屬於中風險動作；新端點一律先進入待驗證狀態。"
+          : "停用與刪除屬於高風險操作。介面會強制填寫原因後，才依既有後端契約送出。"
       }
     >
       <form
@@ -1534,34 +1549,34 @@ function EndpointForm({
           <input type="hidden" name="webhookId" value={webhook.webhookId} />
         ) : null}
         <div style={fieldRowStyle}>
-          <CanvasField theme={th} label="WEBHOOK URL">
+          <CanvasField theme={th} label="回呼網址">
             <input
               name="url"
               defaultValue={webhook?.url ?? ""}
-              placeholder="https://partner.example.com/drts/webhooks"
+              placeholder="例如：https://partner.example.com/drts/callback"
               style={controlStyle}
             />
           </CanvasField>
           {isCreate ? (
             <CanvasField
               theme={th}
-              label="INITIAL SECRET"
-              hint="Secret 會以 masked preview 存回 read model。"
+              label="初始密鑰"
+              hint="密鑰只會以遮罩預覽寫回讀取模型。"
             >
               <input
                 name="secret"
-                placeholder="whsec_..."
+                placeholder="例如：以 whsec 開頭的密鑰"
                 style={controlStyle}
               />
             </CanvasField>
           ) : (
             <CanvasField
               theme={th}
-              label="STATUS"
+              label="狀態"
               hint={
                 disableAction
-                  ? "變更 URL / events / active state 都會觸發 validation 流程。"
-                  : "變更 URL / events / active state 會觸發 validation；disable 狀態需由 backend 發布 disableWebhookEndpoint action 後才可進入。"
+                  ? "變更網址、事件或啟用狀態都會觸發驗證流程。"
+                  : "變更網址、事件或啟用狀態都會觸發驗證；停用狀態需等後端開放「停用端點」操作後才可切換。"
               }
             >
               <select
@@ -1569,10 +1584,10 @@ function EndpointForm({
                 defaultValue={webhook?.status ?? "test_pending"}
                 style={controlStyle}
               >
-                <option value="active">active</option>
-                <option value="test_pending">test_pending</option>
+                <option value="active">啟用中</option>
+                <option value="test_pending">待驗證</option>
                 {canShowDisabledOption ? (
-                  <option value="disabled">disabled</option>
+                  <option value="disabled">已停用</option>
                 ) : null}
               </select>
             </CanvasField>
@@ -1583,13 +1598,13 @@ function EndpointForm({
           {...(webhook?.events ? { selectedEvents: webhook.events } : {})}
         />
         {baselineEvents.length > 0 ? (
-          <CanvasField theme={th} label="ADDITIONAL EVENTS">
+          <CanvasField theme={th} label="額外事件">
             <input
               name="extraEvents"
               defaultValue={(webhook?.events ?? [])
                 .filter((eventType) => !baselineEvents.includes(eventType))
                 .join(", ")}
-              placeholder="Comma-separated extra events"
+              placeholder="以逗號分隔的額外事件"
               style={controlStyle}
             />
           </CanvasField>
@@ -1597,29 +1612,32 @@ function EndpointForm({
         {!isCreate && disableAction ? (
           <CanvasField
             theme={th}
-            label="DISABLE REASON"
+            label="停用原因"
             hint={
               disableAction.enabled
-                ? "當 status 改為 disabled 時必填；符合 packet 的 high-risk reason gate。"
-                : `Disable action unavailable: ${disableAction.disabledReasonCode ?? "disabled_by_backend"}`
+                ? "當狀態改為已停用時必填；符合契約要求的高風險原因閘門。"
+                : `停用操作目前不可用：${formatTenantCodeLabel(
+                    disableAction.disabledReasonCode ?? "disabled_by_backend",
+                    "由後端停用",
+                  )}`
             }
           >
             <textarea
               name="disableReason"
               style={textareaStyle}
-              placeholder="Receiver maintenance window, repeated failure cluster, security hold, etc."
+              placeholder="例如：接收端維護視窗、重複失敗群聚、安全暫停等"
               disabled={!disableAction.enabled}
             />
           </CanvasField>
         ) : !isCreate ? (
           <CanvasField
             theme={th}
-            label="DISABLE"
-            hint={`High-risk disable 目前未由 endpoint.availableActions[] 發布。Reason gate 保持關閉。${webhook?.status === "disabled" ? " 此 endpoint 已是 disabled，只能先回到 active/test_pending 後再等待 backend 重新發布 disable action。" : ` Disabled reason: ${disableUnavailableReason}.`}`}
+            label="停用狀態"
+            hint={`目前尚未取得可執行的停用操作，因此原因欄位維持關閉。${webhook?.status === "disabled" ? " 此端點目前已停用，只能先回到啟用中或待驗證，再等待後端重新開放停用操作。" : ` 停用原因：${formatTenantCodeLabel(disableUnavailableReason, disableUnavailableReason)}。`}`}
           >
             <input
               readOnly
-              value="Disable action unavailable on this endpoint"
+              value="此端點目前不可直接停用"
               style={controlStyle}
             />
           </CanvasField>
@@ -1632,7 +1650,7 @@ function EndpointForm({
               cursor: "pointer",
             }}
           >
-            {isCreate ? "建立 endpoint" : "儲存變更"}
+            {isCreate ? "建立端點" : "儲存變更"}
           </button>
           <Link href="/webhooks" style={getLinkButtonStyle({ size: "md" })}>
             取消
@@ -1642,13 +1660,9 @@ function EndpointForm({
       {!isCreate && webhook ? (
         <div style={{ ...stackStyle, marginTop: 12 }}>
           <div id="high-risk" style={panelStyle}>
-            <div style={{ color: th.text, fontWeight: 600 }}>
-              High-risk actions
-            </div>
+            <div style={{ color: th.text, fontWeight: 600 }}>高風險動作</div>
             <p style={mutedStyle}>
-              Delete 與 disable 依 packet 屬 high action；delete 送出前必須填
-              reason，disable 只有在 `disableWebhookEndpoint`
-              已發布時才可透過上方欄位提交。
+              刪除與停用依契約都屬高風險動作；刪除送出前必須填寫原因，停用則只有在已發布「停用端點」動作時才可透過上方欄位提交。
             </p>
             <div style={buttonWrapStyle}>
               {deleteAction ? (
@@ -1665,7 +1679,7 @@ function EndpointForm({
                     <textarea
                       name="deleteReason"
                       style={{ ...textareaStyle, minHeight: 72 }}
-                      placeholder="Decommissioned integration, duplicate endpoint, security incident, etc."
+                      placeholder="例如：整合下線、端點重複、安全事件等"
                     />
                     <button
                       type="submit"
@@ -1674,7 +1688,7 @@ function EndpointForm({
                         cursor: "pointer",
                       }}
                     >
-                      刪除 endpoint
+                      刪除端點
                     </button>
                   </form>
                 ) : (
@@ -1682,13 +1696,13 @@ function EndpointForm({
                 )
               ) : (
                 renderContractGap(
-                  "Delete CTA withheld until endpoint.availableActions[] publishes deleteWebhookEndpoint.",
+                  "要等端點發布「刪除端點」動作後，這裡才會顯示刪除按鈕。",
                 )
               )}
               {rotateAction
                 ? renderAction(rotateAction, `rotate-${webhook.webhookId}`)
                 : renderContractGap(
-                    "Rotate CTA withheld until endpoint.availableActions[] publishes rotateWebhookSecret.",
+                    "要等端點發布「輪替密鑰」動作後，這裡才會顯示輪替按鈕。",
                   )}
             </div>
           </div>
@@ -1702,17 +1716,17 @@ function RotateSecretForm({ webhook }: { webhook: TenantWebhookEndpoint }) {
   return (
     <CanvasCard
       theme={th}
-      title="Rotate webhook secret"
-      subtitle="High-risk action。依 packet，secret rotation 後 endpoint 需要重新驗證。"
+      title="輪替回呼密鑰"
+      subtitle="這是高風險動作。依契約，密鑰輪替後端點需要重新驗證。"
     >
       <form action={rotateWebhookSecretAction} style={formGridStyle}>
         <input type="hidden" name="webhookId" value={webhook.webhookId} />
         <input type="hidden" name="endpointUrl" value={webhook.url} />
         <div style={fieldRowStyle}>
-          <CanvasField theme={th} label="ENDPOINT">
+          <CanvasField theme={th} label="端點">
             <input value={webhook.url} readOnly style={controlStyle} />
           </CanvasField>
-          <CanvasField theme={th} label="CURRENT PREVIEW">
+          <CanvasField theme={th} label="目前預覽">
             <input
               value={webhook.secretPreview}
               readOnly
@@ -1722,24 +1736,24 @@ function RotateSecretForm({ webhook }: { webhook: TenantWebhookEndpoint }) {
         </div>
         <CanvasField
           theme={th}
-          label="NEW SECRET"
-          hint="目前 rotate command 仍需提交新的 secret；送出後 UI 會立刻進入 plaintext-once receipt，提供 copy / download，再回到 masked preview。"
+          label="新密鑰"
+          hint="目前輪替指令仍需提交新的密鑰；送出後頁面會立刻進入一次性明文收據頁，提供複製與下載，再回到遮罩預覽。"
         >
           <input
             name="secret"
-            placeholder="whsec_new..."
+            placeholder="例如：whsec_rotate_..."
             style={controlStyle}
           />
         </CanvasField>
         <CanvasField
           theme={th}
-          label="ROTATION REASON"
-          hint="送出後會立即進入 plaintext-once receipt，提供 copy / download；主列表之後只保留 masked preview。"
+          label="輪替原因"
+          hint="送出後會立即進入一次性明文收據頁，提供複製與下載；主列表之後只保留遮罩預覽。"
         >
           <textarea
             name="rotationReason"
             style={textareaStyle}
-            placeholder="Compromised receiver key, planned credential rotation, etc."
+            placeholder="例如：接收端金鑰外洩、例行憑證輪替等"
           />
         </CanvasField>
         <div style={buttonWrapStyle}>
@@ -1750,7 +1764,7 @@ function RotateSecretForm({ webhook }: { webhook: TenantWebhookEndpoint }) {
               cursor: "pointer",
             }}
           >
-            旋轉 secret
+            輪替密鑰
           </button>
           <Link href="/webhooks" style={getLinkButtonStyle({ size: "md" })}>
             取消
@@ -1863,44 +1877,44 @@ export default async function WebhooksPage({
     buildExternalLink(
       OPS_CONSOLE_URL,
       "/incidents?event=tenant.webhook.delivery_failed",
-      "Open ops triage",
-      "Cross-app deep link for operational triage when delivery failures need downstream intervention.",
+      "前往營運分流",
+      "當投遞失敗需要下游介入時，可跨應用程式前往營運分流頁處理。",
     ),
     buildExternalLink(
       PLATFORM_ADMIN_URL,
       "/audit?resourceType=webhook_endpoint",
-      "View platform audit",
-      "Cross-app audit trail for secret rotation, endpoint lifecycle, and integration governance events.",
+      "查看平台稽核",
+      "查看密鑰輪替、端點生命週期與整合治理事件的跨應用程式稽核軌跡。",
     ),
   ];
 
-  const endpointColumns: CanvasTableColumn<EndpointRow>[] = [
+  const endpointColumns: ServerCanvasTableColumn<EndpointRow>[] = [
     {
-      h: "URL",
+      h: "回呼網址",
       k: "url",
       mono: true,
       r: (row) => (
         <div style={{ display: "grid", gap: 6 }}>
           <span style={{ ...primaryLinkStyle, ...monoStyle }}>{row.url}</span>
-          <span style={codeLabelStyle}>{row.webhookId}</span>
+          <span style={codeLabelStyle}>端點編號 {row.webhookId}</span>
         </div>
       ),
     },
     {
-      h: "EVENTS",
+      h: "事件",
       w: 280,
       r: (row) => (
         <div style={chipWrapStyle}>
           {row.events.map((eventType) => (
             <CanvasPill key={eventType} theme={th} tone="info">
-              {eventType}
+              {formatTenantCodeLabel(eventType, eventType)}
             </CanvasPill>
           ))}
         </div>
       ),
     },
     {
-      h: "STATUS",
+      h: "狀態",
       w: 120,
       r: (row) => (
         <CanvasPill theme={th} tone={row.statusTone} dot>
@@ -1909,13 +1923,13 @@ export default async function WebhooksPage({
       ),
     },
     {
-      h: "SECRET",
+      h: "密鑰",
       k: "secretLabel",
       w: 160,
       mono: true,
     },
     {
-      h: "HEALTH",
+      h: "健康度",
       w: 190,
       r: (row) => (
         <CanvasPill theme={th} tone={row.healthTone}>
@@ -1924,13 +1938,13 @@ export default async function WebhooksPage({
       ),
     },
     {
-      h: "LAST",
+      h: "最後活動",
       k: "lastActivity",
       w: 180,
       mono: true,
     },
     {
-      h: "ACTIONS",
+      h: "操作",
       w: 320,
       r: (row) => {
         const endpoint = filteredEndpoints.find(
@@ -1952,22 +1966,25 @@ export default async function WebhooksPage({
                   renderAction(action, `${row.webhookId}-${index}`),
                 )
               : endpoint.availableActions === undefined
-                ? renderContractGap("No published endpoint actions.")
-                : renderContractGap(
-                    "No supported endpoint actions published for this surface.",
-                  )}
+                ? renderContractGap("尚未發布任何端點動作。")
+                : renderContractGap("目前沒有適用於此頁面的端點動作。")}
           </div>
         );
       },
     },
   ];
 
-  const deliveryColumns: CanvasTableColumn<DeliveryRow>[] = [
-    { h: "DLV", k: "deliveryId", w: 110, mono: true },
-    { h: "WH", k: "webhookId", w: 100, mono: true },
-    { h: "EVENT", k: "eventType", w: 220, mono: true },
+  const deliveryColumns: ServerCanvasTableColumn<DeliveryRow>[] = [
+    { h: "投遞編號", k: "deliveryId", w: 110, mono: true },
+    { h: "端點編號", k: "webhookId", w: 100, mono: true },
     {
-      h: "STATUS",
+      h: "事件",
+      w: 220,
+      mono: true,
+      r: (row) => formatTenantCodeLabel(row.eventType, row.eventType),
+    },
+    {
+      h: "狀態",
       w: 120,
       r: (row) => (
         <CanvasPill theme={th} tone={row.statusTone}>
@@ -1976,7 +1993,7 @@ export default async function WebhooksPage({
       ),
     },
     {
-      h: "CODE",
+      h: "代碼",
       w: 90,
       align: "right",
       r: (row) => (
@@ -1985,10 +2002,10 @@ export default async function WebhooksPage({
         </CanvasPill>
       ),
     },
-    { h: "TRIES", k: "tries", w: 72, align: "right", mono: true },
-    { h: "AT", k: "at", mono: true },
+    { h: "次數", k: "tries", w: 72, align: "right", mono: true },
+    { h: "時間", k: "at", mono: true },
     {
-      h: "ACTIONS",
+      h: "操作",
       w: 190,
       r: (row) => {
         const delivery = scopedDeliveries.find(
@@ -2005,10 +2022,8 @@ export default async function WebhooksPage({
                   renderAction(action, `${row.deliveryId}-${index}`),
                 )
               : delivery.availableActions === undefined
-                ? renderContractGap("No published delivery actions.")
-                : renderContractGap(
-                    "No supported delivery actions published for this surface.",
-                  )}
+                ? renderContractGap("尚未發布任何投遞動作。")
+                : renderContractGap("目前沒有適用於此頁面的投遞動作。")}
           </div>
         );
       },
@@ -2016,10 +2031,18 @@ export default async function WebhooksPage({
   ];
 
   const globalErrors = [
-    data.identityError ? `身分: ${data.identityError}` : null,
-    data.governanceError ? `治理: ${data.governanceError}` : null,
-    data.readinessError ? `readiness: ${data.readinessError}` : null,
-    data.notificationsError ? `通知: ${data.notificationsError}` : null,
+    data.identityError
+      ? `身分上下文：${formatTenantErrorReasonLabel(data.identityError)}`
+      : null,
+    data.governanceError
+      ? `治理套件：${formatTenantErrorReasonLabel(data.governanceError)}`
+      : null,
+    data.readinessError
+      ? `整備度快照：${formatTenantErrorReasonLabel(data.readinessError)}`
+      : null,
+    data.notificationsError
+      ? `通知設定：${formatTenantErrorReasonLabel(data.notificationsError)}`
+      : null,
   ].filter(Boolean) as string[];
 
   const endpointEmptyCopy = endpointReason
@@ -2033,12 +2056,12 @@ export default async function WebhooksPage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="Webhook"
-        subtitle="端點 · 事件訂閱 · 投遞紀錄 · 重試政策 — 後端 engine 是否啟用直接決定畫面 (Q-TEN08)"
+        title="回呼"
+        subtitle="端點 · 事件訂閱 · 投遞紀錄 · 重試政策，後端引擎是否啟用會直接決定畫面內容。"
         tabs={[
-          `Endpoints${data.endpoints.length > 0 ? ` · ${data.endpoints.length}` : ""}`,
-          "Deliveries",
-          "Replay",
+          `端點${data.endpoints.length > 0 ? ` · ${data.endpoints.length}` : ""}`,
+          "投遞",
+          "重播",
         ]}
         activeTab={activeTab}
         actions={
@@ -2054,42 +2077,42 @@ export default async function WebhooksPage({
         <div style={topMetaRowStyle}>
           <CanvasCard
             theme={th}
-            title="Refresh tier"
-            subtitle="`/webhooks` 屬 T5 Tenant slow。前端只提供手動 refresh；資料新鮮度以 backend contract 為準。"
+            title="刷新層級"
+            subtitle="此頁屬於租戶慢速更新頁面。前端只提供手動重新整理；資料新鮮度以後端資料契約為準。"
             actions={
               <Link href="/webhooks" style={getLinkButtonStyle()}>
-                Refresh now
+                立即重新整理
               </Link>
             }
           >
             <div style={metricGridStyle}>
               <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>Refresh tier</span>
+                <span style={metricLabelStyle}>刷新層級</span>
                 <span style={metricValueStyle}>T5</span>
                 <p style={mutedStyle}>{REFRESH_TIER_LABEL}</p>
               </div>
               <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>Snapshot</span>
+                <span style={metricLabelStyle}>快照時間</span>
                 <span style={{ ...metricValueStyle, fontSize: 18 }}>
                   {formatDateTime(
                     data.governance?.generatedAt ?? data.loadedAt,
                   )}
                 </span>
-                <p style={mutedStyle}>governance.generatedAt / page load</p>
+                <p style={mutedStyle}>治理快照時間 / 頁面載入時間</p>
               </div>
               <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>Scope</span>
+                <span style={metricLabelStyle}>範圍</span>
                 <span style={{ ...metricValueStyle, fontSize: 18 }}>
-                  {selectedWebhook ? "single endpoint" : "tenant-wide"}
+                  {selectedWebhook ? "單一端點" : "全租戶"}
                 </span>
                 <p style={mutedStyle}>
                   {selectedWebhook
                     ? selectedWebhook.url
-                    : "All endpoints + delivery visibility"}
+                    : "所有端點與投遞可見性"}
                 </p>
               </div>
               <div style={metricCardStyle}>
-                <span style={metricLabelStyle}>Readiness</span>
+                <span style={metricLabelStyle}>就緒度</span>
                 <div>
                   <CanvasPill
                     theme={th}
@@ -2100,8 +2123,7 @@ export default async function WebhooksPage({
                   </CanvasPill>
                 </div>
                 <p style={mutedStyle}>
-                  {webhookReadiness?.detail ??
-                    "Integration readiness summary is not currently available."}
+                  {webhookReadiness?.detail ?? "目前無法取得整合就緒度摘要。"}
                 </p>
               </div>
             </div>
@@ -2109,26 +2131,26 @@ export default async function WebhooksPage({
 
           <CanvasCard
             theme={th}
-            title="Governance policy"
-            subtitle="Retry / validation policy comes from the governance package."
+            title="治理政策"
+            subtitle="重試與驗證政策直接來自治理套件。"
           >
             <div style={stackStyle}>
               <div style={detailLineStyle}>
-                <span>test event</span>
+                <span>測試事件</span>
                 <span style={monoStyle}>
                   {data.governance?.webhookPolicy.testEventType ?? "—"}
                 </span>
               </div>
               <div style={detailLineStyle}>
-                <span>retry policy</span>
+                <span>重試策略</span>
                 <span style={monoStyle}>
                   {data.governance
-                    ? `${data.governance.webhookPolicy.retryPolicy.maxAttempts} attempts`
+                    ? `${data.governance.webhookPolicy.retryPolicy.maxAttempts} 次`
                     : "—"}
                 </span>
               </div>
               <div style={detailLineStyle}>
-                <span>failure notice</span>
+                <span>失敗通知</span>
                 <span style={monoStyle}>
                   {data.governance?.webhookPolicy
                     .deliveryFailureNotificationChannel ?? "—"}
@@ -2141,18 +2163,18 @@ export default async function WebhooksPage({
         <div id="payload-schema">
           <CanvasCard
             theme={th}
-            title="Payload schema"
-            subtitle="Header CTA target. Visibility still comes from governance.availableActions[]."
+            title="載荷格式"
+            subtitle="是否可見仍以後端治理設定提供的可用操作為準。"
           >
             <div style={stackStyle}>
               <div style={detailLineStyle}>
-                <span>test event</span>
+                <span>測試事件</span>
                 <span style={monoStyle}>
                   {data.governance?.webhookPolicy.testEventType ?? "—"}
                 </span>
               </div>
               <div style={{ display: "grid", gap: 8 }}>
-                <span style={metricLabelStyle}>baseline events</span>
+                <span style={metricLabelStyle}>基準事件</span>
                 {baselineEvents.length > 0 ? (
                   <div style={chipWrapStyle}>
                     {baselineEvents.map((eventType) => (
@@ -2162,14 +2184,11 @@ export default async function WebhooksPage({
                     ))}
                   </div>
                 ) : (
-                  <p style={mutedStyle}>
-                    Governance package 尚未提供 baseline event schema。
-                  </p>
+                  <p style={mutedStyle}>治理套件尚未提供基準事件結構。</p>
                 )}
               </div>
               <p style={mutedStyle}>
-                Endpoint create / update 必須沿用這組 event schema；UI
-                不自行發明 額外 payload 類型。
+                端點建立與更新都必須沿用這組事件結構；畫面不會自行新增額外載荷類型。
               </p>
             </div>
           </CanvasCard>
@@ -2180,7 +2199,7 @@ export default async function WebhooksPage({
             theme={th}
             tone="success"
             icon="check"
-            title="Action completed"
+            title="操作完成"
             body={success}
           />
         ) : null}
@@ -2190,8 +2209,8 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="Action failed"
-            body={error}
+            title="操作失敗"
+            body={formatTenantUiError(error)}
           />
         ) : null}
 
@@ -2200,22 +2219,22 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="Rotate secret receipt 已失效"
-            body="完整 secret 只會顯示一次。若你已離開 receipt 流程，主列表只保留 masked preview。需要新值時請重新執行 rotate secret。"
+            title="密鑰輪替收據已失效"
+            body="完整密鑰只會顯示一次。若你已離開收據流程，主列表只保留遮罩預覽。需要新值時請重新執行密鑰輪替。"
           />
         ) : null}
 
         {rotateSecretReceipt ? (
           <CanvasCard
             theme={th}
-            title="Rotate secret receipt"
-            subtitle="Plaintext-once reveal for webhook secret rotation. The read model will revert to masked preview after this step."
+            title="密鑰輪替收據"
+            subtitle="回呼密鑰輪替僅提供一次明文揭露，離開此步驟後會回到遮罩預覽。"
           >
             <SecretRevealCard
               theme={th}
-              title="完整 webhook secret 只在本次畫面顯示"
-              subtitle="PLAINTEXT-ONCE · webhook rotate secret"
-              body="請先複製或下載新的 secret，再完成後續 receiver 更新。離開後主列表只保留 masked preview。"
+              title="完整回呼密鑰只在本次畫面顯示"
+              subtitle="一次性明文顯示 · 回呼密鑰輪替"
+              body="請先複製或下載新的密鑰，再完成後續接收端更新。離開後主列表只保留遮罩預覽。"
               endpointUrl={rotateSecretReceipt.endpointUrl}
               secret={rotateSecretReceipt.secret}
               secretPreview={rotateSecretReceipt.secretPreview}
@@ -2232,7 +2251,7 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分 supporting read models 無法載入"
+            title="部分支援讀取模型無法載入"
             body={globalErrors.join(" · ")}
           />
         ) : null}
@@ -2244,10 +2263,10 @@ export default async function WebhooksPage({
             theme={th}
             tone={getReadinessBannerTone(webhookReadiness)}
             icon="info"
-            title={`Webhook readiness: ${webhookReadiness.status}`}
+            title={`回呼就緒度：${getReadinessLabel(webhookReadiness)}`}
             body={
               webhookReadiness.detail ??
-              "Backend integration readiness reports this subsystem as not fully ready."
+              "後端整合就緒度顯示此子系統尚未完全就緒。"
             }
           />
         ) : null}
@@ -2257,8 +2276,8 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="Create flow unavailable"
-            body={`頁面沒有收到可執行的 createWebhookEndpoint action。${createAction?.disabledReasonCode ? ` Disabled reason: ${createAction.disabledReasonCode}.` : " UI 不會補上 fallback create CTA。"}`}
+            title="建立流程目前不可用"
+            body={`頁面目前沒有收到可執行的「建立端點」操作。${createAction?.disabledReasonCode ? ` 原因：${formatTenantCodeLabel(createAction.disabledReasonCode, createAction.disabledReasonCode)}。` : " 畫面不會自行補出替代建立按鈕。"}`}
           />
         ) : null}
 
@@ -2267,8 +2286,8 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="Edit flow unavailable"
-            body="此 endpoint 未發布 updateWebhookEndpoint action，因此 UI 不會直接開啟編輯表單。"
+            title="編輯流程目前不可用"
+            body="此端點尚未發布「編輯端點」動作，因此頁面不會直接開啟編輯表單。"
           />
         ) : null}
 
@@ -2277,16 +2296,16 @@ export default async function WebhooksPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="Rotate flow unavailable"
-            body="此 endpoint 未發布 rotateWebhookSecret action，因此 UI 不會直接開啟 rotate 表單。"
+            title="輪替流程目前不可用"
+            body="此端點尚未發布「輪替密鑰」動作，因此頁面不會直接開啟輪替表單。"
           />
         ) : null}
 
         {engineInactive && endpointEmptyCopy ? (
           <CanvasCard
             theme={th}
-            title="Webhook engine"
-            subtitle="Page-level empty state per Q-TEN08. The route must not imply fake endpoint or delivery data when the real engine is not provisioned."
+            title="回呼引擎"
+            subtitle="在真實引擎尚未佈建前，畫面不會暗示存在假的端點或投遞資料。"
           >
             <div style={pageEmptyWrapStyle}>
               <CanvasBanner
@@ -2305,15 +2324,14 @@ export default async function WebhooksPage({
                   href="/integration-governance"
                   style={getLinkButtonStyle({ primary: true })}
                 >
-                  Open integration governance
+                  開啟整合治理
                 </Link>
                 <Link href="/notifications" style={getLinkButtonStyle()}>
-                  Notification routing
+                  通知路由
                 </Link>
               </div>
               <p style={mutedStyle}>
-                Cross-app operational triage remains available below, but the
-                primary page surface stays empty until provisioning is complete.
+                下方仍可使用跨系統排查連結，但在佈建完成前，主頁面會維持空狀態。
               </p>
             </div>
           </CanvasCard>
@@ -2321,10 +2339,10 @@ export default async function WebhooksPage({
 
         {!engineInactive ? (
           <div style={threeColumnStyle}>
-            <CanvasCard theme={th} title="Endpoint posture">
+            <CanvasCard theme={th} title="端點狀態概覽">
               <div style={metricGridStyle}>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>active</span>
+                  <span style={metricLabelStyle}>啟用中</span>
                   <span style={metricValueStyle}>
                     {
                       data.endpoints.filter(
@@ -2334,7 +2352,7 @@ export default async function WebhooksPage({
                   </span>
                 </div>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>test_pending</span>
+                  <span style={metricLabelStyle}>待驗證</span>
                   <span style={metricValueStyle}>
                     {
                       data.endpoints.filter(
@@ -2344,7 +2362,7 @@ export default async function WebhooksPage({
                   </span>
                 </div>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>failure cluster</span>
+                  <span style={metricLabelStyle}>失敗群聚</span>
                   <span style={metricValueStyle}>
                     {countFailureClusters(data.endpoints)}
                   </span>
@@ -2353,36 +2371,32 @@ export default async function WebhooksPage({
             </CanvasCard>
             <CanvasCard
               theme={th}
-              title="Delivery health"
-              subtitle={
-                selectedWebhook
-                  ? "Current endpoint view"
-                  : "Tenant-wide delivery snapshot"
-              }
+              title="投遞健康度"
+              subtitle={selectedWebhook ? "目前端點檢視" : "租戶整體投遞快照"}
             >
               <div style={metricGridStyle}>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>delivered</span>
+                  <span style={metricLabelStyle}>已送達</span>
                   <span style={metricValueStyle}>{summary.delivered}</span>
                 </div>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>queued</span>
+                  <span style={metricLabelStyle}>排隊中</span>
                   <span style={metricValueStyle}>{summary.queued}</span>
                 </div>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>failed</span>
+                  <span style={metricLabelStyle}>失敗</span>
                   <span style={metricValueStyle}>{summary.failed}</span>
                 </div>
               </div>
             </CanvasCard>
             <CanvasCard
               theme={th}
-              title="Replay posture"
-              subtitle="Retry remains contract-driven. UI renders the state but does not invent a replay engine."
+              title="重播姿態"
+              subtitle="重試仍由契約驅動。介面只呈現狀態，不會自行發明重播引擎。"
             >
               <div style={replayGridStyle}>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>retryable failed</span>
+                  <span style={metricLabelStyle}>可重試失敗</span>
                   <span style={metricValueStyle}>
                     {
                       scopedDeliveries.filter((delivery) =>
@@ -2396,7 +2410,7 @@ export default async function WebhooksPage({
                   </span>
                 </div>
                 <div style={metricCardStyle}>
-                  <span style={metricLabelStyle}>queued retries</span>
+                  <span style={metricLabelStyle}>排隊中的重試</span>
                   <span style={metricValueStyle}>{summary.queued}</span>
                 </div>
               </div>
@@ -2435,8 +2449,8 @@ export default async function WebhooksPage({
           <div style={twoColumnStyle}>
             <CanvasCard
               theme={th}
-              title={`端點 · ${filteredEndpoints.length} entries`}
-              subtitle="availableActions visualized as visible CTAs: enabled, disabled-with-reason, never hidden."
+              title={`端點 · ${filteredEndpoints.length} 筆`}
+              subtitle="可用操作會以按鈕方式呈現：啟用、停用附原因，且不會被靜默隱藏。"
               actions={
                 <div style={buttonWrapStyle}>
                   {["all", "active", "test_pending", "disabled"].map(
@@ -2453,7 +2467,11 @@ export default async function WebhooksPage({
                             primary: statusFilter === value,
                           })}
                         >
-                          {value}
+                          {value === "all"
+                            ? "全部"
+                            : getEndpointStatusLabel(
+                                value as TenantWebhookEndpointStatus,
+                              )}
                         </Link>
                       );
                     },
@@ -2480,7 +2498,7 @@ export default async function WebhooksPage({
                   ) : null}
                 </div>
               ) : (
-                <CanvasTable<EndpointRow>
+                <ServerCanvasTable<EndpointRow>
                   theme={th}
                   columns={endpointColumns}
                   rows={filteredEndpoints.map(toEndpointRow)}
@@ -2490,11 +2508,11 @@ export default async function WebhooksPage({
 
             <CanvasCard
               theme={th}
-              title={selectedWebhook ? "Selected endpoint" : "Action matrix"}
+              title={selectedWebhook ? "已選端點" : "動作矩陣"}
               subtitle={
                 selectedWebhook
-                  ? "Per-endpoint actions and contract notes"
-                  : "Pick an endpoint to inspect delivery scope or update actions."
+                  ? "各端點動作與狀態備註"
+                  : "請先選擇一個端點，查看投遞範圍與可用動作。"
               }
             >
               {selectedWebhook ? (
@@ -2504,12 +2522,12 @@ export default async function WebhooksPage({
                       {selectedWebhook.url}
                     </div>
                     <div style={codeLabelStyle}>
-                      {selectedWebhook.webhookId}
+                      端點編號 {selectedWebhook.webhookId}
                     </div>
                     <div style={chipWrapStyle}>
                       {selectedWebhook.events.map((eventType) => (
                         <CanvasPill key={eventType} theme={th} tone="info">
-                          {eventType}
+                          {formatTenantCodeLabel(eventType, eventType)}
                         </CanvasPill>
                       ))}
                     </div>
@@ -2521,14 +2539,11 @@ export default async function WebhooksPage({
                   </div>
                   {selectedWebhook.availableActions === undefined ? (
                     <p style={mutedStyle}>
-                      Backend 尚未在此 endpoint publish `availableActions[]`；
-                      UI 不再推導 fallback CTA。
+                      後端尚未提供此端點的可用操作清單；畫面不會自行推導替代按鈕。
                     </p>
                   ) : null}
                   <p style={mutedStyle}>
-                    Endpoint 層保留 lifecycle actions；delivery-specific `retry
-                    failed` 會在下方 delivery rows / selected delivery detail 依
-                    `delivery.availableActions` 顯示。
+                    端點層會保留生命週期動作；投遞層的失敗重試則會在下方投遞列表與已選投遞明細中，依後端提供的投遞操作顯示。
                   </p>
                 </div>
               ) : (
@@ -2537,19 +2552,14 @@ export default async function WebhooksPage({
                     theme={th}
                     tone="info"
                     icon="info"
-                    title="Select an endpoint"
-                    body="從左側列表點選 `delivery log` / `更新` / `rotate secret` 即可進入 per-endpoint flow。"
+                    title="請先選擇端點"
+                    body="從左側列表點選「投遞紀錄」、「更新」或「輪替密鑰」即可進入各端點流程。"
                   />
                   <ul style={listStyle}>
-                    <li>Create / update 由真實 backend route 支援。</li>
+                    <li>建立與更新都會直接送往真實後端流程。</li>
+                    <li>密鑰輪替會直接送出回呼密鑰輪替請求。</li>
                     <li>
-                      Rotate secret 直接呼叫
-                      `/api/tenant/webhooks/:id/rotate-secret`。
-                    </li>
-                    <li>
-                      Delivery row 會直接反映 `retryFailedDelivery` 的
-                      enabled/disabled 狀態，並在 enabled 時直接提交 manual
-                      retry。
+                      投遞列會直接反映失敗重試是否可用，並在可用時直接送出人工重試。
                     </li>
                   </ul>
                 </div>
@@ -2562,16 +2572,16 @@ export default async function WebhooksPage({
           <div style={twoColumnStyle}>
             <CanvasCard
               theme={th}
-              title={selectedWebhook ? "Delivery log" : "近 24h 投遞"}
+              title={selectedWebhook ? "投遞紀錄" : "近 24 小時投遞"}
               subtitle={
                 selectedWebhook
-                  ? `${selectedWebhook.url} · real engine records only`
-                  : "Tenant-wide delivery stream · no mock replay rows"
+                  ? `${selectedWebhook.url} · 只顯示真實引擎紀錄`
+                  : "全租戶投遞串流 · 不補任何模擬重播列"
               }
               actions={
                 selectedWebhook ? (
                   <Link href="/webhooks" style={getLinkButtonStyle()}>
-                    Clear endpoint scope
+                    清除端點範圍
                   </Link>
                 ) : null
               }
@@ -2588,7 +2598,7 @@ export default async function WebhooksPage({
                   />
                 </div>
               ) : (
-                <CanvasTable<DeliveryRow>
+                <ServerCanvasTable<DeliveryRow>
                   theme={th}
                   columns={deliveryColumns}
                   rows={scopedDeliveries.slice(0, 12).map(toDeliveryRow)}
@@ -2599,41 +2609,42 @@ export default async function WebhooksPage({
 
             <CanvasCard
               theme={th}
-              title={
-                selectedDelivery ? "Selected delivery" : "Replay / signals"
-              }
+              title={selectedDelivery ? "已選投遞" : "重播與訊號"}
               subtitle={
                 selectedDelivery
-                  ? "Per-delivery actions come from delivery.availableActions[]."
-                  : "Entry/exit per packet: notification deep link + integration governance + audit."
+                  ? "每筆投遞的可執行操作都由後端直接提供。"
+                  : "保留通知、整合治理與稽核的進出入口。"
               }
             >
               <div style={stackStyle}>
                 {selectedDelivery ? (
                   <div style={panelStyle}>
                     <div style={{ color: th.text, fontWeight: 600 }}>
-                      {selectedDelivery.eventType}
+                      {formatTenantCodeLabel(
+                        selectedDelivery.eventType,
+                        selectedDelivery.eventType,
+                      )}
                     </div>
                     <div style={detailLineStyle}>
-                      <span>delivery</span>
+                      <span>投遞編號</span>
                       <span style={monoStyle}>
                         {selectedDelivery.deliveryId}
                       </span>
                     </div>
                     <div style={detailLineStyle}>
-                      <span>endpoint</span>
+                      <span>端點編號</span>
                       <span style={monoStyle}>
                         {selectedDelivery.webhookId}
                       </span>
                     </div>
                     <div style={detailLineStyle}>
-                      <span>signature</span>
+                      <span>簽章</span>
                       <span style={monoStyle}>
                         {selectedDelivery.signature}
                       </span>
                     </div>
                     <div style={detailLineStyle}>
-                      <span>attempt</span>
+                      <span>嘗試次數</span>
                       <span style={monoStyle}>{selectedDelivery.attempt}</span>
                     </div>
                     <div style={buttonWrapStyle}>
@@ -2648,25 +2659,22 @@ export default async function WebhooksPage({
                         }
                         style={getLinkButtonStyle()}
                       >
-                        Clear delivery scope
+                        清除投遞範圍
                       </Link>
                     </div>
                     <p style={mutedStyle}>
-                      Retry CTA 直接跟著 delivery read model 的
-                      `availableActions`；enabled 時會呼叫
-                      `/api/tenant/webhooks/:webhookId/deliveries/:deliveryId/retry`。
+                      重試按鈕會直接依照後端提供的投遞操作顯示；可用時會直接送出人工重試請求。
                     </p>
                     {selectedDelivery.availableActions === undefined ? (
                       <p style={mutedStyle}>
-                        這筆 delivery 尚未發布 `availableActions[]`，因此不顯示
-                        fallback replay CTA。
+                        這筆投遞尚未提供可用操作清單，因此不顯示替代重播按鈕。
                       </p>
                     ) : null}
                   </div>
                 ) : null}
                 <div style={panelStyle}>
                   <div style={{ color: th.text, fontWeight: 600 }}>
-                    Notification feed
+                    通知動態
                   </div>
                   {notifications.length > 0 ? (
                     notifications.map((notification) => (
@@ -2682,25 +2690,22 @@ export default async function WebhooksPage({
                     ))
                   ) : (
                     <p style={mutedStyle}>
-                      目前 notification feed 沒有 webhook / delivery 相關項目。
+                      目前通知串流沒有回呼 / 投遞相關項目。
                     </p>
                   )}
                   <Link href="/notifications" style={secondaryLinkStyle}>
-                    Open notification preferences
+                    開啟通知偏好
                   </Link>
                 </div>
                 <div style={panelStyle}>
                   <div style={{ color: th.text, fontWeight: 600 }}>
-                    Replay notes
+                    重播說明
                   </div>
                   <p style={mutedStyle}>
-                    本頁的 replay 只執行 backend 已公開的 retry posture。若
-                    `retryFailedDelivery` 尚未啟用，畫面會保留 disabled
-                    reason，而不會補出未授權的 replay CTA。
+                    本頁的重播只執行後端已公開的重試流程。若失敗重試尚未啟用，畫面會保留停用原因，而不會補出未授權的重播按鈕。
                   </p>
                   <p style={mutedStyle}>
-                    需要跨系統排查時，請使用頁面底部的 deep links 前往 ops
-                    triage、governance 或 audit。
+                    需要跨系統排查時，請使用頁面底部的深連結前往營運分流、治理或稽核頁面。
                   </p>
                 </div>
               </div>
@@ -2710,19 +2715,19 @@ export default async function WebhooksPage({
 
         <CanvasCard
           theme={th}
-          title="Cross-app deep links"
-          subtitle="Entry paths required by the packet: notification, integration governance, audit, and ops triage."
+          title="跨系統連結"
+          subtitle="保留通知、整合治理、稽核與營運排查入口。"
         >
           <div style={stackStyle}>
             <div style={buttonWrapStyle}>
               <Link href="/notifications" style={getLinkButtonStyle()}>
-                Notification preferences
+                通知偏好
               </Link>
               <Link href="/integration-governance" style={getLinkButtonStyle()}>
-                Integration governance
+                整合治理
               </Link>
               <Link href="/audit" style={getLinkButtonStyle()}>
-                Tenant audit trail
+                租戶稽核軌跡
               </Link>
             </div>
             {externalLinks.map((link) => (
@@ -2742,10 +2747,8 @@ export default async function WebhooksPage({
                 <span style={subtleTextStyle}>{link.description}</span>
                 {!link.href ? (
                   <span style={subtleTextStyle}>
-                    Missing base URL env; configure
-                    `NEXT_PUBLIC_OPS_CONSOLE_URL` /
-                    `NEXT_PUBLIC_PLATFORM_ADMIN_URL` to activate new-tab
-                    navigation.
+                    尚未設定外部系統網址；請補上 `NEXT_PUBLIC_OPS_CONSOLE_URL`
+                    或 `NEXT_PUBLIC_PLATFORM_ADMIN_URL` 後，才能啟用新分頁跳轉。
                   </span>
                 ) : null}
               </div>

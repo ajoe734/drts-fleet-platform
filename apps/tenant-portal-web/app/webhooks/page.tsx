@@ -13,15 +13,21 @@ import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import {
+  formatPortalSectionError,
+  formatPortalUiError,
+  toPortalErrorMessage,
+} from "@/lib/error-copy";
+import { formatPortalCodeLabel } from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
 const WEBHOOK_DELIVERY_DISCLAIMER = {
-  title: "Phase 1 visibility boundary",
+  title: "第一階段可視性邊界",
   summary:
-    "Delivery records are authoritative visibility from the tenant webhook endpoints, but retry and replay controls stay hidden until the backend exposes them.",
+    "投遞紀錄是租戶回呼端點的正式可視資料，但在後端未發佈前，重試與重播控制仍會維持隱藏。",
   detail:
-    "Use this page to inspect endpoint health, delivery outcomes, and related notices. Do not assume replay, resend, or manual retry exists just because a delivery row is visible.",
+    "此頁僅用來檢查端點健康、投遞結果與相關通知。不要因為看得到投遞列，就假設系統已提供重播、重送或人工重試。",
 };
 
 const infoPanelStyle = {
@@ -50,10 +56,10 @@ type PageData = {
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) {
-    return "Not available";
+    return "未提供";
   }
 
-  return new Intl.DateTimeFormat("en", {
+  return new Intl.DateTimeFormat("zh-TW", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
@@ -62,7 +68,7 @@ function formatDateTime(value: string | null | undefined) {
 function getWebhookStatusPresentation(webhook: TenantWebhookEndpoint) {
   if (webhook.status === "disabled") {
     return {
-      label: "Disabled",
+      label: "已停用",
       background: "rgba(244, 63, 94, 0.12)",
       color: "#9f1239",
     };
@@ -70,14 +76,14 @@ function getWebhookStatusPresentation(webhook: TenantWebhookEndpoint) {
 
   if (webhook.status === "test_pending") {
     return {
-      label: "Test pending",
+      label: "待驗證",
       background: "rgba(245, 158, 11, 0.14)",
       color: "#b45309",
     };
   }
 
   return {
-    label: "Active",
+    label: "啟用中",
     background: "rgba(15, 118, 110, 0.12)",
     color: "#0f766e",
   };
@@ -132,16 +138,14 @@ async function loadPageData(
     result: PromiseSettledResult<unknown>,
   ) => {
     if (result.status === "rejected") {
-      errors.push(
-        `${label}: ${result.reason instanceof Error ? result.reason.message : "Unknown error"}`,
-      );
+      errors.push(formatPortalSectionError(label, result.reason));
     }
   };
 
-  collectError("Webhooks", webhooksResult);
-  collectError("Notifications", notificationsResult);
-  collectError("Integration governance", governanceResult);
-  collectError("Deliveries", deliveriesResult);
+  collectError("回呼端點", webhooksResult);
+  collectError("通知", notificationsResult);
+  collectError("整合治理", governanceResult);
+  collectError("投遞紀錄", deliveriesResult);
 
   return {
     webhooks: webhooksResult.status === "fulfilled" ? webhooksResult.value : [],
@@ -205,32 +209,35 @@ export default async function WebhooksPage({
   const relevantNotifications = deriveRelevantNotifications(notifications);
   const baselineEvents = governance?.baselineWebhookEvents ?? [];
   const webhookPolicy = governance?.webhookPolicy ?? null;
+  const actionError = resolvedSearchParams.error
+    ? formatPortalUiError(resolvedSearchParams.error, "回呼作業失敗")
+    : null;
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Webhooks & Delivery Visibility"
+        title="回呼與投遞可視性"
         description={
           roleSnapshot.capabilities.canWriteWebhooks
-            ? "Manage tenant endpoint subscriptions, validation posture, and observable delivery health without inventing retry controls that the backend does not actually expose."
-            : "Webhook delivery visibility remains readable in this backend-issued identity, but endpoint create/edit/delete stays hidden without webhook write scope."
+            ? "管理租戶端點訂閱、驗證狀態與可觀測的投遞健康度，同時避免假裝後端尚未提供的重試控制已經存在。"
+            : "目前身分仍可查看回呼投遞可視性，但在沒有回呼寫入權限時，新增、編輯與刪除端點仍會維持隱藏。"
         }
       >
         {errors.map((error) => (
           <div key={error} className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>錯誤：</strong> {error}
           </div>
         ))}
 
         {resolvedSearchParams.success ? (
           <div className="success-banner">
-            <strong>Success:</strong> {resolvedSearchParams.success}
+            <strong>成功：</strong> {resolvedSearchParams.success}
           </div>
         ) : null}
 
-        {resolvedSearchParams.error ? (
+        {actionError ? (
           <div className="error-banner">
-            <strong>Error:</strong> {resolvedSearchParams.error}
+            <strong>錯誤：</strong> {actionError}
           </div>
         ) : null}
 
@@ -245,7 +252,7 @@ export default async function WebhooksPage({
           }}
         >
           <div style={infoPanelStyle}>
-            <span className="metric-label">Active endpoints</span>
+            <span className="metric-label">啟用端點</span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -255,12 +262,10 @@ export default async function WebhooksPage({
             >
               {activeCount}
             </div>
-            <p className="muted-copy">
-              Validated endpoints receiving live traffic.
-            </p>
+            <p className="muted-copy">已完成驗證並接收正式流量的端點。</p>
           </div>
           <div style={infoPanelStyle}>
-            <span className="metric-label">Pending validation</span>
+            <span className="metric-label">待驗證</span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -270,12 +275,10 @@ export default async function WebhooksPage({
             >
               {pendingCount}
             </div>
-            <p className="muted-copy">
-              New or changed endpoints waiting for test evidence.
-            </p>
+            <p className="muted-copy">新增或變更後，仍在等待測試證據的端點。</p>
           </div>
           <div style={infoPanelStyle}>
-            <span className="metric-label">Disabled</span>
+            <span className="metric-label">已停用</span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -285,13 +288,11 @@ export default async function WebhooksPage({
             >
               {disabledCount}
             </div>
-            <p className="muted-copy">
-              Paused endpoints that need validation before reuse.
-            </p>
+            <p className="muted-copy">重新啟用前仍需再次驗證的暫停端點。</p>
           </div>
           {deliveryWebhookId ? (
             <div style={infoPanelStyle}>
-              <span className="metric-label">Selected log</span>
+              <span className="metric-label">目前檢視紀錄</span>
               <div
                 style={{
                   fontSize: "1.8rem",
@@ -302,8 +303,9 @@ export default async function WebhooksPage({
                 {deliverySummary.total}
               </div>
               <p className="muted-copy">
-                {deliverySummary.delivered} delivered, {deliverySummary.failed}{" "}
-                failed, {deliverySummary.queued} queued.
+                已送達 {deliverySummary.delivered} 筆，失敗{" "}
+                {deliverySummary.failed} 筆，佇列中 {deliverySummary.queued}{" "}
+                筆。
               </p>
             </div>
           ) : null}
@@ -311,7 +313,7 @@ export default async function WebhooksPage({
 
         {webhookPolicy ? (
           <section style={{ ...infoPanelStyle, marginBottom: "1rem" }}>
-            <strong>Authority policy snapshot</strong>
+            <strong>權限政策快照</strong>
             <div
               style={{
                 display: "grid",
@@ -321,37 +323,41 @@ export default async function WebhooksPage({
               }}
             >
               <div>
-                <div className="metric-label">Baseline events</div>
+                <div className="metric-label">基準事件</div>
                 <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
                   {baselineEvents.length > 0
-                    ? baselineEvents.join(", ")
-                    : "No baseline events available from governance."}
+                    ? baselineEvents
+                        .map((eventType) =>
+                          formatPortalCodeLabel(eventType, eventType),
+                        )
+                        .join("、")
+                    : "治理套件目前沒有提供基準事件。"}
                 </p>
               </div>
               <div>
-                <div className="metric-label">Retry contract</div>
+                <div className="metric-label">重試規則</div>
                 <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
-                  {webhookPolicy.retryPolicy.maxAttempts} attempts, starting at{" "}
-                  {webhookPolicy.retryPolicy.initialBackoffSeconds}s, capped at{" "}
-                  {webhookPolicy.retryPolicy.maxBackoffSeconds}s.
+                  最多重試 {webhookPolicy.retryPolicy.maxAttempts} 次，起始退避{" "}
+                  {webhookPolicy.retryPolicy.initialBackoffSeconds} 秒，上限{" "}
+                  {webhookPolicy.retryPolicy.maxBackoffSeconds} 秒。
                 </p>
               </div>
               <div>
-                <div className="metric-label">Validation rules</div>
+                <div className="metric-label">驗證規則</div>
                 <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
-                  New or changed endpoints re-enter <code>test_pending</code>.
-                  Secret rotation also requires revalidation.
+                  新增或變更後的端點會重新進入待驗證狀態，輪替密鑰後也必須再次驗證。
                 </p>
               </div>
               <div>
-                <div className="metric-label">Failure notices</div>
+                <div className="metric-label">失敗通知</div>
                 <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
-                  Final delivery failure auto-disables the endpoint and surfaces
-                  a{" "}
-                  <code>
-                    {webhookPolicy.deliveryFailureNotificationChannel}
-                  </code>{" "}
-                  notification.
+                  最終投遞失敗時，系統會自動停用端點，並發送{" "}
+                  <span>
+                    {formatPortalCodeLabel(
+                      webhookPolicy.deliveryFailureNotificationChannel,
+                    )}
+                  </span>{" "}
+                  通知。
                 </p>
               </div>
             </div>
@@ -363,8 +369,7 @@ export default async function WebhooksPage({
             <CreateWebhookForm baselineEvents={baselineEvents} />
           ) : (
             <div className="error-banner">
-              <strong>Access denied:</strong> Tenant webhook write authority is
-              required to add endpoints.
+              <strong>拒絕存取：</strong> 新增端點需要租戶回呼寫入權限。
             </div>
           )
         ) : editWebhookId ? (
@@ -376,14 +381,12 @@ export default async function WebhooksPage({
               />
             ) : (
               <div className="error-banner">
-                <strong>Access denied:</strong> Tenant webhook write authority
-                is required to edit endpoints.
+                <strong>拒絕存取：</strong> 編輯端點需要租戶回呼寫入權限。
               </div>
             )
           ) : (
             <div className="error-banner">
-              <strong>Error:</strong> The selected webhook endpoint was not
-              found.
+              <strong>錯誤：</strong> 找不到指定的回呼端點。
             </div>
           )
         ) : deliveryWebhookId ? (
@@ -397,7 +400,7 @@ export default async function WebhooksPage({
             {roleSnapshot.capabilities.canWriteWebhooks ? (
               <div className="form-actions" style={{ marginBottom: "1rem" }}>
                 <Link href="/webhooks?create=true" className="btn-primary">
-                  Add Webhook Endpoint
+                  新增回呼端點
                 </Link>
               </div>
             ) : null}
@@ -410,8 +413,8 @@ export default async function WebhooksPage({
         )}
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>返回首頁</strong>
+          回到租戶入口總覽。
         </Link>
       </AppShellCard>
     </main>
@@ -421,7 +424,7 @@ export default async function WebhooksPage({
 function WebhookDeliveryDisclaimer() {
   return (
     <section
-      aria-label="Webhook delivery disclaimer"
+      aria-label="回呼投遞說明"
       style={{
         marginBottom: "1rem",
         padding: "1rem 1.25rem",
@@ -456,12 +459,12 @@ function EventChecklist({
   if (baselineEvents.length === 0) {
     return (
       <div className="form-row">
-        <label htmlFor="extraEvents">Events *</label>
+        <label htmlFor="extraEvents">事件 *</label>
         <input
           type="text"
           id="extraEvents"
           name="extraEvents"
-          placeholder="tenant.webhook.test, booking.created"
+          placeholder="請輸入事件代碼，使用逗號分隔"
           required
         />
       </div>
@@ -471,7 +474,7 @@ function EventChecklist({
   return (
     <>
       <div className="form-row">
-        <label>Baseline events *</label>
+        <label>基準事件 *</label>
         <div
           style={{
             display: "grid",
@@ -483,7 +486,7 @@ function EventChecklist({
             <label
               key={eventType}
               style={{
-                display: "flex",
+                display: "grid",
                 alignItems: "center",
                 gap: "0.55rem",
                 borderRadius: "12px",
@@ -498,13 +501,13 @@ function EventChecklist({
                 value={eventType}
                 defaultChecked={selected.has(eventType)}
               />
-              <code>{eventType}</code>
+              <span>{formatPortalCodeLabel(eventType, eventType)}</span>
             </label>
           ))}
         </div>
       </div>
       <div className="form-row">
-        <label htmlFor="extraEvents">Additional events</label>
+        <label htmlFor="extraEvents">額外事件</label>
         <input
           type="text"
           id="extraEvents"
@@ -512,7 +515,7 @@ function EventChecklist({
           defaultValue={(selectedEvents ?? [])
             .filter((eventType) => !baselineEvents.includes(eventType))
             .join(", ")}
-          placeholder="Comma-separated custom events if authority adds more"
+          placeholder="若權限方新增其他事件，請以逗號分隔輸入"
         />
       </div>
     </>
@@ -522,36 +525,35 @@ function EventChecklist({
 function CreateWebhookForm({ baselineEvents }: { baselineEvents: string[] }) {
   return (
     <div className="form-section">
-      <h3>Create Webhook Endpoint</h3>
+      <h3>新增回呼端點</h3>
       <p className="muted-copy">
-        New endpoints start in <code>test_pending</code> until validation
-        succeeds.
+        新端點會先以待驗證狀態建立，直到驗證完成為止。
       </p>
       <form action={createWebhook} className="form-grid">
         <div className="form-row">
-          <label htmlFor="url">Webhook URL *</label>
+          <label htmlFor="url">回呼網址 *</label>
           <input
             type="url"
             id="url"
             name="url"
-            placeholder="https://partner.example.com/drts/webhooks"
+            placeholder="請輸入回呼網址"
             required
           />
         </div>
         <div className="form-row">
-          <label htmlFor="secret">Secret *</label>
+          <label htmlFor="secret">密鑰 *</label>
           <input
             type="text"
             id="secret"
             name="secret"
-            placeholder="whsec_..."
+            placeholder="請輸入回呼密鑰"
             required
           />
         </div>
         <EventChecklist baselineEvents={baselineEvents} />
         <div className="form-actions">
-          <button type="submit">Create Endpoint</button>
-          <Link href="/webhooks">Cancel</Link>
+          <button type="submit">建立端點</button>
+          <Link href="/webhooks">取消</Link>
         </div>
       </form>
     </div>
@@ -567,15 +569,14 @@ function EditWebhookForm({
 }) {
   return (
     <div className="form-section">
-      <h3>Edit Webhook Endpoint</h3>
+      <h3>編輯回呼端點</h3>
       <p className="muted-copy">
-        Changing the URL, events, or secret lifecycle requires another
-        validation pass.
+        變更網址、事件或密鑰生命週期後，都需要再做一次驗證。
       </p>
       <form action={updateWebhook} className="form-grid">
         <input type="hidden" name="webhookId" value={webhook.webhookId} />
         <div className="form-row">
-          <label htmlFor="edit-url">Webhook URL *</label>
+          <label htmlFor="edit-url">回呼網址 *</label>
           <input
             type="url"
             id="edit-url"
@@ -589,21 +590,21 @@ function EditWebhookForm({
           selectedEvents={webhook.events}
         />
         <div className="form-row">
-          <label htmlFor="edit-status">Status *</label>
+          <label htmlFor="edit-status">狀態 *</label>
           <select
             id="edit-status"
             name="status"
             defaultValue={webhook.status}
             required
           >
-            <option value="active">Active</option>
-            <option value="test_pending">Test Pending</option>
-            <option value="disabled">Disabled</option>
+            <option value="active">啟用中</option>
+            <option value="test_pending">待驗證</option>
+            <option value="disabled">已停用</option>
           </select>
         </div>
         <div className="form-actions">
-          <button type="submit">Update Endpoint</button>
-          <Link href="/webhooks">Cancel</Link>
+          <button type="submit">更新端點</button>
+          <Link href="/webhooks">取消</Link>
         </div>
       </form>
     </div>
@@ -619,23 +620,22 @@ function WebhookList({
 }) {
   return (
     <div className="webhooks-section">
-      <h3>Webhook Endpoints</h3>
+      <h3>回呼端點</h3>
       {webhooks.length === 0 ? (
         <p className="empty-state">
-          No webhook endpoints configured. Add one to receive tenant event
-          notifications.
+          目前尚未設定任何回呼端點。新增端點後，才能接收租戶事件通知。
         </p>
       ) : (
         <div className="data-table">
           <table>
             <thead>
               <tr>
-                <th>Endpoint</th>
-                <th>Events</th>
-                <th>Status</th>
-                <th>Secret</th>
-                <th>Runtime</th>
-                <th>Actions</th>
+                <th>端點</th>
+                <th>事件</th>
+                <th>狀態</th>
+                <th>密鑰</th>
+                <th>執行狀態</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -657,11 +657,17 @@ function WebhookList({
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Created {formatDateTime(webhook.createdAt)}. Updated{" "}
-                        {formatDateTime(webhook.updatedAt)}.
+                        建立於 {formatDateTime(webhook.createdAt)}，更新於{" "}
+                        {formatDateTime(webhook.updatedAt)}。
                       </div>
                     </td>
-                    <td>{webhook.events.join(", ")}</td>
+                    <td>
+                      {webhook.events
+                        .map((eventType) =>
+                          formatPortalCodeLabel(eventType, eventType),
+                        )
+                        .join("、")}
+                    </td>
                     <td>
                       <span
                         style={{
@@ -677,7 +683,10 @@ function WebhookList({
                           className="muted-copy"
                           style={{ marginTop: "0.35rem" }}
                         >
-                          Disable reason: <code>{runtime.disableReason}</code>
+                          停用原因：{" "}
+                          <code>
+                            {formatPortalCodeLabel(runtime.disableReason)}
+                          </code>
                         </div>
                       ) : null}
                     </td>
@@ -687,13 +696,13 @@ function WebhookList({
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Preview <code>{webhook.secretPreview}</code>
+                        預覽 <code>{webhook.secretPreview}</code>
                       </div>
                       <div
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Rotation history{" "}
+                        輪替次數{" "}
                         {runtime?.secretRotation.rotationCount ??
                           webhook.secretHistory?.length ??
                           0}
@@ -701,39 +710,37 @@ function WebhookList({
                     </td>
                     <td>
                       <div className="muted-copy">
-                        Deliveries {runtime?.deliveryCount ?? 0}, failed{" "}
-                        {runtime?.failedDeliveryCount ?? 0}
+                        投遞 {runtime?.deliveryCount ?? 0} 筆，失敗{" "}
+                        {runtime?.failedDeliveryCount ?? 0} 筆
                       </div>
                       <div
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Last attempt {formatDateTime(runtime?.lastAttemptAt)}
+                        最後嘗試 {formatDateTime(runtime?.lastAttemptAt)}
                       </div>
                       <div
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Last delivered{" "}
-                        {formatDateTime(runtime?.lastDeliveredAt)}
+                        最後送達 {formatDateTime(runtime?.lastDeliveredAt)}
                       </div>
                       <div
                         className="muted-copy"
                         style={{ marginTop: "0.35rem" }}
                       >
-                        Last validated{" "}
-                        {formatDateTime(runtime?.lastValidatedAt)}
+                        最後驗證 {formatDateTime(runtime?.lastValidatedAt)}
                       </div>
                     </td>
                     <td>
                       <Link href={`/webhooks?deliveries=${webhook.webhookId}`}>
-                        Deliveries
+                        投遞紀錄
                       </Link>
                       {canManage ? (
                         <>
                           {" | "}
                           <Link href={`/webhooks?edit=${webhook.webhookId}`}>
-                            Edit
+                            編輯
                           </Link>
                           {" | "}
                           <form
@@ -747,14 +754,14 @@ function WebhookList({
                             />
                             <ConfirmSubmitButton
                               type="submit"
-                              confirmMessage={`Delete webhook endpoint "${webhook.url}"? This action cannot be undone.`}
+                              confirmMessage={`確定要刪除回呼端點「${webhook.url}」嗎？此動作無法復原。`}
                             >
-                              Delete
+                              刪除
                             </ConfirmSubmitButton>
                           </form>
                         </>
                       ) : (
-                        <span className="muted-copy"> | Audit only</span>
+                        <span className="muted-copy"> | 僅供稽核</span>
                       )}
                     </td>
                   </tr>
@@ -782,20 +789,20 @@ function DeliveryLogView({
 
   return (
     <div className="delivery-log-section">
-      <h3>Delivery Log</h3>
+      <h3>投遞紀錄</h3>
       <p className="muted-copy">
         {webhook ? (
           <>
-            Endpoint <code>{webhook.url}</code>
+            端點 <code>{webhook.url}</code>
           </>
         ) : (
           <>
-            Endpoint <code>{webhookId}</code>
+            端點 <code>{webhookId}</code>
           </>
         )}
       </p>
       <p style={{ marginBottom: "1rem" }}>
-        <Link href="/webhooks">Back to webhooks</Link>
+        <Link href="/webhooks">返回回呼列表</Link>
       </p>
       <section
         style={{
@@ -806,7 +813,7 @@ function DeliveryLogView({
         }}
       >
         <div style={infoPanelStyle}>
-          <span className="metric-label">Total</span>
+          <span className="metric-label">總數</span>
           <div
             style={{ fontSize: "1.8rem", fontWeight: 700, marginTop: "0.5rem" }}
           >
@@ -814,7 +821,7 @@ function DeliveryLogView({
           </div>
         </div>
         <div style={infoPanelStyle}>
-          <span className="metric-label">Delivered</span>
+          <span className="metric-label">已送達</span>
           <div
             style={{ fontSize: "1.8rem", fontWeight: 700, marginTop: "0.5rem" }}
           >
@@ -822,7 +829,7 @@ function DeliveryLogView({
           </div>
         </div>
         <div style={infoPanelStyle}>
-          <span className="metric-label">Queued</span>
+          <span className="metric-label">佇列中</span>
           <div
             style={{ fontSize: "1.8rem", fontWeight: 700, marginTop: "0.5rem" }}
           >
@@ -830,7 +837,7 @@ function DeliveryLogView({
           </div>
         </div>
         <div style={infoPanelStyle}>
-          <span className="metric-label">Failed</span>
+          <span className="metric-label">失敗</span>
           <div
             style={{ fontSize: "1.8rem", fontWeight: 700, marginTop: "0.5rem" }}
           >
@@ -839,19 +846,19 @@ function DeliveryLogView({
         </div>
       </section>
       {deliveries.length === 0 ? (
-        <p className="empty-state">No delivery records for this webhook.</p>
+        <p className="empty-state">這個回呼端點目前沒有任何投遞紀錄。</p>
       ) : (
         <div className="data-table">
           <table>
             <thead>
               <tr>
-                <th>Delivery ID</th>
-                <th>Event Type</th>
-                <th>Attempt</th>
-                <th>Status</th>
-                <th>HTTP Status</th>
-                <th>Signature</th>
-                <th>Created</th>
+                <th>投遞編號</th>
+                <th>事件類型</th>
+                <th>嘗試次數</th>
+                <th>狀態</th>
+                <th>回應狀態碼</th>
+                <th>簽章</th>
+                <th>建立時間</th>
               </tr>
             </thead>
             <tbody>
@@ -860,14 +867,19 @@ function DeliveryLogView({
                   <td>
                     <code>{delivery.deliveryId}</code>
                   </td>
-                  <td>{delivery.eventType}</td>
+                  <td>
+                    {formatPortalCodeLabel(
+                      delivery.eventType,
+                      delivery.eventType,
+                    )}
+                  </td>
                   <td>{delivery.attempt}</td>
                   <td>
                     {delivery.status === "delivered"
-                      ? "Delivered"
+                      ? "已送達"
                       : delivery.status === "queued"
-                        ? "Queued"
-                        : "Delivery failed"}
+                        ? "佇列中"
+                        : "投遞失敗"}
                   </td>
                   <td>{delivery.httpStatus ?? "-"}</td>
                   <td>
@@ -891,25 +903,22 @@ function NotificationsList({
 }) {
   return (
     <div className="notifications-section" style={{ marginTop: "2rem" }}>
-      <h3>Related notifications</h3>
+      <h3>相關通知</h3>
       <p className="muted-copy" style={{ marginBottom: "0.85rem" }}>
-        Delivery failure and endpoint-governance notices should remain visible
-        in the tenant notification feed.
+        投遞失敗與端點治理相關通知，應持續出現在租戶通知摘要中。
       </p>
       {notifications.length === 0 ? (
-        <p className="empty-state">
-          No webhook-specific notifications are visible in the current feed.
-        </p>
+        <p className="empty-state">目前通知摘要中沒有可見的回呼專屬通知。</p>
       ) : (
         <div className="data-table">
           <table>
             <thead>
               <tr>
-                <th>Notification ID</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Channel</th>
-                <th>Created</th>
+                <th>通知編號</th>
+                <th>標題</th>
+                <th>狀態</th>
+                <th>渠道</th>
+                <th>建立時間</th>
               </tr>
             </thead>
             <tbody>
@@ -919,8 +928,8 @@ function NotificationsList({
                     <code>{notification.notificationId}</code>
                   </td>
                   <td>{notification.title}</td>
-                  <td>{notification.status}</td>
-                  <td>{notification.channel}</td>
+                  <td>{formatPortalCodeLabel(notification.status)}</td>
+                  <td>{formatPortalCodeLabel(notification.channel)}</td>
                   <td>{formatDateTime(notification.createdAt)}</td>
                 </tr>
               ))}
@@ -938,7 +947,7 @@ async function createWebhook(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteWebhooks,
-    "Tenant webhook write authority required.",
+    "需要租戶回呼寫入權限。",
   );
   const client = await getTenantClient();
   const events = parseEvents(formData);
@@ -946,7 +955,7 @@ async function createWebhook(formData: FormData) {
 
   try {
     if (events.length === 0) {
-      throw new Error("Select at least one webhook event.");
+      throw new Error("請至少選擇一個回呼事件。");
     }
 
     const command: CreateTenantWebhookEndpointCommand = {
@@ -956,16 +965,19 @@ async function createWebhook(formData: FormData) {
     };
 
     if (!command.url || !command.secret) {
-      throw new Error("Webhook URL and secret are required.");
+      throw new Error("回呼網址與密鑰皆為必填。");
     }
 
     await client.createWebhookEndpoint(command);
     revalidatePath("/webhooks");
     destination = `/webhooks?success=${encodeURIComponent(
-      "Webhook endpoint created in test_pending status.",
+      "回呼端點已建立，待完成驗證。",
     )}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message = formatPortalUiError(
+      toPortalErrorMessage(error),
+      "無法建立回呼端點",
+    );
     destination = `/webhooks?create=true&error=${encodeURIComponent(message)}`;
   }
 
@@ -978,7 +990,7 @@ async function updateWebhook(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteWebhooks,
-    "Tenant webhook write authority required.",
+    "需要租戶回呼寫入權限。",
   );
   const client = await getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
@@ -987,10 +999,10 @@ async function updateWebhook(formData: FormData) {
 
   try {
     if (!webhookId) {
-      throw new Error("Webhook ID is required.");
+      throw new Error("端點編號為必填。");
     }
     if (events.length === 0) {
-      throw new Error("Select at least one webhook event.");
+      throw new Error("請至少選擇一個回呼事件。");
     }
 
     const command: UpdateTenantWebhookEndpointCommand = {
@@ -1003,16 +1015,17 @@ async function updateWebhook(formData: FormData) {
     };
 
     if (!command.url || !command.status) {
-      throw new Error("Webhook URL and status are required.");
+      throw new Error("回呼網址與狀態皆為必填。");
     }
 
     await client.updateWebhookEndpoint(webhookId, command);
     revalidatePath("/webhooks");
-    destination = `/webhooks?success=${encodeURIComponent(
-      "Webhook endpoint updated successfully.",
-    )}`;
+    destination = `/webhooks?success=${encodeURIComponent("回呼端點已更新。")}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message = formatPortalUiError(
+      toPortalErrorMessage(error),
+      "無法更新回呼端點",
+    );
     destination = `/webhooks?edit=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(message)}`;
   }
 
@@ -1025,7 +1038,7 @@ async function deleteWebhook(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteWebhooks,
-    "Tenant webhook write authority required.",
+    "需要租戶回呼寫入權限。",
   );
   const client = await getTenantClient();
   const webhookId = String(formData.get("webhookId") ?? "");
@@ -1033,16 +1046,19 @@ async function deleteWebhook(formData: FormData) {
 
   try {
     if (!webhookId) {
-      throw new Error("Webhook ID is required.");
+      throw new Error("端點編號為必填。");
     }
 
     await client.deleteWebhookEndpoint(webhookId, {
       reason: "tenant_portal_delete_webhook",
     });
     revalidatePath("/webhooks");
-    destination = `/webhooks?success=${encodeURIComponent("Webhook endpoint deleted successfully.")}`;
+    destination = `/webhooks?success=${encodeURIComponent("回呼端點已刪除。")}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message = formatPortalUiError(
+      toPortalErrorMessage(error),
+      "無法刪除回呼端點",
+    );
     destination = `/webhooks?error=${encodeURIComponent(message)}`;
   }
 

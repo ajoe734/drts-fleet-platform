@@ -23,7 +23,7 @@ export async function generateMetadata({
       allowInactive: true,
     });
     return {
-      title: `${brand.displayName} · Partner Booking`,
+      title: `${brand.displayName} · 合作夥伴預約`,
       description: brand.tagline,
     };
   } catch (error) {
@@ -31,7 +31,7 @@ export async function generateMetadata({
       error instanceof PartnerAuthorityError &&
       error.code === "PARTNER_ENTRY_NOT_FOUND"
     ) {
-      return { title: "Partner Booking" };
+      return { title: "合作夥伴預約" };
     }
     throw error;
   }

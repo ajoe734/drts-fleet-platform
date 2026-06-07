@@ -139,7 +139,7 @@ function fallbackBrandTemplate(slug: string): PartnerBrandTemplate {
       .map((part) => part[0]?.toUpperCase() + part.slice(1))
       .join(" "),
     host: `${slug}.partner.invalid`,
-    tagline: "Partner booking channel awaiting active backend authority.",
+    tagline: "合作夥伴預約通道尚待後端權限啟用。",
     theme: PARTNER_DEFAULT_THEME,
   };
 }
@@ -266,7 +266,7 @@ export async function createPartnerBooking(
 
   const booking = (response as { booking?: BookingRecord }).booking;
   if (!booking) {
-    throw new Error("Backend did not return a booking record.");
+    throw new Error("後端未回傳預約紀錄。");
   }
   return booking;
 }

@@ -27,6 +27,7 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 import { disableCostCenterAction, upsertCostCenterAction } from "./actions";
 import type { CostCenterFlashPayload } from "./constants";
 
@@ -432,7 +433,7 @@ function describeApproval(
   if (relevantRules.length === 0) {
     return {
       label: "沿用租戶規則",
-      meta: "此成本中心沒有明確 code-targeted rule。",
+      meta: "此成本中心沒有明確的代碼定向規則。",
     };
   }
 
@@ -493,13 +494,13 @@ function describeApproval(
   if (ruleUsesCostCenterOwner(primaryRule, code)) {
     return {
       label: `${relevantRules.length} 條規則`,
-      meta: "使用 cost_center_owner approver。",
+      meta: "使用成本中心擁有者作為審批人。",
     };
   }
 
   return {
     label: `${relevantRules.length} 條規則`,
-    meta: "需要進一步查看 `/rules` 的命中條件。",
+    meta: "需要再到審批規則頁查看實際命中條件。",
   };
 }
 
@@ -526,7 +527,7 @@ function describeReports(code: string, reportJobs: ReportJobRecord[]) {
   if (matches.length === 0) {
     return {
       label: "可做成本中心切片",
-      meta: "至 `/reports` 以 cost center scope 建立新報表。",
+      meta: "可前往報表頁，以此成本中心建立對應報表。",
     };
   }
 
@@ -727,9 +728,9 @@ function buildLinkedUserHref(userId: string) {
 
 function buildStateMeta(row: CostCenterRow) {
   if (row.activeFlag) {
-    return "可用於新建立與 quota attribution。";
+    return "可用於新建立與配額歸屬。";
   }
-  return row.disabledReason?.trim() || "停用後保留歷史 attribution。";
+  return row.disabledReason?.trim() || "停用後保留歷史歸屬紀錄。";
 }
 
 function buildStateTone(row: CostCenterRow): CanvasTone {
@@ -737,7 +738,7 @@ function buildStateTone(row: CostCenterRow): CanvasTone {
 }
 
 function buildStateLabel(row: CostCenterRow) {
-  return row.activeFlag ? "Active" : "Disabled";
+  return row.activeFlag ? "啟用中" : "已停用";
 }
 
 function getActionHelpText(action: CostCenterAction) {
@@ -745,7 +746,7 @@ function getActionHelpText(action: CostCenterAction) {
     if (action.intent === "disable" && action.requiresReason) {
       return "需要填寫停用原因";
     }
-    return `${action.riskLevel} risk action`;
+    return `${action.riskLevel === "high" ? "高" : action.riskLevel === "medium" ? "中" : "低"}風險操作`;
   }
   return action.disabledReasonCode ?? "目前無法執行";
 }
@@ -807,38 +808,38 @@ function getEmptyCopy(reason: EmptyReason) {
     case "not_provisioned":
       return {
         title: "治理模組尚未開通",
-        body: "租戶尚未完成成本中心治理初始設定。先建立第一個成本中心，之後才能穩定做 quota 與 approval linkage。",
+        body: "租戶尚未完成成本中心治理初始設定。先建立第一個成本中心，之後才能穩定處理配額與審批連結。",
         tone: "info" as CanvasTone,
       };
     case "fetch_failed":
       return {
         title: "成本中心清單暫時載入失敗",
-        body: "頁面沒有拿到完整目錄。請重新整理；若持續失敗，改去 `/audit` 檢查最近治理寫入與 API 錯誤。",
+        body: "頁面沒有拿到完整目錄。請重新整理；若持續失敗，改到稽核頁檢查最近治理寫入與服務錯誤。",
         tone: "warn" as CanvasTone,
       };
     case "permission_denied":
       return {
         title: "目前身分沒有治理權限",
-        body: "這個 actor 沒有可用的成本中心維護能力，因此不顯示可寫入的治理資料。",
+        body: "這個身分沒有可用的成本中心維護能力，因此不顯示可寫入的治理資料。",
         tone: "warn" as CanvasTone,
       };
     case "external_unavailable":
       return {
         title: "外部依賴暫時不可用",
-        body: "配額或報表切片依賴的下游資料目前不穩定。可以先重整，或稍後再回來查看 attribution 與 quota posture。",
+        body: "配額或報表切片依賴的下游資料目前不穩定。可以先重整，或稍後再回來查看歸屬狀態與配額概況。",
         tone: "warn" as CanvasTone,
       };
     case "filtered_empty":
       return {
         title: "目前篩選條件沒有命中任何成本中心",
-        body: "清空搜尋文字、放寬 owner filter，或把 disabled rows 打開即可回到完整目錄。",
+        body: "清空搜尋文字、放寬負責人篩選，或顯示停用項目後即可回到完整目錄。",
         tone: "neutral" as CanvasTone,
       };
     case "no_data":
     default:
       return {
         title: "尚未建立任何成本中心",
-        body: "這是 `no_data` 狀態。先建立第一個成本中心，再把 quota 與 approval linkage 導回 `/rules`、報表 attribution 導回 `/reports`。",
+        body: "目前還沒有任何資料。先建立第一個成本中心，再到審批規則頁補齊配額與審批連結，並到報表頁設定歸屬。",
         tone: "info" as CanvasTone,
       };
   }
@@ -1092,7 +1093,7 @@ export function CostCentersManager({
             <span style={titlePrimaryStyle}>{row.ownerName ?? "未指定"}</span>
           )}
           <span style={titleMetaStyle}>
-            {row.ownerUserId ?? "可改派 tenant user"}
+            {row.ownerUserId ?? "可改派租戶成員"}
           </span>
         </div>
       ),
@@ -1142,7 +1143,7 @@ export function CostCentersManager({
       ),
     },
     {
-      h: "審批 / 報表",
+      h: "審批與報表",
       w: 236,
       r: (row) => (
         <div style={titleStackStyle}>
@@ -1200,8 +1201,8 @@ export function CostCentersManager({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="成本中心 · Cost Centers"
-        subtitle="部門 · 月配額 · 預設審批規則 (Q-TEN11)"
+        title="成本中心治理"
+        subtitle="部門、月配額與預設審批規則"
         actions={
           <>
             <CanvasBtn
@@ -1254,8 +1255,8 @@ export function CostCentersManager({
           theme={th}
           tone="info"
           icon="warn"
-          title="T5 refresh tier：成本中心目錄、quota、rules、reports 每 30 秒輪詢"
-          body={`${getRefreshMetaLabel(lastRefreshAt)} · 最新 quota refresh ${formatDateTime(freshestQuotaAt)} · owner 連到 /users，approval linkage 連到 /rules，report attribution 連到 /reports。`}
+          title="T5 刷新層級：成本中心目錄、配額、規則與報表每 30 秒輪詢"
+          body={`${getRefreshMetaLabel(lastRefreshAt)} · 最新配額刷新 ${formatDateTime(freshestQuotaAt)} · 可從使用者頁查看擁有者、從規則頁查看審批連結、從報表頁查看歸屬結果。`}
         />
 
         <div style={topGridStyle}>
@@ -1265,45 +1266,43 @@ export function CostCentersManager({
             <span style={kpiMetaStyle}>目前租戶目錄總數</span>
           </div>
           <div style={kpiStyle}>
-            <span style={kpiLabelStyle}>Active</span>
+            <span style={kpiLabelStyle}>啟用中</span>
             <span style={kpiValueStyle}>{formatCount(activeCount)}</span>
-            <span style={kpiMetaStyle}>disabled 可用獨立 filter 顯示</span>
+            <span style={kpiMetaStyle}>已停用項目可用獨立篩選顯示</span>
           </div>
           <div style={kpiStyle}>
-            <span style={kpiLabelStyle}>Over quota</span>
+            <span style={kpiLabelStyle}>超額中</span>
             <span style={kpiValueStyle}>{formatCount(overQuotaCount)}</span>
-            <span style={kpiMetaStyle}>超額列以 danger 標記</span>
+            <span style={kpiMetaStyle}>超額列以警示色標記</span>
           </div>
           <div style={kpiStyle}>
-            <span style={kpiLabelStyle}>Attributed reports</span>
+            <span style={kpiLabelStyle}>已歸屬報表</span>
             <span style={kpiValueStyle}>
               {formatCount(attributedReportCount)}
             </span>
-            <span style={kpiMetaStyle}>
-              已命中 cost-center filter 的報表作業
-            </span>
+            <span style={kpiMetaStyle}>已命中成本中心篩選條件的報表作業</span>
           </div>
         </div>
 
         <CanvasCard theme={th}>
           <div style={filterGridStyle}>
             <label>
-              <span style={fieldLabelStyle}>Search</span>
+              <span style={fieldLabelStyle}>搜尋</span>
               <input
                 style={nativeInputStyle}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜尋 code、名稱、owner"
+                placeholder="搜尋代碼、名稱、擁有者"
               />
             </label>
             <label>
-              <span style={fieldLabelStyle}>Owner</span>
+              <span style={fieldLabelStyle}>擁有者</span>
               <select
                 style={nativeInputStyle}
                 value={ownerFilter}
                 onChange={(event) => setOwnerFilter(event.target.value)}
               >
-                <option value="">全部 owner</option>
+                <option value="">全部擁有者</option>
                 {activeUsers.map((user) => (
                   <option key={user.userId} value={user.userId}>
                     {user.displayName}
@@ -1317,11 +1316,18 @@ export function CostCentersManager({
                 onChange={(event) => setShowDisabled(event.target.checked)}
                 type="checkbox"
               />
-              顯示 disabled 成本中心
+              顯示已停用成本中心
             </label>
             <div style={checkboxRowStyle}>
-              <span style={{ color: th.textMuted }}>Empty reason preview:</span>
-              <code style={monoStyle}>{initialEmptyReason ?? "auto"}</code>
+              <span style={{ color: th.textMuted }}>空狀態預覽：</span>
+              <code style={monoStyle}>
+                {initialEmptyReason
+                  ? formatTenantCodeLabel(
+                      initialEmptyReason,
+                      initialEmptyReason,
+                    )
+                  : "自動"}
+              </code>
             </div>
           </div>
         </CanvasCard>
@@ -1332,7 +1338,10 @@ export function CostCentersManager({
               {emptyCopy ? (
                 <div style={emptyStateStyle}>
                   <CanvasPill theme={th} tone={emptyCopy.tone}>
-                    {emptyReason}
+                    {formatTenantCodeLabel(
+                      emptyReason ?? "fetch_failed",
+                      emptyReason ?? "fetch_failed",
+                    )}
                   </CanvasPill>
                   <div style={emptyTitleStyle}>{emptyCopy.title}</div>
                   <div style={emptyBodyStyle}>{emptyCopy.body}</div>
@@ -1389,9 +1398,7 @@ export function CostCentersManager({
               <div style={sectionLabelStyle}>編輯器</div>
               {mode === null ? (
                 <div style={textWrapStyle}>
-                  選擇新增、更新、停用或重新啟用，所有 CTA 都由本頁的
-                  `availableActions`
-                  描述陣列驅動，而不是直接把按鈕硬寫在表格外。
+                  選擇新增、更新、停用或重新啟用。所有操作按鈕都依照頁面回傳的可執行操作描述帶出，而不是另外硬寫在表格外。
                 </div>
               ) : mode === "disable" ? (
                 <div style={formGridStyle}>
@@ -1405,8 +1412,7 @@ export function CostCentersManager({
                   </CanvasField>
                   <div style={formFooterStyle}>
                     <span style={formNoteStyle}>
-                      high-risk action 需要原因。停用後 row 仍保留並可透過
-                      disabled filter 查看。
+                      高風險操作需要原因。停用後資料列仍會保留，並可透過已停用篩選查看。
                     </span>
                     <div style={actionRowStyle}>
                       <CanvasBtn theme={th} size="sm" onClick={closeEditor}>
@@ -1430,18 +1436,18 @@ export function CostCentersManager({
               ) : (
                 <div style={formGridStyle}>
                   <input type="hidden" value={draft.code} />
-                  <CanvasField theme={th} label="Code">
+                  <CanvasField theme={th} label="代碼">
                     <input
                       style={nativeInputStyle}
                       value={draft.code}
                       onChange={(event) =>
                         updateDraft("code", event.target.value)
                       }
-                      placeholder="CC-FIN-04"
+                      placeholder="例如：CC-FIN-04"
                       disabled={mode !== "create"}
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label="Name">
+                  <CanvasField theme={th} label="名稱">
                     <input
                       style={nativeInputStyle}
                       value={draft.name}
@@ -1451,7 +1457,7 @@ export function CostCentersManager({
                       placeholder="財務處"
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label="Description">
+                  <CanvasField theme={th} label="描述">
                     <textarea
                       style={nativeTextAreaStyle}
                       value={draft.description}
@@ -1461,7 +1467,7 @@ export function CostCentersManager({
                       placeholder="描述此成本中心主要歸屬的差旅與使用情境"
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label="Owner tenant user">
+                  <CanvasField theme={th} label="租戶擁有者">
                     <select
                       style={nativeInputStyle}
                       value={draft.ownerUserId}
@@ -1490,11 +1496,11 @@ export function CostCentersManager({
                       }
                       type="checkbox"
                     />
-                    Active directory row
+                    啟用目錄資料列
                   </label>
                   <div style={formFooterStyle}>
                     <span style={formNoteStyle}>
-                      medium-risk action 會直接送到 published upsert command。
+                      中風險操作會直接送到正式發佈的新增或更新指令。
                     </span>
                     <div style={actionRowStyle}>
                       <CanvasBtn theme={th} size="sm" onClick={closeEditor}>
@@ -1528,52 +1534,52 @@ export function CostCentersManager({
             </CanvasCard>
 
             <CanvasCard theme={th}>
-              <div style={sectionLabelStyle}>Cross-app deep links</div>
+              <div style={sectionLabelStyle}>跨應用深連結</div>
               <ul style={listStyle}>
                 <li>
                   <Link href="/users" style={linkStyle}>
                     /users
                   </Link>{" "}
-                  追 owner tenant user、角色指派與 cost center ownership。
+                  追擁有者租戶使用者、角色指派與成本中心歸屬。
                 </li>
                 <li>
                   <Link href="/rules" style={linkStyle}>
                     /rules
                   </Link>{" "}
-                  查看 code-targeted rule、owner-based approver 與 precedence。
+                  查看代碼定向規則、擁有者審批人與優先序。
                 </li>
                 <li>
                   <Link href="/reports" style={linkStyle}>
                     /reports
                   </Link>{" "}
-                  追查哪些報表 job 對成本中心做 period/scope attribution。
+                  追查哪些報表作業對成本中心做期間 / 範圍歸屬。
                 </li>
                 <li>
                   <Link href="/audit" style={linkStyle}>
                     /audit
                   </Link>{" "}
-                  驗證 `upsert_cost_center` / `disable_cost_center` 的治理軌跡。
+                  驗證成本中心建立、更新與停用的治理軌跡。
                 </li>
               </ul>
             </CanvasCard>
 
             <CanvasCard theme={th}>
-              <div style={sectionLabelStyle}>Coverage follow-up</div>
+              <div style={sectionLabelStyle}>涵蓋情況追蹤</div>
               <div style={titleStackStyle}>
                 <span style={titlePrimaryStyle}>
                   {coverageReport
-                    ? `${formatCount(coverageReport.unresolvedCount)} unresolved legacy values`
-                    : "尚未取得 coverage report"}
+                    ? `${formatCount(coverageReport.unresolvedCount)} 筆舊值待處理`
+                    : "尚未取得涵蓋檢查結果"}
                 </span>
                 <span style={titleMetaStyle}>
                   {coverageReport
-                    ? `resolved ${formatCount(coverageReport.resolvedCount)} / total ${formatCount(coverageReport.totalBookings)} · generated ${formatDateTime(coverageReport.generatedAt)}`
+                    ? `已處理 ${formatCount(coverageReport.resolvedCount)} / 總計 ${formatCount(coverageReport.totalBookings)} · 產生於 ${formatDateTime(coverageReport.generatedAt)}`
                     : "這個切片用來判斷該建立新成本中心，還是擴充既有目錄。"}
                 </span>
               </div>
               {unresolvedSamples.length > 0 ? (
                 <>
-                  <div style={sectionLabelStyle}>Unresolved samples</div>
+                  <div style={sectionLabelStyle}>待處理樣本</div>
                   <ul style={listStyle}>
                     {unresolvedSamples.slice(0, 4).map((sample) => (
                       <li key={sample.rawCostCenter}>
@@ -1590,14 +1596,13 @@ export function CostCentersManager({
             </CanvasCard>
 
             <CanvasCard theme={th}>
-              <div style={sectionLabelStyle}>Disabled visibility</div>
+              <div style={sectionLabelStyle}>停用項目可見性</div>
               <div style={titleStackStyle}>
                 <span style={titlePrimaryStyle}>
-                  {formatCount(disabledCount)} disabled rows
+                  {formatCount(disabledCount)} 筆已停用資料列
                 </span>
                 <span style={titleMetaStyle}>
-                  packet 要求 disabled 成本中心可見且有獨立
-                  filter，不能直接從目錄消失。
+                  已停用的成本中心必須維持可見，並可透過獨立篩選條件查看，不能直接從目錄中消失。
                 </span>
               </div>
             </CanvasCard>

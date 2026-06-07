@@ -1562,7 +1562,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               theme={theme}
               columns={productColumns}
               rows={insights.serviceBuckets.map((row) => ({
-                label: row.label,
+                label: formatOpsCodeLabel(locale, row.key),
                 trips: row.trips,
                 revenue: row.revenueMinor,
                 average: row.averageMinor,

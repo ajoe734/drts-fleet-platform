@@ -4,6 +4,7 @@ import { OWNED_ORDER_STATUSES } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot } from "@/lib/rbac";
+import { formatPortalUiError, toPortalErrorMessage } from "@/lib/error-copy";
 import {
   applyBookingListQuery,
   buildBookingListQueryString,
@@ -16,6 +17,7 @@ import {
   getBookingSourceVisibility,
   getSourceToneClassName,
 } from "@/lib/source-domain";
+import { formatPortalCodeLabel } from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -31,12 +33,14 @@ export default async function BookingListPage({
 
   let bookings: BookingRecord[] = [];
   let error: string | null =
-    typeof rawParams.error === "string" ? rawParams.error : null;
+    typeof rawParams.error === "string"
+      ? formatPortalUiError(rawParams.error, "訂單列表載入失敗")
+      : null;
 
   try {
     bookings = await client.listTenantBookings();
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = formatPortalUiError(toPortalErrorMessage(e), "無法載入訂單列表");
   }
 
   const result = applyBookingListQuery(bookings, query);
@@ -48,44 +52,42 @@ export default async function BookingListPage({
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Booking oversight"
-        description="Booking list aligned to the new tenant console model: shared filter shape, canonical OwnedOrderStatus, fulfillment source visibility, fare context, and view-only deep link into the productized detail surface."
+        title="訂單總覽"
+        description="訂單列表會沿用共用查詢模型、標準訂單狀態、履約來源可見性與查看用明細入口。"
       >
         {error ? (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>錯誤：</strong> {error}
           </div>
         ) : null}
 
         <section className="surface-grid surface-grid-wide">
           <article className="surface-card">
-            <span className="surface-kicker">Query</span>
-            <h3>Shared list contract</h3>
+            <span className="surface-kicker">查詢</span>
+            <h3>共用列表契約</h3>
             <p>
-              Search, status, date window, and pagination follow the
-              SharedListQueryV1 vocabulary recommended by the cross-system
-              filter normalization packet (XS-UI-004). Status accepts only
-              persisted backend OwnedOrderStatus values.
+              搜尋、狀態、日期區間與分頁會遵循跨系統共用的 SharedListQueryV1
+              查詢模型。狀態篩選只接受後端實際保存的 OwnedOrderStatus 值。
             </p>
             <form action="/booking-list" className="booking-query-form">
               <label className="booking-field">
-                <span>Search</span>
+                <span>搜尋</span>
                 <input
                   defaultValue={query.q}
                   name="q"
-                  placeholder="Booking ID, order ID, passenger, route, cost center"
+                  placeholder="訂單編號、叫車單編號、乘客、路線、成本中心"
                   type="text"
                 />
               </label>
               <label className="booking-field">
-                <span>Date field</span>
+                <span>日期欄位</span>
                 <select defaultValue={query.dateField} name="dateField">
-                  <option value="reservationStart">Reservation start</option>
-                  <option value="createdAt">Created at</option>
+                  <option value="reservationStart">預約開始</option>
+                  <option value="createdAt">建立時間</option>
                 </select>
               </label>
               <label className="booking-field">
-                <span>From</span>
+                <span>起</span>
                 <input
                   defaultValue={query.dateFrom}
                   name="dateFrom"
@@ -93,11 +95,11 @@ export default async function BookingListPage({
                 />
               </label>
               <label className="booking-field">
-                <span>To</span>
+                <span>迄</span>
                 <input defaultValue={query.dateTo} name="dateTo" type="date" />
               </label>
               <label className="booking-field">
-                <span>Page size</span>
+                <span>每頁筆數</span>
                 <select defaultValue={String(query.pageSize)} name="pageSize">
                   <option value="10">10</option>
                   <option value="25">25</option>
@@ -113,22 +115,21 @@ export default async function BookingListPage({
               ) : null}
               <div className="booking-form-actions">
                 <button className="action-button-primary" type="submit">
-                  Apply filters
+                  套用篩選
                 </button>
                 <Link className="action-button-secondary" href="/booking-list">
-                  Reset
+                  清除
                 </Link>
               </div>
             </form>
           </article>
 
           <article className="surface-card">
-            <span className="surface-kicker">Status</span>
-            <h3>Order status stays canonical</h3>
+            <span className="surface-kicker">狀態</span>
+            <h3>訂單狀態維持標準值</h3>
             <p>
-              The chip row toggles canonical OwnedOrderStatus filters. Service
-              buckets, fulfillment source, and tenant-only labels never replace
-              the workflow vocabulary.
+              這排 chip 會切換標準 OwnedOrderStatus 篩選。服務類型、履約來源
+              與租戶專屬標籤都不會取代核心流程詞彙。
             </p>
             <div className="chip-row">
               {OWNED_ORDER_STATUSES.map((status) => {
@@ -147,7 +148,7 @@ export default async function BookingListPage({
                     href={href}
                     key={status}
                   >
-                    {status}
+                    {formatPortalCodeLabel(status, status)}
                     <span> · {result.statusCounts[status] ?? 0}</span>
                   </Link>
                 );
@@ -156,41 +157,31 @@ export default async function BookingListPage({
             {roleSnapshot.capabilities.canWriteTenant ? (
               <div className="link-row">
                 <Link className="text-link" href="/bookings/new">
-                  Start new booking intake
+                  建立新訂單
                 </Link>
               </div>
             ) : (
               <p className="muted-copy">
-                Current role can review bookings but cannot create new ones.
+                目前角色可以查看訂單，但不能建立新訂單。
               </p>
             )}
           </article>
         </section>
 
         <article className="surface-card">
-          <span className="surface-kicker">List</span>
-          <h3>{`Showing ${result.items.length} of ${result.total} booking row(s)`}</h3>
+          <span className="surface-kicker">列表</span>
+          <h3>{`目前顯示 ${result.total} 筆中的 ${result.items.length} 筆訂單`}</h3>
           <p>
-            The list reads <code>/api/tenant/bookings</code>. Mutate actions are
-            limited to authority-safe commands; deeper fulfillment trace,
-            fare/invoice linkage, and timeline context belong on the booking
-            detail page.
+            列表資料讀自 <code>/api/tenant/bookings</code>。可執行的操作會限制在
+            租戶權限允許的指令；更深入的履約脈絡、車資／發票關聯與時間線資訊，
+            會放在訂單明細頁。
           </p>
           {hasForwardedAuthority ? (
             <article className="callout-panel is-warning">
-              <strong>
-                Forwarded bookings keep external-platform authority
-              </strong>
+              <strong>轉送訂單仍維持外部平台權限</strong>
               <p>
-                Tenant booking oversight keeps the business record readable, but
-                adapter-native lifecycle states and platform recovery still
-                belong to ops and driver routes.
-              </p>
-              <p>
-                <code>accept_pending</code>, <code>confirmed_by_platform</code>,
-                <code>lost_race</code>, <code>cancelled_by_platform</code>, and
-                <code>sync_failed</code> never become tenant workflow actions on
-                this surface.
+                租戶端會保留可閱讀的業務訂單紀錄，但外部平台原生的生命週期與
+                平台恢復處理仍屬於營運與司機路徑。
               </p>
             </article>
           ) : null}
@@ -200,14 +191,14 @@ export default async function BookingListPage({
               <table>
                 <thead>
                   <tr>
-                    <th>Booking</th>
-                    <th>Passenger</th>
-                    <th>Reservation</th>
-                    <th>Status</th>
-                    <th>Fulfillment</th>
-                    <th>Route</th>
-                    <th>Fare</th>
-                    <th>Action</th>
+                    <th>訂單</th>
+                    <th>乘客</th>
+                    <th>預約時段</th>
+                    <th>狀態</th>
+                    <th>履約</th>
+                    <th>路線</th>
+                    <th>車資</th>
+                    <th>操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -223,7 +214,7 @@ export default async function BookingListPage({
                             {booking.bookingId}
                           </Link>
                           <div className="source-detail">
-                            Order {booking.orderId}
+                            叫車單 {booking.orderId}
                           </div>
                         </td>
                         <td>
@@ -235,17 +226,24 @@ export default async function BookingListPage({
                         <td>
                           {formatDateTime(booking.reservationWindowStart)}
                           <div className="source-detail">
-                            to {formatDateTime(booking.reservationWindowEnd)}
+                            至 {formatDateTime(booking.reservationWindowEnd)}
                           </div>
                         </td>
                         <td>
                           <span
                             className={`status-badge status-${booking.orderStatus}`}
                           >
-                            {booking.orderStatus}
+                            {formatPortalCodeLabel(
+                              booking.orderStatus,
+                              booking.orderStatus,
+                            )}
                           </span>
                           <div className="source-detail">
-                            Booking {booking.status}
+                            訂單紀錄{" "}
+                            {formatPortalCodeLabel(
+                              booking.status,
+                              booking.status,
+                            )}
                           </div>
                         </td>
                         <td>
@@ -266,7 +264,7 @@ export default async function BookingListPage({
                             className="text-link"
                             href={`/booking-list/${booking.bookingId}`}
                           >
-                            View detail
+                            查看明細
                           </Link>
                         </td>
                       </tr>
@@ -277,14 +275,13 @@ export default async function BookingListPage({
             </div>
           ) : (
             <p className="empty-state">
-              No booking matched the current query. Try clearing status chips or
-              broadening the search window.
+              目前沒有符合查詢條件的訂單。可嘗試清除狀態篩選或放寬搜尋區間。
             </p>
           )}
 
           <div className="booking-pagination">
             <span className="muted-copy">
-              Page {result.page} of {result.totalPages}
+              第 {result.page} 頁，共 {result.totalPages} 頁
             </span>
             <div className="link-row">
               {result.page > 1 ? (
@@ -294,7 +291,7 @@ export default async function BookingListPage({
                     page: result.page - 1,
                   })}`}
                 >
-                  Previous
+                  上一頁
                 </Link>
               ) : null}
               {result.page < result.totalPages ? (
@@ -304,7 +301,7 @@ export default async function BookingListPage({
                     page: result.page + 1,
                   })}`}
                 >
-                  Next
+                  下一頁
                 </Link>
               ) : null}
             </div>
@@ -312,18 +309,17 @@ export default async function BookingListPage({
         </article>
 
         <section className="callout-panel">
-          <strong>Authority boundary</strong>
+          <strong>權限邊界</strong>
           <p>
-            The list never invents tenant-local workflow aliases. Status maps to
-            canonical OwnedOrderStatus values, fare values come from the booking
-            record, and deeper dispatch trace belongs to the ops console
-            authority lane.
+            這個列表不會自行發明租戶專用流程別名。狀態會對應標準
+            OwnedOrderStatus，車資來自訂單本身，更深入的派遣追蹤仍屬於營運
+            控制台權限路徑。
           </p>
         </section>
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>返回首頁</strong>
+          回到租戶入口總覽。
         </Link>
       </AppShellCard>
     </main>

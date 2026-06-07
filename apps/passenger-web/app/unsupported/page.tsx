@@ -2,33 +2,26 @@ export default function UnsupportedPage() {
   return (
     <div className="page-shell">
       <section className="hero-card">
-        <span className="eyebrow">Unsupported state</span>
-        <h1>
-          Some trip and receipt outcomes are intentionally not owned by this
-          shell.
-        </h1>
+        <span className="eyebrow">不支援情境</span>
+        <h1>部分行程與收據結果不由乘客入口直接處理。</h1>
         <p>
-          This route is the honest landing zone for out-of-service-area, third-
-          party-owned, or otherwise unsupported passenger scenarios.
+          服務區域外、第三方歸屬或其他不支援情境會在這裡明確說明，避免乘客誤以為可以直接預約或下載。
         </p>
       </section>
 
       <section className="content-grid">
         <article className="surface-card">
-          <span className="surface-kicker">Not serviceable</span>
-          <h3>Out-of-area or unsupported demand</h3>
+          <span className="surface-kicker">暫不服務</span>
+          <h3>服務區域外或需求不支援</h3>
           <p>
-            If the rider is outside the service area, the product rule is to
-            return an explicit `not_serviceable` outcome instead of pretending a
-            booking can proceed.
+            若乘客位於服務區域外，系統會明確告知目前無法服務，而不是假裝預約可以繼續。
           </p>
         </article>
         <article className="surface-card">
-          <span className="surface-kicker">Source-owned receipts</span>
-          <h3>Partner or tenant billing lane</h3>
+          <span className="surface-kicker">來源渠道收據</span>
+          <h3>合作夥伴或租戶帳務</h3>
           <p>
-            Where another channel owns settlement, this shell can point to that
-            authority but should not fabricate a passenger download artifact.
+            若帳務由其他渠道負責，乘客入口會指向正確權責方，不會自行產生下載收據。
           </p>
         </article>
       </section>

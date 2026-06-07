@@ -4,30 +4,25 @@ export default function UnauthenticatedPage() {
   return (
     <div className="page-shell">
       <section className="hero-card">
-        <span className="eyebrow">Unauthenticated state</span>
-        <h1>Trip details stay locked until the rider clears bootstrap.</h1>
+        <span className="eyebrow">尚未驗證</span>
+        <h1>完成驗證前，行程詳細資訊會保持鎖定。</h1>
         <p>
-          This route makes the fallback explicit for passengers who arrive
-          without a valid session, code, or trip-verification context.
+          若乘客沒有有效登入狀態、驗證碼或行程驗證脈絡，系統會顯示此安全處理頁。
         </p>
       </section>
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Allowed next steps</strong>
-          <p>
-            Re-enter through auth, verify a reservation code, or contact support
-            through the future passenger support lane.
-          </p>
+          <strong>可以怎麼做</strong>
+          <p>乘客可回到身分驗證入口、輸入預約代碼，或透過客服渠道取得協助。</p>
           <Link className="text-link" href="/auth">
-            Return to auth entry
+            回到身分驗證
           </Link>
         </article>
         <article className="callout-card warning">
-          <strong>What this route does not do</strong>
+          <strong>此頁不會做的事</strong>
           <p>
-            It does not leak tenant-admin booking data, ops tooling, or partial
-            receipt artifacts to an unauthenticated rider.
+            系統不會向未驗證乘客洩漏租戶後台預約資料、營運工具資訊或部分收據內容。
           </p>
         </article>
       </section>

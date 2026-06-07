@@ -13,7 +13,7 @@ async function requireAdmin(): Promise<void> {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canManageUsers,
-    "Tenant admin authority required.",
+    "需要租戶管理員權限。",
   );
 }
 
@@ -31,7 +31,7 @@ export async function getUsers(): Promise<{
   } catch (e) {
     return {
       users: [],
-      error: e instanceof Error ? e.message : "Unknown error",
+      error: e instanceof Error ? e.message : "未知錯誤",
     };
   }
 }
@@ -45,7 +45,7 @@ export async function inviteUser(formData: FormData): Promise<void> {
   const roleCode = formData.get("roleCode") as string;
 
   if (!email || !displayName || !roleCode) {
-    throw new Error("Email, display name, and role are required.");
+    throw new Error("電子郵件、顯示名稱與角色為必填。");
   }
 
   const command: CreateTenantUserCommand = {
@@ -67,7 +67,7 @@ export async function updateUserRole(formData: FormData): Promise<void> {
   const status = formData.get("status") as "active" | "suspended" | undefined;
 
   if (!userId || !roleCode) {
-    throw new Error("User ID and role are required.");
+    throw new Error("使用者 ID 與角色為必填。");
   }
 
   const command: UpdateTenantRoleCommand = {

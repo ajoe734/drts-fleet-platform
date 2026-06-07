@@ -21,6 +21,10 @@ import {
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { getPlatformAdminClient } from "@/lib/platform-admin-client-factory";
 import {
   getRuntimeApiBaseUrl,
@@ -28,11 +32,14 @@ import {
 } from "@/lib/runtime-config";
 import { useTranslation } from "@/lib/i18n";
 import { AssistantMessageList } from "./AssistantMessageList";
-import { buildRouteContext } from "./route-context";
+import {
+  buildAssistantContextPacket,
+  serializeAssistantContextPacket,
+  usePlatformAdminAssistantRouteContext,
+} from "./route-context";
 import type {
   AssistantActionPlan,
   AssistantMessageRecord,
-  AssistantRouteContext,
   AssistantStepStatus,
 } from "./assistant-types";
 
@@ -214,47 +221,23 @@ function formatAssistantContent(response: AssistantApiMessageResponse) {
   return sections.join("\n\n");
 }
 
-function buildContextPrompt(
-  message: string,
-  routeContext: AssistantRouteContext,
-  locale: "zh" | "en",
-) {
-  const routeTitle = routeContext.title[locale];
-  const warnings =
-    routeContext.warnings.length > 0
-      ? routeContext.warnings
-          .map((warning) => `${warning.code}: ${warning.message[locale]}`)
-          .join("; ")
-      : "none";
-  const entityRefs =
-    routeContext.visibleEntityRefs.length > 0
-      ? routeContext.visibleEntityRefs
-          .map((entity) => `${entity.kind}:${entity.id}`)
-          .join(", ")
-      : "none";
-
-  return [
-    "[Platform Admin route context]",
-    `Path: ${routeContext.pathname}`,
-    `Page: ${routeTitle}`,
-    `Active tab: ${routeContext.activeTab ?? "none"}`,
-    `Refresh tier: ${routeContext.refreshTier}`,
-    `Visible entities: ${entityRefs}`,
-    `Warnings: ${warnings}`,
-    "",
-    "[Operator question]",
-    message,
-  ].join("\n");
+function buildContextPrompt(message: string, context: string) {
+  return [context, "", "[Operator question]", message].join("\n");
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+function errorMessage(locale: "en" | "zh", error: unknown) {
+  return formatPlatformUiError(
+    locale,
+    toPlatformErrorMessage(error),
+    locale === "en" ? "Assistant request failed" : "助理請求失敗",
+  );
 }
 
 export function PlatformAssistantOverlay() {
   const enabled = isPlatformAdminAssistantEnabled();
   const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
+  const { pageBridge } = usePlatformAdminAssistantRouteContext();
   const { locale } = useTranslation();
   const titleId = useId();
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -333,7 +316,7 @@ export function PlatformAssistantOverlay() {
           badge: "Beta",
           label: "平台助理",
           subtitle: "治理操作輔助",
-          heading: "Platform Admin Assistant",
+          heading: "平台管理助理",
           status: "已連接 dev mock gateway，可回答操作問題與產生行動計畫。",
           inputLabel: "輸入平台助理問題",
           inputPlaceholder: "問我這頁該怎麼操作、風險在哪、下一步怎麼做...",
@@ -346,8 +329,8 @@ export function PlatformAssistantOverlay() {
           emptyTitle: "平台助理已就緒",
           emptyBody:
             "詢問目前頁面的操作方式、治理風險，或請我產生一份平台操作檢查清單。",
-          thinking: "我正在讀取目前 Platform Admin route context 並整理回答...",
-          sessionTitle: "Platform Admin assistant",
+          thinking: "我正在讀取目前平台管理頁面的路由脈絡並整理回答...",
+          sessionTitle: "平台管理助理",
         }
       : {
           launcher: "Open platform assistant",
@@ -440,9 +423,12 @@ export function PlatformAssistantOverlay() {
 
     try {
       const activeSession = await ensureSession();
-      const routeContext = buildRouteContext(
+      const snapshot = pageBridge?.getContextSnapshot?.();
+      const contextPacket = buildAssistantContextPacket(
         pathname,
         searchParams?.toString() ?? "",
+        snapshot,
+        { rawPrompt: trimmed, locale },
       );
       const response = await client().post<AssistantApiMessageResponse>(
         `/api/platform-admin/assistant/sessions/${encodeURIComponent(
@@ -450,7 +436,10 @@ export function PlatformAssistantOverlay() {
         )}/messages`,
         {
           body: {
-            message: buildContextPrompt(trimmed, routeContext, locale),
+            message: buildContextPrompt(
+              trimmed,
+              serializeAssistantContextPacket(contextPacket, locale),
+            ),
           },
         },
       );
@@ -478,13 +467,19 @@ export function PlatformAssistantOverlay() {
       const failedMessage: AssistantMessageRecord = {
         id: nextMessageId("paas-error"),
         role: "assistant",
-        content: "The assistant could not complete this request.",
+        content:
+          locale === "en"
+            ? "The assistant could not complete this request."
+            : "平台助理暫時無法完成這次請求。",
         createdAt: new Date().toISOString(),
         state: "error",
         error: {
-          title: "Assistant request failed",
-          message: errorMessage(error),
-          hint: "Check the dev API assistant flag, control-plane proxy, and Cloud Run logs.",
+          title: locale === "en" ? "Assistant request failed" : "助理請求失敗",
+          message: errorMessage(locale, error),
+          hint:
+            locale === "en"
+              ? "Check the dev API assistant flag, control-plane proxy, and Cloud Run logs."
+              : "請檢查助理開關、控制平面代理與 Cloud Run 記錄。",
         },
       };
       setMessages((current) =>

@@ -46,6 +46,7 @@ import {
   COMPLAINT_CATEGORY_VALID_RESOLUTIONS,
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { formatOpsUiError, toOpsErrorMessage } from "@/lib/error-copy";
 import {
   useAssistantActionBridgeRegistration,
   useAssistantSelection,
@@ -244,7 +245,11 @@ const ACTION_META: Record<string, ActionMeta> = {
     en: "Escalate to incident",
     zh: "升級事故",
   },
-  mark_sla_breach: { icon: "sla", en: "Mark SLA breach", zh: "標記 SLA 違規" },
+  mark_sla_breach: {
+    icon: "sla",
+    en: "Mark SLA breach",
+    zh: "標記服務時限違規",
+  },
   export_view: { icon: "reports", en: "Export view", zh: "匯出案件視圖" },
   create: { icon: "plus", en: "Create complaint", zh: "建立客訴" },
 };
@@ -357,7 +362,7 @@ const EMPTY_COPY: Record<
     },
     zh: {
       title: "沒有符合篩選的案件",
-      body: "放寬範圍、狀態、嚴重度或 SLA 篩選即可看到更多案件。",
+      body: "放寬範圍、狀態、嚴重度或服務時限篩選即可看到更多案件。",
       cta: "清除篩選",
     },
   },
@@ -468,9 +473,11 @@ export default function ComplaintsPage() {
   } | null>(null);
 
   const resolveErrorMessage = (error: unknown) =>
-    error instanceof Error
-      ? error.message
-      : tx(locale, "Unknown error", "未知錯誤");
+    formatOpsUiError(
+      locale,
+      toOpsErrorMessage(error, tx(locale, "Unknown error", "未知錯誤")),
+      locale === "en" ? "Complaint request failed" : "客訴操作未完成",
+    );
 
   const [records, setRecords] = useState<ComplaintCaseUiRecord[]>([]);
   const [timeline, setTimeline] = useState<ComplaintTimelineEntry[]>([]);
@@ -921,7 +928,7 @@ export default function ComplaintsPage() {
     },
     {
       key: "breach",
-      label: tx(locale, "SLA breach", "SLA 違規"),
+      label: tx(locale, "SLA breach", "服務時限違規"),
       count: breachedCount,
       tone: "danger",
     },
@@ -1042,7 +1049,7 @@ export default function ComplaintsPage() {
         ),
     },
     {
-      h: tx(locale, "SLA · backend computed", "SLA · 後端計算"),
+      h: tx(locale, "SLA · backend computed", "服務時限 · 後端計算"),
       w: 150,
       r: (row) => {
         const status = resolveSlaStatus(row);
@@ -1059,7 +1066,7 @@ export default function ComplaintsPage() {
                 title={tx(
                   locale,
                   "Derived client-side (backend slaStatus pending)",
-                  "前端推導（後端 slaStatus 待補）",
+                  "由前端暫時推導，等待後端補齊服務時限狀態。",
                 )}
               >
                 ~
@@ -1129,7 +1136,8 @@ export default function ComplaintsPage() {
             resolveDescriptor: (intent: ActionIntent) =>
               selectedActions.find(
                 (descriptor) =>
-                  descriptor.action.toLowerCase() === intent.action.toLowerCase(),
+                  descriptor.action.toLowerCase() ===
+                  intent.action.toLowerCase(),
               ) ?? null,
             invoke: async (
               _intent: ActionIntent,
@@ -1161,7 +1169,7 @@ export default function ComplaintsPage() {
         subtitle={tx(
           locale,
           "End-to-end casework · SLA · escalation · reopen must not overwrite the record",
-          "案件全流程 · SLA · 升級 · reopen 不得覆蓋紀錄",
+          "案件全流程 · 服務時限 · 升級 · 重啟案件不得覆蓋紀錄",
         )}
         actions={
           <>
@@ -1242,7 +1250,8 @@ export default function ComplaintsPage() {
           </Pill>
           <span>
             {tx(locale, "Auto-refresh", "自動更新")} ·{" "}
-            {Math.round(REFRESH_CADENCE_MS / 1000)}s ({COMPLAINTS_REFRESH_TIER})
+            {Math.round(REFRESH_CADENCE_MS / 1000)} 秒（
+            {formatOpsCodeLabel(locale, COMPLAINTS_REFRESH_TIER)}）
           </span>
           <span style={{ color: theme.textDim }}>
             {tx(locale, "Updated", "更新於")}{" "}
@@ -1250,7 +1259,9 @@ export default function ComplaintsPage() {
               ? formatDateTime(refreshMeta.generatedAt)
               : "—"}
           </span>
-          <span style={{ color: theme.textDim }}>· {refreshMeta.source}</span>
+          <span style={{ color: theme.textDim }}>
+            · {formatOpsCodeLabel(locale, refreshMeta.source)}
+          </span>
           <Btn
             theme={theme}
             size="xs"
@@ -1278,7 +1289,7 @@ export default function ComplaintsPage() {
                 ? tx(
                     locale,
                     `${breachedCount} SLA breach`,
-                    `${breachedCount} 件 SLA 違規`,
+                    `${breachedCount} 件服務時限違規`,
                   )
                 : undefined
             }
@@ -1286,9 +1297,9 @@ export default function ComplaintsPage() {
           />
           <KPI
             theme={theme}
-            label={tx(locale, "SLA breached", "SLA 違規")}
+            label={tx(locale, "SLA breached", "服務時限違規")}
             value={breachedCount}
-            sub={tx(locale, "Backend-computed (Q-OPS13)", "後端計算 (Q-OPS13)")}
+            sub={tx(locale, "Backend-computed", "由後端統一判定")}
           />
           <KPI
             theme={theme}
@@ -1298,7 +1309,7 @@ export default function ComplaintsPage() {
           />
           <KPI
             theme={theme}
-            label={tx(locale, "Reopens", "reopen 次數")}
+            label={tx(locale, "Reopens", "重啟次數")}
             value={reopenTotal}
             sub={tx(locale, "Across all cases", "所有案件累計")}
           />
@@ -1404,7 +1415,7 @@ export default function ComplaintsPage() {
             onChange={(event) => setSlaFilter(event.target.value as SlaFilter)}
           >
             <option value="all">
-              {tx(locale, "All SLA states", "全部 SLA 狀態")}
+              {tx(locale, "All SLA states", "全部服務時限狀態")}
             </option>
             {SLA_FILTER_OPTIONS.map((status) => (
               <option key={status} value={status}>
@@ -1662,11 +1673,11 @@ export default function ComplaintsPage() {
                 }}
               >
                 <DetailItem
-                  label={tx(locale, "SLA due", "SLA 期限")}
+                  label={tx(locale, "SLA due", "服務時限期限")}
                   value={`${formatDateTime(selectedRecord.slaDueAt)} · ${formatRelativeSla(selectedRecord.slaDueAt, locale)}`}
                 />
                 <DetailItem
-                  label={tx(locale, "SLA breached at", "SLA 違規時間")}
+                  label={tx(locale, "SLA breached at", "服務時限違規時間")}
                   value={formatDateTime(selectedRecord.slaBreachedAt)}
                 />
                 <DetailItem
@@ -1677,7 +1688,7 @@ export default function ComplaintsPage() {
                   }
                 />
                 <DetailItem
-                  label={tx(locale, "Reopens", "reopen 次數")}
+                  label={tx(locale, "Reopens", "重啟次數")}
                   value={String(selectedRecord.reopenCount ?? 0)}
                 />
                 <DetailItem
@@ -2020,7 +2031,9 @@ function EmptyState({
     >
       <Pill theme={theme} tone={copy.tone} dot>
         <CanvasIcon name={copy.icon} size={12} />
-        <span style={{ marginLeft: 4 }}>{reason}</span>
+        <span style={{ marginLeft: 4 }}>
+          {formatOpsCodeLabel(locale, reason)}
+        </span>
       </Pill>
       <div style={{ fontSize: 14, fontWeight: 600, color: theme.text }}>
         {text.title}
@@ -2170,7 +2183,7 @@ function ConfirmModal({
           >
             {action === "assign" ? (
               <>
-                <ModalField label={tx(locale, "Assignee ID", "負責人 ID")}>
+                <ModalField label={tx(locale, "Assignee ID", "負責人編號")}>
                   <input
                     style={{ ...controlStyle, width: "100%" }}
                     value={assigneeId}

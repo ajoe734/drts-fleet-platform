@@ -9,6 +9,10 @@ import React, {
   type CSSProperties,
 } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import {
@@ -228,26 +232,26 @@ export default function PartnersPage() {
           openDetail: "Open entry detail",
         }
       : {
-          title: "合作夥伴 entry",
+          title: "合作夥伴入口",
           subtitle:
-            "銀行 / 飯店 / 企業 partner 入口、auth 模式、eligibility、品牌",
-          searchPlaceholder: "搜尋 entry、租戶、憑證...",
+            "銀行 / 飯店 / 企業合作夥伴入口、驗證模式、資格檢查與品牌設定。",
+          searchPlaceholder: "搜尋入口代碼、租戶、憑證...",
           filterAction: "篩選",
-          createAction: "建立 entry",
-          createTitle: "建立 partner entry",
+          createAction: "建立入口",
+          createTitle: "建立合作夥伴入口",
           createSubtitle:
-            "在正式導流前先補齊 routing、auth mode、eligibility mode 與品牌 metadata。",
+            "在正式導流前先補齊路由、驗證模式、資格檢查模式與品牌中繼資料。",
           refresh: "重新整理",
           last30Days: "近 30 天",
-          errorTitle: "無法載入 partner entries",
+          errorTitle: "無法載入合作夥伴入口",
           filters: {
             all: "全部",
-            active: "active",
-            inactive: "inactive",
+            active: "啟用中",
+            inactive: "停用中",
             attention: "待處理",
-            revoked: "revoked",
+            revoked: "已撤銷",
           },
-          openDetail: "查看 entry 詳情",
+          openDetail: "查看入口詳情",
         };
 
   const loadEntries = useCallback(async () => {
@@ -257,7 +261,15 @@ export default function PartnersPage() {
       const result = await client.listPlatformPartnerEntries();
       setEntries(result ?? []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en"
+            ? "Partner entries unavailable"
+            : "合作夥伴入口資料暫時無法載入",
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -359,7 +371,13 @@ export default function PartnersPage() {
       setShowCreate(false);
       await loadEntries();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en" ? "Entry creation failed" : "入口建立失敗",
+        ),
+      );
     } finally {
       setCreating(false);
     }

@@ -67,11 +67,11 @@ export function getPlatformReauthMechanism(
 export function getMechanismLabel(mechanism: ReauthMechanism): string {
   switch (mechanism) {
     case "external_browser_oauth":
-      return "外部瀏覽器 OAuth";
+      return "外部瀏覽器授權";
     case "native_app_deeplink":
-      return "平台 App 深連結";
+      return "平台應用程式深連結";
     case "manual_credential":
-      return "手動憑證輸入";
+      return "手動填寫憑證";
     case "ops_managed":
       return "派車台協助處理";
   }
@@ -80,11 +80,11 @@ export function getMechanismLabel(mechanism: ReauthMechanism): string {
 export function getMechanismActionLabel(mechanism: ReauthMechanism): string {
   switch (mechanism) {
     case "external_browser_oauth":
-      return "打開授權頁";
+      return "前往授權頁";
     case "native_app_deeplink":
-      return "開啟平台 App";
+      return "開啟平台應用程式";
     case "manual_credential":
-      return "輸入驗證資料";
+      return "填寫驗證資料";
     case "ops_managed":
       return "聯絡派車台";
   }

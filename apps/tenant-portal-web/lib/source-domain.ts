@@ -42,16 +42,16 @@ export function getBookingSourceVisibility(
     return {
       domain: "forwarded_authority",
       tone: "external",
-      badge: "Forwarded authority",
-      summary: "External platform dispatch authority",
+      badge: "轉送授權",
+      summary: "外部平台派遣權限",
       detail:
-        "This booking is mirrored from an external-platform authority lane. Tenant-visible status remains readable here without exposing driver assignment or adapter internals.",
+        "這筆訂單是由外部平台授權路徑鏡射而來。租戶仍可在此閱讀狀態，但不會暴露司機指派或介接層內部細節。",
       statusBoundary:
-        "Tenant routes show the canonical booking and order record only. Adapter-native states such as accept_pending, confirmed_by_platform, lost_race, cancelled_by_platform, and sync_failed remain on the ops and driver authority lanes.",
+        "租戶頁面只會顯示標準訂單與叫車單紀錄。外部平台的接受、確認、競態失敗、平台取消與同步失敗等內部狀態，仍保留在營運與司機權限路徑。",
       escalationHint:
-        "If execution looks stale or contradictory, escalate through the ops console for reconciliation, reauth recovery, or platform-side intervention.",
+        "若執行狀態看起來過舊或互相矛盾，請改由營運控制台處理對帳、重新授權或平台側介入。",
       financeAuthority:
-        "Quoted fare may still be visible here, but settlement, payout, and external-platform lifecycle ownership remain outside tenant authority.",
+        "此處仍可能看得到報價，但結算、撥款與外部平台生命週期仍不屬於租戶權限範圍。",
     };
   }
 
@@ -59,32 +59,31 @@ export function getBookingSourceVisibility(
     return {
       domain: "partner_external",
       tone: "external",
-      badge: "Externally fulfilled",
-      summary: "Partner or external fulfillment path",
+      badge: "外部履約",
+      summary: "夥伴或外部履約路徑",
       detail:
-        "This booking uses a partner or external fulfillment path. Tenant-facing status stays visible here without exposing adapter internals.",
+        "這筆訂單使用夥伴或外部履約路徑。租戶可在此查看狀態，但不會暴露介接層內部細節。",
       statusBoundary:
-        "Tenant routes keep the canonical booking record visible, while partner-side routing, sponsorship, and dispatch coordination stay outside this surface.",
+        "租戶頁面會保留標準訂單紀錄；夥伴側的路由、贊助與派遣協調則留在此畫面之外。",
       escalationHint:
-        "Use partner support or ops escalation when fulfillment context needs intervention beyond tenant-safe commands.",
+        "若履約脈絡需要超出租戶安全指令的介入，請聯繫夥伴支援或升級至營運處理。",
       financeAuthority:
-        "Billing visibility can remain tenant-readable even when partner-side fulfillment or sponsorship owns part of the downstream execution.",
+        "即使下游執行的一部分由夥伴履約或贊助承擔，租戶仍可能看得到相關計費資訊。",
     };
   }
 
   return {
     domain: "owned",
     tone: "owned",
-    badge: "DRTS operated",
-    summary: "DRTS dispatch and fulfillment",
-    detail:
-      "This booking stays on the DRTS-operated dispatch path for routing, execution, and customer updates.",
+    badge: "DRTS 自營",
+    summary: "DRTS 派遣與履約",
+    detail: "這筆訂單全程走 DRTS 自營的派遣路徑，涵蓋路由、執行與客戶更新。",
     statusBoundary:
-      "Tenant routes and DRTS operations share the same owned booking lifecycle, so published status changes can be acted on through tenant-safe commands when policy allows.",
+      "租戶頁面與 DRTS 營運共用同一套自營訂單生命週期，因此在政策允許下，可直接透過租戶安全指令處理已發布的狀態變更。",
     escalationHint:
-      "Escalate only when the owned dispatch workflow itself needs manual intervention or policy override.",
+      "只有在自營派遣流程本身需要人工介入或政策覆寫時，才需要進一步升級處理。",
     financeAuthority:
-      "DRTS remains the local pricing, dispatch, and settlement authority for this booking unless a later finance artifact says otherwise.",
+      "除非後續財務憑證另有說明，否則 DRTS 仍是這筆訂單的定價、派遣與結算權責方。",
   };
 }
 
@@ -98,16 +97,15 @@ export function getInvoiceLineSourceVisibility(
     return {
       domain: "forwarded_authority",
       tone: "external",
-      badge: "External finance authority",
-      summary: "External platform settlement owner",
+      badge: "外部財務權限",
+      summary: "外部平台結算權責",
       detail:
-        "Settlement, receipt ownership, and driver payout stay with the external platform. DRTS only mirrors audit-safe finance context locally.",
+        "結算、收據歸屬與司機撥款仍由外部平台負責。DRTS 只會在本地鏡射可供稽核的財務脈絡。",
       statusBoundary:
-        "Invoice visibility can remain tenant-safe while external-platform reconciliation states stay on ops and finance operations surfaces.",
+        "發票仍可在租戶端安全顯示，但外部平台的對帳狀態會保留在營運與財務作業畫面。",
       escalationHint:
-        "Use ops or finance reconciliation lanes when a mirrored settlement row looks stale, missing, or disputed.",
-      financeAuthority:
-        "External platform settlement, payout, and receipt issuance remain authoritative for this line.",
+        "若鏡射進來的結算資料看起來過舊、缺漏或有爭議，請改走營運或財務對帳流程。",
+      financeAuthority: "這筆明細的結算、撥款與收據開立仍以外部平台為準。",
     };
   }
 
@@ -115,32 +113,29 @@ export function getInvoiceLineSourceVisibility(
     return {
       domain: "partner_external",
       tone: "external",
-      badge: "Externally fulfilled",
-      summary: "Partner-sponsored fulfillment path",
+      badge: "外部履約",
+      summary: "夥伴贊助履約路徑",
       detail:
-        "This line carries partner-program provenance. Tenant billing stays visible here while partner-side sponsorship and fulfillment context remains distinct from DRTS-operated trips.",
+        "這筆明細帶有夥伴方案來源。租戶仍可在此查看計費，但夥伴側的贊助與履約脈絡會與 DRTS 自營行程分開呈現。",
       statusBoundary:
-        "Tenant billing keeps the business artifact visible, while partner-side fulfillment and sponsorship state remain outside this route.",
-      escalationHint:
-        "Use partner support or ops escalation when the sponsorship or fulfillment side needs intervention.",
+        "租戶計費會保留這筆業務憑證，但夥伴端的履約與贊助狀態不會直接出現在這個路由。",
+      escalationHint: "若贊助或履約側需要介入，請改由夥伴支援或營運升級處理。",
       financeAuthority:
-        "Tenant billing remains readable, but downstream sponsor or partner obligations can still sit outside DRTS-owned execution.",
+        "租戶仍可閱讀這筆計費，但下游的贊助或夥伴責任仍可能落在 DRTS 自營流程之外。",
     };
   }
 
   return {
     domain: "owned",
     tone: "owned",
-    badge: "DRTS finance authority",
-    summary: "Platform-operated billing",
-    detail:
-      "DRTS remains the local billing and settlement authority for this line item.",
+    badge: "DRTS 財務權限",
+    summary: "平台自營計費",
+    detail: "DRTS 仍是這筆明細的本地計費與結算權責方。",
     statusBoundary:
-      "Owned billing artifacts stay within the same tenant-visible lifecycle and do not depend on external-platform reconciliation.",
+      "自營計費憑證會保留在同一套租戶可見生命週期內，不依賴外部平台對帳。",
     escalationHint:
-      "Escalate only when the owned DRTS billing or settlement workflow itself needs manual intervention.",
-    financeAuthority:
-      "DRTS remains the authoritative billing, settlement, and payout lane for this line item.",
+      "只有在 DRTS 自營的計費或結算流程本身需要人工介入時，才需要進一步升級處理。",
+    financeAuthority: "DRTS 仍是這筆明細的計費、結算與撥款權責方。",
   };
 }
 
@@ -165,21 +160,21 @@ export function summarizeInvoiceSourceDomains(
 
   if (counts.externalFinanceAuthority > 0) {
     return {
-      badge: "External finance authority present",
-      detail: `${counts.externalFinanceAuthority} line(s) remain under external-platform settlement ownership.`,
+      badge: "存在外部財務權限",
+      detail: `${counts.externalFinanceAuthority} 筆明細仍由外部平台負責結算。`,
     };
   }
 
   if (counts.external > 0) {
     return {
-      badge: "Mixed source domain",
-      detail: `${counts.owned} DRTS-operated line(s), ${counts.external} externally fulfilled line(s).`,
+      badge: "混合來源領域",
+      detail: `${counts.owned} 筆 DRTS 自營明細，${counts.external} 筆外部履約明細。`,
     };
   }
 
   return {
-    badge: "DRTS operated only",
-    detail: `${counts.owned} DRTS-operated line(s).`,
+    badge: "僅 DRTS 自營",
+    detail: `${counts.owned} 筆 DRTS 自營明細。`,
   };
 }
 
@@ -190,32 +185,31 @@ export function getReportJobSourceSummary(
     return {
       domain: "forwarded_authority",
       tone: "external",
-      badge: "Owned + external finance",
-      summary: "Cross-domain revenue reporting",
+      badge: "自營 + 外部財務",
+      summary: "跨領域營收報表",
       detail:
-        "Revenue summary reports combine DRTS-operated rows with externally fulfilled or externally settled rows when they are part of the tenant-visible finance picture.",
+        "營收摘要報表會在租戶可見的財務脈絡內，同時彙整 DRTS 自營與外部履約／外部結算的資料列。",
       statusBoundary:
-        "The report can surface cross-domain totals without exposing platform-native reconciliation state directly to tenant users.",
+        "報表可以呈現跨領域合計，但不會把平台原生的對帳狀態直接暴露給租戶使用者。",
       escalationHint:
-        "Disputed external-finance rows still require ops or finance reconciliation outside the report route.",
+        "若外部財務資料列有爭議，仍需在報表路由之外改走營運或財務對帳流程。",
       financeAuthority:
-        "Revenue reporting can include external-finance context even though the authoritative settlement lane remains external for forwarded rows.",
+        "營收報表可以納入外部財務脈絡，但對於轉送資料列，真正的結算權責仍在外部。",
     };
   }
 
   return {
     domain: "owned",
     tone: "owned",
-    badge: "DRTS operated",
-    summary: "Owned dispatch reporting",
+    badge: "DRTS 自營",
+    summary: "自營派遣報表",
     detail:
-      "This report tracks DRTS-operated dispatch and service records rather than low-level external adapter behavior.",
+      "這份報表追蹤的是 DRTS 自營的派遣與服務紀錄，而不是低階外部介接行為。",
     statusBoundary:
-      "Owned dispatch reports stay within tenant-readable DRTS business reporting and do not require external-platform lifecycle projection.",
+      "自營派遣報表會維持在租戶可讀的 DRTS 業務報表範圍內，不需要外部平台生命週期投影。",
     escalationHint:
-      "Escalate only when the owned reporting pipeline itself looks stale or incomplete.",
-    financeAuthority:
-      "DRTS remains the authoritative reporting and settlement lane for owned report rows.",
+      "只有在自營報表管線本身看起來過舊或不完整時，才需要進一步升級處理。",
+    financeAuthority: "DRTS 仍是自營報表資料列的報表與結算權責方。",
   };
 }
 

@@ -7,9 +7,16 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
+import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type {
   DriverFeePlanRecord,
   PlatformPricingRuleRecord,
@@ -74,6 +81,10 @@ const PRICING_TAB_VALUES = new Set<TabId>([
   "subsidy",
   "history",
 ]);
+
+function isTabId(value: string | null): value is TabId {
+  return value !== null && PRICING_TAB_VALUES.has(value as TabId);
+}
 
 const theme = buildCanvasTheme({
   surface: "platform",
@@ -331,8 +342,8 @@ const FALLBACK_SUBSIDY_ROWS: SubsidyRow[] = [
     version: "sb_v04",
     name: "輪椅服務補助",
     status: "published",
-    trigger: "service=wheelchair",
-    amount: "NT$ 180 / trip",
+    trigger: "輪椅服務",
+    amount: "NT$ 180 / 每趟",
     scope: "wheelchair",
     from: "2026-01-01",
     to: "open",
@@ -341,8 +352,8 @@ const FALLBACK_SUBSIDY_ROWS: SubsidyRow[] = [
     version: "sb_v05",
     name: "夜間機場接送補助",
     status: "published",
-    trigger: "service=airport && hour∈[22,5]",
-    amount: "12% fare top-up",
+    trigger: "機場接送且時段介於 22:00 至 05:59",
+    amount: "車資加成 12%",
     scope: "airport_transfer",
     from: "2026-04-01",
     to: "2026-06-30",
@@ -356,32 +367,28 @@ const SERVICE_BUCKET_META: Record<
   standard_taxi: {
     label: "standard",
     base: "NT$ 85 / 起",
-    continuation: "NT$ 5 / 250m",
-    fee: "1800 bps",
+    continuation: "NT$ 5 / 250 公尺",
+    fee: "1800 基點",
   },
   business_dispatch: {
     label: "business",
     base: "NT$ 120 / 起",
-    continuation: "NT$ 6 / 200m",
-    fee: "2200 bps",
+    continuation: "NT$ 6 / 200 公尺",
+    fee: "2200 基點",
   },
   airport_transfer: {
     label: "airport",
     base: "NT$ 180 / 起",
-    continuation: "flat by zone",
-    fee: "2500 bps",
+    continuation: "依區域固定",
+    fee: "2500 基點",
   },
   wheelchair: {
     label: "wheelchair",
     base: "NT$ 95 / 起",
-    continuation: "NT$ 5 / 250m",
-    fee: "900 bps · subsidy",
+    continuation: "NT$ 5 / 250 公尺",
+    fee: "900 基點 · 補助",
   },
 };
-
-function formatRange(from: string, to: string | null) {
-  return `${from || "—"} → ${to || "open"}`;
-}
 
 function pricingStatusLabel(
   status: PlatformPricingRuleRecord["status"],
@@ -406,10 +413,7 @@ function buildPricingRows(rules: PlatformPricingRuleRecord[]): PricingRow[] {
     ...rule,
     from: rule.effectiveFrom,
     to: rule.effectiveTo ?? "open",
-    reimburse:
-      rule.reimbursementMode === "mixed"
-        ? "manual + platform"
-        : "platform only",
+    reimburse: rule.reimbursementMode,
     scope: rule.applicableTo,
   }));
 }
@@ -464,8 +468,24 @@ function buildHistoryRows(
   ].sort((left, right) => right.publishedAt.localeCompare(left.publishedAt));
 }
 
+function reimbursementModeLabel(locale: "en" | "zh", mode: string) {
+  if (mode === "mixed") {
+    return locale === "en" ? "Manual + Platform" : "人工 + 平台";
+  }
+  if (mode === "platform_funded") {
+    return locale === "en" ? "Platform Only" : "僅平台";
+  }
+  return formatPlatformCodeLabel(locale, mode);
+}
+
+function booleanLabel(locale: "en" | "zh", value: boolean) {
+  return locale === "en" ? (value ? "Yes" : "No") : value ? "是" : "否";
+}
+
 function ReasonModal({
   selectedDraft,
+  copy,
+  rangeLabel,
   reason,
   onReasonChange,
   windowFrom,
@@ -479,6 +499,20 @@ function ReasonModal({
   onSubmit,
 }: {
   selectedDraft: PlatformPricingRuleRecord | null;
+  copy: {
+    modalTitle: string;
+    modalSubtitle: string;
+    conflictCheckTitle: string;
+    effectiveFromLabel: string;
+    effectiveToLabel: string;
+    reasonLabel: string;
+    reasonPlaceholder: string;
+    publishErrorTitle: string;
+    cancel: string;
+    confirmPublish: string;
+    publishing: string;
+  };
+  rangeLabel: string;
   reason: string;
   onReasonChange: (value: string) => void;
   windowFrom: string;
@@ -500,12 +534,9 @@ function ReasonModal({
       <form style={modalCardStyle} onSubmit={onSubmit}>
         <div style={{ display: "grid", gap: 6 }}>
           <h2 style={{ margin: 0, fontSize: 18, color: theme.text }}>
-            發佈版本
+            {copy.modalTitle}
           </h2>
-          <p style={helperStyle}>
-            high-risk action 需要填寫原因，並在 audit receipt 中保留
-            actor、reason 與 trace evidence。
-          </p>
+          <p style={helperStyle}>{copy.modalSubtitle}</p>
         </div>
 
         <CanvasBanner
@@ -513,10 +544,7 @@ function ReasonModal({
           tone="warn"
           icon="warn"
           title={selectedDraft.version}
-          body={`${selectedDraft.ruleName} · ${formatRange(
-            selectedDraft.effectiveFrom,
-            selectedDraft.effectiveTo,
-          )}`}
+          body={`${selectedDraft.ruleName} · ${rangeLabel}`}
         />
 
         {conflictWarning ? (
@@ -524,13 +552,13 @@ function ReasonModal({
             theme={theme}
             tone="warn"
             icon="warn"
-            title="scope conflict check"
+            title={copy.conflictCheckTitle}
             body={conflictWarning}
           />
         ) : null}
 
         <div style={fieldGridStyle}>
-          <CanvasField theme={theme} label="生效開始" required>
+          <CanvasField theme={theme} label={copy.effectiveFromLabel} required>
             <input
               type="datetime-local"
               value={windowFrom}
@@ -539,7 +567,7 @@ function ReasonModal({
               required
             />
           </CanvasField>
-          <CanvasField theme={theme} label="生效結束">
+          <CanvasField theme={theme} label={copy.effectiveToLabel}>
             <input
               type="datetime-local"
               value={windowTo}
@@ -549,12 +577,12 @@ function ReasonModal({
           </CanvasField>
         </div>
 
-        <CanvasField theme={theme} label="高風險原因" required>
+        <CanvasField theme={theme} label={copy.reasonLabel} required>
           <textarea
             value={reason}
             onChange={(event) => onReasonChange(event.target.value)}
             style={textareaStyle}
-            placeholder="請描述 pricing publish 的治理原因、影響範圍與核准依據。"
+            placeholder={copy.reasonPlaceholder}
             required
           />
         </CanvasField>
@@ -564,14 +592,14 @@ function ReasonModal({
             theme={theme}
             tone="danger"
             icon="warn"
-            title="無法發佈草稿"
+            title={copy.publishErrorTitle}
             body={error}
           />
         ) : null}
 
         <div style={buttonRowStyle}>
           <CanvasBtn theme={theme} onClick={onClose} disabled={publishing}>
-            取消
+            {copy.cancel}
           </CanvasBtn>
           <button
             type="submit"
@@ -596,7 +624,7 @@ function ReasonModal({
               fontFamily: theme.fontFamily,
             }}
           >
-            {publishing ? "發佈中…" : "確認發佈"}
+            {publishing ? copy.publishing : copy.confirmPublish}
           </button>
         </div>
       </form>
@@ -607,12 +635,14 @@ function ReasonModal({
 export default function PricingPage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rules, setRules] = useState<PlatformPricingRuleRecord[]>([]);
   const [plans, setPlans] = useState<DriverFeePlanRecord[]>([]);
   const [catalog, setCatalog] = useState<ProductRuleCatalog | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("passenger");
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   const [publishReason, setPublishReason] = useState("");
@@ -629,25 +659,253 @@ export default function PricingPage() {
     "all" | "90d" | "30d"
   >("all");
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tab = params.get("tab");
-    if (
-      tab === "passenger" ||
-      tab === "driver" ||
-      tab === "subsidy" ||
-      tab === "history"
-    ) {
-      setActiveTab(tab);
-    }
-  }, []);
+  const tabParam = searchParams.get("tab");
+  const activeTab: TabId = isTabId(tabParam) ? tabParam : "passenger";
+  const openEndedLabel = locale === "en" ? "open" : "持續生效";
+  const formatDisplayRange = (from: string, to: string | null) =>
+    `${from || "—"} → ${!to || to === "open" ? openEndedLabel : to}`;
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    params.set("tab", activeTab);
-    const next = `${window.location.pathname}?${params.toString()}`;
-    window.history.replaceState(null, "", next);
-  }, [activeTab]);
+  const copy =
+    locale === "en"
+      ? {
+          loadingWorkspace: "Loading pricing workspace…",
+          pageTitle: "Pricing",
+          pageSubtitle:
+            "draft → published → retired · publish atomically replaces the active version",
+          canonicalTitle: "Canonical quoted fare authority",
+          canonicalBody:
+            "The backend is the only source of pricing truth. Any manual override in the UI must go through override governance and retain actor type plus required evidence fields.",
+          loadErrorTitle: "Pricing workspace failed to load",
+          receiptTitle: "Audit receipt",
+          publishUnavailableTitle: `${activeTab === "driver" ? "Publish driver fee plan" : activeTab === "subsidy" ? "Publish subsidy rule" : "Publish"} is not wired yet`,
+          publishUnavailableBody:
+            "The high-risk publish modal and atomic replace flow are currently wired only for passenger pricing. Driver and subsidy keep the parity structure plus governance guidance for now.",
+          tabs: {
+            passenger: "Passenger Pricing",
+            driver: "Driver Fee Plans",
+            subsidy: "Subsidy / Reimbursement Rules",
+            history: "Published Versions",
+          } as Record<TabId, string>,
+          createDraftLabel:
+            activeTab === "passenger"
+              ? "Create passenger draft"
+              : activeTab === "driver"
+                ? "Create driver plan draft"
+                : activeTab === "subsidy"
+                  ? "Create subsidy draft"
+                  : "View version history",
+          publishButtonLabel:
+            activeTab === "driver"
+              ? "Publish driver fee plan"
+              : activeTab === "subsidy"
+                ? "Publish subsidy rule"
+                : "Publish",
+          passengerEmpty: "No passenger pricing versions yet.",
+          driverEmpty: "No driver fee plan versions yet.",
+          historyEmpty: "No version history matches the current filters.",
+          serviceBucketBreakdownTitle: (version: string) =>
+            `Service bucket fee breakdown · ${version}`,
+          bucketFallbackBase: "canonical backend rule",
+          bucketFallbackContinuation: "see pricing rule",
+          activeDraftComparisonTitle: "Active / Draft Comparison",
+          passengerComparisonSubtitle:
+            "Compare the canonical active version with the candidate draft before publish.",
+          activeLabel: "Active",
+          draftLabel: "Draft",
+          currentLabel: "current",
+          publishCandidateLabel: "publish candidate",
+          emptyLabel: "empty",
+          noActiveRule: "No active pricing rule.",
+          noDraftRule: "No pricing draft is waiting to be published.",
+          publishStepperTitle: "Publish Stepper",
+          publishStepperSubtitle:
+            "select draft → compare → capture reason → atomic replace",
+          conflictCheckTitle: "Scope conflict check",
+          stepSelectDraft: "1. Select draft",
+          stepCompare: "2. Compare active / draft",
+          stepReason: "3. High-risk reason",
+          stepReceipt: "4. Audit receipt",
+          stepNoDraft: "There is no draft available for publishing.",
+          stepNeedCompare:
+            "An active version and a draft are both required for comparison.",
+          stepOpenModal: "Open the modal and fill in the required reason.",
+          stepReceiptPending:
+            "A receipt summary will appear here after publish.",
+          overrideTitle: "Override Governance",
+          overrideSubtitle:
+            "Manual overrides are record-only governance and must not replace the canonical quoted fare authority.",
+          driverComparisonSubtitle:
+            "Driver settlement plans remain immutable after publish.",
+          publishedLabel: "Published",
+          draftQueueLabel: "Draft Queue",
+          noPublishedDriverPlan:
+            "There is no published driver fee plan right now.",
+          noDriverDraft:
+            "The backend currently returns only published fee plans; the draft comparison area is intentionally reserved.",
+          feeStructureTitle: "Per-trip Fee Structure",
+          feeStructureSubtitle: "Must-show fee structure + subsidy linkage.",
+          noFeeStructure: "No fee structure is available to display right now.",
+          subsidyLinkageTitle: "Subsidy / Reimbursement Linkage",
+          subsidyLinkageSubtitle:
+            "Subsidy rules and reimbursement queues are governed separately, but share the same quoted fare authority.",
+          overrideEvidenceSubtitle:
+            "Manual override actors and evidence obligations.",
+          historyFiltersTitle: "Published Version Filters",
+          historyFiltersSubtitle:
+            "Cross-tab history can be filtered by type, scope, and period.",
+          historyTitle: "All published versions · cross-tab history",
+          typeLabel: "Type",
+          scopeLabel: "Scope",
+          periodLabel: "Period",
+          last90d: "Last 90d",
+          last30d: "Last 30d",
+          receiptPublished: (version: string, reason: string) =>
+            `${version} published with reason "${reason}" at ${new Date().toISOString()}`,
+          publishNoDraftError:
+            "There is no draft pricing rule available for publishing.",
+          publishReasonTooShort:
+            "A high-risk reason must be at least 12 characters long.",
+          conflictManyDrafts: (count: number, scope: string) =>
+            `${count} drafts share scope ${scope}; confirm the intended winner before atomic replace.`,
+          conflictRetireActive: (
+            activeVersion: string,
+            nextVersion: string,
+            scope: string,
+          ) =>
+            `${activeVersion} will be retired for scope ${scope} when ${nextVersion} is published.`,
+          modal: {
+            modalTitle: "Publish version",
+            modalSubtitle:
+              "This high-risk action requires a reason and records actor, reason, and trace evidence in the audit receipt.",
+            conflictCheckTitle: "Scope conflict check",
+            effectiveFromLabel: "Effective from",
+            effectiveToLabel: "Effective to",
+            reasonLabel: "High-risk reason",
+            reasonPlaceholder:
+              "Describe the governance reason, impact radius, and approval basis for this pricing publish.",
+            publishErrorTitle: "Unable to publish draft",
+            cancel: "Cancel",
+            confirmPublish: "Confirm publish",
+            publishing: "Publishing…",
+          },
+        }
+      : {
+          loadingWorkspace: "載入定價工作面中…",
+          pageTitle: "定價治理",
+          pageSubtitle: "草稿 → 已發布 → 已退役 · 發布採原子替換",
+          canonicalTitle: "標準報價權威來源",
+          canonicalBody:
+            "後端是唯一的定價真值來源。前端任何人工覆寫都必須走覆寫治理，並保留操作者類型與必填證據欄位。",
+          loadErrorTitle: "定價工作面載入失敗",
+          receiptTitle: "稽核收據",
+          publishUnavailableTitle: `${activeTab === "driver" ? "發布司機費用方案" : activeTab === "subsidy" ? "發布補助規則" : "發布"}尚未接上變更端點`,
+          publishUnavailableBody:
+            "高風險發布視窗與原子替換流程目前只接在乘客定價；司機與補助頁先保留同構版面與治理提示。",
+          tabs: {
+            passenger: "乘客定價",
+            driver: "司機費用方案",
+            subsidy: "補助 / 代墊規則",
+            history: "已發布版本",
+          } as Record<TabId, string>,
+          createDraftLabel:
+            activeTab === "passenger"
+              ? "建立乘客定價草稿"
+              : activeTab === "driver"
+                ? "建立司機方案草稿"
+                : activeTab === "subsidy"
+                  ? "建立補助草稿"
+                  : "查看版本歷史",
+          publishButtonLabel:
+            activeTab === "driver"
+              ? "發布司機費用方案"
+              : activeTab === "subsidy"
+                ? "發布補助規則"
+                : "發布",
+          passengerEmpty: "目前沒有乘客定價版本。",
+          driverEmpty: "目前沒有司機費用方案版本。",
+          historyEmpty: "目前篩選條件下沒有可顯示的版本歷史。",
+          serviceBucketBreakdownTitle: (version: string) =>
+            `服務類別費用拆解 · ${version}`,
+          bucketFallbackBase: "以後端標準規則為準",
+          bucketFallbackContinuation: "請參考定價規則",
+          activeDraftComparisonTitle: "現行 / 草稿比對",
+          passengerComparisonSubtitle: "發布前比對標準現行版本與候選草稿版本。",
+          activeLabel: "現行",
+          draftLabel: "草稿",
+          currentLabel: "目前生效",
+          publishCandidateLabel: "發布候選",
+          emptyLabel: "空白",
+          noActiveRule: "目前沒有生效中的定價規則。",
+          noDraftRule: "目前沒有待發布的定價草稿。",
+          publishStepperTitle: "發布步驟",
+          publishStepperSubtitle: "選擇草稿 → 比對版本 → 填寫原因 → 原子替換",
+          conflictCheckTitle: "範圍衝突檢查",
+          stepSelectDraft: "1. 選擇草稿",
+          stepCompare: "2. 比對現行 / 草稿",
+          stepReason: "3. 高風險原因",
+          stepReceipt: "4. 稽核收據",
+          stepNoDraft: "目前沒有可發布的草稿。",
+          stepNeedCompare: "需要同時有現行版本與草稿版本才能比對。",
+          stepOpenModal: "開啟視窗並填寫必填原因。",
+          stepReceiptPending: "發布後會在這裡留下收據摘要。",
+          overrideTitle: "覆寫治理",
+          overrideSubtitle:
+            "人工覆寫僅能作為記錄式治理，不得覆蓋標準報價權威來源。",
+          driverComparisonSubtitle: "司機結算方案一旦發布後即保持不可變。",
+          publishedLabel: "已發布",
+          draftQueueLabel: "草稿佇列",
+          noPublishedDriverPlan: "目前沒有已發布的司機費用方案。",
+          noDriverDraft:
+            "目前後端只回傳已發布方案；草稿比對區刻意保留為治理空位。",
+          feeStructureTitle: "單趟費用結構",
+          feeStructureSubtitle: "必須呈現的費用結構與補助關聯。",
+          noFeeStructure: "目前沒有可展示的費用結構。",
+          subsidyLinkageTitle: "補助 / 代墊連動",
+          subsidyLinkageSubtitle:
+            "補助規則與代墊佇列各自治理，但共用同一條報價權威來源。",
+          overrideEvidenceSubtitle: "人工覆寫的操作者與證據義務。",
+          historyFiltersTitle: "已發布版本篩選",
+          historyFiltersSubtitle: "跨分頁歷史可依類型、範圍與期間篩選。",
+          historyTitle: "所有已發布版本 · 跨分頁歷史",
+          typeLabel: "類型",
+          scopeLabel: "範圍",
+          periodLabel: "期間",
+          last90d: "近 90 天",
+          last30d: "近 30 天",
+          receiptPublished: (version: string, reason: string) =>
+            `稽核收據：${version} 已於 ${new Date().toISOString()} 發布。原因：${reason}`,
+          publishNoDraftError: "沒有可發布的定價草稿規則。",
+          publishReasonTooShort: "高風險原因至少需要 12 個字。",
+          conflictManyDrafts: (count: number, scope: string) =>
+            `${count} 份草稿共用範圍 ${scope}；發布前請先確認真正要勝出的版本。`,
+          conflictRetireActive: (
+            activeVersion: string,
+            nextVersion: string,
+            scope: string,
+          ) =>
+            `${activeVersion} 會在 ${nextVersion} 發布後於範圍 ${scope} 退役。`,
+          modal: {
+            modalTitle: "發布版本",
+            modalSubtitle:
+              "這是高風險操作，必須填寫原因，並在稽核收據中保留操作者、原因與追蹤證據。",
+            conflictCheckTitle: "範圍衝突檢查",
+            effectiveFromLabel: "生效開始",
+            effectiveToLabel: "生效結束",
+            reasonLabel: "高風險原因",
+            reasonPlaceholder:
+              "請描述這次定價發布的治理原因、影響範圍與核准依據。",
+            publishErrorTitle: "無法發布草稿",
+            cancel: "取消",
+            confirmPublish: "確認發布",
+            publishing: "發布中…",
+          },
+        };
+
+  function handleTabChange(nextTab: TabId) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", nextTab);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }
 
   useEffect(() => {
     async function load() {
@@ -664,7 +922,13 @@ export default function PricingPage() {
         setCatalog(productCatalog);
       } catch (loadError) {
         setError(
-          loadError instanceof Error ? loadError.message : String(loadError),
+          formatPlatformUiError(
+            locale,
+            toPlatformErrorMessage(loadError),
+            locale === "en"
+              ? "Unable to load pricing workspace"
+              : "無法載入費率治理工作區",
+          ),
         );
       } finally {
         setLoading(false);
@@ -672,7 +936,7 @@ export default function PricingPage() {
     }
 
     void load();
-  }, [client]);
+  }, [client, locale]);
 
   const pricingRows = useMemo(() => buildPricingRows(rules), [rules]);
   const feePlanRows = useMemo(() => buildFeePlanRows(plans), [plans]);
@@ -686,7 +950,16 @@ export default function PricingPage() {
     rules.find((rule) => rule.status === "active") ??
     rules.find((rule) => rule.status !== "archived") ??
     null;
-  const draftRules = rules.filter((rule) => rule.status === "draft");
+  // Memoized so the reference is stable across renders: `draftRules` is a
+  // dependency of the `assistantBridge` useMemo below, and deriving it inline
+  // produced a fresh array every render, which recreated the bridge and made
+  // usePlatformAdminAssistantPage call setPageBridge on every render. Sibling
+  // pages (tenants, switchboard) register their bridge with a [] dependency;
+  // this keeps pricing consistent and avoids the wasted re-registration churn.
+  const draftRules = useMemo(
+    () => rules.filter((rule) => rule.status === "draft"),
+    [rules],
+  );
   const selectedDraft =
     draftRules.find((rule) => rule.ruleId === selectedDraftId) ??
     draftRules[0] ??
@@ -726,26 +999,19 @@ export default function PricingPage() {
   );
   const publishConflictBody =
     conflictingDrafts.length > 1
-      ? `${conflictingDrafts.length} drafts share scope ${selectedDraft?.applicableTo ?? "—"}; publish should confirm the intended winner before atomic replace.`
+      ? copy.conflictManyDrafts(
+          conflictingDrafts.length,
+          selectedDraft?.applicableTo ?? "—",
+        )
       : activeRule &&
           selectedDraft &&
           activeRule.applicableTo === selectedDraft.applicableTo
-        ? `${activeRule.version} will be retired for scope ${selectedDraft.applicableTo} when ${selectedDraft.version} publishes.`
+        ? copy.conflictRetireActive(
+            activeRule.version,
+            selectedDraft.version,
+            selectedDraft.applicableTo,
+          )
         : null;
-  const createDraftLabel =
-    activeTab === "passenger"
-      ? "建立 passenger 草稿"
-      : activeTab === "driver"
-        ? "建立 driver plan 草稿"
-        : activeTab === "subsidy"
-          ? "建立 subsidy 草稿"
-          : "檢視版本歷史";
-  const publishButtonLabel =
-    activeTab === "driver"
-      ? "發佈 driver fee plan"
-      : activeTab === "subsidy"
-        ? "發佈 subsidy rule"
-        : "發佈";
   const publishSupported = activeTab === "passenger";
 
   useEffect(() => {
@@ -774,7 +1040,7 @@ export default function PricingPage() {
                   "Pricing tab filter accepts only passenger, driver, subsidy, or history.",
               } as const;
             }
-            setActiveTab(value as TabId);
+            handleTabChange(value as TabId);
             return {
               ok: true,
               code: "filter_applied",
@@ -831,57 +1097,101 @@ export default function PricingPage() {
   usePlatformAdminAssistantPage(assistantBridge);
 
   const passengerColumns: CanvasTableColumn<PricingRow>[] = [
-    { h: "VERSION", k: "version", mono: true, w: 108 },
-    { h: "名稱", k: "ruleName", w: 220 },
     {
-      h: "STATUS",
+      h: locale === "en" ? "Version" : "版本",
+      k: "version",
+      mono: true,
+      w: 108,
+    },
+    { h: locale === "en" ? "Name" : "名稱", k: "ruleName", w: 220 },
+    {
+      h: locale === "en" ? "Status" : "狀態",
       w: 108,
       r: (row) => (
         <CanvasPill theme={theme} tone={ruleTone(row.status)} dot>
-          {pricingStatusLabel(row.status)}
+          {formatPlatformCodeLabel(locale, pricingStatusLabel(row.status))}
         </CanvasPill>
       ),
     },
-    { h: "SERVICE FEE bps", k: "serviceFeeBps", mono: true, align: "right" },
-    { h: "REIMBURSE", k: "reimburse", mono: true, w: 180 },
-    { h: "SCOPE", k: "scope", mono: true, w: 180 },
     {
-      h: "EFFECTIVE",
+      h: locale === "en" ? "Service Fee (bps)" : "服務費（基點）",
+      k: "serviceFeeBps",
+      mono: true,
+      align: "right",
+    },
+    {
+      h: locale === "en" ? "Reimbursement" : "補助模式",
+      mono: true,
+      w: 180,
+      r: (row) => reimbursementModeLabel(locale, row.reimburse),
+    },
+    {
+      h: locale === "en" ? "Scope" : "範圍",
+      mono: true,
+      w: 180,
+      r: (row) => formatPlatformCodeLabel(locale, row.scope),
+    },
+    {
+      h: locale === "en" ? "Effective" : "生效期間",
       w: 210,
       r: (row) => (
-        <span style={monoTextStyle}>{formatRange(row.from, row.to)}</span>
+        <span style={monoTextStyle}>
+          {formatDisplayRange(row.from, row.to)}
+        </span>
       ),
     },
   ];
 
   const driverColumns: CanvasTableColumn<FeePlanRow>[] = [
-    { h: "VERSION", k: "version", mono: true, w: 108 },
-    { h: "名稱", k: "planName", w: 240 },
     {
-      h: "STATUS",
+      h: locale === "en" ? "Version" : "版本",
+      k: "version",
+      mono: true,
+      w: 108,
+    },
+    { h: locale === "en" ? "Name" : "名稱", k: "planName", w: 240 },
+    {
+      h: locale === "en" ? "Status" : "狀態",
       w: 108,
       r: () => (
         <CanvasPill theme={theme} tone="success" dot>
-          published
+          {formatPlatformCodeLabel(locale, "published")}
         </CanvasPill>
       ),
     },
-    { h: "SCOPE", k: "scope", mono: true, w: 160 },
-    { h: "SERVICE FEE bps", k: "serviceFeeBps", mono: true, align: "right" },
     {
-      h: "EFFECTIVE",
+      h: locale === "en" ? "Scope" : "範圍",
+      mono: true,
+      w: 160,
+      r: (row) => formatPlatformCodeLabel(locale, row.scope),
+    },
+    {
+      h: locale === "en" ? "Service Fee (bps)" : "服務費（基點）",
+      k: "serviceFeeBps",
+      mono: true,
+      align: "right",
+    },
+    {
+      h: locale === "en" ? "Effective" : "生效期間",
       w: 210,
       r: (row) => (
-        <span style={monoTextStyle}>{formatRange(row.from, row.to)}</span>
+        <span style={monoTextStyle}>
+          {formatDisplayRange(row.from, row.to)}
+        </span>
       ),
     },
   ];
 
   const subsidyColumns: CanvasTableColumn<SubsidyRow>[] = [
-    { h: "VERSION", k: "version", mono: true, w: 108 },
-    { h: "名稱", k: "name", w: 220 },
     {
-      h: "STATUS",
+      h: locale === "en" ? "Version" : "版本",
+      k: "version",
+      mono: true,
+      w: 108,
+    },
+    { h: locale === "en" ? "Name" : "名稱", k: "name", w: 220 },
+    {
+      h: locale === "en" ? "Status" : "狀態",
       w: 108,
       r: (row) => (
         <CanvasPill
@@ -889,39 +1199,75 @@ export default function PricingPage() {
           tone={row.status === "published" ? "success" : "warn"}
           dot
         >
-          {row.status}
+          {formatPlatformCodeLabel(locale, row.status)}
         </CanvasPill>
       ),
     },
-    { h: "TRIGGER", k: "trigger", mono: true, w: 300 },
-    { h: "AMOUNT / PCT", k: "amount", mono: true, w: 160 },
-    { h: "SCOPE", k: "scope", mono: true, w: 140 },
     {
-      h: "EFFECTIVE",
+      h: locale === "en" ? "Trigger" : "觸發條件",
+      k: "trigger",
+      mono: true,
+      w: 300,
+    },
+    {
+      h: locale === "en" ? "Amount / Pct" : "金額 / 比例",
+      k: "amount",
+      mono: true,
+      w: 160,
+    },
+    {
+      h: locale === "en" ? "Scope" : "範圍",
+      mono: true,
+      w: 140,
+      r: (row) => formatPlatformCodeLabel(locale, row.scope),
+    },
+    {
+      h: locale === "en" ? "Effective" : "生效期間",
       w: 210,
       r: (row) => (
-        <span style={monoTextStyle}>{formatRange(row.from, row.to)}</span>
+        <span style={monoTextStyle}>
+          {formatDisplayRange(row.from, row.to)}
+        </span>
       ),
     },
   ];
 
   const historyColumns: CanvasTableColumn<HistoryRow>[] = [
-    { h: "VERSION", k: "version", mono: true, w: 108 },
-    { h: "TYPE", k: "type", mono: true, w: 132 },
-    { h: "SCOPE", k: "scope", mono: true, w: 132 },
-    { h: "NAME", k: "name", w: 240 },
     {
-      h: "PUBLISHED AT",
+      h: locale === "en" ? "Version" : "版本",
+      k: "version",
+      mono: true,
+      w: 108,
+    },
+    {
+      h: locale === "en" ? "Type" : "類型",
+      mono: true,
+      w: 132,
+      r: (row) => formatPlatformCodeLabel(locale, row.type),
+    },
+    {
+      h: locale === "en" ? "Scope" : "範圍",
+      mono: true,
+      w: 132,
+      r: (row) => formatPlatformCodeLabel(locale, row.scope),
+    },
+    { h: locale === "en" ? "Name" : "名稱", k: "name", w: 240 },
+    {
+      h: locale === "en" ? "Published At" : "發布時間",
       w: 170,
       r: (row) => <span style={monoTextStyle}>{row.publishedAt}</span>,
     },
-    { h: "PUBLISHED BY", k: "publishedBy", w: 180 },
     {
-      h: "STATUS",
+      h: locale === "en" ? "Published By" : "發布者",
+      w: 180,
+      r: (row) => formatPlatformCodeLabel(locale, row.publishedBy),
+    },
+    {
+      h: locale === "en" ? "Status" : "狀態",
       w: 108,
       r: (row) => (
         <CanvasPill theme={theme} tone={historyTone(row.status)} dot>
-          {row.status}
+          {formatPlatformCodeLabel(locale, row.status)}
         </CanvasPill>
       ),
     },
@@ -931,11 +1277,11 @@ export default function PricingPage() {
     event.preventDefault();
 
     if (!selectedDraft) {
-      setPublishError("沒有可發佈的 draft pricing rule。");
+      setPublishError(copy.publishNoDraftError);
       return;
     }
     if (publishReason.trim().length < 12) {
-      setPublishError("高風險原因至少需要 12 個字。");
+      setPublishError(copy.publishReasonTooShort);
       return;
     }
 
@@ -960,14 +1306,16 @@ export default function PricingPage() {
       setCatalog(nextCatalog);
       setPublishModalOpen(false);
       setPublishReceipt(
-        `${selectedDraft.version} published with reason "${publishReason.trim()}" at ${new Date().toISOString()}`,
+        copy.receiptPublished(selectedDraft.version, publishReason.trim()),
       );
       setPublishReason("");
     } catch (publishFailure) {
       setPublishError(
-        publishFailure instanceof Error
-          ? publishFailure.message
-          : String(publishFailure),
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(publishFailure),
+          copy.modal.publishErrorTitle,
+        ),
       );
     } finally {
       setPublishing(false);
@@ -975,25 +1323,27 @@ export default function PricingPage() {
   }
 
   if (loading) {
-    return <div style={loadingStyle}>Loading pricing workspace…</div>;
+    return <div style={loadingStyle}>{copy.loadingWorkspace}</div>;
   }
 
   return (
     <>
       <CanvasPageHeader
         theme={theme}
-        title="Pricing"
-        subtitle="draft → published → retired · 發佈為 atomic replace (Q-ADM10)"
+        title={copy.pageTitle}
+        subtitle={copy.pageSubtitle}
         actions={
           <>
             <CanvasBtn
               theme={theme}
               icon="plus"
               onClick={() =>
-                setActiveTab(activeTab === "history" ? "passenger" : activeTab)
+                handleTabChange(
+                  activeTab === "history" ? "passenger" : activeTab,
+                )
               }
             >
-              {createDraftLabel}
+              {copy.createDraftLabel}
             </CanvasBtn>
             <CanvasBtn
               theme={theme}
@@ -1008,7 +1358,7 @@ export default function PricingPage() {
                 setPublishError(null);
               }}
             >
-              {publishButtonLabel}
+              {copy.publishButtonLabel}
             </CanvasBtn>
           </>
         }
@@ -1019,8 +1369,8 @@ export default function PricingPage() {
           theme={theme}
           tone="info"
           icon="info"
-          title="canonical quoted fare authority"
-          body="後端為唯一計價真值；前端任何 manual override 必須走 override governance 並保留 actor type 與必填欄位。"
+          title={copy.canonicalTitle}
+          body={copy.canonicalBody}
         />
 
         {error ? (
@@ -1028,7 +1378,7 @@ export default function PricingPage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title="pricing workspace 載入失敗"
+            title={copy.loadErrorTitle}
             body={error}
           />
         ) : null}
@@ -1038,7 +1388,7 @@ export default function PricingPage() {
             theme={theme}
             tone="success"
             icon="check"
-            title="audit receipt"
+            title={copy.receiptTitle}
             body={publishReceipt}
           />
         ) : null}
@@ -1048,26 +1398,33 @@ export default function PricingPage() {
             theme={theme}
             tone="warn"
             icon="warn"
-            title={`${publishButtonLabel} 尚未接上 mutation`}
-            body="目前高風險 publish modal 與 atomic replace 流程只接在 passenger pricing；driver / subsidy 先保留 parity 結構與治理提示。"
+            title={copy.publishUnavailableTitle}
+            body={copy.publishUnavailableBody}
           />
         ) : null}
 
         <div style={tabRowStyle}>
           {[
-            { id: "passenger" as const, label: "Passenger Pricing" },
-            { id: "driver" as const, label: "Driver Fee Plans" },
-            { id: "subsidy" as const, label: "Subsidy / Reimbursement Rules" },
-            { id: "history" as const, label: "Published Versions" },
+            { id: "passenger" as const, label: copy.tabs.passenger },
+            { id: "driver" as const, label: copy.tabs.driver },
+            { id: "subsidy" as const, label: copy.tabs.subsidy },
+            { id: "history" as const, label: copy.tabs.history },
           ].map((tab) => (
-            <button
+            <Link
               key={tab.id}
-              type="button"
-              style={tabButtonStyle(activeTab === tab.id)}
-              onClick={() => setActiveTab(tab.id)}
+              href={`${pathname}?tab=${tab.id}`}
+              replace
+              scroll={false}
+              prefetch={false}
+              style={{
+                ...tabButtonStyle(activeTab === tab.id),
+                textDecoration: "none",
+                display: "inline-flex",
+                alignItems: "center",
+              }}
             >
               {tab.label}
-            </button>
+            </Link>
           ))}
         </div>
 
@@ -1076,9 +1433,7 @@ export default function PricingPage() {
             <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
               <CanvasCard theme={theme} padding={0}>
                 {pricingRows.length === 0 ? (
-                  <div style={emptyStateStyle}>
-                    目前沒有 passenger pricing 版本。
-                  </div>
+                  <div style={emptyStateStyle}>{copy.passengerEmpty}</div>
                 ) : (
                   <CanvasTable<PricingRow>
                     theme={theme}
@@ -1090,21 +1445,24 @@ export default function PricingPage() {
 
               <CanvasCard
                 theme={theme}
-                title={`服務 bucket fee 拆解 · ${
+                title={copy.serviceBucketBreakdownTitle(
                   activeRule?.version ??
-                  catalog?.pricingAuthority.canonicalPricingRuleVersion ??
-                  "pr_v23"
-                }`}
+                    catalog?.pricingAuthority.canonicalPricingRuleVersion ??
+                    "pr_v23",
+                )}
               >
                 <div style={bucketGridStyle}>
                   {(catalog?.phase1ServiceBuckets ?? [])
                     .slice(0, 4)
                     .map((bucket: string) => {
                       const meta = SERVICE_BUCKET_META[bucket] ?? {
-                        label: bucket,
-                        base: "canonical backend rule",
-                        continuation: "see pricing rule",
-                        fee: `${activeRule?.serviceFeeBps ?? 1800} bps`,
+                        label: formatPlatformCodeLabel(locale, bucket),
+                        base: copy.bucketFallbackBase,
+                        continuation: copy.bucketFallbackContinuation,
+                        fee:
+                          locale === "en"
+                            ? `${activeRule?.serviceFeeBps ?? 1800} bps`
+                            : `${activeRule?.serviceFeeBps ?? 1800} 基點`,
                       };
 
                       return (
@@ -1120,7 +1478,9 @@ export default function PricingPage() {
                                 fontFamily: theme.monoFamily,
                               }}
                             >
-                              {meta.label}
+                              {locale === "en"
+                                ? meta.label
+                                : formatPlatformCodeLabel(locale, bucket)}
                             </div>
                             <div style={helperStyle}>
                               {meta.base}
@@ -1146,26 +1506,29 @@ export default function PricingPage() {
                         {
                           key: "standard",
                           base: "NT$ 85 / 起",
-                          cont: "NT$ 5 / 250m",
-                          fee: "1800 bps",
+                          cont: "NT$ 5 / 250 公尺",
+                          fee: locale === "en" ? "1800 bps" : "1800 基點",
                         },
                         {
                           key: "business",
                           base: "NT$ 120 / 起",
-                          cont: "NT$ 6 / 200m",
-                          fee: "2200 bps",
+                          cont: "NT$ 6 / 200 公尺",
+                          fee: locale === "en" ? "2200 bps" : "2200 基點",
                         },
                         {
                           key: "airport",
                           base: "NT$ 180 / 起",
-                          cont: "flat by zone",
-                          fee: "2500 bps",
+                          cont: locale === "en" ? "flat by zone" : "依區域固定",
+                          fee: locale === "en" ? "2500 bps" : "2500 基點",
                         },
                         {
                           key: "wheelchair",
                           base: "NT$ 95 / 起",
-                          cont: "NT$ 5 / 250m",
-                          fee: "900 bps · subsidy",
+                          cont: "NT$ 5 / 250 公尺",
+                          fee:
+                            locale === "en"
+                              ? "900 bps · subsidy"
+                              : "900 基點 · 補助",
                         },
                       ].map((bucket) => (
                         <div
@@ -1179,7 +1542,7 @@ export default function PricingPage() {
                               fontFamily: theme.monoFamily,
                             }}
                           >
-                            {bucket.key}
+                            {formatPlatformCodeLabel(locale, bucket.key)}
                           </div>
                           <div style={helperStyle}>
                             {bucket.base}
@@ -1206,8 +1569,8 @@ export default function PricingPage() {
             <div style={{ display: "grid", gap: 16 }}>
               <CanvasCard
                 theme={theme}
-                title="Active / Draft comparison"
-                subtitle="version model · 發佈前比對 canonical active 與候選 draft"
+                title={copy.activeDraftComparisonTitle}
+                subtitle={copy.passengerComparisonSubtitle}
               >
                 <div style={comparisonGridStyle}>
                   <div style={comparisonPanelStyle("success")}>
@@ -1218,24 +1581,33 @@ export default function PricingPage() {
                         gap: 8,
                       }}
                     >
-                      <h3 style={sectionTitleStyle}>Active</h3>
+                      <h3 style={sectionTitleStyle}>{copy.activeLabel}</h3>
                       <CanvasPill theme={theme} tone="success" dot>
-                        current
+                        {copy.currentLabel}
                       </CanvasPill>
                     </div>
                     {activeRule ? (
                       <CanvasDL
                         theme={theme}
                         items={[
-                          { label: "VERSION", value: activeRule.version },
-                          { label: "NAME", value: activeRule.ruleName },
                           {
-                            label: "SERVICE FEE",
-                            value: `${activeRule.serviceFeeBps} bps`,
+                            label: locale === "en" ? "Version" : "版本",
+                            value: activeRule.version,
                           },
                           {
-                            label: "EFFECTIVE",
-                            value: formatRange(
+                            label: locale === "en" ? "Name" : "名稱",
+                            value: activeRule.ruleName,
+                          },
+                          {
+                            label: locale === "en" ? "Service Fee" : "服務費",
+                            value:
+                              locale === "en"
+                                ? `${activeRule.serviceFeeBps} bps`
+                                : `${activeRule.serviceFeeBps} 基點`,
+                          },
+                          {
+                            label: locale === "en" ? "Effective" : "生效期間",
+                            value: formatDisplayRange(
                               activeRule.effectiveFrom,
                               activeRule.effectiveTo,
                             ),
@@ -1243,7 +1615,7 @@ export default function PricingPage() {
                         ]}
                       />
                     ) : (
-                      <p style={helperStyle}>沒有 active pricing rule。</p>
+                      <p style={helperStyle}>{copy.noActiveRule}</p>
                     )}
                   </div>
 
@@ -1259,13 +1631,15 @@ export default function PricingPage() {
                         gap: 8,
                       }}
                     >
-                      <h3 style={sectionTitleStyle}>Draft</h3>
+                      <h3 style={sectionTitleStyle}>{copy.draftLabel}</h3>
                       <CanvasPill
                         theme={theme}
                         tone={selectedDraft ? "warn" : "neutral"}
                         dot
                       >
-                        {selectedDraft ? "publish candidate" : "empty"}
+                        {selectedDraft
+                          ? copy.publishCandidateLabel
+                          : copy.emptyLabel}
                       </CanvasPill>
                     </div>
                     {selectedDraft ? (
@@ -1273,15 +1647,24 @@ export default function PricingPage() {
                         <CanvasDL
                           theme={theme}
                           items={[
-                            { label: "VERSION", value: selectedDraft.version },
-                            { label: "NAME", value: selectedDraft.ruleName },
                             {
-                              label: "SERVICE FEE",
-                              value: `${selectedDraft.serviceFeeBps} bps`,
+                              label: locale === "en" ? "Version" : "版本",
+                              value: selectedDraft.version,
                             },
                             {
-                              label: "EFFECTIVE",
-                              value: formatRange(
+                              label: locale === "en" ? "Name" : "名稱",
+                              value: selectedDraft.ruleName,
+                            },
+                            {
+                              label: locale === "en" ? "Service Fee" : "服務費",
+                              value:
+                                locale === "en"
+                                  ? `${selectedDraft.serviceFeeBps} bps`
+                                  : `${selectedDraft.serviceFeeBps} 基點`,
+                            },
+                            {
+                              label: locale === "en" ? "Effective" : "生效期間",
+                              value: formatDisplayRange(
                                 selectedDraft.effectiveFrom,
                                 selectedDraft.effectiveTo,
                               ),
@@ -1306,9 +1689,7 @@ export default function PricingPage() {
                         </div>
                       </>
                     ) : (
-                      <p style={helperStyle}>
-                        目前沒有待發佈的 pricing draft。
-                      </p>
+                      <p style={helperStyle}>{copy.noDraftRule}</p>
                     )}
                   </div>
                 </div>
@@ -1316,48 +1697,50 @@ export default function PricingPage() {
 
               <CanvasCard
                 theme={theme}
-                title="Publish stepper"
-                subtitle="select draft → compare → reason capture → atomic replace"
+                title={copy.publishStepperTitle}
+                subtitle={copy.publishStepperSubtitle}
               >
                 {publishConflictBody ? (
                   <CanvasBanner
                     theme={theme}
                     tone="warn"
                     icon="warn"
-                    title="conflict check"
+                    title={copy.conflictCheckTitle}
                     body={publishConflictBody}
                   />
                 ) : null}
                 <div style={stepperStyle}>
                   {[
                     {
-                      title: "1. Select draft",
+                      title: copy.stepSelectDraft,
                       body: selectedDraft
-                        ? `${selectedDraft.version} 已進入 publish queue`
-                        : "目前沒有可發佈的 draft",
+                        ? locale === "en"
+                          ? `${selectedDraft.version} is in the publish queue`
+                          : `${selectedDraft.version} 已進入發布佇列`
+                        : copy.stepNoDraft,
                       active: !selectedDraft,
                       complete: Boolean(selectedDraft),
                     },
                     {
-                      title: "2. Compare active/draft",
+                      title: copy.stepCompare,
                       body:
                         activeRule && selectedDraft
                           ? `${activeRule.version} → ${selectedDraft.version}`
-                          : "需要 active 與 draft 才能比對",
+                          : copy.stepNeedCompare,
                       active: Boolean(selectedDraft) && !publishModalOpen,
                       complete: Boolean(selectedDraft),
                     },
                     {
-                      title: "3. High-risk reason",
+                      title: copy.stepReason,
                       body: publishReason.trim()
                         ? publishReason.trim()
-                        : "開啟 modal 並填寫必填 reason",
+                        : copy.stepOpenModal,
                       active: publishModalOpen,
                       complete: publishReason.trim().length >= 12,
                     },
                     {
-                      title: "4. Audit receipt",
-                      body: publishReceipt ?? "發佈後會在此留下 receipt 摘要",
+                      title: copy.stepReceipt,
+                      body: publishReceipt ?? copy.stepReceiptPending,
                       active: false,
                       complete: Boolean(publishReceipt),
                     },
@@ -1380,32 +1763,38 @@ export default function PricingPage() {
 
               <CanvasCard
                 theme={theme}
-                title="Override governance"
-                subtitle="manual override 只允許記錄式治理，不得覆蓋 canonical quoted fare authority"
+                title={copy.overrideTitle}
+                subtitle={copy.overrideSubtitle}
               >
                 <CanvasDL
                   theme={theme}
                   items={[
                     {
-                      label: "CANONICAL",
-                      value:
+                      label: locale === "en" ? "Canonical" : "標準來源",
+                      value: formatPlatformCodeLabel(
+                        locale,
                         catalog?.pricingAuthority.canonicalQuotedFareSource ??
-                        "platform_pricing_rule",
+                          "platform_pricing_rule",
+                      ),
                     },
                     {
-                      label: "VERSION",
+                      label: locale === "en" ? "Version" : "版本",
                       value:
                         catalog?.pricingAuthority.canonicalPricingRuleVersion ??
                         activeRule?.version ??
                         "—",
                     },
                     {
-                      label: "ACTOR TYPES",
-                      value: manualOverrideActors.join(", "),
+                      label: locale === "en" ? "Actor Types" : "操作者類型",
+                      value: manualOverrideActors
+                        .map((actor) => formatPlatformCodeLabel(locale, actor))
+                        .join(", "),
                     },
                     {
-                      label: "REQUIRED FIELDS",
-                      value: requiredFields.join(", "),
+                      label: locale === "en" ? "Required Fields" : "必填欄位",
+                      value: requiredFields
+                        .map((field) => formatPlatformCodeLabel(locale, field))
+                        .join(", "),
                     },
                   ]}
                 />
@@ -1418,9 +1807,7 @@ export default function PricingPage() {
           <div style={splitGridStyle}>
             <CanvasCard theme={theme} padding={0}>
               {feePlanRows.length === 0 ? (
-                <div style={emptyStateStyle}>
-                  目前沒有 driver fee plan 版本。
-                </div>
+                <div style={emptyStateStyle}>{copy.driverEmpty}</div>
               ) : (
                 <CanvasTable<FeePlanRow>
                   theme={theme}
@@ -1433,54 +1820,75 @@ export default function PricingPage() {
             <div style={{ display: "grid", gap: 16 }}>
               <CanvasCard
                 theme={theme}
-                title="Active / Draft comparison"
-                subtitle="driver settlement plans remain immutable after publish"
+                title={copy.activeDraftComparisonTitle}
+                subtitle={copy.driverComparisonSubtitle}
               >
                 <div style={comparisonGridStyle}>
                   <div style={comparisonPanelStyle("success")}>
-                    <h3 style={sectionTitleStyle}>Published</h3>
+                    <h3 style={sectionTitleStyle}>{copy.publishedLabel}</h3>
                     {activePlan ? (
                       <CanvasDL
                         theme={theme}
                         items={[
-                          { label: "VERSION", value: activePlan.version },
-                          { label: "PLAN", value: activePlan.planName },
                           {
-                            label: "SERVICE FEE",
-                            value: `${activePlan.serviceFeeBps} bps`,
+                            label: locale === "en" ? "Version" : "版本",
+                            value: activePlan.version,
                           },
                           {
-                            label: "PUBLISHED",
+                            label: locale === "en" ? "Plan" : "方案",
+                            value: activePlan.planName,
+                          },
+                          {
+                            label: locale === "en" ? "Service Fee" : "服務費",
+                            value:
+                              locale === "en"
+                                ? `${activePlan.serviceFeeBps} bps`
+                                : `${activePlan.serviceFeeBps} 基點`,
+                          },
+                          {
+                            label: locale === "en" ? "Published" : "發布時間",
                             value: formatDateTime(activePlan.publishedAt),
                           },
                         ]}
                       />
                     ) : (
-                      <p style={helperStyle}>目前沒有已發佈司機費用方案。</p>
+                      <p style={helperStyle}>{copy.noPublishedDriverPlan}</p>
                     )}
                   </div>
                   <div
                     style={comparisonPanelStyle(draftPlan ? "warn" : "neutral")}
                   >
-                    <h3 style={sectionTitleStyle}>Draft queue</h3>
+                    <h3 style={sectionTitleStyle}>{copy.draftQueueLabel}</h3>
                     {draftPlan ? (
                       <CanvasDL
                         theme={theme}
                         items={[
-                          { label: "VERSION", value: draftPlan.version },
-                          { label: "PLAN", value: draftPlan.planName },
                           {
-                            label: "SERVICE FEE",
-                            value: `${draftPlan.serviceFeeBps} bps`,
+                            label: locale === "en" ? "Version" : "版本",
+                            value: draftPlan.version,
                           },
-                          { label: "SCOPE", value: draftPlan.scope },
+                          {
+                            label: locale === "en" ? "Plan" : "方案",
+                            value: draftPlan.planName,
+                          },
+                          {
+                            label: locale === "en" ? "Service Fee" : "服務費",
+                            value:
+                              locale === "en"
+                                ? `${draftPlan.serviceFeeBps} bps`
+                                : `${draftPlan.serviceFeeBps} 基點`,
+                          },
+                          {
+                            label: locale === "en" ? "Scope" : "範圍",
+                            value: formatPlatformCodeLabel(
+                              locale,
+                              draftPlan.scope,
+                            ),
+                          },
                         ]}
                       />
                     ) : (
-                      <p style={helperStyle}>
-                        現有後端僅回傳 published fee plan；draft
-                        比對區先保留治理空位。
-                      </p>
+                      <p style={helperStyle}>{copy.noDriverDraft}</p>
                     )}
                   </div>
                 </div>
@@ -1488,33 +1896,47 @@ export default function PricingPage() {
 
               <CanvasCard
                 theme={theme}
-                title="Per-trip fee structure"
-                subtitle="must-show fee structure + subsidy linkage"
+                title={copy.feeStructureTitle}
+                subtitle={copy.feeStructureSubtitle}
               >
                 {selectedFeePlan ? (
                   <CanvasDL
                     theme={theme}
                     items={[
-                      { label: "PLAN", value: selectedFeePlan.planName },
                       {
-                        label: "SERVICE FEE",
-                        value: `${selectedFeePlan.serviceFeeBps} bps / trip`,
+                        label: locale === "en" ? "Plan" : "方案",
+                        value: selectedFeePlan.planName,
                       },
                       {
-                        label: "REIMBURSEMENT MODE",
-                        value: selectedFeePlan.reimbursementMode,
+                        label: locale === "en" ? "Service Fee" : "服務費",
+                        value:
+                          locale === "en"
+                            ? `${selectedFeePlan.serviceFeeBps} bps / trip`
+                            : `${selectedFeePlan.serviceFeeBps} 基點 / 每趟`,
                       },
                       {
-                        label: "SUBSIDY LINKAGE",
+                        label:
+                          locale === "en" ? "Reimbursement Mode" : "補助模式",
+                        value: reimbursementModeLabel(
+                          locale,
+                          selectedFeePlan.reimbursementMode,
+                        ),
+                      },
+                      {
+                        label: locale === "en" ? "Subsidy Linkage" : "補助連動",
                         value:
                           selectedFeePlan.reimbursementMode === "mixed"
-                            ? "mixed reimbursement requires subsidy reconciliation"
-                            : "platform_funded only",
+                            ? locale === "en"
+                              ? "Mixed reimbursement requires subsidy reconciliation"
+                              : "混合補助模式需要額外做補助對帳"
+                            : locale === "en"
+                              ? "Platform-funded only"
+                              : "僅平台資助",
                       },
                     ]}
                   />
                 ) : (
-                  <p style={helperStyle}>目前沒有可展示的 fee structure。</p>
+                  <p style={helperStyle}>{copy.noFeeStructure}</p>
                 )}
               </CanvasCard>
             </div>
@@ -1534,30 +1956,34 @@ export default function PricingPage() {
             <div style={{ display: "grid", gap: 16 }}>
               <CanvasCard
                 theme={theme}
-                title="Subsidy / reimbursement linkage"
-                subtitle="補助規則與 reimbursement queue 採獨立治理，但共用 quoted fare authority"
+                title={copy.subsidyLinkageTitle}
+                subtitle={copy.subsidyLinkageSubtitle}
               >
                 <CanvasDL
                   theme={theme}
                   items={[
                     {
-                      label: "QUEUE",
+                      label: locale === "en" ? "Queue" : "佇列",
                       value: "/payments/reimbursements",
                     },
                     {
-                      label: "TRIGGER COUNT",
+                      label: locale === "en" ? "Trigger Count" : "觸發數量",
                       value: String(subsidyRows.length),
                     },
                     {
-                      label: "CANONICAL VERSION",
+                      label: locale === "en" ? "Canonical Version" : "標準版本",
                       value:
                         catalog?.pricingAuthority.canonicalPricingRuleVersion ??
                         activeRule?.version ??
                         "—",
                     },
                     {
-                      label: "REIMBURSEMENT MODE",
-                      value: activeRule?.reimbursementMode ?? "platform_funded",
+                      label:
+                        locale === "en" ? "Reimbursement Mode" : "補助模式",
+                      value: reimbursementModeLabel(
+                        locale,
+                        activeRule?.reimbursementMode ?? "platform_funded",
+                      ),
                     },
                   ]}
                 />
@@ -1565,30 +1991,42 @@ export default function PricingPage() {
 
               <CanvasCard
                 theme={theme}
-                title="Override governance"
-                subtitle="manual override actor 與 evidence obligations"
+                title={copy.overrideTitle}
+                subtitle={copy.overrideEvidenceSubtitle}
               >
                 <CanvasDL
                   theme={theme}
                   items={[
                     {
-                      label: "MANUAL OVERRIDE",
-                      value: manualOverrideActors.join(", "),
+                      label: locale === "en" ? "Manual Override" : "人工覆寫",
+                      value: manualOverrideActors
+                        .map((actor) => formatPlatformCodeLabel(locale, actor))
+                        .join(", "),
                     },
                     {
-                      label: "REQUIRED FIELDS",
-                      value: requiredFields.join(", "),
+                      label: locale === "en" ? "Required Fields" : "必填欄位",
+                      value: requiredFields
+                        .map((field) => formatPlatformCodeLabel(locale, field))
+                        .join(", "),
                     },
                     {
-                      label: "TENANT CAN SET QUOTED FARE",
-                      value: String(
+                      label:
+                        locale === "en"
+                          ? "Tenant Can Set Quoted Fare"
+                          : "租戶可否設定報價",
+                      value: booleanLabel(
+                        locale,
                         catalog?.pricingAuthority.tenantCanSetQuotedFare ??
                           false,
                       ),
                     },
                     {
-                      label: "PARTNER CAN SET QUOTED FARE",
-                      value: String(
+                      label:
+                        locale === "en"
+                          ? "Partner Can Set Quoted Fare"
+                          : "合作方可否設定報價",
+                      value: booleanLabel(
+                        locale,
                         catalog?.pricingAuthority.partnerCanSetQuotedFare ??
                           false,
                       ),
@@ -1604,16 +2042,16 @@ export default function PricingPage() {
           <div style={{ display: "grid", gap: 16 }}>
             <CanvasCard
               theme={theme}
-              title="Published version filters"
-              subtitle="cross-tab history 可依 type、scope、period 篩選"
+              title={copy.historyFiltersTitle}
+              subtitle={copy.historyFiltersSubtitle}
             >
               <div style={filterRowStyle}>
-                <span style={inlineLabelStyle}>Type</span>
+                <span style={inlineLabelStyle}>{copy.typeLabel}</span>
                 {[
-                  ["all", "All"],
-                  ["passenger", "Passenger"],
-                  ["driver_fee", "Driver"],
-                  ["subsidy", "Subsidy"],
+                  ["all", locale === "en" ? "All" : "全部"],
+                  ["passenger", formatPlatformCodeLabel(locale, "passenger")],
+                  ["driver_fee", formatPlatformCodeLabel(locale, "driver_fee")],
+                  ["subsidy", formatPlatformCodeLabel(locale, "subsidy")],
                 ].map(([value, label]) => (
                   <button
                     key={value}
@@ -1628,7 +2066,7 @@ export default function PricingPage() {
                 ))}
               </div>
               <div style={filterRowStyle}>
-                <span style={inlineLabelStyle}>Scope</span>
+                <span style={inlineLabelStyle}>{copy.scopeLabel}</span>
                 {historyScopeOptions.map((scope) => (
                   <button
                     key={scope}
@@ -1636,16 +2074,20 @@ export default function PricingPage() {
                     style={filterChipStyle(historyScopeFilter === scope)}
                     onClick={() => setHistoryScopeFilter(scope)}
                   >
-                    {scope}
+                    {scope === "all"
+                      ? locale === "en"
+                        ? "All"
+                        : "全部"
+                      : formatPlatformCodeLabel(locale, scope)}
                   </button>
                 ))}
               </div>
               <div style={filterRowStyle}>
-                <span style={inlineLabelStyle}>Period</span>
+                <span style={inlineLabelStyle}>{copy.periodLabel}</span>
                 {[
-                  ["all", "All"],
-                  ["90d", "Last 90d"],
-                  ["30d", "Last 30d"],
+                  ["all", locale === "en" ? "All" : "全部"],
+                  ["90d", copy.last90d],
+                  ["30d", copy.last30d],
                 ].map(([value, label]) => (
                   <button
                     key={value}
@@ -1661,15 +2103,9 @@ export default function PricingPage() {
               </div>
             </CanvasCard>
 
-            <CanvasCard
-              theme={theme}
-              padding={0}
-              title="所有已發佈版本 · 跨 tab 歷史"
-            >
+            <CanvasCard theme={theme} padding={0} title={copy.historyTitle}>
               {filteredHistoryRows.length === 0 ? (
-                <div style={emptyStateStyle}>
-                  目前篩選條件下沒有可顯示的版本歷史。
-                </div>
+                <div style={emptyStateStyle}>{copy.historyEmpty}</div>
               ) : (
                 <CanvasTable<HistoryRow>
                   theme={theme}
@@ -1685,6 +2121,15 @@ export default function PricingPage() {
       {publishModalOpen ? (
         <ReasonModal
           selectedDraft={selectedDraft}
+          copy={copy.modal}
+          rangeLabel={
+            selectedDraft
+              ? formatDisplayRange(
+                  selectedDraft.effectiveFrom,
+                  selectedDraft.effectiveTo,
+                )
+              : "—"
+          }
           reason={publishReason}
           onReasonChange={setPublishReason}
           windowFrom={publishFrom}

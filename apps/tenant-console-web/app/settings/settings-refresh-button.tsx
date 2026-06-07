@@ -34,7 +34,7 @@ export function SettingsRefreshButton({
       }}
       style={style}
     >
-      <span>{isPending ? "Refreshing..." : label}</span>
+      <span>{isPending ? "重新整理中..." : label}</span>
       {surfaceLabel ? (
         <span style={{ fontSize: 10, opacity: 0.8 }}>{surfaceLabel}</span>
       ) : null}

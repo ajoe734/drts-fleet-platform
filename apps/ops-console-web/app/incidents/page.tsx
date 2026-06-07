@@ -47,6 +47,7 @@ import {
   INCIDENT_STATUSES,
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { formatOpsUiError, toOpsErrorMessage } from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 
@@ -295,7 +296,7 @@ function buildCriticalBannerBody(record: IncidentRecord, locale: "en" | "zh") {
       : `目前由 ${record.assignedTo} 接手處理。`
     : locale === "en"
       ? "Ownership not assigned yet."
-      : "目前尚未指派 owner。";
+      : "目前尚未指派負責人。";
 
   return `${driverLabel} ${locationLabel}. ${record.description} ${ownerLabel}`;
 }
@@ -470,7 +471,13 @@ export default function IncidentsPage() {
       setRecords(result);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+      setError(
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(e, t("common.unknown")),
+          locale === "en" ? "Unable to load incidents" : "無法載入事故清單",
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -489,7 +496,15 @@ export default function IncidentsPage() {
       setShowRecoveryForm(false);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+      setError(
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(e, t("common.unknown")),
+          locale === "en"
+            ? "Unable to load incident details"
+            : "無法載入事故詳情",
+        ),
+      );
     }
   }
 
@@ -515,7 +530,13 @@ export default function IncidentsPage() {
         await loadTimeline(incidentId);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+      setError(
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(e, t("common.unknown")),
+          locale === "en" ? "Unable to update incident" : "無法更新事故狀態",
+        ),
+      );
     }
   }
 
@@ -826,7 +847,13 @@ export default function IncidentsPage() {
                   setEditingId(null);
                 } catch (e) {
                   setError(
-                    e instanceof Error ? e.message : t("common.unknown"),
+                    formatOpsUiError(
+                      locale,
+                      toOpsErrorMessage(e, t("common.unknown")),
+                      locale === "en"
+                        ? "Unable to save incident"
+                        : "無法儲存事故",
+                    ),
                   );
                 }
               }}
@@ -1240,9 +1267,13 @@ export default function IncidentsPage() {
                           await loadRecords();
                         } catch (e) {
                           setError(
-                            e instanceof Error
-                              ? e.message
-                              : t("common.unknown"),
+                            formatOpsUiError(
+                              locale,
+                              toOpsErrorMessage(e, t("common.unknown")),
+                              locale === "en"
+                                ? "Unable to record recovery action"
+                                : "無法記錄服務補償動作",
+                            ),
                           );
                         }
                       }}

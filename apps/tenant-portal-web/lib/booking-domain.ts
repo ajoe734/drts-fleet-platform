@@ -8,6 +8,7 @@ import type {
   TenantInvoiceRecord,
 } from "@drts/contracts";
 import { OWNED_ORDER_STATUSES } from "@drts/contracts";
+import { formatPortalCodeLabel } from "./localized-labels";
 
 const TERMINAL_ORDER_STATUSES: ReadonlySet<OwnedOrderStatus> = new Set([
   "completed",
@@ -31,43 +32,43 @@ export function buildBookingTimeline(
   return [
     {
       key: "created",
-      label: "Booking created",
+      label: "訂單已建立",
       at: booking.createdAt,
-      detail: "Tenant intake accepted into the booking ledger.",
+      detail: "租戶建立請求已寫入訂單台帳。",
     },
     {
       key: "window-start",
-      label: "Reservation window opens",
+      label: "預約時段開始",
       at: booking.reservationWindowStart,
-      detail: "Primary service commitment window begins.",
+      detail: "主要服務承諾時段開始。",
     },
     {
       key: "window-end",
-      label: "Reservation window closes",
+      label: "預約時段結束",
       at: booking.reservationWindowEnd,
-      detail: "Requested pickup or dropoff commitment window ends.",
+      detail: "要求的上車或下車承諾時段結束。",
     },
     {
       key: "modify-cutoff",
-      label: "Tenant modification cutoff",
+      label: "租戶可修改截止時間",
       at: booking.modifiableUntil,
       detail: booking.modifiableUntil
-        ? "Further tenant edits follow this cutoff."
-        : "No explicit tenant edit cutoff was published.",
+        ? "超過這個時間後，租戶就不能再修改。"
+        : "目前沒有公布明確的租戶修改截止時間。",
     },
     {
       key: "cancel-cutoff",
-      label: "Tenant cancellation cutoff",
+      label: "租戶可取消截止時間",
       at: booking.cancelableUntil,
       detail: booking.cancelableUntil
-        ? "Further tenant cancellation follows this cutoff."
-        : "No explicit tenant cancellation cutoff was published.",
+        ? "超過這個時間後，租戶就不能再取消。"
+        : "目前沒有公布明確的租戶取消截止時間。",
     },
     {
       key: "current",
-      label: "Current workflow state",
+      label: "目前流程狀態",
       at: booking.updatedAt,
-      detail: `Order status is ${booking.orderStatus}.`,
+      detail: `目前訂單狀態為 ${formatPortalCodeLabel(booking.orderStatus, booking.orderStatus)}。`,
     },
   ];
 }
@@ -98,17 +99,17 @@ export function getBookingActionCapabilities(
     canUpdate: !isTerminal && !isOnTripLane && updateWindowOpen,
     canCancel: !isTerminal && cancelWindowOpen,
     updateReason: isTerminal
-      ? "Completed and cancelled bookings are read-only."
+      ? "已完成或已取消的訂單為唯讀。"
       : isOnTripLane
-        ? "On-trip bookings can no longer be edited from tenant control."
+        ? "行程中的訂單不能再由租戶端修改。"
         : updateWindowOpen
           ? null
-          : "Tenant edit window has closed.",
+          : "租戶可修改時段已關閉。",
     cancelReason: isTerminal
-      ? "Completed and cancelled bookings cannot be cancelled again."
+      ? "已完成或已取消的訂單不能再次取消。"
       : cancelWindowOpen
         ? null
-        : "Tenant cancellation window has closed.",
+        : "租戶可取消時段已關閉。",
   };
 }
 
@@ -124,28 +125,28 @@ export function findInvoicesForOrder(
 export function describeManualFareOverride(
   override: ManualFareOverrideRecord | null,
 ): string {
-  if (!override) return "None";
-  return `${override.actorType} · ${override.reason}`;
+  if (!override) return "未設定";
+  return `${formatPortalCodeLabel(override.actorType, override.actorType)} · ${override.reason}`;
 }
 
 export function summarizeComplianceGates(
   gates: ComplianceGateRecord[] | undefined,
 ): string {
   if (!gates || gates.length === 0) {
-    return "No tenant-visible compliance gates published.";
+    return "目前沒有對租戶公開的合規關卡。";
   }
   const blocked = gates.filter((gate) => gate.blocking).length;
   if (blocked > 0) {
-    return `${blocked} blocking gate(s) of ${gates.length} total.`;
+    return `共 ${gates.length} 個合規關卡，其中 ${blocked} 個目前阻擋中。`;
   }
-  return `${gates.length} compliance gate(s) on file, none currently blocking.`;
+  return `共 ${gates.length} 個合規關卡，目前都沒有阻擋。`;
 }
 
 export function formatMoney(amount: MoneyAmount | null | undefined): string {
-  if (!amount) return "Not published";
+  if (!amount) return "未公布";
   const minor = Number(amount.amountMinor);
-  if (!Number.isFinite(minor)) return "Not published";
-  const major = (minor / 100).toLocaleString(undefined, {
+  if (!Number.isFinite(minor)) return "未公布";
+  const major = (minor / 100).toLocaleString("zh-TW", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -153,14 +154,14 @@ export function formatMoney(amount: MoneyAmount | null | undefined): string {
 }
 
 export function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "Not published";
+  if (!iso) return "未公布";
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "Not published";
-  return date.toLocaleString();
+  if (Number.isNaN(date.getTime())) return "未公布";
+  return date.toLocaleString("zh-TW");
 }
 
 export function formatBookingStatusLabel(status: OwnedOrderStatus): string {
-  return status.replace(/_/g, " ");
+  return formatPortalCodeLabel(status, status);
 }
 
 // ── Shared list query model (XS-UI-004 SharedListQueryV1) ──────────────────

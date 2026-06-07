@@ -10,6 +10,7 @@ import {
   formatDateTime,
   getBookingActionCapabilities,
 } from "@/lib/booking-domain";
+import { formatPortalUiError, toPortalErrorMessage } from "@/lib/error-copy";
 
 type Mode = "update" | "cancel" | null;
 
@@ -27,10 +28,10 @@ export function BookingCommandPanel({
     canCancel: allowMutations && baseCapabilities.canCancel,
     updateReason: allowMutations
       ? baseCapabilities.updateReason
-      : "Current tenant role cannot update bookings.",
+      : "目前角色無法修改訂單。",
     cancelReason: allowMutations
       ? baseCapabilities.cancelReason
-      : "Current tenant role cannot cancel bookings.",
+      : "目前角色無法取消訂單。",
   };
   const [mode, setMode] = useState<Mode>(null);
   const [loading, setLoading] = useState(false);
@@ -73,9 +74,10 @@ export function BookingCommandPanel({
       router.refresh();
     } catch (submitError) {
       setError(
-        submitError instanceof Error
-          ? submitError.message
-          : "Unknown update failure.",
+        formatPortalUiError(
+          toPortalErrorMessage(submitError, "未知的更新失敗。"),
+          "無法更新訂單",
+        ),
       );
     } finally {
       setLoading(false);
@@ -103,9 +105,10 @@ export function BookingCommandPanel({
       router.refresh();
     } catch (submitError) {
       setError(
-        submitError instanceof Error
-          ? submitError.message
-          : "Unknown cancel failure.",
+        formatPortalUiError(
+          toPortalErrorMessage(submitError, "未知的取消失敗。"),
+          "無法取消訂單",
+        ),
       );
     } finally {
       setLoading(false);
@@ -116,12 +119,10 @@ export function BookingCommandPanel({
     <div className="booking-action-panel">
       <div className="booking-action-stack">
         <div>
-          <strong>Allowed tenant actions</strong>
+          <strong>租戶可用操作</strong>
           <p className="muted-copy">
-            Tenant users can only call supported booking commands. Driver
-            assignment, dispatch override, manual fare override, and external
-            settlement actions stay on the ops console authority lane and never
-            surface here.
+            租戶使用者只能執行支援的訂單指令。司機指派、派遣覆寫、人工車資
+            覆寫與外部結算操作仍屬於營運控制台權限路徑，不會出現在這裡。
           </p>
         </div>
 
@@ -135,7 +136,7 @@ export function BookingCommandPanel({
             }}
             type="button"
           >
-            Update booking
+            修改訂單
           </button>
           <button
             className="action-button-danger"
@@ -146,23 +147,23 @@ export function BookingCommandPanel({
             }}
             type="button"
           >
-            Cancel booking
+            取消訂單
           </button>
         </div>
 
         {capabilities.updateReason ? (
           <p className="booking-action-note">
-            Update unavailable: {capabilities.updateReason}
+            無法修改：{capabilities.updateReason}
             {booking.modifiableUntil
-              ? ` (cutoff ${formatDateTime(booking.modifiableUntil)})`
+              ? `（截止 ${formatDateTime(booking.modifiableUntil)}）`
               : ""}
           </p>
         ) : null}
         {capabilities.cancelReason ? (
           <p className="booking-action-note">
-            Cancel unavailable: {capabilities.cancelReason}
+            無法取消：{capabilities.cancelReason}
             {booking.cancelableUntil
-              ? ` (cutoff ${formatDateTime(booking.cancelableUntil)})`
+              ? `（截止 ${formatDateTime(booking.cancelableUntil)}）`
               : ""}
           </p>
         ) : null}
@@ -174,13 +175,11 @@ export function BookingCommandPanel({
             aria-modal="true"
             className="booking-modal-panel"
             role="dialog"
-            aria-label={mode === "update" ? "Update booking" : "Cancel booking"}
+            aria-label={mode === "update" ? "修改訂單" : "取消訂單"}
           >
             <div className="booking-modal-header">
               <div>
-                <strong>
-                  {mode === "update" ? "Update booking" : "Cancel booking"}
-                </strong>
+                <strong>{mode === "update" ? "修改訂單" : "取消訂單"}</strong>
                 <p className="muted-copy">{booking.bookingId}</p>
               </div>
               <button
@@ -188,7 +187,7 @@ export function BookingCommandPanel({
                 onClick={() => setMode(null)}
                 type="button"
               >
-                Close
+                關閉
               </button>
             </div>
 
@@ -197,7 +196,7 @@ export function BookingCommandPanel({
             {mode === "update" ? (
               <div className="booking-form-stack">
                 <label className="booking-field">
-                  <span>Pickup address</span>
+                  <span>上車地址</span>
                   <input
                     onChange={(event) => setPickupAddress(event.target.value)}
                     type="text"
@@ -205,7 +204,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="booking-field">
-                  <span>Dropoff address</span>
+                  <span>下車地址</span>
                   <input
                     onChange={(event) => setDropoffAddress(event.target.value)}
                     type="text"
@@ -213,7 +212,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="booking-field">
-                  <span>Notes</span>
+                  <span>備註</span>
                   <textarea
                     onChange={(event) => setNotes(event.target.value)}
                     rows={3}
@@ -221,7 +220,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="booking-field">
-                  <span>Cost center</span>
+                  <span>成本中心</span>
                   <input
                     onChange={(event) => setCostCenter(event.target.value)}
                     type="text"
@@ -229,7 +228,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="booking-field">
-                  <span>Vehicle preference</span>
+                  <span>車型偏好</span>
                   <input
                     onChange={(event) =>
                       setVehiclePreference(event.target.value)
@@ -245,14 +244,14 @@ export function BookingCommandPanel({
                     onClick={() => void submitUpdate()}
                     type="button"
                   >
-                    {loading ? "Saving..." : "Save changes"}
+                    {loading ? "儲存中..." : "儲存變更"}
                   </button>
                 </div>
               </div>
             ) : (
               <div className="booking-form-stack">
                 <label className="booking-field">
-                  <span>Cancellation reason (optional)</span>
+                  <span>取消原因（選填）</span>
                   <textarea
                     onChange={(event) => setCancelReason(event.target.value)}
                     rows={4}
@@ -266,7 +265,7 @@ export function BookingCommandPanel({
                     onClick={() => void submitCancel()}
                     type="button"
                   >
-                    {loading ? "Cancelling..." : "Confirm cancel"}
+                    {loading ? "取消中..." : "確認取消"}
                   </button>
                 </div>
               </div>

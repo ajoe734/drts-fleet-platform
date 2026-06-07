@@ -42,6 +42,7 @@ import {
   isOwnedUnifiedTask,
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
+import { formatDriverUiError, toDriverErrorMessage } from "@/lib/error-copy";
 import { driverActivationSteps, driverStrings } from "@/lib/strings";
 
 type WorkspaceRoute =
@@ -66,7 +67,7 @@ const ACTIVATION_STEPS: ReadonlyArray<ActivationStep> = driverActivationSteps;
 const DEFAULT_TEST_REGISTRATION_CODE =
   process.env.EXPO_PUBLIC_DRIVER_TEST_REGISTRATION_CODE ?? "driver-demo-001";
 const DEFAULT_TEST_DEVICE_LABEL =
-  process.env.EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL ?? "Driver Pixel 01";
+  process.env.EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL ?? "司機手機 01";
 
 function LoadingState({ label }: { label: string }) {
   return (
@@ -353,7 +354,7 @@ function PlatformRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`查看 ${record.platformCode} 平台狀態`}
+      accessibilityLabel={`查看 ${displayName} 平台狀態`}
       onPress={onPress}
       style={[styles.platformRow, isLast ? null : styles.platformRowDivider]}
     >
@@ -1000,7 +1001,10 @@ export default function OnboardingScreen() {
       setWorkspaceIssue(null);
     } catch (error) {
       setProvisioningError(
-        error instanceof Error ? error.message : "裝置配置失敗，請稍後再試。",
+        formatDriverUiError(
+          toDriverErrorMessage(error, "裝置配置失敗，請稍後再試。"),
+          "裝置配置失敗",
+        ),
       );
     } finally {
       setSubmitting(false);
@@ -1015,7 +1019,10 @@ export default function OnboardingScreen() {
       void initializeDriverIdentity()
         .catch((error: unknown) => {
           setProvisioningError(
-            error instanceof Error ? error.message : "無法重新初始化裝置身份。",
+            formatDriverUiError(
+              toDriverErrorMessage(error, "無法重新初始化裝置身份。"),
+              "無法重新初始化裝置身份",
+            ),
           );
         })
         .finally(() => setReady(true));
@@ -1052,7 +1059,7 @@ export default function OnboardingScreen() {
             "打開行程作業查看下一步";
 
       return {
-        title: `返回行程 · ${task.taskId}`,
+        title: `返回行程 · 任務 ${task.taskId}`,
         meta: `${task.platformDisplayName} · ${routeSummary}`,
         primaryLabel: "前往行程",
         primaryRoute: "/trip" as WorkspaceRoute,
@@ -1090,7 +1097,7 @@ export default function OnboardingScreen() {
       const task = taskSummary.actionRequiredTask;
       return {
         title: "優先處理待回應任務",
-        meta: `${task.platformDisplayName} · ${task.taskId} 等待司機操作。`,
+        meta: `${task.platformDisplayName} · 任務 ${task.taskId} 等待司機操作。`,
         primaryLabel: "打開任務收件匣",
         primaryRoute: "/jobs" as WorkspaceRoute,
         secondaryLabel: "查看平台",
@@ -1223,7 +1230,7 @@ export default function OnboardingScreen() {
             helpText="選填，方便平台與營運端辨識此裝置。"
             label="裝置名稱"
             onChangeText={setDeviceLabel}
-            placeholder="例如：Driver Pixel 01"
+            placeholder="例如：司機手機 01"
             value={deviceLabel}
           />
           <ActionButton

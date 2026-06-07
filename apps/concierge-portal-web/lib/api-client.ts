@@ -31,5 +31,5 @@ export function createConciergeClient(
 }
 
 export function formatScopeSummary() {
-  return LIMITED_SCOPES.join(", ");
+  return "讀取客服通話、建立代訂、讀取訂單、讀取派遣紀錄";
 }

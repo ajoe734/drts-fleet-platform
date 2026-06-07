@@ -15,13 +15,16 @@ import {
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import {
+  ServerCanvasTable,
+  type ServerCanvasTableColumn,
+} from "@/components/server-canvas-table";
 import { getTenantClient } from "@/lib/api-client";
 import { formatDateInput, formatDateTime } from "@/lib/formatters";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -190,7 +193,7 @@ async function loadBillingData(
     errors.push(
       profileResult.reason instanceof Error
         ? profileResult.reason.message
-        : "Unable to load tenant billing profile.",
+        : "無法載入租戶帳務設定。",
     );
   }
 
@@ -198,7 +201,7 @@ async function loadBillingData(
     errors.push(
       invoicesResult.reason instanceof Error
         ? invoicesResult.reason.message
-        : "Unable to load tenant invoices.",
+        : "無法載入租戶發票資料。",
     );
   }
 
@@ -206,7 +209,7 @@ async function loadBillingData(
     errors.push(
       quotaResult.reason instanceof Error
         ? quotaResult.reason.message
-        : "Unable to load tenant quota summary.",
+        : "無法載入租戶配額摘要。",
     );
   }
 
@@ -386,7 +389,7 @@ function getEmptyStateCopy(reason: EmptyReason): {
       return {
         icon: "x",
         title: "目前角色無法檢視帳務",
-        body: "此頁面可見，但目前操作者沒有檢視租戶帳務的權限 (需 tc_admin 或 tc_finance)。",
+        body: "此頁面仍可開啟，但目前操作者尚未具備檢視租戶帳務所需的管理或財務權限。",
       };
     case "external_unavailable":
       return {
@@ -479,7 +482,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
   const bookingLimit = data.quota?.limit.bookingCountLimit ?? null;
   const quotaShare =
     bookingLimit && bookingLimit > 0
-      ? `${Math.round((tripCount / bookingLimit) * 100)}% of ${formatCanvasCount(
+      ? `已使用 ${Math.round((tripCount / bookingLimit) * 100)}% / ${formatCanvasCount(
           bookingLimit,
         )} 配額`
       : data.quota
@@ -505,8 +508,8 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
             ? `${data.profile.contactName} · ${data.profile.email}`
             : data.profile.email,
         },
-        { k: "billing address", v: data.profile.address ?? "—" },
-        { k: "結算方式", v: "月結發票 (invoice)", mono: true },
+        { k: "帳單地址", v: data.profile.address ?? "—" },
+        { k: "結算方式", v: "月結開票", mono: true },
         {
           k: "最後更新",
           v: formatDateTime(data.profile.updatedAt),
@@ -515,9 +518,9 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
       ]
     : [];
 
-  const invoiceColumns: CanvasTableColumn<InvoiceRow>[] = [
+  const invoiceColumns: ServerCanvasTableColumn<InvoiceRow>[] = [
     {
-      h: "INVOICE",
+      h: "發票編號",
       w: 200,
       mono: true,
       r: (row) =>
@@ -536,29 +539,29 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
         ),
     },
     {
-      h: "PERIOD",
+      h: "期間",
       w: 110,
       mono: true,
       r: (row) => toPeriodKey(row.periodStart),
     },
     {
-      h: "AMOUNT",
+      h: "金額",
       w: 160,
       mono: true,
       align: "right",
       r: (row) => formatCanvasMoney(row.amount),
     },
     {
-      h: "STATUS",
+      h: "狀態",
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={getInvoiceStatusTone(row.status)} dot>
-          {row.status}
+          {formatTenantCodeLabel(row.status, row.status)}
         </CanvasPill>
       ),
     },
     {
-      h: "DUE",
+      h: "到期日",
       w: 130,
       mono: true,
       r: (row) => formatDateInput(row.periodEnd) || "—",
@@ -570,7 +573,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
       <CanvasPageHeader
         theme={th}
         title="帳務概覽"
-        subtitle="billing profile · 當期使用 · 近期 invoice"
+        subtitle="帳務設定、當期使用與近期發票總覽"
         actions={
           <>
             <ActionCta
@@ -597,8 +600,11 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
           theme={th}
           tone="info"
           icon="clock"
-          title="更新頻率 T5 · 租戶慢速 (30 秒)"
-          body={`此頁面以 ${REFRESH_CADENCE_MS / 1000} 秒的租戶慢速節奏更新 (tier: ${data.refreshTier})。快照載入於 ${formatDateTime(data.generatedAt)}。`}
+          title="更新頻率 · 租戶慢速（每 30 秒）"
+          body={`此頁面以 ${REFRESH_CADENCE_MS / 1000} 秒的租戶慢速節奏更新（層級：${formatTenantCodeLabel(
+            data.refreshTier,
+            data.refreshTier,
+          )}）。快照載入於 ${formatDateTime(data.generatedAt)}。`}
           actions={
             <ActionCta descriptor={refreshAction} href="/billing" icon="chevR">
               重新整理
@@ -646,7 +652,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
           />
           <CanvasKPI
             theme={th}
-            label="預估結帳 (run-rate)"
+            label="預估結帳"
             value={formatCanvasMoney(projectedClose)}
             sub={
               data.quota
@@ -668,7 +674,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
         </div>
 
         <div style={splitGridStyle}>
-          <CanvasCard theme={th} title="Billing profile">
+          <CanvasCard theme={th} title="帳務設定">
             {data.profile ? (
               <CanvasDL theme={th} cols={1} items={profileItems} />
             ) : (
@@ -680,7 +686,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
 
           <CanvasCard
             theme={th}
-            title="近 6 期 invoice"
+            title="近 6 期發票"
             padding={0}
             actions={
               <ActionCta
@@ -693,7 +699,7 @@ export default async function BillingPage({ searchParams }: BillingPageProps) {
             }
           >
             {recentInvoices.length > 0 ? (
-              <CanvasTable<InvoiceRow>
+              <ServerCanvasTable<InvoiceRow>
                 theme={th}
                 rows={recentInvoices}
                 columns={invoiceColumns}

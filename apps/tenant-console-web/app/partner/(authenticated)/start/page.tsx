@@ -4,6 +4,7 @@ import {
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 import { requirePartnerSession } from "@/lib/partner-session";
 
 export const dynamic = "force-dynamic";
@@ -21,77 +22,68 @@ export default async function PartnerStartPage() {
   const subtype = session.partnerEntry.businessDispatchSubtype;
   const status = session.partnerEntry.status;
   const isActive = status === "active";
+  const bindingSummary = session.partnerEntry.programCode
+    ? "已綁定合作方案"
+    : "由平台管理端維護";
+  const bankSummary = session.partnerEntry.bankCode
+    ? "已綁定合作銀行識別"
+    : "未提供";
 
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="Partner workspace"
-        title={`${session.partnerEntry.displayName} is signed in.`}
-        description="Partner mode only exposes eligibility verification and partner-tagged booking creation. Tenant-admin governance is intentionally absent from this surface."
+        eyebrow="合作夥伴工作區"
+        title={`${session.partnerEntry.displayName} 已完成登入。`}
+        description="合作夥伴模式只開放資格驗證與入口專用訂單建立，不提供租戶管理後台的治理功能。"
       />
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
-          kicker="Entry"
-          title="Entry registration snapshot"
-          description="Backend-issued entry record. Partner mode reads it; it does not edit it."
+          kicker="入口"
+          title="入口註冊快照"
+          description="這是平台管理端簽發的入口摘要。合作夥伴模式只能讀取，不能直接修改。"
         >
           <dl className="definition-grid">
             <div>
-              <dt>Display name</dt>
+              <dt>顯示名稱</dt>
               <dd>{session.partnerEntry.displayName}</dd>
             </div>
             <div>
-              <dt>Slug</dt>
-              <dd>
-                <code>{session.partnerEntry.entrySlug}</code>
-              </dd>
+              <dt>入口識別</dt>
+              <dd>目前工作區已綁定這個合作夥伴入口。</dd>
             </div>
             <div>
-              <dt>Partner code</dt>
-              <dd>
-                <code>{session.partnerEntry.partnerCode}</code>
-              </dd>
+              <dt>合作夥伴來源</dt>
+              <dd>由平台管理端維護合作夥伴識別。</dd>
             </div>
             <div>
-              <dt>Program</dt>
+              <dt>合作方案</dt>
+              <dd>{bindingSummary}</dd>
+            </div>
+            <div>
+              <dt>合作銀行</dt>
+              <dd>{bankSummary}</dd>
+            </div>
+            <div>
+              <dt>服務子類型</dt>
+              <dd>{formatTenantCodeLabel(subtype, subtype)}</dd>
+            </div>
+            <div>
+              <dt>驗證模式</dt>
               <dd>
-                {session.partnerEntry.programCode ? (
-                  <code>{session.partnerEntry.programCode}</code>
-                ) : (
-                  "—"
+                {formatTenantCodeLabel(
+                  session.partnerEntry.authMode,
+                  session.partnerEntry.authMode,
                 )}
               </dd>
             </div>
             <div>
-              <dt>Bank</dt>
-              <dd>
-                {session.partnerEntry.bankCode ? (
-                  <code>{session.partnerEntry.bankCode}</code>
-                ) : (
-                  "—"
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>Service subtype</dt>
-              <dd>
-                <code>{subtype}</code>
-              </dd>
-            </div>
-            <div>
-              <dt>Auth mode</dt>
-              <dd>
-                <code>{session.partnerEntry.authMode}</code>
-              </dd>
-            </div>
-            <div>
-              <dt>Status</dt>
+              <dt>狀態</dt>
               <dd>
                 <span
                   className={`status-badge${isActive ? "" : " is-warning"}`}
                 >
-                  {status}
+                  {formatTenantCodeLabel(status, status)}
                 </span>
               </dd>
             </div>
@@ -99,75 +91,72 @@ export default async function PartnerStartPage() {
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Eligibility"
+          kicker="資格驗證"
           title={
-            eligibilityRequired
-              ? "Eligibility verification required"
-              : "Eligibility check not required"
+            eligibilityRequired ? "需要先完成資格驗證" : "此入口不需要資格驗證"
           }
           description={
             eligibilityRequired
-              ? "Run the eligibility check first; only an `eligible` decision unlocks partner booking creation."
-              : "This entry is configured with `eligibility_mode = none`. Booking creation is allowed without an eligibility verification."
+              ? "請先完成資格驗證；只有驗證結果為符合資格時，才會開放合作夥伴建立訂單。"
+              : "這個入口設定為不需資格驗證，因此可直接建立訂單。"
           }
         >
           <p>
-            Eligibility mode:{" "}
-            <code>{session.partnerEntry.eligibilityMode}</code>
+            資格驗證模式：{" "}
+            {formatTenantCodeLabel(
+              session.partnerEntry.eligibilityMode,
+              session.partnerEntry.eligibilityMode,
+            )}
           </p>
           <div className="link-row">
             <Link className="text-link" href="/partner/eligibility">
-              Open eligibility verification
+              開啟資格驗證
             </Link>
             {!eligibilityRequired ? (
               <Link className="text-link" href="/partner/booking/new">
-                Skip to booking creation
+                直接前往建立訂單
               </Link>
             ) : null}
           </div>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Booking"
-          title="Partner-tagged booking creation"
-          description="Bookings created from this surface stamp `partnerEntrySlug` and (when verified) `eligibilityVerificationId` so downstream audit and billing keep partner provenance."
+          kicker="訂單"
+          title="合作夥伴入口訂單建立"
+          description="從這個頁面建立的訂單都會自動帶入入口別名，以及通過驗證時的資格驗證編號，讓後續稽核與帳務都能保留合作夥伴來源。"
         >
           <ul className="panel-list">
-            <li>Service subtype is fixed by the entry record.</li>
+            <li>服務子類型由入口資料固定，不可自行變更。</li>
+            <li>報價與車資權責仍由後端掌控，合作夥伴模式不能自行設定費用。</li>
             <li>
-              Quoted fare authority remains backend-owned; partner mode does not
-              set fare.
-            </li>
-            <li>
-              Negative paths (denied / ineligible / degraded) stop short of
-              create.
+              只要遇到拒絕、不符合資格或人工審查等負向路徑，系統都會直接中止，不會繞道建立訂單。
             </li>
           </ul>
           <div className="link-row">
             <Link className="text-link" href="/partner/booking/new">
-              Open booking create
+              開啟建立訂單
             </Link>
           </div>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Boundary"
-          title="What partner mode does not get"
-          description="The shell has no nav entry for these surfaces; the routes are not guarded but the navigation makes the boundary explicit."
+          kicker="邊界"
+          title="合作夥伴模式不提供的功能"
+          description="這些頁面不會出現在合作夥伴模式導覽中；雖然路由本身不一定完全封鎖，但工作區會明確劃清邊界。"
         >
           <ul className="panel-list">
-            <li>No tenant users / role assignment.</li>
-            <li>No API keys, webhooks, audit logs, or settings.</li>
-            <li>No tenant billing or integration governance.</li>
-            <li>No fulfilment overrides or dispatch authority.</li>
+            <li>不提供租戶使用者與角色指派。</li>
+            <li>不提供 API 金鑰、回呼、稽核軌跡與租戶設定。</li>
+            <li>不提供租戶帳務與整合治理。</li>
+            <li>不提供履約覆寫或派遣控制權。</li>
           </ul>
         </SurfaceCard>
       </section>
 
       {!isActive ? (
         <CalloutPanel
-          title="Entry status flagged"
-          description={`Entry status is "${status}". Booking creation will fail until the entry is reactivated by platform admin.`}
+          title="入口狀態異常"
+          description={`目前入口狀態為「${formatTenantCodeLabel(status, status)}」。在平台管理端重新啟用前，建立訂單都會失敗。`}
           tone="warning"
         />
       ) : null}

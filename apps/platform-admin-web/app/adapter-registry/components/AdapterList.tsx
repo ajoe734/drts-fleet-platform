@@ -4,6 +4,7 @@ import { EditAdapterModal } from "./EditAdapterModal";
 import { ApiClient } from "@drts/api-client";
 import { useTranslation } from "@/lib/i18n";
 import {
+  formatPlatformAdapterLabel,
   formatPlatformCodeLabel,
   getPlatformLabel,
 } from "@/lib/localized-labels";
@@ -146,18 +147,18 @@ export function AdapterList() {
         }
       : {
           subtitle:
-            "以共享 data-view primitive 呈現 adapter readiness、rollout posture 與財務 authority 歸屬。",
+            "以共享資料檢視元件呈現介接就緒度、發布狀態與財務權限歸屬。",
           summary:
-            "這裡的 compact table、filter pills、status chips、owned/forwarded authority badges 都直接走 ui-web 共用層。",
+            "這裡的精簡表格、篩選膠囊、狀態標籤與自有／轉派權限徽章都直接走共用 UI 元件層。",
           showing: "目前顯示",
-          ownedTag: "owned",
-          forwardedTag: "forwarded",
-          financeTag: "finance",
+          ownedTag: "自有",
+          forwardedTag: "轉派",
+          financeTag: "財務",
           health: "健康",
           enabled: "啟用",
-          webhook: "Webhook",
-          authority: "Authority",
-          rollout: "Rollout",
+          webhook: "回呼",
+          authority: "權限",
+          rollout: "發布",
           all: "全部",
           forwarded: "轉派",
           enabledFilter: "已啟用",
@@ -291,7 +292,9 @@ export function AdapterList() {
               <Td density="compact">
                 <DataCellStack
                   primary={
-                    <strong style={{ fontSize: 13.5 }}>{adapter.name}</strong>
+                    <strong style={{ fontSize: 13.5 }}>
+                      {formatPlatformAdapterLabel(locale, adapter)}
+                    </strong>
                   }
                   secondary={adapter.platformCode}
                   tertiary={`${adapter.version} · ${formatPlatformCodeLabel(

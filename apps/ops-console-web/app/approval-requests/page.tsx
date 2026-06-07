@@ -5,6 +5,7 @@ import type {
   TenantBookingApprovalRequestStatus,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import { ApprovalActions } from "./approval-actions";
 import {
@@ -152,14 +153,14 @@ export default async function ApprovalRequestsPage({
       w: 130,
       r: (row) => (
         <Pill theme={theme} tone={statusTone(row.status)} dot>
-          {row.status}
+          {formatOpsCodeLabel(locale, row.status)}
         </Pill>
       ),
     },
     {
       h: copy(locale, "MODE", "模式"),
       w: 130,
-      r: (row) => row.mode,
+      r: (row) => formatOpsCodeLabel(locale, row.mode),
     },
     {
       h: copy(locale, "ORDER", "訂單"),
@@ -187,7 +188,7 @@ export default async function ApprovalRequestsPage({
       r: (row) => formatStamp(row.created),
     },
     {
-      h: "SLA",
+      h: copy(locale, "SLA", "處理時限"),
       w: 130,
       r: (row) =>
         row.slaBreached ? (
@@ -224,12 +225,7 @@ export default async function ApprovalRequestsPage({
   ];
 
   const tabNodes: ReactNode[] = TAB_ORDER.map((tab) => {
-    const label =
-      tab === "pending"
-        ? "Pending"
-        : tab === "approved"
-          ? "Approved"
-          : "Rejected";
+    const label = formatOpsCodeLabel(locale, tab);
     return (
       <Link
         key={tab}
@@ -250,12 +246,12 @@ export default async function ApprovalRequestsPage({
         title={copy(
           locale,
           "Approval Requests · cross-tenant",
-          "審批佇列 · 跨租戶",
+          "跨租戶審批申請",
         )}
         subtitle={copy(
           locale,
           "Visible only to ops_approval_triage / ops_manager / ops_compliance. Approve, nudge, or acknowledge SLA breach per row.",
-          "僅 ops_approval_triage / ops_manager / ops_compliance 可見。可逐筆核准、提醒或確認 SLA 違規。",
+          "僅供營運審批分流、營運主管與營運法遵角色查看。可逐筆核准、提醒或確認處理時限違規。",
         )}
         tabs={tabNodes}
         activeTab={activeTabNode}

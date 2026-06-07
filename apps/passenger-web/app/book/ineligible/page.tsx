@@ -2,19 +2,22 @@ import Link from "next/link";
 
 const eligibilityGates = [
   {
-    name: "Identity verification",
-    state: "verified",
-    body: "Rider identity has been verified. This gate is currently passing.",
+    name: "身分驗證",
+    state: "已通過",
+    className: "verified",
+    body: "乘客身分已完成驗證，這個檢查目前通過。",
   },
   {
-    name: "Payment instrument",
-    state: "missing",
-    body: "No usable payment instrument is on file. The rider must add one before requesting a paid trip.",
+    name: "付款方式",
+    state: "尚未設定",
+    className: "missing",
+    body: "目前沒有可使用的付款方式。若此行程需付款，乘客必須先新增付款工具。",
   },
   {
-    name: "Program eligibility",
-    state: "not enrolled",
-    body: "The requested fare program (e.g., paratransit, partner subsidy) requires enrollment that is not present on this profile.",
+    name: "方案資格",
+    state: "未加入方案",
+    className: "not-enrolled",
+    body: "此票價或補助方案需要事先加入，乘客資料目前不符合此方案要求。",
   },
 ];
 
@@ -23,24 +26,22 @@ export default function BookingIneligiblePage() {
     <div className="page-shell">
       <section className="hero-card">
         <span className="eyebrow state-pill state-pill-negative">
-          Eligibility failed
+          資格檢查未通過
         </span>
-        <h1>Rider does not currently qualify for this booking.</h1>
+        <h1>乘客目前不符合此預約資格。</h1>
         <p>
-          Eligibility is checked before the request is dispatched. This route
-          shows which gate failed without leaking PII or other riders' data.
-          Each gate has its own remediation lane.
+          系統會在派遣前檢查資格。此頁會說明哪個關卡未通過，但不會洩漏個資或其他乘客資料。
         </p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Eligibility checklist</span>
-        <h3>Gate-by-gate result</h3>
+        <span className="surface-kicker">資格檢查清單</span>
+        <h3>各項檢查結果</h3>
         <ul className="check-list">
           {eligibilityGates.map((gate) => (
             <li
               key={gate.name}
-              className={`check-item check-${gate.state.replace(/\s+/g, "-")}`}
+              className={`check-item check-${gate.className}`}
             >
               <strong>{gate.name}</strong>
               <span className="check-state">{gate.state}</span>
@@ -52,38 +53,34 @@ export default function BookingIneligiblePage() {
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Add a payment instrument</strong>
+          <strong>新增付款方式</strong>
           <p>
-            Riders may resolve the most common ineligible state by adding a
-            valid payment instrument. The rider profile lane owns this entry
-            point.
+            最常見的資格問題是缺少可用付款方式。乘客可先回到個人資料流程新增付款工具。
           </p>
         </article>
         <article className="callout-card">
-          <strong>Program enrollment</strong>
+          <strong>方案加入狀態</strong>
           <p>
-            Subsidy / paratransit / partner programs are not auto-enrolled. The
-            rider is sent to the program owner instead of being denied silently.
+            補助、復康或合作方案不會自動加入。若資格不足，乘客會被導向方案負責單位確認。
           </p>
           <Link className="text-link" href="/unsupported">
-            Open unsupported fallback
+            查看不支援情境
           </Link>
         </article>
         <article className="callout-card warning">
-          <strong>No silent downgrade</strong>
+          <strong>不會偷偷降級</strong>
           <p>
-            The route never silently switches the rider to a different fare
-            program or service tier. Any fallback must be explicit.
+            系統不會默默把乘客改到其他票價方案或服務等級。任何備援都必須清楚告知。
           </p>
         </article>
       </section>
 
       <section className="hero-actions">
         <Link className="primary-link" href="/auth">
-          Re-verify identity
+          重新驗證身分
         </Link>
         <Link className="secondary-link" href="/book">
-          Return to request entry
+          回到預約入口
         </Link>
       </section>
     </div>

@@ -3,7 +3,11 @@
 import { useRouter } from "next/navigation";
 import {
   conciergeDeskCatalog,
+  formatDeskHealth,
   formatDeskMode,
+  formatDeskType,
+  formatQueuePolicy,
+  formatRecordingAvailability,
   resolveDeskAccess,
 } from "@/lib/desk-catalog";
 import { SessionGuard } from "@/components/session-guard";
@@ -17,12 +21,10 @@ export default function StartPage() {
     <div className="page-shell">
       <SessionGuard>
         <section className="hero-card">
-          <span className="section-kicker">Fixed site selection</span>
-          <h1>Choose the desk that owns this assisted-entry session.</h1>
+          <span className="section-kicker">固定站點選擇</span>
+          <h1>選擇此客服代訂工作階段所屬的櫃台。</h1>
           <p>
-            Every call point remains bound to a site. The picker makes health,
-            recording posture, queue policy, and role restrictions visible
-            before the operator touches a booking form.
+            每個電話站點都必須綁定站點。開始填寫代訂表單前，先確認健康狀態、錄音處理、佇列策略與角色限制。
           </p>
         </section>
 
@@ -31,15 +33,12 @@ export default function StartPage() {
             const access = session
               ? resolveDeskAccess(desk, session.mode)
               : { allowed: false as const };
-            const healthLabel =
-              desk.health === "healthy" ? "Healthy" : "Degraded";
+            const healthLabel = formatDeskHealth(desk.health);
 
             return (
               <article className="info-card" key={desk.deskId}>
                 <span className="section-kicker">
-                  {desk.deskType === "concierge"
-                    ? "Concierge desk"
-                    : "Call point"}
+                  {formatDeskType(desk.deskType)}
                 </span>
                 <h3>{desk.deskName}</h3>
                 <p>{desk.notes}</p>
@@ -53,26 +52,26 @@ export default function StartPage() {
                   >
                     {healthLabel}
                   </span>
-                  <span className="chip">{desk.queuePolicy}</span>
+                  <span className="chip">
+                    {formatQueuePolicy(desk.queuePolicy)}
+                  </span>
                   <span className="chip">
                     {desk.allowedModes.map(formatDeskMode).join(" / ")}
                   </span>
                 </div>
                 <div className="kv-grid">
                   <div className="kv-item">
-                    <strong>Site</strong>
+                    <strong>站點</strong>
                     <p>{desk.siteName}</p>
                   </div>
                   <div className="kv-item">
-                    <strong>Zone</strong>
+                    <strong>服務範圍</strong>
                     <p>{desk.zoneLabel}</p>
                   </div>
                   <div className="kv-item">
-                    <strong>Recording</strong>
+                    <strong>錄音</strong>
                     <p>
-                      {desk.recordingAvailability === "ops_callback_only"
-                        ? "Ops callback only"
-                        : "Inline callback"}
+                      {formatRecordingAvailability(desk.recordingAvailability)}
                     </p>
                   </div>
                 </div>
@@ -101,7 +100,7 @@ export default function StartPage() {
                     }}
                     type="button"
                   >
-                    Select {desk.deskName}
+                    選擇 {desk.deskName}
                   </button>
                 </div>
               </article>

@@ -34,37 +34,37 @@ export const CANVAS_EMPTY_REASONS: Record<
 > = {
   no_data: {
     label: "尚無資料",
-    en: "NO DATA",
+    en: "無資料",
     hint: "功能已就緒,目前沒有可顯示的資料。",
   },
   not_provisioned: {
     label: "尚未設定",
-    en: "NOT PROVISIONED",
+    en: "未開通",
     hint: "此功能或通道尚未為租戶啟用,需先完成基線設定。",
   },
   fetch_failed: {
     label: "讀取失敗",
-    en: "FETCH FAILED",
+    en: "讀取失敗",
     hint: "後端讀取發生錯誤,請稍後重試或檢查連線。",
   },
   permission_denied: {
     label: "權限不足",
-    en: "PERMISSION DENIED",
-    hint: "目前角色無法檢視此資料,請洽 tenant admin。",
+    en: "權限不足",
+    hint: "目前角色無法檢視此資料,請洽租戶管理員。",
   },
   external_unavailable: {
     label: "外部服務異常",
-    en: "EXTERNAL UNAVAILABLE",
+    en: "外部異常",
     hint: "相依的外部服務暫時無法使用,稍後會自動恢復。",
   },
   driver_not_eligible: {
     label: "司機未符資格",
-    en: "DRIVER NOT ELIGIBLE",
-    hint: "司機目前無法接收派遣 (driver app 專用狀態)。",
+    en: "資格不足",
+    hint: "司機目前無法接收派遣（僅供司機端應用使用）。",
   },
   filtered_empty: {
     label: "篩選後為空",
-    en: "FILTERED EMPTY",
+    en: "篩選為空",
     hint: "目前篩選條件下沒有符合的資料,調整條件即可。",
   },
 };
@@ -80,13 +80,13 @@ export interface CanvasRefreshTierMeta {
 
 export const CANVAS_REFRESH_TIERS: Record<RefreshTier, CanvasRefreshTierMeta> =
   {
-    urgent: { code: "T0", label: "Urgent", note: "Push + 5s 後援輪詢" },
-    fast: { code: "T1", label: "Fast", note: "3s 輪詢" },
-    dispatch: { code: "T2", label: "Dispatch", note: "5s 輪詢" },
-    medium: { code: "T3", label: "Medium", note: "15s 輪詢" },
-    medium_slow: { code: "T4", label: "Medium slow", note: "30s 輪詢" },
-    slow: { code: "T5", label: "Tenant slow", note: "30s 輪詢" },
-    manual: { code: "T6", label: "Manual", note: "手動刷新" },
+    urgent: { code: "T0", label: "緊急", note: "推送 + 5 秒後援輪詢" },
+    fast: { code: "T1", label: "快速", note: "3 秒輪詢" },
+    dispatch: { code: "T2", label: "派遣", note: "5 秒輪詢" },
+    medium: { code: "T3", label: "中速", note: "15 秒輪詢" },
+    medium_slow: { code: "T4", label: "中慢速", note: "30 秒輪詢" },
+    slow: { code: "T5", label: "租戶慢速", note: "30 秒輪詢" },
+    manual: { code: "T6", label: "手動", note: "手動刷新" },
   };
 
 export interface CanvasRiskLevelMeta {
@@ -98,9 +98,9 @@ export interface CanvasRiskLevelMeta {
 
 export const CANVAS_RISK_LEVELS: Record<ActionRiskLevel, CanvasRiskLevelMeta> =
   {
-    low: { label: "Low", pattern: "直接執行 + toast receipt" },
-    medium: { label: "Medium", pattern: "modal confirm + receipt" },
-    high: { label: "High", pattern: "modal confirm + 原因 + receipt" },
+    low: { label: "低風險", pattern: "直接執行 + 操作收據" },
+    medium: { label: "中風險", pattern: "確認視窗 + 操作收據" },
+    high: { label: "高風險", pattern: "確認視窗 + 原因 + 操作收據" },
   };
 
 export interface CanvasToggleProps {
@@ -147,7 +147,7 @@ export function CanvasToggle({ theme, on, label }: CanvasToggleProps) {
     color: on ? theme.text : theme.textDim,
   };
   return (
-    <span style={wrapStyle} role="img" aria-label={on ? "on" : "off"}>
+    <span style={wrapStyle} role="img" aria-label={on ? "開啟" : "關閉"}>
       <span style={trackStyle}>
         <span style={knobStyle} />
       </span>

@@ -15,11 +15,13 @@ import {
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import {
+  ServerCanvasTable,
+  type ServerCanvasTableColumn,
+} from "@/components/server-canvas-table";
 import {
   CANVAS_EMPTY_REASONS,
   CANVAS_REFRESH_TIERS,
@@ -27,7 +29,15 @@ import {
   CanvasToggle,
   type CanvasEmptyReason,
 } from "@/lib/notification-canvas";
+import {
+  formatTenantErrorSummary,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
 import { getTenantClient } from "@/lib/api-client";
+import {
+  formatTenantCodeLabel,
+  hasTenantCodeLabel,
+} from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -93,12 +103,6 @@ const emptyLabelStyle: CSSProperties = {
   color: th.text,
   fontWeight: 600,
   fontSize: 12,
-};
-
-const emptyCodeStyle: CSSProperties = {
-  color: th.textMuted,
-  fontFamily: th.monoFamily,
-  fontSize: 10.5,
 };
 
 const emptyHintStyle: CSSProperties = {
@@ -178,20 +182,20 @@ const NOTIFICATION_CHANNELS = ["email", "webhook", "ops_console"] as const;
 type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
 const CHANNEL_LABEL: Record<NotificationChannel, string> = {
-  email: "EMAIL",
-  webhook: "WEBHOOK",
-  ops_console: "TENANT CONSOLE",
+  email: "電子郵件",
+  webhook: "回呼",
+  ops_console: "營運控制台",
 };
 
 const EVENT_DESCRIPTIONS: Record<string, string> = {
   "booking.created": "新訂單建立後立即發出",
-  "booking.confirmed": "司機接單,在抵達取車點之前",
-  "booking.cancelled": "訂單取消 (tenant / ops / driver 任一方)",
-  "booking.approval_required": "達 approval rule 條件,需主管簽核",
-  "booking.approval_approved": "簽核通過,訂單繼續派遣",
-  "booking.approval_rejected": "簽核退回,訂單需要重新調整",
-  "invoice.ready": "月結 invoice 已生成",
-  "webhook.delivery_failed": "Webhook 端點連續失敗 3 次",
+  "booking.confirmed": "司機接單後，於抵達取車點前發出",
+  "booking.cancelled": "租戶、營運或司機任一方取消訂單時發出",
+  "booking.approval_required": "達到簽核規則條件，需主管簽核",
+  "booking.approval_approved": "簽核通過後，訂單繼續派遣",
+  "booking.approval_rejected": "簽核退回後，訂單需要重新調整",
+  "invoice.ready": "月結發票已生成",
+  "webhook.delivery_failed": "回呼端點連續失敗 3 次",
   "quota.threshold_warning": "配額使用率 ≥ 80%",
 };
 
@@ -218,26 +222,32 @@ type CrossAppLink = {
 const CROSS_APP_LINKS: CrossAppLink[] = [
   {
     label: "整合就緒度",
-    hint: "回到 /integration-governance 查看整體 readiness",
+    hint: "查看整體整合就緒度與基線檢查項目",
     href: "/integration-governance",
     targetApp: "tenant-console",
     openMode: "same_tab",
   },
   {
-    label: "Webhook 端點",
-    hint: "前往 /webhooks 啟用 webhook channel",
+    label: "回呼端點",
+    hint: "建立或檢查回呼端點，讓回呼通道可以啟用",
     href: "/webhooks",
     targetApp: "tenant-console",
     openMode: "same_tab",
   },
   {
-    label: "Webhook 投遞詳細",
-    hint: "深入 platform-admin 對帳投遞失敗 (Q-X03)",
+    label: "回呼投遞明細",
+    hint: "到平台管理後台追查投遞失敗、重試與稽核紀錄",
     href: "/integrations/webhooks",
     targetApp: "platform-admin",
     openMode: "new_tab",
   },
 ];
+
+const APP_LABELS: Record<CrossAppLink["targetApp"], string> = {
+  "tenant-console": "租戶控制台",
+  "ops-console": "營運控制台",
+  "platform-admin": "平台管理後台",
+};
 
 type NotificationsPageData = {
   preferences: TenantNotificationPreferences | null;
@@ -245,10 +255,6 @@ type NotificationsPageData = {
   webhookEndpoints: TenantWebhookEndpoint[];
   errors: string[];
 };
-
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "未知錯誤";
-}
 
 function formatUpdated(value: string | null | undefined) {
   if (!value) return "—";
@@ -292,13 +298,28 @@ async function loadNotificationsData(): Promise<NotificationsPageData> {
   const errors: string[] = [];
 
   if (preferencesResult.status === "rejected") {
-    errors.push(`通知偏好: ${toErrorMessage(preferencesResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "通知偏好",
+        toTenantErrorMessage(preferencesResult.reason, "通知偏好讀取失敗"),
+      ),
+    );
   }
   if (governanceResult.status === "rejected") {
-    errors.push(`治理基線: ${toErrorMessage(governanceResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "治理基線",
+        toTenantErrorMessage(governanceResult.reason, "治理基線讀取失敗"),
+      ),
+    );
   }
   if (webhooksResult.status === "rejected") {
-    errors.push(`Webhook 端點: ${toErrorMessage(webhooksResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "回呼端點",
+        toTenantErrorMessage(webhooksResult.reason, "回呼端點讀取失敗"),
+      ),
+    );
   }
 
   return {
@@ -384,6 +405,14 @@ function buildMatrixRows(
     });
 }
 
+function formatNotificationEventLabel(eventType: string) {
+  if (!hasTenantCodeLabel(eventType)) {
+    return "未分類事件";
+  }
+
+  return formatTenantCodeLabel(eventType, "未分類事件");
+}
+
 const UPDATE_SUBSCRIPTION_ACTION = "update_subscription";
 
 /**
@@ -461,7 +490,7 @@ function deriveActiveEmptyReason(data: NotificationsPageData): {
   ) {
     return {
       reason: "no_data",
-      detail: "尚未訂閱任何事件,所有 channel 預設關閉。",
+      detail: "目前尚未訂閱任何事件，所有通道都維持預設關閉。",
     };
   }
   return null;
@@ -512,7 +541,7 @@ export default async function NotificationsPage() {
   );
   const activeEmptyReason = deriveActiveEmptyReason(data);
 
-  const headerSubtitle = `${T5_TIER.code} · ${T5_TIER.note} · 事件 × 通道矩陣 · spec §9.6.6`;
+  const headerSubtitle = `${T5_TIER.note} · 事件與通道矩陣快照`;
 
   const channelEnabledByChannel: Record<NotificationChannel, number> = {
     email: 0,
@@ -527,41 +556,45 @@ export default async function NotificationsPage() {
     }
   }
 
-  const matrixColumns: CanvasTableColumn<MatrixRow>[] = [
+  const matrixColumns: ServerCanvasTableColumn<MatrixRow>[] = [
     {
-      h: "EVENT TYPE",
+      h: "事件類型",
       w: 240,
       r: (row) => (
         <div style={matrixEventCellStyle}>
-          <span style={matrixEventCodeStyle}>{row.eventType}</span>
+          <span style={matrixEventCodeStyle}>
+            {formatNotificationEventLabel(row.eventType)}
+          </span>
           <span style={matrixEventDescStyle}>{row.description}</span>
         </div>
       ),
     },
-    ...NOTIFICATION_CHANNELS.map<CanvasTableColumn<MatrixRow>>((channel) => ({
-      h: CHANNEL_LABEL[channel],
-      w: 160,
-      r: (row) => {
-        const cell = row.cells[channel];
-        if (cell === "not_provisioned") {
+    ...NOTIFICATION_CHANNELS.map<ServerCanvasTableColumn<MatrixRow>>(
+      (channel) => ({
+        h: CHANNEL_LABEL[channel],
+        w: 160,
+        r: (row) => {
+          const cell = row.cells[channel];
+          if (cell === "not_provisioned") {
+            return (
+              <CanvasPill theme={th} tone="neutral">
+                <CanvasIcon name="x" size={10} />
+                尚未開通
+              </CanvasPill>
+            );
+          }
           return (
-            <CanvasPill theme={th} tone="neutral">
-              <CanvasIcon name="x" size={10} />
-              not_provisioned
-            </CanvasPill>
+            <span style={matrixCellStyle}>
+              <CanvasToggle
+                theme={th}
+                on={cell === "enabled"}
+                label={cell === "enabled" ? "開" : "關"}
+              />
+            </span>
           );
-        }
-        return (
-          <span style={matrixCellStyle}>
-            <CanvasToggle
-              theme={th}
-              on={cell === "enabled"}
-              label={cell === "enabled" ? "on" : "off"}
-            />
-          </span>
-        );
-      },
-    })),
+        },
+      }),
+    ),
   ];
 
   return (
@@ -573,7 +606,7 @@ export default async function NotificationsPage() {
         actions={
           <>
             <CanvasBtn theme={th} icon="ext" size="sm">
-              webhook payload schema
+              回呼載荷格式
             </CanvasBtn>
             <CanvasBtn
               theme={th}
@@ -604,21 +637,21 @@ export default async function NotificationsPage() {
             theme={th}
             tone="info"
             icon="info"
-            title="Webhook channel 尚未設定"
-            body="目前沒有任何 webhook endpoint,該 channel 將以 not_provisioned 呈現。前往 /webhooks 新增端點後即可啟用。"
+            title="回呼通道尚未設定"
+            body="目前沒有任何回呼端點，因此此通道會顯示為尚未開通。前往回呼管理新增端點後即可啟用。"
           />
         ) : null}
 
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Events"
+            label="事件"
             value={formatCount(matrixRows.length)}
             sub="事件類型"
           />
           <CanvasKPI
             theme={th}
-            label="Subscriptions"
+            label="訂閱數"
             value={`${formatCount(enabledCount)} / ${formatCount(totalCells)}`}
             sub={
               hasCustomConfiguration
@@ -628,21 +661,17 @@ export default async function NotificationsPage() {
           />
           <CanvasKPI
             theme={th}
-            label="Webhook"
+            label="回呼"
             value={formatCount(activeWebhookEndpoints)}
             sub={
-              webhookChannelProvisioned
-                ? "個 active 端點"
-                : "尚未設定 (not_provisioned)"
+              webhookChannelProvisioned ? "啟用中的端點" : "尚未設定（未開通）"
             }
           />
           <CanvasKPI
             theme={th}
-            label="Last update"
+            label="最後更新"
             value={formatUpdated(data.preferences?.updatedAt)}
-            sub={
-              hasCustomConfiguration ? "Custom configuration" : "All defaults"
-            }
+            sub={hasCustomConfiguration ? "自訂設定" : "全為預設基線"}
           />
         </div>
 
@@ -650,21 +679,21 @@ export default async function NotificationsPage() {
           <CanvasCard
             theme={th}
             title="事件 × 通道"
-            subtitle={`每個事件可獨立選擇是否經由 ${NOTIFICATION_CHANNELS.length} 個通道送出 · ${UPDATE_RISK.label} (${UPDATE_RISK.pattern})`}
+            subtitle={`每個事件可獨立選擇是否透過 ${NOTIFICATION_CHANNELS.length} 個通道送出，${UPDATE_RISK.pattern}`}
             padding={0}
             style={matrixCardStyle}
           >
             {matrixRows.length > 0 ? (
               <>
-                <CanvasTable<MatrixRow>
+                <ServerCanvasTable<MatrixRow>
                   theme={th}
                   columns={matrixColumns}
                   rows={matrixRows}
                 />
                 <div style={matrixNoteStyle}>
                   {hasCustomConfiguration
-                    ? `已套用 ${formatCount(overridesCount)} 個租戶覆寫 · 最後更新 ${formatUpdated(data.preferences?.updatedAt)}`
-                    : `尚未覆寫,顯示治理基線快照 ${formatUpdated(data.governance?.generatedAt)}`}
+                    ? `已套用 ${formatCount(overridesCount)} 個租戶覆寫，最後更新於 ${formatUpdated(data.preferences?.updatedAt)}`
+                    : `尚未覆寫，目前顯示治理基線快照，產生時間為 ${formatUpdated(data.governance?.generatedAt)}`}
                 </div>
               </>
             ) : (
@@ -675,7 +704,7 @@ export default async function NotificationsPage() {
           <CanvasCard
             theme={th}
             title="狀態概要"
-            subtitle="State variants 自動偵測"
+            subtitle="系統會自動判定目前狀態變體"
             style={sideCardStyle}
           >
             <CanvasDL
@@ -683,48 +712,46 @@ export default async function NotificationsPage() {
               cols={1}
               items={[
                 {
-                  k: "Variant",
-                  v: hasCustomConfiguration
-                    ? "Custom configuration"
-                    : "All defaults",
+                  k: "變體",
+                  v: hasCustomConfiguration ? "自訂設定" : "全為預設基線",
                   mono: true,
                 },
                 {
-                  k: "Refresh tier",
-                  v: `${T5_TIER.code} · ${T5_TIER.label}`,
+                  k: "刷新層級",
+                  v: `${T5_TIER.label} · ${T5_TIER.note}`,
                   mono: true,
                 },
                 {
-                  k: "Spec ref",
-                  v: "§9.6.6 (Q-TEN02)",
+                  k: "矩陣範圍",
+                  v: `${formatCount(matrixRows.length)} 種事件 × ${NOTIFICATION_CHANNELS.length} 個通道`,
                   mono: true,
                 },
                 {
-                  k: "Risk",
-                  v: `${UPDATE_RISK.label} · ${UPDATE_RISK.pattern}`,
+                  k: "風險",
+                  v: `${UPDATE_RISK.label}，${UPDATE_RISK.pattern}`,
                   mono: true,
                 },
                 {
-                  k: "Action",
+                  k: "操作",
                   v: updateAction.enabled
-                    ? "update_subscription"
-                    : `disabled (${updateAction.disabledReasonCode ?? "blocked"})`,
+                    ? "更新通知訂閱"
+                    : `已停用（${formatTenantCodeLabel(updateAction.disabledReasonCode ?? "blocked", "已阻擋")}）`,
                   mono: true,
                 },
                 {
-                  k: "Email 訂閱",
+                  k: "電子郵件訂閱",
                   v: `${formatCount(channelEnabledByChannel.email)} / ${formatCount(matrixRows.length)}`,
                   mono: true,
                 },
                 {
-                  k: "Webhook 訂閱",
+                  k: "回呼訂閱",
                   v: webhookChannelProvisioned
                     ? `${formatCount(channelEnabledByChannel.webhook)} / ${formatCount(matrixRows.length)}`
-                    : "not_provisioned",
+                    : "尚未開通",
                   mono: true,
                 },
                 {
-                  k: "Ops console 訂閱",
+                  k: "營運控制台訂閱",
                   v: `${formatCount(channelEnabledByChannel.ops_console)} / ${formatCount(matrixRows.length)}`,
                   mono: true,
                 },
@@ -758,8 +785,8 @@ export default async function NotificationsPage() {
 
         <CanvasCard
           theme={th}
-          title="EmptyReason 對照"
-          subtitle="六種 EmptyReason 視覺差異 · 配合 Q-X15 統一處理"
+          title="空狀態原因對照"
+          subtitle="六種空狀態都會用不同的視覺提示，方便快速辨識目前情境"
         >
           <div style={emptyCatalogStyle}>
             {/*
@@ -779,13 +806,13 @@ export default async function NotificationsPage() {
                 "external_unavailable",
                 "filtered_empty",
               ] as const
-            ).map((reason) => {
+            ).map((reason, index) => {
               const meta = CANVAS_EMPTY_REASONS[reason];
               const tone = getEmptyReasonTone(reason);
               const isActive = activeEmptyReason?.reason === reason;
               return (
                 <div
-                  key={reason}
+                  key={`${reason}-${index}`}
                   style={{
                     ...emptyCardStyle,
                     borderColor: isActive ? th.accent : th.border,
@@ -794,16 +821,15 @@ export default async function NotificationsPage() {
                 >
                   <div style={emptyHeaderStyle}>
                     <CanvasPill theme={th} tone={tone} dot>
-                      {meta.en}
+                      {meta.label}
                     </CanvasPill>
                     {isActive ? (
                       <CanvasPill theme={th} tone="accent">
-                        active
+                        目前狀態
                       </CanvasPill>
                     ) : null}
                   </div>
                   <span style={emptyLabelStyle}>{meta.label}</span>
-                  <span style={emptyCodeStyle}>{reason}</span>
                   <span style={emptyHintStyle}>{meta.hint}</span>
                 </div>
               );
@@ -814,7 +840,7 @@ export default async function NotificationsPage() {
         <CanvasCard
           theme={th}
           title="跨應用導向"
-          subtitle="Q-X03 / Q-TEN10 / Q-TEN08 · 通知偏好的相關深連結"
+          subtitle="通知偏好的相關頁面入口"
         >
           <div style={crossAppListStyle}>
             {CROSS_APP_LINKS.map((link) => (
@@ -832,7 +858,7 @@ export default async function NotificationsPage() {
                 />
                 <span style={{ fontWeight: 600 }}>{link.label}</span>
                 <CanvasPill theme={th} tone="neutral">
-                  {link.targetApp}
+                  {APP_LABELS[link.targetApp]}
                 </CanvasPill>
                 <span style={{ color: th.textMuted, fontSize: 11.5 }}>
                   {link.hint}
@@ -845,7 +871,7 @@ export default async function NotificationsPage() {
                     fontSize: 11,
                   }}
                 >
-                  {link.openMode === "new_tab" ? "new tab" : "in app"}
+                  {link.openMode === "new_tab" ? "新分頁" : "站內"}
                 </span>
               </a>
             ))}

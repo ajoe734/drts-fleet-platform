@@ -133,11 +133,11 @@ function actionSummary(intent: string, locale: Locale) {
     case "acknowledge":
       return locale === "en"
         ? "Record that the escalation target accepted the handoff."
-        : "記錄升級對象已接受此次 handoff。";
+        : "記錄升級對象已接受此次交接。";
     default:
       return locale === "en"
         ? "This action stays in the incident workspace."
-        : "此動作會停留在 incident 工作區內完成。";
+        : "此動作會在事故工作區內完成。";
   }
 }
 
@@ -308,12 +308,12 @@ export function IncidentDetailActionPanel({
           title={
             locale === "en"
               ? "Driver-side suppression lift is not writable from this incident form"
-              : "這個 incident 表單目前不能直接寫入司機抑制解除"
+              : "這個事故表單目前不能直接解除司機抑制"
           }
           body={
             locale === "en"
               ? "The deep link now lands correctly. Continue in Driver detail for contextual review, then return here after the driver state is updated."
-              : "deep link 現在會正確落點。請先到 Driver detail 做情境確認，再回到此頁追蹤司機狀態更新。"
+              : "深連結現在會正確導向。請先到司機詳情頁確認情境，再回到此頁追蹤司機狀態更新。"
           }
         />
         <div
@@ -357,7 +357,7 @@ export function IncidentDetailActionPanel({
       let receiptBody =
         locale === "en"
           ? "Mutation completed. Refreshing timeline and audit subset."
-          : "動作已送出，正在刷新 timeline 與 audit 摘要。";
+          : "動作已送出，正在刷新處理時間線與審計摘要。";
       let nextReceipt: ReceiptState | null = null;
 
       // NOTE: the current backend does not return a receipt envelope on
@@ -478,7 +478,7 @@ export function IncidentDetailActionPanel({
           ? submitError.message
           : locale === "en"
             ? "Unknown incident action failure."
-            : "incident 動作失敗。",
+            : "事故處理動作失敗。",
       );
     } finally {
       setIsPending(false);
@@ -505,7 +505,7 @@ export function IncidentDetailActionPanel({
             title={
               locale === "en"
                 ? `${receipt.title} completed`
-                : `${receipt.title}已完成`
+                : `${receipt.title} 已完成`
             }
             body={receipt.body}
           />
@@ -536,7 +536,7 @@ export function IncidentDetailActionPanel({
               <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
                 {locale === "en"
                   ? "Audit subset refreshes on the server snapshot."
-                  : "audit 摘要會隨 server snapshot 一起刷新。"}
+                  : "審計摘要會隨伺服器快照一併刷新。"}
               </span>
             )}
             <button
@@ -831,7 +831,7 @@ export function IncidentDetailActionPanel({
           body={
             locale === "en"
               ? "The deep link intent was not recognized for this incident snapshot."
-              : "這個 incident snapshot 無法識別 deep link 帶來的 intent。"
+              : "這個事故快照無法識別深連結帶來的操作意圖。"
           }
         />
       )}

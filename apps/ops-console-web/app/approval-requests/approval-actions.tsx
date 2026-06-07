@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { CanvasBtn as Btn, buildCanvasTheme } from "@drts/ui-web";
+import { formatOpsUiError } from "@/lib/error-copy";
 import {
   acknowledgeBreachAction,
   approveApprovalRequestAction,
@@ -19,6 +20,27 @@ type Locale = "en" | "zh";
 
 function copy(locale: Locale, en: string, zh: string): string {
   return locale === "en" ? en : zh;
+}
+
+function formatActionMessage(locale: Locale, message: string) {
+  switch (message) {
+    case "MISSING_REQUEST_OR_REASON":
+      return copy(
+        locale,
+        "Request ID and approval reason are required.",
+        "請求編號與核准原因皆為必填。",
+      );
+    case "MISSING_REQUEST":
+      return copy(locale, "Request ID is required.", "請求編號為必填。");
+    case "UNKNOWN_ERROR":
+      return copy(locale, "Unknown error.", "未知錯誤。");
+    default:
+      return formatOpsUiError(
+        locale,
+        message,
+        copy(locale, "Approval action failed", "審批操作失敗"),
+      );
+  }
 }
 
 export function ApprovalActions({
@@ -41,7 +63,8 @@ export function ApprovalActions({
       const result = await run();
       if (!result.ok) {
         window.alert(
-          copy(locale, "Action failed: ", "操作失敗：") + result.message,
+          copy(locale, "Action failed: ", "操作失敗：") +
+            formatActionMessage(locale, result.message),
         );
       }
     });
@@ -82,7 +105,7 @@ export function ApprovalActions({
         copy(
           locale,
           "Acknowledge the SLA breach for this request?",
-          "確認此請求的 SLA 違規？",
+          "確認此請求的服務時限違規？",
         ),
       )
     ) {

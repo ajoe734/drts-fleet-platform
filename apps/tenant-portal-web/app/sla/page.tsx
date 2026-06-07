@@ -3,6 +3,7 @@ import { AppShellCard } from "@drts/ui-web";
 import { getSlaProfile, updateSlaProfile } from "./actions";
 import type { TenantSlaProfile } from "@drts/contracts";
 import { describeRoleSnapshot, getTenantRoleSnapshot } from "@/lib/rbac";
+import { formatPortalUiError } from "@/lib/error-copy";
 
 export default async function SlaPage() {
   const { profile, error: fetchError } = await getSlaProfile();
@@ -11,25 +12,24 @@ export default async function SlaPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="SLA Profile"
+        title="服務時限設定"
         description={
           roleSnapshot.capabilities.canWriteSla
-            ? "View and update SLA thresholds for wait, arrival, and completion times across DRTS-operated and externally fulfilled bookings."
-            : `Viewing as ${describeRoleSnapshot(roleSnapshot)}. SLA thresholds are readable but not writable for this role.`
+            ? "可查看並更新等待、到達與完成時間的服務時限門檻，涵蓋 DRTS 自營與外部履約訂單。"
+            : `目前以 ${describeRoleSnapshot(roleSnapshot)} 身分檢視。這個角色可讀取服務時限門檻，但無法修改。`
         }
       >
         {fetchError && (
           <div className="error-banner">
-            <strong>Error loading SLA profile:</strong> {fetchError}
+            <strong>載入服務時限設定失敗：</strong>{" "}
+            {formatPortalUiError(fetchError, "無法載入服務時限設定")}
           </div>
         )}
 
         <div className="source-guidance">
-          <strong>How to read these thresholds:</strong> DRTS-operated bookings
-          measure dispatch and trip delay inside the platform. Externally
-          fulfilled bookings still surface here, but tenant-facing delay can
-          come from the external fulfillment handoff rather than a DRTS dispatch
-          queue alone.
+          <strong>如何解讀這些門檻：</strong> DRTS 自營訂單會直接衡量平台內的
+          派遣與行程延遲。外部履約訂單也會顯示在這裡，但租戶看到的延遲可能
+          來自外部履約交接，而不只是 DRTS 派遣佇列。
         </div>
 
         {profile && <SlaProfileTable profile={profile} />}
@@ -40,8 +40,8 @@ export default async function SlaPage() {
         />
 
         <Link className="route-link" href="/" style={{ marginTop: "1rem" }}>
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>返回首頁</strong>
+          回到租戶入口總覽。
         </Link>
       </AppShellCard>
     </main>
@@ -54,28 +54,28 @@ function SlaProfileTable({ profile }: { profile: TenantSlaProfile }) {
       <table>
         <thead>
           <tr>
-            <th>Metric</th>
-            <th>Threshold (minutes)</th>
+            <th>指標</th>
+            <th>門檻（分鐘）</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>Wait Time Threshold</td>
-            <td>{profile.waitThresholdMin} min</td>
+            <td>等待時間門檻</td>
+            <td>{profile.waitThresholdMin} 分鐘</td>
           </tr>
           <tr>
-            <td>Arrival Time Threshold</td>
-            <td>{profile.arrivalThresholdMin} min</td>
+            <td>到達時間門檻</td>
+            <td>{profile.arrivalThresholdMin} 分鐘</td>
           </tr>
           <tr>
-            <td>Completion Time Threshold</td>
-            <td>{profile.completionThresholdMin} min</td>
+            <td>完成時間門檻</td>
+            <td>{profile.completionThresholdMin} 分鐘</td>
           </tr>
           <tr>
-            <td>Last Updated</td>
+            <td>最後更新</td>
             <td>
               {profile.updatedAt
-                ? new Date(profile.updatedAt).toLocaleString()
+                ? new Date(profile.updatedAt).toLocaleString("zh-TW")
                 : "-"}
             </td>
           </tr>
@@ -98,14 +98,14 @@ function UpdateSlaForm({
         <table>
           <thead>
             <tr>
-              <th>Metric</th>
-              <th>New Value (minutes)</th>
+              <th>指標</th>
+              <th>新值（分鐘）</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td>
-                <label htmlFor="waitThresholdMin">Wait Time</label>
+                <label htmlFor="waitThresholdMin">等待時間</label>
               </td>
               <td>
                 <input
@@ -120,7 +120,7 @@ function UpdateSlaForm({
             </tr>
             <tr>
               <td>
-                <label htmlFor="arrivalThresholdMin">Arrival Time</label>
+                <label htmlFor="arrivalThresholdMin">到達時間</label>
               </td>
               <td>
                 <input
@@ -135,7 +135,7 @@ function UpdateSlaForm({
             </tr>
             <tr>
               <td>
-                <label htmlFor="completionThresholdMin">Completion Time</label>
+                <label htmlFor="completionThresholdMin">完成時間</label>
               </td>
               <td>
                 <input
@@ -154,7 +154,7 @@ function UpdateSlaForm({
 
       <div style={{ marginTop: "1rem" }}>
         <button type="submit" className="btn-primary" disabled={!canWrite}>
-          {canWrite ? "Update SLA Profile" : "Read-only"}
+          {canWrite ? "更新服務時限設定" : "唯讀"}
         </button>
       </div>
     </form>

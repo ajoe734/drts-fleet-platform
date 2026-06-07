@@ -113,10 +113,22 @@ export function assistantStatusTone(state: AssistantViewState) {
 
 export function assistantStateLabel(state: AssistantViewState) {
   switch (state) {
+    case "idle":
+      return "待命";
+    case "thinking":
+      return "思考中";
+    case "planning":
+      return "規劃中";
     case "awaiting_confirmation":
-      return "awaiting confirmation";
+      return "等待確認";
+    case "executing":
+      return "執行中";
+    case "receipt":
+      return "已完成";
+    case "error":
+      return "錯誤";
     default:
-      return state.replaceAll("_", " ");
+      return "未知狀態";
   }
 }
 
@@ -278,11 +290,118 @@ export interface RouteContextWarning {
   message: LocalizedText;
 }
 
+// ---------------------------------------------------------------------------
+// Context mesh v2 — page / form / table / action context
+//
+// These shapes let a page hand the assistant a *bounded, privacy-filtered*
+// picture of what the operator can see and do right now: visible tables, the
+// forms on screen with their fields and validation errors, the selected rows,
+// and the actions currently available. Every value is page-owned plain data
+// (held in React state); nothing here is ever sourced from DOM scraping, and
+// secret/credential field values are never serialized.
+// ---------------------------------------------------------------------------
+
+/** Form field kinds the assistant can reason about. */
+export type AssistantFieldKind =
+  | "text"
+  | "number"
+  | "select"
+  | "multiselect"
+  | "boolean"
+  | "date"
+  | "secret"
+  | "textarea"
+  | "other";
+
 /**
- * Page-owned snapshot a route may hand to `buildRouteContext`. This is the ONLY
- * channel for dynamic, page-local context (active tab, current selection, live
- * warnings). Pages pass plain serializable data they already hold in React
- * state; the adapter never reaches into the DOM to discover it.
+ * One field of a page-owned form. `valuePreview` is a short, non-sensitive
+ * preview only; for `secret`/`sensitive` fields no value is ever exposed.
+ */
+export interface AssistantFormFieldContext {
+  name: string;
+  label?: string;
+  kind?: AssistantFieldKind;
+  required?: boolean;
+  /** True when the field currently holds a non-empty value. */
+  filled: boolean;
+  /**
+   * Short preview of the current value. The builder truncates it and drops it
+   * entirely for sensitive fields. Never the raw value for credentials.
+   */
+  valuePreview?: string;
+  /** True when the field is sensitive; its value must never be serialized. */
+  sensitive?: boolean;
+}
+
+/** A page-reported validation error, field-scoped when `field` is set. */
+export interface AssistantFormValidationError {
+  field?: string;
+  code?: string;
+  message: string;
+}
+
+/** A page-owned form currently rendered on the route. */
+export interface AssistantFormContext {
+  formId: string;
+  title?: string;
+  fields: AssistantFormFieldContext[];
+  /** True when the operator has edited the form since load/submit. */
+  dirty: boolean;
+  /** True when the form is mid-submit. */
+  submitting?: boolean;
+  validationErrors: AssistantFormValidationError[];
+}
+
+/** A column key/label pair a page exposes for an assistant-visible table. */
+export interface AssistantTableColumn {
+  key: string;
+  label?: string;
+}
+
+/**
+ * A page-owned snapshot of a visible data table. Pages pass bounded summary
+ * data they already hold in state; the builder caps columns and sample rows.
+ */
+export interface AssistantTableContext {
+  tableId: string;
+  title?: string;
+  /** Total rows known to the page (e.g. unfiltered count), when known. */
+  totalRowCount?: number;
+  /** Rows currently rendered/visible after filters. */
+  visibleRowCount: number;
+  /** Columns in display order. */
+  columns?: AssistantTableColumn[];
+  /** Entity kind each row maps to, when uniform. */
+  rowEntityKind?: AssistantEntityKind;
+  /** A bounded set of example row refs (capped by the builder). */
+  sampleRows?: AssistantEntityRef[];
+  /** Active filter label/value, page-owned. */
+  activeFilter?: string;
+}
+
+/** Risk tier of an available action, aligned with the plan §6.4 risk policy. */
+export type AssistantActionRisk = "low" | "medium" | "high" | "external";
+
+/** An action the current view exposes, with its availability + risk. */
+export interface AssistantAvailableAction {
+  id: string;
+  label: string;
+  risk?: AssistantActionRisk;
+  /** False when the action is currently disabled in the UI. */
+  enabled: boolean;
+  /** Machine code explaining why the action is disabled, if any. */
+  disabledReasonCode?: string;
+  /** True when the action requires modal confirmation + reason. */
+  requiresConfirmation?: boolean;
+}
+
+/**
+ * Page-owned snapshot a route may hand to `buildRouteContext` /
+ * `buildAssistantContextPacket`. This is the ONLY channel for dynamic,
+ * page-local context (active tab, current selection, live warnings, visible
+ * tables, on-screen forms, available actions). Pages pass plain serializable
+ * data they already hold in React state; the adapter never reaches into the DOM
+ * to discover it.
  */
 export interface PageContextSnapshot {
   /** Page-owned active tab key. Ignored unless it is a valid tab for the route. */
@@ -291,6 +410,12 @@ export interface PageContextSnapshot {
   selection?: AssistantEntityRef[];
   /** Page-derived advisory warnings (e.g. "maintenance mode is ON"). */
   warnings?: RouteContextWarning[];
+  /** Page-owned visible tables (bounded, never scraped). */
+  tables?: AssistantTableContext[];
+  /** Page-owned forms with fields + validation, privacy-filtered. */
+  forms?: AssistantFormContext[];
+  /** Page-owned actions available in the current view. */
+  availableActions?: AssistantAvailableAction[];
 }
 
 /** Static, compile-time registry entry describing one Platform Admin route. */
@@ -343,6 +468,58 @@ export interface AssistantRouteContext {
     route: boolean;
     query: boolean;
     pageSelection: boolean;
+  };
+}
+
+/** Stable schema id for the v2 assistant context packet (plan §6.2). */
+export const ASSISTANT_CONTEXT_SCHEMA =
+  "platform_admin_assistant_context.v2" as const;
+
+/**
+ * The bounded, privacy-filtered context packet handed to the assistant gateway.
+ * It merges the deterministic route context with the page-owned snapshot
+ * (tables, forms, selection, actions). Shape mirrors the architecture plan
+ * §6.2 "Context Mesh" packet. Built by `buildAssistantContextPacket`.
+ */
+export interface AssistantContextPacket {
+  schema: typeof ASSISTANT_CONTEXT_SCHEMA;
+  route: {
+    pathname: string;
+    routeKey: PlatformAdminRouteKey;
+    title: LocalizedText;
+    section: string;
+    activeTab: string | null;
+    availableTabs: string[];
+    refreshTier: RefreshTier;
+    routeImplemented: boolean;
+  };
+  page: {
+    /** Route + query + selection entity refs, deduped. */
+    visibleEntityRefs: AssistantEntityRef[];
+    /** Page-owned selected rows/records only. */
+    selectedRecords: AssistantEntityRef[];
+    /** Bounded visible tables. */
+    visibleTables: AssistantTableContext[];
+    /** Baseline + body-parity + page warnings, deduped. */
+    visibleWarnings: RouteContextWarning[];
+    /** Actions exposed by the current view. */
+    availableActions: AssistantAvailableAction[];
+  };
+  /** On-screen forms with fields + validation errors. */
+  forms: AssistantFormContext[];
+  /** The operator's raw prompt + locale, when this packet accompanies a turn. */
+  userIntent?: {
+    rawPrompt: string;
+    locale: "zh" | "en";
+  };
+  /** Provenance flags: which inputs contributed to this packet. */
+  generatedFrom: {
+    route: boolean;
+    query: boolean;
+    pageSelection: boolean;
+    pageTables: boolean;
+    pageForms: boolean;
+    pageActions: boolean;
   };
 }
 

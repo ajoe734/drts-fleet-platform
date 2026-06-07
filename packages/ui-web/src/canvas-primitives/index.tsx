@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import type { CSSProperties, ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type Ref,
+  type ReactNode,
+} from "react";
 import {
   buildCanvasTheme,
   type CanvasTheme,
@@ -29,8 +37,34 @@ const DEFAULT_THEME = buildCanvasTheme({
   density: "compact",
 });
 
+const CANVAS_SHELL_STACK_BREAKPOINT = 960;
+const CANVAS_TOPBAR_WRAP_BREAKPOINT = 1120;
+const CANVAS_PAGE_HEADER_STACK_BREAKPOINT = 900;
+const CANVAS_CARD_HEADER_STACK_BREAKPOINT = 720;
+
 function resolveTheme(theme?: CanvasTheme) {
   return theme ?? DEFAULT_THEME;
+}
+
+function getViewportWidth() {
+  return typeof window === "undefined" ? 1440 : window.innerWidth;
+}
+
+function useViewportWidth() {
+  const [viewportWidth, setViewportWidth] = useState(1440);
+
+  useEffect(() => {
+    const updateViewportWidth = () => setViewportWidth(getViewportWidth());
+    updateViewportWidth();
+    window.addEventListener("resize", updateViewportWidth);
+    window.addEventListener("orientationchange", updateViewportWidth);
+    return () => {
+      window.removeEventListener("resize", updateViewportWidth);
+      window.removeEventListener("orientationchange", updateViewportWidth);
+    };
+  }, []);
+
+  return viewportWidth;
 }
 
 function isCanvasIconName(icon: unknown): icon is CanvasIconName {
@@ -138,10 +172,12 @@ function NavItem({
   theme,
   item,
   active,
+  activeRef,
 }: {
   theme: CanvasTheme;
   item: ShellNavItem;
   active: boolean;
+  activeRef?: Ref<HTMLAnchorElement>;
 }) {
   const badgeTone = toneStyles(theme, item.badgeTone ?? "neutral");
   const itemStyle: CSSProperties = {
@@ -197,7 +233,11 @@ function NavItem({
 
   if (item.href) {
     return (
-      <Link href={item.href} style={itemStyle}>
+      <Link
+        ref={active ? activeRef : undefined}
+        href={item.href}
+        style={itemStyle}
+      >
         {content}
       </Link>
     );
@@ -212,7 +252,7 @@ function SearchBox({
   placeholder = "搜尋訂單、租戶、司機…",
 }: {
   theme: CanvasTheme;
-  width?: number;
+  width?: number | string;
   placeholder?: string;
 }) {
   return (
@@ -276,11 +316,41 @@ export function Shell({
   style,
 }: ShellProps) {
   const theme = resolveTheme(providedTheme);
+  const viewportWidth = useViewportWidth();
+  const isStackedShell = viewportWidth < CANVAS_SHELL_STACK_BREAKPOINT;
+  const isWrappedTopbar = viewportWidth < CANVAS_TOPBAR_WRAP_BREAKPOINT;
   const resolvedBrandLabel = brandLabel ?? "DRTS";
   const resolvedBrandSubLabel =
     brandSubLabel === undefined ? theme.surfaceName : brandSubLabel;
   const resolvedBrandMark = brandMark ?? "D";
   const resolvedVersionLabel = versionLabel ?? "v2.14.3";
+  const navRef = useRef<HTMLElement | null>(null);
+  const activeItemRef = useRef<HTMLAnchorElement | null>(null);
+
+  useLayoutEffect(() => {
+    const navElement = navRef.current;
+    const activeItem = activeItemRef.current;
+    if (!navElement || !activeItem) {
+      return;
+    }
+
+    const keepActiveItemVisible = () => {
+      const navRect = navElement.getBoundingClientRect();
+      const itemRect = activeItem.getBoundingClientRect();
+      const padding = 12;
+      const itemIsVisible =
+        itemRect.top >= navRect.top + padding &&
+        itemRect.bottom <= navRect.bottom - padding;
+
+      if (!itemIsVisible) {
+        activeItem.scrollIntoView({ block: "nearest" });
+      }
+    };
+
+    keepActiveItemVisible();
+    const frameId = window.requestAnimationFrame(keepActiveItemVisible);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [active, currentPath, nav.length]);
 
   return (
     <div
@@ -288,8 +358,10 @@ export function Shell({
         width: "100%",
         height: "100%",
         display: "grid",
-        gridTemplateColumns: "224px 1fr",
-        gridTemplateRows: "46px 1fr",
+        gridTemplateColumns: isStackedShell ? "minmax(0, 1fr)" : "224px 1fr",
+        gridTemplateRows: isStackedShell
+          ? "auto auto minmax(0, 1fr)"
+          : "46px 1fr",
         background: theme.bg,
         color: theme.text,
         fontFamily: theme.fontFamily,
@@ -300,9 +372,13 @@ export function Shell({
     >
       <aside
         style={{
-          gridRow: "1 / 3",
+          gridColumn: 1,
+          gridRow: isStackedShell ? 1 : "1 / 3",
           background: theme.surface,
           borderRight: `1px solid ${theme.border}`,
+          borderBottom: isStackedShell
+            ? `1px solid ${theme.border}`
+            : undefined,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -370,6 +446,7 @@ export function Shell({
         </div>
 
         <nav
+          ref={navRef}
           aria-label="Canvas navigation"
           style={{
             flex: 1,
@@ -380,30 +457,36 @@ export function Shell({
             gap: 1,
           }}
         >
-          {nav.map((item, index) =>
-            item.divider ? (
-              <div
-                key={`${item.divider}-${index}`}
-                style={{
-                  margin: "8px 8px 4px",
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: 0.6,
-                  color: theme.textDim,
-                  textTransform: "uppercase",
-                }}
-              >
-                {item.divider}
-              </div>
-            ) : (
+          {nav.map((item, index) => {
+            if (item.divider) {
+              return (
+                <div
+                  key={`${item.divider}-${index}`}
+                  style={{
+                    margin: "8px 8px 4px",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: 0.6,
+                    color: theme.textDim,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {item.divider}
+                </div>
+              );
+            }
+
+            const itemIsActive = isItemActive(item, active, currentPath);
+            return (
               <NavItem
                 key={item.key ?? item.href ?? `nav-${index}`}
                 theme={theme}
                 item={item}
-                active={isItemActive(item, active, currentPath)}
+                active={itemIsActive}
+                activeRef={activeItemRef}
               />
-            ),
-          )}
+            );
+          })}
         </nav>
 
         {!hideEnv ? (
@@ -450,15 +533,17 @@ export function Shell({
 
       <header
         style={{
-          gridColumn: 2,
-          gridRow: 1,
+          gridColumn: 1,
+          gridRow: isStackedShell ? 2 : 1,
+          ...(isStackedShell ? {} : { gridColumn: 2 }),
           borderBottom: `1px solid ${theme.border}`,
           background: theme.surface,
           display: "flex",
-          alignItems: "center",
-          padding: "0 16px",
+          alignItems: isWrappedTopbar ? "flex-start" : "center",
+          flexWrap: isWrappedTopbar ? "wrap" : "nowrap",
+          padding: isWrappedTopbar ? "10px 12px" : "0 16px",
           gap: 12,
-          height: 46,
+          height: isWrappedTopbar ? "auto" : 46,
           boxSizing: "border-box",
         }}
       >
@@ -469,6 +554,7 @@ export function Shell({
             gap: 6,
             minWidth: 0,
             flex: 1,
+            flexBasis: isWrappedTopbar ? "100%" : undefined,
           }}
         >
           {breadcrumb.length > 0 ? (
@@ -504,13 +590,23 @@ export function Shell({
           )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <SearchBox
-            theme={theme}
-            width={searchWidth}
-            placeholder={searchPlaceholder ?? "搜尋訂單、租戶、司機…"}
-          />
-          <Kbd theme={theme}>⌘K</Kbd>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: isWrappedTopbar ? "wrap" : "nowrap",
+            width: isWrappedTopbar ? "100%" : undefined,
+          }}
+        >
+          <div style={{ flex: isWrappedTopbar ? "1 1 100%" : undefined }}>
+            <SearchBox
+              theme={theme}
+              width={isWrappedTopbar ? "100%" : searchWidth}
+              placeholder={searchPlaceholder ?? "搜尋訂單、租戶、司機…"}
+            />
+          </div>
+          {!isWrappedTopbar ? <Kbd theme={theme}>⌘K</Kbd> : null}
           <button
             type="button"
             style={{
@@ -551,8 +647,9 @@ export function Shell({
 
       <main
         style={{
-          gridColumn: 2,
-          gridRow: 2,
+          gridColumn: 1,
+          gridRow: isStackedShell ? 3 : 2,
+          ...(isStackedShell ? {} : { gridColumn: 2 }),
           overflow: "auto",
           background: theme.bg,
           color: theme.text,
@@ -587,11 +684,13 @@ export function PageHeader({
   style,
 }: PageHeaderProps) {
   const theme = resolveTheme(providedTheme);
+  const viewportWidth = useViewportWidth();
+  const isStackedHeader = viewportWidth < CANVAS_PAGE_HEADER_STACK_BREAKPOINT;
 
   return (
     <div
       style={{
-        padding: "18px 24px 0",
+        padding: isStackedHeader ? "14px 16px 0" : "18px 24px 0",
         borderBottom: `1px solid ${theme.border}`,
         background: theme.bg,
         position: sticky ? "sticky" : "static",
@@ -603,6 +702,7 @@ export function PageHeader({
       <div
         style={{
           display: "flex",
+          flexDirection: isStackedHeader ? "column" : "row",
           alignItems: "flex-start",
           justifyContent: "space-between",
           gap: 16,
@@ -635,13 +735,30 @@ export function PageHeader({
           ) : null}
         </div>
         {actions ? (
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              flexShrink: 0,
+              flexWrap: "wrap",
+              width: isStackedHeader ? "100%" : undefined,
+            }}
+          >
             {actions}
           </div>
         ) : null}
       </div>
       {tabs ? (
-        <div style={{ display: "flex", gap: 0, marginTop: 14, marginLeft: -4 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 0,
+            marginTop: 14,
+            marginLeft: -4,
+            overflowX: "auto",
+            paddingBottom: 1,
+          }}
+        >
           {tabs.map((tab, index) => {
             const selected = tab === activeTab;
             return (
@@ -826,6 +943,8 @@ export function Card({
   style,
 }: CardProps) {
   const theme = resolveTheme(providedTheme);
+  const viewportWidth = useViewportWidth();
+  const isStackedHeader = viewportWidth < CANVAS_CARD_HEADER_STACK_BREAKPOINT;
 
   return (
     <section
@@ -843,7 +962,8 @@ export function Card({
             padding: "12px 14px",
             borderBottom: `1px solid ${theme.border}`,
             display: "flex",
-            alignItems: "center",
+            flexDirection: isStackedHeader ? "column" : "row",
+            alignItems: isStackedHeader ? "flex-start" : "center",
             justifyContent: "space-between",
             gap: 12,
           }}
@@ -874,7 +994,9 @@ export function Card({
             ) : null}
           </div>
           {actions ? (
-            <div style={{ display: "flex", gap: 6 }}>{actions}</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {actions}
+            </div>
           ) : null}
         </header>
       ) : null}

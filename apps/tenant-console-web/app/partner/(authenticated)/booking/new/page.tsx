@@ -4,6 +4,7 @@ import {
   SurfaceCard,
 } from "@/components/page-primitives";
 import { PartnerBookingCreateForm } from "@/app/partner/(authenticated)/booking/new/booking-create-form";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 import { requirePartnerSession } from "@/lib/partner-session";
 
 export const dynamic = "force-dynamic";
@@ -25,31 +26,34 @@ export default async function PartnerBookingCreatePage({
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="New booking"
-        title="Create a partner-tagged booking."
-        description="Pickup, dropoff, reservation window, passenger contact, and optional notes are required. The backend stamps `partnerEntrySlug` and (when verified) `eligibilityVerificationId` automatically."
+        eyebrow="建立訂單"
+        title="建立合作夥伴入口專用訂單。"
+        description="必填資料包含上車地點、下車地點、預約時窗與乘客聯絡資訊；其他補充欄位可視需求填寫。後端會自動補上入口別名與資格驗證編號。"
       />
 
       {!isActive ? (
         <CalloutPanel
-          title="Booking creation blocked"
-          description={`Entry status is "${session.partnerEntry.status}". Contact platform admin before creating partner bookings.`}
+          title="目前無法建立訂單"
+          description={`入口狀態為「${formatTenantCodeLabel(session.partnerEntry.status, session.partnerEntry.status)}」。請先聯絡平台管理端恢復此入口，再建立合作夥伴訂單。`}
           tone="warning"
         />
       ) : null}
 
       {requiresEligibility && !eligibilityVerificationId ? (
         <CalloutPanel
-          title="Eligibility verification required"
-          description="This entry requires an eligibility verification id before booking creation. Run the eligibility step and continue from there."
+          title="建立訂單前需要資格驗證"
+          description="這個入口必須先取得資格驗證編號，才能建立訂單。請先完成資格驗證，再從驗證結果頁繼續。"
           tone="warning"
         />
       ) : null}
 
       <SurfaceCard
-        kicker="Service"
-        title={`Subtype fixed by entry: ${session.partnerEntry.businessDispatchSubtype}`}
-        description="Service subtype is owned by the partner entry registration and is not editable from this surface. Quoted fare authority remains backend-only."
+        kicker="服務"
+        title={`入口固定服務子類型：${formatTenantCodeLabel(
+          session.partnerEntry.businessDispatchSubtype,
+          session.partnerEntry.businessDispatchSubtype,
+        )}`}
+        description="服務子類型由合作夥伴入口註冊資料決定，這個頁面不能修改。報價與車資權責仍由後端掌控。"
       >
         <PartnerBookingCreateForm
           canSubmit={
@@ -63,8 +67,8 @@ export default async function PartnerBookingCreatePage({
       </SurfaceCard>
 
       <CalloutPanel
-        title="Negative paths stop short of create"
-        description="If the backend rejects the booking with `partner_entry_inactive`, `eligibility_required`, `eligibility_ineligible`, or `eligibility_manual_review`, the surface returns the rejection reason and never silently falls back to a tenant-admin path."
+        title="未通過路徑不會繞道放行"
+        description="如果後端因入口停用、缺少資格驗證、驗證未通過或人工審查中而拒絕建立訂單，畫面只會回傳拒絕原因，不會悄悄切回租戶管理模式。"
       />
     </div>
   );

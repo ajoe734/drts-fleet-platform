@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { UpdateTenantBookingCommand } from "@drts/contracts";
 import { getTenantClientForRouteHandler } from "@/lib/api-client";
+import { formatPortalUiError, toPortalErrorMessage } from "@/lib/error-copy";
 
 export async function PATCH(
   request: NextRequest,
@@ -17,7 +18,7 @@ export async function PATCH(
 
   if (!client) {
     return NextResponse.json(
-      { error: "Tenant portal session required." },
+      { error: "需要先登入租戶入口。" },
       { status: 401 },
     );
   }
@@ -31,7 +32,12 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update order:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
+      {
+        error: formatPortalUiError(
+          toPortalErrorMessage(error, "更新訂單失敗。"),
+          "無法更新訂單",
+        ),
+      },
       { status: 500 },
     );
   }

@@ -216,7 +216,7 @@ export function TenantIdentityFields({
             }))
           }
           required
-          placeholder="Acme Mobility"
+          placeholder={t("tenants.form.namePlaceholder")}
           style={formInputStyle}
         />
       </label>
@@ -232,7 +232,7 @@ export function TenantIdentityFields({
               }))
             }
             required
-            placeholder="acme_dispatch"
+            placeholder={t("tenants.form.codePlaceholder")}
             style={formInputStyle}
           />
         </label>
@@ -394,7 +394,7 @@ export function IntegrationFields({
                 bootstrapAdminEmail: event.target.value,
               }))
             }
-            placeholder="admin@acme.example"
+            placeholder={t("tenants.form.bootstrapAdminEmailPlaceholder")}
             style={formInputStyle}
           />
         </label>
@@ -408,7 +408,7 @@ export function IntegrationFields({
                 sandboxBaseUrl: event.target.value,
               }))
             }
-            placeholder="https://sandbox.acme.example"
+            placeholder={t("tenants.form.sandboxBaseUrlPlaceholder")}
             style={formInputStyle}
           />
         </label>

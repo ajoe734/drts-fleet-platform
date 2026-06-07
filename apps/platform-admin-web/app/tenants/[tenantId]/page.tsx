@@ -3,7 +3,13 @@
 import { useParams } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
+import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import type { Locale } from "@/lib/translations";
 import type {
   PlatformAdminTenantRecord,
   PlatformTenantBootstrapRoleDefault,
@@ -212,6 +218,7 @@ function buildTenantConsoleHref(tenant: PlatformAdminTenantRecord) {
 function buildInviteeHint(
   role: PlatformTenantBootstrapRoleDefault,
   tenant: PlatformAdminTenantRecord,
+  locale: Locale,
 ) {
   const billingEmail = tenant.bootstrapDefaults.billingBaseline.email;
 
@@ -220,24 +227,31 @@ function buildInviteeHint(
   }
 
   if (role.acknowledgedAt) {
-    return `${role.displayName} acknowledged`;
+    return locale === "en"
+      ? `${role.displayName} acknowledged`
+      : `${role.displayName} 已確認`;
   }
 
   if (role.invitedAt) {
-    return `${role.displayName} invited`;
+    return locale === "en"
+      ? `${role.displayName} invited`
+      : `${role.displayName} 已邀請`;
   }
 
-  return "Pending assignment";
+  return locale === "en" ? "Pending assignment" : "待指派";
 }
 
-function getRoleStateLabel(role: PlatformTenantBootstrapRoleDefault) {
+function getRoleStateLabel(
+  role: PlatformTenantBootstrapRoleDefault,
+  locale: Locale,
+) {
   if (role.acknowledgedAt) {
-    return "已確認";
+    return locale === "en" ? "Acknowledged" : "已確認";
   }
   if (role.invitedAt) {
-    return "邀請中";
+    return locale === "en" ? "Invited" : "邀請中";
   }
-  return "未邀請";
+  return locale === "en" ? "Not invited" : "未邀請";
 }
 
 function getRoleTone(role: PlatformTenantBootstrapRoleDefault): CanvasTone {
@@ -250,16 +264,43 @@ function getRoleTone(role: PlatformTenantBootstrapRoleDefault): CanvasTone {
   return "neutral";
 }
 
-function buildTabs() {
+function resolveRoleDisplayLabel(
+  tenant: PlatformAdminTenantRecord | null,
+  roleCode: string,
+  locale: Locale,
+) {
+  const displayName =
+    tenant?.bootstrapDefaults.roleDefaults.find(
+      (role) => role.roleCode === roleCode,
+    )?.displayName ?? roleCode;
+  return locale === "en"
+    ? `${displayName} (${roleCode})`
+    : `${displayName}（${roleCode}）`;
+}
+
+function buildTabs(locale: Locale) {
+  if (locale === "en") {
+    return [
+      "Overview",
+      "Modules",
+      "Onboarding",
+      "Rollout",
+      "Roles",
+      "Webhook Baseline",
+      "Billing Baseline",
+      "Audit",
+    ];
+  }
+
   return [
-    "Overview",
-    "Modules",
-    "Onboarding",
-    "Rollout",
-    "Roles",
-    "Webhook baseline",
-    "Billing baseline",
-    "Audit",
+    "總覽",
+    "模組",
+    "開通",
+    "推進",
+    "角色",
+    "回呼基準",
+    "帳務基準",
+    "稽核",
   ];
 }
 
@@ -350,11 +391,212 @@ export default function TenantDetailPage() {
   const [rollbackSubmitting, setRollbackSubmitting] = useState(false);
   const [roleActionKey, setRoleActionKey] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ActionReceipt | null>(null);
+  const copy =
+    locale === "en"
+      ? {
+          missingTenantId: "Missing tenant ID.",
+          loading: "Loading tenant lifecycle workspace…",
+          detailTitle: "Tenant detail",
+          detailSubtitle: (tenantId?: string) =>
+            tenantId ? `tenant ID: ${tenantId}` : "Tenant detail",
+          backToTenants: "Back to tenants",
+          loadErrorTitle: "Unable to load tenant detail",
+          notFoundTitle: "Tenant not found",
+          notFoundBody:
+            "The assigned route now resolves with a page body and no longer falls through to a 404. Pick another tenant from the lifecycle table.",
+          openTenantConsole: "Open in Tenant Console",
+          enterRollbackHold: "Enter rollback hold",
+          actionFailed: "Tenant detail action failed",
+          receiptTitle: (action: string) => `Audit receipt · ${action}`,
+          receiptBody: (reason: string | undefined, at: string) =>
+            reason
+              ? `Reason captured: ${reason} · ${formatDateTime(at)}`
+              : formatDateTime(at),
+          rolloutTitle: "Rollout progress · state machine",
+          rolloutSubtitle: (
+            cutoverOwner: string | null,
+            rollbackOwner: string | null,
+          ) =>
+            `Cutover owner: ${cutoverOwner ?? "unassigned"} · Rollback owner: ${rollbackOwner ?? "unassigned"} · linked user records`,
+          rollbackPreparedTitle: (prepared: boolean) =>
+            `Rollback prepared: ${prepared ? "Yes" : "No"}`,
+          rollbackPreparedReady: "Tenant is ready for a production rollback.",
+          rollbackPreparedGap:
+            "Complete the rollback plan before promoting to production.",
+          roleAcknowledgements: "Role acknowledgements",
+          roleAcknowledgementsBody: (acknowledged: number, total: number) =>
+            `${acknowledged}/${total} roles have been invited and acknowledged.`,
+          currentGateTitle: (gate: string | null) =>
+            `Current gate = ${gate ?? "—"}`,
+          cutoverNotesEmpty:
+            "No additional cutover notes have been recorded yet.",
+          onboardingTitle: "Onboarding package",
+          rolesTitle: (acknowledged: number, total: number) =>
+            `Roles & invites · ${acknowledged}/${total} acknowledged`,
+          baselineTitle: "Tenant baseline",
+          recentTitle: "Recent activity",
+          recentSubtitle:
+            "Audit subset for rollout, onboarding, and role-invite decisions",
+          tenantRecordUpdated: "Tenant record updated",
+          tenantCreated: "Tenant created",
+          tenantCreatedBody: (createdAt: string) =>
+            `${formatDateTime(createdAt)} · bootstrap package recorded`,
+          rollbackHoldActive: "Tenant is currently in rollback hold",
+          noRollbackHold: "No active rollback hold",
+          lastPromotion: (value: string) =>
+            `Last promotion: ${formatDateTime(value)}`,
+          promotionMissing: "Promotion history not yet recorded.",
+          rollbackModalTitle: "Enter rollback hold",
+          rollbackModalSubtitle:
+            "High-risk action. Reason is required before the command is sent.",
+          rollbackModalBannerTitle: (tenantName: string) =>
+            `${tenantName} will be blocked from further promotion.`,
+          rollbackModalBannerBody:
+            "Use this when rollout risk or incident state requires an explicit governance hold.",
+          rollbackReason: "Reason",
+          rollbackReasonPlaceholder:
+            "Describe the incident, rollout risk, or operator decision that requires rollback hold.",
+          close: "Close",
+          cancel: "Cancel",
+          submitting: "Submitting…",
+          confirmRollbackHold: "Confirm rollback hold",
+          invite: "Invite",
+          inviting: "Inviting…",
+          acknowledge: "Acknowledge",
+          saving: "Saving…",
+          requiredRole: "Required role",
+          optionalRole: "Optional role",
+          roleTable: {
+            invitee: "Invitee",
+            role: "Role",
+            state: "State",
+            updated: "Updated",
+            action: "Action",
+          },
+          onboardingLabels: {
+            integrationMode: "Integration mode",
+            bootstrapAdmin: "Bootstrap admin",
+            sandboxBaseUrl: "Sandbox base URL",
+            productionBaseUrl: "Production base URL",
+            billingBaseline: "Billing baseline",
+            webhookBaseline: "Webhook baseline",
+            quotaPerMonth: "Quota / month",
+            modules: "Modules",
+          },
+          baselineLabels: {
+            stage: "Stage",
+            currentGate: "Current gate",
+            updated: "Updated",
+            lastPromoted: "Last promoted",
+          },
+          bookingsUnit: "bookings",
+          stepSubtitle: (gate: string) => `Gate ${gate}`,
+          rollbackReady: "Rollback ready",
+          ownerAssigned: (owner: string) => `Owner: ${owner}`,
+          ownerUnassigned: "Owner not assigned",
+        }
+      : {
+          missingTenantId: "缺少租戶編號。",
+          loading: "載入租戶生命週期工作區中…",
+          detailTitle: "租戶詳情",
+          detailSubtitle: (tenantId?: string) =>
+            tenantId ? `租戶編號：${tenantId}` : "租戶詳情",
+          backToTenants: "返回租戶列表",
+          loadErrorTitle: "無法載入租戶詳情",
+          notFoundTitle: "找不到租戶",
+          notFoundBody:
+            "目前此路由已改為顯示頁面內容，不會再導回找不到頁面。請從生命週期列表選擇其他租戶。",
+          openTenantConsole: "在租戶主控台開啟",
+          enterRollbackHold: "進入回滾保留",
+          actionFailed: "租戶詳情操作失敗",
+          receiptTitle: (action: string) => `稽核收據：${action}`,
+          receiptBody: (reason: string | undefined, at: string) =>
+            reason
+              ? `已記錄原因：${reason} · ${formatDateTime(at)}`
+              : formatDateTime(at),
+          rolloutTitle: "推進進度與狀態流程",
+          rolloutSubtitle: (
+            cutoverOwner: string | null,
+            rollbackOwner: string | null,
+          ) =>
+            `切換負責人：${cutoverOwner ?? "未指派"} · 回滾負責人：${rollbackOwner ?? "未指派"}（已連結使用者紀錄）`,
+          rollbackPreparedTitle: (prepared: boolean) =>
+            `回滾準備：${prepared ? "完成" : "未完成"}`,
+          rollbackPreparedReady: "此租戶已具備正式環境回滾條件。",
+          rollbackPreparedGap: "推進到正式環境前，需先補齊回滾計畫。",
+          roleAcknowledgements: "角色確認進度",
+          roleAcknowledgementsBody: (acknowledged: number, total: number) =>
+            `${acknowledged}/${total} 個角色已完成邀請與確認。`,
+          currentGateTitle: (gate: string | null) => `目前閘門：${gate ?? "—"}`,
+          cutoverNotesEmpty: "尚未記錄額外切換備註。",
+          onboardingTitle: "開通套件",
+          rolesTitle: (acknowledged: number, total: number) =>
+            `角色與邀請 · 已確認 ${acknowledged}/${total}`,
+          baselineTitle: "租戶基準",
+          recentTitle: "近期活動",
+          recentSubtitle: "推進、開通與角色邀請決策相關的稽核子集",
+          tenantRecordUpdated: "租戶紀錄已更新",
+          tenantCreated: "租戶已建立",
+          tenantCreatedBody: (createdAt: string) =>
+            `${formatDateTime(createdAt)} · 已記錄開通套件`,
+          rollbackHoldActive: "租戶目前處於回滾保留狀態",
+          noRollbackHold: "目前沒有啟用中的回滾保留",
+          lastPromotion: (value: string) =>
+            `最近推進：${formatDateTime(value)}`,
+          promotionMissing: "尚未記錄推進歷史。",
+          rollbackModalTitle: "進入回滾保留",
+          rollbackModalSubtitle: "高風險動作，送出指令前必須填寫原因。",
+          rollbackModalBannerTitle: (tenantName: string) =>
+            `${tenantName} 將被阻擋後續推進。`,
+          rollbackModalBannerBody:
+            "當推進風險或事件狀態需要明確治理保留時，請使用此動作。",
+          rollbackReason: "原因",
+          rollbackReasonPlaceholder:
+            "請說明需要進入回滾保留的事件、推進風險或操作判斷。",
+          close: "關閉",
+          cancel: "取消",
+          submitting: "送出中…",
+          confirmRollbackHold: "確認進入回滾保留",
+          invite: "邀請",
+          inviting: "邀請中…",
+          acknowledge: "確認",
+          saving: "儲存中…",
+          requiredRole: "必要角色",
+          optionalRole: "選填角色",
+          roleTable: {
+            invitee: "邀請對象",
+            role: "角色",
+            state: "狀態",
+            updated: "更新時間",
+            action: "操作",
+          },
+          onboardingLabels: {
+            integrationMode: "整合模式",
+            bootstrapAdmin: "初始管理員",
+            sandboxBaseUrl: "沙箱基底網址",
+            productionBaseUrl: "正式基底網址",
+            billingBaseline: "帳務基準",
+            webhookBaseline: "回呼基準",
+            quotaPerMonth: "每月額度",
+            modules: "模組",
+          },
+          baselineLabels: {
+            stage: "階段",
+            currentGate: "目前閘門",
+            updated: "更新時間",
+            lastPromoted: "最近推進",
+          },
+          bookingsUnit: "筆預約",
+          stepSubtitle: (gate: string) => `閘門：${gate}`,
+          rollbackReady: "回滾就緒",
+          ownerAssigned: (owner: string) => `負責人：${owner}`,
+          ownerUnassigned: "尚未指派負責人",
+        };
 
   const loadTenant = useCallback(async () => {
     if (!tenantId) {
       setLoading(false);
-      setError("Missing tenant id.");
+      setError(copy.missingTenantId);
       return;
     }
 
@@ -364,18 +606,24 @@ export default function TenantDetailPage() {
       const result = await client.getPlatformTenant(tenantId);
       setTenant(result);
     } catch (cause: unknown) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(cause),
+          copy.loadErrorTitle,
+        ),
+      );
       setTenant(null);
     } finally {
       setLoading(false);
     }
-  }, [client, tenantId]);
+  }, [client, copy.loadErrorTitle, copy.missingTenantId, locale, tenantId]);
 
   useEffect(() => {
     void loadTenant();
   }, [loadTenant]);
 
-  const tabs = useMemo(() => buildTabs(), []);
+  const tabs = useMemo(() => buildTabs(locale), [locale]);
   const activeTab = tabs[3];
 
   const acknowledgedRoles =
@@ -390,11 +638,11 @@ export default function TenantDetailPage() {
       tenant
         ? tenant.bootstrapDefaults.roleDefaults.map((role) => ({
             ...role,
-            invitee: buildInviteeHint(role, tenant),
-            stateLabel: getRoleStateLabel(role),
+            invitee: buildInviteeHint(role, tenant, locale),
+            stateLabel: getRoleStateLabel(role, locale),
           }))
         : [],
-    [tenant],
+    [locale, tenant],
   );
 
   const handleInviteRole = useCallback(
@@ -410,18 +658,30 @@ export default function TenantDetailPage() {
 
       try {
         const updated = await client.inviteTenantRole(tenant.id, command);
+        const roleLabel = resolveRoleDisplayLabel(tenant, roleCode, locale);
         setTenant(updated);
         setReceipt({
-          action: `Invited ${roleCode}`,
+          action:
+            locale === "en"
+              ? `Invited ${roleLabel}`
+              : `已邀請角色：${roleLabel}`,
           at: new Date().toISOString(),
         });
       } catch (cause: unknown) {
-        setError(cause instanceof Error ? cause.message : String(cause));
+        setError(
+          formatPlatformUiError(
+            locale,
+            toPlatformErrorMessage(cause),
+            locale === "en"
+              ? "Unable to invite tenant role"
+              : "無法邀請租戶角色",
+          ),
+        );
       } finally {
         setRoleActionKey(null);
       }
     },
-    [client, tenant],
+    [client, locale, tenant],
   );
 
   const handleAcknowledgeRole = useCallback(
@@ -437,18 +697,30 @@ export default function TenantDetailPage() {
 
       try {
         const updated = await client.acknowledgeTenantRole(tenant.id, command);
+        const roleLabel = resolveRoleDisplayLabel(tenant, roleCode, locale);
         setTenant(updated);
         setReceipt({
-          action: `Acknowledged ${roleCode}`,
+          action:
+            locale === "en"
+              ? `Acknowledged ${roleLabel}`
+              : `已確認角色：${roleLabel}`,
           at: new Date().toISOString(),
         });
       } catch (cause: unknown) {
-        setError(cause instanceof Error ? cause.message : String(cause));
+        setError(
+          formatPlatformUiError(
+            locale,
+            toPlatformErrorMessage(cause),
+            locale === "en"
+              ? "Unable to acknowledge tenant role"
+              : "無法確認租戶角色",
+          ),
+        );
       } finally {
         setRoleActionKey(null);
       }
     },
-    [client, tenant],
+    [client, locale, tenant],
   );
 
   const handleOpenTenantConsole = useCallback(() => {
@@ -475,23 +747,29 @@ export default function TenantDetailPage() {
       const updated = await client.rollbackHoldTenant(tenant.id);
       setTenant(updated);
       setReceipt({
-        action: "Entered rollback_hold",
+        action: locale === "en" ? "Entered rollback hold" : "已進入回滾保留",
         reason: rollbackReason.trim(),
         at: new Date().toISOString(),
       });
       setShowRollbackModal(false);
       setRollbackReason("");
     } catch (cause: unknown) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(cause),
+          copy.actionFailed,
+        ),
+      );
     } finally {
       setRollbackSubmitting(false);
     }
-  }, [client, rollbackReason, tenant]);
+  }, [client, copy.actionFailed, locale, rollbackReason, tenant]);
 
   const roleColumns = useMemo<CanvasTableColumn<RoleRow>[]>(
     () => [
       {
-        h: "INVITEE",
+        h: copy.roleTable.invitee,
         w: 220,
         r: (row) => (
           <div style={{ display: "grid", gap: 2 }}>
@@ -503,27 +781,35 @@ export default function TenantDetailPage() {
                 fontFamily: theme.monoFamily,
               }}
             >
-              {row.required ? "required role" : "optional role"}
+              {row.required ? copy.requiredRole : copy.optionalRole}
             </span>
           </div>
         ),
       },
       {
-        h: "ROLE",
+        h: copy.roleTable.role,
         w: 180,
         r: (row) => (
           <div style={{ display: "grid", gap: 2 }}>
-            <span style={{ fontFamily: theme.monoFamily, fontSize: 11.5 }}>
-              {row.roleCode}
-            </span>
-            <span style={{ color: theme.textMuted, fontSize: 11 }}>
+            <span style={{ color: theme.text, fontWeight: 600 }}>
               {row.displayName}
+            </span>
+            <span
+              style={{
+                color: theme.textMuted,
+                fontSize: 11,
+                fontFamily: theme.monoFamily,
+              }}
+            >
+              {locale === "en"
+                ? `Role code ${row.roleCode}`
+                : `角色代碼 ${row.roleCode}`}
             </span>
           </div>
         ),
       },
       {
-        h: "STATE",
+        h: copy.roleTable.state,
         w: 112,
         r: (row) => (
           <Pill theme={theme} tone={getRoleTone(row)} dot>
@@ -532,14 +818,14 @@ export default function TenantDetailPage() {
         ),
       },
       {
-        h: "UPDATED",
+        h: copy.roleTable.updated,
         w: 112,
         mono: true,
         r: (row) =>
           formatShortDate(row.acknowledgedAt ?? row.invitedAt ?? undefined),
       },
       {
-        h: "ACTION",
+        h: copy.roleTable.action,
         w: 140,
         r: (row) => {
           const inviteKey = `invite:${row.roleCode}`;
@@ -554,7 +840,7 @@ export default function TenantDetailPage() {
                 disabled={roleActionKey !== null}
                 onClick={() => void handleInviteRole(row.roleCode)}
               >
-                {roleActionKey === inviteKey ? "Inviting…" : "Invite"}
+                {roleActionKey === inviteKey ? copy.inviting : copy.invite}
               </Btn>
             );
           }
@@ -568,7 +854,7 @@ export default function TenantDetailPage() {
                 disabled={roleActionKey !== null}
                 onClick={() => void handleAcknowledgeRole(row.roleCode)}
               >
-                {roleActionKey === ackKey ? "Saving…" : "Acknowledge"}
+                {roleActionKey === ackKey ? copy.saving : copy.acknowledge}
               </Btn>
             );
           }
@@ -579,7 +865,22 @@ export default function TenantDetailPage() {
         },
       },
     ],
-    [handleAcknowledgeRole, handleInviteRole, roleActionKey],
+    [
+      copy.acknowledge,
+      copy.invite,
+      copy.inviting,
+      copy.optionalRole,
+      copy.requiredRole,
+      copy.roleTable.action,
+      copy.roleTable.invitee,
+      copy.roleTable.role,
+      copy.roleTable.state,
+      copy.roleTable.updated,
+      copy.saving,
+      handleAcknowledgeRole,
+      handleInviteRole,
+      roleActionKey,
+    ],
   );
 
   const onboardingItems = useMemo(
@@ -587,47 +888,50 @@ export default function TenantDetailPage() {
       tenant
         ? [
             {
-              k: "INTEGRATION MODE",
-              v: tenant.integrationPackage.mode,
+              k: copy.onboardingLabels.integrationMode,
+              v: formatPlatformCodeLabel(
+                locale,
+                tenant.integrationPackage.mode,
+              ),
               mono: true,
             },
             {
-              k: "BOOTSTRAP ADMIN",
+              k: copy.onboardingLabels.bootstrapAdmin,
               v: tenant.bootstrapDefaults.billingBaseline.email || "—",
               mono: true,
             },
             {
-              k: "SANDBOX BASE URL",
+              k: copy.onboardingLabels.sandboxBaseUrl,
               v: tenant.integrationPackage.sandboxBaseUrl || "—",
               mono: true,
             },
             {
-              k: "PRODUCTION BASE URL",
+              k: copy.onboardingLabels.productionBaseUrl,
               v: tenant.integrationPackage.productionBaseUrl || "—",
               mono: true,
             },
             {
-              k: "BILLING BASELINE",
+              k: copy.onboardingLabels.billingBaseline,
               v: `${tenant.bootstrapDefaults.billingBaseline.invoiceTitle || "—"} · ${tenant.bootstrapDefaults.billingBaseline.contactName || "—"}`,
             },
             {
-              k: "WEBHOOK BASELINE",
+              k: copy.onboardingLabels.webhookBaseline,
               v: formatList(tenant.bootstrapDefaults.webhookEvents),
               mono: true,
             },
             {
-              k: "QUOTA / 月",
-              v: `${tenant.quotas.monthlyBookings.toLocaleString(locale === "en" ? "en-US" : "zh-TW")} bookings`,
+              k: copy.onboardingLabels.quotaPerMonth,
+              v: `${tenant.quotas.monthlyBookings.toLocaleString(locale === "en" ? "en-US" : "zh-TW")} ${copy.bookingsUnit}`,
               mono: true,
             },
             {
-              k: "MODULES",
+              k: copy.onboardingLabels.modules,
               v: `${tenant.enabledModules.length}/${PLATFORM_TENANT_MODULES.length}`,
               mono: true,
             },
           ]
         : [],
-    [locale, tenant],
+    [copy.bookingsUnit, copy.onboardingLabels, locale, tenant],
   );
 
   const stepDefinitions = useMemo<
@@ -644,43 +948,49 @@ export default function TenantDetailPage() {
 
     return [
       {
-        label: "sandbox",
-        subtitle: `gate ${tenant.rollout.sandboxStatus}`,
+        label: formatPlatformCodeLabel(locale, "sandbox"),
+        subtitle: copy.stepSubtitle(
+          formatPlatformCodeLabel(locale, tenant.rollout.sandboxStatus),
+        ),
         tone: getGateTone(tenant.rollout.sandboxStatus),
         active:
           tenant.rollout.stage === "sandbox" &&
           tenant.status !== "rollback_hold",
       },
       {
-        label: "pilot",
-        subtitle: `gate ${tenant.rollout.pilotStatus}`,
+        label: formatPlatformCodeLabel(locale, "pilot"),
+        subtitle: copy.stepSubtitle(
+          formatPlatformCodeLabel(locale, tenant.rollout.pilotStatus),
+        ),
         tone: getGateTone(tenant.rollout.pilotStatus),
         active:
           tenant.rollout.stage === "pilot" && tenant.status !== "rollback_hold",
       },
       {
-        label: "production",
-        subtitle: `gate ${tenant.rollout.productionStatus}`,
+        label: formatPlatformCodeLabel(locale, "production"),
+        subtitle: copy.stepSubtitle(
+          formatPlatformCodeLabel(locale, tenant.rollout.productionStatus),
+        ),
         tone: getGateTone(tenant.rollout.productionStatus),
         active:
           tenant.rollout.stage === "production" &&
           tenant.status !== "rollback_hold",
       },
       {
-        label: "rollback_hold ready",
+        label: copy.rollbackReady,
         subtitle: tenant.rollout.rollbackOwner
-          ? `owner: ${tenant.rollout.rollbackOwner}`
-          : "owner not assigned",
+          ? copy.ownerAssigned(tenant.rollout.rollbackOwner)
+          : copy.ownerUnassigned,
         tone: tenant.status === "rollback_hold" ? "danger" : "neutral",
         active: tenant.status === "rollback_hold",
       },
     ];
-  }, [tenant]);
+  }, [copy, locale, tenant]);
 
   if (loading) {
     return (
       <div style={pageBodyStyle}>
-        <div style={emptyStateStyle}>Loading tenant lifecycle workspace…</div>
+        <div style={emptyStateStyle}>{copy.loading}</div>
       </div>
     );
   }
@@ -690,15 +1000,15 @@ export default function TenantDetailPage() {
       <>
         <PageHeader
           theme={theme}
-          title="租戶詳情"
-          subtitle={tenantId ? `tenantId: ${tenantId}` : "Tenant detail"}
+          title={copy.detailTitle}
+          subtitle={copy.detailSubtitle(tenantId)}
           actions={
             <Btn
               theme={theme}
               variant="secondary"
               onClick={() => window.location.assign("/tenants")}
             >
-              Back to tenants
+              {copy.backToTenants}
             </Btn>
           }
         />
@@ -708,7 +1018,7 @@ export default function TenantDetailPage() {
               theme={theme}
               tone="danger"
               icon="warn"
-              title="Unable to load tenant detail"
+              title={copy.loadErrorTitle}
               body={error}
             />
           ) : null}
@@ -717,13 +1027,9 @@ export default function TenantDetailPage() {
               <div
                 style={{ color: theme.text, fontWeight: 600, marginBottom: 8 }}
               >
-                Tenant not found
+                {copy.notFoundTitle}
               </div>
-              <p style={mutedTextStyle}>
-                The assigned route now resolves with a page body and no longer
-                falls through to a 404. Pick another tenant from the lifecycle
-                table.
-              </p>
+              <p style={mutedTextStyle}>{copy.notFoundBody}</p>
             </div>
           </div>
         </div>
@@ -742,12 +1048,16 @@ export default function TenantDetailPage() {
             {tenant.name}
             <Pill theme={theme} tone={getStatusTone(tenant.status)} dot>
               {tenant.status === "rollback_hold"
-                ? "rollback_hold"
-                : tenant.rollout.stage}
+                ? formatPlatformCodeLabel(locale, "rollback_hold")
+                : formatPlatformCodeLabel(locale, tenant.rollout.stage)}
             </Pill>
           </span>
         }
-        subtitle={`${tenant.code} · ${tenant.id}`}
+        subtitle={
+          locale === "zh"
+            ? `租戶代碼 ${tenant.code} · 租戶編號 ${tenant.id}`
+            : `${tenant.code} · ${tenant.id}`
+        }
         tabs={tabs}
         activeTab={activeTab}
         actions={
@@ -758,7 +1068,7 @@ export default function TenantDetailPage() {
               icon="ext"
               onClick={handleOpenTenantConsole}
             >
-              在 Tenant Console 開啟
+              {copy.openTenantConsole}
             </Btn>
             <Btn
               theme={theme}
@@ -767,7 +1077,7 @@ export default function TenantDetailPage() {
               disabled={tenant.status === "rollback_hold"}
               onClick={() => setShowRollbackModal(true)}
             >
-              進入 rollback_hold
+              {copy.enterRollbackHold}
             </Btn>
           </>
         }
@@ -779,7 +1089,7 @@ export default function TenantDetailPage() {
             theme={theme}
             tone="danger"
             icon="warn"
-            title="Tenant detail action failed"
+            title={copy.actionFailed}
             body={error}
           />
         ) : null}
@@ -789,19 +1099,18 @@ export default function TenantDetailPage() {
             theme={theme}
             tone="success"
             icon="ok"
-            title={`Audit receipt · ${receipt.action}`}
-            body={
-              receipt.reason
-                ? `Reason captured: ${receipt.reason} · ${formatDateTime(receipt.at)}`
-                : formatDateTime(receipt.at)
-            }
+            title={copy.receiptTitle(receipt.action)}
+            body={copy.receiptBody(receipt.reason, receipt.at)}
           />
         ) : null}
 
         <Card
           theme={theme}
-          title="Rollout 進度 · state machine"
-          subtitle={`cutover owner: ${tenant.rollout.cutoverOwner ?? "unassigned"} · rollback owner: ${tenant.rollout.rollbackOwner ?? "unassigned"} (linked user records · Q-ADM06)`}
+          title={copy.rolloutTitle}
+          subtitle={copy.rolloutSubtitle(
+            tenant.rollout.cutoverOwner,
+            tenant.rollout.rollbackOwner,
+          )}
         >
           <div style={stepperStyle}>
             {stepDefinitions.map((step) => (
@@ -819,11 +1128,13 @@ export default function TenantDetailPage() {
               theme={theme}
               tone={tenant.rollout.rollbackPrepared ? "success" : "warn"}
               icon={tenant.rollout.rollbackPrepared ? "ok" : "warn"}
-              title={`rollbackPrepared = ${tenant.rollout.rollbackPrepared ? "true" : "false"}`}
+              title={copy.rollbackPreparedTitle(
+                tenant.rollout.rollbackPrepared,
+              )}
               body={
                 tenant.rollout.rollbackPrepared
-                  ? "租戶已具備 production rollback 條件。"
-                  : "推進到 production 前，需先補齊 rollback plan。"
+                  ? copy.rollbackPreparedReady
+                  : copy.rollbackPreparedGap
               }
             />
             <Banner
@@ -838,32 +1149,39 @@ export default function TenantDetailPage() {
                   ? "ok"
                   : "warn"
               }
-              title="role acknowledgements"
-              body={`${acknowledgedRoles ?? 0}/${totalRoles} 角色已邀請並確認。`}
+              title={copy.roleAcknowledgements}
+              body={copy.roleAcknowledgementsBody(
+                acknowledgedRoles ?? 0,
+                totalRoles,
+              )}
             />
             <Banner
               theme={theme}
               tone={rolloutGate === "blocked" ? "danger" : "info"}
               icon={rolloutGate === "blocked" ? "warn" : "clock"}
-              title={`current gate = ${rolloutGate}`}
+              title={copy.currentGateTitle(
+                rolloutGate
+                  ? formatPlatformCodeLabel(locale, rolloutGate)
+                  : null,
+              )}
               body={
                 tenant.rollout.notes?.trim()
                   ? tenant.rollout.notes
-                  : "尚未記錄額外 cutover note。"
+                  : copy.cutoverNotesEmpty
               }
             />
           </div>
         </Card>
 
         <div style={detailGridStyle}>
-          <Card theme={theme} title="Onboarding package">
+          <Card theme={theme} title={copy.onboardingTitle}>
             <DL theme={theme} cols={2} items={onboardingItems} />
           </Card>
 
           <div style={stackStyle}>
             <Card
               theme={theme}
-              title={`Roles & invites · ${acknowledgedRoles ?? 0}/${totalRoles} acknowledged`}
+              title={copy.rolesTitle(acknowledgedRoles ?? 0, totalRoles)}
             >
               <Table
                 theme={theme}
@@ -873,28 +1191,30 @@ export default function TenantDetailPage() {
               />
             </Card>
 
-            <Card theme={theme} title="Tenant baseline">
+            <Card theme={theme} title={copy.baselineTitle}>
               <DL
                 theme={theme}
                 cols={1}
                 items={[
                   {
-                    k: "STAGE",
-                    v: tenant.rollout.stage,
+                    k: copy.baselineLabels.stage,
+                    v: formatPlatformCodeLabel(locale, tenant.rollout.stage),
                     mono: true,
                   },
                   {
-                    k: "CURRENT GATE",
-                    v: rolloutGate ?? "—",
+                    k: copy.baselineLabels.currentGate,
+                    v: rolloutGate
+                      ? formatPlatformCodeLabel(locale, rolloutGate)
+                      : "—",
                     mono: true,
                   },
                   {
-                    k: "UPDATED",
+                    k: copy.baselineLabels.updated,
                     v: formatDateTime(tenant.updatedAt),
                     mono: true,
                   },
                   {
-                    k: "LAST PROMOTED",
+                    k: copy.baselineLabels.lastPromoted,
                     v: formatDateTime(tenant.rollout.lastPromotedAt ?? ""),
                     mono: true,
                   },
@@ -906,23 +1226,27 @@ export default function TenantDetailPage() {
 
         <Card
           theme={theme}
-          title="Recent activity"
-          subtitle="Audit subset for rollout, onboarding, and role-invite decisions"
+          title={copy.recentTitle}
+          subtitle={copy.recentSubtitle}
         >
           <div style={bannerGridStyle}>
             <Banner
               theme={theme}
               tone="info"
               icon="clock"
-              title="Tenant record updated"
-              body={`${formatDateTime(tenant.updatedAt)} · ${tenant.code}`}
+              title={copy.tenantRecordUpdated}
+              body={
+                locale === "zh"
+                  ? `${formatDateTime(tenant.updatedAt)} · 租戶代碼 ${tenant.code}`
+                  : `${formatDateTime(tenant.updatedAt)} · ${tenant.code}`
+              }
             />
             <Banner
               theme={theme}
               tone="info"
               icon="clock"
-              title="Tenant created"
-              body={`${formatDateTime(tenant.createdAt)} · bootstrap package recorded`}
+              title={copy.tenantCreated}
+              body={copy.tenantCreatedBody(tenant.createdAt)}
             />
             <Banner
               theme={theme}
@@ -930,13 +1254,13 @@ export default function TenantDetailPage() {
               icon={tenant.status === "rollback_hold" ? "warn" : "ok"}
               title={
                 tenant.status === "rollback_hold"
-                  ? "Tenant is currently in rollback_hold"
-                  : "No active rollback hold"
+                  ? copy.rollbackHoldActive
+                  : copy.noRollbackHold
               }
               body={
                 tenant.rollout.lastPromotedAt
-                  ? `Last promotion: ${formatDateTime(tenant.rollout.lastPromotedAt)}`
-                  : "Promotion history not yet recorded."
+                  ? copy.lastPromotion(tenant.rollout.lastPromotedAt)
+                  : copy.promotionMissing
               }
             />
           </div>
@@ -966,7 +1290,7 @@ export default function TenantDetailPage() {
                   id="rollback-hold-title"
                   style={{ color: theme.text, fontSize: 14, fontWeight: 600 }}
                 >
-                  Enter rollback_hold
+                  {copy.rollbackModalTitle}
                 </div>
                 <div
                   style={{
@@ -975,8 +1299,7 @@ export default function TenantDetailPage() {
                     marginTop: 2,
                   }}
                 >
-                  High-risk action. Reason is required before the command is
-                  sent.
+                  {copy.rollbackModalSubtitle}
                 </div>
               </div>
               <Btn
@@ -989,7 +1312,7 @@ export default function TenantDetailPage() {
                   }
                 }}
               >
-                Close
+                {copy.close}
               </Btn>
             </div>
             <div style={modalBodyStyle}>
@@ -997,14 +1320,14 @@ export default function TenantDetailPage() {
                 theme={theme}
                 tone="danger"
                 icon="warn"
-                title={`${tenant.name} will be blocked from further promotion.`}
-                body="Use this when rollout risk or incident state requires an explicit governance hold."
+                title={copy.rollbackModalBannerTitle(tenant.name)}
+                body={copy.rollbackModalBannerBody}
               />
-              <Field theme={theme} label="Reason" required>
+              <Field theme={theme} label={copy.rollbackReason} required>
                 <textarea
                   value={rollbackReason}
                   onChange={(event) => setRollbackReason(event.target.value)}
-                  placeholder="Describe the incident, rollout risk, or operator decision that requires rollback_hold."
+                  placeholder={copy.rollbackReasonPlaceholder}
                   style={textareaStyle}
                 />
               </Field>
@@ -1015,7 +1338,7 @@ export default function TenantDetailPage() {
                   onClick={() => setShowRollbackModal(false)}
                   disabled={rollbackSubmitting}
                 >
-                  Cancel
+                  {copy.cancel}
                 </Btn>
                 <Btn
                   theme={theme}
@@ -1025,7 +1348,9 @@ export default function TenantDetailPage() {
                   }
                   onClick={() => void handleConfirmRollbackHold()}
                 >
-                  {rollbackSubmitting ? "Submitting…" : "Confirm rollback_hold"}
+                  {rollbackSubmitting
+                    ? copy.submitting
+                    : copy.confirmRollbackHold}
                 </Btn>
               </div>
             </div>

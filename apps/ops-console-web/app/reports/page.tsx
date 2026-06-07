@@ -42,6 +42,7 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
+import { formatOpsUiError, toOpsErrorMessage } from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 
@@ -422,7 +423,15 @@ export default function ReportsPage() {
         setPackageDetail(null);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+      setError(
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(e, t("common.unknown")),
+          locale === "en"
+            ? "Unable to load reports workspace"
+            : "無法載入報表工作區",
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -436,7 +445,15 @@ export default function ReportsPage() {
       const detail = await getOpsClient().getReportJob(jobId);
       setJobDetail(detail);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+      setError(
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(e, t("common.unknown")),
+          locale === "en"
+            ? "Unable to load report job details"
+            : "無法載入報表工作詳情",
+        ),
+      );
     } finally {
       setDetailLoadingKey(null);
     }
@@ -450,7 +467,15 @@ export default function ReportsPage() {
       const detail = await getOpsClient().getFilingPackage(packageId);
       setPackageDetail(detail);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+      setError(
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(e, t("common.unknown")),
+          locale === "en"
+            ? "Unable to load filing package details"
+            : "無法載入申報包詳情",
+        ),
+      );
     } finally {
       setDetailLoadingKey(null);
     }
@@ -477,7 +502,15 @@ export default function ReportsPage() {
           await loadData();
           await inspectReportJob(accepted.jobId);
         } catch (e) {
-          setError(e instanceof Error ? e.message : t("common.unknown"));
+          setError(
+            formatOpsUiError(
+              locale,
+              toOpsErrorMessage(e, t("common.unknown")),
+              locale === "en"
+                ? "Unable to create report job"
+                : "無法建立報表工作",
+            ),
+          );
         }
       })();
     });
@@ -497,7 +530,15 @@ export default function ReportsPage() {
           await loadData();
           await inspectFilingPackage(accepted.packageId);
         } catch (e) {
-          setError(e instanceof Error ? e.message : t("common.unknown"));
+          setError(
+            formatOpsUiError(
+              locale,
+              toOpsErrorMessage(e, t("common.unknown")),
+              locale === "en"
+                ? "Unable to generate filing package"
+                : "無法產生申報包",
+            ),
+          );
         }
       })();
     });
@@ -555,7 +596,7 @@ export default function ReportsPage() {
 
   const jobColumns: CanvasTableColumn<JobRow>[] = [
     {
-      h: "JOB",
+      h: copyText(locale, "JOB", "工作"),
       w: 156,
       mono: true,
       r: (row) => (
@@ -571,7 +612,7 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: "KIND",
+      h: copyText(locale, "KIND", "類型"),
       w: 220,
       r: (row) => (
         <div style={rowStackStyle}>
@@ -583,19 +624,19 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: "PERIOD",
+      h: copyText(locale, "PERIOD", "期間"),
       w: 140,
       mono: true,
       r: (row) => summarizeJobPeriod(row.filters),
     },
     {
-      h: "FORMAT",
+      h: copyText(locale, "FORMAT", "格式"),
       w: 90,
       mono: true,
       r: (row) => row.format.toUpperCase(),
     },
     {
-      h: "STATUS",
+      h: copyText(locale, "STATUS", "狀態"),
       w: 132,
       r: (row) => (
         <CanvasPill theme={th} tone={reportStatusTone(row.status)} dot>
@@ -604,13 +645,13 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: "EXPIRES",
+      h: copyText(locale, "EXPIRES", "到期時間"),
       w: 132,
       mono: true,
       r: (row) => formatDateTime(locale, row.artifact?.expiresAt),
     },
     {
-      h: "CREATED",
+      h: copyText(locale, "CREATED", "建立時間"),
       mono: true,
       r: (row) => formatDateTime(locale, row.createdAt),
     },
@@ -618,7 +659,7 @@ export default function ReportsPage() {
 
   const packageColumns: CanvasTableColumn<PackageRow>[] = [
     {
-      h: "PACKAGE",
+      h: copyText(locale, "PACKAGE", "申報包"),
       w: 164,
       mono: true,
       r: (row) => (
@@ -634,12 +675,12 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: "TYPE",
+      h: copyText(locale, "TYPE", "類型"),
       w: 180,
       r: (row) => formatOpsCodeLabel(locale, row.packageType),
     },
     {
-      h: "STATUS",
+      h: copyText(locale, "STATUS", "狀態"),
       w: 132,
       r: (row) => (
         <CanvasPill theme={th} tone={filingStatusTone(row.status)} dot>
@@ -648,25 +689,25 @@ export default function ReportsPage() {
       ),
     },
     {
-      h: "MANIFEST",
+      h: copyText(locale, "MANIFEST", "摘要"),
       w: 136,
       mono: true,
       r: (row) => shortHash(row.manifestHash),
     },
     {
-      h: "ITEMS",
+      h: copyText(locale, "ITEMS", "項目數"),
       w: 90,
       mono: true,
       r: (row) => String(row.items.length),
     },
     {
-      h: "GENERATED",
+      h: copyText(locale, "GENERATED", "產生時間"),
       w: 132,
       mono: true,
       r: (row) => formatDateTime(locale, row.generatedAt),
     },
     {
-      h: "ARTIFACTS",
+      h: copyText(locale, "ARTIFACTS", "成品"),
       r: (row) =>
         row.artifactZipUrl || row.artifactPdfUrl ? (
           <div style={rowStackStyle}>
@@ -698,9 +739,9 @@ export default function ReportsPage() {
   ];
 
   const tabItems: Array<{ id: ReportsTab; label: string }> = [
-    { id: "jobs", label: "Report jobs" },
-    { id: "packages", label: "Filing packages" },
-    { id: "schedules", label: "Schedules" },
+    { id: "jobs", label: copyText(locale, "Report jobs", "報表工作") },
+    { id: "packages", label: copyText(locale, "Filing packages", "申報包") },
+    { id: "schedules", label: copyText(locale, "Schedules", "排程") },
   ];
   const renderedTabs = tabItems.map((tab) => (
     <button
@@ -729,7 +770,7 @@ export default function ReportsPage() {
         subtitle={copyText(
           locale,
           "report jobs · filing packages · signed artifact short-lived URLs",
-          "report jobs · filing packages · signed artifact 短效 URL",
+          "報表工作、申報包，以及短時效的簽名成品連結",
         )}
         tabs={renderedTabs}
         activeTab={activeTabNode}
@@ -788,7 +829,7 @@ export default function ReportsPage() {
               body={copyText(
                 locale,
                 "Jobs run in the background and expose signed artifact downloads after completion.",
-                "工作會在背景執行，完成後提供簽名產物下載。",
+                "工作會在背景執行，完成後提供簽名成品下載。",
               )}
             />
             <div style={{ height: 14 }} />
@@ -855,7 +896,7 @@ export default function ReportsPage() {
                 hint={copyText(
                   locale,
                   "Optional filter for vehicle-scoped output.",
-                  "可選，用於限定單一車輛的輸出。",
+                  "可選，用來限定單一車輛範圍的輸出。",
                 )}
               >
                 <input
@@ -872,7 +913,7 @@ export default function ReportsPage() {
                 {copyText(
                   locale,
                   "Existing report-job contract and i18n keys are preserved; this only changes the surface layout.",
-                  "保留既有 report-job contract 與 i18n key；這次僅調整畫面結構。",
+                  "保留既有報表工作契約與多語系鍵值；這次僅調整畫面結構。",
                 )}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -920,7 +961,7 @@ export default function ReportsPage() {
               body={copyText(
                 locale,
                 "Generated filing bundles stay immutable and surface short-lived signed ZIP/PDF downloads.",
-                "產生後的申報包保持不可變，並以短時效 ZIP / PDF 簽名下載提供。",
+                "產生後的申報包會維持不可變，並提供短時效的已簽章壓縮檔或文件下載。",
               )}
             />
             <div style={{ height: 14 }} />
@@ -973,7 +1014,7 @@ export default function ReportsPage() {
                 {copyText(
                   locale,
                   "Filing package generation still uses the same backend flow; only the visual treatment changed.",
-                  "申報包生成仍走相同 backend 流程；變更僅限畫面呈現。",
+                  "申報包生成仍走相同後端流程；變更僅限畫面呈現。",
                 )}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -1174,7 +1215,7 @@ export default function ReportsPage() {
                   subtitle={copyText(
                     locale,
                     "Current request payload",
-                    "本次請求 payload",
+                    "本次請求內容",
                   )}
                 >
                   {Object.keys(jobDetail.filters).length > 0 ? (
@@ -1392,7 +1433,7 @@ export default function ReportsPage() {
                         body={copyText(
                           locale,
                           "Signed ZIP/PDF package artifacts are not ready yet.",
-                          "ZIP / PDF 簽名申報包尚未完成。",
+                          "已簽章的壓縮檔或文件申報套件尚未完成。",
                         )}
                       />
                       <div style={{ height: 14 }} />
@@ -1571,7 +1612,7 @@ export default function ReportsPage() {
               body={copyText(
                 locale,
                 "This handoff keeps report jobs and filing packages intact; automated scheduling remains a follow-up workflow.",
-                "本次 handoff 保留 report job 與 filing package 流程；自動排程仍屬後續工作。",
+                "本次交接會保留報表任務與申報套件流程；自動排程仍屬後續工作。",
               )}
             />
 
@@ -1635,7 +1676,7 @@ export default function ReportsPage() {
                     value: packageTypeSummary,
                   },
                   {
-                    label: copyText(locale, "Default scope", "預設 scope"),
+                    label: copyText(locale, "Default scope", "預設範圍"),
                     value: packageScope,
                     mono: true,
                   },

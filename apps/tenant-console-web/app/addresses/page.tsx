@@ -20,17 +20,24 @@ import {
   CanvasField,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import {
+  ServerCanvasTable,
+  type ServerCanvasTableColumn,
+} from "@/components/server-canvas-table";
 import {
   API_URL,
   DEMO_ACTOR_ID,
   DEMO_TENANT_ID,
   getTenantClient,
 } from "@/lib/api-client";
+import {
+  formatTenantErrorSummary,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -262,18 +269,17 @@ type EmptyStateDefinition = {
 const EMPTY_STATE_DEFINITIONS: Record<EmptyReason, EmptyStateDefinition> = {
   no_data: {
     title: "地址簿尚未建立任何常用地點",
-    message:
-      "建立第一筆地址後，booking create 可以直接重用 pickup / drop-off。",
+    message: "建立第一筆地址後，建立叫車單時即可直接重用上車 / 下車地點。",
     tone: "neutral",
   },
   not_provisioned: {
-    title: "地址模組尚未 provision",
+    title: "地址模組尚未完成建置",
     message: "目前租戶尚未啟用地址目錄或匯出能力，需由管理員先完成設定。",
     tone: "accent",
   },
   fetch_failed: {
     title: "地址資料讀取失敗",
-    message: "後端沒有回傳可用列表，請先查看 API health 與 request error。",
+    message: "後端沒有回傳可用列表，請先查看 API 健康狀態與請求錯誤。",
     tone: "danger",
   },
   permission_denied: {
@@ -283,19 +289,18 @@ const EMPTY_STATE_DEFINITIONS: Record<EmptyReason, EmptyStateDefinition> = {
   },
   external_unavailable: {
     title: "外部依賴暫時不可用",
-    message:
-      "例如 geocode / export provider 降級，頁面可瀏覽，但部分功能需稍後再試。",
+    message: "例如地理編碼或匯出服務降級，頁面可瀏覽，但部分功能需稍後再試。",
     tone: "warn",
   },
   driver_not_eligible: {
-    title: "Driver-only 狀態不適用於此頁",
+    title: "司機專用狀態不適用於此頁",
     message:
-      "這個 enum 仍需有獨立 treatment，以滿足共享 EmptyReason contract。",
+      "這個空狀態類型仍需保留獨立處理方式，但地址頁不會實際使用司機專用情境。",
     tone: "neutral",
   },
   filtered_empty: {
     title: "目前篩選條件沒有符合結果",
-    message: "放寬 tag / owner / keyword 條件，或改成顯示 inactive records。",
+    message: "放寬標籤 / 擁有者 / 關鍵字條件，或改成顯示停用紀錄。",
     tone: "neutral",
   },
 };
@@ -306,18 +311,14 @@ const REFRESH_TIER_CONFIG: Record<
   RefreshTier,
   { badge: string; cadenceLabel: string; staleAfterMs: number }
 > = {
-  urgent: { badge: "T1", cadenceLabel: "5s", staleAfterMs: 5_000 },
-  fast: { badge: "T2", cadenceLabel: "3s", staleAfterMs: 3_000 },
-  dispatch: { badge: "T3", cadenceLabel: "5s", staleAfterMs: 5_000 },
-  medium: { badge: "T4", cadenceLabel: "15s", staleAfterMs: 15_000 },
-  medium_slow: { badge: "T5", cadenceLabel: "30s", staleAfterMs: 30_000 },
-  slow: { badge: "T5", cadenceLabel: "30s", staleAfterMs: 30_000 },
-  manual: { badge: "T6", cadenceLabel: "manual", staleAfterMs: 0 },
+  urgent: { badge: "T1", cadenceLabel: "5 秒", staleAfterMs: 5_000 },
+  fast: { badge: "T2", cadenceLabel: "3 秒", staleAfterMs: 3_000 },
+  dispatch: { badge: "T3", cadenceLabel: "5 秒", staleAfterMs: 5_000 },
+  medium: { badge: "T4", cadenceLabel: "15 秒", staleAfterMs: 15_000 },
+  medium_slow: { badge: "T5", cadenceLabel: "30 秒", staleAfterMs: 30_000 },
+  slow: { badge: "T5", cadenceLabel: "30 秒", staleAfterMs: 30_000 },
+  manual: { badge: "T6", cadenceLabel: "手動", staleAfterMs: 0 },
 };
-
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown error";
-}
 
 function parseDate(value: string | null | undefined) {
   if (!value) return null;
@@ -377,15 +378,28 @@ async function loadAddressesPageData(): Promise<AddressesPageData> {
     exportResult.status === "fulfilled" ? exportResult.value : [];
 
   if (addressesResult.status === "rejected") {
-    errors.push(`address list: ${toErrorMessage(addressesResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "地址清單",
+        toTenantErrorMessage(addressesResult.reason, "地址清單讀取失敗"),
+      ),
+    );
   }
   if (passengersResult.status === "rejected") {
     errors.push(
-      `passenger directory: ${toErrorMessage(passengersResult.reason)}`,
+      formatTenantErrorSummary(
+        "乘客目錄",
+        toTenantErrorMessage(passengersResult.reason, "乘客目錄讀取失敗"),
+      ),
     );
   }
   if (exportResult.status === "rejected") {
-    errors.push(`export view: ${toErrorMessage(exportResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "匯出檢視",
+        toTenantErrorMessage(exportResult.reason, "匯出檢視讀取失敗"),
+      ),
+    );
   }
 
   return {
@@ -428,7 +442,7 @@ async function fetchTenantAddressEnvelope(): Promise<AddressListEnvelope> {
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status} when loading tenant addresses`);
+    throw new Error(`讀取租戶地址時回傳 HTTP ${response.status}`);
   }
 
   const payload = (await response.json()) as
@@ -461,15 +475,15 @@ function getOwnerLabel(
   address: TenantAddressRecord,
   passengerMap: Map<string, TenantPassengerRecord>,
 ) {
-  if (!address.ownerPassengerId) return "shared";
+  if (!address.ownerPassengerId) return "共用";
   const owner = passengerMap.get(address.ownerPassengerId);
   return owner ? owner.fullName : address.ownerPassengerId;
 }
 
 function getQualityLabel(issues: TenantAddressQualityIssue[] | undefined) {
-  if (!issues || issues.length === 0) return "ready";
-  if (issues.includes("duplicate_normalized_address")) return "duplicate";
-  return "needs geocode";
+  if (!issues || issues.length === 0) return "就緒";
+  if (issues.includes("duplicate_normalized_address")) return "地址重複";
+  return "需要補定位";
 }
 
 function getQualityTone(
@@ -525,7 +539,7 @@ function toAddressRow(
       : address.addressText,
     ownerLabel: getOwnerLabel(address, passengerMap),
     coordinatesLabel: `${formatCoordinates(address.lat)} / ${formatCoordinates(address.lng)}`,
-    stateLabel: address.activeFlag ? "active" : "deactivated",
+    stateLabel: address.activeFlag ? "啟用中" : "已停用",
     stateTone: address.activeFlag ? "success" : "neutral",
     qualityTone: getQualityTone(address.qualityIssues),
     qualityLabel: getQualityLabel(address.qualityIssues),
@@ -586,11 +600,9 @@ function actionLabel(action: string) {
 
 function actionTooltip(descriptor: ResourceActionDescriptor) {
   if (descriptor.enabled) {
-    return descriptor.requiresReason
-      ? "high risk action requires reason"
-      : undefined;
+    return descriptor.requiresReason ? "高風險操作必須填寫原因" : undefined;
   }
-  return descriptor.disabledReasonCode ?? "action unavailable";
+  return formatTenantCodeLabel(descriptor.disabledReasonCode, "目前不可執行");
 }
 
 function buildQueryHref(
@@ -623,7 +635,7 @@ function buildCrossAppLinks(
       resourceType: "tenant_booking_create",
       resourceId: address.addressId,
       openMode: "same_tab",
-      label: "前往 `/bookings/new` 預填地址",
+      label: "前往建立叫車並預填地址",
     },
     {
       targetApp: "tenant-console",
@@ -631,7 +643,7 @@ function buildCrossAppLinks(
       resourceType: "tenant_address",
       resourceId: address.addressId,
       openMode: "same_tab",
-      label: "查看此地址的 audit trail",
+      label: "查看此地址的稽核軌跡",
     },
   ];
 }
@@ -647,7 +659,7 @@ function EmptyStatePanel({
   return (
     <CanvasCard theme={th} style={emptyCardStyle}>
       <CanvasPill theme={th} tone={definition.tone}>
-        EmptyReason · {reason}
+        空狀態類型 · {formatTenantCodeLabel(reason, reason)}
       </CanvasPill>
       <h3 style={{ margin: 0, fontSize: 18, color: th.text }}>
         {definition.title}
@@ -896,9 +908,9 @@ export default async function AddressesPage({
     riskLevel: "medium",
   };
 
-  const columns: CanvasTableColumn<AddressRow>[] = [
+  const columns: ServerCanvasTableColumn<AddressRow>[] = [
     {
-      h: "NAME",
+      h: "名稱",
       k: "addressLabel",
       w: 180,
       r: (row) => (
@@ -915,7 +927,7 @@ export default async function AddressesPage({
       ),
     },
     {
-      h: "ADDRESS",
+      h: "地址",
       k: "addressLine",
       r: (row) => (
         <div
@@ -929,14 +941,14 @@ export default async function AddressesPage({
           <span>{row.addressLine}</span>
           {row.sensitiveFlag ? (
             <CanvasPill theme={th} tone="accent">
-              masked
+              已遮罩
             </CanvasPill>
           ) : null}
         </div>
       ),
     },
     {
-      h: "TAGS",
+      h: "標籤",
       w: 190,
       r: (row) =>
         row.tags.length > 0 ? (
@@ -959,18 +971,18 @@ export default async function AddressesPage({
         ),
     },
     {
-      h: "OWNER",
+      h: "擁有者",
       w: 140,
       r: (row) => row.ownerLabel,
     },
     {
-      h: "LAT / LNG",
+      h: "緯度 / 經度",
       w: 150,
       mono: true,
       r: (row) => row.coordinatesLabel,
     },
     {
-      h: "STATE",
+      h: "狀態",
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={row.stateTone} dot>
@@ -979,7 +991,7 @@ export default async function AddressesPage({
       ),
     },
     {
-      h: "QUALITY",
+      h: "品質",
       w: 120,
       r: (row) => (
         <CanvasPill theme={th} tone={row.qualityTone}>
@@ -988,7 +1000,7 @@ export default async function AddressesPage({
       ),
     },
     {
-      h: "ACTIONS",
+      h: "操作",
       w: 200,
       r: (row) => (
         <div style={rowActionsStyle}>
@@ -1044,7 +1056,7 @@ export default async function AddressesPage({
       <CanvasPageHeader
         theme={th}
         title="地址簿"
-        subtitle="常用地點 · tag · 啟用狀態 · 軟停用 only (Q-TEN06)"
+        subtitle="常用地點 · 標籤 · 啟用狀態 · 僅支援軟停用"
         actions={
           <>
             {exportDescriptor.enabled ? (
@@ -1056,13 +1068,13 @@ export default async function AddressesPage({
                 title={actionTooltip(exportDescriptor)}
               >
                 <CanvasBtn theme={th} icon="ext">
-                  匯出 view
+                  匯出檢視
                 </CanvasBtn>
               </a>
             ) : (
               <span title={actionTooltip(exportDescriptor)}>
                 <CanvasBtn theme={th} icon="ext" disabled>
-                  匯出 view
+                  匯出檢視
                 </CanvasBtn>
               </span>
             )}
@@ -1090,13 +1102,13 @@ export default async function AddressesPage({
           >
             {REFRESH_TIER_CONFIG[ADDRESS_REFRESH_TIER].badge} ·{" "}
             {REFRESH_TIER_CONFIG[ADDRESS_REFRESH_TIER].cadenceLabel} ·{" "}
-            {pageData.refreshMetadata.dataFreshness}
+            {formatTenantCodeLabel(pageData.refreshMetadata.dataFreshness)}
           </CanvasPill>
           <CanvasPill theme={th} tone="neutral">
-            generated {formatDateTime(pageData.refreshMetadata.generatedAt)}
+            產生於 {formatDateTime(pageData.refreshMetadata.generatedAt)}
           </CanvasPill>
           <CanvasPill theme={th} tone="neutral">
-            source {pageData.refreshMetadata.source}
+            資料來源已記錄
           </CanvasPill>
         </div>
 
@@ -1109,8 +1121,8 @@ export default async function AddressesPage({
                 : "warn"
             }
             icon="clock"
-            title="資料新鮮度不是 fresh"
-            body={`generatedAt=${formatDateTime(pageData.refreshMetadata.generatedAt)} · staleAfterMs=${pageData.refreshMetadata.staleAfterMs}`}
+            title="資料新鮮度未達即時狀態"
+            body={`產生時間 ${formatDateTime(pageData.refreshMetadata.generatedAt)} · 過舊時限 ${pageData.refreshMetadata.staleAfterMs} 毫秒`}
           />
         ) : null}
 
@@ -1119,55 +1131,53 @@ export default async function AddressesPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分 read-model 讀取失敗"
+            title="部分讀取模型載入失敗"
             body={pageData.errors.join(" · ")}
           />
         ) : null}
 
         <div style={statsGridStyle}>
           <CanvasCard theme={th} style={statCardStyle}>
-            <span style={statLabelStyle}>ACTIVE</span>
+            <span style={statLabelStyle}>啟用中</span>
             <span style={statValueStyle}>{activeCount}</span>
             <span style={sectionSubtitleStyle}>
-              Booking picker 預設只呈現 active 地址。
+              叫車選擇器預設只呈現啟用中的地址。
             </span>
           </CanvasCard>
           <CanvasCard theme={th} style={statCardStyle}>
-            <span style={statLabelStyle}>INACTIVE</span>
+            <span style={statLabelStyle}>已停用</span>
             <span style={statValueStyle}>{inactiveCount}</span>
             <span style={sectionSubtitleStyle}>
-              inactive record 仍保留歷史參照，但不可當作預設可用地址。
+              已停用資料仍保留歷史參照，但不可當作預設可用地址。
             </span>
           </CanvasCard>
           <CanvasCard theme={th} style={statCardStyle}>
-            <span style={statLabelStyle}>GEOCODED</span>
+            <span style={statLabelStyle}>已定位</span>
             <span style={statValueStyle}>{geocodedCount}</span>
             <span style={sectionSubtitleStyle}>
-              缺少座標會標記 quality issue，避免 booking create 猜測地理位置。
+              缺少座標會標記品質問題，避免建立叫車單時猜測地理位置。
             </span>
           </CanvasCard>
           <CanvasCard theme={th} style={statCardStyle}>
-            <span style={statLabelStyle}>EXPORT VIEW</span>
+            <span style={statLabelStyle}>匯出檢視</span>
             <span style={statValueStyle}>{pageData.exportRows.length}</span>
-            <span style={sectionSubtitleStyle}>
-              spec §9.6.4 的 export view 以遮罩地址輸出。
-            </span>
+            <span style={sectionSubtitleStyle}>匯出檢視會以遮罩地址輸出。</span>
           </CanvasCard>
         </div>
 
         <CanvasCard theme={th} style={{ padding: 16 }}>
           <form action="/addresses" style={filterGridStyle}>
-            <CanvasField theme={th} label="Search">
+            <CanvasField theme={th} label="搜尋">
               <input
                 name="q"
-                placeholder="name / address / tag"
+                placeholder="名稱 / 地址 / 標籤"
                 defaultValue={resolvedSearchParams.q ?? ""}
                 style={inputStyle}
               />
             </CanvasField>
-            <CanvasField theme={th} label="Tag">
+            <CanvasField theme={th} label="標籤">
               <select name="tag" defaultValue={tagFilter} style={selectStyle}>
-                <option value="">all tags</option>
+                <option value="">全部標籤</option>
                 {uniqueTags.map((tag) => (
                   <option key={tag} value={tag}>
                     {tag}
@@ -1175,13 +1185,13 @@ export default async function AddressesPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="Owner">
+            <CanvasField theme={th} label="擁有者">
               <select
                 name="owner"
                 defaultValue={ownerFilter}
                 style={selectStyle}
               >
-                <option value="">all owners</option>
+                <option value="">全部擁有者</option>
                 {owners.map((owner) => (
                   <option key={owner.passengerId} value={owner.passengerId}>
                     {owner.fullName}
@@ -1189,15 +1199,15 @@ export default async function AddressesPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="State">
+            <CanvasField theme={th} label="狀態">
               <select
                 name="state"
                 defaultValue={stateFilter}
                 style={selectStyle}
               >
-                <option value="active">active only</option>
-                <option value="all">active + inactive</option>
-                <option value="inactive">inactive only</option>
+                <option value="active">僅啟用</option>
+                <option value="all">啟用與停用</option>
+                <option value="inactive">僅停用</option>
               </select>
             </CanvasField>
             <div style={{ display: "flex", gap: 8 }}>
@@ -1242,7 +1252,7 @@ export default async function AddressesPage({
                   })()}
                 />
               ) : (
-                <CanvasTable theme={th} columns={columns} rows={rows} />
+                <ServerCanvasTable theme={th} columns={columns} rows={rows} />
               )}
             </CanvasCard>
 
@@ -1255,15 +1265,13 @@ export default async function AddressesPage({
                 }}
               >
                 <div>
-                  <h2 style={sectionTitleStyle}>Contract coverage</h2>
+                  <h2 style={sectionTitleStyle}>契約覆蓋範圍</h2>
                   <p style={sectionSubtitleStyle}>
-                    This route wires `availableActions`, `UiRefreshMetadata`,
-                    `CrossAppResourceLink`, and all shared `EmptyReason`
-                    variants without falling back to the old portal CRUD shell.
+                    這個頁面會串接可用操作、刷新中繼資料、跨應用資源連結與共用空狀態，不再退回舊版入口網站的基本表單頁。
                   </p>
                 </div>
                 <CanvasPill theme={th} tone="accent">
-                  Q-TEN02 / Q-TEN06
+                  治理規範
                 </CanvasPill>
               </div>
             </CanvasCard>
@@ -1279,8 +1287,7 @@ export default async function AddressesPage({
                     {composeMode === "edit" ? "編輯地址" : "新增地址"}
                   </h2>
                   <p style={sectionSubtitleStyle}>
-                    `availableActions` drives whether the compose panel is
-                    create, update, or lifecycle review.
+                    可用操作會決定編輯面板目前是新增、更新，還是生命週期檢視模式。
                   </p>
                 </div>
 
@@ -1297,7 +1304,7 @@ export default async function AddressesPage({
                         : ""
                     }
                   />
-                  <CanvasField theme={th} label="Address name">
+                  <CanvasField theme={th} label="地址名稱">
                     <input
                       name="addressName"
                       defaultValue={
@@ -1305,12 +1312,12 @@ export default async function AddressesPage({
                           ? (selectedAddress?.addressName ?? "")
                           : ""
                       }
-                      placeholder="Acme HQ"
+                      placeholder="總部大樓"
                       required
                       style={inputStyle}
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label="Address text">
+                  <CanvasField theme={th} label="地址內容">
                     <textarea
                       name="addressText"
                       defaultValue={
@@ -1324,7 +1331,7 @@ export default async function AddressesPage({
                     />
                   </CanvasField>
                   <div style={detailGridStyle}>
-                    <CanvasField theme={th} label="Latitude">
+                    <CanvasField theme={th} label="緯度">
                       <input
                         name="lat"
                         defaultValue={
@@ -1337,7 +1344,7 @@ export default async function AddressesPage({
                         style={inputStyle}
                       />
                     </CanvasField>
-                    <CanvasField theme={th} label="Longitude">
+                    <CanvasField theme={th} label="經度">
                       <input
                         name="lng"
                         defaultValue={
@@ -1352,7 +1359,7 @@ export default async function AddressesPage({
                     </CanvasField>
                   </div>
                   <div style={detailGridStyle}>
-                    <CanvasField theme={th} label="Tags">
+                    <CanvasField theme={th} label="標籤">
                       <input
                         name="tags"
                         defaultValue={
@@ -1360,11 +1367,11 @@ export default async function AddressesPage({
                             ? (selectedAddress?.tags.join(", ") ?? "")
                             : ""
                         }
-                        placeholder="office, vip, warehouse"
+                        placeholder="辦公室, 貴賓, 倉儲"
                         style={inputStyle}
                       />
                     </CanvasField>
-                    <CanvasField theme={th} label="Owner passenger">
+                    <CanvasField theme={th} label="乘客擁有者">
                       <select
                         name="ownerPassengerId"
                         defaultValue={
@@ -1374,7 +1381,7 @@ export default async function AddressesPage({
                         }
                         style={selectStyle}
                       >
-                        <option value="">shared</option>
+                        <option value="">共用</option>
                         {pageData.passengers.map((passenger) => (
                           <option
                             key={passenger.passengerId}
@@ -1406,7 +1413,7 @@ export default async function AddressesPage({
                             : true
                         }
                       />
-                      activeFlag
+                      啟用狀態
                     </label>
                     <label
                       style={{
@@ -1425,7 +1432,7 @@ export default async function AddressesPage({
                             : false
                         }
                       />
-                      sensitive / masked
+                      敏感資料 / 遮罩
                     </label>
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
@@ -1450,10 +1457,9 @@ export default async function AddressesPage({
                 style={{ display: "flex", flexDirection: "column", gap: 12 }}
               >
                 <div>
-                  <h2 style={sectionTitleStyle}>Selected address</h2>
+                  <h2 style={sectionTitleStyle}>已選地址</h2>
                   <p style={sectionSubtitleStyle}>
-                    側欄顯示 cross-app links、匯出遮罩視圖與 lifecycle action
-                    context。
+                    側欄顯示跨應用連結、匯出遮罩視圖與生命週期操作脈絡。
                   </p>
                 </div>
 
@@ -1461,26 +1467,26 @@ export default async function AddressesPage({
                   <>
                     <div style={detailGridStyle}>
                       <div>
-                        <div style={detailLabelStyle}>Address</div>
+                        <div style={detailLabelStyle}>地址</div>
                         <div style={detailValueStyle}>
                           {selectedAddress.addressName}
                         </div>
                       </div>
                       <div>
-                        <div style={detailLabelStyle}>Owner</div>
+                        <div style={detailLabelStyle}>擁有者</div>
                         <div style={detailValueStyle}>
                           {getOwnerLabel(selectedAddress, passengerMap)}
                         </div>
                       </div>
                       <div>
-                        <div style={detailLabelStyle}>Coordinates</div>
+                        <div style={detailLabelStyle}>座標</div>
                         <div style={detailValueStyle}>
                           {formatCoordinates(selectedAddress.lat)} /{" "}
                           {formatCoordinates(selectedAddress.lng)}
                         </div>
                       </div>
                       <div>
-                        <div style={detailLabelStyle}>Updated</div>
+                        <div style={detailLabelStyle}>更新時間</div>
                         <div style={detailValueStyle}>
                           {formatDateTime(selectedAddress.updatedAt)}
                         </div>
@@ -1498,7 +1504,9 @@ export default async function AddressesPage({
                           <span
                             style={{ color: th.textMuted, ...monoMetaStyle }}
                           >
-                            {item.openMode}
+                            {item.openMode === "same_tab"
+                              ? "同分頁開啟"
+                              : "新分頁開啟"}
                           </span>
                         </Link>
                       ))}
@@ -1564,25 +1572,25 @@ export default async function AddressesPage({
                           icon={selectedAddress.activeFlag ? "warn" : "check"}
                           title={
                             selectedAddress.activeFlag
-                              ? "High-risk lifecycle action"
-                              : "Lifecycle reactivation"
+                              ? "高風險生命週期操作"
+                              : "生命週期重新啟用"
                           }
                           body={
                             selectedAddress.activeFlag
-                              ? "Soft deactivate keeps historical bookings intact but removes the address from default pickers."
-                              : "Reactivation returns this address to active pickers without creating a new resource."
+                              ? "軟停用會保留歷史叫車單，但會把這個地址從預設選擇器中移除。"
+                              : "重新啟用會讓這個地址回到可選清單，不會建立新的資源。"
                           }
                         />
                         {selectedAddress.activeFlag ? (
                           <CanvasField
                             theme={th}
-                            label="Reason"
-                            hint="UI collects a reason per Q-TEN06 even though the current API only exposes `upsertAddress(activeFlag)`."
+                            label="原因"
+                            hint="依治理規範，介面仍會收集原因，即使目前 API 只是切換啟用狀態。"
                           >
                             <textarea
                               name="reason"
                               required
-                              placeholder="Explain why this address should be deactivated."
+                              placeholder="請說明為何要停用這個地址。"
                               style={textAreaStyle}
                             />
                           </CanvasField>
@@ -1636,8 +1644,7 @@ export default async function AddressesPage({
                   <p
                     style={{ margin: 0, color: th.textMuted, lineHeight: 1.6 }}
                   >
-                    選一筆地址後，這裡會顯示 detail、cross-app links 與
-                    lifecycle action。
+                    選一筆地址後，這裡會顯示詳細資料、跨應用連結與生命週期操作。
                   </p>
                 )}
               </div>

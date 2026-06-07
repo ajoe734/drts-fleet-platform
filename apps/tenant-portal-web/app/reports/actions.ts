@@ -12,7 +12,7 @@ export async function createReportJob(formData: FormData): Promise<void> {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteReports,
-    "Reports write authority required.",
+    "需要報表寫入權限。",
   );
   const client = await getTenantClient();
 

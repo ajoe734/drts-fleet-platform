@@ -10,7 +10,12 @@ import {
   type ReactNode,
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
+import type { Locale } from "@/lib/translations";
 import type {
   DriverStatementRecord,
   ReimbursementBatchRecord,
@@ -122,13 +127,12 @@ const badgeStyle = (
 
 const FILTERS: Array<{
   id: QueueFilter;
-  label: string;
   tone: "neutral" | "warn" | "info" | "success";
 }> = [
-  { id: "all", label: "全部", tone: "neutral" },
-  { id: "pending_approval", label: "Pending approval", tone: "warn" },
-  { id: "exported", label: "Exported", tone: "info" },
-  { id: "done", label: "Done", tone: "success" },
+  { id: "all", tone: "neutral" },
+  { id: "pending_approval", tone: "warn" },
+  { id: "exported", tone: "info" },
+  { id: "done", tone: "success" },
 ];
 
 function formatMoney(
@@ -139,7 +143,24 @@ function formatMoney(
   return `${amount.amountMinor.toLocaleString()} ${amount.currency}`;
 }
 
-function getScopeLabel(batch: ReimbursementBatchRecord): string {
+function getQueueFilterLabel(filter: QueueFilter, locale: Locale): string {
+  switch (filter) {
+    case "pending_approval":
+      return locale === "zh" ? "待核准" : "Pending approval";
+    case "exported":
+      return locale === "zh" ? "已匯出" : "Exported";
+    case "done":
+      return locale === "zh" ? "已完成" : "Done";
+    case "all":
+    default:
+      return locale === "zh" ? "全部" : "All";
+  }
+}
+
+function getScopeLabel(
+  batch: ReimbursementBatchRecord,
+  locale: Locale,
+): string {
   const counts = new Map<string, number>();
   for (const item of batch.items) {
     const key = item.channelKey ?? "statement";
@@ -153,15 +174,17 @@ function getScopeLabel(batch: ReimbursementBatchRecord): string {
 
   switch (scopeKey) {
     case "partner_airport":
-      return "partner:airport";
+      return locale === "zh" ? "合作夥伴：機場" : "Partner: airport";
     case "tenant_enterprise":
-      return "tenant:enterprise";
+      return locale === "zh" ? "租戶：企業方案" : "Tenant: enterprise";
     case "phone_dispatch":
-      return "phone:dispatch";
+      return locale === "zh" ? "客服：電話派遣" : "Phone: dispatch";
     case "forwarded_shadow":
-      return "forwarded:shadow";
+      return locale === "zh" ? "轉送：外部鏡像" : "Forwarded: shadow";
     default:
-      return `statement:${batch.statementId}`;
+      return locale === "zh"
+        ? `結算單：${batch.statementId}`
+        : `Statement: ${batch.statementId}`;
   }
 }
 
@@ -223,37 +246,38 @@ function statusTone(
   }
 }
 
-function statusLabel(status: QueueStatus): string {
+function statusLabel(status: QueueStatus, locale: Locale): string {
   switch (status) {
     case "pending_approval":
-      return "pending_approval";
+      return locale === "zh" ? "待核准" : "Pending approval";
     case "approved":
-      return "approved";
+      return locale === "zh" ? "已核准" : "Approved";
     case "exported":
-      return "exported";
+      return locale === "zh" ? "已匯出" : "Exported";
     case "paid":
-      return "paid";
+      return locale === "zh" ? "已付款" : "Paid";
     case "reconciled":
-      return "reconciled";
+      return locale === "zh" ? "已對帳" : "Reconciled";
     case "draft":
     default:
-      return "draft";
+      return locale === "zh" ? "草稿" : "Draft";
   }
 }
 
 function buildRow(
   batch: ReimbursementBatchRecord,
   statement: DriverStatementRecord | undefined,
+  locale: Locale,
 ): QueueRow {
   const submittedAt = getSubmittedAt(batch, statement);
   const updatedAt = getUpdatedAt(batch, statement);
 
   return {
     batchId: batch.batchId,
-    scope: getScopeLabel(batch),
+    scope: getScopeLabel(batch, locale),
     amountLabel: formatMoney(batch.totalAmount),
     status: deriveQueueStatus(batch),
-    submitter: "平台財務 / Platform Finance",
+    submitter: locale === "zh" ? "平台財務" : "Platform Finance",
     submittedAt,
     updatedAt,
     periodMonth: batch.periodMonth,
@@ -281,11 +305,19 @@ export default function ReimbursementsPage() {
       setBatches(batchRecords ?? []);
       setStatements(statementRecords ?? []);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(cause),
+          locale === "zh"
+            ? "無法載入代墊批次"
+            : "Unable to load reimbursement batches",
+        ),
+      );
     } finally {
       setLoading(false);
     }
-  }, [client]);
+  }, [client, locale]);
 
   useEffect(() => {
     void loadQueue();
@@ -297,13 +329,15 @@ export default function ReimbursementsPage() {
     );
 
     return batches
-      .map((batch) => buildRow(batch, statementMap.get(batch.statementId)))
+      .map((batch) =>
+        buildRow(batch, statementMap.get(batch.statementId), locale),
+      )
       .sort(
         (left, right) =>
           Date.parse(right.updatedAt || right.submittedAt) -
           Date.parse(left.updatedAt || left.submittedAt),
       );
-  }, [batches, statements]);
+  }, [batches, locale, statements]);
 
   const counts = useMemo(() => {
     return rows.reduce<Record<QueueStatus, number>>(
@@ -367,14 +401,14 @@ export default function ReimbursementsPage() {
               }}
             >
               <span style={tabLabelStyle}>
-                <span>{filter.label}</span>
+                <span>{getQueueFilterLabel(filter.id, locale)}</span>
                 <span style={badgeStyle(filter.tone)}>{count}</span>
               </span>
             </button>
           ),
         };
       }),
-    [counts, rows.length],
+    [counts, locale, rows.length],
   );
 
   const activeTab =
@@ -382,7 +416,7 @@ export default function ReimbursementsPage() {
 
   const columns: CanvasTableColumn<QueueRow>[] = [
     {
-      h: "BATCH",
+      h: locale === "zh" ? "批次" : "Batch",
       w: 208,
       mono: true,
       r: (row) => (
@@ -395,39 +429,39 @@ export default function ReimbursementsPage() {
       ),
     },
     {
-      h: "SCOPE",
+      h: locale === "zh" ? "範圍" : "Scope",
       w: 180,
       mono: true,
       r: (row) => row.scope,
     },
     {
-      h: "AMOUNT",
+      h: locale === "zh" ? "金額" : "Amount",
       w: 160,
       mono: true,
       r: (row) => row.amountLabel,
     },
     {
-      h: "STATE",
+      h: locale === "zh" ? "狀態" : "State",
       w: 172,
       r: (row) => (
         <CanvasPill theme={theme} tone={statusTone(row.status)} dot>
-          {statusLabel(row.status)}
+          {statusLabel(row.status, locale)}
         </CanvasPill>
       ),
     },
     {
-      h: "SUBMITTER",
+      h: locale === "zh" ? "提交者" : "Submitter",
       w: 192,
       r: (row) => row.submitter,
     },
     {
-      h: "SUBMITTED",
+      h: locale === "zh" ? "提交時間" : "Submitted",
       w: 164,
       mono: true,
       r: (row) => formatDateTime(row.submittedAt),
     },
     {
-      h: "UPDATED",
+      h: locale === "zh" ? "更新時間" : "Updated",
       w: 164,
       mono: true,
       r: (row) => formatDateTime(row.updatedAt),
@@ -449,8 +483,12 @@ export default function ReimbursementsPage() {
     <div style={{ minHeight: "100%", background: theme.bg }}>
       <CanvasPageHeader
         theme={theme}
-        title="代墊批次 · Reimbursement batches"
-        subtitle="draft → pending_approval → approved → exported → paid → reconciled (Q-ADM12 6 狀態 state machine)"
+        title={locale === "zh" ? "代墊批次" : "Reimbursement batches"}
+        subtitle={
+          locale === "zh"
+            ? "草稿 → 待核准 → 已核准 → 已匯出 → 已付款 → 已對帳"
+            : "draft → pending approval → approved → exported → paid → reconciled"
+        }
         tabs={tabs.map((tab) => tab.node)}
         activeTab={activeTab}
       />

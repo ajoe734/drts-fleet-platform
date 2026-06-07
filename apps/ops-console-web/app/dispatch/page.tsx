@@ -316,7 +316,7 @@ async function loadHealthPayload(): Promise<UiHealthEnvelope | null> {
                 impact:
                   payload.mode ??
                   payload.execution_mode ??
-                  "dispatch surface degraded",
+                  "dispatch_surface_degraded",
                 severity: payload.status === "down" ? "critical" : "warning",
               },
             ]
@@ -411,44 +411,44 @@ function getBoardMeta(board: DispatchBoard, locale: Locale) {
   switch (board) {
     case "ready":
       return {
-        label: zh ? "Ready queue" : "Ready queue",
+        label: zh ? "待派佇列" : "Ready queue",
         description: zh
-          ? "待派送與廣播中的自營訂單。"
+          ? "顯示等待指派與媒合中的自營訂單。"
           : "Owned orders waiting for assignment or active matching.",
       };
     case "assigned":
       return {
-        label: zh ? "Assigned" : "Assigned",
+        label: zh ? "已指派" : "Assigned",
         description: zh
-          ? "已指派司機、進行中的工作項目。"
+          ? "已派給司機、正在執行中的訂單。"
           : "Driver-assigned and in-trip work items.",
       };
     case "exception":
       return {
-        label: zh ? "Exception hold" : "Exception hold",
+        label: zh ? "異常保留" : "Exception hold",
         description: zh
-          ? "例外保留，需要先清除 gate 才能回到 queue。"
+          ? "因異常被暫停的訂單，需先解除阻塞才能回到派遣流程。"
           : "Held work items that must clear an exception before requeue.",
       };
     case "no_supply":
       return {
-        label: zh ? "No eligible supply" : "No eligible supply",
+        label: zh ? "無可用供給" : "No eligible supply",
         description: zh
-          ? "無合格供給，需要人工延展或升級。"
+          ? "目前沒有合適車輛，需要人工延展搜尋或升級處理。"
           : "Orders with no eligible supply and active intervention.",
       };
     case "governance":
       return {
-        label: zh ? "Governance blocked" : "Governance blocked",
+        label: zh ? "治理阻塞" : "Governance blocked",
         description: zh
-          ? "等待 override / approval request 的治理阻塞。"
+          ? "等待例外覆核或審批申請完成的治理阻塞訂單。"
           : "Override requests blocked on governance approvals.",
       };
     case "forwarded":
       return {
-        label: zh ? "Forwarded mirror" : "Forwarded mirror",
+        label: zh ? "轉單鏡像" : "Forwarded mirror",
         description: zh
-          ? "外部平台鏡像、adapter 與 reconciliation 觀察。"
+          ? "檢視外部平台鏡像單、介接器狀態與對帳處理。"
           : "Forwarded order mirrors with adapter and reconciliation context.",
       };
   }
@@ -503,6 +503,14 @@ function formatDispatchCode(
   fallback = "—",
 ) {
   return value ? formatOpsCodeLabel(locale, value) : fallback;
+}
+
+function formatEtaLabel(locale: Locale, value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  return locale === "zh" ? `${value} 分` : `${value}m`;
 }
 
 function formatRefreshSummary(refresh: UiRefreshMetadata, locale: Locale) {
@@ -835,33 +843,33 @@ function resolveActionLabel(action: string, locale: Locale) {
     case "request_exception_override":
       return zh ? "申請例外覆核" : "Request override";
     case "approve_exception_override":
-      return zh ? "核准 override" : "Approve override";
+      return zh ? "核准例外覆核" : "Approve override";
     case "reject_exception_override":
-      return zh ? "拒絕 override" : "Reject override";
+      return zh ? "駁回例外覆核" : "Reject override";
     case "escalate_incident":
     case "createIncidentFromDispatchException":
       return zh ? "升級為事件" : "Escalate to incident";
     case "extend_search":
       return zh ? "延展搜尋" : "Extend search";
     case "cancel_no_supply":
-      return zh ? "取消 no-supply 訂單" : "Cancel no-supply order";
+      return zh ? "取消無供給訂單" : "Cancel no-supply order";
     case "resolve_no_supply":
-      return zh ? "人工處理 no-supply" : "Resolve no-supply";
+      return zh ? "處理無供給" : "Resolve no-supply";
     case "jump_approval_request":
-      return zh ? "前往 approval request" : "Open approval request";
+      return zh ? "前往審批申請" : "Open approval request";
     case "trigger_reconciliation":
     case "complete_forwarder_reconciliation":
-      return zh ? "觸發 reconciliation" : "Trigger reconciliation";
+      return zh ? "觸發對帳" : "Trigger reconciliation";
     case "engage_manual_fallback":
-      return zh ? "啟動 manual fallback" : "Engage manual fallback";
+      return zh ? "啟動人工備援" : "Engage manual fallback";
     case "force_refresh":
     case "sync_forwarded_order_status":
     case "mark_forwarder_sync_failed":
       return zh ? "強制刷新" : "Force refresh";
     case "inspect_adapter":
-      return zh ? "查看 adapter ↗" : "Inspect adapter ↗";
+      return zh ? "查看介接器 ↗" : "Inspect adapter ↗";
     default:
-      return action.replace(/_/g, " ");
+      return formatOpsCodeLabel(locale, action);
   }
 }
 
@@ -1089,9 +1097,9 @@ function renderEmptyState(
     { title: string; description: string; tone: CanvasTone; icon: string }
   > = {
     no_data: {
-      title: zh ? "目前沒有工作項目" : "No work items yet",
+      title: zh ? "目前沒有派遣項目" : "No work items yet",
       description: zh
-        ? "這個 board 目前沒有資料，等待新的 dispatch 狀態流入。"
+        ? "這個看板目前沒有資料，等待新的派遣狀態流入。"
         : "This board is currently empty and waiting for new dispatch activity.",
       tone: "neutral",
       icon: "○",
@@ -1099,7 +1107,7 @@ function renderEmptyState(
     not_provisioned: {
       title: zh ? "尚未完成佈建" : "Not provisioned",
       description: zh
-        ? "此 board 需要先完成 adapter / integration 設定後才會有資料。"
+        ? "此看板需先完成介接器或整合設定後，才會開始回傳資料。"
         : "This board requires provisioning before it can return live data.",
       tone: "info",
       icon: "◇",
@@ -1107,7 +1115,7 @@ function renderEmptyState(
     fetch_failed: {
       title: zh ? "讀取失敗" : "Failed to load",
       description: zh
-        ? "資料請求失敗。請使用 refresh，或查看 degraded banner。"
+        ? "資料請求失敗。請重新整理，或先檢查上方的降級提示。"
         : "The data request failed. Refresh the board or inspect degraded services.",
       tone: "danger",
       icon: "!",
@@ -1115,7 +1123,7 @@ function renderEmptyState(
     permission_denied: {
       title: zh ? "沒有權限" : "Permission denied",
       description: zh
-        ? "目前角色沒有此 board 所需的權限。"
+        ? "目前角色沒有使用這個看板所需的權限。"
         : "The current role does not have access to this board.",
       tone: "warn",
       icon: "⛔",
@@ -1123,7 +1131,7 @@ function renderEmptyState(
     external_unavailable: {
       title: zh ? "外部系統不可用" : "External platform unavailable",
       description: zh
-        ? "外部 adapter / callback 無法提供資料，請改走 manual fallback。"
+        ? "外部介接器或回呼資料目前無法提供，請先改走人工備援流程。"
         : "External adapter data is unavailable. Use fallback paths while recovery is in progress.",
       tone: "warn",
       icon: "↗",
@@ -1131,7 +1139,7 @@ function renderEmptyState(
     driver_not_eligible: {
       title: zh ? "目前不可派送" : "Not eligible right now",
       description: zh
-        ? "此狀態通常不適用於 ops console，但後端回傳了 driver eligibility 限制。"
+        ? "這個狀態通常不會出現在營運主控台，但後端回傳了司機資格限制。"
         : "This reason is usually driver-specific, but the backend reported an eligibility restriction.",
       tone: "info",
       icon: "△",
@@ -1139,7 +1147,7 @@ function renderEmptyState(
     filtered_empty: {
       title: zh ? "篩選後無結果" : "No matches for current filters",
       description: zh
-        ? "這個 board 有資料，但目前的 service / facet 篩選沒有命中。"
+        ? "這個看板原本有資料，但目前的服務或面向篩選沒有命中。"
         : "The board has data, but nothing matches the current filters.",
       tone: "accent",
       icon: "⌕",
@@ -1173,7 +1181,7 @@ function renderEmptyState(
       description={`${content.description} ${
         board === "forwarded" && emptyState.reason === "external_unavailable"
           ? zh
-            ? "請改查 adapter health 與 reconciliation queue。"
+            ? "請改查介接器健康狀態與對帳佇列。"
             : "Check adapter health and the reconciliation queue."
           : ""
       }`.trim()}
@@ -1190,7 +1198,7 @@ function renderEmptyState(
             style={{ textDecoration: "none" }}
           >
             <Btn theme={theme} variant="secondary" icon="arrow">
-              {zh ? "重設 board" : "Reset board"}
+              {zh ? "重設看板" : "Reset board"}
             </Btn>
           </Link>
         </div>
@@ -1278,7 +1286,7 @@ function renderBoardSignalBanner({
       ({
         action: "inspect_adapter",
         href: buildPlatformAdminHref("/adapter-registry"),
-        label: zh ? "查看 adapter ↗" : "Inspect adapter ↗",
+        label: zh ? "查看介接器 ↗" : "Inspect adapter ↗",
         riskLevel: "low",
         disabled: false,
         external: true,
@@ -1290,12 +1298,12 @@ function renderBoardSignalBanner({
         icon="warn"
         title={
           zh
-            ? `${formatDispatchCode(locale, degradedAdapters[0]?.platformCode, "Adapter")} 降級 · Forwarded mirror 受影響`
+            ? `${formatDispatchCode(locale, degradedAdapters[0]?.platformCode, "介接器")} 降級，轉單鏡像受影響`
             : `${formatDispatchCode(locale, degradedAdapters[0]?.platformCode, "Adapter")} degraded · forwarded mirror impacted`
         }
         body={
           zh
-            ? `目前可見 ${visibleCount} / ${boardCount} 筆鏡像單；優先走 reconciliation / manual fallback。`
+            ? `目前可見 ${visibleCount} / ${boardCount} 筆鏡像單，請優先處理對帳或人工備援。`
             : `Showing ${visibleCount} / ${boardCount} mirror rows. Prioritize reconciliation and manual fallback.`
         }
         actions={renderActionButton(inspectAdapter, locale)}
@@ -1341,14 +1349,10 @@ function renderBoardSignalBanner({
         theme={theme}
         tone="warn"
         icon="warn"
-        title={
-          zh
-            ? "需平台審批 · /approval-requests"
-            : "Governance hold · /approval-requests"
-        }
+        title={zh ? "需等待平台審批" : "Governance hold · /approval-requests"}
         body={
           zh
-            ? `${title} 正等待 override / approval request。`
+            ? `${title} 正等待例外覆核或審批申請完成，可前往審批申請清單追蹤進度。`
             : `${title} is blocked on an override / approval request.`
         }
         actions={renderActionButton(
@@ -1373,7 +1377,7 @@ function renderBoardSignalBanner({
         title={zh ? "例外保留需先清除" : "Exception hold must be cleared"}
         body={
           zh
-            ? `${title} · hold 原因 ${holdReason}`
+            ? `${title} · 保留原因：${holdReason}`
             : `${title} · hold reason ${holdReason}`
         }
         actions={renderActionButton(
@@ -1397,12 +1401,12 @@ function renderBoardSignalBanner({
         icon="warn"
         title={
           zh
-            ? "No eligible supply 需要人工介入"
+            ? "無可用供給，需要人工介入"
             : "No eligible supply needs intervention"
         }
         body={
           zh
-            ? `${title} · 已嘗試 ${selectedRecord.dispatchAttemptCount} 次，最後原因 ${formatDispatchCode(locale, selectedRecord.lastDispatchFailureReason ?? "unknown")}。`
+            ? `${title} · 已嘗試 ${selectedRecord.dispatchAttemptCount} 次，最後原因：${formatDispatchCode(locale, selectedRecord.lastDispatchFailureReason ?? "unknown")}。`
             : `${title} · ${selectedRecord.dispatchAttemptCount} attempts, last reason ${formatDispatchCode(locale, selectedRecord.lastDispatchFailureReason ?? "unknown")}.`
         }
         actions={renderActionButton(
@@ -1441,8 +1445,8 @@ function renderBoardSignalBanner({
       body={
         zh
           ? board === "assigned"
-            ? "目前為已指派 / 行程進行中工作項目。"
-            : "目前為 ready queue 焦點工作項目。"
+            ? "目前為已指派或行程進行中的焦點訂單。"
+            : "目前為待派佇列中的焦點訂單。"
           : board === "assigned"
             ? "Current driver-assigned / in-trip work item."
             : "Current ready-queue focus item."
@@ -1460,7 +1464,7 @@ function renderActionList(actions: BoardActionContext[], locale: Locale) {
         title={locale === "zh" ? "目前沒有可用動作" : "No available actions"}
         description={
           locale === "zh"
-            ? "這個 work item 目前是 read-only，或後端尚未提供 `availableActions`。"
+            ? "這筆派遣項目目前為唯讀，或後端尚未提供可執行操作。"
             : "This work item is read-only, or the backend has not emitted `availableActions` yet."
         }
       />
@@ -1508,7 +1512,7 @@ function renderActionList(actions: BoardActionContext[], locale: Locale) {
                     action.disabledReason ?? "disabled",
                   )
                 : locale === "zh"
-                  ? "由 availableActions 驅動的可執行 CTA。"
+                  ? "由後端回傳的可執行操作。"
                   : "CTA emitted from availableActions."}
             </div>
           </div>
@@ -1599,7 +1603,7 @@ function freshnessBanner(refresh: UiRefreshMetadata, locale: Locale) {
         ? "資料已過期"
         : "Dispatch snapshot is stale"
       : zh
-        ? "資料新鮮度未知"
+        ? "資料新鮮度降級"
         : "Dispatch freshness is degraded";
   return (
     <Banner
@@ -1609,7 +1613,7 @@ function freshnessBanner(refresh: UiRefreshMetadata, locale: Locale) {
       title={title}
       body={
         zh
-          ? `generatedAt ${formatDateTime(locale, refresh.generatedAt)} · source ${formatDispatchCode(locale, refresh.source)}`
+          ? `快照時間 ${formatDateTime(locale, refresh.generatedAt)} · 資料來源 ${formatDispatchCode(locale, refresh.source)}`
           : `generatedAt ${formatDateTime(locale, refresh.generatedAt)} · source ${formatDispatchCode(locale, refresh.source)}`
       }
     />
@@ -1630,15 +1634,17 @@ function healthBanner(health: UiHealthEnvelope | null, locale: Locale) {
       title={
         health.status === "down"
           ? zh
-            ? "Dispatch 依賴服務中斷"
+            ? "派遣相依服務中斷"
             : "Dispatch dependency is down"
           : zh
-            ? "Dispatch 依賴服務降級"
+            ? "派遣相依服務降級"
             : "Dispatch dependency is degraded"
       }
       body={
         firstService
-          ? `${formatDispatchCode(locale, firstService.service)} · ${formatDispatchCode(locale, firstService.impact)}`
+          ? zh
+            ? `服務 ${formatDispatchCode(locale, firstService.service)} · 影響 ${formatDispatchCode(locale, firstService.impact)}`
+            : `${formatDispatchCode(locale, firstService.service)} · ${formatDispatchCode(locale, firstService.impact)}`
           : formatDateTime(locale, health.lastCheckedAt)
       }
     />
@@ -1977,15 +1983,20 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      { h: "MIRROR", k: "mirror", w: 170, mono: true },
-      { h: "SOURCE", k: "source", w: 140 },
-      { h: "EXTERNAL ORDER", k: "externalOrderId", w: 170, mono: true },
-      { h: "PICKUP → DROP", k: "route", w: 360 },
-      { h: "WINDOW", k: "window", w: 132, mono: true },
-      { h: "STATUS", k: "status", w: 160 },
-      { h: "ADAPTER", k: "adapter", w: 170 },
-      { h: "MISMATCH", k: "mismatch", w: 190 },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      { h: zh ? "鏡像單" : "MIRROR", k: "mirror", w: 170, mono: true },
+      { h: zh ? "來源平台" : "SOURCE", k: "source", w: 140 },
+      {
+        h: zh ? "外部訂單" : "EXTERNAL ORDER",
+        k: "externalOrderId",
+        w: 170,
+        mono: true,
+      },
+      { h: zh ? "上車 → 下車" : "PICKUP → DROP", k: "route", w: 360 },
+      { h: zh ? "時段" : "WINDOW", k: "window", w: 132, mono: true },
+      { h: zh ? "狀態" : "STATUS", k: "status", w: 160 },
+      { h: zh ? "介接器" : "ADAPTER", k: "adapter", w: 170 },
+      { h: zh ? "不一致" : "MISMATCH", k: "mismatch", w: 190 },
+      { h: zh ? "動作" : "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "assigned") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2038,10 +2049,7 @@ export default async function DispatchPage({
             {formatDispatchCode(locale, task?.status ?? "assigned")}
           </Pill>
         ),
-        eta:
-          job && job.latestEtaMinutes !== null
-            ? `${job.latestEtaMinutes}m`
-            : "—",
+        eta: job ? formatEtaLabel(locale, job.latestEtaMinutes) : "—",
         gate: (
           <Pill theme={theme} tone={gate.tone} dot={gate.tone !== "success"}>
             {formatDispatchCode(locale, gate.label)}
@@ -2052,13 +2060,18 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      { h: "ORDER", k: "order", w: 150, mono: true },
-      { h: "TENANT", k: "tenant", w: 160, mono: true },
-      { h: "DRIVER / VEHICLE", k: "driver", w: 170, mono: true },
-      { h: "TASK STATE", k: "taskState", w: 150 },
+      { h: zh ? "訂單" : "ORDER", k: "order", w: 150, mono: true },
+      { h: zh ? "租戶" : "TENANT", k: "tenant", w: 160, mono: true },
+      {
+        h: zh ? "司機 / 車輛" : "DRIVER / VEHICLE",
+        k: "driver",
+        w: 170,
+        mono: true,
+      },
+      { h: zh ? "任務狀態" : "TASK STATE", k: "taskState", w: 150 },
       { h: "ETA", k: "eta", w: 90, mono: true },
-      { h: "GATE", k: "gate", w: 180 },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      { h: zh ? "阻塞" : "GATE", k: "gate", w: 180 },
+      { h: zh ? "動作" : "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "exception") {
     boardRows = visibleOwnedByBoard.map((order) => ({
@@ -2094,7 +2107,7 @@ export default async function DispatchPage({
       owner:
         order.exceptionHold?.overrideRequest?.requestedBy.actorId ??
         order.exceptionHold?.resolution?.actorId ??
-        "ops",
+        formatDispatchCode(locale, "ops"),
       age: formatDurationSince(
         locale,
         order.exceptionHold?.raisedAt ?? order.updatedAt,
@@ -2105,13 +2118,13 @@ export default async function DispatchPage({
     }));
 
     boardColumns = [
-      { h: "ORDER", k: "order", w: 150, mono: true },
-      { h: "TENANT", k: "tenant", w: 160, mono: true },
-      { h: "HOLD REASON", k: "reason", w: 180, mono: true },
-      { h: "HOLD OWNER", k: "owner", w: 150, mono: true },
-      { h: "AGE", k: "age", w: 120, mono: true },
-      { h: "RELATED", k: "related", w: 160, mono: true },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      { h: zh ? "訂單" : "ORDER", k: "order", w: 150, mono: true },
+      { h: zh ? "租戶" : "TENANT", k: "tenant", w: 160, mono: true },
+      { h: zh ? "保留原因" : "HOLD REASON", k: "reason", w: 180, mono: true },
+      { h: zh ? "保留人" : "HOLD OWNER", k: "owner", w: 150, mono: true },
+      { h: zh ? "停留時間" : "AGE", k: "age", w: 120, mono: true },
+      { h: zh ? "相關編號" : "RELATED", k: "related", w: 160, mono: true },
+      { h: zh ? "動作" : "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "no_supply") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2165,12 +2178,18 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      { h: "ORDER", k: "order", w: 150, mono: true },
-      { h: "TENANT", k: "tenant", w: 160, mono: true },
-      { h: "ATTEMPTS", k: "attempts", w: 120, mono: true, align: "right" },
-      { h: "REASON CODE", k: "reason", w: 180, mono: true },
-      { h: "TIME IN STATE", k: "age", w: 140, mono: true },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      { h: zh ? "訂單" : "ORDER", k: "order", w: 150, mono: true },
+      { h: zh ? "租戶" : "TENANT", k: "tenant", w: 160, mono: true },
+      {
+        h: zh ? "嘗試次數" : "ATTEMPTS",
+        k: "attempts",
+        w: 120,
+        mono: true,
+        align: "right",
+      },
+      { h: zh ? "原因" : "REASON CODE", k: "reason", w: 180, mono: true },
+      { h: zh ? "停留時間" : "TIME IN STATE", k: "age", w: 140, mono: true },
+      { h: zh ? "動作" : "ACTIONS", k: "actions", w: 260 },
     ];
   } else if (board === "governance") {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2218,8 +2237,7 @@ export default async function DispatchPage({
             href={approvalHref}
             style={{ color: theme.accent, textDecoration: "none" }}
           >
-            {order.approvalRequestIds[0] ??
-              (zh ? "前往 approval" : "Open approval")}
+            {order.approvalRequestIds[0] ?? (zh ? "前往審批" : "Open approval")}
           </Link>
         ),
         _selected: selectedRecord === order,
@@ -2227,13 +2245,18 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      { h: "ORDER", k: "order", w: 150, mono: true },
-      { h: "TENANT", k: "tenant", w: 160, mono: true },
-      { h: "OVERRIDE", k: "overrideType", w: 150, mono: true },
-      { h: "REQUESTER", k: "requester", w: 150, mono: true },
-      { h: "AGE", k: "age", w: 120, mono: true },
-      { h: "APPROVAL", k: "approval", w: 180, mono: true },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      { h: zh ? "訂單" : "ORDER", k: "order", w: 150, mono: true },
+      { h: zh ? "租戶" : "TENANT", k: "tenant", w: 160, mono: true },
+      {
+        h: zh ? "覆核類型" : "OVERRIDE",
+        k: "overrideType",
+        w: 150,
+        mono: true,
+      },
+      { h: zh ? "申請人" : "REQUESTER", k: "requester", w: 150, mono: true },
+      { h: zh ? "等待時間" : "AGE", k: "age", w: 120, mono: true },
+      { h: zh ? "審批" : "APPROVAL", k: "approval", w: 180, mono: true },
+      { h: zh ? "動作" : "ACTIONS", k: "actions", w: 260 },
     ];
   } else {
     boardRows = visibleOwnedByBoard.map((order) => {
@@ -2285,7 +2308,10 @@ export default async function DispatchPage({
         eta:
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== null &&
           (job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes) !== undefined
-            ? `${job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes}m`
+            ? formatEtaLabel(
+                locale,
+                job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes,
+              )
             : "—",
         candidates: String(candidates.length),
         gate: (
@@ -2303,15 +2329,21 @@ export default async function DispatchPage({
     });
 
     boardColumns = [
-      { h: "ORDER", k: "order", w: 150, mono: true },
-      { h: "TENANT", k: "tenant", w: 150, mono: true },
-      { h: "PICKUP → DROP", k: "route", w: 340 },
-      { h: "WINDOW", k: "window", w: 132, mono: true },
-      { h: "SERVICE", k: "service", w: 130, mono: true },
+      { h: zh ? "訂單" : "ORDER", k: "order", w: 150, mono: true },
+      { h: zh ? "租戶" : "TENANT", k: "tenant", w: 150, mono: true },
+      { h: zh ? "上車 → 下車" : "PICKUP → DROP", k: "route", w: 340 },
+      { h: zh ? "時段" : "WINDOW", k: "window", w: 132, mono: true },
+      { h: zh ? "服務" : "SERVICE", k: "service", w: 130, mono: true },
       { h: "ETA", k: "eta", w: 80, mono: true },
-      { h: "CAND", k: "candidates", w: 70, mono: true, align: "right" },
-      { h: "GATE", k: "gate", w: 210 },
-      { h: "ACTIONS", k: "actions", w: 260 },
+      {
+        h: zh ? "候選" : "CAND",
+        k: "candidates",
+        w: 70,
+        mono: true,
+        align: "right",
+      },
+      { h: zh ? "阻塞" : "GATE", k: "gate", w: 210 },
+      { h: zh ? "動作" : "ACTIONS", k: "actions", w: 260 },
     ];
   }
 
@@ -2333,13 +2365,13 @@ export default async function DispatchPage({
         title={t("dispatch.title", locale)}
         subtitle={
           zh
-            ? "即時派車工作流 · 6 個子看板 · queue / candidates / ETA / override"
+            ? "即時派車工作流，涵蓋 6 個子看板與候選、預估到達時間、覆核等處理脈絡。"
             : "Live dispatch workflow · 6 sub-boards · queue / candidates / ETA / override"
         }
         actions={
           <>
             <Pill theme={theme} tone="accent">
-              T2 dispatch / 5s
+              {zh ? "派遣更新 · 5 秒" : "T2 dispatch / 5s"}
             </Pill>
             <Pill theme={theme} tone="neutral">
               {boardMeta.label}
@@ -2445,7 +2477,7 @@ export default async function DispatchPage({
                         ["all", `${zh ? "全部" : "All"} ${forwardedBaseCount}`],
                         [
                           "attention",
-                          `${zh ? "需注意" : "Attention"} ${sortedForwardedOrders.filter(needsForwardedAttention).length}`,
+                          `${zh ? "待留意" : "Attention"} ${sortedForwardedOrders.filter(needsForwardedAttention).length}`,
                         ],
                         [
                           "sync_failed",
@@ -2548,7 +2580,7 @@ export default async function DispatchPage({
                       <div style={selectedMetaStyle}>
                         <div style={selectedMetaCellStyle}>
                           <span style={{ fontSize: 11, color: theme.textDim }}>
-                            {zh ? "焦點 work item" : "Focused work item"}
+                            {zh ? "焦點派遣項目" : "Focused work item"}
                           </span>
                           <strong
                             style={{
@@ -2557,13 +2589,17 @@ export default async function DispatchPage({
                             }}
                           >
                             {"mirrorOrderId" in selectedRecord
-                              ? `${selectedRecord.mirrorOrderId} · ${selectedRecord.externalOrderId}`
-                              : `${selectedRecord.orderNo} · ${selectedRecord.orderId}`}
+                              ? zh
+                                ? `鏡像單 ${selectedRecord.mirrorOrderId} · 外部單號 ${selectedRecord.externalOrderId}`
+                                : `${selectedRecord.mirrorOrderId} · ${selectedRecord.externalOrderId}`
+                              : zh
+                                ? `訂單 ${selectedRecord.orderNo} · 內部編號 ${selectedRecord.orderId}`
+                                : `${selectedRecord.orderNo} · ${selectedRecord.orderId}`}
                           </strong>
                         </div>
                         <div style={selectedMetaCellStyle}>
                           <span style={{ fontSize: 11, color: theme.textDim }}>
-                            {zh ? "跨 app deep links" : "Cross-app deep links"}
+                            {zh ? "相關頁面捷徑" : "Cross-app deep links"}
                           </span>
                           <div
                             style={{
@@ -2581,7 +2617,7 @@ export default async function DispatchPage({
                                 }}
                               >
                                 <Pill theme={theme} tone="warn" dot>
-                                  /approval-requests
+                                  審批申請清單
                                 </Pill>
                               </Link>
                             ) : null}
@@ -2598,7 +2634,7 @@ export default async function DispatchPage({
                                 }}
                               >
                                 <Pill theme={theme} tone="warn" dot>
-                                  /incidents
+                                  事故處理清單
                                 </Pill>
                               </Link>
                             ) : null}
@@ -2615,7 +2651,7 @@ export default async function DispatchPage({
                                 }}
                               >
                                 <Pill theme={theme} tone="warn" dot>
-                                  platform-admin ↗
+                                  平台管理後台 ↗
                                 </Pill>
                               </Link>
                             ) : null}
@@ -2629,7 +2665,7 @@ export default async function DispatchPage({
                               }}
                             >
                               <Pill theme={theme} tone="neutral">
-                                /audit ↗
+                                最新審計 ↗
                               </Pill>
                             </Link>
                           </div>
@@ -2640,10 +2676,10 @@ export default async function DispatchPage({
                   ) : (
                     <WorkflowEmptyState
                       density="compact"
-                      title={zh ? "沒有焦點 work item" : "No focused work item"}
+                      title={zh ? "目前沒有焦點項目" : "No focused work item"}
                       description={
                         zh
-                          ? "目前 board 沒有可選擇的列。"
+                          ? "目前看板沒有可選取的資料列。"
                           : "There is no selected row on the current board."
                       }
                     />

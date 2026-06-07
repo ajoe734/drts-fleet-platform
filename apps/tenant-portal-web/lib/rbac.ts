@@ -4,38 +4,34 @@ import { getTenantClient } from "@/lib/api-client";
 export const FORMAL_TENANT_ROLE_FRAMING = [
   {
     key: "tenant_admin",
-    label: "Tenant admin",
+    label: "租戶管理員",
     authorityRoles: ["tenant_admin"],
-    summary:
-      "Owns tenant-wide administration across users, booking policy, billing, reports, and integration governance.",
+    summary: "負責整個租戶的人員、訂單政策、計費、報表與整合治理管理。",
   },
   {
     key: "operator",
-    label: "Operator",
+    label: "營運人員",
     authorityRoles: ["tenant_ops_admin"],
-    summary:
-      "Runs booking, passenger, address, and day-to-day operational workflows.",
+    summary: "負責訂單、乘客、地址與日常營運流程。",
   },
   {
     key: "finance_analyst",
-    label: "Finance / analyst",
+    label: "財務／分析",
     authorityRoles: ["tenant_finance_admin"],
-    summary:
-      "Reviews invoice, reporting, and audit follow-up authority for the tenant.",
+    summary: "負責租戶的發票、報表與稽核追蹤相關權限。",
   },
   {
     key: "integration_manager",
-    label: "Integration manager",
+    label: "整合管理員",
     authorityRoles: ["tenant_admin"],
     summary:
-      "Current backend authority still carries API key issuance under tenant admin until a dedicated integration role code ships.",
+      "在後端正式提供獨立整合角色前，整合金鑰簽發仍暫時歸在租戶管理員權限下。",
   },
   {
     key: "viewer",
-    label: "Viewer",
+    label: "檢視者",
     authorityRoles: ["tenant_viewer"],
-    summary:
-      "Read-only access to tenant-visible surfaces without mutation authority.",
+    summary: "只能唯讀檢視租戶可見頁面，不具修改權限。",
   },
 ] as const;
 
@@ -173,7 +169,7 @@ export async function getTenantRoleSnapshot(): Promise<TenantRoleSnapshot> {
       canManageUsers: false,
       canManageIntegrations: false,
       canReviewFinance: false,
-      identityError: error instanceof Error ? error.message : "Unknown error",
+      identityError: error instanceof Error ? error.message : "未知錯誤",
     };
   }
 }
@@ -181,13 +177,13 @@ export async function getTenantRoleSnapshot(): Promise<TenantRoleSnapshot> {
 export function formatAuthorityRoleCode(roleCode: string): string {
   switch (roleCode) {
     case "tenant_admin":
-      return "Tenant Admin";
+      return "租戶管理員";
     case "tenant_ops_admin":
-      return "Tenant Ops Admin";
+      return "租戶營運管理員";
     case "tenant_finance_admin":
-      return "Tenant Finance Admin";
+      return "租戶財務管理員";
     case "tenant_viewer":
-      return "Tenant Viewer";
+      return "租戶檢視者";
     default:
       return roleCode;
   }
@@ -202,7 +198,7 @@ export function describeRoleSnapshot(snapshot: TenantRoleSnapshot): string {
     return snapshot.roleCatalogBackedLabels.join(" / ");
   }
 
-  return "Role context unavailable";
+  return "目前無法取得角色脈絡";
 }
 
 export function requireCapability(
@@ -223,42 +219,42 @@ export function getTenantPortalNavItems(
   snapshot: TenantRoleSnapshot,
 ): TenantPortalNavItem[] {
   const { capabilities } = snapshot;
-  const items: TenantPortalNavItem[] = [{ href: "/", label: "Home" }];
+  const items: TenantPortalNavItem[] = [{ href: "/", label: "首頁" }];
 
   if (capabilities.canReadTenant) {
-    items.push({ href: "/booking-list", label: "Bookings" });
-    items.push({ href: "/passengers", label: "Passengers" });
-    items.push({ href: "/addresses", label: "Addresses" });
-    items.push({ href: "/notifications", label: "Notifications" });
-    items.push({ href: "/settings", label: "Settings" });
+    items.push({ href: "/booking-list", label: "訂單" });
+    items.push({ href: "/passengers", label: "乘客" });
+    items.push({ href: "/addresses", label: "地址" });
+    items.push({ href: "/notifications", label: "通知" });
+    items.push({ href: "/settings", label: "設定" });
   }
 
   if (capabilities.canWriteTenant) {
-    items.push({ href: "/bookings/new", label: "New Booking" });
+    items.push({ href: "/bookings/new", label: "新增訂單" });
   }
 
   if (capabilities.canReadBilling) {
-    items.push({ href: "/billing", label: "Billing" });
+    items.push({ href: "/billing", label: "計費" });
   }
 
   if (capabilities.canReadReports) {
-    items.push({ href: "/reports", label: "Reports" });
+    items.push({ href: "/reports", label: "報表" });
   }
 
   if (capabilities.canReadWebhooks) {
-    items.push({ href: "/webhooks", label: "Webhooks" });
+    items.push({ href: "/webhooks", label: "回呼" });
   }
 
   if (capabilities.canViewApiKeys) {
-    items.push({ href: "/api-keys", label: "API Keys" });
+    items.push({ href: "/api-keys", label: "整合金鑰" });
   }
 
   if (capabilities.canViewUsers) {
-    items.push({ href: "/users", label: "Users" });
+    items.push({ href: "/users", label: "使用者" });
   }
 
   if (capabilities.canReadAudit) {
-    items.push({ href: "/audit", label: "Audit" });
+    items.push({ href: "/audit", label: "稽核" });
   }
 
   return items;

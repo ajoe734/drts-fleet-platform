@@ -12,12 +12,15 @@ import {
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import {
+  ServerCanvasTable,
+  type ServerCanvasTableColumn,
+} from "@/components/server-canvas-table";
 import { getTenantClient } from "@/lib/api-client";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -78,8 +81,8 @@ function platformAdminFlagHistoryLink(flagKey: string): CrossAppResourceLink {
     resourceId: flagKey,
     openMode: "new_tab",
     label: flagKey
-      ? `在 Platform Admin 查看 ${flagKey} 變更紀錄`
-      : "前往功能旗標治理",
+      ? `前往平台管理端查看 ${flagKey} 的變更紀錄`
+      : "前往平台管理端功能旗標治理",
   };
 }
 
@@ -397,19 +400,19 @@ function getEmptyStateCopy(reason: EmptyReason): {
       return {
         tone: "info",
         title: "本租戶尚未佈建任何功能旗標",
-        body: "平台治理尚未把任何 flag 同步到這個租戶領域。完整治理仍在 Platform Admin，佈建後會自動出現於此唯讀視圖。",
+        body: "平台治理尚未把任何功能旗標同步到這個租戶領域。完整治理仍在平台管理端，佈建後會自動出現在此唯讀視圖。",
       };
     case "fetch_failed":
       return {
         tone: "warn",
         title: "功能旗標清單載入失敗",
-        body: "路由仍可用，但 GET /api/tenant/feature-flags 這次讀取失敗。待後端相依恢復後重新整理即可。",
+        body: "頁面仍可開啟，但本次功能旗標讀取失敗。待後端相依恢復後重新整理即可。",
       };
     case "permission_denied":
       return {
         tone: "danger",
         title: "目前角色無法檢視功能旗標",
-        body: "頁面可見，但目前的租戶角色沒有讀取 feature visibility 的權限。請改用具備檢視權限的帳號。",
+        body: "頁面可見，但目前的租戶角色沒有讀取功能旗標可見性的權限。請改用具備檢視權限的帳號。",
       };
     case "external_unavailable":
       return {
@@ -429,7 +432,7 @@ function getEmptyStateCopy(reason: EmptyReason): {
       return {
         tone: "info",
         title: "目前沒有可見的功能旗標",
-        body: "這個租戶領域目前沒有任何 flag 對應的可見資料。",
+        body: "這個租戶領域目前沒有任何功能旗標對應的可見資料。",
       };
   }
 }
@@ -439,7 +442,7 @@ function getScopeTone(scope: TenantFeatureFlagScope): CanvasTone {
 }
 
 function getScopeLabel(scope: TenantFeatureFlagScope) {
-  return scope === "tenant_override" ? "tenant_override" : "global_default";
+  return formatTenantCodeLabel(scope, scope);
 }
 
 type FeatureFlagsPageProps = {
@@ -479,11 +482,11 @@ export default async function FeatureFlagsPage({
   const governanceLink = platformAdminFlagHistoryLink("");
   const historyEnabled = historyAction?.enabled !== false;
 
-  const columns: CanvasTableColumn<
+  const columns: ServerCanvasTableColumn<
     TenantFeatureFlagRecord & Record<string, unknown>
   >[] = [
     {
-      h: "KEY",
+      h: "旗標",
       w: 360,
       r: (row) => (
         <div style={keyCellStyle}>
@@ -495,23 +498,23 @@ export default async function FeatureFlagsPage({
       ),
     },
     {
-      h: "CURRENT",
+      h: "目前狀態",
       w: 150,
       r: (row) => (
         <span style={currentCellStyle}>
           <CanvasPill theme={th} tone={row.enabled ? "success" : "neutral"} dot>
-            {row.enabled ? "enabled" : "disabled"}
+            {row.enabled ? "已啟用" : "已停用"}
           </CanvasPill>
           {row.rolloutStatus === "rolling_out" ? (
             <CanvasPill theme={th} tone="warn">
-              rolling out
+              逐步發布中
             </CanvasPill>
           ) : null}
         </span>
       ),
     },
     {
-      h: "SCOPE",
+      h: "套用範圍",
       w: 150,
       r: (row) => (
         <CanvasPill theme={th} tone={getScopeTone(row.scope)}>
@@ -520,18 +523,18 @@ export default async function FeatureFlagsPage({
       ),
     },
     {
-      h: "LAST CHANGED BY",
+      h: "最後更新人",
       w: 180,
       r: (row) => row.updatedBy ?? "—",
     },
     {
-      h: "AT",
+      h: "更新時間",
       w: 150,
       mono: true,
       r: (row) => formatChangedAt(row.updatedAt),
     },
     {
-      h: "HISTORY",
+      h: "歷史紀錄",
       w: 90,
       align: "right",
       r: (row) =>
@@ -555,8 +558,8 @@ export default async function FeatureFlagsPage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="功能旗標 · read-only"
-        subtitle="本租戶可見的 flags · 完整治理在 Platform Admin · GET /api/tenant/feature-flags"
+        title="功能旗標 · 唯讀"
+        subtitle="本租戶目前可見的功能旗標，以及來自平台管理端的治理鏡像"
         actions={
           <a
             href={crossAppHref(governanceLink)}
@@ -567,7 +570,10 @@ export default async function FeatureFlagsPage({
             title={
               historyEnabled
                 ? governanceLink.label
-                : historyAction?.disabledReasonCode
+                : formatTenantCodeLabel(
+                    historyAction?.disabledReasonCode,
+                    historyAction?.disabledReasonCode ?? "",
+                  )
             }
           >
             治理設定 ↗
@@ -580,18 +586,19 @@ export default async function FeatureFlagsPage({
           theme={th}
           tone="info"
           icon="clock"
-          title="重新整理層級 T5：tenant slow（30 秒）"
-          body={`此頁採 30 秒 tenant-slow 週期更新（${data.refreshTier}）。快照載入時間 ${formatChangedAt(
-            data.generatedAt,
-          )}。`}
+          title="更新頻率 · 每 30 秒同步"
+          body={`此頁採每 30 秒的租戶慢速節奏更新（${formatTenantCodeLabel(
+            data.refreshTier,
+            data.refreshTier,
+          )}）。快照載入時間 ${formatChangedAt(data.generatedAt)}。`}
         />
 
         <CanvasBanner
           theme={th}
           tone="accent"
           icon="flags"
-          title="唯讀視圖 · per Q-X16"
-          body="這是平台功能旗標治理在本租戶領域的唯讀鏡像。可用動作只有搜尋與檢視變更紀錄；任何開關／rollout 變更都在 Platform Admin 進行。"
+          title="唯讀鏡像"
+          body="這是平台功能旗標治理在本租戶領域的唯讀鏡像。可用動作只有搜尋與檢視變更紀錄；任何開關或逐步發布調整都在平台管理端進行。"
         />
 
         {data.errors.length > 0 ? (
@@ -607,31 +614,31 @@ export default async function FeatureFlagsPage({
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Flags"
+            label="功能旗標"
             value={formatCount(data.flags.length)}
             sub={
               data.totalCount !== data.flags.length
                 ? `${formatCount(data.totalCount)} 總數`
-                : "tenant visible"
+                : "租戶可見範圍"
             }
           />
           <CanvasKPI
             theme={th}
-            label="Overrides"
+            label="租戶覆寫"
             value={formatCount(tenantOverrides)}
-            sub="tenant_override"
+            sub="相較平台預設"
           />
           <CanvasKPI
             theme={th}
-            label="Enabled"
+            label="已啟用"
             value={formatCount(enabledCount)}
-            sub="current value on"
+            sub="目前值為開啟"
           />
           <CanvasKPI
             theme={th}
-            label="Rolling out"
+            label="逐步發布"
             value={formatCount(rollingOutCount)}
-            sub="partial rollout"
+            sub="尚未全量套用"
           />
         </div>
 
@@ -641,8 +648,8 @@ export default async function FeatureFlagsPage({
               type="search"
               name="q"
               defaultValue={data.query}
-              placeholder="以 key 搜尋…"
-              aria-label="以 key 搜尋功能旗標"
+              placeholder="依旗標代碼或說明搜尋…"
+              aria-label="依旗標代碼或說明搜尋功能旗標"
               style={searchInputStyle}
               disabled={searchAction?.enabled === false}
             />
@@ -657,7 +664,10 @@ export default async function FeatureFlagsPage({
                   : buttonActionStyle
               }
               disabled={searchAction?.enabled === false}
-              title={searchAction?.disabledReasonCode}
+              title={formatTenantCodeLabel(
+                searchAction?.disabledReasonCode,
+                searchAction?.disabledReasonCode ?? "",
+              )}
             >
               搜尋
             </button>
@@ -690,7 +700,9 @@ export default async function FeatureFlagsPage({
 
         <CanvasCard theme={th} padding={0}>
           {data.flags.length > 0 ? (
-            <CanvasTable<TenantFeatureFlagRecord & Record<string, unknown>>
+            <ServerCanvasTable<
+              TenantFeatureFlagRecord & Record<string, unknown>
+            >
               theme={th}
               columns={columns}
               rows={
@@ -704,7 +716,10 @@ export default async function FeatureFlagsPage({
               return (
                 <div style={emptyStateWrapStyle}>
                   <CanvasPill theme={th} tone={copy.tone} dot>
-                    {data.emptyReason ?? "no_data"}
+                    {formatTenantCodeLabel(
+                      data.emptyReason ?? "no_data",
+                      data.emptyReason ?? "no_data",
+                    )}
                   </CanvasPill>
                   <div style={emptyStateTitleStyle}>{copy.title}</div>
                   <div style={emptyStateBodyStyle}>{copy.body}</div>

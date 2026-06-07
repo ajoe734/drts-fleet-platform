@@ -5,6 +5,7 @@ import type {
   ShiftRecord,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { formatOpsUiError, toOpsErrorMessage } from "@/lib/error-copy";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 import {
@@ -318,8 +319,11 @@ export default async function AttendancePage({
       client.listDrivers(),
     ]);
   } catch (error) {
-    loadError =
-      error instanceof Error ? error.message : t("common.unknown", locale);
+    loadError = formatOpsUiError(
+      locale,
+      toOpsErrorMessage(error, t("common.unknown", locale)),
+      locale === "en" ? "Attendance data unavailable" : "出勤資料暫時無法載入",
+    );
   }
 
   const driversById = buildDriverLookup(drivers);

@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { CheckCircle2, Circle, Clock3, ShieldAlert } from "lucide-react";
 import { CanvasPill as Pill } from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 import {
   assistantCardStyle,
   assistantInsetStyle,
@@ -99,8 +100,52 @@ export function AssistantActionPlanCard({
 }: {
   plan: AssistantActionPlan;
 }) {
+  const { locale } = useTranslation();
+  const copy =
+    locale === "zh"
+      ? {
+          ariaLabel: "平台助理行動計畫",
+          resource: "資源",
+          whyNow: "此刻原因",
+          attention: "注意事項",
+          riskLabel: (risk: NonNullable<AssistantActionPlan["riskLevel"]>) =>
+            ({
+              high: "高風險",
+              medium: "中風險",
+              low: "低風險",
+            })[risk],
+          stepStatus: (status: AssistantActionPlanStep["status"]) =>
+            ({
+              blocked: "已阻擋",
+              completed: "已完成",
+              in_progress: "進行中",
+              pending: "待處理",
+            })[status],
+        }
+      : {
+          ariaLabel: "Assistant action plan",
+          resource: "Resource",
+          whyNow: "Why now",
+          attention: "Attention",
+          riskLabel: (risk: NonNullable<AssistantActionPlan["riskLevel"]>) =>
+            ({
+              high: "HIGH RISK",
+              medium: "MEDIUM RISK",
+              low: "LOW RISK",
+            })[risk],
+          stepStatus: (status: AssistantActionPlanStep["status"]) =>
+            ({
+              blocked: "blocked",
+              completed: "completed",
+              in_progress: "in progress",
+              pending: "pending",
+            })[status],
+        };
+  const localizedLabelStyle: CSSProperties =
+    locale === "zh" ? { ...labelStyle, textTransform: "none" } : labelStyle;
+
   return (
-    <section style={assistantCardStyle} aria-label="Assistant action plan">
+    <section style={assistantCardStyle} aria-label={copy.ariaLabel}>
       <div style={bodyStyle}>
         <div style={headerStyle}>
           <div style={{ minWidth: 0 }}>
@@ -112,7 +157,7 @@ export function AssistantActionPlanCard({
               theme={assistantTheme}
               tone={assistantRiskTone(plan.riskLevel)}
             >
-              {plan.riskLevel.toUpperCase()} RISK
+              {copy.riskLabel(plan.riskLevel)}
             </Pill>
           ) : null}
         </div>
@@ -121,13 +166,13 @@ export function AssistantActionPlanCard({
           <div style={metaGridStyle}>
             {plan.resourceLabel ? (
               <div style={metaItemStyle}>
-                <div style={labelStyle}>Resource</div>
+                <div style={localizedLabelStyle}>{copy.resource}</div>
                 <div style={valueStyle}>{plan.resourceLabel}</div>
               </div>
             ) : null}
             {plan.rationale ? (
               <div style={metaItemStyle}>
-                <div style={labelStyle}>Why now</div>
+                <div style={localizedLabelStyle}>{copy.whyNow}</div>
                 <div style={valueStyle}>{plan.rationale}</div>
               </div>
             ) : null}
@@ -171,7 +216,7 @@ export function AssistantActionPlanCard({
                   theme={assistantTheme}
                   tone={assistantStepTone(step.status)}
                 >
-                  {step.status.replace("_", " ")}
+                  {copy.stepStatus(step.status)}
                 </Pill>
               </div>
               {step.detail ? (
@@ -192,8 +237,13 @@ export function AssistantActionPlanCard({
               gap: 6,
             }}
           >
-            <div style={{ ...labelStyle, color: assistantTheme.warn }}>
-              Attention
+            <div
+              style={{
+                ...localizedLabelStyle,
+                color: assistantTheme.warn,
+              }}
+            >
+              {copy.attention}
             </div>
             {plan.warnings.map((warning) => (
               <div

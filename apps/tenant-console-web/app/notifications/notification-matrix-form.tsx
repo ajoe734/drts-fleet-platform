@@ -12,6 +12,7 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import type { ResourceActionDescriptor } from "@drts/contracts";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 import type { NotificationChannel } from "./constants";
 
 const th = buildCanvasTheme({
@@ -85,11 +86,13 @@ function ChannelToggle({
             style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
           >
             <CanvasIcon name="warn" size={11} />
-            not_provisioned
+            尚未開通
           </span>
         </CanvasPill>
         {state.disabledReason ? (
-          <div style={helperStyle}>{state.disabledReason}</div>
+          <div style={helperStyle}>
+            {formatTenantCodeLabel(state.disabledReason, state.disabledReason)}
+          </div>
         ) : null}
       </div>
     );
@@ -102,7 +105,7 @@ function ChannelToggle({
         name={`pref__${eventType}__${state.channel}`}
         defaultChecked={state.enabled}
         style={checkboxStyle}
-        aria-label={`${eventType} ${state.channel}`}
+        aria-label={`${formatTenantCodeLabel(eventType, "通知事件")} ${formatTenantCodeLabel(state.channel, "通知通道")}`}
         disabled={readOnly}
       />
     </label>
@@ -137,22 +140,25 @@ export function NotificationMatrixForm({
 }) {
   const columns: CanvasTableColumn<NotificationMatrixRow>[] = [
     {
-      h: "EVENT TYPE",
+      h: "事件類型",
       w: 220,
       r: (row) => (
         <div>
-          <div style={codeStyle}>{row.eventType}</div>
+          <div style={codeStyle}>
+            {formatTenantCodeLabel(row.eventType, row.eventType)}
+          </div>
+          <div style={subcopyStyle}>{row.eventType}</div>
           <div style={subcopyStyle}>{row.defaultAudience}</div>
         </div>
       ),
     },
     {
-      h: "WHEN",
+      h: "觸發時機",
       w: 330,
       r: (row) => <span style={subcopyStyle}>{row.description}</span>,
     },
     {
-      h: "EMAIL",
+      h: "電子郵件",
       w: 120,
       r: (row) => (
         <ChannelToggle
@@ -163,7 +169,7 @@ export function NotificationMatrixForm({
       ),
     },
     {
-      h: "WEBHOOK",
+      h: "回呼",
       w: 140,
       r: (row) => (
         <ChannelToggle
@@ -174,7 +180,7 @@ export function NotificationMatrixForm({
       ),
     },
     {
-      h: "OPS CONSOLE",
+      h: "營運控制台",
       w: 140,
       r: (row) => (
         <ChannelToggle
@@ -211,8 +217,11 @@ export function NotificationMatrixForm({
       >
         <div style={{ fontSize: 11.5, color: th.textMuted }}>
           {saveAction.disabledReasonCode
-            ? `update_subscription disabled: ${saveAction.disabledReasonCode}`
-            : "`availableActions.update_subscription` adapter drives the submit CTA."}
+            ? `目前無法儲存：${formatTenantCodeLabel(
+                saveAction.disabledReasonCode,
+                saveAction.disabledReasonCode,
+              )}`
+            : "送出按鈕會依後端回傳的可用操作自動啟用。"}
         </div>
         <SubmitButton enabled={saveAction.enabled} />
       </div>

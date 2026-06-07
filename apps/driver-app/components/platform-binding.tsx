@@ -19,6 +19,7 @@ import { FormField } from "@/components/ui/FormField";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Tokens } from "@/components/ui/tokens";
 import { getDriverClient } from "@/lib/api-client";
+import { formatDriverUiError, toDriverErrorMessage } from "@/lib/error-copy";
 
 interface PlatformBindingProps {
   showSectionTitle?: boolean;
@@ -57,10 +58,10 @@ const SUPPORTED_PLATFORM_HINT = PLATFORM_CODES.map(getPlatformOptionLabel).join(
 );
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-  return "要求失敗";
+  return formatDriverUiError(
+    toDriverErrorMessage(error, "要求失敗"),
+    "要求失敗",
+  );
 }
 
 export function PlatformBinding({
@@ -325,7 +326,7 @@ export function PlatformBinding({
 
           <FormField
             label="平台憑證到期時間（選填）"
-            placeholder="例如 2026-05-06T08:30:00Z"
+            placeholder="例如：2026-05-06T08:30:00Z（世界標準時間）"
             value={form.tokenExpiresAt}
             onChangeText={(value) =>
               setForm({ ...form, tokenExpiresAt: value })

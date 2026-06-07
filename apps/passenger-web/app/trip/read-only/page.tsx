@@ -2,46 +2,46 @@ import Link from "next/link";
 
 const ownership = [
   {
-    label: "Source channel",
-    value: "Tenant booking",
-    note: "The trip was booked by a tenant on behalf of the rider; tenant retains mutation authority.",
+    label: "來源渠道",
+    value: "租戶代訂",
+    note: "此行程由租戶代乘客建立，因此變更權限保留在租戶端。",
   },
   {
-    label: "Visible to rider",
-    value: "Status, ETA, vehicle, lifecycle",
-    note: "All read paths are mirrored so the rider can follow the trip without owning mutation.",
+    label: "乘客可見資訊",
+    value: "狀態、預估抵達、車輛、行程進度",
+    note: "乘客仍可追蹤行程，但不擁有變更權限。",
   },
   {
-    label: "Hidden from rider",
-    value: "Cancel / reschedule / fare override",
-    note: "Mutating affordances live with the source channel and are not surfaced here.",
+    label: "乘客不可操作",
+    value: "取消、改期、費用調整",
+    note: "所有變更操作都保留在來源渠道，不會在乘客端顯示。",
   },
 ];
 
 const ownershipMatrix = [
   {
-    source: "Direct passenger",
-    mutate: "Rider",
-    view: "Rider",
-    note: "The standard `/trip` route. Cancel-safe authority sits with the rider.",
+    source: "乘客直訂",
+    mutate: "乘客",
+    view: "乘客可查看與操作",
+    note: "標準進行中行程，取消權限由乘客持有。",
   },
   {
-    source: "Tenant booking",
-    mutate: "Tenant console",
-    view: "Rider (read-only)",
-    note: "This route. Rider sees status; tenant owns cancel and override.",
+    source: "租戶代訂",
+    mutate: "租戶後台",
+    view: "乘客唯讀",
+    note: "乘客可看狀態，取消與調整由租戶處理。",
   },
   {
-    source: "Partner booking",
-    mutate: "Partner channel",
-    view: "Rider (read-only)",
-    note: "Mutation is delegated to the partner surface. Rider stays read-only.",
+    source: "合作夥伴代訂",
+    mutate: "合作夥伴渠道",
+    view: "乘客唯讀",
+    note: "變更由合作夥伴入口處理，乘客端只顯示狀態。",
   },
   {
-    source: "Concierge booking",
-    mutate: "Concierge / call-point",
-    view: "Rider (read-only)",
-    note: "Mutation is held by the concierge surface (see SYS-UI-005).",
+    source: "客服代訂",
+    mutate: "客服櫃台",
+    view: "乘客唯讀",
+    note: "變更權限由客服端持有。",
   },
 ];
 
@@ -49,20 +49,16 @@ export default function TripReadOnlyPage() {
   return (
     <div className="page-shell">
       <section className="hero-card">
-        <span className="eyebrow state-pill state-pill-positive">
-          Read-only authority
-        </span>
-        <h1>This trip is read-only for the rider.</h1>
+        <span className="eyebrow state-pill state-pill-positive">僅可查看</span>
+        <h1>此行程對乘客為唯讀狀態。</h1>
         <p>
-          The booking is owned by another channel. The rider can follow the trip
-          but cannot cancel, reschedule, or override fare from this surface. The
-          mutating authority lives with the source channel.
+          此預約由其他渠道建立。乘客可以追蹤行程，但不能在此頁取消、改期或調整費用；變更權限由來源渠道持有。
         </p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Ownership snapshot</span>
-        <h3>Authority breakdown</h3>
+        <span className="surface-kicker">權限摘要</span>
+        <h3>可見資訊與可操作項目</h3>
         <dl className="kv-grid">
           {ownership.map((row) => (
             <div className="kv-row" key={row.label}>
@@ -77,15 +73,15 @@ export default function TripReadOnlyPage() {
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Cross-channel matrix</span>
-        <h3>Where mutation lives by source channel</h3>
+        <span className="surface-kicker">跨渠道權限</span>
+        <h3>不同來源渠道的變更權限</h3>
         <table className="matrix-table">
           <thead>
             <tr>
-              <th>Source channel</th>
-              <th>Mutation authority</th>
-              <th>Rider visibility</th>
-              <th>Notes</th>
+              <th>來源渠道</th>
+              <th>變更權限</th>
+              <th>乘客可見性</th>
+              <th>說明</th>
             </tr>
           </thead>
           <tbody>
@@ -105,22 +101,18 @@ export default function TripReadOnlyPage() {
 
       <section className="callout-row">
         <article className="callout-card warning">
-          <strong>No fake mutation affordance</strong>
+          <strong>不顯示假的操作按鈕</strong>
           <p>
-            Cancel, reschedule, and override do not appear here even as disabled
-            buttons. Hiding them is intentional: surfacing a button the rider
-            cannot press would be misleading.
+            取消、改期與費用調整不會以停用按鈕形式出現。乘客不能操作的按鈕若顯示出來，反而會造成誤解。
           </p>
         </article>
         <article className="callout-card">
-          <strong>How the rider acts on this trip</strong>
+          <strong>乘客如何處理此行程</strong>
           <p>
-            The rider must reach back through the source channel — tenant,
-            partner, or concierge — to mutate the trip. Support escalation stays
-            available.
+            若要變更此行程，乘客需回到租戶、合作夥伴或客服等來源渠道。客服協助仍會保持可用。
           </p>
           <Link className="text-link" href="/unsupported">
-            Open unsupported / source-owned fallback
+            查看來源渠道處理說明
           </Link>
         </article>
       </section>

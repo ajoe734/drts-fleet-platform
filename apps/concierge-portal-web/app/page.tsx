@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { OPS_CALLCENTER_URL } from "@/lib/api-client";
+import { formatDeskMode } from "@/lib/desk-catalog";
 import { useConciergePortal, useSelectedDesk } from "@/lib/portal-state";
 
 export default function HomePage() {
@@ -11,90 +12,84 @@ export default function HomePage() {
   return (
     <div className="page-shell">
       <section className="hero-card">
-        <span className="section-kicker">Call Point / Concierge Portal</span>
-        <h1>
-          Site-bound assisted entry is now materialized as a real landing zone.
-        </h1>
+        <span className="section-kicker">電話站點與客服代訂</span>
+        <h1>固定站點的代訂流程集中在此入口處理。</h1>
         <p>
-          This shell covers bootstrap sign-in, fixed-site selection, proxy
-          booking, order lookup, callback follow-up, and explicit guardrail
-          routes for denied, ineligible, degraded, and recording-unavailable
-          states.
+          此入口提供登入、固定站點選擇、代訂建立、訂單查詢、回覆追蹤，以及拒絕、資格不符、服務降級與錄音不可用等明確例外頁。
         </p>
         <div className="hero-actions">
           <Link
             className="primary-link"
             href={session ? "/bookings/new" : "/login"}
           >
-            {session ? "Open proxy booking" : "Start local sign-in"}
+            {session ? "開啟代訂表單" : "開始本機登入"}
           </Link>
           <Link className="secondary-link" href="/lookup">
-            Review lookup surface
+            查看訂單查詢
           </Link>
         </div>
       </section>
 
       <section className="metric-grid">
         <article className="metric-card">
-          <span className="section-kicker">Bootstrap</span>
-          <strong>{ready && session ? "Ready" : "Pending"}</strong>
+          <span className="section-kicker">工作階段</span>
+          <strong>{ready && session ? "已就緒" : "待建立"}</strong>
           <p>
             {session
-              ? `${session.operatorName} signed in as ${session.mode}.`
-              : "No repo-local assisted-entry bootstrap exists yet."}
+              ? `${session.operatorName} 以${formatDeskMode(session.mode)}身分登入。`
+              : "尚未建立本機客服代訂工作階段。"}
           </p>
         </article>
         <article className="metric-card">
-          <span className="section-kicker">Desk</span>
-          <strong>{desk ? desk.deskName : "Not selected"}</strong>
+          <span className="section-kicker">櫃台</span>
+          <strong>{desk ? desk.deskName : "尚未選擇"}</strong>
           <p>
             {desk
               ? `${desk.siteName} · ${desk.zoneLabel}`
-              : "Phase 1 keeps fixed-site selection explicit before order entry."}
+              : "建立代訂前必須先選擇固定站點。"}
           </p>
         </article>
         <article className="metric-card">
-          <span className="section-kicker">Recent activity</span>
-          <strong>{session?.recentOrderIds.length ?? 0} order(s)</strong>
+          <span className="section-kicker">近期活動</span>
+          <strong>{session?.recentOrderIds.length ?? 0} 筆訂單</strong>
           <p>
             {session
-              ? `${session.recentCallIds.length} desk session(s), ${session.recentCallbackTaskIds.length} callback task(s).`
-              : "Recent order, callback, and session recall appears after bootstrap."}
+              ? `${session.recentCallIds.length} 筆櫃台通話，${session.recentCallbackTaskIds.length} 筆回覆任務。`
+              : "建立工作階段後才會顯示近期訂單、通話與回覆任務。"}
           </p>
         </article>
       </section>
 
       <section className="grid-columns">
         <article className="panel-card">
-          <span className="section-kicker">Next action</span>
+          <span className="section-kicker">下一步</span>
           <h2>
             {session
               ? desk
-                ? "Move into booking, lookup, or callback follow-up."
-                : "Select the fixed site before the desk opens."
-              : "Bootstrap the site-bound operator first."}
+                ? "可建立代訂、查詢訂單或追蹤回覆。"
+                : "請先選擇固定站點。"
+              : "請先建立站點操作人員身分。"}
           </h2>
           <p>
-            The portal keeps the external desk flow narrow: it reuses callcenter
-            and order APIs, but it does not expose the full ops navigation or
-            complaint-case management surface.
+            此入口只開放外部櫃台需要的狹窄流程：可使用客服與訂單
+            API，但不開放完整營運導覽或申訴案件管理。
           </p>
           <div className="inline-actions">
             {!session ? (
               <Link className="primary-link" href="/login">
-                Sign in locally
+                本機登入
               </Link>
             ) : !desk ? (
               <Link className="primary-link" href="/start">
-                Choose fixed site
+                選擇固定站點
               </Link>
             ) : (
               <>
                 <Link className="primary-link" href="/bookings/new">
-                  Create proxy booking
+                  建立代訂
                 </Link>
                 <Link className="secondary-link" href="/callbacks">
-                  Open callbacks
+                  開啟回覆任務
                 </Link>
               </>
             )}
@@ -102,12 +97,10 @@ export default function HomePage() {
         </article>
 
         <article className="panel-card">
-          <span className="section-kicker">Control-plane seam</span>
-          <h2>Ops callcenter remains the escalation authority.</h2>
+          <span className="section-kicker">營運交接</span>
+          <h2>營運客服中心仍是升級處理權責方。</h2>
           <p>
-            Dedicated call-point auth and telephony callback binding are still
-            gated. The portal therefore keeps a direct handoff to ops for
-            recording review, complaint transfer, and wider dispatch control.
+            錄音回補、申訴轉交與更完整的派遣控制仍由營運後台處理，櫃台入口只提供必要交接。
           </p>
           <div className="inline-actions">
             <a
@@ -116,10 +109,10 @@ export default function HomePage() {
               rel="noreferrer"
               target="_blank"
             >
-              Open ops callcenter
+              開啟營運客服中心
             </a>
             <Link className="secondary-link" href="/recording-unavailable">
-              Review recording gate
+              查看錄音限制
             </Link>
           </div>
         </article>
@@ -127,39 +120,33 @@ export default function HomePage() {
 
       <section className="grid-columns">
         <article className="info-card">
-          <span className="section-kicker">Positive flow</span>
-          <h3>Bootstrap → site select → booking → lookup</h3>
+          <span className="section-kicker">正常流程</span>
+          <h3>登入、選擇站點、建立代訂、查詢訂單</h3>
           <p>
-            The happy path starts at local sign-in, moves through a fixed desk,
-            opens a desk session, and submits a phone-order style booking with
-            ETA and trace readback.
+            正常流程會先建立本機登入，再選擇固定櫃台、開啟櫃台通話，並送出含預估抵達時間與軌跡回讀的代訂需求。
           </p>
           <div className="inline-actions">
             <Link className="secondary-link" href="/start">
-              View desk catalog
+              查看櫃台清單
             </Link>
           </div>
         </article>
 
         <article className="info-card tone-warning">
-          <span className="section-kicker">Negative states</span>
-          <h3>
-            Denied, ineligible, degraded, and recording gate stay explicit.
-          </h3>
+          <span className="section-kicker">例外狀態</span>
+          <h3>拒絕、資格不符、降級與錄音限制都會清楚顯示。</h3>
           <p>
-            The portal does not collapse failure modes into blank forms. Each
-            guardrail has a first-class route so SYS-UI-006 and SYS-UI-008 can
-            verify the matrix later.
+            此入口不會把失敗情境藏在空白表單裡。每個保護規則都有自己的頁面，方便操作人員理解下一步。
           </p>
           <div className="inline-actions">
             <Link className="secondary-link" href="/denied">
-              Denied
+              拒絕
             </Link>
             <Link className="secondary-link" href="/ineligible">
-              Ineligible
+              資格不符
             </Link>
             <Link className="secondary-link" href="/degraded">
-              Degraded
+              服務降級
             </Link>
           </div>
         </article>

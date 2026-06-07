@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { VerifyPartnerEligibilityCommand } from "@drts/contracts";
+import { formatTenantUiError, toTenantErrorMessage } from "@/lib/error-copy";
 import { buildPartnerClient, getPartnerSession } from "@/lib/partner-session";
 
 type EligibilityPayload = {
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
   const session = await getPartnerSession();
   if (!session) {
     return NextResponse.json(
-      { error: "Partner session expired or missing." },
+      { error: "合作夥伴工作階段已過期，請重新登入。" },
       { status: 401 },
     );
   }
@@ -29,7 +30,10 @@ export async function POST(request: NextRequest) {
   try {
     body = (await request.json()) as EligibilityPayload;
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json(
+      { error: "請求內容格式錯誤，無法解析資格驗證資料。" },
+      { status: 400 },
+    );
   }
 
   const command: VerifyPartnerEligibilityCommand = {
@@ -55,10 +59,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Eligibility verification failed.",
+        error: formatTenantUiError(
+          toTenantErrorMessage(error, "資格驗證失敗。"),
+          "資格驗證失敗",
+        ),
       },
       { status: 502 },
     );

@@ -18,6 +18,7 @@ import type {
 } from "@drts/contracts";
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { formatOpsUiError, toOpsErrorMessage } from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { Badge, Card, CardBody, CardHeader } from "@drts/ui-web";
@@ -64,6 +65,36 @@ type ReconciliationDraft = {
   notes: string;
   payloadJson: string;
 };
+
+type ForwardedSyncError = NonNullable<ForwardedOrderRecord["lastSyncError"]>;
+
+function formatSyncErrorSummary(
+  locale: "en" | "zh",
+  error: ForwardedSyncError,
+) {
+  if (locale === "zh") {
+    return `${formatOpsCodeLabel(locale, error.code)} · ${
+      error.retryable ? "可重試" : "不可重試"
+    }`;
+  }
+
+  return `${error.code}: ${error.message}`;
+}
+
+function formatSyncErrorDetail(locale: "en" | "zh", error: ForwardedSyncError) {
+  if (locale === "zh") {
+    return error.retryable
+      ? "同步錯誤已記錄，可重新推送同步。"
+      : "同步錯誤已記錄，需人工檢查來源平台狀態。";
+  }
+
+  return error.message;
+}
+
+function formatAdapterError(locale: "en" | "zh", message: string | null) {
+  if (!message) return null;
+  return locale === "zh" ? "已偵測到介接器錯誤，請查看原始事件。" : message;
+}
 
 const FILTER_ORDER: ForwardedFilter[] = [
   "all",
@@ -733,9 +764,14 @@ export function ForwardedOrderBoard({
       await refreshBoard(selectedOrder.mirrorOrderId);
     } catch (actionError) {
       setError(
-        actionError instanceof Error
-          ? actionError.message
-          : t("dispatch.forwarded.message.actionFailed"),
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(
+            actionError,
+            t("dispatch.forwarded.message.actionFailed"),
+          ),
+          t("dispatch.forwarded.message.actionFailed"),
+        ),
       );
     } finally {
       setLoadingAction(null);
@@ -774,9 +810,14 @@ export function ForwardedOrderBoard({
       await refreshBoard(selectedOrder.mirrorOrderId);
     } catch (actionError) {
       setError(
-        actionError instanceof Error
-          ? actionError.message
-          : t("dispatch.forwarded.message.actionFailed"),
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(
+            actionError,
+            t("dispatch.forwarded.message.actionFailed"),
+          ),
+          t("dispatch.forwarded.message.actionFailed"),
+        ),
       );
     } finally {
       setLoadingAction(null);
@@ -819,9 +860,14 @@ export function ForwardedOrderBoard({
       await refreshBoard(selectedOrder.mirrorOrderId);
     } catch (actionError) {
       setError(
-        actionError instanceof Error
-          ? actionError.message
-          : t("dispatch.forwarded.message.actionFailed"),
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(
+            actionError,
+            t("dispatch.forwarded.message.actionFailed"),
+          ),
+          t("dispatch.forwarded.message.actionFailed"),
+        ),
       );
     } finally {
       setLoadingAction(null);
@@ -872,9 +918,14 @@ export function ForwardedOrderBoard({
       await refreshBoard(selectedOrder.mirrorOrderId);
     } catch (actionError) {
       setError(
-        actionError instanceof Error
-          ? actionError.message
-          : t("dispatch.forwarded.message.actionFailed"),
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(
+            actionError,
+            t("dispatch.forwarded.message.actionFailed"),
+          ),
+          t("dispatch.forwarded.message.actionFailed"),
+        ),
       );
     } finally {
       setLoadingAction(null);
@@ -1203,7 +1254,10 @@ export function ForwardedOrderBoard({
                           }}
                         >
                           {order.lastSyncError
-                            ? `${order.lastSyncError.code}: ${order.lastSyncError.message}`
+                            ? formatSyncErrorSummary(
+                                locale,
+                                order.lastSyncError,
+                              )
                             : t("common.dash")}
                         </td>
                         <td style={{ padding: "12px", color: "#475569" }}>
@@ -1385,7 +1439,10 @@ export function ForwardedOrderBoard({
                       subtitle={`${selectedOrder.lastSyncError.code} · ${formatDateTime(locale, selectedOrder.lastSyncError.failedAt)}`}
                     />
                     <div style={{ fontSize: "13px", color: "#881337" }}>
-                      {selectedOrder.lastSyncError.message}
+                      {formatSyncErrorDetail(
+                        locale,
+                        selectedOrder.lastSyncError,
+                      )}
                     </div>
                     <div style={{ fontSize: "12px", color: "#9f1239" }}>
                       {selectedOrder.lastSyncError.retryable
@@ -1833,7 +1890,8 @@ export function ForwardedOrderBoard({
                         {formatDateTime(locale, item.lastCheckedAt)}
                       </td>
                       <td style={{ padding: "12px", color: "#475569" }}>
-                        {item.lastError ?? t("common.dash")}
+                        {formatAdapterError(locale, item.lastError) ??
+                          t("common.dash")}
                       </td>
                     </tr>
                   ))

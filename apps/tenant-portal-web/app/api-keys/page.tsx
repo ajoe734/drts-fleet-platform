@@ -15,6 +15,12 @@ import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import {
+  formatPortalSectionError,
+  formatPortalUiError,
+  toPortalErrorMessage,
+} from "@/lib/error-copy";
+import { formatPortalCodeLabel } from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -60,10 +66,10 @@ type ExpirySelection = {
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) {
-    return "Not available";
+    return "未提供";
   }
 
-  return new Intl.DateTimeFormat("en", {
+  return new Intl.DateTimeFormat("zh-TW", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
@@ -71,10 +77,10 @@ function formatDateTime(value: string | null | undefined) {
 
 function formatShortDate(value: string | null | undefined) {
   if (!value) {
-    return "No expiry";
+    return "未設定到期";
   }
 
-  return new Intl.DateTimeFormat("en", {
+  return new Intl.DateTimeFormat("zh-TW", {
     dateStyle: "medium",
   }).format(new Date(value));
 }
@@ -94,19 +100,21 @@ function getFallbackPolicy(): TenantApiKeyGovernancePolicy {
 function resolveApiKeyStatus(key: TenantApiKeyRecord) {
   if (key.revokedAt) {
     return {
-      label: "Revoked",
+      kind: "revoked" as const,
+      label: "已撤銷",
       tone: "#9f1239",
       background: "rgba(244, 63, 94, 0.12)",
-      detail: `Revoked ${formatDateTime(key.revokedAt)}`,
+      detail: `撤銷時間：${formatDateTime(key.revokedAt)}`,
     };
   }
 
   if (key.expiresAt && new Date(key.expiresAt).getTime() <= Date.now()) {
     return {
-      label: "Expired",
+      kind: "expired" as const,
+      label: "已過期",
       tone: "#b45309",
       background: "rgba(245, 158, 11, 0.14)",
-      detail: `Expired ${formatDateTime(key.expiresAt)}`,
+      detail: `過期時間：${formatDateTime(key.expiresAt)}`,
     };
   }
 
@@ -118,20 +126,22 @@ function resolveApiKeyStatus(key: TenantApiKeyRecord) {
     millisUntilExpiry <= 7 * 24 * 60 * 60 * 1000
   ) {
     return {
-      label: "Expiring soon",
+      kind: "expiring" as const,
+      label: "即將到期",
       tone: "#b45309",
       background: "rgba(245, 158, 11, 0.14)",
-      detail: `Expires ${formatDateTime(key.expiresAt)}`,
+      detail: `到期時間：${formatDateTime(key.expiresAt)}`,
     };
   }
 
   return {
-    label: "Active",
+    kind: "active" as const,
+    label: "啟用中",
     tone: "#0f766e",
     background: "rgba(15, 118, 110, 0.12)",
     detail: key.expiresAt
-      ? `Expires ${formatDateTime(key.expiresAt)}`
-      : "No expiry recorded",
+      ? `到期時間：${formatDateTime(key.expiresAt)}`
+      : "未設定到期時間",
   };
 }
 
@@ -144,14 +154,10 @@ async function loadPageData(): Promise<PageData> {
 
   const errors: string[] = [];
   if (apiKeysResult.status === "rejected") {
-    errors.push(
-      `API keys: ${apiKeysResult.reason instanceof Error ? apiKeysResult.reason.message : "Unknown error"}`,
-    );
+    errors.push(formatPortalSectionError("整合金鑰", apiKeysResult.reason));
   }
   if (governanceResult.status === "rejected") {
-    errors.push(
-      `Integration governance: ${governanceResult.reason instanceof Error ? governanceResult.reason.message : "Unknown error"}`,
-    );
+    errors.push(formatPortalSectionError("整合治理", governanceResult.reason));
   }
 
   return {
@@ -176,19 +182,17 @@ function resolveExpirySelection(
   const preset = String(formData.get("lifetimePreset") ?? "recommended");
   const customExpiresAt = String(formData.get("expiresAt") ?? "").trim();
   let expiresAt: string | null = null;
-  let expirySummary = "Authority default lifetime";
+  let expirySummary = "採用治理預設效期";
 
   if (preset === "custom") {
     if (!customExpiresAt) {
       if (policy.requireExpiry) {
-        throw new Error(
-          "Choose a custom expiry or use one of the governance presets.",
-        );
+        throw new Error("請選擇自訂到期時間，或改用治理預設的效期方案。");
       }
       return { expiresAt: null, expirySummary };
     }
     expiresAt = new Date(customExpiresAt).toISOString();
-    expirySummary = `Custom expiry: ${formatDateTime(expiresAt)}`;
+    expirySummary = `自訂到期：${formatDateTime(expiresAt)}`;
   } else {
     const days =
       preset === "short"
@@ -199,7 +203,7 @@ function resolveExpirySelection(
     const target = new Date();
     target.setUTCDate(target.getUTCDate() + days);
     expiresAt = target.toISOString();
-    expirySummary = `Preset expiry: ${days} day(s)`;
+    expirySummary = `預設效期：${days} 天`;
   }
 
   if (!expiresAt) {
@@ -210,14 +214,14 @@ function resolveExpirySelection(
     (policy.maxLifetimeDays || DEFAULT_MAX_LIFETIME_DAYS) * 24 * 60 * 60 * 1000;
   const expiryMillis = new Date(expiresAt).getTime();
   if (Number.isNaN(expiryMillis)) {
-    throw new Error("Invalid expiry date.");
+    throw new Error("到期時間格式無效。");
   }
   if (expiryMillis <= Date.now()) {
-    throw new Error("Expiry must be in the future.");
+    throw new Error("到期時間必須晚於現在。");
   }
   if (expiryMillis - Date.now() > maxLifetimeMillis) {
     throw new Error(
-      `Expiry exceeds the ${policy.maxLifetimeDays}-day governance limit.`,
+      `到期時間不可超過治理規定的 ${policy.maxLifetimeDays} 天上限。`,
     );
   }
 
@@ -261,6 +265,9 @@ export default async function ApiKeysPage({
   const { apiKeys, governance, errors } = await loadPageData();
   const policy = governance?.apiKeyPolicy ?? getFallbackPolicy();
   const oneTimeKeyFlash = cookieStore.get(ONE_TIME_KEY_COOKIE)?.value;
+  const actionError = resolvedSearchParams.error
+    ? formatPortalUiError(resolvedSearchParams.error, "整合金鑰作業失敗")
+    : null;
 
   if (oneTimeKeyFlash) {
     redirect("/api-keys/reveal");
@@ -273,7 +280,7 @@ export default async function ApiKeysPage({
     : null;
   const isApiKeyUsable = (key: TenantApiKeyRecord) => {
     const status = resolveApiKeyStatus(key);
-    return status.label !== "Revoked" && status.label !== "Expired";
+    return status.kind !== "revoked" && status.kind !== "expired";
   };
   const activeKeyCount = apiKeys.filter(isApiKeyUsable).length;
   const unusedKeyCount = apiKeys.filter(
@@ -283,28 +290,28 @@ export default async function ApiKeysPage({
   return (
     <main className="app-grid">
       <AppShellCard
-        title="API Keys"
+        title="整合金鑰"
         description={
           roleSnapshot.capabilities.canManageApiKeys
-            ? "Give tenant integration owners a governed place to issue, rotate, and revoke credentials without losing scope, expiry, or last-used visibility."
-            : "Backend identity resolves this tenant session as read-only for API key governance. Credential inventory remains visible for audit, but issue/rotate/revoke stays tenant-admin only."
+            ? "提供租戶整合管理者可治理的整合金鑰簽發、輪替與撤銷介面，同時保留權限範圍、效期與最後使用時間。"
+            : "目前此租戶工作階段僅具整合金鑰治理唯讀權限。你仍可查看憑證清單供稽核使用，但簽發、輪替與撤銷仍限租戶管理員執行。"
         }
       >
-        {errors.map((error) => (
-          <div key={error} className="error-banner">
-            <strong>Error:</strong> {error}
+        {errors.map((error, index) => (
+          <div key={`${error}-${index}`} className="error-banner">
+            <strong>錯誤：</strong> {error}
           </div>
         ))}
 
         {resolvedSearchParams.success ? (
           <div className="success-banner">
-            <strong>Success:</strong> {resolvedSearchParams.success}
+            <strong>成功：</strong> {resolvedSearchParams.success}
           </div>
         ) : null}
 
-        {resolvedSearchParams.error ? (
+        {actionError ? (
           <div className="error-banner">
-            <strong>Error:</strong> {resolvedSearchParams.error}
+            <strong>錯誤：</strong> {actionError}
           </div>
         ) : null}
 
@@ -317,7 +324,7 @@ export default async function ApiKeysPage({
           }}
         >
           <div style={infoPanelStyle}>
-            <span className="metric-label">Active keys</span>
+            <span className="metric-label">可用金鑰</span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -328,12 +335,11 @@ export default async function ApiKeysPage({
               {activeKeyCount}
             </div>
             <p className="muted-copy">
-              Revoked and expired credentials are kept visible for audit
-              context.
+              已撤銷與已過期的憑證仍會保留在畫面上，方便追蹤稽核脈絡。
             </p>
           </div>
           <div style={infoPanelStyle}>
-            <span className="metric-label">Unused keys</span>
+            <span className="metric-label">未曾使用</span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -344,11 +350,11 @@ export default async function ApiKeysPage({
               {unusedKeyCount}
             </div>
             <p className="muted-copy">
-              Review unused secrets before they drift into long-lived risk.
+              建議優先檢查長期未使用的金鑰，避免變成持續暴露的風險。
             </p>
           </div>
           <div style={infoPanelStyle}>
-            <span className="metric-label">Rotation window</span>
+            <span className="metric-label">建議輪替窗</span>
             <div
               style={{
                 fontSize: "1.8rem",
@@ -356,21 +362,19 @@ export default async function ApiKeysPage({
                 marginTop: "0.5rem",
               }}
             >
-              {policy.defaultLifetimeDays}d
+              {policy.defaultLifetimeDays} 天
             </div>
             <p className="muted-copy">
-              Recommended lifetime. Hard maximum is {policy.maxLifetimeDays}{" "}
-              days.
+              建議效期。最長不得超過 {policy.maxLifetimeDays} 天。
             </p>
           </div>
         </section>
 
         <section style={{ ...infoPanelStyle, marginBottom: "1rem" }}>
-          <strong>Governed scope catalog</strong>
+          <strong>治理核准的權限範圍目錄</strong>
           <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
-            Tenant-issued keys stay inside the authority-approved scope list.
-            Break-glass access is a platform-admin process, not a self-service
-            checkbox.
+            租戶自行簽發的金鑰只能使用已核准的權限範圍。緊急升權類型的例外
+            仍屬平台管理流程，不是這個頁面的自助選項。
           </p>
           <div
             style={{
@@ -382,20 +386,23 @@ export default async function ApiKeysPage({
           >
             {policy.allowedScopes.map((scope) => (
               <span key={scope} style={badgeStyle}>
-                {scope}
+                {formatPortalCodeLabel(scope, scope)}
               </span>
             ))}
           </div>
           <p className="muted-copy" style={{ marginTop: "0.85rem" }}>
-            Expiry{" "}
-            {policy.requireExpiry ? "is required" : "defaults at the authority"}
-            . Revoke effect: {policy.revokeEffect}. Compatibility aliases:{" "}
+            到期時間
+            {policy.requireExpiry ? "為必填" : "可採治理預設"}
+            。撤銷效果：{formatPortalCodeLabel(policy.revokeEffect)}。相容別名：
             {Object.keys(policy.compatibilityAliases).length > 0
               ? Object.entries(policy.compatibilityAliases)
-                  .map(([alias, canonical]) => `${alias} -> ${canonical}`)
-                  .join(", ")
-              : "none"}
-            .
+                  .map(
+                    ([alias, canonical]) =>
+                      `${formatPortalCodeLabel(alias, alias)} 對應 ${formatPortalCodeLabel(canonical, canonical)}`,
+                  )
+                  .join("、")
+              : "無"}
+            。
           </p>
         </section>
 
@@ -404,8 +411,7 @@ export default async function ApiKeysPage({
             <RotateKeyForm apiKey={rotatingKey} policy={policy} />
           ) : (
             <div className="error-banner">
-              <strong>Access denied:</strong> Tenant admin authority is required
-              to rotate API keys.
+              <strong>權限不足：</strong> 輪替整合金鑰需要租戶管理員權限。
             </div>
           )
         ) : issueMode ? (
@@ -413,8 +419,7 @@ export default async function ApiKeysPage({
             <IssueKeyForm policy={policy} />
           ) : (
             <div className="error-banner">
-              <strong>Access denied:</strong> Tenant admin authority is required
-              to issue API keys.
+              <strong>權限不足：</strong> 簽發整合金鑰需要租戶管理員權限。
             </div>
           )
         ) : (
@@ -422,7 +427,7 @@ export default async function ApiKeysPage({
             {roleSnapshot.capabilities.canManageApiKeys ? (
               <div className="form-actions" style={{ marginBottom: "1rem" }}>
                 <Link href="/api-keys?issue=true" className="btn-primary">
-                  Issue New Key
+                  簽發新金鑰
                 </Link>
               </div>
             ) : null}
@@ -434,8 +439,8 @@ export default async function ApiKeysPage({
         )}
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>返回首頁</strong>
+          回到租戶入口總覽。
         </Link>
       </AppShellCard>
     </main>
@@ -453,7 +458,7 @@ function ScopeChecklist({
 
   return (
     <div className="form-row">
-      <label>Scopes *</label>
+      <label>權限範圍 *</label>
       <div
         style={{
           display: "grid",
@@ -480,7 +485,7 @@ function ScopeChecklist({
               value={scope}
               defaultChecked={selected.has(scope)}
             />
-            <code>{scope}</code>
+            <span>{formatPortalCodeLabel(scope, scope)}</span>
           </label>
         ))}
       </div>
@@ -492,25 +497,25 @@ function ExpiryControls({ policy }: { policy: TenantApiKeyGovernancePolicy }) {
   return (
     <>
       <div className="form-row">
-        <label htmlFor="lifetimePreset">Expiry policy *</label>
+        <label htmlFor="lifetimePreset">效期策略 *</label>
         <select
           id="lifetimePreset"
           name="lifetimePreset"
           defaultValue="recommended"
         >
           <option value="recommended">
-            Recommended ({policy.defaultLifetimeDays} days)
+            建議效期（{policy.defaultLifetimeDays} 天）
           </option>
-          <option value="short">Short-lived (30 days)</option>
-          <option value="max">Maximum ({policy.maxLifetimeDays} days)</option>
-          <option value="custom">Custom datetime</option>
+          <option value="short">短效期（30 天）</option>
+          <option value="max">最長效期（{policy.maxLifetimeDays} 天）</option>
+          <option value="custom">自訂日期時間</option>
         </select>
       </div>
       <div className="form-row">
-        <label htmlFor="expiresAt">Custom expiry</label>
+        <label htmlFor="expiresAt">自訂到期時間</label>
         <input type="datetime-local" id="expiresAt" name="expiresAt" />
         <p className="muted-copy" style={{ marginTop: "0.35rem" }}>
-          Used only when the preset is set to custom.
+          只有在上方選擇「自訂日期時間」時才會使用這個欄位。
         </p>
       </div>
     </>
@@ -520,27 +525,26 @@ function ExpiryControls({ policy }: { policy: TenantApiKeyGovernancePolicy }) {
 function IssueKeyForm({ policy }: { policy: TenantApiKeyGovernancePolicy }) {
   return (
     <div className="form-section">
-      <h3>Issue New API Key</h3>
+      <h3>簽發新整合金鑰</h3>
       <p className="muted-copy">
-        Create a tenant-scoped credential with explicit lifetime and auditable
-        scope selection.
+        建立具備明確效期與可稽核權限範圍選擇的租戶憑證。
       </p>
       <form action={issueApiKey} className="form-grid">
         <div className="form-row">
-          <label htmlFor="keyName">Key Name *</label>
+          <label htmlFor="keyName">金鑰名稱 *</label>
           <input
             type="text"
             id="keyName"
             name="keyName"
-            placeholder="e.g., production-booking-sync"
+            placeholder="例如：正式環境訂單同步"
             required
           />
         </div>
         <ScopeChecklist allowedScopes={policy.allowedScopes} />
         <ExpiryControls policy={policy} />
         <div className="form-actions">
-          <button type="submit">Issue Key</button>
-          <Link href="/api-keys">Cancel</Link>
+          <button type="submit">簽發金鑰</button>
+          <Link href="/api-keys">取消</Link>
         </div>
       </form>
     </div>
@@ -558,17 +562,16 @@ function RotateKeyForm({
 
   return (
     <div className="form-section">
-      <h3>Rotate API Key</h3>
+      <h3>輪替整合金鑰</h3>
       <p className="muted-copy">
-        Rotating revokes the current credential immediately and issues a new
-        plaintext key one time.
+        輪替會立即撤銷目前憑證，並只顯示一次新的明文金鑰。
       </p>
       <div style={{ ...infoPanelStyle, marginBottom: "1rem" }}>
         <strong>{apiKey.keyName}</strong>
         <p className="muted-copy" style={{ marginTop: "0.45rem" }}>
-          Prefix <code>{apiKey.keyPrefix}</code>, suffix{" "}
-          <code>{apiKey.maskedSuffix}</code>, last used{" "}
-          {formatDateTime(apiKey.lastUsedAt)}.
+          前綴 <code>{apiKey.keyPrefix}</code>、尾碼{" "}
+          <code>{apiKey.maskedSuffix}</code>，最後使用時間為{" "}
+          {formatDateTime(apiKey.lastUsedAt)}。
         </p>
         <span
           style={{
@@ -584,7 +587,7 @@ function RotateKeyForm({
       <form action={rotateApiKey} className="form-grid">
         <input type="hidden" name="apiKeyId" value={apiKey.apiKeyId} />
         <div className="form-row">
-          <label htmlFor="keyName">Key Name *</label>
+          <label htmlFor="keyName">金鑰名稱 *</label>
           <input
             type="text"
             id="keyName"
@@ -599,8 +602,8 @@ function RotateKeyForm({
         />
         <ExpiryControls policy={policy} />
         <div className="form-actions">
-          <button type="submit">Rotate Key</button>
-          <Link href="/api-keys">Cancel</Link>
+          <button type="submit">確認輪替</button>
+          <Link href="/api-keys">取消</Link>
         </div>
       </form>
     </div>
@@ -618,19 +621,19 @@ function ApiKeyList({
     <div className="data-table">
       {apiKeys.length === 0 ? (
         <p className="empty-state">
-          No API keys found. Issue a governed credential to get started.
+          目前沒有整合金鑰。簽發第一把治理憑證後即可開始使用。
         </p>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Credential</th>
-              <th>Scopes</th>
-              <th>Last used</th>
-              <th>Expiry</th>
-              <th>Created</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>憑證</th>
+              <th>權限範圍</th>
+              <th>最後使用</th>
+              <th>到期</th>
+              <th>建立時間</th>
+              <th>狀態</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -656,11 +659,15 @@ function ApiKeyList({
                       </code>
                     </div>
                   </td>
-                  <td>{key.scopes.join(", ")}</td>
+                  <td>
+                    {key.scopes
+                      .map((scope) => formatPortalCodeLabel(scope, scope))
+                      .join("、")}
+                  </td>
                   <td>
                     {key.lastUsedAt
                       ? formatDateTime(key.lastUsedAt)
-                      : "Never used"}
+                      : "從未使用"}
                   </td>
                   <td>
                     <strong>{formatShortDate(key.expiresAt)}</strong>
@@ -670,7 +677,7 @@ function ApiKeyList({
                     >
                       {key.expiresAt
                         ? formatDateTime(key.expiresAt)
-                        : "Authority default / none"}
+                        : "依治理預設，不另設期限"}
                     </div>
                   </td>
                   <td>{formatDateTime(key.createdAt)}</td>
@@ -695,7 +702,7 @@ function ApiKeyList({
                     {!key.revokedAt && canManage ? (
                       <>
                         <Link href={`/api-keys?rotate=${key.apiKeyId}`}>
-                          Rotate
+                          輪替
                         </Link>
                         {" | "}
                         <form
@@ -709,14 +716,14 @@ function ApiKeyList({
                           />
                           <ConfirmSubmitButton
                             type="submit"
-                            confirmMessage={`Revoke API key "${key.keyName}" immediately? This cannot be undone.`}
+                            confirmMessage={`確定要立即撤銷整合金鑰「${key.keyName}」嗎？此操作無法復原。`}
                           >
-                            Revoke
+                            撤銷
                           </ConfirmSubmitButton>
                         </form>
                       </>
                     ) : (
-                      <span className="muted-copy">Audit only</span>
+                      <span className="muted-copy">僅供稽核</span>
                     )}
                   </td>
                 </tr>
@@ -735,7 +742,7 @@ async function issueApiKey(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canManageApiKeys,
-    "Tenant admin authority required to issue API keys.",
+    "簽發整合金鑰需要租戶管理員權限。",
   );
   const client = await getTenantClient();
   const scopes = parseScopeValues(formData);
@@ -746,7 +753,7 @@ async function issueApiKey(formData: FormData) {
       .apiKeyPolicy;
 
     if (scopes.length === 0) {
-      throw new Error("Select at least one scope.");
+      throw new Error("請至少選擇一個權限範圍。");
     }
 
     const invalidScopes = scopes.filter(
@@ -754,7 +761,9 @@ async function issueApiKey(formData: FormData) {
     );
     if (invalidScopes.length > 0) {
       throw new Error(
-        `Unsupported scope selection: ${invalidScopes.join(", ")}`,
+        `所選權限範圍不受支援：${invalidScopes
+          .map((scope) => formatPortalCodeLabel(scope, scope))
+          .join("、")}`,
       );
     }
 
@@ -769,17 +778,20 @@ async function issueApiKey(formData: FormData) {
     };
 
     if (!command.keyName) {
-      throw new Error("Key name is required.");
+      throw new Error("金鑰名稱為必填。");
     }
 
     const result = await client.issueApiKey(command);
     await writeOneTimeKeyFlash(result);
     revalidatePath("/api-keys");
     destination = `/api-keys/reveal?success=${encodeURIComponent(
-      `Issued ${result.apiKey.keyName} with ${scopes.length} scope(s). ${expirySummary}.`,
+      `已簽發 ${result.apiKey.keyName}，共 ${scopes.length} 個權限範圍。${expirySummary}。`,
     )}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message = formatPortalUiError(
+      toPortalErrorMessage(error),
+      "無法簽發整合金鑰",
+    );
     destination = `/api-keys?issue=true&error=${encodeURIComponent(message)}`;
   }
 
@@ -792,7 +804,7 @@ async function rotateApiKey(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canManageApiKeys,
-    "Tenant admin authority required to rotate API keys.",
+    "輪替整合金鑰需要租戶管理員權限。",
   );
   const client = await getTenantClient();
   const apiKeyId = String(formData.get("apiKeyId") ?? "");
@@ -804,10 +816,10 @@ async function rotateApiKey(formData: FormData) {
       .apiKeyPolicy;
 
     if (!apiKeyId) {
-      throw new Error("API key ID is required.");
+      throw new Error("整合金鑰編號為必填。");
     }
     if (scopes.length === 0) {
-      throw new Error("Select at least one scope.");
+      throw new Error("請至少選擇一個權限範圍。");
     }
 
     const invalidScopes = scopes.filter(
@@ -815,7 +827,9 @@ async function rotateApiKey(formData: FormData) {
     );
     if (invalidScopes.length > 0) {
       throw new Error(
-        `Unsupported scope selection: ${invalidScopes.join(", ")}`,
+        `所選權限範圍不受支援：${invalidScopes
+          .map((scope) => formatPortalCodeLabel(scope, scope))
+          .join("、")}`,
       );
     }
 
@@ -830,17 +844,20 @@ async function rotateApiKey(formData: FormData) {
     };
 
     if (!command.keyName) {
-      throw new Error("Key name is required.");
+      throw new Error("金鑰名稱為必填。");
     }
 
     const result = await client.rotateApiKey(apiKeyId, command);
     await writeOneTimeKeyFlash(result);
     revalidatePath("/api-keys");
     destination = `/api-keys/reveal?success=${encodeURIComponent(
-      `Rotated ${result.apiKey.keyName}. Previous key revoked immediately. ${expirySummary}.`,
+      `已輪替 ${result.apiKey.keyName}，前一把金鑰已立即撤銷。${expirySummary}。`,
     )}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message = formatPortalUiError(
+      toPortalErrorMessage(error),
+      "無法輪替整合金鑰",
+    );
     destination = `/api-keys?rotate=${encodeURIComponent(apiKeyId)}&error=${encodeURIComponent(message)}`;
   }
 
@@ -853,7 +870,7 @@ async function revokeApiKey(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canManageApiKeys,
-    "Tenant admin authority required to revoke API keys.",
+    "撤銷整合金鑰需要租戶管理員權限。",
   );
   const client = await getTenantClient();
   const apiKeyId = String(formData.get("apiKeyId") ?? "");
@@ -861,14 +878,17 @@ async function revokeApiKey(formData: FormData) {
 
   try {
     if (!apiKeyId) {
-      throw new Error("API key ID is required.");
+      throw new Error("整合金鑰編號為必填。");
     }
 
     await client.revokeApiKey(apiKeyId);
     revalidatePath("/api-keys");
-    destination = `/api-keys?success=${encodeURIComponent("API key revoked immediately.")}`;
+    destination = `/api-keys?success=${encodeURIComponent("整合金鑰已立即撤銷。")}`;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message = formatPortalUiError(
+      toPortalErrorMessage(error),
+      "無法撤銷整合金鑰",
+    );
     destination = `/api-keys?error=${encodeURIComponent(message)}`;
   }
 

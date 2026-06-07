@@ -18,29 +18,25 @@ export default async function DeniedPage({
   return (
     <div className="page-shell">
       <section className="hero-card tone-warning">
-        <span className="section-kicker">Denied</span>
-        <h1>The selected desk lane does not have authority for this desk.</h1>
-        <p>
-          The portal keeps role mismatch explicit instead of silently widening
-          access. This is the assisted-entry counterpart to a denied auth row in
-          the full-system UI matrix.
-        </p>
+        <span className="section-kicker">拒絕</span>
+        <h1>目前角色沒有操作此櫃台的權限。</h1>
+        <p>系統會清楚顯示角色與櫃台不符，而不是默默放寬權限或讓操作繼續。</p>
       </section>
 
       <section className="panel-card tone-warning">
-        <span className="section-kicker">Reason</span>
-        <h2>{desk ? desk.deskName : "Desk mismatch"}</h2>
+        <span className="section-kicker">原因</span>
+        <h2>{desk ? desk.deskName : "櫃台角色不符"}</h2>
         <p>
           {desk && mode
-            ? `${formatDeskMode(mode as "concierge_operator" | "call_point_operator")} cannot operate ${desk.deskName}.`
-            : "A mode / desk mismatch occurred before booking creation."}
+            ? `${formatDeskMode(mode as "concierge_operator" | "call_point_operator")}不可操作 ${desk.deskName}。`
+            : "建立代訂前發現角色與櫃台不符。"}
         </p>
         <div className="inline-actions">
           <Link className="primary-link" href="/start">
-            Choose another desk
+            選擇其他櫃台
           </Link>
           <Link className="secondary-link" href="/login">
-            Re-bootstrap operator lane
+            重新建立操作人員身分
           </Link>
         </div>
       </section>

@@ -33,9 +33,11 @@ function assertActionReceipt(
   operation: "update_sla_profile" | "recalculate_sla_bookings",
 ): ActionReceipt {
   if (!isActionReceipt(value)) {
-    throw new Error(
-      `Expected ActionReceipt from tenant SLA ${operation}, but received an incompatible response.`,
-    );
+    const operationLabel =
+      operation === "update_sla_profile"
+        ? "更新服務時限設定"
+        : "重算既有訂單服務時限";
+    throw new Error(`${operationLabel}後，後端回傳的操作收據格式不相容。`);
   }
   return value;
 }

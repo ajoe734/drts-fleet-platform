@@ -12,6 +12,7 @@ import type {
   VehicleContractRecord,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { formatOpsErrorReasonLabel, toOpsErrorMessage } from "@/lib/error-copy";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
@@ -262,16 +263,6 @@ const EMPTY_REASONS = new Set<EmptyReason>([
   "external_unavailable",
   "filtered_empty",
 ]);
-
-const EMPTY_OVERRIDE_REASON_CODES: Record<EmptyReason, string> = {
-  no_data: "contract_registry_empty",
-  not_provisioned: "contract_registry_not_provisioned",
-  fetch_failed: "contract_registry_fetch_failed",
-  permission_denied: "contract_registry_permission_denied",
-  external_unavailable: "contract_registry_external_unavailable",
-  filtered_empty: "contract_registry_filtered_empty",
-  driver_not_eligible: "driver_not_eligible",
-};
 
 function copy(locale: Locale, en: string, zh: string) {
   return locale === "zh" ? zh : en;
@@ -712,8 +703,8 @@ function actionReason(action: ResourceActionDescriptor, locale: Locale) {
   if (action.disabledReasonCode === "contract_detail_pending") {
     return copy(
       locale,
-      "Read-only detail route ships in a follow-up ops leaf (Q-OPS03).",
-      "唯讀詳情路由將由後續 ops 子任務交付（Q-OPS03）。",
+      "The read-only detail route will ship in a follow-up release.",
+      "唯讀詳情頁尚未開放，會於後續版本補上。",
     );
   }
 
@@ -785,6 +776,10 @@ function refreshBadgeLabel(refresh: UiRefreshMetadata, locale: Locale) {
     formatOpsCodeLabel(locale, refresh.dataFreshness),
   );
 
+  if (locale === "zh") {
+    return `${freshness} · 每 15 秒更新`;
+  }
+
   return `${freshness} · T3 · 15s`;
 }
 
@@ -792,7 +787,7 @@ function refreshBody(refresh: UiRefreshMetadata, locale: Locale) {
   return copy(
     locale,
     `Snapshot ${formatLongDateTime(locale, refresh.generatedAt)} UTC from ${refresh.source}.`,
-    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} UTC 產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
+    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} 世界標準時間產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
   );
 }
 
@@ -845,13 +840,17 @@ function normalizeContractPayload(
 
 async function loadWithError<T>(
   loader: () => Promise<T>,
+  locale: Locale,
 ): Promise<LoadResult<T>> {
   try {
     return { data: await loader(), error: null };
   } catch (error) {
     return {
       data: null,
-      error: error instanceof Error ? error.message : String(error),
+      error: formatOpsErrorReasonLabel(
+        locale,
+        toOpsErrorMessage(error, "Unknown error"),
+      ),
     };
   }
 }
@@ -922,7 +921,7 @@ function normalizeHealthPayload(payload: unknown): UiHealthEnvelope | null {
   return null;
 }
 
-async function loadHealthEnvelope(): Promise<HealthLoadResult> {
+async function loadHealthEnvelope(locale: Locale): Promise<HealthLoadResult> {
   const apiBaseUrl = process.env.DRTS_API_URL ?? "http://localhost:3001";
 
   try {
@@ -937,13 +936,19 @@ async function loadHealthEnvelope(): Promise<HealthLoadResult> {
           degradedServices: [
             {
               service: "api",
-              impact: `status=${response.status}`,
+              impact: formatOpsErrorReasonLabel(
+                locale,
+                `health status ${response.status}`,
+              ),
               severity: "critical",
             },
           ],
           lastCheckedAt: new Date().toISOString(),
         },
-        error: `health status ${response.status}`,
+        error: formatOpsErrorReasonLabel(
+          locale,
+          `health status ${response.status}`,
+        ),
       };
     }
 
@@ -959,14 +964,19 @@ async function loadHealthEnvelope(): Promise<HealthLoadResult> {
         degradedServices: [
           {
             service: "api",
-            impact:
-              error instanceof Error ? error.message : "health fetch failed",
+            impact: formatOpsErrorReasonLabel(
+              locale,
+              toOpsErrorMessage(error, "health fetch failed"),
+            ),
             severity: "critical",
           },
         ],
         lastCheckedAt: new Date().toISOString(),
       },
-      error: error instanceof Error ? error.message : String(error),
+      error: formatOpsErrorReasonLabel(
+        locale,
+        toOpsErrorMessage(error, "health fetch failed"),
+      ),
     };
   }
 }
@@ -1022,7 +1032,7 @@ function buildEmptyStateViewModel(
         description: copy(
           locale,
           "Partner and fleet contracts are still bootstrapped from Platform Admin governance for this environment.",
-          "本環境的夥伴與車隊合約仍由 Platform Admin 治理面建立。",
+          "本環境的夥伴與車隊合約仍由平台管理後台治理面建立。",
         ),
         actionLabel: copy(locale, "Open partner governance", "開啟夥伴治理"),
         actionHref: `${resolveAppOrigin("platform-admin")}/partners`,
@@ -1068,7 +1078,7 @@ function buildEmptyStateViewModel(
           "Partner-entry augmentation is degraded. Counterparty names may be missing; use partner governance for the latest relationship state.",
           "夥伴渠道補充資料降級，交易對手名稱可能缺漏；請改用夥伴治理確認最新關係狀態。",
         ),
-        actionLabel: copy(locale, "Open platform admin", "開啟 Platform Admin"),
+        actionLabel: copy(locale, "Open platform admin", "開啟平台管理後台"),
         actionHref: `${resolveAppOrigin("platform-admin")}/partners`,
         actionNewTab: true,
       };
@@ -1141,7 +1151,11 @@ function renderAction(
         </span>
       )}
       <span style={tinyMetaStyle(actionTone(action))}>
-        {copy(locale, `risk:${action.riskLevel}`, `風險:${action.riskLevel}`)}
+        {copy(
+          locale,
+          `Risk: ${formatOpsCodeLabel(locale, action.riskLevel)}`,
+          `風險：${formatOpsCodeLabel(locale, action.riskLevel)}`,
+        )}
         {action.requiresReason
           ? copy(locale, " · reason required", " · 需填原因")
           : ""}
@@ -1304,12 +1318,14 @@ export default async function ContractsPage({
     reviewQueueResult,
     healthResult,
   ] = await Promise.all([
-    loadWithError(() =>
-      client.get<ContractListPayload>("/api/regulatory-registry/contracts"),
+    loadWithError(
+      () =>
+        client.get<ContractListPayload>("/api/regulatory-registry/contracts"),
+      locale,
     ),
-    loadWithError(() => client.listPartnerEntries()),
-    loadWithError(() => client.listPartnerEligibilityReviewQueue()),
-    loadHealthEnvelope(),
+    loadWithError(() => client.listPartnerEntries(), locale),
+    loadWithError(() => client.listPartnerEligibilityReviewQueue(), locale),
+    loadHealthEnvelope(locale),
   ]);
 
   const contractPayload = normalizeContractPayload(
@@ -1635,7 +1651,7 @@ export default async function ContractsPage({
         subtitle={copy(
           locale,
           "ops read-only · mutation runs via Platform Admin / Tenant governance",
-          "ops 只讀；mutation 走 Platform Admin / Tenant Governance",
+          "營運端僅供查看；如需異動請前往平台管理後台或租戶治理。",
         )}
         tabs={tabs.map((tab) => tab.node)}
         activeTab={activeTab}
@@ -1672,18 +1688,20 @@ export default async function ContractsPage({
                 health.degradedServices
                   .map(
                     (service: UiHealthEnvelope["degradedServices"][number]) =>
-                      `${service.service}: ${service.impact}`,
+                      `${formatOpsCodeLabel(locale, service.service)}: ${service.impact}`,
                   )
-                  .join(" · ") || "health unknown"
+                  .join(" · ") ||
+                copy(locale, "Health signal unavailable", "健康訊號未提供")
               } · checked ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
               `${
                 health.degradedServices
                   .map(
                     (service: UiHealthEnvelope["degradedServices"][number]) =>
-                      `${service.service}: ${service.impact}`,
+                      `${formatOpsCodeLabel(locale, service.service)}：${service.impact}`,
                   )
-                  .join(" · ") || "health unknown"
-              } · 檢查時間 ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
+                  .join(" · ") ||
+                copy(locale, "Health signal unavailable", "健康訊號未提供")
+              } · 檢查時間 ${formatLongDateTime(locale, health.lastCheckedAt)} 世界標準時間`,
             )}
           />
         ) : null}
@@ -1715,7 +1733,7 @@ export default async function ContractsPage({
             body={copy(
               locale,
               `${expiringCount} contract(s) expire within ${EXPIRING_SOON_DAYS} days. Confirm renewal terms with Platform Admin before dispatch / billing impact.`,
-              `${expiringCount} 份合約將於 ${EXPIRING_SOON_DAYS} 天內到期；請於影響派車 / 帳務前，向 Platform Admin 確認續約條款。`,
+              `${expiringCount} 份合約將於 ${EXPIRING_SOON_DAYS} 天內到期；請於影響派車或帳務前，向平台管理後台確認續約條款。`,
             )}
             actions={
               <Link
@@ -1901,13 +1919,15 @@ export default async function ContractsPage({
             </span>
             <span style={{ ...helperTextStyle, ...monoTextStyle }}>
               {copy(locale, "generated", "生成時間")} ·{" "}
-              {formatLongDateTime(locale, refresh.generatedAt)} UTC
+              {locale === "zh"
+                ? `${formatLongDateTime(locale, refresh.generatedAt)} 世界標準時間`
+                : `${formatLongDateTime(locale, refresh.generatedAt)} UTC`}
             </span>
             <span style={helperTextStyle}>
               {copy(
                 locale,
                 "supporting actions come from availableActions",
-                "畫面 CTA 以 availableActions 為準",
+                "畫面操作按鈕以後端回傳的可用操作為準",
               )}
             </span>
           </div>
@@ -1919,7 +1939,7 @@ export default async function ContractsPage({
           subtitle={copy(
             locale,
             "Counterparty, kind, term, and key operating terms feeding dispatch and billing — read-only at ops scope.",
-            "在同一張表整合交易對手、類型、合約期間與關鍵營運條款，提供派車與帳務參考；ops 端僅可讀。",
+            "在同一張表整合交易對手、類型、合約期間與關鍵營運條款，提供派車與帳務參考；營運端僅供查看。",
           )}
         >
           {emptyView ? (
@@ -1955,7 +1975,7 @@ export default async function ContractsPage({
               </Link>
               <span style={tinyMetaStyle(emptyView.tone)}>
                 {copy(locale, "emptyReason", "空狀態")} ·{" "}
-                {EMPTY_OVERRIDE_REASON_CODES[emptyReason ?? "no_data"]}
+                {formatOpsCodeLabel(locale, emptyReason ?? "no_data")}
               </span>
             </div>
           ) : (
@@ -1969,7 +1989,7 @@ export default async function ContractsPage({
           subtitle={copy(
             locale,
             "Partner entry slug, program id, status, and eligibility mode behind partner contracts.",
-            "夥伴合約背後的渠道 slug、方案 id、狀態與資格模式。",
+            "夥伴合約背後的渠道代碼、方案編號、狀態與資格模式。",
           )}
         >
           {partnerRelationRows.length === 0 ? (
@@ -2002,7 +2022,7 @@ export default async function ContractsPage({
                   : copy(
                       locale,
                       "Partner programs are provisioned from Platform Admin governance.",
-                      "夥伴方案由 Platform Admin 治理面建立。",
+                      "夥伴方案由平台管理後台建立與治理。",
                     )}
               </span>
             </div>

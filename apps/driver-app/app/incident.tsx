@@ -32,6 +32,7 @@ import {
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
 import { getDriverClient } from "@/lib/api-client";
+import { formatDriverUiError, toDriverErrorMessage } from "@/lib/error-copy";
 import {
   driverForwardedTaskStatusLabels,
   driverIncidentSituations,
@@ -81,22 +82,22 @@ const SUPPORTED_EMPTY_REASONS: readonly EmptyReason[] = [
 
 const EMPTY_STATE_COPY: Record<EmptyReason, EmptyStateConfig> = {
   no_data: {
-    title: "目前沒有 SOS 情境資料",
+    title: "目前沒有緊急求助情境資料",
     description: "找不到可帶入的行程脈絡，仍可返回行程或稍後重試。",
     icon: "search-outline",
   },
   not_provisioned: {
-    title: "此裝置尚未啟用 SOS",
+    title: "此裝置尚未啟用緊急求助",
     description: "請先完成司機裝置啟用與功能下發，再建立安全事件。",
     icon: "construct-outline",
   },
   fetch_failed: {
-    title: "SOS 情境載入失敗",
+    title: "緊急求助情境載入失敗",
     description: "目前無法取得最新任務情境，請手動重整後再送出。",
     icon: "cloud-offline-outline",
   },
   permission_denied: {
-    title: "目前沒有 SOS 權限",
+    title: "目前沒有緊急求助權限",
     description: "您的帳號暫時沒有建立安全事件的權限，請聯絡派車台。",
     icon: "lock-closed-outline",
   },
@@ -106,23 +107,22 @@ const EMPTY_STATE_COPY: Record<EmptyReason, EmptyStateConfig> = {
     icon: "alert-circle-outline",
   },
   driver_not_eligible: {
-    title: "目前狀態不可送出 SOS",
+    title: "目前狀態不可送出緊急求助",
     description: "您的司機資格或班次狀態尚未達到送出條件，請先處理前置限制。",
     icon: "ban-outline",
   },
   filtered_empty: {
     title: "目前篩選下沒有可用情境",
-    description: "請清除目前條件或返回工作台後重新開啟 SOS。",
+    description: "請清除目前條件或返回工作台後重新開啟緊急求助。",
     icon: "filter-outline",
   },
 };
 
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return "SOS 送出失敗，請稍後再試。";
+  return formatDriverUiError(
+    toDriverErrorMessage(error, "緊急求助送出失敗，請稍後再試。"),
+    "緊急求助送出失敗",
+  );
 }
 
 function getSituationLabel(situationId: SosSituationId | null): string | null {
@@ -136,10 +136,22 @@ function getSituationLabel(situationId: SosSituationId | null): string | null {
   );
 }
 
-function humanizeCode(value: string) {
-  return value
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+const INCIDENT_CODE_LABELS: Record<string, string> = {
+  action_disabled: "操作目前已停用",
+  external_unavailable: "外部平台情境暫時無法確認",
+  fetch_failed: "資料讀取失敗",
+  hold_required: "需完整長按後才能送出",
+  permission_denied: "權限不足",
+  driver_not_eligible: "目前司機狀態不可操作",
+};
+
+function formatIncidentCodeLabel(value: string | undefined) {
+  if (!value) {
+    return "原因需由派車台確認";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return INCIDENT_CODE_LABELS[normalized] ?? "原因需由派車台確認";
 }
 
 function isOwnedPlatformCode(platformCode: string | null | undefined) {
@@ -161,7 +173,7 @@ function getPlatformDisplayLabel(platformCode: string | null | undefined) {
     ].displayName;
   }
 
-  return humanizeCode(normalized);
+  return "外部平台";
 }
 
 function formatPlatformStatusLabel(status: string | null): string | null {
@@ -188,7 +200,7 @@ function buildIncidentDescription(
     lines.push(`事件情況：${situationLabel}`);
   }
 
-  const baseDescription = details.trim() || "已由司機 App 送出 SOS 緊急通報。";
+  const baseDescription = details.trim() || "已由司機端送出緊急求助通報。";
   if (!platformContext) {
     lines.push(baseDescription);
     return lines.join("\n");
@@ -197,9 +209,9 @@ function buildIncidentDescription(
   lines.push(
     baseDescription,
     "",
-    "[SOS 平台任務上下文]",
+    "【緊急求助平台任務資訊】",
     `來源平台：${platformContext.platformLabel}（${platformContext.platformCode}）`,
-    `本地鏡像訂單：${platformContext.mirrorOrderId}`,
+    `鏡像訂單編號：${platformContext.mirrorOrderId}`,
   );
 
   if (platformContext.externalOrderId) {
@@ -210,7 +222,7 @@ function buildIncidentDescription(
     platformContext.nativeStatus,
   );
   if (nativeStatusLabel) {
-    lines.push(`目前平台狀態：${nativeStatusLabel}`);
+    lines.push(`來源平台目前狀態：${nativeStatusLabel}`);
   }
 
   return lines.join("\n");
@@ -367,11 +379,11 @@ function getEntrySourceLabel(source: IncidentEntrySource) {
 function getActionLabel(action: string) {
   switch (action) {
     case "submit_sos":
-      return "送出 SOS";
+      return "送出緊急求助";
     case "cancel":
       return "返回行程";
     default:
-      return humanizeCode(action);
+      return "其他操作";
   }
 }
 
@@ -380,13 +392,15 @@ function getDisabledReasonLabel(reason: string | undefined) {
     case "hold_required":
       return "需完整長按 2 秒後才能送出。";
     case "permission_denied":
-      return "目前帳號沒有建立 SOS 事件的權限。";
+      return "目前帳號沒有建立緊急求助事件的權限。";
     case "driver_not_eligible":
-      return "目前司機狀態不可建立 SOS 事件。";
+      return "目前司機狀態不可建立緊急求助事件。";
     case "external_unavailable":
       return "外部平台情境暫時無法確認。";
     default:
-      return reason ? `目前無法操作：${humanizeCode(reason)}` : null;
+      return reason
+        ? `目前無法操作：${formatIncidentCodeLabel(reason)}。`
+        : null;
   }
 }
 
@@ -524,7 +538,7 @@ export default function IncidentScreen() {
       setIncidentContextReady(true);
 
       const created = await client.createIncident({
-        title: "司機 SOS 緊急通報",
+        title: "司機緊急求助通報",
         description: buildIncidentDescription(
           details,
           platformContext,
@@ -584,7 +598,7 @@ export default function IncidentScreen() {
 
   const holdNotice =
     getDisabledReasonLabel(submitAction.disabledReasonCode) ??
-    "進入 SOS 畫面後，請長按 2 秒直接送出，避免誤觸。";
+    "進入緊急求助畫面後，請長按 2 秒直接送出，避免誤觸。";
 
   const activeEmptyReason =
     incidentsEnabled === false ? "not_provisioned" : emptyReasonOverride;
@@ -594,8 +608,8 @@ export default function IncidentScreen() {
 
   const selectedSituationLabel = getSituationLabel(selectedSituation);
   const orderContextSubtitle = incidentContextPreview
-    ? "平台與訂單資訊會跟著 SOS 一起送到安全事件。"
-    : "若目前沒有外部平台任務，SOS 仍會以一般安全事件建立。";
+    ? "平台與訂單資訊會跟著緊急求助一起送到安全事件。"
+    : "若目前沒有外部平台任務，緊急求助仍會以一般安全事件建立。";
 
   const refreshTierLabel =
     INCIDENT_REFRESH_TIER === "manual" ? "手動刷新" : INCIDENT_REFRESH_TIER;
@@ -653,7 +667,7 @@ export default function IncidentScreen() {
         />
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Tokens.colors.primary} />
-          <Text style={styles.loadingLabel}>載入 SOS 流程中…</Text>
+          <Text style={styles.loadingLabel}>載入緊急求助流程中…</Text>
         </View>
       </AppScreen>
     );
@@ -721,7 +735,7 @@ export default function IncidentScreen() {
               <StatusChip label="長按 2 秒送出" variant="danger" />
             </View>
             <View style={styles.heroIconBadge}>
-              <Text style={styles.heroIconLabel}>SOS</Text>
+              <Text style={styles.heroIconLabel}>求助</Text>
             </View>
             <Text style={styles.heroEyebrow}>
               {driverStrings.incident.heroEyebrow}
@@ -808,7 +822,7 @@ export default function IncidentScreen() {
                     {incidentContextPreview.mirrorOrderId}
                   </Text>
                   <Text style={styles.contextBody}>
-                    平台訂單上下文會隨 SOS
+                    平台訂單上下文會隨緊急求助
                     一起送出，營運與安全官可直接對照鏡像與外部單號。
                   </Text>
                   <View style={styles.contextMetaRow}>
@@ -841,7 +855,7 @@ export default function IncidentScreen() {
                     目前未偵測到外部平台訂單
                   </Text>
                   <Text style={styles.contextBody}>
-                    若此刻是自營任務或非訂單情境，SOS
+                    若此刻是自營任務或非訂單情境，緊急求助
                     仍會照常建立，並在成功後返回行程頁。
                   </Text>
                 </View>
@@ -877,15 +891,15 @@ export default function IncidentScreen() {
               style={styles.detailsInput}
               helpText={
                 selectedSituationLabel
-                  ? `已選情況：${selectedSituationLabel}。若留白，系統仍會送出預設 SOS 說明。`
-                  : "若留白，系統會送出預設 SOS 說明。"
+                  ? `已選情況：${selectedSituationLabel}。若留白，系統仍會送出預設緊急求助說明。`
+                  : "若留白，系統會送出預設緊急求助說明。"
               }
             />
           </SectionCard>
 
           <SectionCard
             title={driverStrings.incident.sections.review}
-            subtitle="功能行為以 high-risk action 規格為準。"
+            subtitle="此功能依高風險操作規則執行。"
           >
             <View style={styles.actionPolicyRow}>
               <StatusChip
@@ -898,7 +912,7 @@ export default function IncidentScreen() {
               />
             </View>
             <Text style={styles.confirmationBody}>
-              這個頁面就是 SOS 的保護確認層。請長按底部按鈕滿 2
+              這個頁面就是緊急求助的保護確認層。請長按底部按鈕滿 2
               秒直接送出；若情況已排除，可按取消返回上一頁。
             </Text>
             <Text style={styles.availableActionLabel}>
@@ -913,7 +927,7 @@ export default function IncidentScreen() {
 
       <BottomActionBar
         style={styles.actionBar}
-        notice={holdHintVisible ? holdNotice : "SOS 需長按 2 秒才會送出。"}
+        notice={holdHintVisible ? holdNotice : "緊急求助需長按 2 秒才會送出。"}
       >
         <ActionButton
           title={getActionLabel(cancelAction.action)}

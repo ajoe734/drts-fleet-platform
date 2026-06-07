@@ -17,11 +17,13 @@ import {
   CanvasCard,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import {
+  ServerCanvasTable,
+  type ServerCanvasTableColumn,
+} from "@/components/server-canvas-table";
 import { RefreshTierControl } from "@/app/bookings/refresh-tier-control";
 import {
   applyBookingListQuery,
@@ -31,7 +33,9 @@ import {
   toggleStatus,
 } from "@/lib/booking-list";
 import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
+import { formatTenantUiError } from "@/lib/error-copy";
 import { formatDateTime } from "@/lib/formatters";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 import {
   getBookingSourceVisibility,
   getSourceToneClassName,
@@ -216,28 +220,28 @@ function parseDate(value: string | null | undefined) {
 }
 
 function formatMinutes(minutes: number) {
-  return `${new Intl.NumberFormat("en").format(minutes)}m`;
+  return `${new Intl.NumberFormat("zh-Hant").format(minutes)} 分鐘`;
 }
 
 function formatRelativeDuration(value: string | null | undefined) {
   const parsed = parseDate(value);
   if (!parsed) {
-    return "Unknown";
+    return "未知";
   }
 
   const diffMs = Date.now() - parsed.getTime();
   const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
 
   if (diffMinutes < 60) {
-    return `${formatMinutes(diffMinutes)} old`;
+    return `${formatMinutes(diffMinutes)}前`;
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
   if (diffHours < 24) {
-    return `${diffHours}h old`;
+    return `${diffHours} 小時前`;
   }
 
-  return `${Math.floor(diffHours / 24)}d old`;
+  return `${Math.floor(diffHours / 24)} 天前`;
 }
 
 function formatRemainingWindow(value: string | null | undefined) {
@@ -250,16 +254,16 @@ function formatRemainingWindow(value: string | null | undefined) {
   const diffMinutes = Math.round(diffMs / 60000);
 
   if (diffMinutes <= 0) {
-    return "Closed";
+    return "已關閉";
   }
 
   if (diffMinutes < 60) {
-    return `${formatMinutes(diffMinutes)} left`;
+    return `剩餘 ${formatMinutes(diffMinutes)}`;
   }
 
   const diffHours = Math.floor(diffMinutes / 60);
   const remainderMinutes = diffMinutes % 60;
-  return `${diffHours}h ${remainderMinutes}m left`;
+  return `剩餘 ${diffHours} 小時 ${remainderMinutes} 分鐘`;
 }
 
 function getStatusTone(status: BookingRecord["orderStatus"]): CanvasTone {
@@ -302,36 +306,36 @@ function isActionableStatus(status: BookingRecord["orderStatus"]) {
 function getActionDisabledReason(reasonCode?: string) {
   switch (reasonCode) {
     case "editable_window_passed":
-      return "Edit window closed";
+      return "可編輯時窗已關閉";
     case "cancel_window_passed":
-      return "Cancellation window closed";
+      return "可取消時窗已關閉";
     case "workflow_locked":
-      return "Workflow no longer accepts tenant changes";
+      return "流程已鎖定，不再接受租戶變更";
     default:
-      return "Unavailable";
+      return "目前不可用";
   }
 }
 
 function getActionLabel(action: string) {
   switch (action) {
     case "open_detail":
-      return "Open detail";
+      return "開啟明細";
     case "update_booking":
-      return "Edit";
+      return "編輯";
     case "cancel_booking":
-      return "Cancel";
+      return "取消";
     case "create_booking":
-      return "New";
+      return "新增";
     case "open_ops_approval":
-      return "Ops approval";
+      return "營運審批";
     case "open_ops_dispatch":
-      return "Ops dispatch";
+      return "營運派遣";
     case "open_integration_governance":
-      return "Integration governance";
+      return "整合治理";
     case "reset_filters":
-      return "Clear filters";
+      return "清除篩選";
     default:
-      return action;
+      return formatTenantCodeLabel(action, action);
   }
 }
 
@@ -357,7 +361,7 @@ function buildBookingCrossAppLinks(
       resourceType: "tenant_booking_approval_request",
       resourceId: booking.bookingId,
       openMode: "new_tab",
-      label: "Open ops approval queue",
+      label: "開啟營運審批佇列",
     });
   }
 
@@ -373,7 +377,7 @@ function buildBookingCrossAppLinks(
       resourceType: "dispatch_queue_item",
       resourceId: booking.bookingId,
       openMode: "new_tab",
-      label: "Open ops dispatch queue",
+      label: "開啟營運派遣佇列",
     });
   }
 
@@ -461,10 +465,9 @@ function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
     booking.orderStatus === "exception_hold"
   ) {
     return {
-      label: "SLA at risk",
+      label: "服務時限風險",
       tone: "warn",
-      detail:
-        "Dispatch recovery is required to protect this reservation window.",
+      detail: "需要先恢復派遣，才能保護這筆預約的服務時窗。",
     };
   }
 
@@ -482,9 +485,9 @@ function deriveSlaStatus(booking: BookingRecord): BookingSlaStatus | null {
     isActionableStatus(booking.orderStatus)
   ) {
     return {
-      label: "SLA watch",
+      label: "服務時限觀察",
       tone: "info",
-      detail: `Pickup window opens in ${formatMinutes(minutesUntilStart)}.`,
+      detail: `距離上車時窗開啟還有 ${formatMinutes(minutesUntilStart)}。`,
     };
   }
 
@@ -523,20 +526,20 @@ function getActionHref(action: string, booking: BookingListRecord) {
 function getSubtypeLabel(subtype: BookingRecord["businessDispatchSubtype"]) {
   switch (subtype) {
     case "credit_card_airport_transfer":
-      return "Airport transfer";
+      return "信用卡機場接送";
     case "enterprise_dispatch":
-      return "Enterprise dispatch";
+      return "企業派遣";
     default:
-      return subtype;
+      return formatTenantCodeLabel(subtype, subtype);
   }
 }
 
 function getServiceBucketLabel(bucket: string) {
   switch (bucket) {
     case "business_dispatch":
-      return "Business dispatch";
+      return "商務派遣";
     default:
-      return bucket;
+      return formatTenantCodeLabel(bucket, bucket);
   }
 }
 
@@ -578,9 +581,9 @@ function getEmptyStateContent(
   switch (reason) {
     case "not_provisioned":
       return {
-        title: "Tenant setup is not provisioned yet",
+        title: "租戶設定尚未完成開通",
         description:
-          "Bookings stay unavailable until tenant governance and downstream integrations finish setup for this workspace.",
+          "在租戶治理與下游整合完成這個工作區的設定前，訂單功能仍會保持不可用。",
         tone: "info",
         nextAction: {
           descriptor: {
@@ -593,30 +596,29 @@ function getEmptyStateContent(
       };
     case "permission_denied":
       return {
-        title: "You do not have permission to see bookings",
+        title: "目前沒有查看訂單的權限",
         description:
-          "The current tenant actor can enter the shell, but booking ledger access is not granted for this role context.",
+          "目前的租戶身分可以進入外框，但這個角色情境並未被授予訂單台帳可見權限。",
         tone: "warn",
       };
     case "external_unavailable":
       return {
-        title: "Booking data is temporarily unavailable",
+        title: "訂單資料暫時不可用",
         description:
-          "An upstream dependency did not respond in time. Retry this page, then escalate through ops if the stale window persists.",
+          "上游依賴沒有在時限內回應。請先重新載入此頁，若過舊狀態持續再交由營運處理。",
         tone: "warn",
       };
     case "fetch_failed":
       return {
-        title: "The booking list failed to load",
+        title: "訂單清單載入失敗",
         description:
-          "The page could not retrieve a valid tenant booking snapshot. Retry the page and review service health if the failure repeats.",
+          "頁面未能取得可信的租戶訂單快照。請重試此頁，若持續失敗再檢查服務健康狀態。",
         tone: "warn",
       };
     case "filtered_empty":
       return {
-        title: "No bookings match these filters",
-        description:
-          "Try widening the reservation date range, clearing status chips, or moving back to all service buckets.",
+        title: "目前篩選條件沒有符合的訂單",
+        description: "請放寬預約日期範圍、清除狀態條件，或切回全部服務類別。",
         tone: "info",
         nextAction: {
           descriptor: {
@@ -630,9 +632,9 @@ function getEmptyStateContent(
     case "no_data":
     default:
       return {
-        title: "No bookings exist for this tenant yet",
+        title: "這個租戶目前還沒有訂單",
         description:
-          "This looks like a brand-new tenant workspace. Create the first booking or wait for upstream booking intake to populate this ledger.",
+          "這看起來像是全新的租戶工作區。請建立第一筆訂單，或等待上游訂單流入填滿這份台帳。",
         tone: "info",
         nextAction: {
           descriptor: {
@@ -686,7 +688,7 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
           response.status,
           errorEnvelope?.error.code,
         ),
-        errorMessage: errorEnvelope?.error.message ?? "Unknown booking error.",
+        errorMessage: errorEnvelope?.error.message ?? "未知的訂單錯誤。",
       };
     }
 
@@ -720,8 +722,10 @@ async function loadBookingsPageData(): Promise<BookingListPageData> {
         dataFreshness: "degraded",
       },
       emptyReason: "fetch_failed",
-      errorMessage:
-        error instanceof Error ? error.message : "Unknown booking error.",
+      errorMessage: formatTenantUiError(
+        error instanceof Error ? error.message : "未知的訂單錯誤。",
+        "訂單清單讀取失敗",
+      ),
     };
   }
 }
@@ -835,21 +839,21 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
             {formatDateTime(booking.reservationWindowStart)}
           </span>
           <span style={secondaryTextStyle}>
-            to {formatDateTime(booking.reservationWindowEnd)}
+            至 {formatDateTime(booking.reservationWindowEnd)}
           </span>
           <div style={inlineMetaStyle}>
             <CanvasPill theme={theme} tone="neutral">
-              Age {formatRelativeDuration(booking.createdAt)}
+              建立於 {formatRelativeDuration(booking.createdAt)}
             </CanvasPill>
             <CanvasPill theme={theme} tone="info">
-              Updated {formatRelativeDuration(booking.updatedAt)}
+              更新於 {formatRelativeDuration(booking.updatedAt)}
             </CanvasPill>
             {editWindow ? (
               <CanvasPill
                 theme={theme}
-                tone={editWindow === "Closed" ? "neutral" : "warn"}
+                tone={editWindow === "已關閉" ? "neutral" : "warn"}
               >
-                Editable {editWindow}
+                可編輯 {editWindow}
               </CanvasPill>
             ) : null}
           </div>
@@ -860,7 +864,7 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
           <span style={primaryTextStyle}>{booking.passenger.name}</span>
           <span style={secondaryTextStyle}>{booking.passenger.phone}</span>
           <span style={secondaryTextStyle}>
-            {booking.costCenter ?? "No cost center"}
+            {booking.costCenter ?? "未指定成本中心"}
           </span>
         </div>
       ),
@@ -872,13 +876,17 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
               tone={getStatusTone(booking.orderStatus)}
               dot
             >
-              {booking.orderStatus}
+              {formatTenantCodeLabel(booking.orderStatus, booking.orderStatus)}
             </CanvasPill>
             <CanvasPill
               theme={theme}
               tone={getApprovalTone(booking.approvalState)}
             >
-              approval {booking.approvalState}
+              審批{" "}
+              {formatTenantCodeLabel(
+                booking.approvalState,
+                booking.approvalState,
+              )}
             </CanvasPill>
             {booking.slaStatus ? (
               <CanvasPill theme={theme} tone={booking.slaStatus.tone}>
@@ -886,11 +894,13 @@ function buildBookingRows(bookings: BookingListRecord[]): BookingRow[] {
               </CanvasPill>
             ) : null}
           </div>
-          <span style={secondaryTextStyle}>{booking.status}</span>
+          <span style={secondaryTextStyle}>
+            {formatTenantCodeLabel(booking.status, booking.status)}
+          </span>
           {booking.slaStatus ? (
             <span style={secondaryTextStyle}>{booking.slaStatus.detail}</span>
           ) : (
-            <span style={secondaryTextStyle}>No SLA warning is published.</span>
+            <span style={secondaryTextStyle}>目前沒有發布服務時限警示。</span>
           )}
         </div>
       ),
@@ -985,13 +995,13 @@ export default async function BookingsPage({
   const headerTabs = getHeaderTabs(data.bookings);
   const activeHeaderTab = headerTabs[0];
 
-  const columns: CanvasTableColumn<BookingRow>[] = [
-    { h: "BK", k: "bookingCell", w: 180 },
-    { h: "TYPE", k: "typeCell", w: 150 },
-    { h: "PICKUP → DROP", k: "routeCell", w: 300 },
-    { h: "WIN", k: "windowCell", w: 240 },
-    { h: "PASS.", k: "passengerCell", w: 140 },
-    { h: "STATE", k: "stateCell", w: 220 },
+  const columns: ServerCanvasTableColumn<BookingRow>[] = [
+    { h: "訂單", k: "bookingCell", w: 180 },
+    { h: "類型", k: "typeCell", w: 150 },
+    { h: "上車 → 下車", k: "routeCell", w: 300 },
+    { h: "時窗", k: "windowCell", w: 240 },
+    { h: "乘客", k: "passengerCell", w: 140 },
+    { h: "狀態", k: "stateCell", w: 220 },
   ];
 
   return (
@@ -1005,17 +1015,14 @@ export default async function BookingsPage({
         actions={
           <div style={actionRowStyle}>
             <Link href="#booking-filters" style={actionLinkStyle("secondary")}>
-              Filter
+              篩選
             </Link>
-            <span
-              style={disabledActionStyle}
-              title="Export is not available yet"
-            >
-              Export
+            <span style={disabledActionStyle} title="匯出功能尚未開通">
+              匯出
             </span>
             {renderActionLink({
               href: "/bookings/new",
-              label: "New",
+              label: "新增",
               variant: "primary",
             })}
             <RefreshTierControl
@@ -1032,37 +1039,37 @@ export default async function BookingsPage({
             theme={theme}
             tone="warn"
             icon="warn"
-            title="Tenant booking snapshot degraded"
+            title="租戶訂單快照目前降級"
             body={data.errorMessage}
           />
         ) : null}
 
         <CanvasCard
           theme={theme}
-          title="Filters"
-          subtitle="Search by booking, order, or passenger, then narrow by status, service bucket, and reservation date range."
+          title="篩選"
+          subtitle="可依訂單編號、叫車單、乘客搜尋，再用狀態、服務類別與預約日期範圍收斂結果。"
         >
           <form action="/bookings" id="booking-filters" style={filterFormStyle}>
             <input name="dateField" type="hidden" value={query.dateField} />
 
             <div style={filterGridStyle}>
               <label style={fieldLabelStyle}>
-                Search
+                搜尋
                 <input
                   defaultValue={query.q}
                   name="q"
-                  placeholder="Booking, order, passenger"
+                  placeholder="訂單、叫車單、乘客"
                   style={inputStyle}
                 />
               </label>
               <label style={fieldLabelStyle}>
-                Service bucket
+                服務類別
                 <select
                   defaultValue={query.serviceBucket}
                   name="serviceBucket"
                   style={inputStyle}
                 >
-                  <option value="all">All buckets</option>
+                  <option value="all">全部類別</option>
                   {PHASE1_SERVICE_BUCKETS.map((bucket) => (
                     <option key={bucket} value={bucket}>
                       {getServiceBucketLabel(bucket)}
@@ -1071,7 +1078,7 @@ export default async function BookingsPage({
                 </select>
               </label>
               <label style={fieldLabelStyle}>
-                From
+                起始日
                 <input
                   defaultValue={query.dateFrom}
                   name="dateFrom"
@@ -1080,7 +1087,7 @@ export default async function BookingsPage({
                 />
               </label>
               <label style={fieldLabelStyle}>
-                To
+                結束日
                 <input
                   defaultValue={query.dateTo}
                   name="dateTo"
@@ -1089,7 +1096,7 @@ export default async function BookingsPage({
                 />
               </label>
               <label style={fieldLabelStyle}>
-                Page size
+                每頁筆數
                 <select
                   defaultValue={String(query.pageSize)}
                   name="pageSize"
@@ -1122,7 +1129,7 @@ export default async function BookingsPage({
                         theme={theme}
                         tone={isActive ? "accent" : "neutral"}
                       >
-                        {status}
+                        {formatTenantCodeLabel(status, status)}
                       </CanvasPill>
                     </Link>
                   );
@@ -1144,10 +1151,10 @@ export default async function BookingsPage({
 
             <div style={actionRowStyle}>
               <button type="submit" style={actionLinkStyle("primary")}>
-                Apply filters
+                套用篩選
               </button>
               <Link href="/bookings" style={actionLinkStyle("secondary")}>
-                Reset
+                清除
               </Link>
             </div>
           </form>
@@ -1155,15 +1162,15 @@ export default async function BookingsPage({
 
         <CanvasCard
           theme={theme}
-          title={`Bookings · ${result.items.length} shown / ${result.total} matched`}
-          subtitle={`Page ${result.page} of ${result.totalPages} · snapshot ${formatDateTime(
+          title={`訂單清單 · 顯示 ${result.items.length} 筆 / 符合 ${result.total} 筆`}
+          subtitle={`第 ${result.page} 頁，共 ${result.totalPages} 頁 · 快照 ${formatDateTime(
             data.refresh.generatedAt,
           )}`}
           padding={0}
         >
           {computedEmptyReason === null ? (
             <div style={{ display: "grid" }}>
-              <CanvasTable<BookingRow>
+              <ServerCanvasTable<BookingRow>
                 theme={theme}
                 columns={columns}
                 rows={rows}
@@ -1180,8 +1187,8 @@ export default async function BookingsPage({
                 }}
               >
                 <span style={secondaryTextStyle}>
-                  API page {data.pageInfo.page} · snapshot size{" "}
-                  {data.pageInfo.pageSize} · total {data.pageInfo.totalItems}
+                  API 第 {data.pageInfo.page} 頁 · 快照筆數{" "}
+                  {data.pageInfo.pageSize} · 總筆數 {data.pageInfo.totalItems}
                 </span>
                 <div style={actionRowStyle}>
                   {result.page > 1
@@ -1189,7 +1196,7 @@ export default async function BookingsPage({
                         href: `/bookings?${buildBookingListQueryString(query, {
                           page: result.page - 1,
                         })}`,
-                        label: "Previous",
+                        label: "上一頁",
                       })
                     : null}
                   {result.page < result.totalPages
@@ -1197,7 +1204,7 @@ export default async function BookingsPage({
                         href: `/bookings?${buildBookingListQueryString(query, {
                           page: result.page + 1,
                         })}`,
-                        label: "Next",
+                        label: "下一頁",
                       })
                     : null}
                 </div>

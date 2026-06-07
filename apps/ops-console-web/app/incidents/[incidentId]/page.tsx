@@ -663,7 +663,7 @@ function EmptyStateBlock({
                 color: theme.textDim,
               }}
             >
-              {reason}
+              {formatOpsCodeLabel(locale, reason)}
             </span>
           </div>
           <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
@@ -672,12 +672,13 @@ function EmptyStateBlock({
           {messageCode ? (
             <span
               style={{
-                fontFamily: theme.monoFamily,
                 fontSize: 11.5,
                 color: theme.textDim,
               }}
             >
-              {messageCode}
+              {locale === "en"
+                ? "Backend status recorded for this panel."
+                : "此面板的後端狀態已記錄。"}
             </span>
           ) : null}
         </div>
@@ -928,7 +929,7 @@ export default async function IncidentDetailPage({
           title={
             locale === "en"
               ? "Opens platform-admin audit in a new tab"
-              : "於新分頁開啟 platform-admin 審計"
+              : "於新分頁開啟平台管理後台審計"
           }
         >
           <CanvasIcon name="ext" size={12} />
@@ -1146,9 +1147,7 @@ export default async function IncidentDetailPage({
                 )
               ) : (
                 <Pill theme={theme} tone="neutral">
-                  {locale === "en"
-                    ? "Read-only by contract"
-                    : "依 contract 唯讀"}
+                  {locale === "en" ? "Read-only by contract" : "依合約設定唯讀"}
                 </Pill>
               )}
             </div>
@@ -1162,7 +1161,7 @@ export default async function IncidentDetailPage({
             >
               {locale === "en"
                 ? "Actions are backend-driven via availableActions. Medium and high-risk actions keep confirmation semantics; high-risk actions require a reason."
-                : "所有 CTA 由 availableActions 驅動；中高風險動作維持確認語意，高風險動作必須填寫原因。"}
+                : "所有操作都依後端回傳設定顯示；中高風險動作會維持確認流程，高風險動作必須填寫原因。"}
             </span>
           </div>
         }
@@ -1213,8 +1212,8 @@ export default async function IncidentDetailPage({
                       ? `Source ${refreshMetadata.source}. Use refresh before acting if the timeline or assignment state looks out of date.`
                       : `來源 ${formatOpsCodeLabel(locale, refreshMetadata.source)}。若時間線或指派狀態看起來過期，請先重新整理再操作。`
                     : locale === "en"
-                      ? "The backend did not return UiRefreshMetadata for this incident snapshot."
-                      : "後端沒有為這筆 incident snapshot 回傳 UiRefreshMetadata。"
+                      ? "The backend did not return refresh metadata for this incident snapshot."
+                      : "後端沒有為這筆事故快照回傳刷新中繼資料。"
                 }
               />
             ) : null}
@@ -1445,7 +1444,7 @@ export default async function IncidentDetailPage({
                         >
                           {locale === "en"
                             ? "This is the pre-recovery variant. Record the first recovery action from the incident workflow."
-                            : "這是 pre-recovery 狀態；請透過 incident 流程記錄第一筆補救。"}
+                            : "這是補救前狀態；請先透過事故處理流程記錄第一筆補救。"}
                         </span>
                       ),
                     };
@@ -1471,8 +1470,8 @@ export default async function IncidentDetailPage({
                     }
                     body={[
                       locale === "en"
-                        ? `Reason ${suppression.reasonCode}`
-                        : `原因 ${suppression.reasonCode}`,
+                        ? `Reason ${formatOpsCodeLabel(locale, suppression.reasonCode)}`
+                        : `原因 ${formatOpsCodeLabel(locale, suppression.reasonCode)}`,
                       suppression.expiresAt
                         ? `${locale === "en" ? "Expires" : "到期"} ${formatDateTime(locale, suppression.expiresAt)}`
                         : null,
@@ -1515,7 +1514,7 @@ export default async function IncidentDetailPage({
                       <span style={{ color: theme.textMuted, fontSize: 12.5 }}>
                         {locale === "en"
                           ? "Linked driver exists, but no active DriverMatchingSuppression is in force."
-                          : "此事故已有關聯司機，但目前沒有生效中的 DriverMatchingSuppression。"}
+                          : "此事故已有關聯司機，但目前沒有生效中的派遣抑制設定。"}
                       </span>
                     ) : undefined
                   }

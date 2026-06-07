@@ -8,7 +8,12 @@ import {
   type CSSProperties,
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
+import type { Locale } from "@/lib/translations";
 import type {
   FeatureFlag,
   FeatureFlagSummary,
@@ -348,7 +353,7 @@ const toggleKnobStyle = {
   flexShrink: 0,
 } satisfies CSSProperties;
 
-function toFlagTableRow(flag: FeatureFlag): FlagTableRow {
+function toFlagTableRow(flag: FeatureFlag, locale: Locale): FlagTableRow {
   const isTenantOverride = Boolean(flag.tenantId);
   const deprecated = isDeprecatedFlag(flag);
   const rolloutLabel = deprecated
@@ -365,8 +370,12 @@ function toFlagTableRow(flag: FeatureFlag): FlagTableRow {
     enabled: flag.enabled,
     tenantId: flag.tenantId ?? null,
     scopeLabel: isTenantOverride
-      ? `Tenant override · ${flag.tenantId}`
-      : "Platform default",
+      ? locale === "en"
+        ? `Tenant override · ${flag.tenantId}`
+        : `租戶覆寫 · ${flag.tenantId}`
+      : locale === "en"
+        ? "Platform default"
+        : "平台預設",
     scopeTone: isTenantOverride ? "accent" : "neutral",
     rolloutLabel,
     rolloutTone:
@@ -376,7 +385,7 @@ function toFlagTableRow(flag: FeatureFlag): FlagTableRow {
           ? "success"
           : "warn",
     updatedAt: flag.updatedAt,
-    updatedBy: "Contract not exposed",
+    updatedBy: locale === "en" ? "Contract not exposed" : "合約尚未提供",
   };
 }
 
@@ -429,11 +438,17 @@ export default function FeatureFlagsPage() {
       setFlags(summary.flags || []);
       setNotes(summary.notes || []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en" ? "Unable to load feature flags" : "無法載入功能旗標",
+        ),
+      );
     } finally {
       setLoading(false);
     }
-  }, [client, selectedTenantId]);
+  }, [client, locale, selectedTenantId]);
 
   const loadTenants = useCallback(async () => {
     setTenantLoading(true);
@@ -442,12 +457,18 @@ export default function FeatureFlagsPage() {
       setTenants(result ?? []);
     } catch (e: unknown) {
       setError(
-        (previous) => previous ?? (e instanceof Error ? e.message : String(e)),
+        (previous) =>
+          previous ??
+          formatPlatformUiError(
+            locale,
+            toPlatformErrorMessage(e),
+            locale === "en" ? "Unable to load tenants" : "無法載入租戶清單",
+          ),
       );
     } finally {
       setTenantLoading(false);
     }
-  }, [client]);
+  }, [client, locale]);
 
   useEffect(() => {
     void loadFlags();
@@ -458,8 +479,9 @@ export default function FeatureFlagsPage() {
   }, [loadTenants]);
 
   const rows = useMemo(
-    () => [...flags].sort(sortFlags).map(toFlagTableRow),
-    [flags],
+    () =>
+      [...flags].sort(sortFlags).map((flag) => toFlagTableRow(flag, locale)),
+    [flags, locale],
   );
   const rolloutStateByKey = useMemo(() => {
     const grouped = new Map<
@@ -552,34 +574,6 @@ export default function FeatureFlagsPage() {
         : auditReceipts,
     [auditReceipts, historyKey],
   );
-  const filterOptions: RolloutFilterOption[] = [
-    {
-      value: "all",
-      label: locale === "en" ? "All" : "全部",
-      count: rows.length,
-    },
-    {
-      value: "mid_rollout",
-      label: locale === "en" ? "Mid-rollout" : "進行中 rollout",
-      count: midRolloutCount,
-    },
-    {
-      value: "rolled_out",
-      label: locale === "en" ? "Rolled out" : "已全面 rollout",
-      count: rolledOutCount,
-    },
-    {
-      value: "deprecated",
-      label: locale === "en" ? "Deprecated" : "Deprecated",
-      count: deprecatedCount,
-    },
-    {
-      value: "tenant_overrides",
-      label: locale === "en" ? "Tenant overrides" : "Tenant overrides",
-      count: overrideCount,
-    },
-  ];
-
   const copy =
     locale === "en"
       ? {
@@ -587,6 +581,8 @@ export default function FeatureFlagsPage() {
           pageSubtitle:
             "Writable only here. Ops, tenant, and driver surfaces stay on read-only GET feature flag views.",
           metaPill: "writable only here",
+          filterAll: "All",
+          filterTenantOverrides: "Tenant overrides",
           refresh: t("common.refresh"),
           refreshing: "Refreshing...",
           addOverride: "Add tenant override",
@@ -686,100 +682,128 @@ export default function FeatureFlagsPage() {
           showAllReceipts: "Show all receipts",
         }
       : {
-          pageTitle: "Feature Flags · WRITE authority",
+          pageTitle: "功能旗標 · 可寫入治理",
           pageSubtitle:
-            "只有這裡可寫入。ops、tenant、driver 其他頁面維持 GET feature flag 唯讀檢視。",
-          metaPill: "writable only here",
+            "只有這裡可寫入。營運端、租戶端與司機端其他頁面都維持功能旗標讀取檢視的唯讀模式。",
+          metaPill: "僅此處可寫入",
+          filterAll: "全部",
+          filterTenantOverrides: "租戶覆寫",
           refresh: t("common.refresh"),
           refreshing: "重新整理中...",
-          addOverride: "新增 tenant override",
-          addOverrideHint: "先切到 tenant 範圍，才能建立 override。",
+          addOverride: "新增租戶覆寫",
+          addOverrideHint: "先切到租戶範圍，才能建立覆寫。",
           riskTitle: "高風險操作必須填寫原因。",
           riskBody:
-            "toggle 與 tenant override 都維持在這條 write lane，確認後會留下本地 audit receipt。",
+            "切換與租戶覆寫都維持在這條可寫入治理線上，確認後會留下本地稽核收據。",
           scopeField: "檢視範圍",
-          searchField: "搜尋 key",
-          searchPlaceholder: "依 flag key 搜尋",
+          searchField: "搜尋旗標鍵",
+          searchPlaceholder: "依旗標鍵搜尋",
           scopeHint:
-            "切到 tenant 可檢視該 tenant 的有效 override 列；預設仍以平台資料為主。",
+            "切到租戶後可檢視該租戶生效中的覆寫列；預設仍以平台資料為主。",
           scopeDefault: "平台預設",
-          scopeLoading: "載入 tenant 清單中...",
+          scopeLoading: "載入租戶清單中...",
           currentScope: selectedTenant
             ? `${selectedTenant.name} (${selectedTenant.code})`
             : "平台預設",
           summaryPlatformDefault: "平台預設",
-          summaryTenantOverride: "Tenant overrides",
-          tableTitle: "Feature flag registry",
+          summaryTenantOverride: "租戶覆寫",
+          tableTitle: "功能旗標登錄表",
           tableSubtitle:
-            "依畫布 handoff 對齊 KEY、SCOPE、STATE TOGGLE、UPDATED BY、AT、ACTIONS 的 table-first 主體。",
-          filterLabel: "Rollout 狀態",
-          filterPill: "table-first layout",
-          rolloutMid: "進行中 rollout",
-          rolloutFull: "已全面 rollout",
-          rolloutDeprecated: "Deprecated",
-          keyHeader: "Key",
-          scopeHeader: "Scope",
-          stateHeader: "State",
-          updatedByHeader: "Updated by",
-          updatedAtHeader: "At",
-          actionsHeader: "Actions",
+            "依畫布交接維持「旗標鍵、範圍、狀態切換、更新者、更新時間、操作」的表格優先主體。",
+          filterLabel: "推進狀態",
+          filterPill: "表格優先佈局",
+          rolloutMid: "進行中推進",
+          rolloutFull: "已全面推出",
+          rolloutDeprecated: "已淘汰",
+          keyHeader: "旗標鍵",
+          scopeHeader: "範圍",
+          stateHeader: "狀態",
+          updatedByHeader: "更新者",
+          updatedAtHeader: "更新時間",
+          actionsHeader: "操作",
           noDescription: "尚未提供描述",
-          updatedByValue: "目前 contract 未提供",
+          updatedByValue: "合約尚未提供",
           toggle: "切換",
-          removeOverride: "移除 override",
+          removeOverride: "移除覆寫",
           history: "歷史",
-          confirmToggleTitle: "確認切換 feature flag",
-          confirmToggleBody: "這會變更目前檢視範圍中的有效 feature flag 狀態。",
-          confirmOverrideTitle: "建立 tenant override",
+          confirmToggleTitle: "確認切換功能旗標",
+          confirmToggleBody: "這會變更目前檢視範圍中的有效功能旗標狀態。",
+          confirmOverrideTitle: "建立租戶覆寫",
           confirmOverrideBody:
-            "這會為所選 key 建立 tenant 專屬 override，不影響其他範圍。",
-          confirmRemoveOverrideTitle: "移除 tenant override",
+            "這會為所選旗標鍵建立租戶專屬覆寫，不影響其他範圍。",
+          confirmRemoveOverrideTitle: "移除租戶覆寫",
           confirmRemoveOverrideBody:
-            "這會移除 tenant 專屬 override，讓該 tenant 回到平台預設。",
+            "這會移除租戶專屬覆寫，讓該租戶回到平台預設。",
           reasonLabel: "高風險原因",
-          reasonPlaceholder:
-            "說明 rollout 原因、預期 blast radius 與驗證計畫。",
+          reasonPlaceholder: "說明推進原因、預期影響範圍與驗證計畫。",
           reasonRequired: "執行這個高風險操作前必須填寫原因。",
-          overrideTenantField: "Tenant",
-          overrideKeyField: "Flag key",
-          overrideStateField: "Override 狀態",
-          overrideDescriptionField: "Override 描述",
-          overrideDescriptionHint: "可留白，沿用既有 flag 描述。",
+          overrideTenantField: "租戶",
+          overrideKeyField: "旗標鍵",
+          overrideStateField: "覆寫狀態",
+          overrideDescriptionField: "覆寫描述",
+          overrideDescriptionHint: "可留白，沿用既有旗標描述。",
           enabled: t("common.enabled"),
           disabled: t("common.disabled"),
           cancel: t("common.cancel"),
           confirming: t("common.updating"),
           confirmEnable: "啟用",
           confirmDisable: "停用",
-          confirmCreate: "建立 override",
-          confirmRemove: "移除 override",
+          confirmCreate: "建立覆寫",
+          confirmRemove: "移除覆寫",
           noFlags: t("flags.empty"),
           loading: t("flags.loading"),
-          scopeMeta: "目前 scope",
+          scopeMeta: "目前範圍",
           resultMeta: `可見 ${filteredRows.length} 列`,
           enabledMeta: `啟用 ${enabledCount} 列`,
           disabledMeta: `停用 ${disabledCount} 列`,
-          overrideMeta: `tenant override ${overrideCount} 列`,
+          overrideMeta: `租戶覆寫 ${overrideCount} 列`,
           notesTitle: "延伸備註",
-          notesEmpty: "目前範圍沒有額外 contract 備註。",
-          historyTitle: "本地 audit receipts",
-          historyEmpty: "這個瀏覽 session 尚未記錄任何 receipt。",
-          historyHint: "可用 History 列操作聚焦特定 key 的 receipt。",
-          historyFocusAll: "目前顯示此瀏覽 session 的所有 receipts。",
-          historyFocusKey: `目前聚焦 ${historyKey ?? "全部 key"}`,
+          notesEmpty: "目前範圍沒有額外合約備註。",
+          historyTitle: "本地稽核收據",
+          historyEmpty: "這個瀏覽工作階段尚未記錄任何收據。",
+          historyHint: "可用「歷史」操作聚焦特定旗標鍵的收據。",
+          historyFocusAll: "目前顯示此瀏覽工作階段的所有收據。",
+          historyFocusKey: `目前聚焦 ${historyKey ?? "全部鍵"}`,
           secondaryPanelTitle: "變更控制與延伸細節",
           secondaryPanelSubtitle:
             "高風險原因、延伸備註與本地歷史都收在表格主體下方的次要區塊。",
           actionComposerTitle: "待確認的高風險變更",
-          actionComposerIdle: "toggle 與 override 變更都必須先填寫原因再確認。",
-          actionApplied: "已記錄 audit receipt",
-          noFlagsInFilter:
-            "目前 rollout 篩選與搜尋條件沒有符合的 feature flags。",
+          actionComposerIdle: "切換與覆寫變更都必須先填寫原因再確認。",
+          actionApplied: "已記錄稽核收據",
+          noFlagsInFilter: "目前推進狀態篩選與搜尋條件沒有符合的功能旗標。",
           laneMeta: "僅此處可寫入",
           notesMeta: "延伸備註收在預設主體之外。",
-          receiptsMeta: `本地 receipt ${auditReceipts.length} 筆`,
-          showAllReceipts: "顯示全部 receipts",
+          receiptsMeta: `本地收據 ${auditReceipts.length} 筆`,
+          showAllReceipts: "顯示全部收據",
         };
+
+  const filterOptions: RolloutFilterOption[] = [
+    {
+      value: "all",
+      label: copy.filterAll,
+      count: rows.length,
+    },
+    {
+      value: "mid_rollout",
+      label: copy.rolloutMid,
+      count: midRolloutCount,
+    },
+    {
+      value: "rolled_out",
+      label: copy.rolloutFull,
+      count: rolledOutCount,
+    },
+    {
+      value: "deprecated",
+      label: copy.rolloutDeprecated,
+      count: deprecatedCount,
+    },
+    {
+      value: "tenant_overrides",
+      label: copy.filterTenantOverrides,
+      count: overrideCount,
+    },
+  ];
 
   const columns: CanvasTableColumn<FlagTableRow>[] = [
     {
@@ -968,7 +992,9 @@ export default function FeatureFlagsPage() {
       const scopeLabel =
         pendingAction.intent === "toggle"
           ? pendingAction.scopeLabel
-          : `Tenant override · ${pendingAction.tenantId}`;
+          : locale === "en"
+            ? `Tenant override · ${pendingAction.tenantId}`
+            : `租戶覆寫 · ${pendingAction.tenantId}`;
       const summary =
         pendingAction.intent === "toggle"
           ? `${pendingAction.nextEnabled ? copy.confirmEnable : copy.confirmDisable} ${pendingAction.key}`
@@ -999,7 +1025,15 @@ export default function FeatureFlagsPage() {
         await loadFlags();
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en"
+            ? "Unable to update feature flag"
+            : "無法更新功能旗標",
+        ),
+      );
     } finally {
       setUpdating(null);
     }

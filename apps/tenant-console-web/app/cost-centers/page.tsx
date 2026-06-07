@@ -8,6 +8,10 @@ import type {
   TenantUserRoleRecord,
 } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import {
+  formatTenantErrorSummary,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
 import { CostCentersManager } from "./cost-centers-manager";
 
 export const dynamic = "force-dynamic";
@@ -30,10 +34,6 @@ const EMPTY_REASONS: EmptyReason[] = [
   "external_unavailable",
   "filtered_empty",
 ];
-
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "未知錯誤";
-}
 
 function parseEmptyReason(
   value: string | string[] | undefined,
@@ -77,19 +77,44 @@ async function loadCostCentersData(): Promise<CostCentersPageData> {
     reportJobsResult.status === "fulfilled" ? reportJobsResult.value : [];
 
   if (costCentersResult.status === "rejected") {
-    errors.push(`成本中心目錄: ${toErrorMessage(costCentersResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "成本中心目錄",
+        toTenantErrorMessage(costCentersResult.reason, "成本中心目錄讀取失敗"),
+      ),
+    );
   }
   if (approvalRulesResult.status === "rejected") {
-    errors.push(`審批規則: ${toErrorMessage(approvalRulesResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "審批規則",
+        toTenantErrorMessage(approvalRulesResult.reason, "審批規則讀取失敗"),
+      ),
+    );
   }
   if (usersResult.status === "rejected") {
-    errors.push(`租戶成員: ${toErrorMessage(usersResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "租戶成員",
+        toTenantErrorMessage(usersResult.reason, "租戶成員讀取失敗"),
+      ),
+    );
   }
   if (coverageResult.status === "rejected") {
-    errors.push(`coverage report: ${toErrorMessage(coverageResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "覆蓋率報告",
+        toTenantErrorMessage(coverageResult.reason, "覆蓋率報告讀取失敗"),
+      ),
+    );
   }
   if (reportJobsResult.status === "rejected") {
-    errors.push(`報表作業: ${toErrorMessage(reportJobsResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "報表作業",
+        toTenantErrorMessage(reportJobsResult.reason, "報表作業讀取失敗"),
+      ),
+    );
   }
 
   const quotaSummariesByCode: Partial<
@@ -109,7 +134,12 @@ async function loadCostCentersData(): Promise<CostCentersPageData> {
       if (result.status === "fulfilled") {
         quotaSummariesByCode[code] = result.value;
       } else {
-        errors.push(`${code} quota: ${toErrorMessage(result.reason)}`);
+        errors.push(
+          `${code} 配額：${formatTenantErrorSummary(
+            "讀取狀態",
+            toTenantErrorMessage(result.reason, "配額摘要讀取失敗"),
+          ).replace(/^讀取狀態：/, "")}`,
+        );
       }
     });
   }

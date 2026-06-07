@@ -2,25 +2,25 @@ import Link from "next/link";
 
 const receiptStates = [
   {
-    title: "DRTS-issued receipt",
-    status: "Supported",
-    body: "Direct passenger trips can expose a platform-owned receipt artifact and trace metadata from this lane.",
+    title: "平台開立收據",
+    status: "可支援",
+    body: "乘客直訂行程可在此查看平台管理的收據與追蹤資訊。",
     href: "/trip/completed",
-    cta: "Preview completed-trip receipt",
+    cta: "查看完成行程收據",
   },
   {
-    title: "External receipt reference",
-    status: "Supported with ownership handoff",
-    body: "When the source channel owns billing, the rider sees who owns the receipt and where to continue instead of a fake download button.",
+    title: "外部收據參考",
+    status: "可支援，但需交回來源渠道",
+    body: "若帳務由來源渠道負責，乘客會看到收據歸屬與後續處理位置，而不是假的下載按鈕。",
     href: "/trip/read-only",
-    cta: "See read-only trip ownership",
+    cta: "查看唯讀行程歸屬",
   },
   {
-    title: "Receipt unavailable or unsupported",
-    status: "Explicitly handled",
-    body: "Phone-assisted, partner, or otherwise unsupported cases remain visible with a concrete explanation and support direction.",
+    title: "收據暫不可用或不支援",
+    status: "明確說明",
+    body: "電話協助、合作夥伴或其他不支援情境會顯示具體原因與客服方向。",
     href: "/unsupported",
-    cta: "Open unsupported fallback",
+    cta: "查看不支援情境",
   },
 ];
 
@@ -28,15 +28,10 @@ export default function ReceiptCenterPage() {
   return (
     <div className="page-shell">
       <section className="hero-card hero-gradient">
-        <span className="eyebrow">Receipt center</span>
-        <h1>
-          The passenger receipt surface is now wired to concrete trip outcomes.
-        </h1>
+        <span className="eyebrow">收據中心</span>
+        <h1>依行程結果與來源渠道顯示正確收據狀態。</h1>
         <p>
-          This landing page establishes the receipt topology required by
-          `SYS-UI-003` and links each ownership class to the matching trip
-          outcome route from `SYS-UI-004`. Source-channel ownership stays
-          authoritative; this surface only mirrors it.
+          收據中心會把平台開立、外部來源與不支援情境分開呈現。收據歸屬以來源渠道為準，此頁只同步顯示。
         </p>
       </section>
 
@@ -55,11 +50,9 @@ export default function ReceiptCenterPage() {
 
       <section className="callout-row">
         <article className="callout-card warning">
-          <strong>No invented delivery channel</strong>
+          <strong>不宣稱不存在的寄送渠道</strong>
           <p>
-            The route intentionally avoids claiming new email or SMS receipt
-            delivery. Ownership and availability must stay aligned with the
-            upstream settlement and source-channel rules.
+            頁面不會自行宣稱電子郵件或簡訊收據寄送。可用性與歸屬必須與上游結算和來源渠道一致。
           </p>
         </article>
       </section>

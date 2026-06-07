@@ -4,10 +4,25 @@ import { getUsers, inviteUser, updateUserRole } from "./actions";
 import {
   FORMAL_TENANT_ROLE_FRAMING,
   describeRoleSnapshot,
+  formatAuthorityRoleCode,
   getTenantRoleSnapshot,
 } from "@/lib/rbac";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { formatPortalUiError, toPortalErrorMessage } from "@/lib/error-copy";
+
+function formatUserStatus(status: string) {
+  switch (status) {
+    case "invited":
+      return "已邀請";
+    case "active":
+      return "啟用中";
+    case "suspended":
+      return "已停權";
+    default:
+      return status;
+  }
+}
 
 export default async function UsersPage() {
   const { users, error } = await getUsers();
@@ -20,35 +35,45 @@ export default async function UsersPage() {
   try {
     roleCatalog = await client.listTenantRoles();
   } catch (e) {
-    roleCatalogError = e instanceof Error ? e.message : "Unknown error";
+    roleCatalogError = formatPortalUiError(
+      toPortalErrorMessage(e),
+      "無法載入角色目錄",
+    );
   }
 
-  const combinedError = [error, roleCatalogError, roleSnapshot.identityError]
+  const combinedError = [
+    error ? formatPortalUiError(error, "無法載入使用者資料") : null,
+    roleCatalogError,
+    roleSnapshot.identityError
+      ? formatPortalUiError(roleSnapshot.identityError, "身分載入失敗")
+      : null,
+  ]
     .filter(Boolean)
     .join(" | ");
   const roleLookup = new Map(
     roleCatalog.map((catalogEntry) => [
       catalogEntry.roleCode,
-      catalogEntry.displayName,
+      formatAuthorityRoleCode(catalogEntry.roleCode) ||
+        catalogEntry.displayName,
     ]),
   );
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="User Management"
+        title="使用者管理"
         description={
           adminAccess
-            ? "Invite users and manage tenant access with formal role framing anchored to server-issued authority."
-            : `Viewing as ${describeRoleSnapshot(roleSnapshot)}. Tenant admin authority is required to manage users.`
+            ? "可依伺服器發出的正式角色脈絡邀請使用者並管理租戶存取權限。"
+            : `目前以 ${describeRoleSnapshot(roleSnapshot)} 身分檢視。管理使用者需要租戶管理員權限。`
         }
       >
         <div className="panel-stack">
           <p className="muted-copy">
-            Current authority roles:{" "}
+            目前權限角色：
             {roleSnapshot.roleCatalogBackedLabels.length > 0
               ? roleSnapshot.roleCatalogBackedLabels.join(", ")
-              : "unavailable"}
+              : "目前無法取得"}
           </p>
           <div className="surface-grid">
             {FORMAL_TENANT_ROLE_FRAMING.map((roleFrame) => {
@@ -59,9 +84,7 @@ export default async function UsersPage() {
               return (
                 <article className="surface-card" key={roleFrame.key}>
                   <span className="surface-kicker">
-                    {active
-                      ? "Active in current identity"
-                      : "Prototype framing"}
+                    {active ? "目前身分生效" : "角色原型脈絡"}
                   </span>
                   <h3>{roleFrame.label}</h3>
                   <p>{roleFrame.summary}</p>
@@ -73,7 +96,7 @@ export default async function UsersPage() {
 
         {combinedError && (
           <div className="error-banner">
-            <strong>Error:</strong> {combinedError}
+            <strong>錯誤：</strong> {combinedError}
           </div>
         )}
 
@@ -81,8 +104,8 @@ export default async function UsersPage() {
           <InviteForm roleCatalog={roleCatalog} />
         ) : adminAccess ? (
           <p className="empty-state">
-            Role catalog unavailable. Invite and role-change actions stay
-            disabled until `/api/tenant/roles` responds.
+            角色目錄目前不可用。在 `/api/tenant/roles` 回應之前，邀請與角色
+            調整操作都會維持停用。
           </p>
         ) : null}
 
@@ -91,12 +114,12 @@ export default async function UsersPage() {
             <table>
               <thead>
                 <tr>
-                  <th>User ID</th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  {adminAccess && <th>Actions</th>}
+                  <th>使用者 ID</th>
+                  <th>姓名</th>
+                  <th>電子郵件</th>
+                  <th>角色</th>
+                  <th>狀態</th>
+                  {adminAccess && <th>操作</th>}
                 </tr>
               </thead>
               <tbody>
@@ -106,7 +129,7 @@ export default async function UsersPage() {
                     <td>{user.displayName}</td>
                     <td>{user.email}</td>
                     <td>{roleLookup.get(user.roleCode) ?? user.roleCode}</td>
-                    <td>{user.status}</td>
+                    <td>{formatUserStatus(user.status)}</td>
                     {adminAccess && (
                       <td>
                         <RoleUpdateForm
@@ -123,19 +146,18 @@ export default async function UsersPage() {
           </div>
         ) : (
           <p className="empty-state">
-            No users found.
-            {adminAccess && " Invite a user using the form above."}
+            目前沒有使用者資料。
+            {adminAccess && " 可使用上方表單邀請新的使用者。"}
           </p>
         )}
 
         <Link className="route-link" href="/" style={{ marginTop: "1rem" }}>
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>返回首頁</strong>
+          回到租戶入口總覽。
         </Link>
         <Link className="route-link" href="/settings">
-          <strong>Settings lane</strong>
-          Review the tenant capability and governance summary that backs these
-          role assumptions.
+          <strong>設定頁總覽</strong>
+          前往租戶能力與治理摘要，查看這些角色假設背後的設定依據。
         </Link>
       </AppShellCard>
     </main>
@@ -153,9 +175,9 @@ function InviteForm({
         <table>
           <thead>
             <tr>
-              <th>Email</th>
-              <th>Display Name</th>
-              <th>Role</th>
+              <th>電子郵件</th>
+              <th>顯示名稱</th>
+              <th>角色</th>
               <th></th>
             </tr>
           </thead>
@@ -165,7 +187,7 @@ function InviteForm({
                 <input
                   type="email"
                   name="email"
-                  placeholder="user@example.com"
+                  placeholder="例如：member@tenant.demo"
                   required
                   style={{ width: "100%" }}
                 />
@@ -174,7 +196,7 @@ function InviteForm({
                 <input
                   type="text"
                   name="displayName"
-                  placeholder="John Doe"
+                  placeholder="王小明"
                   required
                   style={{ width: "100%" }}
                 />
@@ -190,14 +212,15 @@ function InviteForm({
                       key={catalogEntry.roleCode}
                       value={catalogEntry.roleCode}
                     >
-                      {catalogEntry.displayName}
+                      {formatAuthorityRoleCode(catalogEntry.roleCode) ||
+                        catalogEntry.displayName}
                     </option>
                   ))}
                 </select>
               </td>
               <td>
                 <button type="submit" className="btn-primary">
-                  Invite User
+                  邀請使用者
                 </button>
               </td>
             </tr>
@@ -227,17 +250,18 @@ function RoleUpdateForm({
       >
         {roleCatalog.map((catalogEntry) => (
           <option key={catalogEntry.roleCode} value={catalogEntry.roleCode}>
-            {catalogEntry.displayName}
+            {formatAuthorityRoleCode(catalogEntry.roleCode) ||
+              catalogEntry.displayName}
           </option>
         ))}
       </select>
       <select name="status" defaultValue={user.status}>
-        <option value="invited">Invited</option>
-        <option value="active">Active</option>
-        <option value="suspended">Suspended</option>
+        <option value="invited">已邀請</option>
+        <option value="active">啟用中</option>
+        <option value="suspended">已停權</option>
       </select>
       <button type="submit" className="btn-secondary" disabled={disabled}>
-        Update
+        更新
       </button>
     </form>
   );

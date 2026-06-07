@@ -18,9 +18,8 @@ import {
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Operations Console",
-  description:
-    "Protected operations workspace for dispatch, reporting, revenue, and registry workflows.",
+  title: "DRTS 營運控制台",
+  description: "派遣、報表、營收與主資料流程的受保護營運工作區。",
 };
 
 export const dynamic = "force-dynamic";

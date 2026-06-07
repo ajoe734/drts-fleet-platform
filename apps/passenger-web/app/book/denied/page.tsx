@@ -2,16 +2,16 @@ import Link from "next/link";
 
 const denialReasons = [
   {
-    code: "policy.safety_hold",
-    body: "Active safety hold on the rider profile. Booking is blocked until the hold clears via support.",
+    label: "安全狀態需客服確認",
+    body: "乘客帳戶目前有安全限制。限制解除前，系統會暫停接受新的預約。",
   },
   {
-    code: "policy.fraud_review",
-    body: "Open fraud review on the rider's recent activity. The rider sees a non-blaming message and a support exit.",
+    label: "近期活動正在審查",
+    body: "近期使用紀錄需要進一步確認。乘客會看到中性的說明與客服協助入口。",
   },
   {
-    code: "policy.unsupported_destination",
-    body: "Drop-off lies in a region the platform has explicitly blocked for non-credentialed riders.",
+    label: "下車地點暫不支援",
+    body: "下車地點位於目前不開放一般乘客預約的區域，因此無法完成此需求。",
   },
 ];
 
@@ -20,34 +20,29 @@ export default function BookingDeniedPage() {
     <div className="page-shell">
       <section className="hero-card">
         <span className="eyebrow state-pill state-pill-negative">
-          Denied by policy
+          政策未通過
         </span>
-        <h1>Booking request was denied.</h1>
+        <h1>此預約需求無法送出。</h1>
         <p>
-          The platform rejected this request for a policy reason. The rider
-          surface intentionally does not show the underlying decision graph; it
-          shows the public-facing reason and the safe next steps.
+          系統因政策或安全原因暫停此需求。頁面只顯示可對乘客說明的原因類型與安全下一步，不顯示內部判斷細節。
         </p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Reason class (sample)</span>
-        <h3>policy.safety_hold</h3>
+        <span className="surface-kicker">原因類型</span>
+        <h3>帳戶狀態需客服確認</h3>
         <p>
-          Public-facing message: "We could not complete this request. Please
-          contact support to review your account before booking again."
+          對乘客顯示的訊息：目前無法完成此預約，請先聯絡客服確認帳戶狀態後再嘗試。
         </p>
         <p className="surface-footnote">
-          Internal reason codes are not surfaced to the rider, but they are
-          stable enough for support to look up. The mapping table is owned by
-          the booking policy service, not by this UI.
+          內部原因代碼只供客服查詢與稽核使用，不會直接顯示給乘客。
         </p>
       </section>
 
       <section className="content-grid">
         {denialReasons.map((reason) => (
-          <article className="surface-card" key={reason.code}>
-            <span className="surface-kicker">{reason.code}</span>
+          <article className="surface-card" key={reason.label}>
+            <span className="surface-kicker">{reason.label}</span>
             <p>{reason.body}</p>
           </article>
         ))}
@@ -55,30 +50,26 @@ export default function BookingDeniedPage() {
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Allowed next steps</strong>
-          <p>
-            Riders may contact support, retry after the policy reason clears, or
-            fall back to an unsupported channel acknowledgement.
-          </p>
+          <strong>可以怎麼做</strong>
+          <p>乘客可聯絡客服、待限制解除後重試，或查看不支援情境說明。</p>
           <Link className="text-link" href="/unsupported">
-            Open unsupported fallback
+            查看不支援情境
           </Link>
         </article>
         <article className="callout-card warning">
-          <strong>What the route does not do</strong>
+          <strong>頁面不會做的事</strong>
           <p>
-            It does not auto-retry, does not silently downgrade to a different
-            service level, and does not blame the rider for the denial.
+            系統不會自動重試、不會偷偷改成其他服務類型，也不會用責備乘客的語氣說明。
           </p>
         </article>
       </section>
 
       <section className="hero-actions">
         <Link className="primary-link" href="/auth">
-          Re-verify rider identity
+          重新驗證乘客身分
         </Link>
         <Link className="secondary-link" href="/book">
-          Return to request entry
+          回到預約入口
         </Link>
       </section>
     </div>

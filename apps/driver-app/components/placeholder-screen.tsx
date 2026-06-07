@@ -20,7 +20,7 @@ export function PlaceholderScreen({
   return (
     <View style={styles.container}>
       <View style={styles.card}>
-        <Text style={styles.eyebrow}>Driver app bootstrap</Text>
+        <Text style={styles.eyebrow}>司機端啟動流程</Text>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.description}>{description}</Text>
         {children}

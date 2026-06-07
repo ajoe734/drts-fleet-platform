@@ -188,6 +188,16 @@ function copy(locale: Locale, en: string, zh: string) {
   return locale === "zh" ? zh : en;
 }
 
+type ForwardedSyncError = NonNullable<ForwardedOrderRecord["lastSyncError"]>;
+
+function formatForwardedSyncError(locale: Locale, error: ForwardedSyncError) {
+  if (locale === "zh") {
+    return error.retryable ? "可重試" : "不可重試";
+  }
+
+  return error.message;
+}
+
 function normalizeOrigin(value: string | null | undefined) {
   return value ? value.replace(/\/+$/, "") : null;
 }
@@ -290,7 +300,7 @@ function emptyTitle(locale: Locale, reason: EmptyReason) {
     case "no_data":
       return copy(locale, "No records yet", "目前沒有資料");
     case "not_provisioned":
-      return copy(locale, "Not provisioned", "尚未 provision");
+      return copy(locale, "Not provisioned", "尚未佈建");
     case "fetch_failed":
       return copy(locale, "Snapshot unavailable", "快照暫不可用");
     case "permission_denied":
@@ -320,7 +330,7 @@ function defaultEmptyDescription(locale: Locale, reason: EmptyReason) {
       return copy(
         locale,
         "The required upstream record has not been provisioned for this driver yet.",
-        "這位司機所需的上游資料尚未 provision。",
+        "這位司機所需的上游資料尚未完成建置。",
       );
     case "fetch_failed":
       return copy(
@@ -371,7 +381,7 @@ function renderEmptyState(
           <span
             style={{ ...monoStyle, fontSize: "11px", color: theme.textDim }}
           >
-            {reason}
+            {formatOpsCodeLabel(locale, reason)}
           </span>
         </span>
       }
@@ -620,19 +630,19 @@ function buildRefreshBannerBody(
     ? copy(
         locale,
         `Generated ${formatDateTime(locale, metadata.generatedAt)}`,
-        `生成時間 ${formatDateTime(locale, metadata.generatedAt)}`,
+        `快照時間 ${formatDateTime(locale, metadata.generatedAt)}`,
       )
     : copy(
         locale,
         "Backend refresh metadata unavailable; showing the latest server-rendered snapshot.",
-        "後端尚未提供 refresh metadata；目前顯示最新一次 server-rendered 快照。",
+        "後端尚未提供刷新資訊；目前顯示最新一次伺服器端快照。",
       );
 
   return [
     copy(
       locale,
       `T3 cadence · ${metadata.source} snapshot · ${freshnessLabel}`,
-      `T3 節奏 · ${metadata.source} 快照 · ${freshnessLabel}`,
+      `中度刷新節奏 · ${formatOpsCodeLabel(locale, metadata.source)} 快照 · ${freshnessLabel}`,
     ),
     snapshotSummary,
     sectionSummary,
@@ -1035,20 +1045,20 @@ export default async function DriverDetailPage({
     },
     {
       descriptor: requestReauthDescriptor,
-      label: copy(locale, "Request re-auth", "請司機 re-auth"),
+      label: copy(locale, "Request re-auth", "請司機重新驗證"),
       icon: "arrow",
       href: "#platform-bindings",
     },
     activeSuppression
       ? {
           descriptor: liftSuppressionDescriptor,
-          label: copy(locale, "Lift suppression", "解除 suppression"),
+          label: copy(locale, "Lift suppression", "解除派遣抑制"),
           icon: "check",
           ...(suppressionIncidentHref ? { href: suppressionIncidentHref } : {}),
         }
       : {
           descriptor: suppressDescriptor,
-          label: copy(locale, "Suppress matching", "suppress matching"),
+          label: copy(locale, "Suppress matching", "啟用派遣抑制"),
           icon: "x",
           ...(sosIncidentHref ? { href: sosIncidentHref } : {}),
         },
@@ -1067,7 +1077,7 @@ export default async function DriverDetailPage({
     resourceType: "driver",
     resourceId: driverId,
     openMode: "new_tab",
-    label: copy(locale, "Adapter registry", "Adapter registry"),
+    label: copy(locale, "Adapter registry", "介接器名冊"),
   };
   const adapterRegistryHref = platformAdminOrigin
     ? buildCrossAppHref(platformAdminOrigin, adapterRegistryLink)
@@ -1079,7 +1089,7 @@ export default async function DriverDetailPage({
       "low",
       adapterRegistryHref ? undefined : "platform_admin_origin_unresolved",
     ),
-    label: copy(locale, "Adapter registry ↗", "Adapter registry ↗"),
+    label: copy(locale, "Adapter registry ↗", "介接器名冊 ↗"),
     icon: "ext",
     ...(adapterRegistryHref ? { href: adapterRegistryHref } : {}),
     openInNewTab: true,
@@ -1142,12 +1152,12 @@ export default async function DriverDetailPage({
       timestamp: copy(
         locale,
         `TTL until ${formatDateTime(locale, activeSuppression.expiresAt)}`,
-        `TTL 至 ${formatDateTime(locale, activeSuppression.expiresAt)}`,
+        `有效至 ${formatDateTime(locale, activeSuppression.expiresAt)}`,
       ),
       detail: copy(
         locale,
         "Driver is held out of matching; ops_manager can extend the TTL.",
-        "司機已被排除於派遣媒合之外；ops_manager 可延長 TTL。",
+        "司機已被排除於派遣媒合之外；營運主管可延長抑制期限。",
       ),
       ...(suppressionIncidentHref
         ? {
@@ -1259,7 +1269,7 @@ export default async function DriverDetailPage({
           </Pill>
           {row.presence.reauthRequired ? (
             <Pill theme={theme} tone="warn">
-              {copy(locale, "re-auth", "需 re-auth")}
+              {copy(locale, "re-auth", "需重新驗證")}
             </Pill>
           ) : null}
         </span>
@@ -1275,7 +1285,7 @@ export default async function DriverDetailPage({
       ),
     },
     {
-      h: copy(locale, "Token", "Token"),
+      h: copy(locale, "Token", "權杖"),
       w: 170,
       mono: true,
       r: (row) =>
@@ -1295,7 +1305,7 @@ export default async function DriverDetailPage({
         ),
     },
     {
-      h: copy(locale, "Adapter", "Adapter"),
+      h: copy(locale, "Adapter", "介接器"),
       w: 140,
       r: (row) => (
         <Pill theme={theme} tone={adapterTone(row.adapter)}>
@@ -1354,7 +1364,7 @@ export default async function DriverDetailPage({
       r: (row) => platformDisplayName(row.order.platformCode),
     },
     {
-      h: copy(locale, "Mirror", "Mirror"),
+      h: copy(locale, "Mirror", "鏡像"),
       w: 150,
       mono: true,
       r: (row) => row.order.mirrorOrderId,
@@ -1364,9 +1374,11 @@ export default async function DriverDetailPage({
       r: (row) =>
         row.order.lastSyncError ? (
           <span>
-            <strong>{row.order.lastSyncError.code}</strong>
+            <strong>
+              {formatOpsCodeLabel(locale, row.order.lastSyncError.code)}
+            </strong>
             <span style={{ color: theme.textMuted, display: "block" }}>
-              {row.order.lastSyncError.message}
+              {formatForwardedSyncError(locale, row.order.lastSyncError)}
             </span>
           </span>
         ) : (
@@ -1541,7 +1553,7 @@ export default async function DriverDetailPage({
             </Pill>
             {sosActive ? (
               <Pill theme={theme} tone="danger" dot>
-                SOS
+                {copy(locale, "SOS", "求救中")}
               </Pill>
             ) : null}
             {activeSuppression ? (
@@ -1575,7 +1587,7 @@ export default async function DriverDetailPage({
           title={copy(
             locale,
             `Refresh tier T3 · ${REFRESH_TIER} (15s) · urgent events push`,
-            `刷新層級 T3 · ${REFRESH_TIER}（15 秒）· 緊急事件即時推播`,
+            "刷新層級 · 每 15 秒更新，緊急事件即時推播",
           )}
           body={buildRefreshBannerBody(
             locale,
@@ -1593,7 +1605,7 @@ export default async function DriverDetailPage({
             title={copy(
               locale,
               "Driver has an active SOS in response — dispatch actions are disabled",
-              "此司機目前處於 SOS in_response — dispatch action 已停用",
+              "此司機目前有緊急求救事件處理中，派遣動作已停用",
             )}
             body={`${sosIncident.incidentId} · ${formatOpsCodeLabel(
               locale,
@@ -1640,7 +1652,7 @@ export default async function DriverDetailPage({
             )} · ${copy(
               locale,
               `TTL until ${formatDateTime(locale, activeSuppression.expiresAt)}`,
-              `TTL 至 ${formatDateTime(locale, activeSuppression.expiresAt)}`,
+              `有效至 ${formatDateTime(locale, activeSuppression.expiresAt)}`,
             )}`}
             actions={
               suppressionIncidentHref
@@ -1689,7 +1701,7 @@ export default async function DriverDetailPage({
                 subtitle={copy(
                   locale,
                   `${onlinePlatforms.length} online · ${reauthPlatforms.length} re-auth · ${ineligiblePlatforms.length} ineligible`,
-                  `${onlinePlatforms.length} 在線 · ${reauthPlatforms.length} 需 re-auth · ${ineligiblePlatforms.length} 不符資格`,
+                  `${onlinePlatforms.length} 在線 · ${reauthPlatforms.length} 需重新驗證 · ${ineligiblePlatforms.length} 不符資格`,
                 )}
                 actions={
                   degradedAdapters.length > 0
@@ -1738,7 +1750,7 @@ export default async function DriverDetailPage({
                     label: copy(
                       locale,
                       "Mark unavailable (forwarded)",
-                      "標記 forwarded 不可用",
+                      "標記轉派任務不可用",
                     ),
                     icon: "x",
                   },

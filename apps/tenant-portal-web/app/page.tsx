@@ -9,6 +9,11 @@ import type {
   TenantInvoiceRecord,
 } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import { formatPortalSectionError } from "@/lib/error-copy";
+import {
+  formatPortalChecklistItem,
+  formatPortalCodeLabel,
+} from "@/lib/localized-labels";
 
 const ATTENTION_STATUSES = new Set([
   "dispatch_failed",
@@ -78,18 +83,16 @@ async function loadDashboardData(): Promise<DashboardData> {
     result: PromiseSettledResult<unknown>,
   ) => {
     if (result.status === "rejected") {
-      errors.push(
-        `${label}: ${result.reason instanceof Error ? result.reason.message : "Unknown error"}`,
-      );
+      errors.push(formatPortalSectionError(label, result.reason));
     }
   };
 
-  collectError("Identity", identityResult);
-  collectError("Feature flags", flagsResult);
-  collectError("Bookings", bookingsResult);
-  collectError("Invoices", invoicesResult);
-  collectError("Notifications", notificationsResult);
-  collectError("Integration governance", governanceResult);
+  collectError("身分", identityResult);
+  collectError("功能旗標", flagsResult);
+  collectError("訂單", bookingsResult);
+  collectError("發票", invoicesResult);
+  collectError("通知", notificationsResult);
+  collectError("整合治理", governanceResult);
 
   return {
     identity:
@@ -129,14 +132,14 @@ function formatCount(value: number) {
   return new Intl.NumberFormat("en").format(value);
 }
 
-const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en", {
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("zh-TW", {
   dateStyle: "medium",
   timeStyle: "short",
 });
 
 function formatDateTime(value: string | null | undefined) {
   if (!value) {
-    return "Not available";
+    return "目前無法取得";
   }
 
   return DATE_TIME_FORMATTER.format(new Date(value));
@@ -226,117 +229,124 @@ export default async function HomePage() {
   return (
     <main className="page-shell">
       <PageHero
-        eyebrow="Tenant home"
-        title="Tenant operators land in a real workspace, not a launcher."
-        description="This dashboard anchors the tenant identity context, active-booking status, billing and notice reminders, integration posture, and quick-entry actions for the tenant portal surface."
+        eyebrow="租戶首頁"
+        title="租戶營運人員會直接進入正式工作台，而不是啟動頁。"
+        description="這個首頁會集中顯示租戶身分脈絡、進行中訂單、計費與公告提醒、整合狀態，以及租戶入口的常用快捷操作。"
       />
 
       <section className="metric-grid">
         <article className="metric-card">
-          <span className="metric-label">Active bookings</span>
+          <span className="metric-label">進行中訂單</span>
           <strong>{formatCount(activeBookings.length)}</strong>
           <p>
             {attentionBookings.length > 0
-              ? `${formatCount(attentionBookings.length)} booking(s) need follow-up across dispatch or proof states.`
-              : "No active bookings currently need tenant-side follow-up."}
+              ? `${formatCount(attentionBookings.length)} 筆訂單在派遣或憑證狀態上需要跟進。`
+              : "目前沒有需要租戶端跟進的進行中訂單。"}
           </p>
         </article>
         <article className="metric-card">
-          <span className="metric-label">Open invoices</span>
+          <span className="metric-label">未結發票</span>
           <strong>{formatCount(openInvoices.length)}</strong>
           <p>
             {data.invoices.length > 0
-              ? `${formatCount(data.invoices.length)} invoice artifact(s) are visible from tenant billing authority.`
-              : "Invoice artifacts are not currently available for this tenant context."}
+              ? `${formatCount(data.invoices.length)} 份發票成品目前可由租戶計費權限查看。`
+              : "這個租戶脈絡目前沒有可用的發票成品。"}
           </p>
         </article>
         <article className="metric-card">
-          <span className="metric-label">Notifications</span>
+          <span className="metric-label">通知</span>
           <strong>{formatCount(recentNotifications.length)}</strong>
           <p>
             {recentNotifications.length > 0
-              ? "Recent platform and tenant reminders surface here before users drill into settings."
-              : "No tenant notification feed items were returned in the current snapshot."}
+              ? "最近的平台與租戶提醒會先顯示在這裡，使用者不必先深入設定頁。"
+              : "目前快照沒有回傳租戶通知動態。"}
           </p>
         </article>
         <article className="metric-card">
-          <span className="metric-label">Integration posture</span>
+          <span className="metric-label">整合狀態</span>
           <strong>
             {onboardingChecklist.length > 0
               ? formatCount(onboardingChecklist.length)
-              : "Ready"}
+              : "已就緒"}
           </strong>
           <p>
             {onboardingChecklist.length > 0
-              ? "Checklist items still frame the integration work that API keys and webhooks must cover."
-              : "No outstanding onboarding checklist items were returned."}
+              ? "清單項目仍定義著整合金鑰與回呼需要完成的整合作業。"
+              : "目前沒有未完成的啟用清單項目。"}
           </p>
         </article>
       </section>
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
-          kicker="Identity"
-          title="Tenant authority context"
-          description="The dashboard reads the backend identity context directly so role, realm, and tenant ownership stay authority-driven."
+          kicker="身分"
+          title="租戶權限脈絡"
+          description="首頁會直接讀取後端身分脈絡，讓角色、領域與租戶歸屬維持由權限來源決定。"
         >
           <dl className="definition-grid">
             <div>
-              <dt>Tenant</dt>
-              <dd>{data.identity?.tenantId ?? "Unavailable"}</dd>
+              <dt>租戶</dt>
+              <dd>{data.identity?.tenantId ?? "目前無法取得"}</dd>
             </div>
             <div>
-              <dt>Realm</dt>
-              <dd>{data.identity?.realm ?? "Unavailable"}</dd>
+              <dt>領域</dt>
+              <dd>
+                {formatPortalCodeLabel(data.identity?.realm, "目前無法取得")}
+              </dd>
             </div>
             <div>
-              <dt>Actor</dt>
-              <dd>{data.identity?.actorType ?? "Unavailable"}</dd>
+              <dt>身分</dt>
+              <dd>
+                {formatPortalCodeLabel(
+                  data.identity?.actorType,
+                  "目前無法取得",
+                )}
+              </dd>
             </div>
             <div>
-              <dt>Auth mode</dt>
-              <dd>{data.identity?.authMode ?? "Unavailable"}</dd>
+              <dt>驗證模式</dt>
+              <dd>
+                {formatPortalCodeLabel(data.identity?.authMode, "目前無法取得")}
+              </dd>
             </div>
           </dl>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Bookings"
-          title="Tenant operations quick lane"
-          description="Bookings remain the primary operating surface; the route list and detail model stay anchored to the tenant booking entry."
+          kicker="訂單"
+          title="租戶作業快捷入口"
+          description="訂單仍是主要作業頁面；列表與明細模型都會以租戶訂單入口為核心。"
         >
           <div className="panel-stack">
             <p>
-              Next reservation window:{" "}
+              下一個預約時段：
               <strong>
                 {activeBookings[0]
                   ? formatDateTime(activeBookings[0].reservationWindowStart)
-                  : "No active reservation queued"}
+                  : "目前沒有待處理的預約"}
               </strong>
             </p>
             <div className="link-row">
               {moduleStatus.booking ? (
                 <>
                   <Link className="text-link" href="/booking-list">
-                    Open booking oversight
+                    前往訂單總覽
                   </Link>
                   <Link className="text-link" href="/bookings/new">
-                    Start new booking intake
+                    建立新訂單
                   </Link>
                 </>
               ) : (
-                <span className="muted-copy">
-                  Booking module is not enabled for this tenant.
-                </span>
+                <span className="muted-copy">這個租戶尚未啟用訂單模組。</span>
               )}
             </div>
           </div>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Billing and notices"
-          title="Operational reminders stay visible"
-          description="Billing posture and notification reminders sit on the home lane so tenant admins do not need to discover them through secondary navigation."
+          kicker="計費與公告"
+          title="營運提醒保持可見"
+          description="計費狀態與通知提醒會直接留在首頁，讓租戶管理員不必再從次級導覽裡尋找。"
         >
           {recentNotifications.length > 0 ? (
             <ul className="panel-list">
@@ -344,55 +354,54 @@ export default async function HomePage() {
                 <li key={notification.notificationId}>
                   <strong>{notification.title}</strong>
                   <span className="list-note">
-                    {notification.channel} ·{" "}
+                    {formatPortalCodeLabel(notification.channel)} ·{" "}
                     {formatDateTime(notification.createdAt)}
                   </span>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="muted-copy">
-              No tenant notification feed items are currently available.
-            </p>
+            <p className="muted-copy">目前沒有可用的租戶通知動態。</p>
           )}
           <div className="link-row">
             {moduleStatus.billing ? (
               <Link className="text-link" href="/billing">
-                Review billing posture
+                查看計費狀態
               </Link>
             ) : null}
             <Link className="text-link" href="/notifications">
-              Notification preferences
+              通知偏好
             </Link>
           </div>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Integration"
-          title="Integration readiness and governance"
-          description="Integration reminders summarize the backend-owned checklist instead of inventing client-local readiness truth."
+          kicker="整合"
+          title="整合就緒度與治理"
+          description="整合提醒會直接摘要後端維護的清單，而不是由前端自行發明一套就緒度真相。"
         >
           {onboardingChecklist.length > 0 ? (
             <ul className="panel-list">
-              {onboardingChecklist.slice(0, 4).map((item) => (
-                <li key={item}>{item}</li>
+              {onboardingChecklist.slice(0, 4).map((item, index) => (
+                <li key={`${item}-${index}`}>
+                  {formatPortalChecklistItem(item)}
+                </li>
               ))}
             </ul>
           ) : (
             <p className="muted-copy">
-              API key and webhook onboarding is not currently reporting any open
-              checklist item.
+              整合金鑰與回呼啟用目前沒有回報任何未完成的清單項目。
             </p>
           )}
           <div className="link-row">
             {moduleStatus.directory ? (
               <Link className="text-link" href="/api-keys">
-                Review API keys
+                查看整合金鑰
               </Link>
             ) : null}
             {moduleStatus.webhooks ? (
               <Link className="text-link" href="/webhooks">
-                Review webhooks
+                查看回呼
               </Link>
             ) : null}
           </div>
@@ -400,72 +409,72 @@ export default async function HomePage() {
       </section>
 
       <CalloutPanel
-        title="Quick actions"
-        description="Common tenant entry points stay one click away from the home lane."
+        title="快捷操作"
+        description="常用的租戶入口會保留在首頁，一次點擊即可進入。"
       >
         <div className="link-row">
           {moduleStatus.booking ? (
             <Link className="text-link" href="/bookings/new">
-              New booking
+              新增訂單
             </Link>
           ) : null}
           {moduleStatus.billing ? (
             <Link className="text-link" href="/billing">
-              Billing
+              計費
             </Link>
           ) : null}
           {moduleStatus.reports ? (
             <Link className="text-link" href="/reports">
-              Reports
+              報表
             </Link>
           ) : null}
           {moduleStatus.directory ? (
             <Link className="text-link" href="/passengers">
-              Passenger directory
+              乘客名冊
             </Link>
           ) : null}
           {moduleStatus.directory ? (
             <Link className="text-link" href="/addresses">
-              Address book
+              地址簿
             </Link>
           ) : null}
           {moduleStatus.admin ? (
             <Link className="text-link" href="/users">
-              User management
+              使用者管理
             </Link>
           ) : null}
           {moduleStatus.admin ? (
             <Link className="text-link" href="/audit">
-              Audit trail
+              稽核軌跡
             </Link>
           ) : null}
           <Link className="text-link" href="/settings">
-            Settings
+            設定
           </Link>
           <Link className="text-link" href="/sla">
-            SLA profile
+            服務時限設定
           </Link>
           <Link className="text-link" href="/feature-flags">
-            Feature flags
+            功能旗標
           </Link>
         </div>
       </CalloutPanel>
 
       <CalloutPanel
-        title="Enabled module snapshot"
+        title="已啟用模組快照"
         description={
           enabledFlags.length > 0
-            ? `${enabledFlags.length} feature flag(s) currently resolve enabled for this tenant context.`
+            ? `目前有 ${enabledFlags.length} 個功能旗標在這個租戶脈絡下解析為啟用。`
             : data.flagsAvailable
-              ? "No tenant-specific module flag resolved enabled."
-              : "Feature flag detail is currently unavailable; modules display in fallback-enabled mode."
+              ? "沒有任何租戶專屬模組旗標解析為啟用。"
+              : "功能旗標明細目前不可用；模組會以後備啟用模式顯示。"
         }
       >
         {enabledFlags.length > 0 ? (
           <div className="chip-row">
             {enabledFlags.slice(0, 6).map((flag) => (
               <span className="status-chip" key={flag.key}>
-                {flag.key}
+                {formatPortalCodeLabel(flag.key, flag.key)}
               </span>
             ))}
           </div>
@@ -474,13 +483,13 @@ export default async function HomePage() {
 
       {data.errors.length > 0 ? (
         <CalloutPanel
-          title="Partial data warning"
-          description="Some dashboard slices fell back because the current authority surface did not answer every read."
+          title="部分資料警示"
+          description="有些首頁區塊已退回後備資料，因為目前的權限介面沒有完整回應所有讀取請求。"
           tone="warning"
         >
           <ul className="panel-list">
-            {data.errors.map((error) => (
-              <li key={error}>{error}</li>
+            {data.errors.map((error, index) => (
+              <li key={`${error}-${index}`}>{error}</li>
             ))}
           </ul>
         </CalloutPanel>

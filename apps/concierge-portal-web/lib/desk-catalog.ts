@@ -45,60 +45,58 @@ export type DeskEligibilityResult =
 export const conciergeDeskCatalog: DeskCatalogRecord[] = [
   {
     deskId: "acme-reception",
-    deskName: "Acme Lobby Desk",
+    deskName: "Acme 大樓大廳櫃台",
     deskType: "concierge",
     siteId: "10000000-0000-0000-0000-000000000311",
-    siteName: "Acme Tower",
+    siteName: "Acme 大樓",
     location: "台北市信義區市府路 1 號 1F",
     phone: "02-5550-0111",
-    zoneLabel: "Xinyi / City Hall corridor",
+    zoneLabel: "信義市府走廊",
     queuePolicy: "realtime",
     health: "healthy",
     recordingAvailability: "ops_callback_only",
     allowedModes: ["concierge_operator", "call_point_operator"],
     authorizedProducts: ["standard_taxi", "medical_discharge"],
     authorizedAddressKeywords: ["信義", "市府", "忠孝", "仁愛", "大安"],
-    escalationLabel: "Ops callcenter / dispatch manager",
+    escalationLabel: "營運客服中心與派遣主管",
     notes:
-      "Healthy desk with both concierge and call-point operators allowed. Recording callback still lands in ops.",
+      "櫃台狀態正常，可由客服櫃台與電話站點人員操作；錄音回補仍交由營運端處理。",
   },
   {
     deskId: "tpe-t1-lobby",
-    deskName: "T1 Concierge Pick-up Point",
+    deskName: "第一航廈客服上車點",
     deskType: "concierge",
     siteId: "10000000-0000-0000-0000-000000000312",
-    siteName: "Taoyuan Airport T1",
+    siteName: "桃園機場第一航廈",
     location: "桃園機場第一航廈 1F",
     phone: "03-390-0001",
-    zoneLabel: "Airport inner-loop",
+    zoneLabel: "機場內環路線",
     queuePolicy: "queue",
     health: "degraded",
     recordingAvailability: "ops_callback_only",
     allowedModes: ["concierge_operator"],
     authorizedProducts: ["standard_taxi", "airport_assist"],
     authorizedAddressKeywords: ["機場", "航廈", "桃園", "南崁"],
-    escalationLabel: "Ops airport desk supervisor",
-    notes:
-      "Route is intentionally degraded to make the read-only fallback explicit for SYS-UI-005.",
+    escalationLabel: "機場櫃台營運主管",
+    notes: "此櫃台目前標記為降級，用來清楚呈現唯讀備援流程。",
   },
   {
     deskId: "riverside-clinic",
-    deskName: "Riverside Clinic Call Point",
+    deskName: "河畔診所電話站點",
     deskType: "call_point",
     siteId: "site-demo-riverside-clinic",
-    siteName: "Riverside Clinic",
+    siteName: "河畔診所",
     location: "新北市板橋區文化路 2 段 188 號",
     phone: "02-7755-2200",
-    zoneLabel: "Boarding transfer / discharge only",
+    zoneLabel: "轉乘與出院接送限定",
     queuePolicy: "realtime",
     health: "healthy",
     recordingAvailability: "ops_callback_only",
     allowedModes: ["call_point_operator"],
     authorizedProducts: ["medical_discharge"],
     authorizedAddressKeywords: ["板橋", "文化路", "新埔", "新北"],
-    escalationLabel: "Clinic transport coordinator",
-    notes:
-      "This desk is useful for denied and ineligible routing because it only allows call-point mode and discharge trips.",
+    escalationLabel: "診所交通協調窗口",
+    notes: "此站點僅允許電話站點模式與出院接送，可用來驗證拒絕與資格不符流程。",
   },
 ];
 
@@ -121,7 +119,9 @@ export function resolveDeskAccess(
   return {
     allowed: false,
     reasonCode: "mode_denied",
-    message: `${desk.deskName} only allows ${desk.allowedModes.join(" / ")}.`,
+    message: `${desk.deskName} 僅允許 ${desk.allowedModes
+      .map(formatDeskMode)
+      .join(" / ")} 操作。`,
   };
 }
 
@@ -135,7 +135,7 @@ export function evaluateDeskEligibility(
     return {
       state: "ineligible",
       reasonCode: "product_not_authorized",
-      message: `${desk.deskName} cannot submit ${requestedProduct} requests.`,
+      message: `${desk.deskName} 不可送出${formatRequestedProduct(requestedProduct)}需求。`,
     };
   }
 
@@ -148,18 +148,45 @@ export function evaluateDeskEligibility(
     return {
       state: "ineligible",
       reasonCode: "service_area_mismatch",
-      message: `${desk.deskName} only covers ${desk.zoneLabel}.`,
+      message: `${desk.deskName} 僅支援${desk.zoneLabel}。`,
     };
   }
 
   return {
     state: "eligible",
-    message: `${desk.deskName} is authorized for this assisted-entry request.`,
+    message: `${desk.deskName} 可處理此代訂需求。`,
   };
 }
 
 export function formatDeskMode(mode: ConciergeOperatorMode) {
-  return mode === "concierge_operator"
-    ? "Concierge operator"
-    : "Call-point operator";
+  return mode === "concierge_operator" ? "客服櫃台人員" : "電話站點人員";
+}
+
+export function formatDeskType(type: DeskCatalogRecord["deskType"]) {
+  return type === "concierge" ? "客服櫃台" : "電話站點";
+}
+
+export function formatDeskHealth(health: DeskHealth) {
+  return health === "healthy" ? "正常" : "降級";
+}
+
+export function formatQueuePolicy(policy: DeskCatalogRecord["queuePolicy"]) {
+  return policy === "realtime" ? "即時處理" : "排隊處理";
+}
+
+export function formatRecordingAvailability(
+  availability: RecordingAvailability,
+) {
+  return availability === "ops_callback_only" ? "僅營運端回補" : "可內嵌回補";
+}
+
+export function formatRequestedProduct(product: RequestedServiceProduct) {
+  switch (product) {
+    case "airport_assist":
+      return "機場協助";
+    case "medical_discharge":
+      return "醫療出院接送";
+    case "standard_taxi":
+      return "一般計程車";
+  }
 }

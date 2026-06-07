@@ -21,6 +21,10 @@ import {
   truncate,
   usePlatformAdminClient,
 } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
 import {
   formatPlatformCodeLabel,
@@ -141,6 +145,33 @@ function actorTone(actorType: AuditLogRecord["actorType"]): CanvasTone {
   }
 }
 
+function formatPolicyDescription(
+  locale: "en" | "zh",
+  family: EvidenceRetentionPolicyRecord["family"],
+  fallback: string,
+) {
+  if (locale === "en") {
+    return fallback;
+  }
+
+  const descriptions: Partial<
+    Record<EvidenceRetentionPolicyRecord["family"], string>
+  > = {
+    call_recording:
+      "客服來電工作階段、錄音識別碼，以及外部錄音供應商參照資料。",
+    report_artifact: "已產生的報表成品、派遣錄音索引匯出，以及營收摘要下載。",
+    filing_package: "不可變更的申報封包、清單，以及稽核請求打包內容。",
+    audit_log: "不可變更的稽核紀錄，以及由其衍生的租戶與平台稽核證據。",
+    webhook_delivery:
+      "租戶回呼投遞歷史、狀態嘗試、簽章預覽，以及重試中繼資料。",
+    eligibility_verification:
+      "合作夥伴資格驗證決策、合約快照，以及雜湊化發卡參照證據。",
+    proof_bundle: "行程結案關聯的完成憑證包、費用憑證附件，以及簽核參照資料。",
+  };
+
+  return descriptions[family] ?? fallback;
+}
+
 export default function AuditPage() {
   const { locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -186,11 +217,19 @@ export default function AuditPage() {
       setLegalHolds(holdList);
       setDeletionExceptions(deletionExceptionList);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en"
+            ? "Unable to load audit workspace"
+            : "無法載入稽核與證據工作區",
+        ),
+      );
     } finally {
       setLoading(false);
     }
-  }, [client]);
+  }, [client, locale]);
 
   useEffect(() => {
     void loadRecords();
@@ -201,7 +240,8 @@ export default function AuditPage() {
     [legalHolds],
   );
   const activeDeletionExceptions = useMemo(
-    () => deletionExceptions.filter((exception) => exception.status === "active"),
+    () =>
+      deletionExceptions.filter((exception) => exception.status === "active"),
     [deletionExceptions],
   );
 
@@ -235,8 +275,7 @@ export default function AuditPage() {
   }, [records]);
 
   const filtered = useMemo(
-    () =>
-      records.filter((r) => !filterModule || r.moduleName === filterModule),
+    () => records.filter((r) => !filterModule || r.moduleName === filterModule),
     [records, filterModule],
   );
 
@@ -259,7 +298,7 @@ export default function AuditPage() {
       ? {
           title: "Audit & Evidence Governance",
           subtitle:
-            "Append-only · legal hold + deletion exception shown via badge (Q-ADM16)",
+            "Append-only · legal holds and deletion exceptions are shown with badges.",
           refresh: "Refresh (T6 manual)",
           refreshing: "Refreshing…",
           exportCsv: "Export CSV",
@@ -306,22 +345,24 @@ export default function AuditPage() {
           holdEnabled: "supported",
           holdDisabled: "not supported",
           holdSupported: "Legal hold supported",
+          holdBadge: "HOLD",
+          exemptBadge: "EXEMPT",
+          reasonCode: "REASON CODE",
         }
       : {
-          title: "Audit & Evidence Governance",
-          subtitle:
-            "append-only · legal hold + deletion exception 透過 badge 顯示 (Q-ADM16)",
-          refresh: "重新整理 (T6 手動)",
+          title: "稽核與證據留存治理",
+          subtitle: "唯增式紀錄，法定保留與刪除例外會以徽章標示。",
+          refresh: "重新整理（T6 手動）",
           refreshing: "重新整理中…",
-          exportCsv: "匯出 csv",
-          tabLog: "Audit log",
-          tabPolicy: "Retention policies",
-          tabHold: "Active legal holds",
-          tabExcept: "Deletion exceptions",
+          exportCsv: "匯出 CSV",
+          tabLog: "稽核紀錄",
+          tabPolicy: "保存政策",
+          tabHold: "作用中的法定保留",
+          tabExcept: "刪除例外",
           all: "全部",
           showing: "顯示",
-          legalHoldTip: "legal hold",
-          deletionExceptionTip: "deletion exception",
+          legalHoldTip: "法定保留",
+          deletionExceptionTip: "刪除例外",
           expires: "到期",
           case: "案號",
           owner: "負責人",
@@ -331,39 +372,46 @@ export default function AuditPage() {
           emptyPolicy: "尚未設定保留政策。",
           emptyHold: "目前沒有作用中的法定保留。",
           emptyExcept: "目前沒有作用中的刪除例外。",
-          holdsTitle: "Active legal holds",
-          exceptTitle: "Deletion exceptions",
-          colWhen: "WHEN",
-          colActorType: "ACTOR TYPE",
-          colActor: "ACTOR",
-          colModule: "MODULE",
-          colAction: "ACTION",
-          colResource: "RESOURCE",
-          colRequest: "REQUEST",
-          polFamily: "FAMILY",
-          polAuthority: "AUTHORITY",
-          polRetention: "RETENTION",
-          polDownload: "DOWNLOAD",
-          polHold: "LEGAL HOLD",
-          holdResource: "RESOURCE",
-          holdCase: "CASE",
-          holdReason: "REASON",
-          holdPlacedBy: "PLACED BY",
-          holdPlacedAt: "PLACED AT",
-          exReason: "REASON",
-          exExpires: "EXPIRES",
-          signedTtl: (m: number) => `signed url · ${m}m ttl`,
-          noDownload: "no download",
-          holdEnabled: "supported",
-          holdDisabled: "not supported",
+          holdsTitle: "法定保留清單",
+          exceptTitle: "刪除例外",
+          colWhen: "時間",
+          colActorType: "操作者類型",
+          colActor: "操作者",
+          colModule: "模組",
+          colAction: "動作",
+          colResource: "資源",
+          colRequest: "請求編號",
+          polFamily: "家族",
+          polAuthority: "權責模組",
+          polRetention: "保存期",
+          polDownload: "下載",
+          polHold: "法定保留",
+          holdResource: "資源",
+          holdCase: "案號",
+          holdReason: "原因",
+          holdPlacedBy: "建立人",
+          holdPlacedAt: "建立時間",
+          exReason: "原因",
+          exExpires: "到期時間",
+          signedTtl: (m: number) => `簽名下載網址 · ${m} 分鐘效期`,
+          noDownload: "不提供下載",
+          holdEnabled: "支援",
+          holdDisabled: "不支援",
           holdSupported: "支援法定保留",
+          holdBadge: "保留",
+          exemptBadge: "例外",
+          reasonCode: "原因代碼",
         };
 
   const tabDefs: { id: AuditTabId; label: string; badge?: number }[] = [
     { id: "log", label: copy.tabLog },
     { id: "policy", label: copy.tabPolicy },
     { id: "hold", label: copy.tabHold, badge: activeLegalHolds.length },
-    { id: "except", label: copy.tabExcept, badge: activeDeletionExceptions.length },
+    {
+      id: "except",
+      label: copy.tabExcept,
+      badge: activeDeletionExceptions.length,
+    },
   ];
 
   const tabNodes = tabDefs.map((def) => (
@@ -404,10 +452,7 @@ export default function AuditPage() {
       h: copy.colActor,
       w: 220,
       r: (row) =>
-        truncate(
-          row.actorId || formatPlatformCodeLabel(locale, "system"),
-          28,
-        ),
+        truncate(row.actorId || formatPlatformCodeLabel(locale, "system"), 28),
     },
     {
       h: copy.colModule,
@@ -421,7 +466,11 @@ export default function AuditPage() {
     {
       h: copy.colAction,
       w: 200,
-      r: (row) => <span style={actionCellStyle}>{row.actionName}</span>,
+      r: (row) => (
+        <span style={actionCellStyle}>
+          {formatPlatformCodeLabel(locale, row.actionName)}
+        </span>
+      ),
     },
     {
       h: copy.colResource,
@@ -429,7 +478,7 @@ export default function AuditPage() {
       r: (row) => (
         <div style={resourceCellStyle}>
           <span style={monoCellStyle}>
-            {row.resourceType}
+            {formatPlatformCodeLabel(locale, row.resourceType)}
             {row.resourceId ? `:${truncate(row.resourceId, 10)}` : ""}
           </span>
           {row.hold ? (
@@ -437,7 +486,7 @@ export default function AuditPage() {
               title={`${copy.legalHoldTip} · ${copy.case} ${row.hold.caseNumber} · ${copy.owner} ${row.hold.placedByActorId}`}
             >
               <CanvasPill theme={theme} tone="danger">
-                HOLD
+                {copy.holdBadge}
               </CanvasPill>
             </span>
           ) : null}
@@ -449,7 +498,7 @@ export default function AuditPage() {
               )} · ${copy.expires} ${formatDateTime(row.exempt.expiresAt)}`}
             >
               <CanvasPill theme={theme} tone="warn">
-                EXEMPT
+                {copy.exemptBadge}
               </CanvasPill>
             </span>
           ) : null}
@@ -475,7 +524,7 @@ export default function AuditPage() {
             {formatPlatformCodeLabel(locale, policy.family)}
           </span>
           <span style={{ color: theme.textMuted, fontSize: 11.5 }}>
-            {policy.description}
+            {formatPolicyDescription(locale, policy.family, policy.description)}
           </span>
         </div>
       ),
@@ -490,8 +539,10 @@ export default function AuditPage() {
       w: 140,
       mono: true,
       r: (policy) =>
-        `${policy.hotRetentionDays}d / ${
-          policy.archiveRetentionDays ? `${policy.archiveRetentionDays}d` : "—"
+        `${policy.hotRetentionDays} 天 / ${
+          policy.archiveRetentionDays
+            ? `${policy.archiveRetentionDays} 天`
+            : "—"
         }`,
     },
     {
@@ -592,7 +643,11 @@ export default function AuditPage() {
               ))}
             </div>
 
-            <CanvasCard theme={theme} padding={0} style={{ overflow: "hidden" }}>
+            <CanvasCard
+              theme={theme}
+              padding={0}
+              style={{ overflow: "hidden" }}
+            >
               {rows.length === 0 ? (
                 <div style={stateStyle}>{copy.emptyLog}</div>
               ) : (
@@ -660,7 +715,10 @@ export default function AuditPage() {
                       return [
                         {
                           k: copy.holdResource,
-                          v: `${exception.sourceResourceType} · ${exception.sourceResourceId}`,
+                          v: `${formatPlatformCodeLabel(
+                            locale,
+                            exception.sourceResourceType,
+                          )} · ${exception.sourceResourceId}`,
                           mono: true,
                         },
                         {
@@ -678,9 +736,11 @@ export default function AuditPage() {
                             ),
                         },
                         {
-                          k: "REASON CODE",
-                          v: exception.reasonCode,
-                          mono: true,
+                          k: copy.reasonCode,
+                          v: formatPlatformCodeLabel(
+                            locale,
+                            exception.reasonCode,
+                          ),
                         },
                       ];
                     })()}
@@ -752,7 +812,10 @@ export default function AuditPage() {
                 <CanvasCard
                   key={exception.exceptionId}
                   theme={theme}
-                  title={`${exception.sourceResourceType} · ${exception.sourceResourceId}`}
+                  title={`${formatPlatformCodeLabel(
+                    locale,
+                    exception.sourceResourceType,
+                  )} · ${exception.sourceResourceId}`}
                   subtitle={formatPlatformCodeLabel(locale, exception.family)}
                 >
                   <CanvasDL
@@ -771,9 +834,11 @@ export default function AuditPage() {
                           formatPlatformCodeLabel(locale, exception.reasonCode),
                       },
                       {
-                        k: "REASON CODE",
-                        v: exception.reasonCode,
-                        mono: true,
+                        k: copy.reasonCode,
+                        v: formatPlatformCodeLabel(
+                          locale,
+                          exception.reasonCode,
+                        ),
                       },
                     ]}
                   />

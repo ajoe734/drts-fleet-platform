@@ -14,6 +14,7 @@ import type {
 } from "@drts/contracts";
 import { PublishAssistantScope } from "@/components/ops-assistant";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { formatOpsErrorReasonLabel, toOpsErrorMessage } from "@/lib/error-copy";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
@@ -259,16 +260,6 @@ const EMPTY_REASONS = new Set<EmptyReason>([
   "external_unavailable",
   "filtered_empty",
 ]);
-
-const EMPTY_OVERRIDE_REASON_CODES: Record<EmptyReason, string> = {
-  no_data: "vehicle_registry_empty",
-  not_provisioned: "vehicle_registry_not_provisioned",
-  fetch_failed: "vehicle_registry_fetch_failed",
-  permission_denied: "vehicle_registry_permission_denied",
-  external_unavailable: "vehicle_registry_external_unavailable",
-  filtered_empty: "vehicle_registry_filtered_empty",
-  driver_not_eligible: "driver_not_eligible",
-};
 
 function copy(locale: Locale, en: string, zh: string) {
   return locale === "zh" ? zh : en;
@@ -767,8 +758,8 @@ function actionReason(action: ResourceActionDescriptor, locale: Locale) {
   if (action.disabledReasonCode === "vehicle_detail_pending") {
     return copy(
       locale,
-      "Detail route ships in UI-FE-OPS-VEHID.",
-      "詳情路由由 UI-FE-OPS-VEHID 交付。",
+      "The vehicle detail route will ship in a follow-up release.",
+      "車輛詳情頁尚未開放，會於後續版本補上。",
     );
   }
 
@@ -854,14 +845,14 @@ function refreshBadgeLabel(refresh: UiRefreshMetadata, locale: Locale) {
     formatOpsCodeLabel(locale, refresh.dataFreshness),
   );
 
-  return `${freshness} · T3 · 15s`;
+  return copy(locale, `${freshness} · T3 · 15s`, `${freshness} · 每 15 秒更新`);
 }
 
 function refreshBody(refresh: UiRefreshMetadata, locale: Locale) {
   return copy(
     locale,
     `Snapshot ${formatLongDateTime(locale, refresh.generatedAt)} UTC from ${refresh.source}.`,
-    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} UTC 產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
+    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} 世界標準時間產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
   );
 }
 
@@ -914,13 +905,17 @@ function normalizeVehiclePayload(
 
 async function loadWithError<T>(
   loader: () => Promise<T>,
+  locale: Locale,
 ): Promise<LoadResult<T>> {
   try {
     return { data: await loader(), error: null };
   } catch (error) {
     return {
       data: null,
-      error: error instanceof Error ? error.message : String(error),
+      error: formatOpsErrorReasonLabel(
+        locale,
+        toOpsErrorMessage(error, "Unknown error"),
+      ),
     };
   }
 }
@@ -991,7 +986,7 @@ function normalizeHealthPayload(payload: unknown): UiHealthEnvelope | null {
   return null;
 }
 
-async function loadHealthEnvelope(): Promise<HealthLoadResult> {
+async function loadHealthEnvelope(locale: Locale): Promise<HealthLoadResult> {
   const apiBaseUrl = process.env.DRTS_API_URL ?? "http://localhost:3001";
 
   try {
@@ -1006,13 +1001,19 @@ async function loadHealthEnvelope(): Promise<HealthLoadResult> {
           degradedServices: [
             {
               service: "api",
-              impact: `status=${response.status}`,
+              impact: formatOpsErrorReasonLabel(
+                locale,
+                `health status ${response.status}`,
+              ),
               severity: "critical",
             },
           ],
           lastCheckedAt: new Date().toISOString(),
         },
-        error: `health status ${response.status}`,
+        error: formatOpsErrorReasonLabel(
+          locale,
+          `health status ${response.status}`,
+        ),
       };
     }
 
@@ -1028,14 +1029,19 @@ async function loadHealthEnvelope(): Promise<HealthLoadResult> {
         degradedServices: [
           {
             service: "api",
-            impact:
-              error instanceof Error ? error.message : "health fetch failed",
+            impact: formatOpsErrorReasonLabel(
+              locale,
+              toOpsErrorMessage(error, "health fetch failed"),
+            ),
             severity: "critical",
           },
         ],
         lastCheckedAt: new Date().toISOString(),
       },
-      error: error instanceof Error ? error.message : String(error),
+      error: formatOpsErrorReasonLabel(
+        locale,
+        toOpsErrorMessage(error, "health fetch failed"),
+      ),
     };
   }
 }
@@ -1092,7 +1098,7 @@ function buildEmptyStateViewModel(
         description: copy(
           locale,
           "Platform Admin fleet governance still owns vehicle bootstrap for this environment.",
-          "目前環境的車輛主檔仍由 Platform Admin 車隊治理面建立。",
+          "目前環境的車輛主檔仍由平台管理後台的車隊治理面建立。",
         ),
         actionLabel: copy(locale, "Open fleet governance", "開啟車隊治理"),
         actionHref: `${resolveAppOrigin("platform-admin")}/fleet`,
@@ -1142,7 +1148,7 @@ function buildEmptyStateViewModel(
           "Driver-binding or maintenance augmentation is degraded. Use the governance view for latest compliance state.",
           "司機綁定或保修補充資料降級，請改用治理檢視確認最新法遵狀態。",
         ),
-        actionLabel: copy(locale, "Open platform admin", "開啟 Platform Admin"),
+        actionLabel: copy(locale, "Open platform admin", "開啟平台管理後台"),
         actionHref: `${resolveAppOrigin("platform-admin")}/fleet`,
         actionNewTab: true,
       };
@@ -1215,7 +1221,11 @@ function renderAction(
         </span>
       )}
       <span style={tinyMetaStyle(actionTone(action))}>
-        {copy(locale, `risk:${action.riskLevel}`, `風險:${action.riskLevel}`)}
+        {copy(
+          locale,
+          `Risk: ${formatOpsCodeLabel(locale, action.riskLevel)}`,
+          `風險：${formatOpsCodeLabel(locale, action.riskLevel)}`,
+        )}
         {action.requiresReason
           ? copy(locale, " · reason required", " · 需填原因")
           : ""}
@@ -1274,7 +1284,7 @@ function buildColumns(locale: Locale): CanvasTableColumn<VehicleRow>[] {
           <span style={secondaryTextStyle}>
             {row.blockedReasonLabels.length > 0
               ? row.blockedReasonLabels.join(" / ")
-              : copy(locale, "No blocking gate", "無阻塞 gate")}
+              : copy(locale, "No blocking gate", "無阻塞條件")}
           </span>
         </div>
       ),
@@ -1397,13 +1407,14 @@ export default async function VehiclesPage({
     maintenanceResult,
     healthResult,
   ] = await Promise.all([
-    loadWithError(() =>
-      client.get<VehicleListPayload>("/api/regulatory-registry/vehicles"),
+    loadWithError(
+      () => client.get<VehicleListPayload>("/api/regulatory-registry/vehicles"),
+      locale,
     ),
-    loadWithError(() => client.listDrivers()),
-    loadWithError(() => client.listShifts()),
-    loadWithError(() => client.listMaintenance()),
-    loadHealthEnvelope(),
+    loadWithError(() => client.listDrivers(), locale),
+    loadWithError(() => client.listShifts(), locale),
+    loadWithError(() => client.listMaintenance(), locale),
+    loadHealthEnvelope(locale),
   ]);
 
   const vehiclePayload = normalizeVehiclePayload(
@@ -1793,7 +1804,7 @@ export default async function VehiclesPage({
         subtitle={copy(
           locale,
           "dispatchable · contract · insurance · debrand",
-          "dispatchable · 合約 · 保險 · debrand",
+          "可派遣狀態 · 合約 · 保險 · 除標識",
         )}
         tabs={tabs.map((tab) => tab.node)}
         activeTab={activeTab}
@@ -1830,18 +1841,20 @@ export default async function VehiclesPage({
                 health.degradedServices
                   .map(
                     (service: UiHealthEnvelope["degradedServices"][number]) =>
-                      `${service.service}: ${service.impact}`,
+                      `${formatOpsCodeLabel(locale, service.service)}: ${service.impact}`,
                   )
-                  .join(" · ") || "health unknown"
+                  .join(" · ") ||
+                copy(locale, "Health signal unavailable", "健康訊號未提供")
               } · checked ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
               `${
                 health.degradedServices
                   .map(
                     (service: UiHealthEnvelope["degradedServices"][number]) =>
-                      `${service.service}: ${service.impact}`,
+                      `${formatOpsCodeLabel(locale, service.service)}：${service.impact}`,
                   )
-                  .join(" · ") || "health unknown"
-              } · 檢查時間 ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
+                  .join(" · ") ||
+                copy(locale, "Health signal unavailable", "健康訊號未提供")
+              } · 檢查時間 ${formatLongDateTime(locale, health.lastCheckedAt)} 世界標準時間`,
             )}
           />
         ) : null}
@@ -2069,13 +2082,15 @@ export default async function VehiclesPage({
             </span>
             <span style={{ ...helperTextStyle, ...monoTextStyle }}>
               {copy(locale, "generated", "生成時間")} ·{" "}
-              {formatLongDateTime(locale, refresh.generatedAt)} UTC
+              {locale === "zh"
+                ? `${formatLongDateTime(locale, refresh.generatedAt)} 世界標準時間`
+                : `${formatLongDateTime(locale, refresh.generatedAt)} UTC`}
             </span>
             <span style={helperTextStyle}>
               {copy(
                 locale,
                 "supporting actions come from availableActions",
-                "畫面 CTA 以 availableActions 為準",
+                "畫面操作按鈕以後端回傳設定為準",
               )}
             </span>
           </div>
@@ -2123,7 +2138,7 @@ export default async function VehiclesPage({
               </Link>
               <span style={tinyMetaStyle(emptyView.tone)}>
                 {copy(locale, "emptyReason", "空狀態")} ·{" "}
-                {EMPTY_OVERRIDE_REASON_CODES[emptyReason ?? "no_data"]}
+                {formatOpsCodeLabel(locale, emptyReason ?? "no_data")}
               </span>
             </div>
           ) : (

@@ -39,6 +39,7 @@ import type {
 } from "@drts/contracts";
 import { MAINTENANCE_STATUSES, MAINTENANCE_TYPES } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { formatOpsUiError, toOpsErrorMessage } from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
 import { isMaintenanceOverdue } from "@/lib/ops-analytics";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
@@ -54,7 +55,10 @@ const STATUSES: MaintenanceStatus[] = [...MAINTENANCE_STATUSES];
 const TYPES: MaintenanceType[] = [...MAINTENANCE_TYPES];
 
 // Refresh tier — packet §3.2 / §5.13: T3 Ops medium (15s polling) for /maintenance.
-const REFRESH_TIER_LABEL = "T3 · 15s";
+const REFRESH_TIER_LABEL = {
+  en: "T3 · 15s",
+  zh: "每 15 秒更新",
+} as const;
 const REFRESH_STALE_AFTER_MS = 15_000;
 const REFRESH_POLL_MS = 15_000;
 
@@ -66,16 +70,6 @@ const EMPTY_REASONS: EmptyReason[] = [
   "external_unavailable",
   "filtered_empty",
 ];
-
-const EMPTY_REASON_CODES: Record<EmptyReason, string> = {
-  no_data: "maintenance_registry_empty",
-  not_provisioned: "maintenance_registry_not_provisioned",
-  fetch_failed: "maintenance_registry_fetch_failed",
-  permission_denied: "maintenance_registry_permission_denied",
-  external_unavailable: "maintenance_registry_external_unavailable",
-  filtered_empty: "maintenance_registry_filtered_empty",
-  driver_not_eligible: "driver_not_eligible",
-};
 
 type StatusTab = "all" | "scheduled" | "in_progress" | "overdue";
 
@@ -544,7 +538,13 @@ export default function MaintenancePage() {
         setNowMs(Date.now());
       } catch (e) {
         setLoadError(
-          e instanceof Error ? e.message : getOpsLabel(locale, "unknown"),
+          formatOpsUiError(
+            locale,
+            toOpsErrorMessage(e, getOpsLabel(locale, "unknown")),
+            locale === "en"
+              ? "Unable to load maintenance records"
+              : "無法載入保修工單",
+          ),
         );
       } finally {
         if (mode === "initial") {
@@ -719,8 +719,13 @@ export default function MaintenancePage() {
       } catch (e) {
         setToast({
           tone: "danger",
-          message:
-            e instanceof Error ? e.message : getOpsLabel(locale, "unknown"),
+          message: formatOpsUiError(
+            locale,
+            toOpsErrorMessage(e, getOpsLabel(locale, "unknown")),
+            locale === "en"
+              ? "Unable to complete maintenance action"
+              : "無法完成保修動作",
+          ),
           actionId: `act_${record.maintenanceId}`,
           auditId: "—",
         });
@@ -960,7 +965,7 @@ export default function MaintenancePage() {
               theme={theme}
               tone={freshness === "fresh" ? "success" : "warn"}
             >
-              {`${formatOpsCodeLabel(locale, freshness)} · ${REFRESH_TIER_LABEL}`}
+              {`${formatOpsCodeLabel(locale, freshness)} · ${locale === "en" ? REFRESH_TIER_LABEL.en : REFRESH_TIER_LABEL.zh}`}
             </Pill>
             <Btn
               theme={theme}
@@ -1010,7 +1015,7 @@ export default function MaintenancePage() {
               "Maintenance page is running degraded",
               "保修頁面目前為降級模式",
             )}
-            body={`maintenance: ${loadError}`}
+            body={loadError}
           />
         ) : null}
 
@@ -1027,7 +1032,7 @@ export default function MaintenancePage() {
             body={copy(
               locale,
               `Last refreshed ${formatLongDateTime(new Date(generatedAtMs).toISOString())} UTC. Auto-refresh runs every 15s (T3).`,
-              `最後更新 ${formatLongDateTime(new Date(generatedAtMs).toISOString())} UTC，每 15 秒自動刷新（T3）。`,
+              `最後更新 ${formatLongDateTime(new Date(generatedAtMs).toISOString())} 世界標準時間，每 15 秒自動刷新。`,
             )}
           />
         ) : null}
@@ -1277,7 +1282,7 @@ export default function MaintenancePage() {
               </Link>
               <span style={tinyMetaStyle(theme, emptyView.tone)}>
                 {copy(locale, "emptyReason", "空狀態")} ·{" "}
-                {EMPTY_REASON_CODES[emptyReason ?? "no_data"]}
+                {formatOpsCodeLabel(locale, emptyReason ?? "no_data")}
               </span>
             </div>
           ) : (
@@ -1289,11 +1294,13 @@ export default function MaintenancePage() {
           {copy(
             locale,
             "Supporting actions come from availableActions · ",
-            "畫面 CTA 以 availableActions 為準 · ",
+            "畫面操作按鈕以後端回傳設定為準 · ",
           )}
           {copy(locale, "generated", "生成時間")} ·{" "}
           {generatedAtMs > 0
-            ? `${formatLongDateTime(new Date(generatedAtMs).toISOString())} UTC`
+            ? locale === "zh"
+              ? `${formatLongDateTime(new Date(generatedAtMs).toISOString())} 世界標準時間`
+              : `${formatLongDateTime(new Date(generatedAtMs).toISOString())} UTC`
             : "—"}
         </div>
       </div>
@@ -1339,7 +1346,9 @@ export default function MaintenancePage() {
               fontFamily: theme.monoFamily,
             }}
           >
-            {`actionId ${toast.actionId} · auditId ${toast.auditId}`}
+            {locale === "en"
+              ? `actionId ${toast.actionId} · auditId ${toast.auditId}`
+              : `操作編號 ${toast.actionId} · 稽核編號 ${toast.auditId}`}
           </span>
         </div>
       ) : null}
@@ -1625,7 +1634,10 @@ function MaintenanceForm({
             onChange={(event) => setTechnician(event.target.value)}
           />
         </Field>
-        <Field theme={theme} label={copy(locale, "Cost (TWD)", "費用 (TWD)")}>
+        <Field
+          theme={theme}
+          label={copy(locale, "Cost (TWD)", "費用（新台幣）")}
+        >
           <input
             type="number"
             min="0"

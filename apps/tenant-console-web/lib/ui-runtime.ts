@@ -10,7 +10,7 @@ export function getRefreshTierDefinition(
 ): RefreshTierDefinition {
   switch (tier) {
     case "urgent":
-      return { label: "T1 · push + 5s fallback", staleAfterMs: 5_000 };
+      return { label: "T1 · 即時推送 + 5 秒備援", staleAfterMs: 5_000 };
     case "fast":
       return { label: "T2 · 3s", staleAfterMs: 3_000 };
     case "dispatch":
@@ -21,6 +21,6 @@ export function getRefreshTierDefinition(
     case "slow":
       return { label: "T5 · 30s", staleAfterMs: 30_000 };
     case "manual":
-      return { label: "T6 · manual", staleAfterMs: Number.MAX_SAFE_INTEGER };
+      return { label: "T6 · 手動刷新", staleAfterMs: Number.MAX_SAFE_INTEGER };
   }
 }

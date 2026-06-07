@@ -37,23 +37,32 @@
 
 import type { CrossAppResourceLink } from "@drts/contracts";
 import { usePathname, useRouter } from "next/navigation";
+import { useTranslation } from "@/lib/i18n";
+import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import {
   createElement,
   createContext,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
-import type {
-  AssistantEntityRef,
-  AssistantQueryInput,
-  AssistantRouteContext,
-  AssistantRouteDescriptor,
-  PageContextSnapshot,
-  PlatformAdminRouteKey,
-  RouteContextWarning,
+import {
+  ASSISTANT_CONTEXT_SCHEMA,
+  type AssistantAvailableAction,
+  type AssistantContextPacket,
+  type AssistantEntityRef,
+  type AssistantFormContext,
+  type AssistantFormFieldContext,
+  type AssistantQueryInput,
+  type AssistantRouteContext,
+  type AssistantRouteDescriptor,
+  type AssistantTableContext,
+  type PageContextSnapshot,
+  type PlatformAdminRouteKey,
+  type RouteContextWarning,
 } from "./assistant-types";
 
 export const PLATFORM_ADMIN_ROUTE_REGISTRY = {
@@ -103,6 +112,14 @@ export type PlatformAdminAssistantPageBridge = {
   filters?: Record<string, AssistantFilterAdapter>;
   drafts?: Record<string, AssistantDraftAdapter>;
   crossAppLinks?: Record<string, CrossAppResourceLink>;
+  /**
+   * Live, page-owned context snapshot for the context mesh v2. The overlay
+   * calls this at send-time so the packet reflects current selection, form
+   * values, validation errors, and visible rows. Read from React state/refs the
+   * page already holds; never scrape the DOM. Returning `undefined` means the
+   * page contributes only route-level context.
+   */
+  getContextSnapshot?: () => PageContextSnapshot | undefined;
 };
 
 // ---------------------------------------------------------------------------
@@ -113,7 +130,7 @@ const HIGH_RISK_ACTIONS_WARNING: RouteContextWarning = {
   code: "high_risk_actions_present",
   severity: "warning",
   message: {
-    zh: "本頁含高風險操作，需 modal 確認、填寫原因並產生稽核紀錄。",
+    zh: "本頁含高風險操作，需以對話框確認、填寫原因並產生稽核紀錄。",
     en: "This route exposes high-risk actions requiring modal confirmation, a reason, and an audit receipt.",
   },
 };
@@ -122,7 +139,7 @@ const WRITE_AUTHORITY_WARNING: RouteContextWarning = {
   code: "platform_write_authority",
   severity: "warning",
   message: {
-    zh: "本頁具平台寫入權限（唯一可寫旗標的 App），變更會即時影響其他 App。",
+    zh: "本頁具平台寫入權限（唯一可寫旗標的應用程式），變更會即時影響其他應用程式。",
     en: "This route holds platform write authority (the only app that can write flags); changes propagate to other apps.",
   },
 };
@@ -140,7 +157,7 @@ const MAINTENANCE_MODE_WARNING: RouteContextWarning = {
   code: "maintenance_mode_surface",
   severity: "warning",
   message: {
-    zh: "維護模式為高風險操作，啟用會跨 App 推送橫幅到 ops/tenant/driver。",
+    zh: "維護模式為高風險操作，啟用後會跨應用程式推送橫幅到營運、租戶與司機介面。",
     en: "Maintenance mode is high-risk; enabling it pushes a cross-app banner to ops/tenant/driver.",
   },
 };
@@ -158,7 +175,7 @@ const BODY_PARITY_PENDING_WARNING: RouteContextWarning = {
   code: "route_body_parity_pending",
   severity: "info",
   message: {
-    zh: "此路由的頁面實作由 body-parity 工作項負責，可能尚未上線；metadata 已就緒。",
+    zh: "此路由的頁面主體由頁面內容一致性工作項負責，可能尚未上線；中繼資料已就緒。",
     en: "This route's page body is owned by a body-parity work item and may not be live yet; metadata is ready.",
   },
 };
@@ -167,7 +184,7 @@ const UNKNOWN_ROUTE_WARNING: RouteContextWarning = {
   code: "unknown_route",
   severity: "info",
   message: {
-    zh: "未在 Platform Admin 路由註冊表中找到此路徑，已退回首頁 context。",
+    zh: "未在平台管理路由註冊表中找到此路徑，已退回首頁內容。",
     en: "Path is not in the Platform Admin route registry; falling back to home context.",
   },
 };
@@ -339,7 +356,7 @@ export const PLATFORM_ADMIN_ROUTES: readonly AssistantRouteDescriptor[] = [
     routeKey: "adapter-registry",
     pathTemplate: "/adapter-registry",
     section: "commerce",
-    title: { zh: "平台 Adapter", en: "Adapter Registry" },
+    title: { zh: "平台介接器", en: "Adapter Registry" },
     tabs: [],
     defaultTab: null,
     refreshTier: "medium",
@@ -647,6 +664,319 @@ export function buildRouteContext(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Context mesh v2 — bounded, privacy-filtered context packet
+// ---------------------------------------------------------------------------
+
+/**
+ * Bounds applied when collecting the page-owned context. They keep the packet
+ * small (plan §6.2: "Context must be small and privacy-filtered") so it never
+ * blows the provider context window or leaks bulk data.
+ */
+export const ASSISTANT_CONTEXT_LIMITS = {
+  maxTables: 6,
+  maxTableColumns: 12,
+  maxSampleRows: 5,
+  maxForms: 6,
+  maxFormFields: 24,
+  maxValidationErrors: 12,
+  maxActions: 16,
+  maxValuePreview: 64,
+} as const;
+
+function truncatePreview(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= ASSISTANT_CONTEXT_LIMITS.maxValuePreview) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, ASSISTANT_CONTEXT_LIMITS.maxValuePreview - 1)}…`;
+}
+
+/** Drop secret values, truncate previews, keep only metadata + filled flag. */
+function sanitizeFormField(
+  field: AssistantFormFieldContext,
+): AssistantFormFieldContext {
+  const sensitive = field.sensitive === true || field.kind === "secret";
+  const base: AssistantFormFieldContext = {
+    name: field.name,
+    filled: field.filled === true,
+  };
+  if (field.label !== undefined) base.label = field.label;
+  if (field.kind !== undefined) base.kind = field.kind;
+  if (field.required !== undefined) base.required = field.required;
+  if (sensitive) {
+    base.sensitive = true;
+    // Never serialize a credential preview, even when the page supplies one.
+    return base;
+  }
+  if (field.valuePreview !== undefined && field.valuePreview.length > 0) {
+    base.valuePreview = truncatePreview(field.valuePreview);
+  }
+  return base;
+}
+
+function sanitizeForm(form: AssistantFormContext): AssistantFormContext {
+  return {
+    formId: form.formId,
+    ...(form.title !== undefined ? { title: form.title } : {}),
+    dirty: form.dirty === true,
+    ...(form.submitting !== undefined ? { submitting: form.submitting } : {}),
+    fields: form.fields
+      .slice(0, ASSISTANT_CONTEXT_LIMITS.maxFormFields)
+      .map(sanitizeFormField),
+    validationErrors: form.validationErrors.slice(
+      0,
+      ASSISTANT_CONTEXT_LIMITS.maxValidationErrors,
+    ),
+  };
+}
+
+function sanitizeTable(table: AssistantTableContext): AssistantTableContext {
+  const next: AssistantTableContext = {
+    tableId: table.tableId,
+    visibleRowCount: Math.max(0, Math.trunc(table.visibleRowCount)),
+  };
+  if (table.title !== undefined) next.title = table.title;
+  if (table.totalRowCount !== undefined) {
+    next.totalRowCount = Math.max(0, Math.trunc(table.totalRowCount));
+  }
+  if (table.columns) {
+    next.columns = table.columns.slice(
+      0,
+      ASSISTANT_CONTEXT_LIMITS.maxTableColumns,
+    );
+  }
+  if (table.rowEntityKind !== undefined) {
+    next.rowEntityKind = table.rowEntityKind;
+  }
+  if (table.sampleRows) {
+    next.sampleRows = table.sampleRows.slice(
+      0,
+      ASSISTANT_CONTEXT_LIMITS.maxSampleRows,
+    );
+  }
+  if (table.activeFilter !== undefined) next.activeFilter = table.activeFilter;
+  return next;
+}
+
+function sanitizeAction(
+  action: AssistantAvailableAction,
+): AssistantAvailableAction {
+  const next: AssistantAvailableAction = {
+    id: action.id,
+    label: action.label,
+    enabled: action.enabled === true,
+  };
+  if (action.risk !== undefined) next.risk = action.risk;
+  if (action.disabledReasonCode !== undefined) {
+    next.disabledReasonCode = action.disabledReasonCode;
+  }
+  if (action.requiresConfirmation !== undefined) {
+    next.requiresConfirmation = action.requiresConfirmation;
+  }
+  return next;
+}
+
+/**
+ * Build the bounded, privacy-filtered v2 context packet (plan §6.2). It reuses
+ * {@link buildRouteContext} for the deterministic route layer and folds in the
+ * page-owned snapshot (tables, forms, selection, actions), capping sizes and
+ * redacting secret field values. Like the route builder it performs NO DOM
+ * scraping — every dynamic value comes from `pageState`.
+ */
+export function buildAssistantContextPacket(
+  pathname: string,
+  query?: AssistantQueryInput,
+  pageState?: PageContextSnapshot,
+  userIntent?: { rawPrompt: string; locale: "zh" | "en" },
+): AssistantContextPacket {
+  const routeContext = buildRouteContext(pathname, query, pageState);
+
+  const selectedRecords: AssistantEntityRef[] = routeContext.visibleEntityRefs
+    .filter((ref) => ref.source === "page-selection")
+    .map((ref) => ({ ...ref }));
+
+  const visibleTables = (pageState?.tables ?? [])
+    .slice(0, ASSISTANT_CONTEXT_LIMITS.maxTables)
+    .map(sanitizeTable);
+  const forms = (pageState?.forms ?? [])
+    .slice(0, ASSISTANT_CONTEXT_LIMITS.maxForms)
+    .map(sanitizeForm);
+  const availableActions = (pageState?.availableActions ?? [])
+    .slice(0, ASSISTANT_CONTEXT_LIMITS.maxActions)
+    .map(sanitizeAction);
+
+  return {
+    schema: ASSISTANT_CONTEXT_SCHEMA,
+    route: {
+      pathname: routeContext.pathname,
+      routeKey: routeContext.routeKey,
+      title: routeContext.title,
+      section: routeContext.section,
+      activeTab: routeContext.activeTab,
+      availableTabs: routeContext.availableTabs,
+      refreshTier: routeContext.refreshTier,
+      routeImplemented: routeContext.routeImplemented,
+    },
+    page: {
+      visibleEntityRefs: routeContext.visibleEntityRefs,
+      selectedRecords,
+      visibleTables,
+      visibleWarnings: routeContext.warnings,
+      availableActions,
+    },
+    forms,
+    ...(userIntent ? { userIntent } : {}),
+    generatedFrom: {
+      route: routeContext.generatedFrom.route,
+      query: routeContext.generatedFrom.query,
+      pageSelection: routeContext.generatedFrom.pageSelection,
+      pageTables: visibleTables.length > 0,
+      pageForms: forms.length > 0,
+      pageActions: availableActions.length > 0,
+    },
+  };
+}
+
+/**
+ * Deterministically serialize a context packet into the compact text block the
+ * gateway prepends to the operator's question. Stable line order keeps the
+ * surface testable. The route header lines are kept byte-stable for backward
+ * compatibility; the page/form sections are appended only when populated.
+ */
+export function serializeAssistantContextPacket(
+  packet: AssistantContextPacket,
+  locale: "zh" | "en",
+): string {
+  const { route, page, forms } = packet;
+
+  const entityRefs =
+    page.visibleEntityRefs.length > 0
+      ? page.visibleEntityRefs
+          .map((entity) => `${entity.kind}:${entity.id}`)
+          .join(", ")
+      : "none";
+  const warnings =
+    page.visibleWarnings.length > 0
+      ? page.visibleWarnings
+          .map((warning) => `${warning.code}: ${warning.message[locale]}`)
+          .join("; ")
+      : "none";
+
+  const lines: string[] = [
+    "[Platform Admin route context]",
+    `Path: ${route.pathname}`,
+    `Page: ${route.title[locale]}`,
+    `Active tab: ${route.activeTab ?? "none"}`,
+    `Refresh tier: ${route.refreshTier}`,
+    `Visible entities: ${entityRefs}`,
+    `Warnings: ${warnings}`,
+  ];
+
+  if (
+    page.visibleTables.length > 0 ||
+    page.selectedRecords.length > 0 ||
+    page.availableActions.length > 0
+  ) {
+    lines.push("", "[Page context]");
+
+    if (page.visibleTables.length > 0) {
+      lines.push(
+        `Visible tables: ${page.visibleTables
+          .map((table) => {
+            const count =
+              table.totalRowCount !== undefined &&
+              table.totalRowCount !== table.visibleRowCount
+                ? `${table.visibleRowCount}/${table.totalRowCount} rows`
+                : `${table.visibleRowCount} rows`;
+            const cols =
+              table.columns && table.columns.length > 0
+                ? `; columns: ${table.columns
+                    .map((col) => col.label ?? col.key)
+                    .join(", ")}`
+                : "";
+            const filter = table.activeFilter
+              ? `; filter: ${table.activeFilter}`
+              : "";
+            return `${table.title ?? table.tableId} (${count}${cols}${filter})`;
+          })
+          .join("; ")}`,
+      );
+    }
+
+    if (page.selectedRecords.length > 0) {
+      lines.push(
+        `Selected records: ${page.selectedRecords
+          .map((ref) =>
+            ref.label
+              ? `${ref.kind}:${ref.id} (${ref.label})`
+              : `${ref.kind}:${ref.id}`,
+          )
+          .join(", ")}`,
+      );
+    }
+
+    if (page.availableActions.length > 0) {
+      lines.push(
+        `Available actions: ${page.availableActions
+          .map((action) => {
+            const tags = [
+              action.risk ?? "low",
+              action.enabled
+                ? action.requiresConfirmation
+                  ? "requires confirmation"
+                  : "ready"
+                : `disabled${
+                    action.disabledReasonCode
+                      ? `:${action.disabledReasonCode}`
+                      : ""
+                  }`,
+            ];
+            return `${action.label} [${tags.join(", ")}]`;
+          })
+          .join("; ")}`,
+      );
+    }
+  }
+
+  if (forms.length > 0) {
+    lines.push("", "[Forms]");
+    for (const form of forms) {
+      const flags = [form.dirty ? "dirty" : "pristine"];
+      if (form.submitting) flags.push("submitting");
+      const fieldSummary =
+        form.fields.length > 0
+          ? form.fields
+              .map((field) => {
+                const state = field.filled
+                  ? field.sensitive
+                    ? "filled(redacted)"
+                    : field.valuePreview
+                      ? `filled "${field.valuePreview}"`
+                      : "filled"
+                  : `empty${field.required ? "(required)" : ""}`;
+                return `${field.name}=${state}`;
+              })
+              .join(", ")
+          : "no fields";
+      lines.push(
+        `${form.title ?? form.formId} (${flags.join(", ")}): ${fieldSummary}`,
+      );
+      if (form.validationErrors.length > 0) {
+        lines.push(
+          `  errors: ${form.validationErrors
+            .map((err) =>
+              err.field ? `${err.field}: ${err.message}` : err.message,
+            )
+            .join("; ")}`,
+        );
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
 type PlatformAdminRouteContextValue = {
   pathname: string;
   pageBridge: PlatformAdminAssistantPageBridge | null;
@@ -723,6 +1053,7 @@ export function PlatformAdminAssistantProvider({
   children: ReactNode;
 }) {
   const router = useRouter();
+  const { locale } = useTranslation();
   const pathname = usePathname() ?? "/";
   const [pageBridge, setPageBridge] =
     useState<PlatformAdminAssistantPageBridge | null>(null);
@@ -737,7 +1068,10 @@ export function PlatformAdminAssistantProvider({
         return {
           ok: true,
           code: "route_opened",
-          message: `Opened platform route ${href}.`,
+          message:
+            locale === "zh"
+              ? `已開啟平台路由 ${href}。`
+              : `Opened platform route ${href}.`,
           payload: { href },
         };
       },
@@ -747,7 +1081,10 @@ export function PlatformAdminAssistantProvider({
         return {
           ok: true,
           code: "cross_app_opened",
-          message: `Opened ${link.targetApp} resource in a new tab.`,
+          message:
+            locale === "zh"
+              ? `已在新分頁開啟${formatPlatformCodeLabel(locale, link.targetApp)}資源。`
+              : `Opened ${formatPlatformCodeLabel(locale, link.targetApp)} resource in a new tab.`,
           payload: {
             href,
             targetApp: link.targetApp,
@@ -757,7 +1094,7 @@ export function PlatformAdminAssistantProvider({
         };
       },
     }),
-    [pageBridge, pathname, router],
+    [locale, pageBridge, pathname, router],
   );
 
   return createElement(PlatformAdminRouteContext.Provider, { value }, children);
@@ -777,15 +1114,53 @@ export function usePlatformAdminAssistantPage(
   bridge: PlatformAdminAssistantPageBridge,
 ) {
   const { setPageBridge } = usePlatformAdminRouteContext();
+  const latestBridgeRef = useRef(bridge);
+  const stableBridgeRef = useRef<PlatformAdminAssistantPageBridge | null>(null);
+
+  latestBridgeRef.current = bridge;
+
+  if (stableBridgeRef.current === null) {
+    stableBridgeRef.current = createStablePageBridgeProxy(
+      () => latestBridgeRef.current,
+    );
+  }
 
   useEffect(() => {
-    setPageBridge(bridge);
+    // Register a stable proxy exactly once. Pages can rebuild their local bridge
+    // objects every render; the proxy keeps assistant consumers pointed at the
+    // latest handlers/snapshots without re-triggering provider state on each
+    // render, which prevents page-bridge identity churn from spiraling into
+    // render/update loops and downstream 429 request storms.
+    setPageBridge(stableBridgeRef.current);
     return () => {
       setPageBridge(null);
     };
-  }, [bridge, setPageBridge]);
+  }, [setPageBridge]);
 }
 
 export function usePlatformAdminAssistantRouteContext() {
   return usePlatformAdminRouteContext();
+}
+
+export function createStablePageBridgeProxy(
+  getCurrentBridge: () => PlatformAdminAssistantPageBridge,
+): PlatformAdminAssistantPageBridge {
+  return new Proxy(
+    {
+      pageId: getCurrentBridge().pageId,
+      getContextSnapshot() {
+        return getCurrentBridge().getContextSnapshot?.();
+      },
+    } as PlatformAdminAssistantPageBridge,
+    {
+      get(_target, property) {
+        if (property === "getContextSnapshot") {
+          return () => getCurrentBridge().getContextSnapshot?.();
+        }
+        return getCurrentBridge()[
+          property as keyof PlatformAdminAssistantPageBridge
+        ];
+      },
+    },
+  );
 }

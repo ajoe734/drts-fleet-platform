@@ -8,6 +8,7 @@ import type {
   PlatformPresenceStatus,
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { formatOpsUiError, toOpsErrorMessage } from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
 
 type DriverPlatformActionsProps = {
@@ -36,7 +37,7 @@ export function DriverPlatformActions({
 }: DriverPlatformActionsProps) {
   const client = getOpsClient();
   const router = useRouter();
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -53,7 +54,13 @@ export function DriverPlatformActions({
         router.refresh();
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("common.unknown"));
+      setError(
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(cause, t("common.unknown")),
+          t("drivers.detail.actionError"),
+        ),
+      );
     } finally {
       setPendingAction(null);
     }
@@ -144,7 +151,7 @@ export function DriverPlatformRowActions({
 }: DriverPlatformRowActionsProps) {
   const client = getOpsClient();
   const router = useRouter();
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [, startTransition] = useTransition();
@@ -161,7 +168,13 @@ export function DriverPlatformRowActions({
         router.refresh();
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("common.unknown"));
+      setError(
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(cause, t("common.unknown")),
+          t("drivers.detail.actionError"),
+        ),
+      );
     } finally {
       setPendingAction(null);
     }

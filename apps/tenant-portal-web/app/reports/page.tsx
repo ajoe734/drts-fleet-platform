@@ -2,12 +2,14 @@ import Link from "next/link";
 import type { ReportJobRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { formatPortalUiError, toPortalErrorMessage } from "@/lib/error-copy";
 import { createReportJob, refreshReports } from "./actions";
 import {
   getReportJobSourceSummary,
   getSourceToneClassName,
 } from "@/lib/source-domain";
 import { describeRoleSnapshot, getTenantRoleSnapshot } from "@/lib/rbac";
+import { formatPortalCodeLabel } from "@/lib/localized-labels";
 
 export default async function ReportsPage() {
   const client = await getTenantClient();
@@ -19,25 +21,24 @@ export default async function ReportsPage() {
   try {
     jobs = await client.listTenantReportJobs();
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = formatPortalUiError(toPortalErrorMessage(e), "無法載入報表工作");
   }
 
-  const desc =
-    "Fetched from /api/tenant/reports/jobs. " + jobs.length + " job(s) found.";
+  const desc = `目前共有 ${jobs.length} 筆報表工作可供檢視。`;
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Reports"
+        title="報表"
         description={
           roleSnapshot.capabilities.canWriteReports
             ? desc
-            : `${desc} Viewing as ${describeRoleSnapshot(roleSnapshot)} with read-only report access.`
+            : `${desc} 目前以 ${describeRoleSnapshot(roleSnapshot)} 身分檢視，僅提供唯讀報表存取。`
         }
       >
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>錯誤：</strong> {error}
           </div>
         )}
 
@@ -48,7 +49,7 @@ export default async function ReportsPage() {
           style={{ marginBottom: 16 }}
         >
           <label htmlFor="jobType" style={{ marginRight: 8 }}>
-            Job Type
+            工作類型
           </label>
           <select
             id="jobType"
@@ -56,13 +57,11 @@ export default async function ReportsPage() {
             defaultValue="dispatch_recording_index"
             style={{ marginRight: 16 }}
           >
-            <option value="dispatch_recording_index">
-              dispatch_recording_index
-            </option>
-            <option value="revenue_summary">revenue_summary</option>
+            <option value="dispatch_recording_index">派遣錄音索引</option>
+            <option value="revenue_summary">營收摘要</option>
           </select>
           <label htmlFor="format" style={{ marginRight: 8 }}>
-            Format
+            格式
           </label>
           <select
             id="format"
@@ -70,23 +69,23 @@ export default async function ReportsPage() {
             defaultValue="csv"
             style={{ marginRight: 16 }}
           >
-            <option value="csv">csv</option>
-            <option value="xlsx">xlsx</option>
-            <option value="pdf">pdf</option>
-            <option value="zip">zip</option>
+            <option value="csv">CSV</option>
+            <option value="xlsx">XLSX</option>
+            <option value="pdf">PDF</option>
+            <option value="zip">ZIP</option>
           </select>
           <button
             type="submit"
             disabled={!roleSnapshot.capabilities.canWriteReports}
           >
-            Create Job
+            建立工作
           </button>
           <button
             type="submit"
             formAction={refreshReports}
             style={{ marginLeft: 8 }}
           >
-            Refresh
+            重新整理
           </button>
         </form>
 
@@ -95,14 +94,14 @@ export default async function ReportsPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Job ID</th>
-                  <th>Status</th>
-                  <th>Job Type</th>
-                  <th>Source Domain</th>
-                  <th>Format</th>
-                  <th>Artifact</th>
-                  <th>Expires</th>
-                  <th>Created</th>
+                  <th>工作編號</th>
+                  <th>狀態</th>
+                  <th>工作類型</th>
+                  <th>來源領域</th>
+                  <th>格式</th>
+                  <th>產出檔案</th>
+                  <th>到期時間</th>
+                  <th>建立時間</th>
                 </tr>
               </thead>
               <tbody>
@@ -111,8 +110,8 @@ export default async function ReportsPage() {
                   return (
                     <tr key={job.jobId}>
                       <td>{job.jobId}</td>
-                      <td>{job.status}</td>
-                      <td>{job.jobType}</td>
+                      <td>{formatPortalCodeLabel(job.status, job.status)}</td>
+                      <td>{formatPortalCodeLabel(job.jobType, job.jobType)}</td>
                       <td>
                         <span className={getSourceToneClassName(source.tone)}>
                           {source.badge}
@@ -127,10 +126,10 @@ export default async function ReportsPage() {
                             target="_blank"
                             rel="noreferrer"
                           >
-                            Download
+                            下載
                           </a>
                         ) : (
-                          <em>pending</em>
+                          <em>待產出</em>
                         )}
                       </td>
                       <td>
@@ -147,13 +146,13 @@ export default async function ReportsPage() {
           </div>
         ) : (
           <p className="empty-state">
-            No report jobs found. Create one via POST /api/tenant/reports/jobs.
+            目前沒有報表工作。可透過上方功能建立新的報表工作。
           </p>
         )}
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>返回首頁</strong>
+          回到租戶入口總覽。
         </Link>
       </AppShellCard>
     </main>

@@ -441,9 +441,7 @@ export async function submitDriverTaskCompletion(
 
   const task = await replayPendingDriverTaskCompletion();
   if (!task) {
-    throw new Error(
-      "Pending driver task completion disappeared before replay.",
-    );
+    throw new Error("暫存中的任務完成指令在重送前遺失，請重新提交。");
   }
 
   return task;
@@ -452,8 +450,8 @@ export async function submitDriverTaskCompletion(
 export function getDriverClient(): ApiClient {
   if (!client) {
     throw new Error(
-      "Driver identity is not provisioned. Complete device registration or " +
-        "set EXPO_PUBLIC_DRIVER_ID for explicit development override.",
+      "尚未完成司機身分佈建。請先完成裝置註冊；若是本機開發，也可設定 " +
+        "EXPO_PUBLIC_DRIVER_ID 直接覆寫。",
     );
   }
   return client;
@@ -467,9 +465,7 @@ export function getDriverId(): string {
     return provisionedSession.driverId;
   }
 
-  throw new Error(
-    "Driver identity is not provisioned. Complete the device provisioning flow.",
-  );
+  throw new Error("尚未完成司機身分佈建，請先完成裝置註冊流程。");
 }
 
 export { API_URL };

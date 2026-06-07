@@ -24,6 +24,12 @@ import type {
 } from "@drts/contracts";
 import { CALL_TYPES, COMPLAINT_CATEGORIES } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import {
+  classifyOpsErrorReason,
+  formatOpsUiError,
+  toOpsErrorMessage,
+} from "@/lib/error-copy";
+import { formatDispatchTraceMessage } from "@/lib/dispatch-trace";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, formatOpsCodeList } from "@/lib/localized-labels";
 
@@ -139,6 +145,18 @@ function toIsoString(value: string) {
   return value ? new Date(value).toISOString() : "";
 }
 
+function formatCallIdLabel(locale: Locale, callId: string) {
+  return locale === "en" ? callId : `通話 ${callId}`;
+}
+
+function formatCallbackIdLabel(locale: Locale, callbackTaskId: string) {
+  return locale === "en" ? callbackTaskId : `回撥 ${callbackTaskId}`;
+}
+
+function formatOrderIdLabel(locale: Locale, orderId: string) {
+  return locale === "en" ? orderId : `訂單編號 ${orderId}`;
+}
+
 function getRecordingStateTone(recordingState: CallRecordingState) {
   switch (recordingState) {
     case "ready":
@@ -182,9 +200,9 @@ function getEmptyStateCopy(
             accent: "Provisioning",
           }
         : {
-            title: "Workspace 尚未 provision",
-            body: "這位操作員缺少 call-center scope 或 telephony bootstrap。",
-            accent: "Provisioning",
+            title: "工作區尚未佈建",
+            body: "這位操作員缺少客服中心權限範圍或電話系統啟動設定。",
+            accent: "佈建",
           };
     case "fetch_failed":
       return locale === "en"
@@ -195,8 +213,8 @@ function getEmptyStateCopy(
           }
         : {
             title: "資料抓取失敗",
-            body: "Workspace 無法從後端刷新。請檢查錯誤訊息後再重試。",
-            accent: "Fetch failed",
+            body: "工作區無法從後端刷新。請檢查錯誤訊息後再重試。",
+            accent: "抓取失敗",
           };
     case "permission_denied":
       return locale === "en"
@@ -207,8 +225,8 @@ function getEmptyStateCopy(
           }
         : {
             title: "權限不足",
-            body: "目前操作員可看到路由頁面，但沒有執行 call-center 動作所需的 scope。",
-            accent: "Permission",
+            body: "目前操作員可看到路由頁面，但沒有執行客服中心動作所需的權限範圍。",
+            accent: "權限",
           };
     case "external_unavailable":
       return locale === "en"
@@ -218,9 +236,9 @@ function getEmptyStateCopy(
             accent: "External",
           }
         : {
-            title: "外部 telephony 不可用",
-            body: "CTI 或錄音連結目前降級。請先依 queue 資訊分流，待依賴恢復後再重試。",
-            accent: "External",
+            title: "外部電話系統不可用",
+            body: "CTI 或錄音連結目前降級。請先依佇列資訊分流，待依賴恢復後再重試。",
+            accent: "外部依賴",
           };
     case "filtered_empty":
       return locale === "en"
@@ -231,8 +249,8 @@ function getEmptyStateCopy(
           }
         : {
             title: "目前篩選沒有結果",
-            body: "清除搜尋條件後，可回到完整的 session、callback 與歷史列表。",
-            accent: "Filtered",
+            body: "清除搜尋條件後，可回到完整的通話、回撥與歷史列表。",
+            accent: "篩選",
           };
     case "no_data":
     default:
@@ -243,9 +261,9 @@ function getEmptyStateCopy(
             accent: "Idle",
           }
         : {
-            title: "目前沒有 active session",
-            body: "Workspace 處於 idle 狀態。可開新 session，或持續留意 callback 與錄音待補佇列。",
-            accent: "Idle",
+            title: "目前沒有進行中的通話",
+            body: "工作區目前閒置。可開啟新通話，或持續留意待回撥與錄音待補佇列。",
+            accent: "閒置",
           };
   }
 }
@@ -255,7 +273,7 @@ function getDisabledReasonLabel(locale: Locale, code?: string) {
     case "active_session_exists":
       return locale === "en"
         ? "Close the current active session first."
-        : "請先結束目前的 active session。";
+        : "請先結束目前進行中的通話。";
     case "identity_already_announced":
       return locale === "en"
         ? "Identity already announced."
@@ -263,23 +281,23 @@ function getDisabledReasonLabel(locale: Locale, code?: string) {
     case "session_closed":
       return locale === "en"
         ? "Closed sessions are read-only."
-        : "已關閉 session 為唯讀。";
+        : "已關閉的通話為唯讀。";
     case "linked_order_exists":
       return locale === "en"
         ? "This session already has a linked order."
-        : "這筆 session 已綁定訂單。";
+        : "這筆通話已綁定訂單。";
     case "complaint_exists":
       return locale === "en"
         ? "This session is already linked to a complaint."
-        : "這筆 session 已連結客訴。";
+        : "這筆通話已連結客訴。";
     case "callback_missing":
       return locale === "en"
         ? "There is no pending callback to complete."
-        : "目前沒有待完成的 callback。";
+        : "目前沒有待完成的回撥。";
     case "compliance_scope_required":
       return locale === "en"
         ? "Compliance scope is required for manual recording attach."
-        : "手動補掛錄音需要 compliance scope。";
+        : "手動補掛錄音需要合規權限。";
     default:
       return locale === "en" ? "Action not available." : "此動作目前不可用。";
   }
@@ -287,12 +305,12 @@ function getDisabledReasonLabel(locale: Locale, code?: string) {
 
 function getActionLabel(locale: Locale, action: string) {
   const labels: Record<string, { en: string; zh: string }> = {
-    open_call_session: { en: "Open call session", zh: "開新 call session" },
+    open_call_session: { en: "Open call session", zh: "開啟新通話" },
     announce_identity: { en: "Announce identity", zh: "標記已告知身分" },
-    close_session: { en: "Close session", zh: "關閉 session" },
-    quote_eta: { en: "Quote ETA", zh: "回覆 ETA" },
-    create_callback: { en: "Create callback", zh: "建立 callback" },
-    complete_callback: { en: "Complete callback", zh: "完成 callback" },
+    close_session: { en: "Close session", zh: "結束通話" },
+    quote_eta: { en: "Quote ETA", zh: "回覆預估到達時間" },
+    create_callback: { en: "Create callback", zh: "建立回撥" },
+    complete_callback: { en: "Complete callback", zh: "完成回撥" },
     create_phone_booking: { en: "Create phone booking", zh: "建立電話訂車" },
     link_existing_order: { en: "Link existing order", zh: "連結既有訂單" },
     transfer_to_complaint: { en: "Transfer to complaint", zh: "轉交客訴" },
@@ -358,30 +376,7 @@ function classifyEmptyReason(
   totalCallbacks: number,
 ): EmptyReason {
   if (errorMessage) {
-    const normalized = errorMessage.toLowerCase();
-    if (
-      normalized.includes("permission") ||
-      normalized.includes("forbidden") ||
-      normalized.includes("unauthorized")
-    ) {
-      return "permission_denied";
-    }
-    if (
-      normalized.includes("provision") ||
-      normalized.includes("scope") ||
-      normalized.includes("bootstrap")
-    ) {
-      return "not_provisioned";
-    }
-    if (
-      normalized.includes("cti") ||
-      normalized.includes("telephony") ||
-      normalized.includes("recording provider") ||
-      normalized.includes("external")
-    ) {
-      return "external_unavailable";
-    }
-    return "fetch_failed";
+    return classifyOpsErrorReason(errorMessage);
   }
 
   if (filtered) {
@@ -416,10 +411,13 @@ function buildFallbackHealth(errorMessage: string | null): UiHealthEnvelope {
   }
 
   const normalized = errorMessage.toLowerCase();
+  const reason = classifyOpsErrorReason(errorMessage);
   const service =
-    normalized.includes("telephony") || normalized.includes("cti")
+    normalized.includes("telephony") ||
+    normalized.includes("cti") ||
+    errorMessage.includes("電話")
       ? "telephony"
-      : normalized.includes("recording")
+      : normalized.includes("recording") || errorMessage.includes("錄音")
         ? "recording"
         : "ops-api";
 
@@ -429,10 +427,7 @@ function buildFallbackHealth(errorMessage: string | null): UiHealthEnvelope {
       {
         service,
         impact: errorMessage,
-        severity:
-          normalized.includes("down") || normalized.includes("unavailable")
-            ? "critical"
-            : "warning",
+        severity: reason === "external_unavailable" ? "critical" : "warning",
       },
     ],
     lastCheckedAt: new Date().toISOString(),
@@ -569,7 +564,7 @@ function buildSessionLinks(session: CallSessionRecord): CrossAppResourceLink[] {
       resourceType: "order",
       resourceId: session.linkedOrderId,
       openMode: "same_tab",
-      label: "Dispatch workspace",
+      label: "派遣工作區",
     });
   }
 
@@ -580,7 +575,7 @@ function buildSessionLinks(session: CallSessionRecord): CrossAppResourceLink[] {
       resourceType: "complaint_case",
       resourceId: session.linkedCaseNo,
       openMode: "same_tab",
-      label: "Complaint detail",
+      label: "客訴明細",
     });
   }
 
@@ -741,7 +736,13 @@ export default function CallcenterPage() {
   const { t, locale } = useTranslation();
   const currentLocale = locale as Locale;
   const resolveErrorMessage = (error: unknown) =>
-    error instanceof Error ? error.message : t("common.unknown");
+    formatOpsUiError(
+      currentLocale,
+      toOpsErrorMessage(error, t("common.unknown")),
+      currentLocale === "en"
+        ? "Callcenter request failed"
+        : "客服工作區操作未完成",
+    );
 
   const [sessions, setSessions] = useState<RuntimeSessionRecord[]>([]);
   const [callbacks, setCallbacks] = useState<RuntimeCallbackRecord[]>([]);
@@ -903,12 +904,12 @@ export default function CallcenterPage() {
   const tabs = [
     {
       id: "sessions" as const,
-      label: currentLocale === "en" ? "Sessions" : "當前 session",
+      label: currentLocale === "en" ? "Sessions" : "當前通話",
       badge: activeSessions.length,
     },
     {
       id: "callback" as const,
-      label: currentLocale === "en" ? "Callback queue" : "Callback 佇列",
+      label: currentLocale === "en" ? "Callback queue" : "回撥佇列",
       badge: pendingCallbacks.length,
     },
     {
@@ -1117,7 +1118,7 @@ export default function CallcenterPage() {
   const activeQueueCard =
     queueView === "callback"
       ? {
-          kicker: currentLocale === "en" ? "Callback queue" : "Callback 佇列",
+          kicker: currentLocale === "en" ? "Callback queue" : "回撥佇列",
           title: currentLocale === "en" ? "Pending follow-up" : "待追蹤回覆",
           count: pendingCallbacks.length,
           body:
@@ -1130,7 +1131,12 @@ export default function CallcenterPage() {
                   onClick={() => setSelectedCallId(callback.callId)}
                 >
                   <div>
-                    <strong>{callback.callbackTaskId}</strong>
+                    <strong>
+                      {formatCallbackIdLabel(
+                        currentLocale,
+                        callback.callbackTaskId,
+                      )}
+                    </strong>
                     <p>{getCallbackSummary(callback, currentLocale)}</p>
                   </div>
                   <span>
@@ -1142,7 +1148,7 @@ export default function CallcenterPage() {
               <div className="subtle-empty">
                 {currentLocale === "en"
                   ? "No callbacks match the current scope."
-                  : "目前 scope 內沒有 callback。"}
+                  : "目前範圍內沒有待回撥項目。"}
               </div>
             ),
         }
@@ -1164,7 +1170,9 @@ export default function CallcenterPage() {
                     onClick={() => setSelectedCallId(session.callId)}
                   >
                     <div>
-                      <strong>{session.callId}</strong>
+                      <strong>
+                        {formatCallIdLabel(currentLocale, session.callId)}
+                      </strong>
                       <p>{session.callerPhone}</p>
                     </div>
                     <span
@@ -1200,7 +1208,9 @@ export default function CallcenterPage() {
                     onClick={() => setSelectedCallId(session.callId)}
                   >
                     <div>
-                      <strong>{session.callId}</strong>
+                      <strong>
+                        {formatCallIdLabel(currentLocale, session.callId)}
+                      </strong>
                       <p>
                         {formatOpsCodeLabel(currentLocale, session.callType)} ·{" "}
                         {session.callerPhone}
@@ -1228,7 +1238,7 @@ export default function CallcenterPage() {
         subtitle={
           currentLocale === "en"
             ? "One active session per agent. Waiting, callback, recording, and history queues stay visible in the same workspace."
-            : "每位 agent 同時間僅一個 active session，等待 / callback / 錄音 / 歷史佇列維持在同一個 workspace。"
+            : "每位客服人員同時間僅能有一筆進行中的通話；等待、回撥、錄音與歷史佇列都會留在同一個工作區。"
         }
         tabs={headerTabs}
         activeTab={headerTabs[activeTabIndex] ?? headerTabs[0]}
@@ -1274,13 +1284,13 @@ export default function CallcenterPage() {
                   message:
                     currentLocale === "en"
                       ? `Session ${selectedSession.callId} closed.`
-                      : `已關閉 session ${selectedSession.callId}。`,
+                      : `已結束通話，通話編號 ${selectedSession.callId}。`,
                 });
                 await loadData(selectedSession.callId);
               })
             }
           >
-            {currentLocale === "en" ? "Close current" : "結束目前"}
+            {currentLocale === "en" ? "Close current" : "結束目前通話"}
           </button>,
         ]}
         sticky={false}
@@ -1292,20 +1302,22 @@ export default function CallcenterPage() {
             <span className="hero-eyebrow">
               {currentLocale === "en"
                 ? `Refresh tier ${CALLCENTER_REFRESH_TIER} · 5s auto refresh`
-                : `Refresh tier ${CALLCENTER_REFRESH_TIER} · 每 5 秒自動刷新`}
+                : "客服中心即時刷新 · 每 5 秒自動更新"}
             </span>
             <h2>
               {selectedSession
-                ? `${selectedSession.callId} · ${formatOpsCodeLabel(currentLocale, selectedSession.callType)}`
+                ? currentLocale === "en"
+                  ? `${selectedSession.callId} · ${formatOpsCodeLabel(currentLocale, selectedSession.callType)}`
+                  : `通話 ${selectedSession.callId} · ${formatOpsCodeLabel(currentLocale, selectedSession.callType)}`
                 : currentLocale === "en"
                   ? "Idle workspace"
-                  : "Idle workspace"}
+                  : "工作區閒置"}
             </h2>
             <p>
               {selectedSession
                 ? currentLocale === "en"
                   ? "Handle booking, callback, complaint handoff, and recording evidence without leaving the canvas."
-                  : "在同一個 canvas 內完成建單、callback、客訴轉案與錄音證據補齊。"
+                  : "在同一個工作區內完成建單、回撥、客訴轉案與錄音證據補齊。"
                 : emptyCopy.body}
             </p>
           </div>
@@ -1313,15 +1325,13 @@ export default function CallcenterPage() {
             <div className="hero-metrics">
               <div className="hero-chip hero-chip-accent">
                 <span>
-                  {currentLocale === "en" ? "Open sessions" : "Active session"}
+                  {currentLocale === "en" ? "Open sessions" : "進行中通話"}
                 </span>
                 <strong>{openSessionsCount}</strong>
               </div>
               <div className="hero-chip">
                 <span>
-                  {currentLocale === "en"
-                    ? "Pending callbacks"
-                    : "待回覆 callback"}
+                  {currentLocale === "en" ? "Pending callbacks" : "待回撥"}
                 </span>
                 <strong>{pendingCallbacks.length}</strong>
               </div>
@@ -1357,7 +1367,9 @@ export default function CallcenterPage() {
               </button>
             </div>
             <div className="toolbar-meta">
-              <span className="tier-chip">T2</span>
+              <span className="tier-chip">
+                {currentLocale === "en" ? "T2" : "即時"}
+              </span>
               <span className={getFreshnessTone(activeRefresh)}>
                 {workspaceStale
                   ? currentLocale === "en"
@@ -1371,7 +1383,7 @@ export default function CallcenterPage() {
                 {health.status === "healthy"
                   ? currentLocale === "en"
                     ? "Healthy"
-                    : "健康"
+                    : "正常"
                   : currentLocale === "en"
                     ? "Degraded"
                     : "降級中"}
@@ -1450,7 +1462,7 @@ export default function CallcenterPage() {
                       message:
                         currentLocale === "en"
                           ? `Session ${created.callId} opened.`
-                          : `已開啟 session ${created.callId}。`,
+                          : `已開啟通話，通話編號 ${created.callId}。`,
                     });
                     await loadData(created.callId);
                   },
@@ -1616,7 +1628,7 @@ export default function CallcenterPage() {
                     <span className="section-kicker">
                       {currentLocale === "en"
                         ? "Workspace signals"
-                        : "Workspace 訊號"}
+                        : "工作區訊號"}
                     </span>
                     <h3>
                       {currentLocale === "en"
@@ -1630,33 +1642,40 @@ export default function CallcenterPage() {
                     <span>
                       {currentLocale === "en"
                         ? "availableActions"
-                        : "availableActions"}
+                        : "可執行操作"}
                     </span>
                     <strong>{selectedSession.availableActions.length}</strong>
                     <small>
                       {currentLocale === "en"
                         ? "Affordances stay visible even when disabled."
-                        : "即使 disabled 也保留 affordance。"}
+                        : "即使停用，也會保留可見操作。"}
                     </small>
                   </div>
                   <div className="signal-card">
                     <span>
-                      {currentLocale === "en" ? "Deep links" : "Deep links"}
+                      {currentLocale === "en" ? "Deep links" : "相關捷徑"}
                     </span>
                     <strong>{selectedSession.deepLinks.length}</strong>
                     <small>
                       {currentLocale === "en"
                         ? "Dispatch and complaint routes are contract-driven."
-                        : "Dispatch 與 complaint 連結由 contract 決定。"}
+                        : "派遣與客訴路徑都由契約決定。"}
                     </small>
                   </div>
                   <div className="signal-card">
                     <span>{currentLocale === "en" ? "Health" : "健康度"}</span>
-                    <strong>{health.status}</strong>
+                    <strong>
+                      {formatOpsCodeLabel(currentLocale, health.status)}
+                    </strong>
                     <small>
                       {health.degradedServices.length > 0
                         ? health.degradedServices
-                            .map((service) => service.service)
+                            .map((service) =>
+                              formatOpsCodeLabel(
+                                currentLocale,
+                                service.service,
+                              ),
+                            )
                             .join(" · ")
                         : currentLocale === "en"
                           ? "No degraded dependencies."
@@ -1675,19 +1694,19 @@ export default function CallcenterPage() {
                   <span className="section-kicker">
                     {currentLocale === "en"
                       ? "Active session panel"
-                      : "Active session panel"}
+                      : "目前通話面板"}
                   </span>
                   <h3>
                     {selectedSession
-                      ? selectedSession.callId
+                      ? formatCallIdLabel(currentLocale, selectedSession.callId)
                       : currentLocale === "en"
                         ? "Idle workspace"
-                        : "Idle workspace"}
+                        : "工作區閒置"}
                   </h3>
                   <p>
                     {currentLocale === "en"
                       ? "Must-show: call type, caller phone, agent identity, linked order, recording state, and dispatch trace."
-                      : "必顯示：call type、caller phone、agent identity、linked order、recording state 與 dispatch trace。"}
+                      : "必顯示：通話類型、來電電話、客服身分、關聯訂單、錄音狀態與派遣軌跡。"}
                   </p>
                 </div>
                 {selectedSession ? (
@@ -1708,7 +1727,7 @@ export default function CallcenterPage() {
                 <div className="loading-state">
                   {currentLocale === "en"
                     ? "Loading call center workspace..."
-                    : "正在載入 call center workspace..."}
+                    : "正在載入客服中心工作區..."}
                 </div>
               ) : selectedSession ? (
                 <>
@@ -1721,7 +1740,11 @@ export default function CallcenterPage() {
                           selectedSession.callType,
                         )}
                       </strong>
-                      <small>{selectedSession.callId}</small>
+                      <small>
+                        {currentLocale === "en"
+                          ? selectedSession.callId
+                          : `通話編號 ${selectedSession.callId}`}
+                      </small>
                     </div>
                     <div className="spotlight-cell">
                       <span>
@@ -1792,15 +1815,15 @@ export default function CallcenterPage() {
                         {selectedSession.lastEtaQuotedMinutes
                           ? currentLocale === "en"
                             ? `Last ETA ${selectedSession.lastEtaQuotedMinutes} min`
-                            : `最近 ETA ${selectedSession.lastEtaQuotedMinutes} 分鐘`
+                            : `最近回覆 ${selectedSession.lastEtaQuotedMinutes} 分鐘`
                           : currentLocale === "en"
                             ? "No ETA quoted yet"
-                            : "尚未回覆 ETA"}
+                            : "尚未回覆預估到達時間"}
                       </small>
                     </div>
                     <div className="spotlight-cell">
                       <span>
-                        {currentLocale === "en" ? "Deep links" : "Deep links"}
+                        {currentLocale === "en" ? "Deep links" : "相關捷徑"}
                       </span>
                       <div className="deep-link-list">
                         {selectedSession.deepLinks.length > 0 ? (
@@ -1812,7 +1835,7 @@ export default function CallcenterPage() {
                           <span className="deep-link-empty">
                             {currentLocale === "en"
                               ? "No linked resources"
-                              : "尚無 linked resource"}
+                              : "尚無關聯資源"}
                           </span>
                         )}
                       </div>
@@ -1866,19 +1889,17 @@ export default function CallcenterPage() {
               <div className="card-head">
                 <div>
                   <span className="section-kicker">
-                    {currentLocale === "en"
-                      ? "Session actions"
-                      : "Session 動作"}
+                    {currentLocale === "en" ? "Session actions" : "通話動作"}
                   </span>
                   <h3>
                     {currentLocale === "en"
                       ? "Greeting to resolution"
-                      : "從 greeting 到 resolution"}
+                      : "從開場到結案"}
                   </h3>
                   <p>
                     {currentLocale === "en"
                       ? "Affordances stay visible even when disabled; enabled state comes from availableActions."
-                      : "即使 disabled 也保留 affordance；enabled 狀態由 availableActions 決定。"}
+                      : "即使操作目前不可用，也會保留按鈕樣式；是否可執行由後端回傳的可用操作清單決定。"}
                   </p>
                 </div>
               </div>
@@ -1886,9 +1907,7 @@ export default function CallcenterPage() {
               <div className="action-panels">
                 <section className="mini-panel">
                   <h4>
-                    {currentLocale === "en"
-                      ? "Session controls"
-                      : "Session 控制"}
+                    {currentLocale === "en" ? "Session controls" : "通話控制"}
                   </h4>
                   <div className="mini-actions">
                     <button
@@ -1925,7 +1944,7 @@ export default function CallcenterPage() {
                               message:
                                 currentLocale === "en"
                                   ? `Identity announced for ${selectedSession.callId}.`
-                                  : `已為 ${selectedSession.callId} 標記身分告知。`,
+                                  : `已為通話 ${selectedSession.callId} 標記身分告知。`,
                             });
                             await loadData(selectedSession.callId);
                           },
@@ -1960,7 +1979,7 @@ export default function CallcenterPage() {
                               message:
                                 currentLocale === "en"
                                   ? `Session ${selectedSession.callId} closed.`
-                                  : `已關閉 session ${selectedSession.callId}。`,
+                                  : `已結束通話，通話編號 ${selectedSession.callId}。`,
                             });
                             await loadData(selectedSession.callId);
                           },
@@ -1979,7 +1998,9 @@ export default function CallcenterPage() {
                 </section>
 
                 <section className="mini-panel">
-                  <h4>{currentLocale === "en" ? "Quote ETA" : "回覆 ETA"}</h4>
+                  <h4>
+                    {currentLocale === "en" ? "Quote ETA" : "回覆預估到達時間"}
+                  </h4>
                   <form
                     className="stack-form"
                     onSubmit={(event) => {
@@ -2002,7 +2023,7 @@ export default function CallcenterPage() {
                             message:
                               currentLocale === "en"
                                 ? `ETA ${quotedEtaMinutes} min saved.`
-                                : `已儲存 ETA ${quotedEtaMinutes} 分鐘。`,
+                                : `已儲存預估到達時間：${quotedEtaMinutes} 分鐘。`,
                           });
                           await loadData(selectedSession.callId);
                         },
@@ -2126,19 +2147,17 @@ export default function CallcenterPage() {
               <div className="card-head">
                 <div>
                   <span className="section-kicker">
-                    {currentLocale === "en"
-                      ? "Resolution desk"
-                      : "Resolution desk"}
+                    {currentLocale === "en" ? "Resolution desk" : "處理工作台"}
                   </span>
                   <h3>
                     {currentLocale === "en"
                       ? "Booking, callback, and complaint handoff"
-                      : "建單、callback 與客訴轉案"}
+                      : "建單、回撥與客訴轉案"}
                   </h3>
                   <p>
                     {currentLocale === "en"
                       ? "Primary decision points: new booking vs existing order, and callback vs complaint remediation."
-                      : "主要決策點：新建訂單或既有訂單，以及 callback 或客訴補救。"}
+                      : "主要決策點：新建訂單或既有訂單，以及回撥或客訴補救。"}
                   </p>
                 </div>
               </div>
@@ -2188,12 +2207,12 @@ export default function CallcenterPage() {
                             message:
                               currentLocale === "en"
                                 ? `Phone booking created from ${selectedSession.callId}.`
-                                : `已從 ${selectedSession.callId} 建立電話訂單。`,
+                                : `已由通話 ${selectedSession.callId} 建立電話訂單。`,
                             href: `/dispatch/${encodeURIComponent(created.orderId)}`,
                             label:
                               currentLocale === "en"
                                 ? "Open dispatch workspace"
-                                : "前往 dispatch workspace",
+                                : "前往派遣工作區",
                           });
                           await loadData(selectedSession.callId);
                         },
@@ -2306,7 +2325,7 @@ export default function CallcenterPage() {
                             label:
                               currentLocale === "en"
                                 ? "Open linked dispatch"
-                                : "開啟已綁定 dispatch",
+                                : "開啟已綁定派遣",
                           });
                           await loadData(selectedSession.callId);
                         },
@@ -2364,7 +2383,7 @@ export default function CallcenterPage() {
                             message:
                               currentLocale === "en"
                                 ? `Callback queued for ${selectedSession.callId}.`
-                                : `已為 ${selectedSession.callId} 建立 callback。`,
+                                : `已為通話 ${selectedSession.callId} 建立回撥。`,
                           });
                           await loadData(selectedSession.callId);
                         },
@@ -2417,7 +2436,7 @@ export default function CallcenterPage() {
                             message:
                               currentLocale === "en"
                                 ? `Callback ${selectedSession.callbackTask!.callbackTaskId} completed.`
-                                : `已完成 callback ${selectedSession.callbackTask!.callbackTaskId}。`,
+                                : `已完成回撥，回撥編號 ${selectedSession.callbackTask!.callbackTaskId}。`,
                           });
                           await loadData(selectedSession.callId);
                         },
@@ -2489,7 +2508,7 @@ export default function CallcenterPage() {
                             message:
                               currentLocale === "en"
                                 ? `Complaint ${result.complaintCase.caseNo} created from ${selectedSession.callId}.`
-                                : `已從 ${selectedSession.callId} 建立客訴 ${result.complaintCase.caseNo}。`,
+                                : `已由通話 ${selectedSession.callId} 建立客訴案件 ${result.complaintCase.caseNo}。`,
                             href: `/complaints?caseNo=${encodeURIComponent(result.complaintCase.caseNo)}`,
                             label:
                               currentLocale === "en"
@@ -2578,9 +2597,7 @@ export default function CallcenterPage() {
               <div className="card-head">
                 <div>
                   <span className="section-kicker">
-                    {currentLocale === "en"
-                      ? "Dispatch trace"
-                      : "Dispatch trace"}
+                    {currentLocale === "en" ? "Dispatch trace" : "派遣追蹤"}
                   </span>
                   <h3>
                     {currentLocale === "en"
@@ -2590,7 +2607,7 @@ export default function CallcenterPage() {
                   <p>
                     {currentLocale === "en"
                       ? "Deep links and trace stay in the same workspace while the operator resolves the call."
-                      : "當操作員處理通話時，deep link 與 trace 要保留在同一個 workspace。"}
+                      : "當操作員處理通話時，相關捷徑與追蹤資訊會保留在同一個工作區。"}
                   </p>
                 </div>
               </div>
@@ -2601,7 +2618,12 @@ export default function CallcenterPage() {
                     <div className="spotlight-cell">
                       <span>{currentLocale === "en" ? "Order" : "訂單"}</span>
                       <strong>{selectedOrder.orderNo}</strong>
-                      <small>{selectedOrder.orderId}</small>
+                      <small>
+                        {formatOrderIdLabel(
+                          currentLocale,
+                          selectedOrder.orderId,
+                        )}
+                      </small>
                     </div>
                     <div className="spotlight-cell">
                       <span>{currentLocale === "en" ? "Status" : "狀態"}</span>
@@ -2615,10 +2637,10 @@ export default function CallcenterPage() {
                         {selectedOrder.etaSnapshot
                           ? currentLocale === "en"
                             ? `${selectedOrder.etaSnapshot.etaMinutes} min ETA`
-                            : `${selectedOrder.etaSnapshot.etaMinutes} 分鐘 ETA`
+                            : `預估到達時間 ${selectedOrder.etaSnapshot.etaMinutes} 分鐘`
                           : currentLocale === "en"
                             ? "ETA pending"
-                            : "ETA 尚未回傳"}
+                            : "預估到達時間尚未回傳"}
                       </small>
                     </div>
                     <div className="spotlight-cell">
@@ -2649,7 +2671,7 @@ export default function CallcenterPage() {
                     >
                       {currentLocale === "en"
                         ? "Open dispatch detail"
-                        : "開啟 dispatch 明細"}
+                        : "開啟派遣明細"}
                     </Link>
                   </div>
 
@@ -2664,7 +2686,9 @@ export default function CallcenterPage() {
                                 entry.eventType,
                               )}
                             </strong>
-                            <p>{entry.message}</p>
+                            <p>
+                              {formatDispatchTraceMessage(currentLocale, entry)}
+                            </p>
                           </div>
                           <span>
                             {formatDateTime(currentLocale, entry.createdAt)}
@@ -2675,7 +2699,7 @@ export default function CallcenterPage() {
                       <div className="subtle-empty">
                         {currentLocale === "en"
                           ? "No dispatch trace entries yet."
-                          : "尚無 dispatch trace 紀錄。"}
+                          : "尚無派遣追蹤紀錄。"}
                       </div>
                     )}
                   </div>
@@ -2684,7 +2708,7 @@ export default function CallcenterPage() {
                 <div className="subtle-empty">
                   {currentLocale === "en"
                     ? "Select or link an order to load dispatch trace."
-                    : "請先選取或連結訂單，才能載入 dispatch trace。"}
+                    : "請先選取或連結訂單，才能載入派遣追蹤。"}
                 </div>
               )}
             </article>
@@ -2695,14 +2719,12 @@ export default function CallcenterPage() {
               <div className="card-head">
                 <div>
                   <span className="section-kicker">
-                    {currentLocale === "en"
-                      ? "Callback queue"
-                      : "Callback 佇列"}
+                    {currentLocale === "en" ? "Callback queue" : "回撥佇列"}
                   </span>
                   <h3>
                     {currentLocale === "en"
                       ? "Across all sessions"
-                      : "跨所有 session"}
+                      : "跨所有通話"}
                   </h3>
                 </div>
                 <span className="count-pill">{pendingCallbacks.length}</span>
@@ -2717,7 +2739,12 @@ export default function CallcenterPage() {
                       onClick={() => setSelectedCallId(callback.callId)}
                     >
                       <div>
-                        <strong>{callback.callbackTaskId}</strong>
+                        <strong>
+                          {formatCallbackIdLabel(
+                            currentLocale,
+                            callback.callbackTaskId,
+                          )}
+                        </strong>
                         <p>{getCallbackSummary(callback, currentLocale)}</p>
                       </div>
                       <span>
@@ -2729,7 +2756,7 @@ export default function CallcenterPage() {
                   <div className="subtle-empty">
                     {currentLocale === "en"
                       ? "No callbacks match the current scope."
-                      : "目前 scope 內沒有 callback。"}
+                      : "目前範圍內沒有符合條件的回撥。"}
                   </div>
                 )}
               </div>
@@ -2759,7 +2786,9 @@ export default function CallcenterPage() {
                       onClick={() => setSelectedCallId(session.callId)}
                     >
                       <div>
-                        <strong>{session.callId}</strong>
+                        <strong>
+                          {formatCallIdLabel(currentLocale, session.callId)}
+                        </strong>
                         <p>{session.callerPhone}</p>
                       </div>
                       <span
@@ -2788,9 +2817,7 @@ export default function CallcenterPage() {
               <div className="card-head">
                 <div>
                   <span className="section-kicker">
-                    {currentLocale === "en"
-                      ? "Session history"
-                      : "Session 歷史"}
+                    {currentLocale === "en" ? "Session history" : "通話歷史"}
                   </span>
                   <h3>
                     {currentLocale === "en" ? "Closed calls" : "已結束通話"}
@@ -2808,7 +2835,9 @@ export default function CallcenterPage() {
                       onClick={() => setSelectedCallId(session.callId)}
                     >
                       <div>
-                        <strong>{session.callId}</strong>
+                        <strong>
+                          {formatCallIdLabel(currentLocale, session.callId)}
+                        </strong>
                         <p>
                           {formatOpsCodeLabel(currentLocale, session.callType)}{" "}
                           · {session.callerPhone}
@@ -2823,7 +2852,7 @@ export default function CallcenterPage() {
                   <div className="subtle-empty">
                     {currentLocale === "en"
                       ? "No closed sessions yet."
-                      : "目前尚無已關閉 session。"}
+                      : "目前尚無已結束的通話。"}
                   </div>
                 )}
               </div>

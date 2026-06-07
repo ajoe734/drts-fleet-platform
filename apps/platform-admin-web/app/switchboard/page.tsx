@@ -17,14 +17,26 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
 import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
+import type {
+  AssistantFormContext,
+  PageContextSnapshot,
+} from "@/components/assistant/assistant-types";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
-import { getPlatformLabel } from "@/lib/localized-labels";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -385,12 +397,16 @@ export default function SwitchboardPage() {
     null,
   );
 
+  // Live context-mesh-v2 snapshot, held in a ref so the bridge object stays
+  // stable while the assistant reads current page state at send-time.
+  const assistantSnapshotRef = useRef<PageContextSnapshot>({});
+
   const copy =
     locale === "en"
       ? {
           title: "Public Info & Placards",
           subtitle:
-            "Route name preserved as /switchboard · one public-info version can produce many placards (Q-ADM14)",
+            "Public info stays in one workspace, and one source version can produce multiple placards.",
           createDraft: "Create draft",
           publishVersion: "Publish version",
           refresh: "Refresh",
@@ -450,6 +466,7 @@ export default function SwitchboardPage() {
             "Medium-risk · the placard is bound to the selected source public-info version.",
           confirmGenerate: "Generate placard",
           generating: "Generating...",
+          creating: "Creating...",
           cancel: "Cancel",
           fTitle: "Title",
           fCallPhone: "Call phone",
@@ -459,10 +476,25 @@ export default function SwitchboardPage() {
           fCallRate: "Call rate text",
           fFare: "Fare text",
           fPayment: "Payment method text",
+          effectiveFromPlaceholder: "e.g. 2026-07-01T00:00:00.000Z",
           fSource: "Source public info version",
           fVersionCode: "Version code",
           fTemplate: "Template",
           fArtifact: "Artifact file id (optional)",
+          versionCodePlaceholder: "e.g. placard-2026-q3",
+          templatePlaceholder: "e.g. seatback-default",
+          callLabel: "Call",
+          complaintLabel: "Complaint",
+          sourceLabel: "source",
+          statusDraft: formatPlatformCodeLabel(locale, "draft"),
+          statusPublished: formatPlatformCodeLabel(locale, "published"),
+          assistantInvalidFilter:
+            "Switchboard tab filter accepts only versions, placards, or history.",
+          assistantTabApplied: (value: string) =>
+            `Applied switchboard tab ${value}.`,
+          assistantPublicInfoFilled:
+            "Filled public info draft without submitting.",
+          assistantPlacardFilled: "Filled placard draft without submitting.",
           receiptPublishVersion: (id: string, reason: string) =>
             `Audit receipt: published public info ${id}. Reason: ${reason}`,
           receiptCreate: "Audit receipt: public info draft created.",
@@ -484,35 +516,34 @@ export default function SwitchboardPage() {
           } as Record<string, string>,
         }
       : {
-          title: "Public Info & Placards",
-          subtitle:
-            "route name 保留為 /switchboard · 1 個公開資訊版本可產生多個車牌貼 (Q-ADM14)",
+          title: "公開資訊與牌貼",
+          subtitle: "同一個公開資訊版本可延伸產生多張牌貼，方便維持來源沿革。",
           createDraft: "建立草稿",
           publishVersion: "發佈版本",
           refresh: "重新整理",
           tabVersions: "版本",
           tabPlacards: "牌貼",
           tabHistory: "歷史",
-          versionsTitle: "Public info versions",
-          versionsSubtitle: "effective from / to · 公開電話 · 狀態",
+          versionsTitle: "公開資訊版本",
+          versionsSubtitle: "生效起訖 · 公開電話 · 狀態",
           placardPreviewTitle: (code: string, src: string) =>
-            `目前發行牌貼 · ${code} (source ${src})`,
+            `目前牌貼：牌貼代碼 ${code}（來源版本代碼 ${src}）`,
           placardPreviewEmpty: "目前尚未產生牌貼。",
-          downloadPdf: "下載 PDF",
-          generatePlacard: "產生新 placard",
+          downloadPdf: "下載牌貼檔案",
+          generatePlacard: "產生牌貼",
           placardListTitle: "牌貼版本",
           placardListSubtitle: "每張牌貼皆可追溯到來源公開資訊版本",
           historyVersionsTitle: "公開資訊版本歷史",
           historyVersionsSubtitle: "已發佈版本為不可變的揭露紀錄。",
           historyPlacardsTitle: "牌貼沿革",
           historyPlacardsSubtitle: "已發行牌貼及其來源公開資訊版本。",
-          loading: "載入交換台中...",
+          loading: "載入公開資訊與牌貼中...",
           noVersions: "目前沒有公開資訊版本。",
           noPlacards: "目前沒有牌貼版本。",
           noHistory: "目前尚無已發佈歷史。",
           colVersion: "版本",
-          colFrom: "EFFECTIVE FROM",
-          colTo: "EFFECTIVE TO",
+          colFrom: "生效起",
+          colTo: "生效迄",
           colCall: "叫車電話",
           colComplaint: "客訴電話",
           colStatus: "狀態",
@@ -533,7 +564,7 @@ export default function SwitchboardPage() {
           createSubtitle: "中度風險 · 發佈前皆為草稿。",
           publishTitle: "發佈公開資訊版本",
           publishSubtitle:
-            "高風險 · 發佈會替換目前生效的揭露資訊；需填寫原因以產生稽核憑據。",
+            "高風險 · 發佈會替換目前生效的揭露資訊；需填寫原因以產生稽核收據。",
           publishNoDrafts: "目前沒有可發佈的草稿版本。",
           publishPick: "選擇草稿版本",
           publishReasonLabel: "原因（必填）",
@@ -543,6 +574,7 @@ export default function SwitchboardPage() {
           generateSubtitle: "中度風險 · 牌貼會綁定所選的來源公開資訊版本。",
           confirmGenerate: "產生牌貼",
           generating: "產生中...",
+          creating: "建立中...",
           cancel: "取消",
           fTitle: "標題",
           fCallPhone: "叫車電話",
@@ -552,16 +584,31 @@ export default function SwitchboardPage() {
           fCallRate: "叫車費率說明",
           fFare: "計費說明",
           fPayment: "支付方式說明",
+          effectiveFromPlaceholder: "例如：2026-07-01T00:00:00.000Z",
           fSource: "來源公開資訊版本",
           fVersionCode: "版本代碼",
           fTemplate: "範本",
-          fArtifact: "成品檔 id（選填）",
+          fArtifact: "成品檔案編號（選填）",
+          versionCodePlaceholder: "例如：placard-2026-q3",
+          templatePlaceholder: "例如：seatback-default",
+          callLabel: "叫車",
+          complaintLabel: "客訴",
+          sourceLabel: "來源",
+          statusDraft: formatPlatformCodeLabel(locale, "draft"),
+          statusPublished: formatPlatformCodeLabel(locale, "published"),
+          assistantInvalidFilter:
+            "公開資訊頁面的分頁篩選只接受版本、牌貼或歷史紀錄。",
+          assistantTabApplied: (value: string) =>
+            `已切換到${value === "versions" ? "版本" : value === "placards" ? "牌貼" : "歷史"}分頁。`,
+          assistantPublicInfoFilled: "已填入公開資訊草稿，但尚未送出。",
+          assistantPlacardFilled: "已填入牌貼草稿，但尚未送出。",
           receiptPublishVersion: (id: string, reason: string) =>
-            `稽核憑據：已發佈公開資訊 ${id}。原因：${reason}`,
-          receiptCreate: "稽核憑據：已建立公開資訊草稿。",
-          receiptGenerate: (code: string) => `稽核憑據：已產生牌貼 ${code}。`,
+            `稽核收據：已發佈公開資訊版本代碼 ${id}。原因：${reason}`,
+          receiptCreate: "稽核收據：已建立公開資訊草稿。",
+          receiptGenerate: (code: string) =>
+            `稽核收據：已產生牌貼代碼 ${code}。`,
           receiptPublishPlacard: (code: string) =>
-            `稽核憑據：已發佈牌貼 ${code}。`,
+            `稽核收據：已發佈牌貼代碼 ${code}。`,
           disabledReason: {
             no_draft_versions: "目前沒有可發佈的草稿版本。",
             no_draft_selected: "請選擇要發佈的草稿版本。",
@@ -586,7 +633,15 @@ export default function SwitchboardPage() {
       setPublicInfo(publicInfoVersions ?? []);
       setPlacards(placardVersions ?? []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en"
+            ? "Switchboard data unavailable"
+            : "公開資訊資料暫時無法載入",
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -658,6 +713,217 @@ export default function SwitchboardPage() {
     selectedPlacardSource,
   );
 
+  // Context mesh v2 snapshot: the visible table for the active tab, the
+  // create / generate / publish forms (when open), and the actions this view
+  // exposes. Page-owned plain data only — never DOM-scraped.
+  const assistantSnapshot = useMemo<PageContextSnapshot>(() => {
+    const tabMeta =
+      activeTab === "placards"
+        ? { tab: "placards", title: copy.tabPlacards }
+        : activeTab === "versions"
+          ? { tab: "public-info", title: copy.tabVersions }
+          : { tab: undefined, title: copy.tabHistory };
+
+    const tables =
+      activeTab === "placards"
+        ? [
+            {
+              tableId: "switchboard-placards",
+              title: copy.tabPlacards,
+              visibleRowCount: placards.length,
+              rowEntityKind: "placard" as const,
+              sampleRows: placards.slice(0, 5).map((placard) => ({
+                kind: "placard" as const,
+                id: placard.placardVersionId,
+                label: placard.versionCode,
+                source: "page-selection" as const,
+              })),
+            },
+          ]
+        : activeTab === "history"
+          ? [
+              {
+                tableId: "switchboard-history",
+                title: copy.tabHistory,
+                visibleRowCount:
+                  historyVersions.length + publishedPlacards.length,
+                rowEntityKind: "public-info-version" as const,
+                sampleRows: historyVersions.slice(0, 5).map((version) => ({
+                  kind: "public-info-version" as const,
+                  id: version.versionId,
+                  label: version.title,
+                  source: "page-selection" as const,
+                })),
+              },
+            ]
+          : [
+              {
+                tableId: "switchboard-versions",
+                title: copy.tabVersions,
+                visibleRowCount: draftVersions.length,
+                totalRowCount: publicInfo.length,
+                rowEntityKind: "public-info-version" as const,
+                sampleRows: draftVersions.slice(0, 5).map((version) => ({
+                  kind: "public-info-version" as const,
+                  id: version.versionId,
+                  label: version.title,
+                  source: "page-selection" as const,
+                })),
+              },
+            ];
+
+    const forms: AssistantFormContext[] = [];
+    if (modal === "create") {
+      const dirty =
+        JSON.stringify(publicInfoForm) !==
+        JSON.stringify(EMPTY_PUBLIC_INFO_FORM);
+      forms.push({
+        formId: "public-info-create",
+        title: copy.createTitle,
+        dirty,
+        submitting: creatingPublicInfo,
+        fields: [
+          {
+            name: "title",
+            kind: "text",
+            required: true,
+            filled: (publicInfoForm.title ?? "").trim().length > 0,
+            ...(publicInfoForm.title
+              ? { valuePreview: publicInfoForm.title }
+              : {}),
+          },
+          {
+            name: "callPhone",
+            kind: "text",
+            filled: Boolean(publicInfoForm.callPhone),
+          },
+          {
+            name: "complaintPhone",
+            kind: "text",
+            filled: Boolean(publicInfoForm.complaintPhone),
+          },
+          {
+            name: "effectiveFrom",
+            kind: "date",
+            filled: Boolean(publicInfoForm.effectiveFrom),
+          },
+          {
+            name: "effectiveTo",
+            kind: "date",
+            filled: Boolean(publicInfoForm.effectiveTo),
+          },
+        ],
+        validationErrors: [],
+      });
+    } else if (modal === "placard") {
+      forms.push({
+        formId: "placard-generate",
+        title: copy.generateTitle,
+        dirty:
+          placardForm.versionCode.length > 0 ||
+          placardForm.templateName.length > 0,
+        submitting: creatingPlacard,
+        fields: [
+          {
+            name: "versionCode",
+            kind: "text",
+            required: true,
+            filled: placardForm.versionCode.trim().length > 0,
+            ...(placardForm.versionCode
+              ? { valuePreview: placardForm.versionCode }
+              : {}),
+          },
+          {
+            name: "publicInfoVersionId",
+            kind: "select",
+            required: true,
+            filled: placardForm.publicInfoVersionId.trim().length > 0,
+          },
+          {
+            name: "templateName",
+            kind: "text",
+            filled: placardForm.templateName.trim().length > 0,
+          },
+        ],
+        validationErrors: versionCodePrecheckMessage
+          ? [{ field: "versionCode", message: versionCodePrecheckMessage }]
+          : [],
+      });
+    } else if (modal === "publish") {
+      forms.push({
+        formId: "public-info-publish",
+        title: copy.publishTitle,
+        dirty: publishReason.trim().length > 0,
+        submitting: publishingVersionId != null,
+        fields: [
+          {
+            name: "version",
+            kind: "select",
+            required: true,
+            filled: publishTargetId.trim().length > 0,
+            ...(publishTargetId ? { valuePreview: publishTargetId } : {}),
+          },
+          {
+            name: "reason",
+            kind: "textarea",
+            required: true,
+            filled: publishReason.trim().length > 0,
+          },
+        ],
+        validationErrors: [],
+      });
+    }
+
+    return {
+      ...(tabMeta.tab ? { activeTab: tabMeta.tab } : {}),
+      tables,
+      forms,
+      availableActions: [
+        {
+          id: "create_public_info_draft",
+          label: copy.createDraft,
+          risk: "medium",
+          enabled: true,
+        },
+        {
+          id: "publish_public_info_version",
+          label: copy.publishVersion,
+          risk: "high",
+          enabled: draftVersions.length > 0,
+          requiresConfirmation: true,
+          ...(draftVersions.length === 0
+            ? { disabledReasonCode: "no_draft_versions" }
+            : {}),
+        },
+        {
+          id: "generate_placard",
+          label: copy.generatePlacard,
+          risk: "medium",
+          enabled: true,
+        },
+      ],
+    };
+  }, [
+    activeTab,
+    copy,
+    publicInfo.length,
+    placards,
+    draftVersions,
+    historyVersions,
+    publishedPlacards.length,
+    modal,
+    publicInfoForm,
+    placardForm,
+    creatingPublicInfo,
+    creatingPlacard,
+    versionCodePrecheckMessage,
+    publishReason,
+    publishTargetId,
+    publishingVersionId,
+  ]);
+
+  assistantSnapshotRef.current = assistantSnapshot;
+
   const assistantBridge = useMemo(
     () => ({
       pageId: "switchboard",
@@ -672,15 +938,14 @@ export default function SwitchboardPage() {
               return {
                 ok: false,
                 code: "invalid_filter_value",
-                message:
-                  "Switchboard tab filter accepts only versions, placards, or history.",
+                message: copy.assistantInvalidFilter,
               } as const;
             }
             setActiveTab(value);
             return {
               ok: true,
               code: "filter_applied",
-              message: `Applied switchboard tab ${value}.`,
+              message: copy.assistantTabApplied(value),
               payload: { filterId: "workspace_tab", value },
             } as const;
           },
@@ -726,7 +991,7 @@ export default function SwitchboardPage() {
             return {
               ok: true,
               code: "draft_filled",
-              message: "Filled public info draft without submitting.",
+              message: copy.assistantPublicInfoFilled,
             } as const;
           },
         },
@@ -755,13 +1020,14 @@ export default function SwitchboardPage() {
             return {
               ok: true,
               code: "draft_filled",
-              message: "Filled placard draft without submitting.",
+              message: copy.assistantPlacardFilled,
             } as const;
           },
         },
       },
+      getContextSnapshot: () => assistantSnapshotRef.current,
     }),
-    [],
+    [copy],
   );
 
   usePlatformAdminAssistantPage(assistantBridge);
@@ -790,7 +1056,13 @@ export default function SwitchboardPage() {
       setModal(null);
       await loadData();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en" ? "Draft creation failed" : "草稿建立失敗",
+        ),
+      );
     } finally {
       setCreatingPublicInfo(false);
     }
@@ -807,7 +1079,13 @@ export default function SwitchboardPage() {
       setModal(null);
       await loadData();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en" ? "Version publish failed" : "版本發佈失敗",
+        ),
+      );
     } finally {
       setPublishingVersionId(null);
     }
@@ -823,7 +1101,13 @@ export default function SwitchboardPage() {
       }
       await loadData();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en" ? "Draft deletion failed" : "草稿刪除失敗",
+        ),
+      );
     } finally {
       setDeletingVersionId(null);
     }
@@ -849,7 +1133,13 @@ export default function SwitchboardPage() {
       setModal(null);
       await loadData();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en" ? "Placard creation failed" : "告示牌建立失敗",
+        ),
+      );
     } finally {
       setCreatingPlacard(false);
     }
@@ -863,14 +1153,22 @@ export default function SwitchboardPage() {
       setReceipt(copy.receiptPublishPlacard(placard.versionCode));
       await loadData();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en" ? "Placard publish failed" : "告示牌發佈失敗",
+        ),
+      );
     } finally {
       setPublishingPlacardId(null);
     }
   }
 
   const reasonText = (code: string | null | undefined): string | undefined =>
-    code ? (copy.disabledReason[code] ?? code) : undefined;
+    code
+      ? (copy.disabledReason[code] ?? formatPlatformCodeLabel(locale, code))
+      : undefined;
 
   const createHeaderDescriptor = buildDescriptor(
     ACTION_CREATE_PUBLIC_INFO,
@@ -969,7 +1267,7 @@ export default function SwitchboardPage() {
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={publicInfoStatusTone(row.status)} dot>
-          {row.status}
+          {formatPlatformCodeLabel(locale, row.status)}
         </CanvasPill>
       ),
     },
@@ -1031,7 +1329,7 @@ export default function SwitchboardPage() {
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={row.publishedAt ? "success" : "warn"} dot>
-          {row.publishedAt ? "published" : "draft"}
+          {row.publishedAt ? copy.statusPublished : copy.statusDraft}
         </CanvasPill>
       ),
     },
@@ -1089,7 +1387,7 @@ export default function SwitchboardPage() {
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={publicInfoStatusTone(row.status)} dot>
-          {row.status}
+          {formatPlatformCodeLabel(locale, row.status)}
         </CanvasPill>
       ),
     },
@@ -1276,9 +1574,8 @@ export default function SwitchboardPage() {
                         fontWeight: 600,
                       }}
                     >
-                      {locale === "en" ? "Call" : "叫車"}{" "}
-                      {livePlacardSource?.callPhone ?? "—"} ·{" "}
-                      {locale === "en" ? "Complaint" : "客訴"}{" "}
+                      {copy.callLabel} {livePlacardSource?.callPhone ?? "—"} ·{" "}
+                      {copy.complaintLabel}{" "}
                       {livePlacardSource?.complaintPhone ?? "—"}
                     </div>
                     <div style={{ fontSize: 10.5 }}>
@@ -1292,8 +1589,8 @@ export default function SwitchboardPage() {
                         <div>{livePlacardSource.paymentMethodText}</div>
                       ) : null}
                       <div style={{ marginTop: 4, color: "#666" }}>
-                        {livePlacard.versionCode} · source{" "}
-                        {livePlacard.publicInfoVersionId}
+                        牌貼代碼 {livePlacard.versionCode} · {copy.sourceLabel}
+                        版本 {livePlacard.publicInfoVersionId}
                         {livePlacardSource?.effectiveFrom
                           ? ` (${livePlacardSource.effectiveFrom}${
                               livePlacardSource.effectiveTo
@@ -1445,7 +1742,7 @@ export default function SwitchboardPage() {
               <DescriptorButton
                 descriptor={createConfirmDescriptor}
                 label={copy.createDraft}
-                busyLabel={copy.generating}
+                busyLabel={copy.creating}
                 busy={creatingPublicInfo}
                 icon="plus"
                 variant="primary"
@@ -1507,7 +1804,7 @@ export default function SwitchboardPage() {
               <input
                 style={fieldInputStyle}
                 value={publicInfoForm.effectiveFrom ?? ""}
-                placeholder="2026-07-01T00:00:00.000Z"
+                placeholder={copy.effectiveFromPlaceholder}
                 onChange={(event) =>
                   setPublicInfoForm((current) => ({
                     ...current,
@@ -1726,7 +2023,7 @@ export default function SwitchboardPage() {
               <input
                 style={fieldInputStyle}
                 value={placardForm.versionCode}
-                placeholder="placard-2026-q3"
+                placeholder={copy.versionCodePlaceholder}
                 onChange={(event) =>
                   setPlacardForm((current) => ({
                     ...current,
@@ -1740,7 +2037,7 @@ export default function SwitchboardPage() {
               <input
                 style={fieldInputStyle}
                 value={placardForm.templateName}
-                placeholder="seatback-default"
+                placeholder={copy.templatePlaceholder}
                 onChange={(event) =>
                   setPlacardForm((current) => ({
                     ...current,

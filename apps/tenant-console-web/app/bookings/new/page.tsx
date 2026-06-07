@@ -13,6 +13,10 @@ import type {
 import { BUSINESS_DISPATCH_SUBTYPES } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
 import {
+  formatTenantErrorSummary,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
+import {
   TenantBookingCreateForm,
   type TenantBookingCreatePageModel,
 } from "./tenant-booking-create-form";
@@ -28,10 +32,6 @@ const EMPTY_REASON_VALUES: EmptyReason[] = [
   "external_unavailable",
   "filtered_empty",
 ];
-
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown error";
-}
 
 function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
@@ -83,7 +83,7 @@ function buildHealthEnvelope(
   return {
     status: "degraded",
     degradedServices: errors.map((message) => ({
-      service: message.split(":")[0] ?? "directory",
+      service: message.split(/[：:]/)[0] ?? "directory",
       impact: message,
       severity: "warning",
     })),
@@ -195,13 +195,28 @@ export default async function NewBookingPage({
     costCentersResult.status === "fulfilled" ? costCentersResult.value : [];
 
   if (passengersResult.status === "rejected") {
-    errors.push(`passengers: ${toErrorMessage(passengersResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "乘客目錄",
+        toTenantErrorMessage(passengersResult.reason, "乘客目錄讀取失敗"),
+      ),
+    );
   }
   if (addressesResult.status === "rejected") {
-    errors.push(`addresses: ${toErrorMessage(addressesResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "地址目錄",
+        toTenantErrorMessage(addressesResult.reason, "地址目錄讀取失敗"),
+      ),
+    );
   }
   if (costCentersResult.status === "rejected") {
-    errors.push(`cost_centers: ${toErrorMessage(costCentersResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "成本中心",
+        toTenantErrorMessage(costCentersResult.reason, "成本中心讀取失敗"),
+      ),
+    );
   }
 
   const activePassengers = passengers.filter((row) => row.activeFlag);

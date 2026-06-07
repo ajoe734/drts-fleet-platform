@@ -165,8 +165,7 @@ async function ensureLocationPermissions(): Promise<HeartbeatSyncResult> {
   if (!foregroundGranted) {
     return {
       status: "permission_denied",
-      message:
-        "Foreground location access is required to start trip tracking and driver heartbeat updates.",
+      message: "需要前景定位權限，才能開始行程追蹤與司機定位心跳。",
       latestUpdate,
     };
   }
@@ -182,7 +181,7 @@ async function ensureLocationPermissions(): Promise<HeartbeatSyncResult> {
     return {
       status: "active",
       message:
-        "Foreground trip tracking is active. Allow background location if you want heartbeats to continue while the app is backgrounded.",
+        "前景行程追蹤已啟用。若要讓應用程式在背景時持續傳送定位心跳，請允許背景定位。",
       latestUpdate,
     };
   }
@@ -284,9 +283,8 @@ export async function syncDriverLocationHeartbeat(
       showsBackgroundLocationIndicator: true,
       timeInterval: HEARTBEAT_INTERVAL_MS,
       foregroundService: {
-        notificationTitle: "Trip tracking active",
-        notificationBody:
-          "DRTS is sending driver location heartbeats for the active trip.",
+        notificationTitle: "行程定位追蹤進行中",
+        notificationBody: "DRTS 正在為目前行程傳送司機定位心跳。",
         killServiceOnDestroy: false,
       },
     });

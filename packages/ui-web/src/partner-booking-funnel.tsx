@@ -64,52 +64,51 @@ const screenMeta: ReadonlyArray<ScreenMeta> = [
   {
     id: "landing",
     label: "入口",
-    eyebrow: "PB_Landing",
-    summary: "Partner-entry hero with entitlement balance and service menu.",
+    eyebrow: "入口頁",
+    summary: "合作夥伴入口，顯示權益餘額與可用服務。",
   },
   {
     id: "eligibility",
     label: "資格確認",
-    eyebrow: "PB_Eligibility",
-    summary: "One-time linking and consent for the partner benefit program.",
+    eyebrow: "資格頁",
+    summary: "完成合作夥伴權益方案的一次性連結與同意。",
   },
   {
     id: "book",
     label: "建立行程",
-    eyebrow: "PB_Book",
-    summary:
-      "Pickup, schedule, service detail, and benefit-aware fare breakdown.",
+    eyebrow: "預約頁",
+    summary: "確認上車地點、出發時間、服務細節與權益折抵費用。",
   },
   {
     id: "confirmed",
     label: "已派車",
-    eyebrow: "PB_Confirmed",
-    summary: "Assigned driver, ETA, map placeholder, and support actions.",
+    eyebrow: "派車頁",
+    summary: "顯示已指派司機、預估抵達、地圖資訊與客服操作。",
   },
   {
     id: "trips",
     label: "我的行程",
-    eyebrow: "PB_Trips",
-    summary: "Trip ledger with yearly remaining benefit balance.",
+    eyebrow: "行程頁",
+    summary: "列出行程紀錄與年度剩餘權益趟次。",
   },
   {
     id: "receipt",
     label: "行程明細",
-    eyebrow: "PB_Receipt",
-    summary: "Completed trip receipt with benefit settlement detail.",
+    eyebrow: "明細頁",
+    summary: "顯示已完成行程收據與權益折抵明細。",
   },
   {
     id: "help",
     label: "協助",
-    eyebrow: "PB_Help",
-    summary: "Hotline, FAQs, and dispute initiation entry point.",
+    eyebrow: "協助頁",
+    summary: "提供客服專線、常見問題與爭議申請入口。",
   },
 ] as const;
 
 const serviceItems = [
-  ["機場接送", "桃園 / 松山 · 商務車", "AIRPORT"],
-  ["優先派車", "都會區 · 8 分鐘內到車", "PRIORITY"],
-  ["商務時段", "平日 07:00-22:00 · 含車型升級", "BUSINESS"],
+  ["機場接送", "桃園 / 松山 · 商務車", "機場"],
+  ["優先派車", "都會區 · 8 分鐘內到車", "優先"],
+  ["商務時段", "平日 07:00-22:00 · 含車型升級", "商務"],
 ] as const;
 
 const screenMetaById = Object.fromEntries(
@@ -121,123 +120,119 @@ const stateScreenMeta: ReadonlyArray<StateScreenMeta> = [
     id: "eligible",
     routeSegment: "eligible",
     label: "資格通過",
-    eyebrow: "PBK Gate",
-    title: "Eligibility approved",
-    summary: "The partner benefit check passed and booking create may proceed.",
+    eyebrow: "狀態閘門",
+    title: "資格已通過",
+    summary: "合作夥伴權益檢查已通過，可以繼續建立預約。",
     tone: "success",
     guidance:
-      "This route is explicit so a verified rider lands on a dedicated gate instead of being redirected silently into booking creation.",
+      "此頁明確告知乘客資格已通過，不會在未說明的情況下直接跳進建立預約。",
     primaryAction: {
-      label: "Continue to booking",
+      label: "繼續預約",
       href: "/book",
     },
     secondaryAction: {
-      label: "Review eligibility step",
+      label: "回看資格確認",
       href: "/eligibility",
     },
     bullets: [
-      "Use the verification record to stamp partner provenance on the booking.",
-      "Free-benefit or discounted-lane rules stay backend-owned.",
-      "This route is safe to deep-link from a partner bootstrap or callback flow.",
+      "建立預約時會帶入資格驗證紀錄與合作夥伴來源。",
+      "免費趟次或折扣規則仍由後端權益服務判定。",
+      "合作夥伴登入或回呼流程可安全導向此頁。",
     ],
   },
   {
     id: "ineligible",
     routeSegment: "ineligible",
     label: "資格不符",
-    eyebrow: "PBK Gate",
-    title: "Benefit eligibility denied",
-    summary: "The issuer or partner rule rejected this rider for benefit use.",
+    eyebrow: "狀態閘門",
+    title: "權益資格未通過",
+    summary: "發卡方或合作夥伴規則未允許此乘客使用權益。",
     tone: "accent",
     guidance:
-      "Booking creation remains blocked. The user must fix the partner reference or continue outside the sponsored benefit lane.",
+      "建立預約會維持鎖定。乘客需修正合作夥伴資料，或改由非權益流程處理。",
     primaryAction: {
-      label: "Retry eligibility",
+      label: "重新確認資格",
       href: "/eligibility",
     },
     secondaryAction: {
-      label: "Contact support",
+      label: "聯絡客服",
       href: "/help",
     },
     bullets: [
-      "Do not fall through into booking create with an ineligible result.",
-      "Show issuer or partner denial context on the dedicated gate.",
-      "Support can redirect the rider to a non-benefit flow if policy allows.",
+      "資格不符時不會繼續進入建立預約。",
+      "頁面會顯示發卡方或合作夥伴拒絕使用權益的脈絡。",
+      "若政策允許，客服可引導乘客改走非權益流程。",
     ],
   },
   {
     id: "manual_review",
     routeSegment: "manual_review",
     label: "人工審查",
-    eyebrow: "PBK Gate",
-    title: "Manual review required",
-    summary:
-      "The eligibility adapter could not grant a clean pass and queued manual review.",
+    eyebrow: "狀態閘門",
+    title: "需要人工審查",
+    summary: "資格驗證無法自動通過，已進入人工審查佇列。",
     tone: "primary",
     guidance:
-      "Partner booking is paused until ops or sponsor review resolves the verification outcome. This is a hard stop, not a soft warning.",
+      "營運或合作夥伴審查完成前，合作夥伴預約會暫停。這是明確阻擋，不是一般提示。",
     primaryAction: {
-      label: "Open support options",
+      label: "開啟客服選項",
       href: "/help",
     },
     secondaryAction: {
-      label: "Back to entry",
+      label: "回到入口",
       href: "/",
     },
     bullets: [
-      "Treat adapter timeout and offline sponsor confirmation as review work, not success.",
-      "Do not present booking create actions while the review queue is unresolved.",
-      "Use explicit queue language so the rider knows follow-up is pending.",
+      "驗證逾時或需離線確認時，會視為待審查而非成功。",
+      "審查未完成前，不會顯示建立預約操作。",
+      "頁面會明確告知乘客後續處理仍在等待。",
     ],
   },
   {
     id: "inactive",
     routeSegment: "inactive",
     label: "入口停用",
-    eyebrow: "PBK Gate",
-    title: "Partner entry inactive",
-    summary:
-      "This partner entry is not active, so benefit-sponsored booking is unavailable.",
+    eyebrow: "狀態閘門",
+    title: "合作夥伴入口已停用",
+    summary: "此合作夥伴入口目前未啟用，暫時無法使用權益預約。",
     tone: "neutral",
     guidance:
-      "The route stays visible as an explicit inactive state. It must never render live booking actions or an unbranded fallback.",
+      "頁面會保留白牌品牌框架並明確顯示停用狀態，不會顯示可建立預約的操作。",
     primaryAction: {
-      label: "Return to landing",
+      label: "回到入口",
       href: "/",
     },
     secondaryAction: {
-      label: "Call partner hotline",
+      label: "撥打合作夥伴專線",
       href: "/help",
     },
     bullets: [
-      "Inactive entry means platform admin action is required before service resumes.",
-      "Rollback and coexistence flows may deep-link here during cutover windows.",
-      "The white-label frame remains intact so support can verify the intended partner.",
+      "入口停用代表需要平台管理員處理後才能恢復服務。",
+      "切換或回復期間可能會直接導向此停用頁。",
+      "白牌框架會保持可見，方便客服確認乘客原本要使用的合作夥伴。",
     ],
   },
   {
     id: "eligibility_required",
     routeSegment: "eligibility-required",
     label: "需要驗證",
-    eyebrow: "PBK Gate",
-    title: "Eligibility verification required",
-    summary:
-      "This partner program requires eligibility confirmation before booking create is unlocked.",
+    eyebrow: "狀態閘門",
+    title: "需要先完成資格驗證",
+    summary: "此合作方案必須先確認資格，才能開放建立預約。",
     tone: "primary",
-    guidance:
-      "Use this dedicated route when a rider reaches booking create without the required verification context.",
+    guidance: "若乘客在缺少資格驗證脈絡時進入預約頁，會先導向此頁。",
     primaryAction: {
-      label: "Verify eligibility",
+      label: "驗證資格",
       href: "/eligibility",
     },
     secondaryAction: {
-      label: "Return to landing",
+      label: "回到入口",
       href: "/",
     },
     bullets: [
-      "Keep the gate explicit instead of auto-starting a booking attempt.",
-      "Only an eligible decision unlocks the booking create route.",
-      "This keeps partner entry authority aligned with legacy tenant-console behavior.",
+      "系統不會自動開始建立預約，而是先明確要求驗證。",
+      "只有資格通過才會解鎖建立預約。",
+      "這能讓合作夥伴入口權限與既有租戶後台規則保持一致。",
     ],
   },
 ] as const;
@@ -318,7 +313,7 @@ function metaForBrand(brand: PartnerBrandTemplate) {
   const trips: TripItem[] = [
     {
       when: "今天 14:30",
-      route: "台北信義 -> 桃園 T2",
+      route: "台北信義 → 桃園 T2",
       state: "已派車",
       tone: "success",
       amount: "免費",
@@ -342,7 +337,7 @@ function metaForBrand(brand: PartnerBrandTemplate) {
     },
     {
       when: "4/28 07:30",
-      route: "陽明山 -> 桃園 T1",
+      route: "陽明山 → 桃園 T1",
       state: "已完成",
       tone: "accent",
       amount: "NT$ 240",
@@ -357,7 +352,7 @@ function metaForBrand(brand: PartnerBrandTemplate) {
     personName: "陳俊宏",
     riderName: "陳〇明",
     pickup: "台北市信義區松仁路 100 號",
-    pickupDetail: "大和商務集團 · HQ 大廳",
+    pickupDetail: "大和商務集團 · 總部大廳",
     dropoff: "桃園機場 第二航廈",
     dropoffDetail: "出境大廳 7 號門",
     departureTime: "2026-05-08 17:30",
@@ -638,9 +633,9 @@ export function PartnerBookingPhoneScreen({
       <>
         <PhoneHeader
           brand={brand}
-          title="禮賓接送 Concierge"
+          title="禮賓接送"
           subtitle={`${brand.programName} 卡友專屬 · 全年免費 ${demo.totalBenefits} 趟`}
-          trailing="EXCLUSIVE"
+          trailing="專屬"
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
           <PhoneCard>
@@ -674,7 +669,7 @@ export function PartnerBookingPhoneScreen({
                   {demo.riderName} · {brand.programName}
                 </div>
               </div>
-              <Chip brand={brand} tone="success" label="eligible" />
+              <Chip brand={brand} tone="success" label="資格通過" />
             </div>
             <div
               style={{
@@ -873,8 +868,7 @@ export function PartnerBookingPhoneScreen({
                       marginTop: "2px",
                     }}
                   >
-                    不會傳送完整卡號或安全碼，只保留 partner eligibility
-                    所需欄位。
+                    不會傳送完整卡號或安全碼，只保留合作資格驗證所需欄位。
                   </div>
                 </div>
               </div>
@@ -927,7 +921,7 @@ export function PartnerBookingPhoneScreen({
                     color: "#56657f",
                   }}
                 >
-                  PICKUP
+                  上車
                 </span>
               </div>
               <div style={{ fontSize: "14px", fontWeight: 700 }}>
@@ -964,7 +958,7 @@ export function PartnerBookingPhoneScreen({
                     color: "#56657f",
                   }}
                 >
-                  DROP
+                  下車
                 </span>
               </div>
               <div style={{ fontSize: "14px", fontWeight: 700 }}>
@@ -1187,7 +1181,7 @@ export function PartnerBookingPhoneScreen({
                 >
                   8{" "}
                   <span style={{ fontSize: "12px", color: "#56657f" }}>
-                    min
+                    分鐘
                   </span>
                 </div>
               </div>
@@ -1563,7 +1557,7 @@ export function PartnerBookingReferenceFunnel({
                 color: "#0e1424",
               }}
             >
-              CTBC reference funnel · 7 screens
+              合作夥伴預約流程 · 7 個頁面
             </h1>
             <p
               style={{
@@ -1573,9 +1567,8 @@ export function PartnerBookingReferenceFunnel({
                 color: "#56657f",
               }}
             >
-              White-label booking flow demo for partner entry. The content below
-              uses PBK-UI-002 brand tokens and mock data while mirroring the
-              CTBC `Partner Booking.html` artboards.
+              白牌合作夥伴預約流程示範。下方內容使用品牌樣式與展示資料，
+              呈現乘客從資格確認到收據查詢的完整路徑。
             </p>
           </div>
 
@@ -1599,7 +1592,7 @@ export function PartnerBookingReferenceFunnel({
                 fontWeight: 700,
               }}
             >
-              Program summary
+              方案摘要
             </div>
             <div
               style={{ fontSize: "18px", fontWeight: 800, color: "#0e1424" }}
@@ -1607,7 +1600,7 @@ export function PartnerBookingReferenceFunnel({
               {brand.programName}
             </div>
             <div style={{ fontSize: "13px", color: "#56657f" }}>
-              剩餘禮遇 {demo.remainingBenefits}/{demo.totalBenefits} · Hotline{" "}
+              剩餘禮遇 {demo.remainingBenefits}/{demo.totalBenefits} · 客服專線{" "}
               {brand.hotline.phone}
             </div>
           </div>
@@ -1688,7 +1681,7 @@ export function PartnerBookingReferenceFunnel({
                   fontWeight: 700,
                 }}
               >
-                Active screen
+                目前頁面
               </div>
               <div
                 style={{ fontSize: "28px", fontWeight: 800, color: "#0e1424" }}
@@ -1710,10 +1703,10 @@ export function PartnerBookingReferenceFunnel({
               }}
             >
               {[
-                ["Entry host", brand.host],
-                ["Tenant code", brand.tenantCode],
-                ["Program", brand.cardArt.programLabel],
-                ["Card suffix", brand.cardArt.lastFour],
+                ["入口網域", brand.host],
+                ["租戶代碼", brand.tenantCode],
+                ["方案", brand.cardArt.programLabel],
+                ["卡號末四碼", brand.cardArt.lastFour],
               ].map(([label, value]) => (
                 <div
                   key={label}
@@ -1767,7 +1760,7 @@ export function PartnerBookingReferenceFunnel({
                   fontWeight: 700,
                 }}
               >
-                Screen coverage
+                頁面覆蓋
               </div>
               {screenMeta.map((item, index) => (
                 <div
@@ -1944,19 +1937,14 @@ export function PartnerBookingStateGate({
                 <div
                   style={{ display: "flex", alignItems: "center", gap: "12px" }}
                 >
-                  <Chip
-                    brand={brand}
-                    tone={meta.tone}
-                    label={meta.routeSegment}
-                  />
+                  <Chip brand={brand} tone={meta.tone} label={meta.label} />
                   <div style={{ fontSize: "13px", color: "#56657f" }}>
-                    Route:{" "}
-                    <code>{getPartnerBookingStateHref(basePath, state)}</code>
+                    此狀態有獨立頁面，避免乘客被靜默導向其他流程。
                   </div>
                 </div>
               </PhoneCard>
 
-              <PhoneCard title="Authority-safe handling">
+              <PhoneCard title="權限安全處理">
                 {meta.bullets.map((bullet, index) => (
                   <div
                     key={bullet}

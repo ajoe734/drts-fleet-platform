@@ -32,8 +32,8 @@ export function TenantPortalChrome({
       }}
     >
       <AppSidebar
-        brand="Tenant Portal"
-        brandSub="Authority-backed workspace"
+        brand="租戶入口"
+        brandSub="權限脈絡工作區"
         navItems={navItems}
         currentPath={pathname}
         footer={footer}

@@ -9,7 +9,7 @@ export default function LoginPage() {
   const router = useRouter();
   const { session, signIn } = useConciergePortal();
   const [operatorName, setOperatorName] = useState(
-    session?.operatorName ?? "Lobby Desk Operator",
+    session?.operatorName ?? "大廳櫃台人員",
   );
   const [operatorId, setOperatorId] = useState(
     session?.operatorId ?? "CP-OPS-001",
@@ -21,19 +21,17 @@ export default function LoginPage() {
   return (
     <div className="page-shell">
       <section className="hero-card">
-        <span className="section-kicker">Repo-local sign-in</span>
-        <h1>Bootstrap the assisted-entry operator locally.</h1>
+        <span className="section-kicker">本機登入</span>
+        <h1>建立客服代訂操作人員工作階段。</h1>
         <p>
-          Canonical PRD truth requires site-bound sign-in, but the repo does not
-          yet expose a dedicated call-point bootstrap session contract. This
-          route therefore creates a local desk session and scopes API access to
-          the narrow assisted-entry capabilities only.
+          此入口會建立本機櫃台工作階段，並將 API
+          權限限制在客服代訂所需的範圍內。
         </p>
       </section>
 
       <section className="panel-card">
-        <span className="section-kicker">Bootstrap form</span>
-        <h2>Choose the desk role before selecting a site.</h2>
+        <span className="section-kicker">登入表單</span>
+        <h2>選擇櫃台角色後，再選擇固定站點。</h2>
         <form
           className="form-grid"
           onSubmit={(event) => {
@@ -47,7 +45,7 @@ export default function LoginPage() {
           }}
         >
           <div className="field-stack">
-            <label htmlFor="operator-name">Operator display name</label>
+            <label htmlFor="operator-name">操作人員顯示名稱</label>
             <input
               id="operator-name"
               onChange={(event) => setOperatorName(event.target.value)}
@@ -55,12 +53,12 @@ export default function LoginPage() {
               value={operatorName}
             />
             <p className="form-help">
-              Stored only in local browser state for the repo demo shell.
+              僅儲存在本機瀏覽器狀態，用於此客服代訂入口。
             </p>
           </div>
 
           <div className="field-stack">
-            <label htmlFor="operator-id">Operator id</label>
+            <label htmlFor="operator-id">操作人員編號</label>
             <input
               id="operator-id"
               onChange={(event) => setOperatorId(event.target.value)}
@@ -68,13 +66,12 @@ export default function LoginPage() {
               value={operatorId}
             />
             <p className="form-help">
-              Reused as the limited-scope `x-actor-id` when the portal talks to
-              callcenter and order APIs.
+              呼叫客服與訂單 API 時，會以此編號作為受限操作人員識別。
             </p>
           </div>
 
           <div className="field-stack">
-            <label htmlFor="operator-mode">Desk lane</label>
+            <label htmlFor="operator-mode">櫃台角色</label>
             <select
               id="operator-mode"
               onChange={(event) =>
@@ -94,13 +91,13 @@ export default function LoginPage() {
               </option>
             </select>
             <p className="form-help">
-              Desk selection enforces role mismatch through the denied route.
+              若角色與櫃台不符，系統會導向拒絕頁，避免擴大權限。
             </p>
           </div>
 
           <div className="inline-actions">
             <button className="primary-button" type="submit">
-              Continue to fixed site selector
+              繼續選擇固定站點
             </button>
           </div>
         </form>

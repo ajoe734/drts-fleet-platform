@@ -6,7 +6,12 @@ import type { ComponentProps, CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { partnerHasReadinessGaps } from "@/components/partner-governance-shared";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
+import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type {
   AuditLogRecord,
   OperationalObservabilitySnapshot,
@@ -271,11 +276,20 @@ export default function HomePage() {
           noAudit: "No audit records found.",
           noTodos: "No platform-routed governance blockers at the moment.",
           auditTime: "Time",
+          auditActorType: "Actor type",
           auditModule: "Module",
           auditAction: "Action",
           auditActor: "Actor",
-          auditRequest: "Request",
+          auditRequest: "Request ID",
           queueCount: (count: number) => `${count} items`,
+          tenantKpiSub: (pilot: number, sandbox: number) =>
+            `${formatCount(pilot)} pilot · ${formatCount(sandbox)} sandbox`,
+          tenantRollback: (count: number) =>
+            `${formatCount(count)} rollback hold`,
+          partnerMix: (bank: number, other: number) =>
+            `${formatCount(bank)} bank · ${formatCount(other)} hotel / enterprise`,
+          driverHealthy: "Healthy",
+          noOpenIssueIds: "no open issue IDs",
           routes: [
             {
               href: "/tenants",
@@ -312,7 +326,7 @@ export default function HomePage() {
       : {
           title: "平台治理工作首頁",
           subtitle: (count: number) =>
-            `DRTS 平台控制平面 · 您今日有 ${count} 件需治理事項`,
+            `平台治理控制台 · 您今日有 ${count} 件需治理事項`,
           openAll: "展開所有",
           openAudit: "前往稽核",
           loading: "載入治理快照中...",
@@ -321,55 +335,63 @@ export default function HomePage() {
           quickLinksTitle: "模組捷徑",
           todayTitle: "今日治理待辦",
           todaySubtitle: "跨模組需要平台治理人介入",
-          recentTitle: "近期高敏感操作 · 平台層審計足跡 (24h)",
+          recentTitle: "近期高敏感操作 · 平台層稽核軌跡（24 小時）",
           kpiTenants: "活躍租戶",
-          kpiPartners: "合作夥伴 entry",
+          kpiPartners: "合作夥伴入口",
           kpiDrivers: "活躍司機",
           kpiRecon: "待結算對帳",
-          partnerReadiness: (count: number) => `${count} 待 readiness`,
-          driverDelta: (count: number) => `${count} 筆 stale`,
+          partnerReadiness: (count: number) => `${count} 筆待補就緒度`,
+          driverDelta: (count: number) => `${count} 筆定位過舊`,
           driverSub: (eligible: number, total: number) =>
             `${eligible} 可派 · ${total} 總數`,
           reconDelta: (partner: number, forwarded: number) =>
-            `${partner} partner · ${forwarded} forwarded`,
+            `${partner} 合作夥伴 · ${forwarded} 轉發`,
           reconSub: (count: number) => `${count} 筆重大平台告警`,
           noAudit: "目前沒有稽核紀錄。",
           noTodos: "目前沒有路由到平台端的治理阻塞。",
           auditTime: "時間",
+          auditActorType: "操作者類型",
           auditModule: "模組",
           auditAction: "動作",
           auditActor: "操作者",
-          auditRequest: "Request",
+          auditRequest: "請求編號",
           queueCount: (count: number) => `${count} 件`,
+          tenantKpiSub: (pilot: number, sandbox: number) =>
+            `${formatCount(pilot)} 試點 · ${formatCount(sandbox)} 沙箱`,
+          tenantRollback: (count: number) => `${formatCount(count)} 筆回滾保留`,
+          partnerMix: (bank: number, other: number) =>
+            `${formatCount(bank)} 銀行 · ${formatCount(other)} 飯店／企業`,
+          driverHealthy: "正常",
+          noOpenIssueIds: "目前無待處理問題編號",
           routes: [
             {
               href: "/tenants",
-              label: "租戶 · Tenants",
+              label: "租戶",
               icon: "tenants",
             },
             {
               href: "/partners",
-              label: "合作夥伴 · Partners",
+              label: "合作夥伴",
               icon: "partners",
             },
             {
               href: "/pricing",
-              label: "費率 · Pricing",
+              label: "定價",
               icon: "pricing",
             },
             {
               href: "/payments",
-              label: "結算 · Payments",
+              label: "結算",
               icon: "payments",
             },
             {
               href: "/fleet",
-              label: "車隊 · Fleet",
+              label: "車隊",
               icon: "fleet",
             },
             {
               href: "/audit",
-              label: "稽核 · Audit",
+              label: "稽核",
               icon: "audit",
             },
           ] satisfies ShortcutRoute[],
@@ -398,7 +420,15 @@ export default function HomePage() {
         observability,
       });
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en"
+            ? "Platform overview unavailable"
+            : "平台總覽資料暫時無法載入",
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -515,18 +545,16 @@ export default function HomePage() {
             title:
               locale === "en"
                 ? "BGMT dispatch reporting token expires in 6 days"
-                : "BGMT 派遣回報 token 將於 6 天內到期",
+                : "派遣回報憑證將於 6 天內到期",
             description:
               locale === "en"
                 ? `Measured ${tokenAlert.measuredValue} at ${formatDateTime(
                     tokenAlert.observedAt,
                   )}. Renew the client credential before reporting completion traffic stalls.`
-                : `${formatDateTime(tokenAlert.observedAt)} 量測值 ${tokenAlert.measuredValue}。需先輪替 client credential，否則今日完成單將無法回報。`,
+                : `${formatDateTime(tokenAlert.observedAt)} 量測值 ${tokenAlert.measuredValue}。需先輪替用戶端憑證，否則今日完成單將無法回報。`,
             href: "/adapter-registry",
             actionLabel:
-              locale === "en"
-                ? "Open adapter registry"
-                : "前往 adapter-registry",
+              locale === "en" ? "Open adapter registry" : "前往介接器註冊表",
             actionVariant: "primary",
           }
         : null,
@@ -538,13 +566,13 @@ export default function HomePage() {
             title:
               locale === "en"
                 ? "GoCab forwarded · 24h sync_failed 4.2%"
-                : "GoCab forwarded · 24h sync_failed 4.2%",
+                : "GoCab 轉發通道 · 24 小時同步失敗率 4.2%",
             description:
               locale === "en"
                 ? `Above the 3% warning threshold. Inspect adapter health and watch manual fallback volume before finance close.`
-                : "超過 3% 警戒值。建議檢查 adapter 健康並啟動 manual fallback 觀察。",
+                : "已超過 3% 警戒值。建議先檢查介接器健康狀態，並持續觀察人工補救量能。",
             href: "/adapter-registry",
-            actionLabel: locale === "en" ? "Open adapter" : "查看 adapter",
+            actionLabel: locale === "en" ? "Open adapter" : "查看介接器",
             actionVariant: "secondary",
           }
         : null,
@@ -555,12 +583,12 @@ export default function HomePage() {
             icon: "info",
             title:
               locale === "en"
-                ? `${rollbackTenant.code} is in rollback_hold`
-                : `${rollbackTenant.code} 處於 rollback_hold`,
+                ? `${rollbackTenant.code} is in rollback hold`
+                : `${rollbackTenant.code} 處於回滾保留`,
             description:
               locale === "en"
                 ? "Customer complaint cmp_0894 escalated into inc_0212. Rollout is paused until platform and ops agree on the next move."
-                : "客訴 cmp_0894 升級為 inc_0212 後，rollout 已暫停。需平台與營運共識下一步。",
+                : "已有客訴升級為事故案件，推進已暫停。需由平台與營運共同確認下一步。",
             href: `/tenants/${rollbackTenant.id}`,
             actionLabel: locale === "en" ? "Open tenant" : "查看租戶",
             actionVariant: "secondary",
@@ -586,6 +614,16 @@ export default function HomePage() {
       .join(", ") || undefined;
   const governanceItemCount = governanceQueue.length;
   const showLoadingState = loading && !snapshot;
+  const formatAuditIdentity = (value?: string | null) =>
+    value &&
+    [
+      "system",
+      "platform-admin",
+      "platform_admin",
+      "platform-admin.preview",
+    ].includes(value)
+      ? formatPlatformCodeLabel(locale, value)
+      : (value ?? "—");
   const auditColumns: CanvasTableColumn<AuditTableRow>[] = [
     {
       h: copy.auditTime,
@@ -594,29 +632,39 @@ export default function HomePage() {
       r: (row) => formatDateTime(row.createdAt),
     },
     {
-      h: "ACTOR TYPE",
+      h: copy.auditActorType,
       w: 148,
       r: (row) => (
         <CanvasPill theme={th} tone={actorTypeTone(row.actorType)} dot>
-          {row.actorType}
+          {formatPlatformCodeLabel(locale, row.actorType)}
         </CanvasPill>
       ),
     },
     {
       h: copy.auditModule,
       w: 136,
-      r: (row) => <span style={moduleCellStyle}>{row.moduleName}</span>,
+      r: (row) => (
+        <span style={moduleCellStyle}>
+          {formatPlatformCodeLabel(locale, row.moduleName)}
+        </span>
+      ),
     },
     {
       h: copy.auditAction,
       w: 184,
-      r: (row) => <span style={actionCellStyle}>{row.actionName}</span>,
+      r: (row) => (
+        <span style={actionCellStyle}>
+          {formatPlatformCodeLabel(locale, row.actionName)}
+        </span>
+      ),
     },
     {
       h: copy.auditActor,
       r: (row) => (
         <div style={actorCellStyle}>
-          <span style={actorPrimaryStyle}>{row.actorId ?? "system"}</span>
+          <span style={actorPrimaryStyle}>
+            {formatAuditIdentity(row.actorId ?? "system")}
+          </span>
           {row.tenantId ? (
             <span style={actorMetaStyle}>{row.tenantId}</span>
           ) : null}
@@ -662,16 +710,13 @@ export default function HomePage() {
                 theme={th}
                 label={copy.kpiTenants}
                 value={formatCount(metrics.activeTenants)}
-                sub={
-                  locale === "en"
-                    ? `${formatCount(metrics.pilotTenants)} pilot · ${formatCount(metrics.sandboxTenants)} sandbox`
-                    : `${formatCount(metrics.pilotTenants)} pilot · ${formatCount(metrics.sandboxTenants)} sandbox`
-                }
+                sub={copy.tenantKpiSub(
+                  metrics.pilotTenants,
+                  metrics.sandboxTenants,
+                )}
                 delta={
                   metrics.rollbackTenants > 0
-                    ? locale === "en"
-                      ? `${formatCount(metrics.rollbackTenants)} rollback_hold`
-                      : `${formatCount(metrics.rollbackTenants)} rollback_hold`
+                    ? copy.tenantRollback(metrics.rollbackTenants)
                     : undefined
                 }
                 deltaTone={metrics.rollbackTenants > 0 ? "down" : "neutral"}
@@ -680,11 +725,10 @@ export default function HomePage() {
                 theme={th}
                 label={copy.kpiPartners}
                 value={formatCount(metrics.partnerEntries)}
-                sub={
-                  locale === "en"
-                    ? `${formatCount(metrics.bankPartners)} bank · ${formatCount(metrics.hotelPartners + metrics.enterprisePartners)} hotel / enterprise`
-                    : `${formatCount(metrics.bankPartners)} 銀行 · ${formatCount(metrics.hotelPartners + metrics.enterprisePartners)} 飯店 / 企業`
-                }
+                sub={copy.partnerMix(
+                  metrics.bankPartners,
+                  metrics.hotelPartners + metrics.enterprisePartners,
+                )}
                 delta={copy.partnerReadiness(metrics.partnerAttention)}
                 deltaTone={metrics.partnerAttention > 0 ? "neutral" : "up"}
               />
@@ -699,9 +743,7 @@ export default function HomePage() {
                 delta={
                   metrics.staleDrivers > 0
                     ? copy.driverDelta(metrics.staleDrivers)
-                    : locale === "en"
-                      ? "healthy"
-                      : "穩定"
+                    : copy.driverHealthy
                 }
                 deltaTone={metrics.staleDrivers > 0 ? "down" : "up"}
               />
@@ -719,10 +761,7 @@ export default function HomePage() {
                 }
                 deltaTone={metrics.openIssues > 0 ? "neutral" : "up"}
                 sub={copy.reconSub(metrics.criticalAlerts)}
-                hint={
-                  unresolvedIssueHint ??
-                  (locale === "en" ? "no open issue ids" : "目前無待處理 issue")
-                }
+                hint={unresolvedIssueHint ?? copy.noOpenIssueIds}
               />
             </div>
 

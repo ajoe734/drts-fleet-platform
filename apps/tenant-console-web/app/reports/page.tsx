@@ -4,6 +4,10 @@ import type {
   ResourceActionDescriptor,
 } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import {
+  formatTenantErrorSummary,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
 import { ReportsManager } from "./reports-manager";
 
 export const dynamic = "force-dynamic";
@@ -80,10 +84,6 @@ function inferEmptyReason(data: {
   return null;
 }
 
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown reporting error.";
-}
-
 async function loadReportsPageData(
   emptyReasonOverride: EmptyReason | null,
 ): Promise<ReportsPageData> {
@@ -98,7 +98,14 @@ async function loadReportsPageData(
         right.createdAt.localeCompare(left.createdAt),
       )
     : [];
-  const errors = jobsResult.ok ? [] : [toErrorMessage(jobsResult.error)];
+  const errors = jobsResult.ok
+    ? []
+    : [
+        formatTenantErrorSummary(
+          "報表工作",
+          toTenantErrorMessage(jobsResult.error, "報表工作讀取失敗"),
+        ),
+      ];
 
   const generatedAt =
     jobs[0]?.updatedAt ?? jobs[0]?.createdAt ?? new Date().toISOString();

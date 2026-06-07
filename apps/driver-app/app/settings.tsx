@@ -27,6 +27,7 @@ import {
   clearDriverProvisioning,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
+import { formatDriverUiError, toDriverErrorMessage } from "@/lib/error-copy";
 import {
   DEFAULT_PROFILE_VALUES,
   DEFAULT_SETTINGS_VALUES,
@@ -47,10 +48,10 @@ import {
 import { driverSaveStatusLabels, driverStrings } from "@/lib/strings";
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-  return "要求失敗";
+  return formatDriverUiError(
+    toDriverErrorMessage(error, "要求失敗"),
+    "要求失敗",
+  );
 }
 
 function formatSectionList(labels: string[]): string {
@@ -293,7 +294,7 @@ export default function SettingsScreen() {
   const saveStatus = describeSaveStatus(saveState);
   const profileInitial = profileValues.profileName.trim().charAt(0) || "司";
   const identitySummary = [
-    driverId ? `ID ${driverId}` : null,
+    driverId ? `司機編號 ${driverId}` : null,
     profileValues.profilePhone.trim() || null,
   ]
     .filter(Boolean)
@@ -504,7 +505,7 @@ export default function SettingsScreen() {
               label="電子郵件"
               value={profileValues.profileEmail}
               onChangeText={(value) => updateProfile({ profileEmail: value })}
-              placeholder="driver@example.com"
+              placeholder="請輸入常用電子郵件"
               keyboardType="email-address"
               autoCapitalize="none"
               error={profileErrors.profileEmail}
@@ -552,7 +553,7 @@ export default function SettingsScreen() {
               label="介面語言"
               value={settingsValues.language}
               onChangeText={(value) => updateSettings({ language: value })}
-              placeholder="zh-TW"
+              placeholder="例如：繁體中文（zh-TW）"
               autoCapitalize="none"
               error={settingsErrors.language}
               editable={settingsLoaded && !saving}

@@ -18,6 +18,7 @@ import {
   formatRelativeTime,
   isFutureIso,
 } from "@/lib/formatters";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 import {
   getBookingSourceVisibility,
   getSourceToneClassName,
@@ -105,51 +106,51 @@ const BOOKING_TIMELINE_STEPS = [
 
 const EMPTY_REASON_COPY: Record<EmptyReason, EmptyStateCopy> = {
   no_data: {
-    title: "No booking data exists yet",
-    body: "This tenant has booking access, but no booking record exists in the current workspace snapshot.",
-    ctaLabel: "Create a booking",
+    title: "目前尚無叫車資料",
+    body: "此租戶已開通叫車功能，但目前工作區快照中還沒有任何叫車紀錄。",
+    ctaLabel: "建立叫車",
     ctaHref: "/bookings/new",
     tone: "default",
   },
   not_provisioned: {
-    title: "Booking module is not provisioned",
-    body: "Tenant setup is incomplete, so booking detail cannot be hydrated until provisioning finishes.",
-    ctaLabel: "Open settings",
+    title: "叫車模組尚未完成佈建",
+    body: "租戶設定尚未完成，因此在佈建完成前無法載入叫車明細。",
+    ctaLabel: "前往設定",
     ctaHref: "/settings",
     tone: "warning",
   },
   fetch_failed: {
-    title: "The booking snapshot could not be loaded",
-    body: "The backend request failed before a usable read model was returned. Retry or inspect the audit lane for the last successful mutation.",
-    ctaLabel: "Back to bookings",
+    title: "無法載入叫車快照",
+    body: "後端請求在可用讀取模型回傳前就失敗了。請重試，或到稽核頁查看上一筆成功異動。",
+    ctaLabel: "返回叫車列表",
     ctaHref: "/bookings",
     tone: "warning",
   },
   permission_denied: {
-    title: "This actor cannot read the booking detail",
-    body: "The booking exists, but the current tenant actor does not have read scope for this record.",
-    ctaLabel: "Back to bookings",
+    title: "目前帳號無法讀取叫車明細",
+    body: "這筆叫車單確實存在，但目前租戶帳號沒有讀取這筆資料的權限範圍。",
+    ctaLabel: "返回叫車列表",
     ctaHref: "/bookings",
     tone: "warning",
   },
   external_unavailable: {
-    title: "The linked external system is unavailable",
-    body: "Tenant truth is still readable, but one or more external dispatch details cannot be refreshed right now.",
-    ctaLabel: "Open audit",
+    title: "關聯外部系統目前不可用",
+    body: "租戶側資料仍可讀取，但有一個或多個外部派遣細節目前無法刷新。",
+    ctaLabel: "前往稽核",
     ctaHref: "/audit",
     tone: "warning",
   },
   filtered_empty: {
-    title: "This deep link no longer matches the current filters",
-    body: "The booking detail route is valid, but the surrounding filtered context no longer contains the record you expected.",
-    ctaLabel: "Reset booking filters",
+    title: "這個深連結已不符合目前篩選條件",
+    body: "叫車明細路徑本身有效，但外層的篩選情境已不再包含你預期的那筆資料。",
+    ctaLabel: "清除叫車篩選",
     ctaHref: "/bookings",
     tone: "default",
   },
   driver_not_eligible: {
-    title: "The assigned driver is no longer eligible",
-    body: "The booking still exists, but the current driver eligibility state prevents showing a complete live assignment snapshot.",
-    ctaLabel: "Open audit",
+    title: "已指派司機目前不再符合資格",
+    body: "這筆叫車單仍然存在，但目前的司機資格狀態讓系統無法顯示完整的即時指派快照。",
+    ctaLabel: "前往稽核",
     ctaHref: "/audit",
     tone: "warning",
   },
@@ -263,66 +264,64 @@ function buildBookingActions(
 function buildBookingEvents(booking: BookingRecord): BookingEvent[] {
   const events: BookingEvent[] = [
     {
-      label: "Booking created",
+      label: "叫車單已建立",
       at: booking.createdAt,
-      actor: booking.bookedBy?.name ?? "Tenant intake",
+      actor: booking.bookedBy?.name ?? "租戶受理",
       realm: "tenant",
       tone: "default",
-      detail: `Reservation window ${formatDateTime(booking.reservationWindowStart)} to ${formatDateTime(booking.reservationWindowEnd)}.`,
+      detail: `預約時段 ${formatDateTime(booking.reservationWindowStart)} 至 ${formatDateTime(booking.reservationWindowEnd)}。`,
     },
   ];
 
   if (booking.approvalState !== "not_required") {
     events.push({
-      label: "Approval workflow",
+      label: "審批流程",
       at: booking.updatedAt,
-      actor: "tenant.approval",
+      actor: "租戶審批",
       realm: "system",
       tone: booking.approvalState === "approved" ? "success" : "warning",
-      detail: `Approval state is ${booking.approvalState}. Related request count: ${booking.approvalRequestIds.length}.`,
+      detail: `審批狀態為 ${formatTenantCodeLabel(booking.approvalState)}，關聯申請共 ${booking.approvalRequestIds.length} 筆。`,
     });
   }
 
   if (ACTIVE_ORDER_STATUSES.has(booking.orderStatus)) {
     events.push({
-      label: "Driver assignment active",
+      label: "司機指派進行中",
       at: booking.updatedAt,
-      actor: "dispatch.engine",
+      actor: "派遣引擎",
       realm: "ops",
       tone: "success",
       detail:
-        "The booking is currently attached to an active fulfillment leg. Live ETA is not published by the current read model.",
+        "這筆叫車單目前已掛上進行中的履約派遣。現行讀取模型尚未發佈即時預估到達時間。",
     });
   }
 
   if (booking.orderStatus === "cancelled") {
     events.push({
-      label: "Booking cancelled",
+      label: "叫車單已取消",
       at: booking.updatedAt,
-      actor: "tenant command",
+      actor: "租戶指令",
       realm: "tenant",
       tone: "warning",
-      detail:
-        "Tenant cancellation completed. Audit retains the reason and actor attribution.",
+      detail: "租戶取消已完成，稽核中保留了原因與執行者資訊。",
     });
   } else if (booking.orderStatus === "completed") {
     events.push({
-      label: "Trip completed",
+      label: "行程已完成",
       at: booking.updatedAt,
-      actor: "driver workflow",
+      actor: "司機流程",
       realm: "system",
       tone: "success",
-      detail:
-        "Fulfillment completed. Billing and audit remain accessible from tenant-owned routes.",
+      detail: "履約已完成，租戶仍可透過帳務與稽核路徑檢視後續資料。",
     });
   } else {
     events.push({
-      label: "Workflow snapshot updated",
+      label: "流程快照已更新",
       at: booking.updatedAt,
-      actor: "booking.readmodel",
+      actor: "叫車讀模型",
       realm: "system",
       tone: "default",
-      detail: `Current order status is ${booking.orderStatus}.`,
+      detail: `目前訂單狀態為 ${formatTenantCodeLabel(booking.orderStatus)}。`,
     });
   }
 
@@ -434,22 +433,22 @@ function deriveBookingView(
       href: commandReceipt?.auditId
         ? `${auditBase}?auditId=${encodeURIComponent(commandReceipt.auditId)}`
         : `${auditBase}?bookingId=${encodeURIComponent(booking.bookingId)}`,
-      label: "View audit subset",
+      label: "查看稽核子集",
       note: commandReceipt?.auditId
-        ? "Open the action receipt audit trail directly when a command has already been accepted."
-        : "Tenant audit includes actor realm chips for tenant, ops, platform, and system actions.",
+        ? "若指令已被接受，可直接開啟該指令收據對應的稽核軌跡。"
+        : "租戶稽核會顯示租戶、營運、平台與系統等角色範圍標記。",
     },
     {
       href: `/rules?bookingId=${encodeURIComponent(booking.bookingId)}`,
-      label: "Open approval rules",
-      note: "Use the tenant rules lane to inspect the approval logic that currently applies to this booking.",
+      label: "開啟審批規則",
+      note: "可到租戶規則頁檢查目前套用在這筆叫車單上的審批邏輯。",
     },
     ...(source.domain === "forwarded_authority"
       ? [
           {
             href: `${opsConsoleBase}/dispatch?orderId=${encodeURIComponent(booking.orderId)}`,
-            label: "Open ops console detail",
-            note: "Forwarded-authority bookings escalate to the ops app in a new tab when dispatch recovery is needed.",
+            label: "開啟營運派遣明細",
+            note: "若這是轉單權限來源的訂單，且需派遣補救，會以新分頁跳轉至營運系統。",
             external: true,
           },
         ]
@@ -476,15 +475,15 @@ function deriveBookingView(
 function describeReadOnlyReason(reasonCode: string | null) {
   switch (reasonCode) {
     case "past_editable_until":
-      return "The tenant edit window has passed, so the detail is now read-only for update commands.";
+      return "租戶可編輯時窗已結束，因此此明細目前無法再送出更新指令。";
     case "booking_terminal":
-      return "The trip is already closed. Tenant users can review context and audit, but no longer mutate the booking.";
+      return "這趟行程已經結案。租戶仍可檢視情境與稽核，但不能再修改叫車單。";
     case "on_trip_locked":
-      return "The driver workflow is already in progress. Follow-up should happen through cancellation policy or ops escalation, not inline edits.";
+      return "司機履約流程已在進行中。後續處理應透過取消政策或營運升級，而不是在此直接編輯。";
     case "approval_pending":
-      return "The booking is waiting on approval resolution before another update command can be accepted.";
+      return "這筆叫車單仍在等待審批結果，暫時無法接受新的更新指令。";
     default:
-      return "This booking currently exposes no tenant update command.";
+      return "這筆叫車單目前沒有可由租戶端執行的更新指令。";
   }
 }
 
@@ -495,31 +494,31 @@ function describeEditableWindow(
   const relativeWindow = formatRelativeTime(editableUntil);
   if (!editableUntil) {
     return editable
-      ? "The backend currently exposes no edit deadline for this booking."
-      : "The booking is read-only even though no edit deadline was published.";
+      ? "後端目前沒有發佈這筆叫車單的編輯截止時間。"
+      : "這筆叫車單目前為唯讀，即使後端沒有發佈編輯截止時間也是如此。";
   }
 
   return editable
-    ? `The tenant edit window remains open until ${formatDateTime(editableUntil)}${relativeWindow ? ` (${relativeWindow})` : ""}.`
-    : `The tenant edit window closed at ${formatDateTime(editableUntil)}${relativeWindow ? ` (${relativeWindow})` : ""}.`;
+    ? `租戶可編輯時窗將持續到 ${formatDateTime(editableUntil)}${relativeWindow ? `（${relativeWindow}）` : ""}。`
+    : `租戶可編輯時窗已於 ${formatDateTime(editableUntil)}${relativeWindow ? `（${relativeWindow}）` : ""} 關閉。`;
 }
 
 function describeApprovalState(state: BookingRecord["approvalState"]) {
   switch (state) {
     case "not_required":
-      return "No approval gate is active for this booking.";
+      return "這筆叫車單目前沒有審批門檻。";
     case "pending":
-      return "Approval is required before dispatch can continue.";
+      return "派遣流程必須等待審批通過後才能繼續。";
     case "approved":
-      return "The approval gate cleared and the booking can continue.";
+      return "審批門檻已解除，叫車單可繼續往下處理。";
     case "rejected":
-      return "Approval was rejected. Review the rule lane before resubmitting.";
+      return "審批已遭駁回。請先檢查規則頁，再決定是否重新送審。";
     case "blocked":
-      return "A policy block currently prevents the booking from proceeding.";
+      return "目前有政策阻擋，這筆叫車單無法繼續。";
     case "cancelled_by_re_evaluation":
-      return "A prior approval request was invalidated by a later booking change.";
+      return "先前的審批申請因後續叫車內容異動而失效。";
     default:
-      return state;
+      return formatTenantCodeLabel(state, state);
   }
 }
 
@@ -551,20 +550,16 @@ function renderEmptyState(reason: EmptyReason, bookingId: string) {
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="Booking detail"
-        title={`${bookingId} unavailable`}
-        description="The tenant detail route implements all six shared EmptyReason treatments so the UI does not collapse every empty/not-ready case into the same message."
+        eyebrow="叫車明細"
+        title={`叫車單編號 ${bookingId} 目前無法顯示`}
+        description="此租戶明細頁完整實作六種空狀態原因顯示，不會把所有空狀態與未就緒情境都混成同一種訊息。"
       />
-      <SurfaceCard
-        kicker="EmptyReason"
-        title={copy.title}
-        description={copy.body}
-      >
+      <SurfaceCard kicker="空狀態" title={copy.title} description={copy.body}>
         <div className="booking-empty-state">
           <span
             className={`status-chip${copy.tone === "warning" ? " booking-pill-warning" : ""}`}
           >
-            {reason}
+            {formatTenantCodeLabel(reason, reason)}
           </span>
           <div className="link-row">
             <Link
@@ -577,7 +572,7 @@ function renderEmptyState(reason: EmptyReason, bookingId: string) {
               className="action-button action-button-secondary"
               href={`/bookings/${bookingId}`}
             >
-              Restore live detail
+              重新載入即時明細
             </Link>
           </div>
         </div>
@@ -611,7 +606,7 @@ function parseCommandReceipt(
     message:
       typeof query.commandMessage === "string"
         ? query.commandMessage
-        : "The tenant command was accepted and is waiting on external dispatch confirmation.",
+        : "租戶指令已被接受，正在等待外部派遣系統確認。",
   };
 }
 
@@ -683,10 +678,10 @@ export default async function BookingDetailPage({
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="Booking detail"
+        eyebrow="叫車明細"
         title={
           <span className="booking-hero-title">
-            <span>{`${booking.bookingId} · ${booking.businessDispatchSubtype}`}</span>
+            <span>{`叫車單編號 ${booking.bookingId} · ${formatTenantCodeLabel(booking.businessDispatchSubtype, booking.businessDispatchSubtype)}`}</span>
             <span
               className={`status-chip ${
                 bookingView.acceptedPending
@@ -697,76 +692,84 @@ export default async function BookingDetailPage({
               }`}
             >
               {bookingView.acceptedPending
-                ? "accepted_pending"
-                : booking.orderStatus}
+                ? "已受理待確認"
+                : formatTenantCodeLabel(
+                    booking.orderStatus,
+                    booking.orderStatus,
+                  )}
             </span>
           </span>
         }
-        description="Booking detail now follows the Tenant Console canvas: editable-until visibility, approval context, driver-assignment state, audit subset, refresh tier, and action descriptors all sit on one tenant-owned screen."
+        description="此頁已對齊租戶端明細畫布：可編輯時窗、審批脈絡、司機指派狀態、稽核子集、刷新層級與可用動作都集中在同一頁。"
       />
 
       {bookingView.acceptedPending && bookingView.commandReceipt ? (
         <CalloutPanel
-          title={`Command accepted · awaiting external confirmation · ${bookingView.commandReceipt.actionId}`}
+          title="指令已受理，等待外部確認"
           description={bookingView.commandReceipt.message}
           tone="warning"
         >
           <p>
-            Audit link {bookingView.commandReceipt.auditId} is already assigned.
-            Keep this detail open or refresh after the next T5 cycle if the
-            status has not advanced.
+            指令編號 {bookingView.commandReceipt.actionId} · 稽核編號{" "}
+            {bookingView.commandReceipt.auditId}{" "}
+            已建立。若狀態尚未前進，請保留此頁，或等下一個 T5
+            刷新週期後重新整理。
           </p>
         </CalloutPanel>
       ) : null}
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
-          kicker="Refresh tier"
-          title="Tenant booking detail refreshes on T5"
-          description="This screen is a tenant slow-lane detail surface: auto refresh is slow, manual review remains available, and stale states must be explicit."
+          kicker="刷新層級"
+          title="租戶叫車明細以 T5 更新"
+          description="這個頁面屬於租戶慢速明細面：自動刷新節奏較慢，但人工檢查仍可持續進行，且過舊狀態必須明確呈現。"
         >
           <div className="booking-refresh-card">
             <div className="chip-row">
-              <span className="status-chip booking-pill-accent">T5 slow</span>
-              <span className="status-chip">fresh snapshot</span>
+              <span className="status-chip booking-pill-accent">T5 慢速</span>
+              <span className="status-chip">最新快照</span>
             </div>
             <dl className="definition-grid">
               <div>
-                <dt>Generated</dt>
+                <dt>產生時間</dt>
                 <dd>{formatDateTime(bookingView.generatedAt)}</dd>
               </div>
               <div>
-                <dt>Last booking update</dt>
+                <dt>最後更新</dt>
                 <dd>{formatDateTime(booking.updatedAt)}</dd>
               </div>
               <div>
-                <dt>Source</dt>
-                <dd>live tenant API</dd>
+                <dt>來源</dt>
+                <dd>租戶即時介面</dd>
               </div>
               <div>
-                <dt>Manual refresh</dt>
-                <dd>
-                  Browser refresh, notification reopen, or command receipt
-                  refresh
-                </dd>
+                <dt>手動刷新</dt>
+                <dd>可用瀏覽器重整、重新開啟通知，或依指令收據再次刷新</dd>
               </div>
             </dl>
           </div>
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Status"
-          title="Editability and approval posture"
-          description="Per Q-TEN05, editability is driven by action descriptors plus editableUntil, not by guessing from the status label alone."
+          kicker="狀態"
+          title="可編輯性與審批狀態"
+          description="是否可編輯必須由動作描述與可編輯截止時間共同決定，不能只看狀態字樣推測。"
         >
           <div className="detail-stack">
             <div className="chip-row">
-              <span className="status-badge">{booking.orderStatus}</span>
-              <span className="status-chip">Booking {booking.status}</span>
+              <span className="status-badge">
+                {formatTenantCodeLabel(
+                  booking.orderStatus,
+                  booking.orderStatus,
+                )}
+              </span>
+              <span className="status-chip">
+                叫車單 {formatTenantCodeLabel(booking.status, booking.status)}
+              </span>
               <span
                 className={`status-chip${editable ? " booking-pill-success" : " booking-pill-warning"}`}
               >
-                {editable ? "Editable" : "Read only"}
+                {editable ? "可編輯" : "唯讀"}
               </span>
               <span className={getSourceToneClassName(source.tone)}>
                 {source.badge}
@@ -774,19 +777,31 @@ export default async function BookingDetailPage({
             </div>
             <dl className="definition-grid">
               <div>
-                <dt>editableUntil</dt>
+                <dt>可編輯截止時間</dt>
                 <dd>{formatDateTime(bookingView.editableUntil)}</dd>
               </div>
               <div>
-                <dt>readOnlyReasonCode</dt>
-                <dd>{bookingView.readOnlyReasonCode ?? "None"}</dd>
+                <dt>唯讀原因</dt>
+                <dd>
+                  {bookingView.readOnlyReasonCode
+                    ? formatTenantCodeLabel(
+                        bookingView.readOnlyReasonCode,
+                        bookingView.readOnlyReasonCode,
+                      )
+                    : "無"}
+                </dd>
               </div>
               <div>
-                <dt>Approval state</dt>
-                <dd>{booking.approvalState}</dd>
+                <dt>審批狀態</dt>
+                <dd>
+                  {formatTenantCodeLabel(
+                    booking.approvalState,
+                    booking.approvalState,
+                  )}
+                </dd>
               </div>
               <div>
-                <dt>Approval requests</dt>
+                <dt>審批申請數</dt>
                 <dd>{booking.approvalRequestIds.length}</dd>
               </div>
             </dl>
@@ -795,13 +810,12 @@ export default async function BookingDetailPage({
             </div>
             {booking.approvalState === "pending" ? (
               <CalloutPanel
-                title="Approval-required state"
+                title="需等待審批"
                 description={describeApprovalState(booking.approvalState)}
                 tone="warning"
               >
                 <p>
-                  This booking should not be treated as editable just because it
-                  is not terminal. Wait for approval or use the rules lane.
+                  即使這筆叫車單還沒到終態，也不能直接視為可編輯。請先等待審批結果，或到規則頁進一步查看。
                 </p>
               </CalloutPanel>
             ) : null}
@@ -817,14 +831,11 @@ export default async function BookingDetailPage({
       <section className="booking-detail-layout">
         <div className="booking-detail-main">
           <SurfaceCard
-            kicker="Trip context"
-            title="Booking, rider, and routing detail"
-            description="The page keeps the full tenant-visible booking payload close to the action lane so a user does not need a separate ops-only surface to validate the reservation."
+            kicker="行程資訊"
+            title="叫車、乘客與路線明細"
+            description="此頁會把租戶可見的完整叫車資料放在操作區旁邊，避免使用者必須切到僅限營運的頁面才能確認預約內容。"
           >
-            <div
-              className="booking-stepper"
-              aria-label="Booking workflow state"
-            >
+            <div className="booking-stepper" aria-label="叫車流程狀態">
               {BOOKING_TIMELINE_STEPS.map((step, index) => {
                 const isActive = index === bookingView.timelineStep;
                 const isComplete = index < bookingView.timelineStep;
@@ -834,8 +845,8 @@ export default async function BookingDetailPage({
                     BOOKING_TIMELINE_STEPS[BOOKING_TIMELINE_STEPS.length - 1];
                 const stepLabel =
                   isTerminalCancelled && step === "completed"
-                    ? "cancelled"
-                    : step;
+                    ? "已取消"
+                    : formatTenantCodeLabel(step, step);
 
                 return (
                   <div
@@ -850,15 +861,15 @@ export default async function BookingDetailPage({
             </div>
             <dl className="definition-grid">
               <div>
-                <dt>Booking ID</dt>
+                <dt>叫車單編號</dt>
                 <dd>{booking.bookingId}</dd>
               </div>
               <div>
-                <dt>Order ID</dt>
+                <dt>訂單編號</dt>
                 <dd>{booking.orderId}</dd>
               </div>
               <div>
-                <dt>Passenger</dt>
+                <dt>乘客</dt>
                 <dd>
                   <Link className="text-link" href={passengerHref}>
                     {booking.passenger.name}
@@ -866,11 +877,11 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>Phone</dt>
+                <dt>電話</dt>
                 <dd>{booking.passenger.phone}</dd>
               </div>
               <div>
-                <dt>Pickup</dt>
+                <dt>上車地點</dt>
                 <dd>
                   <Link className="text-link" href={pickupAddressHref}>
                     {booking.pickup.address}
@@ -878,7 +889,7 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>Dropoff</dt>
+                <dt>下車地點</dt>
                 <dd>
                   <Link className="text-link" href={dropoffAddressHref}>
                     {booking.dropoff.address}
@@ -886,72 +897,79 @@ export default async function BookingDetailPage({
                 </dd>
               </div>
               <div>
-                <dt>Window start</dt>
+                <dt>時段起始</dt>
                 <dd>{formatDateTime(booking.reservationWindowStart)}</dd>
               </div>
               <div>
-                <dt>Window end</dt>
+                <dt>時段結束</dt>
                 <dd>{formatDateTime(booking.reservationWindowEnd)}</dd>
               </div>
               <div>
-                <dt>Booked by</dt>
-                <dd>{booking.bookedBy?.name ?? "Tenant intake"}</dd>
+                <dt>建立人</dt>
+                <dd>{booking.bookedBy?.name ?? "租戶受理"}</dd>
               </div>
               <div>
-                <dt>Onsite contact</dt>
-                <dd>{booking.onsiteContact?.name ?? "Not published"}</dd>
+                <dt>現場聯絡人</dt>
+                <dd>{booking.onsiteContact?.name ?? "未提供"}</dd>
               </div>
               <div>
-                <dt>Cost center</dt>
+                <dt>成本中心</dt>
                 <dd>
                   {booking.costCenter ? (
                     <Link className="text-link" href={costCenterHref}>
                       {booking.costCenter}
                     </Link>
                   ) : (
-                    "Not published"
+                    "未提供"
                   )}
                 </dd>
               </div>
               <div>
-                <dt>Vehicle preference</dt>
-                <dd>{booking.vehiclePreference ?? "Not published"}</dd>
-              </div>
-              <div>
-                <dt>Flight / terminal</dt>
+                <dt>車型偏好</dt>
                 <dd>
-                  {booking.flightNo ?? "No flight"} /{" "}
-                  {booking.terminal ?? "No terminal"}
+                  {booking.vehiclePreference
+                    ? formatTenantCodeLabel(
+                        booking.vehiclePreference,
+                        booking.vehiclePreference,
+                      )
+                    : "未提供"}
                 </dd>
               </div>
               <div>
-                <dt>Notes</dt>
-                <dd>{booking.notes ?? "No notes"}</dd>
+                <dt>航班 / 航廈</dt>
+                <dd>
+                  {booking.flightNo ?? "無航班"} /{" "}
+                  {booking.terminal ?? "無航廈"}
+                </dd>
+              </div>
+              <div>
+                <dt>備註</dt>
+                <dd>{booking.notes ?? "無備註"}</dd>
               </div>
             </dl>
             <div className="booking-reference-links">
               <Link className="text-link" href={passengerHref}>
-                Open passenger directory reference
+                開啟乘客名錄
               </Link>
               <Link className="text-link" href={pickupAddressHref}>
-                Open pickup address reference
+                開啟上車地址參考
               </Link>
               <Link className="text-link" href={dropoffAddressHref}>
-                Open dropoff address reference
+                開啟下車地址參考
               </Link>
               <Link className="text-link" href={costCenterHref}>
-                Open cost center governance
+                開啟成本中心治理
               </Link>
               <Link className="text-link" href={bookingFiltersHref}>
-                Return to booking list context
+                回到叫車列表情境
               </Link>
             </div>
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Lifecycle"
-            title="Timeline and recent updates"
-            description="Tenant audit visibility includes cross-actor changes on tenant-owned resources, so the recent update lane must not pretend every event came from the tenant actor."
+            kicker="生命週期"
+            title="時間軸與近期更新"
+            description="租戶稽核可看見跨角色的異動，因此這裡的近期更新不會假裝每一筆都是租戶本人操作。"
           >
             <ol className="booking-event-list">
               {(recentEvents.length > 0
@@ -965,16 +983,14 @@ export default async function BookingDetailPage({
                   <div className="booking-event-head">
                     <strong>{event.label}</strong>
                     <span>
-                      {event.at
-                        ? formatDateTime(event.at)
-                        : "Pending timestamp"}
+                      {event.at ? formatDateTime(event.at) : "等待時間戳"}
                     </span>
                   </div>
                   <div className="chip-row">
                     <span
                       className={`status-chip booking-realm-${event.realm}`}
                     >
-                      {event.realm}
+                      {formatTenantCodeLabel(event.realm, event.realm)}
                     </span>
                     <span className="muted-copy">{event.actor}</span>
                   </div>
@@ -985,54 +1001,62 @@ export default async function BookingDetailPage({
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Finance"
-            title="Fare, invoice, and approval context"
-            description="Quoted fare, approval posture, and invoice linkage remain tenant-visible while dispatch-only mechanics stay out of band."
+            kicker="帳務"
+            title="車資、發票與審批脈絡"
+            description="報價車資、審批狀態與發票連結都維持租戶可見；僅限派遣端的執行細節則留在別的工作區。"
           >
             <dl className="definition-grid">
               <div>
-                <dt>Quoted fare</dt>
+                <dt>預估車資</dt>
                 <dd>{formatMoney(booking.quotedFare)}</dd>
               </div>
               <div>
-                <dt>Fare source</dt>
-                <dd>{booking.quotedFareSource ?? "Not published"}</dd>
-              </div>
-              <div>
-                <dt>Pricing version</dt>
-                <dd>{booking.quotedFareRuleVersion ?? "Not published"}</dd>
-              </div>
-              <div>
-                <dt>Manual override</dt>
+                <dt>車資來源</dt>
                 <dd>
-                  {booking.manualFareOverride
-                    ? `${booking.manualFareOverride.actorType} · ${booking.manualFareOverride.reason}`
-                    : "None"}
+                  {booking.quotedFareSource
+                    ? formatTenantCodeLabel(
+                        booking.quotedFareSource,
+                        booking.quotedFareSource,
+                      )
+                    : "未提供"}
                 </dd>
               </div>
               <div>
-                <dt>Approval</dt>
+                <dt>定價版本</dt>
+                <dd>{booking.quotedFareRuleVersion ?? "未提供"}</dd>
+              </div>
+              <div>
+                <dt>人工覆價</dt>
+                <dd>
+                  {booking.manualFareOverride
+                    ? `${formatTenantCodeLabel(booking.manualFareOverride.actorType, booking.manualFareOverride.actorType)} · ${booking.manualFareOverride.reason}`
+                    : "無"}
+                </dd>
+              </div>
+              <div>
+                <dt>審批</dt>
                 <dd>{describeApprovalState(booking.approvalState)}</dd>
               </div>
               <div>
-                <dt>Benefit ref</dt>
-                <dd>{booking.benefitReference ?? "Not published"}</dd>
+                <dt>補助參考</dt>
+                <dd>{booking.benefitReference ?? "未提供"}</dd>
               </div>
             </dl>
             {relatedInvoices.length > 0 ? (
               <ul className="panel-list">
                 {relatedInvoices.map((invoice) => (
                   <li key={invoice.invoiceId}>
-                    <strong>{invoice.invoiceId}</strong>
+                    <strong>發票編號 {invoice.invoiceId}</strong>
                     <span className="list-note">
-                      {invoice.status} · {formatMoney(invoice.amount)}
+                      {formatTenantCodeLabel(invoice.status, invoice.status)} ·{" "}
+                      {formatMoney(invoice.amount)}
                     </span>
                   </li>
                 ))}
               </ul>
             ) : (
               <p className="muted-copy">
-                No tenant invoice row is currently linked to this order.
+                目前沒有任何租戶發票列與這筆訂單相連。
               </p>
             )}
           </SurfaceCard>
@@ -1040,54 +1064,59 @@ export default async function BookingDetailPage({
 
         <div className="booking-detail-side">
           <SurfaceCard
-            kicker="Assignment"
-            title="Driver / vehicle assignment"
-            description="If dispatch has already attached a fulfillment leg, tenant users can see the assignment state without gaining dispatch control."
+            kicker="指派"
+            title="司機 / 車輛指派"
+            description="若派遣端已掛上履約任務，租戶仍可看見指派狀態，但不會因此獲得派遣控制權。"
           >
             <dl className="definition-grid">
               <div>
-                <dt>Assignment state</dt>
+                <dt>指派狀態</dt>
                 <dd>
                   {ACTIVE_ORDER_STATUSES.has(booking.orderStatus)
-                    ? "Active driver assignment"
-                    : "No active assignment published"}
+                    ? "已有進行中的司機指派"
+                    : "目前沒有發佈中的有效指派"}
                 </dd>
               </div>
               <div>
-                <dt>ETA</dt>
+                <dt>預估到達時間</dt>
                 <dd>
                   {ACTIVE_ORDER_STATUSES.has(booking.orderStatus)
-                    ? "Live ETA pending from dispatch read model"
-                    : "Not active"}
+                    ? "等待派遣讀取模型發佈即時預估到達時間"
+                    : "目前未啟用"}
                 </dd>
               </div>
               <div>
-                <dt>Order status</dt>
-                <dd>{booking.orderStatus}</dd>
+                <dt>訂單狀態</dt>
+                <dd>
+                  {formatTenantCodeLabel(
+                    booking.orderStatus,
+                    booking.orderStatus,
+                  )}
+                </dd>
               </div>
               <div>
-                <dt>Escalation</dt>
+                <dt>升級處理</dt>
                 <dd>
                   {source.domain === "forwarded_authority"
-                    ? "Ops console deep link available"
-                    : "Tenant detail remains the primary owner view"}
+                    ? "可使用營運主控台深連結"
+                    : "此頁仍是租戶端主要檢視視角"}
                 </dd>
               </div>
               <div>
-                <dt>Command receipt</dt>
+                <dt>指令收據</dt>
                 <dd>
                   {bookingView.commandReceipt
-                    ? `${bookingView.commandReceipt.status} · ${bookingView.commandReceipt.actionId}`
-                    : "No pending receipt"}
+                    ? `${formatTenantCodeLabel(bookingView.commandReceipt.status)} · ${bookingView.commandReceipt.actionId}`
+                    : "目前沒有待處理收據"}
                 </dd>
               </div>
             </dl>
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Actions"
-            title="Available actions"
-            description="The command panel renders enabled, disabled, and hidden states from the action descriptor set for this booking."
+            kicker="動作"
+            title="可用操作"
+            description="指令面板會直接依這筆叫車單的動作描述，呈現可用、停用與隱藏狀態。"
           >
             <BookingCommandPanel
               actions={bookingView.actions}
@@ -1099,9 +1128,9 @@ export default async function BookingDetailPage({
           </SurfaceCard>
 
           <SurfaceCard
-            kicker="Deep links"
-            title="Cross-app and follow-up links"
-            description="Phase 1 keeps the apps separate, so follow-up routes stay explicit instead of masquerading as one runtime shell."
+            kicker="深連結"
+            title="跨系統與後續追查連結"
+            description="第一階段仍維持多個獨立應用，因此後續路徑會明確列出，而不是偽裝成同一個執行時殼層。"
           >
             <ul className="panel-list">
               {bookingView.deepLinks.map((link) => (
@@ -1119,15 +1148,14 @@ export default async function BookingDetailPage({
               ))}
             </ul>
             <p className="muted-copy">
-              Cross-app routes open in a new tab when authority belongs to ops
-              or another deployment.
+              若權限實際屬於 ops 或其他部署，跨系統路徑會以新分頁開啟。
             </p>
           </SurfaceCard>
         </div>
       </section>
 
       <CalloutPanel
-        title="Authority boundary"
+        title="權限邊界"
         description={source.detail}
         tone={source.domain === "forwarded_authority" ? "warning" : "default"}
       >

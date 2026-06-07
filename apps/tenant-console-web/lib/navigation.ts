@@ -1,9 +1,9 @@
 import type { CanvasTone } from "@drts/ui-web";
 
 export const TENANT_CONSOLE_BRAND = "DRTS";
-export const TENANT_CONSOLE_BRAND_SUB = "TENANT CONSOLE";
+export const TENANT_CONSOLE_BRAND_SUB = "租戶控制台";
 export const TENANT_CONSOLE_CONTEXT = "YAMATO 大和商務集團";
-export const TENANT_CONSOLE_ENV = "production";
+export const TENANT_CONSOLE_ENV = "正式環境";
 export const TENANT_CONSOLE_VERSION = "v0.1.0";
 export const TENANT_CONSOLE_SEARCH_PLACEHOLDER =
   "搜尋叫車、乘客、對帳單、報表…";
@@ -91,7 +91,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     icon: "users",
     label: "人員與角色",
   },
-  { divider: "通知與 SLA" },
+  { divider: "通知與服務時限" },
   {
     key: "notifications",
     href: "/notifications",
@@ -102,7 +102,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     key: "sla",
     href: "/sla",
     icon: "sla",
-    label: "SLA",
+    label: "服務時限",
   },
   { divider: "帳務與治理" },
   {
@@ -134,7 +134,7 @@ export const tenantNavEntries: TenantNavEntry[] = [
     key: "webhooks",
     href: "/webhooks",
     icon: "webhooks",
-    label: "Webhook",
+    label: "回呼",
   },
   {
     key: "integration-governance",

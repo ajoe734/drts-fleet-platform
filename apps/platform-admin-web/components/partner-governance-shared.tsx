@@ -383,7 +383,7 @@ export function EntryForm({
           onChange={(value) =>
             setForm((current) => ({ ...current, entryHost: value }))
           }
-          placeholder="partner.example"
+          placeholder={t("partners.form.entryHostPlaceholder")}
         />
         <TextField
           label={t("partners.form.entryPath")}
@@ -391,7 +391,7 @@ export function EntryForm({
           onChange={(value) =>
             setForm((current) => ({ ...current, entryPath: value }))
           }
-          placeholder="/partner/bank-demo-alpha-airport"
+          placeholder={t("partners.form.entryPathPlaceholder")}
         />
         <TextField
           label={t("partners.form.themeAccent")}
@@ -399,7 +399,7 @@ export function EntryForm({
           onChange={(value) =>
             setForm((current) => ({ ...current, themeAccent: value }))
           }
-          placeholder="#0b7285"
+          placeholder={t("partners.form.themeAccentPlaceholder")}
         />
         <TextField
           label={t("partners.form.supportEmail")}

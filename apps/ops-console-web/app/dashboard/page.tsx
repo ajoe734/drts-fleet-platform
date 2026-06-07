@@ -119,6 +119,13 @@ const DRIVER_TASK_PRIORITY: Record<string, number> = {
   rejected: 8,
 };
 
+function formatIdentitySummary(locale: Locale, identity: IdentitySummary) {
+  return `${formatOpsCodeLabel(locale, identity?.realm ?? "ops")} / ${formatOpsCodeLabel(
+    locale,
+    identity?.actorType ?? "ops_user",
+  )}`;
+}
+
 const OWNED_STATE_PRIORITY: Record<string, number> = {
   override_pending: 0,
   no_supply: 1,
@@ -129,7 +136,7 @@ const OWNED_STATE_PRIORITY: Record<string, number> = {
 };
 
 const pageBodyStyle = {
-  padding: 24,
+  padding: "clamp(12px, 3vw, 24px)",
   display: "flex",
   flexDirection: "column" as const,
   gap: 16,
@@ -137,13 +144,13 @@ const pageBodyStyle = {
 
 const kpiGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
   gap: 10,
 };
 
 const splitGridStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.5fr) minmax(280px, 1fr)",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
   gap: 16,
   alignItems: "start",
 };
@@ -195,7 +202,7 @@ const queueLinkStyle = {
 
 const refreshCardStyle = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.6fr) minmax(300px, 1fr)",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
   gap: 16,
   alignItems: "stretch",
 };
@@ -221,7 +228,7 @@ const metaLabelStyle = {
 
 const summaryGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
   gap: 10,
 };
 
@@ -289,7 +296,9 @@ function formatTimestamp(value: string | null, locale: Locale) {
     return t("dashboard.platformOps.notReported", locale);
   }
 
-  return `${formatDateTime(locale, value)} UTC`;
+  return locale === "zh"
+    ? `${formatDateTime(locale, value)} 世界標準時間`
+    : `${formatDateTime(locale, value)} UTC`;
 }
 
 function formatEtaLabel(minutes: number | null | undefined) {
@@ -316,17 +325,17 @@ function buildAction(
 function getActionButtonLabel(action: string, locale: Locale) {
   switch (action) {
     case "open_call_session":
-      return locale === "en" ? "Open call session" : "開新 call session";
+      return locale === "en" ? "Open call session" : "建立通話工作階段";
     case "open_duty_handbook":
       return locale === "en" ? "Duty handbook" : "值班手冊";
     case "open_dispatch":
       return locale === "en" ? "Open dispatch" : "前往派遣";
     case "open_forwarded_dispatch":
-      return locale === "en" ? "Forwarded board" : "查看 forwarded board";
+      return locale === "en" ? "Forwarded board" : "查看轉發看板";
     case "open_incidents":
       return locale === "en" ? "Open incidents" : "前往事故";
     case "inspect_adapter_registry":
-      return locale === "en" ? "Adapter registry" : "查看 adapter registry";
+      return locale === "en" ? "Adapter registry" : "查看介接器註冊表";
     case "refresh_dashboard":
       return locale === "en" ? "Refresh now" : "立即重新整理";
     case "clear_filters":
@@ -386,6 +395,7 @@ function getAdapterSeverityRank(
 }
 
 function getHealthEnvelope(
+  locale: Locale,
   health: HealthPayload,
   adapters: OperationalAdapterDetailRecord[],
 ): UiHealthEnvelope {
@@ -395,8 +405,12 @@ function getHealthEnvelope(
       service: health.service,
       impact:
         health.status === "down"
-          ? "dashboard data unavailable"
-          : "dashboard data may be stale",
+          ? locale === "en"
+            ? "dashboard data unavailable"
+            : "儀表板資料目前不可用"
+          : locale === "en"
+            ? "dashboard data may be stale"
+            : "儀表板資料可能已過舊",
       severity: health.status === "down" ? "critical" : "warning",
     });
   }
@@ -404,7 +418,7 @@ function getHealthEnvelope(
   for (const adapter of adapters.filter((item) => item.status !== "healthy")) {
     degradedServices.push({
       service: adapter.platformCode,
-      impact: adapter.reason,
+      impact: formatOpsCodeLabel(locale, adapter.reason),
       severity: adapter.status === "down" ? "critical" : "warning",
     });
   }
@@ -504,7 +518,7 @@ function getFreshnessLabel(
 
 function getRefreshTierLabel(tier: RefreshTier, locale: Locale) {
   if (tier === "medium") {
-    return locale === "en" ? "T3 · 15s" : "T3 · 15 秒";
+    return locale === "en" ? "T3 · 15s" : "中速 · 15 秒";
   }
   return tier;
 }
@@ -522,7 +536,7 @@ function getEmptyStateCopy(
         body:
           locale === "en"
             ? "This workspace is healthy for the current shift. Monitor refresh time and keep dispatch open for new work."
-            : "目前班次狀態穩定。留意 refresh 時間，並保持派遣工作面待命。",
+            : "目前班次狀態穩定。留意重新整理時間，並保持派遣工作面待命。",
       };
     case "not_provisioned":
       return {
@@ -549,7 +563,7 @@ function getEmptyStateCopy(
         body:
           locale === "en"
             ? "Your current ops scope cannot see this dataset. Ask the owner app to grant the required role."
-            : "你目前的 ops scope 無法查看此資料集。請向 owner app 申請所需角色。",
+            : "你目前的營運權限範圍無法查看此資料集。請向資料所屬系統申請所需角色。",
       };
     case "external_unavailable":
       return {
@@ -561,7 +575,7 @@ function getEmptyStateCopy(
         body:
           locale === "en"
             ? "An external platform is down or degraded. Use the fallback route and inspect adapter health before taking action."
-            : "外部平台停擺或降級。請先使用 fallback 路徑並檢查 adapter 健康狀態。",
+            : "外部平台停擺或降級。請先使用替代流程，並檢查介接器健康狀態後再進行操作。",
       };
     case "filtered_empty":
       return {
@@ -570,13 +584,16 @@ function getEmptyStateCopy(
         body:
           locale === "en"
             ? "The current drill-down produced no rows. Clear filters or jump to the full board."
-            : "目前 drill-down 條件沒有結果。請清除篩選或回到完整看板。",
+            : "目前下鑽條件沒有結果。請清除篩選或回到完整看板。",
       };
     default:
       return {
         tone: "neutral",
         title: locale === "en" ? "No data" : "沒有資料",
-        body: emptyState.messageCode,
+        body:
+          locale === "en"
+            ? "The backend returned an unmapped empty-state status for this feed. Refresh first, then inspect the owning workspace if needed."
+            : "後端回傳了此資料面的未分類空狀態。請先重新整理；若仍無結果，再前往對應工作面確認。",
       };
   }
 }
@@ -675,7 +692,7 @@ function EmptyStateCard({
             resourceType: "adapter_registry",
             resourceId: "all",
             openMode: "new_tab",
-            label: "Adapter registry",
+            label: locale === "en" ? "Adapter registry" : "介接器註冊表",
           };
         }
         return action;
@@ -742,7 +759,7 @@ function getQueueColumnLabel(
     case "driver":
       return "司機";
     case "eta":
-      return "ETA";
+      return "預估到達";
     default:
       return String(key);
   }
@@ -1192,6 +1209,7 @@ export default async function DashboardPage() {
     observability.adapters.downAdapters;
   const topAlert = opsAlerts[0];
   const healthEnvelope = getHealthEnvelope(
+    locale,
     health,
     observability.adapterDetails,
   );
@@ -1330,7 +1348,7 @@ export default async function DashboardPage() {
           body:
             locale === "en"
               ? "Critical incident banners must interrupt the shift handover. Review incident recovery before touching lower-priority queue work."
-              : "重大事故必須在交接時第一時間被看見。請先處理 incident recovery，再回到較低優先派遣佇列。",
+              : "重大事故必須在交接時第一時間被看見。請先處理事故復原流程，再回到較低優先派遣佇列。",
           actions: [
             {
               descriptor: buildAction("open_incidents", "medium"),
@@ -1348,7 +1366,7 @@ export default async function DashboardPage() {
           body:
             locale === "en"
               ? `${noSupplyCount} no-supply · ${exceptionHoldCount} exception hold · ${overridePendingCount} override pending`
-              : `${noSupplyCount} 筆 no_supply · ${exceptionHoldCount} 筆 exception_hold · ${overridePendingCount} 筆 override_pending`,
+              : `${noSupplyCount} 筆無可用供給 · ${exceptionHoldCount} 筆例外暫停 · ${overridePendingCount} 筆待覆寫處理`,
           actions: [
             {
               descriptor: buildAction("open_dispatch", "low"),
@@ -1386,7 +1404,7 @@ export default async function DashboardPage() {
                 resourceType: "adapter_registry",
                 resourceId: topAdapter?.platformCode ?? "all",
                 openMode: "new_tab",
-                label: "Adapter registry",
+                label: locale === "en" ? "Adapter registry" : "介接器註冊表",
               },
             },
           ],
@@ -1413,7 +1431,7 @@ export default async function DashboardPage() {
     },
     {
       label: locale === "en" ? "Identity" : "身分摘要",
-      value: `${identity?.realm ?? "ops"} / ${identity?.actorType ?? "ops_user"}`,
+      value: formatIdentitySummary(locale, identity),
       tone: "neutral",
     },
     {
@@ -1439,7 +1457,7 @@ export default async function DashboardPage() {
     },
     {
       label: t("dashboard.runtime.apiStatus", locale),
-      value: health.status,
+      value: formatOpsCodeLabel(locale, health.status),
       tone: getHealthTone(health.status),
     },
   ];
@@ -1623,7 +1641,7 @@ export default async function DashboardPage() {
               healthEnvelope.degradedServices
                 .map(
                   (service: UiHealthEnvelope["degradedServices"][number]) =>
-                    `${service.service} · ${service.impact}`,
+                    `${formatOpsCodeLabel(locale, service.service)} · ${service.impact}`,
                 )
                 .join(" · ") ||
               (locale === "en"
@@ -1643,7 +1661,7 @@ export default async function DashboardPage() {
             subtitle={
               locale === "en"
                 ? "Identity, refresh tier, and stale-data affordance for the T3 dashboard."
-                : "T3 dashboard 的身份摘要、refresh tier 與 stale-data 提示。"
+                : "身分摘要、刷新層級與資料過舊提示。"
             }
             actions={
               <ActionLinkButton action={refreshAction} locale={locale} />
@@ -1662,8 +1680,7 @@ export default async function DashboardPage() {
                   {getRefreshTierLabel(DASHBOARD_REFRESH_TIER, locale)}
                 </Pill>
                 <Pill theme={theme} tone="neutral">
-                  {identity?.realm ?? "ops"} /{" "}
-                  {identity?.actorType ?? "ops_user"}
+                  {formatIdentitySummary(locale, identity)}
                 </Pill>
               </div>
               <div style={summaryGridStyle}>
@@ -1697,11 +1714,11 @@ export default async function DashboardPage() {
 
           <Card
             theme={theme}
-            title={locale === "en" ? "Adapter summary" : "Adapter 摘要"}
+            title={locale === "en" ? "Adapter summary" : "介接器摘要"}
             subtitle={
               locale === "en"
                 ? "Dashboard-level visibility into forwarded dependency health."
-                : "在 Dashboard 即可看到 forwarded 依賴健康狀態。"
+                : "可直接在儀表板檢視轉派依賴的健康狀態。"
             }
             actions={
               topAdapter ? (
@@ -1718,7 +1735,8 @@ export default async function DashboardPage() {
                       resourceType: "adapter_registry",
                       resourceId: topAdapter.platformCode,
                       openMode: "new_tab",
-                      label: "Adapter registry",
+                      label:
+                        locale === "en" ? "Adapter registry" : "介接器註冊表",
                     },
                   }}
                   locale={locale}
@@ -1746,9 +1764,7 @@ export default async function DashboardPage() {
                     {formatOpsCodeLabel(locale, topAdapter.credentialStatus)}
                   </Pill>
                   <span style={signalLabelStyle}>
-                    {locale === "en"
-                      ? "Credential / auth"
-                      : "Credential / auth"}
+                    {locale === "en" ? "Credential / auth" : "憑證與驗證"}
                   </span>
                 </div>
                 <div style={signalRowStyle}>
@@ -1758,7 +1774,7 @@ export default async function DashboardPage() {
                   <span style={signalLabelStyle}>
                     {locale === "en"
                       ? "Webhook / rate limit"
-                      : "Webhook / rate limit"}
+                      : "回呼與速率限制"}
                   </span>
                 </div>
                 <div style={signalRowStyle}>
@@ -1779,10 +1795,13 @@ export default async function DashboardPage() {
                     {locale === "en" ? "error" : "錯誤"}
                   </Pill>
                   <span style={signalLabelStyle}>
-                    {topAdapter.lastError ??
-                      (locale === "en"
+                    {topAdapter.lastError
+                      ? locale === "en"
+                        ? topAdapter.lastError
+                        : "已偵測到介接器錯誤，請查看原始事件。"
+                      : locale === "en"
                         ? "No current adapter error."
-                        : "目前沒有 adapter 錯誤。")}
+                        : "目前沒有介接器錯誤。"}
                   </span>
                 </div>
               </div>
@@ -1819,7 +1838,9 @@ export default async function DashboardPage() {
             value={formatCompactNumber(dispatch.queueDepth)}
             delta={
               broadcastingCount > 0
-                ? `${formatCompactNumber(broadcastingCount)} broadcasting`
+                ? locale === "en"
+                  ? `${formatCompactNumber(broadcastingCount)} broadcasting`
+                  : `${formatCompactNumber(broadcastingCount)} 筆廣播中`
                 : undefined
             }
             sub={
@@ -1849,7 +1870,7 @@ export default async function DashboardPage() {
               staleLocationDrivers > 0
                 ? locale === "en"
                   ? `${formatCompactNumber(staleLocationDrivers)} stale`
-                  : `${formatCompactNumber(staleLocationDrivers)} 筆 stale`
+                  : `${formatCompactNumber(staleLocationDrivers)} 筆位置過期`
                 : undefined
             }
             deltaTone={
@@ -1903,7 +1924,7 @@ export default async function DashboardPage() {
             subtitle={
               locale === "en"
                 ? "Critical first, then SLA breach, then blocking queue"
-                : "排序：critical → SLA breach → blocking"
+                : "排序：重大事故 → 服務時限違規 → 阻塞佇列"
             }
             actions={
               <Btn theme={theme} variant="ghost">
@@ -1976,9 +1997,7 @@ export default async function DashboardPage() {
 
         <Card
           theme={theme}
-          title={
-            locale === "en" ? "Current Dispatch Queue" : "當前 dispatch 隊列"
-          }
+          title={locale === "en" ? "Current Dispatch Queue" : "當前派遣佇列"}
           padding={0}
           actions={
             <ActionLinkButton

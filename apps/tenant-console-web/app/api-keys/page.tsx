@@ -6,6 +6,10 @@ import type {
   TenantIntegrationGovernancePackage,
 } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import {
+  formatTenantErrorSummary,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
 import { ApiKeyManager } from "./api-key-manager";
 
 export const dynamic = "force-dynamic";
@@ -152,25 +156,28 @@ async function loadApiKeyPageData(): Promise<ApiKeyPageData> {
 
   if (apiKeysResult.status === "rejected") {
     errors.push(
-      apiKeysResult.reason instanceof Error
-        ? apiKeysResult.reason.message
-        : "Unable to load tenant API keys.",
+      formatTenantErrorSummary(
+        "API 金鑰",
+        toTenantErrorMessage(apiKeysResult.reason, "租戶 API 金鑰讀取失敗"),
+      ),
     );
   }
 
   if (governanceResult.status === "rejected") {
     errors.push(
-      governanceResult.reason instanceof Error
-        ? governanceResult.reason.message
-        : "Unable to load integration governance policy.",
+      formatTenantErrorSummary(
+        "整合治理策略",
+        toTenantErrorMessage(governanceResult.reason, "整合治理策略讀取失敗"),
+      ),
     );
   }
 
   if (identityResult.status === "rejected") {
     errors.push(
-      identityResult.reason instanceof Error
-        ? identityResult.reason.message
-        : "Unable to load tenant identity context.",
+      formatTenantErrorSummary(
+        "租戶身分脈絡",
+        toTenantErrorMessage(identityResult.reason, "租戶身分脈絡讀取失敗"),
+      ),
     );
   }
 

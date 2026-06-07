@@ -73,7 +73,7 @@ export async function getNotificationPreferences(): Promise<{
   } catch (e) {
     return {
       preferences: buildDefaultPreferences(),
-      error: e instanceof Error ? e.message : "Unknown error",
+      error: e instanceof Error ? e.message : "未知錯誤",
     };
   }
 }
@@ -84,7 +84,7 @@ export async function updateNotificationPreferences(
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteNotifications,
-    "Tenant write authority required to update notification preferences.",
+    "更新通知偏好需要租戶寫入權限。",
   );
   const client = await getTenantClient();
   const subscriptions: TenantNotificationSubscription[] = [];

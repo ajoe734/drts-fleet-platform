@@ -2,10 +2,10 @@
 
 import type { KeyboardEvent } from "react";
 import { SendHorizontal, Sparkles } from "lucide-react";
+import { useTranslation } from "@/lib/i18n";
 import {
   assistantCardStyle,
   assistantMutedTextStyle,
-  assistantStateLabel,
   assistantStatusTone,
   assistantTheme,
   type AssistantViewState,
@@ -56,8 +56,53 @@ export function AssistantComposer({
   placeholder?: string;
   submitLabel?: string;
 }) {
+  const { locale } = useTranslation();
   const isBusy = busyStates.includes(state);
   const submitDisabled = disabled || isBusy || value.trim().length === 0;
+  const copy =
+    locale === "zh"
+      ? {
+          title: "平台管理助理",
+          helper: (currentState: AssistantViewState) => {
+            switch (currentState) {
+              case "thinking":
+                return "助理正在整理下一則回覆。";
+              case "planning":
+                return "助理正在準備可供檢視的治理計畫。";
+              case "awaiting_confirmation":
+                return "執行已暫停，等待操作人確認。";
+              case "executing":
+                return "指令執行中，請避免重複送出。";
+              case "receipt":
+                return "上一個動作已完成，可以繼續對話。";
+              case "error":
+                return "上一輪執行失敗，請調整請求或重試。";
+              case "idle":
+              default:
+                return "按 Enter 送出，Shift+Enter 換行。";
+            }
+          },
+          stateLabel: (currentState: AssistantViewState) =>
+            ({
+              awaiting_confirmation: "等待確認",
+              error: "錯誤",
+              executing: "執行中",
+              idle: "待命",
+              planning: "規劃中",
+              receipt: "已完成",
+              thinking: "思考中",
+            })[currentState],
+          waiting: "請稍候…",
+        }
+      : {
+          title: "Platform Admin assistant",
+          helper: helperCopy,
+          stateLabel: (currentState: AssistantViewState) =>
+            currentState === "awaiting_confirmation"
+              ? "awaiting confirmation"
+              : currentState.replaceAll("_", " "),
+          waiting: "Waiting...",
+        };
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -83,11 +128,11 @@ export function AssistantComposer({
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Sparkles size={16} color={assistantTheme.accent} />
             <strong style={{ color: assistantTheme.text, fontSize: 15.5 }}>
-              Platform Admin assistant
+              {copy.title}
             </strong>
           </div>
           <Pill theme={assistantTheme} tone={assistantStatusTone(state)}>
-            {assistantStateLabel(state)}
+            {copy.stateLabel(state)}
           </Pill>
         </div>
 
@@ -125,7 +170,7 @@ export function AssistantComposer({
             flexWrap: "wrap",
           }}
         >
-          <div style={assistantMutedTextStyle}>{helperCopy(state)}</div>
+          <div style={assistantMutedTextStyle}>{copy.helper(state)}</div>
           <button
             type="button"
             onClick={onSubmit}
@@ -148,7 +193,7 @@ export function AssistantComposer({
             }}
           >
             <SendHorizontal size={15} />
-            {isBusy ? "Waiting..." : submitLabel}
+            {isBusy ? copy.waiting : submitLabel}
           </button>
         </div>
       </div>

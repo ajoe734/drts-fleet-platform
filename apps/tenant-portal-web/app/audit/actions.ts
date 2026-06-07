@@ -14,7 +14,7 @@ export async function getAuditLogs(): Promise<{
   } catch (e) {
     return {
       logs: [],
-      error: e instanceof Error ? e.message : "Unknown error",
+      error: e instanceof Error ? e.message : "未知錯誤",
     };
   }
 }

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, startTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { RefreshTier, UiRefreshMetadata } from "@drts/contracts";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import {
   CanvasBtn as Btn,
   CanvasPill as Pill,
@@ -145,9 +146,11 @@ export function IncidentRefreshTier({
         }}
       >
         {metadata
-          ? `${locale === "zh" ? "snapshot" : "snapshot"} ${formatClock(locale, metadata.generatedAt)} UTC · ${metadata.source}`
+          ? locale === "zh"
+            ? `快照 ${formatClock(locale, metadata.generatedAt)} 世界標準時間 · ${formatOpsCodeLabel(locale, metadata.source)}`
+            : `snapshot ${formatClock(locale, metadata.generatedAt)} UTC · ${formatOpsCodeLabel(locale, metadata.source)}`
           : locale === "zh"
-            ? "snapshot -- · metadata unavailable"
+            ? "快照 -- · 中繼資料不可用"
             : "snapshot -- · metadata unavailable"}
       </span>
       <Btn

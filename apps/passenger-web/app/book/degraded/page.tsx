@@ -3,23 +3,27 @@ import Link from "next/link";
 const degradedAffordances = [
   {
     state: "available",
-    name: "View existing trip status",
-    body: "Read paths still work. Riders can confirm whether an in-progress trip exists and view its last-known status snapshot.",
+    stateLabel: "可使用",
+    name: "查看既有行程狀態",
+    body: "查詢功能仍可使用。乘客可以確認是否有進行中行程，並查看最後更新的狀態快照。",
   },
   {
     state: "blocked",
-    name: "Submit new booking request",
-    body: "Mutating endpoints are intentionally disabled while the platform is in degraded mode. The submit affordance is hidden, not faked.",
+    stateLabel: "暫停",
+    name: "送出新的預約需求",
+    body: "平台降級期間會暫停變更操作。送出按鈕會被隱藏，而不是假裝可以送出。",
   },
   {
     state: "blocked",
-    name: "Cancel an active trip",
-    body: "Cancellation is also held back; ops/support owns mutations during the degraded window so two writers cannot race.",
+    stateLabel: "暫停",
+    name: "取消進行中行程",
+    body: "降級期間取消操作也會暫停，由營運或客服協助處理，避免多方同時改寫狀態。",
   },
   {
     state: "available",
-    name: "Contact support",
-    body: "Support escalation is always available, including a clearly-named incident reference for the rider to share.",
+    stateLabel: "可使用",
+    name: "聯絡客服",
+    body: "客服協助始終可用，並會提供清楚的事件參考供乘客說明。",
   },
 ];
 
@@ -27,26 +31,21 @@ export default function BookingDegradedPage() {
   return (
     <div className="page-shell">
       <section className="hero-card">
-        <span className="eyebrow state-pill state-pill-negative">
-          Read-only fallback
-        </span>
-        <h1>Booking is in degraded mode.</h1>
+        <span className="eyebrow state-pill state-pill-negative">唯讀備援</span>
+        <h1>預約服務目前處於降級模式。</h1>
         <p>
-          The booking surface has detected a degraded backend. The route stays
-          honest about which affordances are available and which are
-          intentionally blocked instead of failing silently when a submit is
-          attempted.
+          系統偵測到預約後端服務異常。頁面會清楚說明哪些功能可用、哪些操作暫停，而不是在送出時才無聲失敗。
         </p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Affordance matrix</span>
-        <h3>What works, what is blocked, and why</h3>
+        <span className="surface-kicker">功能可用性</span>
+        <h3>哪些功能可用、哪些暫停，以及原因</h3>
         <ul className="check-list">
           {degradedAffordances.map((row) => (
             <li className={`check-item check-${row.state}`} key={row.name}>
               <strong>{row.name}</strong>
-              <span className="check-state">{row.state}</span>
+              <span className="check-state">{row.stateLabel}</span>
               <p>{row.body}</p>
             </li>
           ))}
@@ -55,29 +54,25 @@ export default function BookingDegradedPage() {
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Where the signal comes from</strong>
+          <strong>狀態來源</strong>
           <p>
-            Degraded mode is driven by an upstream health signal, not by the UI
-            guessing. The rider sees the same posture support is operating on,
-            so explanations stay consistent.
+            降級模式由上游健康狀態決定，不是前端自行猜測。乘客與客服看到的說法會保持一致。
           </p>
         </article>
         <article className="callout-card warning">
-          <strong>No fake retries</strong>
+          <strong>不偷偷重試</strong>
           <p>
-            The route never silently retries a blocked mutation in the
-            background. Retries are explicit rider actions tied to the recovery
-            state.
+            頁面不會在背景偷偷重試已暫停的操作。任何重試都必須由乘客明確觸發，並依恢復狀態判斷。
           </p>
         </article>
       </section>
 
       <section className="hero-actions">
         <Link className="primary-link" href="/trip">
-          View any active trip status
+          查看進行中行程狀態
         </Link>
         <Link className="secondary-link" href="/unsupported">
-          Open unsupported fallback
+          查看不支援情境
         </Link>
       </section>
     </div>

@@ -15,11 +15,15 @@ import {
   CanvasField,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import {
+  ServerCanvasTable,
+  type ServerCanvasTableColumn,
+} from "@/components/server-canvas-table";
 import { getTenantClient } from "@/lib/api-client";
+import { formatTenantUiError, toTenantErrorMessage } from "@/lib/error-copy";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +81,19 @@ const inputStyle: CSSProperties = {
   fontFamily: th.fontFamily,
   fontSize: 12.5,
   padding: "7px 10px",
+};
+
+const submitButtonStyle: CSSProperties = {
+  minHeight: 30,
+  padding: "0 12px",
+  borderRadius: 8,
+  border: `1px solid ${th.accent}`,
+  background: th.accent,
+  color: "#fff",
+  fontFamily: th.fontFamily,
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: "pointer",
 };
 
 const emptyStateWrapStyle: CSSProperties = {
@@ -329,7 +346,7 @@ function getActorPillTone(actorType: AuditLogRecord["actorType"]) {
 
 function formatActorName(log: AuditLogRecord) {
   if (log.actorId) return log.actorId;
-  return log.actorType === "system" ? "system" : "masked";
+  return log.actorType === "system" ? "系統" : "已遮罩";
 }
 
 function formatResourceLabel(log: AuditLogRecord) {
@@ -469,7 +486,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "在 Tenant Console 檢視地址脈絡",
+        label: "查看地址脈絡",
       };
     }
     if (
@@ -531,7 +548,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看 API 金鑰",
+        label: "查看整合金鑰",
       };
     }
     if (["webhook_endpoint", "webhook_delivery"].includes(log.resourceType)) {
@@ -541,7 +558,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看 Webhook 狀態",
+        label: "查看回呼狀態",
       };
     }
     if (
@@ -557,7 +574,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
         resourceType: log.resourceType,
         resourceId: tenantResourceId,
         openMode: "same_tab",
-        label: "查看 Partner Booking 設定",
+        label: "查看合作夥伴叫車設定",
       };
     }
     if (log.resourceType === "report_job") {
@@ -578,7 +595,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
       resourceType: log.resourceType,
       resourceId: tenantResourceId,
       openMode: "same_tab",
-      label: "在 Tenant Console 檢視",
+      label: "在租戶主控台查看",
     };
   }
 
@@ -595,7 +612,7 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
       resourceType: log.resourceType,
       resourceId: id ?? log.auditId,
       openMode: "new_tab",
-      label: "在 Ops Console 開啟",
+      label: "在營運主控台開啟",
     };
   }
 
@@ -617,8 +634,8 @@ function buildResourceLink(log: AuditLogRecord): CrossAppResourceLink | null {
       openMode: "new_tab",
       label:
         log.actorType === "platform_admin"
-          ? "在 Platform Admin 開啟"
-          : "在 Platform Admin 檢視稽核",
+          ? "在平台管理員後台開啟"
+          : "在平台管理員後台查看稽核",
     };
   }
 
@@ -673,27 +690,31 @@ function buildAuditRows(logs: AuditLogRecord[]): AuditRow[] {
         <div style={actorCellStyle}>
           <div style={chipRowStyle}>
             <CanvasPill theme={th} tone={getActorPillTone(log.actorType)} dot>
-              {getActorRealm(log.actorType)}
+              {formatTenantCodeLabel(getActorRealm(log.actorType))}
             </CanvasPill>
             {masked ? (
               <CanvasPill theme={th} tone="neutral">
-                masked
+                已遮罩
               </CanvasPill>
             ) : null}
           </div>
           <strong>{formatActorName(log)}</strong>
-          <span style={actorIdStyle}>{log.actorType}</span>
+          <span style={actorIdStyle}>
+            {formatTenantCodeLabel(log.actorType, log.actorType)}
+          </span>
         </div>
       ),
-      module: log.moduleName,
+      module: formatTenantCodeLabel(log.moduleName, log.moduleName),
       action: (
         <span style={{ color: th.accent, fontFamily: th.monoFamily }}>
-          {log.actionName}
+          {formatTenantCodeLabel(log.actionName, log.actionName)}
         </span>
       ),
       resource: (
         <div style={resourceCellStyle}>
-          <strong>{log.resourceType}</strong>
+          <strong>
+            {formatTenantCodeLabel(log.resourceType, log.resourceType)}
+          </strong>
           {resourceHref ? (
             <a
               href={resourceHref}
@@ -720,25 +741,25 @@ function buildAuditRows(logs: AuditLogRecord[]): AuditRow[] {
           <summary style={detailSummaryStyle}>展開</summary>
           <div style={detailBodyStyle}>
             <div style={detailRowStyle}>
-              <span style={detailKeyStyle}>audit</span>
+              <span style={detailKeyStyle}>稽核編號</span>
               <span style={{ ...detailValueStyle, fontFamily: th.monoFamily }}>
                 {log.auditId}
               </span>
             </div>
             <div style={detailRowStyle}>
-              <span style={detailKeyStyle}>old</span>
+              <span style={detailKeyStyle}>變更前</span>
               <span style={detailValueStyle}>
                 {stringifySummary(log.oldValuesSummary)}
               </span>
             </div>
             <div style={detailRowStyle}>
-              <span style={detailKeyStyle}>new</span>
+              <span style={detailKeyStyle}>變更後</span>
               <span style={detailValueStyle}>
                 {stringifySummary(log.newValuesSummary)}
               </span>
             </div>
             <div style={detailRowStyle}>
-              <span style={detailKeyStyle}>link</span>
+              <span style={detailKeyStyle}>深連結</span>
               {resourceHref ? (
                 <a
                   href={resourceHref}
@@ -782,23 +803,23 @@ function getActionVisualSpec(action: string): ActionVisualSpec {
   switch (action) {
     case "filter":
       return {
-        label: "Filter",
-        helper: "依 actor、module、action、時間範圍收斂結果。",
+        label: "篩選",
+        helper: "依行為人、模組、動作與時間範圍收斂結果。",
       };
     case "refresh":
       return {
-        label: "Refresh",
-        helper: "T6 manual tier，不做自動輪詢。",
+        label: "重新整理",
+        helper: "T6 手動刷新層級，不做自動輪詢。",
       };
     case "export":
       return {
-        label: "Export",
-        helper: "匯出目前篩選結果，對應 signed artifact workflow。",
+        label: "匯出",
+        helper: "匯出目前篩選結果，對應簽章成品流程。",
       };
     default:
       return {
-        label: action,
-        helper: "由 availableActions 決定是否顯示或禁用。",
+        label: formatTenantCodeLabel(action, action),
+        helper: "是否顯示或停用會由後端回傳的操作清單決定。",
       };
   }
 }
@@ -899,38 +920,38 @@ function getEmptyCopy(reason: EmptyReason) {
       return {
         tone: "warn" as const,
         title: "租戶尚未啟用稽核檢視",
-        body: "此租戶的 evidence lane 尚未 provision 完成。等治理設定完成後，tenant admin 與 finance 才會看到 append-only audit ledger。",
+        body: "此租戶的稽核證據通道尚未完成建置。等治理設定完成後，租戶管理員與財務角色才會看到僅追加的稽核帳本。",
       };
     case "permission_denied":
       return {
         tone: "danger" as const,
-        title: "目前身分沒有 audit read 權限",
-        body: "此頁只對具備 tenant-scoped audit visibility 的角色開放。若這不是預期行為，請由 tenant admin 檢查角色與範圍設定。",
+        title: "目前身分沒有稽核讀取權限",
+        body: "此頁只對具備租戶範圍稽核可見性的角色開放。若這不是預期行為，請由租戶管理員檢查角色與範圍設定。",
       };
     case "external_unavailable":
       return {
         tone: "warn" as const,
-        title: "外部 evidence 來源暫時不可用",
-        body: "目前顯示通道未能取得完整 cross-actor evidence。這種情況不會假裝成空資料；待上游恢復後請手動 refresh。",
+        title: "外部稽核證據來源暫時不可用",
+        body: "目前顯示通道未能取得完整的跨角色稽核證據。這種情況不會假裝成空資料；待上游恢復後請手動重新整理。",
       };
     case "fetch_failed":
       return {
         tone: "danger" as const,
         title: "稽核資料讀取失敗",
-        body: "後端回應失敗，因此頁面沒有用假資料填補。請稍後重整，或確認 API 與 auth bootstrap 是否正常。",
+        body: "後端回應失敗，因此頁面沒有用假資料填補。請稍後重整，或確認稽核服務與登入啟動流程是否正常。",
       };
     case "filtered_empty":
       return {
         tone: "info" as const,
         title: "目前篩選條件沒有命中紀錄",
-        body: "Cross-actor audit 仍存在，但此組 actor、module、action、時間條件下沒有相符列。清除篩選即可回到完整 tenant scope。",
+        body: "跨角色稽核仍存在，但此組行為人、模組、動作與時間條件下沒有相符列。清除篩選即可回到完整租戶範圍。",
       };
     case "no_data":
     default:
       return {
         tone: "neutral" as const,
         title: "目前沒有任何稽核紀錄",
-        body: "此租戶尚未產生可見的 state-changing evidence。等第一筆 tenant、ops、platform 或 system 動作落地後，這裡會顯示 append-only ledger。",
+        body: "此租戶尚未產生可見的狀態變更證據。等第一筆租戶、營運、平台或系統動作落地後，這裡會顯示僅追加的稽核帳本。",
       };
   }
 }
@@ -1007,7 +1028,10 @@ export default async function AuditPage({
     serverActions = auditResponse.availableActions;
     refreshMetadata = auditResponse.refreshMetadata;
   } catch (error) {
-    loadError = error instanceof Error ? error.message : "unknown error";
+    loadError = formatTenantUiError(
+      toTenantErrorMessage(error),
+      "稽核紀錄讀取失敗",
+    );
   }
 
   const filteredLogs = loadError ? [] : filterLogs(logs, query);
@@ -1049,26 +1073,26 @@ export default async function AuditPage({
     : null;
   const emptyCopy = emptyReason ? getEmptyCopy(emptyReason) : null;
 
-  const columns: CanvasTableColumn<AuditRow>[] = [
-    { h: "WHEN", k: "at", w: 170, mono: true },
-    { h: "ACTOR", k: "actor", w: 280 },
-    { h: "MODULE", k: "module", w: 140, mono: true },
-    { h: "ACTION", k: "action", w: 190 },
-    { h: "RESOURCE", k: "resource", w: 220 },
-    { h: "REQUEST", k: "request", w: 160, mono: true },
-    { h: "DETAIL", k: "detail", w: 260 },
+  const columns: ServerCanvasTableColumn<AuditRow>[] = [
+    { h: "時間", k: "at", w: 170, mono: true },
+    { h: "操作者", k: "actor", w: 280 },
+    { h: "模組", k: "module", w: 140, mono: true },
+    { h: "動作", k: "action", w: 190 },
+    { h: "資源", k: "resource", w: 220 },
+    { h: "請求識別碼", k: "request", w: 160, mono: true },
+    { h: "明細", k: "detail", w: 260 },
   ];
 
   return (
     <div>
       <CanvasPageHeader
         theme={th}
-        title="稽核 · cross-actor"
-        subtitle="不可變 · 7 年保存 · 含所有 actor realm 對 tenant 資源的動作 (Q-TEN13)"
+        title="稽核紀錄"
+        subtitle="唯增式紀錄，保留租戶、營運、平台與系統對租戶資源的動作"
         actions={renderActionButton({
           action: actionLookup.get("export"),
           href: exportHref,
-          label: "匯出 (簽名 artifact)",
+          label: "匯出（簽章檔案）",
           icon: "export",
           download: "tenant-audit-export.csv",
         })}
@@ -1077,16 +1101,16 @@ export default async function AuditPage({
       <div style={pageBodyStyle}>
         <div style={heroMetaStyle}>
           <CanvasPill theme={th} tone="neutral" dot>
-            T6 manual refresh
+            T6 手動刷新
           </CanvasPill>
           <CanvasPill theme={th} tone="accent">
-            visible {visibleLogs.length}
+            可見 {visibleLogs.length}
           </CanvasPill>
           <CanvasPill theme={th} tone="info">
-            tenant scope {logs.length}
+            租戶範圍 {logs.length}
           </CanvasPill>
           <CanvasPill theme={th} tone="neutral">
-            snapshot{" "}
+            快照{" "}
             {formatGeneratedAt(
               refreshMetadata?.generatedAt
                 ? new Date(refreshMetadata.generatedAt)
@@ -1103,18 +1127,21 @@ export default async function AuditPage({
                   : "neutral"
             }
           >
-            {refreshMetadata?.dataFreshness ?? "manual"}
+            {formatTenantCodeLabel(
+              refreshMetadata?.dataFreshness ?? "manual",
+              "手動",
+            )}
           </CanvasPill>
           <CanvasPill theme={th} tone="neutral">
-            source {refreshMetadata?.source ?? "live"}
+            來源 {formatTenantCodeLabel(refreshMetadata?.source ?? "live")}
           </CanvasPill>
         </div>
 
         <CanvasBanner
           theme={th}
           tone="info"
-          title="跨 actor 可見性 · Q-TEN13"
-          body="本租戶可看到：(a) 自家使用者對自家資源的動作；(b) ops 對 booking / complaint 的動作；(c) platform admin 影響租戶設定的動作；(d) system 對租戶資源的動作。敏感欄位由 policy 自動 mask。"
+          title="跨角色可見性"
+          body="本租戶可看到：一、自家使用者對自家資源的動作；二、營運對叫車單與客訴的動作；三、平台管理影響租戶設定的動作；四、系統對租戶資源的動作。敏感欄位由規則自動遮罩。"
         />
 
         {query.auditId ? (
@@ -1123,13 +1150,13 @@ export default async function AuditPage({
             tone={focusedLog ? "accent" : "warn"}
             title={
               focusedLog
-                ? `Receipt deep link · ${query.auditId}`
-                : "Receipt deep link 未命中"
+                ? `收據深連結 · 稽核編號 ${query.auditId}`
+                : "收據深連結未命中"
             }
             body={
               focusedLog
-                ? "此頁已接住 action receipt 的 auditId，並將 ledger 聚焦到該筆紀錄。"
-                : "目前 tenant scope 內找不到這筆 auditId；可能不屬於此租戶、資料尚未同步，或 receipt 指向錯誤。"
+                ? "此頁已接住動作收據的稽核編號，並將帳本聚焦到該筆紀錄。"
+                : "目前租戶範圍內找不到這筆稽核編號；可能不屬於此租戶、資料尚未同步，或收據指向錯誤。"
             }
           />
         ) : null}
@@ -1137,7 +1164,7 @@ export default async function AuditPage({
         <CanvasCard
           theme={th}
           title="篩選"
-          subtitle="依 actor、module、action、time range 調查 tenant-owned evidence。"
+          subtitle="依行為人、模組、動作與時間範圍調查租戶自有稽核證據。"
           actions={
             <div style={chipRowStyle}>
               {pageActions.map((action) => {
@@ -1151,7 +1178,7 @@ export default async function AuditPage({
                     {spec.label}
                     {action.enabled
                       ? ""
-                      : ` · ${action.disabledReasonCode ?? "disabled"}`}
+                      : ` · ${formatTenantCodeLabel(action.disabledReasonCode, "已停用")}`}
                   </CanvasPill>
                 );
               })}
@@ -1159,27 +1186,27 @@ export default async function AuditPage({
           }
         >
           <form action="/audit" method="get" style={filterGridStyle}>
-            <CanvasField theme={th} label="Actor realm">
+            <CanvasField theme={th} label="行為人範圍">
               <select
                 defaultValue={query.actor}
                 name="actor"
                 style={inputStyle}
               >
-                <option value="">All actor realms</option>
+                <option value="">全部行為人範圍</option>
                 {ACTOR_REALM_OPTIONS.map((actor) => (
                   <option key={actor} value={actor}>
-                    {actor}
+                    {formatTenantCodeLabel(actor, actor)}
                   </option>
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="Module">
+            <CanvasField theme={th} label="模組">
               <select
                 defaultValue={query.module}
                 name="module"
                 style={inputStyle}
               >
-                <option value="">All modules</option>
+                <option value="">全部模組</option>
                 {moduleOptions.map((moduleName) => (
                   <option key={moduleName} value={moduleName}>
                     {moduleName}
@@ -1187,13 +1214,13 @@ export default async function AuditPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="Action">
+            <CanvasField theme={th} label="動作">
               <select
                 defaultValue={query.action}
                 name="action"
                 style={inputStyle}
               >
-                <option value="">All actions</option>
+                <option value="">全部動作</option>
                 {actionOptions.map((actionName) => (
                   <option key={actionName} value={actionName}>
                     {actionName}
@@ -1201,7 +1228,7 @@ export default async function AuditPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label="From">
+            <CanvasField theme={th} label="起始">
               <input
                 defaultValue={query.from}
                 name="from"
@@ -1209,7 +1236,7 @@ export default async function AuditPage({
                 type="date"
               />
             </CanvasField>
-            <CanvasField theme={th} label="To">
+            <CanvasField theme={th} label="結束">
               <input
                 defaultValue={query.to}
                 name="to"
@@ -1219,44 +1246,40 @@ export default async function AuditPage({
             </CanvasField>
             <CanvasField
               theme={th}
-              label="Audit receipt"
-              hint="支援 action receipt deep link。"
+              label="稽核收據"
+              hint="支援動作收據深連結。"
             >
               <input
                 defaultValue={query.auditId}
                 name="auditId"
-                placeholder="audit_..."
+                placeholder="請輸入稽核編號"
                 style={inputStyle}
                 type="text"
               />
             </CanvasField>
             <CanvasField
               theme={th}
-              label="Empty state demo"
-              hint="驗證 6 種 distinct states。"
+              label="空狀態示範"
+              hint="驗證 6 種不同狀態。"
             >
               <select
                 defaultValue={query.emptyReason}
                 name="emptyReason"
                 style={inputStyle}
               >
-                <option value="">Live data</option>
-                <option value="no_data">no_data</option>
-                <option value="not_provisioned">not_provisioned</option>
-                <option value="fetch_failed">fetch_failed</option>
-                <option value="permission_denied">permission_denied</option>
-                <option value="external_unavailable">
-                  external_unavailable
-                </option>
-                <option value="filtered_empty">filtered_empty</option>
+                <option value="">即時資料</option>
+                <option value="no_data">無資料</option>
+                <option value="not_provisioned">尚未開通</option>
+                <option value="fetch_failed">讀取失敗</option>
+                <option value="permission_denied">權限不足</option>
+                <option value="external_unavailable">外部依賴不可用</option>
+                <option value="filtered_empty">篩選後無資料</option>
               </select>
             </CanvasField>
 
             <div style={{ ...formActionStyle, gridColumn: "1 / -1" }}>
-              <button type="submit" style={{ all: "unset" }}>
-                <CanvasBtn theme={th} variant="primary" size="sm">
-                  套用篩選
-                </CanvasBtn>
+              <button type="submit" style={submitButtonStyle}>
+                套用篩選
               </button>
               {renderActionButton({
                 action: actionLookup.get("refresh"),
@@ -1279,28 +1302,34 @@ export default async function AuditPage({
 
             <div style={{ ...formFootnoteStyle, gridColumn: "1 / -1" }}>
               {loadError
-                ? `目前 audit API 讀取失敗：${loadError}`
-                : "Tenant-owned resource 留在本 app；ops / platform-owned evidence 走 deep link 新分頁。manual tier 不會自動輪詢。"}
+                ? `目前稽核服務讀取失敗：${loadError}`
+                : "租戶自有資源會留在本應用；營運與平台自有證據會開新分頁走深連結。手動刷新層級不會自動輪詢。"}
             </div>
           </form>
         </CanvasCard>
 
         <CanvasCard
           theme={th}
-          title="Append-only ledger"
-          subtitle="時間優先、request-first correlation，並保留 per-record expand 與跨 app deep links。"
+          title="僅追加稽核帳本"
+          subtitle="以時間優先、請求優先關聯為主，並保留逐筆展開與跨應用深連結。"
           padding={0}
         >
           {emptyCopy ? (
             <div style={emptyStateWrapStyle}>
               <CanvasPill theme={th} tone={emptyCopy.tone}>
-                {emptyReason}
+                {emptyReason
+                  ? formatTenantCodeLabel(emptyReason, emptyReason)
+                  : "—"}
               </CanvasPill>
               <h2 style={emptyStateTitleStyle}>{emptyCopy.title}</h2>
               <p style={emptyStateBodyStyle}>{emptyCopy.body}</p>
             </div>
           ) : (
-            <CanvasTable<AuditRow> theme={th} columns={columns} rows={rows} />
+            <ServerCanvasTable<AuditRow>
+              theme={th}
+              columns={columns}
+              rows={rows}
+            />
           )}
         </CanvasCard>
       </div>

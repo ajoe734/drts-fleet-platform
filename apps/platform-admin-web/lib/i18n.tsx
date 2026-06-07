@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useState,
   useEffect,
@@ -33,19 +34,23 @@ export function LanguageProvider({
   const [locale, setLocaleState] = useState<Locale>(defaultLocale);
   const router = useRouter();
 
+  const persistLocale = useCallback((next: Locale) => {
+    localStorage.setItem(STORAGE_KEY, next);
+    document.cookie = `${COOKIE_KEY}=${next};path=/;max-age=31536000;SameSite=Lax`;
+  }, []);
+
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY) as Locale | null;
-    if (stored && stored in translations) {
-      setLocaleState(stored);
-    } else {
-      setLocaleState(defaultLocale);
-    }
-  }, [defaultLocale]);
+    const resolved =
+      stored && stored in translations ? (stored as Locale) : defaultLocale;
+
+    setLocaleState(resolved);
+    persistLocale(resolved);
+  }, [defaultLocale, persistLocale]);
 
   function setLocale(next: Locale) {
     setLocaleState(next);
-    localStorage.setItem(STORAGE_KEY, next);
-    document.cookie = `${COOKIE_KEY}=${next};path=/;max-age=31536000;SameSite=Lax`;
+    persistLocale(next);
     router.refresh();
   }
 
@@ -59,9 +64,15 @@ export function LanguageProvider({
 export function useTranslation() {
   const { locale, setLocale } = useContext(LanguageContext);
 
-  function t(key: string, params?: Record<string, string | number>): string {
-    return translate(key, locale, params);
-  }
+  // Memoize `t` on `locale` so its identity is stable across renders. An
+  // unstable `t` poisons any useCallback/useMemo/useEffect that lists it as a
+  // dependency — most acutely the users page, whose loadUsers→useEffect chain
+  // refetched on every render and hammered the API into 429 throttling.
+  const t = useCallback(
+    (key: string, params?: Record<string, string | number>): string =>
+      translate(key, locale, params),
+    [locale],
+  );
 
   return { locale, setLocale, t };
 }

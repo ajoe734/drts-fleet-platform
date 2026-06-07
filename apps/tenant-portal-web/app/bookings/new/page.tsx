@@ -12,7 +12,9 @@ import {
 } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { formatPortalUiError, toPortalErrorMessage } from "@/lib/error-copy";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
+import { formatPortalCodeLabel } from "@/lib/localized-labels";
 
 const MANUAL_ENTRY = "__manual__";
 const SUBTYPE_LABELS: Record<
@@ -24,16 +26,14 @@ const SUBTYPE_LABELS: Record<
   }
 > = {
   enterprise_dispatch: {
-    label: "Enterprise Dispatch",
-    reservationPolicy: "Modify or cancel up to 30 minutes before the window.",
-    guidance:
-      "Best for internal employee or department travel with tenant-side policy tracking.",
+    label: "企業派車",
+    reservationPolicy: "可在預約時窗開始前 30 分鐘修改或取消。",
+    guidance: "適合員工或部門用車，可搭配租戶端政策追蹤。",
   },
   credit_card_airport_transfer: {
-    label: "Credit Card Airport Transfer",
-    reservationPolicy: "Modify or cancel up to 60 minutes before the window.",
-    guidance:
-      "Use when airport routing, flight context, or sponsor/benefit references matter.",
+    label: "信用卡機場接送",
+    reservationPolicy: "可在預約時窗開始前 60 分鐘修改或取消。",
+    guidance: "適用於機場路線、航班資訊或補助／贊助脈絡需要一併記錄的情境。",
   },
 };
 
@@ -80,11 +80,15 @@ function describePassenger(passenger: TenantPassengerRecord) {
   ].filter(Boolean);
 
   if (!passenger.mobile) {
-    details.push("phone missing");
+    details.push("缺少電話");
   }
 
   if ((passenger.qualityIssues?.length ?? 0) > 0) {
-    details.push(`issues: ${passenger.qualityIssues?.join(", ")}`);
+    details.push(
+      `待修正：${passenger.qualityIssues
+        ?.map((issue) => formatPortalCodeLabel(issue, issue))
+        .join("、")}`,
+    );
   }
 
   return `${passenger.fullName}${details.length > 0 ? ` · ${details.join(" · ")}` : ""}`;
@@ -102,12 +106,16 @@ function describeAddress(
 
   if (address.ownerPassengerId) {
     details.push(
-      `owner ${passengerNameById.get(address.ownerPassengerId) ?? address.ownerPassengerId}`,
+      `所屬乘客 ${passengerNameById.get(address.ownerPassengerId) ?? address.ownerPassengerId}`,
     );
   }
 
   if ((address.qualityIssues?.length ?? 0) > 0) {
-    details.push(`issues: ${address.qualityIssues?.join(", ")}`);
+    details.push(
+      `待修正：${address.qualityIssues
+        ?.map((issue) => formatPortalCodeLabel(issue, issue))
+        .join("、")}`,
+    );
   }
 
   return `${address.addressName}${details.length > 0 ? ` · ${details.join(" · ")}` : ""}`;
@@ -291,7 +299,9 @@ export default async function NewBookingPage({
   const client = await getTenantClient();
   const roleSnapshot = await getTenantRoleSnapshot();
   const params = await searchParams;
-  const formError = params.error ?? null;
+  const formError = params.error
+    ? formatPortalUiError(params.error, "建立訂單失敗")
+    : null;
 
   const [identityResult, passengersResult, addressesResult, catalogResult] =
     await Promise.allSettled([
@@ -316,16 +326,16 @@ export default async function NewBookingPage({
 
   const warnings = [
     identityResult.status === "rejected"
-      ? "Identity context unavailable. This page now depends on a backend-issued tenant bearer session, so create authority cannot be confirmed."
+      ? "目前無法取得身分脈絡。此頁仰賴後端簽發的租戶授權工作階段，因此暫時無法確認建立權限。"
       : null,
     passengersResult.status === "rejected"
-      ? "Passenger directory unavailable. Manual passenger entry remains available."
+      ? "目前無法取得乘客名冊，仍可改用手動輸入乘客資料。"
       : null,
     addressesResult.status === "rejected"
-      ? "Address book unavailable. Manual pickup and dropoff entry remains available."
+      ? "目前無法取得地址簿，仍可手動輸入上車與下車地址。"
       : null,
     catalogResult.status === "rejected"
-      ? "Product rule catalog unavailable. Using built-in subtype labels and pricing authority defaults."
+      ? "目前無法取得產品規則目錄，將改用內建的服務類型標籤與預設定價權威。"
       : null,
   ].filter(Boolean) as string[];
 
@@ -356,7 +366,7 @@ export default async function NewBookingPage({
     const actionRoleSnapshot = await getTenantRoleSnapshot();
     requireCapability(
       actionRoleSnapshot.capabilities.canWriteTenant,
-      "Tenant write authority required to create bookings.",
+      "建立訂單需要租戶寫入權限。",
     );
     const client = await getTenantClient();
     const businessDispatchSubtype = trimFormValue(
@@ -401,37 +411,29 @@ export default async function NewBookingPage({
     const validationErrors: string[] = [];
 
     if (!BUSINESS_DISPATCH_SUBTYPES.includes(businessDispatchSubtype)) {
-      validationErrors.push("Choose a supported booking subtype.");
+      validationErrors.push("請選擇支援的訂單類型。");
     }
 
     if (!windowStartLocal || !windowEndLocal) {
-      validationErrors.push("Reservation window start and end are required.");
+      validationErrors.push("預約時窗的開始與結束時間皆為必填。");
     } else if (
       Number.isNaN(new Date(windowStartLocal).getTime()) ||
       Number.isNaN(new Date(windowEndLocal).getTime()) ||
       new Date(windowStartLocal).getTime() >= new Date(windowEndLocal).getTime()
     ) {
-      validationErrors.push(
-        "Reservation window end must be after the reservation window start.",
-      );
+      validationErrors.push("預約時窗的結束時間必須晚於開始時間。");
     }
 
     if (!pickupAddressId && !pickupAddress) {
-      validationErrors.push(
-        "Select a pickup address from the address book or enter one manually.",
-      );
+      validationErrors.push("請從地址簿選擇上車地址，或手動輸入上車地址。");
     }
 
     if (!dropoffAddressId && !dropoffAddress) {
-      validationErrors.push(
-        "Select a dropoff address from the address book or enter one manually.",
-      );
+      validationErrors.push("請從地址簿選擇下車地址，或手動輸入下車地址。");
     }
 
     if (!passengerId && (!passengerName || !passengerPhone)) {
-      validationErrors.push(
-        "Select a passenger from the directory or provide manual passenger name and phone.",
-      );
+      validationErrors.push("請從乘客名冊選擇乘客，或手動提供乘客姓名與電話。");
     }
 
     if (
@@ -439,36 +441,28 @@ export default async function NewBookingPage({
       direction === "pickup" &&
       !flightNo
     ) {
-      validationErrors.push(
-        "Flight number is required for airport pickup bookings.",
-      );
+      validationErrors.push("機場接機訂單必須填寫航班號碼。");
     }
 
     if (
       (onsiteContactName && !onsiteContactPhone) ||
       (!onsiteContactName && onsiteContactPhone)
     ) {
-      validationErrors.push(
-        "Provide both onsite contact name and phone, or leave both blank.",
-      );
+      validationErrors.push("現場聯絡人姓名與電話需同時填寫，或同時留白。");
     }
 
     if (
       Number.isNaN(luggageCount) ||
       (luggageCount != null && luggageCount < 0)
     ) {
-      validationErrors.push(
-        "Luggage count must be a whole number of 0 or more.",
-      );
+      validationErrors.push("行李件數必須是大於或等於 0 的整數。");
     }
 
     if (
       Number.isNaN(minPhotoCount) ||
       (minPhotoCount != null && (minPhotoCount < 1 || minPhotoCount > 5))
     ) {
-      validationErrors.push(
-        "Completion photo requirement must stay between 1 and 5 photos.",
-      );
+      validationErrors.push("完成照片張數必須介於 1 到 5 張之間。");
     }
 
     if (validationErrors.length > 0) {
@@ -513,8 +507,10 @@ export default async function NewBookingPage({
       revalidatePath("/booking-list");
       redirect("/booking-list");
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unknown booking error";
+      const message = formatPortalUiError(
+        toPortalErrorMessage(error, "未知訂單錯誤"),
+        "無法建立訂單",
+      );
       redirectWithError(message);
     }
   }
@@ -522,21 +518,21 @@ export default async function NewBookingPage({
   return (
     <main className="app-grid" style={pageStyle}>
       <AppShellCard
-        title="New Booking"
-        description="Create a tenant booking against the live create-booking command, with passenger and address masters folded in where available."
+        title="建立新訂單"
+        description="直接送出正式的建立訂單指令建立租戶訂單，並在可用時帶入乘客與地址主檔資料。"
       >
         {formError ? (
           <div style={alertStyle}>
-            <strong>Submit blocked:</strong> {formError}
+            <strong>送出失敗：</strong> {formError}
           </div>
         ) : null}
 
         {warnings.length > 0 ? (
           <div style={alertStyle}>
-            <strong>Fallback mode:</strong>
+            <strong>目前以降級模式顯示：</strong>
             <ul style={warningListStyle}>
-              {warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
+              {warnings.map((warning, index) => (
+                <li key={`${warning}-${index}`}>{warning}</li>
               ))}
             </ul>
           </div>
@@ -544,55 +540,56 @@ export default async function NewBookingPage({
 
         {!roleSnapshot.capabilities.canWriteTenant ? (
           <div style={alertStyle}>
-            <strong>Read-only identity:</strong> Current backend-issued role can
-            review booking inputs but cannot submit new tenant bookings.
+            <strong>唯讀身分：</strong> 目前後端簽發的角色可檢視訂單欄位，但不能
+            送出新的租戶訂單。
           </div>
         ) : null}
 
         <div style={overviewGridStyle}>
           <div style={overviewCardStyle}>
-            <span style={overviewLabelStyle}>Authority Context</span>
+            <span style={overviewLabelStyle}>權限脈絡</span>
             <strong>
               {identity
-                ? `${identity.actorType} in ${identity.realm} scope`
-                : "Bootstrap tenant scope"}
+                ? `${formatPortalCodeLabel(identity.actorType, identity.actorType)} · ${formatPortalCodeLabel(identity.realm, identity.realm)} 範圍`
+                : "租戶啟動工作階段"}
             </strong>
             <div style={roleListStyle}>
               {(identity?.roles.length ?? 0) > 0 ? (
                 identity?.roles.map((role) => (
                   <span key={role} style={badgeStyle}>
-                    {role}
+                    {formatPortalCodeLabel(role, role)}
                   </span>
                 ))
               ) : (
-                <span style={subtleBadgeStyle}>roles unavailable</span>
+                <span style={subtleBadgeStyle}>目前無法取得角色</span>
               )}
             </div>
             <p style={mutedNoteStyle}>
               {isPartnerMode
-                ? "Partner mode remains create-only. Tenant-admin governance actions stay hidden and out of scope here."
-                : "This page only exposes tenant-safe create fields. Status edits, dispatch overrides, and fare overrides stay server-side."}
+                ? "合作夥伴模式目前只開放建立流程；租戶管理員層級的治理操作不會在這裡顯示。"
+                : "此頁只開放租戶可安全提交的建立欄位。狀態變更、派遣覆寫與車資覆寫仍保留在伺服器端治理。"}
             </p>
           </div>
 
           <div style={overviewCardStyle}>
-            <span style={overviewLabelStyle}>Pricing Authority</span>
-            <strong>{pricingAuthority.canonicalQuotedFareSource}</strong>
+            <span style={overviewLabelStyle}>計價權威</span>
+            <strong>
+              {formatPortalCodeLabel(
+                pricingAuthority.canonicalQuotedFareSource,
+                pricingAuthority.canonicalQuotedFareSource,
+              )}
+            </strong>
             <p style={mutedNoteStyle}>
-              Quoted fare resolves from rule version{" "}
-              <code>{pricingAuthority.canonicalPricingRuleVersion}</code>.
-              Tenant submitters can create the booking, but cannot set or
-              override fare values from this form.
+              報價會依據目前生效的規則版本計算。租戶端可以建立訂單，但不能在此表單直接指定或覆寫車資。
             </p>
           </div>
 
           <div style={overviewCardStyle}>
-            <span style={overviewLabelStyle}>Policy Framing</span>
-            <strong>Cost center + proof requirements</strong>
+            <span style={overviewLabelStyle}>政策說明</span>
+            <strong>成本中心與佐證需求</strong>
             <p style={mutedNoteStyle}>
-              Cost center persists as free text today. Sign-off and expense
-              proof flags shape downstream evidence expectations, but there is
-              no tenant-visible approval queue or save-draft command yet.
+              成本中心目前仍以自由文字保存。簽核與報支憑證旗標會影響後續需要的
+              佐證，但租戶端目前還沒有可見的核准佇列或草稿暫存指令。
             </p>
           </div>
         </div>
@@ -600,10 +597,9 @@ export default async function NewBookingPage({
         <form action={createBooking} style={formStyle}>
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
-              <h2 style={sectionTitleStyle}>Service And Schedule</h2>
+              <h2 style={sectionTitleStyle}>服務與時程</h2>
               <p style={sectionDescriptionStyle}>
-                Pick the booking subtype, booking direction, and reservation
-                window that define the backend policy envelope for this request.
+                選擇訂單類型、接送方向與預約時窗，讓後端能套用正確的政策規則。
               </p>
             </div>
 
@@ -613,7 +609,7 @@ export default async function NewBookingPage({
                   htmlFor="businessDispatchSubtype"
                   style={fieldLabelStyle}
                 >
-                  Booking subtype
+                  訂單類型
                 </label>
                 <select
                   id="businessDispatchSubtype"
@@ -636,7 +632,7 @@ export default async function NewBookingPage({
 
               <div style={formFieldStyle}>
                 <label htmlFor="direction" style={fieldLabelStyle}>
-                  Direction
+                  接送方向
                 </label>
                 <select
                   id="direction"
@@ -644,17 +640,17 @@ export default async function NewBookingPage({
                   defaultValue="pickup"
                   style={fieldInputStyle}
                 >
-                  <option value="pickup">Pickup</option>
-                  <option value="dropoff">Dropoff</option>
+                  <option value="pickup">接機／接送起點</option>
+                  <option value="dropoff">送機／送達目的地</option>
                 </select>
                 <p style={fieldHintStyle}>
-                  Airport-transfer pickup requests must include a flight number.
+                  機場接機類型的訂單必須填寫航班號碼。
                 </p>
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="reservationWindowStart" style={fieldLabelStyle}>
-                  Window start
+                  時窗開始
                 </label>
                 <input
                   id="reservationWindowStart"
@@ -667,7 +663,7 @@ export default async function NewBookingPage({
 
               <div style={formFieldStyle}>
                 <label htmlFor="reservationWindowEnd" style={fieldLabelStyle}>
-                  Window end
+                  時窗結束
                 </label>
                 <input
                   id="reservationWindowEnd"
@@ -684,7 +680,7 @@ export default async function NewBookingPage({
                 <span key={subtype} style={subtleBadgeStyle}>
                   {getSubtypeLabel(subtype)}:{" "}
                   {SUBTYPE_LABELS[subtype]?.reservationPolicy ??
-                    "Submit to view policy window."}
+                    "送出後才會顯示政策時窗。"}
                 </span>
               ))}
             </div>
@@ -692,18 +688,17 @@ export default async function NewBookingPage({
 
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
-              <h2 style={sectionTitleStyle}>Passenger Selection</h2>
+              <h2 style={sectionTitleStyle}>乘客選擇</h2>
               <p style={sectionDescriptionStyle}>
-                Reuse a passenger master record when possible. Manual fallback
-                fields still travel with the command and can cover missing
-                contact data.
+                優先重用乘客主檔。若資料不完整，也可改以手動欄位補齊本次訂單的
+                乘客聯絡資訊。
               </p>
             </div>
 
             <div style={inputGridStyle}>
               <div style={fullWidthFieldStyle}>
                 <label htmlFor="passengerId" style={fieldLabelStyle}>
-                  Passenger directory entry
+                  乘客名冊
                 </label>
                 <select
                   id="passengerId"
@@ -712,7 +707,7 @@ export default async function NewBookingPage({
                   style={fieldInputStyle}
                 >
                   <option value={MANUAL_ENTRY}>
-                    Manual entry / no saved passenger
+                    手動輸入／不使用已儲存乘客
                   </option>
                   {activePassengers.map((passenger) => (
                     <option
@@ -724,32 +719,31 @@ export default async function NewBookingPage({
                   ))}
                 </select>
                 <p style={fieldHintStyle}>
-                  {activePassengers.length} active passenger record(s)
-                  available. Use{" "}
+                  目前共有 {activePassengers.length}{" "}
+                  筆啟用中的乘客資料。若要補齊 缺少的手機號碼，可前往{" "}
                   <Link href="/passengers">
                     <strong>/passengers</strong>
                   </Link>{" "}
-                  to repair missing mobile numbers before relying on
-                  directory-only submit.
+                  先修正名冊內容，再依賴主檔直接送單。
                 </p>
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="passengerName" style={fieldLabelStyle}>
-                  Manual passenger name
+                  手動乘客姓名
                 </label>
                 <input
                   id="passengerName"
                   name="passengerName"
                   type="text"
                   style={fieldInputStyle}
-                  placeholder="Passenger full name"
+                  placeholder="請輸入乘客姓名"
                 />
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="passengerPhone" style={fieldLabelStyle}>
-                  Manual or fallback phone
+                  手動或備援電話
                 </label>
                 <input
                   id="passengerPhone"
@@ -764,19 +758,17 @@ export default async function NewBookingPage({
 
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
-              <h2 style={sectionTitleStyle}>Route And Address Book</h2>
+              <h2 style={sectionTitleStyle}>路線與地址簿</h2>
               <p style={sectionDescriptionStyle}>
-                Each stop can reference the tenant address book or accept a
-                fresh manual address. The backend resolves saved addresses by
-                `addressId` and falls back to manual text when no directory
-                entry is selected.
+                每一站都可以引用租戶地址簿，或直接輸入新的地址。若未選擇已儲存
+                地址，系統會自動改用手動輸入的文字內容。
               </p>
             </div>
 
             <div style={inputGridStyle}>
               <div style={formFieldStyle}>
                 <label htmlFor="pickupAddressId" style={fieldLabelStyle}>
-                  Pickup address book entry
+                  上車地址簿項目
                 </label>
                 <select
                   id="pickupAddressId"
@@ -785,7 +777,7 @@ export default async function NewBookingPage({
                   style={fieldInputStyle}
                 >
                   <option value={MANUAL_ENTRY}>
-                    Manual pickup / no saved address
+                    手動輸入上車地址／不使用已儲存地址
                   </option>
                   {activeAddresses.map((address) => (
                     <option key={address.addressId} value={address.addressId}>
@@ -797,7 +789,7 @@ export default async function NewBookingPage({
 
               <div style={formFieldStyle}>
                 <label htmlFor="dropoffAddressId" style={fieldLabelStyle}>
-                  Dropoff address book entry
+                  下車地址簿項目
                 </label>
                 <select
                   id="dropoffAddressId"
@@ -806,7 +798,7 @@ export default async function NewBookingPage({
                   style={fieldInputStyle}
                 >
                   <option value={MANUAL_ENTRY}>
-                    Manual dropoff / no saved address
+                    手動輸入下車地址／不使用已儲存地址
                   </option>
                   {activeAddresses.map((address) => (
                     <option key={address.addressId} value={address.addressId}>
@@ -818,84 +810,82 @@ export default async function NewBookingPage({
 
               <div style={fullWidthFieldStyle}>
                 <label htmlFor="pickupAddress" style={fieldLabelStyle}>
-                  Manual pickup address
+                  手動上車地址
                 </label>
                 <textarea
                   id="pickupAddress"
                   name="pickupAddress"
                   rows={3}
                   style={fieldInputStyle}
-                  placeholder="Enter a pickup address when not reusing the address book."
+                  placeholder="未使用地址簿時，請輸入上車地址。"
                 />
               </div>
 
               <div style={fullWidthFieldStyle}>
                 <label htmlFor="dropoffAddress" style={fieldLabelStyle}>
-                  Manual dropoff address
+                  手動下車地址
                 </label>
                 <textarea
                   id="dropoffAddress"
                   name="dropoffAddress"
                   rows={3}
                   style={fieldInputStyle}
-                  placeholder="Enter a dropoff address when not reusing the address book."
+                  placeholder="未使用地址簿時，請輸入下車地址。"
                 />
               </div>
             </div>
 
             <p style={fieldHintStyle}>
-              {activeAddresses.length} active address record(s) available. Use{" "}
+              目前共有 {activeAddresses.length} 筆啟用中的地址資料。可前往{" "}
               <Link href="/addresses">
                 <strong>/addresses</strong>
               </Link>{" "}
-              to maintain owner-linked addresses, tags, and geocode hygiene.
+              維護地址擁有者、標籤與地理資訊品質。
             </p>
           </section>
 
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
-              <h2 style={sectionTitleStyle}>Policy And Service Attributes</h2>
+              <h2 style={sectionTitleStyle}>政策與服務屬性</h2>
               <p style={sectionDescriptionStyle}>
-                These fields capture fulfillment context without leaking
-                authority that belongs to pricing, approvals, or dispatch
-                operations.
+                這些欄位用來補充履約情境，但不會暴露屬於定價、核准或派遣端的管理
+                權限。
               </p>
             </div>
 
             <div style={inputGridStyle}>
               <div style={formFieldStyle}>
                 <label htmlFor="costCenter" style={fieldLabelStyle}>
-                  Cost center
+                  成本中心
                 </label>
                 <input
                   id="costCenter"
                   name="costCenter"
                   type="text"
                   style={fieldInputStyle}
-                  placeholder="DEPT-001 / Travel Ops"
+                  placeholder="例如：行政差旅／總務中心"
                 />
                 <p style={fieldHintStyle}>
-                  Recorded as free text today. No server-backed cost-center
-                  catalog or quota lookup is available yet.
+                  目前仍以自由文字保存，尚未接上伺服器端成本中心目錄或額度查詢。
                 </p>
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="vehiclePreference" style={fieldLabelStyle}>
-                  Vehicle preference
+                  車型偏好
                 </label>
                 <input
                   id="vehiclePreference"
                   name="vehiclePreference"
                   type="text"
                   style={fieldInputStyle}
-                  placeholder="Sedan, van, executive, wheelchair..."
+                  placeholder="例如：轎車、廂型車、無障礙車"
                 />
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="flightNo" style={fieldLabelStyle}>
-                  Flight number
+                  航班號碼
                 </label>
                 <input
                   id="flightNo"
@@ -908,20 +898,20 @@ export default async function NewBookingPage({
 
               <div style={formFieldStyle}>
                 <label htmlFor="terminal" style={fieldLabelStyle}>
-                  Terminal
+                  航廈／集合點
                 </label>
                 <input
                   id="terminal"
                   name="terminal"
                   type="text"
                   style={fieldInputStyle}
-                  placeholder="T1 / T2 / Arrival Hall B"
+                  placeholder="例如：T1／T2／入境大廳 B"
                 />
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="luggageCount" style={fieldLabelStyle}>
-                  Luggage count
+                  行李件數
                 </label>
                 <input
                   id="luggageCount"
@@ -936,7 +926,7 @@ export default async function NewBookingPage({
 
               <div style={formFieldStyle}>
                 <label htmlFor="minPhotoCount" style={fieldLabelStyle}>
-                  Completion photo minimum
+                  最少完成照片
                 </label>
                 <select
                   id="minPhotoCount"
@@ -944,30 +934,30 @@ export default async function NewBookingPage({
                   defaultValue="1"
                   style={fieldInputStyle}
                 >
-                  <option value="1">1 photo</option>
-                  <option value="2">2 photos</option>
-                  <option value="3">3 photos</option>
-                  <option value="4">4 photos</option>
-                  <option value="5">5 photos</option>
+                  <option value="1">1 張</option>
+                  <option value="2">2 張</option>
+                  <option value="3">3 張</option>
+                  <option value="4">4 張</option>
+                  <option value="5">5 張</option>
                 </select>
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="onsiteContactName" style={fieldLabelStyle}>
-                  Onsite contact name
+                  現場聯絡人姓名
                 </label>
                 <input
                   id="onsiteContactName"
                   name="onsiteContactName"
                   type="text"
                   style={fieldInputStyle}
-                  placeholder="Lobby or event contact"
+                  placeholder="例如：大廳接待／活動窗口"
                 />
               </div>
 
               <div style={formFieldStyle}>
                 <label htmlFor="onsiteContactPhone" style={fieldLabelStyle}>
-                  Onsite contact phone
+                  現場聯絡人電話
                 </label>
                 <input
                   id="onsiteContactPhone"
@@ -980,14 +970,14 @@ export default async function NewBookingPage({
 
               <div style={fullWidthFieldStyle}>
                 <label htmlFor="notes" style={fieldLabelStyle}>
-                  Notes
+                  備註
                 </label>
                 <textarea
                   id="notes"
                   name="notes"
                   rows={4}
                   style={fieldInputStyle}
-                  placeholder="Arrival instructions, gate constraints, rider preferences, or other authority-safe notes."
+                  placeholder="可填寫抵達指示、門禁限制、乘客偏好或其他租戶端可提交的備註。"
                 />
               </div>
             </div>
@@ -996,28 +986,22 @@ export default async function NewBookingPage({
               <label style={checkboxRowStyle}>
                 <input type="checkbox" name="signoffRequired" />
                 <span>
-                  Require onsite sign-off. This increases downstream completion
-                  proof requirements; it does not open a separate tenant
-                  approval queue.
+                  需要現場簽收。這會提高後續完成證明要求，但不會另外開啟租戶端
+                  核准佇列。
                 </span>
               </label>
               <label style={checkboxRowStyle}>
                 <input type="checkbox" name="expenseProofRequired" />
-                <span>
-                  Require expense proof for reimbursement or finance follow-up.
-                </span>
+                <span>需要報支憑證，供後續代墊或財務追蹤使用。</span>
               </label>
             </div>
           </section>
 
           <section style={sectionStyle}>
             <div style={sectionHeaderStyle}>
-              <h2 style={sectionTitleStyle}>Submit Flow</h2>
+              <h2 style={sectionTitleStyle}>送出流程</h2>
               <p style={sectionDescriptionStyle}>
-                Submit creates a live booking through{" "}
-                <code>POST /api/tenant/bookings</code>. Save-draft is
-                intentionally absent because there is no authority-safe draft
-                command in the current contract.
+                送出後會直接建立正式訂單。目前契約沒有安全的草稿指令，因此刻意不提供暫存草稿功能。
               </p>
             </div>
 
@@ -1027,19 +1011,17 @@ export default async function NewBookingPage({
                 style={primaryButtonStyle}
                 disabled={!roleSnapshot.capabilities.canWriteTenant}
               >
-                Submit Booking
+                送出訂單
               </button>
               <Link className="route-link" href="/booking-list">
-                <strong>Back to booking list</strong>
-                Return to the tenant booking registry.
+                <strong>返回訂單列表</strong>
+                回到租戶訂單清單。
               </Link>
             </div>
 
             <p style={mutedNoteStyle}>
-              Draft save, approval-routing selection, and cost-center catalog
-              lookup remain explicit backend gaps. This form only materializes
-              the create flow that is already backed by canonical tenant
-              commands.
+              草稿暫存、核准路由選擇與成本中心目錄查詢仍屬後端待補項目。這份
+              表單只負責呈現目前已有正式契約支援的建立流程。
             </p>
           </section>
         </form>

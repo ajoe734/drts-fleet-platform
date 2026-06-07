@@ -15,12 +15,19 @@ import {
   CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import {
+  ServerCanvasTable,
+  type ServerCanvasTableColumn,
+} from "@/components/server-canvas-table";
 import { getTenantClient } from "@/lib/api-client";
+import {
+  formatTenantErrorSummary,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -275,36 +282,32 @@ const EMPTY_STATE_VIEWS: Record<PassengerEmptyReason, EmptyStateView> = {
   },
   fetch_failed: {
     title: "乘客資料讀取失敗",
-    body: "頁面已載入，但本次無法完成 passenger directory 讀取。請稍後重新整理或查看 API 狀態。",
+    body: "頁面已載入，但本次無法完成乘客名冊讀取。請稍後重新整理或查看 API 狀態。",
     accent: "FF",
     tone: "danger",
   },
   permission_denied: {
     title: "目前角色無法管理乘客",
-    body: "這個帳號缺少 passenger directory 存取權限。CTA 仍保留，但會以 disabled reason 呈現。",
+    body: "這個帳號缺少乘客名冊存取權限。操作按鈕仍會保留，但會以不可用原因顯示。",
     accent: "PD",
     tone: "neutral",
     usePrimaryAction: true,
   },
   external_unavailable: {
     title: "相依服務暫時不可用",
-    body: "租戶目錄依賴的外部整合目前不可用，因此無法回傳 passenger directory。",
+    body: "租戶名冊依賴的外部整合目前不可用，因此無法回傳乘客資料。",
     accent: "EU",
     tone: "danger",
   },
   filtered_empty: {
     title: "目前篩選沒有結果",
-    body: "放寬關鍵字、部門或切換 active/inactive 篩選後，即可回到完整乘客目錄。",
+    body: "放寬關鍵字、部門或切換啟用／停用篩選後，即可回到完整乘客目錄。",
     accent: "FE",
     tone: "accent",
     ctaLabel: "清除篩選",
     ctaHref: "/passengers",
   },
 };
-
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "未知錯誤";
-}
 
 function parseDate(value: string | null | undefined) {
   if (!value) return null;
@@ -337,11 +340,55 @@ function getStateTone(activeFlag: boolean): CanvasTone {
 }
 
 function getStateLabel(activeFlag: boolean) {
-  return activeFlag ? "active" : "deactivated";
+  return activeFlag ? "啟用中" : "已停用";
 }
 
 function getKindLabel(passenger: TenantPassengerRecord) {
   return isEmployeePassenger(passenger) ? "員工" : "訪客";
+}
+
+function formatRefreshFreshness(value: string | null | undefined) {
+  switch (value) {
+    case "fresh":
+      return "最新";
+    case "stale":
+      return "已過新鮮期";
+    case "degraded":
+      return "降級";
+    case "unknown":
+      return "未知";
+    default:
+      return formatTenantCodeLabel(value);
+  }
+}
+
+function formatRefreshSource(value: string | null | undefined) {
+  switch (value) {
+    case "live":
+      return "即時快照";
+    case "cache":
+      return "快取快照";
+    case "sandbox":
+      return "沙箱快照";
+    case "static":
+      return "靜態快照";
+    default:
+      return formatTenantCodeLabel(value);
+  }
+}
+
+function formatActiveStateLabel(
+  value: PassengerFilters["activeState"],
+): string {
+  switch (value) {
+    case "active":
+      return "僅啟用";
+    case "inactive":
+      return "僅停用";
+    case "all":
+    default:
+      return "全部";
+  }
 }
 
 function comparePassengers(
@@ -470,13 +517,13 @@ function getDisabledReasonLabel(code: string | undefined) {
     case "already_deactivated":
       return "已是停用狀態";
     case "requires_tenant_admin":
-      return "僅 tenant admin 可執行";
+      return "僅租戶管理員可執行";
     case "read_only_mode":
       return "目前資源為唯讀";
     case "not_wired_yet":
-      return "後端 mutation flow 尚未接入";
+      return "後端異動流程尚未接入";
     default:
-      return code ? code.replaceAll("_", " ") : "目前不可用";
+      return formatTenantCodeLabel(code, "目前不可用");
   }
 }
 
@@ -715,7 +762,12 @@ async function loadPassengersData(): Promise<PassengerPageData> {
       : [];
 
   if (passengersResult.status === "rejected") {
-    errors.push(`乘客目錄: ${toErrorMessage(passengersResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "乘客目錄",
+        toTenantErrorMessage(passengersResult.reason, "乘客目錄讀取失敗"),
+      ),
+    );
   }
 
   return {
@@ -784,7 +836,7 @@ function renderActionDescriptor(
   const helper = descriptor.requiresReason
     ? `${label} · 需要理由`
     : descriptor.riskLevel === "high"
-      ? `${label} · high risk`
+      ? `${label} · 高風險`
       : label;
 
   if (descriptor.enabled) {
@@ -817,7 +869,7 @@ function getActionLabel(action: string) {
     case "reactivate":
       return "重新啟用";
     default:
-      return action;
+      return formatTenantCodeLabel(action, action);
   }
 }
 
@@ -858,7 +910,7 @@ function renderEmptyState(
         )
       ) : null}
       <CanvasPill theme={th} tone={view.tone}>
-        emptyReason: {reason}
+        空狀態原因：{formatTenantCodeLabel(reason, reason)}
       </CanvasPill>
     </div>
   );
@@ -913,29 +965,29 @@ function getRefreshSummary(
   fetchedAt: string,
 ) {
   if (!refreshMetadata) {
-    return `30s tenant slow tier · fallback ${formatUpdated(fetchedAt)}`;
+    return `30 秒租戶慢速層級 · 後備快照 ${formatUpdated(fetchedAt)}`;
   }
 
-  return `${refreshMetadata.dataFreshness} · ${formatUpdated(
+  return `${formatRefreshFreshness(refreshMetadata.dataFreshness)} · ${formatUpdated(
     refreshMetadata.generatedAt,
-  )} · ${refreshMetadata.source}`;
+  )} · ${formatRefreshSource(refreshMetadata.source)}`;
 }
 
 function getRefreshTierLabel(refreshMetadata: UiRefreshMetadata | null) {
   if (!refreshMetadata) {
-    return "T5 · 30s fallback";
+    return "30 秒後備快照";
   }
 
   switch (refreshMetadata.source) {
     case "live":
-      return "T5 · live snapshot";
+      return "即時快照";
     case "cache":
-      return "T5 · cached snapshot";
+      return "快取快照";
     case "sandbox":
-      return "T5 · sandbox snapshot";
+      return "沙箱快照";
     case "static":
     default:
-      return "T5 · static snapshot";
+      return "靜態快照";
   }
 }
 
@@ -948,21 +1000,21 @@ function getRefreshBannerCopy(refreshMetadata: UiRefreshMetadata | null) {
     case "stale":
       return {
         tone: "warn" as const,
-        title: "Passenger directory snapshot 已過新鮮期",
-        body: `目前顯示的是 ${formatUpdated(refreshMetadata.generatedAt)} 產生的 ${refreshMetadata.source} snapshot；重新整理可拉回最新 T5 read model。`,
+        title: "乘客名冊快照已過新鮮期",
+        body: `目前顯示的是 ${formatUpdated(refreshMetadata.generatedAt)} 產生的${formatRefreshSource(refreshMetadata.source)}；重新整理可拉回最新讀取快照。`,
       };
     case "degraded":
       return {
         tone: "danger" as const,
-        title: "Passenger directory 正處於 degraded refresh",
-        body: `資料來源回報 degraded；目前以 ${refreshMetadata.source} snapshot 提供列表，請先避免依賴此頁進行時效敏感判斷。`,
+        title: "乘客名冊目前處於降級刷新",
+        body: `資料來源回報降級；目前以${formatRefreshSource(refreshMetadata.source)}提供列表，請先避免依賴此頁進行時效敏感判斷。`,
       };
     case "unknown":
     default:
       return {
         tone: "info" as const,
-        title: "Passenger directory refresh 狀態未知",
-        body: "後端未提供可判定的新鮮度，頁面保留 T5 tier 與手動 refresh 供使用者重新取樣。",
+        title: "乘客名冊刷新狀態未知",
+        body: "後端未提供可判定的新鮮度，頁面會保留背景快照與手動重新整理，供使用者重新取樣。",
       };
   }
 }
@@ -976,12 +1028,12 @@ function getRecordActions(passenger: RuntimePassengerRecord) {
 function getTargetAppLabel(targetApp: CrossAppResourceLink["targetApp"]) {
   switch (targetApp) {
     case "ops-console":
-      return "Ops Console";
+      return "營運控制台";
     case "platform-admin":
-      return "Platform Admin";
+      return "平台管理後台";
     case "tenant-console":
     default:
-      return "Tenant Console";
+      return "租戶控制台";
   }
 }
 
@@ -1038,12 +1090,12 @@ function toPassengerDeepLinks(
 function getQualityIssueLabel(issue: TenantPassengerQualityIssue) {
   switch (issue) {
     case "duplicate_employee_no":
-      return "duplicate employee no";
+      return "工號重複";
     case "missing_contact":
-      return "missing contact";
+      return "缺少聯絡方式";
     case "missing_employee_no":
     default:
-      return "missing employee no";
+      return "缺少工號";
   }
 }
 
@@ -1109,9 +1161,9 @@ export default async function PassengersPage({
   const refreshTierLabel = getRefreshTierLabel(refreshMetadata);
   const refreshBanner = getRefreshBannerCopy(refreshMetadata);
 
-  const columns: CanvasTableColumn<PassengerRow>[] = [
+  const columns: ServerCanvasTableColumn<PassengerRow>[] = [
     {
-      h: "NAME",
+      h: "姓名",
       w: 190,
       r: (row) => (
         <div style={{ display: "grid", gap: 5 }}>
@@ -1132,7 +1184,7 @@ export default async function PassengersPage({
             </CanvasPill>
             {row.duplicateName ? (
               <CanvasPill theme={th} tone="warn">
-                duplicate name
+                同名重複
               </CanvasPill>
             ) : null}
           </div>
@@ -1140,29 +1192,29 @@ export default async function PassengersPage({
       ),
     },
     {
-      h: "EMP ID",
+      h: "工號",
       w: 110,
       mono: true,
       r: (row) => row.employeeNo ?? "—",
     },
     {
-      h: "DEPT",
+      h: "部門",
       w: 150,
       r: (row) => row.departmentName ?? "—",
     },
     {
-      h: "MOBILE",
+      h: "手機",
       w: 140,
       mono: true,
       r: (row) => row.mobile ?? "—",
     },
     {
-      h: "EMAIL",
+      h: "電子郵件",
       mono: true,
       r: (row) => row.email ?? "—",
     },
     {
-      h: "STATE",
+      h: "狀態",
       w: 110,
       r: (row) => (
         <CanvasPill theme={th} tone={row.stateTone} dot>
@@ -1171,13 +1223,13 @@ export default async function PassengersPage({
       ),
     },
     {
-      h: "UPDATED",
+      h: "更新時間",
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.updatedAt),
     },
     {
-      h: "ACTIONS",
+      h: "操作",
       w: 220,
       r: (row) => (
         <div style={tableActionCellStyle}>
@@ -1218,7 +1270,7 @@ export default async function PassengersPage({
       <CanvasPageHeader
         theme={th}
         title="乘客通訊錄"
-        subtitle="員工 · 訪客 · 啟用狀態 · 同意書版本 · soft deactivate"
+        subtitle="員工 · 訪客 · 啟用狀態 · 同意書版本 · 軟停用"
         tabs={tabs as ReactNode[]}
         activeTab={activeTab}
         actions={
@@ -1250,7 +1302,7 @@ export default async function PassengersPage({
             tone="warn"
             icon="warn"
             title="偵測到重複姓名"
-            body="backend duplicate-name warning 已落在 passenger rows；請優先使用 employee no 或 mobile 區分同名乘客。"
+            body="後端的同名警示已標記在乘客列上；請優先使用工號或手機區分同名乘客。"
           />
         ) : null}
 
@@ -1267,34 +1319,34 @@ export default async function PassengersPage({
         <div style={kpiGridStyle}>
           <CanvasKPI
             theme={th}
-            label="Passengers"
+            label="乘客數"
             value={String(passengers.length)}
-            sub={`${activeCount} active / ${inactiveCount} inactive`}
+            sub={`${activeCount} 啟用中 / ${inactiveCount} 已停用`}
           />
           <CanvasKPI
             theme={th}
-            label="Employee"
+            label="員工"
             value={String(employeeCount)}
-            sub={`${passengers.length - employeeCount} visitor`}
+            sub={`${passengers.length - employeeCount} 位訪客`}
           />
           <CanvasKPI
             theme={th}
-            label="Refresh"
-            value="T5"
+            label="刷新"
+            value="30 秒"
             sub={`${refreshTierLabel} · ${refreshSummary}`}
           />
           <CanvasKPI
             theme={th}
-            label="Selected"
-            value={selectedPassenger ? "ready" : "none"}
-            sub={selectedPassenger ? selectedPassenger.fullName : "pick a row"}
+            label="已選取"
+            value={selectedPassenger ? "就緒" : "未選取"}
+            sub={selectedPassenger ? selectedPassenger.fullName : "請選擇一列"}
           />
         </div>
 
         <CanvasCard
           theme={th}
-          title="Directory filters"
-          subtitle="Filter by active state, department, and search by name / employee no / mobile."
+          title="名冊篩選"
+          subtitle="可依啟用狀態、部門與姓名／工號／手機進行搜尋。"
         >
           <form action="/passengers" method="get" style={filterBarStyle}>
             {selectedTab !== "all" ? (
@@ -1308,7 +1360,7 @@ export default async function PassengersPage({
               />
             ) : null}
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>Search</span>
+              <span style={fieldLabelStyle}>搜尋</span>
               <input
                 defaultValue={filters.q}
                 name="q"
@@ -1317,7 +1369,7 @@ export default async function PassengersPage({
               />
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>Department</span>
+              <span style={fieldLabelStyle}>部門</span>
               <select
                 defaultValue={filters.department}
                 name="department"
@@ -1332,7 +1384,7 @@ export default async function PassengersPage({
               </select>
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>State</span>
+              <span style={fieldLabelStyle}>狀態</span>
               <select
                 defaultValue={filters.activeState}
                 name="state"
@@ -1344,7 +1396,7 @@ export default async function PassengersPage({
               </select>
             </label>
             <label style={fieldStackStyle}>
-              <span style={fieldLabelStyle}>Refresh tier</span>
+              <span style={fieldLabelStyle}>刷新層級</span>
               <div
                 style={{
                   ...fieldStyle,
@@ -1355,7 +1407,9 @@ export default async function PassengersPage({
               >
                 <span>{refreshTierLabel}</span>
                 <CanvasPill theme={th} tone={refreshTone}>
-                  {refreshMetadata?.dataFreshness ?? "fallback"}
+                  {formatRefreshFreshness(
+                    refreshMetadata?.dataFreshness ?? "fallback",
+                  )}
                 </CanvasPill>
               </div>
             </label>
@@ -1375,13 +1429,13 @@ export default async function PassengersPage({
             theme={th}
             padding={0}
             style={cardStyle}
-            title="Passenger roster"
-            subtitle={`${rows.length} visible row(s) · state ${filters.activeState}`}
+            title="乘客名冊"
+            subtitle={`${rows.length} 筆可見資料 · 狀態 ${formatActiveStateLabel(filters.activeState)}`}
           >
             {emptyReason ? (
               renderEmptyState(emptyReason, primaryPageAction)
             ) : (
-              <CanvasTable<PassengerRow>
+              <ServerCanvasTable<PassengerRow>
                 theme={th}
                 columns={columns}
                 rows={rows}
@@ -1391,11 +1445,11 @@ export default async function PassengersPage({
 
           <CanvasCard
             theme={th}
-            title="Passenger detail"
+            title="乘客明細"
             subtitle={
               selectedPassenger
-                ? `${selectedPassenger.fullName} · ${selectedPassenger.activeFlag ? "active" : "deactivated"}`
-                : "Select a row to inspect actions, deep links, and quality warnings."
+                ? `${selectedPassenger.fullName} · ${selectedPassenger.activeFlag ? "啟用中" : "已停用"}`
+                : "選擇一列後即可檢視操作、深連結與品質警示。"
             }
             style={detailCardStyle}
           >
@@ -1407,14 +1461,14 @@ export default async function PassengersPage({
                     tone={selectedPassenger.activeFlag ? "success" : "neutral"}
                     dot
                   >
-                    {selectedPassenger.activeFlag ? "active" : "deactivated"}
+                    {selectedPassenger.activeFlag ? "啟用中" : "已停用"}
                   </CanvasPill>
                   <CanvasPill theme={th} tone="info">
                     {getKindLabel(selectedPassenger)}
                   </CanvasPill>
                   {selectedPassengerDuplicate ? (
                     <CanvasPill theme={th} tone="warn">
-                      duplicate name
+                      同名重複
                     </CanvasPill>
                   ) : null}
                 </div>
@@ -1440,25 +1494,25 @@ export default async function PassengersPage({
                       mono: true,
                     },
                     {
-                      k: "Email",
+                      k: "電子郵件",
                       v: selectedPassenger.email ?? "—",
                       mono: true,
                     },
                     {
-                      k: "editableUntil",
+                      k: "可編輯至",
                       v: formatUpdated(selectedEditableUntil),
                       mono: true,
                     },
                     {
-                      k: "consentVersion",
+                      k: "同意書版本",
                       v: selectedConsentVersion ?? "—",
                     },
                     {
-                      k: "readOnlyReason",
-                      v: selectedReadOnlyReason ?? "—",
+                      k: "唯讀原因",
+                      v: formatTenantCodeLabel(selectedReadOnlyReason),
                     },
                     {
-                      k: "updatedAt",
+                      k: "更新時間",
                       v: formatUpdated(selectedPassenger.updatedAt),
                       mono: true,
                     },
@@ -1467,7 +1521,7 @@ export default async function PassengersPage({
 
                 <div style={{ display: "grid", gap: 8 }}>
                   <div style={{ ...fieldLabelStyle, color: th.text }}>
-                    Available actions
+                    可用操作
                   </div>
                   <div style={actionsWrapStyle}>
                     {selectedActions.map((action) =>
@@ -1478,20 +1532,18 @@ export default async function PassengersPage({
                     )}
                   </div>
                   <div style={subtleTextStyle}>
-                    CTAs are driven from `availableActions` when present; this
-                    page falls back to spec-safe disabled affordances until the
-                    mutation route lands.
+                    畫面上的操作按鈕會優先採用後端提供的可用操作；在異動路由
+                    尚未接通前，頁面會以規格安全的不可用樣式保留操作入口。
                   </div>
                   <div style={helperTextStyle}>
-                    Q-TEN06: passenger deactivation is soft-only. Existing
-                    bookings retain their snapshot; inactive records disappear
-                    from pickers but stay visible in historical detail.
+                    乘客停用僅做軟停用。既有訂單會保留建立當下的快照；
+                    停用乘客會從選擇器移除，但仍保留在歷史明細。
                   </div>
                 </div>
 
                 <div style={{ display: "grid", gap: 8 }}>
                   <div style={{ ...fieldLabelStyle, color: th.text }}>
-                    Deep links
+                    深連結
                   </div>
                   <div style={actionsWrapStyle}>
                     {selectedDeepLinks.map((link) => (
@@ -1507,14 +1559,13 @@ export default async function PassengersPage({
                     ))}
                   </div>
                   <div style={helperTextStyle}>
-                    Cross-app deep links follow Q-X03 and open in a new tab when
-                    the target lives in Ops Console or Platform Admin.
+                    若目標位於營運控制台或平台管理後台，跨應用深連結會以新分頁開啟。
                   </div>
                 </div>
 
                 <div style={{ display: "grid", gap: 8 }}>
                   <div style={{ ...fieldLabelStyle, color: th.text }}>
-                    Quality issues
+                    品質問題
                   </div>
                   {selectedQualityIssues.length > 0 ? (
                     <div style={infoListStyle}>
@@ -1529,16 +1580,14 @@ export default async function PassengersPage({
                       ))}
                     </div>
                   ) : (
-                    <div style={subtleTextStyle}>
-                      No current data-quality warning.
-                    </div>
+                    <div style={subtleTextStyle}>目前沒有資料品質警示。</div>
                   )}
                 </div>
               </div>
             ) : (
               <div style={subtleTextStyle}>
-                目前沒有可用 passenger row。若是新租戶，這會對應 `no_data`；
-                若是套了篩選，則會落在 `filtered_empty`。
+                目前沒有可用乘客資料。若是新租戶，這會對應「無資料」；若是
+                套了篩選，則會落在「篩選為空」。
               </div>
             )}
           </CanvasCard>

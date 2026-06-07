@@ -83,11 +83,29 @@ const theme = buildCanvasTheme({
   density: "compact",
 });
 
-const STREAM_MESSAGES = [
-  "Assistant shell online. Monitoring dispatch exceptions, handoff notes, and queue pressure.",
-  "Mock stream active. Replace this source with the real assistant transport when the API contract lands.",
-  "Widget state persists locally so operators keep position, dock choice, and density across route changes.",
-];
+function copy(locale: "en" | "zh", en: string, zh: string) {
+  return locale === "zh" ? zh : en;
+}
+
+function getStreamMessages(locale: "en" | "zh") {
+  return [
+    copy(
+      locale,
+      "Assistant shell online. Monitoring dispatch exceptions, handoff notes, and queue pressure.",
+      "助理浮動面板已上線，正持續監看派遣異常、移交備註與佇列壓力。",
+    ),
+    copy(
+      locale,
+      "Mock stream active. Replace this source with the real assistant transport when the API contract lands.",
+      "模擬串流運作中。待 API 契約落地後，請改接真實的助理傳輸來源。",
+    ),
+    copy(
+      locale,
+      "Widget state persists locally so operators keep position, dock choice, and density across route changes.",
+      "元件狀態會保存在本機，方便操作員跨頁維持位置、停靠方式與密度設定。",
+    ),
+  ];
+}
 
 function getViewportRect() {
   if (typeof window === "undefined") {
@@ -267,6 +285,7 @@ export function OpsAssistantWidget() {
   const router = useRouter();
   const context = useOpsAssistantContext();
   const actionBridge = useOpsAssistantActionBridge();
+  const locale = context?.locale ?? "en";
   const titleId = useId();
   const instructionsId = useId();
   const liveRegionId = useId();
@@ -292,8 +311,9 @@ export function OpsAssistantWidget() {
   const [isExecutingIntent, setIsExecutingIntent] = useState(false);
   const [draft, setDraft] = useState("");
   const actions = useMemo(() => buildAssistantActions(context), [context]);
+  const streamMessages = useMemo(() => getStreamMessages(locale), [locale]);
 
-  const activeMessage = STREAM_MESSAGES[stream.activeIndex] ?? "";
+  const activeMessage = streamMessages[stream.activeIndex] ?? "";
 
   const appendConversation = useEffectEvent((entry: ConversationEntry) => {
     setConversation((current) => [...current.slice(-9), entry]);
@@ -349,7 +369,7 @@ export function OpsAssistantWidget() {
     const timeout = window.setTimeout(
       () => {
         setStream((current) => {
-          const message = STREAM_MESSAGES[current.activeIndex] ?? "";
+          const message = streamMessages[current.activeIndex] ?? "";
           if (current.visibleChars < message.length) {
             return {
               ...current,
@@ -357,7 +377,7 @@ export function OpsAssistantWidget() {
             };
           }
           return {
-            activeIndex: (current.activeIndex + 1) % STREAM_MESSAGES.length,
+            activeIndex: (current.activeIndex + 1) % streamMessages.length,
             visibleChars: 0,
           };
         });
@@ -368,7 +388,7 @@ export function OpsAssistantWidget() {
     );
 
     return () => window.clearTimeout(timeout);
-  }, [activeMessage.length, stream]);
+  }, [activeMessage.length, stream, streamMessages]);
 
   const clearPointerInteraction = useEffectEvent(() => {
     dragStateRef.current = null;
@@ -590,16 +610,20 @@ export function OpsAssistantWidget() {
   };
 
   const describeIntent = (intent: ActionIntent) =>
-    `${intent.resourceKind}:${intent.resourceId} · ${intent.action}`;
+    `${formatOpsCodeLabel(locale, intent.resourceKind)} ${intent.resourceId} · ${formatOpsCodeLabel(locale, intent.action)}`;
 
   const buildAlternatives = (descriptors: ResourceActionDescriptor[]) => {
     const alternatives = descriptors
       .filter((descriptor) => descriptor.enabled)
-      .map((descriptor) => descriptor.action)
+      .map((descriptor) => formatOpsCodeLabel(locale, descriptor.action))
       .slice(0, 3);
     return alternatives.length > 0
-      ? `Available: ${alternatives.join(", ")}`
-      : "No enabled alternatives.";
+      ? copy(
+          locale,
+          `Available: ${alternatives.join(", ")}`,
+          `可用動作：${alternatives.join("、")}`,
+        )
+      : copy(locale, "No enabled alternatives.", "目前沒有可用動作。");
   };
 
   const handleSubmitPrompt = () => {
@@ -634,13 +658,17 @@ export function OpsAssistantWidget() {
       return;
     }
 
-    const help = buildTier0HelpResult(query);
+    const help = buildTier0HelpResult(query, locale);
     appendConversation({
       id: `${Date.now()}-tier0-answer`,
       author: "assistant",
       tone: isForcedDegraded() ? "neutral" : "accent",
       message: isForcedDegraded()
-        ? `LLM degraded. Showing curated help-search fallback.\n\n${help.message}`
+        ? copy(
+            locale,
+            `LLM degraded. Showing curated help-search fallback.\n\n${help.message}`,
+            `LLM 已降級，改顯示整理過的說明搜尋備援。\n\n${help.message}`,
+          )
         : help.message,
       meta: help.meta,
     });
@@ -669,7 +697,11 @@ export function OpsAssistantWidget() {
         id: `${Date.now()}-${intent.action}`,
         author: "assistant",
         tone: "accent",
-        message: `Proposed ${intent.action} for ${intent.resourceKind} ${intent.resourceId}.`,
+        message: copy(
+          locale,
+          `Proposed ${intent.action} for ${intent.resourceKind} ${intent.resourceId}.`,
+          `已為 ${formatOpsCodeLabel(locale, intent.resourceKind)} ${intent.resourceId} 提出「${formatOpsCodeLabel(locale, intent.action)}」動作。`,
+        ),
         meta: describeIntent(intent),
       });
     } catch (error) {
@@ -680,7 +712,11 @@ export function OpsAssistantWidget() {
         message:
           error instanceof Error
             ? error.message
-            : "Assistant action proposal failed.",
+            : copy(
+                locale,
+                "Assistant action proposal failed.",
+                "助理動作提案失敗。",
+              ),
       });
     } finally {
       setIsProposing(false);
@@ -698,7 +734,11 @@ export function OpsAssistantWidget() {
         id: `${Date.now()}-unavailable`,
         author: "assistant",
         tone: "danger",
-        message: `Unavailable action: ${pendingIntent.action}.`,
+        message: copy(
+          locale,
+          `Unavailable action: ${pendingIntent.action}.`,
+          `動作目前不可用：${formatOpsCodeLabel(locale, pendingIntent.action)}。`,
+        ),
         meta: buildAlternatives(actionBridge.availableActions),
       });
       setPendingIntent(null);
@@ -710,9 +750,13 @@ export function OpsAssistantWidget() {
         id: `${Date.now()}-disabled`,
         author: "assistant",
         tone: "danger",
-        message: `Action blocked: ${descriptor.action}.`,
+        message: copy(
+          locale,
+          `Action blocked: ${descriptor.action}.`,
+          `動作已被阻擋：${formatOpsCodeLabel(locale, descriptor.action)}。`,
+        ),
         meta: descriptor.disabledReasonCode
-          ? `${descriptor.disabledReasonCode} · ${buildAlternatives(actionBridge.availableActions)}`
+          ? `${formatOpsCodeLabel(locale, descriptor.disabledReasonCode)} · ${buildAlternatives(actionBridge.availableActions)}`
           : buildAlternatives(actionBridge.availableActions),
       });
       setPendingIntent(null);
@@ -726,11 +770,23 @@ export function OpsAssistantWidget() {
       tone: "neutral",
       message:
         descriptor.riskLevel === "low"
-          ? `Executing ${descriptor.action}.`
-          : `Opening ${descriptor.riskLevel}-risk confirmation for ${descriptor.action}.`,
+          ? copy(
+              locale,
+              `Executing ${descriptor.action}.`,
+              `正在執行 ${formatOpsCodeLabel(locale, descriptor.action)}。`,
+            )
+          : copy(
+              locale,
+              `Opening ${descriptor.riskLevel}-risk confirmation for ${descriptor.action}.`,
+              `正在開啟 ${formatOpsCodeLabel(locale, descriptor.riskLevel)} 風險確認流程：${formatOpsCodeLabel(locale, descriptor.action)}。`,
+            ),
       ...(descriptor.requiresReason || descriptor.riskLevel === "high"
         ? {
-            meta: "Reason may be required by the existing page confirmation UI.",
+            meta: copy(
+              locale,
+              "Reason may be required by the existing page confirmation UI.",
+              "既有頁面確認流程可能要求填寫原因。",
+            ),
           }
         : {}),
     });
@@ -740,14 +796,16 @@ export function OpsAssistantWidget() {
       appendReceipt(receipt, descriptor.action);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Assistant action failed.";
+        error instanceof Error
+          ? error.message
+          : copy(locale, "Assistant action failed.", "助理動作執行失敗。");
       appendConversation({
         id: `${Date.now()}-execute-error`,
         author: "system",
         tone: message === "ASSISTANT_ACTION_CANCELLED" ? "neutral" : "danger",
         message:
           message === "ASSISTANT_ACTION_CANCELLED"
-            ? "Action cancelled."
+            ? copy(locale, "Action cancelled.", "動作已取消。")
             : message,
       });
     } finally {
@@ -762,8 +820,18 @@ export function OpsAssistantWidget() {
         id: `${Date.now()}-${receipt.actionId}`,
         author: "assistant",
         tone: "success",
-        message: receipt.message || `${action} completed.`,
-        meta: `actionId ${receipt.actionId} · auditId ${receipt.auditId}`,
+        message:
+          receipt.message ||
+          copy(
+            locale,
+            `${action} completed.`,
+            `${formatOpsCodeLabel(locale, action)} 已完成。`,
+          ),
+        meta: copy(
+          locale,
+          `actionId ${receipt.actionId} · auditId ${receipt.auditId}`,
+          `動作編號 ${receipt.actionId} · 稽核編號 ${receipt.auditId}`,
+        ),
         auditHref:
           receipt.auditHref ??
           `/audit?auditId=${encodeURIComponent(receipt.auditId)}`,
@@ -799,7 +867,7 @@ export function OpsAssistantWidget() {
         <button
           type="button"
           data-testid="ops-assistant-launcher"
-          aria-label="Open operations assistant"
+          aria-label={copy(locale, "Open operations assistant", "開啟營運助理")}
           onClick={() =>
             setWidget((current) => ({ ...current, closed: false }))
           }
@@ -822,7 +890,9 @@ export function OpsAssistantWidget() {
           }}
         >
           <CanvasIcon name="callcenter" size={16} />
-          <span style={{ fontSize: 13, fontWeight: 700 }}>Assistant</span>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>
+            {copy(locale, "Assistant", "助理")}
+          </span>
         </button>
       ) : null}
 
@@ -839,7 +909,11 @@ export function OpsAssistantWidget() {
           tabIndex={0}
           onPointerDown={onDragPointerDown}
           onKeyDown={onHeaderKeyDown}
-          aria-label="Assistant widget header. Use arrow keys to move, Home or End to dock, Escape to close."
+          aria-label={copy(
+            locale,
+            "Assistant widget header. Use arrow keys to move, Home or End to dock, Escape to close.",
+            "助理元件標頭。可用方向鍵移動，Home 或 End 停靠，Escape 關閉。",
+          )}
           style={{
             display: "flex",
             alignItems: "center",
@@ -866,19 +940,25 @@ export function OpsAssistantWidget() {
               id={titleId}
               style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.15 }}
             >
-              Operations Assistant
+              {copy(locale, "Operations Assistant", "營運助理")}
             </div>
             <div
               style={{ fontSize: 11, color: theme.textMuted, lineHeight: 1.15 }}
             >
-              Floating shell · mock stream · persistent layout
+              {copy(
+                locale,
+                "Floating shell · mock stream · persistent layout",
+                "浮動面板 · 模擬串流 · 版面持久保存",
+              )}
             </div>
           </div>
 
           <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <ActionButton
               label={
-                widget.minimized ? "Expand assistant" : "Minimize assistant"
+                widget.minimized
+                  ? copy(locale, "Expand assistant", "展開助理")
+                  : copy(locale, "Minimize assistant", "縮小助理")
               }
               icon="minus"
               pressed={widget.minimized}
@@ -891,7 +971,11 @@ export function OpsAssistantWidget() {
               }
             />
             <ActionButton
-              label="Dock assistant to left edge"
+              label={copy(
+                locale,
+                "Dock assistant to left edge",
+                "將助理停靠在左側",
+              )}
               icon="pin"
               pressed={widget.docked === "left"}
               onClick={() =>
@@ -899,7 +983,11 @@ export function OpsAssistantWidget() {
               }
             />
             <ActionButton
-              label="Dock assistant to right edge"
+              label={copy(
+                locale,
+                "Dock assistant to right edge",
+                "將助理停靠在右側",
+              )}
               icon="arrow"
               pressed={widget.docked === "right"}
               onClick={() =>
@@ -907,7 +995,7 @@ export function OpsAssistantWidget() {
               }
             />
             <ActionButton
-              label="Close assistant"
+              label={copy(locale, "Close assistant", "關閉助理")}
               icon="x"
               onClick={() =>
                 setWidget((current) => ({ ...current, closed: true }))
@@ -952,7 +1040,7 @@ export function OpsAssistantWidget() {
                   }}
                 >
                   <span style={{ fontSize: 11, color: theme.textDim }}>
-                    Session
+                    {copy(locale, "Session", "工作階段")}
                   </span>
                   <span
                     style={{
@@ -965,18 +1053,24 @@ export function OpsAssistantWidget() {
                       padding: "2px 8px",
                     }}
                   >
-                    online
+                    {copy(locale, "online", "上線")}
                   </span>
                 </div>
                 <div style={{ display: "grid", gap: 8 }}>
                   <MessageBubble
                     tone="neutral"
-                    author="System"
-                    message="Queue scan complete. No active blocking incidents in the shell frame."
+                    author={copy(locale, "System", "系統")}
+                    locale={locale}
+                    message={copy(
+                      locale,
+                      "Queue scan complete. No active blocking incidents in the shell frame.",
+                      "佇列掃描完成，目前此面板範圍內沒有阻塞中的事故。",
+                    )}
                   />
                   <MessageBubble
                     tone="accent"
-                    author="Assistant"
+                    author={copy(locale, "Assistant", "助理")}
+                    locale={locale}
                     message={activeMessage.slice(0, stream.visibleChars)}
                     liveRegionId={liveRegionId}
                   />
@@ -994,12 +1088,12 @@ export function OpsAssistantWidget() {
                 }}
               >
                 <div style={{ fontSize: 11, color: theme.textDim }}>
-                  Action bridge
+                  {copy(locale, "Action bridge", "動作橋接")}
                 </div>
                 {actionBridge ? (
                   <>
                     <div style={{ fontSize: 11.5, color: theme.textMuted }}>
-                      {`${actionBridge.resourceKind}:${actionBridge.resourceId}`}
+                      {`${formatOpsCodeLabel(locale, actionBridge.resourceKind)} ${actionBridge.resourceId}`}
                     </div>
                     <div style={{ display: "grid", gap: 8 }}>
                       {actionBridge.availableActions.map((action) => (
@@ -1020,7 +1114,7 @@ export function OpsAssistantWidget() {
                             }}
                           >
                             <span style={{ fontSize: 12.5, fontWeight: 700 }}>
-                              {action.action}
+                              {formatOpsCodeLabel(locale, action.action)}
                             </span>
                             <span
                               style={{
@@ -1044,9 +1138,21 @@ export function OpsAssistantWidget() {
                           >
                             {action.enabled
                               ? action.requiresReason
-                                ? "Existing confirmation flow requires a reason."
-                                : "Resolve via availableActions, then reuse the existing page action flow."
-                              : `Disabled: ${action.disabledReasonCode ?? "unavailable"}`}
+                                ? copy(
+                                    locale,
+                                    "Existing confirmation flow requires a reason.",
+                                    "既有確認流程要求填寫原因。",
+                                  )
+                                : copy(
+                                    locale,
+                                    "Resolve via availableActions, then reuse the existing page action flow.",
+                                    "請先依可用操作清單判斷，再沿用既有頁面動作流程。",
+                                  )
+                              : copy(
+                                  locale,
+                                  `Disabled: ${action.disabledReasonCode ?? "unavailable"}`,
+                                  `已停用：${formatOpsCodeLabel(locale, action.disabledReasonCode ?? "unavailable")}`,
+                                )}
                           </span>
                         </button>
                       ))}
@@ -1063,7 +1169,11 @@ export function OpsAssistantWidget() {
                         }}
                       >
                         <span style={{ fontSize: 12.5, color: theme.text }}>
-                          {`Pending intent · ${pendingIntent.action}`}
+                          {copy(
+                            locale,
+                            `Pending intent · ${formatOpsCodeLabel(locale, pendingIntent.action)}`,
+                            `待處理意圖 · ${formatOpsCodeLabel(locale, pendingIntent.action)}`,
+                          )}
                         </span>
                         <span
                           style={{
@@ -1085,8 +1195,8 @@ export function OpsAssistantWidget() {
                             style={primaryAssistButtonStyle}
                           >
                             {isExecutingIntent
-                              ? "Working..."
-                              : "Open confirmation"}
+                              ? copy(locale, "Working...", "處理中...")
+                              : copy(locale, "Open confirmation", "開啟確認")}
                           </button>
                           <button
                             type="button"
@@ -1094,7 +1204,7 @@ export function OpsAssistantWidget() {
                             onClick={() => setPendingIntent(null)}
                             style={secondaryAssistButtonStyle}
                           >
-                            Dismiss
+                            {copy(locale, "Dismiss", "關閉")}
                           </button>
                         </div>
                       </div>
@@ -1112,9 +1222,11 @@ export function OpsAssistantWidget() {
                       lineHeight: 1.45,
                     }}
                   >
-                    Focus a supported detail view to let the assistant resolve
-                    `ActionIntent` against that resource&apos;s available
-                    actions.
+                    {copy(
+                      locale,
+                      "Focus a supported detail view to let the assistant resolve action intent against that resource's available actions.",
+                      "請先切到支援的明細頁，讓助理能依該資源的可用操作清單解析動作意圖。",
+                    )}
                   </div>
                 )}
               </div>
@@ -1130,7 +1242,7 @@ export function OpsAssistantWidget() {
                 }}
               >
                 <div style={{ fontSize: 11, color: theme.textDim }}>
-                  Assistant actions
+                  {copy(locale, "Assistant actions", "助理動作")}
                 </div>
                 <div
                   style={{
@@ -1142,14 +1254,18 @@ export function OpsAssistantWidget() {
                     htmlFor="ops-assistant-composer"
                     style={{ fontSize: 11, color: theme.textDim }}
                   >
-                    Ask assistant
+                    {copy(locale, "Ask assistant", "詢問助理")}
                   </label>
                   <textarea
                     id="ops-assistant-composer"
                     data-testid="ops-assistant-composer"
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
-                    placeholder="Ask about refresh tiers, current scope, or available actions"
+                    placeholder={copy(
+                      locale,
+                      "Ask about refresh tiers, current scope, or available actions",
+                      "可詢問刷新層級、目前範圍或可用動作",
+                    )}
                     rows={3}
                     style={{
                       width: "100%",
@@ -1171,7 +1287,7 @@ export function OpsAssistantWidget() {
                       onClick={handleSubmitPrompt}
                       style={primaryAssistButtonStyle}
                     >
-                      Ask
+                      {copy(locale, "Ask", "送出")}
                     </button>
                   </div>
                   {actions.length > 0 ? (
@@ -1222,8 +1338,11 @@ export function OpsAssistantWidget() {
                         lineHeight: 1.45,
                       }}
                     >
-                      Open a board or detail page to let the assistant emit
-                      route-aware actions and deep links.
+                      {copy(
+                        locale,
+                        "Open a board or detail page to let the assistant emit route-aware actions and deep links.",
+                        "先開啟一個看板或明細頁，助理才會產生對應路由的動作與深連結。",
+                      )}
                     </div>
                   )}
                 </div>
@@ -1240,7 +1359,7 @@ export function OpsAssistantWidget() {
                 }}
               >
                 <div style={{ fontSize: 11, color: theme.textDim }}>
-                  Conversation
+                  {copy(locale, "Conversation", "對話紀錄")}
                 </div>
                 <div style={{ display: "grid", gap: 8 }}>
                   {conversation.length > 0 ? (
@@ -1250,12 +1369,13 @@ export function OpsAssistantWidget() {
                         tone={entry.tone}
                         author={
                           entry.author === "assistant"
-                            ? "Assistant"
+                            ? copy(locale, "Assistant", "助理")
                             : entry.author === "operator"
-                              ? "Operator"
-                              : "System"
+                              ? copy(locale, "Operator", "操作員")
+                              : copy(locale, "System", "系統")
                         }
                         message={entry.message}
+                        locale={locale}
                         {...(entry.meta ? { meta: entry.meta } : {})}
                         {...(entry.auditHref !== undefined
                           ? { auditHref: entry.auditHref }
@@ -1274,8 +1394,11 @@ export function OpsAssistantWidget() {
                         lineHeight: 1.45,
                       }}
                     >
-                      Proposed actions, disabled refusals, and action receipts
-                      will be written back here.
+                      {copy(
+                        locale,
+                        "Proposed actions, disabled refusals, and action receipts will be written back here.",
+                        "提出的動作、停用回覆與動作收據都會回寫在這裡。",
+                      )}
                     </div>
                   )}
                 </div>
@@ -1292,7 +1415,7 @@ export function OpsAssistantWidget() {
                 }}
               >
                 <div style={{ fontSize: 11, color: theme.textDim }}>
-                  Context envelope
+                  {copy(locale, "Context envelope", "內容封包")}
                 </div>
                 <dl
                   style={{
@@ -1303,19 +1426,29 @@ export function OpsAssistantWidget() {
                     fontSize: 11.5,
                   }}
                 >
-                  <dt style={{ color: theme.textDim }}>Route</dt>
+                  <dt style={{ color: theme.textDim }}>
+                    {copy(locale, "Route", "路由")}
+                  </dt>
                   <dd style={contextValueStyle}>{context?.route ?? "—"}</dd>
-                  <dt style={{ color: theme.textDim }}>Board</dt>
+                  <dt style={{ color: theme.textDim }}>
+                    {copy(locale, "Board", "看板")}
+                  </dt>
                   <dd style={contextValueStyle}>{context?.board ?? "—"}</dd>
-                  <dt style={{ color: theme.textDim }}>Tab</dt>
+                  <dt style={{ color: theme.textDim }}>
+                    {copy(locale, "Tab", "分頁")}
+                  </dt>
                   <dd style={contextValueStyle}>{context?.activeTab ?? "—"}</dd>
-                  <dt style={{ color: theme.textDim }}>Selection</dt>
+                  <dt style={{ color: theme.textDim }}>
+                    {copy(locale, "Selection", "目前選取")}
+                  </dt>
                   <dd style={contextValueStyle}>
                     {context?.selectedEntity
-                      ? `${context.selectedEntity.kind}:${context.selectedEntity.id}`
+                      ? `${formatOpsCodeLabel(locale, context.selectedEntity.kind)} ${context.selectedEntity.id}`
                       : "—"}
                   </dd>
-                  <dt style={{ color: theme.textDim }}>Filters</dt>
+                  <dt style={{ color: theme.textDim }}>
+                    {copy(locale, "Filters", "篩選條件")}
+                  </dt>
                   <dd style={contextValueStyle}>
                     {context?.visibleFilters
                       ? JSON.stringify(context.visibleFilters)
@@ -1340,13 +1473,20 @@ export function OpsAssistantWidget() {
                 id={instructionsId}
                 style={{ fontSize: 11, color: theme.textMuted, minWidth: 0 }}
               >
-                Header arrows move. Resize handle arrows resize. Layout persists
-                in local storage.
+                {copy(
+                  locale,
+                  "Header arrows move. Resize handle arrows resize. Layout persists in local storage.",
+                  "標頭可用方向鍵移動；右下角調整尺寸。版面會保存在本機儲存空間。",
+                )}
               </div>
               <button
                 type="button"
                 data-testid="ops-assistant-resize-handle"
-                aria-label="Resize assistant widget"
+                aria-label={copy(
+                  locale,
+                  "Resize assistant widget",
+                  "調整助理元件大小",
+                )}
                 onPointerDown={onResizePointerDown}
                 onKeyDown={onResizeKeyDown}
                 style={{
@@ -1384,17 +1524,27 @@ export function OpsAssistantWidget() {
               background: theme.surface,
             }}
           >
-            <span>Minimized. Expand to resume the live mock stream.</span>
+            <span>
+              {copy(
+                locale,
+                "Minimized. Expand to resume the live mock stream.",
+                "已縮小，展開後可繼續查看模擬即時串流。",
+              )}
+            </span>
             <button
               type="button"
               data-testid="ops-assistant-restore"
-              aria-label="Restore assistant widget"
+              aria-label={copy(
+                locale,
+                "Restore assistant widget",
+                "還原助理元件",
+              )}
               onClick={() =>
                 setWidget((current) => ({ ...current, minimized: false }))
               }
               style={restoreButtonStyle}
             >
-              Restore
+              {copy(locale, "Restore", "還原")}
             </button>
           </div>
         )}
@@ -1408,6 +1558,7 @@ function MessageBubble({
   author,
   message,
   tone,
+  locale,
   meta,
   auditHref,
   liveRegionId,
@@ -1415,6 +1566,7 @@ function MessageBubble({
   author: string;
   message: string;
   tone: "neutral" | "accent" | "success" | "danger";
+  locale: "en" | "zh";
   meta?: string;
   auditHref?: string | null;
   liveRegionId?: string;
@@ -1500,7 +1652,7 @@ function MessageBubble({
             textDecoration: "none",
           }}
         >
-          View audit
+          {copy(locale, "View audit", "檢視稽核")}
         </a>
       ) : null}
     </div>

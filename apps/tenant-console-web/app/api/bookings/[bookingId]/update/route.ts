@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { UpdateTenantBookingCommand } from "@drts/contracts";
 import { createTenantClient } from "@drts/api-client";
 import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
+import { formatTenantUiError, toTenantErrorMessage } from "@/lib/error-copy";
 
 export async function POST(
   request: NextRequest,
@@ -16,7 +17,12 @@ export async function POST(
     return NextResponse.json(receipt ?? { ok: true, bookingId });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
+      {
+        error: formatTenantUiError(
+          toTenantErrorMessage(error, "更新叫車失敗。"),
+          "更新叫車失敗",
+        ),
+      },
       { status: 500 },
     );
   }

@@ -31,6 +31,7 @@ import {
   driverCanvasTheme,
 } from "@/components/canvas-primitives";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
+import { formatDriverUiError, toDriverErrorMessage } from "@/lib/error-copy";
 import {
   canReceiveOrders,
   deriveBlockingReasons,
@@ -47,7 +48,7 @@ import { driverStrings } from "@/lib/strings";
 
 const THEME = driverCanvasTheme;
 const REFRESH_INTERVAL_MS = 15_000;
-const REFRESH_TIER_LABEL = "T3 · 每 15 秒輪詢";
+const REFRESH_TIER_LABEL = "中度刷新 · 每 15 秒輪詢";
 
 type EnrichedPresence = {
   record: PlatformPresenceViewRecord;
@@ -70,10 +71,10 @@ type ManualReauthState = {
 };
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-  return driverStrings.common.requestFailed;
+  return formatDriverUiError(
+    toDriverErrorMessage(error, driverStrings.common.requestFailed),
+    driverStrings.common.requestFailed,
+  );
 }
 
 function isPermissionDeniedError(error: string | null): boolean {
@@ -127,6 +128,36 @@ function formatTokenExpiry(value: string | null | undefined): string {
   }
 
   return `${Math.floor(remainingHours / 24)} 天後到期`;
+}
+
+function formatRefreshSource(value: string | null | undefined): string {
+  switch (value) {
+    case "cache":
+      return "快取";
+    case "sandbox":
+      return "沙盒";
+    case "static":
+      return "靜態資料";
+    case "live":
+      return "即時";
+    default:
+      return "即時";
+  }
+}
+
+function formatEligibilityLabel(
+  value: PlatformPresenceRecord["eligibility"],
+): string {
+  switch (value) {
+    case "eligible":
+      return "符合資格";
+    case "pending":
+      return "審核中";
+    case "ineligible":
+      return "不符合資格";
+    default:
+      return value;
+  }
 }
 
 function isOwnedPlatform(record: PlatformPresenceRecord): boolean {
@@ -270,7 +301,7 @@ function emptyStateCopy(reason: EmptyReason): {
     case "external_unavailable":
       return {
         title: "外部平台同步異常",
-        body: "所有外部平台目前都處於 degraded/down，請先查看需處理平台或聯絡派車台。",
+        body: "所有外部平台目前都處於降級或中斷狀態，請先查看需處理平台或聯絡派車台。",
         tone: "warn",
       };
     case "driver_not_eligible":
@@ -346,7 +377,7 @@ function MechanismLegend() {
     <Card
       theme={THEME}
       title="重新授權方式"
-      subtitle="平台 capability flag 可配置 4 種處理流程"
+      subtitle="平台連線設定共支援 4 種重新授權流程"
     >
       <View style={styles.legendList}>
         {[
@@ -390,21 +421,20 @@ function ManualReauthCard({
     <Card
       theme={THEME}
       title={`${state.displayName} 手動重新授權`}
-      subtitle="依 Q-DRV05，這個平台使用 manual credential 流程"
+      subtitle="此平台使用手動憑證流程"
     >
       <View style={styles.manualCardBody}>
         <Text style={[styles.manualHint, { color: THEME.textMuted }]}>
-          本階段 API 僅提交重新驗證請求與選填 Token
-          到期時間。若平台要求完整帳密，請依派車台流程補件。
+          本階段系統僅會送出重新驗證請求，以及選填的權杖到期時間。若平台要求完整帳密，請依派車台流程補件。
         </Text>
         <View style={styles.fieldBlock}>
           <Text style={[styles.fieldLabel, { color: THEME.textMuted }]}>
-            Token 到期時間（選填）
+            權杖到期時間（選填）
           </Text>
           <TextInput
             value={state.tokenExpiresAt}
             onChangeText={onChange}
-            placeholder="例如 2026-06-01T12:00:00Z"
+            placeholder="例如：2026-06-01T12:00:00Z（世界標準時間）"
             placeholderTextColor={THEME.textDim}
             autoCapitalize="none"
             autoCorrect={false}
@@ -555,7 +585,7 @@ function PlatformCard({
               </Pill>
             </View>
             <Text style={[styles.platformSubline, { color: THEME.textMuted }]}>
-              {item.record.platformCode} · 最後同步 {lastSync}
+              平台代碼 {item.record.platformCode} · 最後同步 {lastSync}
             </Text>
           </View>
         </View>
@@ -572,10 +602,13 @@ function PlatformCard({
               value: item.canReceive ? "可以接單" : "暫停接單",
             },
             {
-              label: "Token",
+              label: "權杖期限",
               value: formatTokenExpiry(item.record.tokenExpiresAt),
             },
-            { label: "資格", value: item.record.eligibility },
+            {
+              label: "資格",
+              value: formatEligibilityLabel(item.record.eligibility),
+            },
             { label: "重新授權", value: item.mechanismLabel },
           ]}
         />
@@ -601,9 +634,9 @@ function PlatformCard({
             為何目前無法派單
           </Text>
           <View style={styles.reasonList}>
-            {item.blockingReasons.map((reason) => (
+            {item.blockingReasons.map((reason, index) => (
               <Text
-                key={reason}
+                key={`${reason}-${index}`}
                 style={[styles.reasonItem, { color: THEME.text }]}
               >
                 • {reason}
@@ -905,14 +938,14 @@ export default function PlatformPresenceScreen() {
       case "native_app_deeplink":
         await openExternalTarget(
           item.record.nativeAppUrl,
-          `${item.displayName} 需要平台 App 深連結，但目前 API 尚未提供目標 URL。`,
+          `${item.displayName} 需要開啟平台應用程式，但目前系統尚未提供對應連結。`,
         );
         return;
       case "external_browser_oauth":
       default:
         await openExternalTarget(
           item.record.reauthUrl,
-          `${item.displayName} 需要外部瀏覽器 OAuth，但目前 API 尚未提供授權 URL。`,
+          `${item.displayName} 需要外部瀏覽器授權，但目前系統尚未提供授權連結。`,
         );
     }
   };
@@ -981,14 +1014,14 @@ export default function PlatformPresenceScreen() {
 
       <Card
         theme={THEME}
-        title="Platform Health Center"
-        subtitle="依 spec §5.6 / Q-DRV05 / Q-DRV07 顯示平台派單可用性"
+        title="平台健康中心"
+        subtitle="顯示平台派單可用性與健康狀態"
       >
         <DL
           theme={THEME}
           cols={2}
           items={[
-            { label: "Refresh tier", value: REFRESH_TIER_LABEL },
+            { label: "刷新節奏", value: REFRESH_TIER_LABEL },
             {
               label: "最後更新",
               value: formatCompactDateTime(
@@ -997,11 +1030,11 @@ export default function PlatformPresenceScreen() {
             },
             {
               label: "資料來源",
-              value: summary?.refreshMeta?.source ?? "live",
+              value: formatRefreshSource(summary?.refreshMeta?.source),
             },
             {
-              label: "Binding 管理",
-              value: "設定 / Settings",
+              label: "連線管理",
+              value: "設定頁",
             },
           ]}
         />

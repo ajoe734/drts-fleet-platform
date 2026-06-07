@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
+import { formatTenantUiError } from "@/lib/error-copy";
 
 export function PartnerLoginForm() {
   const router = useRouter();
@@ -33,7 +34,10 @@ export function PartnerLoginForm() {
           error?: string;
         } | null;
         setError(
-          payload?.error ?? `Partner sign-in failed (HTTP ${response.status}).`,
+          formatTenantUiError(
+            payload?.error ?? `合作夥伴登入失敗（狀態碼 ${response.status}）。`,
+            "合作夥伴登入失敗",
+          ),
         );
         return;
       }
@@ -44,7 +48,10 @@ export function PartnerLoginForm() {
       });
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : "Unknown sign-in failure.",
+        formatTenantUiError(
+          caught instanceof Error ? caught.message : "未知的合作夥伴登入失敗。",
+          "合作夥伴登入失敗",
+        ),
       );
     } finally {
       setSubmitting(false);
@@ -55,7 +62,7 @@ export function PartnerLoginForm() {
 
   return (
     <form
-      aria-label="Partner sign-in"
+      aria-label="合作夥伴登入"
       className="partner-login-form"
       onSubmit={handleSubmit}
     >
@@ -65,24 +72,24 @@ export function PartnerLoginForm() {
         </div>
       ) : null}
       <label className="field-stack">
-        <span>Entry slug</span>
+        <span>入口別名</span>
         <input
           autoComplete="username"
           name="entrySlug"
           onChange={(event) => setEntrySlug(event.target.value)}
-          placeholder="e.g. acme-airport-vip"
+          placeholder="請輸入平台提供的入口別名"
           required
           type="text"
           value={entrySlug}
         />
       </label>
       <label className="field-stack">
-        <span>Partner API key</span>
+        <span>合作夥伴 API 金鑰</span>
         <input
           autoComplete="current-password"
           name="apiKey"
           onChange={(event) => setApiKey(event.target.value)}
-          placeholder="Provided by platform admin"
+          placeholder="由平台管理端提供"
           required
           type="password"
           value={apiKey}
@@ -93,7 +100,7 @@ export function PartnerLoginForm() {
         disabled={disabled}
         type="submit"
       >
-        {disabled ? "Starting partner session..." : "Start partner session"}
+        {disabled ? "正在啟動合作夥伴工作階段..." : "啟動合作夥伴工作階段"}
       </button>
     </form>
   );

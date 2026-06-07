@@ -18,13 +18,16 @@ import {
   CanvasCard,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import {
+  formatTenantErrorSummary,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
 import { getTenantClient } from "@/lib/api-client";
 import { formatDateInput } from "@/lib/formatters";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 import { TENANT_PAGE_REFRESH_POLICIES } from "@/lib/page-refresh-policy";
 import { getRefreshTierDescriptor } from "@/lib/refresh-tier";
 
@@ -197,6 +200,42 @@ const tableCardStyle: CSSProperties = {
   boxShadow: "0 20px 44px rgba(15, 23, 42, 0.06)",
 };
 
+const invoiceTableWrapStyle: CSSProperties = {
+  overflowX: "auto",
+  border: `1px solid ${th.border}`,
+  borderRadius: 12,
+};
+
+const invoiceTableStyle: CSSProperties = {
+  width: "100%",
+  minWidth: 980,
+  borderCollapse: "collapse",
+  fontSize: 12.5,
+};
+
+const invoiceTableHeadStyle: CSSProperties = {
+  background: th.surfaceLo,
+  color: th.textMuted,
+  textAlign: "left",
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: 0.36,
+  textTransform: "uppercase",
+};
+
+const invoiceTableHeaderCellStyle: CSSProperties = {
+  padding: "10px 12px",
+  borderBottom: `1px solid ${th.border}`,
+  whiteSpace: "nowrap",
+};
+
+const invoiceTableCellStyle: CSSProperties = {
+  padding: "12px",
+  borderBottom: `1px solid ${th.border}`,
+  color: th.text,
+  verticalAlign: "top",
+};
+
 const invoicePrimaryStyle: CSSProperties = {
   color: th.accent,
   fontWeight: 700,
@@ -362,12 +401,6 @@ type InvoicesPageData = {
   emptyState: EmptyStateEnvelope | null;
 };
 
-function toErrorMessage(error: unknown) {
-  return error instanceof Error
-    ? error.message
-    : "Unknown tenant invoice error.";
-}
-
 function toPeriodKey(value: string | null | undefined) {
   return value ? value.slice(0, 7) : "";
 }
@@ -490,10 +523,20 @@ async function loadInvoicesData(): Promise<InvoicesPageData> {
   let emptyState: EmptyStateEnvelope | null = null;
 
   if (billingResult.status === "rejected") {
-    errors.push(`Billing profile: ${toErrorMessage(billingResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "帳務設定",
+        toTenantErrorMessage(billingResult.reason, "帳務設定讀取失敗"),
+      ),
+    );
   }
   if (invoicesResult.status === "rejected") {
-    errors.push(`Invoice register: ${toErrorMessage(invoicesResult.reason)}`);
+    errors.push(
+      formatTenantErrorSummary(
+        "發票清單",
+        toTenantErrorMessage(invoicesResult.reason, "發票清單讀取失敗"),
+      ),
+    );
   }
 
   if (invoicesResult.status === "fulfilled") {
@@ -570,38 +613,38 @@ function describeEmptyState(reason: EmptyReason) {
     case "not_provisioned":
       return {
         title: "尚未完成帳務設定",
-        body: "租戶 billing profile 尚未準備好，先補齊 invoice title、稅籍與月結設定，再回到發票頁。",
+        body: "租戶帳務設定尚未準備好，先補齊發票抬頭、稅籍與月結設定，再回到發票頁。",
         tone: "warn" as const,
       };
     case "fetch_failed":
       return {
         title: "發票快照讀取失敗",
-        body: "本次載入沒有取得可信的 invoice register，頁面保留語境並要求使用者重試，而不是誤導成沒有資料。",
+        body: "本次載入沒有取得可信的發票清冊，頁面保留查詢語境並要求使用者重試，而不是誤導成沒有資料。",
         tone: "danger" as const,
       };
     case "permission_denied":
       return {
         title: "目前角色沒有發票可見權限",
-        body: "這不是 empty data。後端拒絕此角色查看 tenant invoice，需回到角色或權限設定處理。",
+        body: "這不是空資料。後端拒絕此角色查看租戶發票，需回到角色或權限設定處理。",
         tone: "neutral" as const,
       };
     case "external_unavailable":
       return {
-        title: "外部 artifact 服務暫時不可用",
+        title: "外部成品服務暫時不可用",
         body: "發票頁仍存在，但簽名下載或相關外部依賴無法提供完整結果，必須保留治理與稽核去向。",
         tone: "warn" as const,
       };
     case "filtered_empty":
       return {
         title: "目前篩選條件沒有符合的發票",
-        body: "保留 status、period 與 invoice id 的查詢語境，並提供清楚的回復路徑，避免把搜尋失敗誤解為 tenant 沒有任何 invoice。",
+        body: "保留狀態、期間與發票編號的查詢語境，並提供清楚的回復路徑，避免把搜尋失敗誤解為租戶沒有任何發票。",
         tone: "info" as const,
       };
     case "no_data":
     default:
       return {
         title: "這個租戶目前還沒有發票",
-        body: "系統讀取正常，但目前 tenant scope 尚未產出任何 invoice record；使用者仍可回到帳務概覽或稽核確認月結狀態。",
+        body: "系統讀取正常，但目前租戶範圍尚未產出任何發票紀錄；使用者仍可回到帳務概覽或稽核確認月結狀態。",
         tone: "info" as const,
       };
   }
@@ -610,30 +653,34 @@ function describeEmptyState(reason: EmptyReason) {
 function getArtifactState(invoice: InvoiceViewRecord) {
   if (!invoice.artifactUrl) {
     return {
-      label: "artifact missing",
+      label: "成品未就緒",
       tone: "neutral" as const,
     };
   }
 
   if (invoice.expiresAt && isIsoPast(invoice.expiresAt)) {
     return {
-      label: "artifact expired",
+      label: "成品已過期",
       tone: "warn" as const,
     };
   }
 
   return {
-    label: "artifact ready",
+    label: "成品可下載",
     tone: "success" as const,
   };
 }
 
 function formatStatusLabel(status: InvoiceViewRecord["statusView"]) {
-  return status;
+  return formatTenantCodeLabel(status, status);
 }
 
 function formatActionLabel(action: ResourceActionDescriptor) {
   switch (action.action) {
+    case "download_artifact":
+      return "下載成品";
+    case "view_detail":
+      return "檢視詳情";
     case "open_billing_setup":
       return "前往帳務設定";
     case "refresh_snapshot":
@@ -647,7 +694,7 @@ function formatActionLabel(action: ResourceActionDescriptor) {
     case "open_billing":
       return "前往帳務概覽";
     default:
-      return action.action;
+      return formatTenantCodeLabel(action.action, action.action);
   }
 }
 
@@ -656,11 +703,11 @@ function formatRefreshWindow(staleAfterMs: number | null | undefined) {
 
   const totalSeconds = Math.round(staleAfterMs / 1000);
   if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
+    return `${totalSeconds} 秒`;
   }
 
   const totalMinutes = Math.round(totalSeconds / 60);
-  return `${totalMinutes}m`;
+  return `${totalMinutes} 分鐘`;
 }
 
 function formatRefreshTierBadge(
@@ -668,8 +715,8 @@ function formatRefreshTierBadge(
   refreshWindow: string | null,
 ) {
   const refreshTier = getRefreshTierDescriptor(policy.runtimeTier);
-  return `${policy.packetTier} · ${policy.runtimeTier} · ${refreshTier.cadenceLabel}${
-    refreshWindow ? ` · staleAfter ${refreshWindow}` : ""
+  return `${policy.packetTier} · ${formatTenantCodeLabel(policy.runtimeTier, policy.runtimeTier)} · ${refreshTier.cadenceLabel}${
+    refreshWindow ? ` · 過舊時限 ${refreshWindow}` : ""
   }`;
 }
 
@@ -760,7 +807,7 @@ function describeEmptyStateAction(action: ResourceActionDescriptor) {
   }
 
   if (action.disabledReasonCode) {
-    return `${getEmptyStateActionLabel(action)} (${action.disabledReasonCode})`;
+    return `${getEmptyStateActionLabel(action)}（${formatTenantCodeLabel(action.disabledReasonCode, "已停用")}）`;
   }
 
   return `${getEmptyStateActionLabel(action)} 已停用`;
@@ -793,14 +840,15 @@ function renderEmptyStateAction(action: ResourceActionDescriptor) {
 }
 
 function describeAction(action: InvoiceActionView) {
-  if (action.enabled) return action.label;
+  const label = formatActionLabel(action);
+  if (action.enabled) return label;
   if (action.disabledReasonCode === "artifact_missing") {
-    return `${action.label}不可用`;
+    return `${label}不可用`;
   }
   if (action.disabledReasonCode === "artifact_expired") {
-    return `${action.label}已過期`;
+    return `${label}已過期`;
   }
-  return `${action.label}已停用`;
+  return `${label}已停用`;
 }
 
 function renderActionLink(
@@ -880,6 +928,132 @@ function summarizeInvoices(invoices: InvoiceViewRecord[]) {
       currency: invoices[0]?.amount.currency ?? "TWD",
     }),
   };
+}
+
+function renderInvoiceTable(
+  rows: InvoiceRow[],
+  filters: Pick<InvoiceFilters, "query" | "period" | "status">,
+) {
+  return (
+    <div style={invoiceTableWrapStyle}>
+      <table style={invoiceTableStyle}>
+        <thead style={invoiceTableHeadStyle}>
+          <tr>
+            {[
+              "發票編號",
+              "期間",
+              "金額",
+              "狀態",
+              "到期日",
+              "開立日",
+              "成品",
+              "操作",
+            ].map((header) => (
+              <th key={header} style={invoiceTableHeaderCellStyle}>
+                {header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const artifactState = getArtifactState(row);
+
+            return (
+              <tr key={row.invoiceId}>
+                <td style={{ ...invoiceTableCellStyle, width: 220 }}>
+                  <Link
+                    href={buildInvoiceDetailHref(row.invoiceId, filters)}
+                    style={invoicePrimaryStyle}
+                  >
+                    {row.invoiceId}
+                  </Link>
+                  <div style={invoiceSecondaryStyle}>
+                    {formatDateInput(row.createdAt) || "—"}
+                  </div>
+                </td>
+                <td
+                  style={{
+                    ...invoiceTableCellStyle,
+                    width: 110,
+                    fontFamily: th.monoFamily,
+                  }}
+                >
+                  {toPeriodKey(row.periodStart)}
+                </td>
+                <td
+                  style={{
+                    ...invoiceTableCellStyle,
+                    width: 170,
+                    textAlign: "right",
+                    fontFamily: th.monoFamily,
+                  }}
+                >
+                  {formatCanvasMoney(row.amount)}
+                </td>
+                <td style={{ ...invoiceTableCellStyle, width: 110 }}>
+                  <CanvasPill
+                    theme={th}
+                    tone={getStatusTone(row.statusView)}
+                    dot
+                  >
+                    {formatStatusLabel(row.statusView)}
+                  </CanvasPill>
+                </td>
+                <td
+                  style={{
+                    ...invoiceTableCellStyle,
+                    width: 120,
+                    fontFamily: th.monoFamily,
+                  }}
+                >
+                  {formatDateInput(row.dueDate) || "—"}
+                </td>
+                <td
+                  style={{
+                    ...invoiceTableCellStyle,
+                    width: 120,
+                    fontFamily: th.monoFamily,
+                  }}
+                >
+                  {formatDateInput(row.createdAt) || "—"}
+                </td>
+                <td style={{ ...invoiceTableCellStyle, width: 220 }}>
+                  <div style={artifactCellStyle}>
+                    <CanvasPill theme={th} tone={artifactState.tone}>
+                      {artifactState.label}
+                    </CanvasPill>
+                    {row.artifactUrl ? (
+                      <Link
+                        href={row.artifactUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={artifactLinkStyle}
+                      >
+                        {formatArtifactUrl(row.artifactUrl)}
+                      </Link>
+                    ) : (
+                      <span style={monoHintStyle}>未提供成品網址</span>
+                    )}
+                    <span style={monoHintStyle}>
+                      到期 {formatDateInput(row.expiresAt) || "—"}
+                    </span>
+                  </div>
+                </td>
+                <td style={{ ...invoiceTableCellStyle, width: 210 }}>
+                  <div style={actionRowStyle}>
+                    {row.availableActions.map((action) =>
+                      renderActionLink(action, row, filters),
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export default async function InvoicesPage({
@@ -970,107 +1144,12 @@ export default async function InvoicesPage({
   }));
   const invoiceSummary = summarizeInvoices(filteredInvoices);
 
-  const columns: CanvasTableColumn<InvoiceRow>[] = [
-    {
-      h: "INVOICE",
-      w: 220,
-      mono: true,
-      r: (row) => (
-        <div>
-          <Link
-            href={buildInvoiceDetailHref(row.invoiceId, filters)}
-            style={invoicePrimaryStyle}
-          >
-            {row.invoiceId}
-          </Link>
-          <div style={invoiceSecondaryStyle}>
-            {formatDateInput(row.createdAt) || "—"}
-          </div>
-        </div>
-      ),
-    },
-    {
-      h: "PERIOD",
-      w: 110,
-      mono: true,
-      r: (row) => toPeriodKey(row.periodStart),
-    },
-    {
-      h: "AMOUNT",
-      w: 170,
-      mono: true,
-      align: "right",
-      r: (row) => formatCanvasMoney(row.amount),
-    },
-    {
-      h: "STATUS",
-      w: 110,
-      r: (row) => (
-        <CanvasPill theme={th} tone={getStatusTone(row.statusView)} dot>
-          {formatStatusLabel(row.statusView)}
-        </CanvasPill>
-      ),
-    },
-    {
-      h: "DUE",
-      w: 120,
-      mono: true,
-      r: (row) => formatDateInput(row.dueDate) || "—",
-    },
-    {
-      h: "ISSUED",
-      w: 120,
-      mono: true,
-      r: (row) => formatDateInput(row.createdAt) || "—",
-    },
-    {
-      h: "ARTIFACT",
-      w: 220,
-      r: (row) => {
-        const artifactState = getArtifactState(row);
-        return (
-          <div style={artifactCellStyle}>
-            <CanvasPill theme={th} tone={artifactState.tone}>
-              {artifactState.label}
-            </CanvasPill>
-            {row.artifactUrl ? (
-              <Link
-                href={row.artifactUrl}
-                target="_blank"
-                rel="noreferrer"
-                style={artifactLinkStyle}
-              >
-                {formatArtifactUrl(row.artifactUrl)}
-              </Link>
-            ) : (
-              <span style={monoHintStyle}>no artifact URL</span>
-            )}
-            <span style={monoHintStyle}>
-              expiresAt {formatDateInput(row.expiresAt) || "—"}
-            </span>
-          </div>
-        );
-      },
-    },
-    {
-      h: "ACTIONS",
-      w: 210,
-      r: (row) => (
-        <div style={actionRowStyle}>
-          {row.availableActions.map((action) =>
-            renderActionLink(action, row, filters),
-          )}
-        </div>
-      ),
-    },
-  ];
-
   return (
     <div>
       <CanvasPageHeader
         theme={th}
-        title="發票 · Invoices"
-        subtitle="invoice history · status / period / id filters · availableActions-driven CTAs"
+        title="發票"
+        subtitle="發票歷史、狀態 / 期間 / 編號篩選，以及由後端操作契約驅動的入口"
         actions={
           <>
             <CanvasPill theme={th} tone="info">
@@ -1078,7 +1157,10 @@ export default async function InvoicesPage({
             </CanvasPill>
             {data.refresh ? (
               <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
-                {data.refresh.dataFreshness}
+                {formatTenantCodeLabel(
+                  data.refresh.dataFreshness,
+                  data.refresh.dataFreshness,
+                )}
               </CanvasPill>
             ) : null}
             {selectedArtifactAction?.enabled && selectedArtifactHref ? (
@@ -1094,7 +1176,7 @@ export default async function InvoicesPage({
                   minHeight: 34,
                 }}
               >
-                {selectedArtifactAction.label}
+                {formatActionLabel(selectedArtifactAction)}
               </Link>
             ) : null}
           </>
@@ -1104,9 +1186,7 @@ export default async function InvoicesPage({
       <div style={pageStyle}>
         <div style={pageLeadStyle}>
           <div style={pageLeadCopyStyle}>
-            狀態與 CTA 以 backend read model 為準，頁面只負責呈現
-            `availableActions`、 `EmptyReason`、refresh tier 與 cross-app deep
-            links，不從 client 推導角色權限。
+            狀態與可執行操作以後端讀取模型為準，頁面只負責呈現可用操作、空狀態、刷新層級與跨應用深連結，不由前端自行推導角色權限。
           </div>
           <div style={pageLeadMetaStyle}>
             <CanvasPill theme={th} tone="info">
@@ -1114,50 +1194,53 @@ export default async function InvoicesPage({
             </CanvasPill>
             {data.refresh ? (
               <CanvasPill theme={th} tone={getRefreshTone(data.refresh)}>
-                {data.refresh.dataFreshness}
+                {formatTenantCodeLabel(
+                  data.refresh.dataFreshness,
+                  data.refresh.dataFreshness,
+                )}
               </CanvasPill>
             ) : null}
             {data.refresh ? (
-              <CanvasPill
-                theme={th}
-                tone="neutral"
-              >{`source · ${data.refresh.source}`}</CanvasPill>
+              <CanvasPill theme={th} tone="neutral">
+                {`來源 · ${formatTenantCodeLabel(
+                  data.refresh.source,
+                  data.refresh.source,
+                )}`}
+              </CanvasPill>
             ) : null}
             <CanvasPill theme={th} tone="neutral">
-              {`${filteredInvoices.length} visible`}
+              {`可見 ${filteredInvoices.length} 筆`}
             </CanvasPill>
           </div>
         </div>
 
         <div style={summaryGridStyle}>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>Visible invoices</div>
+            <div style={summaryLabelStyle}>可見發票</div>
             <div style={summaryValueStyle}>{filteredInvoices.length}</div>
             <div style={summaryCaptionStyle}>
-              current register slice after status, period, and id filters
+              套用狀態、期間與編號篩選後的當前清單切片
             </div>
           </div>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>Overdue</div>
+            <div style={summaryLabelStyle}>逾期</div>
             <div style={summaryValueStyle}>{invoiceSummary.overdueCount}</div>
-            <div style={summaryCaptionStyle}>
-              urgency state stays distinct from regular `issued`
-            </div>
+            <div style={summaryCaptionStyle}>必須與一般已開立狀態分開辨識</div>
           </div>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>Expired artifacts</div>
+            <div style={summaryLabelStyle}>已過期成品</div>
             <div style={summaryValueStyle}>
               {invoiceSummary.expiredArtifacts}
             </div>
             <div style={summaryCaptionStyle}>
-              signed-download links may expire while invoice metadata remains
+              成品下載連結可能過期，但發票中繼資料仍需保留
             </div>
           </div>
           <div style={summaryCardStyle}>
-            <div style={summaryLabelStyle}>Visible amount</div>
+            <div style={summaryLabelStyle}>可見金額</div>
             <div style={summaryValueStyle}>{invoiceSummary.totalAmount}</div>
             <div style={summaryCaptionStyle}>
-              finance users can validate the current slice before opening detail
+              財務角色可先核對目前切片，再開啟詳細內容
             </div>
           </div>
         </div>
@@ -1167,7 +1250,7 @@ export default async function InvoicesPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="Invoice read model degraded"
+            title="發票讀取模型目前降級"
             body={data.errors.join(" / ")}
           />
         ) : null}
@@ -1177,22 +1260,23 @@ export default async function InvoicesPage({
             theme={th}
             tone={data.refresh.dataFreshness === "degraded" ? "danger" : "warn"}
             icon="warn"
-            title="Snapshot freshness warning"
+            title="快照新鮮度警示"
             body={`目前內容產生於 ${formatDateInput(
               data.refresh.generatedAt,
-            )}，refresh tier 為 ${INVOICES_REFRESH_POLICY.packetTier} / ${
-              INVOICES_REFRESH_POLICY.runtimeTier
-            }${
-              refreshWindow ? `，staleAfter ${refreshWindow}` : ""
-            }。資料不是 fresh 時，頁面必須明確提示而不是假裝即時。`}
+            )}，刷新層級為 ${INVOICES_REFRESH_POLICY.packetTier} / ${formatTenantCodeLabel(
+              INVOICES_REFRESH_POLICY.runtimeTier,
+              INVOICES_REFRESH_POLICY.runtimeTier,
+            )}${
+              refreshWindow ? `，過舊時限 ${refreshWindow}` : ""
+            }。資料未達即時狀態時，頁面必須明確提示，而不是假裝即時。`}
           />
         ) : null}
 
         <div style={pageGridStyle}>
           <CanvasCard
             theme={th}
-            title="Invoice register"
-            subtitle="status / period / invoice id filters · overdue and artifact expiry stay visible"
+            title="發票清單"
+            subtitle="狀態 / 期間 / 發票編號篩選，並保留逾期與成品過期資訊"
             style={tableCardStyle}
           >
             <div style={registerCardBodyStyle}>
@@ -1205,20 +1289,20 @@ export default async function InvoicesPage({
 
                 <div style={fieldStackStyle}>
                   <label htmlFor="invoice-query" style={fieldLabelStyle}>
-                    Search by invoice id
+                    依發票編號搜尋
                   </label>
                   <input
                     id="invoice-query"
                     name="q"
                     defaultValue={filters.query}
-                    placeholder="inv_2026_05_001"
+                    placeholder="輸入發票編號"
                     style={fieldControlStyle}
                   />
                 </div>
 
                 <div style={fieldStackStyle}>
                   <label htmlFor="invoice-status" style={fieldLabelStyle}>
-                    Status
+                    狀態
                   </label>
                   <select
                     id="invoice-status"
@@ -1228,7 +1312,9 @@ export default async function InvoicesPage({
                   >
                     {STATUS_FILTERS.map((status) => (
                       <option key={status} value={status}>
-                        {status}
+                        {status === "all"
+                          ? "全部狀態"
+                          : formatStatusLabel(status)}
                       </option>
                     ))}
                   </select>
@@ -1236,7 +1322,7 @@ export default async function InvoicesPage({
 
                 <div style={fieldStackStyle}>
                   <label htmlFor="invoice-period" style={fieldLabelStyle}>
-                    Period
+                    期間
                   </label>
                   <select
                     id="invoice-period"
@@ -1244,7 +1330,7 @@ export default async function InvoicesPage({
                     defaultValue={filters.period}
                     style={fieldControlStyle}
                   >
-                    <option value="">all periods</option>
+                    <option value="">全部期間</option>
                     {periodOptions.map((period) => (
                       <option key={period} value={period}>
                         {period}
@@ -1265,13 +1351,13 @@ export default async function InvoicesPage({
 
               <div style={registerMetaStyle}>
                 <CanvasPill theme={th} tone="neutral">
-                  {`${allInvoices.length} total`}
+                  {`總數 ${allInvoices.length}`}
                 </CanvasPill>
                 <CanvasPill theme={th} tone="danger">
-                  {`${invoiceSummary.overdueCount} overdue`}
+                  {`逾期 ${invoiceSummary.overdueCount}`}
                 </CanvasPill>
                 <CanvasPill theme={th} tone="warn">
-                  {`${invoiceSummary.expiredArtifacts} expired artifacts`}
+                  {`過期成品 ${invoiceSummary.expiredArtifacts}`}
                 </CanvasPill>
                 <CanvasPill theme={th} tone="info">
                   {invoiceSummary.totalAmount}
@@ -1283,14 +1369,17 @@ export default async function InvoicesPage({
                   style={{ ...emptyStateWrapStyle, ...emptyReasonCardStyle }}
                 >
                   <CanvasPill theme={th} tone={emptyDescription.tone}>
-                    {emptyState.reason}
+                    {formatTenantCodeLabel(
+                      emptyState.reason,
+                      emptyState.reason,
+                    )}
                   </CanvasPill>
                   <div style={emptyTitleStyle}>{emptyDescription.title}</div>
                   <div style={helperTextStyle}>{emptyDescription.body}</div>
                   <div style={helperTextStyle}>
-                    messageCode: {emptyState.messageCode}
+                    後端空狀態訊息已記錄
                     {emptyState.nextAction
-                      ? ` · nextAction: ${formatActionLabel(emptyState.nextAction)}`
+                      ? ` · 下一步：${formatActionLabel(emptyState.nextAction)}`
                       : ""}
                   </div>
                   {emptyState.nextAction
@@ -1298,11 +1387,7 @@ export default async function InvoicesPage({
                     : null}
                 </div>
               ) : (
-                <CanvasTable<InvoiceRow>
-                  theme={th}
-                  columns={columns}
-                  rows={rows}
-                />
+                renderInvoiceTable(rows, filters)
               )}
             </div>
           </CanvasCard>
@@ -1312,8 +1397,8 @@ export default async function InvoicesPage({
               <>
                 <CanvasCard
                   theme={th}
-                  title="Selected invoice"
-                  subtitle="drawer/new route 未拆前，右側保留 packet 必備 detail"
+                  title="已選發票"
+                  subtitle="在抽屜與新路由拆分前，右側先保留必要的明細脈絡"
                 >
                   <div style={sideStackStyle}>
                     <div>
@@ -1330,13 +1415,13 @@ export default async function InvoicesPage({
                         </CanvasPill>
                         {selectedInvoice.statusView === "overdue" ? (
                           <CanvasPill theme={th} tone="danger">
-                            overdue
+                            已逾期
                           </CanvasPill>
                         ) : null}
                         {selectedInvoice.expiresAt &&
                         isIsoPast(selectedInvoice.expiresAt) ? (
                           <CanvasPill theme={th} tone="warn">
-                            artifact expired
+                            成品已過期
                           </CanvasPill>
                         ) : null}
                       </div>
@@ -1347,8 +1432,8 @@ export default async function InvoicesPage({
                         theme={th}
                         tone="warn"
                         icon="warn"
-                        title="Overdue invoice"
-                        body="已逾預設付款期，必須與一般 issued 狀態分開提示。"
+                        title="發票已逾期"
+                        body="已逾預設付款期，必須與一般已開立狀態分開提示。"
                       />
                     ) : null}
 
@@ -1358,35 +1443,35 @@ export default async function InvoicesPage({
                         theme={th}
                         tone="danger"
                         icon="warn"
-                        title="Artifact expired"
-                        body="簽名下載連結已過期，仍需保留 invoice metadata 與治理去向。"
+                        title="成品已過期"
+                        body="簽名下載連結已過期，但仍需保留發票中繼資料與治理去向。"
                       />
                     ) : null}
 
                     <dl style={dlStyle}>
-                      <dt style={fieldLabelStyle}>Billing title</dt>
+                      <dt style={fieldLabelStyle}>帳務抬頭</dt>
                       <dd style={{ margin: 0 }}>
                         {data.billingProfile?.invoiceTitle || "—"}
                       </dd>
-                      <dt style={fieldLabelStyle}>Amount</dt>
+                      <dt style={fieldLabelStyle}>金額</dt>
                       <dd style={{ margin: 0 }}>
                         {formatCanvasMoney(selectedInvoice.amount)}
                       </dd>
-                      <dt style={fieldLabelStyle}>Period</dt>
+                      <dt style={fieldLabelStyle}>期間</dt>
                       <dd style={{ margin: 0 }}>
                         {`${formatDateInput(selectedInvoice.periodStart) || "—"} → ${
                           formatDateInput(selectedInvoice.periodEnd) || "—"
                         }`}
                       </dd>
-                      <dt style={fieldLabelStyle}>Issued</dt>
+                      <dt style={fieldLabelStyle}>開立時間</dt>
                       <dd style={{ margin: 0 }}>
                         {formatDateInput(selectedInvoice.createdAt) || "—"}
                       </dd>
-                      <dt style={fieldLabelStyle}>Due</dt>
+                      <dt style={fieldLabelStyle}>到期日</dt>
                       <dd style={{ margin: 0 }}>
                         {formatDateInput(selectedInvoice.dueDate) || "—"}
                       </dd>
-                      <dt style={fieldLabelStyle}>Artifact URL</dt>
+                      <dt style={fieldLabelStyle}>成品網址</dt>
                       <dd style={{ margin: 0, overflowWrap: "anywhere" }}>
                         {selectedInvoice.artifactUrl ? (
                           <Link
@@ -1401,14 +1486,14 @@ export default async function InvoicesPage({
                           "—"
                         )}
                       </dd>
-                      <dt style={fieldLabelStyle}>expiresAt</dt>
+                      <dt style={fieldLabelStyle}>成品到期時間</dt>
                       <dd style={{ margin: 0 }}>
                         {formatDateInput(selectedInvoice.expiresAt) || "—"}
                       </dd>
                     </dl>
 
                     <div>
-                      <div style={fieldLabelStyle}>Available actions</div>
+                      <div style={fieldLabelStyle}>可用操作</div>
                       <div style={actionRowStyle}>
                         {selectedInvoice.availableActions.map((action) =>
                           renderActionLink(action, selectedInvoice, filters),
@@ -1417,7 +1502,7 @@ export default async function InvoicesPage({
                     </div>
 
                     <div>
-                      <div style={fieldLabelStyle}>Invoice picker</div>
+                      <div style={fieldLabelStyle}>發票切換</div>
                       <div style={actionRowStyle}>
                         {selectedInvoiceDetailHref &&
                         selectedInvoice.availableActions.some(
@@ -1458,19 +1543,19 @@ export default async function InvoicesPage({
 
                 <CanvasCard
                   theme={th}
-                  title="Cross-app context"
-                  subtitle="deep links and line-item attribution"
+                  title="跨應用脈絡"
+                  subtitle="深連結與明細項目的歸屬資訊"
                 >
                   <div style={sideStackStyle}>
                     <div>
-                      <div style={fieldLabelStyle}>Deep links</div>
+                      <div style={fieldLabelStyle}>深連結</div>
                       <div style={lineListStyle}>
                         {selectedInvoice.deepLinks.map(renderDeepLink)}
                       </div>
                     </div>
 
                     <div>
-                      <div style={fieldLabelStyle}>Line items</div>
+                      <div style={fieldLabelStyle}>明細項目</div>
                       <div style={lineListStyle}>
                         {selectedInvoice.lines.map((line) => (
                           <div key={line.lineId} style={lineItemStyle}>
@@ -1478,7 +1563,7 @@ export default async function InvoicesPage({
                               {line.description}
                             </div>
                             <div style={helperTextStyle}>
-                              orderId:{" "}
+                              訂單編號：{" "}
                               <span style={{ fontFamily: th.monoFamily }}>
                                 {line.orderId}
                               </span>
@@ -1510,12 +1595,11 @@ export default async function InvoicesPage({
             ) : (
               <CanvasCard
                 theme={th}
-                title="Invoice context"
-                subtitle="select an invoice to inspect detail, artifact state, and deep links"
+                title="發票脈絡"
+                subtitle="選取一筆發票後，可在右側查看明細、成品狀態與深連結"
               >
                 <div style={helperTextStyle}>
-                  發票詳情會在右側呈現。若目前是 empty
-                  state，右側保留為空，不假裝有 detail 資料。
+                  發票詳情會在右側呈現。若目前是空狀態，右側會維持空白，不假裝已有明細資料。
                 </div>
               </CanvasCard>
             )}

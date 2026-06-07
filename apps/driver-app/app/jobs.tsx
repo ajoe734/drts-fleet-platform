@@ -36,6 +36,7 @@ import {
   getDriverIdentityIssue,
   rejectForwardedDriverOffer,
 } from "@/lib/api-client";
+import { formatDriverUiError, toDriverErrorMessage } from "@/lib/error-copy";
 import { formatMoney } from "@/lib/money";
 import {
   formatDriverTaskStatusLabel,
@@ -93,12 +94,6 @@ const ACTION_LABELS: Record<DriverTaskAction, string> = driverTaskActionLabels;
 const SWIPE_LIMIT = 124;
 const SWIPE_TRIGGER = 78;
 
-function humanizeCode(value: string) {
-  return value
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
 function formatStatusLabel(status: string | null) {
   if (!status) {
     return "待同步";
@@ -128,7 +123,7 @@ function formatActionStateLabel(
     case "read_only":
       return driverStrings.jobs.actionStateLabels.read_only;
     default:
-      return humanizeCode(actionState);
+      return "未知狀態";
   }
 }
 
@@ -394,20 +389,34 @@ function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) {
     const apiMatch = /^API error \d+:\s*(.*)$/s.exec(error.message);
     if (!apiMatch) {
-      return error.message.trim();
+      return formatDriverUiError(
+        toDriverErrorMessage(error.message.trim()),
+        "操作未完成",
+      );
     }
 
     try {
       const payload = JSON.parse(apiMatch[1]) as {
         error?: { message?: string };
       };
-      return payload.error?.message?.trim() || error.message.trim();
+      return formatDriverUiError(
+        toDriverErrorMessage(
+          payload.error?.message?.trim() || error.message.trim(),
+        ),
+        "操作未完成",
+      );
     } catch {
-      return error.message.trim();
+      return formatDriverUiError(
+        toDriverErrorMessage(error.message.trim()),
+        "操作未完成",
+      );
     }
   }
 
-  return driverStrings.common.requestFailed;
+  return formatDriverUiError(
+    toDriverErrorMessage(error, driverStrings.common.requestFailed),
+    driverStrings.common.requestFailed,
+  );
 }
 
 function getTaskPillTone(task: UnifiedDriverTaskView) {
@@ -464,7 +473,7 @@ function buildTaskTitle(task: UnifiedDriverTaskView) {
     return `${task.platformDisplayName} 平台訂單`;
   }
 
-  return `訂單 ${task.orderId}`;
+  return `訂單編號 ${task.orderId}`;
 }
 
 function buildTaskSubtitle(task: UnifiedDriverTaskView) {
@@ -499,7 +508,11 @@ function buildTaskSubtitle(task: UnifiedDriverTaskView) {
 }
 
 function buildCardMeta(task: UnifiedDriverTaskView) {
-  return [task.orderId, formatTimestamp(task.updatedAt)]
+  const updatedAt = formatTimestamp(task.updatedAt);
+  return [
+    task.orderId ? `訂單編號 ${task.orderId}` : null,
+    updatedAt ? `最後同步 ${updatedAt}` : null,
+  ]
     .filter((value): value is string => Boolean(value))
     .join(" · ");
 }
@@ -1039,7 +1052,7 @@ function TaskCard({
                 </Text>
               )}
             </View>
-            <Text style={styles.cardTaskCode}>{task.taskId}</Text>
+            <Text style={styles.cardTaskCode}>{`任務 ${task.taskId}`}</Text>
           </View>
 
           <View style={styles.cardCopy}>
@@ -1260,7 +1273,7 @@ function DenseTaskRow({
                 {getTaskPlatformCode(task)}
               </Text>
               <View style={styles.denseMetaDot} />
-              <Text style={styles.denseTaskCode}>{task.taskId}</Text>
+              <Text style={styles.denseTaskCode}>{`任務 ${task.taskId}`}</Text>
             </View>
             <Text style={styles.denseTitle} numberOfLines={1}>
               {buildTaskTitle(task)}
@@ -1499,7 +1512,7 @@ export default function JobsScreen() {
             />
           }
           title="目前使用本地鏡像備援"
-          body="已退回舊任務 API；forwarded 任務仍會顯示，但平台原生狀態與同步摘要可能延後。"
+          body="目前已退回舊版任務服務；轉派任務仍會顯示，但平台原生狀態與同步摘要可能延後。"
         />
       );
     }

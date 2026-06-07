@@ -2,7 +2,12 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
+import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import {
   CanvasBanner,
   CanvasBtn,
@@ -141,16 +146,19 @@ function statusTone(status: PlatformNoticeStatus): CanvasTone {
   return statusToneMap[status] ?? "neutral";
 }
 
-function audienceTargets(audience: PlatformNoticeRecord["targetAudience"]) {
+function audienceTargets(
+  audience: PlatformNoticeRecord["targetAudience"],
+  locale: "en" | "zh",
+) {
   switch (audience) {
     case "all":
-      return "ops · tenant · driver";
+      return locale === "en" ? "ops · tenant · driver" : "營運 · 租戶 · 司機";
     case "tenants":
-      return "tenant";
+      return locale === "en" ? "tenant" : "租戶";
     case "ops":
-      return "ops";
+      return locale === "en" ? "ops" : "營運";
     case "drivers":
-      return "driver";
+      return locale === "en" ? "driver" : "司機";
     default:
       return audience;
   }
@@ -161,14 +169,14 @@ function toSeverityLabel(
   locale: string,
 ): string {
   const en: Record<PlatformNoticeSeverity, string> = {
-    info: "low",
-    warning: "medium",
-    critical: "high",
+    info: "Low",
+    warning: "Medium",
+    critical: "High",
   };
   const zh: Record<PlatformNoticeSeverity, string> = {
-    info: "low",
-    warning: "medium",
-    critical: "high",
+    info: "低",
+    warning: "中",
+    critical: "高",
   };
   const labels = locale === "en" ? en : zh;
   return labels[severity] ?? severity;
@@ -176,17 +184,32 @@ function toSeverityLabel(
 
 function toStatusLabel(status: PlatformNoticeStatus, locale: string): string {
   const en: Record<PlatformNoticeStatus, string> = {
-    active: "active",
-    scheduled: "scheduled",
-    resolved: "resolved",
+    active: "Active",
+    scheduled: "Scheduled",
+    resolved: "Resolved",
   };
   const zh: Record<PlatformNoticeStatus, string> = {
-    active: "active",
-    scheduled: "scheduled",
-    resolved: "resolved",
+    active: "生效中",
+    scheduled: "已排程",
+    resolved: "已解決",
   };
   const labels = locale === "en" ? en : zh;
   return labels[status] ?? status;
+}
+
+function formatDeliveryLabel(
+  notice: PlatformNoticeRecord,
+  locale: "en" | "zh",
+) {
+  if (notice.status === "resolved") {
+    return locale === "en" ? "Archived after delivery" : "已送達並封存";
+  }
+
+  if (notice.targetAudience === "all") {
+    return locale === "en" ? "Delivered 3 / 3 surfaces" : "已送達 3 / 3 個端面";
+  }
+
+  return locale === "en" ? "Delivered 1 / 1 surface" : "已送達 1 / 1 個端面";
 }
 
 function formatWindow(
@@ -227,14 +250,14 @@ export default function NoticesPage() {
       ? {
           title: "Notices & Maintenance",
           subtitle:
-            "critical / maintenance severity pushes a cross-app banner to ops, tenant, and driver surfaces (Q-ADM15).",
+            "Critical or maintenance severity pushes a cross-app banner to ops, tenant, and driver surfaces.",
           notices: "Notices",
           maintenance: "Maintenance Mode",
           history: "Broadcast History",
           createNotice: "Create notice",
-          enterMaintenance: "Enter maintenance",
+          enterMaintenance: "Update maintenance mode",
           refresh: "Refresh",
-          refreshing: "Refreshing",
+          refreshing: "Refreshing…",
           emptyNotices: "No platform notices have been published yet.",
           emptyHistory: "No broadcasts have been delivered yet.",
           noticeComposerTitle: "Create notice",
@@ -271,8 +294,8 @@ export default function NoticesPage() {
           confirmApply: "Apply maintenance update",
           resolving: "Resolving",
           resolve: "Resolve",
-          maintenanceEnabled: "enabled",
-          maintenanceDisabled: "disabled",
+          maintenanceEnabled: "Enabled",
+          maintenanceDisabled: "Disabled",
           maintenanceSummary:
             "Once enabled, dispatch, webhook delivery, and partner ingress are paused.",
           reasonPlaceholder:
@@ -284,69 +307,77 @@ export default function NoticesPage() {
           status: "Status",
           severity: "SEV",
           delivery: "Delivery",
-          broadcastAt: "Broadcast at",
+          broadcastAt: "Broadcast At",
           updatedBy: "Updated by",
           window: "Window",
+          action: "Action",
+          archived: "Archived",
+          noticeId: "Notice",
+          targets: "Targets",
+          historySubtitle: "Broadcast history · cross-app delivery outcomes",
+          highRisk: "High risk",
         }
       : {
-          title: "Notices & Maintenance",
-          subtitle:
-            "critical / maintenance severity 會推 cross-app banner 到 ops / tenant / driver (Q-ADM15)。",
-          notices: "Notices",
-          maintenance: "Maintenance Mode",
-          history: "Broadcast History",
+          title: "公告與維護",
+          subtitle: "重大或維護等級會將跨應用橫幅推送到營運、租戶與司機端。",
+          notices: "公告",
+          maintenance: "維護模式",
+          history: "廣播歷史",
           createNotice: "建立公告",
-          enterMaintenance: "進入維護",
+          enterMaintenance: "更新維護模式",
           refresh: "重新整理",
-          refreshing: "重新整理中",
+          refreshing: "重新整理中…",
           emptyNotices: "目前沒有平台公告。",
           emptyHistory: "目前沒有跨應用廣播紀錄。",
           noticeComposerTitle: "建立公告",
           noticeComposerSubtitle:
-            "發佈給平台營運、租戶或司機端的 cross-app banner。",
+            "發佈給平台營運、租戶或司機端的跨應用橫幅公告。",
           noticeTitle: "標題",
           noticeBody: "內容",
           noticeAudience: "對象",
-          noticeSeverity: "Severity",
+          noticeSeverity: "嚴重程度",
           publishNotice: "發佈公告",
-          publishing: "發佈中",
-          activeNoticeGuardrailTitle: "進入維護前應先發 maintenance notice",
+          publishing: "發佈中…",
+          activeNoticeGuardrailTitle: "進入維護前應先發維護公告",
           activeNoticeGuardrailBody:
-            "先發佈 maintenance severity notice，再啟用全平台 maintenance mode。",
-          currentMaintenance: "Maintenance mode · 目前狀態",
-          currentMaintenanceSubtitle: "全平台 dispatch 與入站流量控管。",
-          internalReason: "原因 · 內部紀錄",
+            "請先發佈維護等級公告，再啟用全平台維護模式。",
+          currentMaintenance: "目前維護模式",
+          currentMaintenanceSubtitle: "全平台派遣與入站流量控管。",
+          internalReason: "內部紀錄原因",
           scheduledStart: "預定起始",
           scheduledEnd: "預定結束",
-          saveMaintenance: "保存維護設定",
-          previewTitle: "當前 maintenance notice (preview)",
+          saveMaintenance: "儲存維護設定",
+          previewTitle: "目前維護公告預覽",
           previewFallback: "啟用維護模式後，將推送跨應用中斷公告。",
-          previewTargets: "目標對象：ops · tenant · driver",
-          reasonRequired: "高風險 maintenance 動作必須填寫原因後才能保存。",
-          confirmTitle: "確認更新 maintenance mode",
-          confirmBody:
-            "這是高風險動作。保存後會改變全平台 dispatch 與 webhook 行為。",
+          previewTargets: "目標對象：營運 · 租戶 · 司機",
+          reasonRequired: "高風險維護動作必須填寫原因後才能儲存。",
+          confirmTitle: "確認更新維護模式",
+          confirmBody: "這是高風險動作。儲存後會改變全平台派遣與回呼行為。",
           confirmReasonLabel: "稽核原因",
           confirmCancel: "取消",
           confirmApply: "套用維護更新",
-          resolving: "處理中",
-          resolve: "Resolve",
-          maintenanceEnabled: "enabled",
-          maintenanceDisabled: "disabled",
-          maintenanceSummary:
-            "啟用後將停止 dispatch、webhook 投遞與 partner 入站。",
-          reasonPlaceholder:
-            "例如：計畫性維護、partner outage mitigation、compliance hold",
-          startPlaceholder: "YYYY-MM-DD HH:MM",
-          endPlaceholder: "YYYY-MM-DD HH:MM",
-          createdAt: "更新",
+          resolving: "處理中…",
+          resolve: "解決",
+          maintenanceEnabled: "已啟用",
+          maintenanceDisabled: "已停用",
+          maintenanceSummary: "啟用後將停止派遣、回呼投遞與合作夥伴入站。",
+          reasonPlaceholder: "例如：計畫性維護、合作夥伴服務中斷緩解或法遵保留",
+          startPlaceholder: "例如 2026-06-07 14:30",
+          endPlaceholder: "例如 2026-06-07 16:00",
+          createdAt: "更新時間",
           audience: "對象",
-          status: "Status",
-          severity: "SEV",
-          delivery: "Delivery",
-          broadcastAt: "Broadcast at",
-          updatedBy: "Updated by",
-          window: "Window",
+          status: "狀態",
+          severity: "等級",
+          delivery: "送達狀態",
+          broadcastAt: "廣播時間",
+          updatedBy: "更新者",
+          window: "時窗",
+          action: "操作",
+          archived: "已封存",
+          noticeId: "公告",
+          targets: "目標對象",
+          historySubtitle: "廣播歷史與跨應用投遞結果",
+          highRisk: "高風險",
         };
 
   const [loading, setLoading] = useState(true);
@@ -393,12 +424,18 @@ export default function NoticesPage() {
       setConfirmReason(maintenanceResult.reason ?? "");
     } catch (nextError: unknown) {
       setError(
-        nextError instanceof Error ? nextError.message : String(nextError),
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(nextError),
+          locale === "en"
+            ? "Unable to load notices workspace"
+            : "無法載入公告與維護工作區",
+        ),
       );
     } finally {
       setLoading(false);
     }
-  }, [client]);
+  }, [client, locale]);
 
   useEffect(() => {
     void loadData();
@@ -453,11 +490,11 @@ export default function NoticesPage() {
         title: notice.title,
         severity: notice.severity,
         status: notice.status,
-        audience: audienceTargets(notice.targetAudience),
+        audience: audienceTargets(notice.targetAudience, locale),
         updated: formatDateTime(notice.updatedAt),
         source: notice,
       })),
-    [sortedNotices],
+    [locale, sortedNotices],
   );
 
   const historyRows = useMemo<BroadcastRow[]>(
@@ -466,23 +503,18 @@ export default function NoticesPage() {
         id: notice.noticeId.slice(0, 12),
         title: notice.title,
         severity: notice.severity,
-        targets: audienceTargets(notice.targetAudience),
-        delivery:
-          notice.status === "resolved"
-            ? "resolved delivery archived"
-            : notice.targetAudience === "all"
-              ? "delivered 3 / 3"
-              : "delivered 1 / 1",
+        targets: audienceTargets(notice.targetAudience, locale),
+        delivery: formatDeliveryLabel(notice, locale),
         broadcastAt: formatDateTime(
           notice.scheduledAt ?? notice.updatedAt ?? notice.createdAt,
         ),
       })),
-    [sortedNotices],
+    [locale, sortedNotices],
   );
 
   const noticeColumns = useMemo<CanvasTableColumn<NoticeRow>[]>(
     () => [
-      { h: "ID", k: "id", w: 100, mono: true },
+      { h: copy.noticeId, k: "id", w: 100, mono: true },
       {
         h: copy.noticeTitle,
         w: 320,
@@ -523,12 +555,12 @@ export default function NoticesPage() {
       },
       { h: copy.createdAt, k: "updated", w: 180, mono: true },
       {
-        h: "Action",
+        h: copy.action,
         w: 110,
         r: (row: NoticeRow) =>
           row.status === "resolved" ? (
             <CanvasPill theme={theme} tone="neutral">
-              archived
+              {copy.archived}
             </CanvasPill>
           ) : (
             <CanvasBtn
@@ -545,6 +577,8 @@ export default function NoticesPage() {
       },
     ],
     [
+      copy.action,
+      copy.archived,
       copy.audience,
       copy.createdAt,
       copy.noticeTitle,
@@ -559,7 +593,7 @@ export default function NoticesPage() {
 
   const historyColumns = useMemo<CanvasTableColumn<BroadcastRow>[]>(
     () => [
-      { h: "Notice", k: "id", w: 110, mono: true },
+      { h: copy.noticeId, k: "id", w: 110, mono: true },
       { h: copy.noticeTitle, k: "title", w: 280 },
       {
         h: copy.severity,
@@ -570,7 +604,7 @@ export default function NoticesPage() {
           </CanvasPill>
         ),
       },
-      { h: "Targets", k: "targets", w: 180, mono: true },
+      { h: copy.targets, k: "targets", w: 180, mono: true },
       {
         h: copy.delivery,
         w: 180,
@@ -582,7 +616,15 @@ export default function NoticesPage() {
       },
       { h: copy.broadcastAt, k: "broadcastAt", w: 180, mono: true },
     ],
-    [copy.broadcastAt, copy.delivery, copy.noticeTitle, copy.severity, locale],
+    [
+      copy.broadcastAt,
+      copy.delivery,
+      copy.noticeId,
+      copy.noticeTitle,
+      copy.severity,
+      copy.targets,
+      locale,
+    ],
   );
 
   const pageTabs = useMemo(() => {
@@ -647,7 +689,11 @@ export default function NoticesPage() {
       await loadData();
     } catch (nextError: unknown) {
       setError(
-        nextError instanceof Error ? nextError.message : String(nextError),
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(nextError),
+          locale === "en" ? "Unable to create notice" : "無法建立公告",
+        ),
       );
     } finally {
       setCreating(false);
@@ -662,7 +708,11 @@ export default function NoticesPage() {
       await loadData();
     } catch (nextError: unknown) {
       setError(
-        nextError instanceof Error ? nextError.message : String(nextError),
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(nextError),
+          locale === "en" ? "Unable to resolve notice" : "無法結束公告",
+        ),
       );
     } finally {
       setResolvingNoticeId(null);
@@ -689,7 +739,13 @@ export default function NoticesPage() {
       await loadData();
     } catch (nextError: unknown) {
       setError(
-        nextError instanceof Error ? nextError.message : String(nextError),
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(nextError),
+          locale === "en"
+            ? "Unable to update maintenance mode"
+            : "無法更新維護模式",
+        ),
       );
     } finally {
       setUpdatingMaintenance(false);
@@ -759,7 +815,9 @@ export default function NoticesPage() {
             theme={theme}
             tone="danger"
             title={error}
-            body={copy.activeNoticeGuardrailBody}
+            body={
+              activeTab === "maint" ? copy.activeNoticeGuardrailBody : undefined
+            }
           />
         ) : null}
 
@@ -802,9 +860,15 @@ export default function NoticesPage() {
                         }
                         style={selectStyle}
                       >
-                        <option value="info">low</option>
-                        <option value="warning">medium</option>
-                        <option value="critical">high</option>
+                        <option value="info">
+                          {toSeverityLabel("info", locale)}
+                        </option>
+                        <option value="warning">
+                          {toSeverityLabel("warning", locale)}
+                        </option>
+                        <option value="critical">
+                          {toSeverityLabel("critical", locale)}
+                        </option>
                       </select>
                     </CanvasField>
                     <CanvasField
@@ -822,10 +886,18 @@ export default function NoticesPage() {
                         }
                         style={selectStyle}
                       >
-                        <option value="all">ops · tenant · driver</option>
-                        <option value="ops">ops</option>
-                        <option value="tenants">tenant</option>
-                        <option value="drivers">driver</option>
+                        <option value="all">
+                          {audienceTargets("all", locale)}
+                        </option>
+                        <option value="ops">
+                          {audienceTargets("ops", locale)}
+                        </option>
+                        <option value="tenants">
+                          {audienceTargets("tenants", locale)}
+                        </option>
+                        <option value="drivers">
+                          {audienceTargets("drivers", locale)}
+                        </option>
                       </select>
                     </CanvasField>
                   </div>
@@ -1003,7 +1075,7 @@ export default function NoticesPage() {
                     <CanvasField
                       theme={theme}
                       label={copy.scheduledStart}
-                      hint="UTC"
+                      hint="以世界標準時間記錄"
                     >
                       <input
                         type="datetime-local"
@@ -1076,7 +1148,10 @@ export default function NoticesPage() {
                   <CanvasField theme={theme} label={copy.updatedBy}>
                     <CanvasInput
                       theme={theme}
-                      value={maintenance?.updatedBy ?? "system"}
+                      value={
+                        maintenance?.updatedBy ??
+                        formatPlatformCodeLabel(locale, "system")
+                      }
                     />
                   </CanvasField>
                   <CanvasField theme={theme} label={copy.createdAt}>
@@ -1096,7 +1171,7 @@ export default function NoticesPage() {
           <CanvasCard
             theme={theme}
             title={copy.history}
-            subtitle="Broadcast history · 跨 app 投遞結果"
+            subtitle={copy.historySubtitle}
             padding={0}
           >
             {historyRows.length > 0 ? (
@@ -1121,7 +1196,7 @@ export default function NoticesPage() {
             style={modalCardStyle}
             actions={
               <CanvasPill theme={theme} tone="danger" dot>
-                high risk
+                {copy.highRisk}
               </CanvasPill>
             }
           >

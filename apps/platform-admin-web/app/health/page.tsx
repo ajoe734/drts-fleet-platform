@@ -9,7 +9,12 @@ import {
   type ReactNode,
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
+import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type {
   AdapterHealthRecord,
   OperationalAdapterDetailRecord,
@@ -269,32 +274,13 @@ function formatAdapterSource(
 ): string {
   const normalized = platformCode.replace(/[_-]+/g, " ").trim();
   const title = normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
-  return locale === "en" ? title : `${title} 通道`;
+  return locale === "en"
+    ? title
+    : `${formatPlatformCodeLabel(locale, platformCode)}通道`;
 }
 
 function statusLabel(locale: "en" | "zh", status: string): string {
-  if (locale === "en") {
-    return status.replace(/_/g, " ");
-  }
-
-  switch (status) {
-    case "healthy":
-      return "正常";
-    case "degraded":
-      return "降級";
-    case "down":
-      return "中斷";
-    case "unknown":
-      return "未知";
-    case "active":
-      return "啟用";
-    case "expiring":
-      return "即將到期";
-    case "missing":
-      return "缺失";
-    default:
-      return status.replace(/_/g, " ");
-  }
+  return formatPlatformCodeLabel(locale, status);
 }
 
 function formatAlertTitle(
@@ -319,7 +305,7 @@ function formatAlertTitle(
     },
     webhook_failure_burst: {
       en: "Webhook failures spiked",
-      zh: "Webhook 失敗量異常",
+      zh: "回呼失敗量異常",
     },
     eligibility_review_backlog: {
       en: "Eligibility review backlog increased",
@@ -327,7 +313,7 @@ function formatAlertTitle(
     },
     adapter_degradation: {
       en: "Adapter degradation detected",
-      zh: "Adapter 健康降級",
+      zh: "介接器健康降級",
     },
   };
 
@@ -394,11 +380,11 @@ function buildCanvasTabs(
   const badge = activeAlertsCount > 0 ? ` · ${activeAlertsCount}` : "";
 
   return {
-    alerts: locale === "en" ? `Alerts${badge}` : `Alerts${badge}`,
-    dispatch: "Dispatch",
-    webhook: "Webhook",
-    filing: "Filing",
-    adapters: "Adapters",
+    alerts: locale === "en" ? `Alerts${badge}` : `警示${badge}`,
+    dispatch: locale === "en" ? "Dispatch" : "派遣",
+    webhook: locale === "en" ? "Webhook" : "回呼",
+    filing: locale === "en" ? "Filing" : "申報",
+    adapters: locale === "en" ? "Adapters" : "介接器",
   };
 }
 
@@ -418,15 +404,15 @@ export default function HealthPage() {
       ? {
           title: "Platform Health",
           subtitle:
-            "平台層告警 · dispatch lag · webhook queue · adapter health",
+            "Platform-routed alerts, dispatch lag, webhook queue, and adapter health.",
           refresh: "Refresh",
-          alertsTitle: "Active alerts · 跨模組告警總覽",
+          alertsTitle: "Active Alerts",
           alertsEmpty: "No active alerts. Platform health is within threshold.",
-          adaptersTitle: "Adapter inventory",
+          adaptersTitle: "Adapter Inventory",
           adaptersEmpty: "No adapter health records yet.",
-          dispatchTitle: "Dispatch watch",
-          webhookTitle: "Webhook watch",
-          filingTitle: "Filing & reporting watch",
+          dispatchTitle: "Dispatch Watch",
+          webhookTitle: "Webhook Watch",
+          filingTitle: "Filing & Reporting Watch",
           dispatchEmpty:
             "Dispatch lag, queue depth, and redispatch counters are healthy.",
           webhookEmpty:
@@ -440,80 +426,109 @@ export default function HealthPage() {
             "Latency and 24h volume will populate when adapter telemetry is exposed by the API.",
           kpis: {
             dispatch: {
-              label: "dispatch lag p95",
+              label: "Oldest Ready Lag",
               sub: (count: number) => `${count} lagged orders`,
             },
             webhook: {
-              label: "webhook queue",
+              label: "Queued Webhooks",
               sub: (count: number) => `${count} failed in the last hour`,
             },
             eligibility: {
-              label: "eligibility queue",
+              label: "Eligibility Review Queue",
               sub: (count: number) => `${count} manual reviews`,
             },
             reporting: {
-              label: "reporting failures 24h",
+              label: "Failed Jobs (24h)",
               sub: (count: number) => `${count} jobs queued`,
             },
           },
           adapterColumns: {
-            adapter: "ADAPTER",
-            source: "SOURCE",
-            kind: "KIND",
-            status: "STATUS",
-            latency: "LATENCY",
-            lastEvent: "LAST EVENT",
-            orders24h: "orders 24h",
+            adapter: "Adapter",
+            source: "Source",
+            kind: "Mode",
+            status: "Status",
+            latency: "Latency",
+            lastEvent: "Last Event",
+            orders24h: "Orders 24h",
           },
+          summary: {
+            readyQueueDepth: "Ready Queue Depth",
+            redispatchOrders: "Redispatch Orders",
+            exceptionHolds: "Exception Holds",
+            dispatchFailedOrders: "Dispatch Failed Orders",
+            activeEndpoints: "Active Endpoints",
+            disabledEndpoints: "Disabled Endpoints",
+            queuedDeliveries: "Queued Deliveries",
+            oldestQueuedLag: "Oldest Queued Lag",
+            reportingQueuedJobs: "Reporting Queued Jobs",
+            recordingBacklog: "Recording Backlog",
+            manualReviewQueue: "Manual Review Queue",
+            eligibilityFailures24h: "Eligibility Failures 24h",
+          },
+          refreshErrorTitle: "Unable to refresh platform health",
+          entries: "entries",
         }
       : {
-          title: "Platform Health",
-          subtitle:
-            "平台層告警 · dispatch lag · webhook queue · adapter health",
-          refresh: "重整",
-          alertsTitle: "Active alerts · 跨模組告警總覽",
+          title: "平台健康",
+          subtitle: "平台層警示、派遣延遲、回呼佇列與介接器健康總覽。",
+          refresh: "重新整理",
+          alertsTitle: "有效警示",
           alertsEmpty: "目前沒有有效告警，平台指標都在門檻內。",
-          adaptersTitle: "Adapter inventory",
-          adaptersEmpty: "目前沒有 adapter 健康紀錄。",
-          dispatchTitle: "Dispatch watch",
-          webhookTitle: "Webhook watch",
-          filingTitle: "Filing & reporting watch",
-          dispatchEmpty:
-            "目前 dispatch lag、queue depth 與 redispatch 指標都在門檻內。",
-          webhookEmpty: "Webhook 投遞與重試都在門檻內，暫時不需人工介入。",
-          filingEmpty: "申報、報表與 eligibility backlog 目前都在門檻內。",
+          adaptersTitle: "介接器盤點",
+          adaptersEmpty: "目前沒有介接器健康紀錄。",
+          dispatchTitle: "派遣監看",
+          webhookTitle: "回呼監看",
+          filingTitle: "申報與報表監看",
+          dispatchEmpty: "派遣延遲、佇列深度與重新派遣指標都在門檻內。",
+          webhookEmpty: "回呼投遞與重試都在門檻內，暫時不需人工介入。",
+          filingEmpty: "申報、報表與資格審查積壓都在門檻內。",
           loadingAlerts: "正在載入健康訊號...",
-          loadingAdapters: "正在載入 adapter inventory...",
+          loadingAdapters: "正在載入介接器盤點...",
           openAlert: "查看",
-          metricsNote:
-            "Latency 與 24h volume 會在 adapter telemetry API 暴露後補齊。",
+          metricsNote: "當介接器遙測資料可用後，延遲與 24 小時量能會補齊。",
           kpis: {
             dispatch: {
-              label: "dispatch lag p95",
+              label: "最久待派延遲",
               sub: (count: number) => `${count} 筆延遲訂單`,
             },
             webhook: {
-              label: "webhook queue",
+              label: "回呼佇列",
               sub: (count: number) => `近 1 小時失敗 ${count} 筆`,
             },
             eligibility: {
-              label: "eligibility queue",
+              label: "資格審查佇列",
               sub: (count: number) => `${count} 筆人工審核`,
             },
             reporting: {
-              label: "reporting failures 24h",
+              label: "24 小時報表失敗",
               sub: (count: number) => `${count} 筆工作仍在佇列`,
             },
           },
           adapterColumns: {
-            adapter: "ADAPTER",
-            source: "SOURCE",
-            kind: "KIND",
-            status: "STATUS",
-            latency: "LATENCY",
-            lastEvent: "LAST EVENT",
-            orders24h: "orders 24h",
+            adapter: "介接器",
+            source: "來源",
+            kind: "模式",
+            status: "狀態",
+            latency: "延遲",
+            lastEvent: "最後事件",
+            orders24h: "24 小時訂單",
           },
+          summary: {
+            readyQueueDepth: "待派佇列深度",
+            redispatchOrders: "重新派遣訂單",
+            exceptionHolds: "例外保留",
+            dispatchFailedOrders: "派遣失敗訂單",
+            activeEndpoints: "啟用中的端點",
+            disabledEndpoints: "停用端點",
+            queuedDeliveries: "排隊中的投遞",
+            oldestQueuedLag: "最久排隊延遲",
+            reportingQueuedJobs: "排隊中的報表工作",
+            recordingBacklog: "錄音回補積壓",
+            manualReviewQueue: "人工審查佇列",
+            eligibilityFailures24h: "24 小時資格失敗",
+          },
+          refreshErrorTitle: "無法更新平台健康資料",
+          entries: "筆",
         };
 
   const loadData = useCallback(async () => {
@@ -530,9 +545,13 @@ export default function HealthPage() {
       setObservability(operationalData);
     } catch (caughtError: unknown) {
       setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : String(caughtError),
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(caughtError),
+          locale === "en"
+            ? "Platform health data unavailable"
+            : "平台健康資料暫時無法載入",
+        ),
       );
     } finally {
       setLoading(false);
@@ -590,7 +609,7 @@ export default function HealthPage() {
     return merged.map((adapter) => ({
       adapter: adapter.platformCode,
       source: formatAdapterSource(locale, adapter.platformCode),
-      kind: adapter.capabilitySummary.mode.toUpperCase(),
+      kind: formatPlatformCodeLabel(locale, adapter.capabilitySummary.mode),
       status: adapter.status,
       latency: "—",
       lastEvent: formatDateTime(
@@ -603,7 +622,11 @@ export default function HealthPage() {
         fallbackOrders > 0
           ? fallbackOrders.toLocaleString(locale === "en" ? "en-US" : "zh-TW")
           : "—",
-      note: adapter.lastError ?? statusLabel(locale, adapter.reason),
+      note: adapter.lastError
+        ? locale === "en"
+          ? adapter.lastError
+          : "已偵測到介接器錯誤，請查看原始事件。"
+        : formatPlatformCodeLabel(locale, adapter.reason),
     }));
   }, [
     adapters,
@@ -661,7 +684,7 @@ export default function HealthPage() {
 
   const dispatchSummary = [
     {
-      label: locale === "en" ? "Ready queue depth" : "Ready queue depth",
+      label: copy.summary.readyQueueDepth,
       value: formatMetricValue(
         locale,
         observability.dispatch.queueDepth,
@@ -669,7 +692,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: locale === "en" ? "Redispatch orders" : "Redispatch orders",
+      label: copy.summary.redispatchOrders,
       value: formatMetricValue(
         locale,
         observability.dispatch.redispatchOrders,
@@ -677,7 +700,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: locale === "en" ? "Exception holds" : "Exception holds",
+      label: copy.summary.exceptionHolds,
       value: formatMetricValue(
         locale,
         observability.dispatch.exceptionHoldOrders,
@@ -685,8 +708,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label:
-        locale === "en" ? "Dispatch failed orders" : "Dispatch failed orders",
+      label: copy.summary.dispatchFailedOrders,
       value: formatMetricValue(
         locale,
         observability.dispatch.dispatchFailedOrders,
@@ -697,7 +719,7 @@ export default function HealthPage() {
 
   const webhookSummary = [
     {
-      label: locale === "en" ? "Active endpoints" : "Active endpoints",
+      label: copy.summary.activeEndpoints,
       value: formatMetricValue(
         locale,
         observability.webhook.activeEndpoints,
@@ -705,7 +727,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: locale === "en" ? "Disabled endpoints" : "Disabled endpoints",
+      label: copy.summary.disabledEndpoints,
       value: formatMetricValue(
         locale,
         observability.webhook.disabledEndpoints,
@@ -713,7 +735,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: locale === "en" ? "Queued deliveries" : "Queued deliveries",
+      label: copy.summary.queuedDeliveries,
       value: formatMetricValue(
         locale,
         observability.webhook.queuedDeliveries,
@@ -721,7 +743,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: locale === "en" ? "Oldest queued lag" : "Oldest queued lag",
+      label: copy.summary.oldestQueuedLag,
       value: formatMetricValue(
         locale,
         observability.webhook.oldestQueuedDeliveryLagMinutes,
@@ -732,8 +754,7 @@ export default function HealthPage() {
 
   const filingSummary = [
     {
-      label:
-        locale === "en" ? "Reporting queued jobs" : "Reporting queued jobs",
+      label: copy.summary.reportingQueuedJobs,
       value: formatMetricValue(
         locale,
         observability.reporting.queuedJobs,
@@ -741,7 +762,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: locale === "en" ? "Recording backlog" : "Recording backlog",
+      label: copy.summary.recordingBacklog,
       value: formatMetricValue(
         locale,
         observability.recording.pendingOrders,
@@ -749,7 +770,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label: locale === "en" ? "Manual review queue" : "Manual review queue",
+      label: copy.summary.manualReviewQueue,
       value: formatMetricValue(
         locale,
         observability.eligibility.manualReviewQueue,
@@ -757,10 +778,7 @@ export default function HealthPage() {
       ),
     },
     {
-      label:
-        locale === "en"
-          ? "Eligibility failures 24h"
-          : "Eligibility failures 24h",
+      label: copy.summary.eligibilityFailures24h,
       value: formatMetricValue(
         locale,
         observability.eligibility.recentFailureCount24h,
@@ -794,11 +812,7 @@ export default function HealthPage() {
           <CanvasBanner
             theme={theme}
             tone="danger"
-            title={
-              locale === "en"
-                ? "Unable to refresh platform health"
-                : "無法更新平台健康資料"
-            }
+            title={copy.refreshErrorTitle}
             body={error}
           />
         ) : null}
@@ -910,7 +924,7 @@ export default function HealthPage() {
                             <span style={alertSecondaryStyle}>
                               {locale === "en"
                                 ? `${measured} measured · critical at ${threshold}`
-                                : `目前 ${measured} · critical 門檻 ${threshold}`}
+                                : `目前 ${measured} · 重大門檻 ${threshold}`}
                             </span>
                           </div>
                         </div>
@@ -1017,7 +1031,7 @@ export default function HealthPage() {
 
         <CanvasCard
           theme={theme}
-          title={`${copy.adaptersTitle} · ${adapterRows.length} ${locale === "en" ? "entries" : "筆"}`}
+          title={`${copy.adaptersTitle} · ${adapterRows.length} ${copy.entries}`}
           subtitle={copy.metricsNote}
           padding={0}
         >

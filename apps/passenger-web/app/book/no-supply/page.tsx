@@ -2,19 +2,19 @@ import Link from "next/link";
 
 const supplyContext = [
   {
-    label: "Pickup ETA window",
-    value: "no qualified driver under 30 min",
-    note: "The platform searched the configured radius and time window without a match.",
+    label: "預估上車時間",
+    value: "30 分鐘內沒有符合條件的司機",
+    note: "系統已在設定的距離與時間範圍內搜尋，但尚未媒合成功。",
   },
   {
-    label: "Service area",
-    value: "in service",
-    note: "The drop-off is inside the supported area, so this is not an `unsupported` outcome.",
+    label: "服務區域",
+    value: "位於服務範圍內",
+    note: "下車地點仍在支援範圍內，因此問題是暫無車輛，而不是地點不支援。",
   },
   {
-    label: "Fallback options",
-    value: "schedule for later, retry, alternate channel",
-    note: "Each fallback is offered as an explicit affordance, not auto-applied.",
+    label: "可用備援",
+    value: "稍後預約、重新嘗試、改由其他渠道協助",
+    note: "每個備援都會明確提供給乘客選擇，不會自動套用。",
   },
 ];
 
@@ -23,21 +23,17 @@ export default function BookingNoSupplyPage() {
     <div className="page-shell">
       <section className="hero-card">
         <span className="eyebrow state-pill state-pill-negative">
-          No driver matched
+          尚未媒合司機
         </span>
-        <h1>No supply is currently available for this request.</h1>
+        <h1>目前沒有可接此需求的車輛。</h1>
         <p>
-          The request was not denied; the platform simply could not match a
-          qualified driver inside the configured radius and time window. The
-          rider keeps cancel-safe authority and is offered explicit fallbacks.
+          這不代表需求被政策拒絕，而是系統在指定範圍內尚未找到符合條件的司機。乘客可以重試或選擇其他備援方式。
         </p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">
-          Why this differs from `denied` and `unsupported`
-        </span>
-        <h3>Supply-side rather than policy-side</h3>
+        <span className="surface-kicker">與政策拒絕或不支援不同</span>
+        <h3>這是車輛供給問題，不是資格或政策問題</h3>
         <dl className="kv-grid">
           {supplyContext.map((row) => (
             <div className="kv-row" key={row.label}>
@@ -53,28 +49,20 @@ export default function BookingNoSupplyPage() {
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Retry now</strong>
-          <p>
-            Riders may retry immediately; supply changes second-by-second and
-            the platform may match a driver shortly.
-          </p>
+          <strong>立即重試</strong>
+          <p>乘客可以立即重新嘗試。車輛供給會隨時間變化，稍後可能成功媒合。</p>
           <Link className="text-link" href="/book">
-            Re-submit the same request
+            重新送出相同需求
           </Link>
         </article>
         <article className="callout-card">
-          <strong>Schedule for later</strong>
-          <p>
-            Riders may convert the request into a scheduled reservation if the
-            program allows it. The reservation lane owns the actual booking type
-            swap.
-          </p>
+          <strong>改約稍後</strong>
+          <p>若方案允許，乘客可改成稍後預約。實際預約類型會由預約流程處理。</p>
         </article>
         <article className="callout-card warning">
-          <strong>No phantom matching</strong>
+          <strong>不假裝已媒合</strong>
           <p>
-            The route never claims a match that does not exist and never holds
-            the rider in a fake "searching forever" state without a deadline.
+            頁面不會宣稱不存在的媒合，也不會讓乘客停在沒有期限的「持續搜尋中」狀態。
           </p>
         </article>
       </section>

@@ -319,7 +319,7 @@ function emptyTitle(locale: Locale, reason: EmptyReason) {
     case "no_data":
       return copy(locale, "No records yet", "目前沒有資料");
     case "not_provisioned":
-      return copy(locale, "Not provisioned", "尚未 provision");
+      return copy(locale, "Not provisioned", "尚未佈建");
     case "fetch_failed":
       return copy(locale, "Snapshot unavailable", "快照暫不可用");
     case "permission_denied":
@@ -349,7 +349,7 @@ function defaultEmptyDescription(locale: Locale, reason: EmptyReason) {
       return copy(
         locale,
         "The required upstream record has not been provisioned for this vehicle yet.",
-        "這輛車所需的上游資料尚未 provision。",
+        "這輛車所需的上游資料尚未佈建。",
       );
     case "fetch_failed":
       return copy(
@@ -550,7 +550,7 @@ function renderEmptyState(
           <span
             style={{ ...monoStyle, fontSize: "11px", color: theme.textDim }}
           >
-            {reason}
+            {formatOpsCodeLabel(locale, reason)}
           </span>
         </span>
       }
@@ -781,14 +781,14 @@ function buildRefreshBannerBody(
     : copy(
         locale,
         "Backend refresh metadata unavailable; showing the latest server-rendered snapshot.",
-        "後端尚未提供 refresh metadata；目前顯示最新一次 server-rendered 快照。",
+        "後端尚未提供刷新中繼資料；目前顯示最新一次伺服器端渲染快照。",
       );
 
   return [
     copy(
       locale,
-      `T3 cadence · ${metadata.source} snapshot · ${freshnessLabel}`,
-      `T3 節奏 · ${metadata.source} 快照 · ${freshnessLabel}`,
+      `T3 cadence · ${formatOpsCodeLabel(locale, metadata.source)} snapshot · ${freshnessLabel}`,
+      `T3 節奏 · ${formatOpsCodeLabel(locale, metadata.source)}快照 · ${freshnessLabel}`,
     ),
     snapshotSummary,
     sectionSummary,
@@ -878,7 +878,7 @@ function buildVehicleActionFromDescriptor(
   ) {
     return {
       descriptor,
-      label: copy(locale, "Platform Admin /fleet", "Platform Admin /fleet"),
+      label: copy(locale, "Platform Admin /fleet", "平台管理後台車隊頁"),
       icon: "ext",
       ...(context.platformAdminHref ? { href: context.platformAdminHref } : {}),
       openInNewTab: true,
@@ -1141,7 +1141,7 @@ export default async function VehicleDetailPage({
               copy(
                 locale,
                 "No vehicle record matches this id in the current ops registry snapshot.",
-                "目前 ops 名冊快照中沒有符合此編號的車輛。",
+                "目前營運名冊快照中沒有符合此編號的車輛。",
               ),
             ),
             backAction,
@@ -1205,7 +1205,7 @@ export default async function VehicleDetailPage({
     label: copy(
       locale,
       "Open offboarding in Platform Admin",
-      "在 Platform Admin 開啟退場流程",
+      "在平台管理後台開啟退場流程",
     ),
   };
   const platformAdminHref = platformAdminOrigin
@@ -1261,7 +1261,7 @@ export default async function VehicleDetailPage({
           : "offboarding_inactive",
       riskLevel: "medium",
     },
-    label: copy(locale, "Platform Admin /fleet", "Platform Admin /fleet"),
+    label: copy(locale, "Platform Admin /fleet", "平台管理後台車隊頁"),
     icon: "ext",
     ...(platformAdminHref ? { href: platformAdminHref } : {}),
     openInNewTab: true,
@@ -1557,7 +1557,7 @@ export default async function VehicleDetailPage({
       v: copy(
         locale,
         "No dedicated field in current read model",
-        "目前 read model 沒有獨立欄位",
+        "目前讀取模型沒有獨立欄位",
       ),
     },
     {
@@ -1587,7 +1587,7 @@ export default async function VehicleDetailPage({
       mono: true,
     },
     {
-      k: copy(locale, "Last lifecycle trace", "最近 lifecycle 追蹤"),
+      k: copy(locale, "Last lifecycle trace", "最近生命週期追蹤"),
       v: vehicle.supplyLifecycle.lastTrace?.message ?? "—",
     },
   ];
@@ -1657,7 +1657,7 @@ export default async function VehicleDetailPage({
           title={copy(
             locale,
             `Refresh tier T3 · ${REFRESH_TIER}`,
-            `刷新層級 T3 · ${REFRESH_TIER}`,
+            "刷新層級 · 每 15 秒更新",
           )}
           body={buildRefreshBannerBody(
             locale,
@@ -1675,7 +1675,7 @@ export default async function VehicleDetailPage({
             title={copy(
               locale,
               "This vehicle is inside the offboarding state machine",
-              "此車輛已進入 offboarding state machine",
+              "此車輛已進入退場狀態流程",
             )}
             body={[
               formatOpsCodeLabel(
@@ -1860,7 +1860,7 @@ export default async function VehicleDetailPage({
                           ? copy(
                               locale,
                               "active driver task",
-                              "進行中 driver task",
+                              "進行中的司機任務",
                             )
                           : copy(locale, "active shift", "進行中班次"),
                     },
@@ -1892,12 +1892,12 @@ export default async function VehicleDetailPage({
                     ? copy(
                         locale,
                         "This vehicle is dispatch-disabled while offboarding, so no active driver binding is expected.",
-                        "此車正在退場且已停派，因此目前不預期會有 active driver binding。",
+                        "此車正在退場且已停派，因此目前不預期會有生效中的司機綁定。",
                       )
                     : copy(
                         locale,
                         "No active task or shift currently binds a driver to this vehicle.",
-                        "目前沒有 active task 或 shift 將司機綁定到此車。",
+                        "目前沒有生效中的任務或班次將司機綁定到此車。",
                       ),
                   driverBindingAction,
                 )
@@ -1940,7 +1940,7 @@ export default async function VehicleDetailPage({
                     copy(
                       locale,
                       "No incidents in the current incident snapshot reference this vehicle.",
-                      "目前事故快照中沒有任何事件關聯到這輛車。",
+                      "目前事故快照中沒有任何事件參照這輛車。",
                     ),
                   ),
                   incidentEmptyAction,
@@ -1953,7 +1953,7 @@ export default async function VehicleDetailPage({
               title={copy(
                 locale,
                 "Audit subset · vehicle scope",
-                "稽核子集 · 車輛範圍",
+                "稽核紀錄 · 車輛範圍",
               )}
               padding={0}
             >
@@ -1987,7 +1987,7 @@ export default async function VehicleDetailPage({
                     copy(
                       locale,
                       "No audit entries for this vehicle or its linked maintenance / contract resources were found.",
-                      "目前找不到這輛車或其關聯 maintenance / contract resource 的稽核紀錄。",
+                      "目前找不到這輛車或其關聯保修與合約資源的稽核紀錄。",
                     ),
                   ),
                   auditEmptyAction,

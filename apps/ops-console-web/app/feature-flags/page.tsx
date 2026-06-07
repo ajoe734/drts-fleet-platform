@@ -11,7 +11,13 @@ import type {
   UiRefreshMetadata,
 } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import {
+  classifyOpsErrorReason,
+  formatOpsUiError,
+  toOpsErrorMessage,
+} from "@/lib/error-copy";
 import { getServerLocale } from "@/lib/server-locale";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { t } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
@@ -89,6 +95,10 @@ type FlagTableRow = Record<string, unknown> & {
   _selected?: boolean;
 };
 
+function copyText(locale: Locale, en: string, zh: string) {
+  return locale === "zh" ? zh : en;
+}
+
 type EmptyStateIconName = "flags" | "audit" | "reports" | "search" | "warn";
 
 const theme = buildCanvasTheme({
@@ -127,15 +137,26 @@ const metaGridStyle = {
   gap: 12,
 };
 
-const tableColumns: CanvasTableColumn<FlagTableRow>[] = [
-  { h: "KEY", k: "keyCell", w: 320, mono: true },
-  { h: "SCOPE", k: "scopeCell", w: 120 },
-  { h: "STATE", k: "stateCell", w: 180 },
-  { h: "UPDATED BY", k: "updatedByCell", w: 180 },
-  { h: "AT", k: "updatedAt", w: 160, mono: true },
-  { h: "DESCRIPTION", k: "description" },
-  { h: "ACTIONS", k: "actionsCell", w: 220 },
-];
+function buildTableColumns(locale: Locale): CanvasTableColumn<FlagTableRow>[] {
+  return [
+    { h: copyText(locale, "KEY", "旗標"), k: "keyCell", w: 320, mono: true },
+    { h: copyText(locale, "SCOPE", "範圍"), k: "scopeCell", w: 120 },
+    { h: copyText(locale, "STATE", "狀態"), k: "stateCell", w: 180 },
+    {
+      h: copyText(locale, "UPDATED BY", "更新人"),
+      k: "updatedByCell",
+      w: 180,
+    },
+    {
+      h: copyText(locale, "AT", "更新時間"),
+      k: "updatedAt",
+      w: 160,
+      mono: true,
+    },
+    { h: copyText(locale, "DESCRIPTION", "說明"), k: "description" },
+    { h: copyText(locale, "ACTIONS", "操作"), k: "actionsCell", w: 220 },
+  ];
+}
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -330,7 +351,7 @@ function resolvePlatformAdminFlagsHref(flagKey?: string): string | null {
       resourceType: "feature_flag",
       resourceId: flagKey ?? "feature_flags",
       openMode: "new_tab",
-      label: "Platform Admin",
+      label: "平台管理端",
     }) ?? route
   );
 }
@@ -339,20 +360,20 @@ function featureFlagDescription(locale: Locale, flag: FeatureFlagRecordLike) {
   if (locale !== "zh") return flag.description ?? "—";
 
   const descriptions: Record<string, string> = {
-    "driver-app.earnings": "啟用司機 App 收益讀模型",
-    "driver-app.incidents": "啟用司機 App 事故回報",
-    "driver-app.shift": "啟用司機 App 班次與出勤追蹤",
-    "driver-app.tasks": "啟用司機 App 任務生命週期",
+    "driver-app.earnings": "啟用司機應用程式收益讀模型",
+    "driver-app.incidents": "啟用司機應用程式事故回報",
+    "driver-app.shift": "啟用司機應用程式班次與出勤追蹤",
+    "driver-app.tasks": "啟用司機應用程式任務生命週期",
     "ops-console.callcenter": "啟用營運後台客服中心工作階段檢視",
     "ops-console.complaint": "啟用營運後台客訴案件管理",
     "ops-console.dispatch": "啟用營運後台派車調度板",
     "ops-console.reports": "啟用營運後台報表任務管理",
-    "phase1.read-models": "啟用 Phase 1 讀模型介面",
-    "phase1.smoke-paths": "啟用 Phase 1 smoke test 端點",
+    "phase1.read-models": "啟用第一階段讀模型介面",
+    "phase1.smoke-paths": "啟用第一階段冒煙測試端點",
     "tenant-portal.billing": "啟用租戶入口帳務檢視",
     "tenant-portal.booking": "啟用租戶入口訂車管理",
     "tenant-portal.reports": "啟用租戶入口報表任務提交",
-    "tenant-portal.webhooks": "啟用租戶入口 Webhook 管理",
+    "tenant-portal.webhooks": "啟用租戶入口回呼管理",
   };
 
   return descriptions[flag.key] || flag.description || "—";
@@ -394,25 +415,14 @@ function actionTone(
 }
 
 function mapErrorToEmptyReason(error: string): EmptyReason {
-  const message = error.toLowerCase();
-  if (message.includes("403") || message.includes("forbidden")) {
-    return "permission_denied";
-  }
-  if (
-    message.includes("adapter") ||
-    message.includes("upstream") ||
-    message.includes("503") ||
-    message.includes("gateway")
-  ) {
-    return "external_unavailable";
-  }
-  return "fetch_failed";
+  return classifyOpsErrorReason(error);
 }
 
 function formatActionLabel(locale: Locale, action: string) {
   const key = `flags.action.${action}`;
   const translated = t(key, locale);
   if (translated !== key) return translated;
+  if (locale === "zh") return formatOpsCodeLabel(locale, action);
   return action
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
@@ -423,7 +433,7 @@ function formatDisabledReason(locale: Locale, reasonCode: string) {
   const key = `flags.disabledReason.${reasonCode}`;
   const translated = t(key, locale);
   if (translated !== key) return translated;
-  return reasonCode.replaceAll("_", " ");
+  return formatOpsCodeLabel(locale, reasonCode);
 }
 
 function resolveFlagActionHref(
@@ -576,7 +586,7 @@ function buildEmptyState(
       return {
         icon: "flags",
         tone: "warn",
-        label: "NOT PROVISIONED",
+        label: copyText(locale, "NOT PROVISIONED", "尚未開通"),
         title: t("flags.emptyState.notProvisioned.title", locale),
         body: t("flags.emptyState.notProvisioned.body", locale),
         actionLabel: t("flags.platformAdminLink", locale),
@@ -587,7 +597,7 @@ function buildEmptyState(
       return {
         icon: "audit",
         tone: "danger",
-        label: "PERMISSION DENIED",
+        label: copyText(locale, "PERMISSION DENIED", "權限不足"),
         title: t("flags.emptyState.permissionDenied.title", locale),
         body: t("flags.emptyState.permissionDenied.body", locale),
         actionLabel: t("common.refresh", locale),
@@ -597,7 +607,7 @@ function buildEmptyState(
       return {
         icon: "reports",
         tone: "warn",
-        label: "EXTERNAL UNAVAILABLE",
+        label: copyText(locale, "EXTERNAL UNAVAILABLE", "外部依賴異常"),
         title: t("flags.emptyState.externalUnavailable.title", locale),
         body: t("flags.emptyState.externalUnavailable.body", locale),
         actionLabel: t("common.tryAgain", locale),
@@ -607,7 +617,7 @@ function buildEmptyState(
       return {
         icon: "search",
         tone: "neutral",
-        label: "FILTERED EMPTY",
+        label: copyText(locale, "FILTERED EMPTY", "篩選後無結果"),
         title: t("flags.emptyState.filteredEmpty.title", locale),
         body: t("flags.emptyState.filteredEmpty.body", locale),
         actionLabel: t("flags.clearFilters", locale),
@@ -617,7 +627,7 @@ function buildEmptyState(
       return {
         icon: "warn",
         tone: "danger",
-        label: "FETCH FAILED",
+        label: copyText(locale, "FETCH FAILED", "載入失敗"),
         title: t("flags.emptyState.fetchFailed.title", locale),
         body: t("flags.emptyState.fetchFailed.body", locale),
         actionLabel: t("common.tryAgain", locale),
@@ -628,7 +638,7 @@ function buildEmptyState(
       return {
         icon: "flags",
         tone: "neutral",
-        label: "NO DATA",
+        label: copyText(locale, "NO DATA", "目前無資料"),
         title: t("flags.emptyState.noData.title", locale),
         body: t("flags.emptyState.noData.body", locale),
         actionLabel: t("common.refresh", locale),
@@ -719,11 +729,25 @@ function EmptyStateCard({
               {emptyState.label}
             </Pill>
             <Pill theme={theme} tone="neutral">
-              {reason}
+              {copyText(
+                locale,
+                formatOpsCodeLabel(locale, reason),
+                reason === "not_provisioned"
+                  ? "尚未開通"
+                  : reason === "permission_denied"
+                    ? "權限不足"
+                    : reason === "external_unavailable"
+                      ? "外部依賴異常"
+                      : reason === "filtered_empty"
+                        ? "篩選後無結果"
+                        : reason === "fetch_failed"
+                          ? "載入失敗"
+                          : "目前無資料",
+              )}
             </Pill>
             {messageCode ? (
               <Pill theme={theme} tone="neutral">
-                {messageCode}
+                {copyText(locale, messageCode, "後端訊息已記錄")}
               </Pill>
             ) : null}
           </div>
@@ -899,15 +923,21 @@ export default async function FeatureFlagsPage({
     const response = await client.getFeatureFlags();
     payload = normalizeFeatureFlags(response, locale);
   } catch (error) {
-    errorMessage =
-      error instanceof Error ? error.message : t("common.unknown", locale);
+    const rawError = toOpsErrorMessage(error, t("common.unknown", locale));
+    errorMessage = formatOpsUiError(
+      locale,
+      rawError,
+      locale === "en"
+        ? "Feature flag data unavailable"
+        : "功能旗標資料暫時無法載入",
+    );
     payload = {
       flags: [],
       notes: [],
       refresh: fallbackRefreshMetadata(),
       refreshTier: REFRESH_TIER,
       emptyState: {
-        reason: mapErrorToEmptyReason(errorMessage),
+        reason: mapErrorToEmptyReason(rawError),
         messageCode: "feature_flags.fetch_failed",
       },
     };
@@ -943,13 +973,14 @@ export default async function FeatureFlagsPage({
   const refreshHref = buildRefreshHref(query, scope, emptyReasonOverride);
   const platformAdminFlagsHref = resolvePlatformAdminFlagsHref();
   const rows = buildFlagTableRows(visibleFlags, locale);
+  const tableColumns = buildTableColumns(locale);
 
   return (
     <>
       <PageHeader
         theme={theme}
         title={
-          locale === "zh" ? "功能旗標 · read only" : "Feature Flags · read only"
+          locale === "zh" ? "功能旗標 · 唯讀" : "Feature Flags · read only"
         }
         subtitle={t("flags.subtitleReadOnly", locale)}
         actions={
@@ -1099,7 +1130,7 @@ export default async function FeatureFlagsPage({
                 />
                 <KPI
                   theme={theme}
-                  label={locale === "zh" ? "進行中 rollout" : "Mid-rollout"}
+                  label={locale === "zh" ? "進行中推進" : "Mid-rollout"}
                   value={partialCount}
                   sub={
                     locale === "zh" ? "跨租戶值不一致" : "Tenant values diverge"
@@ -1128,7 +1159,17 @@ export default async function FeatureFlagsPage({
                   )}
                 </Pill>
                 <Pill theme={theme} tone="neutral">
-                  {payload.refresh.source}
+                  {copyText(
+                    locale,
+                    payload.refresh.source,
+                    payload.refresh.source === "static"
+                      ? "靜態快照"
+                      : payload.refresh.source === "cache"
+                        ? "快取"
+                        : payload.refresh.source === "live"
+                          ? "即時來源"
+                          : payload.refresh.source,
+                  )}
                 </Pill>
                 <Pill theme={theme} tone="neutral">
                   {formatDateTime(payload.refresh.generatedAt, locale)}
@@ -1152,7 +1193,7 @@ export default async function FeatureFlagsPage({
             title={locale === "zh" ? "治理邊界" : "Governance boundary"}
             subtitle={
               locale === "zh"
-                ? "ops 只做 read-only 可見性與交叉 app 深連結。"
+                ? "營運後台只提供唯讀可見性，以及跨應用深連結。"
                 : "Ops stays read-only and links to the owner app for governance."
             }
             padding={18}
@@ -1160,16 +1201,20 @@ export default async function FeatureFlagsPage({
             <div style={metaGridStyle}>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 <Pill theme={theme} tone="accent">
-                  GET /api/ops/feature-flags
+                  {copyText(
+                    locale,
+                    "GET /api/ops/feature-flags",
+                    "營運旗標資料來源",
+                  )}
                 </Pill>
                 <Pill theme={theme} tone="neutral">
-                  availableActions
+                  {copyText(locale, "availableActions", "可用操作")}
                 </Pill>
                 <Pill theme={theme} tone="neutral">
-                  EmptyReason x6
+                  {copyText(locale, "EmptyReason x6", "六種空狀態原因")}
                 </Pill>
                 <Pill theme={theme} tone="neutral">
-                  cross-app deep links
+                  {copyText(locale, "cross-app deep links", "跨應用深連結")}
                 </Pill>
               </div>
               <div style={{ display: "grid", gap: 10 }}>
@@ -1179,7 +1224,7 @@ export default async function FeatureFlagsPage({
                   value={enabledCount}
                   sub={
                     locale === "zh"
-                      ? "營運可見 enabled"
+                      ? "目前在營運端可見且啟用"
                       : "Operationally enabled"
                   }
                 />
@@ -1189,7 +1234,7 @@ export default async function FeatureFlagsPage({
                   value={tenantScopedCount}
                   sub={
                     locale === "zh"
-                      ? "有 override 足跡"
+                      ? "可見租戶覆寫痕跡"
                       : "Overrides are present"
                   }
                 />
@@ -1253,9 +1298,7 @@ export default async function FeatureFlagsPage({
           <Card
             theme={theme}
             title={
-              locale === "zh"
-                ? "Operational flag registry"
-                : "Operational flag registry"
+              locale === "zh" ? "營運旗標總覽" : "Operational flag registry"
             }
             subtitle={t("flags.registrySummaryV2", locale, {
               total: payload.flags.length,

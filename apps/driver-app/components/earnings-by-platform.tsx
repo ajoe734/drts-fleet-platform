@@ -82,25 +82,25 @@ function EarningsRow({ item }: { item: PlatformEarningsItem }) {
     item.subsidy.amountMinor === 0 &&
     item.netAmount.amountMinor === 0;
 
-  const settlementLabel = owned ? "結算：DRTS" : "結算：外部平台";
-  const payoutLabel = owned ? "撥款：DRTS" : "撥款：外部平台";
+  const settlementLabel = owned ? "結算：平台自營" : "結算：外部平台";
+  const payoutLabel = owned ? "撥款：平台自營" : "撥款：外部平台";
   const ledgerLabel = owned
-    ? "列入 DRTS 對帳"
+    ? "列入自營對帳"
     : shadowOnly
-      ? "Shadow-only 鏡像"
+      ? "僅鏡像對帳"
       : "外部平台結算";
   const authorityColor = forwarded
     ? Tokens.colors.forwarded
     : Tokens.colors.owned;
   const authorityNote = owned
-    ? "會進入 DRTS 對帳單與待撥款計算。"
+    ? "會進入平台自營對帳與待撥款計算。"
     : shadowOnly
-      ? "僅供對帳檢視；不列入 DRTS 待撥款。"
-      : "由外部平台結算與撥款，不列入 DRTS 待撥款。";
+      ? "僅供鏡像對帳檢視；不列入平台自營待撥款。"
+      : "由外部平台結算與撥款，不列入平台自營待撥款。";
   const netAmountAccessibilityLabel = owned
-    ? "DRTS 淨額"
+    ? "平台自營淨額"
     : shadowOnly
-      ? "shadow-only 淨額"
+      ? "鏡像對帳淨額"
       : "外部平台淨額";
 
   return (

@@ -4,10 +4,15 @@ import { useEffect, useState } from "react";
 import type { CallSessionRecord } from "@drts/contracts";
 import { SessionGuard } from "@/components/session-guard";
 import { createConciergeClient } from "@/lib/api-client";
+import {
+  formatCallbackTaskStatus,
+  formatCallSessionStatus,
+  formatRecordingState,
+} from "@/lib/display-labels";
 import { useConciergePortal } from "@/lib/portal-state";
 
 function formatDateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : "Not set";
+  return value ? new Date(value).toLocaleString("zh-TW") : "未設定";
 }
 
 export default function CallbacksPage() {
@@ -35,12 +40,8 @@ export default function CallbacksPage() {
       );
       setSessions(items);
       setSelectedCallId((current) => current || items[0]?.callId || "");
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error
-          ? nextError.message
-          : "Failed to load callback sessions.",
-      );
+    } catch {
+      setError("載入回覆通話失敗，請稍後再試。");
     } finally {
       setLoading(false);
     }
@@ -73,13 +74,9 @@ export default function CallbacksPage() {
           setSessions(items);
           setSelectedCallId((current) => current || items[0]?.callId || "");
         }
-      } catch (nextError) {
+      } catch {
         if (!cancelled) {
-          setError(
-            nextError instanceof Error
-              ? nextError.message
-              : "Failed to load callback sessions.",
-          );
+          setError("載入回覆通話失敗，請稍後再試。");
         }
       } finally {
         if (!cancelled) {
@@ -97,20 +94,18 @@ export default function CallbacksPage() {
     <div className="page-shell">
       <SessionGuard requireDesk>
         <section className="hero-card">
-          <span className="section-kicker">Callbacks</span>
-          <h1>Schedule and close follow-up work from recent desk sessions.</h1>
+          <span className="section-kicker">回覆任務</span>
+          <h1>針對近期櫃台通話安排或完成後續回覆。</h1>
           <p>
-            The concierge surface stops short of complaint-case management, but
-            it still materializes callback creation and callback completion for
-            desk-owned sessions.
+            此入口不處理完整申訴案件管理，但可為櫃台擁有的通話建立回覆任務並標記完成。
           </p>
         </section>
 
         {error ? <section className="error-copy">{error}</section> : null}
 
         <section className="panel-card">
-          <span className="section-kicker">Create callback</span>
-          <h2>Attach follow-up to the active or recent desk session.</h2>
+          <span className="section-kicker">建立回覆</span>
+          <h2>將後續回覆綁定到進行中或近期櫃台通話。</h2>
           <form
             className="form-grid"
             onSubmit={async (event) => {
@@ -136,35 +131,32 @@ export default function CallbacksPage() {
                 recordCallbackTask(created.callbackTaskId);
                 setNote("");
                 await reloadSessions();
-              } catch (nextError) {
-                setError(
-                  nextError instanceof Error
-                    ? nextError.message
-                    : "Failed to create the callback task.",
-                );
+              } catch {
+                setError("建立回覆任務失敗，請稍後再試。");
               } finally {
                 setLoading(false);
               }
             }}
           >
             <div className="field-stack">
-              <label htmlFor="call-id">Desk session</label>
+              <label htmlFor="call-id">櫃台通話</label>
               <select
                 id="call-id"
                 onChange={(event) => setSelectedCallId(event.target.value)}
                 value={selectedCallId}
               >
-                <option value="">Select a recent call session</option>
+                <option value="">選擇近期通話</option>
                 {sessions.map((callSession) => (
                   <option key={callSession.callId} value={callSession.callId}>
-                    {callSession.callId} · {callSession.status} ·{" "}
-                    {callSession.linkedOrderId ?? "No order yet"}
+                    {callSession.callId} ·{" "}
+                    {formatCallSessionStatus(callSession.status)} ·{" "}
+                    {callSession.linkedOrderId ?? "尚未連結訂單"}
                   </option>
                 ))}
               </select>
             </div>
             <div className="field-stack">
-              <label htmlFor="callback-due">Due time</label>
+              <label htmlFor="callback-due">回覆期限</label>
               <input
                 id="callback-due"
                 onChange={(event) => setDueAt(event.target.value)}
@@ -173,7 +165,7 @@ export default function CallbacksPage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="callback-note">Callback note</label>
+              <label htmlFor="callback-note">回覆備註</label>
               <textarea
                 id="callback-note"
                 onChange={(event) => setNote(event.target.value)}
@@ -186,27 +178,25 @@ export default function CallbacksPage() {
                 disabled={loading}
                 type="submit"
               >
-                Create callback task
+                建立回覆任務
               </button>
             </div>
           </form>
         </section>
 
         <section className="panel-card">
-          <span className="section-kicker">Recent session follow-up</span>
-          <h2>Desk callback state</h2>
-          {loading ? <p>Loading callback state.</p> : null}
+          <span className="section-kicker">近期通話後續</span>
+          <h2>櫃台回覆狀態</h2>
+          {loading ? <p>正在載入回覆狀態。</p> : null}
           {!loading && sessions.length === 0 ? (
-            <p className="empty-state">
-              No desk sessions are stored in this browser session yet.
-            </p>
+            <p className="empty-state">此瀏覽器工作階段尚未儲存櫃台通話。</p>
           ) : null}
           <div className="list-stack">
             {sessions.map((callSession) => (
               <article className="detail-card" key={callSession.callId}>
                 <header>
                   <div>
-                    <span className="section-kicker">Call session</span>
+                    <span className="section-kicker">通話</span>
                     <h3>{callSession.callId}</h3>
                   </div>
                   <span
@@ -218,25 +208,25 @@ export default function CallbacksPage() {
                           : ""
                     }`}
                   >
-                    {callSession.callbackTask?.status ?? "No callback"}
+                    {formatCallbackTaskStatus(callSession.callbackTask?.status)}
                   </span>
                 </header>
                 <div className="kv-grid">
                   <div className="kv-item">
-                    <strong>Linked order</strong>
-                    <p>{callSession.linkedOrderId ?? "None yet"}</p>
+                    <strong>連結訂單</strong>
+                    <p>{callSession.linkedOrderId ?? "尚未連結"}</p>
                   </div>
                   <div className="kv-item">
-                    <strong>Recording</strong>
-                    <p>{callSession.recordingState}</p>
+                    <strong>錄音</strong>
+                    <p>{formatRecordingState(callSession.recordingState)}</p>
                   </div>
                   <div className="kv-item">
-                    <strong>Callback due</strong>
+                    <strong>回覆期限</strong>
                     <p>{formatDateTime(callSession.callbackTask?.dueAt)}</p>
                   </div>
                   <div className="kv-item">
-                    <strong>Callback note</strong>
-                    <p>{callSession.callbackTask?.note ?? "No note"}</p>
+                    <strong>回覆備註</strong>
+                    <p>{callSession.callbackTask?.note ?? "無備註"}</p>
                   </div>
                 </div>
                 {callSession.callbackTask?.status !== "completed" ? (
@@ -263,12 +253,8 @@ export default function CallbacksPage() {
                         );
                         setCompleteNote("");
                         await reloadSessions();
-                      } catch (nextError) {
-                        setError(
-                          nextError instanceof Error
-                            ? nextError.message
-                            : "Failed to complete the callback task.",
-                        );
+                      } catch {
+                        setError("完成回覆任務失敗，請稍後再試。");
                       } finally {
                         setLoading(false);
                       }
@@ -276,7 +262,7 @@ export default function CallbacksPage() {
                   >
                     <div className="field-stack">
                       <label htmlFor={`complete-note-${callSession.callId}`}>
-                        Completion note
+                        完成備註
                       </label>
                       <textarea
                         id={`complete-note-${callSession.callId}`}
@@ -292,7 +278,7 @@ export default function CallbacksPage() {
                         disabled={loading}
                         type="submit"
                       >
-                        Mark callback completed
+                        標記回覆已完成
                       </button>
                     </div>
                   </form>

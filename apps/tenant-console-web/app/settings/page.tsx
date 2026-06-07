@@ -32,6 +32,10 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
+import {
+  formatTenantErrorSummary,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
 import { TENANT_CONSOLE_ENV } from "@/lib/navigation";
 import { getRefreshTierDefinition } from "@/lib/ui-runtime";
 import {
@@ -39,6 +43,7 @@ import {
   type SettingsNotificationRow,
 } from "./settings-notification-table";
 import { SettingsRefreshButton } from "./settings-refresh-button";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -266,6 +271,40 @@ const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
   dateStyle: "short",
   timeStyle: "short",
 });
+
+const RUNTIME_SURFACE_LABELS: Record<string, string> = {
+  identity: "租戶身分",
+  billing: "計費設定",
+  notifications: "通知偏好",
+  sla: "服務時限",
+  governance: "整合治理",
+  quota: "租戶配額",
+  users: "租戶人員",
+  api_keys: "API 金鑰",
+  webhooks: "回呼",
+  audit: "租戶稽核",
+};
+
+const CAPABILITY_CHIP_LABELS: Record<string, string> = {
+  billing_profile: "計費資料",
+  notification_baseline: "通知基線",
+  sla_thresholds: "服務時限門檻",
+  api_key_policy: "API 金鑰政策",
+  webhook_governance: "回呼治理",
+};
+
+const SETTINGS_ROUTE_LABELS: Record<string, string> = {
+  "/settings": "設定",
+  "/users": "人員與角色",
+  "/audit": "租戶稽核",
+  "/api-keys": "API 金鑰",
+  "/webhooks": "回呼",
+  "/billing": "計費",
+  "/notifications": "通知偏好",
+  "/sla": "服務時限",
+  "/integration-governance": "整合治理",
+  "/feature-flags": "功能旗標",
+};
 
 type RuntimeListEnvelope<T> = {
   items: T[];
@@ -610,7 +649,26 @@ function parseListSurface<T>(payload: unknown): RuntimeListSurface<T> {
 }
 
 function formatActionLabel(action: string) {
-  return action.replaceAll("_", " ");
+  switch (action) {
+    case "refresh_snapshot":
+      return "刷新快照";
+    case "open_link":
+      return "開啟連結";
+    default:
+      return formatTenantCodeLabel(action, action);
+  }
+}
+
+function formatRuntimeSurfaceLabel(label: string) {
+  return RUNTIME_SURFACE_LABELS[label] ?? formatTenantCodeLabel(label, label);
+}
+
+function formatCapabilityChipLabel(label: string) {
+  return CAPABILITY_CHIP_LABELS[label] ?? formatTenantCodeLabel(label, label);
+}
+
+function formatSettingsRouteLabel(route: string) {
+  return SETTINGS_ROUTE_LABELS[route] ?? route;
 }
 
 function buildActionLink(
@@ -815,24 +873,27 @@ function getFreshnessTone(refresh: UiRefreshMetadata): CanvasTone {
 }
 
 function formatRefreshChipValue(refresh: UiRefreshMetadata) {
-  return `${refresh.dataFreshness} · ${refresh.source}`;
+  return `${formatTenantCodeLabel(refresh.dataFreshness, refresh.dataFreshness)} · ${formatTenantCodeLabel(refresh.source, refresh.source)}`;
 }
 
 function formatActionTooltip(action: ActionLink) {
   if (!action.descriptor.enabled) {
-    return action.descriptor.disabledReasonCode ?? "disabled";
+    return formatTenantCodeLabel(
+      action.descriptor.disabledReasonCode ?? "disabled",
+      "已停用",
+    );
   }
   if (action.note === "refresh-runtime") {
-    return "重新抓取目前 settings snapshot。";
+    return "重新抓取目前設定快照。";
   }
   if (action.note === "module-route-pending") {
-    return "此 module 仍由 settings posture 承接；尚未提供獨立 route。";
+    return "此模組目前仍由設定總覽承接，尚未提供獨立頁面。";
   }
   if (action.note === "route-pending") {
-    return "此 module route 尚未落地；目前不提供站內跳轉。";
+    return "此模組頁面尚未落地，目前不提供站內跳轉。";
   }
   if (action.kind === "unresolved") {
-    return "後端已提供此 action descriptor，但 settings 尚未定義 canonical 導向。";
+    return "後端已提供此動作描述符，但設定頁尚未定義對應導向。";
   }
   return action.note ?? null;
 }
@@ -926,7 +987,7 @@ function getEmptyReasonCopy(reason: EmptyReason): {
     case "not_provisioned":
       return {
         title: "模組未開通",
-        body: "例如 webhook engine 或專屬通知 channel 尚未為此 tenant provision。",
+        body: "例如回呼引擎或專屬通知通道尚未為此租戶完成開通。",
       };
     case "fetch_failed":
       return {
@@ -936,12 +997,12 @@ function getEmptyReasonCopy(reason: EmptyReason): {
     case "permission_denied":
       return {
         title: "權限不足",
-        body: "當前 actor 只有受限 posture，不能操作這個設定面或資料子集。",
+        body: "目前身分只有受限姿態，不能操作這個設定頁或資料子集。",
       };
     case "external_unavailable":
       return {
         title: "外部依賴降級",
-        body: "上游身分、通知或第三方 delivery 供應商異常時，要保留降級說明與 trace 入口。",
+        body: "當上游身分、通知或第三方投遞供應商異常時，仍要保留降級說明與追蹤入口。",
       };
     case "filtered_empty":
       return {
@@ -951,7 +1012,7 @@ function getEmptyReasonCopy(reason: EmptyReason): {
     default:
       return {
         title: "不支援的空狀態",
-        body: "tenant settings 僅支援 packet 定義的 6 種 EmptyReason；其餘值視為 contract mismatch。",
+        body: "租戶設定頁只支援定義中的 6 種空狀態原因；其餘值都視為契約不一致。",
       };
   }
 }
@@ -1015,7 +1076,9 @@ function renderEmptyStateSurface(surface: EmptyStateSurface) {
           {copy.title}
         </CanvasPill>
         <span style={sitemapRouteStyle}>{surface.title}</span>
-        <span style={sitemapRouteStyle}>{surface.route}</span>
+        <span style={sitemapRouteStyle}>
+          {formatSettingsRouteLabel(surface.route)}
+        </span>
       </div>
       <div
         style={{
@@ -1028,8 +1091,7 @@ function renderEmptyStateSurface(surface: EmptyStateSurface) {
         {copy.body}
       </div>
       <div style={{ ...sitemapRouteStyle, marginTop: 8 }}>
-        reason={surface.envelope.reason} · messageCode=
-        {surface.envelope.messageCode}
+        觸發原因：{formatTenantCodeLabel(surface.envelope.reason, "未提供")}
       </div>
       {surface.actions.length > 0 ? (
         <div style={{ ...actionRowStyle, marginTop: 10 }}>
@@ -1069,7 +1131,7 @@ async function loadSettingsData(): Promise<SettingsData> {
 
   const errors: string[] = [];
   const tag = (label: string, reason: unknown) =>
-    `${label}: ${reason instanceof Error ? reason.message : "未知錯誤"}`;
+    formatTenantErrorSummary(label, toTenantErrorMessage(reason));
   const missingRuntimeLabels: string[] = [];
   const markRuntimeGap = (
     label: string,
@@ -1086,7 +1148,7 @@ async function loadSettingsData(): Promise<SettingsData> {
     errors.push(tag("計費設定", billingProfile.reason));
   if (preferences.status === "rejected")
     errors.push(tag("通知訂閱", preferences.reason));
-  if (sla.status === "rejected") errors.push(tag("SLA 門檻", sla.reason));
+  if (sla.status === "rejected") errors.push(tag("服務時限門檻", sla.reason));
   if (governance.status === "rejected")
     errors.push(tag("整合治理", governance.reason));
   if (quotaSummary.status === "rejected")
@@ -1094,8 +1156,7 @@ async function loadSettingsData(): Promise<SettingsData> {
   if (users.status === "rejected") errors.push(tag("租戶人員", users.reason));
   if (apiKeys.status === "rejected")
     errors.push(tag("API 金鑰", apiKeys.reason));
-  if (webhooks.status === "rejected")
-    errors.push(tag("Webhook", webhooks.reason));
+  if (webhooks.status === "rejected") errors.push(tag("回呼", webhooks.reason));
   if (auditLogs.status === "rejected")
     errors.push(tag("租戶稽核", auditLogs.reason));
 
@@ -1147,17 +1208,17 @@ async function loadSettingsData(): Promise<SettingsData> {
   markRuntimeGap("租戶身分", identityValue);
   markRuntimeGap("計費設定", billingValue);
   markRuntimeGap("通知訂閱", preferenceValue);
-  markRuntimeGap("SLA 門檻", slaValue);
+  markRuntimeGap("服務時限門檻", slaValue);
   markRuntimeGap("整合治理", governanceValue);
   markRuntimeGap("租戶配額", quotaValue);
   markRuntimeGap("租戶人員", usersValue);
   markRuntimeGap("API 金鑰", apiKeysValue);
-  markRuntimeGap("Webhook", webhooksValue);
+  markRuntimeGap("回呼", webhooksValue);
   markRuntimeGap("租戶稽核", auditLogsValue);
 
   if (missingRuntimeLabels.length > 0) {
     errors.push(
-      `legacy payload without UiRefreshMetadata: ${missingRuntimeLabels.join(" · ")}`,
+      `部分舊版封包缺少刷新中繼資料：${missingRuntimeLabels.join(" · ")}`,
     );
   }
 
@@ -1246,31 +1307,31 @@ export default async function SettingsPage() {
   const capabilityChips = [
     data.billingProfile.item
       ? {
-          label: "billing_profile",
+          label: "計費資料",
           tone: "accent" as const,
         }
       : null,
     subscriptions.length > 0 || baselineSubscriptions.length > 0
       ? {
-          label: "notification_baseline",
+          label: "通知基線",
           tone: "info" as const,
         }
       : null,
     data.sla.item
       ? {
-          label: "sla_thresholds",
+          label: "服務時限門檻",
           tone: "accent" as const,
         }
       : null,
     data.governance.item?.apiKeyPolicy
       ? {
-          label: "api_key_policy",
+          label: "API 金鑰政策",
           tone: "info" as const,
         }
       : null,
     data.governance.item?.webhookPolicy
       ? {
-          label: "webhook_governance",
+          label: "回呼治理",
           tone: "info" as const,
         }
       : null,
@@ -1305,7 +1366,7 @@ export default async function SettingsPage() {
     },
     {
       surface: {
-        label: "SLA 設定",
+        label: "服務時限設定",
         note: "module-route-pending",
       },
       descriptors: getSurfaceActionDescriptors(data.sla),
@@ -1321,7 +1382,7 @@ export default async function SettingsPage() {
     },
     {
       surface: {
-        label: "Webhook",
+        label: "回呼",
         href: "/webhooks",
       },
       descriptors: getSurfaceActionDescriptors(data.webhooks),
@@ -1351,7 +1412,7 @@ export default async function SettingsPage() {
     },
     {
       surface: {
-        label: "SLA 設定",
+        label: "服務時限設定",
         note: "module-route-pending",
       },
       descriptors: getSurfaceActionDescriptors(data.sla),
@@ -1372,7 +1433,7 @@ export default async function SettingsPage() {
     },
     {
       surface: {
-        label: "Webhook",
+        label: "回呼",
         href: "/webhooks",
       },
       descriptors: getSurfaceActionDescriptors(data.webhooks),
@@ -1388,44 +1449,48 @@ export default async function SettingsPage() {
   );
   const runtimeSurfaces = [
     {
-      label: "identity",
+      label: "租戶身分",
       refresh: data.identity.refresh,
       legacy: data.identity.legacy,
     },
     {
-      label: "billing",
+      label: "計費設定",
       refresh: data.billingProfile.refresh,
       legacy: data.billingProfile.legacy,
     },
     {
-      label: "notifications",
+      label: "通知偏好",
       refresh: data.preferences.refresh,
       legacy: data.preferences.legacy,
     },
-    { label: "sla", refresh: data.sla.refresh, legacy: data.sla.legacy },
+    { label: "服務時限", refresh: data.sla.refresh, legacy: data.sla.legacy },
     {
-      label: "governance",
+      label: "整合治理",
       refresh: data.governance.refresh,
       legacy: data.governance.legacy,
     },
     {
-      label: "quota",
+      label: "租戶配額",
       refresh: data.quotaSummary.refresh,
       legacy: data.quotaSummary.legacy,
     },
-    { label: "users", refresh: data.users.refresh, legacy: data.users.legacy },
     {
-      label: "api_keys",
+      label: "租戶人員",
+      refresh: data.users.refresh,
+      legacy: data.users.legacy,
+    },
+    {
+      label: "API 金鑰",
       refresh: data.apiKeys.refresh,
       legacy: data.apiKeys.legacy,
     },
     {
-      label: "webhooks",
+      label: "回呼",
       refresh: data.webhooks.refresh,
       legacy: data.webhooks.legacy,
     },
     {
-      label: "audit",
+      label: "租戶稽核",
       refresh: data.auditLogs.refresh,
       legacy: data.auditLogs.legacy,
     },
@@ -1439,20 +1504,20 @@ export default async function SettingsPage() {
   );
   const runtimeChips: RuntimeChip[] = [
     {
-      label: "refresh tier",
+      label: "刷新層級",
       value: SETTINGS_PAGE_TIER.label,
       mono: true,
     },
     ...runtimeSurfaces.map((surface) =>
       surface.refresh
         ? ({
-            label: surface.label,
+            label: formatRuntimeSurfaceLabel(surface.label),
             value: formatRefreshChipValue(surface.refresh),
             tone: getFreshnessTone(surface.refresh),
           } satisfies RuntimeChip)
         : ({
-            label: surface.label,
-            value: "legacy",
+            label: formatRuntimeSurfaceLabel(surface.label),
+            value: "舊版封包",
             mono: true,
           } satisfies RuntimeChip),
     ),
@@ -1464,38 +1529,35 @@ export default async function SettingsPage() {
   const sitemapEntries: SettingsSitemapEntry[] = [
     {
       title: "一般資料",
-      route: "/settings · /billing (deferred)",
+      route: "設定總覽 · 計費摘要",
       detail:
-        "租戶代碼、計費資料、身分與預設 posture 留在此頁總覽；計費細節 route 尚未落地前，以本頁摘要承接。",
+        "租戶代碼、計費資料、身分與預設姿態都保留在此頁總覽；計費細節頁尚未落地前，先由本頁摘要承接。",
       actions: generalActions,
     },
     {
-      title: "通知與 SLA",
-      route: "/notifications · /sla",
-      detail:
-        "通知事件矩陣與 SLA 門檻屬獨立 module route；此頁只顯示 posture。",
+      title: "通知與服務時限",
+      route: "通知偏好 · 服務時限設定",
+      detail: "通知事件矩陣與服務時限門檻屬於獨立模組頁；此頁只保留姿態摘要。",
       actions: notificationActions,
     },
     {
       title: "整合預設",
-      route:
-        "/integration-governance (deferred) · /api-keys · /webhooks · platform-admin /audit",
+      route: "整合治理摘要 · API 金鑰 · 回呼管理 · 平台稽核",
       detail:
-        "API key / webhook 治理留在 tenant app；feature rollout 與 platform-owned 變更從 cross-app trace 解釋。",
+        "API 金鑰與回呼治理維持在租戶應用中；功能推出與平台持有變更則透過跨應用追蹤說明。",
       actions: integrationActions,
     },
     {
-      title: "人員、隱私、跨 app",
-      route: "/users · /audit · platform-admin /audit",
-      detail:
-        "權限、隱私同意與 platform-owned 設定變更用 cross-app audit trace 串起來。",
+      title: "人員、隱私、跨應用",
+      route: "人員與角色 · 租戶稽核 · 平台稽核",
+      detail: "權限、隱私同意與平台持有設定變更，都會透過跨應用稽核追蹤串接。",
       actions: peopleActions,
     },
     {
       title: "功能可見性",
-      route: "/feature-flags (platform trace)",
+      route: "功能旗標（平台追蹤）",
       detail:
-        "feature visibility 是 read-scoped、platform-owned surface；settings 只保留治理脈絡與 new-tab trace。",
+        "功能可見性屬於唯讀且由平台持有的頁面；設定頁只保留治理脈絡與新分頁追蹤入口。",
       actions: [],
     },
   ];
@@ -1508,40 +1570,40 @@ export default async function SettingsPage() {
     {
       title: "平台稽核",
       detail:
-        "平台管理員變更 feature rollout、billing governance 或 rollout gate 時，trace 回 platform-owned audit。",
+        "當平台管理員變更功能推出、計費治理或推出閘門時，可回到平台稽核頁追蹤。",
       link: {
         targetApp: "platform-admin",
         route: `/audit?tenantId=${encodeURIComponent(tenantCode)}`,
         resourceType: "tenant",
         resourceId: tenantCode,
         openMode: "new_tab",
-        label: "前往 platform-admin /audit",
+        label: "前往平台管理後台稽核",
       },
     },
     {
       title: "營運客訴/事件",
       detail:
-        "若設定變更影響現場訂單或 webhook 投遞，cross-app 到 ops-console 追事故與人工處置。",
+        "若設定變更影響現場訂單或回呼投遞，可跨應用前往營運控制台追查事故與人工處置。",
       link: {
         targetApp: "ops-console",
         route: "/complaints",
         resourceType: "complaint_case",
         resourceId: tenantCode,
         openMode: "new_tab",
-        label: "前往 ops-console /complaints",
+        label: "前往營運控制台客訴",
       },
     },
     {
-      title: "平台 rollout trace",
+      title: "平台推出追蹤",
       detail:
-        "功能可見性是 platform-owned surface；本頁只保留 posture，若需追 tenant override 或 rollout gate，從 platform-admin 查看。",
+        "功能可見性屬於平台持有頁面；若要追查租戶覆寫或推出閘門，請改由平台管理後台查看。",
       link: {
         targetApp: "platform-admin",
         route: "/feature-flags",
         resourceType: "tenant",
         resourceId: tenantCode,
         openMode: "new_tab",
-        label: "前往 platform-admin feature trace",
+        label: "前往平台功能追蹤",
       },
     },
   ];
@@ -1588,12 +1650,12 @@ export default async function SettingsPage() {
     },
     {
       key: "webhooks",
-      title: "Webhook",
+      title: "回呼",
       route: "/webhooks",
       envelope: data.webhooks.emptyState,
       actions: flattenActionLinks({
         surface: {
-          label: "Webhook",
+          label: "回呼",
           href: "/webhooks",
         },
         descriptors: getSurfaceActionDescriptors(data.webhooks),
@@ -1646,11 +1708,14 @@ export default async function SettingsPage() {
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分 settings module snapshot 不是 fresh"
+            title="部分設定模組快照不是最新"
             body={degradedModules
               .map((surface) => {
                 if (!surface.refresh) return surface.label;
-                return `${surface.label}=${surface.refresh.dataFreshness} @ ${formatUpdated(surface.refresh.generatedAt)}`;
+                return `${surface.label}=${formatTenantCodeLabel(
+                  surface.refresh.dataFreshness,
+                  surface.refresh.dataFreshness,
+                )} @ ${formatUpdated(surface.refresh.generatedAt)}`;
               })
               .join(" · ")}
           />
@@ -1661,8 +1726,8 @@ export default async function SettingsPage() {
             theme={th}
             tone="info"
             icon="warn"
-            title="目前 actor 沒有 backend 可用動作"
-            body="settings CTA 直接取自各 module/list envelope 的 availableActions；若後端未提供，畫面會保守顯示 read-only。"
+            title="目前身分沒有可用後端操作"
+            body="設定頁按鈕會直接取自各模組或列表封包的可用操作；若後端未提供，畫面就會保守地顯示為唯讀。"
           />
         ) : null}
 
@@ -1671,8 +1736,8 @@ export default async function SettingsPage() {
             theme={th}
             tone="warn"
             icon="warn"
-            title="部分 module 仍是 legacy payload"
-            body={`缺少 UiRefreshMetadata / ui-runtime envelope：${legacyModules.map((surface) => surface.label).join(" · ")}`}
+            title="部分模組仍是舊版封包"
+            body={`缺少刷新中繼資料與空狀態操作資訊：${legacyModules.map((surface) => surface.label).join(" · ")}`}
           />
         ) : null}
 
@@ -1689,8 +1754,8 @@ export default async function SettingsPage() {
         <div style={runtimeStripStyle}>
           {!hasRefreshAction ? (
             <SettingsRefreshButton
-              label="Refresh snapshot"
-              title="重新抓取目前 settings snapshot。"
+              label="重新抓取快照"
+              title="重新抓取目前設定快照。"
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -1708,8 +1773,8 @@ export default async function SettingsPage() {
               }}
             />
           ) : null}
-          {runtimeChips.map((chip) => (
-            <div key={chip.label} style={runtimeChipStyle}>
+          {runtimeChips.map((chip, index) => (
+            <div key={`${chip.label}-${index}`} style={runtimeChipStyle}>
               <span style={runtimeLabelStyle}>{chip.label}</span>
               {"tone" in chip ? (
                 <CanvasPill theme={th} tone={chip.tone} dot>
@@ -1734,22 +1799,22 @@ export default async function SettingsPage() {
           <div id="general-overview">
             <CanvasCard theme={th} title="一般" style={generalCardStyle}>
               <div style={generalGridStyle}>
-                <CanvasField theme={th} label="租戶代碼 · tenant_code">
+                <CanvasField theme={th} label="租戶代碼">
                   <CanvasInput theme={th} value={tenantCode} mono />
                 </CanvasField>
-                <CanvasField theme={th} label="顯示名稱 · display_name">
+                <CanvasField theme={th} label="顯示名稱">
                   <CanvasInput theme={th} value={displayName} />
                 </CanvasField>
-                <CanvasField theme={th} label="統一編號 · tax_id">
+                <CanvasField theme={th} label="統一編號">
                   <CanvasInput theme={th} value={taxId} mono />
                 </CanvasField>
                 <CanvasField theme={th} label="計費聯絡人">
                   <CanvasInput theme={th} value={billingContact} />
                 </CanvasField>
-                <CanvasField theme={th} label="預設語系 · default_locale">
+                <CanvasField theme={th} label="預設語系">
                   <CanvasSelect theme={th} value="zh-Hant" />
                 </CanvasField>
-                <CanvasField theme={th} label="預設時區 · timezone">
+                <CanvasField theme={th} label="預設時區">
                   <CanvasSelect theme={th} value="Asia/Taipei" />
                 </CanvasField>
               </div>
@@ -1761,7 +1826,7 @@ export default async function SettingsPage() {
               theme={th}
               cols={1}
               items={[
-                { k: "STAGE", v: currentStageValue, mono: true },
+                { k: "環境", v: currentStageValue, mono: true },
                 {
                   k: "啟用模組",
                   v: `${localModuleCount} / ${moduleCatalogCount}`,
@@ -1773,7 +1838,7 @@ export default async function SettingsPage() {
                   mono: true,
                 },
                 {
-                  k: "webhook 簽章",
+                  k: "回呼簽章",
                   v: "sha256-hmac",
                   mono: true,
                 },
@@ -1791,8 +1856,8 @@ export default async function SettingsPage() {
         <div style={summaryGridStyle}>
           <CanvasCard
             theme={th}
-            title="設定 sitemap"
-            subtitle="`/settings` 保留總覽；未落地 module 先回到本頁 posture 或 cross-app trace。"
+            title="設定導覽"
+            subtitle="此頁保留總覽；尚未獨立成頁的模組會先回到本頁摘要或跨應用追蹤。"
           >
             <div style={sitemapListStyle}>
               {sitemapEntries.map((entry) => (
@@ -1840,12 +1905,12 @@ export default async function SettingsPage() {
 
           <CanvasCard
             theme={th}
-            title="可用動作與 posture"
-            subtitle="header CTA 與下列模組捷徑全部取自 runtime `availableActions`。"
+            title="可用動作與姿態"
+            subtitle="頁首按鈕與下列模組捷徑都直接取自執行時封包提供的可用操作。"
           >
             <div style={summaryStackStyle}>
               <div style={actionPanelStyle}>
-                <div style={sectionLabelStyle}>availableActions</div>
+                <div style={sectionLabelStyle}>可用操作</div>
                 {headerActions.length > 0 ? (
                   <div style={actionRowStyle}>
                     {headerActions.map((action, index) =>
@@ -1853,9 +1918,7 @@ export default async function SettingsPage() {
                     )}
                   </div>
                 ) : (
-                  <div style={emptyStateStyle}>
-                    目前 actor 沒有 backend 可用動作
-                  </div>
+                  <div style={emptyStateStyle}>目前身分沒有可用後端操作</div>
                 )}
               </div>
 
@@ -1864,23 +1927,26 @@ export default async function SettingsPage() {
                 cols={2}
                 items={[
                   {
-                    k: "realm",
-                    v: data.identity.item?.realm ?? "tenant",
+                    k: "領域",
+                    v:
+                      data.identity.item?.realm === "tenant"
+                        ? "租戶"
+                        : (data.identity.item?.realm ?? "租戶"),
                     mono: true,
                   },
-                  { k: "auth mode", v: authMode, mono: true },
+                  { k: "驗證模式", v: authMode, mono: true },
                   { k: "角色摘要", v: roleSummary, mono: true },
                   {
-                    k: "billing email",
+                    k: "計費電子郵件",
                     v: data.billingProfile.item?.email ?? "—",
                     mono: true,
                   },
                   {
-                    k: "billing address",
+                    k: "計費地址",
                     v: billingAddress,
                   },
                   {
-                    k: "billing snapshot",
+                    k: "計費快照",
                     v: formatUpdated(data.billingProfile.refresh?.generatedAt),
                     mono: true,
                   },
@@ -1917,7 +1983,7 @@ export default async function SettingsPage() {
             <div id="sla-governance-posture">
               <CanvasCard
                 theme={th}
-                title="SLA 與整合姿態"
+                title="服務時限與整合姿態"
                 subtitle="等待 / 抵達 / 完成門檻 · 月配額姿態 · 治理預設"
               >
                 <div style={kpiGridStyle}>
@@ -1962,17 +2028,17 @@ export default async function SettingsPage() {
                   cols={2}
                   items={[
                     {
-                      k: "API key 壽命",
+                      k: "API 金鑰壽命",
                       v: apiKeyLifetime,
                       mono: true,
                     },
                     {
-                      k: "webhook 重送",
+                      k: "回呼重送",
                       v: webhookRetry,
                       mono: true,
                     },
                     {
-                      k: "Webhook 基線",
+                      k: "回呼基線",
                       v: `${baselineEvents.length} 項`,
                       mono: true,
                     },
@@ -2002,8 +2068,8 @@ export default async function SettingsPage() {
 
             <CanvasCard
               theme={th}
-              title="Cross-app deep links"
-              subtitle="platform-owned / ops-owned trace 一律 new tab；settings 保留 owner app 指向。"
+              title="跨應用深連結"
+              subtitle="平台或營運持有的追蹤一律用新分頁開啟；設定頁只保留擁有者應用的入口。"
             >
               <div style={linkStackStyle}>
                 {deepLinks.map((item) => {
@@ -2071,7 +2137,7 @@ export default async function SettingsPage() {
             <CanvasCard
               theme={th}
               title="能力與整合準備"
-              subtitle="租戶可用設定面 · webhook 基線 · onboarding checklist"
+              subtitle="租戶可用設定面、回呼基線與導入檢查清單"
             >
               <div style={capabilityStackStyle}>
                 <div>
@@ -2079,35 +2145,33 @@ export default async function SettingsPage() {
                   <div style={chipRowStyle}>
                     {settingsModuleRoutes.map((route) => (
                       <CanvasPill key={route} theme={th} tone="accent">
-                        {route}
+                        {formatSettingsRouteLabel(route)}
                       </CanvasPill>
                     ))}
                   </div>
                 </div>
 
                 <div>
-                  <div style={sectionLabelStyle}>Tenant posture</div>
+                  <div style={sectionLabelStyle}>租戶姿態</div>
                   {capabilityChips.length > 0 ? (
                     <div style={chipRowStyle}>
-                      {capabilityChips.map((chip) => (
+                      {capabilityChips.map((chip, index) => (
                         <CanvasPill
-                          key={chip.label}
+                          key={`${chip.label}-${index}`}
                           theme={th}
                           tone={chip.tone}
                         >
-                          {chip.label}
+                          {formatCapabilityChipLabel(chip.label)}
                         </CanvasPill>
                       ))}
                     </div>
                   ) : (
-                    <div style={emptyStateStyle}>
-                      目前沒有可揭露的 posture 項目
-                    </div>
+                    <div style={emptyStateStyle}>目前沒有可揭露的姿態項目</div>
                   )}
                 </div>
 
                 <div>
-                  <div style={sectionLabelStyle}>Webhook 基線事件</div>
+                  <div style={sectionLabelStyle}>回呼基線事件</div>
                   {baselineEvents.length > 0 ? (
                     <div style={chipRowStyle}>
                       {baselineEvents.slice(0, 8).map((eventType) => (
@@ -2128,7 +2192,7 @@ export default async function SettingsPage() {
                       tone="info"
                       icon="warn"
                       title="整合準備仍有待辦"
-                      body={`${checklist.length} 項檢查仍需確認，保留 cutover 前的 capability framing。`}
+                      body={`${checklist.length} 項檢查仍需確認，保留正式切換前的能力框架。`}
                     />
                     <ul style={checklistStyle}>
                       {checklist.map((item, index) => (
@@ -2149,8 +2213,8 @@ export default async function SettingsPage() {
 
             <CanvasCard
               theme={th}
-              title="Runtime empty states"
-              subtitle="各 module 回傳的 `emptyState` 直接映射到畫面，不再用 query param 或本地假資料示範。"
+              title="執行時空狀態"
+              subtitle="各模組回傳的空狀態會直接映射到畫面，不再用查詢參數或本地假資料示範。"
             >
               {emptyStateSurfaces.length > 0 ? (
                 <div style={emptyReasonGridStyle}>
@@ -2160,8 +2224,7 @@ export default async function SettingsPage() {
                 </div>
               ) : (
                 <div style={emptyStateStyle}>
-                  目前沒有 module 回傳 `emptyState`；此頁維持正常 snapshot
-                  posture。
+                  目前沒有模組回傳空狀態；此頁維持正常快照姿態。
                 </div>
               )}
             </CanvasCard>

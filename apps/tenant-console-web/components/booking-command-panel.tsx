@@ -14,6 +14,8 @@ import {
   formatRelativeTime,
   isFutureIso,
 } from "@/lib/formatters";
+import { formatTenantUiError } from "@/lib/error-copy";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 
 type Mode = "update" | "cancel" | null;
 
@@ -35,19 +37,21 @@ function getActionDescriptor(
 function describeReason(reasonCode: string | null | undefined) {
   switch (reasonCode) {
     case "past_editable_until":
-      return "The tenant edit window has already closed.";
+      return "租戶可編輯時窗已結束。";
     case "past_cancelable_until":
-      return "The tenant cancellation window has already closed.";
+      return "租戶可取消時窗已結束。";
     case "booking_terminal":
-      return "Completed or cancelled bookings are read-only.";
+      return "已完成或已取消的叫車單為唯讀。";
     case "on_trip_locked":
-      return "On-trip bookings cannot be changed from tenant control.";
+      return "行程進行中的叫車單不能由租戶端修改。";
     case "approval_pending":
-      return "The booking is waiting on approval resolution before it can change again.";
+      return "這筆叫車單仍在等待審批，暫時不能再次修改。";
     case "approval_not_retryable":
-      return "There is no approval workflow step that can be retried from this detail page.";
+      return "這個明細頁目前沒有可重新送審的流程節點。";
     default:
-      return reasonCode ? `Backend reason: ${reasonCode}` : null;
+      return reasonCode
+        ? `後端原因：${formatTenantCodeLabel(reasonCode, reasonCode)}`
+        : null;
   }
 }
 
@@ -67,6 +71,29 @@ function isActionReceipt(value: unknown): value is ActionReceipt {
       candidate.status === "completed" ||
       candidate.status === "failed")
   );
+}
+
+function resolveReceiptMessage(receipt: ActionReceipt): string {
+  const message = receipt.message.trim();
+  if (
+    /[\u3400-\u9fff]/.test(message) &&
+    !/permission|forbidden|unauthor|external|upstream|dependency|gateway|timeout|network|adapter|error|exception|status|http/i.test(
+      message,
+    )
+  ) {
+    return message;
+  }
+
+  switch (receipt.status) {
+    case "accepted":
+      return "租戶指令已受理，正在等待外部系統確認。";
+    case "completed":
+      return "租戶指令已完成，請至明細與稽核軌跡確認最新結果。";
+    case "failed":
+      return "租戶指令未完成，請稍後重試或查看稽核紀錄。";
+    default:
+      return "租戶指令狀態已更新。";
+  }
 }
 
 export function BookingCommandPanel({
@@ -158,10 +185,11 @@ export function BookingCommandPanel({
   );
 
   function buildReceiptHref(receipt: ActionReceipt) {
+    const message = resolveReceiptMessage(receipt);
     const params = new URLSearchParams({
       auditId: receipt.auditId,
       commandId: receipt.actionId,
-      commandMessage: receipt.message,
+      commandMessage: message,
       commandStatus: receipt.status,
     });
 
@@ -198,30 +226,39 @@ export function BookingCommandPanel({
             "error" in payload &&
             typeof payload.error === "string"
             ? payload.error
-            : "Unknown update failure.",
+            : "後端未回傳更新失敗原因。",
         );
       }
 
       setMode(null);
       if (isActionReceipt(payload)) {
+        const message = resolveReceiptMessage(payload);
         setReceipt(
-          `${payload.status} · ${payload.actionId} · ${payload.message}`,
+          `${formatTenantCodeLabel(payload.status)} · ${payload.actionId} · ${message}`,
         );
         if (payload.status === "accepted") {
-          router.push(buildReceiptHref(payload));
+          router.push(
+            buildReceiptHref({
+              ...payload,
+              message,
+            }),
+          );
           return;
         }
       } else {
         setReceipt(
-          `Update completed at ${new Date().toLocaleTimeString()} · audit visible from the tenant audit lane.`,
+          `更新已完成，時間 ${new Date().toLocaleTimeString("zh-TW")} · 可至租戶稽核軌跡查看紀錄。`,
         );
       }
       router.refresh();
     } catch (submissionError) {
       setError(
-        submissionError instanceof Error
-          ? submissionError.message
-          : "Unknown update failure.",
+        formatTenantUiError(
+          submissionError instanceof Error
+            ? submissionError.message
+            : "更新失敗，原因未知。",
+          "更新叫車失敗",
+        ),
       );
     } finally {
       setLoading(false);
@@ -250,30 +287,39 @@ export function BookingCommandPanel({
             "error" in payload &&
             typeof payload.error === "string"
             ? payload.error
-            : "Unknown cancel failure.",
+            : "後端未回傳取消失敗原因。",
         );
       }
 
       setMode(null);
       if (isActionReceipt(payload)) {
+        const message = resolveReceiptMessage(payload);
         setReceipt(
-          `${payload.status} · ${payload.actionId} · ${payload.message}`,
+          `${formatTenantCodeLabel(payload.status)} · ${payload.actionId} · ${message}`,
         );
         if (payload.status === "accepted") {
-          router.push(buildReceiptHref(payload));
+          router.push(
+            buildReceiptHref({
+              ...payload,
+              message,
+            }),
+          );
           return;
         }
       } else {
         setReceipt(
-          `Cancellation completed at ${new Date().toLocaleTimeString()} · audit visible from the tenant audit lane.`,
+          `取消已完成，時間 ${new Date().toLocaleTimeString("zh-TW")} · 可至租戶稽核軌跡查看紀錄。`,
         );
       }
       router.refresh();
     } catch (submissionError) {
       setError(
-        submissionError instanceof Error
-          ? submissionError.message
-          : "Unknown cancel failure.",
+        formatTenantUiError(
+          submissionError instanceof Error
+            ? submissionError.message
+            : "取消失敗，原因未知。",
+          "取消叫車失敗",
+        ),
       );
     } finally {
       setLoading(false);
@@ -284,10 +330,9 @@ export function BookingCommandPanel({
     <div className="action-panel">
       <div className="action-stack">
         <div className="action-copy">
-          <strong>Allowed tenant actions</strong>
+          <strong>租戶可執行動作</strong>
           <p>
-            Every CTA on this panel is driven by the booking action descriptors.
-            Disabled actions stay visible with a reason instead of disappearing.
+            這個面板上的所有操作都由叫車單的動作描述驅動。即使動作被停用，也會保留在畫面上並附上原因，不會直接消失。
           </p>
         </div>
         <div className="action-row">
@@ -302,7 +347,7 @@ export function BookingCommandPanel({
                 setMode("update");
               }}
             >
-              Update booking
+              編輯叫車
             </button>
           ) : null}
           {cancelAction ? (
@@ -316,7 +361,7 @@ export function BookingCommandPanel({
                 setMode("cancel");
               }}
             >
-              Cancel booking
+              取消叫車
             </button>
           ) : null}
           {resubmitAction ? (
@@ -330,14 +375,14 @@ export function BookingCommandPanel({
                 }
               }}
             >
-              Resubmit approval
+              重新送審
             </Link>
           ) : null}
           <Link
             className="action-button action-button-secondary"
             href={auditHref}
           >
-            View audit
+            查看稽核
           </Link>
         </div>
         {receipt ? <div className="booking-receipt">{receipt}</div> : null}
@@ -352,19 +397,19 @@ export function BookingCommandPanel({
         ) : null}
         {updateAction?.disabledReasonCode === "past_editable_until" ? (
           <p className="action-note">
-            Editable until{" "}
+            可編輯截止時間{" "}
             {formatDateTime(booking.editableUntil ?? booking.modifiableUntil)}
             {formatRelativeTime(
               booking.editableUntil ?? booking.modifiableUntil,
             )
-              ? ` (${formatRelativeTime(booking.editableUntil ?? booking.modifiableUntil)})`
+              ? `（${formatRelativeTime(booking.editableUntil ?? booking.modifiableUntil)}）`
               : ""}
-            .
+            。
           </p>
         ) : null}
         {cancelAction?.disabledReasonCode === "past_cancelable_until" ? (
           <p className="action-note">
-            Cancelable until {formatDateTime(booking.cancelableUntil)}.
+            可取消截止時間 {formatDateTime(booking.cancelableUntil)}。
           </p>
         ) : null}
       </div>
@@ -375,13 +420,11 @@ export function BookingCommandPanel({
             aria-modal="true"
             className="modal-panel"
             role="dialog"
-            aria-label={mode === "update" ? "Update booking" : "Cancel booking"}
+            aria-label={mode === "update" ? "編輯叫車" : "取消叫車"}
           >
             <div className="modal-header">
               <div>
-                <strong>
-                  {mode === "update" ? "Update booking" : "Cancel booking"}
-                </strong>
+                <strong>{mode === "update" ? "編輯叫車" : "取消叫車"}</strong>
                 <p>{booking.bookingId}</p>
               </div>
               <button
@@ -389,7 +432,7 @@ export function BookingCommandPanel({
                 type="button"
                 onClick={() => setMode(null)}
               >
-                Close
+                關閉
               </button>
             </div>
 
@@ -398,7 +441,7 @@ export function BookingCommandPanel({
             {mode === "update" ? (
               <div className="form-stack">
                 <label className="field-stack">
-                  <span>Pickup address</span>
+                  <span>上車地址</span>
                   <input
                     value={pickupAddress}
                     onChange={(event) => setPickupAddress(event.target.value)}
@@ -406,7 +449,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="field-stack">
-                  <span>Dropoff address</span>
+                  <span>下車地址</span>
                   <input
                     value={dropoffAddress}
                     onChange={(event) => setDropoffAddress(event.target.value)}
@@ -414,7 +457,7 @@ export function BookingCommandPanel({
                   />
                 </label>
                 <label className="field-stack">
-                  <span>Notes</span>
+                  <span>備註</span>
                   <textarea
                     rows={3}
                     value={notes}
@@ -423,7 +466,7 @@ export function BookingCommandPanel({
                 </label>
                 <div className="form-grid">
                   <label className="field-stack">
-                    <span>Cost center</span>
+                    <span>成本中心</span>
                     <input
                       value={costCenter}
                       onChange={(event) => setCostCenter(event.target.value)}
@@ -431,7 +474,7 @@ export function BookingCommandPanel({
                     />
                   </label>
                   <label className="field-stack">
-                    <span>Vehicle preference</span>
+                    <span>車型偏好</span>
                     <input
                       value={vehiclePreference}
                       onChange={(event) =>
@@ -448,14 +491,14 @@ export function BookingCommandPanel({
                     type="button"
                     onClick={() => void submitUpdate()}
                   >
-                    {loading ? "Saving..." : "Save changes"}
+                    {loading ? "儲存中..." : "儲存變更"}
                   </button>
                 </div>
               </div>
             ) : (
               <div className="form-stack">
                 <label className="field-stack">
-                  <span>Cancellation reason</span>
+                  <span>取消原因</span>
                   <textarea
                     rows={4}
                     value={cancelReason}
@@ -469,7 +512,7 @@ export function BookingCommandPanel({
                     type="button"
                     onClick={() => void submitCancel()}
                   >
-                    {loading ? "Cancelling..." : "Confirm cancel"}
+                    {loading ? "取消中..." : "確認取消"}
                   </button>
                 </div>
               </div>

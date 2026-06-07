@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import type { CSSProperties } from "react";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { CanvasPill as Pill } from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 import {
   assistantCardStyle,
   assistantInsetStyle,
@@ -72,9 +73,52 @@ export function AssistantConfirmationPanel({
   onConfirm: (reason: string) => void | Promise<void>;
   onCancel?: () => void;
 }) {
+  const { locale } = useTranslation();
   const reasonFieldId = useId();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const copy =
+    locale === "zh"
+      ? {
+          ariaLabel: "平台助理確認面板",
+          requiredError: "此操作執行前必須填寫原因。",
+          targetResource: "目標資源",
+          defaultReasonLabel: "執行原因",
+          requiredPlaceholder: "高風險操作必填原因。",
+          optionalPlaceholder: "可選填操作備註。",
+          requiredHint: "在提供非空原因前，這個動作無法執行。",
+          optionalHint: "若有填寫，原因會一併附加到稽核軌跡。",
+          cancel: "取消",
+          executing: "執行中…",
+          confirm: "確認並執行",
+          riskLabel: (risk: AssistantConfirmationRequest["riskLevel"]) =>
+            ({
+              high: "高風險",
+              medium: "中風險",
+              low: "低風險",
+            })[risk],
+        }
+      : {
+          ariaLabel: "Assistant confirmation panel",
+          requiredError: "Reason is required before this action can run.",
+          targetResource: "Target resource",
+          defaultReasonLabel: "Execution reason",
+          requiredPlaceholder: "Required for high-risk execution.",
+          optionalPlaceholder: "Optional operator note.",
+          requiredHint:
+            "This action cannot execute until a non-empty reason is supplied.",
+          optionalHint:
+            "Reason will be attached to the audit trail when provided.",
+          cancel: "Cancel",
+          executing: "Executing...",
+          confirm: "Confirm and execute",
+          riskLabel: (risk: AssistantConfirmationRequest["riskLevel"]) =>
+            ({
+              high: "HIGH RISK",
+              medium: "MEDIUM RISK",
+              low: "LOW RISK",
+            })[risk],
+        };
   const requiresReason = Boolean(
     request.requiresReason || request.riskLevel === "high",
   );
@@ -84,7 +128,7 @@ export function AssistantConfirmationPanel({
 
   async function handleConfirm() {
     if (requiresReason && trimmedReason.length === 0) {
-      setError("Reason is required before this action can run.");
+      setError(copy.requiredError);
       return;
     }
 
@@ -93,10 +137,7 @@ export function AssistantConfirmationPanel({
   }
 
   return (
-    <section
-      style={assistantCardStyle}
-      aria-label="Assistant confirmation panel"
-    >
+    <section style={assistantCardStyle} aria-label={copy.ariaLabel}>
       <div style={bodyStyle}>
         <div
           style={{
@@ -120,7 +161,7 @@ export function AssistantConfirmationPanel({
             theme={assistantTheme}
             tone={assistantRiskTone(request.riskLevel)}
           >
-            {request.riskLevel.toUpperCase()} RISK
+            {copy.riskLabel(request.riskLevel)}
           </Pill>
         </div>
 
@@ -136,7 +177,7 @@ export function AssistantConfirmationPanel({
                 marginBottom: 4,
               }}
             >
-              Target resource
+              {copy.targetResource}
             </div>
             <div style={{ color: assistantTheme.text, fontSize: 13.5 }}>
               {request.resourceLabel}
@@ -153,7 +194,7 @@ export function AssistantConfirmationPanel({
               color: assistantTheme.text,
             }}
           >
-            {request.reasonLabel ?? "Execution reason"}
+            {request.reasonLabel ?? copy.defaultReasonLabel}
           </label>
           <textarea
             id={reasonFieldId}
@@ -167,8 +208,8 @@ export function AssistantConfirmationPanel({
             placeholder={
               request.reasonPlaceholder ??
               (requiresReason
-                ? "Required for high-risk execution."
-                : "Optional operator note.")
+                ? copy.requiredPlaceholder
+                : copy.optionalPlaceholder)
             }
             rows={4}
             style={{
@@ -188,9 +229,7 @@ export function AssistantConfirmationPanel({
           />
           <div style={assistantMutedTextStyle}>
             {request.reasonHint ??
-              (requiresReason
-                ? "This action cannot execute until a non-empty reason is supplied."
-                : "Reason will be attached to the audit trail when provided.")}
+              (requiresReason ? copy.requiredHint : copy.optionalHint)}
           </div>
         </div>
 
@@ -220,7 +259,7 @@ export function AssistantConfirmationPanel({
               disabled={isSubmitting}
               style={buttonStyle("secondary", isSubmitting)}
             >
-              {request.cancelLabel ?? "Cancel"}
+              {request.cancelLabel ?? copy.cancel}
             </button>
           ) : null}
           <button
@@ -233,8 +272,8 @@ export function AssistantConfirmationPanel({
             )}
           >
             {isSubmitting
-              ? "Executing..."
-              : (request.confirmLabel ?? "Confirm and execute")}
+              ? copy.executing
+              : (request.confirmLabel ?? copy.confirm)}
           </button>
         </div>
       </div>

@@ -18,6 +18,7 @@ import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { PublishAssistantScope } from "@/components/ops-assistant";
 import { RefreshOnInterval } from "@/components/refresh-on-interval";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { formatOpsUiError, toOpsErrorMessage } from "@/lib/error-copy";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import { getRefreshIntervalMs } from "@/lib/refresh-tier";
 import { getServerLocale } from "@/lib/server-locale";
@@ -304,8 +305,11 @@ async function loadWithError<T>(
   } catch (error) {
     return {
       data: null,
-      error:
-        error instanceof Error ? error.message : t("common.unknown", locale),
+      error: formatOpsUiError(
+        locale,
+        toOpsErrorMessage(error, t("common.unknown", locale)),
+        locale === "en" ? "Data load failed" : "資料載入失敗",
+      ),
     };
   }
 }

@@ -4,24 +4,24 @@ import { bookingFlowRoutes } from "@/lib/navigation";
 
 const requestSummary = [
   {
-    label: "Pickup",
-    value: "1 Market St, San Francisco",
-    note: "Captured from the rider's stored location or fresh entry.",
+    label: "上車地點",
+    value: "舊金山市 Market St 1 號",
+    note: "可使用乘客已儲存地點，或由乘客重新輸入。",
   },
   {
-    label: "Drop-off",
-    value: "SFO Terminal 2",
-    note: "Drop-off can be a saved place or freeform address.",
+    label: "下車地點",
+    value: "舊金山機場第 2 航廈",
+    note: "下車地點可選擇常用地點，也可輸入自由格式地址。",
   },
   {
-    label: "Reservation window",
-    value: "Pick up in ~10 min (estimate)",
-    note: "Estimated arrival is shown as a range, never as a guaranteed minute.",
+    label: "預約時段",
+    value: "約 10 分鐘後上車",
+    note: "抵達時間會以範圍或預估呈現，不保證精準分鐘。",
   },
   {
-    label: "Service level",
-    value: "Standard direct (DRTS-owned)",
-    note: "Partner / tenant / concierge surfaces have their own request entry; this lane is direct passenger.",
+    label: "服務類型",
+    value: "一般直達服務",
+    note: "合作夥伴、租戶與客服代訂各有自己的入口；此頁只處理乘客直訂。",
   },
 ];
 
@@ -33,29 +33,24 @@ export default function BookingRequestPage() {
   return (
     <div className="page-shell">
       <section className="hero-card hero-gradient">
-        <span className="eyebrow">Booking request</span>
-        <h1>
-          Request a ride lands as a real route, not a "coming soon" placeholder.
-        </h1>
+        <span className="eyebrow">叫車預約</span>
+        <h1>送出乘車需求前，先確認地點、時段與可用性。</h1>
         <p>
-          This route materializes the passenger booking entry required by
-          `SYS-UI-004`. It frames the request as a quote-then-confirm flow,
-          stays explicit about ETA estimates, and exposes every reachable
-          negative outcome as its own named subroute.
+          此頁以先估價、再確認的方式呈現乘客預約流程，並明確說明抵達時間只是預估。任何可預期的失敗情境都會導向具體說明頁。
         </p>
         <div className="hero-actions">
           <Link className="primary-link" href="/trip">
-            Continue to active trip view
+            前往進行中行程
           </Link>
           <Link className="secondary-link" href="/auth">
-            Verify rider identity first
+            先驗證乘客身分
           </Link>
         </div>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Request payload (preview)</span>
-        <h3>Confirm pickup, drop-off, and timing before submission</h3>
+        <span className="surface-kicker">預約內容預覽</span>
+        <h3>送出前確認上車、下車與時間</h3>
         <dl className="kv-grid">
           {requestSummary.map((row) => (
             <div className="kv-row" key={row.label}>
@@ -68,38 +63,31 @@ export default function BookingRequestPage() {
           ))}
         </dl>
         <p className="surface-footnote">
-          Submission is intentionally not wired to a live backend in this slice.
-          The slice materializes the route topology and authority framing; the
-          actual `POST /bookings` integration belongs to a downstream wave.
+          若即時預約服務暫時不可用，系統會顯示明確備援狀態，而不是讓乘客誤以為已成功預約。
         </p>
       </section>
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>Authority-safe entry</strong>
+          <strong>只處理乘客直訂</strong>
           <p>
-            This surface only owns direct passenger requests. Bookings owned by
-            tenant, partner, or concierge channels stay in their own surfaces
-            and are not duplicated here.
+            此入口只負責乘客直接送出的需求。租戶、合作夥伴或客服代訂的行程會保留在原來源渠道處理。
           </p>
         </article>
         <article className="callout-card warning">
-          <strong>ETA stays an estimate</strong>
+          <strong>抵達時間是預估</strong>
           <p>
-            The route never guarantees a specific pickup minute. Quote and
-            estimated-arrival framing is part of the contract, not decoration.
+            頁面不會保證特定上車分鐘數。估價與預估抵達時間都會清楚標示為估計值。
           </p>
         </article>
       </section>
 
       <section className="page-shell-block">
         <header className="block-header">
-          <span className="eyebrow">Negative outcomes</span>
-          <h2>Every reachable rejection has its own route</h2>
+          <span className="eyebrow">可能無法預約</span>
+          <h2>每一種失敗情境都有清楚說明</h2>
           <p>
-            Riders never land on a vague "something went wrong" page. Each
-            failure mode is a named subroute with explicit framing and a safe
-            next action.
+            乘客不會只看到「發生錯誤」。每個情境都會說明原因類型與安全的下一步。
           </p>
         </header>
         <FlowRouteCards routes={negativeRoutes} emphasizeKind="negative" />

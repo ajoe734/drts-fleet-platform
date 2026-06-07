@@ -13,19 +13,14 @@ export function PassengerShell({ children }: { children: ReactNode }) {
     <div className="passenger-shell">
       <aside className="passenger-sidebar">
         <div className="passenger-brand">
-          <span className="passenger-badge">Phase 1 passenger surface</span>
-          <h1>Passenger Web</h1>
+          <span className="passenger-badge">乘客服務入口</span>
+          <h1>乘客入口</h1>
           <p>
-            External-consumer shell for trip status, trip history, and
-            receipt-aware follow-up, kept separate from tenant and ops control
-            planes.
+            提供乘客查詢行程狀態、行程紀錄與收據後續處理，並與租戶及營運後台權限分離。
           </p>
         </div>
 
-        <nav
-          className="passenger-nav"
-          aria-label="Passenger surface navigation"
-        >
+        <nav className="passenger-nav" aria-label="乘客服務導覽">
           {passengerNavItems.map((item) => {
             const isActive = activeItem?.href === item.href;
 
@@ -43,18 +38,14 @@ export function PassengerShell({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="sidebar-callout">
-          <strong>Receipt ownership stays source-driven</strong>
+          <strong>收據歸屬依來源渠道為準</strong>
           <p>
-            This shell may show DRTS receipts, external receipt references, or
-            explicit unsupported states. It must not invent a new email or SMS
-            delivery channel.
+            此入口可顯示平台收據、外部收據參考或明確的不支援狀態，但不會自行宣稱新的電子郵件或簡訊寄送渠道。
           </p>
         </div>
 
         <p className="sidebar-footnote">
-          Baseline routes come from `SYS-UI-003`. Booking request, active trip,
-          cancel, completion, and the named negative-flow routes are
-          materialized by `SYS-UI-004`.
+          預約、進行中行程、取消、完成與例外情境都以獨立頁面呈現，避免乘客只看到空白狀態或含糊提示。
         </p>
       </aside>
 
@@ -62,18 +53,15 @@ export function PassengerShell({ children }: { children: ReactNode }) {
         <div className="passenger-frame">
           <header className="passenger-topbar">
             <div className="topbar-copy">
-              <span className="eyebrow">External Consumer Plane</span>
-              <h2>{activeItem?.label ?? "Passenger Web"}</h2>
+              <span className="eyebrow">乘客服務</span>
+              <h2>{activeItem?.label ?? "乘客入口"}</h2>
               <p>
-                {activeItem?.note ??
-                  "Dedicated shell for rider-facing status and receipt surfaces."}
+                {activeItem?.note ?? "乘客查看行程狀態與收據資訊的專用入口。"}
               </p>
             </div>
             <div className="topbar-meta">
-              <span className="meta-pill">Topology: `apps/passenger-web`</span>
-              <span className="meta-pill">
-                Scope: booking + trip + negative routes
-              </span>
+              <span className="meta-pill">入口：乘客網站</span>
+              <span className="meta-pill">範圍：預約、行程與例外情境</span>
             </div>
           </header>
           {children}

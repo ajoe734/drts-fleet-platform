@@ -22,6 +22,8 @@ import type {
 } from "@drts/contracts";
 import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
 import { useOpsAssistantContextActions } from "@/components/ops-assistant";
+import { formatDispatchTraceMessage } from "@/lib/dispatch-trace";
+import { formatOpsUiError, toOpsErrorMessage } from "@/lib/error-copy";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
@@ -302,15 +304,21 @@ function formatEta(
 ): { display: string; tooltip: string } {
   if (etaMinutes === null || etaMinutes === undefined) {
     return {
-      display: "N/A",
+      display: locale === "zh" ? "未提供" : "N/A",
       tooltip: getOpsLabel(locale, "dispatchEtaUnavailable"),
     };
   }
   const updated = updatedAt
-    ? new Date(updatedAt).toLocaleTimeString()
+    ? new Date(updatedAt).toLocaleTimeString(
+        locale === "zh" ? "zh-TW" : "en-US",
+        {
+          hour: "2-digit",
+          minute: "2-digit",
+        },
+      )
     : getOpsLabel(locale, "unknown");
   return {
-    display: `${etaMinutes} min`,
+    display: locale === "zh" ? `${etaMinutes} 分鐘` : `${etaMinutes} min`,
     tooltip: getOpsLabel(locale, "dispatchLastUpdated", { value: updated }),
   };
 }
@@ -447,14 +455,18 @@ function getTimelineManagementTone(
 }
 
 function buildFallbackTimelineEntries(
+  locale: "en" | "zh",
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
 ): DispatchTimelineEntry[] {
   const entries: DispatchTimelineEntry[] = [
     {
       id: `${order.orderId}:created`,
-      title: "Order created",
-      body: `${order.orderNo} entered the owned dispatch queue.`,
+      title: locale === "zh" ? "進入佇列" : "Order created",
+      body:
+        locale === "zh"
+          ? `訂單 ${order.orderNo} 已進入自營派遣佇列。`
+          : `${order.orderNo} entered the owned dispatch queue.`,
       at: order.createdAt,
       tone: "default",
     },
@@ -463,8 +475,11 @@ function buildFallbackTimelineEntries(
   if (job) {
     entries.push({
       id: `${job.dispatchJobId}:job`,
-      title: "Dispatch job active",
-      body: `Job ${job.dispatchJobId} is ${job.status}.`,
+      title: locale === "zh" ? "派遣工作進行中" : "Dispatch job active",
+      body:
+        locale === "zh"
+          ? `派遣工作 ${job.dispatchJobId} 目前狀態為 ${formatOpsCodeLabel(locale, job.status)}。`
+          : `Job ${job.dispatchJobId} is ${job.status}.`,
       at: job.updatedAt,
       tone: getTimelineTone(job.status),
     });
@@ -473,8 +488,14 @@ function buildFallbackTimelineEntries(
   if (order.dispatchTimeout) {
     entries.push({
       id: `${order.orderId}:timeout`,
-      title: "Dispatch timeout",
-      body: `Timeout escalated as ${order.dispatchTimeout.escalationAction}.`,
+      title: locale === "zh" ? "派遣逾時" : "Dispatch timeout",
+      body:
+        locale === "zh"
+          ? `逾時後已執行 ${formatOpsCodeLabel(
+              locale,
+              order.dispatchTimeout.escalationAction,
+            )}。`
+          : `Timeout escalated as ${order.dispatchTimeout.escalationAction}.`,
       at: order.dispatchTimeout.timeoutAt,
       tone: "warning",
     });
@@ -483,8 +504,14 @@ function buildFallbackTimelineEntries(
   if (order.noSupplyEscalation) {
     entries.push({
       id: `${order.orderId}:no-supply`,
-      title: "No supply escalation",
-      body: `Attempt ${order.noSupplyEscalation.attemptCount} escalated via ${order.noSupplyEscalation.escalationAction}.`,
+      title: locale === "zh" ? "無供給升級" : "No supply escalation",
+      body:
+        locale === "zh"
+          ? `第 ${order.noSupplyEscalation.attemptCount} 次嘗試後，執行 ${formatOpsCodeLabel(
+              locale,
+              order.noSupplyEscalation.escalationAction,
+            )}。`
+          : `Attempt ${order.noSupplyEscalation.attemptCount} escalated via ${order.noSupplyEscalation.escalationAction}.`,
       at: order.noSupplyEscalation.escalatedAt,
       tone: "warning",
     });
@@ -493,16 +520,25 @@ function buildFallbackTimelineEntries(
   if (order.exceptionHold) {
     entries.push({
       id: `${order.orderId}:hold`,
-      title: "Exception hold raised",
-      body: `Reason: ${order.exceptionHold.reasonCode}.`,
+      title: locale === "zh" ? "人工覆核觸發" : "Exception hold raised",
+      body:
+        locale === "zh"
+          ? `原因：${formatOpsCodeLabel(locale, order.exceptionHold.reasonCode)}。`
+          : `Reason: ${order.exceptionHold.reasonCode}.`,
       at: order.exceptionHold.raisedAt,
       tone: "critical",
     });
     if (order.exceptionHold.overrideRequest) {
       entries.push({
         id: order.exceptionHold.overrideRequest.overrideRequestId,
-        title: "Override request",
-        body: `${order.exceptionHold.overrideRequest.status} by ${order.exceptionHold.overrideRequest.requestedBy.actorId}.`,
+        title: locale === "zh" ? "覆寫申請" : "Override request",
+        body:
+          locale === "zh"
+            ? `${formatOpsCodeLabel(
+                locale,
+                order.exceptionHold.overrideRequest.status,
+              )}，申請人 ${order.exceptionHold.overrideRequest.requestedBy.actorId}。`
+            : `${order.exceptionHold.overrideRequest.status} by ${order.exceptionHold.overrideRequest.requestedBy.actorId}.`,
         at: order.exceptionHold.overrideRequest.requestedAt,
         tone: "warning",
       });
@@ -510,8 +546,14 @@ function buildFallbackTimelineEntries(
     if (order.exceptionHold.resolution) {
       entries.push({
         id: `${order.orderId}:resolution`,
-        title: "Exception resolved",
-        body: `${order.exceptionHold.resolution.actorId} recorded ${order.exceptionHold.resolution.resolution}.`,
+        title: locale === "zh" ? "覆核完成" : "Exception resolved",
+        body:
+          locale === "zh"
+            ? `${order.exceptionHold.resolution.actorId} 記錄 ${formatOpsCodeLabel(
+                locale,
+                order.exceptionHold.resolution.resolution,
+              )}。`
+            : `${order.exceptionHold.resolution.actorId} recorded ${order.exceptionHold.resolution.resolution}.`,
         at: order.exceptionHold.resolution.resolvedAt,
         tone: "default",
       });
@@ -521,8 +563,11 @@ function buildFallbackTimelineEntries(
   if (order.manualFareOverride) {
     entries.push({
       id: `${order.orderId}:fare-override`,
-      title: "Manual fare override",
-      body: `${order.manualFareOverride.actorId} applied a fare override.`,
+      title: locale === "zh" ? "人工車資覆寫" : "Manual fare override",
+      body:
+        locale === "zh"
+          ? `${order.manualFareOverride.actorId} 已套用人工車資覆寫。`
+          : `${order.manualFareOverride.actorId} applied a fare override.`,
       at: order.manualFareOverride.overriddenAt,
       tone: "warning",
     });
@@ -826,9 +871,14 @@ export function DispatchWorkflow({
       reloadTimerRef.current = null;
       void reloadDispatchState().catch((reloadError) => {
         setError(
-          reloadError instanceof Error
-            ? reloadError.message
-            : t("dispatch.workflow.refreshFailed"),
+          formatOpsUiError(
+            locale,
+            toOpsErrorMessage(
+              reloadError,
+              t("dispatch.workflow.refreshFailed"),
+            ),
+            t("dispatch.workflow.refreshFailed"),
+          ),
         );
       });
     }, 300);
@@ -1048,9 +1098,11 @@ export function DispatchWorkflow({
       setCandidates((prev) => ({ ...prev, [jobId]: items }));
     } catch (e) {
       setError(
-        e instanceof Error
-          ? e.message
-          : t("dispatch.workflow.loadCandidatesFailed"),
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(e, t("dispatch.workflow.loadCandidatesFailed")),
+          t("dispatch.workflow.loadCandidatesFailed"),
+        ),
       );
     } finally {
       setLoading(null);
@@ -1069,7 +1121,11 @@ export function DispatchWorkflow({
       return true;
     } catch (e) {
       setError(
-        e instanceof Error ? e.message : t("dispatch.workflow.actionFailed"),
+        formatOpsUiError(
+          locale,
+          toOpsErrorMessage(e, t("dispatch.workflow.actionFailed")),
+          t("dispatch.workflow.actionFailed"),
+        ),
       );
       return false;
     } finally {
@@ -1442,7 +1498,7 @@ export function DispatchWorkflow({
             (trace): DispatchTimelineEntry => ({
               id: trace.traceId,
               title: formatOpsCodeLabel(locale, trace.eventType),
-              body: trace.message,
+              body: formatDispatchTraceMessage(locale, trace),
               at: trace.createdAt,
               tone: getTimelineTone(trace.eventType),
             }),
@@ -1451,7 +1507,7 @@ export function DispatchWorkflow({
             (left, right) =>
               new Date(right.at).getTime() - new Date(left.at).getTime(),
           )
-      : buildFallbackTimelineEntries(selectedOrder, selectedJob)
+      : buildFallbackTimelineEntries(locale, selectedOrder, selectedJob)
     : [];
   const selectedTimelineItems = selectedTimelineEntries.map((entry) => ({
     id: entry.id,
@@ -2910,7 +2966,13 @@ export function DispatchWorkflow({
                                 {t("dispatch.workflow.override.expiresAt", {
                                   time: new Date(
                                     exceptionHold.overrideRequest.expiresAt,
-                                  ).toLocaleTimeString(),
+                                  ).toLocaleTimeString(
+                                    locale === "zh" ? "zh-TW" : "en-US",
+                                    {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    },
+                                  ),
                                 })}
                               </div>
                             </div>

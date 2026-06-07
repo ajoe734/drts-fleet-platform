@@ -138,7 +138,7 @@ async function loadRulesPageData(
     errors.push(
       rulesResult.reason instanceof Error
         ? rulesResult.reason.message
-        : "Unable to load tenant approval rules.",
+        : "無法載入租戶審批規則。",
     );
   }
 
@@ -146,7 +146,7 @@ async function loadRulesPageData(
     errors.push(
       quotaSummaryResult.reason instanceof Error
         ? quotaSummaryResult.reason.message
-        : "Unable to load tenant quota summary.",
+        : "無法載入租戶配額摘要。",
     );
   }
 
@@ -154,7 +154,7 @@ async function loadRulesPageData(
     errors.push(
       approvalRequestsResult.reason instanceof Error
         ? approvalRequestsResult.reason.message
-        : "Unable to load pending approval requests.",
+        : "無法載入待處理審批申請。",
     );
   }
 
@@ -162,7 +162,7 @@ async function loadRulesPageData(
     errors.push(
       ledgerEntriesResult.reason instanceof Error
         ? ledgerEntriesResult.reason.message
-        : "Unable to load tenant quota ledger entries.",
+        : "無法載入租戶配額帳務紀錄。",
     );
   }
 

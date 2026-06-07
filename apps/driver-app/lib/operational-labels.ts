@@ -35,6 +35,10 @@ function humanizeCode(value: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function fallbackCodeLabel(value: string, locale: DriverLocale) {
+  return locale === "zh" ? UNKNOWN_STATUS.zh : humanizeCode(value);
+}
+
 export function formatDriverTaskStatusLabel(
   status: DriverTaskStatus | string | null | undefined,
   locale: DriverLocale = "zh",
@@ -45,7 +49,7 @@ export function formatDriverTaskStatusLabel(
 
   return (
     DRIVER_TASK_STATUS_LABELS[status as DriverTaskStatus]?.[locale] ??
-    humanizeCode(status)
+    fallbackCodeLabel(status, locale)
   );
 }
 
@@ -59,7 +63,7 @@ export function formatDriverPayoutStatusLabel(
 
   return (
     DRIVER_PAYOUT_STATUS_LABELS[status as DriverPayoutStatus]?.[locale] ??
-    humanizeCode(status)
+    fallbackCodeLabel(status, locale)
   );
 }
 

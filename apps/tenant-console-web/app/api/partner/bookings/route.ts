@@ -5,6 +5,7 @@ import type {
   CreateTenantBookingCommand,
   PassengerProfile,
 } from "@drts/contracts";
+import { formatTenantUiError, toTenantErrorMessage } from "@/lib/error-copy";
 import { buildPartnerClient, getPartnerSession } from "@/lib/partner-session";
 
 type BookingPayload = {
@@ -25,14 +26,14 @@ type BookingPayload = {
 
 function ensureString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`Missing required field: ${label}`);
+    throw new Error(`缺少必填欄位：${label}`);
   }
   return value.trim();
 }
 
 function ensureAddress(raw: unknown, label: string): AddressPayload {
   if (!raw || typeof raw !== "object") {
-    throw new Error(`Missing ${label} address payload.`);
+    throw new Error(`缺少${label === "pickup" ? "上車" : "下車"}地址資料。`);
   }
   const record = raw as Record<string, unknown>;
   const address = ensureString(record.address, `${label}.address`);
@@ -45,14 +46,16 @@ function ensureAddress(raw: unknown, label: string): AddressPayload {
       ? record.lng
       : Number.parseFloat(String(record.lng ?? ""));
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    throw new Error(`${label} requires numeric lat and lng.`);
+    throw new Error(
+      `${label === "pickup" ? "上車" : "下車"}地址的經緯度必須為數字。`,
+    );
   }
   return { address, lat, lng };
 }
 
 function ensurePassenger(raw: unknown): PassengerProfile {
   if (!raw || typeof raw !== "object") {
-    throw new Error("Missing passenger payload.");
+    throw new Error("缺少乘客資料。");
   }
   const record = raw as Record<string, unknown>;
   return {
@@ -65,7 +68,7 @@ export async function POST(request: NextRequest) {
   const session = await getPartnerSession();
   if (!session) {
     return NextResponse.json(
-      { error: "Partner session expired or missing." },
+      { error: "合作夥伴工作階段已過期，請重新登入。" },
       { status: 401 },
     );
   }
@@ -73,7 +76,7 @@ export async function POST(request: NextRequest) {
   if (session.partnerEntry.status !== "active") {
     return NextResponse.json(
       {
-        error: `Partner entry status is "${session.partnerEntry.status}". Booking creation is blocked until the entry is reactivated by platform admin.`,
+        error: `合作夥伴入口目前狀態為「${session.partnerEntry.status}」，需由平台管理端重新啟用後才能建立訂單。`,
       },
       { status: 403 },
     );
@@ -83,7 +86,10 @@ export async function POST(request: NextRequest) {
   try {
     body = (await request.json()) as BookingPayload;
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json(
+      { error: "請求內容格式錯誤，無法解析訂單資料。" },
+      { status: 400 },
+    );
   }
 
   let command: CreateTenantBookingCommand;
@@ -147,8 +153,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : "Invalid booking payload.",
+        error: formatTenantUiError(
+          toTenantErrorMessage(error, "建立訂單資料驗證失敗。"),
+          "建立訂單資料驗證失敗",
+        ),
       },
       { status: 400 },
     );
@@ -160,8 +168,7 @@ export async function POST(request: NextRequest) {
   ) {
     return NextResponse.json(
       {
-        error:
-          "Eligibility verification id is required for this entry. Run the eligibility step first.",
+        error: "這個合作夥伴入口必須先完成資格驗證，才能建立訂單。",
       },
       { status: 422 },
     );
@@ -180,7 +187,7 @@ export async function POST(request: NextRequest) {
 
     if (!booking) {
       return NextResponse.json(
-        { error: "Backend did not return a booking record." },
+        { error: "後端沒有回傳訂單資料，請稍後再試。" },
         { status: 502 },
       );
     }
@@ -189,10 +196,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Booking create rejected by backend.",
+        error: formatTenantUiError(
+          toTenantErrorMessage(error, "建立訂單失敗。"),
+          "建立訂單失敗",
+        ),
       },
       { status: 502 },
     );

@@ -5,7 +5,7 @@ export const driverRouteTitles = {
   onboarding: "裝置啟用",
   jobs: "任務收件匣",
   trip: "行程作業台",
-  incident: "SOS 緊急通報",
+  incident: "緊急求助",
   earnings: "收益儀表板",
   platformPresence: "平台上線狀態",
   shift: "班次與出勤",
@@ -110,7 +110,7 @@ export const driverStrings = {
     registrationCodeLabel: "註冊代碼",
     registrationCodePlaceholder: "請輸入註冊代碼",
     deviceNameLabel: "裝置名稱",
-    deviceNamePlaceholder: "例如：Driver Pixel 01",
+    deviceNamePlaceholder: "例如：司機手機 01",
     registerDevice: "註冊此裝置",
     registerDeviceLoading: "配置中…",
     provisioningWarning:
@@ -197,7 +197,7 @@ export const driverStrings = {
     },
     orderContextForwarded: "外部訂單",
     orderContextOwned: "一般安全事件",
-    primaryAction: "開啟 SOS 緊急通報",
+    primaryAction: "開啟緊急求助",
     cancelAction: "取消",
     confirmAction: "長按 2 秒送出",
   },
@@ -228,7 +228,7 @@ export const driverStrings = {
     },
     sections: {
       drtsRecon: "DRTS 對帳與撥款",
-      financeAuthority: "外部平台 finance authority",
+      financeAuthority: "外部平台帳務權責",
       platformBreakdown: "平台分項",
       monthlyStatements: "月結報表",
     },
@@ -259,7 +259,7 @@ export const driverStrings = {
   },
   components: {
     routeDisplay: {
-      eyebrow: "Trip Route Summary",
+      eyebrow: "行程路線摘要",
       title: "路線資訊",
       locked: "路線鎖定",
       pickup: "上車點",
@@ -269,7 +269,7 @@ export const driverStrings = {
       editRoute: "編輯路線",
     },
     platformTaskBadge: {
-      ownedTitle: "自營派單 · DRTS",
+      ownedTitle: "自營派單 · 平台自營",
       ownedAuthority: "本地可操作",
       forwardedTitlePrefix: "平台主導 · ",
       forwardedAuthority: "來源平台規則生效",

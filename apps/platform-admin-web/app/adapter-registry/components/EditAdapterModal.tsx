@@ -5,6 +5,11 @@ import {
   Policy,
   UpdatePlatformAdapterCommand,
 } from "@drts/contracts";
+import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformAdapterLabel,
+  formatPlatformCodeLabel,
+} from "@/lib/localized-labels";
 
 interface EditAdapterModalProps {
   adapter: PlatformAdapter | null;
@@ -19,9 +24,60 @@ export function EditAdapterModal({
   onClose,
   onSave,
 }: EditAdapterModalProps) {
+  const { locale } = useTranslation();
   const [editedAdapter, setEditedAdapter] = useState<PlatformAdapter | null>(
     null,
   );
+
+  const copy =
+    locale === "en"
+      ? {
+          editTitle: "Edit Adapter",
+          name: "Name",
+          version: "Version",
+          enabled: "Enabled",
+          rolloutStatus: "Rollout Status",
+          credentialStatus: "Credential Status",
+          webhookSettings: "Webhook Settings",
+          webhookEnabled: "Webhook Enabled",
+          webhookUrl: "Webhook URL",
+          webhookPlaceholder: "https://partner.example.com/webhook",
+          policySettings: "Policy Settings",
+          serviceBuckets: "Service Buckets (comma-separated)",
+          maxCandidates: "Max Candidates",
+          acceptTimeout: "Accept Timeout (seconds)",
+          manualFallback: "Manual Fallback Threshold (seconds)",
+          supportedActions: "Supported Actions",
+          noSupportedActions:
+            "No adapter actions are enabled for this platform.",
+          supportedActionDescription: (actionLabel: string) =>
+            `Supports the ${actionLabel} action.`,
+          cancel: "Cancel",
+          save: "Save",
+        }
+      : {
+          editTitle: "編輯介接器",
+          name: "名稱",
+          version: "版本",
+          enabled: "啟用",
+          rolloutStatus: "推進狀態",
+          credentialStatus: "憑證狀態",
+          webhookSettings: "回呼設定",
+          webhookEnabled: "啟用回呼",
+          webhookUrl: "回呼網址",
+          webhookPlaceholder: "例如：https://partner.example.com/callback",
+          policySettings: "政策設定",
+          serviceBuckets: "服務分類（以逗號分隔）",
+          maxCandidates: "最大候選數",
+          acceptTimeout: "受理逾時（秒）",
+          manualFallback: "人工接手門檻（秒）",
+          supportedActions: "支援動作",
+          noSupportedActions: "此平台目前沒有啟用任何介接器動作。",
+          supportedActionDescription: (actionLabel: string) =>
+            `支援「${actionLabel}」動作。`,
+          cancel: "取消",
+          save: "儲存",
+        };
 
   useEffect(() => {
     if (adapter) {
@@ -33,6 +89,8 @@ export function EditAdapterModal({
   if (!isOpen || !editedAdapter) {
     return null;
   }
+
+  const adapterDisplayName = formatPlatformAdapterLabel(locale, editedAdapter);
 
   const handleInputChange = (field: string, value: any) => {
     setEditedAdapter((prev) => {
@@ -99,7 +157,7 @@ export function EditAdapterModal({
       <div className="bg-white rounded-lg p-6 shadow-xl max-w-3xl w-full">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold">
-            Edit Adapter: {editedAdapter.name}
+            {copy.editTitle}: {adapterDisplayName}
           </h2>
           <button
             onClick={onClose}
@@ -113,13 +171,13 @@ export function EditAdapterModal({
           {/* Name and Version (display only) */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Name
+              {copy.name}
             </label>
-            <p className="text-gray-900">{editedAdapter.name}</p>
+            <p className="text-gray-900">{adapterDisplayName}</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Version
+              {copy.version}
             </label>
             <p className="text-gray-900">{editedAdapter.version}</p>
           </div>
@@ -130,7 +188,7 @@ export function EditAdapterModal({
               htmlFor="isEnabled"
               className="block text-sm font-medium text-gray-700"
             >
-              Enabled
+              {copy.enabled}
             </label>
             <div className="flex items-center">
               <input
@@ -151,7 +209,7 @@ export function EditAdapterModal({
               htmlFor="rolloutStatus"
               className="block text-sm font-medium text-gray-700"
             >
-              Rollout Status
+              {copy.rolloutStatus}
             </label>
             <select
               id="rolloutStatus"
@@ -163,7 +221,7 @@ export function EditAdapterModal({
             >
               {Object.values(RolloutStatus).map((status) => (
                 <option key={status} value={status}>
-                  {status.replace("_", " ")}
+                  {formatPlatformCodeLabel(locale, status)}
                 </option>
               ))}
             </select>
@@ -172,15 +230,17 @@ export function EditAdapterModal({
           {/* Credential Status (display only for now) */}
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Credential Status
+              {copy.credentialStatus}
             </label>
-            <p className="text-gray-900">{editedAdapter.credentialStatus}</p>
+            <p className="text-gray-900">
+              {formatPlatformCodeLabel(locale, editedAdapter.credentialStatus)}
+            </p>
           </div>
 
           {/* Webhook Settings */}
           <div className="col-span-2 grid grid-cols-2 gap-4">
             <h3 className="col-span-2 text-lg font-medium text-gray-900">
-              Webhook Settings
+              {copy.webhookSettings}
             </h3>
             {/* Webhook Enabled Toggle */}
             <div className="flex items-center justify-between col-span-2">
@@ -188,7 +248,7 @@ export function EditAdapterModal({
                 htmlFor="webhookEnabled"
                 className="block text-sm font-medium text-gray-700"
               >
-                Webhook Enabled
+                {copy.webhookEnabled}
               </label>
               <div className="flex items-center">
                 <input
@@ -211,7 +271,7 @@ export function EditAdapterModal({
                 htmlFor="webhookUrl"
                 className="block text-sm font-medium text-gray-700"
               >
-                Webhook URL
+                {copy.webhookUrl}
               </label>
               <input
                 type="url"
@@ -221,7 +281,7 @@ export function EditAdapterModal({
                   handleInputChange("webhookStatus.url", e.target.value)
                 }
                 className="mt-1 block w-full pl-3 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-                placeholder="https://example.com/webhook"
+                placeholder={copy.webhookPlaceholder}
               />
             </div>
           </div>
@@ -229,7 +289,7 @@ export function EditAdapterModal({
           {/* Policy Settings */}
           <div className="col-span-2 grid grid-cols-2 gap-4">
             <h3 className="col-span-2 text-lg font-medium text-gray-900">
-              Policy Settings
+              {copy.policySettings}
             </h3>
             {/* Service Buckets Input */}
             <div>
@@ -237,7 +297,7 @@ export function EditAdapterModal({
                 htmlFor="policies.serviceBuckets"
                 className="block text-sm font-medium text-gray-700"
               >
-                Service Buckets (comma-separated)
+                {copy.serviceBuckets}
               </label>
               <input
                 type="text"
@@ -255,7 +315,7 @@ export function EditAdapterModal({
                 htmlFor="policies.maxCandidates"
                 className="block text-sm font-medium text-gray-700"
               >
-                Max Candidates
+                {copy.maxCandidates}
               </label>
               <input
                 type="number"
@@ -276,7 +336,7 @@ export function EditAdapterModal({
                 htmlFor="policies.acceptTimeoutSeconds"
                 className="block text-sm font-medium text-gray-700"
               >
-                Accept Timeout (seconds)
+                {copy.acceptTimeout}
               </label>
               <input
                 type="number"
@@ -297,7 +357,7 @@ export function EditAdapterModal({
                 htmlFor="policies.manualFallbackThresholdSeconds"
                 className="block text-sm font-medium text-gray-700"
               >
-                Manual Fallback Threshold (seconds)
+                {copy.manualFallback}
               </label>
               <input
                 type="number"
@@ -316,7 +376,7 @@ export function EditAdapterModal({
 
           <div className="col-span-2">
             <h3 className="text-lg font-medium text-gray-900 mb-2">
-              Supported Actions
+              {copy.supportedActions}
             </h3>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {editedAdapter.supportedActions.length > 0 ? (
@@ -326,16 +386,20 @@ export function EditAdapterModal({
                     className="rounded-md border border-gray-200 bg-gray-50 p-3"
                   >
                     <p className="text-sm font-medium text-gray-900">
-                      {action.name}
+                      {formatPlatformCodeLabel(locale, action.name)}
                     </p>
                     <p className="mt-1 text-xs text-gray-500">
-                      {action.description}
+                      {locale === "en"
+                        ? action.description
+                        : copy.supportedActionDescription(
+                            formatPlatformCodeLabel(locale, action.name),
+                          )}
                     </p>
                   </div>
                 ))
               ) : (
                 <p className="text-sm text-gray-500">
-                  No adapter actions are enabled for this platform.
+                  {copy.noSupportedActions}
                 </p>
               )}
             </div>
@@ -347,13 +411,13 @@ export function EditAdapterModal({
             onClick={onClose}
             className="mr-4 px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            Cancel
+            {copy.cancel}
           </button>
           <button
             onClick={handleSave}
             className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
           >
-            Save
+            {copy.save}
           </button>
         </div>
       </div>

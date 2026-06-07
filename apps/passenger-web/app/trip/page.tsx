@@ -4,39 +4,44 @@ import { tripFlowRoutes } from "@/lib/navigation";
 
 const tripSnapshot = {
   tripId: "trp_8FQ12X",
-  status: "Driver matched",
-  eta: "8 min (estimate)",
-  vehicle: "White Toyota Camry · 7VBN384",
-  driverName: "Driver M. (first name shown to rider)",
-  cancelWindow: "Cancel-safe until pickup arrival",
-  authority: "DRTS-owned trip",
+  status: "已媒合司機",
+  eta: "約 8 分鐘",
+  vehicle: "白色 Toyota Camry，車牌 7VBN384",
+  driverName: "司機 M.，僅顯示名字",
+  cancelWindow: "抵達上車地點前可取消",
+  authority: "乘客直訂行程",
 };
 
 const lifecycle = [
   {
-    phase: "Requested",
+    phase: "已送出需求",
     state: "complete",
-    body: "Rider submitted the request.",
+    stateLabel: "已完成",
+    body: "乘客已送出叫車需求。",
   },
   {
-    phase: "Matched",
+    phase: "已媒合",
     state: "current",
-    body: "Driver accepted; ETA estimate is rolling.",
+    stateLabel: "目前階段",
+    body: "司機已接受行程，預估抵達時間會持續更新。",
   },
   {
-    phase: "En route to pickup",
+    phase: "前往上車地點",
     state: "upcoming",
-    body: "Driver is moving toward pickup.",
+    stateLabel: "待進行",
+    body: "司機正在前往乘客上車地點。",
   },
   {
-    phase: "Picked up",
+    phase: "已上車",
     state: "upcoming",
-    body: "Trip starts after rider boards.",
+    stateLabel: "待進行",
+    body: "乘客上車後，行程正式開始。",
   },
   {
-    phase: "Drop-off",
+    phase: "抵達下車地點",
     state: "upcoming",
-    body: "Trip ends at the drop-off; receipt becomes available.",
+    stateLabel: "待進行",
+    body: "行程於下車地點結束，收據將可查詢。",
   },
 ];
 
@@ -46,86 +51,71 @@ export default function TripStatusPage() {
   return (
     <div className="page-shell">
       <section className="hero-card hero-gradient">
-        <span className="eyebrow">Active trip status</span>
-        <h1>
-          The active trip surface is now a real route, not a roadmap note.
-        </h1>
+        <span className="eyebrow">進行中行程狀態</span>
+        <h1>查看司機、車輛、預估抵達與可用操作。</h1>
         <p>
-          This page materializes the in-flight passenger trip view required by
-          `SYS-UI-004`. Status, ETA framing, vehicle metadata, and authority
-          posture are all visible. Mutations only appear when the rider still
-          owns the relevant authority.
+          此頁提供乘客在行程進行中需要的資訊。只有在乘客仍有操作權限時，才會顯示取消等變更操作。
         </p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Trip {tripSnapshot.tripId}</span>
+        <span className="surface-kicker">行程 {tripSnapshot.tripId}</span>
         <h3>{tripSnapshot.status}</h3>
         <dl className="kv-grid">
           <div className="kv-row">
-            <dt>ETA</dt>
+            <dt>預估抵達</dt>
             <dd>
               <strong>{tripSnapshot.eta}</strong>
-              <span>Always rendered as an estimate, never as a guarantee.</span>
+              <span>一律以預估呈現，不作為保證時間。</span>
             </dd>
           </div>
           <div className="kv-row">
-            <dt>Vehicle</dt>
+            <dt>車輛</dt>
             <dd>
               <strong>{tripSnapshot.vehicle}</strong>
-              <span>
-                Plate and model shown so the rider can identify the vehicle.
-              </span>
+              <span>顯示車牌與車型，協助乘客辨識車輛。</span>
             </dd>
           </div>
           <div className="kv-row">
-            <dt>Driver</dt>
+            <dt>司機</dt>
             <dd>
               <strong>{tripSnapshot.driverName}</strong>
-              <span>
-                Only first name; phone-bridged contact handled outside this
-                surface.
-              </span>
+              <span>僅顯示必要資訊；通話或轉接聯絡由其他流程處理。</span>
             </dd>
           </div>
           <div className="kv-row">
-            <dt>Authority</dt>
+            <dt>操作權限</dt>
             <dd>
               <strong>{tripSnapshot.authority}</strong>
-              <span>
-                Mutation is allowed because this is a direct passenger trip.
-              </span>
+              <span>因為此行程由乘客直訂，仍可在規則允許時操作。</span>
             </dd>
           </div>
           <div className="kv-row">
-            <dt>Cancel window</dt>
+            <dt>取消期限</dt>
             <dd>
               <strong>{tripSnapshot.cancelWindow}</strong>
-              <span>
-                Cancellation policy is enforced server-side; the UI only mirrors
-                it.
-              </span>
+              <span>取消規則由後端判定，前端只呈現目前可用狀態。</span>
             </dd>
           </div>
         </dl>
         <div className="hero-actions">
           <Link className="primary-link" href="/trip/cancel">
-            Cancel this trip
+            取消此行程
           </Link>
           <Link className="secondary-link" href="/trip/completed">
-            Preview completion view
+            查看完成頁
           </Link>
         </div>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Lifecycle</span>
-        <h3>Phase-by-phase progress</h3>
+        <span className="surface-kicker">行程進度</span>
+        <h3>各階段狀態</h3>
         <ul className="check-list">
           {lifecycle.map((phase) => (
             <li className={`check-item check-${phase.state}`} key={phase.phase}>
               <strong>{phase.phase}</strong>
-              <span className="check-state">{phase.state}</span>
+              <span className="check-state">{phase.stateLabel}</span>
               <p>{phase.body}</p>
             </li>
           ))}
@@ -134,12 +124,10 @@ export default function TripStatusPage() {
 
       <section className="page-shell-block">
         <header className="block-header">
-          <span className="eyebrow">Subroutes</span>
-          <h2>Each lifecycle outcome has its own named route</h2>
+          <span className="eyebrow">行程狀態頁</span>
+          <h2>每個結果都有自己的說明頁</h2>
           <p>
-            Cancel, complete, read-only authority, post-fact cancellation, and
-            reauth-required outcomes are split out so the UI is auditable
-            route-by-route, not behind hidden conditional branches.
+            取消、完成、唯讀權限、事後取消與重新驗證都拆成獨立頁面，讓狀態與責任清楚可查。
           </p>
         </header>
         <FlowRouteCards routes={subRoutes} />

@@ -9,6 +9,7 @@ import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { formatPortalUiError, toPortalErrorMessage } from "@/lib/error-copy";
 
 export default async function PassengersPage({
   searchParams,
@@ -23,7 +24,7 @@ export default async function PassengersPage({
   try {
     passengers = await client.listPassengers();
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = formatPortalUiError(toPortalErrorMessage(e), "無法載入乘客資料");
   }
 
   const editId = searchParams?.edit;
@@ -31,17 +32,19 @@ export default async function PassengersPage({
     ? passengers.find((p) => p.passengerId === editId)
     : null;
 
-  const formError = searchParams?.error ?? null;
+  const formError = searchParams?.error
+    ? formatPortalUiError(searchParams.error, "乘客作業失敗")
+    : null;
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Passengers"
-        description={`${passengers.length} passenger(s) found.`}
+        title="乘客名冊"
+        description={`目前共有 ${passengers.length} 筆乘客資料。`}
       >
         {error && (
           <div className="error-banner">
-            <strong>Error loading passengers:</strong> {error}
+            <strong>載入乘客資料失敗：</strong> {error}
           </div>
         )}
 
@@ -55,7 +58,7 @@ export default async function PassengersPage({
         )}
 
         <Link className="route-link" href="/">
-          Back to home
+          返回首頁
         </Link>
       </AppShellCard>
     </main>
@@ -65,39 +68,39 @@ export default async function PassengersPage({
 function NewPassengerForm({ formError }: { formError: string | null }) {
   return (
     <div className="form-section">
-      <h3>New Passenger</h3>
+      <h3>新增乘客</h3>
       {formError && (
         <div className="error-banner">
-          <strong>Error:</strong> {formError}
+          <strong>錯誤：</strong> {formError}
         </div>
       )}
       <form action={createPassenger} className="form-grid">
         <div className="form-row">
-          <label htmlFor="fullName">Full Name *</label>
+          <label htmlFor="fullName">姓名 *</label>
           <input type="text" id="fullName" name="fullName" required />
         </div>
         <div className="form-row">
-          <label htmlFor="employeeNo">Employee No</label>
+          <label htmlFor="employeeNo">工號</label>
           <input type="text" id="employeeNo" name="employeeNo" />
         </div>
         <div className="form-row">
-          <label htmlFor="departmentName">Department</label>
+          <label htmlFor="departmentName">部門</label>
           <input type="text" id="departmentName" name="departmentName" />
         </div>
         <div className="form-row">
-          <label htmlFor="mobile">Mobile</label>
+          <label htmlFor="mobile">手機</label>
           <input type="tel" id="mobile" name="mobile" />
         </div>
         <div className="form-row">
-          <label htmlFor="email">Email</label>
+          <label htmlFor="email">電子郵件</label>
           <input type="email" id="email" name="email" />
         </div>
         <div className="form-row">
           <label>
-            <input type="checkbox" name="activeFlag" defaultChecked /> Active
+            <input type="checkbox" name="activeFlag" defaultChecked /> 啟用中
           </label>
         </div>
-        <button type="submit">Create Passenger</button>
+        <button type="submit">建立乘客</button>
       </form>
     </div>
   );
@@ -110,11 +113,11 @@ function EditPassengerForm({
 }) {
   return (
     <div className="form-section">
-      <h3>Edit Passenger: {passenger.fullName}</h3>
+      <h3>編輯乘客：{passenger.fullName}</h3>
       <form action={updatePassenger} className="form-grid">
         <input type="hidden" name="passengerId" value={passenger.passengerId} />
         <div className="form-row">
-          <label htmlFor="fullName">Full Name *</label>
+          <label htmlFor="fullName">姓名 *</label>
           <input
             type="text"
             id="fullName"
@@ -124,7 +127,7 @@ function EditPassengerForm({
           />
         </div>
         <div className="form-row">
-          <label htmlFor="employeeNo">Employee No</label>
+          <label htmlFor="employeeNo">工號</label>
           <input
             type="text"
             id="employeeNo"
@@ -133,7 +136,7 @@ function EditPassengerForm({
           />
         </div>
         <div className="form-row">
-          <label htmlFor="departmentName">Department</label>
+          <label htmlFor="departmentName">部門</label>
           <input
             type="text"
             id="departmentName"
@@ -142,7 +145,7 @@ function EditPassengerForm({
           />
         </div>
         <div className="form-row">
-          <label htmlFor="mobile">Mobile</label>
+          <label htmlFor="mobile">手機</label>
           <input
             type="tel"
             id="mobile"
@@ -151,7 +154,7 @@ function EditPassengerForm({
           />
         </div>
         <div className="form-row">
-          <label htmlFor="email">Email</label>
+          <label htmlFor="email">電子郵件</label>
           <input
             type="email"
             id="email"
@@ -166,12 +169,12 @@ function EditPassengerForm({
               name="activeFlag"
               defaultChecked={passenger.activeFlag}
             />{" "}
-            Active
+            啟用中
           </label>
         </div>
         <div className="form-actions">
-          <button type="submit">Save Changes</button>
-          <Link href="/passengers">Cancel</Link>
+          <button type="submit">儲存變更</button>
+          <Link href="/passengers">取消</Link>
         </div>
       </form>
     </div>
@@ -186,18 +189,18 @@ function PassengerList({
   return (
     <div className="data-table">
       {passengers.length === 0 ? (
-        <p className="empty-state">No passengers found. Create one above.</p>
+        <p className="empty-state">目前沒有乘客資料，可先建立一筆。</p>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Employee No</th>
-              <th>Department</th>
-              <th>Mobile</th>
-              <th>Email</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>姓名</th>
+              <th>工號</th>
+              <th>部門</th>
+              <th>手機</th>
+              <th>電子郵件</th>
+              <th>狀態</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -208,9 +211,9 @@ function PassengerList({
                 <td>{p.departmentName ?? "-"}</td>
                 <td>{p.mobile ?? "-"}</td>
                 <td>{p.email ?? "-"}</td>
-                <td>{p.activeFlag ? "Active" : "Inactive"}</td>
+                <td>{p.activeFlag ? "啟用中" : "停用中"}</td>
                 <td>
-                  <Link href={`/passengers?edit=${p.passengerId}`}>Edit</Link>
+                  <Link href={`/passengers?edit=${p.passengerId}`}>編輯</Link>
                   {" | "}
                   <form action={deletePassenger} style={{ display: "inline" }}>
                     <input
@@ -220,9 +223,9 @@ function PassengerList({
                     />
                     <ConfirmSubmitButton
                       type="submit"
-                      confirmMessage={`Delete passenger "${p.fullName}"?`}
+                      confirmMessage={`確定要刪除乘客「${p.fullName}」嗎？`}
                     >
-                      Delete
+                      刪除
                     </ConfirmSubmitButton>
                   </form>
                 </td>
@@ -240,7 +243,7 @@ async function createPassenger(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteTenant,
-    "Tenant write authority required to manage passengers.",
+    "管理乘客需要租戶寫入權限。",
   );
   const client = await getTenantClient();
 
@@ -257,7 +260,7 @@ async function createPassenger(formData: FormData) {
     await client.upsertPassenger(command);
     revalidatePath("/passengers");
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
+    const msg = formatPortalUiError(toPortalErrorMessage(e), "無法建立乘客");
     redirect(`/passengers?error=${encodeURIComponent(msg)}`);
   }
 }
@@ -267,7 +270,7 @@ async function updatePassenger(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteTenant,
-    "Tenant write authority required to manage passengers.",
+    "管理乘客需要租戶寫入權限。",
   );
   const client = await getTenantClient();
 
@@ -285,7 +288,7 @@ async function updatePassenger(formData: FormData) {
     await client.upsertPassenger(command);
     revalidatePath("/passengers");
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
+    const msg = formatPortalUiError(toPortalErrorMessage(e), "無法更新乘客");
     redirect(
       `/passengers?edit=${command.passengerId}&error=${encodeURIComponent(msg)}`,
     );
@@ -297,7 +300,7 @@ async function deletePassenger(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteTenant,
-    "Tenant write authority required to manage passengers.",
+    "管理乘客需要租戶寫入權限。",
   );
   const client = await getTenantClient();
 
@@ -314,7 +317,7 @@ async function deletePassenger(formData: FormData) {
     await client.upsertPassenger(command);
     revalidatePath("/passengers");
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
+    const msg = formatPortalUiError(toPortalErrorMessage(e), "無法刪除乘客");
     redirect(`/passengers?error=${encodeURIComponent(msg)}`);
   }
 }

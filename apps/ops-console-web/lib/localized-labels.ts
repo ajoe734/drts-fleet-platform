@@ -9,7 +9,10 @@ const UI_LABELS: Record<string, LocalizedText> = {
   error: { en: "Error", zh: "錯誤" },
   switchLanguage: { en: "Switch language", zh: "切換語言" },
   unknown: { en: "Unknown", zh: "未知" },
-  dispatchEtaUnavailable: { en: "ETA not available", zh: "暫無 ETA" },
+  dispatchEtaUnavailable: {
+    en: "ETA not available",
+    zh: "暫無預估到達時間",
+  },
   dispatchLastUpdated: {
     en: "Last updated: {value}",
     zh: "最後更新：{value}",
@@ -21,7 +24,10 @@ const UI_LABELS: Record<string, LocalizedText> = {
   dispatchId: { en: "ID: {value}", zh: "編號：{value}" },
   dispatchStatus: { en: "Status: {value}", zh: "狀態：{value}" },
   incidentsPriorityQueue: { en: "Priority queue", zh: "優先處理佇列" },
-  incidentsCriticalQueue: { en: "Critical / SOS queue", zh: "重大 / SOS 佇列" },
+  incidentsCriticalQueue: {
+    en: "Critical / SOS queue",
+    zh: "重大 / 緊急求助佇列",
+  },
   incidentsActiveCritical: {
     en: "{count} active critical incident(s)",
     zh: "{count} 筆重大事故處理中",
@@ -39,7 +45,7 @@ const UI_LABELS: Record<string, LocalizedText> = {
   },
   reportsPeriodExample: { en: "2026-04 or 2026-H1", zh: "2026-04 或 2026-H1" },
   reportsClosedMonthExample: { en: "2026-03", zh: "2026-03" },
-  reportsRequestedByExample: { en: "ops-console", zh: "ops-console" },
+  reportsRequestedByExample: { en: "ops-console", zh: "營運後台" },
   driverRegistryUnavailableSubtitle: {
     en: "Unable to load driver registry data for {driverId}.",
     zh: "無法載入司機名冊資料：{driverId}。",
@@ -55,9 +61,9 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   eligible: { en: "Eligible", zh: "符合資格" },
   ineligible: { en: "Ineligible", zh: "不符合資格" },
   online: { en: "Online", zh: "上線" },
-  lifecycle_draft: { en: "Lifecycle: Draft", zh: "Lifecycle：草稿" },
-  lifecycle_suspended: { en: "Lifecycle: Suspended", zh: "Lifecycle：停用" },
-  lifecycle_retired: { en: "Lifecycle: Retired", zh: "Lifecycle：退場" },
+  lifecycle_draft: { en: "Lifecycle: Draft", zh: "生命週期：草稿" },
+  lifecycle_suspended: { en: "Lifecycle: Suspended", zh: "生命週期：停用" },
+  lifecycle_retired: { en: "Lifecycle: Retired", zh: "生命週期：退場" },
   licenses_invalid: { en: "Licenses Invalid", zh: "駕照失效" },
   work_state_reserved: { en: "Work State: Reserved", zh: "工作狀態：已預約" },
   work_state_enroute: { en: "Work State: En Route", zh: "工作狀態：前往中" },
@@ -75,7 +81,8 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   api: { en: "API", zh: "API" },
   absent: { en: "Absent", zh: "缺勤" },
   approved: { en: "Approved", zh: "已核准" },
-  app: { en: "App", zh: "App" },
+  app: { en: "App", zh: "應用程式" },
+  any_of: { en: "Any Of", zh: "任一核准" },
   arrived: { en: "Arrived", zh: "已到達" },
   assigned: { en: "Assigned", zh: "已指派" },
   arrived_pickup: { en: "Arrived at Pickup", zh: "已到接送點" },
@@ -113,9 +120,35 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   },
   critical: { en: "Critical", zh: "重大" },
   degraded: { en: "Degraded", zh: "降級" },
+  disabled: { en: "Disabled", zh: "已停用" },
   dispatch_failed: { en: "Dispatch Failed", zh: "派車失敗" },
+  dispatch_matching: { en: "Dispatch Matching", zh: "派遣媒合中" },
+  dispatch_assigned: { en: "Dispatch Assigned", zh: "派遣已指派" },
+  dispatch_reassigned: { en: "Dispatch Reassigned", zh: "派遣已重新指派" },
   dispatch_recording_index: { en: "Dispatch Trace", zh: "派車追蹤" },
+  dispatch_surface_degraded: {
+    en: "Dispatch Surface Degraded",
+    zh: "派遣頁面降級",
+  },
   driver_accepted: { en: "Driver Accepted", zh: "司機已接單" },
+  driver_arrived_pickup: {
+    en: "Driver Arrived at Pickup",
+    zh: "司機已到接送點",
+  },
+  driver_completed_trip: {
+    en: "Driver Completed Trip",
+    zh: "司機已完成行程",
+  },
+  driver_departed_pickup: {
+    en: "Driver Departed to Pickup",
+    zh: "司機前往接送點",
+  },
+  driver_proof_pending: {
+    en: "Driver Proof Pending",
+    zh: "司機待補證明",
+  },
+  driver_rejected: { en: "Driver Rejected", zh: "司機拒單" },
+  driver_started_trip: { en: "Driver Started Trip", zh: "司機已開始行程" },
   driver_injury: { en: "Driver Injury", zh: "司機受傷" },
   driver_roster: { en: "Driver Roster", zh: "司機名冊" },
   driver_service: { en: "Driver Service", zh: "司機服務" },
@@ -140,6 +173,8 @@ const CODE_LABELS: Record<string, LocalizedText> = {
     zh: "無可用供給",
   },
   expired: { en: "Expired", zh: "已過期" },
+  escalate_to_incident: { en: "Escalate To Incident", zh: "升級為事故" },
+  export_view: { en: "Export View", zh: "匯出目前檢視" },
   failed: { en: "Failed", zh: "失敗" },
   failing: { en: "Failing", zh: "異常" },
   fare_dispute: { en: "Fare Dispute", zh: "車資爭議" },
@@ -147,11 +182,15 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   filing: { en: "Filing", zh: "申報" },
   fresh: { en: "Fresh", zh: "最新" },
   forwarder_broadcast: { en: "Forwarder Broadcast", zh: "轉派廣播" },
+  forwarder_terminal_state: {
+    en: "Forwarder Terminal State",
+    zh: "轉派終態同步",
+  },
   general_inquiry: { en: "General Inquiry", zh: "一般諮詢" },
   grab_taiwan: { en: "Grab Taiwan", zh: "Grab Taiwan" },
   high: { en: "High", zh: "高" },
   healthy: { en: "Healthy", zh: "健康" },
-  hybrid: { en: "Hybrid", zh: "Hybrid" },
+  hybrid: { en: "Hybrid", zh: "混合" },
   immutable: { en: "Immutable", zh: "不可變" },
   in_progress: { en: "In Progress", zh: "進行中" },
   incident_assigned: { en: "Incident Assigned", zh: "事故已指派" },
@@ -176,6 +215,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   invalid: { en: "Invalid", zh: "無效" },
   investigating: { en: "Investigating", zh: "調查中" },
   late_arrival: { en: "Late Arrival", zh: "延遲到達" },
+  live: { en: "Live", zh: "即時" },
   lost_and_found: { en: "Lost and Found", zh: "失物招領" },
   lost_race: { en: "Lost Race", zh: "已失去競單" },
   low: { en: "Low", zh: "低" },
@@ -192,9 +232,27 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   manual_fallback: { en: "Manual Fallback", zh: "人工備援" },
   manual_review_queue: { en: "Manual Review Queue", zh: "人工審查佇列" },
   mismatch: { en: "Mismatch", zh: "不一致" },
+  missing_request: { en: "Request ID Required", zh: "請求編號為必填" },
+  missing_request_or_reason: {
+    en: "Request ID And Reason Required",
+    zh: "請求編號與原因皆為必填",
+  },
   mutable: { en: "Mutable", zh: "可變" },
   new: { en: "New", zh: "新建" },
   none: { en: "None", zh: "無" },
+  no_data: { en: "No Data", zh: "無資料" },
+  filtered_empty: { en: "Filtered Empty", zh: "篩選後無結果" },
+  fetch_failed: { en: "Fetch Failed", zh: "載入失敗" },
+  permission_denied: { en: "Permission Denied", zh: "權限不足" },
+  external_unavailable: {
+    en: "External Dependency Unavailable",
+    zh: "外部依賴不可用",
+  },
+  not_provisioned: { en: "Not Provisioned", zh: "尚未開通" },
+  driver_not_eligible: {
+    en: "Driver Not Eligible",
+    zh: "司機不符合資格",
+  },
   no_arrival: { en: "No Arrival", zh: "未到場" },
   normal: { en: "Normal", zh: "一般" },
   not_applicable: { en: "Not Applicable", zh: "不適用" },
@@ -205,11 +263,18 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   on_trip: { en: "On Trip", zh: "行程中" },
   open: { en: "Open", zh: "開啟" },
   override_pending: { en: "Override Pending", zh: "等待覆核" },
+  order_cancelled: { en: "Order Cancelled", zh: "訂單已取消" },
+  order_exception_hold: { en: "Order Exception Hold", zh: "訂單進入異常暫停" },
   escalated_to_incident: { en: "Escalated to Incident", zh: "已升級為事故" },
   incident_linked: { en: "Incident Linked", zh: "已連結事故" },
   operational: { en: "Operational", zh: "營運" },
   ops: { en: "Ops", zh: "營運" },
+  ops_approval_triage: { en: "Ops Approval Triage", zh: "營運審批分流" },
+  ops_compliance: { en: "Ops Compliance", zh: "營運法遵" },
+  ops_manager: { en: "Ops Manager", zh: "營運主管" },
+  ops_user: { en: "Ops User", zh: "營運人員" },
   other: { en: "Other", zh: "其他" },
+  ordered_chain: { en: "Ordered Chain", zh: "依序核准" },
   overdue: { en: "Overdue", zh: "逾期" },
   paid: { en: "Paid", zh: "已付款" },
   partial: { en: "Partial", zh: "部分出勤" },
@@ -218,6 +283,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   pending: { en: "Pending", zh: "待處理" },
   pending_review: { en: "Pending Review", zh: "待審核" },
   phone: { en: "Phone", zh: "電話" },
+  partner_api_key: { en: "Partner API Key", zh: "合作夥伴 API 金鑰" },
   portal: { en: "Portal", zh: "入口網站" },
   platform: { en: "Platform", zh: "平台" },
   preassigned: { en: "Preassigned", zh: "預先指派" },
@@ -228,6 +294,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   property_damage: { en: "Property Damage", zh: "財物損壞" },
   queued: { en: "Queued", zh: "排隊中" },
   queue: { en: "Queue", zh: "排隊" },
+  queue_entry_created: { en: "Queue Entry Created", zh: "佇列項目已建立" },
   received: { en: "Received", zh: "已接收" },
   ready_for_dispatch: { en: "Ready for Dispatch", zh: "待派車" },
   rate_limit: { en: "Rate Limit", zh: "速率限制" },
@@ -240,6 +307,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
     en: "Recording Missing For Dispatch",
     zh: "派遣前缺少錄音",
   },
+  rejected: { en: "Rejected", zh: "已駁回" },
   redispatch_required: { en: "Redispatch Required", zh: "需重新派車" },
   redispatch_priority_queue: {
     en: "Redispatch Priority Queue",
@@ -263,12 +331,23 @@ const CODE_LABELS: Record<string, LocalizedText> = {
     en: "No Supply — Delayed Retry",
     zh: "無供給—延遲重試",
   },
+  dispatch_no_supply_delayed: {
+    en: "Dispatch No Supply Delayed",
+    zh: "派遣無供給，轉入延遲重試",
+  },
+  dispatch_no_supply_escalated: {
+    en: "Dispatch No Supply Escalated",
+    zh: "派遣無供給，已升級處理",
+  },
+  dispatch_no_supply_resolved: {
+    en: "Dispatch No Supply Resolved",
+    zh: "無供給事件已處理",
+  },
   no_supply_escalated_to_ops: {
     en: "No Supply — Escalated to Ops",
     zh: "無供給—已升級至營運",
   },
   operator_redispatch: { en: "Operator Redispatch", zh: "營運人員重派" },
-  driver_rejected: { en: "Driver Rejected", zh: "司機拒單" },
   no_supply_available: { en: "No Supply Available", zh: "無可用供給" },
   vehicle_became_unavailable: {
     en: "Vehicle Became Unavailable",
@@ -293,6 +372,14 @@ const CODE_LABELS: Record<string, LocalizedText> = {
     en: "Confirmation Window Open",
     zh: "確認視窗已開啟",
   },
+  reservation_hold_created: {
+    en: "Reservation Hold Created",
+    zh: "預約保留已建立",
+  },
+  reservation_hold_released: {
+    en: "Reservation Hold Released",
+    zh: "預約保留已解除",
+  },
   reconciliation: { en: "Reconciliation", zh: "對帳同步" },
   reserved: { en: "Reserved", zh: "已預約" },
   resolved: { en: "Resolved", zh: "已解決" },
@@ -313,17 +400,22 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   scheduled: { en: "Scheduled", zh: "已排程" },
   scheduled_service: { en: "Scheduled Service", zh: "定期保養" },
   six_month_statistics: { en: "Six-Month Statistics", zh: "半年統計" },
-  stub: { en: "Stub", zh: "Stub" },
+  stub: { en: "Stub", zh: "替身" },
   stale: { en: "Stale", zh: "資料過舊" },
   static: { en: "Static", zh: "靜態" },
   suspended: { en: "Suspended", zh: "停用" },
   system: { en: "System", zh: "系統" },
+  tenant: { en: "Tenant", zh: "租戶" },
+  tenant_admin: { en: "Tenant Admin", zh: "租戶管理員" },
   terminated: { en: "Terminated", zh: "已終止" },
+  timeout_escalated: { en: "Timeout Escalated", zh: "逾時升級" },
   tire_replacement: { en: "Tire Replacement", zh: "輪胎更換" },
   traffic: { en: "Traffic", zh: "交通" },
   trip_summary: { en: "Trip Summary", zh: "行程摘要" },
   under_investigation: { en: "Under Investigation", zh: "調查中" },
+  unavailable: { en: "Unavailable", zh: "不可用" },
   unknown: { en: "Unknown", zh: "未知" },
+  unknown_error: { en: "Unknown Error", zh: "未知錯誤" },
   valid: { en: "Valid", zh: "有效" },
   vehicle_condition: { en: "Vehicle Condition", zh: "車況" },
   vehicle_damage: { en: "Vehicle Damage", zh: "車輛損壞" },
@@ -332,7 +424,8 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   uber: { en: "Uber", zh: "Uber" },
   weather: { en: "Weather", zh: "天候" },
   web: { en: "Web", zh: "網站" },
-  webhook: { en: "Webhook", zh: "Webhook" },
+  webhook: { en: "Webhook", zh: "回呼" },
+  booking_updated: { en: "Booking Updated", zh: "訂單已更新" },
   resolved_with_apology: { en: "Resolved — Apology", zh: "已解決——致歉" },
   resolved_with_refund: { en: "Resolved — Refund", zh: "已解決——退款" },
   resolved_with_credit: { en: "Resolved — Credit", zh: "已解決——補償額度" },
@@ -412,8 +505,147 @@ function formatTemplate(
 
 function humanizeCode(value: string) {
   return value
-    .replace(/[_-]+/g, " ")
+    .replace(/[._-]+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+const ZH_CODE_TOKEN_LABELS: Record<string, string> = {
+  accept: "受理",
+  action: "動作",
+  actor: "操作者",
+  active: "啟用中",
+  adapter: "介接器",
+  admin: "管理員",
+  api: "API",
+  approval: "審批",
+  approve: "核准",
+  arrived: "已到達",
+  audit: "稽核",
+  booking: "訂單",
+  call: "通話",
+  callback: "回撥",
+  cancel: "取消",
+  cancelled: "已取消",
+  center: "中心",
+  close: "關閉",
+  closed: "已關閉",
+  complaint: "客訴",
+  completed: "已完成",
+  config: "設定",
+  console: "控制台",
+  contract: "合約",
+  create: "建立",
+  credential: "憑證",
+  critical: "重大",
+  data: "資料",
+  delayed: "延遲",
+  detail: "明細",
+  disabled: "停用",
+  dispatch: "派遣",
+  driver: "司機",
+  endpoint: "端點",
+  enroute: "前往中",
+  error: "錯誤",
+  exception: "例外",
+  export: "匯出",
+  external: "外部",
+  failed: "失敗",
+  fallback: "備援",
+  fare: "車資",
+  filing: "申報",
+  fleet: "車隊",
+  forwarder: "轉派",
+  governance: "治理",
+  health: "健康",
+  hold: "暫停",
+  id: "編號",
+  incident: "事故",
+  ingress: "入口",
+  invoice: "發票",
+  issue: "問題",
+  job: "工作",
+  key: "金鑰",
+  lifecycle: "生命週期",
+  list: "清單",
+  log: "紀錄",
+  maintenance: "保修",
+  manual: "人工",
+  matching: "媒合",
+  mode: "模式",
+  native: "原生",
+  no: "無",
+  notification: "通知",
+  ops: "營運",
+  order: "訂單",
+  partner: "合作夥伴",
+  payment: "付款",
+  pending: "待處理",
+  platform: "平台",
+  proof: "憑證",
+  queue: "佇列",
+  read: "讀取",
+  ready: "待命",
+  reassigned: "重新指派",
+  recording: "錄音",
+  reconciliation: "對帳",
+  redispatch: "重新派遣",
+  registry: "名冊",
+  rejected: "已拒絕",
+  report: "報表",
+  request: "請求",
+  required: "需要",
+  resolved: "已解決",
+  retry: "重試",
+  review: "審查",
+  route: "路線",
+  safety: "安全",
+  service: "服務",
+  session: "工作階段",
+  source: "來源",
+  status: "狀態",
+  sync: "同步",
+  system: "系統",
+  task: "任務",
+  tenant: "租戶",
+  timeout: "逾時",
+  trip: "行程",
+  unavailable: "不可用",
+  unknown: "未知",
+  update: "更新",
+  vehicle: "車輛",
+  view: "檢視",
+  webhook: "回呼",
+  work: "工作",
+};
+
+function normalizeCode(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[.\s-]+/g, "_");
+}
+
+function formatUnknownZhCode(value: string) {
+  const tokens = normalizeCode(value).split("_").filter(Boolean);
+  if (tokens.length === 0) {
+    return getOpsLabel("zh", "unknown");
+  }
+
+  return tokens
+    .map((token) => {
+      const translated = ZH_CODE_TOKEN_LABELS[token];
+      if (translated) {
+        return translated;
+      }
+      if (/^\d+$/.test(token)) {
+        return token;
+      }
+      if (/^[a-z]{1,4}$/.test(token)) {
+        return token.toUpperCase();
+      }
+      return "未定義";
+    })
+    .join("");
 }
 
 export function getOpsLabel(
@@ -433,8 +665,20 @@ export function formatOpsCodeLabel(
     return getOpsLabel(locale, "unknown");
   }
 
-  const normalized = value.trim().toLowerCase();
-  return CODE_LABELS[normalized]?.[locale] ?? humanizeCode(value);
+  const normalized = normalizeCode(value);
+  const variants = [
+    normalized,
+    normalized.replace(/[.\s]+/g, "_"),
+    normalized.replace(/[.\s]+/g, "-"),
+  ];
+  const matchedKey = variants.find((candidate) => candidate in CODE_LABELS) as
+    | keyof typeof CODE_LABELS
+    | undefined;
+  const matchedLabel = matchedKey ? CODE_LABELS[matchedKey] : undefined;
+  if (matchedLabel) {
+    return matchedLabel[locale];
+  }
+  return locale === "zh" ? formatUnknownZhCode(value) : humanizeCode(value);
 }
 
 export function formatOpsCodeList(

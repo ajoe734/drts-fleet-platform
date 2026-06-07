@@ -18,8 +18,13 @@ import {
   type EntryFormState,
 } from "@/components/partner-governance-shared";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import type { Locale } from "@/lib/translations";
 import {
   BUSINESS_DISPATCH_SUBTYPES,
   PARTNER_ENTRY_AUTH_MODES,
@@ -609,6 +614,8 @@ function ModalFrame({
   footer: React.ReactNode;
   onClose: () => void;
 }) {
+  const { locale } = useTranslation();
+
   return (
     <div style={modalOverlayStyle} role="presentation" onClick={onClose}>
       <div
@@ -645,7 +652,7 @@ function ModalFrame({
             ) : null}
           </div>
           <Btn theme={theme} variant="ghost" size="xs" onClick={onClose}>
-            Close
+            {locale === "en" ? "Close" : "關閉"}
           </Btn>
         </div>
         <div style={modalBodyStyle}>{children}</div>
@@ -663,6 +670,7 @@ function SecretRevealModal({
   onClose,
   onCopy,
   onDownload,
+  locale,
   copy,
 }: {
   entry: PartnerChannelEntryRecord;
@@ -672,8 +680,10 @@ function SecretRevealModal({
   onClose: () => void;
   onCopy: () => void;
   onDownload: () => void;
+  locale: Locale;
   copy: {
     title: string;
+    subtitle: string;
     warningTitle: string;
     warningBody: string;
     secretName: string;
@@ -713,7 +723,7 @@ function SecretRevealModal({
           {copy.title}
         </>
       }
-      subtitle="PLAINTEXT-ONCE · Q-ADM07"
+      subtitle={copy.subtitle}
       onClose={onClose}
       footer={
         <>
@@ -760,13 +770,23 @@ function SecretRevealModal({
         theme={theme}
         cols={2}
         items={[
-          { k: copy.scope, v: credential.source, mono: true },
+          {
+            k: copy.scope,
+            v: formatPlatformCodeLabel(locale, credential.source),
+            mono: true,
+          },
           {
             k: copy.expiresAt,
             v: "—",
             mono: true,
           },
-          { k: copy.createdBy, v: credential.issuedBy ?? "platform-admin" },
+          {
+            k: copy.createdBy,
+            v: formatPlatformCodeLabel(
+              locale,
+              credential.issuedBy ?? "platform-admin",
+            ),
+          },
           {
             k: copy.createdAt,
             v: formatDateTime(credential.createdAt),
@@ -1019,6 +1039,7 @@ export default function PartnerDetailPage() {
           notFoundBody: "The requested partner entry could not be found.",
           updateErrorTitle: "Unable to update partner entry",
           issueErrorTitle: "Unable to issue credential",
+          previewModeTitle: "Preview fixture mode",
           previewNotice:
             "Platform Admin API data is unavailable in this workspace. Showing the canvas-aligned preview fixture for local verification.",
           tabs: {
@@ -1029,15 +1050,32 @@ export default function PartnerDetailPage() {
             credentials: "Credentials",
             audit: "Audit",
           },
+          headerSubtitle: (entry: PartnerChannelEntryRecord) =>
+            `/${entry.entrySlug} · partner ID ${entry.partnerId}`,
           preview: "Preview entry",
           issueCredential: "Issue credential",
           rotateCredential: "Rotate credential",
+          activateEntry: "Activate entry",
+          deactivateEntry: "Deactivate entry",
+          revokeEntry: "Revoke entry",
           save: "Save changes",
           saveHint:
             "Apply branding, routing, auth, and eligibility changes without moving away from the platform-governed entry model.",
           overviewTitle: "Entry basics",
           overviewSubtitle:
             "Platform-owned routing, identity, and launch posture for the selected partner entry.",
+          overviewLabels: {
+            tenant: "Tenant",
+            bankCode: "Bank code",
+            program: "Program",
+            businessSubtype: "Business subtype",
+            authMode: "Auth mode",
+            eligibility: "Eligibility",
+            entryHost: "Entry host",
+            entryPath: "Entry path",
+            themeAccent: "Theme accent",
+            supportContact: "Support contact",
+          },
           readinessTitle: "Readiness · masked governance gates",
           readinessReady: "Ready to promote",
           readinessBlocked: "Readiness gaps remain",
@@ -1045,31 +1083,104 @@ export default function PartnerDetailPage() {
             "All required gates are green. Promotion can proceed without hiding governance controls.",
           readinessBlockedBody:
             "Keep traffic blocked until branding, contract, audit, and credential gaps are resolved.",
+          readinessOk: (count: number, total: number) => `OK ${count}/${total}`,
+          readinessGap: "Gap",
           credentialsTitle: "Active credentials · masked only",
           credentialsSubtitle:
             "Plaintext values are only shown once at issue time. The roster below remains masked.",
           credentialsEmpty:
             "No active ingress credentials are available for this entry yet.",
+          credentialsBannerTitle: (count: number, total: number) =>
+            `${count}/${total} governance gates ready`,
+          credentialsBannerBody: (count: number) =>
+            `${count} active credential(s) remain masked in the table below.`,
           brandingTitle: "Branding",
           brandingSubtitle:
             "Partner-facing title, route, accent, and support metadata.",
           authTitle: "Auth",
           authSubtitle:
             "Authority stays on the platform side even when partner-specific credentials are used.",
+          authBannerBodyWithCredentials: (count: number) =>
+            `${count} credential(s) currently gate ingress traffic.`,
+          authBannerBodyMissing:
+            "Partner API key mode is active, but there is no usable ingress credential.",
+          authBannerBodyNotRequired:
+            "This entry does not require partner-managed ingress credentials.",
+          webhookLinkageTitle: "Webhook linkage",
+          webhookLinkageSubtitle:
+            "Operational delivery remains masked here; only the governance binding is shown.",
+          requestLineage: "Request lineage",
+          bound: "Bound",
+          gap: "Gap",
+          auditSource: "Audit source",
+          platformOwned: "Platform-owned",
           eligibilityTitle: "Eligibility",
           eligibilitySubtitle:
             "Contract snapshot, adapter posture, and fallback behavior for this entry.",
+          noEligibilityVerificationBody:
+            "No partner-side eligibility verification is required before fulfillment.",
+          eligibilityLinkedBody:
+            "Eligibility remains platform-governed and is backed by the linked contract snapshot.",
+          adapterLinkageTitle: "Adapter linkage",
+          adapterLinkageSubtitle:
+            "Cross-link the contract snapshot to the platform adapter registry.",
+          linkedAdapter: "Linked adapter",
+          manualFallback: "Manual fallback",
+          opsQueueRequired: "Ops queue required",
+          noTimeoutFallback: "No timeout fallback",
+          snapshotLinked: "Snapshot linked",
+          missingSnapshot: "Missing snapshot",
+          eligibilitySnapshotLabels: {
+            contractId: "Contract ID",
+            adapter: "Adapter",
+            adapterPosture: "Adapter posture",
+            fallback: "Fallback",
+          },
           auditTitle: "Audit",
           auditSubtitle:
             "Creation, updates, credential events, and request lineage for platform review.",
+          auditInfoLabels: {
+            source: "Audit source",
+            requestId: "Request ID",
+            createdBy: "Created by",
+            createdAt: "Created at",
+            updatedBy: "Updated by",
+            updatedAt: "Updated at",
+            revokedAt: "Revoked at",
+            revokeReason: "Revoke reason",
+          },
+          auditTable: {
+            event: "Event",
+            actor: "Actor",
+            detail: "Detail",
+            at: "At",
+          },
           routeHint: "Public route preview",
           accentHint: "Brand accent delivered to the partner skin",
           contractEmpty:
             "No eligibility contract snapshot is currently linked to this entry.",
           authBannerTitle: "Credential posture",
           eligibilityBannerTitle: "Contract posture",
+          governanceActionsTitle: "Governance actions",
+          governanceActionsSubtitle:
+            "State transitions and high-risk lifecycle controls.",
+          governanceStatusLabel: "Status",
+          governanceTrafficLabel: "Traffic posture",
+          governanceTrafficReady: "Entry can accept governed traffic",
+          governanceTrafficBlocked: "Entry remains blocked",
+          entryRevokedTitle: "Entry revoked",
+          entryRevokedBody: "Traffic should remain blocked for this entry.",
+          credentialTable: {
+            kind: "Kind",
+            masked: "Masked",
+            rotated: "Rotated",
+            lastUsed: "Last used",
+            actions: "Actions",
+            revoke: "Revoke",
+          },
           secretModal: {
             title: "Ingress credential generated · only shown once",
+            subtitle: "Plaintext shown once",
             warningTitle:
               "Closing this window permanently hides the full secret",
             warningBody:
@@ -1078,10 +1189,10 @@ export default function PartnerDetailPage() {
             secretField: "Secret · plaintext once",
             secretHint:
               "Copy the value now. The full secret will not be returned again.",
-            scope: "SOURCE",
-            expiresAt: "EXPIRES AT",
-            createdBy: "CREATED BY",
-            createdAt: "CREATED AT",
+            scope: "Source",
+            expiresAt: "Expires at",
+            createdBy: "Created by",
+            createdAt: "Created at",
             stored: "I stored this credential in a secure location.",
             cancel: "Cancel",
             complete: "Complete · I stored this key",
@@ -1130,112 +1241,194 @@ export default function PartnerDetailPage() {
           },
         }
       : {
-          notFoundTitle: "Partner entry 目前不可用",
-          notFoundBody: "找不到指定的 partner entry。",
-          updateErrorTitle: "Partner entry 更新失敗",
-          issueErrorTitle: "Credential 發行失敗",
+          notFoundTitle: "合作夥伴入口目前不可用",
+          notFoundBody: "找不到指定的合作夥伴入口。",
+          updateErrorTitle: "合作夥伴入口更新失敗",
+          issueErrorTitle: "憑證發行失敗",
+          previewModeTitle: "預覽樣板模式",
           previewNotice:
-            "目前無法從 Platform Admin API 取得資料；此頁改用符合畫布的 preview fixture 供本地驗證。",
+            "目前無法從平台管理端資料介面取得資料；此頁改用符合畫布的預覽樣板資料供本地驗證。",
           tabs: {
-            overview: "Overview",
-            branding: "Branding",
-            auth: "Auth",
-            eligibility: "Eligibility",
-            credentials: "Credentials",
-            audit: "Audit",
+            overview: "總覽",
+            branding: "品牌",
+            auth: "驗證",
+            eligibility: "資格",
+            credentials: "憑證",
+            audit: "稽核",
           },
-          preview: "預覽 entry",
-          issueCredential: "發行 credential",
-          rotateCredential: "輪替 credential",
+          headerSubtitle: (entry: PartnerChannelEntryRecord) =>
+            `入口代碼 ${entry.entrySlug} · 合作夥伴編號 ${entry.partnerId}`,
+          preview: "預覽入口",
+          issueCredential: "發行憑證",
+          rotateCredential: "輪替憑證",
+          activateEntry: "啟用入口",
+          deactivateEntry: "停用入口",
+          revokeEntry: "撤銷入口",
           save: "儲存變更",
           saveHint:
-            "在不脫離平台治理模型的前提下，更新此 entry 的 branding、routing、auth 與 eligibility 設定。",
-          overviewTitle: "Entry 基本資料",
+            "在不脫離平台治理模型的前提下，更新此入口的品牌、路由、驗證與資格設定。",
+          overviewTitle: "入口基本資料",
           overviewSubtitle:
-            "集中檢視此 partner entry 的平台 routing、識別與上線姿態。",
-          readinessTitle: "Readiness · masked governance gates",
+            "集中檢視此合作夥伴入口的平台路由、識別與上線姿態。",
+          overviewLabels: {
+            tenant: "租戶",
+            bankCode: "銀行代碼",
+            program: "方案",
+            businessSubtype: "派單子類型",
+            authMode: "驗證模式",
+            eligibility: "資格模式",
+            entryHost: "入口主機",
+            entryPath: "入口路徑",
+            themeAccent: "主題色",
+            supportContact: "支援資訊",
+          },
+          readinessTitle: "上線就緒度與治理閘門",
           readinessReady: "可推進上線",
-          readinessBlocked: "仍有 readiness 缺口",
+          readinessBlocked: "仍有就緒缺口",
           readinessReadyBody:
-            "必要 gate 已全部轉綠，可在不模糊治理邊界下推進 promotion。",
+            "必要閘門已全部轉綠，可在不模糊治理邊界下推進上線。",
           readinessBlockedBody:
-            "在 branding、contract、audit 與 credential 缺口補齊前，不應直接導流。",
-          credentialsTitle: "Active credentials · masked only",
+            "在品牌、契約、稽核與憑證缺口補齊前，不應直接導流。",
+          readinessOk: (count: number, total: number) =>
+            `已就緒 ${count}/${total}`,
+          readinessGap: "缺口",
+          credentialsTitle: "啟用中憑證 · 僅顯示遮罩",
           credentialsSubtitle:
-            "完整 plaintext secret 只在發行當下顯示一次；下方清單只保留遮罩資訊。",
-          credentialsEmpty: "此 entry 目前沒有可用的 ingress credential。",
-          brandingTitle: "Branding",
+            "完整明文密鑰只會在發行當下顯示一次；下方清單只保留遮罩資訊。",
+          credentialsEmpty: "此入口目前沒有可用的入口憑證。",
+          credentialsBannerTitle: (count: number, total: number) =>
+            `${count}/${total} 個治理閘門已就緒`,
+          credentialsBannerBody: (count: number) =>
+            `下方表格仍有 ${count} 組啟用中的憑證，且只顯示遮罩資訊。`,
+          brandingTitle: "品牌設定",
           brandingSubtitle:
-            "partner-facing 顯示名稱、入口路由、色彩與支援資訊。",
-          authTitle: "Auth",
-          authSubtitle:
-            "即使使用 partner 專屬 credential，驗證權限仍保留在平台側。",
-          eligibilityTitle: "Eligibility",
-          eligibilitySubtitle:
-            "檢視此 entry 的 contract snapshot、adapter posture 與 fallback policy。",
-          auditTitle: "Audit",
-          auditSubtitle:
-            "平台稽核需要完整保留建立、更新、credential 事件與 request lineage。",
-          routeHint: "公開入口預覽",
-          accentHint: "套用到 partner skin 的品牌 accent",
-          contractEmpty: "此 entry 尚未綁定 eligibility contract snapshot。",
-          authBannerTitle: "Credential posture",
-          eligibilityBannerTitle: "Contract posture",
-          secretModal: {
-            title: "Ingress credential 已產生 · only shown once",
-            warningTitle: "關閉此視窗後將永久隱藏完整 secret",
-            warningBody:
-              "若遺失必須重新建立並立即輪替。之後平台只保留遮罩後綴，不可還原完整值。",
-            secretName: "Credential 名稱",
-            secretField: "Secret · plaintext once",
-            secretHint: "請現在複製。完整 secret 不會再被回傳。",
-            scope: "SOURCE",
-            expiresAt: "EXPIRES AT",
+            "設定合作夥伴對外顯示名稱、入口路由、色彩與支援資訊。",
+          authTitle: "驗證",
+          authSubtitle: "即使使用合作夥伴專屬憑證，驗證權限仍保留在平台側。",
+          authBannerBodyWithCredentials: (count: number) =>
+            `目前有 ${count} 組憑證負責控管入口流量。`,
+          authBannerBodyMissing:
+            "目前啟用了合作夥伴金鑰模式，但沒有可用的入口憑證。",
+          authBannerBodyNotRequired: "此入口不需要合作夥伴自行管理的入口憑證。",
+          webhookLinkageTitle: "回呼綁定",
+          webhookLinkageSubtitle:
+            "此處只顯示治理綁定關係，不展開營運投遞細節。",
+          requestLineage: "請求沿革",
+          bound: "已綁定",
+          gap: "缺口",
+          auditSource: "稽核來源",
+          platformOwned: "平台治理",
+          eligibilityTitle: "資格",
+          eligibilitySubtitle: "檢視此入口的契約快照、介接姿態與補救策略。",
+          noEligibilityVerificationBody:
+            "此流程在履約前不要求合作夥伴側資格驗證。",
+          eligibilityLinkedBody:
+            "資格驗證仍由平台治理，且已有對應契約快照作為依據。",
+          adapterLinkageTitle: "介接器綁定",
+          adapterLinkageSubtitle: "將契約快照與平台介接器註冊表交叉對照。",
+          linkedAdapter: "已綁定介接器",
+          manualFallback: "人工補救",
+          opsQueueRequired: "逾時時需進入營運佇列",
+          noTimeoutFallback: "無逾時補救流程",
+          snapshotLinked: "快照已綁定",
+          missingSnapshot: "缺少快照",
+          eligibilitySnapshotLabels: {
+            contractId: "契約編號",
+            adapter: "介接器",
+            adapterPosture: "介接姿態",
+            fallback: "補救策略",
+          },
+          auditTitle: "稽核",
+          auditSubtitle: "平台稽核需要完整保留建立、更新、憑證事件與請求沿革。",
+          auditInfoLabels: {
+            source: "稽核來源",
+            requestId: "請求編號",
             createdBy: "建立者",
             createdAt: "建立時間",
-            stored: "我已將這組 credential 妥善保存於安全位置。",
+            updatedBy: "更新者",
+            updatedAt: "更新時間",
+            revokedAt: "撤銷時間",
+            revokeReason: "撤銷原因",
+          },
+          auditTable: {
+            event: "事件",
+            actor: "執行者",
+            detail: "內容",
+            at: "時間",
+          },
+          routeHint: "公開入口預覽",
+          accentHint: "套用到合作夥伴介面的品牌主色",
+          contractEmpty: "此入口尚未綁定資格驗證契約快照。",
+          authBannerTitle: "憑證姿態",
+          eligibilityBannerTitle: "契約姿態",
+          governanceActionsTitle: "治理動作",
+          governanceActionsSubtitle: "集中執行狀態切換與高風險生命週期控制。",
+          governanceStatusLabel: "狀態",
+          governanceTrafficLabel: "流量姿態",
+          governanceTrafficReady: "此入口可承接平台治理流量",
+          governanceTrafficBlocked: "此入口仍維持封鎖",
+          entryRevokedTitle: "入口已撤銷",
+          entryRevokedBody: "此入口的流量應持續維持封鎖。",
+          credentialTable: {
+            kind: "類型",
+            masked: "遮罩值",
+            rotated: "輪替時間",
+            lastUsed: "最後使用",
+            actions: "操作",
+            revoke: "撤銷",
+          },
+          secretModal: {
+            title: "入口憑證已產生 · 僅顯示一次",
+            subtitle: "完整密鑰僅顯示一次",
+            warningTitle: "關閉此視窗後將永久隱藏完整明文密鑰",
+            warningBody:
+              "若遺失必須重新建立並立即輪替。之後平台只保留遮罩後綴，不可還原完整值。",
+            secretName: "憑證名稱",
+            secretField: "密鑰（僅此一次明文顯示）",
+            secretHint: "請現在複製，完整密鑰不會再次回傳。",
+            scope: "來源",
+            expiresAt: "到期時間",
+            createdBy: "建立者",
+            createdAt: "建立時間",
+            stored: "我已將這組憑證妥善保存於安全位置。",
             cancel: "取消",
-            complete: "完成 · 我已保存此 key",
+            complete: "完成，我已保存此金鑰",
             copyLabel: "複製",
-            downloadLabel: ".txt",
+            downloadLabel: "文字檔",
           },
           credentialActionModal: {
-            issueTitle: "發行 ingress credential",
-            rotateTitle: "輪替 ingress credential",
-            subtitle: "HIGH-RISK ACTION · 必填 audit reason",
+            issueTitle: "發行入口憑證",
+            rotateTitle: "輪替入口憑證",
+            subtitle: "高風險動作 · 必填稽核原因",
             fieldLabel: "輪替原因",
-            hint: "請填寫操作原因。此動作會留下 audit 記錄，且完整 secret 只會顯示一次。",
-            placeholderIssue:
-              "例如：CTBC World Elite entry 首次 production 上線",
+            hint: "請填寫操作原因。此動作會留下稽核記錄，且完整密鑰只會顯示一次。",
+            placeholderIssue: "例如：合作夥伴入口首次正式上線",
             placeholderRotate: "例如：金鑰外洩演練後輪替 / 季度例行更新",
             cancel: "取消",
-            issueConfirm: "發行 credential",
-            rotateConfirm: "輪替 credential",
+            issueConfirm: "發行憑證",
+            rotateConfirm: "輪替憑證",
           },
           governanceActionModal: {
-            activateTitle: "啟用 partner entry",
-            deactivateTitle: "停用 partner entry",
-            revokeTitle: "撤銷 partner entry",
-            revokeCredentialTitle: "撤銷 ingress credential",
-            mediumSubtitle: "MEDIUM-RISK ACTION · 產出 audit receipt",
-            highSubtitle: "HIGH-RISK ACTION · 必填 audit reason",
-            activateBody:
-              "啟用後，此 entry 會在 readiness 條件滿足時可承接平台治理流量。",
-            deactivateBody:
-              "停用會保留 registry 紀錄，但封鎖新的平台治理流量。",
+            activateTitle: "啟用合作夥伴入口",
+            deactivateTitle: "停用合作夥伴入口",
+            revokeTitle: "撤銷合作夥伴入口",
+            revokeCredentialTitle: "撤銷入口憑證",
+            mediumSubtitle: "中風險動作 · 產出稽核收據",
+            highSubtitle: "高風險動作 · 必填稽核原因",
+            activateBody: "啟用後，此入口會在就緒條件滿足時承接平台治理流量。",
+            deactivateBody: "停用會保留註冊資料，但封鎖新的平台治理流量。",
             revokeBody:
-              "entry 層級撤銷不可逆，僅適用於合約終止或安全撤出等情境。",
+              "入口層級撤銷不可逆，僅適用於合約終止或安全撤出等情境。",
             revokeCredentialBody:
-              "撤銷後此 credential 不可再用於 ingress。若需要不中斷流量，應先輪替再撤銷。",
-            fieldLabel: "Audit 原因",
-            fieldHint:
-              "請具體說明操作原因。此動作會寫入 Platform Admin audit 歷史。",
+              "撤銷後此憑證不可再用於入口流量。若需要不中斷服務，應先輪替再撤銷。",
+            fieldLabel: "稽核原因",
+            fieldHint: "請具體說明操作原因。此動作會寫入平台管理端稽核歷史。",
             fieldPlaceholder: "例如：合作終止 / 安全事件調查後撤銷",
             cancel: "取消",
             activateConfirm: "啟用",
             deactivateConfirm: "停用",
-            revokeConfirm: "撤銷 entry",
-            revokeCredentialConfirm: "撤銷 credential",
+            revokeConfirm: "撤銷入口",
+            revokeCredentialConfirm: "撤銷憑證",
           },
         };
 
@@ -1291,7 +1484,13 @@ export default function PartnerDetailPage() {
           setError(null);
         } else {
           setError(
-            nextError instanceof Error ? nextError.message : String(nextError),
+            formatPlatformUiError(
+              locale,
+              toPlatformErrorMessage(nextError),
+              locale === "en"
+                ? "Unable to load partner entry"
+                : "無法載入合作夥伴入口",
+            ),
           );
           setEntry(null);
           setEditForm(EMPTY_ENTRY_FORM);
@@ -1303,7 +1502,7 @@ export default function PartnerDetailPage() {
         setLoading(false);
       }
     },
-    [client, copy.previewNotice, entrySlug],
+    [client, copy.previewNotice, entrySlug, locale],
   );
 
   useEffect(() => {
@@ -1333,12 +1532,18 @@ export default function PartnerDetailPage() {
       await loadEntry({ preserveIssuedCredential: true });
     } catch (nextError: unknown) {
       setError(
-        nextError instanceof Error ? nextError.message : String(nextError),
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(nextError),
+          locale === "en"
+            ? "Unable to update partner entry"
+            : "無法更新合作夥伴入口",
+        ),
       );
     } finally {
       setSaving(false);
     }
-  }, [client, editForm, entry, isPreviewMode, loadEntry]);
+  }, [client, editForm, entry, isPreviewMode, loadEntry, locale]);
 
   const issueCredential = useCallback(async () => {
     if (!entry || !credentialActionMode) {
@@ -1396,7 +1601,13 @@ export default function PartnerDetailPage() {
       await loadEntry({ preserveIssuedCredential: true });
     } catch (nextError: unknown) {
       setError(
-        nextError instanceof Error ? nextError.message : String(nextError),
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(nextError),
+          locale === "en"
+            ? "Unable to issue partner credential"
+            : "無法簽發合作夥伴憑證",
+        ),
       );
     } finally {
       setIssuingCredential(false);
@@ -1409,6 +1620,7 @@ export default function PartnerDetailPage() {
     entry,
     isPreviewMode,
     loadEntry,
+    locale,
   ]);
 
   const runGovernanceAction = useCallback(async () => {
@@ -1503,7 +1715,13 @@ export default function PartnerDetailPage() {
       await loadEntry({ preserveIssuedCredential: true });
     } catch (nextError: unknown) {
       setError(
-        nextError instanceof Error ? nextError.message : String(nextError),
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(nextError),
+          locale === "en"
+            ? "Unable to update partner governance"
+            : "無法更新合作夥伴治理狀態",
+        ),
       );
     } finally {
       setGovernanceBusy(false);
@@ -1516,6 +1734,7 @@ export default function PartnerDetailPage() {
     governanceReason,
     isPreviewMode,
     loadEntry,
+    locale,
   ]);
 
   const updateFormField = <Key extends keyof EntryFormState>(
@@ -1600,6 +1819,23 @@ export default function PartnerDetailPage() {
   const activeTabNode =
     tabDefs.find((definition) => definition.key === activeTab)?.node ?? null;
 
+  const formatKnownIdentity = (value?: string | null) => {
+    if (!value) {
+      return "—";
+    }
+
+    if (
+      value === "system" ||
+      value === "platform-admin" ||
+      value === "platform-admin.preview" ||
+      value === "platform_admin"
+    ) {
+      return formatPlatformCodeLabel(locale, value);
+    }
+
+    return value;
+  };
+
   const overviewItems = useMemo(() => {
     if (!entry) {
       return [];
@@ -1615,56 +1851,59 @@ export default function PartnerDetailPage() {
 
     return [
       {
-        k: "TENANT",
-        v: `${entry.partnerType} · ${entry.tenantId}`,
+        k: copy.overviewLabels.tenant,
+        v:
+          locale === "zh"
+            ? `${formatPlatformCodeLabel(locale, entry.partnerType)} · 租戶編號 ${entry.tenantId}`
+            : `${formatPlatformCodeLabel(locale, entry.partnerType)} · ${entry.tenantId}`,
         mono: true,
       },
       {
-        k: "BANK CODE",
+        k: copy.overviewLabels.bankCode,
         v: entry.bankCode ?? "—",
         mono: true,
       },
       {
-        k: "PROGRAM",
+        k: copy.overviewLabels.program,
         v: entry.programId,
       },
       {
-        k: "BUSINESS SUBTYPE",
+        k: copy.overviewLabels.businessSubtype,
         v: formatPlatformCodeLabel(locale, entry.businessDispatchSubtype),
         mono: true,
       },
       {
-        k: "AUTH MODE",
+        k: copy.overviewLabels.authMode,
         v: formatPlatformCodeLabel(locale, entry.authMode),
         mono: true,
       },
       {
-        k: "ELIGIBILITY",
+        k: copy.overviewLabels.eligibility,
         v: formatPlatformCodeLabel(locale, entry.eligibilityMode),
         mono: true,
       },
       {
-        k: "ENTRY HOST",
+        k: copy.overviewLabels.entryHost,
         v: entry.entryHost ?? "—",
         mono: true,
       },
       {
-        k: "ENTRY PATH",
+        k: copy.overviewLabels.entryPath,
         v: entry.entryPath ?? "—",
         mono: true,
       },
       {
-        k: "THEME ACCENT",
+        k: copy.overviewLabels.themeAccent,
         v: entry.themeAccent ?? "—",
         mono: true,
       },
       {
-        k: "SUPPORT CONTACT",
+        k: copy.overviewLabels.supportContact,
         v: supportValue,
         mono: true,
       },
     ];
-  }, [entry, locale]);
+  }, [copy.overviewLabels, entry, locale]);
 
   const eligibilitySnapshotItems = useMemo(() => {
     if (!entry) {
@@ -1675,33 +1914,39 @@ export default function PartnerDetailPage() {
 
     return [
       {
-        k: locale === "en" ? "Contract ID" : "契約 ID",
+        k: copy.eligibilitySnapshotLabels.contractId,
         v: contract?.contractId ?? "—",
         mono: true,
       },
       {
-        k: locale === "en" ? "Adapter" : "Adapter",
+        k: copy.eligibilitySnapshotLabels.adapter,
         v: contract
-          ? `${contract.adapterCode} · ${contract.adapterVersion}`
+          ? locale === "zh"
+            ? `${formatPlatformCodeLabel(locale, contract.adapterCode)} · 版本 ${contract.adapterVersion}`
+            : `${formatPlatformCodeLabel(locale, contract.adapterCode)} · ${contract.adapterVersion}`
           : "—",
         mono: true,
       },
       {
-        k: locale === "en" ? "Adapter posture" : "Adapter posture",
-        v: contract?.adapterKind ?? "—",
+        k: copy.eligibilitySnapshotLabels.adapterPosture,
+        v: contract?.adapterKind
+          ? formatPlatformCodeLabel(locale, contract.adapterKind)
+          : "—",
       },
       {
-        k: locale === "en" ? "Fallback" : "Fallback",
+        k: copy.eligibilitySnapshotLabels.fallback,
         v: contract?.manualFallbackPolicy?.requiredOnTimeout
-          ? locale === "en"
-            ? "Ops queue required"
-            : "需進 ops queue"
-          : locale === "en"
-            ? "No timeout fallback"
-            : "無 timeout fallback",
+          ? copy.opsQueueRequired
+          : copy.noTimeoutFallback,
       },
     ];
-  }, [entry, locale]);
+  }, [
+    copy.eligibilitySnapshotLabels,
+    copy.noTimeoutFallback,
+    copy.opsQueueRequired,
+    entry,
+    locale,
+  ]);
 
   const auditItems = useMemo(() => {
     if (!entry) {
@@ -1710,43 +1955,43 @@ export default function PartnerDetailPage() {
 
     return [
       {
-        k: locale === "en" ? "Audit source" : "Audit 來源",
-        v: entry.auditMetadata.source ?? "—",
+        k: copy.auditInfoLabels.source,
+        v: formatKnownIdentity(entry.auditMetadata.source),
       },
       {
-        k: locale === "en" ? "Request ID" : "Request ID",
+        k: copy.auditInfoLabels.requestId,
         v: entry.auditMetadata.requestId ?? "—",
         mono: true,
       },
       {
-        k: locale === "en" ? "Created by" : "建立者",
-        v: entry.auditMetadata.createdBy ?? "—",
+        k: copy.auditInfoLabels.createdBy,
+        v: formatKnownIdentity(entry.auditMetadata.createdBy),
       },
       {
-        k: locale === "en" ? "Created at" : "建立時間",
+        k: copy.auditInfoLabels.createdAt,
         v: formatDateTime(entry.createdAt),
         mono: true,
       },
       {
-        k: locale === "en" ? "Updated by" : "更新者",
-        v: entry.auditMetadata.updatedBy ?? "—",
+        k: copy.auditInfoLabels.updatedBy,
+        v: formatKnownIdentity(entry.auditMetadata.updatedBy),
       },
       {
-        k: locale === "en" ? "Updated at" : "更新時間",
+        k: copy.auditInfoLabels.updatedAt,
         v: formatDateTime(entry.updatedAt),
         mono: true,
       },
       {
-        k: locale === "en" ? "Revoked at" : "撤銷時間",
+        k: copy.auditInfoLabels.revokedAt,
         v: entry.revokedAt ? formatDateTime(entry.revokedAt) : "—",
         mono: true,
       },
       {
-        k: locale === "en" ? "Revoke reason" : "撤銷原因",
+        k: copy.auditInfoLabels.revokeReason,
         v: entry.revokeReason ?? "—",
       },
     ];
-  }, [entry, locale]);
+  }, [copy.auditInfoLabels, entry]);
 
   const credentialRows = useMemo<CredentialRow[]>(
     () =>
@@ -1759,7 +2004,7 @@ export default function PartnerDetailPage() {
         )
         .map((credential) => ({
           keyId: credential.keyId,
-          kind: credential.source,
+          kind: formatPlatformCodeLabel(locale, credential.source),
           masked: `${credential.keyPrefix}${credential.maskedSuffix}`,
           rotatedAt: formatDateTime(credential.createdAt),
           lastUsedAt: credential.lastUsedAt
@@ -1767,37 +2012,37 @@ export default function PartnerDetailPage() {
             : "—",
           status: credential.revokedAt ? "revoked" : "active",
         })),
-    [credentials],
+    [credentials, locale],
   );
 
   const credentialColumns = useMemo<CanvasTableColumn<CredentialRow>[]>(
     () => [
       {
-        h: "kind",
+        h: copy.credentialTable.kind,
         k: "kind",
         mono: true,
         w: 160,
       },
       {
-        h: "masked",
+        h: copy.credentialTable.masked,
         k: "masked",
         mono: true,
         w: 170,
       },
       {
-        h: "rotated",
+        h: copy.credentialTable.rotated,
         k: "rotatedAt",
         mono: true,
         w: 160,
       },
       {
-        h: "last_used",
+        h: copy.credentialTable.lastUsed,
         k: "lastUsedAt",
         mono: true,
         w: 160,
       },
       {
-        h: "actions",
+        h: copy.credentialTable.actions,
         w: 120,
         r: (row) => (
           <Btn
@@ -1810,12 +2055,12 @@ export default function PartnerDetailPage() {
               setGovernanceReason("");
             }}
           >
-            Revoke
+            {copy.credentialTable.revoke}
           </Btn>
         ),
       },
     ],
-    [],
+    [copy.credentialTable],
   );
 
   const auditRows = useMemo<AuditRow[]>(() => {
@@ -1825,14 +2070,16 @@ export default function PartnerDetailPage() {
 
     const rows: AuditRow[] = [
       {
-        event: locale === "en" ? "entry.created" : "entry.created",
-        actor: entry.auditMetadata.createdBy ?? "system",
-        detail: entry.auditMetadata.source ?? "platform-admin",
+        event: formatPlatformCodeLabel(locale, "entry.created"),
+        actor: formatKnownIdentity(entry.auditMetadata.createdBy ?? "system"),
+        detail: formatKnownIdentity(
+          entry.auditMetadata.source ?? "platform-admin",
+        ),
         at: formatDateTime(entry.createdAt),
       },
       {
-        event: locale === "en" ? "entry.updated" : "entry.updated",
-        actor: entry.auditMetadata.updatedBy ?? "system",
+        event: formatPlatformCodeLabel(locale, "entry.updated"),
+        actor: formatKnownIdentity(entry.auditMetadata.updatedBy ?? "system"),
         detail: entry.auditMetadata.requestId ?? "—",
         at: formatDateTime(entry.updatedAt),
       },
@@ -1840,11 +2087,12 @@ export default function PartnerDetailPage() {
 
     credentials.slice(0, 4).forEach((credential) => {
       rows.push({
-        event: credential.revokedAt
-          ? "credential.revoked"
-          : "credential.issued",
-        actor: credential.issuedBy ?? "platform-admin",
-        detail: `${credential.source} · ${credential.keyPrefix}${credential.maskedSuffix}`,
+        event: formatPlatformCodeLabel(
+          locale,
+          credential.revokedAt ? "credential.revoked" : "credential.issued",
+        ),
+        actor: formatKnownIdentity(credential.issuedBy ?? "platform-admin"),
+        detail: `${formatPlatformCodeLabel(locale, credential.source)} · ${credential.keyPrefix}${credential.maskedSuffix}`,
         at: formatDateTime(credential.revokedAt ?? credential.createdAt),
       });
     });
@@ -1854,12 +2102,12 @@ export default function PartnerDetailPage() {
 
   const auditColumns = useMemo<CanvasTableColumn<AuditRow>[]>(
     () => [
-      { h: "EVENT", k: "event", mono: true, w: 170 },
-      { h: "ACTOR", k: "actor", w: 180 },
-      { h: "DETAIL", k: "detail", mono: true },
-      { h: "AT", k: "at", mono: true, w: 170 },
+      { h: copy.auditTable.event, k: "event", mono: true, w: 170 },
+      { h: copy.auditTable.actor, k: "actor", w: 180 },
+      { h: copy.auditTable.detail, k: "detail", mono: true },
+      { h: copy.auditTable.at, k: "at", mono: true, w: 170 },
     ],
-    [],
+    [copy.auditTable],
   );
 
   const handleCopySecret = useCallback(async () => {
@@ -1973,13 +2221,7 @@ export default function PartnerDetailPage() {
           setGovernanceReason("");
         }}
       >
-        {entry.activeFlag
-          ? locale === "en"
-            ? "Deactivate"
-            : "停用 entry"
-          : locale === "en"
-            ? "Activate"
-            : "啟用 entry"}
+        {entry.activeFlag ? copy.deactivateEntry : copy.activateEntry}
       </Btn>
       <Btn
         theme={theme}
@@ -2010,7 +2252,7 @@ export default function PartnerDetailPage() {
           setGovernanceReason("");
         }}
       >
-        {locale === "en" ? "Revoke entry" : "撤銷 entry"}
+        {copy.revokeEntry}
       </Btn>
     </>
   );
@@ -2041,7 +2283,7 @@ export default function PartnerDetailPage() {
       <PageHeader
         theme={theme}
         title={titleNode}
-        subtitle={`/${entry.entrySlug} · partner_id ${entry.partnerId}`}
+        subtitle={copy.headerSubtitle(entry)}
         tabs={tabDefs.map((definition) => definition.node)}
         activeTab={activeTabNode}
         actions={headerActions}
@@ -2052,9 +2294,7 @@ export default function PartnerDetailPage() {
           <Banner
             theme={theme}
             tone="info"
-            title={
-              locale === "en" ? "Preview fixture mode" : "Preview fixture 模式"
-            }
+            title={copy.previewModeTitle}
             body={previewNotice}
           />
         ) : null}
@@ -2188,8 +2428,11 @@ export default function PartnerDetailPage() {
                           }}
                         >
                           {item.ready
-                            ? `OK ${readinessReadyCount}/${readinessItems.length}`
-                            : "GAP"}
+                            ? copy.readinessOk(
+                                readinessReadyCount,
+                                readinessItems.length,
+                              )
+                            : copy.readinessGap}
                         </span>
                       </div>
                     ))}
@@ -2221,12 +2464,8 @@ export default function PartnerDetailPage() {
 
               <Card
                 theme={theme}
-                title={locale === "en" ? "Governance actions" : "治理動作"}
-                subtitle={
-                  locale === "en"
-                    ? "State transitions and high-risk lifecycle controls."
-                    : "集中執行狀態切換與高風險 lifecycle 控制。"
-                }
+                title={copy.governanceActionsTitle}
+                subtitle={copy.governanceActionsSubtitle}
               >
                 <div style={{ display: "grid", gap: 12 }}>
                   <DL
@@ -2234,18 +2473,14 @@ export default function PartnerDetailPage() {
                     cols={1}
                     items={[
                       {
-                        k: locale === "en" ? "Status" : "狀態",
+                        k: copy.governanceStatusLabel,
                         v: formatPlatformCodeLabel(locale, entry.status),
                       },
                       {
-                        k: locale === "en" ? "Traffic posture" : "流量姿態",
+                        k: copy.governanceTrafficLabel,
                         v: entry.activeFlag
-                          ? locale === "en"
-                            ? "Entry can accept governed traffic"
-                            : "可承接平台治理流量"
-                          : locale === "en"
-                            ? "Entry remains blocked"
-                            : "仍維持封鎖",
+                          ? copy.governanceTrafficReady
+                          : copy.governanceTrafficBlocked,
                       },
                     ]}
                   />
@@ -2262,12 +2497,8 @@ export default function PartnerDetailPage() {
                       }}
                     >
                       {entry.activeFlag
-                        ? locale === "en"
-                          ? "Deactivate"
-                          : "停用"
-                        : locale === "en"
-                          ? "Activate"
-                          : "啟用"}
+                        ? copy.deactivateEntry
+                        : copy.activateEntry}
                     </Btn>
                     <Btn
                       theme={theme}
@@ -2279,7 +2510,7 @@ export default function PartnerDetailPage() {
                         setGovernanceReason("");
                       }}
                     >
-                      {locale === "en" ? "Revoke entry" : "撤銷 entry"}
+                      {copy.revokeEntry}
                     </Btn>
                   </div>
                 </div>
@@ -2306,14 +2537,14 @@ export default function PartnerDetailPage() {
                   label={t("partners.form.entryHost")}
                   value={editForm.entryHost}
                   onChange={(value) => updateFormField("entryHost", value)}
-                  placeholder="partner.example"
+                  placeholder={t("partners.form.entryHostPlaceholder")}
                   mono
                 />
                 <TextField
                   label={t("partners.form.entryPath")}
                   value={editForm.entryPath}
                   onChange={(value) => updateFormField("entryPath", value)}
-                  placeholder="/partner/world-elite"
+                  placeholder={t("partners.form.entryPathPlaceholder")}
                   mono
                   hint={
                     previewUrl ? `${copy.routeHint}: ${previewUrl}` : undefined
@@ -2323,7 +2554,7 @@ export default function PartnerDetailPage() {
                   label={t("partners.form.themeAccent")}
                   value={editForm.themeAccent}
                   onChange={(value) => updateFormField("themeAccent", value)}
-                  placeholder="#0b7285"
+                  placeholder={t("partners.form.themeAccentPlaceholder")}
                   mono
                   hint={copy.accentHint}
                 />
@@ -2374,29 +2605,23 @@ export default function PartnerDetailPage() {
                   body={
                     entry.authMode === "partner_api_key"
                       ? activeCredentialCount > 0
-                        ? `${activeCredentialCount} credential(s) currently gate ingress traffic.`
-                        : "Partner API key mode is active, but there is no usable ingress credential."
-                      : "This entry does not require partner-managed ingress credentials."
+                        ? copy.authBannerBodyWithCredentials(
+                            activeCredentialCount,
+                          )
+                        : copy.authBannerBodyMissing
+                      : copy.authBannerBodyNotRequired
                   }
                 />
                 <Card
                   theme={theme}
-                  title={
-                    locale === "en" ? "Webhook linkage" : "Webhook linkage"
-                  }
-                  subtitle={
-                    locale === "en"
-                      ? "Operational delivery remains masked here; only the governance binding is shown."
-                      : "此處只顯示治理綁定，不展開 operational delivery 細節。"
-                  }
+                  title={copy.webhookLinkageTitle}
+                  subtitle={copy.webhookLinkageSubtitle}
                 >
                   <div style={linkCardStyle}>
                     <div style={linkRowStyle}>
                       <div>
                         <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                          {locale === "en"
-                            ? "Request lineage"
-                            : "Request lineage"}
+                          {copy.requestLineage}
                         </div>
                         <div style={monoValueStyle}>
                           {entry.auditMetadata.requestId ?? "—"}
@@ -2406,26 +2631,20 @@ export default function PartnerDetailPage() {
                         theme={theme}
                         tone={entry.auditMetadata.source ? "success" : "warn"}
                       >
-                        {entry.auditMetadata.source
-                          ? locale === "en"
-                            ? "bound"
-                            : "已綁定"
-                          : locale === "en"
-                            ? "gap"
-                            : "缺口"}
+                        {entry.auditMetadata.source ? copy.bound : copy.gap}
                       </Pill>
                     </div>
                     <div style={linkRowStyle}>
                       <div>
                         <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                          {locale === "en" ? "Audit source" : "Audit 來源"}
+                          {copy.auditSource}
                         </div>
                         <div style={monoValueStyle}>
-                          {entry.auditMetadata.source ?? "—"}
+                          {formatKnownIdentity(entry.auditMetadata.source)}
                         </div>
                       </div>
                       <Pill theme={theme} tone="info">
-                        {locale === "en" ? "platform-owned" : "平台治理"}
+                        {copy.platformOwned}
                       </Pill>
                     </div>
                   </div>
@@ -2526,13 +2745,9 @@ export default function PartnerDetailPage() {
                   title={copy.eligibilityBannerTitle}
                   body={
                     entry.eligibilityMode === "none"
-                      ? locale === "en"
-                        ? "No partner-side eligibility verification is required before fulfillment."
-                        : "此流程在 fulfill 前不要求 partner-side eligibility verification。"
+                      ? copy.noEligibilityVerificationBody
                       : entry.eligibilityContract?.contractId
-                        ? locale === "en"
-                          ? "Eligibility remains platform-governed and is backed by the linked contract snapshot."
-                          : "Eligibility 仍由平台治理，且已有對應 contract snapshot。"
+                        ? copy.eligibilityLinkedBody
                         : copy.contractEmpty
                   }
                 />
@@ -2567,22 +2782,20 @@ export default function PartnerDetailPage() {
             </Card>
             <Card
               theme={theme}
-              title={locale === "en" ? "Adapter linkage" : "Adapter linkage"}
-              subtitle={
-                locale === "en"
-                  ? "Cross-link the contract snapshot to the platform adapter registry."
-                  : "將 contract snapshot 與平台 adapter registry 對照。"
-              }
+              title={copy.adapterLinkageTitle}
+              subtitle={copy.adapterLinkageSubtitle}
             >
               <div style={linkCardStyle}>
                 <div style={linkRowStyle}>
                   <div>
                     <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                      {locale === "en" ? "Linked adapter" : "Linked adapter"}
+                      {copy.linkedAdapter}
                     </div>
                     <div style={monoValueStyle}>
                       {entry.eligibilityContract
-                        ? `${entry.eligibilityContract.adapterCode} · ${entry.eligibilityContract.adapterVersion}`
+                        ? locale === "zh"
+                          ? `${formatPlatformCodeLabel(locale, entry.eligibilityContract.adapterCode)} · 版本 ${entry.eligibilityContract.adapterVersion}`
+                          : `${formatPlatformCodeLabel(locale, entry.eligibilityContract.adapterCode)} · ${entry.eligibilityContract.adapterVersion}`
                         : "—"}
                     </div>
                   </div>
@@ -2600,17 +2813,13 @@ export default function PartnerDetailPage() {
                 <div style={linkRowStyle}>
                   <div>
                     <div style={{ fontSize: 12.5, fontWeight: 600 }}>
-                      {locale === "en" ? "Manual fallback" : "Manual fallback"}
+                      {copy.manualFallback}
                     </div>
                     <div style={monoValueStyle}>
                       {entry.eligibilityContract?.manualFallbackPolicy
                         ?.requiredOnTimeout
-                        ? locale === "en"
-                          ? "ops_console required on timeout"
-                          : "timeout 時需進 ops_console"
-                        : locale === "en"
-                          ? "no timeout fallback"
-                          : "無 timeout fallback"}
+                        ? copy.opsQueueRequired
+                        : copy.noTimeoutFallback}
                     </div>
                   </div>
                   <Pill
@@ -2620,12 +2829,8 @@ export default function PartnerDetailPage() {
                     }
                   >
                     {entry.eligibilityContract?.contractId
-                      ? locale === "en"
-                        ? "snapshot linked"
-                        : "snapshot 已綁定"
-                      : locale === "en"
-                        ? "missing snapshot"
-                        : "缺少 snapshot"}
+                      ? copy.snapshotLinked
+                      : copy.missingSnapshot}
                   </Pill>
                 </div>
               </div>
@@ -2671,10 +2876,13 @@ export default function PartnerDetailPage() {
                 <Banner
                   theme={theme}
                   tone={activeCredentialCount > 0 ? "success" : "warn"}
-                  title={`${readinessReadyCount}/${readinessItems.length} governance gates ready`}
+                  title={copy.credentialsBannerTitle(
+                    readinessReadyCount,
+                    readinessItems.length,
+                  )}
                   body={
                     activeCredentialCount > 0
-                      ? `${activeCredentialCount} active credential(s) remain masked in the table below.`
+                      ? copy.credentialsBannerBody(activeCredentialCount)
                       : copy.credentialsEmpty
                   }
                 />
@@ -2716,13 +2924,8 @@ export default function PartnerDetailPage() {
                   <Banner
                     theme={theme}
                     tone="danger"
-                    title={locale === "en" ? "Entry revoked" : "Entry 已撤銷"}
-                    body={
-                      entry.revokeReason ??
-                      (locale === "en"
-                        ? "Traffic should remain blocked for this entry."
-                        : "此 entry 應持續維持流量封鎖。")
-                    }
+                    title={copy.entryRevokedTitle}
+                    body={entry.revokeReason ?? copy.entryRevokedBody}
                   />
                 ) : null}
 
@@ -2795,6 +2998,7 @@ export default function PartnerDetailPage() {
           }}
           onCopy={() => void handleCopySecret()}
           onDownload={handleDownloadSecret}
+          locale={locale}
           copy={copy.secretModal}
         />
       ) : null}

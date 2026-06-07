@@ -9,6 +9,7 @@ import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { formatPortalUiError, toPortalErrorMessage } from "@/lib/error-copy";
 
 export default async function AddressesPage({
   searchParams,
@@ -23,7 +24,7 @@ export default async function AddressesPage({
   try {
     addresses = await client.listAddresses();
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = formatPortalUiError(toPortalErrorMessage(e), "無法載入地址資料");
   }
 
   const editId = searchParams?.edit;
@@ -31,17 +32,19 @@ export default async function AddressesPage({
     ? addresses.find((a) => a.addressId === editId)
     : null;
 
-  const formError = searchParams?.error ?? null;
+  const formError = searchParams?.error
+    ? formatPortalUiError(searchParams.error, "地址作業失敗")
+    : null;
 
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Addresses"
-        description={`${addresses.length} address(es) found.`}
+        title="地址簿"
+        description={`目前共有 ${addresses.length} 筆地址資料。`}
       >
         {error && (
           <div className="error-banner">
-            <strong>Error loading addresses:</strong> {error}
+            <strong>載入地址資料失敗：</strong> {error}
           </div>
         )}
 
@@ -55,7 +58,7 @@ export default async function AddressesPage({
         )}
 
         <Link className="route-link" href="/">
-          Back to home
+          返回首頁
         </Link>
       </AppShellCard>
     </main>
@@ -65,48 +68,48 @@ export default async function AddressesPage({
 function NewAddressForm({ formError }: { formError: string | null }) {
   return (
     <div className="form-section">
-      <h3>New Address</h3>
+      <h3>新增地址</h3>
       {formError && (
         <div className="error-banner">
-          <strong>Error:</strong> {formError}
+          <strong>錯誤：</strong> {formError}
         </div>
       )}
       <form action={createAddress} className="form-grid">
         <div className="form-row">
-          <label htmlFor="addressName">Address Name *</label>
+          <label htmlFor="addressName">地址名稱 *</label>
           <input type="text" id="addressName" name="addressName" required />
         </div>
         <div className="form-row">
-          <label htmlFor="addressText">Address *</label>
+          <label htmlFor="addressText">地址內容 *</label>
           <textarea id="addressText" name="addressText" required rows={3} />
         </div>
         <div className="form-row">
-          <label htmlFor="lat">Latitude</label>
+          <label htmlFor="lat">緯度</label>
           <input type="number" step="any" id="lat" name="lat" />
         </div>
         <div className="form-row">
-          <label htmlFor="lng">Longitude</label>
+          <label htmlFor="lng">經度</label>
           <input type="number" step="any" id="lng" name="lng" />
         </div>
         <div className="form-row">
-          <label htmlFor="tags">Tags (comma-separated)</label>
+          <label htmlFor="tags">標籤（以逗號分隔）</label>
           <input
             type="text"
             id="tags"
             name="tags"
-            placeholder="e.g. office, warehouse"
+            placeholder="例如：辦公室、倉庫"
           />
         </div>
         <div className="form-row">
-          <label htmlFor="ownerPassengerId">Owner Passenger ID</label>
+          <label htmlFor="ownerPassengerId">所屬乘客 ID</label>
           <input type="text" id="ownerPassengerId" name="ownerPassengerId" />
         </div>
         <div className="form-row">
           <label>
-            <input type="checkbox" name="activeFlag" defaultChecked /> Active
+            <input type="checkbox" name="activeFlag" defaultChecked /> 啟用中
           </label>
         </div>
-        <button type="submit">Create Address</button>
+        <button type="submit">建立地址</button>
       </form>
     </div>
   );
@@ -115,11 +118,11 @@ function NewAddressForm({ formError }: { formError: string | null }) {
 function EditAddressForm({ address }: { address: TenantAddressRecord }) {
   return (
     <div className="form-section">
-      <h3>Edit Address: {address.addressName}</h3>
+      <h3>編輯地址：{address.addressName}</h3>
       <form action={updateAddress} className="form-grid">
         <input type="hidden" name="addressId" value={address.addressId} />
         <div className="form-row">
-          <label htmlFor="addressName">Address Name *</label>
+          <label htmlFor="addressName">地址名稱 *</label>
           <input
             type="text"
             id="addressName"
@@ -129,7 +132,7 @@ function EditAddressForm({ address }: { address: TenantAddressRecord }) {
           />
         </div>
         <div className="form-row">
-          <label htmlFor="addressText">Address *</label>
+          <label htmlFor="addressText">地址內容 *</label>
           <textarea
             id="addressText"
             name="addressText"
@@ -139,7 +142,7 @@ function EditAddressForm({ address }: { address: TenantAddressRecord }) {
           />
         </div>
         <div className="form-row">
-          <label htmlFor="lat">Latitude</label>
+          <label htmlFor="lat">緯度</label>
           <input
             type="number"
             step="any"
@@ -149,7 +152,7 @@ function EditAddressForm({ address }: { address: TenantAddressRecord }) {
           />
         </div>
         <div className="form-row">
-          <label htmlFor="lng">Longitude</label>
+          <label htmlFor="lng">經度</label>
           <input
             type="number"
             step="any"
@@ -159,17 +162,17 @@ function EditAddressForm({ address }: { address: TenantAddressRecord }) {
           />
         </div>
         <div className="form-row">
-          <label htmlFor="tags">Tags (comma-separated)</label>
+          <label htmlFor="tags">標籤（以逗號分隔）</label>
           <input
             type="text"
             id="tags"
             name="tags"
             defaultValue={address.tags.join(", ")}
-            placeholder="e.g. office, warehouse"
+            placeholder="例如：辦公室、倉庫"
           />
         </div>
         <div className="form-row">
-          <label htmlFor="ownerPassengerId">Owner Passenger ID</label>
+          <label htmlFor="ownerPassengerId">所屬乘客 ID</label>
           <input
             type="text"
             id="ownerPassengerId"
@@ -184,12 +187,12 @@ function EditAddressForm({ address }: { address: TenantAddressRecord }) {
               name="activeFlag"
               defaultChecked={address.activeFlag}
             />{" "}
-            Active
+            啟用中
           </label>
         </div>
         <div className="form-actions">
-          <button type="submit">Save Changes</button>
-          <Link href="/addresses">Cancel</Link>
+          <button type="submit">儲存變更</button>
+          <Link href="/addresses">取消</Link>
         </div>
       </form>
     </div>
@@ -200,18 +203,18 @@ function AddressList({ addresses }: { addresses: TenantAddressRecord[] }) {
   return (
     <div className="data-table">
       {addresses.length === 0 ? (
-        <p className="empty-state">No addresses found. Create one above.</p>
+        <p className="empty-state">目前沒有地址資料，可先建立一筆。</p>
       ) : (
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Address</th>
-              <th>Tags</th>
-              <th>Lat</th>
-              <th>Lng</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>名稱</th>
+              <th>地址</th>
+              <th>標籤</th>
+              <th>緯度</th>
+              <th>經度</th>
+              <th>狀態</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -222,17 +225,17 @@ function AddressList({ addresses }: { addresses: TenantAddressRecord[] }) {
                 <td>{a.tags.length > 0 ? a.tags.join(", ") : "-"}</td>
                 <td>{a.lat != null ? a.lat.toFixed(6) : "-"}</td>
                 <td>{a.lng != null ? a.lng.toFixed(6) : "-"}</td>
-                <td>{a.activeFlag ? "Active" : "Inactive"}</td>
+                <td>{a.activeFlag ? "啟用中" : "停用中"}</td>
                 <td>
-                  <Link href={`/addresses?edit=${a.addressId}`}>Edit</Link>
+                  <Link href={`/addresses?edit=${a.addressId}`}>編輯</Link>
                   {" | "}
                   <form action={deleteAddress} style={{ display: "inline" }}>
                     <input type="hidden" name="addressId" value={a.addressId} />
                     <ConfirmSubmitButton
                       type="submit"
-                      confirmMessage={`Delete address "${a.addressName}"?`}
+                      confirmMessage={`確定要刪除地址「${a.addressName}」嗎？`}
                     >
-                      Delete
+                      刪除
                     </ConfirmSubmitButton>
                   </form>
                 </td>
@@ -250,7 +253,7 @@ async function createAddress(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteTenant,
-    "Tenant write authority required to manage addresses.",
+    "管理地址需要租戶寫入權限。",
   );
   const client = await getTenantClient();
 
@@ -279,7 +282,7 @@ async function createAddress(formData: FormData) {
     await client.upsertAddress(command);
     revalidatePath("/addresses");
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
+    const msg = formatPortalUiError(toPortalErrorMessage(e), "無法建立地址");
     redirect(`/addresses?error=${encodeURIComponent(msg)}`);
   }
 }
@@ -289,7 +292,7 @@ async function updateAddress(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteTenant,
-    "Tenant write authority required to manage addresses.",
+    "管理地址需要租戶寫入權限。",
   );
   const client = await getTenantClient();
 
@@ -319,7 +322,7 @@ async function updateAddress(formData: FormData) {
     await client.upsertAddress(command);
     revalidatePath("/addresses");
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
+    const msg = formatPortalUiError(toPortalErrorMessage(e), "無法更新地址");
     redirect(
       `/addresses?edit=${command.addressId}&error=${encodeURIComponent(msg)}`,
     );
@@ -331,7 +334,7 @@ async function deleteAddress(formData: FormData) {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteTenant,
-    "Tenant write authority required to manage addresses.",
+    "管理地址需要租戶寫入權限。",
   );
   const client = await getTenantClient();
 
@@ -349,7 +352,7 @@ async function deleteAddress(formData: FormData) {
     await client.upsertAddress(command);
     revalidatePath("/addresses");
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
+    const msg = formatPortalUiError(toPortalErrorMessage(e), "無法刪除地址");
     redirect(`/addresses?error=${encodeURIComponent(msg)}`);
   }
 }

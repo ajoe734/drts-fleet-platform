@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { formatTenantUiError, toTenantErrorMessage } from "@/lib/error-copy";
 import {
   clearPartnerSession,
   createPartnerSession,
@@ -14,7 +15,10 @@ export async function POST(request: NextRequest) {
   try {
     body = (await request.json()) as LoginPayload;
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json(
+      { error: "請求內容格式錯誤，無法解析登入資料。" },
+      { status: 400 },
+    );
   }
 
   const entrySlug =
@@ -22,7 +26,7 @@ export async function POST(request: NextRequest) {
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
   if (!entrySlug || !apiKey) {
     return NextResponse.json(
-      { error: "Both entrySlug and apiKey are required." },
+      { error: "入口別名與合作夥伴 API 金鑰皆為必填。" },
       { status: 400 },
     );
   }
@@ -38,10 +42,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Partner bootstrap rejected.",
+        error: formatTenantUiError(
+          toTenantErrorMessage(error, "合作夥伴登入失敗。"),
+          "合作夥伴登入失敗",
+        ),
       },
       { status: 401 },
     );

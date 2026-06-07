@@ -10,6 +10,11 @@ import React, {
   type CSSProperties,
 } from "react";
 import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
+import type { PageContextSnapshot } from "@/components/assistant/assistant-types";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import {
   EMPTY_TENANT_FORM,
   createTenantModuleLabels,
@@ -24,6 +29,7 @@ import { formatPlatformCodeLabel } from "@/lib/localized-labels";
 import type {
   CreatePlatformTenantCommand,
   PlatformAdminTenantRecord,
+  PlatformTenantGateStatus,
 } from "@drts/contracts";
 import {
   PLATFORM_TENANT_INTEGRATION_MODES,
@@ -229,6 +235,25 @@ const tenantMetaStyle: CSSProperties = {
   fontFamily: th.monoFamily,
 };
 
+const tenantLifecycleMetaStyle: CSSProperties = {
+  fontSize: 11,
+  color: th.textMuted,
+  fontFamily: th.fontFamily,
+};
+
+const tableToolbarStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-end",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const searchFieldStyle: CSSProperties = {
+  minWidth: 260,
+  width: "min(420px, 100%)",
+};
+
 const tenantSummaryStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
@@ -270,44 +295,41 @@ function getStageTone(stage: TenantStageValue): CanvasTone {
   return toCanvasTone(tenantStageTone(stage));
 }
 
-function getGateTone(stage: TenantStageValue): CanvasTone {
-  if (stage === "production") {
+function getTenantGateStatus(
+  tenant: PlatformAdminTenantRecord,
+): PlatformTenantGateStatus {
+  if (tenant.status === "rollback_hold") {
+    return "blocked";
+  }
+
+  if (tenant.rollout.stage === "production") {
+    return tenant.rollout.productionStatus;
+  }
+
+  if (tenant.rollout.stage === "pilot") {
+    return tenant.rollout.pilotStatus;
+  }
+
+  return tenant.rollout.sandboxStatus;
+}
+
+function getGateTone(gate: PlatformTenantGateStatus): CanvasTone {
+  if (gate === "approved") {
     return "success";
   }
-  if (stage === "rollback_hold") {
+  if (gate === "ready") {
+    return "info";
+  }
+  if (gate === "blocked") {
     return "danger";
   }
   return "warn";
 }
 
-function getGateLabel(
-  stage: TenantStageValue,
-): "ready" | "blocked" | "pending" {
-  if (stage === "production") {
-    return "ready";
-  }
-  if (stage === "rollback_hold") {
-    return "blocked";
-  }
-  return "pending";
-}
-
 function formatQuotaSummary(locale: string, tenant: PlatformAdminTenantRecord) {
-  return `${formatLocaleNumber(locale, tenant.quotas.monthlyBookings)}/mo`;
-}
-
-function getIntegrationSummary(tenant: PlatformAdminTenantRecord) {
-  switch (tenant.integrationPackage.mode) {
-    case "api_key":
-      return "api";
-    case "api_key_and_webhook":
-      return "api+webhook";
-    case "partner_managed":
-      return "partner";
-    case "none":
-    default:
-      return "none";
-  }
+  return locale === "en"
+    ? `${formatLocaleNumber(locale, tenant.quotas.monthlyBookings)}/mo`
+    : `${formatLocaleNumber(locale, tenant.quotas.monthlyBookings)}/月`;
 }
 
 function formatShortDate(value: string) {
@@ -341,8 +363,14 @@ export default function TenantsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<TenantFilter>("all");
+  const [searchTerm, setSearchTerm] = useState("");
   const [createForm, setCreateForm] =
     useState<TenantFormState>(EMPTY_TENANT_FORM);
+
+  // Live v2 context snapshot (page/form/table/action mesh). Held in a ref so the
+  // bridge object stays stable while the assistant always reads current state at
+  // send-time. Populated below once derived page state exists.
+  const assistantSnapshotRef = useRef<PageContextSnapshot>({});
 
   const assistantBridge = useMemo(
     () => ({
@@ -354,161 +382,103 @@ export default function TenantsPage() {
               return {
                 ok: false,
                 code: "invalid_filter_value",
-                message:
-                  "Tenants filter accepts only all, sandbox, pilot, production, or rollback_hold.",
+                message: t("tenants.list.assistant.invalidFilter"),
               } as const;
             }
             setFilter(value as TenantFilter);
             return {
               ok: true,
               code: "filter_applied",
-              message: `Applied tenants filter ${value}.`,
+              message: t("tenants.list.assistant.filterApplied", { value }),
               payload: { filterId: "rollout_stage", value },
             } as const;
           },
         },
       },
+      getContextSnapshot: () => assistantSnapshotRef.current,
     }),
-    [],
+    [t],
   );
 
   usePlatformAdminAssistantPage(assistantBridge);
 
-  const copy =
-    locale === "en"
-      ? {
-          title: "Tenants",
-          subtitle:
-            "Manage the full tenant lifecycle from creation through production rollout.",
-          filterAction: "Filter",
-          exportAction: "Export",
-          createTitle: "Create tenant",
-          createSubtitle:
-            "Bootstrap tenant identity, quotas, enabled modules, and onboarding defaults before the first promotion.",
-          createSummaryTitle: "Bootstrap snapshot",
-          createSummarySubtitle:
-            "Keep the initial rollout package explicit before this tenant joins the live roster.",
-          errorTitle: "Unable to load tenant governance",
-          filterPill: "last 30 days",
-          columns: {
-            tenant: "TENANT",
-            stage: "STAGE",
-            gate: "GATE",
-            modules: "MODULES",
-            quotas: "配額/月",
-            integration: "介接",
-            updated: "更新",
-          },
-          filters: {
-            all: "All",
-            production: "Production",
-            pilot: "Pilot",
-            sandbox: "Sandbox",
-            rollback_hold: "Rollback hold",
-          },
-          moduleState: {
-            enabled: "enabled",
-            disabled: "optional",
-          },
-          bootstrap: {
-            modules: "Selected modules",
-            quota: "Bookings / month",
-            api: "API calls / month",
-            status: "STATUS",
-            integration: "INTEGRATION",
-            admin: "BOOTSTRAP ADMIN",
-            sandbox: "SANDBOX BASE URL",
-            empty: "—",
-          },
-          searchPlaceholder: "Search tenants, users, adapters…",
-          breadcrumb: ["Tenant Governance", "Tenants"],
-          nav: {
-            workspace: "Workspace",
-            governance: "Tenant Governance",
-            fleet: "Fleet & Compliance",
-            pricing: "Pricing & Settlement",
-            platform: "Platform Layer",
-            home: "Home",
-            health: "Platform Health",
-            tenants: "Tenants",
-            partners: "Partner Entry",
-            users: "Platform Staff",
-            fleetPage: "Fleet & Compliance",
-            switchboard: "Public Info & Placards",
-            pricingPage: "Pricing",
-            payments: "Settlement Governance",
-            notices: "Notices & Maintenance",
-            audit: "Audit & Evidence",
-            flags: "Feature Flags",
-            adapters: "Adapter Registry",
-          },
-        }
-      : {
-          title: "租戶",
-          subtitle: "管理 tenant 從建立到 production rollout 的完整生命週期。",
-          filterAction: "篩選",
-          exportAction: "匯出",
-          createTitle: "建立租戶",
-          createSubtitle:
-            "在第一次 promotion 前，先補齊租戶主檔、配額、模組與 onboarding defaults。",
-          createSummaryTitle: "Bootstrap 摘要",
-          createSummarySubtitle:
-            "在租戶進入 live roster 之前，先把初始 rollout package 固定下來。",
-          errorTitle: "無法載入租戶治理資料",
-          filterPill: "最近 30 天",
-          columns: {
-            tenant: "TENANT",
-            stage: "STAGE",
-            gate: "GATE",
-            modules: "MODULES",
-            quotas: "配額/月",
-            integration: "介接",
-            updated: "更新",
-          },
-          filters: {
-            all: "全部",
-            production: "Production",
-            pilot: "Pilot",
-            sandbox: "Sandbox",
-            rollback_hold: "Rollback hold",
-          },
-          moduleState: {
-            enabled: "已啟用",
-            disabled: "可選",
-          },
-          bootstrap: {
-            modules: "已選模組",
-            quota: "每月 bookings",
-            api: "每月 API 呼叫",
-            status: "狀態",
-            integration: "介接模式",
-            admin: "Bootstrap 管理員",
-            sandbox: "Sandbox Base URL",
-            empty: "—",
-          },
-          searchPlaceholder: "搜尋租戶、平台人員、介接…",
-          breadcrumb: ["租戶治理", "租戶"],
-          nav: {
-            workspace: "工作面",
-            governance: "租戶治理",
-            fleet: "車隊與法遵",
-            pricing: "計價與結算",
-            platform: "平台層",
-            home: "工作首頁",
-            health: "平台健康",
-            tenants: "租戶",
-            partners: "合作夥伴 entry",
-            users: "平台人員",
-            fleetPage: "車隊與合規",
-            switchboard: "法定資訊與牌貼",
-            pricingPage: "計價",
-            payments: "結算治理",
-            notices: "公告與維護",
-            audit: "稽核與證據",
-            flags: "功能旗標",
-            adapters: "介接登錄",
-          },
-        };
+  const copy = useMemo(
+    () => ({
+      title: t("tenants.list.pageTitle"),
+      subtitle: t("tenants.list.pageSubtitle"),
+      filterAction: t("tenants.list.filterAction"),
+      exportAction: t("tenants.list.exportAction"),
+      createTitle: t("tenants.list.createTitle"),
+      createSubtitle: t("tenants.list.createSubtitle"),
+      createSummaryTitle: t("tenants.list.createSummaryTitle"),
+      createSummarySubtitle: t("tenants.list.createSummarySubtitle"),
+      errorTitle: t("tenants.list.errorTitle"),
+      columns: {
+        tenant: t("tenants.list.col.tenant"),
+        stage: t("tenants.list.col.stage"),
+        gate: t("tenants.list.col.gate"),
+        modules: t("tenants.list.col.modules"),
+        quotas: t("tenants.list.col.quotasPerMonth"),
+        integration: t("tenants.list.col.integration"),
+        updated: t("tenants.list.col.updated"),
+      },
+      filters: {
+        all: t("common.all"),
+        production: t("tenants.list.filter.production"),
+        pilot: t("tenants.list.filter.pilot"),
+        sandbox: t("tenants.list.filter.sandbox"),
+        rollback_hold: t("tenants.list.filter.rollbackHold"),
+      },
+      gate: {
+        ready: t("tenants.list.gate.ready"),
+        pending: t("tenants.list.gate.pending"),
+        blocked: t("tenants.list.gate.blocked"),
+        approved: t("tenants.list.gate.approved"),
+      },
+      lifecycle: {
+        status: t("tenants.list.lifecycle.status"),
+        cutover: t("tenants.list.lifecycle.cutover"),
+        rollback: t("tenants.list.lifecycle.rollback"),
+        unassigned: t("tenants.list.lifecycle.unassigned"),
+      },
+      search: {
+        label: t("tenants.list.search.label"),
+        placeholder: t("tenants.list.search.placeholder"),
+        clear: t("tenants.list.search.clear"),
+      },
+      moduleState: {
+        enabled: t("tenants.list.moduleState.enabled"),
+        disabled: t("tenants.list.moduleState.disabled"),
+      },
+      bootstrap: {
+        modules: t("tenants.list.bootstrap.modules"),
+        quota: t("tenants.list.bootstrap.quota"),
+        api: t("tenants.list.bootstrap.api"),
+        status: t("tenants.list.bootstrap.status"),
+        integration: t("tenants.list.bootstrap.integration"),
+        admin: t("tenants.list.bootstrap.admin"),
+        sandbox: t("tenants.list.bootstrap.sandbox"),
+        empty: "—",
+      },
+      hints: {
+        quota: t("tenants.list.quotaHint"),
+        modules: t("tenants.list.modulesHint"),
+        onboarding: t("tenants.list.onboardingHint"),
+      },
+      kpiSub: {
+        modules: t("tenants.list.kpi.modulesSub"),
+        bookings: t("tenants.list.kpi.bookingsSub"),
+        api: t("tenants.list.kpi.apiSub"),
+      },
+      placeholders: {
+        name: t("tenants.list.placeholder.name"),
+        code: t("tenants.list.placeholder.code"),
+        adminEmail: t("tenants.list.placeholder.adminEmail"),
+        sandboxBaseUrl: t("tenants.list.placeholder.sandboxBaseUrl"),
+      },
+    }),
+    [t],
+  );
 
   const moduleLabels = useMemo(() => createTenantModuleLabels(t), [t]);
 
@@ -519,7 +489,13 @@ export default function TenantsPage() {
       const result = await client.listPlatformTenants();
       setTenants(result ?? []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en" ? "Tenant list unavailable" : "租戶清單暫時無法載入",
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -549,6 +525,7 @@ export default function TenantsPage() {
   );
 
   const visibleTenants = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
     const filtered =
       filter === "rollback_hold"
         ? tenants.filter((tenant) => tenant.status === "rollback_hold")
@@ -560,12 +537,142 @@ export default function TenantsPage() {
                 tenant.rollout.stage === filter,
             );
 
-    return [...filtered].sort(
+    const searched = query
+      ? filtered.filter((tenant) =>
+          [tenant.name, tenant.code, tenant.id]
+            .join(" ")
+            .toLowerCase()
+            .includes(query),
+        )
+      : filtered;
+
+    return [...searched].sort(
       (left, right) =>
         new Date(right.updatedAt).getTime() -
         new Date(left.updatedAt).getTime(),
     );
-  }, [filter, tenants]);
+  }, [filter, searchTerm, tenants]);
+
+  // Context mesh v2 snapshot: the visible tenant table, the create-tenant form
+  // (when open), and the actions this view exposes. Page-owned plain data only.
+  const assistantSnapshot = useMemo<PageContextSnapshot>(() => {
+    const formDirty =
+      JSON.stringify(createForm) !== JSON.stringify(EMPTY_TENANT_FORM);
+
+    return {
+      tables: [
+        {
+          tableId: "tenants",
+          title: copy.title,
+          totalRowCount: tenants.length,
+          visibleRowCount: visibleTenants.length,
+          activeFilter: searchTerm.trim()
+            ? `${filter} / ${searchTerm.trim()}`
+            : filter,
+          rowEntityKind: "tenant",
+          columns: [
+            { key: "tenant", label: copy.columns.tenant },
+            { key: "stage", label: copy.columns.stage },
+            { key: "gate", label: copy.columns.gate },
+            { key: "modules", label: copy.columns.modules },
+            { key: "quotas", label: copy.columns.quotas },
+            { key: "integration", label: copy.columns.integration },
+            { key: "updated", label: copy.columns.updated },
+          ],
+          sampleRows: visibleTenants.slice(0, 5).map((tenant) => ({
+            kind: "tenant",
+            id: tenant.code,
+            label: tenant.name,
+            source: "page-selection",
+          })),
+        },
+      ],
+      forms: showCreate
+        ? [
+            {
+              formId: "tenant-create-form",
+              title: copy.createTitle,
+              dirty: formDirty,
+              submitting: creating,
+              fields: [
+                {
+                  name: "name",
+                  kind: "text",
+                  required: true,
+                  filled: createForm.name.trim().length > 0,
+                  ...(createForm.name ? { valuePreview: createForm.name } : {}),
+                },
+                {
+                  name: "code",
+                  kind: "text",
+                  required: true,
+                  filled: createForm.code.trim().length > 0,
+                  ...(createForm.code ? { valuePreview: createForm.code } : {}),
+                },
+                {
+                  name: "status",
+                  kind: "select",
+                  filled: true,
+                  valuePreview: createForm.status,
+                },
+                {
+                  name: "enabledModules",
+                  kind: "multiselect",
+                  filled: createForm.enabledModules.length > 0,
+                  ...(createForm.enabledModules.length > 0
+                    ? { valuePreview: createForm.enabledModules.join(", ") }
+                    : {}),
+                },
+                {
+                  name: "integrationMode",
+                  kind: "select",
+                  filled: true,
+                  valuePreview: createForm.integrationMode,
+                },
+                {
+                  name: "bootstrapAdminEmail",
+                  kind: "text",
+                  filled: createForm.bootstrapAdminEmail.trim().length > 0,
+                  ...(createForm.bootstrapAdminEmail
+                    ? { valuePreview: createForm.bootstrapAdminEmail }
+                    : {}),
+                },
+              ],
+              validationErrors: [],
+            },
+          ]
+        : [],
+      availableActions: [
+        {
+          id: "create_tenant",
+          label: copy.createTitle,
+          risk: "medium",
+          enabled: !creating,
+          requiresConfirmation: true,
+        },
+        {
+          id: "export_tenants",
+          label: copy.exportAction,
+          risk: "low",
+          enabled: visibleTenants.length > 0,
+          ...(visibleTenants.length === 0
+            ? { disabledReasonCode: "no_visible_rows" }
+            : {}),
+        },
+      ],
+    };
+  }, [
+    copy,
+    tenants.length,
+    visibleTenants,
+    filter,
+    searchTerm,
+    showCreate,
+    createForm,
+    creating,
+  ]);
+
+  assistantSnapshotRef.current = assistantSnapshot;
 
   const exportVisibleTenants = useCallback(() => {
     if (visibleTenants.length === 0) {
@@ -584,11 +691,11 @@ export default function TenantsPage() {
 
     const rows = visibleTenants.map((tenant) => [
       `${tenant.name} (${tenant.code})`,
-      getTenantStageValue(tenant),
-      getGateLabel(getTenantStageValue(tenant)),
+      formatPlatformCodeLabel(locale, getTenantStageValue(tenant)),
+      copy.gate[getTenantGateStatus(tenant)],
       `${tenant.enabledModules.length}/${PLATFORM_TENANT_MODULES.length}`,
       formatQuotaSummary(locale, tenant),
-      getIntegrationSummary(tenant),
+      formatPlatformCodeLabel(locale, tenant.integrationPackage.mode),
       formatDateTime(tenant.updatedAt),
     ]);
 
@@ -603,7 +710,7 @@ export default function TenantsPage() {
     anchor.download = `platform-tenants-${filter}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [copy.columns, filter, locale, visibleTenants]);
+  }, [copy.columns, copy.gate, filter, locale, visibleTenants]);
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -633,7 +740,13 @@ export default function TenantsPage() {
       setShowCreate(false);
       await loadTenants();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e),
+          locale === "en" ? "Tenant creation failed" : "租戶建立失敗",
+        ),
+      );
     } finally {
       setCreating(false);
     }
@@ -650,6 +763,14 @@ export default function TenantsPage() {
             <span style={tenantMetaStyle}>
               {tenant.code} · {tenant.id}
             </span>
+            <span style={tenantLifecycleMetaStyle}>
+              {copy.lifecycle.status}:{" "}
+              {formatPlatformCodeLabel(locale, tenant.status)} ·{" "}
+              {copy.lifecycle.cutover}:{" "}
+              {tenant.rollout.cutoverOwner ?? copy.lifecycle.unassigned} ·{" "}
+              {copy.lifecycle.rollback}:{" "}
+              {tenant.rollout.rollbackOwner ?? copy.lifecycle.unassigned}
+            </span>
           </Link>
         ),
       },
@@ -661,7 +782,7 @@ export default function TenantsPage() {
 
           return (
             <CanvasPill theme={th} tone={getStageTone(stage)} dot>
-              {stage}
+              {formatPlatformCodeLabel(locale, stage)}
             </CanvasPill>
           );
         },
@@ -670,11 +791,11 @@ export default function TenantsPage() {
         h: copy.columns.gate,
         w: 130,
         r: (tenant) => {
-          const stage = getTenantStageValue(tenant);
+          const gate = getTenantGateStatus(tenant);
 
           return (
-            <CanvasPill theme={th} tone={getGateTone(stage)}>
-              {getGateLabel(stage)}
+            <CanvasPill theme={th} tone={getGateTone(gate)}>
+              {copy.gate[gate]}
             </CanvasPill>
           );
         },
@@ -699,7 +820,10 @@ export default function TenantsPage() {
         mono: true,
         r: (tenant) => (
           <span
-            title={`${formatLocaleNumber(locale, tenant.quotas.activeDrivers)} drivers · ${formatLocaleNumber(locale, tenant.quotas.monthlyApiCalls)} API`}
+            title={t("tenants.list.quotasTooltip", {
+              drivers: formatLocaleNumber(locale, tenant.quotas.activeDrivers),
+              api: formatLocaleNumber(locale, tenant.quotas.monthlyApiCalls),
+            })}
           >
             {formatQuotaSummary(locale, tenant)}
           </span>
@@ -711,7 +835,7 @@ export default function TenantsPage() {
         mono: true,
         r: (tenant) => (
           <span title={tenant.integrationPackage.sandboxBaseUrl ?? ""}>
-            {getIntegrationSummary(tenant)}
+            {formatPlatformCodeLabel(locale, tenant.integrationPackage.mode)}
           </span>
         ),
       },
@@ -722,7 +846,7 @@ export default function TenantsPage() {
         r: (tenant) => formatShortDate(tenant.updatedAt),
       },
     ],
-    [copy.columns, locale, moduleLabels],
+    [copy.columns, copy.gate, copy.lifecycle, locale, moduleLabels, t],
   );
 
   const filterOptions = [
@@ -866,7 +990,7 @@ export default function TenantsPage() {
                               }))
                             }
                             required
-                            placeholder="Acme Mobility"
+                            placeholder={copy.placeholders.name}
                             style={inputStyle}
                           />
                         </CanvasField>
@@ -884,7 +1008,7 @@ export default function TenantsPage() {
                               }))
                             }
                             required
-                            placeholder="acme_dispatch"
+                            placeholder={copy.placeholders.code}
                             style={monoInputStyle}
                           />
                         </CanvasField>
@@ -916,11 +1040,7 @@ export default function TenantsPage() {
                         <h3 style={sectionTitleStyle}>
                           {t("tenants.quotaAllocation")}
                         </h3>
-                        <p style={sectionHintStyle}>
-                          {locale === "en"
-                            ? "Set the initial monthly quota envelope before enabling traffic."
-                            : "在正式啟用前先設定初始月配額範圍。"}
-                        </p>
+                        <p style={sectionHintStyle}>{copy.hints.quota}</p>
                         <div style={quotaGridStyle}>
                           <CanvasField
                             theme={th}
@@ -980,11 +1100,7 @@ export default function TenantsPage() {
                         <h3 style={sectionTitleStyle}>
                           {t("tenants.form.modules")}
                         </h3>
-                        <p style={sectionHintStyle}>
-                          {locale === "en"
-                            ? "Keep the initial module footprint explicit."
-                            : "把首批啟用模組明確列出。"}
-                        </p>
+                        <p style={sectionHintStyle}>{copy.hints.modules}</p>
                         <div style={moduleGridStyle}>
                           {PLATFORM_TENANT_MODULES.map((moduleCode) => {
                             const active =
@@ -1042,11 +1158,7 @@ export default function TenantsPage() {
                         <h3 style={sectionTitleStyle}>
                           {t("tenants.section.onboarding")}
                         </h3>
-                        <p style={sectionHintStyle}>
-                          {locale === "en"
-                            ? "Seed integration posture and bootstrap ownership from the platform side."
-                            : "由平台端預先補齊 integration posture 與 bootstrap owner。"}
-                        </p>
+                        <p style={sectionHintStyle}>{copy.hints.onboarding}</p>
                         <div style={fieldGridStyle}>
                           <CanvasField
                             theme={th}
@@ -1082,7 +1194,7 @@ export default function TenantsPage() {
                                   bootstrapAdminEmail: event.target.value,
                                 }))
                               }
-                              placeholder="admin@acme.example"
+                              placeholder={copy.placeholders.adminEmail}
                               style={inputStyle}
                             />
                           </CanvasField>
@@ -1098,7 +1210,7 @@ export default function TenantsPage() {
                                   sandboxBaseUrl: event.target.value,
                                 }))
                               }
-                              placeholder="https://sandbox.acme.example"
+                              placeholder={copy.placeholders.sandboxBaseUrl}
                               style={monoInputStyle}
                             />
                           </CanvasField>
@@ -1138,21 +1250,19 @@ export default function TenantsPage() {
                         theme={th}
                         label={copy.bootstrap.modules}
                         value={`${createForm.enabledModules.length}/${PLATFORM_TENANT_MODULES.length}`}
-                        sub={
-                          locale === "en" ? "tenant modules" : "tenant modules"
-                        }
+                        sub={copy.kpiSub.modules}
                       />
                       <CanvasKPI
                         theme={th}
                         label={copy.bootstrap.quota}
                         value={createForm.monthlyBookings || "0"}
-                        sub={locale === "en" ? "bookings" : "bookings"}
+                        sub={copy.kpiSub.bookings}
                       />
                       <CanvasKPI
                         theme={th}
                         label={copy.bootstrap.api}
                         value={createForm.monthlyApiCalls || "0"}
-                        sub="API"
+                        sub={copy.kpiSub.api}
                       />
                     </div>
                     <CanvasDL
@@ -1193,7 +1303,28 @@ export default function TenantsPage() {
           </div>
         ) : null}
 
-        <div ref={tableSectionRef}>
+        <div ref={tableSectionRef} style={createGridStyle}>
+          <div style={tableToolbarStyle}>
+            <CanvasField theme={th} label={copy.search.label}>
+              <input
+                type="search"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder={copy.search.placeholder}
+                style={{ ...inputStyle, ...searchFieldStyle }}
+              />
+            </CanvasField>
+            {searchTerm.trim() ? (
+              <CanvasBtn
+                theme={th}
+                variant="secondary"
+                icon="x"
+                onClick={() => setSearchTerm("")}
+              >
+                {copy.search.clear}
+              </CanvasBtn>
+            ) : null}
+          </div>
           <CanvasCard theme={th} padding={0}>
             {loading ? (
               <div style={loadingStateStyle}>{t("tenants.loading")}</div>

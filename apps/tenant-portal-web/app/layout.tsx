@@ -16,9 +16,8 @@ import {
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Tenant Portal",
-  description:
-    "Tenant workspace for formal tenant roles, operational settings, and authority-driven governance surfaces.",
+  title: "DRTS 租戶入口",
+  description: "租戶角色、營運設定與治理能力的單一入口。",
 };
 
 function SignOutForm() {
@@ -42,7 +41,7 @@ function SignOutForm() {
           cursor: "pointer",
         }}
       >
-        Sign out
+        登出
       </button>
     </form>
   );
@@ -71,7 +70,7 @@ export default async function RootLayout({
     ) : null;
 
   return (
-    <html lang="en">
+    <html lang="zh-Hant">
       <body>
         <TenantPortalChrome navItems={navItems} footer={footer}>
           {children}

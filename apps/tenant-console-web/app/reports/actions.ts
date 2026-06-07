@@ -8,6 +8,7 @@ import {
   type ReportOutputFormat,
 } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import { formatTenantUiError, toTenantErrorMessage } from "@/lib/error-copy";
 
 const REPORTS_PATH = "/reports";
 
@@ -101,9 +102,10 @@ function parseFiltersJson(value: string) {
 }
 
 function toErrorMessage(error: unknown) {
-  return error instanceof Error
-    ? error.message.slice(0, 180)
-    : "Unable to complete report action.";
+  return formatTenantUiError(
+    toTenantErrorMessage(error, "報表操作失敗。"),
+    "報表操作失敗",
+  ).slice(0, 180);
 }
 
 async function submitReportJob(

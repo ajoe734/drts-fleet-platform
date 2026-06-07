@@ -18,12 +18,23 @@ import {
   CanvasField,
   CanvasPageHeader,
   CanvasPill,
-  CanvasTable,
-  type CanvasTableColumn,
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import {
+  ServerCanvasTable,
+  type ServerCanvasTableColumn,
+} from "@/components/server-canvas-table";
 import { DEMO_TENANT_ID, getTenantClient } from "@/lib/api-client";
+import {
+  classifyTenantErrorReason,
+  formatTenantErrorReasonLabel,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
+import {
+  formatTenantCodeLabel,
+  formatTenantCodeList,
+} from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -344,14 +355,14 @@ type TenantUsersResponse =
     };
 
 const ROLE_CANVAS_LABEL: Record<string, string> = {
-  tc_admin: "tenant_admin",
-  tc_operator: "operator",
-  tc_finance: "finance",
-  tc_viewer: "viewer",
-  tenant_admin: "tenant_admin",
-  tenant_ops_admin: "operator",
-  tenant_finance_admin: "finance",
-  tenant_viewer: "viewer",
+  tc_admin: "租戶管理員",
+  tc_operator: "營運",
+  tc_finance: "財務",
+  tc_viewer: "檢視",
+  tenant_admin: "租戶管理員",
+  tenant_ops_admin: "營運",
+  tenant_finance_admin: "財務",
+  tenant_viewer: "檢視",
 };
 
 const ROLE_SORT_ORDER: Record<string, number> = {
@@ -380,9 +391,9 @@ function formatUpdated(value: string | null | undefined) {
 
 function formatDurationMs(value: number | null | undefined) {
   if (typeof value !== "number" || Number.isNaN(value) || value < 0) return "—";
-  if (value < 1_000) return `${value}ms`;
-  if (value % 1_000 === 0) return `${value / 1_000}s`;
-  return `${(value / 1_000).toFixed(1)}s`;
+  if (value < 1_000) return `${value} 毫秒`;
+  if (value % 1_000 === 0) return `${value / 1_000} 秒`;
+  return `${(value / 1_000).toFixed(1)} 秒`;
 }
 
 function formatCount(value: number) {
@@ -413,9 +424,9 @@ function getStateTone(status: TenantUserRoleRecord["status"]): CanvasTone {
 }
 
 function getStateLabel(status: TenantUserRoleRecord["status"]) {
-  if (status === "active") return "active";
-  if (status === "invited") return "pending_invite";
-  return "suspended";
+  if (status === "active") return "啟用中";
+  if (status === "invited") return "待邀請";
+  return "已停用";
 }
 
 function getRefreshTone(
@@ -429,8 +440,8 @@ function getRefreshTone(
 }
 
 function getRefreshSummary(metadata: UiRefreshMetadata | null) {
-  if (!metadata) return "backend did not return refreshMetadata";
-  return `${metadata.dataFreshness} · ${metadata.source} · staleAfter ${formatDurationMs(metadata.staleAfterMs)}`;
+  if (!metadata) return "後端未回傳刷新中繼資料";
+  return `${formatTenantCodeLabel(metadata.dataFreshness, "未知狀態")} · 過舊時限 ${formatDurationMs(metadata.staleAfterMs)}`;
 }
 
 function compareUsers(a: TenantUserRoleRecord, b: TenantUserRoleRecord) {
@@ -452,22 +463,8 @@ function compareRoles(a: TenantRoleCatalogRecord, b: TenantRoleCatalogRecord) {
   return a.roleCode.localeCompare(b.roleCode, "en");
 }
 
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "未知錯誤";
-}
-
-function classifyFailureReason(message: string): EmptyReason {
-  if (/permission|forbidden|unauthorized|401|403/i.test(message)) {
-    return "permission_denied";
-  }
-  if (
-    /external|upstream|dependency|gateway|timeout|temporar|unavailable|refused/i.test(
-      message,
-    )
-  ) {
-    return "external_unavailable";
-  }
-  return "fetch_failed";
+function getFailureSourceLabel(source: LoadFailure["source"]) {
+  return source === "roles" ? "角色目錄" : "使用者名冊";
 }
 
 function parseFilterValue(
@@ -602,7 +599,7 @@ function getEmptyStateConfig(
     case "not_provisioned":
       return {
         title: "尚未開通使用者管理",
-        body: "租戶角色目錄尚未準備完成，無法建立或指派使用者。請先完成 tenant access provisioning。",
+        body: "租戶角色目錄尚未準備完成，無法建立或指派使用者。請先完成租戶存取權限建置。",
         tone: "info",
         icon: "info",
         nextAction,
@@ -610,7 +607,7 @@ function getEmptyStateConfig(
     case "fetch_failed":
       return {
         title: "使用者資料讀取失敗",
-        body: "後端快照沒有成功回來。請重新整理，若持續失敗再進 audit 或支援流程。",
+        body: "後端快照沒有成功回來。請重新整理，若持續失敗再進稽核頁或支援流程。",
         tone: "danger",
         icon: "warn",
         ...(refreshHref
@@ -623,15 +620,15 @@ function getEmptyStateConfig(
       };
     case "permission_denied":
       return {
-        title: "目前身分無法檢視 /users",
-        body: "此頁是 tc_admin only。若這是異常授權狀態，請檢查跨 app audit 與 platform-admin role assignment。",
+        title: "目前身分無法檢視使用者頁",
+        body: "此頁僅限租戶管理員存取。若這是異常授權狀態，請檢查跨應用稽核與平台管理角色指派。",
         tone: "warn",
         icon: "warn",
       };
     case "external_unavailable":
       return {
-        title: "外部身份依賴暫時不可用",
-        body: "租戶使用者清單可讀性受外部 identity / session 依賴影響。可先到 audit 查看近期 role 變更。",
+        title: "外部身分依賴暫時不可用",
+        body: "租戶使用者清單可讀性受外部身分與工作階段依賴影響。可先到稽核頁查看近期角色變更。",
         tone: "warn",
         icon: "warn",
         ...(refreshHref
@@ -645,7 +642,7 @@ function getEmptyStateConfig(
     case "filtered_empty":
       return {
         title: "篩選結果為空",
-        body: "目前 role / status 篩選沒有命中任何成員。放寬條件後會回到完整 roster。",
+        body: "目前角色 / 狀態篩選沒有命中任何成員。放寬條件後會回到完整名單。",
         tone: "neutral",
         icon: "warn",
       };
@@ -653,7 +650,7 @@ function getEmptyStateConfig(
     default:
       return {
         title: "租戶尚未有其他成員",
-        body: "目前只剩 tenant admin 或整個 roster 尚未建立。從 invite flow 加入第一位 operator / finance / viewer。",
+        body: "目前只剩租戶管理員，或整份成員名單尚未建立。從邀請流程加入第一位營運 / 財務 / 檢視人員。",
         tone: "neutral",
         icon: "info",
         nextAction,
@@ -691,19 +688,19 @@ async function loadUsersData(): Promise<UsersPageData> {
       : [];
 
   if (usersResult.status === "rejected") {
-    const message = toErrorMessage(usersResult.reason);
+    const message = toTenantErrorMessage(usersResult.reason);
     failures.push({
       source: "users",
       message,
-      reason: classifyFailureReason(message),
+      reason: classifyTenantErrorReason(message),
     });
   }
   if (rolesResult.status === "rejected") {
-    const message = toErrorMessage(rolesResult.reason);
+    const message = toTenantErrorMessage(rolesResult.reason);
     failures.push({
       source: "roles",
       message,
-      reason: classifyFailureReason(message),
+      reason: classifyTenantErrorReason(message),
     });
   }
 
@@ -712,7 +709,7 @@ async function loadUsersData(): Promise<UsersPageData> {
       identityResult.status === "fulfilled" ? identityResult.value : null,
     identityError:
       identityResult.status === "rejected"
-        ? toErrorMessage(identityResult.reason)
+        ? toTenantErrorMessage(identityResult.reason)
         : null,
     users,
     roles,
@@ -758,7 +755,7 @@ function getActionLabel(action: string) {
     case "refresh":
       return "重新整理";
     default:
-      return action;
+      return formatTenantCodeLabel(action, action);
   }
 }
 
@@ -940,7 +937,7 @@ function EmptyStateBlock({
   return (
     <div style={emptyStateStyle}>
       <CanvasPill theme={th} tone={config.tone}>
-        {reason}
+        {formatTenantCodeLabel(reason, reason)}
       </CanvasPill>
       <div style={{ color: th.text, fontWeight: 600 }}>{config.title}</div>
       <div
@@ -971,13 +968,13 @@ function EmptyStateBlock({
 }
 
 function getActorChip(identity: IdentityContext | null, tenantId: string) {
-  if (!identity) return `unknown / tenant / ${tenantId} / production`;
-  return `${identity.actorId ?? identity.actorType} / ${identity.realm} / ${identity.tenantId ?? tenantId} / production`;
+  if (!identity) return `未知身分 / 租戶 / ${tenantId} / 正式環境`;
+  return `${identity.actorId ?? formatTenantCodeLabel(identity.actorType, identity.actorType)} / ${formatTenantCodeLabel(identity.realm, identity.realm)} / ${identity.tenantId ?? tenantId} / 正式環境`;
 }
 
 function getActorSummary(identity: IdentityContext | null) {
-  if (!identity) return "identity unavailable";
-  return `${identity.actorId ?? identity.actorType} · ${identity.authMode} · roles=${identity.roles.join(", ") || "none"}`;
+  if (!identity) return "目前無法取得身分摘要";
+  return `${identity.actorId ?? formatTenantCodeLabel(identity.actorType, identity.actorType)} · ${formatTenantCodeLabel(identity.authMode, identity.authMode)} · 角色 ${formatTenantCodeList(identity.roles)}`;
 }
 
 export default async function UsersPage({
@@ -1061,9 +1058,9 @@ export default async function UsersPage({
     status: null,
   });
 
-  const columns: CanvasTableColumn<UserRow>[] = [
+  const columns: ServerCanvasTableColumn<UserRow>[] = [
     {
-      h: "NAME",
+      h: "名稱",
       k: "displayName",
       w: 200,
       r: (row) => (
@@ -1074,13 +1071,13 @@ export default async function UsersPage({
       ),
     },
     {
-      h: "EMAIL",
+      h: "電子郵件",
       k: "email",
       mono: true,
       w: 220,
     },
     {
-      h: "ROLE",
+      h: "角色",
       k: "roleCode",
       w: 180,
       r: (row) => (
@@ -1093,7 +1090,7 @@ export default async function UsersPage({
       ),
     },
     {
-      h: "STATE",
+      h: "狀態",
       w: 130,
       r: (row) => (
         <CanvasPill theme={th} tone={getStateTone(row.status)} dot>
@@ -1102,25 +1099,25 @@ export default async function UsersPage({
       ),
     },
     {
-      h: "INVITED",
+      h: "邀請時間",
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.invitedAt),
     },
     {
-      h: "LAST LOGIN",
+      h: "最近登入",
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.lastLoginAt),
     },
     {
-      h: "UPDATED",
+      h: "更新時間",
       w: 150,
       mono: true,
       r: (row) => formatUpdated(row.updatedAt),
     },
     {
-      h: "ACTIONS",
+      h: "操作",
       w: 260,
       r: (row) => (
         <div style={rowActionMetaStyle}>
@@ -1141,7 +1138,7 @@ export default async function UsersPage({
       <CanvasPageHeader
         theme={th}
         title="使用者"
-        subtitle="只有 tc_admin 可操作 · tenant_admin / operator / finance / viewer"
+        subtitle="僅限租戶管理員操作 · 支援管理員、營運、財務與檢視角色"
         actions={
           <>
             <ActionDescriptorList
@@ -1160,8 +1157,8 @@ export default async function UsersPage({
             theme={th}
             tone={getRefreshTone(backendRefreshMetadata)}
             icon="refresh"
-            title={`Snapshot ${formatUpdated(backendRefreshMetadata.generatedAt)}`}
-            body={`Refresh tier T5 · ${TENANT_REFRESH_TIER} · cadence ${TENANT_REFRESH_CADENCE_MS / 1000}s · ${getRefreshSummary(backendRefreshMetadata)}`}
+            title={`快照時間 ${formatUpdated(backendRefreshMetadata.generatedAt)}`}
+            body={`T5 刷新層級 · ${TENANT_REFRESH_CADENCE_MS / 1000} 秒節奏 · ${getRefreshSummary(backendRefreshMetadata)}`}
           />
         ) : null}
 
@@ -1170,8 +1167,8 @@ export default async function UsersPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="身份上下文讀取失敗"
-            body={`IdentityContext 無法讀取，因此頁面改以 tenant users snapshot 推導 tenant 範圍。${identityError}`}
+            title="身分上下文讀取失敗"
+            body={`身分上下文暫時無法讀取，因此頁面改以租戶使用者快照推導目前範圍。原因：${formatTenantErrorReasonLabel(identityError)}。`}
           />
         ) : null}
 
@@ -1180,11 +1177,11 @@ export default async function UsersPage({
             theme={th}
             tone="warn"
             icon="warn"
-            title="頁面處於 degraded state"
+            title="頁面目前處於降級狀態"
             body={failures
               .map(
                 (failure) =>
-                  `${failure.source}: ${failure.reason} · ${failure.message}`,
+                  `${getFailureSourceLabel(failure.source)}：${formatTenantCodeLabel(failure.reason, failure.reason)}`,
               )
               .join(" · ")}
           />
@@ -1192,18 +1189,14 @@ export default async function UsersPage({
 
         <div style={stripGridStyle}>
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>Sitemap / Entry</div>
-            <div style={routeCodeStyle}>/users</div>
-            <div style={stripValueStyle}>
-              Sidebar · tenant access management
-            </div>
-            <div style={hintCopyStyle}>
-              Entry from sidebar or action receipt deep link.
-            </div>
+            <div style={stripLabelStyle}>站點入口</div>
+            <div style={routeCodeStyle}>使用者頁</div>
+            <div style={stripValueStyle}>側邊欄 · 租戶存取管理</div>
+            <div style={hintCopyStyle}>可從側邊欄或動作收據深連結進入。</div>
           </div>
 
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>Header Chip</div>
+            <div style={stripLabelStyle}>頁首身分標籤</div>
             <div style={stripValueStyle}>
               {getActorChip(identity, tenantId)}
             </div>
@@ -1211,52 +1204,46 @@ export default async function UsersPage({
           </div>
 
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>Roster Snapshot</div>
+            <div style={stripLabelStyle}>名單快照</div>
             <div style={pillRowStyle}>
               <CanvasPill theme={th} tone="accent">
-                {formatCount(users.length)} users
+                {formatCount(users.length)} 位使用者
               </CanvasPill>
               <CanvasPill theme={th} tone="success">
-                {formatCount(activeUsers)} active
+                {formatCount(activeUsers)} 啟用中
               </CanvasPill>
               <CanvasPill theme={th} tone="warn">
-                {formatCount(invitedUsers)} pending_invite
+                {formatCount(invitedUsers)} 待邀請
               </CanvasPill>
               <CanvasPill theme={th} tone="neutral">
-                {formatCount(suspendedUsers)} suspended
+                {formatCount(suspendedUsers)} 已停用
               </CanvasPill>
             </div>
             <div style={hintCopyStyle}>
-              latest roster update{" "}
-              {latestUpdated ? formatUpdated(latestUpdated) : "—"}
+              最近名單更新 {latestUpdated ? formatUpdated(latestUpdated) : "—"}
             </div>
           </div>
 
           <div style={stripCardStyle}>
-            <div style={stripLabelStyle}>Cross-App Audit</div>
+            <div style={stripLabelStyle}>跨應用稽核</div>
             <div style={stripValueStyle}>
-              Tenant same-tab · ops/platform new-tab
+              租戶頁同分頁 · 營運 / 平台頁新分頁
             </div>
             <div style={hintCopyStyle}>
-              Cross-app access traces stay explicit so tenant admins can follow
-              platform-owned changes without losing their current roster view.
+              跨應用存取軌跡會保持清楚明確，讓租戶管理員可以追蹤平台端變更，同時不會失去目前的名單檢視。
             </div>
           </div>
         </div>
 
         <div style={summaryGridStyle}>
-          <CanvasCard theme={th} title="篩選" subtitle="role + status">
+          <CanvasCard theme={th} title="篩選" subtitle="角色 + 狀態">
             <div style={stackStyle}>
-              <CanvasField
-                theme={th}
-                label="Role"
-                hint="依 packet §5.7，必須可按角色檢視。"
-              >
+              <CanvasField theme={th} label="角色" hint="必須可按角色檢視。">
                 <div style={pillRowStyle}>
                   <FilterPillLink
                     href={allRoleHref}
                     active={roleFilter === "all"}
-                    label="all roles"
+                    label="全部角色"
                     tone="accent"
                   />
                   {roles.map((role) => (
@@ -1275,14 +1262,14 @@ export default async function UsersPage({
 
               <CanvasField
                 theme={th}
-                label="Status"
-                hint="active / invited / suspended 都必須分開辨識。"
+                label="狀態"
+                hint="啟用 / 已邀請 / 已停用都必須分開辨識。"
               >
                 <div style={pillRowStyle}>
                   <FilterPillLink
                     href={allStatusHref}
                     active={statusFilter === "all"}
-                    label="all states"
+                    label="全部狀態"
                     tone="accent"
                   />
                   <FilterPillLink
@@ -1290,7 +1277,7 @@ export default async function UsersPage({
                       status: "active",
                     })}
                     active={statusFilter === "active"}
-                    label="active"
+                    label="啟用中"
                     tone="success"
                   />
                   <FilterPillLink
@@ -1298,7 +1285,7 @@ export default async function UsersPage({
                       status: "invited",
                     })}
                     active={statusFilter === "invited"}
-                    label="pending_invite"
+                    label="待邀請"
                     tone="warn"
                   />
                   <FilterPillLink
@@ -1306,7 +1293,7 @@ export default async function UsersPage({
                       status: "suspended",
                     })}
                     active={statusFilter === "suspended"}
-                    label="suspended"
+                    label="已停用"
                     tone="neutral"
                   />
                 </div>
@@ -1316,8 +1303,8 @@ export default async function UsersPage({
 
           <CanvasCard
             theme={th}
-            title="Authority / Refresh"
-            subtitle="tc_admin guardrail + T5 snapshot freshness"
+            title="權限 / 刷新"
+            subtitle="租戶管理員守門條件 + T5 快照新鮮度"
           >
             <div style={stackStyle}>
               <div style={metricGridStyle}>
@@ -1325,14 +1312,14 @@ export default async function UsersPage({
                   <div style={metricValueStyle}>
                     {formatCount(emptyReason ? 0 : filteredUsers.length)}
                   </div>
-                  <div style={metricLabelStyle}>visible rows</div>
+                  <div style={metricLabelStyle}>可見資料列</div>
                 </div>
                 <div style={metricCardStyle}>
                   <div style={metricValueStyle}>
                     {formatCount(assignableRoles.length)} /{" "}
                     {formatCount(roles.length)}
                   </div>
-                  <div style={metricLabelStyle}>assignable roles</div>
+                  <div style={metricLabelStyle}>可指派角色</div>
                 </div>
               </div>
 
@@ -1341,52 +1328,52 @@ export default async function UsersPage({
                 cols={1}
                 items={[
                   {
-                    k: "Primary persona",
-                    v: "tc_admin only",
+                    k: "主要身分",
+                    v: "僅限租戶管理員",
                     mono: true,
                   },
                   {
-                    k: "Entry / exit",
-                    v: "sidebar → /users · audit deep links only",
+                    k: "進出路徑",
+                    v: "側邊欄 → 使用者頁 · 僅支援稽核深連結",
                     mono: true,
                   },
                   {
-                    k: "Must-support actions",
+                    k: "必備動作",
                     v:
                       sortAvailableActions(availableActions)
-                        .map((descriptor) => descriptor.action)
-                        .join(" / ") || "runtime_unavailable",
+                        .map((descriptor) => getActionLabel(descriptor.action))
+                        .join(" / ") || "目前快照未提供",
                     mono: true,
                   },
                   {
-                    k: "Refresh tier",
-                    v: `T5 / ${TENANT_REFRESH_TIER} / ${TENANT_REFRESH_CADENCE_MS / 1000}s`,
+                    k: "刷新層級",
+                    v: `T5 / ${formatTenantCodeLabel(TENANT_REFRESH_TIER, TENANT_REFRESH_TIER)} / ${TENANT_REFRESH_CADENCE_MS / 1000} 秒`,
                     mono: true,
                   },
                   {
-                    k: "Snapshot generated",
+                    k: "快照產生時間",
                     v: backendRefreshMetadata
                       ? formatUpdated(backendRefreshMetadata.generatedAt)
-                      : "runtime_unavailable",
+                      : "目前快照未提供",
                     mono: true,
                   },
                   {
-                    k: "Freshness / source",
+                    k: "新鮮度 / 來源",
                     v: backendRefreshMetadata
-                      ? `${backendRefreshMetadata.dataFreshness} / ${backendRefreshMetadata.source}`
-                      : "runtime_unavailable",
+                      ? `${formatTenantCodeLabel(backendRefreshMetadata.dataFreshness, "未知")} / 系統回傳`
+                      : "目前快照未提供",
                     mono: true,
                   },
                   {
-                    k: "Stale after",
+                    k: "過舊時限",
                     v: backendRefreshMetadata
                       ? formatDurationMs(backendRefreshMetadata.staleAfterMs)
-                      : "runtime_unavailable",
+                      : "目前快照未提供",
                     mono: true,
                   },
                   {
-                    k: "Tenant audit",
-                    v: "/audit?resourceType=tenant_user_role",
+                    k: "租戶稽核",
+                    v: "同頁開啟租戶使用者角色的稽核檢視",
                     mono: true,
                   },
                 ]}
@@ -1397,14 +1384,14 @@ export default async function UsersPage({
 
         <CanvasCard
           theme={th}
-          title="Tenant roster"
-          subtitle="user id · display name · email · role · status · invited at · last login · updated"
+          title="租戶名單"
+          subtitle="使用者編號 · 顯示名稱 · 電子郵件 · 角色 · 狀態 · 邀請時間 · 最近登入 · 更新時間"
           padding={0}
         >
           {emptyReason && emptyConfig ? (
             <EmptyStateBlock reason={emptyReason} config={emptyConfig} />
           ) : (
-            <CanvasTable<UserRow>
+            <ServerCanvasTable<UserRow>
               theme={th}
               columns={columns}
               rows={userRows}
@@ -1416,7 +1403,7 @@ export default async function UsersPage({
           <CanvasCard
             theme={th}
             title="角色目錄"
-            subtitle="role catalog remains backend-owned"
+            subtitle="角色目錄仍以後端資料為準"
           >
             {roles.length > 0 ? (
               <div style={roleListStyle}>
@@ -1430,36 +1417,35 @@ export default async function UsersPage({
                     <div style={roleListMetaStyle}>
                       <span style={roleListTitleStyle}>{role.displayName}</span>
                       <CanvasPill theme={th} tone={getRoleCatalogTone(role)}>
-                        {role.roleCode}
+                        {getRoleLabel(role.roleCode)}
                       </CanvasPill>
                     </div>
                     <div style={roleListDescriptionStyle}>
                       {role.description}
                     </div>
                     <div style={compactMetaStyle}>
-                      {role.assignable ? "assignable" : "system-managed only"}
+                      {role.assignable ? "可指派" : "僅系統管理"}
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
               <div style={hintCopyStyle}>
-                角色目錄目前沒有資料。此區等待後端 role catalog 契約補齊，
-                不再本地推導 empty reason。
+                角色目錄目前沒有資料。此區等待後端角色目錄契約補齊，不再本地推導空狀態原因。
               </div>
             )}
           </CanvasCard>
 
           <CanvasCard
             theme={th}
-            title="Cross-app audit"
-            subtitle="ops / platform actions affecting tenant access open in new tab"
+            title="跨應用稽核"
+            subtitle="影響租戶存取的營運 / 平台動作會在新分頁開啟"
           >
             <div style={cardStackStyle}>
               <div style={authorityMetaStyle}>
-                <span>cross-app deep links</span>
+                <span>跨應用深連結</span>
                 <CanvasPill theme={th} tone="info">
-                  new_tab
+                  新分頁
                 </CanvasPill>
               </div>
               <div style={linkStackStyle}>
@@ -1467,9 +1453,9 @@ export default async function UsersPage({
                   href="/audit?resourceType=tenant_user_role"
                   style={linkCardStyle}
                 >
-                  <span style={linkTitleStyle}>Tenant Console audit</span>
+                  <span style={linkTitleStyle}>租戶主控台稽核</span>
                   <span style={linkMetaStyle}>
-                    same-tab filtered view for tenant-owned user actions
+                    在同分頁查看租戶自有使用者動作的篩選結果
                   </span>
                 </a>
                 {crossAppLinks.map((link) => (
@@ -1486,11 +1472,19 @@ export default async function UsersPage({
                   >
                     <span style={linkTitleStyle}>
                       {link.label}{" "}
-                      <span style={compactMetaStyle}>[{link.openMode}]</span>
+                      <span style={compactMetaStyle}>
+                        [{link.openMode === "new_tab" ? "新分頁" : "同分頁"}]
+                      </span>
                     </span>
                     <span style={linkMetaStyle}>
-                      {link.targetApp} · {link.route} · {link.resourceType}:
-                      {link.resourceId}
+                      目標應用：
+                      {formatTenantCodeLabel(link.targetApp, link.targetApp)} ·
+                      資源類型：
+                      {formatTenantCodeLabel(
+                        link.resourceType,
+                        link.resourceType,
+                      )}{" "}
+                      · 資源編號：{link.resourceId}
                     </span>
                   </a>
                 ))}
@@ -1500,50 +1494,50 @@ export default async function UsersPage({
 
           <CanvasCard
             theme={th}
-            title="Action contract"
-            subtitle="availableActions decides every CTA; UI does not infer permissions from role"
+            title="動作契約"
+            subtitle="後端回傳的可用操作會決定每個按鈕；介面不會自行從角色名稱推導權限"
           >
             <CanvasDL
               theme={th}
               cols={1}
               items={[
                 {
-                  k: "Invite user",
+                  k: "邀請使用者",
                   v: inviteAction
                     ? inviteAction.enabled
-                      ? "runtime-driven primary CTA"
-                      : `disabled · ${inviteAction.disabledReasonCode ?? "runtime"}`
-                    : "not returned in current snapshot",
+                      ? "由執行階段回傳的主要操作"
+                      : `已停用 · ${formatTenantCodeLabel(inviteAction.disabledReasonCode ?? "disabled")}`
+                    : "目前快照未提供",
                 },
                 {
-                  k: "Update role",
+                  k: "更新角色",
                   v: userRows.some((row) =>
                     row.availableActions.some((action) =>
                       rowRoleActionNames.includes(action.action),
                     ),
                   )
-                    ? "row-level runtime action"
-                    : "not returned in current snapshot",
+                    ? "由資料列執行階段回傳的操作"
+                    : "目前快照未提供",
                 },
                 {
-                  k: "Suspend",
+                  k: "停用",
                   v: userRows.some((row) =>
                     row.availableActions.some((action) =>
                       rowSuspendActionNames.includes(action.action),
                     ),
                   )
-                    ? "high risk row action"
-                    : "not returned in current snapshot",
+                    ? "高風險資料列操作"
+                    : "目前快照未提供",
                 },
                 {
-                  k: "Resend invitation",
+                  k: "重送邀請",
                   v: userRows.some((row) =>
                     row.availableActions.some((action) =>
                       rowResendActionNames.includes(action.action),
                     ),
                   )
-                    ? "invited rows expose resend affordance"
-                    : "not returned in current snapshot",
+                    ? "已邀請資料列會提供重送入口"
+                    : "目前快照未提供",
                 },
               ]}
             />

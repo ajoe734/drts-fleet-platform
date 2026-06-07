@@ -91,7 +91,7 @@ export function RefreshTierControl({
           });
         }}
       >
-        {isPending ? "Refreshing" : "Refresh"}
+        {isPending ? "重新整理中" : "重新整理"}
       </CanvasBtn>
     </div>
   );

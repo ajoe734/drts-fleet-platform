@@ -52,6 +52,7 @@ import {
   replayPendingDriverTaskCompletion,
   submitDriverTaskCompletion,
 } from "@/lib/api-client";
+import { formatDriverUiError, toDriverErrorMessage } from "@/lib/error-copy";
 import {
   accumulateTripDistanceKm,
   calculateTripDurationSec,
@@ -228,18 +229,23 @@ function getErrorMessage(error: unknown): string {
         const payload = JSON.parse(apiMatch[1]) as {
           error?: { message?: string };
         };
-        return payload.error?.message?.trim() || error.message;
+        return formatDriverUiError(
+          toDriverErrorMessage(payload.error?.message?.trim() || error.message),
+          "操作未完成",
+        );
       } catch {
-        return error.message;
+        return formatDriverUiError(
+          toDriverErrorMessage(error.message),
+          "操作未完成",
+        );
       }
     }
   }
 
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "Unknown error";
+  return formatDriverUiError(
+    toDriverErrorMessage(error, "發生未明錯誤"),
+    "操作未完成",
+  );
 }
 
 function getCanvasToneSet(tone: CanvasTone) {
@@ -790,7 +796,7 @@ function getTripAuthorityBannerProps(
         title: "平台同步異常",
         authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
         description:
-          "既有 sync_failed guardrail 保持鎖定；派車台接手處理前，司機端不開放本地狀態變更。",
+          "既有同步失敗保護規則維持鎖定；派車台接手處理前，司機端不開放本地狀態變更。",
         tone: "danger",
         icon: "alert-circle-outline",
       };
@@ -907,8 +913,8 @@ export default function TripScreen() {
   );
   const headerSubtitle = taskDetail
     ? taskDetail.orderId
-      ? `${taskDetail.taskId} · ${taskDetail.orderId}`
-      : taskDetail.taskId
+      ? `任務編號 ${taskDetail.taskId} · 訂單編號 ${taskDetail.orderId}`
+      : `任務編號 ${taskDetail.taskId}`
     : driverStrings.trip.subtitle;
   const forwardedOutcomeSummary = forwardedActionResult
     ? describeForwardedActionOutcome(
@@ -956,7 +962,7 @@ export default function TripScreen() {
     routeMetricDistance !== "待同步"
       ? `${routeMetricDistance} · ${routeMetricDuration}`
       : orderDetail?.etaSnapshot?.etaMinutes != null
-        ? `ETA ${orderDetail.etaSnapshot.etaMinutes} 分`
+        ? `預估到達 ${orderDetail.etaSnapshot.etaMinutes} 分`
         : routeMetricDuration;
   const footerNotice =
     completionSubmitBlocker === "proof_requirements_unavailable"
@@ -1747,7 +1753,7 @@ export default function TripScreen() {
                 {formatDriverTaskStatusLabel(taskDetail.status)}
               </Pill>
               <Pill theme={driverCanvasTheme} tone="neutral">
-                {taskDetail.taskId}
+                {`任務 ${taskDetail.taskId}`}
               </Pill>
               {isForwardedTrip ? <RouteLockedBadge /> : null}
               {recordingActive ? (
@@ -1811,7 +1817,7 @@ export default function TripScreen() {
                     {forwardedActionResult?.driverMessage}
                   </Text>
                   <Text style={styles.bannerMetaText}>
-                    平台訂單編號：
+                    鏡像訂單編號：
                     {
                       forwardedActionResult?.managementCorrelationIds
                         .mirrorOrderId
@@ -1837,7 +1843,7 @@ export default function TripScreen() {
                   theme={driverCanvasTheme}
                   tone="danger"
                   title="需先載入訂單詳情"
-                  body="確認完單 requirements 前，請先重新整理行程。"
+                  body="確認完單所需佐證前，請先重新整理行程。"
                 />
               ) : null}
 

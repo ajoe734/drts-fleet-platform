@@ -12,12 +12,6 @@ const PLATFORM_LABELS: Record<string, string> = {
   didi: "DiDi",
 };
 
-function humanizePlatformCode(platformCode: string) {
-  return platformCode
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
 export function normalizePlatformCode(platformCode: string | null | undefined) {
   const normalizedCode = platformCode?.trim().toLowerCase() ?? "owned";
   return normalizedCode.length > 0 ? normalizedCode : "owned";
@@ -31,7 +25,7 @@ export function getPlatformDisplayLabel(
   platformCode: string | null | undefined,
 ) {
   const code = normalizePlatformCode(platformCode);
-  return PLATFORM_LABELS[code] ?? humanizePlatformCode(code);
+  return PLATFORM_LABELS[code] ?? "外部平台";
 }
 
 export function PlatformTaskBadge({

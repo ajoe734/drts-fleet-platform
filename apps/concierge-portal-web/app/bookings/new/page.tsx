@@ -12,7 +12,19 @@ import type {
 import { SessionGuard } from "@/components/session-guard";
 import { createConciergeClient } from "@/lib/api-client";
 import {
+  formatCallSessionStatus,
+  formatComplianceFlags,
+  formatOrderStatus,
+  formatRecordingState,
+  formatTraceEventLabel,
+  formatTraceMessage,
+} from "@/lib/display-labels";
+import {
   evaluateDeskEligibility,
+  formatDeskHealth,
+  formatQueuePolicy,
+  formatRecordingAvailability,
+  formatRequestedProduct,
   type RequestedServiceProduct,
   resolveDeskAccess,
 } from "@/lib/desk-catalog";
@@ -25,7 +37,7 @@ type SubmissionSummary = {
 };
 
 function formatDateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : "Not set";
+  return value ? new Date(value).toLocaleString("zh-TW") : "未設定";
 }
 
 export default function ConciergeBookingCreatePage() {
@@ -50,9 +62,7 @@ export default function ConciergeBookingCreatePage() {
   const [quotedEtaMinutes, setQuotedEtaMinutes] = useState("12");
   const [callbackDueAt, setCallbackDueAt] = useState("");
   const [callbackNote, setCallbackNote] = useState("");
-  const [notes, setNotes] = useState(
-    "Desk-created assisted-entry booking from the concierge portal.",
-  );
+  const [notes, setNotes] = useState("客服代訂入口建立的櫃台代訂。");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentSession, setCurrentSession] =
@@ -74,13 +84,9 @@ export default function ConciergeBookingCreatePage() {
         if (!cancelled) {
           setCurrentSession(nextSession);
         }
-      } catch (nextError) {
+      } catch {
         if (!cancelled) {
-          setError(
-            nextError instanceof Error
-              ? nextError.message
-              : "Failed to load the active desk session.",
-          );
+          setError("載入進行中櫃台通話失敗，請稍後再試。");
         }
       }
     })();
@@ -107,15 +113,10 @@ export default function ConciergeBookingCreatePage() {
     <div className="page-shell">
       <SessionGuard requireDesk>
         <section className="hero-card">
-          <span className="section-kicker">Proxy booking</span>
-          <h1>
-            Open a desk session, create the booking, then read back the trace.
-          </h1>
+          <span className="section-kicker">建立代訂</span>
+          <h1>先開啟櫃台通話，再建立代訂並回讀派遣軌跡。</h1>
           <p>
-            This route reuses the callcenter order seam for assisted entry. Site
-            eligibility, denied access, degraded desks, and recording
-            unavailability are surfaced as first-class routes instead of silent
-            failures.
+            此頁使用客服訂單流程建立代訂。站點資格、權限拒絕、櫃台降級與錄音不可用都會導向明確頁面，而不是無聲失敗。
           </p>
         </section>
 
@@ -123,11 +124,11 @@ export default function ConciergeBookingCreatePage() {
 
         <section className="detail-grid">
           <article className="panel-card">
-            <span className="section-kicker">Desk posture</span>
+            <span className="section-kicker">櫃台狀態</span>
             <h2>{desk?.deskName}</h2>
             <p>
-              {desk?.siteName} · {desk?.zoneLabel} · queue policy{" "}
-              {desk?.queuePolicy}
+              {desk?.siteName} · {desk?.zoneLabel} ·{" "}
+              {desk ? formatQueuePolicy(desk.queuePolicy) : "佇列未設定"}
             </p>
             <div className="badge-row">
               <span
@@ -135,12 +136,12 @@ export default function ConciergeBookingCreatePage() {
                   desk?.health === "healthy" ? " chip-success" : " chip-warning"
                 }`}
               >
-                {desk?.health === "healthy" ? "Healthy" : "Degraded"}
+                {desk ? formatDeskHealth(desk.health) : "狀態未設定"}
               </span>
               <span className="chip">
-                {desk?.recordingAvailability === "ops_callback_only"
-                  ? "Ops callback only"
-                  : "Inline recording callback"}
+                {desk
+                  ? formatRecordingAvailability(desk.recordingAvailability)
+                  : "錄音狀態未設定"}
               </span>
             </div>
             <div className="inline-actions">
@@ -167,21 +168,15 @@ export default function ConciergeBookingCreatePage() {
                     });
                     recordCall(opened.callId);
                     setCurrentSession(opened);
-                  } catch (nextError) {
-                    setError(
-                      nextError instanceof Error
-                        ? nextError.message
-                        : "Failed to open the desk session.",
-                    );
+                  } catch {
+                    setError("開啟櫃台通話失敗，請稍後再試。");
                   } finally {
                     setBusyKey(null);
                   }
                 }}
                 type="button"
               >
-                {activeDeskSession
-                  ? "Desk session active"
-                  : "Open desk session"}
+                {activeDeskSession ? "櫃台通話進行中" : "開啟櫃台通話"}
               </button>
               {activeDeskSession ? (
                 <button
@@ -204,42 +199,38 @@ export default function ConciergeBookingCreatePage() {
                       );
                       clearActiveCall();
                       setCurrentSession(closed);
-                    } catch (nextError) {
-                      setError(
-                        nextError instanceof Error
-                          ? nextError.message
-                          : "Failed to close the desk session.",
-                      );
+                    } catch {
+                      setError("關閉櫃台通話失敗，請稍後再試。");
                     } finally {
                       setBusyKey(null);
                     }
                   }}
                   type="button"
                 >
-                  Close desk session
+                  關閉櫃台通話
                 </button>
               ) : null}
             </div>
             {currentSession ? (
               <div className="kv-grid">
                 <div className="kv-item">
-                  <strong>Call id</strong>
+                  <strong>通話編號</strong>
                   <p>{currentSession.callId}</p>
                 </div>
                 <div className="kv-item">
-                  <strong>Status</strong>
-                  <p>{currentSession.status}</p>
+                  <strong>狀態</strong>
+                  <p>{formatCallSessionStatus(currentSession.status)}</p>
                 </div>
                 <div className="kv-item">
-                  <strong>Recording</strong>
-                  <p>{currentSession.recordingState}</p>
+                  <strong>錄音</strong>
+                  <p>{formatRecordingState(currentSession.recordingState)}</p>
                 </div>
                 <div className="kv-item">
-                  <strong>Last ETA</strong>
+                  <strong>最近預估抵達</strong>
                   <p>
                     {currentSession.lastEtaQuotedMinutes
-                      ? `${currentSession.lastEtaQuotedMinutes} min`
-                      : "Not quoted"}
+                      ? `${currentSession.lastEtaQuotedMinutes} 分鐘`
+                      : "尚未回報"}
                   </p>
                 </div>
               </div>
@@ -247,31 +238,28 @@ export default function ConciergeBookingCreatePage() {
           </article>
 
           <article className="panel-card">
-            <span className="section-kicker">Guardrails</span>
-            <h2>Negative paths are explicit before submission.</h2>
+            <span className="section-kicker">保護規則</span>
+            <h2>送出前會先檢查所有例外路徑。</h2>
             <p>
-              Unauthorized desk lanes route to denied. Unsupported product or
-              service area routes to ineligible. Degraded desks block create and
-              redirect to read-only fallback. Recording callback stays explicit
-              as an ops-only escalation step.
+              未授權角色會導向拒絕頁；服務類型或區域不符會導向資格不符；降級櫃台會阻擋建立並轉為唯讀備援；錄音回補會明確轉交營運端。
             </p>
             <div className="inline-actions">
               <Link className="secondary-link" href="/denied">
-                Denied route
+                拒絕頁
               </Link>
               <Link className="secondary-link" href="/ineligible">
-                Ineligible route
+                資格不符頁
               </Link>
               <Link className="secondary-link" href="/recording-unavailable">
-                Recording gate
+                錄音限制
               </Link>
             </div>
           </article>
         </section>
 
         <section className="panel-card">
-          <span className="section-kicker">Create order</span>
-          <h2>Submit the proxy booking through the assisted-entry desk.</h2>
+          <span className="section-kicker">建立訂單</span>
+          <h2>透過客服櫃台送出代訂需求。</h2>
           <form
             className="form-grid"
             onSubmit={async (event) => {
@@ -375,19 +363,15 @@ export default function ConciergeBookingCreatePage() {
                   trace,
                   callbackTask,
                 });
-              } catch (nextError) {
-                setError(
-                  nextError instanceof Error
-                    ? nextError.message
-                    : "Failed to create the assisted-entry booking.",
-                );
+              } catch {
+                setError("建立代訂失敗，請稍後再試。");
               } finally {
                 setBusyKey(null);
               }
             }}
           >
             <div className="field-stack">
-              <label htmlFor="passenger-name">Passenger name</label>
+              <label htmlFor="passenger-name">乘客姓名</label>
               <input
                 id="passenger-name"
                 onChange={(event) => setPassengerName(event.target.value)}
@@ -396,7 +380,7 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="passenger-phone">Passenger phone</label>
+              <label htmlFor="passenger-phone">乘客電話</label>
               <input
                 id="passenger-phone"
                 onChange={(event) => setPassengerPhone(event.target.value)}
@@ -405,7 +389,7 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="requested-product">Requested product</label>
+              <label htmlFor="requested-product">服務類型</label>
               <select
                 id="requested-product"
                 onChange={(event) =>
@@ -415,17 +399,22 @@ export default function ConciergeBookingCreatePage() {
                 }
                 value={requestedProduct}
               >
-                <option value="standard_taxi">standard_taxi</option>
-                <option value="airport_assist">airport_assist</option>
-                <option value="medical_discharge">medical_discharge</option>
+                <option value="standard_taxi">
+                  {formatRequestedProduct("standard_taxi")}
+                </option>
+                <option value="airport_assist">
+                  {formatRequestedProduct("airport_assist")}
+                </option>
+                <option value="medical_discharge">
+                  {formatRequestedProduct("medical_discharge")}
+                </option>
               </select>
               <p className="form-help">
-                Portal validates authorized products before using the existing
-                callcenter order seam.
+                送出前會先確認此櫃台是否授權該服務類型。
               </p>
             </div>
             <div className="field-stack">
-              <label htmlFor="quoted-eta">Quoted ETA minutes</label>
+              <label htmlFor="quoted-eta">回報預估抵達分鐘數</label>
               <input
                 id="quoted-eta"
                 min="1"
@@ -435,7 +424,7 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="pickup-address">Pickup address</label>
+              <label htmlFor="pickup-address">上車地址</label>
               <textarea
                 id="pickup-address"
                 onChange={(event) => setPickupAddress(event.target.value)}
@@ -444,7 +433,7 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="dropoff-address">Drop-off address</label>
+              <label htmlFor="dropoff-address">下車地址</label>
               <textarea
                 id="dropoff-address"
                 onChange={(event) => setDropoffAddress(event.target.value)}
@@ -453,9 +442,7 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="callback-due-at">
-                Optional callback due time
-              </label>
+              <label htmlFor="callback-due-at">可選回覆期限</label>
               <input
                 id="callback-due-at"
                 onChange={(event) => setCallbackDueAt(event.target.value)}
@@ -464,7 +451,7 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="callback-note">Callback note</label>
+              <label htmlFor="callback-note">回覆備註</label>
               <textarea
                 id="callback-note"
                 onChange={(event) => setCallbackNote(event.target.value)}
@@ -472,7 +459,7 @@ export default function ConciergeBookingCreatePage() {
               />
             </div>
             <div className="field-stack">
-              <label htmlFor="booking-notes">Desk notes</label>
+              <label htmlFor="booking-notes">櫃台備註</label>
               <textarea
                 id="booking-notes"
                 onChange={(event) => setNotes(event.target.value)}
@@ -486,7 +473,7 @@ export default function ConciergeBookingCreatePage() {
                 disabled={busyKey === "submit-order"}
                 type="submit"
               >
-                Submit assisted-entry booking
+                送出代訂
               </button>
             </div>
           </form>
@@ -497,7 +484,7 @@ export default function ConciergeBookingCreatePage() {
             <article className="detail-card">
               <header>
                 <div>
-                  <span className="section-kicker">Submission accepted</span>
+                  <span className="section-kicker">送出成功</span>
                   <h3>{submission.order.orderNo}</h3>
                 </div>
                 <span
@@ -507,50 +494,52 @@ export default function ConciergeBookingCreatePage() {
                       : " chip-success"
                   }`}
                 >
-                  {submission.order.status}
+                  {formatOrderStatus(submission.order.status)}
                 </span>
               </header>
               <div className="kv-grid">
                 <div className="kv-item">
-                  <strong>Order id</strong>
+                  <strong>訂單編號</strong>
                   <p>{submission.order.orderId}</p>
                 </div>
                 <div className="kv-item">
-                  <strong>Call id</strong>
-                  <p>{submission.order.callId ?? "Not linked"}</p>
+                  <strong>通話編號</strong>
+                  <p>{submission.order.callId ?? "尚未連結"}</p>
                 </div>
                 <div className="kv-item">
-                  <strong>ETA snapshot</strong>
+                  <strong>預估抵達快照</strong>
                   <p>
                     {submission.order.etaSnapshot
-                      ? `${submission.order.etaSnapshot.etaMinutes} min`
-                      : "Not available"}
+                      ? `${submission.order.etaSnapshot.etaMinutes} 分鐘`
+                      : "尚不可用"}
                   </p>
                 </div>
                 <div className="kv-item">
-                  <strong>Recording posture</strong>
-                  <p>{submission.order.complianceFlags.join(", ")}</p>
+                  <strong>錄音合規狀態</strong>
+                  <p>
+                    {formatComplianceFlags(submission.order.complianceFlags)}
+                  </p>
                 </div>
               </div>
               {submission.callbackTask ? (
                 <p>
-                  Callback task {submission.callbackTask.callbackTaskId} is due{" "}
-                  {formatDateTime(submission.callbackTask.dueAt)}.
+                  回覆任務 {submission.callbackTask.callbackTaskId} 需於{" "}
+                  {formatDateTime(submission.callbackTask.dueAt)} 前處理。
                 </p>
               ) : null}
               <div className="inline-actions">
                 <Link className="secondary-link" href="/lookup">
-                  Open lookup surface
+                  開啟訂單查詢
                 </Link>
                 <Link className="secondary-link" href="/callbacks">
-                  Open callbacks
+                  開啟回覆任務
                 </Link>
                 {desk?.recordingAvailability === "ops_callback_only" ? (
                   <Link
                     className="secondary-link"
                     href="/recording-unavailable"
                   >
-                    Review recording gate
+                    查看錄音限制
                   </Link>
                 ) : null}
               </div>
@@ -559,15 +548,15 @@ export default function ConciergeBookingCreatePage() {
             <article className="detail-card">
               <header>
                 <div>
-                  <span className="section-kicker">Dispatch trace</span>
-                  <h3>Order lifecycle evidence</h3>
+                  <span className="section-kicker">派遣軌跡</span>
+                  <h3>訂單生命週期紀錄</h3>
                 </div>
               </header>
               <ul className="trace-list">
                 {submission.trace.map((entry) => (
                   <li key={entry.traceId}>
-                    <strong>{entry.eventType}</strong>
-                    <p>{entry.message}</p>
+                    <strong>{formatTraceEventLabel(entry.eventType)}</strong>
+                    <p>{formatTraceMessage(entry.eventType, entry.message)}</p>
                     <p>{formatDateTime(entry.createdAt)}</p>
                   </li>
                 ))}

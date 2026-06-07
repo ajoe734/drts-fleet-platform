@@ -1,6 +1,7 @@
 import type { TenantSlaProfileView } from "@drts/contracts";
 import { CanvasBanner, buildCanvasTheme } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { formatTenantUiError, toTenantErrorMessage } from "@/lib/error-copy";
 import { SlaManager } from "./sla-manager";
 
 export const dynamic = "force-dynamic";
@@ -27,8 +28,10 @@ async function loadSlaPageData(): Promise<{
   } catch (error) {
     return {
       view: null,
-      transportErrorMessage:
-        error instanceof Error ? error.message : "Unknown error",
+      transportErrorMessage: formatTenantUiError(
+        toTenantErrorMessage(error),
+        "服務時限設定讀取失敗",
+      ),
     };
   }
 }
@@ -43,7 +46,7 @@ export default async function SlaPage() {
           <CanvasBanner
             theme={th}
             tone="warn"
-            title="SLA profile request failed"
+            title="服務時限設定檔讀取失敗"
             body={data.transportErrorMessage}
           />
         </div>

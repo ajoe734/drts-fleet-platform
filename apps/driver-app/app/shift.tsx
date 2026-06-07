@@ -17,6 +17,7 @@ import {
   getDriverId,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
+import { formatDriverUiError, toDriverErrorMessage } from "@/lib/error-copy";
 import {
   ActionButton,
   AppScreen,
@@ -83,15 +84,11 @@ function formatOdometer(value: number | null) {
     return "未填寫";
   }
 
-  return `${value.toLocaleString("zh-TW")} km`;
+  return `${value.toLocaleString("zh-TW")} 公里`;
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  return fallback;
+  return formatDriverUiError(toDriverErrorMessage(error, fallback), fallback);
 }
 
 function getElapsedMinutes(shift: ShiftRecord, now: number) {
@@ -650,7 +647,7 @@ export default function ShiftScreen() {
           subtitle={
             activeShift
               ? "下線前可補充目前里程與位置。"
-              : "這些欄位皆為選填，不影響班次 guardrails。"
+              : "這些欄位皆為選填，不影響班次檢核規則。"
           }
         >
           {activeShift ? (
@@ -669,7 +666,7 @@ export default function ShiftScreen() {
                 label="目前位置（選填）"
                 value={location}
                 onChangeText={setLocation}
-                placeholder="例如 營運據點 B"
+                placeholder="例如 北區營運據點"
               />
             </View>
           ) : (
@@ -678,14 +675,14 @@ export default function ShiftScreen() {
                 label="車輛編號（選填）"
                 value={vehicleId}
                 onChangeText={setVehicleId}
-                placeholder="例如 ABC-1234"
+                placeholder="例如 車隊一號"
               />
 
               <FormField
                 label="位置（選填）"
                 value={location}
                 onChangeText={setLocation}
-                placeholder="例如 營運據點 A"
+                placeholder="例如 南區營運據點"
               />
 
               <FormField
@@ -706,7 +703,7 @@ export default function ShiftScreen() {
           subtitle={
             availabilityItems.length > 0
               ? `${onlinePlatforms} 個平台上線中，${readyPlatforms} 個平台目前可接單。`
-              : "沿用既有 platform presence 資料來源，只讀顯示目前可接單狀態。"
+              : "沿用既有平台連線資料來源，唯讀顯示目前可接單狀態。"
           }
         >
           {presenceError ? <ErrorBanner message={presenceError} /> : null}
@@ -804,8 +801,8 @@ export default function ShiftScreen() {
             </View>
           ) : (
             <EmptyState
-              title="尚無平台可接單狀態"
-              description="目前沒有可顯示的平台 presence 資料，可前往平台狀態頁確認綁定與上線狀態。"
+              title="尚無平台連線狀態"
+              description="目前沒有可顯示的平台連線資料，可前往平台狀態頁確認綁定與上線狀態。"
               icon="swap-horizontal-outline"
               actionTitle="查看平台狀態"
               onAction={() => router.push("/platform-presence")}
@@ -815,8 +812,8 @@ export default function ShiftScreen() {
         </SectionCard>
 
         <AuthorityBanner
-          title="班次資料 guardrails"
-          authorityLabel="不變更定位心跳、provisioning 與上下線 API"
+          title="班次資料檢核範圍"
+          authorityLabel="不變更定位心跳、裝置啟用流程與上下線介面"
           description="這個畫面只調整呈現方式；資料寫入仍沿用現有班次與出勤流程。"
           tone="owned"
           icon="shield-checkmark"
@@ -827,7 +824,7 @@ export default function ShiftScreen() {
         notice={
           activeShift
             ? "完成下線打卡前，可先更新里程與位置。"
-            : "上線打卡後才會建立 active shift。"
+            : "上線打卡後才會建立進行中的班次。"
         }
       >
         {activeShift ? (

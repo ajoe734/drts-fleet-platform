@@ -16,6 +16,11 @@ import {
   buildCanvasTheme,
 } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import {
+  formatTenantErrorSummary,
+  toTenantErrorMessage,
+} from "@/lib/error-copy";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 
 export const dynamic = "force-dynamic";
 
@@ -129,50 +134,48 @@ const subSystemMeta: Record<
   }
 > = {
   api_keys: {
-    label: "API keys",
+    label: "API 金鑰",
     code: "api_keys",
     href: "/api-keys",
-    fallbackDetail: "Active keys, expiring keys, and missing scope coverage.",
+    fallbackDetail: "啟用中的金鑰、即將到期的金鑰，以及缺漏的權限範圍覆蓋。",
   },
   webhooks: {
-    label: "Webhooks",
+    label: "回呼",
     code: "webhooks",
     href: "/webhooks",
-    fallbackDetail:
-      "Endpoint count, delivery failure rate, and engine availability.",
+    fallbackDetail: "端點數量、投遞失敗率與引擎可用性。",
   },
   notifications: {
-    label: "Notifications routing",
+    label: "通知路由",
     code: "notifications",
     href: "/settings#notifications",
-    fallbackDetail: "Configured channels across inbox, email, and webhook.",
+    fallbackDetail: "站內通知、電子郵件與回呼的已設定通道。",
   },
   sla: {
-    label: "SLA profile",
+    label: "服務時限設定",
     code: "sla_profile",
     href: "/settings#sla",
-    fallbackDetail: "Wait, arrival, and completion thresholds are evaluated.",
+    fallbackDetail: "等待、到達與完成門檻的評估狀態。",
   },
   reports: {
-    label: "Reports availability",
+    label: "報表可用性",
     code: "reports",
     href: "/reports",
-    fallbackDetail: "Runnable jobs and report artifact availability.",
+    fallbackDetail: "可執行工作與報表產物的可用性。",
   },
   modules: {
-    label: "Module enablement",
+    label: "模組啟用狀態",
     code: "modules",
     href: "/settings",
-    fallbackDetail: "Tenant-facing module posture and visibility state.",
+    fallbackDetail: "租戶可見模組的姿態與可視狀態。",
   },
   partner_entries: {
-    label: "Partner entries",
+    label: "合作夥伴入口",
     code: "partner_entries",
     href: "/partner",
-    fallbackDetail: "Partner-linked ingress posture when entries exist.",
+    fallbackDetail: "存在入口時的合作夥伴接入姿態。",
     emptyReason: "not_provisioned",
-    emptyBody:
-      "This tenant has no partner entry yet, so the lane stays distinct.",
+    emptyBody: "這個租戶目前尚未建立合作夥伴入口，因此此接入路徑仍維持獨立。",
   },
 };
 
@@ -188,60 +191,60 @@ const emptyReasonMeta: Record<
   }
 > = {
   no_data: {
-    title: "No readiness data yet",
-    body: "The tenant route is live, but no aggregated readiness snapshot has been published yet.",
+    title: "尚未提供就緒度資料",
+    body: "租戶路由已可使用，但整體就緒度快照尚未發布。",
     glyph: "00",
     tone: "neutral",
     href: "/api-keys",
-    actionLabel: "Start with API keys",
+    actionLabel: "先查看 API 金鑰",
   },
   not_provisioned: {
-    title: "First-time setup required",
-    body: "The tenant exists but one or more integration lanes still require first-time provisioning.",
+    title: "需要首次設定",
+    body: "租戶已建立，但仍有一個或多個整合路徑尚未完成首次開通。",
     glyph: "NP",
     tone: "warn",
     href: "/webhooks",
-    actionLabel: "Set up webhook",
+    actionLabel: "設定回呼",
   },
   fetch_failed: {
-    title: "Snapshot fetch failed",
-    body: "The aggregated readiness endpoint did not return a usable payload for this request.",
+    title: "快照讀取失敗",
+    body: "整體就緒度端點沒有回傳此請求可用的資料內容。",
     glyph: "FF",
     tone: "danger",
     href: "/integration-governance",
-    actionLabel: "Retry snapshot",
+    actionLabel: "重新讀取快照",
   },
   permission_denied: {
-    title: "Access is read-restricted",
-    body: "The current actor can land on the route shell but cannot read the readiness summary.",
+    title: "目前身分無法讀取",
+    body: "目前使用者可以進入頁面外框，但沒有讀取就緒度摘要的權限。",
     glyph: "PD",
     tone: "danger",
     href: "/users",
-    actionLabel: "Review tenant roles",
+    actionLabel: "檢查租戶角色",
   },
   external_unavailable: {
-    title: "External dependency unavailable",
-    body: "One or more upstream integrations that feed the aggregated view are degraded or offline.",
+    title: "外部依賴暫時不可用",
+    body: "提供整體檢視的一個或多個上游整合目前已降級或離線。",
     glyph: "EX",
     tone: "warn",
     href: "/webhooks",
-    actionLabel: "Inspect delivery posture",
+    actionLabel: "檢查投遞姿態",
   },
   filtered_empty: {
-    title: "Current filter returns nothing",
-    body: "The route is healthy, but the current filter leaves no subsystem cards in the result set.",
+    title: "目前篩選沒有結果",
+    body: "此路由本身正常，但目前的篩選條件沒有留下任何子系統卡片。",
     glyph: "FX",
     tone: "info",
     href: "/integration-governance",
-    actionLabel: "Clear filters",
+    actionLabel: "清除篩選",
   },
   driver_not_eligible: {
-    title: "Driver-only empty reason",
-    body: "This global empty reason should never be used to drive tenant integration governance.",
+    title: "司機專用空狀態原因",
+    body: "這個全域空狀態原因不應用於租戶整合治理頁面。",
     glyph: "DN",
     tone: "neutral",
     href: "/integration-governance",
-    actionLabel: "Back to readiness",
+    actionLabel: "返回就緒度",
   },
 };
 
@@ -260,12 +263,6 @@ function isEmptyReason(value: string | undefined): value is EmptyReason {
   );
 }
 
-function toErrorMessage(error: unknown) {
-  return error instanceof Error
-    ? error.message
-    : "Unknown integration readiness error.";
-}
-
 async function loadPageData(): Promise<PageData> {
   const client = getTenantClient();
 
@@ -278,7 +275,12 @@ async function loadPageData(): Promise<PageData> {
   } catch (error) {
     return {
       summary: null,
-      errors: [toErrorMessage(error)],
+      errors: [
+        formatTenantErrorSummary(
+          "整合就緒度快照",
+          toTenantErrorMessage(error, "整合就緒度讀取失敗"),
+        ),
+      ],
     };
   }
 }
@@ -300,7 +302,18 @@ function getStatusTone(
 }
 
 function getStatusLabel(status: TenantIntegrationReadinessItem["status"]) {
-  return status.replaceAll("_", " ");
+  switch (status) {
+    case "ready":
+      return "就緒";
+    case "partial":
+      return "部分就緒";
+    case "blocked":
+      return "已阻擋";
+    case "not_provisioned":
+      return "尚未開通";
+    default:
+      return formatTenantCodeLabel(status, "未知狀態");
+  }
 }
 
 function getStatusAccent(status: TenantIntegrationReadinessItem["status"]) {
@@ -337,17 +350,17 @@ function getActionHref(action: string, fallbackHref: string) {
 function getActionLabel(action: string) {
   switch (action) {
     case "issue_api_key":
-      return "Issue API key";
+      return "簽發 API 金鑰";
     case "create_webhook_endpoint":
-      return "Set up webhook";
+      return "設定回呼";
     case "update_notifications":
-      return "Configure notifications";
+      return "設定通知";
     case "update_sla_profile":
-      return "Configure SLA";
+      return "設定服務時限";
     case "create_report_job":
-      return "Create report job";
+      return "建立報表工作";
     default:
-      return action.replaceAll("_", " ");
+      return formatTenantCodeLabel(action, "未知動作");
   }
 }
 
@@ -381,10 +394,10 @@ function linkStyle(emphasis = false): CSSProperties {
 
 function getActionAssistiveCopy(action: ResourceActionDescriptor) {
   if (!action.enabled && action.disabledReasonCode) {
-    return `Unavailable: ${action.disabledReasonCode}`;
+    return `目前不可用：${formatTenantCodeLabel(action.disabledReasonCode, "已停用")}`;
   }
   if (!action.enabled) {
-    return "Unavailable";
+    return "目前不可用";
   }
   return undefined;
 }
@@ -454,9 +467,8 @@ function buildDisplayItems(items: TenantIntegrationReadinessItem[]) {
         meta.emptyReason === "not_provisioned" ? "not_provisioned" : "blocked",
       detail:
         meta.emptyReason === "not_provisioned"
-          ? (meta.emptyBody ??
-            "This subsystem has not been provisioned for the tenant yet.")
-          : "The aggregated payload did not return this subsystem. Verify upstream readiness evidence.",
+          ? (meta.emptyBody ?? "這個子系統尚未為此租戶完成開通。")
+          : "整體聚合資料沒有回傳這個子系統，請檢查上游就緒度證據。",
     } satisfies TenantIntegrationReadinessItem;
   });
 }
@@ -493,24 +505,24 @@ function dedupeActions(items: TenantIntegrationReadinessItem[]) {
 function getStateVariant(items: TenantIntegrationReadinessItem[]) {
   if (items.every((item) => item.status === "ready")) {
     return {
-      label: "Fully ready",
+      label: "全部就緒",
       tone: "success" as CanvasTone,
-      body: "All seven integration lanes report green from the aggregated snapshot.",
+      body: "七個整合路徑都在聚合快照中顯示正常。",
     };
   }
 
   if (items.every((item) => item.status === "not_provisioned")) {
     return {
-      label: "First-time setup",
+      label: "首次設定",
       tone: "warn" as CanvasTone,
-      body: "The tenant exists, but every tracked lane still requires first-time setup.",
+      body: "租戶已存在，但所有追蹤中的整合路徑都仍需完成首次設定。",
     };
   }
 
   return {
-    label: "Partial readiness",
+    label: "部分就緒",
     tone: "info" as CanvasTone,
-    body: "Some subsystem lanes remain yellow or red, so follow-up actions stay visible.",
+    body: "仍有部分子系統路徑尚未完全就緒，因此後續操作仍會保留顯示。",
   };
 }
 
@@ -534,7 +546,7 @@ function buildCrossAppLinks(
       resourceType: "tenant",
       resourceId: tenantId,
       openMode: "new_tab",
-      label: "Open tenant governance in Platform Admin",
+      label: "在平台管理後台開啟租戶治理",
     },
   ];
 
@@ -546,7 +558,7 @@ function buildCrossAppLinks(
       resourceType: "tenant_audit",
       resourceId: tenantId,
       openMode: "new_tab",
-      label: "Open webhook-linked audit lane in Ops Console",
+      label: "在營運控制台開啟回呼稽核路徑",
     });
   }
 
@@ -560,7 +572,7 @@ function buildCrossAppLinks(
       resourceType: "tenant_partner_entry",
       resourceId: tenantId,
       openMode: "new_tab",
-      label: "Inspect partner entry ownership in Platform Admin",
+      label: "在平台管理後台檢查合作夥伴入口歸屬",
     });
   }
 
@@ -619,12 +631,14 @@ function EmptyReasonPreviewCard({
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>{meta.title}</div>
-            <div style={{ ...monoStyle, ...subtleCopyStyle }}>{reason}</div>
+            <div style={{ ...monoStyle, ...subtleCopyStyle }}>
+              {formatTenantCodeLabel(reason, reason)}
+            </div>
           </div>
         </div>
         <p style={mutedCopyStyle}>{meta.body}</p>
         <Link href={`?emptyReason=${reason}`} style={linkStyle(true)}>
-          {selected ? "Current variant" : "Preview this empty state"}
+          {selected ? "目前變體" : "預覽此空狀態"}
         </Link>
       </div>
     </CanvasCard>
@@ -674,21 +688,19 @@ function ReadinessTile({ item }: { item: TenantIntegrationReadinessItem }) {
 
         {!action && item.status === "not_provisioned" ? (
           <div style={subtleCopyStyle}>
-            Distinct from `no_data`: this lane is intentionally present but not
-            provisioned yet.
+            這與「無資料」不同：此路徑是刻意保留顯示，但尚未完成開通。
           </div>
         ) : null}
 
         {!action && item.subSystem === "partner_entries" ? (
           <div style={subtleCopyStyle}>
-            Partner-linked investigations remain cross-app and hand off to
-            Platform Admin.
+            與合作夥伴相關的調查仍維持跨應用處理，並會交由平台管理後台接手。
           </div>
         ) : null}
 
         <div style={tileFooterStyle}>
           <Link href={meta.href} style={linkStyle()}>
-            Open module
+            開啟模組
           </Link>
           {action ? (
             renderActionLink(
@@ -698,7 +710,7 @@ function ReadinessTile({ item }: { item: TenantIntegrationReadinessItem }) {
               true,
             )
           ) : (
-            <span style={actionButtonStyle(true, false)}>{"Inspect ->"}</span>
+            <span style={actionButtonStyle(true, false)}>{"檢查 ->"}</span>
           )}
         </div>
 
@@ -746,12 +758,12 @@ export default async function IntegrationGovernancePage({
     <div>
       <CanvasPageHeader
         theme={th}
-        title="Integration Governance"
-        subtitle="aggregated readiness · 來自 GET /api/tenant/integration-governance/readiness (Q-TEN10 · 單一聚合 endpoint，非 6+ 個查詢)"
+        title="整合治理"
+        subtitle="整體聚合就緒度，資料來自單一租戶整合就緒度端點。"
         actions={
           <>
             <CanvasPill theme={th} tone="success" dot>
-              T5 slow
+              T5 慢速
             </CanvasPill>
             <CanvasPill
               theme={th}
@@ -759,8 +771,8 @@ export default async function IntegrationGovernancePage({
               dot={hasSnapshot}
             >
               {hasSnapshot
-                ? `${readyCount} of ${items.length} ready`
-                : "No snapshot"}
+                ? `${readyCount} / ${items.length} 已就緒`
+                : "尚無快照"}
             </CanvasPill>
           </>
         }
@@ -770,8 +782,8 @@ export default async function IntegrationGovernancePage({
         <CanvasBanner
           theme={th}
           tone="info"
-          title="本頁透過 1 個 aggregated endpoint 拉資料 · 不是 6+ 個並行查詢"
-          body="UI 不應 orchestrate 多個無關 query。可操作 CTA 來自 backend 回傳的 action descriptor，refresh tier 固定為 tenant slow (T5)。"
+          title="本頁透過單一聚合端點拉資料，不會拆成多個並行查詢"
+          body="此頁不應自行編排多個無關查詢；可操作按鈕全部依後端回傳的動作描述符顯示，刷新層級固定為租戶 T5 慢速。"
         />
 
         {selectedEmptyReason && selectedEmptyMeta ? (
@@ -827,7 +839,7 @@ export default async function IntegrationGovernancePage({
                     {selectedEmptyMeta.actionLabel}
                   </Link>
                   <Link href="/integration-governance" style={linkStyle()}>
-                    Return to live snapshot
+                    返回即時快照
                   </Link>
                 </div>
 
@@ -859,31 +871,26 @@ export default async function IntegrationGovernancePage({
               <CanvasCard theme={th}>
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    EmptyReason coverage
+                    空狀態覆蓋範圍
                   </div>
                   <p style={mutedCopyStyle}>
-                    Reviewer can preview all six tenant-relevant empty states
-                    from this route with
-                    <span style={monoStyle}> ?emptyReason=&lt;reason&gt;</span>.
+                    可在此路由預覽六種與租戶相關的空狀態，用於驗收與覆蓋檢查。
                   </p>
-                  <div style={{ ...monoStyle, ...subtleCopyStyle }}>
-                    supported · no_data / not_provisioned / fetch_failed /
-                    permission_denied / external_unavailable / filtered_empty
+                  <div style={subtleCopyStyle}>
+                    支援：無資料、尚未開通、載入失敗、權限不足、外部依賴不可用與篩選後無結果。
                   </div>
                 </div>
               </CanvasCard>
 
               <CanvasCard theme={th}>
                 <div style={{ display: "grid", gap: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    Refresh tier
-                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>刷新層級</div>
                   <p style={mutedCopyStyle}>
-                    This screen remains on T5 tenant-slow cadence even when the
-                    current route is rendering an empty variant.
+                    即使目前頁面正在顯示空狀態變體，這個畫面仍維持租戶 T5
+                    慢速節奏。
                   </p>
                   <div style={{ ...monoStyle, ...subtleCopyStyle }}>
-                    cadence · T5 / tenant slow
+                    節奏：T5 / 租戶慢速
                   </div>
                 </div>
               </CanvasCard>
@@ -899,9 +906,9 @@ export default async function IntegrationGovernancePage({
                   "external_unavailable",
                   "filtered_empty",
                 ] as EmptyReason[]
-              ).map((reason) => (
+              ).map((reason, index) => (
                 <EmptyReasonPreviewCard
-                  key={reason}
+                  key={`${reason}-${index}`}
                   reason={reason}
                   selected={reason === selectedEmptyReason}
                 />
@@ -923,12 +930,10 @@ export default async function IntegrationGovernancePage({
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>
-                      Aggregated readiness board
+                      聚合就緒度看板
                     </div>
                     <p style={{ marginTop: 6, ...mutedCopyStyle }}>
-                      Seven subsystem lanes render from one readiness payload.
-                      Drill targets stay module-specific, and quick CTAs only
-                      appear when the backend returns an action descriptor.
+                      七個子系統路徑都從同一份就緒度資料渲染。深入入口維持模組邊界，快速操作只會在後端有回傳動作描述符時顯示。
                     </p>
                   </div>
                   <div style={actionStripStyle}>
@@ -936,10 +941,10 @@ export default async function IntegrationGovernancePage({
                       {stateVariant.label}
                     </CanvasPill>
                     <CanvasPill theme={th} tone="neutral">
-                      7 subsystem lanes
+                      7 個子系統路徑
                     </CanvasPill>
                     <CanvasPill theme={th} tone="neutral">
-                      snapshot {formatDateTime(summary!.computedAt)}
+                      快照 {formatDateTime(summary!.computedAt)}
                     </CanvasPill>
                   </div>
                 </div>
@@ -962,7 +967,7 @@ export default async function IntegrationGovernancePage({
                     ))
                   ) : (
                     <CanvasPill theme={th} tone="success" dot>
-                      No follow-up action
+                      目前沒有後續操作
                     </CanvasPill>
                   )}
                 </div>
@@ -978,19 +983,16 @@ export default async function IntegrationGovernancePage({
             <div style={secondaryGridStyle}>
               <CanvasCard theme={th}>
                 <div style={{ display: "grid", gap: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    Refresh tier
-                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>刷新層級</div>
                   <p style={mutedCopyStyle}>
-                    Packet §5.16 puts this route on T5. The page keeps that
-                    cadence explicit instead of pretending the summary is
-                    real-time.
+                    規格將此路由放在
+                    T5。頁面會明確標示這個節奏，而不是假裝摘要是即時資料。
                   </p>
                   <div style={{ ...monoStyle, ...subtleCopyStyle }}>
-                    cadence · T5 / tenant slow
+                    節奏：T5 / 租戶慢速
                   </div>
                   <div style={{ ...monoStyle, ...subtleCopyStyle }}>
-                    computedAt · {formatDateTime(summary!.computedAt)}
+                    計算時間：{formatDateTime(summary!.computedAt)}
                   </div>
                 </div>
               </CanvasCard>
@@ -998,12 +1000,10 @@ export default async function IntegrationGovernancePage({
               <CanvasCard theme={th}>
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    Cross-app drill targets
+                    跨應用深入入口
                   </div>
                   <p style={mutedCopyStyle}>
-                    When the next investigation step belongs to another app, the
-                    route deep-links out in a new tab instead of inventing a
-                    local mirror.
+                    當下一步調查屬於其他應用時，這裡會直接以新分頁深連結出去，而不會在本地再造一份鏡像頁。
                   </p>
                   <div style={{ display: "grid", gap: 8 }}>
                     {crossAppLinks.map((link) => {
@@ -1025,7 +1025,7 @@ export default async function IntegrationGovernancePage({
                         >
                           <span style={linkStyle(true)}>{link.label}</span>
                           <span style={subtleCopyStyle}>
-                            Configure
+                            請設定
                             <span style={monoStyle}>
                               {" "}
                               NEXT_PUBLIC_
@@ -1033,8 +1033,8 @@ export default async function IntegrationGovernancePage({
                                 ? "PLATFORM_ADMIN"
                                 : "OPS_CONSOLE"}
                               _URL
-                            </span>{" "}
-                            to activate this deep link.
+                            </span>
+                            ，即可啟用此深連結。
                           </span>
                         </div>
                       );
@@ -1045,12 +1045,9 @@ export default async function IntegrationGovernancePage({
 
               <CanvasCard theme={th}>
                 <div style={{ display: "grid", gap: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>
-                    QA variants
-                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>測試變體</div>
                   <p style={mutedCopyStyle}>
-                    This route still exposes the six tenant-relevant
-                    `EmptyReason` previews for review coverage.
+                    這個路由仍保留六種與租戶相關的空狀態預覽，供驗收與覆蓋檢查使用。
                   </p>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                     {(
@@ -1062,13 +1059,13 @@ export default async function IntegrationGovernancePage({
                         "external_unavailable",
                         "filtered_empty",
                       ] as EmptyReason[]
-                    ).map((reason) => (
+                    ).map((reason, index) => (
                       <Link
-                        key={reason}
+                        key={`${reason}-${index}`}
                         href={`?emptyReason=${reason}`}
                         style={linkStyle()}
                       >
-                        {reason}
+                        {formatTenantCodeLabel(reason, reason)}
                       </Link>
                     ))}
                   </div>

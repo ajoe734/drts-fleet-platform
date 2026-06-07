@@ -9,6 +9,7 @@ import {
   type CanvasTone,
   buildCanvasTheme,
 } from "@drts/ui-web";
+import { formatTenantCodeLabel } from "@/lib/localized-labels";
 
 const th = buildCanvasTheme({
   surface: "tenant",
@@ -19,6 +20,12 @@ const th = buildCanvasTheme({
 const accentCodeStyle: CSSProperties = {
   color: th.accent,
   fontWeight: 600,
+};
+
+const eventMetaStyle: CSSProperties = {
+  marginTop: 4,
+  fontSize: 11,
+  color: th.textMuted,
 };
 
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
@@ -50,24 +57,31 @@ export type SettingsNotificationRow = {
 
 const columns: CanvasTableColumn<SettingsNotificationRow>[] = [
   {
-    h: "EVENT",
+    h: "事件",
     k: "eventType",
     w: 310,
     mono: true,
-    r: (row) => <span style={accentCodeStyle}>{row.eventType}</span>,
+    r: (row) => (
+      <div>
+        <div style={accentCodeStyle}>
+          {formatTenantCodeLabel(row.eventType, row.eventType)}
+        </div>
+        <div style={eventMetaStyle}>{row.eventType}</div>
+      </div>
+    ),
   },
   {
-    h: "CHANNEL",
+    h: "通道",
     w: 120,
     mono: true,
     r: (row) => (
       <CanvasPill theme={th} tone={getChannelTone(row.channel)}>
-        {row.channel}
+        {formatTenantCodeLabel(row.channel, row.channel)}
       </CanvasPill>
     ),
   },
   {
-    h: "STATE",
+    h: "狀態",
     w: 100,
     r: (row) => (
       <CanvasPill
@@ -80,7 +94,7 @@ const columns: CanvasTableColumn<SettingsNotificationRow>[] = [
     ),
   },
   {
-    h: "UPDATED",
+    h: "更新時間",
     w: 150,
     mono: true,
     r: (row) => formatUpdated(row.updatedAt),

@@ -25,9 +25,7 @@ export function FlowRouteCards({
             </span>
             <h3>{route.label}</h3>
             <p>{route.body}</p>
-            <span className="text-link route-link">
-              Open route → {route.href}
-            </span>
+            <span className="text-link route-link">開啟頁面：{route.href}</span>
           </Link>
         );
       })}

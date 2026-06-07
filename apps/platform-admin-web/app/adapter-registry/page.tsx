@@ -2,8 +2,15 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
-import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import {
+  formatPlatformAdapterLabel,
+  formatPlatformCodeLabel,
+} from "@/lib/localized-labels";
 import type { PlatformAdapter } from "../../../../packages/contracts/src/platform-adapter-registry";
 import {
   Banner,
@@ -320,22 +327,57 @@ function formatLatency(adapter: PlatformAdapter) {
   return `${adapter.policies.acceptTimeoutSeconds}s`;
 }
 
-function formatWebhookValue(copy: Copy, adapter: PlatformAdapter) {
+function formatWebhookValue(
+  locale: LabelLocale,
+  copy: Copy,
+  adapter: PlatformAdapter,
+) {
   if (!adapter.webhookStatus?.url) {
     return copy.webhookNotConfigured;
   }
 
-  const status = adapter.webhookStatus.lastStatus.toLowerCase();
+  const status = formatPlatformCodeLabel(
+    locale,
+    adapter.webhookStatus.lastStatus,
+  );
   const code = adapter.webhookStatus.lastStatusCode
     ? ` · ${adapter.webhookStatus.lastStatusCode}`
     : "";
   return `${status}${code}`;
 }
 
-function formatServiceBuckets(copy: Copy, adapter: PlatformAdapter) {
+function formatServiceBuckets(
+  locale: LabelLocale,
+  copy: Copy,
+  adapter: PlatformAdapter,
+) {
   return adapter.policies.serviceBuckets.length > 0
-    ? adapter.policies.serviceBuckets.join(" / ")
+    ? adapter.policies.serviceBuckets
+        .map((bucket) => formatPlatformCodeLabel(locale, bucket))
+        .join(" / ")
     : copy.notConfigured;
+}
+
+function formatAdapterKindLabel(locale: LabelLocale, adapter: PlatformAdapter) {
+  if (adapter.isForwarded) {
+    return locale === "en" ? "Forwarder" : "轉發器";
+  }
+
+  return formatPlatformCodeLabel(locale, adapter.adapterType);
+}
+
+function formatPolicySummary(locale: LabelLocale, adapter: PlatformAdapter) {
+  return locale === "en"
+    ? `${adapter.policies.maxCandidates} max candidates · ${adapter.policies.manualFallbackThresholdSeconds}s manual fallback`
+    : `最多 ${adapter.policies.maxCandidates} 位候選司機 · ${adapter.policies.manualFallbackThresholdSeconds} 秒後轉人工接手`;
+}
+
+function formatBooleanState(locale: LabelLocale, value: boolean) {
+  if (locale === "en") {
+    return value ? "enabled" : "disabled";
+  }
+
+  return value ? "已啟用" : "已停用";
 }
 
 function getFeatureFlagEntries(adapter: PlatformAdapter) {
@@ -348,9 +390,20 @@ function normalizeRegistryError(message: string, unavailable: string) {
   return /404|not found/i.test(message) ? unavailable : message;
 }
 
+function withLocalizedAdapterName(
+  locale: LabelLocale,
+  adapter: PlatformAdapter,
+): PlatformAdapter {
+  const localizedName = formatPlatformAdapterLabel(locale, adapter);
+  return localizedName === adapter.name
+    ? adapter
+    : { ...adapter, name: localizedName };
+}
+
 export default function AdapterRegistryPage() {
   const client = usePlatformAdminClient();
   const { locale } = useTranslation();
+  const labelLocale = locale as LabelLocale;
   const [adapters, setAdapters] = useState<PlatformAdapter[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -363,7 +416,7 @@ export default function AdapterRegistryPage() {
         ? {
             title: "External Platform Adapter Registry",
             subtitle:
-              "config / credential governance stays in platform-admin while operational pause / retry stays in ops (Q-ADM17 split authority).",
+              "Configuration and credential governance stay in Platform Admin, while operational pause and retry stay in Ops.",
             registerAction: "Register adapter",
             registerInfo:
               "Adapter registration remains a governed high-risk flow and is not opened inline on this route.",
@@ -432,69 +485,66 @@ export default function AdapterRegistryPage() {
             notConfigured: "not configured",
           }
         : {
-            title: "External Platform Adapter Registry",
+            title: "外部平台介接登錄",
             subtitle:
-              "config / credential 治理在 platform-admin，operational pause / retry 在 ops（Q-ADM17 split authority）。",
-            registerAction: "註冊 adapter",
+              "設定與憑證治理由平台管理負責，營運暫停與重試則留在營運主控台處理。",
+            registerAction: "註冊介接",
             registerInfo:
-              "註冊 adapter 仍屬高風險治理流程，這個 route 不直接展開 inline 建立。",
-            loading: "載入 adapter registry 中...",
-            empty:
-              "目前尚未註冊任何 adapter。請先建立第一筆受治理的 adapter 登錄。",
+              "註冊介接仍屬高風險治理流程，此路由不直接展開內嵌建立表單。",
+            loading: "載入介接登錄中...",
+            empty: "目前尚未註冊任何介接。請先建立第一筆受治理的介接登錄。",
             unavailable:
-              "Adapter registry 資料暫時不可用，請檢查 Platform Admin adapter API 後再重新整理。",
-            bannerFallbackTitle: "mof-bgmt · token 距到期 6 天",
+              "介接登錄資料暫時不可用，請檢查平台管理介接服務後再重新整理。",
+            bannerFallbackTitle: "派遣回報介接權杖距到期 6 天",
             bannerFallbackBody:
-              "BGMT 派遣回報 token 必須於 2026-05-31 前輪替；否則無法回報今日完成單。",
-            bannerTitle: (adapter) =>
-              `${adapter.platformCode.toLowerCase()} · token 距到期治理檢查`,
+              "派遣回報權杖必須於 2026-05-31 前輪替，否則今日完成的訂單將無法順利回報。",
+            bannerTitle: (adapter) => `${adapter.name} · 權杖到期治理檢查`,
             bannerBody: (adapter) =>
-              `${adapter.name} 目前 credential 為 ${formatPlatformCodeLabel(locale, adapter.credentialStatus)}，健康狀態為 ${adapter.healthStatus.status.toLowerCase()}。請在 production 受影響前完成 token 治理檢查與輪替。`,
+              `${adapter.name} 目前憑證狀態為 ${formatPlatformCodeLabel(locale, adapter.credentialStatus)}，健康狀態為 ${formatPlatformCodeLabel(locale, adapter.healthStatus.status)}。請在正式流量受影響前完成權杖治理檢查與輪替。`,
             rotateNow: "立即輪替",
-            statusHealthy: "healthy",
-            statusDegraded: "degraded",
-            statusUnhealthy: "down",
-            metricLatency: "LATENCY",
-            metricLastEvent: "LAST EVENT",
-            metricOrders: "ORDERS 24H",
-            metricOrdersPending: "telemetry pending",
+            statusHealthy: "健康",
+            statusDegraded: "降級",
+            statusUnhealthy: "中斷",
+            metricLatency: "延遲",
+            metricLastEvent: "最新事件",
+            metricOrders: "24 小時訂單",
+            metricOrdersPending: "遙測待回報",
             adapterTitle: (adapter) => adapter.name,
             sourceValue: (adapter) => adapter.id,
-            webhookTitle: "Webhook",
-            financeMode: "Finance mode",
-            serviceBuckets: "Service buckets",
-            featureFlags: "Feature flags",
-            supportedActions: "Supported actions",
-            operationalPause: "Operational pause",
+            webhookTitle: "回呼",
+            financeMode: "財務模式",
+            serviceBuckets: "服務分類",
+            featureFlags: "功能旗標",
+            supportedActions: "支援動作",
+            operationalPause: "營運暫停",
             noPause: "未暫停",
-            pauseUnknown: "adapter API 尚未回報 pause 狀態。",
-            authorityPa: "Platform Admin authority",
-            authorityOps: "Ops authority",
+            pauseUnknown: "介接服務尚未回報暫停狀態。",
+            authorityPa: "平台管理權限",
+            authorityOps: "營運權限",
             governedActionInfo:
-              "建立 config、編輯 credential、輪替 secret、啟停 adapter 仍屬這裡的治理權限。",
+              "建立設定、編輯憑證、輪替密鑰，以及啟用或停用介接，仍屬平台管理治理權限。",
             opsActionInfo:
-              "operational pause TTL 與 failed callback retry 仍屬 ops console，刻意與 Platform Admin 分權。",
-            editConfig: "編輯 config",
-            editCredential: "編輯 credential",
+              "營運暫停時效與失敗回呼重試仍屬營運主控台，刻意與平台管理分權。",
+            editConfig: "編輯設定",
+            editCredential: "編輯憑證",
             rotateCredential: "輪替",
             enableAdapter: "啟用",
             disableAdapter: "停用",
-            pauseTraffic: "ops pause (TTL)",
-            retryCallback: "retry callback",
+            pauseTraffic: "營運暫停時效",
+            retryCallback: "重試回呼",
             queueGoverned: (label, adapter, reason) =>
-              `${adapter.name} 的「${label}」仍需走 Platform Admin 治理流程。${reason ? ` 已記錄原因：${reason}。` : ""} plaintext-once secret 不會在這裡再次顯示。`,
+              `${adapter.name} 的「${label}」仍需走平台管理治理流程。${reason ? ` 已記錄原因：${reason}。` : ""} 僅顯示一次的明文密鑰不會在這裡再次顯示。`,
             queueOps: (label, adapter) =>
-              `${adapter.name} 的「${label}」仍屬 ops authority，請在 ops console 執行。`,
+              `${adapter.name} 的「${label}」仍屬營運權限，請在營運主控台執行。`,
             toggleSuccess: (adapter, enabled, reason) =>
               `${copyAuditPrefix("稽核收據")}${adapter.name} 已${enabled ? "啟用" : "停用"}。${reason ? ` 原因：${reason}。` : ""}`,
-            toggleError: "更新 adapter 狀態失敗。",
-            showUnsupportedOpsAction:
-              "這個 adapter 沒有回報 ops pause 或 retry 能力。",
+            toggleError: "更新介接狀態失敗。",
+            showUnsupportedOpsAction: "這個介接沒有回報營運暫停或重試能力。",
             webhookNotConfigured: "未設定",
-            lastCheck: "Last check",
-            reasonRequired: "停用 production adapter 前必須填寫原因。",
+            lastCheck: "最後檢查",
+            reasonRequired: "停用正式環境介接前必須填寫原因。",
             disableConfirm: (adapter) =>
-              `確認要停用 ${adapter.name} 嗎？這會影響受治理的 adapter readiness。`,
+              `確認要停用 ${adapter.name} 嗎？這會影響受治理的介接就緒狀態。`,
             enableConfirm: (adapter) => `確認要啟用 ${adapter.name} 嗎？`,
             disableReasonPrompt: (adapter) =>
               `請輸入停用 ${adapter.name} 的治理原因。`,
@@ -517,9 +567,16 @@ export default function AdapterRegistryPage() {
         }
       } catch (caught) {
         if (!cancelled) {
-          const message =
-            caught instanceof Error ? caught.message : String(caught);
-          setError(normalizeRegistryError(message, copy.unavailable));
+          setError(
+            formatPlatformUiError(
+              locale,
+              normalizeRegistryError(
+                toPlatformErrorMessage(caught),
+                copy.unavailable,
+              ),
+              copy.unavailable,
+            ),
+          );
         }
       } finally {
         if (!cancelled) {
@@ -533,7 +590,7 @@ export default function AdapterRegistryPage() {
     return () => {
       cancelled = true;
     };
-  }, [client, copy.unavailable]);
+  }, [client, copy.unavailable, locale]);
 
   const attentionAdapter = useMemo(
     () => findAttentionAdapter(adapters),
@@ -565,12 +622,13 @@ export default function AdapterRegistryPage() {
     const nextEnabled = !adapter.config.isEnabled;
     const needsReason =
       adapter.environment === "PRODUCTION" && adapter.config.isEnabled;
+    const localizedAdapter = withLocalizedAdapterName(labelLocale, adapter);
 
     if (
       !window.confirm(
         nextEnabled
-          ? copy.enableConfirm(adapter)
-          : copy.disableConfirm(adapter),
+          ? copy.enableConfirm(localizedAdapter)
+          : copy.disableConfirm(localizedAdapter),
       )
     ) {
       return;
@@ -578,7 +636,9 @@ export default function AdapterRegistryPage() {
 
     let reason: string | undefined;
     if (needsReason) {
-      const input = window.prompt(copy.disableReasonPrompt(adapter))?.trim();
+      const input = window
+        .prompt(copy.disableReasonPrompt(localizedAdapter))
+        ?.trim();
       if (!input) {
         setFlash({ tone: "danger", message: copy.reasonRequired });
         return;
@@ -597,7 +657,11 @@ export default function AdapterRegistryPage() {
       );
       setFlash({
         tone: "success",
-        message: copy.toggleSuccess(updated, nextEnabled, reason),
+        message: copy.toggleSuccess(
+          withLocalizedAdapterName(labelLocale, updated),
+          nextEnabled,
+          reason,
+        ),
       });
     } catch {
       setFlash({ tone: "danger", message: copy.toggleError });
@@ -611,14 +675,21 @@ export default function AdapterRegistryPage() {
     adapter: PlatformAdapter,
     reason?: string,
   ) {
+    const localizedAdapter = withLocalizedAdapterName(labelLocale, adapter);
     setFlash({
       tone: "info",
-      message: copy.queueGoverned(label, adapter, reason),
+      message: copy.queueGoverned(label, localizedAdapter, reason),
     });
   }
 
   function queueOpsAction(label: string, adapter: PlatformAdapter) {
-    setFlash({ tone: "info", message: copy.queueOps(label, adapter) });
+    setFlash({
+      tone: "info",
+      message: copy.queueOps(
+        label,
+        withLocalizedAdapterName(labelLocale, adapter),
+      ),
+    });
   }
 
   return (
@@ -652,12 +723,16 @@ export default function AdapterRegistryPage() {
           icon="warn"
           title={
             bannerAdapter && attentionAdapter
-              ? copy.bannerTitle(bannerAdapter)
+              ? copy.bannerTitle(
+                  withLocalizedAdapterName(labelLocale, bannerAdapter),
+                )
               : copy.bannerFallbackTitle
           }
           body={
             bannerAdapter && attentionAdapter
-              ? copy.bannerBody(bannerAdapter)
+              ? copy.bannerBody(
+                  withLocalizedAdapterName(labelLocale, bannerAdapter),
+                )
               : copy.bannerFallbackBody
           }
           actions={
@@ -699,6 +774,10 @@ export default function AdapterRegistryPage() {
         ) : (
           <div style={cardGridStyle}>
             {sortedAdapters.map((adapter) => {
+              const localizedAdapter = withLocalizedAdapterName(
+                labelLocale,
+                adapter,
+              );
               const opsPauseSupported =
                 adapter.isForwarded && hasSupportedAction(adapter, "accept");
               const retrySupported = hasSupportedAction(adapter, "retry");
@@ -711,14 +790,9 @@ export default function AdapterRegistryPage() {
                   theme={theme}
                   title={
                     <span style={cardTitleStyle}>
-                      {copy.adapterTitle(adapter)}
+                      {copy.adapterTitle(localizedAdapter)}
                       <Pill theme={theme} tone={adapterKindTone(adapter)}>
-                        {adapter.isForwarded
-                          ? "forwarder"
-                          : formatPlatformCodeLabel(
-                              locale as LabelLocale,
-                              adapter.adapterType,
-                            )}
+                        {formatAdapterKindLabel(labelLocale, adapter)}
                       </Pill>
                     </span>
                   }
@@ -759,7 +833,11 @@ export default function AdapterRegistryPage() {
                     <div style={metadataBlockStyle}>
                       <p style={metadataLabelStyle}>{copy.webhookTitle}</p>
                       <p style={metadataValueStyle}>
-                        {formatWebhookValue(copy, adapter)}
+                        {formatWebhookValue(
+                          locale as LabelLocale,
+                          copy,
+                          adapter,
+                        )}
                       </p>
                       <p style={metadataSubValueStyle}>
                         {adapter.webhookStatus?.url ??
@@ -786,12 +864,14 @@ export default function AdapterRegistryPage() {
                     <div style={metadataBlockStyle}>
                       <p style={metadataLabelStyle}>{copy.serviceBuckets}</p>
                       <p style={metadataValueStyle}>
-                        {formatServiceBuckets(copy, adapter)}
+                        {formatServiceBuckets(
+                          locale as LabelLocale,
+                          copy,
+                          adapter,
+                        )}
                       </p>
                       <p style={metadataSubValueStyle}>
-                        {adapter.policies.maxCandidates} max candidates ·{" "}
-                        {adapter.policies.manualFallbackThresholdSeconds}s
-                        manual fallback
+                        {formatPolicySummary(locale as LabelLocale, adapter)}
                       </p>
                     </div>
                     <div style={metadataBlockStyle}>
@@ -887,7 +967,12 @@ export default function AdapterRegistryPage() {
                               theme={theme}
                               tone={value ? "success" : "neutral"}
                             >
-                              {key}:{value ? "on" : "off"}
+                              {formatPlatformCodeLabel(
+                                locale as LabelLocale,
+                                key,
+                              )}
+                              ：
+                              {formatBooleanState(locale as LabelLocale, value)}
                             </Pill>
                           ))
                         ) : (
@@ -943,7 +1028,10 @@ export default function AdapterRegistryPage() {
                               theme={theme}
                               tone="neutral"
                             >
-                              {action.name}
+                              {formatPlatformCodeLabel(
+                                locale as LabelLocale,
+                                action.name,
+                              )}
                             </Pill>
                           ))
                         ) : (

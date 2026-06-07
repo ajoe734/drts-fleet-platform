@@ -8,6 +8,12 @@ import type {
 } from "@drts/contracts";
 import { SessionGuard } from "@/components/session-guard";
 import { createConciergeClient } from "@/lib/api-client";
+import {
+  formatOrderStatus,
+  formatRecordingState,
+  formatTraceEventLabel,
+  formatTraceMessage,
+} from "@/lib/display-labels";
 import { useConciergePortal } from "@/lib/portal-state";
 
 type LookupRecord = {
@@ -17,7 +23,7 @@ type LookupRecord = {
 };
 
 function formatDateTime(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : "Not set";
+  return value ? new Date(value).toLocaleString("zh-TW") : "未設定";
 }
 
 function LookupCard({ record }: { record: LookupRecord }) {
@@ -25,7 +31,7 @@ function LookupCard({ record }: { record: LookupRecord }) {
     <article className="detail-card">
       <header>
         <div>
-          <span className="section-kicker">Order lookup</span>
+          <span className="section-kicker">訂單查詢</span>
           <h3>{record.order.orderNo}</h3>
         </div>
         <span
@@ -35,34 +41,36 @@ function LookupCard({ record }: { record: LookupRecord }) {
               : " chip-success"
           }`}
         >
-          {record.order.status}
+          {formatOrderStatus(record.order.status)}
         </span>
       </header>
       <div className="kv-grid">
         <div className="kv-item">
-          <strong>Passenger</strong>
+          <strong>乘客</strong>
           <p>{record.order.passenger.name}</p>
         </div>
         <div className="kv-item">
-          <strong>Pickup</strong>
+          <strong>上車地點</strong>
           <p>{record.order.pickup.address}</p>
         </div>
         <div className="kv-item">
-          <strong>Drop-off</strong>
+          <strong>下車地點</strong>
           <p>{record.order.dropoff.address}</p>
         </div>
         <div className="kv-item">
-          <strong>Recording state</strong>
+          <strong>錄音狀態</strong>
           <p>
-            {record.callSession?.recordingState ?? "No linked call session"}
+            {record.callSession
+              ? formatRecordingState(record.callSession.recordingState)
+              : "尚未連結通話"}
           </p>
         </div>
       </div>
       <ul className="trace-list">
         {record.trace.map((entry) => (
           <li key={entry.traceId}>
-            <strong>{entry.eventType}</strong>
-            <p>{entry.message}</p>
+            <strong>{formatTraceEventLabel(entry.eventType)}</strong>
+            <p>{formatTraceMessage(entry.eventType, entry.message)}</p>
             <p>{formatDateTime(entry.createdAt)}</p>
           </li>
         ))}
@@ -109,13 +117,9 @@ export default function LookupPage() {
         if (!cancelled) {
           setRecords(nextRecords);
         }
-      } catch (nextError) {
+      } catch {
         if (!cancelled) {
-          setError(
-            nextError instanceof Error
-              ? nextError.message
-              : "Failed to load recent assisted-entry orders.",
-          );
+          setError("載入近期代訂訂單失敗，請稍後再試。");
         }
       } finally {
         if (!cancelled) {
@@ -133,22 +137,19 @@ export default function LookupPage() {
     <div className="page-shell">
       <SessionGuard requireDesk>
         <section className="hero-card">
-          <span className="section-kicker">Lookup</span>
-          <h1>Read back order state, dispatch trace, and recording posture.</h1>
+          <span className="section-kicker">查詢</span>
+          <h1>查看訂單狀態、派遣軌跡與錄音狀態。</h1>
           <p>
-            The portal keeps lookup route-level and explicit. Recent assisted
-            orders are stored locally in the browser session, while the actual
-            order and call-session truth comes from existing backend APIs.
+            近期代訂訂單會保存在本機工作階段中；實際訂單與通話狀態仍以後端 API
+            回傳為準。
           </p>
         </section>
 
         {error ? <section className="error-copy">{error}</section> : null}
 
         <section className="panel-card">
-          <span className="section-kicker">Manual lookup</span>
-          <h2>
-            Fetch a specific order id if it is not in the recent desk list.
-          </h2>
+          <span className="section-kicker">手動查詢</span>
+          <h2>若近期清單沒有該訂單，可輸入訂單編號查詢。</h2>
           <form
             className="form-grid"
             onSubmit={async (event) => {
@@ -177,23 +178,19 @@ export default function LookupPage() {
                   trace,
                   callSession,
                 });
-              } catch (nextError) {
-                setError(
-                  nextError instanceof Error
-                    ? nextError.message
-                    : "Manual order lookup failed.",
-                );
+              } catch {
+                setError("手動查詢訂單失敗，請確認編號後再試。");
               } finally {
                 setLoading(false);
               }
             }}
           >
             <div className="field-stack">
-              <label htmlFor="manual-order-id">Order id</label>
+              <label htmlFor="manual-order-id">訂單編號</label>
               <input
                 id="manual-order-id"
                 onChange={(event) => setManualOrderId(event.target.value)}
-                placeholder="Paste an order id"
+                placeholder="貼上訂單編號"
                 value={manualOrderId}
               />
             </div>
@@ -203,7 +200,7 @@ export default function LookupPage() {
                 disabled={loading}
                 type="submit"
               >
-                Lookup order
+                查詢訂單
               </button>
             </div>
           </form>
@@ -212,13 +209,12 @@ export default function LookupPage() {
         {manualRecord ? <LookupCard record={manualRecord} /> : null}
 
         <section className="panel-card">
-          <span className="section-kicker">Recent assisted-entry orders</span>
-          <h2>Desk-local recall</h2>
-          {loading ? <p>Loading recent order state.</p> : null}
+          <span className="section-kicker">近期代訂訂單</span>
+          <h2>本機櫃台紀錄</h2>
+          {loading ? <p>正在載入近期訂單狀態。</p> : null}
           {!loading && records.length === 0 ? (
             <p className="empty-state">
-              No recent assisted-entry orders are stored in this browser session
-              yet. Create a booking first or use manual lookup.
+              此瀏覽器工作階段尚未儲存近期代訂訂單。請先建立代訂，或使用手動查詢。
             </p>
           ) : null}
           <div className="list-stack">

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { UpsertTenantCostCenterCommand } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import { formatTenantUiError, toTenantErrorMessage } from "@/lib/error-copy";
 import type { CostCenterFlashPayload } from "./constants";
 
 function readTrimmedString(
@@ -72,20 +73,20 @@ export async function upsertCostCenterAction(
       tone: "default",
       title:
         mode === "reactivate"
-          ? "Cost center reactivated"
+          ? "成本中心已重新啟用"
           : mode === "update"
-            ? "Cost center updated"
-            : "Cost center created",
+            ? "成本中心已更新"
+            : "成本中心已建立",
       description: `${saved.code} · ${saved.name} 已同步到租戶成本中心目錄。`,
     };
   } catch (error) {
     payload = {
       tone: "warning",
-      title: "Cost center could not be saved",
-      description:
-        error instanceof Error
-          ? error.message
-          : "Unable to save tenant cost center.",
+      title: "無法儲存成本中心",
+      description: formatTenantUiError(
+        toTenantErrorMessage(error, "無法儲存租戶成本中心。"),
+        "成本中心儲存失敗",
+      ),
     };
   }
 
@@ -115,17 +116,17 @@ export async function disableCostCenterAction(
     });
     payload = {
       tone: "default",
-      title: "Cost center disabled",
+      title: "成本中心已停用",
       description: `${saved.code} 已停用，後續建立叫車時不再接受此成本中心。`,
     };
   } catch (error) {
     payload = {
       tone: "warning",
-      title: "Cost center could not be disabled",
-      description:
-        error instanceof Error
-          ? error.message
-          : "Unable to disable tenant cost center.",
+      title: "無法停用成本中心",
+      description: formatTenantUiError(
+        toTenantErrorMessage(error, "無法停用租戶成本中心。"),
+        "成本中心停用失敗",
+      ),
     };
   }
 

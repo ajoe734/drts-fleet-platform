@@ -2,47 +2,43 @@ import Link from "next/link";
 
 const policyDetails = [
   {
-    label: "Cancel window",
-    value: "Open until pickup",
-    note: "Rider holds cancellation authority until the driver arrives at pickup.",
+    label: "取消期限",
+    value: "上車前仍可取消",
+    note: "司機抵達上車地點前，乘客仍保有取消權限。",
   },
   {
-    label: "Cancellation fee",
-    value: "$0 today",
-    note: "Server enforces fee policy. The UI mirrors the current quote and never invents a different amount.",
+    label: "取消費用",
+    value: "目前為 0 元",
+    note: "費用政策由後端判定，前端只呈現目前報價，不自行產生其他金額。",
   },
   {
-    label: "Refund posture",
-    value: "Pre-auth release",
-    note: "Any payment pre-auth is released; no settled charge happens for an in-window cancel.",
+    label: "退款狀態",
+    value: "解除預授權",
+    note: "若有付款預授權，會解除保留；期限內取消不會產生已結算扣款。",
   },
 ];
 
 const reasonOptions = [
-  { id: "changed_plans", label: "Plans changed" },
-  { id: "wait_too_long", label: "Wait time too long" },
-  { id: "wrong_pickup", label: "Pickup location is wrong" },
-  { id: "other", label: "Other (free text optional)" },
+  { id: "changed_plans", label: "行程計畫改變" },
+  { id: "wait_too_long", label: "等待時間太久" },
+  { id: "wrong_pickup", label: "上車地點有誤" },
+  { id: "other", label: "其他原因，可選填文字" },
 ];
 
 export default function TripCancelPage() {
   return (
     <div className="page-shell">
       <section className="hero-card">
-        <span className="eyebrow state-pill state-pill-positive">
-          Cancel requested
-        </span>
-        <h1>Cancel the active trip while authority allows it.</h1>
+        <span className="eyebrow state-pill state-pill-positive">準備取消</span>
+        <h1>在規則允許時取消進行中行程。</h1>
         <p>
-          This route is reachable only while the rider holds cancel authority.
-          The page mirrors the server-enforced policy window and the quoted fee
-          so the rider sees the same numbers support sees.
+          此頁只會在乘客仍具取消權限時開放。頁面會呈現後端判定的取消期限與費用，讓乘客與客服看到一致資訊。
         </p>
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Policy snapshot</span>
-        <h3>What cancellation does right now</h3>
+        <span className="surface-kicker">取消規則</span>
+        <h3>目前取消會產生的結果</h3>
         <dl className="kv-grid">
           {policyDetails.map((row) => (
             <div className="kv-row" key={row.label}>
@@ -57,50 +53,44 @@ export default function TripCancelPage() {
       </section>
 
       <section className="surface-card">
-        <span className="surface-kicker">Reason (optional)</span>
-        <h3>Why are you cancelling?</h3>
+        <span className="surface-kicker">取消原因，可選填</span>
+        <h3>為什麼要取消？</h3>
         <ul className="check-list">
           {reasonOptions.map((reason) => (
             <li className="check-item check-available" key={reason.id}>
               <strong>{reason.label}</strong>
-              <span className="check-state">selectable</span>
-              <p>Free-form text is allowed but is not required to cancel.</p>
+              <span className="check-state">可選擇</span>
+              <p>可補充文字說明，但不是取消的必要條件。</p>
             </li>
           ))}
         </ul>
         <p className="surface-footnote">
-          The reason is reported to the operations side for supply tuning. It
-          never blocks cancellation when the policy window is open.
+          取消原因會提供給營運端調整供給品質；只要仍在取消期限內，未填原因也不會阻擋取消。
         </p>
       </section>
 
       <section className="callout-row">
         <article className="callout-card">
-          <strong>After cancellation</strong>
-          <p>
-            The rider lands on the cancelled-trip surface, which names the
-            cancelling actor (rider, driver, or platform) for clarity.
-          </p>
+          <strong>取消後</strong>
+          <p>乘客會前往已取消行程頁，並清楚看到取消方是乘客、司機或平台。</p>
           <Link className="text-link" href="/trip/cancelled">
-            Preview cancelled-trip view
+            查看已取消行程
           </Link>
         </article>
         <article className="callout-card warning">
-          <strong>Out-of-window cancellation</strong>
+          <strong>超過取消期限</strong>
           <p>
-            Once the cancel window closes, this route stops offering the
-            mutation and routes the rider to the read-only or completed view
-            instead.
+            一旦取消期限結束，此頁會停止提供取消操作，並導向唯讀或完成狀態。
           </p>
         </article>
       </section>
 
       <section className="hero-actions">
         <Link className="primary-link" href="/trip/cancelled">
-          Confirm cancellation (preview)
+          確認取消
         </Link>
         <Link className="secondary-link" href="/trip">
-          Keep the trip
+          保留行程
         </Link>
       </section>
     </div>

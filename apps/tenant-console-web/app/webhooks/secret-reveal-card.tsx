@@ -99,10 +99,10 @@ export function SecretRevealCard({
 
   const downloadHref = `data:text/plain;charset=utf-8,${encodeURIComponent(
     [
-      "DRTS tenant webhook secret receipt",
-      `Endpoint: ${endpointUrl}`,
-      `Secret version: v${secretVersion}`,
-      `Rotated at: ${rotatedAt}`,
+      "DRTS 租戶回呼密鑰收據",
+      `端點：${endpointUrl}`,
+      `密鑰版本：v${secretVersion}`,
+      `輪替時間：${rotatedAt}`,
       "",
       secret,
     ].join("\n"),
@@ -135,19 +135,19 @@ export function SecretRevealCard({
         </div>
         <div style={metaGridStyle}>
           <div style={metaCardStyle(theme)}>
-            <span style={metaLabelStyle(theme)}>Endpoint</span>
+            <span style={metaLabelStyle(theme)}>端點</span>
             <span style={metaValueStyle(theme)}>{endpointUrl}</span>
           </div>
           <div style={metaCardStyle(theme)}>
-            <span style={metaLabelStyle(theme)}>Masked preview</span>
+            <span style={metaLabelStyle(theme)}>遮罩預覽</span>
             <span style={metaValueStyle(theme)}>{secretPreview}</span>
           </div>
           <div style={metaCardStyle(theme)}>
-            <span style={metaLabelStyle(theme)}>Secret version</span>
+            <span style={metaLabelStyle(theme)}>密鑰版本</span>
             <span style={metaValueStyle(theme)}>v{secretVersion}</span>
           </div>
           <div style={metaCardStyle(theme)}>
-            <span style={metaLabelStyle(theme)}>Rotated at</span>
+            <span style={metaLabelStyle(theme)}>輪替時間</span>
             <span style={metaValueStyle(theme)}>{rotatedAt}</span>
           </div>
         </div>
@@ -163,7 +163,7 @@ export function SecretRevealCard({
             }}
           >
             <CanvasBtn theme={theme} size="sm" variant="primary">
-              {copied ? "Copied" : "Copy secret"}
+              {copied ? "已複製" : "複製密鑰"}
             </CanvasBtn>
           </button>
           <a
@@ -171,7 +171,7 @@ export function SecretRevealCard({
             download={`webhook-secret-v${secretVersion}.txt`}
           >
             <CanvasBtn theme={theme} size="sm" variant="secondary">
-              Download .txt
+              下載 .txt
             </CanvasBtn>
           </a>
           <label
@@ -188,7 +188,7 @@ export function SecretRevealCard({
               checked={stored}
               onChange={(event) => setStored(event.target.checked)}
             />
-            I stored this secret in a secure location
+            我已將此密鑰存放到安全位置
           </label>
           <form action={clearReceiptAction}>
             <input type="hidden" name="webhookId" value={webhookId} />
@@ -216,7 +216,7 @@ export function SecretRevealCard({
                     }
                   : {})}
               >
-                Done
+                完成
               </CanvasBtn>
             </button>
           </form>

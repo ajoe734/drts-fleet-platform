@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     const redirectUrl = new URL("/api-keys", request.url);
     redirectUrl.searchParams.set(
       "error",
-      "No pending plaintext key was found. Issue or rotate a key again if you still need it.",
+      "找不到待顯示的一次性明文金鑰；若仍需要，請重新簽發或輪替整合金鑰。",
     );
     const response = NextResponse.redirect(redirectUrl);
     response.cookies.set(ONE_TIME_KEY_COOKIE, "", {
@@ -58,11 +58,11 @@ export async function GET(request: Request) {
 
   const success = new URL(request.url).searchParams.get("success");
   const html = `<!doctype html>
-<html lang="en">
+<html lang="zh-Hant">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>One-time API key reveal</title>
+    <title>一次性整合金鑰顯示</title>
     <style>
       :root {
         color-scheme: light;
@@ -145,16 +145,16 @@ export async function GET(request: Request) {
       <div class="panel">
         ${
           success
-            ? `<div class="banner"><strong>Success:</strong> ${escapeHtml(success)}</div>`
+            ? `<div class="banner"><strong>成功：</strong> ${escapeHtml(success)}</div>`
             : ""
         }
         <div class="meta">
           <div>
-            <h1 style="margin: 0; font-size: 1.75rem;">One-time plaintext key for ${escapeHtml(
+            <h1 style="margin: 0; font-size: 1.75rem;">${escapeHtml(
               flash.keyName,
-            )}</h1>
+            )} 的一次性明文金鑰</h1>
             <p class="muted" style="margin: 0.75rem 0 0;">
-              This value has been consumed from the flash cookie and will not be shown again on refresh or revisit. Move it into your secret vault now.
+              這組金鑰已從一次性暫存資料取出，重新整理或再次造訪都不會再顯示。請立即將它存入你的密鑰保管機制。
             </p>
           </div>
           <span class="badge">${escapeHtml(flash.keyId)}</span>
@@ -162,13 +162,13 @@ export async function GET(request: Request) {
         <pre>${escapeHtml(flash.plaintextKey)}</pre>
         ${
           flash.revokedApiKeyId
-            ? `<p class="muted" style="margin-top: 0.85rem;">Rotation revoked previous key <code>${escapeHtml(
+            ? `<p class="muted" style="margin-top: 0.85rem;">這次輪替已同步撤銷前一把金鑰 <code>${escapeHtml(
                 flash.revokedApiKeyId,
-              )}</code>.</p>`
+              )}</code>。</p>`
             : ""
         }
         <p style="margin: 1.2rem 0 0;">
-          <a href="/api-keys">Return to API keys</a>
+          <a href="/api-keys">返回整合金鑰列表</a>
         </p>
       </div>
     </main>

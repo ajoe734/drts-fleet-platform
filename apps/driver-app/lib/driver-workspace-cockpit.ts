@@ -13,12 +13,6 @@ const ACTIVE_DRIVER_TASK_STATUSES = new Set([
   "proof_pending",
 ]);
 
-function humanizeCode(value: string) {
-  return value
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
 function getPlatformDisplayName(sourcePlatform: string | null): string {
   if (!sourcePlatform || sourcePlatform === "drts") {
     return "DRTS";
@@ -30,7 +24,7 @@ function getPlatformDisplayName(sourcePlatform: string | null): string {
     ].displayName;
   }
 
-  return humanizeCode(sourcePlatform);
+  return "外部平台";
 }
 
 function normalizeStateCode(value: string | null | undefined) {

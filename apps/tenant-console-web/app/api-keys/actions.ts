@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { TENANT_API_KEY_ALLOWED_SCOPES } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
+import { formatTenantUiError, toTenantErrorMessage } from "@/lib/error-copy";
 import type { ApiKeyFlashPayload } from "./constants";
 
 function readTrimmedString(
@@ -34,12 +35,12 @@ function readScopes(formData: FormData): string[] {
   const uniqueValues = [...new Set(values)];
 
   if (uniqueValues.length === 0) {
-    throw new Error("Select at least one published API key scope.");
+    throw new Error("至少選擇一個已發布的 API 金鑰權限範圍。");
   }
 
   const invalidScope = uniqueValues.find((scope) => !isAllowedScope(scope));
   if (invalidScope) {
-    throw new Error(`Unsupported API key scope: ${invalidScope}`);
+    throw new Error(`不支援的 API 金鑰權限範圍：${invalidScope}`);
   }
 
   return uniqueValues;
@@ -52,14 +53,12 @@ function buildOptionalExpiry(expiresAt: string | undefined) {
 
   const hasExplicitTimezone = /(?:[zZ]|[+-]\d{2}:\d{2})$/.test(expiresAt);
   if (!hasExplicitTimezone) {
-    throw new Error(
-      "Expiry must include an explicit timezone offset or Z suffix.",
-    );
+    throw new Error("到期時間必須包含明確時區 offset 或 Z 結尾。");
   }
 
   const parsedExpiry = new Date(expiresAt);
   if (Number.isNaN(parsedExpiry.getTime())) {
-    throw new Error("Expiry must be a valid ISO 8601 timestamp.");
+    throw new Error("到期時間必須是有效的 ISO 8601 時間戳記。");
   }
 
   return { expiresAt: parsedExpiry.toISOString() };
@@ -73,7 +72,7 @@ export async function issueTenantApiKeyAction(
   try {
     const keyName = readTrimmedString(formData, "keyName");
     if (!keyName) {
-      throw new Error("API key label is required.");
+      throw new Error("API 金鑰名稱為必填。");
     }
 
     const client = getTenantClient();
@@ -88,16 +87,18 @@ export async function issueTenantApiKeyAction(
       tone: "default",
       action: "issue",
       keyName: issued.apiKey.keyName,
-      title: "API key issued",
-      description: `${issued.apiKey.keyName} is now active. Save the plaintext value now because subsequent fetches only show the masked suffix.`,
+      title: "API 金鑰已發行",
+      description: `${issued.apiKey.keyName} 已啟用。請立即保存這次顯示的明文金鑰，之後只會顯示遮罩尾碼。`,
       plaintextKey: issued.plaintextKey,
     };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to issue API key.";
+    const message = formatTenantUiError(
+      toTenantErrorMessage(error, "發行 API 金鑰失敗。"),
+      "API 金鑰發行失敗",
+    );
     payload = {
       tone: "warning",
-      title: "API key could not be issued",
+      title: "API 金鑰發行失敗",
       description: message,
     };
   }
@@ -116,7 +117,7 @@ export async function rotateTenantApiKeyAction(
     const keyName = readTrimmedString(formData, "keyName");
 
     if (!apiKeyId) {
-      throw new Error("API key selection is required for rotation.");
+      throw new Error("輪替時必須指定 API 金鑰。");
     }
 
     const client = getTenantClient();
@@ -131,16 +132,18 @@ export async function rotateTenantApiKeyAction(
       tone: "default",
       action: "rotate",
       keyName: issued.apiKey.keyName,
-      title: "API key rotated",
-      description: `${issued.apiKey.keyName} has a new plaintext value. The previously active credential is invalidated immediately.`,
+      title: "API 金鑰已輪替",
+      description: `${issued.apiKey.keyName} 已產生新的明文金鑰，先前啟用的憑證會立即失效。`,
       plaintextKey: issued.plaintextKey,
     };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to rotate API key.";
+    const message = formatTenantUiError(
+      toTenantErrorMessage(error, "輪替 API 金鑰失敗。"),
+      "API 金鑰輪替失敗",
+    );
     payload = {
       tone: "warning",
-      title: "API key could not be rotated",
+      title: "API 金鑰輪替失敗",
       description: message,
     };
   }
@@ -160,11 +163,11 @@ export async function revokeTenantApiKeyAction(
     const reason = readTrimmedString(formData, "reason");
 
     if (!apiKeyId) {
-      throw new Error("API key selection is required for revocation.");
+      throw new Error("撤銷時必須指定 API 金鑰。");
     }
 
     if (!reason) {
-      throw new Error("Revocation reason is required.");
+      throw new Error("撤銷原因為必填。");
     }
 
     const client = getTenantClient();
@@ -174,15 +177,17 @@ export async function revokeTenantApiKeyAction(
       tone: "default",
       action: "revoke",
       keyName: keyName ?? apiKeyId,
-      title: "API key revoked",
-      description: `${keyName ?? apiKeyId} is now revoked and cannot authenticate again.`,
+      title: "API 金鑰已撤銷",
+      description: `${keyName ?? apiKeyId} 已撤銷，之後不能再用來驗證。`,
     };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unable to revoke API key.";
+    const message = formatTenantUiError(
+      toTenantErrorMessage(error, "撤銷 API 金鑰失敗。"),
+      "API 金鑰撤銷失敗",
+    );
     payload = {
       tone: "warning",
-      title: "API key could not be revoked",
+      title: "API 金鑰撤銷失敗",
       description: message,
     };
   }

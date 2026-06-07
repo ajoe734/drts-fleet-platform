@@ -19,7 +19,7 @@ export async function getSlaProfile(): Promise<{
   } catch (e) {
     return {
       profile: null,
-      error: e instanceof Error ? e.message : "Unknown error",
+      error: e instanceof Error ? e.message : "未知錯誤",
     };
   }
 }
@@ -28,7 +28,7 @@ export async function updateSlaProfile(formData: FormData): Promise<void> {
   const snapshot = await getTenantRoleSnapshot();
   requireCapability(
     snapshot.capabilities.canWriteSla,
-    "Tenant SLA write authority required.",
+    "需要租戶服務時限設定寫入權限。",
   );
   const client = await getTenantClient();
 

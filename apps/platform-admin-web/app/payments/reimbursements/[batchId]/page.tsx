@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import React, { useEffect, useState } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
+import { formatPlatformCodeLabel } from "@/lib/localized-labels";
+import type { Locale } from "@/lib/translations";
 import type {
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
@@ -227,7 +233,7 @@ function formatMoney(
 
 function buildFallbackBatch(
   batchId: string,
-  locale: string,
+  locale: Locale,
 ): FallbackBatchRuntime {
   const normalizedBatchId = batchId || "rb_2026_05_001";
   return {
@@ -252,7 +258,10 @@ function buildFallbackBatch(
             amountMinor: 994560,
             currency: "TWD",
           },
-          reason: "sponsor reimbursement Q2-Apr",
+          reason:
+            locale === "en"
+              ? "Sponsor reimbursement Q2-Apr"
+              : "第二季四月贊助補貼報銷",
           channelKey: "World Elite",
         },
         {
@@ -262,7 +271,10 @@ function buildFallbackBatch(
             amountMinor: 246240,
             currency: "TWD",
           },
-          reason: "sponsor reimbursement Q2-Apr",
+          reason:
+            locale === "en"
+              ? "Sponsor reimbursement Q2-Apr"
+              : "第二季四月贊助補貼報銷",
           channelKey: "Infinite",
         },
         {
@@ -272,7 +284,7 @@ function buildFallbackBatch(
             amountMinor: 180000,
             currency: "TWD",
           },
-          reason: "差額 TWD 1,820 × 99 筆",
+          reason: "差額新台幣 1,820 元 × 99 筆",
           channelKey: "reconciliation_adjustment",
         },
       ],
@@ -280,7 +292,7 @@ function buildFallbackBatch(
     warning:
       locale === "en"
         ? "API reimbursement detail is unavailable, so the page is rendering route-local fallback data aligned to the canvas artboard."
-        : "目前 reimbursement detail API 無法使用，頁面改以 route-local fallback 資料渲染 canvas 對齊內容。",
+        : "目前代墊批次詳細資料暫時無法使用，頁面先以替代資料維持批次檢視內容。",
   };
 }
 
@@ -316,21 +328,22 @@ function workflowTone(step: WorkflowStep): CanvasTone {
   }
 }
 
-function workflowLabel(step: WorkflowStep) {
-  switch (step) {
-    case "pending_approval":
-      return "pending approval";
-    default:
-      return step;
-  }
+function workflowLabel(locale: Locale, step: WorkflowStep) {
+  return formatPlatformCodeLabel(locale, step);
 }
 
-function buildTimeline(batch: ReimbursementBatchRecord): TimelineEntry[] {
+function buildTimeline(
+  batch: ReimbursementBatchRecord,
+  locale: Locale,
+): TimelineEntry[] {
   const entries: TimelineEntry[] = [
     {
       at: batch.periodMonth,
-      title: "Batch created",
-      body: `Generated for statement ${batch.statementId} and driver ${batch.driverId}.`,
+      title: locale === "en" ? "Batch created" : "批次已建立",
+      body:
+        locale === "en"
+          ? `Generated for statement ${batch.statementId} and driver ${batch.driverId}.`
+          : `已根據結算單 ${batch.statementId} 與司機 ${batch.driverId} 產生此批次。`,
       tone: "neutral",
     },
   ];
@@ -338,8 +351,11 @@ function buildTimeline(batch: ReimbursementBatchRecord): TimelineEntry[] {
   if (batch.items.length > 0) {
     entries.push({
       at: batch.periodMonth,
-      title: "Submitted for approval",
-      body: `${batch.items.length} reimbursement line items queued for finance review.`,
+      title: locale === "en" ? "Submitted for approval" : "已送交核准",
+      body:
+        locale === "en"
+          ? `${batch.items.length} reimbursement line items queued for finance review.`
+          : `共有 ${batch.items.length} 筆代墊明細已排入財務審核佇列。`,
       tone: "warn",
     });
   }
@@ -347,8 +363,11 @@ function buildTimeline(batch: ReimbursementBatchRecord): TimelineEntry[] {
   if (batch.approvedAt) {
     entries.push({
       at: batch.approvedAt,
-      title: "Approved",
-      body: "Batch approved and ready for export/remittance handling.",
+      title: locale === "en" ? "Approved" : "已核准",
+      body:
+        locale === "en"
+          ? "Batch approved and ready for export/remittance handling."
+          : "批次已核准，可進入匯出與匯款處理流程。",
       tone: "info",
     });
   }
@@ -356,8 +375,11 @@ function buildTimeline(batch: ReimbursementBatchRecord): TimelineEntry[] {
   if (batch.remittanceProofId) {
     entries.push({
       at: batch.paidAt ?? batch.approvedAt ?? batch.periodMonth,
-      title: "Remittance proof attached",
-      body: `Proof ID ${batch.remittanceProofId} recorded on the batch.`,
+      title: locale === "en" ? "Remittance proof attached" : "已附上匯款憑證",
+      body:
+        locale === "en"
+          ? `Proof ID ${batch.remittanceProofId} recorded on the batch.`
+          : `批次已記錄匯款憑證編號 ${batch.remittanceProofId}。`,
       tone: "info",
     });
   }
@@ -365,8 +387,11 @@ function buildTimeline(batch: ReimbursementBatchRecord): TimelineEntry[] {
   if (batch.paidAt) {
     entries.push({
       at: batch.paidAt,
-      title: "Marked paid",
-      body: "Driver reimbursement has been marked paid in the finance console.",
+      title: locale === "en" ? "Marked paid" : "已標記付款",
+      body:
+        locale === "en"
+          ? "Driver reimbursement has been marked paid in the finance console."
+          : "司機代墊款已在財務控制台標記為已付款。",
       tone: "success",
     });
   }
@@ -374,8 +399,11 @@ function buildTimeline(batch: ReimbursementBatchRecord): TimelineEntry[] {
   if (!batch.approvedAt) {
     entries.push({
       at: batch.periodMonth,
-      title: "Waiting approval",
-      body: "High-risk approval still requires reason capture before state can advance.",
+      title: locale === "en" ? "Waiting approval" : "等待核准",
+      body:
+        locale === "en"
+          ? "High-risk approval still requires reason capture before state can advance."
+          : "高風險核准仍需先記錄原因，狀態才可繼續推進。",
       tone: "warn",
     });
   }
@@ -383,13 +411,18 @@ function buildTimeline(batch: ReimbursementBatchRecord): TimelineEntry[] {
   return entries;
 }
 
-function buildLineItemRows(batch: ReimbursementBatchRecord): LineItemRow[] {
+function buildLineItemRows(
+  batch: ReimbursementBatchRecord,
+  locale: Locale,
+): LineItemRow[] {
   return batch.items.map((item: ReimbursementItemRecord, index: number) => ({
     id: item.itemId,
-    recipient: `${batch.driverId}${item.channelKey ? ` · ${item.channelKey}` : ""}`,
+    recipient: `${batch.driverId}${item.channelKey ? ` · ${formatPlatformCodeLabel(locale, item.channelKey)}` : ""}`,
     amount: formatMoney(item.amount),
     sourceReference: item.orderId,
-    note: item.reason || `Line item ${index + 1}`,
+    note:
+      item.reason ||
+      (locale === "en" ? `Line item ${index + 1}` : `明細項目 ${index + 1}`),
   }));
 }
 
@@ -429,6 +462,144 @@ export default function ReimbursementDetailPage() {
   const [savingAction, setSavingAction] = useState<"approve" | "paid" | null>(
     null,
   );
+  const copy =
+    locale === "en"
+      ? {
+          loading: "Loading…",
+          pageTitle: "Reimbursement batch",
+          backToPayments: "Back to payments",
+          batchUnavailable: "Batch unavailable",
+          batchUnavailableBody:
+            "The reimbursement batch route resolves, but the batch was not found.",
+          queue: "Queue",
+          copyBatchId: "Copy batch ID",
+          headerSubtitle: (driverId: string, totalAmount: string) =>
+            `${driverId} · ${totalAmount} · 6-state reimbursement workflow`,
+          refreshFailed: "Refresh failed",
+          fallbackDetailTitle: "Fallback reimbursement detail",
+          workflowBannerTitle: "Audit-derived workflow view",
+          workflowBannerBody:
+            "The six-state stepper matches the canvas while underlying contract data is derived from batch approval, remittance, and payment timestamps.",
+          receiptTitle: "Audit receipt",
+          stateMachineTitle: "State machine",
+          headerTitle: "Header",
+          approveFlowTitle: "Approve reason flow",
+          approveFlowSubtitle:
+            "High-risk action requires a reason before approval.",
+          approvalReason: "Approval reason",
+          approvalPlaceholder:
+            "Explain sponsor exposure, evidence, or audit context.",
+          remittanceProof: "Remittance proof",
+          remittanceProofPlaceholder: "remit-proof-20260602-001",
+          actionFailed: "Action failed",
+          saving: "Saving…",
+          approve: "Approve",
+          markPaid: "Mark paid",
+          stateTimelineTitle: "State timeline · audit-derived",
+          batchSummaryTitle: "Batch summary",
+          batchSummarySubtitle: (usingFallbackData: boolean) =>
+            usingFallbackData
+              ? "Canvas body density rendered from route-local fallback finance context."
+              : "Canvas body density with route-local finance context.",
+          approvalGate: "Approval gate",
+          approvalGateComplete: "Completed",
+          approvalGatePending: "Pending super-admin signoff",
+          exportPosture: "Export posture",
+          exportPostureAttached: "Proof attached",
+          exportPosturePending: "Not exported yet",
+          settlementTarget: "Settlement target",
+          evidenceScope: "Evidence scope",
+          lineItemsUnit: "line items",
+          lineItemsTitle: "Line items",
+          lineItemsSubtitle: (count: number) =>
+            `${count} sources contributing to the batch total.`,
+          noLineItems:
+            "No reimbursement line items were returned for this batch.",
+          tableHeaders: {
+            recipient: "Recipient",
+            amount: "Amount",
+            sourceReference: "Source reference",
+            note: "Note",
+          },
+          detailLabels: {
+            batchId: "Batch ID",
+            driver: "Driver",
+            statement: "Statement",
+            period: "Period",
+            totalAmount: "Total amount",
+            state: "State",
+            approvedAt: "Approved at",
+            paidAt: "Paid at",
+            remittanceProof: "Remittance proof",
+            lineItems: "Line items",
+          },
+        }
+      : {
+          loading: "載入中…",
+          pageTitle: "代墊批次",
+          backToPayments: "返回結算治理",
+          batchUnavailable: "找不到批次",
+          batchUnavailableBody: "路由已建立，但找不到對應的代墊批次資料。",
+          queue: "批次佇列",
+          copyBatchId: "複製批次編號",
+          headerSubtitle: (driverId: string, totalAmount: string) =>
+            `${driverId} · ${totalAmount} · 六階段代墊流程`,
+          refreshFailed: "重新整理失敗",
+          fallbackDetailTitle: "代墊批次替代資料",
+          workflowBannerTitle: "稽核推導流程視圖",
+          workflowBannerBody:
+            "六階段流程條對齊畫布設計；目前狀態由批次的核准、匯款憑證與付款時間推導呈現。",
+          receiptTitle: "稽核收據",
+          stateMachineTitle: "六階段狀態流程",
+          headerTitle: "批次摘要",
+          approveFlowTitle: "核准原因流程",
+          approveFlowSubtitle: "高風險操作在核准前必須填寫原因。",
+          approvalReason: "核准原因",
+          approvalPlaceholder: "請說明贊助曝險、佐證依據或稽核背景。",
+          remittanceProof: "匯款憑證編號",
+          remittanceProofPlaceholder: "例如：匯款證明-20260602-001",
+          actionFailed: "操作失敗",
+          saving: "儲存中…",
+          approve: "核准",
+          markPaid: "標記已付款",
+          stateTimelineTitle: "狀態時間軸 · 稽核推導",
+          batchSummaryTitle: "批次摘要",
+          batchSummarySubtitle: (usingFallbackData: boolean) =>
+            usingFallbackData
+              ? "目前以替代財務情境補齊批次檢視內容。"
+              : "目前以財務情境補齊批次檢視內容。",
+          approvalGate: "核准關卡",
+          approvalGateComplete: "已完成",
+          approvalGatePending: "待平台管理員簽核",
+          exportPosture: "匯出狀態",
+          exportPostureAttached: "已附匯款憑證",
+          exportPosturePending: "尚未匯出",
+          settlementTarget: "結算對象",
+          evidenceScope: "佐證範圍",
+          lineItemsUnit: "筆明細",
+          lineItemsTitle: "代墊明細",
+          lineItemsSubtitle: (count: number) =>
+            `共有 ${count} 筆來源構成此批次總額。`,
+          noLineItems: "此批次目前沒有可顯示的代墊明細。",
+          tableHeaders: {
+            recipient: "對象",
+            amount: "金額",
+            sourceReference: "來源參照",
+            note: "備註",
+          },
+          detailLabels: {
+            batchId: "批次編號",
+            driver: "司機",
+            statement: "結算單",
+            period: "期間",
+            totalAmount: "總金額",
+            state: "狀態",
+            approvedAt: "核准時間",
+            paidAt: "付款時間",
+            remittanceProof: "匯款憑證編號",
+            lineItems: "明細數",
+          },
+        };
 
   useEffect(() => {
     let active = true;
@@ -470,7 +641,13 @@ export default function ReimbursementDetailPage() {
         setUsingFallbackData(true);
         setFallbackWarning(fallback.warning);
         setRemittanceProofId(fallback.batch.remittanceProofId ?? "");
-        setError(nextError?.message ?? String(nextError));
+        setError(
+          formatPlatformUiError(
+            locale,
+            toPlatformErrorMessage(nextError),
+            copy.refreshFailed,
+          ),
+        );
       } finally {
         if (active) {
           setLoading(false);
@@ -519,7 +696,15 @@ export default function ReimbursementDetailPage() {
       );
       setApproveReason("");
     } catch (nextError: any) {
-      setApprovalError(nextError?.message ?? String(nextError));
+      setApprovalError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(nextError),
+          locale === "en"
+            ? "Unable to approve reimbursement batch"
+            : "無法核准代墊批次",
+        ),
+      );
     } finally {
       setSavingAction(null);
     }
@@ -555,18 +740,22 @@ export default function ReimbursementDetailPage() {
           : "批次已標記為已付款，且已記錄匯款憑證。",
       );
     } catch (nextError: any) {
-      setApprovalError(nextError?.message ?? String(nextError));
+      setApprovalError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(nextError),
+          locale === "en"
+            ? "Unable to mark reimbursement batch paid"
+            : "無法將代墊批次標記為已付款",
+        ),
+      );
     } finally {
       setSavingAction(null);
     }
   }
 
   if (loading) {
-    return (
-      <div style={emptyStateStyle}>
-        {locale === "en" ? "Loading…" : "載入中…"}
-      </div>
-    );
+    return <div style={emptyStateStyle}>{copy.loading}</div>;
   }
 
   if (!batch) {
@@ -574,11 +763,11 @@ export default function ReimbursementDetailPage() {
       <div style={pageShellStyle}>
         <PageHeader
           theme={theme}
-          title={locale === "en" ? "Reimbursement batch" : "代墊批次"}
+          title={copy.pageTitle}
           subtitle={batchId}
           actions={
             <Link href="/payments" style={actionButtonLinkStyle()}>
-              {locale === "en" ? "Back to payments" : "返回結算治理"}
+              {copy.backToPayments}
             </Link>
           }
         />
@@ -586,13 +775,8 @@ export default function ReimbursementDetailPage() {
           <Banner
             theme={theme}
             tone="danger"
-            title={locale === "en" ? "Batch unavailable" : "找不到批次"}
-            body={
-              error ??
-              (locale === "en"
-                ? "The reimbursement batch route resolves, but the batch was not found."
-                : "Route 已建立，但找不到對應的代墊批次資料。")
-            }
+            title={copy.batchUnavailable}
+            body={error ?? copy.batchUnavailableBody}
           />
         </div>
       </div>
@@ -601,30 +785,33 @@ export default function ReimbursementDetailPage() {
 
   const workflowState = getWorkflowState(batch);
   const workflowIndex = WORKFLOW_STEPS.indexOf(workflowState);
-  const lineItemRows = buildLineItemRows(batch);
-  const timelineEntries = buildTimeline(batch);
+  const lineItemRows = buildLineItemRows(batch, locale);
+  const timelineEntries = buildTimeline(batch, locale);
   const statusTone = workflowTone(workflowState);
+  const workflowSequence = WORKFLOW_STEPS.map((step) =>
+    workflowLabel(locale, step),
+  ).join(" → ");
   const lineItemColumns: CanvasTableColumn<LineItemRow>[] = [
     {
-      h: locale === "en" ? "RECIPIENT" : "RECIPIENT",
+      h: copy.tableHeaders.recipient,
       w: 220,
       r: (row: LineItemRow) => row.recipient,
     },
     {
-      h: locale === "en" ? "AMOUNT" : "AMOUNT",
+      h: copy.tableHeaders.amount,
       w: 140,
       mono: true,
       align: "right",
       r: (row: LineItemRow) => row.amount,
     },
     {
-      h: locale === "en" ? "SOURCE REFERENCE" : "SOURCE REFERENCE",
+      h: copy.tableHeaders.sourceReference,
       w: 220,
       mono: true,
       r: (row: LineItemRow) => row.sourceReference,
     },
     {
-      h: locale === "en" ? "NOTE" : "NOTE",
+      h: copy.tableHeaders.note,
       r: (row: LineItemRow) => row.note,
     },
   ];
@@ -639,25 +826,28 @@ export default function ReimbursementDetailPage() {
           >
             <span style={monoStyle}>{batch.batchId}</span>
             <Pill theme={theme} tone={statusTone} dot>
-              {workflowLabel(workflowState)}
+              {workflowLabel(locale, workflowState)}
             </Pill>
           </span>
         }
-        subtitle={`${batch.driverId} · ${formatMoney(batch.totalAmount)} · 6-state reimbursement workflow`}
+        subtitle={copy.headerSubtitle(
+          batch.driverId,
+          formatMoney(batch.totalAmount),
+        )}
         actions={
           <>
             <Link
               href="/payments/reimbursements"
               style={actionButtonLinkStyle()}
             >
-              {locale === "en" ? "Queue" : "批次佇列"}
+              {copy.queue}
             </Link>
             <Btn
               theme={theme}
               icon="copy"
               onClick={() => setApprovalReceipt(batch.batchId)}
             >
-              {locale === "en" ? "Copy batch ID" : "複製批次 ID"}
+              {copy.copyBatchId}
             </Btn>
           </>
         }
@@ -668,7 +858,7 @@ export default function ReimbursementDetailPage() {
           <Banner
             theme={theme}
             tone="danger"
-            title={locale === "en" ? "Refresh failed" : "重新整理失敗"}
+            title={copy.refreshFailed}
             body={error}
           />
         ) : null}
@@ -677,11 +867,7 @@ export default function ReimbursementDetailPage() {
           <Banner
             theme={theme}
             tone="warn"
-            title={
-              locale === "en"
-                ? "Fallback reimbursement detail"
-                : "Fallback 代墊批次詳情"
-            }
+            title={copy.fallbackDetailTitle}
             body={fallbackWarning}
           />
         ) : null}
@@ -689,37 +875,23 @@ export default function ReimbursementDetailPage() {
         <Banner
           theme={theme}
           tone="info"
-          title={
-            locale === "en"
-              ? "Audit-derived workflow view"
-              : "Audit-derived workflow 視圖"
-          }
-          body={
-            locale === "en"
-              ? "The six-state stepper matches the canvas while underlying contract data is derived from batch approval, remittance, and payment timestamps."
-              : "六狀態 stepper 對齊 canvas；目前狀態由 batch 的核准、匯款憑證與付款時間推導呈現。"
-          }
+          title={copy.workflowBannerTitle}
+          body={copy.workflowBannerBody}
         />
 
         {approvalReceipt ? (
           <Banner
             theme={theme}
             tone="success"
-            title={locale === "en" ? "Audit receipt" : "稽核收據"}
+            title={copy.receiptTitle}
             body={approvalReceipt}
           />
         ) : null}
 
         <Card
           theme={theme}
-          title={
-            locale === "en" ? "State machine · Q-ADM12" : "狀態機 · Q-ADM12"
-          }
-          subtitle={
-            locale === "en"
-              ? "draft → pending approval → approved → exported → paid → reconciled"
-              : "draft → pending approval → approved → exported → paid → reconciled"
-          }
+          title={copy.stateMachineTitle}
+          subtitle={workflowSequence}
         >
           <div style={stepperStyle}>
             {WORKFLOW_STEPS.map((step, index) => {
@@ -737,7 +909,7 @@ export default function ReimbursementDetailPage() {
                   <div
                     style={{ fontSize: 12.5, fontWeight: active ? 700 : 600 }}
                   >
-                    {workflowLabel(step)}
+                    {workflowLabel(locale, step)}
                   </div>
                 </div>
               );
@@ -746,75 +918,83 @@ export default function ReimbursementDetailPage() {
         </Card>
 
         <div style={heroGridStyle}>
-          <Card theme={theme} title="Header">
+          <Card theme={theme} title={copy.headerTitle}>
             <DL
               theme={theme}
               cols={2}
               items={[
-                { k: "BATCH ID", v: batch.batchId, mono: true },
-                { k: "DRIVER", v: batch.driverId, mono: true },
-                { k: "STATEMENT", v: batch.statementId, mono: true },
-                { k: "PERIOD", v: batch.periodMonth, mono: true },
+                { k: copy.detailLabels.batchId, v: batch.batchId, mono: true },
+                { k: copy.detailLabels.driver, v: batch.driverId, mono: true },
                 {
-                  k: "TOTAL AMOUNT",
+                  k: copy.detailLabels.statement,
+                  v: batch.statementId,
+                  mono: true,
+                },
+                {
+                  k: copy.detailLabels.period,
+                  v: batch.periodMonth,
+                  mono: true,
+                },
+                {
+                  k: copy.detailLabels.totalAmount,
                   v: formatMoney(batch.totalAmount),
                   mono: true,
                 },
-                { k: "STATE", v: workflowLabel(workflowState), mono: true },
                 {
-                  k: "APPROVED AT",
+                  k: copy.detailLabels.state,
+                  v: workflowLabel(locale, workflowState),
+                  mono: true,
+                },
+                {
+                  k: copy.detailLabels.approvedAt,
                   v: batch.approvedAt ? formatDateTime(batch.approvedAt) : "—",
                   mono: true,
                 },
                 {
-                  k: "PAID AT",
+                  k: copy.detailLabels.paidAt,
                   v: batch.paidAt ? formatDateTime(batch.paidAt) : "—",
                   mono: true,
                 },
                 {
-                  k: "REMITTANCE PROOF",
+                  k: copy.detailLabels.remittanceProof,
                   v: batch.remittanceProofId ?? "—",
                   mono: true,
                 },
-                { k: "LINE ITEMS", v: String(batch.items.length), mono: true },
+                {
+                  k: copy.detailLabels.lineItems,
+                  v: String(batch.items.length),
+                  mono: true,
+                },
               ]}
             />
           </Card>
 
           <Card
             theme={theme}
-            title={locale === "en" ? "Approve reason flow" : "核准原因流程"}
-            subtitle={
-              locale === "en"
-                ? "High-risk action requires a reason before approval."
-                : "高風險操作在核准前必須填寫原因。"
-            }
+            title={copy.approveFlowTitle}
+            subtitle={copy.approveFlowSubtitle}
           >
             <div style={actionPanelStyle}>
               <label style={{ display: "grid", gap: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 700 }}>
-                  {locale === "en" ? "Approval reason" : "核准原因"}
+                  {copy.approvalReason}
                 </span>
                 <textarea
                   value={approveReason}
                   onChange={(event) => setApproveReason(event.target.value)}
-                  placeholder={
-                    locale === "en"
-                      ? "Explain sponsor exposure, evidence, or audit context."
-                      : "說明 sponsor exposure、佐證或 audit context。"
-                  }
+                  placeholder={copy.approvalPlaceholder}
                   style={textAreaStyle}
                 />
               </label>
 
               <label style={{ display: "grid", gap: 8 }}>
                 <span style={{ fontSize: 12, fontWeight: 700 }}>
-                  {locale === "en" ? "Remittance proof" : "匯款憑證"}
+                  {copy.remittanceProof}
                 </span>
                 <input
                   value={remittanceProofId}
                   onChange={(event) => setRemittanceProofId(event.target.value)}
-                  placeholder="wire_20260602_001"
+                  placeholder={copy.remittanceProofPlaceholder}
                   style={{
                     width: "100%",
                     boxSizing: "border-box",
@@ -832,7 +1012,7 @@ export default function ReimbursementDetailPage() {
                 <Banner
                   theme={theme}
                   tone="danger"
-                  title={locale === "en" ? "Action failed" : "操作失敗"}
+                  title={copy.actionFailed}
                   body={approvalError}
                 />
               ) : null}
@@ -845,13 +1025,7 @@ export default function ReimbursementDetailPage() {
                   disabled={Boolean(batch.approvedAt) || savingAction !== null}
                   onClick={() => void handleApprove()}
                 >
-                  {savingAction === "approve"
-                    ? locale === "en"
-                      ? "Saving…"
-                      : "儲存中…"
-                    : locale === "en"
-                      ? "Approve"
-                      : "核准"}
+                  {savingAction === "approve" ? copy.saving : copy.approve}
                 </Btn>
                 <Btn
                   theme={theme}
@@ -864,13 +1038,7 @@ export default function ReimbursementDetailPage() {
                   }
                   onClick={() => void handleMarkPaid()}
                 >
-                  {savingAction === "paid"
-                    ? locale === "en"
-                      ? "Saving…"
-                      : "儲存中…"
-                    : locale === "en"
-                      ? "Mark paid"
-                      : "標記已付款"}
+                  {savingAction === "paid" ? copy.saving : copy.markPaid}
                 </Btn>
               </div>
             </div>
@@ -878,14 +1046,7 @@ export default function ReimbursementDetailPage() {
         </div>
 
         <div style={heroGridStyle}>
-          <Card
-            theme={theme}
-            title={
-              locale === "en"
-                ? "State timeline · audit-derived"
-                : "狀態時間軸 · audit-derived"
-            }
-          >
+          <Card theme={theme} title={copy.stateTimelineTitle}>
             <div style={timelineListStyle}>
               {timelineEntries.map((entry, index) => (
                 <div key={`${entry.title}-${index}`} style={timelineItemStyle}>
@@ -923,54 +1084,29 @@ export default function ReimbursementDetailPage() {
 
           <Card
             theme={theme}
-            title={locale === "en" ? "Batch summary" : "批次摘要"}
-            subtitle={
-              locale === "en"
-                ? usingFallbackData
-                  ? "Canvas body density rendered from route-local fallback finance context."
-                  : "Canvas body density with route-local finance context."
-                : usingFallbackData
-                  ? "以 route-local fallback finance context 補齊 canvas body 密度。"
-                  : "以 route-local finance context 補齊 canvas body 密度。"
-            }
+            title={copy.batchSummaryTitle}
+            subtitle={copy.batchSummarySubtitle(usingFallbackData)}
           >
             <div style={{ display: "grid", gap: 10, fontSize: 12.5 }}>
               <div>
-                <strong>
-                  {locale === "en" ? "Approval gate:" : "核准關卡："}
-                </strong>{" "}
+                <strong>{copy.approvalGate}:</strong>{" "}
                 {batch.approvedAt
-                  ? locale === "en"
-                    ? "Completed"
-                    : "已完成"
-                  : locale === "en"
-                    ? "Pending super-admin signoff"
-                    : "待 super-admin 簽核"}
+                  ? copy.approvalGateComplete
+                  : copy.approvalGatePending}
               </div>
               <div>
-                <strong>
-                  {locale === "en" ? "Export posture:" : "匯出姿態："}
-                </strong>{" "}
+                <strong>{copy.exportPosture}:</strong>{" "}
                 {batch.remittanceProofId
-                  ? locale === "en"
-                    ? "Proof attached"
-                    : "已附憑證"
-                  : locale === "en"
-                    ? "Not exported yet"
-                    : "尚未匯出"}
+                  ? copy.exportPostureAttached
+                  : copy.exportPosturePending}
               </div>
               <div>
-                <strong>
-                  {locale === "en" ? "Settlement target:" : "結算對象："}
-                </strong>{" "}
+                <strong>{copy.settlementTarget}:</strong>{" "}
                 <span style={monoStyle}>{batch.driverId}</span>
               </div>
               <div>
-                <strong>
-                  {locale === "en" ? "Evidence scope:" : "佐證範圍："}
-                </strong>{" "}
-                {lineItemRows.length}{" "}
-                {locale === "en" ? "line items" : "筆 line item"}
+                <strong>{copy.evidenceScope}:</strong> {lineItemRows.length}{" "}
+                {copy.lineItemsUnit}
               </div>
             </div>
           </Card>
@@ -978,12 +1114,8 @@ export default function ReimbursementDetailPage() {
 
         <Card
           theme={theme}
-          title={locale === "en" ? "Line items" : "Line items"}
-          subtitle={
-            locale === "en"
-              ? `${lineItemRows.length} sources contributing to the batch total.`
-              : `${lineItemRows.length} 筆來源構成此批次總額。`
-          }
+          title={copy.lineItemsTitle}
+          subtitle={copy.lineItemsSubtitle(lineItemRows.length)}
           padding={0}
         >
           {lineItemRows.length > 0 ? (
@@ -997,9 +1129,7 @@ export default function ReimbursementDetailPage() {
             <div
               style={{ padding: 18, color: theme.textMuted, fontSize: 12.5 }}
             >
-              {locale === "en"
-                ? "No reimbursement line items were returned for this batch."
-                : "此批次目前沒有可顯示的 reimbursement line item。"}
+              {copy.noLineItems}
             </div>
           )}
         </Card>

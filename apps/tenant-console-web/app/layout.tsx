@@ -4,13 +4,13 @@ import { TenantShell } from "@/components/tenant-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Tenant Console",
-  description: "Tenant administration workspace shell for DRTS Phase 1.",
+  title: "DRTS 租戶控制台",
+  description: "DRTS 第一階段租戶管理工作台。",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="zh-Hant">
       <body>
         <TenantShell>{children}</TenantShell>
       </body>

@@ -8,6 +8,7 @@ import type {
 } from "@drts/contracts";
 import { createTenantClient } from "@drts/api-client";
 import { API_URL, DEMO_ACTOR_ID, DEMO_TENANT_ID } from "@/lib/api-client";
+import { formatTenantUiError, toTenantErrorMessage } from "@/lib/error-copy";
 
 type TenantBookingCommandResponse = {
   bookingId: string;
@@ -29,7 +30,7 @@ function buildCrossAppLinks(
       resourceType: "booking",
       resourceId: bookingId,
       openMode: "new_tab",
-      label: "Open ops booking board",
+      label: "開啟營運訂單看板",
     },
     {
       targetApp: "platform-admin",
@@ -37,7 +38,7 @@ function buildCrossAppLinks(
       resourceType: "audit_log",
       resourceId: requestId,
       openMode: "new_tab",
-      label: "Open platform audit view",
+      label: "開啟平台稽核檢視",
     },
   ];
 }
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
 
     if (!booking?.bookingId) {
       return NextResponse.json(
-        { error: "Backend did not return a booking identifier." },
+        { error: "後端沒有回傳訂單編號，請稍後再試。" },
         { status: 502 },
       );
     }
@@ -96,8 +97,8 @@ export async function POST(request: NextRequest) {
       status: receiptStatus,
       message:
         receiptStatus === "accepted"
-          ? "Booking command accepted. External confirmation is still pending."
-          : "Booking created. Review approval and dispatch status on the detail page.",
+          ? "租戶指令已受理，正在等待外部派遣系統確認。"
+          : "叫車已建立，請在明細頁查看審批與派遣狀態。",
     };
 
     return NextResponse.json({
@@ -115,10 +116,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Booking create rejected by backend.",
+        error: formatTenantUiError(
+          toTenantErrorMessage(error, "建立叫車失敗。"),
+          "建立叫車失敗",
+        ),
       },
       { status: 502 },
     );

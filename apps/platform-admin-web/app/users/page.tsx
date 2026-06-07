@@ -10,6 +10,10 @@ import {
   type ReactNode,
 } from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
+import {
+  formatPlatformUiError,
+  toPlatformErrorMessage,
+} from "@/lib/error-copy";
 import { useTranslation } from "@/lib/i18n";
 import {
   formatPlatformCodeLabel,
@@ -269,6 +273,7 @@ export default function UsersPage() {
           inviteTitle: "Invite platform staff",
           inviteSubtitle:
             "Create an internal user record and assign the initial role before the user enters any tenant or ops workflow.",
+          inviteEmailPlaceholder: "ops@platform.demo",
           colName: "NAME",
           colEmail: "EMAIL",
           colRole: "ROLE",
@@ -300,19 +305,20 @@ export default function UsersPage() {
         }
       : {
           title: "平台人員",
-          subtitle: "6 個角色 · RBAC 守門以後端為準",
+          subtitle: "6 個角色 · 權限守門以後端為準",
           refresh: t("common.refresh"),
           refreshing: "重新整理中…",
           invite: "邀請",
           inviteTitle: "邀請平台人員",
           inviteSubtitle:
-            "先建立內部使用者主檔與初始角色，再讓該使用者進入 tenant 或 ops workflow。",
-          colName: "NAME",
-          colEmail: "EMAIL",
-          colRole: "ROLE",
-          colStatus: "STATUS",
+            "先建立內部使用者主檔與初始角色，再讓該使用者進入租戶或營運工作流程。",
+          inviteEmailPlaceholder: "例如：ops@platform.demo",
+          colName: "姓名",
+          colEmail: "電子郵件",
+          colRole: "角色",
+          colStatus: "狀態",
           colUpdated: "更新",
-          colActions: "ACTIONS",
+          colActions: "操作",
           actionRole: "更新角色",
           actionSuspend: "停用",
           actionActivate: "啟用",
@@ -342,11 +348,19 @@ export default function UsersPage() {
       const result = await client.listPlatformAdminUsers();
       setUsers(result ?? []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e, t("common.unknown")),
+          locale === "en"
+            ? "Unable to load platform users"
+            : "無法載入平台人員",
+        ),
+      );
     } finally {
       setLoading(false);
     }
-  }, [client, t]);
+  }, [client, locale, t]);
 
   useEffect(() => {
     void loadUsers();
@@ -377,7 +391,15 @@ export default function UsersPage() {
       resetInvite();
       await loadUsers();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : t("common.unknown"));
+      setError(
+        formatPlatformUiError(
+          locale,
+          toPlatformErrorMessage(e, t("common.unknown")),
+          locale === "en"
+            ? "Unable to invite platform user"
+            : "無法邀請平台人員",
+        ),
+      );
     } finally {
       setCreating(false);
     }
@@ -396,12 +418,20 @@ export default function UsersPage() {
         setPendingAction(null);
         await loadUsers();
       } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : t("common.unknown"));
+        setError(
+          formatPlatformUiError(
+            locale,
+            toPlatformErrorMessage(e, t("common.unknown")),
+            locale === "en"
+              ? "Unable to update platform user"
+              : "無法更新平台人員",
+          ),
+        );
       } finally {
         setUpdatingUserId(null);
       }
     },
-    [client, loadUsers, t],
+    [client, loadUsers, locale, t],
   );
 
   const handleConfirm = async () => {
@@ -566,7 +596,7 @@ export default function UsersPage() {
                     value={formEmail}
                     onChange={(event) => setFormEmail(event.target.value)}
                     required
-                    placeholder="staff@platform.drts"
+                    placeholder={copy.inviteEmailPlaceholder}
                     style={controlStyle(theme)}
                   />
                 </CanvasField>

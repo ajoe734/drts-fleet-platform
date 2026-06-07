@@ -11,42 +11,37 @@ export default function RecordingUnavailablePage() {
   return (
     <div className="page-shell">
       <section className="hero-card tone-warning">
-        <span className="section-kicker">Recording unavailable</span>
-        <h1>Raw recording callback remains an ops-only follow-up step.</h1>
+        <span className="section-kicker">錄音不可用</span>
+        <h1>錄音回補仍需由營運端處理。</h1>
         <p>
-          The portal can open sessions, create orders, quote ETA, and manage
-          callbacks, but it does not pretend to own the CTI callback binding
-          path. Recording callback remains explicit because production telephony
-          activation is still gated.
+          此入口可開啟通話、建立訂單、回報預估抵達與管理回覆，但不會假裝擁有錄音系統的綁定權限。
         </p>
       </section>
 
       <section className="detail-grid">
         <article className="panel-card tone-warning">
-          <span className="section-kicker">Current desk posture</span>
-          <h2>{desk ? desk.deskName : "Desk not selected"}</h2>
+          <span className="section-kicker">目前櫃台狀態</span>
+          <h2>{desk ? desk.deskName : "尚未選擇櫃台"}</h2>
           <p>
             {session?.activeCallId
-              ? `Active call session: ${session.activeCallId}`
-              : "No active desk session is currently open in local state."}
+              ? `進行中通話：${session.activeCallId}`
+              : "目前本機狀態中沒有開啟中的櫃台通話。"}
           </p>
           <div className="inline-actions">
             <Link className="primary-link" href="/callbacks">
-              Route to callback follow-up
+              前往回覆追蹤
             </Link>
             <Link className="secondary-link" href="/lookup">
-              Review order lookup
+              查看訂單查詢
             </Link>
           </div>
         </article>
 
         <article className="panel-card">
-          <span className="section-kicker">Escalation seam</span>
-          <h2>Ops callcenter owns attach-recording-callback.</h2>
+          <span className="section-kicker">營運交接</span>
+          <h2>錄音綁定由營運客服中心負責。</h2>
           <p>
-            This mirrors the current backend truth: callcenter supports
-            `attach-recording-callback`, but the assisted-entry portal does not
-            surface raw recording evidence management as a primary desk action.
+            後端目前支援錄音回補，但客服代訂入口不會把原始錄音證據管理當成櫃台主要操作。
           </p>
           <div className="inline-actions">
             <a
@@ -55,7 +50,7 @@ export default function RecordingUnavailablePage() {
               rel="noreferrer"
               target="_blank"
             >
-              Open ops callcenter
+              開啟營運客服中心
             </a>
           </div>
         </article>

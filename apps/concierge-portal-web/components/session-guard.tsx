@@ -17,12 +17,9 @@ export function SessionGuard({
   if (!ready) {
     return (
       <section className="panel-card">
-        <span className="section-kicker">Bootstrap</span>
-        <h2>Loading local portal session.</h2>
-        <p>
-          This route waits for the repo-local assisted-entry bootstrap because
-          dedicated call-point auth is still gated outside the repo.
-        </p>
+        <span className="section-kicker">工作階段</span>
+        <h2>正在載入本機客服代訂工作階段。</h2>
+        <p>此頁需要先確認目前操作人員與櫃台狀態，請稍候。</p>
       </section>
     );
   }
@@ -30,15 +27,14 @@ export function SessionGuard({
   if (!session) {
     return (
       <section className="panel-card tone-warning">
-        <span className="section-kicker">Sign-in required</span>
-        <h2>Desk bootstrap has not been created yet.</h2>
+        <span className="section-kicker">需要登入</span>
+        <h2>尚未建立櫃台工作階段。</h2>
         <p>
-          Use the repo-local sign-in route first, then choose a fixed site
-          before opening bookings, lookup, or callback follow-up.
+          請先透過本機登入建立操作人員身分，再選擇固定站點，才能建立代訂、查詢訂單或處理回覆。
         </p>
         <div className="inline-actions">
           <Link className="primary-link" href="/login">
-            Open bootstrap sign-in
+            開啟登入
           </Link>
         </div>
       </section>
@@ -48,15 +44,12 @@ export function SessionGuard({
   if (requireDesk && !desk) {
     return (
       <section className="panel-card tone-warning">
-        <span className="section-kicker">Desk selection required</span>
-        <h2>Select the fixed site first.</h2>
-        <p>
-          Phase 1 requires every call point to be bound to a site before proxy
-          booking starts. The portal keeps that selection explicit.
-        </p>
+        <span className="section-kicker">需要選擇櫃台</span>
+        <h2>請先選擇固定站點。</h2>
+        <p>每個電話站點或客服櫃台都必須綁定固定站點後，才能開始代訂流程。</p>
         <div className="inline-actions">
           <Link className="primary-link" href="/start">
-            Choose site-bound desk
+            選擇站點櫃台
           </Link>
         </div>
       </section>

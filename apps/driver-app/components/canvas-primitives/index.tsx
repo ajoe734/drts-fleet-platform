@@ -40,7 +40,7 @@ export const driverCanvasTheme: DriverCanvasTheme = {
   accentHi: "#A9D6FF",
   accentBg: "#0F2236",
   accentBorder: "#1B3A5A",
-  surfaceName: "Driver App",
+  surfaceName: "司機端",
   surfaceTagline: "多平台駕駛工作台",
   fontFamily: UI_FONT,
   monoFamily: MONO_FONT ?? "monospace",

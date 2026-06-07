@@ -6,6 +6,8 @@ import {
 } from "./actions";
 import type { PreferenceRow } from "./actions";
 import { describeRoleSnapshot, getTenantRoleSnapshot } from "@/lib/rbac";
+import { formatPortalUiError } from "@/lib/error-copy";
+import { formatPortalCodeLabel } from "@/lib/localized-labels";
 
 export default async function NotificationsPage() {
   const { preferences, error: fetchError } = await getNotificationPreferences();
@@ -14,16 +16,17 @@ export default async function NotificationsPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Notification Preferences"
+        title="通知偏好"
         description={
           roleSnapshot.capabilities.canWriteNotifications
-            ? "Configure which events are sent to which channels."
-            : `Viewing as ${describeRoleSnapshot(roleSnapshot)}. This role can review notification posture but cannot change it.`
+            ? "設定哪些事件要送往哪些通知通道。"
+            : `目前以 ${describeRoleSnapshot(roleSnapshot)} 身分檢視。這個角色可查看通知設定，但無法修改。`
         }
       >
         {fetchError && (
           <div className="error-banner">
-            <strong>Error loading preferences:</strong> {fetchError}
+            <strong>載入通知偏好失敗：</strong>{" "}
+            {formatPortalUiError(fetchError, "無法載入通知偏好")}
           </div>
         )}
 
@@ -32,10 +35,10 @@ export default async function NotificationsPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Event Type</th>
-                  <th>Email</th>
-                  <th>Webhook</th>
-                  <th>Ops Console</th>
+                  <th>事件類型</th>
+                  <th>電子郵件</th>
+                  <th>回呼</th>
+                  <th>營運控制台</th>
                 </tr>
               </thead>
               <tbody>
@@ -44,7 +47,7 @@ export default async function NotificationsPage() {
                 ) : (
                   <tr>
                     <td colSpan={4} className="empty-state">
-                      No notification preferences available.
+                      目前沒有通知偏好資料。
                     </td>
                   </tr>
                 )}
@@ -59,15 +62,15 @@ export default async function NotificationsPage() {
               disabled={!roleSnapshot.capabilities.canWriteNotifications}
             >
               {roleSnapshot.capabilities.canWriteNotifications
-                ? "Save Preferences"
-                : "Read-only"}
+                ? "儲存偏好"
+                : "唯讀"}
             </button>
           </div>
         </form>
 
         <Link className="route-link" href="/" style={{ marginTop: "1rem" }}>
-          <strong>Back to home</strong>
-          Return to the tenant portal overview.
+          <strong>返回首頁</strong>
+          回到租戶入口總覽。
         </Link>
       </AppShellCard>
     </main>
@@ -90,7 +93,7 @@ function buildRows(preferences: PreferenceRow[]) {
     return (
       <tr key={eventType}>
         <td>
-          <code>{eventType}</code>
+          <code>{formatPortalCodeLabel(eventType, eventType)}</code>
         </td>
         {channels.map((ch) => (
           <td key={ch}>
