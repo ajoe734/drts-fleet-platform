@@ -2,15 +2,39 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 const ENABLED_PROJECT = "platform-admin-assistant-on";
 const DISABLED_PROJECT = "platform-admin-assistant-off";
+const NAV_LABEL = /Platform Admin navigation|平台管理導覽/;
 
 const routeSmokeTargets = [
   "/",
   "/tenants",
+  "/health",
+  "/notices",
   "/partners/acme-demo",
   "/pricing",
   "/payments",
   "/audit",
+  "/switchboard",
+  "/adapter-registry",
   "/feature-flags",
+] as const;
+
+const LOCALIZATION_LEAK_PATTERNS = [
+  /Unknown error/i,
+  /Request failed/i,
+  /Unable to /i,
+  /\bfetch_failed\b/i,
+  /\bpermission_denied\b/i,
+  /\bnot_provisioned\b/i,
+  /\bexternal_unavailable\b/i,
+  /\bmid_rollout\b/i,
+  /\brolled_out\b/i,
+  /Tenant override/i,
+  /Platform default/i,
+  /Role code /i,
+  /Health signal unavailable/i,
+  /Public info stays on \/switchboard/i,
+  /DRTS Native Dispatch/i,
+  /CityRide Forwarded Orders/i,
 ] as const;
 
 type AssistantMockState = {
@@ -24,6 +48,13 @@ function isEnabledProject(testInfo: TestInfo) {
 
 function isDisabledProject(testInfo: TestInfo) {
   return testInfo.project.name === DISABLED_PROJECT;
+}
+
+async function primeZhLocale(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("drts-locale-v2", "zh");
+    document.cookie = "drts-locale-v2=zh;path=/;max-age=31536000;SameSite=Lax";
+  });
 }
 
 async function mockAssistantApi(page: Page): Promise<AssistantMockState> {
@@ -205,7 +236,7 @@ async function gotoShellRoute(
   }
 
   expect(response?.ok()).toBeTruthy();
-  await expect(page.getByLabel("Platform Admin navigation")).toBeVisible();
+  await expect(page.getByLabel(NAV_LABEL)).toBeVisible();
   await expect(page.locator("main")).toBeVisible();
   if (assistantEnabled) {
     await expect(page.getByTestId("platform-assistant-launcher")).toBeVisible({
@@ -219,12 +250,41 @@ async function expectSingleShellLayout(page: Page) {
   const main = page.locator("main");
 
   await expect(page.locator("aside")).toHaveCount(1);
-  await expect(page.getByLabel("Platform Admin navigation")).toHaveCount(1);
+  await expect(page.getByLabel(NAV_LABEL)).toHaveCount(1);
   await expect(main).toHaveCount(1);
   await expect(body).toHaveCSS("overflow", "hidden");
 }
 
+async function expectNoLocalizationLeaks(page: Page, route: string) {
+  const [bodyText, placeholderText] = await Promise.all([
+    page.locator("body").innerText(),
+    page
+      .locator("input[placeholder], textarea[placeholder]")
+      .evaluateAll((elements) =>
+        elements
+          .map((element) => element.getAttribute("placeholder") ?? "")
+          .filter(Boolean)
+          .join("\n"),
+      ),
+  ]);
+
+  for (const pattern of LOCALIZATION_LEAK_PATTERNS) {
+    expect(
+      bodyText,
+      `Unexpected untranslated text on ${route}: ${pattern}`,
+    ).not.toMatch(pattern);
+    expect(
+      placeholderText,
+      `Unexpected untranslated placeholder on ${route}: ${pattern}`,
+    ).not.toMatch(pattern);
+  }
+}
+
 test.describe("platform admin assistant overlay", () => {
+  test.beforeEach(async ({ page }) => {
+    await primeZhLocale(page);
+  });
+
   test("feature flag off hides the launcher", async ({ page }, testInfo) => {
     test.skip(!isDisabledProject(testInfo));
 
@@ -374,6 +434,14 @@ test.describe("platform admin assistant overlay", () => {
     expect(mockState.lastMessage).toContain(
       "Available actions: refresh_payments",
     );
+    // Context mesh v2: the deterministic route layer is serialized with the
+    // stable header lines, then the operator question is appended.
+    expect(mockState.lastMessage).toContain("Refresh tier:");
+    expect(mockState.lastMessage).toContain("Warnings:");
+    expect(mockState.lastMessage).toContain("[Operator question]");
+    expect(mockState.lastMessage).toContain(
+      "What should I check before changing payments?",
+    );
   });
 
   test("renders governed action confirmation and receipt for assistant-authored write proposals", async ({
@@ -417,5 +485,63 @@ test.describe("platform admin assistant overlay", () => {
       await gotoShellRoute(page, route, { assistantEnabled: true });
       await expectSingleShellLayout(page);
     }
+  });
+
+  test("zh routes do not leak common English errors or internal codes", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isDisabledProject(testInfo));
+    test.setTimeout(90_000);
+
+    for (const route of routeSmokeTargets) {
+      await gotoShellRoute(page, route);
+      await page.waitForTimeout(600);
+      await expectNoLocalizationLeaks(page, route);
+    }
+  });
+
+  test("sidebar keeps the bottom scroll position after selecting a lower nav item and reloading", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isDisabledProject(testInfo));
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width: 1440, height: 620 });
+
+    await gotoShellRoute(page, "/audit");
+
+    const nav = page.getByLabel(NAV_LABEL);
+    const featureFlagsLink = page.getByRole("link", {
+      name: /Feature Flags|功能旗標/,
+    });
+
+    const initialScroll = await nav.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      return {
+        maxScrollTop: element.scrollHeight - element.clientHeight,
+        scrollTop: element.scrollTop,
+      };
+    });
+
+    expect(initialScroll.maxScrollTop).toBeGreaterThan(0);
+    expect(initialScroll.scrollTop).toBeGreaterThanOrEqual(
+      Math.max(initialScroll.maxScrollTop - 32, 0),
+    );
+
+    await featureFlagsLink.click();
+    await page.waitForURL("**/feature-flags");
+    await expect(featureFlagsLink).toBeVisible();
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(nav).toBeVisible();
+    await expect(featureFlagsLink).toBeVisible();
+
+    const restoredScroll = await nav.evaluate((element) => ({
+      maxScrollTop: element.scrollHeight - element.clientHeight,
+      scrollTop: element.scrollTop,
+    }));
+
+    expect(restoredScroll.scrollTop).toBeGreaterThanOrEqual(
+      Math.max(restoredScroll.maxScrollTop - 32, 0),
+    );
   });
 });

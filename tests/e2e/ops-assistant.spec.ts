@@ -10,6 +10,17 @@ const ENABLED_PROJECT = "ops-assistant-on";
 const DISABLED_PROJECT = "ops-assistant-off";
 const CASE_NO = "CMP-001";
 const FORCE_DISABLED_KEY = "ops-console.assistant.force-disabled";
+const LOCALE_STORAGE_KEY = "drts-locale-v2";
+
+const OPS_LOCALIZATION_LEAK_PATTERNS = [
+  /Unknown error/i,
+  /Request failed/i,
+  /Unable to /i,
+  /\bfetch_failed\b/i,
+  /\bpermission_denied\b/i,
+  /\bnot_provisioned\b/i,
+  /\bexternal_unavailable\b/i,
+] as const;
 
 function buildEnvelope<T>(data: T) {
   return {
@@ -85,19 +96,25 @@ async function primeProjectState(page: Page, testInfo: TestInfo) {
     ({
       forceDisabledKey,
       disabled,
+      localeStorageKey,
     }: {
       forceDisabledKey: string;
       disabled: boolean;
+      localeStorageKey: string;
     }) => {
       if (disabled) {
         window.localStorage.setItem(forceDisabledKey, "true");
       } else {
         window.localStorage.removeItem(forceDisabledKey);
       }
+
+      window.localStorage.setItem(localeStorageKey, "zh");
+      document.cookie = `${localeStorageKey}=zh;path=/;max-age=31536000;SameSite=Lax`;
     },
     {
       forceDisabledKey: FORCE_DISABLED_KEY,
       disabled: isDisabledProject(testInfo),
+      localeStorageKey: LOCALE_STORAGE_KEY,
     },
   );
 }
@@ -198,6 +215,16 @@ async function openAssistant(page: Page) {
   }
   await expect(panel).toBeVisible();
   return { launcher, panel };
+}
+
+async function expectNoOpsLocalizationLeaks(page: Page, route: string) {
+  const bodyText = await page.locator("body").innerText();
+  for (const pattern of OPS_LOCALIZATION_LEAK_PATTERNS) {
+    expect(
+      bodyText,
+      `Unexpected untranslated text on ${route}: ${pattern}`,
+    ).not.toMatch(pattern);
+  }
 }
 
 test.describe("ops assistant verification", () => {
@@ -307,21 +334,15 @@ test.describe("ops assistant verification", () => {
       .fill("What refresh tier does this page use?");
     await page.getByTestId("ops-assistant-send").click();
     await expect(
-      page.getByText(
-        "Citation: apps/ops-console-web/app/dashboard/page.tsx:1645",
-      ),
+      page.getByText("引用：apps/ops-console-web/app/dashboard/page.tsx:1645"),
     ).toBeVisible();
 
     await page
       .getByTestId("ops-assistant-composer")
       .fill("What actions are available for the current case?");
     await page.getByTestId("ops-assistant-send").click();
-    await expect(
-      page.getByText(`Scoped to complaint:${CASE_NO}.`),
-    ).toBeVisible();
-    await expect(
-      page.getByText(/availableActions: escalate_to_incident/),
-    ).toBeVisible();
+    await expect(page.getByText(`目前範圍為客訴 ${CASE_NO}。`)).toBeVisible();
+    await expect(page.getByText(/可用動作：升級為事故/)).toBeVisible();
   });
 
   test("tier2 actions stay confirm-gated and emit audit evidence", async ({
@@ -333,12 +354,13 @@ test.describe("ops assistant verification", () => {
     await openAssistant(page);
 
     await page.getByTestId("ops-assistant-action-escalate_to_incident").click();
-    await expect(
-      page.getByText("Pending intent · escalate_to_incident"),
-    ).toBeVisible();
+    await expect(page.getByText("待處理意圖 · 升級為事故")).toBeVisible();
     await page.getByTestId("ops-assistant-open-confirmation").click();
 
-    const confirmButton = page.getByRole("button", { name: /Confirm|確認/ });
+    const confirmButton = page.getByRole("button", {
+      name: "確認",
+      exact: true,
+    });
     await expect(confirmButton).toBeDisabled();
     await page
       .getByLabel(/Escalation reason|升級原因/)
@@ -347,9 +369,9 @@ test.describe("ops assistant verification", () => {
     await confirmButton.click();
 
     await expect(
-      page.getByText(/auditId audit-CMP-001-escalate_to_incident/),
+      page.getByText(/稽核編號 audit-CMP-001-escalate_to_incident/),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: /View audit/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /檢視稽核/ })).toBeVisible();
   });
 
   test("degraded LLM path falls back to curated help search", async ({
@@ -371,12 +393,22 @@ test.describe("ops assistant verification", () => {
       .fill("How does incident confirmation work?");
     await page.getByTestId("ops-assistant-send").click();
     await expect(
-      page.getByText("LLM degraded. Showing curated help-search fallback."),
+      page.getByText("LLM 已降級，改顯示整理過的說明搜尋備援。"),
     ).toBeVisible();
     await expect(
       page.getByText(
-        "Citation: apps/ops-console-web/app/incidents/[incidentId]/incident-detail-action-panel.tsx:257",
+        "引用：apps/ops-console-web/app/incidents/[incidentId]/incident-detail-action-panel.tsx:257",
       ),
     ).toBeVisible();
+  });
+
+  test("zh complaint route does not leak common English errors or internal codes", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isDisabledProject(testInfo));
+
+    await gotoComplaints(page);
+    await page.waitForTimeout(400);
+    await expectNoOpsLocalizationLeaks(page, "/complaints");
   });
 });

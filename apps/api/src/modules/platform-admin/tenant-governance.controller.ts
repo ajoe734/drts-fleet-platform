@@ -1,10 +1,14 @@
 import { Controller, Get, Headers, Query } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import type { PlatformTenantGovernanceSummaryQuery } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { PlatformTenantGovernanceService } from "./tenant-governance.service";
 
+// Read-heavy admin console surface — see PlatformAdminController for rationale.
+@Throttle(READ_HEAVY_RATE_LIMIT)
 @Controller("admin")
 export class PlatformTenantGovernanceController {
   constructor(
