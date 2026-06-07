@@ -2,22 +2,19 @@
 
 Real provider gateway for Platform Admin assistant
 
-- Status: `backlog`
-- Owner: `Gemini`
-- Reviewer: `Claude2`
+- Status: `done`
+- Owner: `Codex`
+- Reviewer: `Claude`
 - Planning Ref: `docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md`
-- Last Update: `2026-06-03T00:00:00Z`
+- Last Update: `2026-06-03T13:45:29Z`
 
 ## 中文說明
 
-把 Platform Admin assistant 從 mock-only provider 升級成 dev 可使用真實 LLM
-provider 的 gateway。前端不可取得 provider key/model 設定，所有 provider
-credential 只存在 API runtime / Secret Manager。
+把 Platform Admin assistant / OpenClaw runtime 從 mock-only provider 升級成 dev 可使用真實 LLM provider 的 gateway。
 
 ## Short Summary
 
-Implement real provider adapters and runtime config enforcement for the Platform
-Admin assistant.
+Scope clarified for direct OpenClaw adoption: the real provider gateway must serve OpenClaw-backed assistant runs, not only the legacy mock chat path.
 
 ## Dependencies
 
@@ -25,13 +22,7 @@ Admin assistant.
 
 ## Acceptance
 
-- `PlatformAdminAssistantProviderKind` supports at least `mock` plus one real provider.
-- API runtime reads provider/model/key/budget settings from backend-only env vars.
-- Missing real provider key fails fast outside local/CI mock fallback policy.
-- Dev deploy can run with `LLM_GATEWAY_PROVIDER` set to a real provider.
-- Provider telemetry records provider kind, model, token estimates, latency, and degraded state.
-- Frontend receives no provider key, provider slug, or model identifiers.
-- Targeted unit tests cover mock fallback, missing key, real provider selection, and budget config.
+- See task brief acceptance checklist
 
 ## Artifacts
 
@@ -42,6 +33,5 @@ Admin assistant.
 
 ## Guardrails
 
-- Do not put provider credentials in `platform-admin-web`.
-- Do not make mock responses appear as production-ready dev behavior.
-- Keep local/CI deterministic by retaining mock mode.
+- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes.
+- Treat `current-work.md` as a human summary, not canonical machine context.

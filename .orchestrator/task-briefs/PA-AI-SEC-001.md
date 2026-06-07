@@ -1,22 +1,20 @@
 # Task Brief: PA-AI-SEC-001
 
-Platform Admin assistant safety, policy, redaction, and audit hardening
+Platform Admin assistant safety policy redaction and audit hardening
 
-- Status: `backlog`
+- Status: `done`
 - Owner: `Codex2`
-- Reviewer: `Claude`
+- Reviewer: `Codex`
 - Planning Ref: `docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md`
-- Last Update: `2026-06-03T00:00:00Z`
+- Last Update: `2026-06-03T13:25:08Z`
 
 ## 中文說明
 
-建立 agentic assistant 的安全底座：RBAC、tool policy、prompt injection
-防護、redaction、budget、rate limit、human confirmation、audit、dev/prod mode
-差異。
+建立 agentic assistant 的安全底座：RBAC、tool policy、prompt injection 防護、redaction、budget、rate limit、human confirmation 與 audit。
 
 ## Short Summary
 
-Harden the assistant before broad tool execution and worker dispatch.
+Owner closeout complete. Reviewed commit 94bc2704 remains accepted; added metadata-only closeout commit 0bab558d with required Verification field, pushed to origin/codex2/pa-ai-sec-001. Verification: pnpm --dir apps/api test -- --run…
 
 ## Dependencies
 
@@ -24,13 +22,7 @@ Harden the assistant before broad tool execution and worker dispatch.
 
 ## Acceptance
 
-- Policy engine classifies tool calls by family, actor scope, environment, and risk.
-- Prompt-injection tests cover page content, docs, tool output, and assistant transcript history.
-- Redaction removes secrets, API keys, tokens, private headers, and once-only credentials before provider calls.
-- Budget/rate limits are enforced and surfaced as degraded state.
-- Assistant audit entries include session id, run id, actor id, tool name, risk level, and receipt id when applicable.
-- Dev/staging/prod environment policies are explicit and tested.
-- Security docs include OpenClaw-style sidecar risk boundaries and why direct unrestricted embedding is forbidden.
+- See task brief acceptance checklist
 
 ## Artifacts
 
@@ -42,6 +34,5 @@ Harden the assistant before broad tool execution and worker dispatch.
 
 ## Guardrails
 
-- No assistant tool may widen the current actor's permissions.
-- No provider request may contain raw secrets.
-- No high-risk write may execute without reason and confirmation.
+- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes.
+- Treat `current-work.md` as a human summary, not canonical machine context.

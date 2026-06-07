@@ -1728,6 +1728,25 @@ def sync_docs_site() -> None:
             shutil.copy2(path, DOCS_SITE_DIR / target_name)
 
 
+def sync_task_briefs(state: dict[str, Any]) -> None:
+    orchestrator_dir = ROOT / ".orchestrator"
+    if not orchestrator_dir.exists():
+        return
+    sys.path.insert(0, str(orchestrator_dir))
+    try:
+        from common import ensure_task_brief, load_config  # type: ignore
+
+        config = load_config(orchestrator_dir / "config.json")
+        for task in state.get("tasks", []):
+            if isinstance(task, dict) and task.get("id"):
+                ensure_task_brief(config, task=task, status=state, runtime_state=state)
+    finally:
+        try:
+            sys.path.remove(str(orchestrator_dir))
+        except ValueError:
+            pass
+
+
 def sync_all(state: dict[str, Any]) -> None:
     sync_canonical_document_metadata(state)
     normalize_state_agents(state)
@@ -1737,6 +1756,7 @@ def sync_all(state: dict[str, Any]) -> None:
     recompute_workload(state)
     state["updated_at"] = iso_now()
     save_state(state)
+    sync_task_briefs(state)
     logs = load_logs()
     write_current_work(state, logs)
     sync_docs_site()

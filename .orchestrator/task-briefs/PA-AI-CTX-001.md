@@ -2,21 +2,19 @@
 
 Platform Admin assistant page/form/table context mesh v2
 
-- Status: `backlog`
-- Owner: `Claude2`
-- Reviewer: `Codex`
+- Status: `done`
+- Owner: `Codex`
+- Reviewer: `Claude`
 - Planning Ref: `docs/05-ui/platform-admin-agentic-assistant-architecture-plan-20260603.md`
-- Last Update: `2026-06-03T00:00:00Z`
+- Last Update: `2026-06-03T13:51:28Z`
 
 ## 中文說明
 
-讓小幫手能理解目前 Platform Admin 頁面的 route、tab、visible records、form
-fields、validation errors、selected rows、available actions，而不是只送 pathname。
+讓 OpenClaw 驅動的小幫手能理解目前 Platform Admin 頁面的 route、tab、visible records、form fields、validation errors、selected rows 與 available actions。
 
 ## Short Summary
 
-Create a bounded assistant-readable context packet for Platform Admin pages and
-forms.
+Owner finalized approved platform-admin context mesh v2, added closeout metadata commit, pushed branch, and recorded branch-only integration status. Verification: prettier check on task files, eslint on task files, platform-admin-web typecheck. E2E remains integration-layer…
 
 ## Dependencies
 
@@ -24,22 +22,15 @@ forms.
 
 ## Acceptance
 
-- Context packet schema `platform_admin_assistant_context.v2` is documented and typed.
-- Current route context includes pathname, page title, active tab, refresh tier, visible entity refs, and warnings.
-- Form registry exposes field labels, values, validation errors, dirty state, and allowed assistant-fill behavior.
-- Table/list registry exposes bounded visible rows and selected records without dumping entire datasets.
-- Assistant overlay sends context packet separately from raw user prompt or with a clearly delimited context envelope.
-- Unit or e2e tests verify `/payments`, `/tenants`, `/partners`, and `/pricing` context packets.
+- See task brief acceptance checklist
 
 ## Artifacts
 
-- `apps/platform-admin-web/components/assistant/route-context.ts`
 - `apps/platform-admin-web/components/assistant/`
 - `apps/platform-admin-web/app/**/page.tsx`
 - `tests/e2e/platform-admin-assistant-overlay.spec.ts`
 
 ## Guardrails
 
-- Do not use arbitrary DOM scraping as source of truth.
-- Keep context bounded and redacted.
-- Sensitive data must come from caller-scoped API read tools, not raw DOM dumps.
+- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes.
+- Treat `current-work.md` as a human summary, not canonical machine context.
