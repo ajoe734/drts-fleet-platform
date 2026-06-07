@@ -43,14 +43,21 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+import { ASSISTANT_CONTEXT_SCHEMA } from "./assistant-types";
 import type {
+  AssistantAvailableAction,
+  AssistantContextPacket,
   AssistantEntityRef,
+  AssistantFormContext,
+  AssistantFormFieldContext,
   AssistantQueryInput,
   AssistantRouteContext,
   AssistantRouteDescriptor,
+  AssistantTableContext,
   PageContextSnapshot,
   PlatformAdminRouteKey,
   RouteContextWarning,
@@ -106,6 +113,12 @@ export type PlatformAdminAssistantPageBridge = {
   filters?: Record<string, AssistantFilterAdapter>;
   drafts?: Record<string, AssistantDraftAdapter>;
   crossAppLinks?: Record<string, CrossAppResourceLink>;
+  /**
+   * Live, page-owned context snapshot for the context mesh v2. The overlay
+   * calls this at send-time so the packet reflects current selection, form
+   * values, validation errors, and visible rows.
+   */
+  getContextSnapshot?: () => PageContextSnapshot | undefined;
 };
 
 // ---------------------------------------------------------------------------
@@ -691,6 +704,313 @@ export function buildRouteContext(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Context mesh v2 — bounded, privacy-filtered context packet
+// ---------------------------------------------------------------------------
+
+export const ASSISTANT_CONTEXT_LIMITS = {
+  maxTables: 6,
+  maxTableColumns: 12,
+  maxSampleRows: 5,
+  maxForms: 6,
+  maxFormFields: 24,
+  maxValidationErrors: 12,
+  maxActions: 16,
+  maxValuePreview: 64,
+} as const;
+
+function truncatePreview(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= ASSISTANT_CONTEXT_LIMITS.maxValuePreview) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, ASSISTANT_CONTEXT_LIMITS.maxValuePreview - 1)}…`;
+}
+
+function sanitizeFormField(
+  field: AssistantFormFieldContext,
+): AssistantFormFieldContext {
+  const sensitive = field.sensitive === true || field.kind === "secret";
+  const base: AssistantFormFieldContext = {
+    name: field.name,
+    filled: field.filled === true,
+  };
+  if (field.label !== undefined) {
+    base.label = field.label;
+  }
+  if (field.kind !== undefined) {
+    base.kind = field.kind;
+  }
+  if (field.required !== undefined) {
+    base.required = field.required;
+  }
+  if (sensitive) {
+    base.sensitive = true;
+    return base;
+  }
+  if (field.valuePreview !== undefined && field.valuePreview.length > 0) {
+    base.valuePreview = truncatePreview(field.valuePreview);
+  }
+  return base;
+}
+
+function sanitizeForm(form: AssistantFormContext): AssistantFormContext {
+  return {
+    formId: form.formId,
+    ...(form.title !== undefined ? { title: form.title } : {}),
+    dirty: form.dirty === true,
+    ...(form.submitting !== undefined ? { submitting: form.submitting } : {}),
+    fields: form.fields
+      .slice(0, ASSISTANT_CONTEXT_LIMITS.maxFormFields)
+      .map(sanitizeFormField),
+    validationErrors: form.validationErrors.slice(
+      0,
+      ASSISTANT_CONTEXT_LIMITS.maxValidationErrors,
+    ),
+  };
+}
+
+function sanitizeTable(table: AssistantTableContext): AssistantTableContext {
+  const next: AssistantTableContext = {
+    tableId: table.tableId,
+    visibleRowCount: Math.max(0, Math.trunc(table.visibleRowCount)),
+  };
+  if (table.title !== undefined) {
+    next.title = table.title;
+  }
+  if (table.totalRowCount !== undefined) {
+    next.totalRowCount = Math.max(0, Math.trunc(table.totalRowCount));
+  }
+  if (table.columns) {
+    next.columns = table.columns.slice(
+      0,
+      ASSISTANT_CONTEXT_LIMITS.maxTableColumns,
+    );
+  }
+  if (table.rowEntityKind !== undefined) {
+    next.rowEntityKind = table.rowEntityKind;
+  }
+  if (table.sampleRows) {
+    next.sampleRows = table.sampleRows.slice(
+      0,
+      ASSISTANT_CONTEXT_LIMITS.maxSampleRows,
+    );
+  }
+  if (table.activeFilter !== undefined) {
+    next.activeFilter = table.activeFilter;
+  }
+  return next;
+}
+
+function sanitizeAction(
+  action: AssistantAvailableAction,
+): AssistantAvailableAction {
+  const next: AssistantAvailableAction = {
+    id: action.id,
+    label: action.label,
+    enabled: action.enabled === true,
+  };
+  if (action.risk !== undefined) {
+    next.risk = action.risk;
+  }
+  if (action.disabledReasonCode !== undefined) {
+    next.disabledReasonCode = action.disabledReasonCode;
+  }
+  if (action.requiresConfirmation !== undefined) {
+    next.requiresConfirmation = action.requiresConfirmation;
+  }
+  return next;
+}
+
+export function buildAssistantContextPacket(
+  pathname: string,
+  query?: AssistantQueryInput,
+  pageState?: PageContextSnapshot,
+  userIntent?: { rawPrompt: string; locale: "zh" | "en" },
+): AssistantContextPacket {
+  const routeContext = buildRouteContext(pathname, query, pageState);
+
+  const selectedRecords: AssistantEntityRef[] = routeContext.visibleEntityRefs
+    .filter((ref) => ref.source === "page-selection")
+    .map((ref) => ({ ...ref }));
+
+  const visibleTables = (pageState?.tables ?? [])
+    .slice(0, ASSISTANT_CONTEXT_LIMITS.maxTables)
+    .map(sanitizeTable);
+  const forms = (pageState?.forms ?? [])
+    .slice(0, ASSISTANT_CONTEXT_LIMITS.maxForms)
+    .map(sanitizeForm);
+  const availableActions = (pageState?.availableActions ?? [])
+    .slice(0, ASSISTANT_CONTEXT_LIMITS.maxActions)
+    .map(sanitizeAction);
+
+  return {
+    schema: ASSISTANT_CONTEXT_SCHEMA,
+    route: {
+      pathname: routeContext.pathname,
+      routeKey: routeContext.routeKey,
+      title: routeContext.title,
+      section: routeContext.section,
+      activeTab: routeContext.activeTab,
+      availableTabs: routeContext.availableTabs,
+      refreshTier: routeContext.refreshTier,
+      routeImplemented: routeContext.routeImplemented,
+    },
+    page: {
+      visibleEntityRefs: routeContext.visibleEntityRefs,
+      selectedRecords,
+      visibleTables,
+      visibleWarnings: routeContext.warnings,
+      availableActions,
+    },
+    forms,
+    ...(userIntent ? { userIntent } : {}),
+    generatedFrom: {
+      route: routeContext.generatedFrom.route,
+      query: routeContext.generatedFrom.query,
+      pageSelection: routeContext.generatedFrom.pageSelection,
+      pageTables: visibleTables.length > 0,
+      pageForms: forms.length > 0,
+      pageActions: availableActions.length > 0,
+    },
+  };
+}
+
+export function serializeAssistantContextPacket(
+  packet: AssistantContextPacket,
+  locale: "zh" | "en",
+): string {
+  const { route, page, forms } = packet;
+
+  const entityRefs =
+    page.visibleEntityRefs.length > 0
+      ? page.visibleEntityRefs
+          .map((entity) => `${entity.kind}:${entity.id}`)
+          .join(", ")
+      : "none";
+  const warnings =
+    page.visibleWarnings.length > 0
+      ? page.visibleWarnings
+          .map((warning) => `${warning.code}: ${warning.message[locale]}`)
+          .join("; ")
+      : "none";
+
+  const lines: string[] = [
+    "[Platform Admin route context]",
+    `Path: ${route.pathname}`,
+    `Page: ${route.title[locale]}`,
+    `Active tab: ${route.activeTab ?? "none"}`,
+    `Refresh tier: ${route.refreshTier}`,
+    `Visible entities: ${entityRefs}`,
+    `Warnings: ${warnings}`,
+  ];
+
+  if (
+    page.visibleTables.length > 0 ||
+    page.selectedRecords.length > 0 ||
+    page.availableActions.length > 0
+  ) {
+    lines.push("", "[Page context]");
+
+    if (page.visibleTables.length > 0) {
+      lines.push(
+        `Visible tables: ${page.visibleTables
+          .map((table) => {
+            const count =
+              table.totalRowCount !== undefined &&
+              table.totalRowCount !== table.visibleRowCount
+                ? `${table.visibleRowCount}/${table.totalRowCount} rows`
+                : `${table.visibleRowCount} rows`;
+            const cols =
+              table.columns && table.columns.length > 0
+                ? `; columns: ${table.columns
+                    .map((col) => col.label ?? col.key)
+                    .join(", ")}`
+                : "";
+            const filter = table.activeFilter
+              ? `; filter: ${table.activeFilter}`
+              : "";
+            return `${table.title ?? table.tableId} (${count}${cols}${filter})`;
+          })
+          .join("; ")}`,
+      );
+    }
+
+    if (page.selectedRecords.length > 0) {
+      lines.push(
+        `Selected records: ${page.selectedRecords
+          .map((ref) =>
+            ref.label
+              ? `${ref.kind}:${ref.id} (${ref.label})`
+              : `${ref.kind}:${ref.id}`,
+          )
+          .join(", ")}`,
+      );
+    }
+
+    if (page.availableActions.length > 0) {
+      lines.push(
+        `Available actions: ${page.availableActions
+          .map((action) => {
+            const tags = [
+              action.risk ?? "low",
+              action.enabled
+                ? action.requiresConfirmation
+                  ? "requires confirmation"
+                  : "ready"
+                : `disabled${
+                    action.disabledReasonCode
+                      ? `:${action.disabledReasonCode}`
+                      : ""
+                  }`,
+            ];
+            return `${action.label} [${tags.join(", ")}]`;
+          })
+          .join("; ")}`,
+      );
+    }
+  }
+
+  if (forms.length > 0) {
+    lines.push("", "[Forms]");
+    for (const form of forms) {
+      const flags = [form.dirty ? "dirty" : "pristine"];
+      if (form.submitting) {
+        flags.push("submitting");
+      }
+      const fieldSummary =
+        form.fields.length > 0
+          ? form.fields
+              .map((field) => {
+                const state = field.filled
+                  ? field.sensitive
+                    ? "filled(redacted)"
+                    : field.valuePreview
+                      ? `filled "${field.valuePreview}"`
+                      : "filled"
+                  : `empty${field.required ? "(required)" : ""}`;
+                return `${field.name}=${state}`;
+              })
+              .join(", ")
+          : "no fields";
+      lines.push(
+        `${form.title ?? form.formId} (${flags.join(", ")}): ${fieldSummary}`,
+      );
+      if (form.validationErrors.length > 0) {
+        lines.push(
+          `  errors: ${form.validationErrors
+            .map((err) =>
+              err.field ? `${err.field}: ${err.message}` : err.message,
+            )
+            .join("; ")}`,
+        );
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
 type PlatformAdminRouteContextValue = {
   pathname: string;
   pageBridge: PlatformAdminAssistantPageBridge | null;
@@ -821,15 +1141,48 @@ export function usePlatformAdminAssistantPage(
   bridge: PlatformAdminAssistantPageBridge,
 ) {
   const { setPageBridge } = usePlatformAdminRouteContext();
+  const latestBridgeRef = useRef(bridge);
+  const stableBridgeRef = useRef<PlatformAdminAssistantPageBridge | null>(null);
+
+  latestBridgeRef.current = bridge;
+
+  if (stableBridgeRef.current === null) {
+    stableBridgeRef.current = createStablePageBridgeProxy(
+      () => latestBridgeRef.current,
+    );
+  }
 
   useEffect(() => {
-    setPageBridge(bridge);
+    setPageBridge(stableBridgeRef.current);
     return () => {
       setPageBridge(null);
     };
-  }, [bridge, setPageBridge]);
+  }, [setPageBridge]);
 }
 
 export function usePlatformAdminAssistantRouteContext() {
   return usePlatformAdminRouteContext();
+}
+
+export function createStablePageBridgeProxy(
+  getCurrentBridge: () => PlatformAdminAssistantPageBridge,
+): PlatformAdminAssistantPageBridge {
+  return new Proxy(
+    {
+      pageId: getCurrentBridge().pageId,
+      getContextSnapshot() {
+        return getCurrentBridge().getContextSnapshot?.();
+      },
+    } as PlatformAdminAssistantPageBridge,
+    {
+      get(_target, property) {
+        if (property === "getContextSnapshot") {
+          return () => getCurrentBridge().getContextSnapshot?.();
+        }
+        return getCurrentBridge()[
+          property as keyof PlatformAdminAssistantPageBridge
+        ];
+      },
+    },
+  );
 }
