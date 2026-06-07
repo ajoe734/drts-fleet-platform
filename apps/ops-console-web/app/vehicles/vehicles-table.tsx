@@ -7,7 +7,7 @@ import type {
   ResourceActionDescriptor,
 } from "@drts/contracts";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
-import type { Locale } from "@/lib/translations";
+import { t, type Locale } from "@/lib/translations";
 import {
   CanvasIcon,
   CanvasPill as Pill,
@@ -101,8 +101,12 @@ const actionStackStyle: CSSProperties = {
   whiteSpace: "normal",
 };
 
-function copy(locale: Locale, en: string, zh: string) {
-  return locale === "zh" ? zh : en;
+function listT(
+  locale: Locale,
+  key: string,
+  params?: Record<string, string | number>,
+) {
+  return t(`vehicles.list.${key}`, locale, params);
 }
 
 function linkButtonStyle(
@@ -200,13 +204,13 @@ function actionTone(action: ResourceActionDescriptor): CanvasTone {
 function actionLabel(action: ResourceActionDescriptor, locale: Locale) {
   switch (action.action) {
     case "open_vehicle_detail":
-      return copy(locale, "Vehicle detail", "車輛詳情");
+      return listT(locale, "table.action.vehicleDetail");
     case "open_driver_binding":
-      return copy(locale, "Driver binding", "司機綁定");
+      return listT(locale, "table.action.driverBinding");
     case "review_maintenance":
-      return copy(locale, "Maintenance", "保修檢視");
+      return listT(locale, "table.action.maintenance");
     case "open_fleet_governance":
-      return copy(locale, "Fleet governance", "車隊治理");
+      return listT(locale, "table.action.fleetGovernance");
     default:
       return formatOpsCodeLabel(locale, action.action);
   }
@@ -218,11 +222,7 @@ function actionReason(action: ResourceActionDescriptor, locale: Locale) {
   }
 
   if (action.disabledReasonCode === "vehicle_detail_pending") {
-    return copy(
-      locale,
-      "Detail route ships in UI-FE-OPS-VEHID.",
-      "詳情路由由 UI-FE-OPS-VEHID 交付。",
-    );
+    return listT(locale, "table.action.reason.detailPending");
   }
 
   return formatOpsCodeLabel(locale, action.disabledReasonCode);
@@ -291,9 +291,9 @@ function renderAction(
         </span>
       )}
       <span style={tinyMetaStyle(actionTone(action))}>
-        {copy(locale, `risk:${action.riskLevel}`, `風險:${action.riskLevel}`)}
+        {listT(locale, "table.action.risk", { level: action.riskLevel })}
         {action.requiresReason
-          ? copy(locale, " · reason required", " · 需填原因")
+          ? listT(locale, "table.action.reasonRequired")
           : ""}
       </span>
       {!action.enabled && reason ? (
@@ -309,7 +309,7 @@ function buildColumns(
 ): CanvasTableColumn<VehicleRow>[] {
   return [
     {
-      h: copy(locale, "VEHICLE", "車輛"),
+      h: listT(locale, "table.col.vehicle"),
       w: 200,
       r: (row) => (
         <div style={stackStyle}>
@@ -321,7 +321,7 @@ function buildColumns(
       ),
     },
     {
-      h: copy(locale, "TYPE / STATUS", "類型 / 狀態"),
+      h: listT(locale, "table.col.typeStatus"),
       w: 220,
       r: (row) => (
         <div style={stackStyle}>
@@ -335,7 +335,7 @@ function buildColumns(
       ),
     },
     {
-      h: copy(locale, "DISPATCHABLE", "派遣可用"),
+      h: listT(locale, "table.col.dispatchable"),
       w: 250,
       r: (row) => (
         <div style={stackStyle}>
@@ -346,20 +346,20 @@ function buildColumns(
               dot
             >
               {row.dispatchable
-                ? copy(locale, "yes", "可派")
-                : copy(locale, "no", "不可派")}
+                ? listT(locale, "table.dispatchable.yes")
+                : listT(locale, "table.dispatchable.no")}
             </Pill>
           </div>
           <span style={secondaryTextStyle}>
             {row.blockedReasonLabels.length > 0
               ? row.blockedReasonLabels.join(" / ")
-              : copy(locale, "No blocking gate", "無阻塞 gate")}
+              : listT(locale, "table.dispatchable.noGate")}
           </span>
         </div>
       ),
     },
     {
-      h: copy(locale, "CURRENT DRIVER", "當前司機"),
+      h: listT(locale, "table.col.currentDriver"),
       w: 200,
       r: (row) => (
         <div style={stackStyle}>
@@ -372,33 +372,33 @@ function buildColumns(
             </Link>
           ) : (
             <span style={primaryTextStyle}>
-              {copy(locale, "Unbound", "未綁定")}
+              {listT(locale, "table.driver.unbound")}
             </span>
           )}
           <span style={{ ...secondaryTextStyle, ...monoTextStyle }}>
-            {row.currentShiftId ??
-              copy(locale, "No active shift", "無啟用班次")}
+            {row.currentShiftId ?? listT(locale, "table.driver.noActiveShift")}
           </span>
         </div>
       ),
     },
     {
-      h: copy(locale, "COMPLIANCE", "法遵覆蓋"),
+      h: listT(locale, "table.col.compliance"),
       w: 210,
       r: (row) => (
         <div style={stackStyle}>
           <span style={secondaryTextStyle}>
-            {copy(locale, "Contract", "合約")} · {row.contractLabel}
+            {listT(locale, "table.compliance.contract")} · {row.contractLabel}
           </span>
           <span style={secondaryTextStyle}>
-            {copy(locale, "Insurance", "保險")} · {row.insuranceLabel}
+            {listT(locale, "table.compliance.insurance")} ·{" "}
+            {row.insuranceLabel}
           </span>
           <span style={mutedTextStyle}>{row.debrandDueLabel}</span>
         </div>
       ),
     },
     {
-      h: copy(locale, "MAINT / LAST SEEN", "保修 / 最近訊號"),
+      h: listT(locale, "table.col.maintLastSeen"),
       w: 210,
       r: (row) => (
         <div style={stackStyle}>
@@ -412,9 +412,8 @@ function buildColumns(
           </div>
           <span style={secondaryTextStyle}>
             {row.nextMaintenanceAt
-              ? copy(locale, "Next due", "下次保修") +
-                ` · ${row.nextMaintenanceAt}`
-              : copy(locale, "No open work order", "無未結工單")}
+              ? `${listT(locale, "table.maintenance.nextDue")} · ${row.nextMaintenanceAt}`
+              : listT(locale, "table.maintenance.noOpenWorkOrder")}
           </span>
           <span style={{ ...mutedTextStyle, ...monoTextStyle }}>
             {row.lastSeenLabel}
@@ -423,7 +422,7 @@ function buildColumns(
       ),
     },
     {
-      h: copy(locale, "ACTIONS", "操作"),
+      h: listT(locale, "table.col.actions"),
       w: 250,
       r: (row) => (
         <div style={actionStackStyle}>
