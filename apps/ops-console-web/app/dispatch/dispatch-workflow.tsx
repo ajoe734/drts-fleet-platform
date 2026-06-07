@@ -26,6 +26,7 @@ import { CanvasActivityFeed, CanvasEmptyPanel } from "@/lib/canvas-workflow";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { t as translate } from "@/lib/translations";
 import {
   AuthorityBadge,
   DetailMetadataGrid,
@@ -308,7 +309,7 @@ function formatEta(
 ): { display: string; tooltip: string } {
   if (etaMinutes === null || etaMinutes === undefined) {
     return {
-      display: "N/A",
+      display: translate("common.notAvailable", locale),
       tooltip: getOpsLabel(locale, "dispatchEtaUnavailable"),
     };
   }
@@ -316,7 +317,9 @@ function formatEta(
     ? new Date(updatedAt).toLocaleTimeString()
     : getOpsLabel(locale, "unknown");
   return {
-    display: `${etaMinutes} min`,
+    display: translate("dispatch.workflow.etaMinutes", locale, {
+      count: etaMinutes,
+    }),
     tooltip: getOpsLabel(locale, "dispatchLastUpdated", { value: updated }),
   };
 }
@@ -326,7 +329,7 @@ function formatDateTime(
   value: string | null | undefined,
 ): string {
   if (!value) {
-    return "-";
+    return translate("common.dash", locale);
   }
 
   return new Date(value).toLocaleString(locale === "zh" ? "zh-TW" : "en-US", {
@@ -387,6 +390,8 @@ function getOverrideStatusLabel(
       return "dispatch.workflow.override.rejected";
     case "expired":
       return "dispatch.workflow.override.expired";
+    default:
+      return "dispatch.workflow.override.pending";
   }
 }
 
@@ -401,6 +406,8 @@ function getOverrideStatusTone(
     case "rejected":
       return "bg-rose-100 text-rose-800";
     case "expired":
+      return "bg-slate-100 text-slate-700";
+    default:
       return "bg-slate-100 text-slate-700";
   }
 }
@@ -453,14 +460,17 @@ function getActivityCanvasTone(
 }
 
 function buildFallbackActivityEntries(
+  locale: "en" | "zh",
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
 ): DispatchActivityEntry[] {
   const entries: DispatchActivityEntry[] = [
     {
       id: `${order.orderId}:created`,
-      title: "Order created",
-      body: `${order.orderNo} entered the owned dispatch queue.`,
+      title: translate("dispatch.workflow.activity.orderCreated.title", locale),
+      body: translate("dispatch.workflow.activity.orderCreated.body", locale, {
+        orderNo: order.orderNo,
+      }),
       at: order.createdAt,
       tone: "default",
     },
@@ -469,8 +479,18 @@ function buildFallbackActivityEntries(
   if (job) {
     entries.push({
       id: `${job.dispatchJobId}:job`,
-      title: "Dispatch job active",
-      body: `Job ${job.dispatchJobId} is ${job.status}.`,
+      title: translate(
+        "dispatch.workflow.activity.dispatchJobActive.title",
+        locale,
+      ),
+      body: translate(
+        "dispatch.workflow.activity.dispatchJobActive.body",
+        locale,
+        {
+          jobId: job.dispatchJobId,
+          status: formatOpsCodeLabel(locale, job.status),
+        },
+      ),
       at: job.updatedAt,
       tone: getActivityTone(job.status),
     });
@@ -479,8 +499,20 @@ function buildFallbackActivityEntries(
   if (order.dispatchTimeout) {
     entries.push({
       id: `${order.orderId}:timeout`,
-      title: "Dispatch timeout",
-      body: `Timeout escalated as ${order.dispatchTimeout.escalationAction}.`,
+      title: translate(
+        "dispatch.workflow.activity.dispatchTimeout.title",
+        locale,
+      ),
+      body: translate(
+        "dispatch.workflow.activity.dispatchTimeout.body",
+        locale,
+        {
+          action: formatOpsCodeLabel(
+            locale,
+            order.dispatchTimeout.escalationAction,
+          ),
+        },
+      ),
       at: order.dispatchTimeout.timeoutAt,
       tone: "warn",
     });
@@ -489,8 +521,21 @@ function buildFallbackActivityEntries(
   if (order.noSupplyEscalation) {
     entries.push({
       id: `${order.orderId}:no-supply`,
-      title: "No supply escalation",
-      body: `Attempt ${order.noSupplyEscalation.attemptCount} escalated via ${order.noSupplyEscalation.escalationAction}.`,
+      title: translate(
+        "dispatch.workflow.activity.noSupplyEscalation.title",
+        locale,
+      ),
+      body: translate(
+        "dispatch.workflow.activity.noSupplyEscalation.body",
+        locale,
+        {
+          count: order.noSupplyEscalation.attemptCount,
+          action: formatOpsCodeLabel(
+            locale,
+            order.noSupplyEscalation.escalationAction,
+          ),
+        },
+      ),
       at: order.noSupplyEscalation.escalatedAt,
       tone: "warn",
     });
@@ -499,16 +544,40 @@ function buildFallbackActivityEntries(
   if (order.exceptionHold) {
     entries.push({
       id: `${order.orderId}:hold`,
-      title: "Exception hold raised",
-      body: `Reason: ${order.exceptionHold.reasonCode}.`,
+      title: translate(
+        "dispatch.workflow.activity.exceptionHoldRaised.title",
+        locale,
+      ),
+      body: translate(
+        "dispatch.workflow.activity.exceptionHoldRaised.body",
+        locale,
+        {
+          reason: formatOpsCodeLabel(locale, order.exceptionHold.reasonCode),
+        },
+      ),
       at: order.exceptionHold.raisedAt,
       tone: "critical",
     });
     if (order.exceptionHold.overrideRequest) {
       entries.push({
         id: order.exceptionHold.overrideRequest.overrideRequestId,
-        title: "Override request",
-        body: `${order.exceptionHold.overrideRequest.status} by ${order.exceptionHold.overrideRequest.requestedBy.actorId}.`,
+        title: translate(
+          "dispatch.workflow.activity.overrideRequest.title",
+          locale,
+        ),
+        body: translate(
+          "dispatch.workflow.activity.overrideRequest.body",
+          locale,
+          {
+            status: translate(
+              getOverrideStatusLabel(
+                order.exceptionHold.overrideRequest.status,
+              ),
+              locale,
+            ),
+            actor: order.exceptionHold.overrideRequest.requestedBy.actorId,
+          },
+        ),
         at: order.exceptionHold.overrideRequest.requestedAt,
         tone: "warn",
       });
@@ -516,8 +585,21 @@ function buildFallbackActivityEntries(
     if (order.exceptionHold.resolution) {
       entries.push({
         id: `${order.orderId}:resolution`,
-        title: "Exception resolved",
-        body: `${order.exceptionHold.resolution.actorId} recorded ${order.exceptionHold.resolution.resolution}.`,
+        title: translate(
+          "dispatch.workflow.activity.exceptionResolved.title",
+          locale,
+        ),
+        body: translate(
+          "dispatch.workflow.activity.exceptionResolved.body",
+          locale,
+          {
+            actor: order.exceptionHold.resolution.actorId,
+            resolution: formatOpsCodeLabel(
+              locale,
+              order.exceptionHold.resolution.resolution,
+            ),
+          },
+        ),
         at: order.exceptionHold.resolution.resolvedAt,
         tone: "default",
       });
@@ -527,8 +609,17 @@ function buildFallbackActivityEntries(
   if (order.manualFareOverride) {
     entries.push({
       id: `${order.orderId}:fare-override`,
-      title: "Manual fare override",
-      body: `${order.manualFareOverride.actorId} applied a fare override.`,
+      title: translate(
+        "dispatch.workflow.activity.manualFareOverride.title",
+        locale,
+      ),
+      body: translate(
+        "dispatch.workflow.activity.manualFareOverride.body",
+        locale,
+        {
+          actor: order.manualFareOverride.actorId,
+        },
+      ),
       at: order.manualFareOverride.overriddenAt,
       tone: "warn",
     });
@@ -1412,7 +1503,10 @@ export function DispatchWorkflow({
     : [];
   const selectedEta = selectedJob
     ? formatEta(locale, selectedJob.latestEtaMinutes, selectedJob.updatedAt)
-    : { display: "-", tooltip: t("dispatch.workflow.noJobEta") };
+    : {
+        display: t("common.dash"),
+        tooltip: t("dispatch.workflow.noJobEta"),
+      };
   const selectedComplianceGates = selectedOrder?.complianceGates ?? [];
   const selectedActiveGates = selectedComplianceGates.filter(
     (gate) => gate.state !== "clear",
@@ -1440,7 +1534,7 @@ export function DispatchWorkflow({
     ? selectedOrder.reservationWindowStart && selectedOrder.reservationWindowEnd
       ? `${formatDateTime(locale, selectedOrder.reservationWindowStart)} - ${formatDateTime(locale, selectedOrder.reservationWindowEnd)}`
       : t("dispatch.workflow.detail.immediateQueue")
-    : "-";
+    : t("common.dash");
   const selectedActivityEntries = selectedOrder
     ? selectedDispatchTrace.length > 0
       ? selectedDispatchTrace
@@ -1457,7 +1551,7 @@ export function DispatchWorkflow({
             (left, right) =>
               new Date(right.at).getTime() - new Date(left.at).getTime(),
           )
-      : buildFallbackActivityEntries(selectedOrder, selectedJob)
+      : buildFallbackActivityEntries(locale, selectedOrder, selectedJob)
     : [];
   const selectedActivityItems = selectedActivityEntries.map((entry) => ({
     id: entry.id,
@@ -2236,8 +2330,11 @@ export function DispatchWorkflow({
                       {
                         id: "contact",
                         label: t("dispatch.workflow.detail.contact"),
-                        value: selectedOrder.onsiteContact?.name ?? "-",
-                        hint: selectedOrder.onsiteContact?.phone ?? "-",
+                        value:
+                          selectedOrder.onsiteContact?.name ?? t("common.dash"),
+                        hint:
+                          selectedOrder.onsiteContact?.phone ??
+                          t("common.dash"),
                       },
                       {
                         id: "revenue",
@@ -2255,7 +2352,7 @@ export function DispatchWorkflow({
                         value: formatDateTime(locale, selectedOrder.updatedAt),
                         hint: selectedJob
                           ? formatDateTime(locale, selectedJob.updatedAt)
-                          : "-",
+                          : t("common.dash"),
                       },
                       {
                         id: "order-status",
@@ -2269,7 +2366,7 @@ export function DispatchWorkflow({
                         value: selectedJob
                           ? formatOpsCodeLabel(locale, selectedJob.status)
                           : t("dispatch.workflow.noJob"),
-                        hint: selectedJob?.dispatchJobId ?? "-",
+                        hint: selectedJob?.dispatchJobId ?? t("common.dash"),
                       },
                       {
                         id: "service-window",
@@ -2418,7 +2515,7 @@ export function DispatchWorkflow({
                                   )}
                                 </div>
                               ) : (
-                                "-"
+                                t("common.dash")
                               ),
                             hint:
                               selectedDownstreamReviewDuties.length > 0
@@ -2623,7 +2720,7 @@ export function DispatchWorkflow({
                               locale,
                               selectedActivityEntries[0].at,
                             )
-                          : "-",
+                          : t("common.dash"),
                       },
                     ]}
                   />
@@ -2780,7 +2877,10 @@ export function DispatchWorkflow({
                   order.status === "delayed_queue";
                 const etaInfo = job
                   ? formatEta(locale, job.latestEtaMinutes, job.updatedAt)
-                  : { display: "-", tooltip: t("dispatch.workflow.noJobEta") };
+                  : {
+                      display: t("common.dash"),
+                      tooltip: t("dispatch.workflow.noJobEta"),
+                    };
                 const isFocused = focusOrderId === order.orderId;
                 const complianceGates = order.complianceGates ?? [];
                 const activeGates = complianceGates.filter(
