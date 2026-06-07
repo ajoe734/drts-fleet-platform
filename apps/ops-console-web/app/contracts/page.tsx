@@ -271,6 +271,19 @@ function copy(locale: Locale, en: string, zh: string) {
   return locale === "zh" ? zh : en;
 }
 
+function formatPartnerDisplayName(locale: Locale, name: string): string {
+  if (locale !== "zh") {
+    return name;
+  }
+
+  const demoNames: Record<string, string> = {
+    "Bank Demo Alpha Airport Transfer": "銀行示範 Alpha 機場接送",
+    "Bank Demo Beta Airport Transfer": "銀行示範 Beta 機場接送",
+  };
+
+  return demoNames[name] ?? name;
+}
+
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -1424,10 +1437,12 @@ export default async function ContractsPage({
       kindKey: kind.key,
       kindLabel: kind.label(locale),
       partnerId: contract.partnerId,
-      partnerDisplayName:
+      partnerDisplayName: formatPartnerDisplayName(
+        locale,
         contract.partnerDisplayName ??
-        partnerEntry?.displayName ??
-        contract.partnerId,
+          partnerEntry?.displayName ??
+          contract.partnerId,
+      ),
       partnerType: contract.partnerType,
       partnerEntrySlug:
         contract.partnerEntrySlug ?? partnerEntry?.entrySlug ?? null,
@@ -1633,7 +1648,7 @@ export default async function ContractsPage({
     .slice(0, 8)
     .map((entry) => ({
       partnerId: entry.partnerId,
-      displayName: entry.displayName,
+      displayName: formatPartnerDisplayName(locale, entry.displayName),
       entrySlug: entry.entrySlug,
       programId: entry.programId,
       partnerTypeLabel: formatOpsCodeLabel(locale, entry.partnerType),

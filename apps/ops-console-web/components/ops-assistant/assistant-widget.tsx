@@ -87,6 +87,97 @@ function copy(locale: "en" | "zh", en: string, zh: string) {
   return locale === "zh" ? zh : en;
 }
 
+function contextLabel(locale: "en" | "zh", key: string): string {
+  const labels: Record<string, { en: string; zh: string }> = {
+    "/revenue": { en: "Revenue", zh: "收益" },
+    revenue: { en: "Revenue", zh: "收益" },
+    "/drivers": { en: "Drivers", zh: "司機" },
+    drivers: { en: "Drivers", zh: "司機" },
+    "/vehicles": { en: "Vehicles", zh: "車輛" },
+    vehicles: { en: "Vehicles", zh: "車輛" },
+    "/contracts": { en: "Contracts", zh: "合約" },
+    contracts: { en: "Contracts", zh: "合約" },
+    all: { en: "All", zh: "全部" },
+    available: { en: "Available", zh: "可派遣" },
+    on_trip: { en: "On trip", zh: "行程中" },
+    offline: { en: "Offline", zh: "離線" },
+    license_warn: { en: "License warning", zh: "駕照警示" },
+    suppression: { en: "Suppression", zh: "停派" },
+    dispatchable: { en: "Dispatchable", zh: "可派遣" },
+    offboarding: { en: "Offboarding", zh: "退場中" },
+    expiring: { en: "Expiring soon", zh: "即將到期" },
+    partner: { en: "Partner", zh: "合作夥伴" },
+    insight: { en: "Insight", zh: "洞察" },
+    channel: { en: "Channel mix", zh: "通道組成" },
+    matrix: { en: "Settlement matrix", zh: "結算矩陣" },
+    mismatch: { en: "Mismatch review", zh: "差異複核" },
+    today: { en: "Today", zh: "今日" },
+    yesterday: { en: "Yesterday", zh: "昨日" },
+    "7d": { en: "Last 7 days", zh: "近 7 天" },
+    "30d": { en: "Last 30 days", zh: "近 30 天" },
+    yes: { en: "Yes", zh: "是" },
+    no: { en: "No", zh: "否" },
+    q: { en: "Search", zh: "搜尋" },
+    period: { en: "Period", zh: "期別" },
+    serviceBucket: { en: "Service", zh: "服務" },
+    vehicleId: { en: "Vehicle", zh: "車輛" },
+    shift: { en: "Shift", zh: "班次" },
+    platform: { en: "Platform", zh: "平台" },
+    eligibility: { en: "Eligibility", zh: "派遣資格" },
+    status: { en: "Status", zh: "狀態" },
+    type: { en: "Type", zh: "類型" },
+    overdue: { en: "Maintenance overdue", zh: "保修逾期" },
+  };
+
+  const label = labels[key];
+  if (label) {
+    return label[locale];
+  }
+
+  return formatOpsCodeLabel(locale, key);
+}
+
+function formatContextRoute(locale: "en" | "zh", route?: string): string {
+  if (!route) {
+    return "—";
+  }
+
+  const pathname = route.split("?")[0] || route;
+  return contextLabel(locale, pathname);
+}
+
+function formatContextValue(
+  locale: "en" | "zh",
+  value: string | string[] | undefined,
+): string {
+  if (value === undefined) {
+    return "—";
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => formatContextValue(locale, entry)).join("、");
+  }
+  if (!value) {
+    return "—";
+  }
+  return contextLabel(locale, value);
+}
+
+function formatVisibleFilters(
+  locale: "en" | "zh",
+  filters?: Record<string, string | string[]>,
+): string {
+  if (!filters || Object.keys(filters).length === 0) {
+    return "—";
+  }
+
+  return Object.entries(filters)
+    .map(
+      ([key, value]) =>
+        `${contextLabel(locale, key)}：${formatContextValue(locale, value)}`,
+    )
+    .join("；");
+}
+
 function getStreamMessages(locale: "en" | "zh") {
   return [
     copy(
@@ -97,7 +188,7 @@ function getStreamMessages(locale: "en" | "zh") {
     copy(
       locale,
       "Mock stream active. Replace this source with the real assistant transport when the API contract lands.",
-      "模擬串流運作中。待 API 契約落地後，請改接真實的助理傳輸來源。",
+      "模擬串流運作中。待助理介面契約落地後，請改接真實的助理傳輸來源。",
     ),
     copy(
       locale,
@@ -1429,15 +1520,21 @@ export function OpsAssistantWidget() {
                   <dt style={{ color: theme.textDim }}>
                     {copy(locale, "Route", "路由")}
                   </dt>
-                  <dd style={contextValueStyle}>{context?.route ?? "—"}</dd>
+                  <dd style={contextValueStyle}>
+                    {formatContextRoute(locale, context?.route)}
+                  </dd>
                   <dt style={{ color: theme.textDim }}>
                     {copy(locale, "Board", "看板")}
                   </dt>
-                  <dd style={contextValueStyle}>{context?.board ?? "—"}</dd>
+                  <dd style={contextValueStyle}>
+                    {formatContextValue(locale, context?.board)}
+                  </dd>
                   <dt style={{ color: theme.textDim }}>
                     {copy(locale, "Tab", "分頁")}
                   </dt>
-                  <dd style={contextValueStyle}>{context?.activeTab ?? "—"}</dd>
+                  <dd style={contextValueStyle}>
+                    {formatContextValue(locale, context?.activeTab)}
+                  </dd>
                   <dt style={{ color: theme.textDim }}>
                     {copy(locale, "Selection", "目前選取")}
                   </dt>
@@ -1450,9 +1547,7 @@ export function OpsAssistantWidget() {
                     {copy(locale, "Filters", "篩選條件")}
                   </dt>
                   <dd style={contextValueStyle}>
-                    {context?.visibleFilters
-                      ? JSON.stringify(context.visibleFilters)
-                      : "—"}
+                    {formatVisibleFilters(locale, context?.visibleFilters)}
                   </dd>
                 </dl>
               </div>

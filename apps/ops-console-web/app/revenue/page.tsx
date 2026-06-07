@@ -36,7 +36,7 @@ import {
   type ServerCanvasTableColumn as CanvasTableColumn,
 } from "@/components/server-canvas-table";
 import { getOpsClient } from "@/lib/api-client";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
+import { formatOpsCodeLabel, formatOpsCodeList } from "@/lib/localized-labels";
 import {
   buildRevenueInsights,
   formatCompactNumber,
@@ -1713,8 +1713,8 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     const matrixRows = settlementChannels.map((row) => ({
       channelKey: row.channelKey,
       channelLabel: describeMatrixChannel(row.channelKey),
-      orderDomain: row.orderDomain,
-      orderSources: row.orderSources.join(" / "),
+      orderDomain: formatOpsCodeLabel(locale, row.orderDomain),
+      orderSources: formatOpsCodeList(locale, row.orderSources),
       payer: describeMatrixField("payer", row, row.payerType),
       sponsor: describeMatrixField("sponsor", row, row.sponsorType),
       invoiceOwner: describeMatrixField("invoiceOwner", row, row.invoiceOwner),

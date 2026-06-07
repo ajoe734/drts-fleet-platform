@@ -48,6 +48,9 @@ export default async function RootLayout({
               brandLabel={t("app.name", locale)}
               brandSubLabel={t("app.sub", locale)}
               searchPlaceholder={t("common.search", locale)}
+              env={t("app.env", locale)}
+              versionLabel={t("app.version", locale)}
+              avatarLabel={locale === "zh" ? "營" : "OC"}
             >
               {children}
             </OpsShell>

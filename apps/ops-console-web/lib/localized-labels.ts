@@ -191,6 +191,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   fare_version_history: { en: "Fare Version History", zh: "票價版本歷史" },
   filing: { en: "Filing", zh: "申報" },
   fleet_company_partner: { en: "Fleet Company Partner", zh: "車隊合作夥伴" },
+  forwarded: { en: "Forwarded", zh: "轉派" },
   forwarded_shadow: { en: "Forwarded Shadow Order", zh: "轉派鏡像訂單" },
   fresh: { en: "Fresh", zh: "最新" },
   forwarder_broadcast: { en: "Forwarder Broadcast", zh: "轉派廣播" },
@@ -274,6 +275,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   oil_change: { en: "Oil Change", zh: "換油" },
   on_trip: { en: "On Trip", zh: "行程中" },
   open: { en: "Open", zh: "開啟" },
+  owned: { en: "Owned", zh: "自營" },
   override_pending: { en: "Override Pending", zh: "等待覆核" },
   order_cancelled: { en: "Order Cancelled", zh: "訂單已取消" },
   order_exception_hold: { en: "Order Exception Hold", zh: "訂單進入異常暫停" },
@@ -300,7 +302,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
     en: "Partner Airport Transfer",
     zh: "合作方機場接送",
   },
-  partner_api_key: { en: "Partner API Key", zh: "合作夥伴 API 金鑰" },
+  partner_api_key: { en: "Partner API Key", zh: "合作夥伴介面金鑰" },
   portal: { en: "Portal", zh: "入口網站" },
   platform: { en: "Platform", zh: "平台" },
   preassigned: { en: "Preassigned", zh: "預先指派" },
@@ -713,5 +715,7 @@ export function formatOpsCodeList(
     return "-";
   }
 
-  return values.map((value) => formatOpsCodeLabel(locale, value)).join(", ");
+  return values
+    .map((value) => formatOpsCodeLabel(locale, value))
+    .join(locale === "zh" ? "、" : ", ");
 }

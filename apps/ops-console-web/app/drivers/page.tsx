@@ -23,7 +23,11 @@ import {
 } from "@/components/server-canvas-table";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsUiError, toOpsErrorMessage } from "@/lib/error-copy";
-import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import {
+  formatOpsCodeLabel,
+  formatOpsCodeList,
+  getOpsLabel,
+} from "@/lib/localized-labels";
 import { getRefreshIntervalMs } from "@/lib/refresh-tier";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
@@ -329,6 +333,41 @@ function isLocationStale(
   return Date.now() - recorded > STALE_LOCATION_THRESHOLD_MS;
 }
 
+function formatDriverDateTime(
+  locale: Locale,
+  value: string | null | undefined,
+): string {
+  if (!value) {
+    return t("common.unknown", locale);
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(",", "");
+}
+
+function formatDriverDisplayName(locale: Locale, name: string): string {
+  if (locale !== "zh") {
+    return name;
+  }
+
+  const demoNames: Record<string, string> = {
+    "Driver Demo One": "示範司機一",
+    "Driver Demo Two": "示範司機二",
+    "Driver Demo Three": "示範司機三",
+  };
+
+  return demoNames[name] ?? name;
+}
+
 function resolveLocationState(
   snapshot: DriverLocationSnapshot | undefined,
   locationsError: string | null,
@@ -364,7 +403,7 @@ function presenceLabel(
       ? "未綁定"
       : "unbound";
   const status = presence.reauthRequired
-    ? "reauth"
+    ? formatOpsCodeLabel(locale, "reauth_required")
     : formatOpsCodeLabel(locale, presence.status);
   return `${name ?? presence.platformCode} · ${status} · ${binding}`;
 }
@@ -1026,10 +1065,12 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
                 }
                 style={driverPrimaryStyle}
               >
-                {row.driver.name}
+                {formatDriverDisplayName(locale, row.driver.name)}
               </Link>
             ) : (
-              <span style={driverPrimaryStyle}>{row.driver.name}</span>
+              <span style={driverPrimaryStyle}>
+                {formatDriverDisplayName(locale, row.driver.name)}
+              </span>
             )}
             <span style={driverSecondaryStyle}>
               {row.driver.driverId}
@@ -1141,7 +1182,7 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
                   .join("、")}
           </Pill>
           <span style={signalDetailStyle}>
-            {row.driver.supportedServiceBuckets.join(" · ")}
+            {formatOpsCodeList(locale, row.driver.supportedServiceBuckets)}
           </span>
         </div>
       ),
@@ -1197,7 +1238,10 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
             <span style={signalDetailStyle}>
               {row.location?.recordedAt
                 ? t("driverDetail.summary.locationRecordedAt", locale, {
-                    recordedAt: row.location.recordedAt,
+                    recordedAt: formatDriverDateTime(
+                      locale,
+                      row.location.recordedAt,
+                    ),
                   })
                 : t("driverDetail.summary.locationNoSample", locale)}
             </span>
@@ -1442,7 +1486,10 @@ export default async function DriversPage({ searchParams }: DriversPageProps) {
             <div style={footerTextStyle}>
               {t("drivers.meta.refreshValue", locale)}
               {" · "}
-              {refreshMetadata?.generatedAt ?? generatedAt}
+              {formatDriverDateTime(
+                locale,
+                refreshMetadata?.generatedAt ?? generatedAt,
+              )}
             </div>
           }
         >
