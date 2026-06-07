@@ -11,9 +11,14 @@ import type {
   UiRefreshMetadata,
   VehicleContractRecord,
 } from "@drts/contracts";
+import {
+  ServerCanvasTable as Table,
+  type ServerCanvasTableColumn as CanvasTableColumn,
+} from "@/components/server-canvas-table";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsErrorReasonLabel, toOpsErrorMessage } from "@/lib/error-copy";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
+import { resolveCrossAppBase } from "@/lib/ops-cross-app-links";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import {
@@ -22,9 +27,7 @@ import {
   CanvasIcon,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasTable as Table,
   buildCanvasTheme,
-  type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
 
@@ -580,12 +583,14 @@ function deriveKeyTerms(
   }
 
   const parts: string[] = [];
+  const serviceScope =
+    contract.serviceScope || formatOpsCodeLabel(locale, contract.contractType);
   parts.push(
-    `${copy(locale, "Scope", "服務範圍")}: ${contract.serviceScope || formatOpsCodeLabel(locale, contract.contractType)}`,
+    `${copy(locale, "Scope", "服務範圍")}: ${formatOpsCodeLabel(locale, serviceScope)}`,
   );
   if (contract.operatingAreaId) {
     parts.push(
-      `${copy(locale, "Area", "營運區")}: ${contract.operatingAreaId}`,
+      `${copy(locale, "Area", "營運區")}: ${formatOpsCodeLabel(locale, contract.operatingAreaId)}`,
     );
   }
   if (partnerEntry) {
@@ -626,9 +631,7 @@ function resolveAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
     return resolved.replace(/\/$/, "");
   }
 
-  if (targetApp === "platform-admin") return "http://localhost:3002";
-  if (targetApp === "tenant-console") return "http://localhost:3004";
-  return "http://localhost:3003";
+  return resolveCrossAppBase(targetApp);
 }
 
 function buildCrossAppHref(link: CrossAppResourceLink) {
@@ -1411,10 +1414,13 @@ export default async function ContractsPage({
 
     const provisionalRow = {
       contractId: contract.contractId,
-      serviceScope:
-        contract.serviceScope ||
-        formatOpsCodeLabel(locale, contract.contractType),
-      operatingAreaId: contract.operatingAreaId,
+      serviceScope: formatOpsCodeLabel(
+        locale,
+        contract.serviceScope || contract.contractType,
+      ),
+      operatingAreaId: contract.operatingAreaId
+        ? formatOpsCodeLabel(locale, contract.operatingAreaId)
+        : null,
       kindKey: kind.key,
       kindLabel: kind.label(locale),
       partnerId: contract.partnerId,

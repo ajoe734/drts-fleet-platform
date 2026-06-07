@@ -17,6 +17,10 @@ import type {
 import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
 import { PublishAssistantScope } from "@/components/ops-assistant";
 import { RefreshOnInterval } from "@/components/refresh-on-interval";
+import {
+  ServerCanvasTable as Table,
+  type ServerCanvasTableColumn as CanvasTableColumn,
+} from "@/components/server-canvas-table";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsUiError, toOpsErrorMessage } from "@/lib/error-copy";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
@@ -27,9 +31,7 @@ import {
   CanvasCard as Card,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasTable as Table,
   buildCanvasTheme,
-  type CanvasTableColumn,
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";

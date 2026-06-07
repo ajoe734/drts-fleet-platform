@@ -13,9 +13,14 @@ import type {
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import { PublishAssistantScope } from "@/components/ops-assistant";
+import {
+  ServerCanvasTable as Table,
+  type ServerCanvasTableColumn as CanvasTableColumn,
+} from "@/components/server-canvas-table";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsErrorReasonLabel, toOpsErrorMessage } from "@/lib/error-copy";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
+import { resolveCrossAppBase } from "@/lib/ops-cross-app-links";
 import { getServerLocale } from "@/lib/server-locale";
 import type { Locale } from "@/lib/translations";
 import {
@@ -24,9 +29,7 @@ import {
   CanvasIcon,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasTable as Table,
   buildCanvasTheme,
-  type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
 
@@ -676,9 +679,7 @@ function resolveAppOrigin(targetApp: CrossAppResourceLink["targetApp"]) {
     return resolved.replace(/\/$/, "");
   }
 
-  if (targetApp === "platform-admin") return "http://localhost:3002";
-  if (targetApp === "tenant-console") return "http://localhost:3004";
-  return "http://localhost:3003";
+  return resolveCrossAppBase(targetApp);
 }
 
 function buildCrossAppHref(link: CrossAppResourceLink) {
@@ -1537,12 +1538,14 @@ export default async function VehiclesPage({
     const provisionalRow = {
       vehicleId: vehicle.vehicleId,
       plateNo: vehicle.plateNo,
-      typeLabel:
-        vehicle.vehicleType ??
-        formatBuckets(locale, vehicle.supportedServiceBuckets),
+      typeLabel: vehicle.vehicleType
+        ? formatOpsCodeLabel(locale, vehicle.vehicleType)
+        : formatBuckets(locale, vehicle.supportedServiceBuckets),
       typeKeys: deriveTypeKeys(vehicle),
       statusKey: vehicleStatus.key,
-      statusLabel: vehicle.operationalStatus ?? vehicleStatus.label,
+      statusLabel: vehicle.operationalStatus
+        ? formatOpsCodeLabel(locale, vehicle.operationalStatus)
+        : vehicleStatus.label,
       statusTone: vehicleStatus.tone,
       dispatchable:
         vehicle.dispatchableFlag &&

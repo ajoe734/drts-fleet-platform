@@ -24,15 +24,17 @@ import {
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
-  CanvasTable as Table,
   buildCanvasTheme,
-  type CanvasTableColumn,
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
 
 import { PublishAssistantScope } from "@/components/ops-assistant";
 import { RevenueAutoRefresh } from "@/components/revenue-auto-refresh";
+import {
+  ServerCanvasTable as Table,
+  type ServerCanvasTableColumn as CanvasTableColumn,
+} from "@/components/server-canvas-table";
 import { getOpsClient } from "@/lib/api-client";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import {
