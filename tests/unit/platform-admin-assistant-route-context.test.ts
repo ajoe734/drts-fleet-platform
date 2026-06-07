@@ -16,10 +16,15 @@ import {
   PLATFORM_ADMIN_ROUTES,
   PLATFORM_ADMIN_ROUTE_KEYS,
   buildRouteContext,
+  createStablePageBridgeProxy,
   getRouteDescriptor,
   matchRoute,
 } from "../../apps/platform-admin-web/components/assistant/route-context";
-import type { PlatformAdminRouteKey } from "../../apps/platform-admin-web/components/assistant/assistant-types";
+import type {
+  PageContextSnapshot,
+  PlatformAdminRouteKey,
+} from "../../apps/platform-admin-web/components/assistant/assistant-types";
+import type { PlatformAdminAssistantPageBridge } from "../../apps/platform-admin-web/components/assistant/route-context";
 
 describe("Platform Admin route registry", () => {
   it("registers exactly the 18 canvas routes", () => {
@@ -218,5 +223,80 @@ describe("page-owned selection — never scraped", () => {
     expect(tenantRefs).toHaveLength(1);
     expect(tenantRefs[0]?.label).toBe("Acme Co");
     expect(ctx.generatedFrom.pageSelection).toBe(true);
+  });
+});
+
+describe("createStablePageBridgeProxy", () => {
+  it("delegates to the latest page bridge without changing proxy identity", () => {
+    let currentSnapshot: PageContextSnapshot = {
+      activeTab: "passenger-pricing",
+    };
+    let currentBridge: PlatformAdminAssistantPageBridge = {
+      pageId: "pricing",
+      filters: {
+        tab: {
+          apply: (value: unknown) => ({
+            ok: true as const,
+            code: "tab_set",
+            message: String(value),
+          }),
+        },
+      },
+      getContextSnapshot: () => currentSnapshot,
+    };
+
+    const proxy = createStablePageBridgeProxy(() => currentBridge);
+    const firstFilter = proxy.filters?.tab;
+
+    expect(proxy.pageId).toBe("pricing");
+    expect(proxy.getContextSnapshot?.()).toEqual({
+      activeTab: "passenger-pricing",
+    });
+    expect(firstFilter?.apply("history")).toEqual({
+      ok: true,
+      code: "tab_set",
+      message: "history",
+    });
+
+    currentSnapshot = {
+      activeTab: "placards",
+    };
+    currentBridge = {
+      pageId: "switchboard",
+      drafts: {
+        create_notice: {
+          fill: (values) => ({
+            ok: true as const,
+            code: "draft_filled",
+            message: JSON.stringify(values),
+          }),
+        },
+      },
+      crossAppLinks: {
+        tenant_console: {
+          label: "Tenant users",
+          targetApp: "tenant-console",
+          route: "/users",
+          resourceType: "tenant",
+          resourceId: "tnt-1",
+          openMode: "new_tab",
+        },
+      },
+      getContextSnapshot: () => currentSnapshot,
+    };
+
+    expect(proxy.pageId).toBe("switchboard");
+    expect(proxy.filters).toBeUndefined();
+    expect(proxy.drafts?.create_notice).toBeDefined();
+    expect(proxy.drafts?.create_notice?.fill({ title: "Ops" })).toEqual({
+      ok: true,
+      code: "draft_filled",
+      message: JSON.stringify({ title: "Ops" }),
+    });
+    expect(proxy.crossAppLinks?.tenant_console).toBeDefined();
+    expect(proxy.crossAppLinks?.tenant_console?.route).toBe("/users");
+    expect(proxy.getContextSnapshot?.()).toEqual({
+      activeTab: "placards",
+    });
   });
 });

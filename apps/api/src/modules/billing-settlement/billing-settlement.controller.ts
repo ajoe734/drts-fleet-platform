@@ -7,6 +7,7 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import type {
   AddReconciliationIssueCommentCommand,
@@ -27,6 +28,7 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { BillingSettlementService } from "./billing-settlement.service";
 
 @Controller()
@@ -131,7 +133,10 @@ export class BillingSettlementController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
+  // Read consumed on every Platform Admin pricing page load; READ_HEAVY
+  // (180/min, no block) instead of the global default 60/min + 5-min block.
   @Get("driver-fee-plans")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listDriverFeePlans(@Headers("x-request-id") requestId?: string) {
     const items = this.billingSettlementService.listDriverFeePlans();
     return toApiSuccessEnvelope(toApiListData(items), requestId);

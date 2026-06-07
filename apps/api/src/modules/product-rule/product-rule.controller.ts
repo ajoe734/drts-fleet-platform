@@ -1,8 +1,10 @@
 import { Controller, Get, Headers } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import type { ProductRuleCatalog } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import {
   BUSINESS_DISPATCH_SUBTYPE_VALUES,
   DISPATCH_SEMANTIC_VALUES,
@@ -11,6 +13,10 @@ import {
   PHASE1_SERVICE_BUCKET_VALUES,
 } from "../foundation/foundation.constants";
 
+// Static read catalog consumed on every Platform Admin pricing page load.
+// READ_HEAVY (180/min, no block) instead of the global default (60/min with a
+// 5-min block) so a burst can never lock the pricing page out for minutes.
+@Throttle(READ_HEAVY_RATE_LIMIT)
 @Controller("product-rule")
 export class ProductRuleController {
   @Get("catalog")
