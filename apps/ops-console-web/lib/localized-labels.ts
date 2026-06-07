@@ -305,6 +305,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   partner_api_key: { en: "Partner API Key", zh: "合作夥伴介面金鑰" },
   portal: { en: "Portal", zh: "入口網站" },
   platform: { en: "Platform", zh: "平台" },
+  platform_admin: { en: "Platform Admin", zh: "平台管理員" },
   preassigned: { en: "Preassigned", zh: "預先指派" },
   present: { en: "Present", zh: "出勤" },
   priority: { en: "Priority", zh: "優先" },

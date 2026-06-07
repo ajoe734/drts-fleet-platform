@@ -356,6 +356,80 @@ function resolvePlatformAdminFlagsHref(flagKey?: string): string | null {
   );
 }
 
+const FEATURE_FLAG_LABELS: Record<string, Record<Locale, string>> = {
+  "driver-app.earnings": {
+    en: "Driver app earnings",
+    zh: "司機應用程式收益",
+  },
+  "driver-app.incidents": {
+    en: "Driver app incident reports",
+    zh: "司機應用程式事故回報",
+  },
+  "driver-app.shift": {
+    en: "Driver app shifts and attendance",
+    zh: "司機應用程式班次與出勤",
+  },
+  "driver-app.tasks": {
+    en: "Driver app task lifecycle",
+    zh: "司機應用程式任務生命週期",
+  },
+  "ops-console.callcenter": {
+    en: "Ops Console call center",
+    zh: "營運控制台客服中心",
+  },
+  "ops-console.complaint": {
+    en: "Ops Console complaint cases",
+    zh: "營運控制台客訴案件",
+  },
+  "ops-console.dispatch": {
+    en: "Ops Console dispatch board",
+    zh: "營運控制台派車調度板",
+  },
+  "ops-console.reports": {
+    en: "Ops Console reports",
+    zh: "營運控制台報表",
+  },
+  "phase1.read-models": {
+    en: "Phase 1 read models",
+    zh: "第一階段讀模型",
+  },
+  "phase1.smoke-paths": {
+    en: "Phase 1 smoke-test paths",
+    zh: "第一階段冒煙測試路徑",
+  },
+  "tenant-portal.billing": {
+    en: "Tenant portal billing",
+    zh: "租戶入口帳務",
+  },
+  "tenant-portal.booking": {
+    en: "Tenant portal bookings",
+    zh: "租戶入口訂車",
+  },
+  "tenant-portal.reports": {
+    en: "Tenant portal reports",
+    zh: "租戶入口報表",
+  },
+  "tenant-portal.webhooks": {
+    en: "Tenant portal webhooks",
+    zh: "租戶入口回呼",
+  },
+};
+
+function featureFlagDisplayName(locale: Locale, key: string) {
+  const label = FEATURE_FLAG_LABELS[key];
+  if (label) return label[locale];
+
+  if (locale === "zh") {
+    return formatOpsCodeLabel(locale, key);
+  }
+
+  return key
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function featureFlagDescription(locale: Locale, flag: FeatureFlagRecordLike) {
   if (locale !== "zh") return flag.description ?? "—";
 
@@ -377,6 +451,47 @@ function featureFlagDescription(locale: Locale, flag: FeatureFlagRecordLike) {
   };
 
   return descriptions[flag.key] || flag.description || "—";
+}
+
+function formatFlagActor(locale: Locale, value: string | null) {
+  if (!value) return t("common.dash", locale);
+  return formatOpsCodeLabel(locale, value);
+}
+
+function formatFlagCurrentValue(locale: Locale, value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") return t("flags.state.enabled", locale);
+  if (normalized === "false") return t("flags.state.disabled", locale);
+  if (normalized === "partial") return t("flags.state.partial", locale);
+  return formatOpsCodeLabel(locale, value);
+}
+
+function formatRefreshSource(
+  locale: Locale,
+  source: UiRefreshMetadata["source"],
+) {
+  if (locale === "zh") {
+    if (source === "static") return "靜態快照";
+    if (source === "cache") return "快取";
+    if (source === "live") return "即時來源";
+    if (source === "sandbox") return "沙箱";
+  }
+  return formatOpsCodeLabel(locale, source);
+}
+
+function formatFeatureFlagNote(locale: Locale, note: string) {
+  if (locale !== "zh") return note;
+
+  const notes: Record<string, string> = {
+    "Feature flags control module-level rollout for Phase 1 client surfaces.":
+      "功能旗標控制第一階段用戶端模組的推出範圍。",
+    "Flags are tenant-scoped; include x-tenant-id header for tenant-specific overrides.":
+      "旗標支援租戶範圍；查詢租戶覆寫時需帶入租戶識別標頭。",
+    "This endpoint is admin-only; smoke test with x-actor-type=platform_admin.":
+      "此端點僅限管理員使用；冒煙測試時使用平台管理員身分。",
+  };
+
+  return notes[note] ?? note;
 }
 
 function formatDateTime(value: string | null, locale: Locale) {
@@ -808,7 +923,7 @@ function buildFlagTableRows(
       key: flag.key,
       keyCell: renderStack(
         <span style={{ color: theme.text, fontFamily: theme.monoFamily }}>
-          {flag.key}
+          {featureFlagDisplayName(locale, flag.key)}
         </span>,
         flag.state === "partial"
           ? t("flags.midRollout", locale)
@@ -827,13 +942,15 @@ function buildFlagTableRows(
         <Pill theme={theme} tone={stateTone(flag.state)} dot>
           {t(`flags.state.${flag.state}`, locale)}
         </Pill>,
-        flag.currentValue !== flag.state ? flag.currentValue : undefined,
+        flag.currentValue !== flag.state
+          ? formatFlagCurrentValue(locale, flag.currentValue)
+          : undefined,
         flag.state === "partial"
           ? t("flags.partialStateHelp", locale)
           : undefined,
       ),
       updatedByCell: renderStack(
-        flag.lastChangedBy ?? t("common.dash", locale),
+        formatFlagActor(locale, flag.lastChangedBy),
         hasHistoryLinkAction ? t("flags.crossAppHint", locale) : undefined,
       ),
       updatedAt: formatDateTime(flag.lastChangedAt, locale),
@@ -1159,17 +1276,7 @@ export default async function FeatureFlagsPage({
                   )}
                 </Pill>
                 <Pill theme={theme} tone="neutral">
-                  {copyText(
-                    locale,
-                    payload.refresh.source,
-                    payload.refresh.source === "static"
-                      ? "靜態快照"
-                      : payload.refresh.source === "cache"
-                        ? "快取"
-                        : payload.refresh.source === "live"
-                          ? "即時來源"
-                          : payload.refresh.source,
-                  )}
+                  {formatRefreshSource(locale, payload.refresh.source)}
                 </Pill>
                 <Pill theme={theme} tone="neutral">
                   {formatDateTime(payload.refresh.generatedAt, locale)}
@@ -1272,7 +1379,7 @@ export default async function FeatureFlagsPage({
                         paddingTop: 8,
                       }}
                     >
-                      {note}
+                      {formatFeatureFlagNote(locale, note)}
                     </div>
                   ))}
                 </div>
