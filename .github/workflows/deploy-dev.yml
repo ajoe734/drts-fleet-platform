@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: "Required for manual dispatch: publish/v<date>, release/v<date>, dev rollback ref, or commit SHA. Never main."
+        description: "Required for manual dispatch: publish/v<date>, release/v<date>, or full commit SHA. Never mutable branches like dev/main/design."
         required: true
         type: string
       skip_migration:
@@ -182,17 +182,24 @@ jobs:
           source_ref="${INPUT_SOURCE_REF:-}"
           if [[ -z "$source_ref" ]]; then
             if [[ "${GITHUB_EVENT_NAME:-}" == "workflow_dispatch" ]]; then
-              echo "::error::source_ref is required for manual dev deploy. Per branch-strategy v4, dev deploys must use a publish/v* snapshot or an explicitly chosen rollback/ref, never the dispatcher branch SHA."
+              echo "::error::source_ref is required for manual dev deploy. Per branch-strategy v4, dev deploys must use a publish/v* snapshot, release/v* snapshot, or full commit SHA, never the dispatcher branch SHA."
               exit 1
             fi
             source_ref="${GITHUB_SHA}"
           fi
 
           if [[ "${GITHUB_EVENT_NAME:-}" == "workflow_dispatch" ]]; then
-            if [[ "$source_ref" == "main" || "$source_ref" == "refs/heads/main" ]]; then
-              echo "::error::main is not a valid dev deploy source_ref. main is reserved for staging/prod promotion; use publish/v*, release/v*, dev, or an explicit commit SHA."
-              exit 1
-            fi
+            case "$source_ref" in
+              publish/v*|refs/heads/publish/v*|release/v*|refs/tags/release/v*) ;;
+              *)
+                if [[ "$source_ref" =~ ^[0-9a-fA-F]{40}$ ]]; then
+                  :
+                else
+                  echo "::error::${source_ref} is not a valid dev deploy source_ref. Per branch-strategy v4, manual dev deploys must use publish/v*, release/v*, or a full commit SHA; mutable branches such as dev/main/design are blocked."
+                  exit 1
+                fi
+                ;;
+            esac
             echo "::notice::Dev deploy source_ref resolved to ${source_ref}."
           fi
 
