@@ -3,14 +3,15 @@ name: Deploy — Dev
 # v4: auto-fires on push to publish/v* (nightly snapshot). dev env now reflects
 # the latest nightly publish — NOT bleeding-edge dev branch — so testers have
 # a stable target for ~24h. Per docs/ops/branch-strategy.md (v4 §5).
-# Also workflow_dispatch for ad-hoc redeploys of any SHA / branch / tag.
+# Manual dispatch is for explicit redeploys only; it must never fall back to
+# the UI-selected dispatcher branch (especially main).
 
 on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: "Tag (release/v<date>) OR branch (publish/v<date>) OR commit SHA. Default: current branch SHA."
-        required: false
+        description: "Required for manual dispatch: publish/v<date>, release/v<date>, dev rollback ref, or commit SHA. Never main."
+        required: true
         type: string
       skip_migration:
         description: "Skip DB migration step (use only if migrations already applied)"
@@ -97,8 +98,9 @@ jobs:
           INPUT_SOURCE_REF: ${{ inputs.source_ref }}
           INPUT_SKIP_MIGRATION: ${{ inputs.skip_migration }}
           # On push to publish/v*, GITHUB_SHA is already the publish branch HEAD.
-          # On workflow_dispatch, INPUT_SOURCE_REF wins. The fallback chain
-          # below preserves both.
+          # On workflow_dispatch, INPUT_SOURCE_REF is mandatory. Do not fall
+          # back to the UI-selected workflow branch; that lets main/feature
+          # branches overwrite the shared dev environment.
         run: |
           set -euo pipefail
 
@@ -169,7 +171,30 @@ jobs:
           fleet_partner_portal_origin="${DEV_FLEET_PARTNER_PORTAL_ORIGIN:-}"
           registry="${artifact_region}-docker.pkg.dev/${artifact_project_id}/${artifact_repository}"
 
-          source_ref="${INPUT_SOURCE_REF:-${GITHUB_SHA}}"
+          if [[ "${GITHUB_EVENT_NAME:-}" == "workflow_dispatch" ]]; then
+            dispatch_ref="${GITHUB_REF_NAME:-}"
+            if [[ "$dispatch_ref" == "main" || "$dispatch_ref" == "refs/heads/main" ]]; then
+              echo "::error::Do not dispatch deploy-dev from main. Per branch-strategy v4, run nightly-publish.yml or dispatch deploy-dev on a publish/v* snapshot ref."
+              exit 1
+            fi
+          fi
+
+          source_ref="${INPUT_SOURCE_REF:-}"
+          if [[ -z "$source_ref" ]]; then
+            if [[ "${GITHUB_EVENT_NAME:-}" == "workflow_dispatch" ]]; then
+              echo "::error::source_ref is required for manual dev deploy. Per branch-strategy v4, dev deploys must use a publish/v* snapshot or an explicitly chosen rollback/ref, never the dispatcher branch SHA."
+              exit 1
+            fi
+            source_ref="${GITHUB_SHA}"
+          fi
+
+          if [[ "${GITHUB_EVENT_NAME:-}" == "workflow_dispatch" ]]; then
+            if [[ "$source_ref" == "main" || "$source_ref" == "refs/heads/main" ]]; then
+              echo "::error::main is not a valid dev deploy source_ref. main is reserved for staging/prod promotion; use publish/v*, release/v*, dev, or an explicit commit SHA."
+              exit 1
+            fi
+            echo "::notice::Dev deploy source_ref resolved to ${source_ref}."
+          fi
 
           missing=()
           [[ -n "$project_id" ]] || missing+=("vars.DEV_GCP_PROJECT_ID")
