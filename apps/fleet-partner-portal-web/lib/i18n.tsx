@@ -9,7 +9,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
 import { type Locale, t as translate, translations } from "./translations";
 
 const COOKIE_KEY = "drts-locale-v2";
@@ -33,7 +32,6 @@ export function LanguageProvider({
   defaultLocale?: Locale;
 }) {
   const [locale, setLocaleState] = useState<Locale>(defaultLocale);
-  const router = useRouter();
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY) as Locale | null;
@@ -44,15 +42,12 @@ export function LanguageProvider({
     }
   }, [defaultLocale]);
 
-  const setLocale = useCallback(
-    (next: Locale) => {
-      setLocaleState(next);
-      localStorage.setItem(STORAGE_KEY, next);
-      document.cookie = `${COOKIE_KEY}=${next};path=/;max-age=31536000;SameSite=Lax`;
-      router.refresh();
-    },
-    [router],
-  );
+  const setLocale = useCallback((next: Locale) => {
+    setLocaleState(next);
+    localStorage.setItem(STORAGE_KEY, next);
+    document.cookie = `${COOKIE_KEY}=${next};path=/;max-age=31536000;SameSite=Lax`;
+    window.location.reload();
+  }, []);
 
   const value = useMemo(() => ({ locale, setLocale }), [locale, setLocale]);
 
