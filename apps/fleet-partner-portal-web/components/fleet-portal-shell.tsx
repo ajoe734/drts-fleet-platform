@@ -1,0 +1,41 @@
+"use client";
+
+import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
+import { CanvasShell, type CanvasShellNavItem } from "@drts/ui-web";
+import { buildFleetTheme } from "@/lib/fleet-portal-theme";
+
+export function FleetPortalShell({
+  nav,
+  brandLabel,
+  brandSubLabel,
+  brandMark,
+  searchPlaceholder,
+  children,
+}: {
+  nav: CanvasShellNavItem[];
+  brandLabel: ReactNode;
+  brandSubLabel: ReactNode;
+  brandMark: ReactNode;
+  searchPlaceholder: string;
+  children: ReactNode;
+}) {
+  const theme = buildFleetTheme();
+  const pathname = usePathname();
+
+  return (
+    <CanvasShell
+      theme={theme}
+      nav={nav}
+      currentPath={pathname}
+      brandLabel={brandLabel}
+      brandSubLabel={brandSubLabel}
+      brandMark={brandMark}
+      searchPlaceholder={searchPlaceholder}
+      env="production"
+      avatarLabel="CH"
+    >
+      {children}
+    </CanvasShell>
+  );
+}

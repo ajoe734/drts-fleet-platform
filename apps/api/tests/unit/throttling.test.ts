@@ -17,6 +17,11 @@ import {
 import { HealthController } from "../../src/health/health.controller";
 import { IdentityController } from "../../src/modules/identity/identity.controller";
 import { OwnedMobilityController } from "../../src/modules/owned-mobility/owned-mobility.controller";
+import { PlatformAdminController } from "../../src/modules/platform-admin/platform-admin.controller";
+import { TenantsController } from "../../src/modules/platform-admin/tenants.controller";
+import { PlatformTenantGovernanceController } from "../../src/modules/platform-admin/tenant-governance.controller";
+import { ProductRuleController } from "../../src/modules/product-rule/product-rule.controller";
+import { BillingSettlementController } from "../../src/modules/billing-settlement/billing-settlement.controller";
 
 class TestBootstrapThrottlerGuard extends BootstrapThrottlerGuard {
   async exposeTracker(req: Record<string, any>) {
@@ -116,5 +121,38 @@ describe("route throttling metadata", () => {
         OwnedMobilityController.prototype.listDispatchJobs,
       ),
     ).toBe(READ_HEAVY_RATE_LIMIT.default.ttl);
+  });
+
+  it("raises the cap for the read-heavy platform-admin console controllers", () => {
+    // The admin console fans out many GETs per page through one shared
+    // bootstrap-actor bucket; the global 60/min + 5-min block locked it out
+    // with a 429. Class-level @Throttle(READ_HEAVY_RATE_LIMIT) lifts the cap to
+    // 180/min with no sticky block across every route in these controllers.
+    for (const controller of [
+      PlatformAdminController,
+      TenantsController,
+      PlatformTenantGovernanceController,
+    ]) {
+      expect(Reflect.getMetadata(THROTTLER_LIMIT + "default", controller)).toBe(
+        READ_HEAVY_RATE_LIMIT.default.limit,
+      );
+      expect(Reflect.getMetadata(THROTTLER_TTL + "default", controller)).toBe(
+        READ_HEAVY_RATE_LIMIT.default.ttl,
+      );
+    }
+  });
+
+  it("raises the cap for the other reads the pricing page loads", () => {
+    // The pricing page also fans out to the product-rule catalog and the
+    // driver-fee-plans read; both must escape the global 60/min + 5-min block.
+    expect(
+      Reflect.getMetadata(THROTTLER_LIMIT + "default", ProductRuleController),
+    ).toBe(READ_HEAVY_RATE_LIMIT.default.limit);
+    expect(
+      Reflect.getMetadata(
+        THROTTLER_LIMIT + "default",
+        BillingSettlementController.prototype.listDriverFeePlans,
+      ),
+    ).toBe(READ_HEAVY_RATE_LIMIT.default.limit);
   });
 });

@@ -47,6 +47,7 @@
     "prepare": "husky",
     "test": "pnpm test:unit && turbo run test",
     "test:e2e": "playwright test",
+    "test:e2e:tenant-localization": "playwright test -c playwright.tenant-localization.config.ts",
     "test:unit": "vitest run",
     "typecheck": "pnpm typecheck:root && turbo run typecheck",
     "typecheck:root": "tsc -p tsconfig.json --noEmit"

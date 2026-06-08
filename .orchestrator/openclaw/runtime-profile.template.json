@@ -1,0 +1,80 @@
+{
+  "plugins": {
+    "allow": ["codex"],
+    "entries": {
+      "codex": {
+        "enabled": true
+      }
+    }
+  },
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": "drts-openclaw-local-token"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "__WORKSPACE__",
+      "repoRoot": "__REPO_ROOT__",
+      "model": {
+        "primary": "__MODEL__"
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true,
+        "identity": {
+          "name": "DRTS Platform Admin Dev Assistant",
+          "theme": "bounded repo-local OpenClaw profile"
+        },
+        "tools": {
+          "profile": "coding",
+          "deny": [
+            "group:fs",
+            "exec",
+            "process",
+            "write",
+            "edit",
+            "apply_patch",
+            "browser",
+            "web_search",
+            "cron",
+            "image_generate",
+            "music_generate",
+            "video_generate"
+          ]
+        }
+      }
+    ]
+  },
+  "auth": {
+    "profiles": {
+      "openai-codex:drts": {
+        "provider": "openai-codex",
+        "mode": "oauth"
+      }
+    },
+    "order": {
+      "openai": ["openai-codex:drts"],
+      "openai-codex": ["openai-codex:drts"]
+    }
+  },
+  "mcp": {
+    "servers": {
+      "drts-local": {
+        "command": "python3",
+        "args": ["__MCP_SERVER__"],
+        "cwd": "__REPO_ROOT__",
+        "env": {
+          "ORCH_STATUS_ROOT": "__STATUS_ROOT__",
+          "AI_STATUS_ROOT": "__STATUS_ROOT__",
+          "DRTS_OPENCLAW_TOKEN_INJECTED": "__TOKEN_INJECTED__",
+          "DRTS_OPENCLAW_MCP_LOG": "__MCP_LOG__"
+        }
+      }
+    }
+  }
+}

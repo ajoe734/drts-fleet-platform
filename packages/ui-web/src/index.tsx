@@ -6,11 +6,14 @@ export { PageHeader } from "./page-header";
 export type { PageHeaderProps } from "./page-header";
 export * as CanvasPrimitives from "./canvas-primitives";
 export {
+  ActionButton,
   Banner as CanvasBanner,
+  CanvasActionButton,
   Btn as CanvasBtn,
   CanvasIcon,
   Card as CanvasCard,
   DL as CanvasDL,
+  EmptyState as CanvasEmptyState,
   Field as CanvasField,
   Input as CanvasInput,
   KPI as CanvasKPI,
@@ -18,16 +21,20 @@ export {
   Pill as CanvasPill,
   Select as CanvasSelect,
   Shell as CanvasShell,
+  StaleBanner as CanvasStaleBanner,
   Table as CanvasTable,
   TrafficLights as CanvasTrafficLights,
   WindowChrome as CanvasWindowChrome,
 } from "./canvas-primitives";
 export type {
+  ActionButtonProps,
+  CanvasActionButtonProps,
   BannerProps as CanvasBannerProps,
   BtnProps as CanvasBtnProps,
   CardProps as CanvasCardProps,
   DLItem as CanvasDLItem,
   DLProps as CanvasDLProps,
+  EmptyStateProps as CanvasEmptyStateProps,
   FieldProps as CanvasFieldProps,
   InputProps as CanvasInputProps,
   KPIProps as CanvasKPIProps,
@@ -36,6 +43,7 @@ export type {
   SelectProps as CanvasSelectProps,
   ShellNavItem as CanvasShellNavItem,
   ShellProps as CanvasShellProps,
+  StaleBannerProps as CanvasStaleBannerProps,
   TableColumn as CanvasTableColumn,
   TableProps as CanvasTableProps,
   WindowChromeProps as CanvasWindowChromeProps,
@@ -45,16 +53,22 @@ export {
   CANVAS_DARK_NAVY_PALETTE,
   CANVAS_DENSITY,
   CANVAS_LIGHT_PALETTE,
+  CANVAS_REALM_DARK,
+  CANVAS_REALM_LIGHT,
+  CANVAS_REALM_NAMES,
   CANVAS_SURFACE_ACCENTS,
   CANVAS_TYPE,
 } from "./canvas-tokens";
 export type {
   CanvasDensity,
   CanvasMode,
+  CanvasRealm,
+  CanvasRealmRamp,
   CanvasSurface,
   CanvasTheme,
   CanvasTone,
 } from "./canvas-tokens";
+export type { CanvasPillTone } from "./canvas-primitives";
 export { AppShellCard } from "./app-shell-card";
 export { AppSidebar } from "./app-sidebar";
 export type { AppSidebarProps, SidebarNavItem } from "./app-sidebar";

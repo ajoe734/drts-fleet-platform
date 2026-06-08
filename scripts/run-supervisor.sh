@@ -4,32 +4,4 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 export PATH="$ROOT_DIR/.orchestrator/bin/node_modules/.bin:$ROOT_DIR/.orchestrator/bin:$PATH"
-
-# Pre-flight: ensure the autoworker OAuth credentials remain a symlink to the
-# main lane's credentials. Claude CLI silently rewrites this as a regular file
-# when it refreshes tokens; once that happens the main lane 401s on the next
-# request. See scripts/repair-claude-symlinks.sh and the memory note
-# `feedback_autoworker_creds_symlink.md`. Failure here must not block startup —
-# supervisor will surface real auth failures through its normal channels.
-if [[ -x "$ROOT_DIR/scripts/repair-claude-symlinks.sh" ]]; then
-  "$ROOT_DIR/scripts/repair-claude-symlinks.sh" || true
-fi
-
-# Pre-flight: same pattern for codex2's ChatGPT OAuth credentials. Symlink
-# ~/.codex2/auth.json to ~/.codex/auth.json so both lanes share on-disk state
-# and concurrent refresh races have a single source of truth. See
-# scripts/repair-codex-symlinks.sh.
-if [[ -x "$ROOT_DIR/scripts/repair-codex-symlinks.sh" ]]; then
-  "$ROOT_DIR/scripts/repair-codex-symlinks.sh" || true
-fi
-
-# Pre-flight: install the codex wrapper into the gitignored .orchestrator/bin/
-# so it overrides the system codex on the supervisor's PATH. The wrapper
-# itself lives in scripts/ (tracked); .orchestrator/bin/codex is a symlink to
-# it. See scripts/codex-wrapper.sh.
-if [[ -x "$ROOT_DIR/scripts/codex-wrapper.sh" ]]; then
-  mkdir -p "$ROOT_DIR/.orchestrator/bin"
-  ln -sfn "$ROOT_DIR/scripts/codex-wrapper.sh" "$ROOT_DIR/.orchestrator/bin/codex"
-fi
-
 exec python3 "$ROOT_DIR/.orchestrator/supervisor.py" "$@"

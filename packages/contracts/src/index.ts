@@ -1,5 +1,13 @@
 import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
+import type {
+  CrossAppResourceLink,
+  DriverMatchingSuppression,
+  EmptyStateEnvelope,
+  RefreshTier,
+  ResourceActionDescriptor,
+  UiRefreshMetadata,
+} from "./ui-runtime";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
@@ -41,9 +49,62 @@ export type DispatchSemantics = (typeof DISPATCH_SEMANTICS)[number];
 export const BUSINESS_DISPATCH_SUBTYPES = [
   "credit_card_airport_transfer",
   "enterprise_dispatch",
+  "insurance_replacement_vehicle",
+  "travel_agency_transfer",
 ] as const;
 export type BusinessDispatchSubtype =
   (typeof BUSINESS_DISPATCH_SUBTYPES)[number];
+
+export const SERVICE_PRODUCT_TYPES = [
+  "taxi_realtime",
+  "taxi_reservation",
+  "enterprise_dispatch",
+  "credit_card_airport_transfer",
+  "insurance_replacement_vehicle",
+  "travel_agency_transfer",
+  "third_party_forwarded_order",
+] as const;
+export type ServiceProductType = (typeof SERVICE_PRODUCT_TYPES)[number];
+
+export const VEHICLE_LICENSE_TYPES = [
+  "taxi",
+  "multi_purpose_taxi",
+  "rental_car",
+  "business_vehicle",
+  "airport_transfer_vehicle",
+] as const;
+export type VehicleLicenseType = (typeof VEHICLE_LICENSE_TYPES)[number];
+
+export interface VehicleEligibilityMatrixRecord {
+  capabilityId: string;
+  licenseType: VehicleLicenseType;
+  supportedProducts: ServiceProductType[];
+  seatCount: number;
+  luggageCapacity: number;
+  airportPermit: boolean;
+  businessDispatchEligible: boolean;
+  taxiMeterRequired: boolean;
+  fixedFareAllowed: boolean;
+  // F3 eligibility-matrix cell richness.
+  conditionallyAllowed: boolean;
+  requiredDocuments: string[];
+  trainingRequired: boolean;
+  permitRequired: boolean;
+  platformForwardingAllowed: boolean;
+  active: boolean;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VehicleServiceCapabilityRecord extends VehicleEligibilityMatrixRecord {
+  vehicleId: string;
+}
+
+export interface UpdateVehicleEligibilityMatrixCommand {
+  items: VehicleEligibilityMatrixRecord[];
+}
 
 export const PARTNER_ENTRY_AUTH_MODES = [
   "tenant_portal_bearer",
@@ -819,6 +880,7 @@ export interface TenantNotificationPreferences {
   tenantId: string;
   subscriptions: TenantNotificationSubscription[];
   updatedAt: string;
+  availableActions?: ResourceActionDescriptor[];
 }
 
 export interface WebhookRetryPolicyRecord {
@@ -853,6 +915,7 @@ export interface TenantWebhookRuntimeMetadata {
   lastSignaturePreview: string | null;
   disabledAt: string | null;
   disableReason: TenantWebhookDisableReason | null;
+  disableReasonNote?: string | null;
   retryPolicy: WebhookRetryPolicyRecord;
   secretRotation: {
     currentVersion: number;
@@ -886,6 +949,7 @@ export interface TenantWebhookEndpoint {
   secretPreview: string;
   createdAt: string;
   updatedAt: string;
+  availableActions?: ResourceActionDescriptor[];
   retryPolicy?: WebhookRetryPolicyRecord;
   runtimeMetadata?: TenantWebhookRuntimeMetadata;
   secretHistory?: TenantWebhookSecretRotationRecord[];
@@ -895,6 +959,11 @@ export interface UpdateTenantWebhookEndpointCommand {
   url?: string;
   events?: string[];
   status?: TenantWebhookEndpointStatus;
+  disableReason?: string;
+}
+
+export interface DeleteTenantWebhookEndpointCommand {
+  reason: string;
 }
 
 export interface SendTestWebhookCommand {
@@ -911,12 +980,18 @@ export interface WebhookDeliveryRecord {
   httpStatus: number | null;
   signature: string;
   createdAt: string;
+  availableActions?: ResourceActionDescriptor[];
 }
 
 export interface UpdateTenantSlaProfileCommand {
   waitThresholdMin?: number;
   arrivalThresholdMin?: number;
   completionThresholdMin?: number;
+  reason?: string;
+}
+
+export interface RecalculateTenantSlaBookingsCommand {
+  reason: string;
 }
 
 export interface TenantSlaProfile {
@@ -925,6 +1000,17 @@ export interface TenantSlaProfile {
   arrivalThresholdMin: number;
   completionThresholdMin: number;
   updatedAt: string;
+}
+
+export interface TenantSlaProfileView {
+  profile: TenantSlaProfile | null;
+  emptyState: EmptyStateEnvelope | null;
+  availableActions: ResourceActionDescriptor[];
+  refreshTier: RefreshTier;
+  refreshMetadata: UiRefreshMetadata;
+  resourceLinks: CrossAppResourceLink[];
+  updatedBy: string | null;
+  lastRecalculationAt: string | null;
 }
 
 export const TENANT_PASSENGER_MASTER_ROLES = [
@@ -1402,6 +1488,7 @@ export interface OpsPendingApprovalRequestRecord extends TenantBookingApprovalRe
   opsSlaAcknowledgedAt: string | null;
   opsSlaAcknowledgedByActorId: string | null;
   opsSlaAcknowledgedByActorType: IdentityContext["actorType"] | null;
+  availableActions: ResourceActionDescriptor[];
 }
 
 export interface ListTenantBookingApprovalRequestsQuery {
@@ -1646,6 +1733,7 @@ export interface TenantWebhookGovernancePolicy {
 export interface TenantIntegrationGovernancePackage {
   tenantId: string;
   generatedAt: string;
+  availableActions?: ResourceActionDescriptor[];
   apiKeyPolicy: TenantApiKeyGovernancePolicy;
   webhookPolicy: TenantWebhookGovernancePolicy;
   baselineWebhookEvents: string[];
@@ -2352,6 +2440,66 @@ export interface BookingRecord {
   orderStatus: OwnedOrderStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+// NOTE(integration 20260605): be-tenbiz-001 originally re-declared
+// `ServiceProductType = BusinessDispatchSubtype` as a stopgap because the
+// canonical SVC contracts were not yet on dev. The canonical 7-value union
+// (see SERVICE_PRODUCT_TYPES above, per SD §6.1) is now authoritative, so the
+// duplicate alias is removed here.
+
+export interface TenantCostCenterQuotaWarning {
+  tenantId: string;
+  costCenterCode: string;
+  costCenterName: string | null;
+  periodKey: string;
+  remainingBookingCount: number | null;
+  remainingAmountMinor: number | null;
+  remainingPercent: number | null;
+  enforcementMode: TenantQuotaEnforcementMode;
+  warningLevel: "warning" | "critical";
+}
+
+export interface TenantBookingSummary {
+  bookingId: string;
+  orderId: string;
+  serviceProduct: ServiceProductType;
+  status: OwnedOrderStatus;
+  reservationWindowStart: string | null;
+  reservationWindowEnd: string | null;
+  passengerName: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  costCenterCode: string | null;
+  tenantServiceProgramId: string | null;
+}
+
+export interface TenantDashboardSummary {
+  tenantId: string;
+  periodMonth: string;
+  bookingCount: number;
+  completedTripCount: number;
+  cancelledTripCount: number;
+  noShowTripCount: number;
+  pendingApprovalCount: number;
+  pendingExceptionCount: number;
+  estimatedPayableAmountMinor: number;
+  issuedInvoiceAmountMinor: number;
+  unpaidInvoiceAmountMinor: number;
+  costCenterWarnings: TenantCostCenterQuotaWarning[];
+  upcomingBookings: TenantBookingSummary[];
+}
+
+export interface TenantOrderListQuery {
+  from?: string;
+  to?: string;
+  serviceProduct?: ServiceProductType;
+  status?: string;
+  costCenterCode?: string;
+  tenantServiceProgramId?: string;
+  riderId?: string;
+  sourcePlatform?: string;
+  invoiceStatus?: string;
 }
 
 export interface DispatchCandidate {
@@ -3410,6 +3558,66 @@ export interface TenantInvoiceRecord {
   updatedAt: string;
 }
 
+export type TenantPayableInvoiceStatus =
+  | "draft"
+  | "issued"
+  | "paid"
+  | "overdue";
+
+export interface TenantPayableSummary {
+  tenantId: string;
+  periodMonth: string;
+  totalTrips: number;
+  completedTrips: number;
+  cancelledTrips: number;
+  noShowTrips: number;
+  grossAmountMinor: number;
+  adjustmentAmountMinor: number;
+  taxAmountMinor: number;
+  payableAmountMinor: number;
+  invoiceStatus: TenantPayableInvoiceStatus;
+}
+
+export interface TenantPayableLineItem {
+  lineItemId: string;
+  orderId: string;
+  tripId: string | null;
+  serviceProduct: ServiceProductType;
+  costCenterCode: string | null;
+  tenantServiceProgramId: string | null;
+  riderId: string | null;
+  baseAmountMinor: number;
+  extraAmountMinor: number;
+  discountAmountMinor: number;
+  taxAmountMinor: number;
+  payableAmountMinor: number;
+}
+
+export type TenantServiceProgramType =
+  | "enterprise_dispatch"
+  | "credit_card_airport_transfer"
+  | "insurance_replacement_vehicle"
+  | "travel_agency_transfer"
+  | "taxi_platform_forwarding";
+
+export type TenantServiceProgramBillingMode =
+  | "monthly_invoice"
+  | "per_trip_invoice"
+  | "partner_settlement";
+
+export interface TenantServiceProgramRecord {
+  programId: string;
+  tenantId: string;
+  programType: TenantServiceProgramType;
+  displayName: string;
+  active: boolean;
+  billingMode: TenantServiceProgramBillingMode;
+  pricingPlanId: string;
+  eligibilityRuleId: string | null;
+  serviceRuleSetId: string;
+  allowedServiceProducts: ServiceProductType[];
+}
+
 export interface IssuePassengerReceiptCommand {
   orderId: string;
 }
@@ -3427,6 +3635,259 @@ export interface PublishDriverFeePlanCommand {
   version: string;
   serviceFeeBps: number;
   reimbursementMode: "platform_funded" | "mixed";
+}
+
+export const FLEET_PARTNERSHIP_TYPES = [
+  "driver_recruitment",
+  "fleet_management",
+  "vehicle_owner_group",
+  "business_dispatch_fleet",
+] as const;
+export type FleetPartnershipType = (typeof FLEET_PARTNERSHIP_TYPES)[number];
+
+export const DRIVER_FLEET_AFFILIATION_TYPES = [
+  "recruited_by",
+  "managed_by",
+  "vehicle_owned_by",
+  "contracted_under",
+] as const;
+export type DriverFleetAffiliationType =
+  (typeof DRIVER_FLEET_AFFILIATION_TYPES)[number];
+
+export const FLEET_REVENUE_SHARE_APPLIES_TO = [
+  "all_trips",
+  "tenant_program",
+  "service_product",
+  "driver_group",
+  "platform_source",
+] as const;
+export type FleetRevenueShareAppliesTo =
+  (typeof FLEET_REVENUE_SHARE_APPLIES_TO)[number];
+
+export const FLEET_REVENUE_SHARE_FORMULAS = [
+  "percent_of_gross",
+  "fixed_per_trip",
+  "monthly_fixed",
+  "tiered_bonus",
+] as const;
+export type FleetRevenueShareFormula =
+  (typeof FLEET_REVENUE_SHARE_FORMULAS)[number];
+
+export interface FleetPartnerRecord {
+  fleetPartnerId: string;
+  legalName: string;
+  displayName: string;
+  businessRegistrationNo: string;
+  contactName: string;
+  contactPhone: string;
+  active: boolean;
+  partnershipType: FleetPartnershipType;
+}
+
+export interface CreateFleetPartnerCommand {
+  legalName: string;
+  displayName: string;
+  businessRegistrationNo: string;
+  contactName: string;
+  contactPhone: string;
+  active?: boolean;
+  partnershipType: FleetPartnershipType;
+}
+
+export interface UpdateFleetPartnerCommand {
+  legalName?: string;
+  displayName?: string;
+  businessRegistrationNo?: string;
+  contactName?: string;
+  contactPhone?: string;
+  active?: boolean;
+  partnershipType?: FleetPartnershipType;
+}
+
+export interface DriverFleetAffiliationRecord {
+  affiliationId: string;
+  driverId: string;
+  fleetPartnerId: string;
+  affiliationType: DriverFleetAffiliationType;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  driverGroupId?: string | null;
+}
+
+export interface CreateDriverFleetAffiliationCommand {
+  fleetPartnerId: string;
+  affiliationType: DriverFleetAffiliationType;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+  driverGroupId?: string | null;
+}
+
+export interface FleetPartnerRevenueShareRuleRecord {
+  ruleId: string;
+  fleetPartnerId: string;
+  appliesTo: FleetRevenueShareAppliesTo;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
+  driverGroupId?: string | null;
+  formula: FleetRevenueShareFormula;
+  rateBps?: number | null;
+  fixedAmountMinor?: number | null;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+}
+
+export interface CreateFleetPartnerRevenueShareRuleCommand {
+  appliesTo: FleetRevenueShareAppliesTo;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
+  driverGroupId?: string | null;
+  formula: FleetRevenueShareFormula;
+  rateBps?: number | null;
+  fixedAmountMinor?: number | null;
+  effectiveFrom: string;
+  effectiveUntil?: string | null;
+}
+
+export interface UpdateFleetPartnerRevenueShareRuleCommand {
+  appliesTo?: FleetRevenueShareAppliesTo;
+  serviceProduct?: string | null;
+  tenantServiceProgramId?: string | null;
+  sourcePlatform?: string | null;
+  driverGroupId?: string | null;
+  formula?: FleetRevenueShareFormula;
+  rateBps?: number | null;
+  fixedAmountMinor?: number | null;
+  effectiveFrom?: string;
+  effectiveUntil?: string | null;
+}
+
+export interface FleetPartnerStatementLineRecord {
+  lineId: string;
+  ruleId: string;
+  formula: FleetRevenueShareFormula;
+  orderId: string | null;
+  driverId: string | null;
+  affiliationId: string | null;
+  grossEarning: MoneyAmount | null;
+  driverNetAmount: MoneyAmount | null;
+  shareAmount: MoneyAmount;
+  completedAt: string | null;
+  metadata: {
+    appliesTo: FleetRevenueShareAppliesTo;
+    serviceProduct: string | null;
+    tenantServiceProgramId: string | null;
+    sourcePlatform: string | null;
+    driverGroupId: string | null;
+    orderSource: OwnedOrderSource | null;
+  };
+}
+
+export interface FleetPartnerStatementRecord {
+  statementId: string;
+  fleetPartnerId: string;
+  periodMonth: string;
+  payoutStatus: DriverPayoutStatus;
+  grossEarningBasis: MoneyAmount;
+  driverNetAmountBasis: MoneyAmount;
+  shareAmount: MoneyAmount;
+  lines: FleetPartnerStatementLineRecord[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FleetPartnerPortalDashboardRecord {
+  fleetPartnerId: string;
+  periodMonth: string;
+  activeDriverCount: number;
+  onlineDriverCount: number;
+  dispatchEligibleDriverCount: number;
+  totalVehicleCount: number;
+  dispatchableVehicleCount: number;
+  completedTripCount: number;
+  inFlightTripCount: number;
+  proofPendingTripCount: number;
+  pendingStatementCount: number;
+  latestStatementPeriodMonth: string | null;
+  grossEarningAmount: MoneyAmount;
+  shareAmount: MoneyAmount;
+}
+
+export interface FleetPartnerPortalDriverRecord {
+  affiliationId: string;
+  driverId: string;
+  fleetPartnerId: string;
+  driverGroupId: string | null;
+  affiliationType: DriverFleetAffiliationType;
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  name: string;
+  workState: DriverWorkState;
+  licensesValid: boolean;
+  lifecycleStatus: DriverMasterLifecycleStatus;
+  dispatchEligible: boolean;
+  supportedServiceBuckets: Phase1ServiceBucket[];
+  currentVehicleId: string | null;
+  currentVehiclePlateNo: string | null;
+}
+
+export interface FleetPartnerPortalVehicleRecord {
+  vehicleId: string;
+  plateNo: string;
+  operatingArea: string;
+  supportedServiceBuckets: Phase1ServiceBucket[];
+  dispatchableFlag: boolean;
+  exclusivityApproved: boolean;
+  insuranceStatus: "valid" | "expired";
+  updatedAt: string;
+  activeDriverIds: string[];
+  activeDriverNames: string[];
+  currentEtaMinutes: number | null;
+}
+
+export interface FleetPartnerPortalTripRecord {
+  orderId: string;
+  fleetPartnerId: string;
+  driverId: string;
+  driverName: string | null;
+  vehicleId: string | null;
+  vehiclePlateNo: string | null;
+  status: OwnedOrderStatus | "completed";
+  completedAt: string;
+  orderSource: OwnedOrderSource;
+  businessDispatchSubtype:
+    | "enterprise_dispatch"
+    | "credit_card_airport_transfer"
+    | "insurance_replacement_vehicle"
+    | "travel_agency_transfer";
+  grossEarning: MoneyAmount;
+  subsidy: MoneyAmount;
+  serviceProduct: string | null;
+  tenantServiceProgramId: string | null;
+  sourcePlatform: string | null;
+  partnerId: string | null;
+  partnerProgramId: string | null;
+  passengerName: string | null;
+  pickupAddress: string | null;
+  dropoffAddress: string | null;
+  reservationWindowStart: string | null;
+  reservationWindowEnd: string | null;
+}
+
+export interface FleetPartnerPortalQualityMetricsRecord {
+  fleetPartnerId: string;
+  periodMonth: string;
+  totalCompletedTrips: number;
+  proofPendingTripCount: number;
+  cancelledTripCount: number;
+  activeDriverCount: number;
+  offlineDriverCount: number;
+  licenseInvalidDriverCount: number;
+  nonDispatchableVehicleCount: number;
+  expiredInsuranceVehicleCount: number;
+  pendingStatementCount: number;
+  shareAmount: MoneyAmount;
 }
 
 export interface DriverFeePlanRecord {
@@ -4255,6 +4716,12 @@ export interface UpdateIncidentCommand {
   severity?: IncidentSeverity;
 }
 
+export interface ExtendDriverMatchingSuppressionCommand {
+  reason: string;
+  expiresAt?: string;
+  extendByHours?: number;
+}
+
 export interface CreateIncidentFromDispatchExceptionCommand {
   orderId: string;
   exceptionReasonCode: string;
@@ -4305,6 +4772,8 @@ export interface IncidentRecord {
   location: string | null;
   resolutionNote: string | null;
   serviceRecoveryActions: ServiceRecoveryActionRecord[];
+  availableActions?: ResourceActionDescriptor[];
+  matchingSuppression?: DriverMatchingSuppression | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -4595,7 +5064,11 @@ export interface PlatformTenantGovernanceSummaryQuery {
 export type PlatformTenantGovernanceAlertFlag =
   | "no_approvers_configured"
   | "quota_above_95_percent"
-  | "pending_approval_over_48h";
+  | "pending_approval_over_48h"
+  | "rollback_hold"
+  | "blocked_rollout_gate"
+  | "expired_credentials"
+  | "expiring_contract";
 
 export interface PlatformTenantGovernanceSummaryRow {
   tenantId: string;
@@ -4603,6 +5076,7 @@ export interface PlatformTenantGovernanceSummaryRow {
   tenantName: string;
   tenantStatus: PlatformAdminTenantRecord["status"];
   tenantRolloutStage: PlatformTenantRolloutStage;
+  tenantRolloutGateStatus: PlatformTenantGateStatus;
   costCenterCount: number;
   activeRuleCount: number;
   monthlyQuotaPercentUsed: number;
@@ -4917,5 +5391,24 @@ export interface SetTenantStatusCommand {
   reason?: string;
 }
 
+export interface ProposeActionToolInput {
+  resourceKind: string;
+  resourceId: string;
+  action: string;
+  args?: Record<string, unknown>;
+}
+
+export interface ActionIntent {
+  type: "action_intent";
+  tool: string;
+  resourceKind: string;
+  resourceId: string;
+  action: string;
+  args: Record<string, unknown>;
+  confirmationRequired: boolean;
+  mutates: boolean;
+}
+
 export * from "./platform-codes";
 export * from "./platform-adapter-registry";
+export * from "./ui-runtime";

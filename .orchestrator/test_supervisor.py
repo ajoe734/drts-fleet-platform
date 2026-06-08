@@ -5,6 +5,9 @@ import json
 import signal
 import subprocess
 import tempfile
+import pathlib
+import time
+from datetime import datetime, timezone
 import unittest
 import os
 from pathlib import Path
@@ -670,6 +673,79 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(request.metadata["workspace_root"], str(workspace))
 
 
+class DiskGuardTests(unittest.TestCase):
+    def _repo_config(self, root: Path) -> dict:
+        (root / "ai-status.json").write_text('{"tasks":[]}\n', encoding="utf-8")
+        return {
+            "paths": {
+                "status_file": str(root / "ai-status.json"),
+                "activity_log": str(root / "ai-activity-log.jsonl"),
+                "state_file": str(root / ".orchestrator/state.json"),
+            },
+            "branch_strategy": {
+                "worker_worktrees": {
+                    "enabled": True,
+                    "root": ".artifacts/worktrees/auto",
+                }
+            },
+            "supervisor": {
+                "disk_guard": {
+                    "enabled": True,
+                    "worktree_retention_days": 3,
+                    "max_worktrees_removed_per_tick": 20,
+                    "remove_dirty_worktrees": False,
+                }
+            },
+        }
+
+    def _init_repo(self, root: Path) -> None:
+        _git(root, "init", "-b", "dev")
+        _git(root, "config", "user.email", "test@example.com")
+        _git(root, "config", "user.name", "Test User")
+        (root / "README.md").write_text("test\n", encoding="utf-8")
+        _git(root, "add", "README.md")
+        _git(root, "commit", "-m", "init")
+
+    def test_prunes_only_stale_clean_inactive_auto_worktrees(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            base = root / ".artifacts/worktrees/auto"
+            clean = base / "codex-old-clean"
+            dirty = base / "codex-old-dirty"
+            active = base / "codex-old-active"
+            _git(root, "worktree", "add", "-b", "codex/old-clean", str(clean), "dev")
+            _git(root, "worktree", "add", "-b", "codex/old-dirty", str(dirty), "dev")
+            _git(root, "worktree", "add", "-b", "codex/old-active", str(active), "dev")
+            (dirty / "scratch.txt").write_text("untracked work\n", encoding="utf-8")
+            old = time.time() - 4 * 86400
+            for path in (clean, dirty, active):
+                os.utime(path, (old, old))
+
+            result = supervisor.prune_stale_worker_worktrees(
+                self._repo_config(root),
+                {
+                    "workers": {
+                        "active-run": {
+                            "status": "running",
+                            "workspace_root": str(active),
+                        }
+                    }
+                },
+                {
+                    "worktree_retention_days": 3,
+                    "max_worktrees_removed_per_tick": 20,
+                    "remove_dirty_worktrees": False,
+                },
+            )
+
+            self.assertEqual(result["removed"], 1)
+            self.assertFalse(clean.exists())
+            self.assertTrue(dirty.exists())
+            self.assertTrue(active.exists())
+
+
 class ProcessQueueDispatchGuardTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config = {
@@ -936,6 +1012,34 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertTrue(changed)
         queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
         self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
+
+    def test_lane_capacity_override_zero_disables_lane(self) -> None:
+        settings = {
+            "max_tasks_per_agent": 4,
+            "max_tasks_per_agent_by_lane": {"gemini": 0},
+        }
+
+        self.assertEqual(supervisor.max_tasks_per_agent_for_lane(settings, "Gemini"), 0)
+
+    def test_first_viable_agent_skips_disabled_lane(self) -> None:
+        config = {
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 2,
+                "max_tasks_per_agent_by_lane": {"gemini": 0, "codex": 2},
+            },
+            "agents": {
+                "gemini": {"display_name": "Gemini", "provider": "gemini"},
+                "codex": {"display_name": "Codex", "provider": "codex"},
+            },
+        }
+
+        result = supervisor.first_viable_agent(
+            config,
+            ["Gemini", "Codex"],
+            exclude=set(),
+        )
+
+        self.assertEqual(result, "Codex")
 
     def test_dispatcher_round_robins_ready_reviews_across_lanes(self) -> None:
         config = {
@@ -1385,6 +1489,55 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         build_request.assert_called_once_with(self.config, queue_payload)
         start_worker.assert_called_once()
 
+    def test_process_queue_defers_worker_start_when_disk_guard_blocks_dispatch(self) -> None:
+        queued_task = {
+            "id": "BUS-VAL-005",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Gemini",
+            "depends_on": [],
+            "last_update": "2026-04-05T14:54:01Z",
+        }
+        queued_event = supervisor.build_dispatch_event(
+            queued_task,
+            "Codex",
+            "owned_in_progress_dispatch",
+            {"BUS-VAL-005": queued_task},
+        )
+        queue_payload = {
+            "event_id": "evt-disk",
+            "event_key": queued_event["key"],
+            "task_id": "BUS-VAL-005",
+            "target_agent": "codex",
+            "target_display_name": "Codex",
+            "reason": "owned_in_progress_dispatch",
+            "message": "wake",
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {},
+            "disk_guard": {
+                "dispatch_blocked": True,
+                "reason": "disk usage 90.00% >= 85.00%",
+            },
+        }
+        config = {**self.config, "supervisor": {"disk_guard": {"enabled": True}}}
+
+        with (
+            mock.patch.object(supervisor, "load_event_queue", return_value=[queue_payload]),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [queued_task]}),
+            mock.patch.object(supervisor, "build_request", side_effect=AssertionError("worker request should be deferred")),
+            mock.patch.object(supervisor, "start_worker_for_request", side_effect=AssertionError("worker should not start")),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.process_queue(config, state, self.provider_report)
+
+        self.assertTrue(changed)
+        record = state["queue"]["events"]["evt-disk"]
+        self.assertEqual(record["status"], "queued")
+        self.assertEqual(record["attempt_count"], 0)
+        self.assertEqual(record["deferred_reason"], "disk_guard")
+
     def test_dispatcher_can_requeue_same_task_after_previous_failure(self) -> None:
         current_task = {
             "id": "REG-002",
@@ -1431,6 +1584,38 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertEqual(queued_event["task_id"], "REG-002")
         self.assertEqual(queued_event["target_agent"], "Codex")
         self.assertEqual(queued_event["reason"], "owned_in_progress_dispatch")
+
+    def test_dispatcher_does_not_queue_new_events_when_disk_guard_blocks_dispatch(self) -> None:
+        current_task = {
+            "id": "REG-DISK-001",
+            "status": "in_progress",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": [],
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {},
+            "seen_event_keys": {},
+            "disk_guard": {
+                "dispatch_blocked": True,
+                "reason": "disk usage 90.00% >= 85.00%",
+            },
+        }
+        status = {"tasks": [current_task]}
+        config = {**self.config, "supervisor": {"disk_guard": {"enabled": True}}}
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", side_effect=AssertionError("new event should not be queued")),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["queue"]["events"], {})
+        self.assertEqual(state["disk_guard"]["last_dispatch_block_source"], "ready_dispatcher")
 
     def test_dispatcher_queues_owner_finalize_after_review_approved(self) -> None:
         current_task = {
@@ -2223,6 +2408,108 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
 
         self.assertEqual(state["pending"], [{"approval_id": "apr-1", "status": "pending"}])
         self.assertEqual(state["history"], [{"approval_id": "apr-old", "status": "resolved"}])
+
+
+class ReconcileStatusFromGitThrottleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._clear_reconcile_registry()
+
+    def tearDown(self) -> None:
+        self._clear_reconcile_registry()
+
+    def _clear_reconcile_registry(self) -> None:
+        for entry in supervisor._RECONCILE_PROCS.values():
+            for handle_key in ("stdout_fh", "stderr_fh"):
+                handle = entry.get(handle_key)
+                if handle is not None:
+                    try:
+                        handle.close()
+                    except OSError:
+                        pass
+        supervisor._RECONCILE_PROCS.clear()
+
+    def _config(self, root: Path, *, interval: float | None = None) -> dict[str, object]:
+        supervisor_cfg: dict[str, object] = {}
+        if interval is not None:
+            supervisor_cfg["git_reconcile_interval_seconds"] = interval
+        config: dict[str, object] = {
+            "paths": {"status_file": str(root / "ai-status.json")},
+            "supervisor": supervisor_cfg,
+        }
+        return config
+
+    def _fake_popen(self) -> mock.MagicMock:
+        proc = mock.MagicMock()
+        proc.poll.return_value = None
+        proc.returncode = None
+        return proc
+
+    def test_first_call_spawns_and_stamps_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "ai-status.json").write_text("{}", encoding="utf-8")
+            (root / "scripts").mkdir()
+            script = root / "scripts" / "ai_status.py"
+            script.write_text("# placeholder\n", encoding="utf-8")
+            config = self._config(root)
+            state: dict[str, object] = {"supervisor": {}}
+            with mock.patch.object(supervisor.subprocess, "Popen", return_value=self._fake_popen()) as popen_mock:
+                ran = supervisor.reconcile_status_from_git(config, state)
+            self.assertFalse(ran)
+            popen_mock.assert_called_once()
+            self.assertIn("last_git_reconcile_at", state["supervisor"])  # type: ignore[index]
+
+    def test_second_call_within_window_skips_subprocess(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "ai-status.json").write_text("{}", encoding="utf-8")
+            (root / "scripts").mkdir()
+            (root / "scripts" / "ai_status.py").write_text("# placeholder\n", encoding="utf-8")
+            config = self._config(root, interval=60.0)
+            # Timestamp 5s ago — within 60s window.
+            recent = supervisor.datetime.now(supervisor.timezone.utc) - supervisor.timedelta(seconds=5)
+            state = {
+                "supervisor": {
+                    "last_git_reconcile_at": recent.replace(microsecond=0)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                }
+            }
+            with mock.patch.object(supervisor.subprocess, "Popen") as popen_mock:
+                ran = supervisor.reconcile_status_from_git(config, state)
+            self.assertFalse(ran)
+            popen_mock.assert_not_called()
+
+    def test_second_call_after_window_runs_subprocess(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "ai-status.json").write_text("{}", encoding="utf-8")
+            (root / "scripts").mkdir()
+            (root / "scripts" / "ai_status.py").write_text("# placeholder\n", encoding="utf-8")
+            config = self._config(root, interval=60.0)
+            # Timestamp 120s ago — well outside 60s window.
+            old = supervisor.datetime.now(supervisor.timezone.utc) - supervisor.timedelta(seconds=120)
+            state = {
+                "supervisor": {
+                    "last_git_reconcile_at": old.replace(microsecond=0)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                }
+            }
+            with mock.patch.object(supervisor.subprocess, "Popen", return_value=self._fake_popen()) as popen_mock:
+                ran = supervisor.reconcile_status_from_git(config, state)
+            self.assertFalse(ran)
+            popen_mock.assert_called_once()
+
+    def test_skips_when_status_file_path_missing(self) -> None:
+        # OPS-STATE-RECONCILE-002 guard: don't raise KeyError when config
+        # omits paths.status_file (e.g. minimal test config).
+        config: dict[str, object] = {"paths": {}, "supervisor": {}}
+        state: dict[str, object] = {"supervisor": {}}
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen_mock:
+            ran = supervisor.reconcile_status_from_git(config, state)
+        self.assertFalse(ran)
+        popen_mock.assert_not_called()
 
 
 class UnderutilizationSidecarDispatchTests(unittest.TestCase):
@@ -6507,6 +6794,63 @@ class ChairmanFlowTests(unittest.TestCase):
             "task should wait for the assigned lane to resume.",
         )
 
+    def test_proactive_claim_reassigns_disabled_lane_owner(self) -> None:
+        """A lane disabled via capacity=0 should not keep tasks stuck forever."""
+        config = {
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 2,
+                "max_tasks_per_agent_by_lane": {
+                    "gemini": 0,
+                    "codex": 4,
+                    "codex2": 4,
+                },
+            },
+            "worker_reassignment": {
+                "owner_fallbacks": {"Gemini": ["Codex", "Codex2"]},
+                "reviewer_fallbacks": {"Gemini": ["Codex", "Codex2"]},
+            },
+            "agents": {
+                "gemini": {"display_name": "Gemini", "provider": "gemini"},
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            },
+        }
+        task = {
+            "id": "TENBIZ-012",
+            "status": "todo",
+            "owner": "Gemini",
+            "reviewer": "Codex2",
+            "depends_on": [],
+        }
+
+        plan = supervisor.proactive_claim_plan_for_idle_agent(
+            config,
+            task=task,
+            task_map={"TENBIZ-012": task},
+            idle_agent_name="Codex",
+            idle_agent_names=["Codex", "Codex2"],
+            agent_loads={"Gemini": [3], "Codex": [99], "Codex2": [99]},
+            helper_settings={
+                "enabled": True,
+                "task_statuses": ["backlog", "todo", "in_progress", "review", "review_approved"],
+                "availability_first": False,
+                "allow_any_idle_lane": False,
+                "prefer_assigned_when_idle": True,
+                "require_assigned_agent_busy": True,
+                "require_owner_higher_priority_load": True,
+                "respect_explicit_owner_when_paused": True,
+            },
+            review_statuses={"review"},
+            finalize_statuses={"review_approved"},
+            dependency_done_statuses={"done"},
+            state={"provider_pauses": {}},
+        )
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["claim_agent"], "Codex")
+        self.assertEqual(plan["new_owner"], "Codex")
+        self.assertEqual(plan["new_reviewer"], "Codex2")
+
     def test_proactive_claim_still_reshuffles_when_explicit_owner_busy(self) -> None:
         """The paused-owner guard must not block legitimate busy reshuffling.
 
@@ -6812,5 +7156,539 @@ class CheckWorkerTreeGuardTests(unittest.TestCase):
         self.assertEqual(result["dirty_paths"], [".orchestrator/skills/renamed.md"])
 
 
+
+
+class DispatchCooldownTests(unittest.TestCase):
+    """Cooldown protects freshly-dispatched workers from voluntary supersede.
+
+    See `worker_in_dispatch_cooldown` in supervisor.py. Cooldown is
+    measured against the timestamp embedded in the worker run_id; for
+    workers whose run_id has no parseable timestamp (legacy / synthetic
+    fixtures), cooldown is bypassed so the historical supersede behaviour
+    is preserved.
+    """
+
+    def test_parse_returns_none_for_short_slug(self) -> None:
+        self.assertIsNone(supervisor.parse_worker_dispatched_at("run-1"))
+        self.assertIsNone(supervisor.parse_worker_dispatched_at(None))
+        self.assertIsNone(supervisor.parse_worker_dispatched_at(""))
+
+    def test_parse_extracts_timestamp_from_production_run_id(self) -> None:
+        dt = supervisor.parse_worker_dispatched_at("codex-20260526T043357Z-d168b9f0")
+        self.assertIsNotNone(dt)
+        from datetime import datetime, timezone
+        self.assertEqual(
+            dt, datetime(2026, 5, 26, 4, 33, 57, tzinfo=timezone.utc)
+        )
+
+    def test_cooldown_false_when_disabled(self) -> None:
+        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
+        self.assertFalse(supervisor.worker_in_dispatch_cooldown(worker, 0))
+        self.assertFalse(supervisor.worker_in_dispatch_cooldown(worker, -1))
+
+    def test_cooldown_false_for_non_running_worker(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "stalled", "run_id": "codex-20260526T043357Z-aaa"}
+        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
+        self.assertFalse(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "stalled workers must remain recoverable via supersede",
+        )
+
+    def test_cooldown_true_for_fresh_running_worker(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
+        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
+        self.assertTrue(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "running worker dispatched 3s ago is within 300s cooldown",
+        )
+
+    def test_cooldown_false_for_stale_worker(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "running", "run_id": "codex-20260526T043357Z-aaa"}
+        now = datetime(2026, 5, 26, 5, 30, 0, tzinfo=timezone.utc)
+        self.assertFalse(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "running worker dispatched 56 min ago is outside 300s cooldown",
+        )
+
+    def test_cooldown_false_when_runid_has_no_timestamp(self) -> None:
+        from datetime import datetime, timezone
+        worker = {"status": "running", "run_id": "run-active"}
+        now = datetime(2026, 5, 26, 4, 34, 0, tzinfo=timezone.utc)
+        self.assertFalse(
+            supervisor.worker_in_dispatch_cooldown(worker, 300, now=now),
+            "synthetic test fixtures without timestamped run_ids must bypass cooldown",
+        )
+
+    def test_ready_dispatch_settings_default_cooldown(self) -> None:
+        settings = supervisor.ready_dispatch_settings({})
+        self.assertEqual(settings.get("dispatch_cooldown_seconds"), 300)
+
+    def test_ready_dispatch_settings_honors_explicit_zero(self) -> None:
+        settings = supervisor.ready_dispatch_settings({
+            "ready_dispatcher": {"dispatch_cooldown_seconds": 0}
+        })
+        self.assertEqual(settings.get("dispatch_cooldown_seconds"), 0)
+
+
+
+
+class PruneDoneHandoffsTests(unittest.TestCase):
+    """`prune_done_handoffs` bounds ai-status.json's handoffs audit-log tail.
+
+    Without this prune the file grew to ~9 MB / 17k entries during the
+    2026-05-26 incident, making the dashboard fetch unusably slow. See
+    feedback_ai_status_handoff_bloat.
+    """
+
+    def test_noop_under_keep_threshold(self) -> None:
+        s = {"handoffs": [{"status": "done"}] * 100}
+        supervisor.prune_done_handoffs(s, keep=500)
+        self.assertEqual(len(s["handoffs"]), 100)
+
+    def test_pending_entries_always_preserved(self) -> None:
+        # 2000 done + 5 pending; even with keep=10, pending entries survive.
+        handoffs = (
+            [{"status": "done", "task_id": f"D{i}"} for i in range(2000)]
+            + [{"status": "pending", "task_id": f"P{i}"} for i in range(5)]
+        )
+        s = {"handoffs": list(handoffs)}
+        supervisor.prune_done_handoffs(s, keep=10)
+        kinds = [x.get("status") for x in s["handoffs"]]
+        self.assertEqual(kinds.count("pending"), 5,
+                         "all pending handoffs must survive prune")
+        self.assertEqual(kinds.count("done"), 10,
+                         "only the last `keep` done entries survive")
+
+    def test_keeps_most_recent_done_by_position(self) -> None:
+        # done entries are appended chronologically; the prune must keep the
+        # tail, not the head, so audit history reflects what *just* happened.
+        handoffs = [{"status": "done", "task_id": f"T{i}"} for i in range(1000)]
+        s = {"handoffs": list(handoffs)}
+        supervisor.prune_done_handoffs(s, keep=3)
+        self.assertEqual(
+            [x["task_id"] for x in s["handoffs"]],
+            ["T997", "T998", "T999"],
+        )
+
+    def test_missing_handoffs_key_is_safe(self) -> None:
+        s = {}
+        supervisor.prune_done_handoffs(s, keep=500)  # must not raise
+        self.assertNotIn("handoffs", s)
+
+    def test_non_list_handoffs_is_safe(self) -> None:
+        # Bad data type — defensive against malformed input.
+        s = {"handoffs": "not-a-list"}
+        supervisor.prune_done_handoffs(s, keep=500)
+        self.assertEqual(s["handoffs"], "not-a-list")  # unchanged
+
+
+
+
+class ReconcileStatusFromGitAsyncTests(unittest.TestCase):
+    """OPS-RECONCILE-ASYNC-001: reconcile_status_from_git must spawn the
+    git-reconcile subprocess in the background (non-blocking) and finalize
+    its result on the NEXT tick, so a slow reconcile cannot freeze the
+    supervisor's main dispatch loop.
+
+    Previously the supervisor used `subprocess.run` and synchronously waited
+    for the reconcile-from-git subprocess. On a bloated ai-status.json the
+    subprocess took ~4 minutes, during which dispatch was completely starved
+    and every lane drained to zero (OPS-RECONCILE-INTERVAL-600 throttled
+    re-entry but did not address the per-call freeze).
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        root = pathlib.Path(self._tmp.name)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "ai_status.py").write_text("# stub\n")
+        (root / ".orchestrator").mkdir()
+        (root / "ai-status.json").write_text("{}")
+        self.config = {
+            "paths": {
+                "status_file": str(root / "ai-status.json"),
+                "activity_log": str(root / "ai-activity-log.jsonl"),
+            },
+            "supervisor": {"git_reconcile_interval_seconds": 60},
+        }
+        # ensure the registry is empty across tests
+        self._clear_reconcile_registry()
+
+    def tearDown(self) -> None:
+        self._clear_reconcile_registry()
+        self._tmp.cleanup()
+
+    def _clear_reconcile_registry(self) -> None:
+        for entry in supervisor._RECONCILE_PROCS.values():
+            for handle_key in ("stdout_fh", "stderr_fh"):
+                handle = entry.get(handle_key)
+                if handle is not None:
+                    try:
+                        handle.close()
+                    except OSError:
+                        pass
+        supervisor._RECONCILE_PROCS.clear()
+
+    def _fake_popen(self, *, alive: bool, returncode: int = 0,
+                     stdout: str = "", stderr: str = "") -> mock.MagicMock:
+        proc = mock.MagicMock()
+        proc.poll.return_value = None if alive else returncode
+        proc.returncode = None if alive else returncode
+        proc._fake_stdout = stdout
+        proc._fake_stderr = stderr
+        return proc
+
+    def test_first_call_spawns_popen_and_returns_false(self) -> None:
+        # Fresh state — first call spawns Popen and returns False (no
+        # result to apply yet).
+        state: dict = {}
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            popen.return_value = self._fake_popen(alive=True)
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        self.assertEqual(popen.call_count, 1)
+        # Throttle timestamp recorded so a re-entry skips spawn.
+        self.assertIn("last_git_reconcile_at", state.get("supervisor", {}))
+        # In-flight entry registered.
+        self.assertEqual(len(supervisor._RECONCILE_PROCS), 1)
+
+    def test_subsequent_call_while_in_flight_does_not_respawn(self) -> None:
+        # Simulate: previous tick spawned reconcile; this tick should observe
+        # it still running and NOT spawn a second one.
+        state: dict = {}
+        popen_proc = self._fake_popen(alive=True)
+        with mock.patch.object(supervisor.subprocess, "Popen", return_value=popen_proc) as popen:
+            supervisor.reconcile_status_from_git(self.config, state)
+            # Second call while alive=True
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        self.assertEqual(popen.call_count, 1, "must NOT re-spawn while in flight")
+
+    def test_completion_applies_stdout_and_returns_true(self) -> None:
+        # Spawn -> mark completed -> ensure next call reads stdout, emits
+        # activity-log entries, clears the registry and returns True.
+        state: dict = {}
+        # Spawn
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            proc = self._fake_popen(alive=True)
+            popen.return_value = proc
+            supervisor.reconcile_status_from_git(self.config, state)
+        # Find the tempfile paths from the registry and prefill them
+        entry = next(iter(supervisor._RECONCILE_PROCS.values()))
+        entry["stdout_path"].write_text("reconciled UI-X to done\n")
+        entry["stderr_path"].write_text("")
+        # Mark process completed (rc=0)
+        entry["proc"].poll.return_value = 0
+        entry["proc"].returncode = 0
+        with mock.patch.object(supervisor, "write_activity_log") as log:
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertTrue(changed)
+        self.assertEqual(len(supervisor._RECONCILE_PROCS), 0,
+                         "registry must clear after applying completion")
+        # Activity log invoked with the reconcile message
+        calls = [c.args[1] for c in log.call_args_list]
+        self.assertTrue(any(
+            c.get("type") == "reconcile_status_from_git" and "UI-X" in c.get("message", "")
+            for c in calls
+        ))
+
+    def test_throttle_blocks_spawn_within_interval(self) -> None:
+        # last_git_reconcile_at < interval ago and registry empty -> no spawn.
+        state = {"supervisor": {
+            "last_git_reconcile_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }}
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        popen.assert_not_called()
+
+    def test_completion_with_nonzero_rc_logs_failure_and_returns_false(self) -> None:
+        state: dict = {}
+        with mock.patch.object(supervisor.subprocess, "Popen") as popen:
+            popen.return_value = self._fake_popen(alive=True)
+            supervisor.reconcile_status_from_git(self.config, state)
+        entry = next(iter(supervisor._RECONCILE_PROCS.values()))
+        entry["stdout_path"].write_text("")
+        entry["stderr_path"].write_text("boom: missing remote\n")
+        entry["proc"].poll.return_value = 2
+        entry["proc"].returncode = 2
+        with mock.patch.object(supervisor, "write_activity_log") as log:
+            changed = supervisor.reconcile_status_from_git(self.config, state)
+        self.assertFalse(changed)
+        types = [c.args[1].get("type") for c in log.call_args_list]
+        self.assertIn("reconcile_status_from_git_failed", types)
+
+
+
+
+class SdNotifyTests(unittest.TestCase):
+    """OPS-SUPERVISOR-SD-NOTIFY-001: _sd_notify must (a) no-op when
+    NOTIFY_SOCKET is unset (covers interactive / --once usage), (b) deliver
+    a WATCHDOG=1 datagram to the AF_UNIX socket systemd hands us when set,
+    (c) swallow all OS errors (heartbeat must never take the supervisor
+    down)."""
+
+    def test_noop_when_notify_socket_unset(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("NOTIFY_SOCKET", None)
+            with mock.patch.object(supervisor.socket, "socket") as sk:
+                supervisor._sd_notify("WATCHDOG=1")
+            sk.assert_not_called()
+
+    def test_sends_datagram_when_notify_socket_set(self) -> None:
+        fake_sock = mock.MagicMock()
+        with mock.patch.dict(os.environ, {"NOTIFY_SOCKET": "/run/systemd/notify"}):
+            with mock.patch.object(supervisor.socket, "socket", return_value=fake_sock):
+                supervisor._sd_notify("WATCHDOG=1")
+        fake_sock.connect.assert_called_once_with("/run/systemd/notify")
+        fake_sock.sendall.assert_called_once_with(b"WATCHDOG=1")
+        fake_sock.close.assert_called_once()
+
+    def test_abstract_namespace_socket_path_translated(self) -> None:
+        # systemd uses @-prefix for abstract namespace; kernel wants \0-prefix.
+        fake_sock = mock.MagicMock()
+        with mock.patch.dict(os.environ, {"NOTIFY_SOCKET": "@some-abstract"}):
+            with mock.patch.object(supervisor.socket, "socket", return_value=fake_sock):
+                supervisor._sd_notify("READY=1")
+        fake_sock.connect.assert_called_once_with("\0some-abstract")
+        fake_sock.sendall.assert_called_once_with(b"READY=1")
+
+    def test_oserror_during_send_is_swallowed(self) -> None:
+        # If the systemd socket disappears mid-supervisor (or perms drop),
+        # _sd_notify must NOT raise — heartbeat is best-effort.
+        fake_sock = mock.MagicMock()
+        fake_sock.sendall.side_effect = OSError("broken pipe")
+        with mock.patch.dict(os.environ, {"NOTIFY_SOCKET": "/run/systemd/notify"}):
+            with mock.patch.object(supervisor.socket, "socket", return_value=fake_sock):
+                # MUST NOT raise.
+                supervisor._sd_notify("WATCHDOG=1")
+        fake_sock.close.assert_called_once()
+
+
+class ProviderReportPreloadTests(unittest.TestCase):
+    # OPS-PROVIDER-REPORT-PRELOAD: caller can pre-load provider_report once per
+    # tick and thread it through first_viable_agent / poll_workers /
+    # maybe_reassign_task_after_worker_failure instead of each of those
+    # reloading it from disk independently.
+
+    def _config(self) -> dict:
+        return {
+            "agents": [
+                {"display_name": "Codex"},
+                {"display_name": "Claude"},
+            ],
+            "provider_report_path": "/dev/null",
+            "supervisor": {},
+            "ready_dispatcher": {},
+        }
+
+    def test_first_viable_agent_uses_passed_provider_report(self) -> None:
+        # When provider_report is passed, load_provider_report MUST NOT be called.
+        sentinel = {"providers": {"Codex": {"auth_ready": True}}}
+        with mock.patch.object(supervisor, "load_provider_report") as mock_load, \
+             mock.patch.object(supervisor, "known_agent_display_names", return_value={"Codex", "Claude"}), \
+             mock.patch.object(supervisor, "is_agent_dispatch_paused", return_value=False) as mock_paused:
+            result = supervisor.first_viable_agent(
+                self._config(),
+                ["Codex", "Claude"],
+                exclude=set(),
+                state={"workers": {}},
+                provider_report=sentinel,
+            )
+        mock_load.assert_not_called()
+        # is_agent_dispatch_paused must receive the same sentinel.
+        self.assertEqual(mock_paused.call_args.kwargs.get("provider_report"), sentinel)
+        self.assertEqual(result, "Codex")
+
+    def test_first_viable_agent_falls_back_to_load_when_none(self) -> None:
+        # Backwards-compatible: if caller does not pass provider_report and
+        # state is given, the function still loads one itself.
+        loaded = {"providers": {"Codex": {"auth_ready": True}}}
+        with mock.patch.object(supervisor, "load_provider_report", return_value=loaded) as mock_load, \
+             mock.patch.object(supervisor, "known_agent_display_names", return_value={"Codex"}), \
+             mock.patch.object(supervisor, "is_agent_dispatch_paused", return_value=False) as mock_paused:
+            result = supervisor.first_viable_agent(
+                self._config(),
+                ["Codex"],
+                exclude=set(),
+                state={"workers": {}},
+            )
+        mock_load.assert_called_once()
+        self.assertEqual(mock_paused.call_args.kwargs.get("provider_report"), loaded)
+        self.assertEqual(result, "Codex")
+
+    def test_poll_workers_accepts_provider_report_kwarg(self) -> None:
+        # Verifies the new poll_workers signature accepts an optional 3rd
+        # positional arg and threads it into retry_due_workers without
+        # triggering a second load_provider_report call.
+        config = self._config()
+        state: dict = {"workers": {}, "queue": {"events": {}}}
+        sentinel = {"providers": {}}
+        with mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}), \
+             mock.patch.object(supervisor, "task_index_from_status", return_value={}), \
+             mock.patch.object(supervisor, "load_status", return_value={}), \
+             mock.patch.object(supervisor, "redispatch_candidate_statuses", return_value=set()), \
+             mock.patch.object(supervisor, "ready_dispatch_settings", return_value={"active_worker_statuses": []}), \
+             mock.patch.object(supervisor, "retry_due_workers", return_value=False) as mock_retry, \
+             mock.patch.object(supervisor, "load_provider_report") as mock_load:
+            # MUST NOT raise; signature accepts the 3rd positional arg.
+            supervisor.poll_workers(config, state, sentinel)
+        # When provider_report is given, load_provider_report MUST NOT be called.
+        mock_load.assert_not_called()
+        # retry_due_workers must receive the sentinel that was passed in.
+        self.assertEqual(mock_retry.call_args[0][2], sentinel)
+class PruneDoneTasksTests(unittest.TestCase):
+    """`prune_done_tasks` bounds ai-status.json's tasks array.
+
+    Without this prune the array accumulated 646 done tasks / ~1.0 MB by the
+    2026-05-30 incident, pushing ai-status.json past the 256 KB cap the
+    chair/coordination worker's Read tool enforces. See
+    feedback_ai_status_handoff_bloat.
+    """
+
+    def test_noop_under_keep_threshold(self) -> None:
+        s = {"tasks": [{"id": f"D{i}", "status": "done"} for i in range(100)]}
+        supervisor.prune_done_tasks(s, keep=150)
+        self.assertEqual(len(s["tasks"]), 100)
+        self.assertNotIn("archived_task_ids", s)
+
+    def test_active_tasks_always_preserved(self) -> None:
+        tasks = (
+            [{"id": f"D{i}", "status": "done"} for i in range(2000)]
+            + [{"id": f"A{i}", "status": "in_progress"} for i in range(5)]
+            + [{"id": f"B{i}", "status": "todo"} for i in range(5)]
+        )
+        s = {"tasks": list(tasks)}
+        supervisor.prune_done_tasks(s, keep=10)
+        statuses = [t["status"] for t in s["tasks"]]
+        self.assertEqual(statuses.count("in_progress"), 5)
+        self.assertEqual(statuses.count("todo"), 5)
+        self.assertEqual(statuses.count("done"), 10, "only the last `keep` done tasks survive")
+
+    def test_keeps_most_recent_done_and_preserves_order(self) -> None:
+        # Interleave active + done; prune must keep the done *tail* and leave the
+        # relative order of surviving entries intact.
+        tasks = []
+        for i in range(1000):
+            tasks.append({"id": f"T{i}", "status": "done"})
+            if i % 100 == 0:
+                tasks.append({"id": f"ACT{i}", "status": "todo"})
+        s = {"tasks": list(tasks)}
+        supervisor.prune_done_tasks(s, keep=3)
+        done_ids = [t["id"] for t in s["tasks"] if t["status"] == "done"]
+        self.assertEqual(done_ids, ["T997", "T998", "T999"])
+        # all active survive, in original order
+        active_ids = [t["id"] for t in s["tasks"] if t["status"] == "todo"]
+        self.assertEqual(active_ids, [f"ACT{i}" for i in range(0, 1000, 100)])
+
+    def test_dropped_ids_recorded_in_archive_without_duplicates(self) -> None:
+        s = {
+            "tasks": [{"id": f"D{i}", "status": "done"} for i in range(10)],
+            "archived_task_ids": ["D0"],  # already archived once
+        }
+        supervisor.prune_done_tasks(s, keep=3)
+        # D0..D6 dropped; D0 not duplicated; recent D7..D9 kept in tasks.
+        self.assertEqual([t["id"] for t in s["tasks"]], ["D7", "D8", "D9"])
+        self.assertEqual(s["archived_task_ids"].count("D0"), 1)
+        for i in range(7):
+            self.assertIn(f"D{i}", s["archived_task_ids"])
+
+    def test_missing_and_non_list_tasks_are_safe(self) -> None:
+        empty: dict = {}
+        supervisor.prune_done_tasks(empty, keep=150)
+        self.assertNotIn("tasks", empty)
+        bad = {"tasks": "not-a-list"}
+        supervisor.prune_done_tasks(bad, keep=150)
+        self.assertEqual(bad["tasks"], "not-a-list")
+
+
+class PruneBlockersTests(unittest.TestCase):
+    """`prune_blockers` keeps every open blocker plus the recent resolved tail."""
+
+    def test_open_blockers_always_preserved(self) -> None:
+        blockers = (
+            [{"task_id": f"R{i}", "status": "resolved"} for i in range(500)]
+            + [{"task_id": "OPEN1", "status": "open"}]
+        )
+        s = {"blockers": list(blockers)}
+        supervisor.prune_blockers(s, keep=10)
+        statuses = [b["status"] for b in s["blockers"]]
+        self.assertEqual(statuses.count("open"), 1, "open blockers must survive prune")
+        self.assertEqual(statuses.count("resolved"), 10)
+
+    def test_keeps_most_recent_resolved(self) -> None:
+        s = {"blockers": [{"task_id": f"R{i}", "status": "resolved"} for i in range(100)]}
+        supervisor.prune_blockers(s, keep=2)
+        self.assertEqual([b["task_id"] for b in s["blockers"]], ["R98", "R99"])
+
+    def test_noop_under_threshold_and_safe_on_bad_input(self) -> None:
+        s = {"blockers": [{"status": "resolved"}] * 5}
+        supervisor.prune_blockers(s, keep=100)
+        self.assertEqual(len(s["blockers"]), 5)
+        empty: dict = {}
+        supervisor.prune_blockers(empty, keep=100)  # must not raise
+        self.assertNotIn("blockers", empty)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class BreakFullDeadlockTests(unittest.TestCase):
+    CONFIG = {
+        "agents": {"claude2": {"provider": "claude2"}},
+        "supervisor": {"deadlock_breaker_cooldown_seconds": 1800},
+        "ready_dispatcher": {},
+    }
+
+    def _wedged_state(self):
+        return {
+            "workers": {},
+            "queue": {"events": {}},
+            "chair_review": {"blocked": {"reason": "no lane"}},
+            "provider_pauses": {"claude2": {"kind": "auth", "resume_at": None, "paused_at": supervisor.utc_now()}},
+            "quota_paused_agents": {},
+        }
+
+    _STATUS = {"tasks": [{"id": "T1", "status": "backlog"}]}
+
+    def test_clears_lane_when_wedged_and_probe_healthy(self):
+        state = self._wedged_state()
+        report = {"providers": {"claude2": {"installed": True, "auth_ready": True}}}
+        with mock.patch.object(supervisor, "_force_recovery_probe", return_value=report), \
+             mock.patch.object(supervisor, "write_activity_log"):
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertTrue(changed)
+        self.assertNotIn("claude2", state["provider_pauses"])
+
+    def test_escalates_operator_attention_when_unrecoverable(self):
+        state = self._wedged_state()
+        report = {"providers": {"claude2": {"installed": True, "auth_ready": False}}}
+        with mock.patch.object(supervisor, "_force_recovery_probe", return_value=report), \
+             mock.patch.object(supervisor, "write_activity_log") as wal:
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertTrue(changed)
+        self.assertIn("claude2", state["provider_pauses"])  # still paused
+        self.assertIn("operator_attention", state["deadlock_recovery"])
+        kinds = [c.args[1].get("type") for c in wal.call_args_list]
+        self.assertIn("operator_attention_required", kinds)
+
+    def test_noop_when_workers_active(self):
+        state = self._wedged_state()
+        state["workers"] = {"w1": {"agent_id": "claude2", "status": "running"}}
+        probe = mock.Mock()
+        with mock.patch.object(supervisor, "_force_recovery_probe", probe):
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertFalse(changed)
+        probe.assert_not_called()
+
+    def test_noop_when_chair_not_blocked(self):
+        state = self._wedged_state()
+        state["chair_review"] = {}
+        with mock.patch.object(supervisor, "_force_recovery_probe") as probe:
+            changed = supervisor.break_full_deadlock(self.CONFIG, state, self._STATUS)
+        self.assertFalse(changed)
+        probe.assert_not_called()

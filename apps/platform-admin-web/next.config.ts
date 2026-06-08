@@ -3,6 +3,7 @@ import path from "path";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  distDir: process.env.NEXT_DIST_DIR?.trim() || ".next",
   allowedDevOrigins: [
     "127.0.0.1",
     "*.trycloudflare.com",
@@ -15,7 +16,7 @@ const nextConfig: NextConfig = {
   // `content-encoding: gzip` header.
   compress: false,
   outputFileTracingRoot: path.join(__dirname, "../../"),
-  transpilePackages: ["@drts/shared-types", "@drts/ui-tokens", "@drts/ui-web"],
+  transpilePackages: ["@drts/shared-types", "@drts/ui-web"],
 };
 
 export default nextConfig;

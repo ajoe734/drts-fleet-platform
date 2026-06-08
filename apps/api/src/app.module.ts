@@ -14,18 +14,21 @@ import {
   InternalKeyMiddleware,
 } from "./common/auth";
 import { JwtAuthService } from "./common/auth/jwt-auth.service";
+import { LlmGatewayModule } from "./common/llm-gateway";
 import { SnakeCaseExceptionFilter } from "./common/snake-case.exception-filter";
 import { SnakeCaseInterceptor } from "./common/snake-case.interceptor";
 import { BootstrapThrottlerGuard } from "./common/throttling/bootstrap-throttler.guard";
 import { GLOBAL_RATE_LIMIT } from "./common/throttling/rate-limit.constants";
 import { HealthModule } from "./health/health.module";
 import { AuditNotificationModule } from "./modules/audit-notification/audit-notification.module";
+import { AssistantModule } from "./modules/assistant/assistant.module";
 import { BillingSettlementModule } from "./modules/billing-settlement/billing-settlement.module";
 import { CallcenterModule } from "./modules/callcenter/callcenter.module";
 import { ComplaintModule } from "./modules/complaint/complaint.module";
 import { DriverProfileModule } from "./modules/driver-profile/driver-profile.module";
 import { DriverSettingsModule } from "./modules/driver-settings/driver-settings.module";
 import { FeatureFlagsModule } from "./modules/feature-flags/feature-flags.module";
+import { FleetPartnerModule } from "./modules/fleet-partner/fleet-partner.module";
 import { FoundationModule } from "./modules/foundation/foundation.module";
 import { ForwarderModule } from "./modules/forwarder/forwarder.module";
 import { IdentityModule } from "./modules/identity/identity.module";
@@ -34,20 +37,25 @@ import { MaintenanceModule } from "./modules/maintenance/maintenance.module";
 import { OwnedMobilityModule } from "./modules/owned-mobility/owned-mobility.module";
 import { OperationalObservabilityModule } from "./modules/operational-observability/operational-observability.module";
 import { PlatformAdminModule } from "./modules/platform-admin/platform-admin.module";
+import { PlatformAdminAssistantModule } from "./modules/platform-admin-assistant/platform-admin-assistant.module";
 import { PlatformPresenceModule } from "./modules/platform-presence/platform-presence.module";
 import { PlatformEarningsModule } from "./modules/platform-earnings/platform-earnings.module";
 import { ProductRuleModule } from "./modules/product-rule/product-rule.module";
 import { RegulatoryRegistryModule } from "./modules/regulatory-registry/regulatory-registry.module";
 import { ReportingFilingModule } from "./modules/reporting-filing/reporting-filing.module";
+import { ServiceProductModule } from "./modules/service-product/service-product.module";
 import { ShiftAttendanceModule } from "./modules/shift-attendance/shift-attendance.module";
 import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.module";
 import { AuthModule } from "./modules/auth/auth.module";
+import { VehicleEligibilityModule } from "./modules/vehicle-eligibility/vehicle-eligibility.module";
 
 @Module({
   imports: [
     EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([...GLOBAL_RATE_LIMIT]),
+    LlmGatewayModule,
     AuthModule,
+    AssistantModule,
     HealthModule,
     FoundationModule,
     IdentityModule,
@@ -61,16 +69,20 @@ import { AuthModule } from "./modules/auth/auth.module";
     OwnedMobilityModule,
     OperationalObservabilityModule,
     PlatformAdminModule,
+    PlatformAdminAssistantModule,
     BillingSettlementModule,
     ReportingFilingModule,
+    ServiceProductModule,
     ForwarderModule,
     FeatureFlagsModule,
+    FleetPartnerModule,
     IncidentModule,
     MaintenanceModule,
     ShiftAttendanceModule,
     DriverSettingsModule,
     PlatformPresenceModule,
     PlatformEarningsModule,
+    VehicleEligibilityModule,
   ],
   providers: [
     JwtAuthService,

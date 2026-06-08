@@ -1,0 +1,547 @@
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
+
+const ENABLED_PROJECT = "platform-admin-assistant-on";
+const DISABLED_PROJECT = "platform-admin-assistant-off";
+const NAV_LABEL = /Platform Admin navigation|平台管理導覽/;
+
+const routeSmokeTargets = [
+  "/",
+  "/tenants",
+  "/health",
+  "/notices",
+  "/partners/acme-demo",
+  "/pricing",
+  "/payments",
+  "/audit",
+  "/switchboard",
+  "/adapter-registry",
+  "/feature-flags",
+] as const;
+
+const LOCALIZATION_LEAK_PATTERNS = [
+  /Unknown error/i,
+  /Request failed/i,
+  /Unable to /i,
+  /\bfetch_failed\b/i,
+  /\bpermission_denied\b/i,
+  /\bnot_provisioned\b/i,
+  /\bexternal_unavailable\b/i,
+  /\bmid_rollout\b/i,
+  /\brolled_out\b/i,
+  /Tenant override/i,
+  /Platform default/i,
+  /Role code /i,
+  /Health signal unavailable/i,
+  /Public info stays on \/switchboard/i,
+  /DRTS Native Dispatch/i,
+  /CityRide Forwarded Orders/i,
+] as const;
+
+type AssistantMockState = {
+  lastMessage: string | null;
+  lastActionReason: string | null;
+};
+
+function isEnabledProject(testInfo: TestInfo) {
+  return testInfo.project.name === ENABLED_PROJECT;
+}
+
+function isDisabledProject(testInfo: TestInfo) {
+  return testInfo.project.name === DISABLED_PROJECT;
+}
+
+async function primeZhLocale(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("drts-locale-v2", "zh");
+    document.cookie = "drts-locale-v2=zh;path=/;max-age=31536000;SameSite=Lax";
+  });
+}
+
+async function mockAssistantApi(page: Page): Promise<AssistantMockState> {
+  const state: AssistantMockState = {
+    lastMessage: null,
+    lastActionReason: null,
+  };
+
+  await page.route(
+    "**/control-plane-proxy/platform-admin/assistant/sessions",
+    async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: {
+            session_id: "paas_e2e_session_001",
+            title: "E2E Platform Admin assistant",
+            created_at: "2026-06-03T09:30:00.000Z",
+            updated_at: "2026-06-03T09:30:00.000Z",
+            provider: "mock",
+            actor: {
+              auth_mode: "bootstrap_headers",
+              actor_type: "platform_admin",
+              actor_id: "pa-admin-e2e",
+              realm: "platform",
+              tenant_id: null,
+              role_families: ["platform"],
+              roles: ["superadmin"],
+              scopes: ["foundation:read", "foundation:write"],
+              request_id: "req-e2e-session",
+            },
+            latest_answer_preview: null,
+          },
+          meta: {
+            request_id: "req-e2e-session",
+            timestamp: "2026-06-03T09:30:00.000Z",
+          },
+        }),
+      });
+    },
+  );
+
+  await page.route(
+    "**/control-plane-proxy/platform-admin/assistant/sessions/*/messages",
+    async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+
+      const body = route.request().postDataJSON() as { message?: string };
+      state.lastMessage = body.message ?? null;
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: {
+            answer:
+              "Mock assistant response for pa-admin-e2e: review the current route risks before changing platform state.",
+            citations: [
+              {
+                title: "Platform Admin product routes",
+                section: "§7.3 Current route map",
+              },
+            ],
+            suggested_prompts: [
+              "List the route risks.",
+              "Draft the operator checklist.",
+            ],
+            action_plan: {
+              plan_id: "plan-e2e-001",
+              title: "Mock action plan",
+              summary: "Inspect current state before taking action.",
+              steps: [
+                {
+                  step_id: "validate-context",
+                  title: "Validate current Platform Admin context",
+                  status: "completed",
+                },
+                {
+                  step_id: "inspect-state",
+                  title: "Inspect the impacted governance state",
+                  status: "in_progress",
+                },
+              ],
+            },
+            governed_action: body.message?.includes("公告")
+              ? {
+                  tool_name: "action.create_platform_notice",
+                  payload: {
+                    title: "Assistant drafted notice",
+                    body: "Review before execution.",
+                    severity: "warning",
+                    target_audience: "all",
+                  },
+                  descriptor: {
+                    action: "create_platform_notice",
+                    enabled: true,
+                    risk_level: "medium",
+                    requires_reason: false,
+                  },
+                  confirmation_required: true,
+                  title: "Confirm platform notice creation",
+                  message: "This will publish a warning notice for all.",
+                  resource_label: "Assistant drafted notice · warning · all",
+                  confirm_label: "Create notice",
+                  cancel_label: "Keep draft",
+                  reason_label: "Operator note",
+                  reason_placeholder: "Optional note for the audit trail.",
+                }
+              : null,
+          },
+          meta: {
+            request_id: "req-e2e-message",
+            timestamp: "2026-06-03T09:30:01.000Z",
+          },
+        }),
+      });
+    },
+  );
+
+  await page.route(
+    "**/control-plane-proxy/platform-admin/assistant/sessions/*/actions/execute",
+    async (route) => {
+      const body = route.request().postDataJSON() as { reason?: string };
+      state.lastActionReason = body.reason ?? null;
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: {
+            receipt: {
+              action_id: "req-e2e-action-001",
+              audit_id: "audit-e2e-action-001",
+              resource_type: "platform_notice",
+              resource_id: "notice_e2e_001",
+              status: "completed",
+              message: "Platform notice created.",
+            },
+            assistant_audit_id: "assistant-audit-e2e-001",
+          },
+          meta: {
+            request_id: "req-e2e-action-001",
+            timestamp: "2026-06-03T09:30:02.000Z",
+          },
+        }),
+      });
+    },
+  );
+
+  return state;
+}
+
+async function gotoShellRoute(
+  page: Page,
+  route: string,
+  { assistantEnabled = false }: { assistantEnabled?: boolean } = {},
+) {
+  let response = null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      response = await page.goto(route, { waitUntil: "domcontentloaded" });
+      break;
+    } catch (error) {
+      if (attempt === 1) {
+        throw error;
+      }
+      await page.waitForTimeout(750);
+    }
+  }
+
+  expect(response?.ok()).toBeTruthy();
+  await expect(page.getByLabel(NAV_LABEL)).toBeVisible();
+  await expect(page.locator("main")).toBeVisible();
+  if (assistantEnabled) {
+    await expect(page.getByTestId("platform-assistant-launcher")).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+}
+
+async function expectSingleShellLayout(page: Page) {
+  const body = page.locator("body");
+  const main = page.locator("main");
+
+  await expect(page.locator("aside")).toHaveCount(1);
+  await expect(page.getByLabel(NAV_LABEL)).toHaveCount(1);
+  await expect(main).toHaveCount(1);
+  await expect(body).toHaveCSS("overflow", "hidden");
+}
+
+async function expectNoLocalizationLeaks(page: Page, route: string) {
+  const [bodyText, placeholderText] = await Promise.all([
+    page.locator("body").innerText(),
+    page
+      .locator("input[placeholder], textarea[placeholder]")
+      .evaluateAll((elements) =>
+        elements
+          .map((element) => element.getAttribute("placeholder") ?? "")
+          .filter(Boolean)
+          .join("\n"),
+      ),
+  ]);
+
+  for (const pattern of LOCALIZATION_LEAK_PATTERNS) {
+    expect(
+      bodyText,
+      `Unexpected untranslated text on ${route}: ${pattern}`,
+    ).not.toMatch(pattern);
+    expect(
+      placeholderText,
+      `Unexpected untranslated placeholder on ${route}: ${pattern}`,
+    ).not.toMatch(pattern);
+  }
+}
+
+test.describe("platform admin assistant overlay", () => {
+  test.beforeEach(async ({ page }) => {
+    await primeZhLocale(page);
+  });
+
+  test("feature flag off hides the launcher", async ({ page }, testInfo) => {
+    test.skip(!isDisabledProject(testInfo));
+
+    await gotoShellRoute(page, "/");
+    await expect(page.getByTestId("platform-assistant-launcher")).toHaveCount(
+      0,
+    );
+    await expect(page.getByTestId("platform-assistant-panel")).toHaveCount(0);
+  });
+
+  test("open, minimize, close, drag, and persist across routes without changing shell layout", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isEnabledProject(testInfo));
+    test.setTimeout(90_000);
+
+    await gotoShellRoute(page, "/", { assistantEnabled: true });
+
+    const main = page.locator("main");
+    const launcher = page.getByTestId("platform-assistant-launcher");
+    const panel = page.getByTestId("platform-assistant-panel");
+    const dragHandle = page.getByTestId("platform-assistant-drag-handle");
+    const minimizeButton = panel.getByRole("button", {
+      name: /Minimize|最小化/,
+    });
+    const closeButton = panel.getByRole("button", { name: /Close|關閉/ });
+
+    const initialMainBox = await main.boundingBox();
+    expect(initialMainBox).not.toBeNull();
+    await expectSingleShellLayout(page);
+
+    await launcher.click();
+    await expect(panel).toBeVisible();
+    await expectSingleShellLayout(page);
+
+    const openMainBox = await main.boundingBox();
+    expect(openMainBox).toEqual(initialMainBox);
+
+    const beforeDrag = await panel.boundingBox();
+    expect(beforeDrag).not.toBeNull();
+    const handleBox = await dragHandle.boundingBox();
+    expect(handleBox).not.toBeNull();
+
+    if (!beforeDrag || !handleBox) {
+      throw new Error("Assistant panel did not expose drag geometry.");
+    }
+
+    await page.mouse.move(
+      handleBox.x + handleBox.width / 2,
+      handleBox.y + handleBox.height / 2,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      handleBox.x + handleBox.width / 2 - 140,
+      handleBox.y + handleBox.height / 2 - 90,
+      { steps: 12 },
+    );
+    await page.mouse.up();
+
+    const afterDrag = await panel.boundingBox();
+    expect(afterDrag).not.toBeNull();
+    expect(Math.abs((afterDrag?.x ?? 0) - beforeDrag.x)).toBeGreaterThan(40);
+    expect(Math.abs((afterDrag?.y ?? 0) - beforeDrag.y)).toBeGreaterThan(40);
+
+    await page.getByRole("link", { name: /Payments|結算與帳務/ }).click();
+    await page.waitForURL("**/payments");
+    await expect(panel).toBeVisible();
+    await expectSingleShellLayout(page);
+
+    const afterRouteChange = await panel.boundingBox();
+    expect(afterRouteChange).not.toBeNull();
+    expect(
+      Math.abs((afterRouteChange?.x ?? 0) - (afterDrag?.x ?? 0)),
+    ).toBeLessThanOrEqual(4);
+    expect(
+      Math.abs((afterRouteChange?.y ?? 0) - (afterDrag?.y ?? 0)),
+    ).toBeLessThanOrEqual(4);
+
+    await minimizeButton.click();
+    await expect(panel).toHaveCount(0);
+    await expect(launcher).toBeVisible();
+
+    await launcher.click();
+    await expect(panel).toBeVisible();
+    await closeButton.click();
+    await expect(panel).toHaveCount(0);
+    await expect(launcher).toBeVisible();
+
+    await page.reload();
+    await expect(launcher).toBeVisible();
+    await launcher.click();
+    await expect(panel).toBeVisible();
+
+    const afterReload = await panel.boundingBox();
+    expect(afterReload).not.toBeNull();
+    expect(
+      Math.abs((afterReload?.x ?? 0) - (afterDrag?.x ?? 0)),
+    ).toBeLessThanOrEqual(4);
+    expect(
+      Math.abs((afterReload?.y ?? 0) - (afterDrag?.y ?? 0)),
+    ).toBeLessThanOrEqual(4);
+  });
+
+  test("sends a question and renders the assistant response, citations, and action plan", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isEnabledProject(testInfo));
+    test.setTimeout(90_000);
+
+    const mockState = await mockAssistantApi(page);
+
+    await gotoShellRoute(page, "/payments", { assistantEnabled: true });
+
+    await page.getByRole("button", { name: /Open issue|開立 issue/ }).click();
+
+    await page.getByTestId("platform-assistant-launcher").click();
+    const panel = page.getByTestId("platform-assistant-panel");
+    await expect(panel).toBeVisible();
+
+    await panel
+      .getByLabel(/Ask the platform assistant|輸入平台助理問題/)
+      .fill("What should I check before changing payments?");
+    await panel.getByTestId("platform-assistant-send").click();
+
+    await expect(
+      panel.getByText("Mock assistant response for pa-admin-e2e"),
+    ).toBeVisible();
+    await expect(
+      panel.getByText("Platform Admin product routes"),
+    ).toBeVisible();
+    await expect(panel.getByText("Mock action plan")).toBeVisible();
+    await expect(
+      panel.getByText("Validate current Platform Admin context"),
+    ).toBeVisible();
+    await expect(
+      panel.getByRole("button", { name: "List the route risks." }),
+    ).toBeVisible();
+    expect(mockState.lastMessage).toContain("[Platform Admin route context]");
+    expect(mockState.lastMessage).toContain("Path: /payments");
+    expect(mockState.lastMessage).toContain("Active tab: recon");
+    expect(mockState.lastMessage).toContain("[Platform Admin page context]");
+    expect(mockState.lastMessage).toContain("reconciliation-issues");
+    expect(mockState.lastMessage).toContain("reconciliation-issue-create");
+    expect(mockState.lastMessage).toContain(
+      "validationErrors=summary:required",
+    );
+    expect(mockState.lastMessage).toContain(
+      "Available actions: refresh_payments",
+    );
+    // Context mesh v2: the deterministic route layer is serialized with the
+    // stable header lines, then the operator question is appended.
+    expect(mockState.lastMessage).toContain("Refresh tier:");
+    expect(mockState.lastMessage).toContain("Warnings:");
+    expect(mockState.lastMessage).toContain("[Operator question]");
+    expect(mockState.lastMessage).toContain(
+      "What should I check before changing payments?",
+    );
+  });
+
+  test("renders governed action confirmation and receipt for assistant-authored write proposals", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isEnabledProject(testInfo));
+    test.setTimeout(90_000);
+
+    const mockState = await mockAssistantApi(page);
+
+    await gotoShellRoute(page, "/notices", { assistantEnabled: true });
+
+    await page.getByTestId("platform-assistant-launcher").click();
+    const panel = page.getByTestId("platform-assistant-panel");
+    await expect(panel).toBeVisible();
+
+    await panel
+      .getByLabel(/Ask the platform assistant|輸入平台助理問題/)
+      .fill("請幫我建立公告");
+    await panel.getByTestId("platform-assistant-send").click();
+
+    await expect(
+      panel.getByText("Confirm platform notice creation"),
+    ).toBeVisible();
+    await panel.getByLabel("Operator note").fill("Operator approved copy.");
+    await panel.getByRole("button", { name: "Create notice" }).click();
+
+    await expect(panel.getByText("Action receipt")).toBeVisible();
+    await expect(panel.getByText("Platform notice created.")).toBeVisible();
+    expect(mockState.lastMessage).toContain("Path: /notices");
+    expect(mockState.lastActionReason).toBe("Operator approved copy.");
+  });
+
+  test("route-context smoke keeps one shell/sidebar across key routes", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isEnabledProject(testInfo));
+    test.setTimeout(90_000);
+
+    for (const route of routeSmokeTargets) {
+      await gotoShellRoute(page, route, { assistantEnabled: true });
+      await expectSingleShellLayout(page);
+    }
+  });
+
+  test("zh routes do not leak common English errors or internal codes", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isDisabledProject(testInfo));
+    test.setTimeout(90_000);
+
+    for (const route of routeSmokeTargets) {
+      await gotoShellRoute(page, route);
+      await page.waitForTimeout(600);
+      await expectNoLocalizationLeaks(page, route);
+    }
+  });
+
+  test("sidebar keeps the bottom scroll position after selecting a lower nav item and reloading", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isDisabledProject(testInfo));
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width: 1440, height: 620 });
+
+    await gotoShellRoute(page, "/audit");
+
+    const nav = page.getByLabel(NAV_LABEL);
+    const featureFlagsLink = page.getByRole("link", {
+      name: /Feature Flags|功能旗標/,
+    });
+
+    const initialScroll = await nav.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      return {
+        maxScrollTop: element.scrollHeight - element.clientHeight,
+        scrollTop: element.scrollTop,
+      };
+    });
+
+    expect(initialScroll.maxScrollTop).toBeGreaterThan(0);
+    expect(initialScroll.scrollTop).toBeGreaterThanOrEqual(
+      Math.max(initialScroll.maxScrollTop - 32, 0),
+    );
+
+    await featureFlagsLink.click();
+    await page.waitForURL("**/feature-flags");
+    await expect(featureFlagsLink).toBeVisible();
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(nav).toBeVisible();
+    await expect(featureFlagsLink).toBeVisible();
+
+    const restoredScroll = await nav.evaluate((element) => ({
+      maxScrollTop: element.scrollHeight - element.clientHeight,
+      scrollTop: element.scrollTop,
+    }));
+
+    expect(restoredScroll.scrollTop).toBeGreaterThanOrEqual(
+      Math.max(restoredScroll.maxScrollTop - 32, 0),
+    );
+  });
+});

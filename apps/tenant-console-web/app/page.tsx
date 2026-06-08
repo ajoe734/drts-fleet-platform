@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type {
   BookingRecord,
+  DriverStatementRecord,
   FeatureFlagSummary,
   IdentityContext,
   NotificationRecord,
@@ -14,6 +15,7 @@ import {
 } from "@/components/page-primitives";
 import { getTenantClient } from "@/lib/api-client";
 import { formatCount, formatDateTime } from "@/lib/formatters";
+import { t } from "@/lib/translations";
 
 const ATTENTION_STATUSES = new Set([
   "dispatch_failed",
@@ -31,6 +33,7 @@ type DashboardData = {
   featureFlags: FeatureFlagSummary | null;
   bookings: BookingRecord[];
   invoices: TenantInvoiceRecord[];
+  statements: DriverStatementRecord[];
   notifications: NotificationRecord[];
   governance: TenantIntegrationGovernancePackage | null;
   errors: string[];
@@ -43,6 +46,7 @@ async function loadDashboardData(): Promise<DashboardData> {
     flagsResult,
     bookingsResult,
     invoicesResult,
+    statementsResult,
     notificationsResult,
     governanceResult,
   ] = await Promise.allSettled([
@@ -50,6 +54,7 @@ async function loadDashboardData(): Promise<DashboardData> {
     client.getFeatureFlags({ tenantId: "tenant-demo-001" }),
     client.listTenantBookings(),
     client.listInvoices(),
+    client.listTenantStatements(),
     client.listTenantNotificationFeed(),
     client.getTenantIntegrationGovernancePackage(),
   ]);
@@ -70,6 +75,7 @@ async function loadDashboardData(): Promise<DashboardData> {
   collectError("Feature flags", flagsResult);
   collectError("Bookings", bookingsResult);
   collectError("Invoices", invoicesResult);
+  collectError("Statements", statementsResult);
   collectError("Notifications", notificationsResult);
   collectError("Integration governance", governanceResult);
 
@@ -79,6 +85,8 @@ async function loadDashboardData(): Promise<DashboardData> {
     featureFlags: flagsResult.status === "fulfilled" ? flagsResult.value : null,
     bookings: bookingsResult.status === "fulfilled" ? bookingsResult.value : [],
     invoices: invoicesResult.status === "fulfilled" ? invoicesResult.value : [],
+    statements:
+      statementsResult.status === "fulfilled" ? statementsResult.value : [],
     notifications:
       notificationsResult.status === "fulfilled"
         ? notificationsResult.value
@@ -102,6 +110,7 @@ export default async function HomePage() {
   const openInvoices = data.invoices.filter(
     (invoice) => invoice.status !== "paid",
   );
+  const recentStatements = data.statements.slice(0, 4);
   const enabledFlags =
     data.featureFlags?.flags.filter((flag) => flag.enabled) ?? [];
   const recentNotifications = data.notifications.slice(0, 3);
@@ -109,23 +118,25 @@ export default async function HomePage() {
   return (
     <div className="page-shell">
       <PageHero
-        eyebrow="Home"
-        title="Tenant operators now land in a real admin workspace, not a launcher page."
-        description="This dashboard anchors the tenant identity context, active-booking summary, billing reminders, integration posture, and quick-entry actions on top of the new `apps/tenant-console-web` shell."
+        eyebrow={t("dashboard.hero.eyebrow")}
+        title={t("dashboard.hero.title")}
+        description={t("dashboard.hero.description")}
       />
 
       <section className="metric-grid">
         <article className="metric-card">
-          <span className="metric-label">Active bookings</span>
+          <span className="metric-label">{t("dashboard.kpi.inProgress")}</span>
           <strong>{formatCount(activeBookings.length)}</strong>
           <p>
             {attentionBookings.length > 0
               ? `${formatCount(attentionBookings.length)} booking(s) need follow-up across dispatch or proof states.`
-              : "No active bookings currently need tenant-side follow-up."}
+              : t("dashboard.empty.activeBookings")}
           </p>
         </article>
         <article className="metric-card">
-          <span className="metric-label">Open invoices</span>
+          <span className="metric-label">
+            {t("dashboard.kpi.currentInvoice")}
+          </span>
           <strong>{formatCount(openInvoices.length)}</strong>
           <p>
             {data.invoices.length > 0
@@ -134,24 +145,28 @@ export default async function HomePage() {
           </p>
         </article>
         <article className="metric-card">
-          <span className="metric-label">Notifications</span>
-          <strong>{formatCount(recentNotifications.length)}</strong>
+          <span className="metric-label">
+            {t("dashboard.kpi.todayCompleted")}
+          </span>
+          <strong>
+            {formatCount(
+              data.bookings.filter(
+                (booking) => booking.orderStatus === "completed",
+              ).length,
+            )}
+          </strong>
           <p>
             {recentNotifications.length > 0
-              ? "Recent platform and tenant reminders are surfaced here before a user drills into settings."
+              ? `${formatCount(recentNotifications.length)} recent reminder(s) surfaced on the home lane.`
               : "No tenant notification feed items were returned in the current snapshot."}
           </p>
         </article>
         <article className="metric-card">
-          <span className="metric-label">Integration posture</span>
-          <strong>
-            {data.governance?.onboardingChecklist.length
-              ? formatCount(data.governance.onboardingChecklist.length)
-              : "Ready"}
-          </strong>
+          <span className="metric-label">{t("dashboard.kpi.mtdUsage")}</span>
+          <strong>{formatCount(data.bookings.length)}</strong>
           <p>
             {data.governance?.onboardingChecklist.length
-              ? "Checklist items still frame the integration work that API keys and webhooks must cover."
+              ? `${formatCount(data.governance.onboardingChecklist.length)} open integration checklist item(s).`
               : "No outstanding onboarding checklist items were returned."}
           </p>
         </article>
@@ -159,9 +174,102 @@ export default async function HomePage() {
 
       <section className="surface-grid surface-grid-wide">
         <SurfaceCard
+          kicker={t("dashboard.section.activeBookings")}
+          title={t("dashboard.section.activeBookings")}
+          description={t("dashboard.section.activeBookingsSub")}
+        >
+          {activeBookings.length > 0 ? (
+            <ul className="panel-list">
+              {activeBookings.slice(0, 5).map((booking) => (
+                <li key={booking.bookingId}>
+                  <strong>{booking.bookingId}</strong>
+                  <span className="list-note">
+                    {booking.passenger.name} ·{" "}
+                    {formatDateTime(booking.reservationWindowStart)} ·{" "}
+                    {booking.orderStatus}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted-copy">{t("dashboard.empty.activeBookings")}</p>
+          )}
+          <div className="link-row">
+            <Link className="text-link" href="/bookings">
+              {t("dashboard.link.openBookings")}
+            </Link>
+            <Link className="text-link" href="/bookings/new">
+              {t("dashboard.link.newBooking")}
+            </Link>
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard
+          kicker={t("dashboard.section.finance")}
+          title={t("dashboard.section.finance")}
+          description={t("dashboard.section.financeSub")}
+        >
+          {recentStatements.length > 0 ? (
+            <ul className="panel-list">
+              {recentStatements.map((statement) => (
+                <li key={statement.statementId}>
+                  <strong>{statement.statementId}</strong>
+                  <span className="list-note">
+                    {statement.driverId} · {statement.periodMonth} ·{" "}
+                    {statement.netAmount.currency}{" "}
+                    {(statement.netAmount.amountMinor / 100).toLocaleString(
+                      "en-US",
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted-copy">{t("dashboard.empty.statements")}</p>
+          )}
+          <div className="link-row">
+            <Link className="text-link" href="/billing">
+              {t("dashboard.link.openBilling")}
+            </Link>
+          </div>
+        </SurfaceCard>
+
+        <SurfaceCard
+          kicker={t("dashboard.section.integration")}
+          title={t("dashboard.section.integration")}
+          description={t("dashboard.section.integrationSub")}
+        >
+          {data.governance?.onboardingChecklist.length ? (
+            <ul className="panel-list">
+              {data.governance.onboardingChecklist.slice(0, 4).map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted-copy">
+              API key and webhook onboarding is not currently reporting any open
+              checklist item.
+            </p>
+          )}
+          <div className="link-row">
+            <Link className="text-link" href="/integration-governance">
+              {t("dashboard.link.openGovernance")}
+            </Link>
+            <Link className="text-link" href="/api-keys">
+              Review API keys
+            </Link>
+            <Link className="text-link" href="/webhooks">
+              Review webhooks
+            </Link>
+          </div>
+        </SurfaceCard>
+      </section>
+
+      <section className="surface-grid surface-grid-wide">
+        <SurfaceCard
           kicker="Identity"
           title="Tenant authority context"
-          description="The dashboard reads the backend identity context directly so role, realm, and tenant ownership stay authority-driven."
+          description="The dashboard reads tenant identity directly from the backend so actor and realm remain authority-driven."
         >
           <dl className="definition-grid">
             <div>
@@ -184,34 +292,9 @@ export default async function HomePage() {
         </SurfaceCard>
 
         <SurfaceCard
-          kicker="Bookings"
-          title="Tenant operations quick lane"
-          description="Bookings remain the primary operating surface, with the route list and detail model now anchored to `/bookings`."
-        >
-          <div className="panel-stack">
-            <p>
-              Next reservation window:{" "}
-              <strong>
-                {activeBookings[0]
-                  ? formatDateTime(activeBookings[0].reservationWindowStart)
-                  : "No active reservation queued"}
-              </strong>
-            </p>
-            <div className="link-row">
-              <Link className="text-link" href="/bookings">
-                Open booking oversight
-              </Link>
-              <Link className="text-link" href="/bookings/new">
-                Start new booking intake
-              </Link>
-            </div>
-          </div>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Billing and notices"
-          title="Operational reminders stay visible"
-          description="Billing posture and notification reminders sit on the home lane so tenant admins do not need to discover them through secondary navigation."
+          kicker="Notifications"
+          title="Recent reminders"
+          description="Platform and tenant notices remain visible without leaving the workspace home."
         >
           {recentNotifications.length > 0 ? (
             <ul className="panel-list">
@@ -230,33 +313,6 @@ export default async function HomePage() {
               No tenant notification feed items are currently available.
             </p>
           )}
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Integration"
-          title="Integration readiness and governance"
-          description="Integration reminders summarize the backend-owned checklist instead of inventing client-local readiness truth."
-        >
-          {data.governance?.onboardingChecklist.length ? (
-            <ul className="panel-list">
-              {data.governance.onboardingChecklist.slice(0, 4).map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted-copy">
-              API key and webhook onboarding is not currently reporting any open
-              checklist item.
-            </p>
-          )}
-          <div className="link-row">
-            <Link className="text-link" href="/api-keys">
-              Review API keys
-            </Link>
-            <Link className="text-link" href="/webhooks">
-              Review webhooks
-            </Link>
-          </div>
         </SurfaceCard>
       </section>
 

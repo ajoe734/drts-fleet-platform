@@ -24,5 +24,10 @@ import { PlatformAdminService } from "./platform-admin.service";
     TenantsService,
     PlatformTenantGovernanceService,
   ],
+  exports: [
+    PlatformAdminService,
+    TenantsService,
+    PlatformTenantGovernanceService,
+  ],
 })
 export class PlatformAdminModule {}

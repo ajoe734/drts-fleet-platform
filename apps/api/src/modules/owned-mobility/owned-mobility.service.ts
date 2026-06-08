@@ -76,7 +76,9 @@ import {
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
+import { ServiceProductService } from "../service-product/service-product.service";
 import type { MessageEvent } from "@nestjs/common";
 import { EMPTY, type Observable } from "rxjs";
 
@@ -145,6 +147,16 @@ const BOOKING_RULES: Record<
     cancelableMinutes: 60,
     confirmationWindowMinutes: 60,
   },
+  insurance_replacement_vehicle: {
+    modifiableMinutes: 120,
+    cancelableMinutes: 120,
+    confirmationWindowMinutes: 120,
+  },
+  travel_agency_transfer: {
+    modifiableMinutes: 90,
+    cancelableMinutes: 90,
+    confirmationWindowMinutes: 90,
+  },
 };
 
 const MAX_COMPLETION_PROOF_PHOTO_COUNT = 5;
@@ -192,6 +204,16 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly ownedMobilityRepository?: OwnedMobilityRepository,
     @Optional()
     private readonly tenantPartnerService?: TenantPartnerService,
+    // NOTE(integration 20260605): the two SVC params below are appended LAST
+    // (both @Optional) so the original 7-param positional order is preserved for
+    // unit-test harnesses. e2e-svc-013 had inserted vehicleEligibilityService at
+    // position 2, which silently shifted every positional arg in ~16 harnesses.
+    @Optional()
+    private readonly vehicleEligibilityService?:
+      | VehicleEligibilityService
+      | undefined,
+    @Optional()
+    private readonly serviceProductService?: ServiceProductService,
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
@@ -529,6 +551,7 @@ export class OwnedMobilityService implements OnModuleInit {
       command.direction,
       command.flightNo,
     );
+    this.requireActiveBookingServiceProduct(command.businessDispatchSubtype);
     const partnerContext = this.resolvePartnerBookingContext(command, tenantId);
     const pickup = this.resolveTenantAddressPayload(
       tenantId,
@@ -616,9 +639,6 @@ export class OwnedMobilityService implements OnModuleInit {
       manualFareOverride: null,
       exceptionHold: null,
       proofRequirements: {
-        // Enterprise dispatch keeps a photo proof requirement by default; unlike
-        // the standard createOrder path, omitting minPhotoCount here must still
-        // enforce at least one completion photo.
         minPhotoCount: command.minPhotoCount ?? 1,
         signoffRequired: command.signoffRequired ?? false,
         expenseProofRequired: command.expenseProofRequired ?? false,
@@ -1042,6 +1062,7 @@ export class OwnedMobilityService implements OnModuleInit {
       nextDirection,
       nextFlightNo,
     );
+    this.requireActiveBookingServiceProduct(businessDispatchSubtype);
 
     if (command.pickupAddressId !== undefined || command.pickup) {
       const nextPickupAddressId =
@@ -1426,10 +1447,7 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
-    const candidates = this.regulatoryRegistryService.getEligibleCandidates(
-      order.serviceBucket,
-      this.resolvePickupEtaDestination(order),
-    );
+    const candidates = this.listEligibleDispatchCandidates(order);
     const now = new Date().toISOString();
     const isReservation = order.dispatchSemantics === "reservation";
     const initialReservationHoldStatus = order.reservationHoldStatus;
@@ -2312,12 +2330,8 @@ export class OwnedMobilityService implements OnModuleInit {
   listDispatchCandidates(dispatchJobId: string): DispatchCandidate[] {
     const dispatchJob = this.requireDispatchJob(dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
-    return this.regulatoryRegistryService
-      .getEligibleCandidates(
-        order.serviceBucket,
-        this.resolvePickupEtaDestination(order),
-      )
-      .map((candidate) => ({ ...candidate }));
+    const candidates = this.listEligibleDispatchCandidates(order);
+    return candidates.map((candidate) => ({ ...candidate }));
   }
 
   private buildDispatchJobSnapshot(dispatchJob: DispatchJobRecord) {
@@ -2328,10 +2342,7 @@ export class OwnedMobilityService implements OnModuleInit {
       return { ...dispatchJob };
     }
 
-    const liveCandidates = this.regulatoryRegistryService.getEligibleCandidates(
-      order.serviceBucket,
-      this.resolvePickupEtaDestination(order),
-    );
+    const liveCandidates = this.listEligibleDispatchCandidates(order);
 
     return {
       ...dispatchJob,
@@ -2507,36 +2518,44 @@ export class OwnedMobilityService implements OnModuleInit {
     driverId: string,
     requestId?: string,
   ) {
-    if (
-      !this.regulatoryRegistryService.getVehicleDispatchability(
+    if (this.vehicleEligibilityService) {
+      this.vehicleEligibilityService.assertDispatchAssignmentEligible(
+        order,
         vehicleId,
-        order.serviceBucket,
-      )
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "VEHICLE_NOT_DISPATCHABLE",
-        "Vehicle is not eligible for dispatch.",
-        {
-          vehicleId,
-        },
-      );
-    }
-
-    if (
-      !this.regulatoryRegistryService.getDriverAvailability(
         driverId,
-        order.serviceBucket,
-      )
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "DRIVER_NOT_AVAILABLE",
-        "Driver is not eligible for dispatch.",
-        {
-          driverId,
-        },
       );
+    } else {
+      if (
+        !this.regulatoryRegistryService.getVehicleDispatchability(
+          vehicleId,
+          order.serviceBucket,
+        )
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VEHICLE_NOT_DISPATCHABLE",
+          "Vehicle is not eligible for dispatch.",
+          {
+            vehicleId,
+          },
+        );
+      }
+
+      if (
+        !this.regulatoryRegistryService.getDriverAvailability(
+          driverId,
+          order.serviceBucket,
+        )
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "DRIVER_NOT_AVAILABLE",
+          "Driver is not eligible for dispatch.",
+          {
+            driverId,
+          },
+        );
+      }
     }
 
     const now = new Date().toISOString();
@@ -3757,6 +3776,62 @@ export class OwnedMobilityService implements OnModuleInit {
     }
   }
 
+  private requireActiveBookingServiceProduct(
+    businessDispatchSubtype: NonNullable<
+      OwnedOrderRecord["businessDispatchSubtype"]
+    >,
+  ) {
+    const serviceProduct =
+      this.serviceProductService?.getRuntimeServiceProductByType(
+        businessDispatchSubtype,
+      ) ?? null;
+
+    if (serviceProduct) {
+      if (!serviceProduct.active) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "SERVICE_PRODUCT_INACTIVE",
+          "The requested service product is not active.",
+          {
+            serviceProduct: businessDispatchSubtype,
+          },
+        );
+      }
+
+      if (serviceProduct.timing !== "reservation") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "INVALID_SERVICE_PRODUCT_TIMING",
+          "Tenant bookings require a reservation service product.",
+          {
+            serviceProduct: businessDispatchSubtype,
+            timing: serviceProduct.timing,
+          },
+        );
+      }
+
+      return serviceProduct;
+    }
+
+    if (!BOOKING_RULES[businessDispatchSubtype]) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "SERVICE_PRODUCT_INACTIVE",
+        "The requested service product is not active.",
+        {
+          serviceProduct: businessDispatchSubtype,
+        },
+      );
+    }
+
+    return {
+      defaultProofRequirements:
+        businessDispatchSubtype === "credit_card_airport_transfer"
+          ? ["photo", "signoff"]
+          : ["photo"],
+    };
+  }
+
   private computeBookingWindows(
     businessDispatchSubtype: NonNullable<
       OwnedOrderRecord["businessDispatchSubtype"]
@@ -4861,6 +4936,21 @@ export class OwnedMobilityService implements OnModuleInit {
       this.driverTasks.find((task) => task.assignmentId === assignmentId) ??
       null
     );
+  }
+
+  private listEligibleDispatchCandidates(order: OwnedOrderRecord) {
+    const destination = this.resolvePickupEtaDestination(order);
+    return this.vehicleEligibilityService
+      ? this.vehicleEligibilityService.listEligibleSupply(
+          this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
+            order,
+          ),
+          { destination },
+        )
+      : this.regulatoryRegistryService.getEligibleCandidates(
+          order.serviceBucket,
+          destination,
+        );
   }
 
   private resolvePickupEtaDestination(order: Pick<OwnedOrderRecord, "pickup">) {

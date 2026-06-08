@@ -7,8 +7,10 @@ import fnmatch
 import hashlib
 import json
 import os
+import socket
 import random
 import re
+import shutil
 import shlex
 import signal
 import subprocess
@@ -149,6 +151,7 @@ CHAIR_REVIEW_OUTPUT_KEYS = {
     "recommended_focus",
 }
 CLOSEOUT_SKILL_PATH = THIS_DIR / "skills" / "task-closeout-finalization.md"
+INTEGRATION_CLOSEOUT_SKILL_PATH = THIS_DIR / "skills" / "integration-closeout.md"
 CHAIRMAN_SKILL_PATH = THIS_DIR / "skills" / "chairman-operational-review.md"
 
 
@@ -188,14 +191,190 @@ WORKSPACE_BASELINE_MARKERS = (
 TASK_ID_MENTION_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+\b")
 
 
+def prune_done_handoffs(status: dict[str, Any], keep: int = 500) -> None:
+    """Trim ``status["handoffs"]`` in place, keeping all pending entries plus
+    the most recent ``keep`` done entries.
+
+    ai-status.json accumulates handoff records forever; each completed task
+    appends 1+ entries with status="done" that supervisor never reads again
+    (see the ``pending_handoffs = [...]`` filter and the iteration in
+    ``ensure_review_finalize_handoff`` / ``ensure_owner_resume_handoff`` —
+    both consume only pending entries). Without pruning the file grew to
+    ~9 MB with 17k handoffs by the 2026-05-26 incident, slowing the
+    dashboard fetch to the point of appearing dead. See
+    feedback_ai_status_handoff_bloat for the incident write-up.
+
+    Called from ``write_status_with_prune`` (the only sanctioned writer of
+    the status file) so every supervisor cycle that mutates status also
+    bounds the audit-log tail. No-op when handoffs already fit.
+    """
+    handoffs = status.get("handoffs") or []
+    if not isinstance(handoffs, list) or len(handoffs) <= keep:
+        return
+    pending = [x for x in handoffs if x.get("status") != "done"]
+    done = [x for x in handoffs if x.get("status") == "done"]
+    if len(done) <= keep:
+        return
+    status["handoffs"] = pending + done[-keep:]
+
+
+def archive_task_bodies(archive_path: Path | None, dropped: list[dict[str, Any]]) -> None:
+    """Append full bodies of pruned done-tasks to ``ai-task-archive.jsonl`` so
+    their detail stays auditable after the live status file drops them (which
+    keeps only the id in ``archived_task_ids``). Append-only JSONL + O_APPEND is
+    deliberate — it is concurrency-safe, unlike a read-modify-write of one JSON
+    object. Mirrors ``ai_status.py.archive_task_bodies``. Best-effort: archival
+    must never block or fail a status write."""
+    if not archive_path or not dropped:
+        return
+    stamp = utc_now()
+    try:
+        with archive_path.open("a", encoding="utf-8") as handle:
+            for task in dropped:
+                if not task.get("id"):
+                    continue
+                record = dict(task)
+                record["_archived_at"] = stamp
+                record["_archived_by"] = "supervisor.py"
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def prune_done_tasks(
+    status: dict[str, Any], keep: int = 150, archive_path: Path | None = None
+) -> None:
+    """Trim ``status["tasks"]`` in place, keeping every non-done task plus the
+    most recent ``keep`` done tasks. Dropped done-task ids are recorded in
+    ``status["archived_task_ids"]``; their full bodies are appended to
+    ``archive_path`` (``ai-task-archive.jsonl``) when supplied.
+
+    ai-status.json's tasks array accumulates every completed task forever
+    (646 done / ~1.0 MB by the 2026-05-30 incident), pushing the file past the
+    256 KB cap the chair/coordination worker's Read tool enforces — so the only
+    healthy lanes could no longer read machine truth and the supervisor thrashed
+    re-queuing chair reviews. Dropping done tasks is dependency-safe:
+    ``dependencies_satisfied`` treats a dep missing from the task map as
+    archived/done (see its comment), so archived done tasks still satisfy
+    downstream deps. See feedback_ai_status_handoff_bloat for the write-up.
+    """
+    tasks = status.get("tasks") or []
+    if not isinstance(tasks, list):
+        return
+    done = [t for t in tasks if str(t.get("status") or "").lower() == "done"]
+    if len(done) <= keep:
+        return
+    dropped = done[:-keep] if keep > 0 else done
+    dropped_ids = {t.get("id") for t in dropped if t.get("id")}
+    if not dropped_ids:
+        return
+    archive_task_bodies(archive_path, dropped)
+    status["tasks"] = [
+        t
+        for t in tasks
+        if str(t.get("status") or "").lower() != "done" or t.get("id") not in dropped_ids
+    ]
+    archived = status.setdefault("archived_task_ids", [])
+    if isinstance(archived, list):
+        already = set(archived)
+        for tid in (t.get("id") for t in dropped):
+            if tid and tid not in already:
+                archived.append(tid)
+                already.add(tid)
+
+
+def prune_blockers(status: dict[str, Any], keep: int = 100) -> None:
+    """Trim ``status["blockers"]`` keeping every unresolved blocker plus the most
+    recent ``keep`` resolved ones. Resolved blockers accumulate forever and are
+    never re-read once closed; only open blockers drive chair decisions."""
+    blockers = status.get("blockers") or []
+    if not isinstance(blockers, list):
+        return
+    resolved = [b for b in blockers if str(b.get("status") or "").lower() == "resolved"]
+    if len(resolved) <= keep:
+        return
+    dropped = {id(b) for b in (resolved[:-keep] if keep > 0 else resolved)}
+    status["blockers"] = [b for b in blockers if id(b) not in dropped]
+
+
+def write_status_with_prune(
+    status_path,
+    status: dict[str, Any],
+    *,
+    config: dict[str, Any] | None = None,
+    keep_handoffs: int | None = None,
+    keep_done_tasks: int | None = None,
+    keep_blockers: int | None = None,
+) -> None:
+    """Standard status-file write that bounds the unbounded audit tails (done
+    handoffs, done tasks, resolved blockers) so ai-status.json stays under the
+    256 KB cap the chair/coordination workers' Read tool enforces.
+
+    All supervisor paths that previously called ``write_json(status_path, status)``
+    now route through this wrapper so the prune cannot be forgotten in a new code
+    path. Keep counts are tunable via the ``supervisor.handoff_keep_count`` /
+    ``supervisor.task_keep_count`` / ``supervisor.blocker_keep_count`` config keys
+    for hosts that want a longer audit tail.
+    """
+    supervisor_cfg = (config or {}).get("supervisor", {}) if isinstance(config, dict) else {}
+    if keep_handoffs is None:
+        keep_handoffs = int(supervisor_cfg.get("handoff_keep_count", 200))
+    if keep_done_tasks is None:
+        keep_done_tasks = int(supervisor_cfg.get("task_keep_count", 150))
+    if keep_blockers is None:
+        keep_blockers = int(supervisor_cfg.get("blocker_keep_count", 100))
+    prune_done_handoffs(status, keep=keep_handoffs)
+    prune_done_tasks(
+        status,
+        keep=keep_done_tasks,
+        archive_path=Path(status_path).parent / "ai-task-archive.jsonl",
+    )
+    prune_blockers(status, keep=keep_blockers)
+    write_json(status_path, status)
+
+
+def _sd_notify(message: str) -> None:
+    """Send a state message to systemd via the sd_notify protocol.
+
+    Used to deliver periodic WATCHDOG=1 heartbeats so a non-zero
+    WatchdogSec in the unit file accurately detects a hung tick loop
+    (instead of killing a healthy supervisor every interval — the
+    failure mode that produced OPS-SUPERVISOR-WATCHDOG-OFF-001 #313).
+
+    No-op when NOTIFY_SOCKET is unset (the supervisor is not running
+    under systemd, e.g., interactive smoke tests or --once invocations).
+    All socket / OS errors are swallowed so heartbeat delivery cannot
+    take the supervisor down.
+    """
+    sock_path = os.environ.get("NOTIFY_SOCKET")
+    if not sock_path:
+        return
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            # systemd encodes abstract namespace sockets with a leading '@';
+            # the kernel expects a leading NUL byte for those.
+            if sock_path.startswith("@"):
+                sock_path = "\0" + sock_path[1:]
+            sock.connect(sock_path)
+            sock.sendall(message.encode("utf-8"))
+        finally:
+            sock.close()
+    except OSError:
+        return
+
+
 def supervisor_pid_path(config: dict[str, Any]) -> Path:
     return config_path(config, "state_file").parent / "supervisor.pid"
 
 
 def write_supervisor_pid(config: dict[str, Any]) -> None:
     path = supervisor_pid_path(config)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    except OSError as exc:
+        console_log(f"unable to write supervisor pid file {path}: {exc}", quiet=SUPERVISOR_LOG_QUIET)
 
 
 def clear_supervisor_pid(config: dict[str, Any]) -> None:
@@ -208,6 +387,330 @@ def clear_supervisor_pid(config: dict[str, Any]) -> None:
         return
     if current == str(os.getpid()):
         path.unlink(missing_ok=True)
+
+
+def disk_guard_settings(config: dict[str, Any]) -> dict[str, Any]:
+    supervisor_settings = config.get("supervisor", {}) if isinstance(config.get("supervisor"), dict) else {}
+    raw = supervisor_settings.get("disk_guard")
+    settings = dict(raw) if isinstance(raw, dict) else {}
+    # Keep disabled unless the deployment config opts in, so small unit-test
+    # configs and ad-hoc local runs are not coupled to host disk pressure.
+    settings.setdefault("enabled", bool(raw))
+    settings.setdefault("path", ".")
+    settings.setdefault("warn_usage_percent", 80.0)
+    settings.setdefault("cleanup_usage_percent", 85.0)
+    settings.setdefault("block_dispatch_usage_percent", 85.0)
+    settings.setdefault("min_free_gb", 5.0)
+    settings.setdefault("cleanup_interval_seconds", 3600.0)
+    settings.setdefault("worktree_retention_days", 3.0)
+    settings.setdefault("max_worktrees_removed_per_tick", 200)
+    settings.setdefault("remove_dirty_worktrees", False)
+    return settings
+
+
+def _disk_guard_path(config: dict[str, Any], settings: dict[str, Any]) -> Path:
+    raw_path = Path(str(settings.get("path") or ".")).expanduser()
+    if raw_path.is_absolute():
+        return raw_path
+    try:
+        root = config_path(config, "status_file").parent
+    except KeyError:
+        root = THIS_DIR.parent
+    return (root / raw_path).resolve()
+
+
+def disk_usage_snapshot(path: Path) -> dict[str, Any] | None:
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        return None
+    usage_percent = (usage.used / usage.total * 100.0) if usage.total else 0.0
+    return {
+        "path": str(path),
+        "total_bytes": usage.total,
+        "used_bytes": usage.used,
+        "free_bytes": usage.free,
+        "usage_percent": round(usage_percent, 2),
+        "free_gb": round(usage.free / (1024**3), 2),
+    }
+
+
+def active_worker_workspace_roots(state: dict[str, Any]) -> set[str]:
+    active_statuses = ACTIVE_RUNTIME_STATUSES
+    roots: set[str] = set()
+    for worker in (state.get("workers", {}) or {}).values():
+        if not isinstance(worker, dict):
+            continue
+        if str(worker.get("status") or "") not in active_statuses:
+            continue
+        for key in ("workspace_root", "cwd", "worktree", "worktree_path"):
+            value = worker.get(key)
+            if value:
+                roots.add(str(Path(str(value)).expanduser().resolve()))
+        command = worker.get("command") or []
+        if isinstance(command, list):
+            for index, token in enumerate(command[:-1]):
+                if token == "-C":
+                    roots.add(str(Path(str(command[index + 1])).expanduser().resolve()))
+    return roots
+
+
+def _registered_worktrees(repo_root: Path) -> list[dict[str, Any]]:
+    result = _git_capture(repo_root, ["worktree", "list", "--porcelain"], timeout=30.0)
+    if result.returncode != 0:
+        return []
+    records: list[dict[str, Any]] = []
+    current: dict[str, Any] = {}
+    for line in (result.stdout or "").splitlines():
+        if line.startswith("worktree "):
+            if current:
+                records.append(current)
+            current = {"path": line[len("worktree "):]}
+        elif line.startswith("branch "):
+            current["branch"] = line[len("branch "):]
+        elif line.startswith("HEAD "):
+            current["head"] = line[len("HEAD "):]
+        elif line == "locked":
+            current["locked"] = True
+    if current:
+        records.append(current)
+    return records
+
+
+def prune_stale_worker_worktrees(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        repo_root = config_path(config, "status_file").parent.resolve()
+    except KeyError:
+        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "errors": ["missing status_file path"]}
+    if not _worker_worktrees_enabled(config):
+        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "errors": ["worker worktrees disabled"]}
+
+    base = _worker_worktree_base(config, repo_root)
+    if not base.exists():
+        return {"checked": 0, "removed": 0, "skipped": 0, "failed": 0, "errors": []}
+
+    retention_seconds = max(0.0, float(settings.get("worktree_retention_days", 3.0))) * 86400.0
+    cutoff = time.time() - retention_seconds
+    max_removed = max(0, int(settings.get("max_worktrees_removed_per_tick", 200)))
+    remove_dirty = bool(settings.get("remove_dirty_worktrees", False))
+    active_roots = active_worker_workspace_roots(state)
+    checked = removed = skipped = failed = 0
+    errors: list[str] = []
+
+    for record in sorted(_registered_worktrees(repo_root), key=lambda item: str(item.get("path") or "")):
+        if max_removed and removed >= max_removed:
+            break
+        raw_path = str(record.get("path") or "").strip()
+        if not raw_path:
+            continue
+        path = Path(raw_path).expanduser().resolve()
+        if path == repo_root or not str(path).startswith(str(base) + os.sep):
+            continue
+        checked += 1
+        if str(path) in active_roots:
+            skipped += 1
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            skipped += 1
+            continue
+        if stat.st_mtime > cutoff:
+            skipped += 1
+            continue
+        command = ["worktree", "remove"]
+        if remove_dirty:
+            command.append("--force")
+        command.append(str(path))
+        result = _git_capture(repo_root, command, timeout=30.0)
+        if result.returncode == 0:
+            removed += 1
+            continue
+        failed += 1
+        if len(errors) < 10:
+            message = (result.stderr or result.stdout or "").strip().replace("\n", " | ")
+            errors.append(f"{path}: {message[:240]}")
+
+    prune = _git_capture(repo_root, ["worktree", "prune"], timeout=30.0)
+    if prune.returncode != 0 and len(errors) < 10:
+        errors.append(f"git worktree prune: {(prune.stderr or prune.stdout or '').strip()[:240]}")
+    return {"checked": checked, "removed": removed, "skipped": skipped, "failed": failed, "errors": errors}
+
+
+def _disk_guard_should_cleanup(record: dict[str, Any], settings: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    if float(snapshot.get("usage_percent") or 0.0) >= float(settings.get("cleanup_usage_percent", 85.0)):
+        return True
+    last_cleanup = _parse_iso_utc(record.get("last_cleanup_at"))
+    if last_cleanup is None:
+        return True
+    return (datetime.now(timezone.utc) - last_cleanup).total_seconds() >= float(
+        settings.get("cleanup_interval_seconds", 3600.0)
+    )
+
+
+def maintain_disk_guard(config: dict[str, Any], state: dict[str, Any]) -> bool:
+    settings = disk_guard_settings(config)
+    if not settings.get("enabled", False):
+        return False
+
+    record = state.setdefault("disk_guard", {})
+    path = _disk_guard_path(config, settings)
+    snapshot = disk_usage_snapshot(path)
+    if snapshot is None:
+        record["last_check_at"] = utc_now()
+        record["last_error"] = f"Unable to read disk usage for {path}"
+        return True
+
+    changed = False
+    before_blocked = bool(record.get("dispatch_blocked"))
+    record.update(snapshot)
+    record["last_check_at"] = utc_now()
+
+    cleanup_result: dict[str, Any] | None = None
+    if _disk_guard_should_cleanup(record, settings, snapshot):
+        cleanup_result = prune_stale_worker_worktrees(config, state, settings)
+        record["last_cleanup_at"] = utc_now()
+        record["last_cleanup"] = cleanup_result
+        changed = True
+        refreshed = disk_usage_snapshot(path)
+        if refreshed is not None:
+            snapshot = refreshed
+            record.update(snapshot)
+
+    usage_percent = float(snapshot.get("usage_percent") or 0.0)
+    free_gb = float(snapshot.get("free_gb") or 0.0)
+    block_percent = float(settings.get("block_dispatch_usage_percent", 85.0))
+    min_free_gb = float(settings.get("min_free_gb", 5.0))
+    dispatch_blocked = usage_percent >= block_percent or free_gb < min_free_gb
+    record["dispatch_blocked"] = dispatch_blocked
+    record["reason"] = (
+        f"disk usage {usage_percent:.2f}% >= {block_percent:.2f}% or free {free_gb:.2f}GB < {min_free_gb:.2f}GB"
+        if dispatch_blocked
+        else None
+    )
+    if before_blocked != dispatch_blocked:
+        changed = True
+
+    warn_percent = float(settings.get("warn_usage_percent", 80.0))
+    if cleanup_result and int(cleanup_result.get("removed") or 0) > 0:
+        try:
+            write_activity_log(
+                config,
+                {
+                    "type": "disk_guard_worktree_prune",
+                    "message": (
+                        f"Pruned {cleanup_result.get('removed')} stale clean auto worktree(s); "
+                        f"disk usage now {usage_percent:.2f}% with {free_gb:.2f}GB free."
+                    ),
+                    "checked": cleanup_result.get("checked"),
+                    "removed": cleanup_result.get("removed"),
+                    "skipped": cleanup_result.get("skipped"),
+                    "failed": cleanup_result.get("failed"),
+                    "usage_percent": usage_percent,
+                    "free_gb": free_gb,
+                },
+            )
+        except OSError:
+            pass
+    if dispatch_blocked or usage_percent >= warn_percent:
+        console_log(
+            (
+                "disk guard: "
+                f"usage={usage_percent:.2f}% free={free_gb:.2f}GB "
+                f"dispatch_blocked={dispatch_blocked}"
+            ),
+            quiet=SUPERVISOR_LOG_QUIET,
+        )
+    return changed
+
+
+def disk_guard_dispatch_blocked(config: dict[str, Any], state: dict[str, Any]) -> bool:
+    settings = disk_guard_settings(config)
+    if not settings.get("enabled", False):
+        return False
+    record = state.get("disk_guard") if isinstance(state.get("disk_guard"), dict) else {}
+    if bool(record.get("dispatch_blocked")):
+        return True
+    snapshot = disk_usage_snapshot(_disk_guard_path(config, settings))
+    if snapshot is None:
+        return False
+    return (
+        float(snapshot.get("usage_percent") or 0.0) >= float(settings.get("block_dispatch_usage_percent", 85.0))
+        or float(snapshot.get("free_gb") or 0.0) < float(settings.get("min_free_gb", 5.0))
+    )
+
+
+def note_dispatch_blocked_by_disk_guard(config: dict[str, Any], state: dict[str, Any], source: str) -> bool:
+    if not disk_guard_dispatch_blocked(config, state):
+        return False
+    guard = state.setdefault("disk_guard", {})
+    reason = str(guard.get("reason") or "disk guard blocked dispatch")
+    now = utc_now()
+    last_at = _parse_iso_utc(guard.get("last_dispatch_block_log_at"))
+    cooldown_seconds = 300.0
+    if (
+        guard.get("last_dispatch_block_source") == source
+        and guard.get("last_dispatch_block_reason") == reason
+        and last_at is not None
+        and (datetime.now(timezone.utc) - last_at).total_seconds() < cooldown_seconds
+    ):
+        return False
+    guard["last_dispatch_block_source"] = source
+    guard["last_dispatch_block_reason"] = reason
+    guard["last_dispatch_block_log_at"] = now
+    try:
+        write_activity_log(
+            config,
+            {
+                "type": "dispatch_blocked_disk_guard",
+                "source": source,
+                "message": reason,
+                "usage_percent": guard.get("usage_percent"),
+                "free_gb": guard.get("free_gb"),
+            },
+        )
+    except OSError:
+        pass
+    console_log(f"dispatch blocked by disk guard ({source}): {reason}", quiet=SUPERVISOR_LOG_QUIET)
+    return True
+
+
+def mark_dispatch_deferred_by_disk_guard(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    record: dict[str, Any],
+    *,
+    event_id: str | None = None,
+    task_id: str | None = None,
+    target_agent: str | None = None,
+) -> bool:
+    reason = str((state.get("disk_guard") or {}).get("reason") or "disk guard blocked dispatch")
+    now = utc_now()
+    changed = record.get("status") != "queued" or record.get("deferred_reason") != "disk_guard"
+    record["status"] = "queued"
+    record["deferred_reason"] = "disk_guard"
+    record["last_deferred_at"] = now
+    record["last_deferred_message"] = reason
+    try:
+        write_activity_log(
+            config,
+            {
+                "type": "dispatch_deferred_disk_guard",
+                "task_id": task_id,
+                "target_agent": target_agent,
+                "queue_event_id": event_id,
+                "message": reason,
+                "usage_percent": (state.get("disk_guard") or {}).get("usage_percent"),
+                "free_gb": (state.get("disk_guard") or {}).get("free_gb"),
+            },
+        )
+    except OSError:
+        pass
+    return changed
 
 
 def supervisor_shutdown_reason(signum: int) -> str:
@@ -1201,6 +1704,10 @@ def build_request(config: dict[str, Any], event: dict[str, Any]) -> DeliveryRequ
             )
         ]
     if request_reason := str(event.get("reason") or ""):
+        if request_reason in EXECUTION_DISPATCH_REASONS and INTEGRATION_CLOSEOUT_SKILL_PATH.exists():
+            integration_path = relpath(INTEGRATION_CLOSEOUT_SKILL_PATH)
+            if integration_path not in context_files:
+                context_files.append(integration_path)
         if request_reason == "owned_finalize_dispatch" and CLOSEOUT_SKILL_PATH.exists():
             closeout_path = relpath(CLOSEOUT_SKILL_PATH)
             if closeout_path not in context_files:
@@ -1450,6 +1957,16 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
                 },
             )
             changed = True
+            continue
+        if disk_guard_dispatch_blocked(config, state):
+            changed = mark_dispatch_deferred_by_disk_guard(
+                config,
+                state,
+                record,
+                event_id=event_id,
+                task_id=event.get("task_id"),
+                target_agent=event.get("target_display_name") or event.get("target_agent"),
+            ) or changed
             continue
         request = build_request(config, event)
         record["attempt_count"] = int(record.get("attempt_count", 0)) + 1
@@ -2093,6 +2610,40 @@ def is_agent_dispatch_paused(
     return float(resume_at) > datetime.now(timezone.utc).timestamp()
 
 
+def _force_recovery_probe(config: dict[str, Any]) -> dict[str, Any] | None:
+    """Force a fresh provider capability probe, bypassing the cached
+    provider_capabilities.json (which is stale when
+    auto_refresh_provider_capabilities is False). Best-effort: returns None on
+    failure so a probe error never crashes the tick."""
+    try:
+        report = build_provider_capabilities(config)
+        write_provider_capabilities(config, report=report)
+        return report
+    except Exception as exc:  # noqa: BLE001 - recovery probe must never crash the tick
+        console_log(f"recovery probe failed: {exc}", quiet=SUPERVISOR_LOG_QUIET)
+        return None
+
+
+def _lane_probe_healthy(
+    config: dict[str, Any], report: dict[str, Any] | None, agent_id: str
+) -> bool | None:
+    """True only if a capability probe says the lane is installed AND auth-ready.
+    NOTE: verifies install + login, NOT quota — a chronic-quota lane can still
+    read healthy here, so callers must treat True as 'worth retrying', not
+    'guaranteed to dispatch'."""
+    if not report:
+        return None
+    info = provider_info_for_agent(config, report, agent_id)
+    if not info:
+        return None
+    if info.get("installed") is False:
+        return False
+    auth_ready = info.get("auth_ready")
+    if auth_ready is None:
+        return None
+    return bool(auth_ready)
+
+
 def expire_provider_pauses(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -2106,8 +2657,9 @@ def expire_provider_pauses(
         resume_at = entry.get("resume_at")
         if kind == "auth":
             # Auth failures from real worker runs are stronger evidence than a
-            # lightweight capability probe. Keep the lane paused until a human
-            # or explicit repair flow clears it.
+            # lightweight capability probe. Keep the lane paused until a human or
+            # explicit repair flow clears it. (break_full_deadlock may clear it as
+            # a last resort when the whole fleet is wedged.)
             continue
         if resume_at is not None and float(resume_at) <= now_ts:
             clear_provider_pause(state, agent_id)
@@ -2513,17 +3065,33 @@ def display_name_is_legacy_alias(name: str | None) -> bool:
     return "legacy alias" in str(name or "").lower()
 
 
-def first_viable_agent(config: dict[str, Any], preferred: list[str], exclude: set[str], state: dict[str, Any] | None = None) -> str | None:
+def first_viable_agent(
+    config: dict[str, Any],
+    preferred: list[str],
+    exclude: set[str],
+    state: dict[str, Any] | None = None,
+    *,
+    provider_report: dict[str, Any] | None = None,
+) -> str | None:
     known = known_agent_display_names(config)
     seen: set[str] = set()
-    provider_report = load_provider_report(config) if state is not None else None
+    effective_provider_report = provider_report
+    if effective_provider_report is None and state is not None:
+        effective_provider_report = load_provider_report(config)
     for candidate in preferred:
         name = str(candidate or "").strip()
         if not name or name in seen or name in exclude or display_name_is_legacy_alias(name):
             continue
         seen.add(name)
         if name in known:
-            if state is not None and is_agent_dispatch_paused(config, state, name, provider_report=provider_report):
+            if lane_dispatch_disabled(config, name):
+                continue
+            if state is not None and is_agent_dispatch_paused(
+                config,
+                state,
+                name,
+                provider_report=effective_provider_report,
+            ):
                 continue
             return name
     return None
@@ -2679,7 +3247,7 @@ def proactive_claim_plan_for_idle_agent(
     # to whoever is idle — typically cascading the entire queue onto a
     # single lane. See feedback_supervisor_ignores_explicit_owner.md.
     if helper_settings.get("respect_explicit_owner_when_paused", True) and state is not None:
-        if is_agent_dispatch_paused(config, state, assigned_agent):
+        if not lane_dispatch_disabled(config, assigned_agent) and is_agent_dispatch_paused(config, state, assigned_agent):
             assigned_load = len(agent_loads.get(assigned_agent, []))
             if assigned_load == 0:
                 return None
@@ -2687,6 +3255,11 @@ def proactive_claim_plan_for_idle_agent(
     current_priority = dispatch_reason_priority(reason)
     assigned_loads = agent_loads.get(assigned_agent, [])
     has_higher_priority_load = current_priority is not None and any(priority < current_priority for priority in assigned_loads)
+    if lane_dispatch_disabled(config, assigned_agent):
+        # A lane ban (`max_tasks_per_agent_by_lane = 0`) means the assigned lane
+        # cannot service this task on the current host, so waiting for
+        # higher-priority load on that lane would deadlock dispatch.
+        has_higher_priority_load = True
     assigned_busy = assigned_agent not in idle_agent_names
 
     if helper_settings.get("require_owner_higher_priority_load", False):
@@ -2816,6 +3389,177 @@ def sync_status_pipeline(config: dict[str, Any]) -> bool:
     return False
 
 
+# Module-level registry of in-flight reconcile-from-git subprocesses, keyed
+# by canonical status_file path so multiple workspaces (e.g., a test fixture)
+# don't share state. Not persisted across supervisor restarts — on restart we
+# orphan the previous Popen (it will finish on its own) and start fresh next
+# time the throttle elapses; that is safe because reconcile is idempotent.
+_RECONCILE_PROCS: dict[str, dict[str, Any]] = {}
+
+
+def reconcile_status_from_git(config: dict[str, Any], state: dict[str, Any]) -> bool:
+    """Bridge git-merged closeouts → state-machine `done` periodically.
+
+    Workers occasionally ship a task via PR + merge but skip `ai-status.sh
+    done`, leaving ai-status.json stuck in in_progress/review/backlog. This
+    invokes the dedicated reconcile-from-git command which scans origin/dev
+    for closeout commits and finalizes any drift.
+
+    Non-blocking design (OPS-RECONCILE-ASYNC-001):
+    The subprocess parses ai-status.json (multi-MB) and runs `git log`. On a
+    bloated repo with many recently-merged PRs it can take minutes. Running
+    it synchronously would freeze the supervisor's main tick loop for that
+    entire window — observed up to 4 minutes, during which dispatch is
+    completely starved and every lane drains to zero. Instead we:
+      - Spawn the reconcile as a `subprocess.Popen` (no parent block).
+      - Stream stdout/stderr into tempfiles so the parent never deadlocks
+        on a full OS pipe buffer.
+      - On each subsequent tick, peek at the process via `Popen.poll()` (one
+        cheap syscall). If still running we return immediately and the
+        supervisor keeps dispatching. If completed we read the temp files,
+        emit activity-log entries the same way the synchronous path did,
+        delete the tempfiles, and clear the in-flight record.
+      - Throttle stays the same: we don't spawn a NEW reconcile until
+        `supervisor.git_reconcile_interval_seconds` has elapsed since the
+        last spawn (the existing `last_git_reconcile_at` timestamp). A
+        long-running in-flight reconcile prevents the spawn naturally.
+
+    Returns True only when a completed reconcile is fully applied (so callers
+    that OR this into `changed` still get the right signal). A fresh spawn
+    or an in-flight no-op returns False.
+    """
+    try:
+        status_root = config_path(config, "status_file").parent
+    except KeyError:
+        return False
+    script = status_root / "scripts" / "ai_status.py"
+    key = str(script.resolve())
+
+    # 1. If a previous reconcile is still in flight, peek + maybe finalize.
+    in_flight = _RECONCILE_PROCS.get(key)
+    if in_flight is not None:
+        proc = in_flight["proc"]
+        if proc.poll() is None:
+            return False
+        # Completed — apply result.
+        rc = proc.returncode
+        stdout_path = in_flight["stdout_path"]
+        stderr_path = in_flight["stderr_path"]
+        for handle_key in ("stdout_fh", "stderr_fh"):
+            handle = in_flight.get(handle_key)
+            if handle is not None:
+                try:
+                    handle.close()
+                except OSError:
+                    pass
+        try:
+            stdout = stdout_path.read_text() if stdout_path.exists() else ""
+        except OSError:
+            stdout = ""
+        try:
+            stderr = stderr_path.read_text() if stderr_path.exists() else ""
+        except OSError:
+            stderr = ""
+        for p in (stdout_path, stderr_path):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        _RECONCILE_PROCS.pop(key, None)
+        if rc != 0:
+            write_activity_log(
+                config,
+                {
+                    "type": "reconcile_status_from_git_failed",
+                    "message": (stderr.strip() or stdout.strip() or "unknown error"),
+                },
+            )
+            return False
+        stdout_stripped = stdout.strip()
+        if stdout_stripped and "no drift" not in stdout_stripped:
+            for line in stdout_stripped.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                write_activity_log(
+                    config,
+                    {"type": "reconcile_status_from_git", "message": line},
+                )
+        return True
+
+    # 2. No in-flight subprocess — honour the throttle before spawning.
+    interval = float(
+        config.get("supervisor", {}).get("git_reconcile_interval_seconds", 60.0)
+    )
+    supervisor_state = state.setdefault("supervisor", {})
+    last_at_raw = supervisor_state.get("last_git_reconcile_at")
+    now = datetime.now(timezone.utc)
+    if last_at_raw:
+        try:
+            last_at = datetime.fromisoformat(str(last_at_raw).replace("Z", "+00:00"))
+            if (now - last_at).total_seconds() < interval:
+                return False
+        except (ValueError, TypeError):
+            pass
+
+    if not script.exists():
+        return False
+
+    # 3. Spawn the reconcile in the background. Stream output into tempfiles
+    # so a chatty reconcile cannot deadlock the parent on pipe back-pressure.
+    import tempfile
+    tmp_dir = Path(tempfile.mkdtemp(prefix="drts-reconcile-"))
+    stdout_path = tmp_dir / "stdout"
+    stderr_path = tmp_dir / "stderr"
+    try:
+        stdout_fh = open(stdout_path, "wb")
+        stderr_fh = open(stderr_path, "wb")
+        proc = subprocess.Popen(
+            [sys.executable, str(script), "reconcile-from-git"],
+            cwd=str(status_root),
+            stdout=stdout_fh,
+            stderr=stderr_fh,
+        )
+    except OSError as exc:
+        for handle in (stdout_fh, stderr_fh):
+            try:
+                handle.close()
+            except OSError:
+                pass
+        write_activity_log(
+            config,
+            {
+                "type": "reconcile_status_from_git_failed",
+                "message": f"failed to spawn reconcile subprocess: {exc}",
+            },
+        )
+        for p in (stdout_path, stderr_path):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        try:
+            tmp_dir.rmdir()
+        except OSError:
+            pass
+        return False
+
+    # Record the spawn timestamp now so the throttle prevents re-spawning
+    # while this run is still in flight, even if it takes minutes.
+    supervisor_state["last_git_reconcile_at"] = (
+        now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
+    _RECONCILE_PROCS[key] = {
+        "proc": proc,
+        "stdout_path": stdout_path,
+        "stderr_path": stderr_path,
+        "stdout_fh": stdout_fh,
+        "stderr_fh": stderr_fh,
+        "started_at": now,
+    }
+    return False
+
+
 def brief_reason_text(text: str | None, max_length: int = 240) -> str:
     raw = re.sub(r"\s+", " ", str(text or "")).strip()
     if len(raw) <= max_length:
@@ -2940,7 +3684,7 @@ def persist_task_reassignment(
             }
         )
 
-    write_json(status_path, status)
+    write_status_with_prune(status_path, status, config=config)
     return sync_status_pipeline(config)
 
 
@@ -2951,6 +3695,7 @@ def maybe_reassign_task_after_worker_failure(
     *,
     terminal: bool = False,
     state: dict[str, Any] | None = None,
+    provider_report: dict[str, Any] | None = None,
 ) -> str | None:
     settings = worker_reassignment_settings(config)
     if not settings.get("enabled", True):
@@ -2992,7 +3737,13 @@ def maybe_reassign_task_after_worker_failure(
 
     if task_status in review_statuses and reviewer == failing_agent:
         candidates = normalized_mapping_values(settings.get("reviewer_fallbacks", {}), failing_agent)
-        new_reviewer = first_viable_agent(config, candidates, exclude={owner, reviewer}, state=state)
+        new_reviewer = first_viable_agent(
+            config,
+            candidates,
+            exclude={owner, reviewer},
+            state=state,
+            provider_report=provider_report,
+        )
         if not new_reviewer:
             return None
         message = f"Auto-reassigned review from {reviewer} to {new_reviewer} after repeated {failing_agent} {failure_summary}"
@@ -3028,13 +3779,25 @@ def maybe_reassign_task_after_worker_failure(
 
     if task_status in owned_statuses | finalize_statuses and owner == failing_agent:
         candidates = normalized_mapping_values(settings.get("owner_fallbacks", {}), failing_agent)
-        new_owner = first_viable_agent(config, candidates, exclude={owner, reviewer}, state=state)
+        new_owner = first_viable_agent(
+            config,
+            candidates,
+            exclude={owner, reviewer},
+            state=state,
+            provider_report=provider_report,
+        )
         if not new_owner:
             return None
         reviewer_candidates = [reviewer]
         reviewer_candidates.extend(normalized_mapping_values(settings.get("reviewer_fallbacks", {}), failing_agent))
         reviewer_candidates.extend(normalized_mapping_values(settings.get("owner_fallbacks", {}), failing_agent))
-        new_reviewer = first_viable_agent(config, reviewer_candidates, exclude={new_owner}, state=state)
+        new_reviewer = first_viable_agent(
+            config,
+            reviewer_candidates,
+            exclude={new_owner},
+            state=state,
+            provider_report=provider_report,
+        )
         if not new_reviewer:
             return None
         message = f"Auto-reassigned ownership from {owner} to {new_owner} after repeated {failing_agent} {failure_summary}"
@@ -3532,7 +4295,11 @@ def resume_claude_worker(
     }
 
 
-def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
+def poll_workers(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
     changed = False
     approval_state = load_approval_state(config)
     task_map = task_index_from_status(config, load_status(config))
@@ -3552,7 +4319,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
 
     stall_after = float(config.get("supervisor", {}).get("stall_after_seconds", 300))
     now = datetime.now(timezone.utc)
-    provider_report = load_provider_report(config)
+    provider_report = provider_report or load_provider_report(config)
     changed = retry_due_workers(config, state, provider_report, now) or changed
     workers = state.setdefault("workers", {})
     for run_id, worker in list(workers.items()):
@@ -3598,6 +4365,22 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             else:
                 if worker.get("status") == "superseded":
                     continue
+                # Dispatch cooldown: protect freshly-dispatched workers
+                # from being killed for an assignment reshuffle. Without
+                # this guard, availability-first claims thrash the worker
+                # pool — a worker that just spawned is wasteful to kill
+                # before it has had a chance to make progress.
+                if alive and worker_in_dispatch_cooldown(
+                    worker,
+                    ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
+                ):
+                    if not SUPERVISOR_LOG_QUIET:
+                        console_log(
+                            f"supersede skipped (cooldown): task={worker.get('task_id')} "
+                            f"provider={worker.get('provider')} run={worker.get('run_id')}",
+                            quiet=SUPERVISOR_LOG_QUIET,
+                        )
+                    continue
                 if alive:
                     terminate_worker_pid(worker.get("pid"))
                 worker["status"] = "superseded"
@@ -3632,6 +4415,24 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             and worker.get("status") in active_worker_statuses
             and higher_priority_ready_task_exists(config, worker, task_map, state=state, active_statuses=active_worker_statuses)
         ):
+            # Dispatch cooldown: same protection as the assignment-moved
+            # branch. Priority escalation that fires within seconds of a
+            # dispatch is almost always thrashing — the new "higher
+            # priority" task was already visible when this worker was
+            # claimed, so the supervisor should have taken that task
+            # then rather than killing a fresh worker now.
+            if alive and worker_in_dispatch_cooldown(
+                worker,
+                ready_dispatch_settings(config).get("dispatch_cooldown_seconds", 300),
+            ):
+                if not SUPERVISOR_LOG_QUIET:
+                    console_log(
+                        f"priority-escalation supersede skipped (cooldown): "
+                        f"task={worker.get('task_id')} provider={worker.get('provider')} "
+                        f"run={worker.get('run_id')}",
+                        quiet=SUPERVISOR_LOG_QUIET,
+                    )
+                continue
             if alive:
                 terminate_worker_pid(worker.get("pid"))
             worker["status"] = "superseded"
@@ -3896,6 +4697,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                         live_failure_reason,
                         terminal=True,
                         state=state,
+                        provider_report=provider_report,
                     )
                     if reassigned_to:
                         worker["status"] = "reassigned"
@@ -3998,6 +4800,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 failure_reason,
                 terminal=True,
                 state=state,
+                provider_report=provider_report,
             )
             if reassigned_to:
                 worker["status"] = "reassigned"
@@ -4117,6 +4920,58 @@ def reconcile_queue_records(config: dict[str, Any], state: dict[str, Any]) -> bo
 
 
 
+def parse_worker_dispatched_at(run_id: str | None) -> datetime | None:
+    """Extract the dispatch timestamp embedded in a worker run_id.
+
+    Production run_ids are formatted as ``<provider>-<YYYYMMDDTHHMMSSZ>-<hash>``
+    (see worker spawn paths). The supervisor never stored a dedicated
+    ``dispatched_at`` field on worker records, so parsing the run_id is the
+    least invasive way to recover the dispatch moment for cooldown checks.
+
+    Returns ``None`` when the run_id is missing or none of its dash-separated
+    components parse as the expected timestamp shape — that preserves prior
+    behaviour for synthetic test fixtures whose run_ids are short slugs like
+    ``run-1`` / ``old-run``.
+    """
+    if not run_id:
+        return None
+    for part in str(run_id).split("-"):
+        try:
+            return datetime.strptime(part, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+def worker_in_dispatch_cooldown(
+    worker: dict[str, Any],
+    cooldown_seconds: int,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Return True if the worker is within the dispatch cooldown window.
+
+    Cooldown only protects *running* workers — stalled / fallback / etc.
+    workers must remain recoverable via the normal supersede paths.
+
+    Returns False when:
+      - cooldown_seconds <= 0 (feature disabled)
+      - worker.status is not "running"
+      - run_id has no parseable timestamp (synthetic fixtures, legacy records)
+      - dispatched_at is older than cooldown_seconds
+    """
+    if cooldown_seconds <= 0:
+        return False
+    if worker.get("status") != "running":
+        return False
+    dispatched_at = parse_worker_dispatched_at(worker.get("run_id"))
+    if dispatched_at is None:
+        return False
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return (now - dispatched_at).total_seconds() < cooldown_seconds
+
+
 def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(config.get("ready_dispatcher", {}) or {})
     settings.setdefault("enabled", True)
@@ -4133,6 +4988,13 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("max_tasks_per_agent", 1)
     settings.setdefault("max_tasks_per_agent_by_lane", {})
     settings.setdefault("max_dispatches_per_tick", 4)
+    # Dispatch cooldown: a *running* worker dispatched within the last
+    # N seconds is protected from voluntary supersede (assignment-moved
+    # or priority-escalation paths). Dead, stalled, and fallback workers
+    # are NOT protected — recovery flows still work. Default 300s
+    # (5 min) is enough to absorb a normal supervisor reshuffle without
+    # killing real work; set to 0 to disable. See worker_in_dispatch_cooldown.
+    settings.setdefault("dispatch_cooldown_seconds", 300)
     return settings
 
 
@@ -4146,10 +5008,17 @@ def max_tasks_per_agent_for_lane(settings: dict[str, Any], agent_id: str) -> int
         if normalize_agent_id(str(key)) != normalized_agent_id:
             continue
         try:
-            return max(1, int(value))
+            # A lane override of 0 is an intentional operator disable/ban.
+            return max(0, int(value))
         except (TypeError, ValueError):
             return default
     return default
+
+
+def lane_dispatch_disabled(config: dict[str, Any], agent_id: str) -> bool:
+    """True when local dispatcher policy intentionally disables a lane."""
+    settings = ready_dispatch_settings(config)
+    return max_tasks_per_agent_for_lane(settings, agent_id) <= 0
 
 
 def helper_claim_settings(config: dict[str, Any]) -> dict[str, Any]:
@@ -5465,6 +6334,17 @@ def build_chair_review_message(
             path = config_path(config, key)
         except KeyError:
             continue
+        if key == "state_file":
+            # Point the chair at the bounded chair-scoped digest, not the full
+            # state.json — the latter exceeds the 256 KB worker Read cap under
+            # concurrent dispatch (fat per-worker request_snapshot/command/metadata
+            # + seen_event_keys). See runtime_state.build_state_digest /
+            # feedback_ai_status_handoff_bloat.
+            path = path.parent / "state-digest.json"
+            machine_truth_lines.append(
+                f"- {label} (chair-scoped digest of state.json; tasks live in ai-status): `{path.resolve()}`"
+            )
+            continue
         machine_truth_lines.append(f"- {label}: `{path.resolve()}`")
     if not machine_truth_lines:
         machine_truth_lines.append("- configured machine-truth paths are unavailable in this test/config context")
@@ -6131,7 +7011,7 @@ def apply_chair_reassignment_action(
             "created_at": timestamp,
         }
     )
-    write_json(status_path, status)
+    write_status_with_prune(status_path, status, config=config)
     if not sync_status_pipeline(config):
         return False
     clear_failure_streak(state, task_id, role)
@@ -6722,7 +7602,7 @@ def apply_chair_parent_resume_action(
             blocker["status"] = "resolved"
             blocker["resolved_at"] = timestamp
 
-    write_json(status_path, status)
+    write_status_with_prune(status_path, status, config=config)
     if not sync_status_pipeline(config):
         return False
 
@@ -6768,8 +7648,17 @@ def apply_chair_task_action(
     target_agent, dispatch_reason = dispatch_plan
     if requested_target and requested_target != target_agent:
         return False
+    role = task_role_for_dispatch_reason(dispatch_reason)
+    streak_key = failure_streak_key(task_id, role) if role else ""
+    streak_record = failure_streak_registry(state).get(streak_key) if streak_key else None
     if task_waiting_on_chair_reassignment(state, task, reason=dispatch_reason, target_agent=target_agent):
-        return False
+        if not isinstance(streak_record, dict):
+            return False
+        # The chair has explicitly approved this dispatch action. Clear the
+        # task-scoped guard that exists only to wait for that chair decision.
+        streak_record["awaiting_chair"] = False
+        streak_record["chair_cleared_at"] = utc_now()
+        streak_record["chair_clear_reason"] = chair_reason
 
     agent_id = normalize_agent_id(target_agent)
     if agent_id not in (config.get("agents", {}) or {}):
@@ -7149,6 +8038,8 @@ def dispatch_ready_tasks(
     settings = ready_dispatch_settings(config)
     if not settings.get("enabled", True):
         return False
+    if disk_guard_dispatch_blocked(config, state):
+        return note_dispatch_blocked_by_disk_guard(config, state, "ready_dispatcher")
 
     status = load_status(config)
     schema = config.get("schema", {})
@@ -7382,6 +8273,8 @@ def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, 
     if not settings.get("enabled", True):
         tracking["below_threshold_since"] = None
         return changed
+    if disk_guard_dispatch_blocked(config, state):
+        return note_dispatch_blocked_by_disk_guard(config, state, "underutilization_sidecars") or changed
 
     if ratio >= threshold:
         if tracking.get("below_threshold_since") is not None:
@@ -7596,6 +8489,8 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
     settings = underutilization_settings(config)
     if not settings.get("enabled", True):
         return False
+    if disk_guard_dispatch_blocked(config, state):
+        return note_dispatch_blocked_by_disk_guard(config, state, "underutilization_main_tasks")
 
     tracking = state.setdefault("underutilization", {})
     productive_statuses = {str(v) for v in settings.get("productive_worker_statuses", [])}
@@ -7739,6 +8634,86 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
     return changed
 
 
+def _has_dispatchable_backlog(status: dict[str, Any]) -> bool:
+    dispatchable = {"backlog", "todo", "in_progress", "review", "review_approved"}
+    for task in (status.get("tasks") or []):
+        if isinstance(task, dict) and str(task.get("status") or "") in dispatchable:
+            return True
+    return False
+
+
+def break_full_deadlock(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    status: dict[str, Any],
+) -> bool:
+    """Last-resort recovery when the orchestrator is fully wedged: zero active
+    workers, an empty queue, the chairman review blocked for lack of a
+    dispatch-capable lane, yet dispatchable backlog remains. Forces a fresh
+    capability probe and clears any paused lane the probe now reports healthy
+    (auth OR an indefinite quota hold whose underlying probe has recovered). If
+    nothing recovers, raises a loud operator-attention escalation instead of
+    sitting silently at zero workers. Rate-limited by a cooldown so genuinely
+    dead lanes are not thrashed."""
+    settings = config.get("supervisor", {})
+    if not settings.get("deadlock_breaker_enabled", True):
+        return False
+    active_statuses = {str(v) for v in ready_dispatch_settings(config).get("active_worker_statuses", [])}
+    active_agents, _ = active_worker_indexes(state, active_statuses)
+    if active_agents:
+        return False
+    if state.get("queue", {}).get("events", {}):
+        return False
+    if not state.get("chair_review", {}).get("blocked"):
+        return False
+    if not _has_dispatchable_backlog(status):
+        return False
+    rec = state.setdefault("deadlock_recovery", {})
+    cooldown = float(settings.get("deadlock_breaker_cooldown_seconds", 1800))
+    last_attempt = _parse_iso_utc(rec.get("last_attempt_at"))
+    now = datetime.now(timezone.utc)
+    if last_attempt is not None and (now - last_attempt).total_seconds() < cooldown:
+        return False
+    rec["last_attempt_at"] = utc_now()
+    console_log(
+        "FULL DEADLOCK detected (0 active workers, queue empty, chair review "
+        "blocked, backlog pending) - forcing recovery probe",
+        quiet=False,
+    )
+    fresh_report = _force_recovery_probe(config)
+    paused = list(provider_pause_registry(state).keys())
+    recovered = [a for a in paused if _lane_probe_healthy(config, fresh_report, a) is True]
+    for agent_id in recovered:
+        clear_provider_pause(state, agent_id)
+    if recovered:
+        rec.pop("operator_attention", None)
+        console_log(f"deadlock breaker cleared lanes {recovered} via fresh healthy probe", quiet=False)
+        write_activity_log(config, {
+            "type": "deadlock_recovered",
+            "message": f"Full-deadlock recovery cleared paused lanes {recovered} after a healthy probe.",
+            "agents": recovered,
+        })
+        return True
+    prior = rec.get("operator_attention") or {}
+    rec["operator_attention"] = {
+        "since": prior.get("since") or utc_now(),
+        "reason": "All lanes paused and none auto-recoverable (probe unhealthy). "
+                  "Manual fix needed: re-login auth lanes and/or restore quota.",
+        "paused": paused,
+    }
+    console_log(
+        "OPERATOR ATTENTION REQUIRED: full orchestrator deadlock and no lane is "
+        f"auto-recoverable. Paused lanes: {paused}",
+        quiet=False,
+    )
+    write_activity_log(config, {
+        "type": "operator_attention_required",
+        "message": "Full orchestrator deadlock: 0 workers, all lanes paused, none auto-recoverable.",
+        "paused": paused,
+    })
+    return True
+
+
 def run_once(
     config: dict[str, Any],
     *,
@@ -7749,9 +8724,12 @@ def run_once(
     once: bool = False,
     manage_pid_file: bool = True,
 ) -> bool:
+    heartbeat_at = utc_now()
+    state = load_runtime_state(config)
+    changed = maintain_disk_guard(config, state)
+    disk_guard_record = dict(state.get("disk_guard", {}) or {})
     if manage_pid_file:
         write_supervisor_pid(config)
-    heartbeat_at = utc_now()
     status = load_status(config)
     desired_focus_mode = desired_focus_mode_from_status(status)
 
@@ -7770,10 +8748,9 @@ def run_once(
             heartbeat_at=heartbeat_at,
         )
 
-    state = load_runtime_state(config)
+    _sd_notify("WATCHDOG=1")
     previous_heartbeat = state.get("supervisor", {}).get("last_heartbeat_at")
     stamp_supervisor_state(state)
-    changed = False
     provider_report = load_provider_report(config)
     changed = bool(expire_provider_pauses(config, state, provider_report)) or changed
     pruned = prune_stale_approvals(config)
@@ -7782,12 +8759,15 @@ def run_once(
     if watch:
         changed = run_scan(config, state, replay=replay, provider_capabilities=provider_report) or changed
         state = load_runtime_state(config)
+        if disk_guard_record:
+            state["disk_guard"] = disk_guard_record
         stamp_supervisor_state(state)
         changed = bool(expire_provider_pauses(config, state, provider_report)) or changed
     status = load_status(config)
     desired_focus_mode = desired_focus_mode_from_status(status)
-    changed = poll_workers(config, state) or changed
+    changed = poll_workers(config, state, provider_report) or changed
     changed = reconcile_queue_records(config, state) or changed
+    reconcile_status_from_git(config, state)
     changed = prune_event_queue(config, state) or changed
     changed = prune_completed_dispatch_pauses(state, status, config=config, provider_report=provider_report) or changed
     changed = prune_failure_streaks(state, status) or changed
@@ -7800,11 +8780,12 @@ def run_once(
         changed = ensure_planning_baton_dispatch(config, state, status) or changed
     else:
         changed = queue_chair_review(config, state, status, provider_report) or changed
+        changed = break_full_deadlock(config, state, status) or changed
         changed = dispatch_ready_tasks(config, state, provider_report) or changed
         changed = dispatch_underutilization_sidecars(config, state) or changed
         changed = dispatch_underutilization_main_tasks(config, state) or changed
     changed = process_queue(config, state, provider_report) or changed
-    changed = poll_workers(config, state) or changed
+    changed = poll_workers(config, state, provider_report) or changed
     status = load_status(config)
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
@@ -7814,7 +8795,11 @@ def run_once(
     trim_worker_history(state, int(config.get("supervisor", {}).get("max_worker_history", 200)))
     trim_seen_events(state, int(config.get("watcher", {}).get("max_seen_events", 2000)))
     stamp_supervisor_state(state)
-    save_runtime_state(config, state)
+    try:
+        save_runtime_state(config, state)
+    except OSError as exc:
+        console_log(f"unable to save runtime state: {exc}", quiet=SUPERVISOR_LOG_QUIET)
+        return changed
     log_runtime_summary(
         state,
         safe_load_approval_state(config),

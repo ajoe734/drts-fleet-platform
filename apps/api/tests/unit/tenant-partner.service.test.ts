@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { OwnedOrderRecord } from "@drts/contracts";
+
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { BankCardInlineEligibilityAdapter } from "../../src/modules/tenant-partner/bank-card-inline-eligibility.adapter";
@@ -34,6 +36,8 @@ function createEmptyRepositoryState(): TenantPartnerState {
     partnerIngressCredentials: [],
     partnerEligibilityVerifications: [],
     approvalRules: [],
+    approvalRequests: [],
+    approvalDecisions: [],
     passengers: [],
     addresses: [],
     costCenters: [],
@@ -42,6 +46,92 @@ function createEmptyRepositoryState(): TenantPartnerState {
     quotaMonthlySnapshots: [],
     userRoles: [],
     apiKeys: [],
+  };
+}
+
+function createTenantOrder(
+  overrides: Partial<OwnedOrderRecord> = {},
+): OwnedOrderRecord {
+  return {
+    orderId: overrides.orderId ?? "order-tenant-demo-001",
+    orderNo: overrides.orderNo ?? "ORD-000001",
+    orderSource: overrides.orderSource ?? "portal",
+    orderDomain: "owned",
+    tenantId: overrides.tenantId ?? "tenant-demo-001",
+    partnerId: overrides.partnerId ?? null,
+    partnerProgramId: overrides.partnerProgramId ?? null,
+    partnerEntrySlug: overrides.partnerEntrySlug ?? null,
+    eligibilityVerificationId: overrides.eligibilityVerificationId ?? null,
+    issuerAuthorizationRef: overrides.issuerAuthorizationRef ?? null,
+    serviceBucket: "business_dispatch",
+    dispatchSemantics: overrides.dispatchSemantics ?? "reservation",
+    businessDispatchSubtype:
+      overrides.businessDispatchSubtype ?? "enterprise_dispatch",
+    status: overrides.status ?? "created",
+    pickup: overrides.pickup ?? { address: "A St", lat: null, lng: null },
+    dropoff: overrides.dropoff ?? { address: "B St", lat: null, lng: null },
+    passenger: overrides.passenger ?? {
+      passengerId: "rider-001",
+      name: "Rider One",
+      phone: "0912000000",
+      roles: ["employee"],
+    },
+    bookingId: overrides.bookingId ?? "booking-001",
+    bookingType: overrides.bookingType ?? "scheduled",
+    etaSnapshot: overrides.etaSnapshot ?? null,
+    callId: overrides.callId ?? null,
+    recordingId: overrides.recordingId ?? null,
+    reservationWindowStart:
+      overrides.reservationWindowStart ?? "2099-06-05T10:00:00.000Z",
+    reservationWindowEnd:
+      overrides.reservationWindowEnd ?? "2099-06-05T11:00:00.000Z",
+    recurrenceRule: overrides.recurrenceRule ?? null,
+    modifiableUntil: overrides.modifiableUntil ?? null,
+    cancelableUntil: overrides.cancelableUntil ?? null,
+    bookedBy: overrides.bookedBy ?? {
+      name: "Ops Booker",
+      email: "ops@example.com",
+    },
+    onsiteContact: overrides.onsiteContact ?? null,
+    costCenter: overrides.costCenter ?? "ENG",
+    vehiclePreference: overrides.vehiclePreference ?? null,
+    benefitReference: overrides.benefitReference ?? null,
+    direction: overrides.direction ?? null,
+    flightNo: overrides.flightNo ?? null,
+    terminal: overrides.terminal ?? null,
+    luggageCount: overrides.luggageCount ?? null,
+    notes: overrides.notes ?? null,
+    fixedPrice: overrides.fixedPrice ?? true,
+    quotedFare: overrides.quotedFare ?? {
+      currency: "NTD",
+      amountMinor: 100000,
+    },
+    quotedFareSource: overrides.quotedFareSource ?? "pricing_rule",
+    quotedFareRuleVersion: overrides.quotedFareRuleVersion ?? "pricing-rule-v1",
+    manualFareOverride: overrides.manualFareOverride ?? null,
+    exceptionHold: overrides.exceptionHold ?? null,
+    proofRequirements: overrides.proofRequirements ?? {
+      minPhotoCount: 0,
+      signoffRequired: false,
+      expenseProofRequired: false,
+    },
+    approvalState: overrides.approvalState ?? "not_required",
+    approvalRequestIds: overrides.approvalRequestIds ?? [],
+    complianceGates: overrides.complianceGates ?? [],
+    complianceFlags: overrides.complianceFlags ?? [],
+    cancelledAt: overrides.cancelledAt ?? null,
+    cancelReason: overrides.cancelReason ?? null,
+    reservationHoldStatus: overrides.reservationHoldStatus ?? "not_required",
+    reservationHoldId: overrides.reservationHoldId ?? null,
+    reservationHoldExpiresAt: overrides.reservationHoldExpiresAt ?? null,
+    queueFamily: overrides.queueFamily ?? null,
+    queueEntryReason: overrides.queueEntryReason ?? null,
+    dispatchAttemptCount: overrides.dispatchAttemptCount ?? 0,
+    lastDispatchFailureReason: overrides.lastDispatchFailureReason ?? null,
+    noSupplyEscalation: overrides.noSupplyEscalation ?? null,
+    dispatchTimeout: overrides.dispatchTimeout ?? null,
+    createdAt: overrides.createdAt ?? "2026-03-01T09:00:00.000Z",
+    updatedAt: overrides.updatedAt ?? "2026-03-01T09:00:00.000Z",
   };
 }
 
@@ -1621,6 +1711,142 @@ describe("TenantPartnerService sensitive-data governance", () => {
       status: "test_pending",
       runtimeMetadata: expect.objectContaining({
         disableReason: null,
+        disableReasonNote: null,
+      }),
+    });
+  });
+
+  it("retries failed webhook deliveries through the tenant command surface", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 410,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+      });
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      new WebhookDispatchService(fetchImpl as never),
+      [],
+    );
+
+    const created = service.createWebhookEndpoint(
+      "tenant-demo-001",
+      {
+        url: "https://tenant.example/webhooks/retry-once",
+        secret: "whsec_retry_once",
+        events: ["booking.created"],
+      },
+      "req-webhook-create-retry-001",
+    );
+
+    await service.sendTestWebhook(
+      "tenant-demo-001",
+      {
+        webhookId: created.webhookId,
+      },
+      "req-webhook-test-retry-001",
+    );
+
+    const [failedDelivery] = service.listWebhookDeliveriesByWebhook(
+      "tenant-demo-001",
+      created.webhookId,
+      "req-webhook-deliveries-retry-001",
+      {
+        actorType: "tenant_admin",
+        actorId: "tenant-admin-001",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roles: ["tc_admin"],
+        scopes: [
+          "tenant:webhooks:read",
+          "tenant:webhooks:write",
+          "tenant:read",
+        ],
+      },
+    );
+    expect(failedDelivery).toMatchObject({
+      status: "delivery_failed",
+      availableActions: expect.arrayContaining([
+        expect.objectContaining({
+          action: "retryFailedDelivery",
+          enabled: true,
+        }),
+      ]),
+    });
+
+    const retried = await service.retryWebhookDelivery(
+      "tenant-demo-001",
+      created.webhookId,
+      failedDelivery.deliveryId,
+      "req-webhook-retry-001",
+      {
+        actorType: "tenant_admin",
+        actorId: "tenant-admin-001",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roles: ["tc_admin"],
+        scopes: [
+          "tenant:webhooks:read",
+          "tenant:webhooks:write",
+          "tenant:read",
+        ],
+      },
+    );
+
+    expect(retried).toMatchObject({
+      deliveryId: failedDelivery.deliveryId,
+      status: "delivered",
+      attempt: 2,
+      httpStatus: 202,
+    });
+    expect(service.listWebhookEndpoints("tenant-demo-001")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          webhookId: created.webhookId,
+          status: "active",
+        }),
+      ]),
+    );
+  });
+
+  it("preserves manual disable reason notes on webhook endpoints", () => {
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      undefined,
+      new WebhookDispatchService(
+        vi.fn(async () => ({ ok: true, status: 202 })) as never,
+      ),
+      [],
+    );
+
+    const created = service.createWebhookEndpoint("tenant-demo-001", {
+      url: "https://tenant.example/webhooks/manual-disable",
+      secret: "whsec_manual_disable",
+      events: ["booking.created"],
+    });
+
+    const updated = service.updateWebhookEndpoint(
+      "tenant-demo-001",
+      created.webhookId,
+      {
+        status: "disabled",
+        disableReason: "Receiver maintenance window",
+      },
+      "req-webhook-disable-005",
+    );
+
+    expect(updated).toMatchObject({
+      webhookId: created.webhookId,
+      status: "disabled",
+      runtimeMetadata: expect.objectContaining({
+        disableReason: "manual_disable",
+        disableReasonNote: "Receiver maintenance window",
       }),
     });
   });
@@ -1729,6 +1955,133 @@ describe("TenantPartnerService sensitive-data governance", () => {
           newValuesSummary: expect.objectContaining({
             evidenceFamily: "eligibility_verification",
           }),
+        }),
+      ]),
+    );
+  });
+});
+
+describe("TenantPartnerService tenant business ops views", () => {
+  it("builds dashboard metrics, tenant order filters, and service programs", async () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+    service.registerOrderFeedProvider(() => [
+      createTenantOrder({
+        orderId: "order-upcoming-001",
+        bookingId: "booking-upcoming-001",
+        status: "created",
+      }),
+      createTenantOrder({
+        orderId: "order-completed-001",
+        bookingId: "booking-completed-001",
+        status: "completed",
+        reservationWindowStart: "2026-03-02T09:00:00.000Z",
+        reservationWindowEnd: "2026-03-02T10:00:00.000Z",
+        createdAt: "2026-03-01T08:00:00.000Z",
+        updatedAt: "2026-03-02T10:00:00.000Z",
+      }),
+      createTenantOrder({
+        orderId: "order-partner-001",
+        bookingId: "booking-partner-001",
+        status: "cancelled",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        orderSource: "api",
+        reservationWindowStart: "2026-03-03T09:00:00.000Z",
+        reservationWindowEnd: "2026-03-03T10:00:00.000Z",
+        createdAt: "2026-03-01T08:00:00.000Z",
+        updatedAt: "2026-03-03T10:00:00.000Z",
+      }),
+    ]);
+
+    const billingSettlementService = {
+      listTenantInvoices: vi.fn(() => [
+        {
+          invoiceId: "invoice-001",
+          tenantId: "tenant-demo-001",
+          periodStart: "2026-03-01T00:00:00.000Z",
+          periodEnd: "2026-03-31T23:59:59.999Z",
+          amount: { currency: "NTD", amountMinor: 250000 },
+          status: "issued",
+          artifactUrl: null,
+          pricingVersionSnapshot: "tenant-pricing-v1",
+          lines: [
+            {
+              lineId: "line-001",
+              orderId: "order-completed-001",
+              description: "x",
+              amount: { currency: "NTD", amountMinor: 250000 },
+            },
+          ],
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+        },
+      ]),
+      getTenantPayableSummary: vi.fn(async () => ({
+        tenantId: "tenant-demo-001",
+        periodMonth: "2026-03",
+        totalTrips: 2,
+        completedTrips: 1,
+        cancelledTrips: 1,
+        noShowTrips: 0,
+        grossAmountMinor: 300000,
+        adjustmentAmountMinor: 0,
+        taxAmountMinor: 0,
+        payableAmountMinor: 300000,
+        invoiceStatus: "issued",
+      })),
+    } as any;
+
+    const dashboard = await service.getTenantDashboardSummary(
+      "tenant-demo-001",
+      billingSettlementService,
+    );
+    expect(dashboard).toMatchObject({
+      tenantId: "tenant-demo-001",
+      periodMonth: "2026-03",
+      bookingCount: 3,
+      completedTripCount: 1,
+      cancelledTripCount: 1,
+      estimatedPayableAmountMinor: 300000,
+      issuedInvoiceAmountMinor: 250000,
+      unpaidInvoiceAmountMinor: 250000,
+    });
+
+    const partnerOrders = service.listTenantOrders(
+      "tenant-demo-001",
+      {
+        serviceProduct: "credit_card_airport_transfer",
+        tenantServiceProgramId: "program-airport-alpha",
+        sourcePlatform: "api",
+      },
+      billingSettlementService,
+    );
+    expect(partnerOrders.map((order) => order.orderId)).toEqual([
+      "order-partner-001",
+    ]);
+
+    const draftOrders = service.listTenantOrders(
+      "tenant-demo-001",
+      { invoiceStatus: "draft" },
+      billingSettlementService,
+    );
+    expect(draftOrders.map((order) => order.orderId)).toEqual(
+      expect.arrayContaining(["order-upcoming-001", "order-partner-001"]),
+    );
+
+    const servicePrograms =
+      service.listTenantServicePrograms("tenant-demo-001");
+    expect(servicePrograms).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          programId: "tenant-program-enterprise-dispatch",
+          programType: "enterprise_dispatch",
+        }),
+        expect.objectContaining({
+          programId: "program-airport-alpha",
+          programType: "credit_card_airport_transfer",
+          billingMode: "partner_settlement",
         }),
       ]),
     );
@@ -2099,8 +2452,10 @@ describe("TenantPartnerService approval rules", () => {
       results.filter((result) => result.status === "rejected"),
     ).toHaveLength(1);
     expect(
-      service.getTenantQuotaSummary("tenant-demo-001").usage
-        .pendingReservedBookingCount,
+      service.getTenantQuotaSummary(
+        "tenant-demo-001",
+        "2026-05-13T10:00:00.000Z",
+      ).usage.pendingReservedBookingCount,
     ).toBe(1);
   });
 

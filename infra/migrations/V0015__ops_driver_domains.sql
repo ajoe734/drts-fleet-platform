@@ -36,6 +36,17 @@ CREATE TABLE IF NOT EXISTS ops.phase1_incident_timelines (
   record        jsonb NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ops.phase1_driver_matching_suppressions (
+  source_incident_id varchar(100) PRIMARY KEY REFERENCES ops.phase1_incidents(incident_id),
+  driver_id          varchar(100) NOT NULL,
+  active             boolean NOT NULL,
+  reason_code        varchar(50) NOT NULL,
+  expires_at         timestamptz NOT NULL,
+  lifted_at          timestamptz,
+  updated_at         timestamptz NOT NULL,
+  record             jsonb NOT NULL
+);
+
 -- ── Maintenance Logs ─────────────────────────────────────────────────
 -- Source: Phase 1 PRD §9.5.4 (Maintenance Logs - Ops Console)
 
@@ -93,6 +104,12 @@ CREATE INDEX IF NOT EXISTS idx_incidents_reported_by
 
 CREATE INDEX IF NOT EXISTS idx_incident_timelines_incident
   ON ops.phase1_incident_timelines(incident_id);
+
+CREATE INDEX IF NOT EXISTS idx_driver_matching_suppressions_driver
+  ON ops.phase1_driver_matching_suppressions(driver_id);
+
+CREATE INDEX IF NOT EXISTS idx_driver_matching_suppressions_active
+  ON ops.phase1_driver_matching_suppressions(active, expires_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_maintenance_vehicle
   ON ops.phase1_maintenance_logs(vehicle_id);

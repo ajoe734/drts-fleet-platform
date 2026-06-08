@@ -47,14 +47,17 @@ env:
   DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
   DEV_GCP_PLATFORM_ADMIN_SERVICE: ${{ vars.DEV_GCP_PLATFORM_ADMIN_SERVICE }}
   DEV_GCP_OPS_CONSOLE_SERVICE: ${{ vars.DEV_GCP_OPS_CONSOLE_SERVICE }}
+  DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE }}
   DEV_GCP_MIGRATION_JOB: ${{ vars.DEV_GCP_MIGRATION_JOB }}
   DEV_API_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_API_ALLOW_UNAUTHENTICATED }}
   DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED }}
   DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED }}
+  DEV_FLEET_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_FLEET_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED }}
   DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
   DEV_IAP_CLIENT_ID: ${{ vars.DEV_IAP_CLIENT_ID }}
   DEV_PLATFORM_ADMIN_ORIGIN: ${{ vars.DEV_PLATFORM_ADMIN_ORIGIN }}
   DEV_OPS_CONSOLE_ORIGIN: ${{ vars.DEV_OPS_CONSOLE_ORIGIN }}
+  DEV_FLEET_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_FLEET_PARTNER_PORTAL_ORIGIN }}
   WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
   WIF_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
 
@@ -76,13 +79,16 @@ jobs:
       api_service: ${{ steps.resolve.outputs.api_service }}
       platform_admin_service: ${{ steps.resolve.outputs.platform_admin_service }}
       ops_console_service: ${{ steps.resolve.outputs.ops_console_service }}
+      fleet_partner_portal_service: ${{ steps.resolve.outputs.fleet_partner_portal_service }}
       migration_job: ${{ steps.resolve.outputs.migration_job }}
       api_exposure_flag: ${{ steps.resolve.outputs.api_exposure_flag }}
       platform_admin_exposure_flag: ${{ steps.resolve.outputs.platform_admin_exposure_flag }}
       ops_console_exposure_flag: ${{ steps.resolve.outputs.ops_console_exposure_flag }}
+      fleet_partner_portal_exposure_flag: ${{ steps.resolve.outputs.fleet_partner_portal_exposure_flag }}
       api_origin: ${{ steps.resolve.outputs.api_origin }}
       platform_admin_origin: ${{ steps.resolve.outputs.platform_admin_origin }}
       ops_console_origin: ${{ steps.resolve.outputs.ops_console_origin }}
+      fleet_partner_portal_origin: ${{ steps.resolve.outputs.fleet_partner_portal_origin }}
 
     steps:
       - name: Resolve dev config
@@ -151,13 +157,16 @@ jobs:
           api_service="$(pick "${DEV_GCP_API_SERVICE:-}" "" "drts-api")"
           platform_admin_service="$(pick "${DEV_GCP_PLATFORM_ADMIN_SERVICE:-}" "" "drts-platform-admin-web")"
           ops_console_service="$(pick "${DEV_GCP_OPS_CONSOLE_SERVICE:-}" "" "drts-ops-console-web")"
+          fleet_partner_portal_service="$(pick "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-}" "" "drts-fleet-partner-portal-web")"
           migration_job="$(pick "${DEV_GCP_MIGRATION_JOB:-}" "" "drts-migrate")"
           api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" true)"
           platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" true)"
           ops_console_exposure_flag="$(exposure_flag "${DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)"
+          fleet_partner_portal_exposure_flag="$(exposure_flag "${DEV_FLEET_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" true)"
           api_origin="${DEV_CONTROL_PLANE_API_ORIGIN:-}"
           platform_admin_origin="${DEV_PLATFORM_ADMIN_ORIGIN:-}"
           ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
+          fleet_partner_portal_origin="${DEV_FLEET_PARTNER_PORTAL_ORIGIN:-}"
           registry="${artifact_region}-docker.pkg.dev/${artifact_project_id}/${artifact_repository}"
 
           source_ref="${INPUT_SOURCE_REF:-${GITHUB_SHA}}"
@@ -185,13 +194,16 @@ jobs:
           emit api_service "$api_service"
           emit platform_admin_service "$platform_admin_service"
           emit ops_console_service "$ops_console_service"
+          emit fleet_partner_portal_service "$fleet_partner_portal_service"
           emit migration_job "$migration_job"
           emit api_exposure_flag "$api_exposure_flag"
           emit platform_admin_exposure_flag "$platform_admin_exposure_flag"
           emit ops_console_exposure_flag "$ops_console_exposure_flag"
+          emit fleet_partner_portal_exposure_flag "$fleet_partner_portal_exposure_flag"
           emit api_origin "$api_origin"
           emit platform_admin_origin "$platform_admin_origin"
           emit ops_console_origin "$ops_console_origin"
+          emit fleet_partner_portal_origin "$fleet_partner_portal_origin"
 
   build-push:
     name: Build & push images
@@ -278,6 +290,18 @@ jobs:
           cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/ops-console-web:cache
           cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/ops-console-web:cache,mode=max
 
+      - name: Build & push — fleet-partner-portal-web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/fleet-partner-portal-web/Dockerfile
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ steps.tag.outputs.tag }}
+            ${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:latest
+          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:cache
+          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:cache,mode=max
+
   migrate:
     name: DB migration
     runs-on: ubuntu-latest
@@ -363,6 +387,10 @@ jobs:
           secret_prefix="${{ needs.prepare.outputs.secret_prefix }}"
           project_id="${{ needs.prepare.outputs.project_id }}"
           secret_args="DATABASE_URL=${secret_prefix}-db-url:latest,API_KEY_SALT=${secret_prefix}-api-key-salt:latest,JWT_SECRET=${secret_prefix}-jwt-secret:latest"
+          llm_provider="mock"
+          llm_chat_model="mock-chat-v1"
+          llm_summarizer_model="mock-summary-v1"
+          llm_base_url=""
 
           controlled_download_secret="${secret_prefix}-controlled-download-signing-secret"
           if ! gcloud secrets describe "$controlled_download_secret" --project "$project_id" >/dev/null 2>&1; then
@@ -375,7 +403,32 @@ jobs:
             secret_args="${secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
           fi
 
+          llm_secret="${secret_prefix}-llm-gateway-api-key"
+          if gcloud secrets describe "$llm_secret" --project "$project_id" >/dev/null 2>&1; then
+            secret_args="${secret_args},LLM_GATEWAY_API_KEY=${llm_secret}:latest"
+            llm_provider="${DEV_LLM_GATEWAY_PROVIDER:-openai}"
+            llm_chat_model="${DEV_LLM_GATEWAY_CHAT_MODEL:-gpt-4.1-mini}"
+            llm_summarizer_model="${DEV_LLM_GATEWAY_SUMMARIZER_MODEL:-gpt-4.1-mini}"
+            llm_base_url="${DEV_LLM_GATEWAY_BASE_URL:-}"
+          fi
+
           echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
+          echo "llm_provider=${llm_provider}" >> "$GITHUB_OUTPUT"
+          echo "llm_chat_model=${llm_chat_model}" >> "$GITHUB_OUTPUT"
+          echo "llm_summarizer_model=${llm_summarizer_model}" >> "$GITHUB_OUTPUT"
+          echo "llm_base_url=${llm_base_url}" >> "$GITHUB_OUTPUT"
+
+      - name: Build API env vars
+        id: api_env
+        run: |
+          set -euo pipefail
+
+          env_vars="NODE_ENV=production,API_PORT=3001,PLATFORM_ADMIN_ASSISTANT_ENABLED=true,LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }},LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }},LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}"
+          if [[ -n "${{ steps.api_secrets.outputs.llm_base_url }}" ]]; then
+            env_vars="${env_vars},LLM_GATEWAY_BASE_URL=${{ steps.api_secrets.outputs.llm_base_url }}"
+          fi
+
+          echo "vars=${env_vars}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy — api
         run: |
@@ -389,7 +442,7 @@ jobs:
             --set-cloudsql-instances "${{ needs.prepare.outputs.cloudsql }}" \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "NODE_ENV=production,API_PORT=3001" \
+            --set-env-vars "${{ steps.api_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.api_exposure_flag }} \
             --min-instances 0 \
             --max-instances 3 \
@@ -433,7 +486,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
             ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
             --min-instances 0 \
             --max-instances 2 \
@@ -452,6 +505,23 @@ jobs:
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
             --set-env-vars "${{ steps.web_env.outputs.vars }}" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
+            --min-instances 0 \
+            --max-instances 2 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Deploy — fleet-partner-portal-web
+        run: |
+          IMAGE="${{ needs.prepare.outputs.registry }}/fleet-partner-portal-web:${{ needs.build-push.outputs.image_tag }}"
+
+          gcloud run deploy "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --port 3007 \
+            --ingress all \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            ${{ needs.prepare.outputs.fleet_partner_portal_exposure_flag }} \
             --min-instances 0 \
             --max-instances 2 \
             --project "${{ needs.prepare.outputs.project_id }}"
@@ -482,7 +552,8 @@ jobs:
           for svc in \
             "${{ needs.prepare.outputs.api_service }}" \
             "${{ needs.prepare.outputs.platform_admin_service }}" \
-            "${{ needs.prepare.outputs.ops_console_service }}"; do
+            "${{ needs.prepare.outputs.ops_console_service }}" \
+            "${{ needs.prepare.outputs.fleet_partner_portal_service }}"; do
             echo "Waiting for ${svc} ..."
             service_ready=false
             for i in $(seq 1 24); do
@@ -522,16 +593,22 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)')"
+          fleet_partner_portal_url="$(gcloud run services describe "${{ needs.prepare.outputs.fleet_partner_portal_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
 
           echo "api=${api_url}" >> "$GITHUB_OUTPUT"
           echo "platform_admin=${platform_admin_url}" >> "$GITHUB_OUTPUT"
           echo "ops_console=${ops_console_url}" >> "$GITHUB_OUTPUT"
+          echo "fleet_partner_portal=${fleet_partner_portal_url}" >> "$GITHUB_OUTPUT"
 
       - name: Verify dev endpoints
         run: |
           curl --fail --silent --show-error "${{ steps.urls.outputs.api }}/health" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.platform_admin }}" >/dev/null
           curl --fail --silent --show-error "${{ steps.urls.outputs.ops_console }}" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.fleet_partner_portal }}" >/dev/null
 
       - name: Print dev URLs
         run: |
@@ -539,3 +616,4 @@ jobs:
           echo "  api: ${{ steps.urls.outputs.api }}"
           echo "  platform-admin: ${{ steps.urls.outputs.platform_admin }}"
           echo "  ops-console: ${{ steps.urls.outputs.ops_console }}"
+          echo "  fleet-partner-portal: ${{ steps.urls.outputs.fleet_partner_portal }}"

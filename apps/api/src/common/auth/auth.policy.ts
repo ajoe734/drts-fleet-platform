@@ -107,6 +107,64 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "admin/fleet-partners") {
+    return {
+      routeKey: `admin:fleet-partners:${upperMethod}`,
+      requiredScopes: methodScope(
+        "foundation:read",
+        "foundation:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Fleet partner administration",
+    };
+  }
+
+  if (routePath.startsWith("admin/fleet-partners/")) {
+    const isBillingRoute =
+      routePath.includes("/revenue-share-rules") ||
+      routePath.endsWith("/statements");
+
+    return {
+      routeKey: isBillingRoute
+        ? `admin:fleet-partners:billing:${upperMethod}`
+        : `admin:fleet-partners:${upperMethod}`,
+      requiredScopes: isBillingRoute
+        ? methodScope("billing:read", "billing:write", upperMethod)
+        : methodScope("foundation:read", "foundation:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: isBillingRoute
+        ? "Fleet partner billing administration"
+        : "Fleet partner administration",
+    };
+  }
+
+  if (
+    routePath.startsWith("admin/drivers/") &&
+    routePath.endsWith("/fleet-affiliations")
+  ) {
+    return {
+      routeKey: `admin:driver-fleet-affiliations:${upperMethod}`,
+      requiredScopes: methodScope(
+        "foundation:read",
+        "foundation:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Driver fleet affiliation management",
+    };
+  }
+
+  if (routePath.startsWith("fleet-partner/")) {
+    const routeSuffix = routePath.slice("fleet-partner/".length) || "root";
+    return {
+      routeKey: `fleet-partner:${routeSuffix}:${upperMethod}`,
+      requiredScopes: ["billing:read"],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Fleet partner self-service access",
+    };
+  }
+
   if (routePath.startsWith("tenant/")) {
     const readRoute = isReadMethod(upperMethod);
     if (routePath.startsWith("tenant/webhooks")) {

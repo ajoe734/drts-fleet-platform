@@ -1,16 +1,17 @@
 import type { CanvasTone } from "@drts/ui-web";
+import { t } from "@/lib/translations";
 
 export const TENANT_CONSOLE_BRAND = "DRTS";
 export const TENANT_CONSOLE_BRAND_SUB = "TENANT CONSOLE";
 export const TENANT_CONSOLE_CONTEXT = "YAMATO 大和商務集團";
 export const TENANT_CONSOLE_ENV = "production";
 export const TENANT_CONSOLE_VERSION = "v0.1.0";
-export const TENANT_CONSOLE_SEARCH_PLACEHOLDER =
-  "搜尋叫車、乘客、對帳單、報表…";
+export const TENANT_CONSOLE_SEARCH_PLACEHOLDER = t("shell.search");
 
 type TenantNavIcon =
   | "home"
   | "bookings"
+  | "bell"
   | "plus"
   | "passengers"
   | "addresses"
@@ -19,6 +20,8 @@ type TenantNavIcon =
   | "reports"
   | "apiKeys"
   | "webhooks"
+  | "integrationGov"
+  | "sla"
   | "audit"
   | "users";
 
@@ -40,12 +43,12 @@ export type TenantNavEntry = TenantNavDivider | TenantNavItem;
 
 export const tenantNavEntries: TenantNavEntry[] = [
   { divider: "工作面" },
-  { key: "home", href: "/", icon: "home", label: "首頁" },
+  { key: "home", href: "/", icon: "home", label: t("nav.home") },
   {
     key: "bookings",
     href: "/bookings",
     icon: "bookings",
-    label: "叫車",
+    label: t("nav.bookings"),
     badge: "5",
     badgeTone: "accent",
     matchPaths: ["/bookings"],
@@ -54,77 +57,109 @@ export const tenantNavEntries: TenantNavEntry[] = [
     key: "newbooking",
     href: "/bookings/new",
     icon: "plus",
-    label: "建立叫車",
+    label: t("nav.newBooking"),
   },
-  { divider: "通訊錄" },
+  { divider: "資料維護" },
   {
     key: "passengers",
     href: "/passengers",
     icon: "passengers",
-    label: "乘客",
+    label: t("nav.passengers"),
   },
   {
     key: "addresses",
     href: "/addresses",
     icon: "addresses",
-    label: "地址簿",
+    label: t("nav.addresses"),
   },
   {
     key: "costcenter",
     href: "/cost-centers",
     icon: "billing",
-    label: "成本中心",
+    label: t("nav.costCenters"),
   },
   {
     key: "rules",
     href: "/rules",
     icon: "flags",
-    label: "審批與配額",
+    label: t("nav.rules"),
   },
-  { divider: "帳務" },
+  { divider: "帳號與權限" },
+  {
+    key: "users",
+    href: "/users",
+    icon: "users",
+    label: t("nav.users"),
+  },
+  { divider: "通知與 SLA" },
+  {
+    key: "notifications",
+    href: "/notifications",
+    icon: "bell",
+    label: t("nav.notifications"),
+  },
+  {
+    key: "sla",
+    href: "/sla",
+    icon: "sla",
+    label: t("nav.sla"),
+  },
+  { divider: "帳務與治理" },
+  {
+    key: "billing",
+    href: "/billing",
+    icon: "billing",
+    label: t("nav.billing"),
+  },
   {
     key: "invoices",
     href: "/invoices",
     icon: "billing",
-    label: "對帳單",
+    label: t("nav.invoices"),
   },
   {
     key: "reports",
     href: "/reports",
     icon: "reports",
-    label: "報表",
+    label: t("nav.reports"),
   },
   { divider: "整合" },
   {
     key: "apikeys",
     href: "/api-keys",
     icon: "apiKeys",
-    label: "API 金鑰",
+    label: t("nav.apiKeys"),
   },
   {
     key: "webhooks",
     href: "/webhooks",
     icon: "webhooks",
-    label: "Webhook",
+    label: t("nav.webhooks"),
   },
   {
-    key: "audit",
-    href: "/audit",
-    icon: "audit",
-    label: "稽核",
+    key: "integration-governance",
+    href: "/integration-governance",
+    icon: "integrationGov",
+    label: t("nav.integrationGovernance"),
   },
-  { divider: "組織" },
+  { divider: "系統" },
   {
-    key: "users",
-    href: "/users",
-    icon: "users",
-    label: "人員與角色",
+    key: "featureflags",
+    href: "/feature-flags",
+    icon: "flags",
+    label: t("nav.featureFlags"),
   },
   {
     key: "settings",
     href: "/settings",
     icon: "flags",
-    label: "租戶設定",
+    label: t("nav.settings"),
+  },
+  {
+    key: "audit",
+    href: "/audit",
+    icon: "audit",
+    label: t("nav.audit"),
   },
 ];
 

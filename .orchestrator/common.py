@@ -9,10 +9,16 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None
 
 ROOT = Path(__file__).resolve().parents[1]
 ORCHESTRATOR_DIR = ROOT / ".orchestrator"
@@ -36,6 +42,38 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
     tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     tmp_path.write_text(content, encoding=encoding)
     tmp_path.replace(path)
+
+
+def _jsonl_lock_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.lock")
+
+
+@contextmanager
+def _hold_jsonl_lock(path: Path):
+    ensure_parent(path)
+    handle = _jsonl_lock_path(path).open("a+", encoding="utf-8")
+    try:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def _append_jsonl_line_unlocked(path: Path, line: str) -> None:
+    payload = (line + "\n").encode("utf-8")
+    fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
+    try:
+        written = 0
+        while written < len(payload):
+            chunk = os.write(fd, payload[written:])
+            if chunk == 0:
+                raise OSError(f"short write while appending {path}")
+            written += chunk
+    finally:
+        os.close(fd)
 
 
 def _strip_js_comments(text: str) -> str:
@@ -135,8 +173,8 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     ensure_parent(path)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    with _hold_jsonl_lock(path):
+        _append_jsonl_line_unlocked(path, json.dumps(payload, ensure_ascii=False))
 
 
 def deep_merge(base: Any, overlay: Any) -> Any:
@@ -345,13 +383,79 @@ def render_template(path: Path, variables: dict[str, Any]) -> str:
     return text
 
 
+# Activity-log size ceiling: when ai-activity-log.jsonl crosses this byte
+# threshold, write_activity_log rotates it down to ACTIVITY_LOG_KEEP_LINES
+# tail entries before appending the new payload. Without this bound the file
+# grew to ~500 MB / 338k lines by the 2026-05-26 incident, slowing the
+# dashboard's mirror fetch to the point of appearing dead. Per-call os.stat()
+# is microseconds — cheaper than discovering the bloat after-the-fact.
+ACTIVITY_LOG_MAX_BYTES = int(os.environ.get("ACTIVITY_LOG_MAX_BYTES", str(50 * 1024 * 1024)))
+ACTIVITY_LOG_KEEP_LINES = int(os.environ.get("ACTIVITY_LOG_KEEP_LINES", "10000"))
+
+
+def _rotate_activity_log_if_oversize(path: Path) -> None:
+    """If `path` exceeds ACTIVITY_LOG_MAX_BYTES, rewrite it to keep only the
+    last ACTIVITY_LOG_KEEP_LINES lines.
+
+    Atomic via tempfile + os.replace so concurrent writers from other
+    processes see either the pre-rotation file or the post-rotation file,
+    never a half-truncated one. Concurrent rotations are safe — both write
+    the same tail to their own tempfile; whichever rename wins, the other
+    loses a few in-flight lines at worst. Returning silently when the file
+    is missing or unreadable preserves write_activity_log's no-throw
+    contract.
+    """
+    try:
+        if not path.exists():
+            return
+        size = path.stat().st_size
+        if size <= ACTIVITY_LOG_MAX_BYTES:
+            return
+    except OSError:
+        return
+    try:
+        with path.open("rb") as handle:
+            # tail by reading from the end. ACTIVITY_LOG_KEEP_LINES lines is
+            # roughly a few MB given current per-line size; reading a 50+ MB
+            # tail block once per rotation is acceptable.
+            handle.seek(0, 2)
+            file_size = handle.tell()
+            # Read at most the last 20 MB (matches typical 10k * 1.5 KB lines
+            # plus headroom for unusually wide records).
+            read_back = min(file_size, 20 * 1024 * 1024)
+            handle.seek(file_size - read_back)
+            tail_bytes = handle.read()
+        tail_lines = tail_bytes.decode("utf-8", errors="replace").splitlines()
+        kept = tail_lines[-ACTIVITY_LOG_KEEP_LINES:]
+        tmp = path.with_suffix(path.suffix + ".rotate.tmp")
+        with tmp.open("w", encoding="utf-8") as handle:
+            for line in kept:
+                handle.write(line + "\n")
+        os.replace(tmp, path)
+    except (OSError, UnicodeDecodeError):
+        # Don't surface rotation errors to the caller; activity logging
+        # must be non-fatal. Worst case the file keeps growing until the
+        # operator investigates.
+        return
+
+
 def write_activity_log(config: dict[str, Any], entry: dict[str, Any]) -> None:
     payload = {
         "ts": utc_now(),
         "agent": "Orchestrator",
         **entry,
     }
-    append_jsonl(config_path(config, "activity_log"), payload)
+    log_path = config_path(config, "activity_log")
+    encoded_payload = json.dumps(payload, ensure_ascii=False)
+    with _hold_jsonl_lock(log_path):
+        # Rotation and append must share the same lock. Otherwise a rotator can
+        # replace the file while another process appends, producing NUL-padded
+        # or concatenated JSONL records that make the dashboard look broken.
+        try:
+            _rotate_activity_log_if_oversize(log_path)
+        except Exception:
+            pass
+        _append_jsonl_line_unlocked(log_path, encoded_payload)
 
 
 def runtime_log_path(prefix: str, target: str) -> Path:

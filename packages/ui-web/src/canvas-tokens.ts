@@ -10,6 +10,19 @@ export type CanvasTone =
   | "danger"
   | "accent";
 
+/**
+ * Actor realm tones — cross-actor audit chips (design canvas mgmt-tokens.jsx
+ * `REALM_COLORS`). Mirrors `@drts/ui-tokens` `REALM_COLORS` so badge surfaces
+ * stay consistent across the ops / admin / tenant / partner / fleet consoles.
+ */
+export type CanvasRealm = "tenant" | "ops" | "platform" | "system" | "driver";
+
+export type CanvasRealmRamp = {
+  fg: string;
+  bg: string;
+  bd: string;
+};
+
 type CanvasAccentScale = {
   light: string;
   lightHi: string;
@@ -81,6 +94,7 @@ export interface CanvasTheme extends CanvasPalette, CanvasDensityScale {
   surfaceTagline: string;
   fontFamily: string;
   monoFamily: string;
+  realm: Record<CanvasRealm, CanvasRealmRamp>;
 }
 
 export const CANVAS_SURFACE_ACCENTS: Record<CanvasSurface, CanvasAccentScale> =
@@ -207,6 +221,30 @@ export const CANVAS_DARK_NAVY_PALETTE: CanvasPalette = {
   shadowSm: "0 1px 2px rgba(0,0,0,.4)",
 };
 
+export const CANVAS_REALM_LIGHT: Record<CanvasRealm, CanvasRealmRamp> = {
+  tenant: { fg: "#0F766E", bg: "#F0FDFA", bd: "#99F6E4" },
+  ops: { fg: "#DC2626", bg: "#FEF2F2", bd: "#FECACA" },
+  platform: { fg: "#4F46E5", bg: "#EEF2FF", bd: "#C7D2FE" },
+  system: { fg: "#6B7280", bg: "#F1F4F8", bd: "#CBD5E1" },
+  driver: { fg: "#A8590B", bg: "#FCEED6", bd: "#F0CC95" },
+};
+
+export const CANVAS_REALM_DARK: Record<CanvasRealm, CanvasRealmRamp> = {
+  tenant: { fg: "#5EEAD4", bg: "#0F2A28", bd: "#134E48" },
+  ops: { fg: "#FCA5A5", bg: "#3F1212", bd: "#5C1A1A" },
+  platform: { fg: "#A5B4FC", bg: "#1E1B4B", bd: "#312E81" },
+  system: { fg: "#94A3B8", bg: "#1A2230", bd: "#2A3445" },
+  driver: { fg: "#FCD34D", bg: "#3A2A0A", bd: "#5C4218" },
+};
+
+export const CANVAS_REALM_NAMES = [
+  "tenant",
+  "ops",
+  "platform",
+  "system",
+  "driver",
+] as const satisfies readonly CanvasRealm[];
+
 export const CANVAS_DENSITY: Record<CanvasDensity, CanvasDensityScale> = {
   comfy: {
     rowH: 44,
@@ -259,6 +297,7 @@ export function buildCanvasTheme({
     surfaceTagline: accentSet.tagline,
     fontFamily: CANVAS_TYPE.family,
     monoFamily: CANVAS_TYPE.mono,
+    realm: dark ? CANVAS_REALM_DARK : CANVAS_REALM_LIGHT,
     ...palette,
     ...scale,
   };

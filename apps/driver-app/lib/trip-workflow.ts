@@ -1,4 +1,4 @@
-import type { DriverTaskRecord } from "@drts/contracts";
+import type { DriverTaskRecord, UnifiedDriverTaskView } from "@drts/contracts";
 
 export type TripPrimaryActionKey =
   | "accept"
@@ -74,7 +74,16 @@ function getRuntimeTaskStatus(task: DriverTaskRecord | null): string | null {
 
 function getForwardedRuntimeStatus(
   task: DriverTaskRecord | null,
+  taskView?: UnifiedDriverTaskView | null,
 ): string | null {
+  const viewNativeStatus =
+    typeof taskView?.nativeStatus === "string" && taskView.nativeStatus.trim()
+      ? taskView.nativeStatus.trim()
+      : null;
+  if (viewNativeStatus) {
+    return viewNativeStatus;
+  }
+
   if (!task) {
     return null;
   }
@@ -115,6 +124,7 @@ function getForwardedRuntimeStatus(
 
 export function getTripExperienceState(
   task: DriverTaskRecord | null,
+  taskView?: UnifiedDriverTaskView | null,
 ): TripExperienceState | null {
   if (!task) {
     return null;
@@ -124,8 +134,16 @@ export function getTripExperienceState(
     return "owned_active";
   }
 
-  const forwardedStatus = getForwardedRuntimeStatus(task);
-  const runtimeStatus = getRuntimeTaskStatus(task);
+  const forwardedStatus = getForwardedRuntimeStatus(task, taskView);
+  const runtimeStatus =
+    typeof taskView?.localStatus === "string" && taskView.localStatus.trim()
+      ? taskView.localStatus.trim()
+      : getRuntimeTaskStatus(task);
+  const actionState = taskView?.driverActionState ?? null;
+
+  if (actionState === "awaiting_platform") {
+    return "forwarded_pending";
+  }
 
   switch (forwardedStatus) {
     case "accept_pending":
@@ -149,6 +167,10 @@ export function getTripExperienceState(
   }
 
   if (runtimeStatus === "completed") {
+    return "forwarded_completed";
+  }
+
+  if (actionState === "completed") {
     return "forwarded_completed";
   }
 

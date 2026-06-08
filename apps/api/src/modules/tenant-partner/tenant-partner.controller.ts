@@ -20,6 +20,7 @@ import type {
   IssuePartnerIngressCredentialCommand,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
+  DeleteTenantWebhookEndpointCommand,
   DisableTenantCostCenterCommand,
   EvaluateTenantApprovalRuleCommand,
   ListOpsPendingApprovalRequestsQuery,
@@ -38,14 +39,18 @@ import type {
   PartnerEligibilityReviewQueueItem,
   PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
+  RecalculateTenantSlaBookingsCommand,
   ResolvePartnerEligibilityReviewCommand,
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
   TenantBookingApprovalRequestRecord,
+  TenantDashboardSummary,
   TenantAddressExportViewRecord,
+  TenantOrderListQuery,
   TenantCostCenterRecord,
   TenantCostCenterQuotaSummary,
+  TenantServiceProgramRecord,
   TenantIntegrationGovernancePackage,
   TenantPartnerSummary,
   TenantQuotaLedgerEntry,
@@ -74,6 +79,7 @@ import {
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import { BillingSettlementService } from "../billing-settlement/billing-settlement.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { TenantPartnerService } from "./tenant-partner.service";
 
@@ -81,6 +87,7 @@ import { TenantPartnerService } from "./tenant-partner.service";
 export class TenantPartnerController {
   constructor(
     private readonly tenantPartnerService: TenantPartnerService,
+    private readonly billingSettlementService: BillingSettlementService,
     private readonly ownedMobilityService: OwnedMobilityService,
   ) {}
 
@@ -127,6 +134,103 @@ export class TenantPartnerController {
     };
 
     return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("tenant/dashboard")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getTenantDashboard(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const summary: TenantDashboardSummary =
+      await this.tenantPartnerService.getTenantDashboardSummary(
+        this.requireTenantId(tenantId),
+        this.billingSettlementService,
+      );
+    return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("tenant/orders")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantOrders(
+    @Query() query: TenantOrderListQuery,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        this.tenantPartnerService.listTenantOrders(
+          this.requireTenantId(tenantId),
+          query,
+          this.billingSettlementService,
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Get("tenant/orders/:orderId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getTenantOrder(
+    @Param("orderId") orderId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getTenantOrder(
+        this.requireTenantId(tenantId),
+        orderId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("tenant/trips")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantTrips(
+    @Query() query: TenantOrderListQuery,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        this.tenantPartnerService.listTenantTrips(
+          this.requireTenantId(tenantId),
+          query,
+          this.billingSettlementService,
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Get("tenant/service-programs")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantServicePrograms(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantServiceProgramRecord[] =
+      this.tenantPartnerService.listTenantServicePrograms(
+        this.requireTenantId(tenantId),
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/service-programs/:programId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getTenantServiceProgram(
+    @Param("programId") programId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getTenantServiceProgram(
+        this.requireTenantId(tenantId),
+        programId,
+      ),
+      requestId,
+    );
   }
 
   @Get("partner/entries")
@@ -386,6 +490,63 @@ export class TenantPartnerController {
   ) {
     return toApiSuccessEnvelope(
       await this.tenantPartnerService.acknowledgeOpsApprovalRequestBreach(
+        approvalRequestId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("ops/approval-requests/:approvalRequestId/approve")
+  @RequireRealms("platform", "ops")
+  async approveOpsApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: ApproveTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.approveOpsApprovalRequest(
+        approvalRequestId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("ops/approval-requests/:approvalRequestId/reject")
+  @RequireRealms("platform", "ops")
+  async rejectOpsApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: RejectTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.rejectOpsApprovalRequest(
+        approvalRequestId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("ops/approval-requests/:approvalRequestId/escalate")
+  @RequireRealms("platform", "ops")
+  async escalateOpsApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: EscalateTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.escalateOpsApprovalRequest(
         approvalRequestId,
         command,
         identity,
@@ -977,12 +1138,14 @@ export class TenantPartnerController {
   @Get("tenant/integration-governance")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   getTenantIntegrationGovernancePackage(
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const item: TenantIntegrationGovernancePackage =
       this.tenantPartnerService.getIntegrationGovernancePackage(
         this.requireTenantId(tenantId),
+        identity,
       );
     return toApiSuccessEnvelope(item, requestId);
   }
@@ -1017,11 +1180,13 @@ export class TenantPartnerController {
 
   @Get("tenant/webhooks")
   listWebhookEndpoints(
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const items = this.tenantPartnerService.listWebhookEndpoints(
       this.requireTenantId(tenantId),
+      identity,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
@@ -1083,6 +1248,7 @@ export class TenantPartnerController {
   @Delete("tenant/webhooks/:webhookId")
   deleteWebhookEndpoint(
     @Param("webhookId") webhookId: string,
+    @Body() command: DeleteTenantWebhookEndpointCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -1090,6 +1256,7 @@ export class TenantPartnerController {
       this.tenantPartnerService.deleteWebhookEndpoint(
         this.requireTenantId(tenantId),
         webhookId,
+        command,
         requestId,
       ) ?? {
         status: "not_found",
@@ -1163,6 +1330,27 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
+  @Post("tenant/webhooks/:webhookId/deliveries/:deliveryId/retry")
+  @RequireRealms("tenant", "platform", "ops")
+  retryWebhookDelivery(
+    @Param("webhookId") webhookId: string,
+    @Param("deliveryId") deliveryId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.retryWebhookDelivery(
+        this.requireTenantId(tenantId),
+        webhookId,
+        deliveryId,
+        requestId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
   @Get("tenant/sla")
   getSlaProfile(
     @Headers("x-tenant-id") tenantId?: string,
@@ -1174,16 +1362,49 @@ export class TenantPartnerController {
     );
   }
 
+  @Get("tenant/sla/view")
+  getSlaProfileView(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getSlaProfileView(
+        this.requireTenantId(tenantId),
+      ),
+      requestId,
+    );
+  }
+
   @Post("tenant/sla")
   updateSlaProfile(
     @Body() command: UpdateTenantSlaProfileCommand,
     @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-actor-id") actorId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.updateSlaProfile(
         this.requireTenantId(tenantId),
         command,
+        actorId,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/sla/recalculate")
+  recalculateSlaBookings(
+    @Body() command: RecalculateTenantSlaBookingsCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-actor-id") actorId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.recalculateSlaBookings(
+        this.requireTenantId(tenantId),
+        command,
+        actorId,
         requestId,
       ),
       requestId,
