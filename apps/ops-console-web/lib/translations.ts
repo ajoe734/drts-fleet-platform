@@ -67,6 +67,7 @@ const en = {
   "common.scheduledAt": "Scheduled: {value}",
   "common.completedAt": "Completed: {value}",
   "common.dash": "-",
+  "common.notAvailable": "N/A",
 
   // ── Dashboard ──
   "dashboard.title": "Operations Overview",
@@ -809,6 +810,7 @@ const en = {
   "dispatch.workflow.noJob": "No dispatch job",
   "dispatch.workflow.awaitingJob": "Awaiting dispatch job",
   "dispatch.workflow.noJobEta": "No job",
+  "dispatch.workflow.etaMinutes": "{count} min",
   "dispatch.workflow.fixedPrice": "Fixed-price booking",
   "dispatch.workflow.metered": "Metered / TBD",
   "dispatch.workflow.viewCandidates": "View candidates",
@@ -949,6 +951,29 @@ const en = {
   "dispatch.workflow.detail.activeWorkspace": "Workspace active",
   "dispatch.workflow.detail.selectCandidateHint":
     "Pick a candidate in this row, then complete assignment from the detail workspace.",
+  "dispatch.workflow.activity.orderCreated.title": "Order created",
+  "dispatch.workflow.activity.orderCreated.body":
+    "{orderNo} entered the owned dispatch queue.",
+  "dispatch.workflow.activity.dispatchJobActive.title": "Dispatch job active",
+  "dispatch.workflow.activity.dispatchJobActive.body":
+    "Job {jobId} is {status}.",
+  "dispatch.workflow.activity.dispatchTimeout.title": "Dispatch timeout",
+  "dispatch.workflow.activity.dispatchTimeout.body":
+    "Timeout escalated as {action}.",
+  "dispatch.workflow.activity.noSupplyEscalation.title": "No-supply escalation",
+  "dispatch.workflow.activity.noSupplyEscalation.body":
+    "Attempt {count} escalated via {action}.",
+  "dispatch.workflow.activity.exceptionHoldRaised.title":
+    "Exception hold raised",
+  "dispatch.workflow.activity.exceptionHoldRaised.body": "Reason: {reason}.",
+  "dispatch.workflow.activity.overrideRequest.title": "Override request",
+  "dispatch.workflow.activity.overrideRequest.body": "{status} by {actor}.",
+  "dispatch.workflow.activity.exceptionResolved.title": "Exception resolved",
+  "dispatch.workflow.activity.exceptionResolved.body":
+    "{actor} recorded {resolution}.",
+  "dispatch.workflow.activity.manualFareOverride.title": "Manual fare override",
+  "dispatch.workflow.activity.manualFareOverride.body":
+    "{actor} applied a fare override.",
   "dispatch.workflow.candidateLocation.live": "Live location",
   "dispatch.workflow.candidateLocation.stale": "Stale location",
   "dispatch.workflow.candidateLocation.no_location": "No location",
@@ -2308,6 +2333,7 @@ const zh: Record<keyof typeof en, string> = {
   "common.scheduledAt": "排程：{value}",
   "common.completedAt": "完成：{value}",
   "common.dash": "—",
+  "common.notAvailable": "N/A",
 
   // ── Dashboard ──
   "dashboard.title": "營運總覽",
@@ -3019,6 +3045,7 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.noJob": "無派車任務",
   "dispatch.workflow.awaitingJob": "等待派車任務",
   "dispatch.workflow.noJobEta": "無任務",
+  "dispatch.workflow.etaMinutes": "{count} 分鐘",
   "dispatch.workflow.fixedPrice": "固定價格預約",
   "dispatch.workflow.metered": "計費 / 待定",
   "dispatch.workflow.viewCandidates": "查看候選人",
@@ -3155,6 +3182,29 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.detail.activeWorkspace": "工作區焦點",
   "dispatch.workflow.detail.selectCandidateHint":
     "先在列表挑選候選人，再回到明細工作區完成指派。",
+  "dispatch.workflow.activity.orderCreated.title": "訂單建立",
+  "dispatch.workflow.activity.orderCreated.body":
+    "{orderNo} 已進入自有派遣佇列。",
+  "dispatch.workflow.activity.dispatchJobActive.title": "派遣任務進行中",
+  "dispatch.workflow.activity.dispatchJobActive.body":
+    "任務 {jobId} 目前狀態為 {status}。",
+  "dispatch.workflow.activity.dispatchTimeout.title": "派遣逾時",
+  "dispatch.workflow.activity.dispatchTimeout.body":
+    "逾時後已升級為 {action}。",
+  "dispatch.workflow.activity.noSupplyEscalation.title": "無供給升級",
+  "dispatch.workflow.activity.noSupplyEscalation.body":
+    "第 {count} 次嘗試已透過 {action} 升級處理。",
+  "dispatch.workflow.activity.exceptionHoldRaised.title": "已建立例外保留",
+  "dispatch.workflow.activity.exceptionHoldRaised.body": "原因：{reason}。",
+  "dispatch.workflow.activity.overrideRequest.title": "Override 申請",
+  "dispatch.workflow.activity.overrideRequest.body":
+    "{actor} 提出，狀態為 {status}。",
+  "dispatch.workflow.activity.exceptionResolved.title": "例外已解除",
+  "dispatch.workflow.activity.exceptionResolved.body":
+    "{actor} 記錄了 {resolution}。",
+  "dispatch.workflow.activity.manualFareOverride.title": "人工車資覆寫",
+  "dispatch.workflow.activity.manualFareOverride.body":
+    "{actor} 已套用車資覆寫。",
   "dispatch.workflow.loadCandidatesFailed": "載入候選人失敗",
   "dispatch.workflow.refreshFailed": "重新整理派車看板失敗",
   "dispatch.workflow.candidateLocation.live": "即時位置",
