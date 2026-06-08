@@ -20,7 +20,7 @@ import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
-import type { Locale } from "@/lib/translations";
+import { t as translate, type Locale } from "@/lib/translations";
 import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
@@ -72,7 +72,6 @@ const theme = buildCanvasTheme({
 });
 
 // Refresh tier T2 (Dispatch): 5s cadence per packet §3.2 / §5.3.
-const REFRESH_TIER_LABEL = "T2 · 5s";
 const REFRESH_STALE_AFTER_MS = 5_000;
 const SMOKE_DISPATCH_ID = "OPS-SMOKE-DISPATCH";
 
@@ -124,8 +123,12 @@ async function resolveOrFallback<T>(
   }
 }
 
-function copy(locale: Locale, en: string, zh: string) {
-  return locale === "zh" ? zh : en;
+function detailT(
+  locale: Locale,
+  key: string,
+  params?: Record<string, string | number>,
+) {
+  return translate(key, locale, params);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -196,7 +199,7 @@ function readForwardedValue(
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return "—";
+    return detailT(locale, "common.dash");
   }
 
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
@@ -213,7 +216,7 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
 
 function formatLongDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return copy(locale, "unknown", "未知");
+    return detailT(locale, "dispatch.detail.unknown");
   }
 
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
@@ -231,7 +234,7 @@ function formatLongDateTime(locale: Locale, value: string | null | undefined) {
 
 function formatWindow(order: OwnedOrderRecord, locale: Locale) {
   if (!order.reservationWindowStart || !order.reservationWindowEnd) {
-    return locale === "zh" ? "即時" : "realtime";
+    return detailT(locale, "dispatch.detail.realtime");
   }
 
   return `${formatDateTime(locale, order.reservationWindowStart)} → ${formatDateTime(locale, order.reservationWindowEnd)}`;
@@ -257,7 +260,7 @@ function formatForwardedWindow(order: ForwardedOrderRecord, locale: Locale) {
     return formatDateTime(locale, start);
   }
 
-  return locale === "zh" ? "即時" : "realtime";
+  return detailT(locale, "dispatch.detail.realtime");
 }
 
 function getAddressLabel(
@@ -412,36 +415,34 @@ function getCandidateGate(
       label:
         driver.eligibilityBlockedReasons[0] !== undefined
           ? formatOpsCodeLabel(locale, driver.eligibilityBlockedReasons[0])
-          : locale === "zh"
-            ? "人工覆核"
-            : "manual review",
+          : detailT(locale, "dispatch.detail.candidateGate.manualReview"),
       tone: "warn" as const,
     };
   }
 
   if (!candidate.serviceBuckets.includes(order.serviceBucket)) {
     return {
-      label: "service bucket gap",
+      label: detailT(locale, "dispatch.detail.candidateGate.serviceBucketGap"),
       tone: "warn" as const,
     };
   }
 
   if (locationState === "no_location") {
     return {
-      label: "no location",
+      label: detailT(locale, "dispatch.detail.candidateGate.noLocation"),
       tone: "warn" as const,
     };
   }
 
   if (locationState === "stale") {
     return {
-      label: "location stale",
+      label: detailT(locale, "dispatch.detail.candidateGate.locationStale"),
       tone: "warn" as const,
     };
   }
 
   return {
-    label: "ok",
+    label: detailT(locale, "dispatch.detail.candidateGate.ok"),
     tone: "success" as const,
   };
 }
@@ -603,14 +604,11 @@ function buildFallbackActivity(
   const entries: ActivityEntry[] = [
     {
       id: `${order.orderId}:created`,
-      title: locale === "zh" ? "進入 queue" : "Entered queue",
-      body:
-        locale === "zh"
-          ? `${formatOpsCodeLabel(locale, getTenantLabel(order))} 透過 ${formatOpsCodeLabel(
-              locale,
-              order.orderSource,
-            )} 建立訂單。`
-          : `${getTenantLabel(order)} created this owned order via ${order.orderSource}.`,
+      title: detailT(locale, "dispatch.detail.activity.enteredQueue.title"),
+      body: detailT(locale, "dispatch.detail.activity.enteredQueue.body", {
+        tenant: formatOpsCodeLabel(locale, getTenantLabel(order)),
+        source: formatOpsCodeLabel(locale, order.orderSource),
+      }),
       at: order.createdAt,
       tone: "accent",
       actor: order.orderSource,
@@ -620,17 +618,14 @@ function buildFallbackActivity(
   if (order.quotedFare) {
     entries.push({
       id: `${order.orderId}:fare`,
-      title: locale === "zh" ? "計價" : "Pricing",
-      body:
-        locale === "zh"
-          ? `套用 ${order.quotedFareRuleVersion ?? "manual"}：${formatMinorCurrency(
-              order.quotedFare.amountMinor,
-              order.quotedFare.currency,
-            )}。`
-          : `${order.quotedFareRuleVersion ?? "manual"} quoted ${formatMinorCurrency(
-              order.quotedFare.amountMinor,
-              order.quotedFare.currency,
-            )}.`,
+      title: detailT(locale, "dispatch.detail.activity.pricing.title"),
+      body: detailT(locale, "dispatch.detail.activity.pricing.body", {
+        rule: order.quotedFareRuleVersion ?? "manual",
+        fare: formatMinorCurrency(
+          order.quotedFare.amountMinor,
+          order.quotedFare.currency,
+        ),
+      }),
       at: order.updatedAt,
       tone: "accent",
       actor: "pricing.engine",
@@ -640,11 +635,18 @@ function buildFallbackActivity(
   if (job) {
     entries.push({
       id: `${job.dispatchJobId}:job`,
-      title: locale === "zh" ? "派遣評估" : "Dispatch evaluation",
-      body:
-        locale === "zh"
-          ? `job ${job.dispatchJobId} 目前為 ${formatOpsCodeLabel(locale, job.status)}。`
-          : `Job ${job.dispatchJobId} is ${job.status}.`,
+      title: detailT(
+        locale,
+        "dispatch.detail.activity.dispatchEvaluation.title",
+      ),
+      body: detailT(
+        locale,
+        "dispatch.detail.activity.dispatchEvaluation.body",
+        {
+          jobId: job.dispatchJobId,
+          status: formatOpsCodeLabel(locale, job.status),
+        },
+      ),
       at: job.updatedAt,
       tone: getActivityTone(job.status),
       actor: "dispatch.scorer",
@@ -654,14 +656,21 @@ function buildFallbackActivity(
   if (order.noSupplyEscalation) {
     entries.push({
       id: `${order.orderId}:no-supply`,
-      title: locale === "zh" ? "No-supply escalation" : "No-supply escalation",
-      body:
-        locale === "zh"
-          ? `第 ${order.noSupplyEscalation.attemptCount} 次嘗試後，執行 ${formatOpsCodeLabel(
-              locale,
-              order.noSupplyEscalation.escalationAction,
-            )}。`
-          : `Attempt ${order.noSupplyEscalation.attemptCount} escalated via ${order.noSupplyEscalation.escalationAction}.`,
+      title: detailT(
+        locale,
+        "dispatch.workflow.activity.noSupplyEscalation.title",
+      ),
+      body: detailT(
+        locale,
+        "dispatch.workflow.activity.noSupplyEscalation.body",
+        {
+          count: order.noSupplyEscalation.attemptCount,
+          action: formatOpsCodeLabel(
+            locale,
+            order.noSupplyEscalation.escalationAction,
+          ),
+        },
+      ),
       at: order.noSupplyEscalation.escalatedAt,
       tone: "warn",
       actor: "dispatch.recovery",
@@ -671,11 +680,17 @@ function buildFallbackActivity(
   if (order.exceptionHold) {
     entries.push({
       id: `${order.orderId}:hold`,
-      title: locale === "zh" ? "人工覆核觸發" : "Exception hold raised",
-      body:
-        locale === "zh"
-          ? `原因：${formatOpsCodeLabel(locale, order.exceptionHold.reasonCode)}。`
-          : `Reason: ${order.exceptionHold.reasonCode}.`,
+      title: detailT(
+        locale,
+        "dispatch.workflow.activity.exceptionHoldRaised.title",
+      ),
+      body: detailT(
+        locale,
+        "dispatch.workflow.activity.exceptionHoldRaised.body",
+        {
+          reason: formatOpsCodeLabel(locale, order.exceptionHold.reasonCode),
+        },
+      ),
       at: order.exceptionHold.raisedAt,
       tone: "danger",
       actor: "compliance",
@@ -685,14 +700,17 @@ function buildFallbackActivity(
   if (order.exceptionHold?.overrideRequest) {
     entries.push({
       id: order.exceptionHold.overrideRequest.overrideRequestId,
-      title: locale === "zh" ? "Override request" : "Override request",
-      body:
-        locale === "zh"
-          ? `${formatOpsCodeLabel(
-              locale,
-              order.exceptionHold.overrideRequest.status,
-            )}，申請人 ${order.exceptionHold.overrideRequest.requestedBy.actorId}。`
-          : `${order.exceptionHold.overrideRequest.status} by ${order.exceptionHold.overrideRequest.requestedBy.actorId}.`,
+      title: detailT(
+        locale,
+        "dispatch.workflow.activity.overrideRequest.title",
+      ),
+      body: detailT(locale, "dispatch.workflow.activity.overrideRequest.body", {
+        status: formatOpsCodeLabel(
+          locale,
+          order.exceptionHold.overrideRequest.status,
+        ),
+        actor: order.exceptionHold.overrideRequest.requestedBy.actorId,
+      }),
       at: order.exceptionHold.overrideRequest.requestedAt,
       tone: "warn",
       actor: order.exceptionHold.overrideRequest.requestedBy.actorId,
@@ -702,14 +720,21 @@ function buildFallbackActivity(
   if (order.exceptionHold?.resolution) {
     entries.push({
       id: `${order.orderId}:resolution`,
-      title: locale === "zh" ? "覆核完成" : "Exception resolved",
-      body:
-        locale === "zh"
-          ? `${order.exceptionHold.resolution.actorId} 記錄 ${formatOpsCodeLabel(
-              locale,
-              order.exceptionHold.resolution.resolution,
-            )}。`
-          : `${order.exceptionHold.resolution.actorId} recorded ${order.exceptionHold.resolution.resolution}.`,
+      title: detailT(
+        locale,
+        "dispatch.workflow.activity.exceptionResolved.title",
+      ),
+      body: detailT(
+        locale,
+        "dispatch.workflow.activity.exceptionResolved.body",
+        {
+          actor: order.exceptionHold.resolution.actorId,
+          resolution: formatOpsCodeLabel(
+            locale,
+            order.exceptionHold.resolution.resolution,
+          ),
+        },
+      ),
       at: order.exceptionHold.resolution.resolvedAt,
       tone: "info",
       actor: order.exceptionHold.resolution.actorId,
@@ -719,11 +744,18 @@ function buildFallbackActivity(
   if (order.manualFareOverride) {
     entries.push({
       id: `${order.orderId}:fare-override`,
-      title: locale === "zh" ? "人工車資覆寫" : "Manual fare override",
-      body:
-        locale === "zh"
-          ? `${order.manualFareOverride.actorId} 套用人工車資，原因：${order.manualFareOverride.reason}。`
-          : `${order.manualFareOverride.actorId} applied a fare override.`,
+      title: detailT(
+        locale,
+        "dispatch.workflow.activity.manualFareOverride.title",
+      ),
+      body: detailT(
+        locale,
+        "dispatch.detail.activity.manualFareOverride.bodyWithReason",
+        {
+          actor: order.manualFareOverride.actorId,
+          reason: order.manualFareOverride.reason,
+        },
+      ),
       at: order.manualFareOverride.overriddenAt,
       tone: "warn",
       actor: order.manualFareOverride.actorId,
@@ -733,11 +765,11 @@ function buildFallbackActivity(
   if (task?.acceptedAt) {
     entries.push({
       id: `${task.taskId}:accepted`,
-      title: locale === "zh" ? "司機已接單" : "Driver accepted",
-      body:
-        locale === "zh"
-          ? `${task.driverId} 已接受 ${task.vehicleId} 的任務。`
-          : `${task.driverId} accepted ${task.vehicleId}.`,
+      title: detailT(locale, "dispatch.detail.activity.driverAccepted.title"),
+      body: detailT(locale, "dispatch.detail.activity.driverAccepted.body", {
+        driverId: task.driverId,
+        vehicleId: task.vehicleId,
+      }),
       at: task.acceptedAt,
       tone: "info",
       actor: task.driverId,
@@ -747,11 +779,10 @@ function buildFallbackActivity(
   if (task?.departedAt) {
     entries.push({
       id: `${task.taskId}:departed`,
-      title: locale === "zh" ? "前往接送點" : "Departed to pickup",
-      body:
-        locale === "zh"
-          ? `${task.vehicleId} 已開始前往接送點。`
-          : `${task.vehicleId} departed toward pickup.`,
+      title: detailT(locale, "dispatch.detail.activity.departedToPickup.title"),
+      body: detailT(locale, "dispatch.detail.activity.departedToPickup.body", {
+        vehicleId: task.vehicleId,
+      }),
       at: task.departedAt,
       tone: "info",
       actor: task.driverId,
@@ -761,11 +792,10 @@ function buildFallbackActivity(
   if (task?.arrivedPickupAt) {
     entries.push({
       id: `${task.taskId}:arrived`,
-      title: locale === "zh" ? "到達接送點" : "Arrived at pickup",
-      body:
-        locale === "zh"
-          ? `${task.vehicleId} 已到達接送點。`
-          : `${task.vehicleId} arrived at pickup.`,
+      title: detailT(locale, "dispatch.detail.activity.arrivedAtPickup.title"),
+      body: detailT(locale, "dispatch.detail.activity.arrivedAtPickup.body", {
+        vehicleId: task.vehicleId,
+      }),
       at: task.arrivedPickupAt,
       tone: "info",
       actor: task.driverId,
@@ -775,11 +805,10 @@ function buildFallbackActivity(
   if (task?.startedAt) {
     entries.push({
       id: `${task.taskId}:started`,
-      title: locale === "zh" ? "開始行程" : "Trip started",
-      body:
-        locale === "zh"
-          ? `${task.driverId} 已開始載客。`
-          : `${task.driverId} started the trip.`,
+      title: detailT(locale, "dispatch.detail.activity.tripStarted.title"),
+      body: detailT(locale, "dispatch.detail.activity.tripStarted.body", {
+        driverId: task.driverId,
+      }),
       at: task.startedAt,
       tone: "accent",
       actor: task.driverId,
@@ -789,11 +818,10 @@ function buildFallbackActivity(
   if (task?.completedAt) {
     entries.push({
       id: `${task.taskId}:completed`,
-      title: locale === "zh" ? "完成任務" : "Task completed",
-      body:
-        locale === "zh"
-          ? `${task.vehicleId} 已完成任務。`
-          : `${task.vehicleId} completed the task.`,
+      title: detailT(locale, "dispatch.detail.activity.taskCompleted.title"),
+      body: detailT(locale, "dispatch.detail.activity.taskCompleted.body", {
+        vehicleId: task.vehicleId,
+      }),
       at: task.completedAt,
       tone: "accent",
       actor: task.driverId,
@@ -840,11 +868,18 @@ function buildForwardedActivity(
   const entries: ActivityEntry[] = [
     {
       id: `${order.mirrorOrderId}:received`,
-      title: copy(locale, "Mirror received", "鏡像建立"),
-      body: copy(
+      title: detailT(
         locale,
-        `Forwarded mirror ${order.mirrorOrderId} created for ${order.platformCode} order ${order.externalOrderId}.`,
-        `為 ${formatOpsCodeLabel(locale, order.platformCode)} 訂單 ${order.externalOrderId} 建立 forwarded 鏡像 ${order.mirrorOrderId}。`,
+        "dispatch.detail.forwardedActivity.mirrorReceived.title",
+      ),
+      body: detailT(
+        locale,
+        "dispatch.detail.forwardedActivity.mirrorReceived.body",
+        {
+          mirrorOrderId: order.mirrorOrderId,
+          platform: formatOpsCodeLabel(locale, order.platformCode),
+          externalOrderId: order.externalOrderId,
+        },
       ),
       at: order.createdAt,
       tone: "accent",
@@ -852,11 +887,19 @@ function buildForwardedActivity(
     },
     {
       id: `${order.mirrorOrderId}:status`,
-      title: copy(locale, "Status sync", "狀態同步"),
-      body: copy(
+      title: detailT(
         locale,
-        `Local mirror status is ${formatOpsCodeLabel(locale, order.status)}; last native status ${order.lastNativeStatus ?? "unknown"}.`,
-        `本地鏡像狀態為 ${formatOpsCodeLabel(locale, order.status)}；最後外部狀態 ${order.lastNativeStatus ?? "未知"}。`,
+        "dispatch.detail.forwardedActivity.statusSync.title",
+      ),
+      body: detailT(
+        locale,
+        "dispatch.detail.forwardedActivity.statusSync.body",
+        {
+          status: formatOpsCodeLabel(locale, order.status),
+          nativeStatus:
+            order.lastNativeStatus ??
+            detailT(locale, "dispatch.detail.unknown"),
+        },
       ),
       at: order.updatedAt,
       tone: getActivityTone(order.status),
@@ -867,7 +910,10 @@ function buildForwardedActivity(
   if (order.lastSyncError) {
     entries.push({
       id: `${order.mirrorOrderId}:sync-error`,
-      title: copy(locale, "Sync failure", "同步失敗"),
+      title: detailT(
+        locale,
+        "dispatch.detail.forwardedActivity.syncFailure.title",
+      ),
       body: `${formatOpsCodeLabel(locale, order.lastSyncError.code)} · ${order.lastSyncError.message}`,
       at: order.lastSyncError.failedAt,
       tone: "danger",
@@ -878,10 +924,16 @@ function buildForwardedActivity(
   if (order.manualFallback.required) {
     entries.push({
       id: `${order.mirrorOrderId}:fallback`,
-      title: copy(locale, "Manual fallback engaged", "啟動人工 fallback"),
+      title: detailT(
+        locale,
+        "dispatch.detail.forwardedActivity.manualFallback.title",
+      ),
       body:
         order.manualFallback.reason ??
-        copy(locale, "Manual fallback required.", "需要人工 fallback。"),
+        detailT(
+          locale,
+          "dispatch.detail.forwardedActivity.manualFallback.body",
+        ),
       at: order.manualFallback.requestedAt ?? order.updatedAt,
       tone: "warn",
       actor: order.manualFallback.requestedBy ?? "ops",
@@ -891,11 +943,18 @@ function buildForwardedActivity(
   if (order.reconciliationJob) {
     entries.push({
       id: order.reconciliationJob.reconciliationJobId,
-      title: copy(locale, "Reconciliation", "對帳"),
-      body: copy(
+      title: detailT(
         locale,
-        `Reconciliation ${order.reconciliationJob.status} · ${order.reconciliationJob.mismatchCount} mismatch · reason ${order.reconciliationJob.reason}.`,
-        `對帳 ${formatOpsCodeLabel(locale, order.reconciliationJob.status)} · ${order.reconciliationJob.mismatchCount} 筆不符 · 原因 ${formatOpsCodeLabel(locale, order.reconciliationJob.reason)}。`,
+        "dispatch.detail.forwardedActivity.reconciliation.title",
+      ),
+      body: detailT(
+        locale,
+        "dispatch.detail.forwardedActivity.reconciliation.body",
+        {
+          status: formatOpsCodeLabel(locale, order.reconciliationJob.status),
+          mismatchCount: order.reconciliationJob.mismatchCount,
+          reason: formatOpsCodeLabel(locale, order.reconciliationJob.reason),
+        },
       ),
       at:
         order.reconciliationJob.completedAt ??
@@ -933,40 +992,44 @@ function buildOverrideSummary(locale: Locale, order: OwnedOrderRecord) {
       note: formatOpsCodeLabel(locale, order.exceptionHold?.reasonCode ?? null),
       nextAction:
         order.exceptionHold?.overrideAllowed === true
-          ? locale === "zh"
-            ? "可由 reviewer 放行"
-            : "reviewer can release"
-          : locale === "zh"
-            ? "需維持人工覆核"
-            : "keep in manual review",
+          ? detailT(
+              locale,
+              "dispatch.detail.override.nextAction.reviewerCanRelease",
+            )
+          : detailT(
+              locale,
+              "dispatch.detail.override.nextAction.keepManualReview",
+            ),
     };
   }
 
   if (order.manualFareOverride) {
     return {
-      type: locale === "zh" ? "fare override" : "fare override",
-      status: locale === "zh" ? "已套用" : "applied",
+      type: detailT(locale, "dispatch.detail.override.type.fareOverride"),
+      status: detailT(locale, "dispatch.detail.override.status.applied"),
       actor: order.manualFareOverride.actorId,
       note: order.manualFareOverride.reason,
-      nextAction:
-        locale === "zh" ? "確認後回到一般派遣" : "return to normal dispatch",
+      nextAction: detailT(
+        locale,
+        "dispatch.detail.override.nextAction.returnNormalDispatch",
+      ),
     };
   }
 
   return {
-    type: locale === "zh" ? "—" : "—",
-    status: locale === "zh" ? "未申請" : "not requested",
-    actor: "—",
+    type: detailT(locale, "common.dash"),
+    status: detailT(locale, "dispatch.detail.override.status.notRequested"),
+    actor: detailT(locale, "common.dash"),
     note:
       order.noSupplyEscalation !== null
         ? formatOpsCodeLabel(locale, order.noSupplyEscalation.escalationAction)
         : order.dispatchTimeout !== null
           ? formatOpsCodeLabel(locale, order.dispatchTimeout.escalationAction)
-          : locale === "zh"
-            ? "目前沒有手動 override"
-            : "no manual override",
-    nextAction:
-      locale === "zh" ? "可直接指派或重派候選" : "candidate can be assigned",
+          : detailT(locale, "dispatch.detail.override.noManualOverride"),
+    nextAction: detailT(
+      locale,
+      "dispatch.detail.override.nextAction.candidateCanBeAssigned",
+    ),
   };
 }
 
@@ -1055,12 +1118,8 @@ function renderSequenceRail(
                   {timestampByStep[index]
                     ? formatDateTime(locale, timestampByStep[index])
                     : idle
-                      ? locale === "zh"
-                        ? "waiting"
-                        : "waiting"
-                      : locale === "zh"
-                        ? "active"
-                        : "active"}
+                      ? detailT(locale, "dispatch.detail.sequence.waiting")
+                      : detailT(locale, "dispatch.detail.sequence.active")}
                 </span>
               </div>
             </div>
@@ -1075,9 +1134,7 @@ function renderActivityFeed(locale: Locale, entries: ActivityEntry[]) {
   if (entries.length === 0) {
     return (
       <div style={{ color: theme.textMuted, fontSize: "12.5px" }}>
-        {locale === "zh"
-          ? "目前沒有 dispatch activity。"
-          : "No dispatch activity yet."}
+        {detailT(locale, "dispatch.detail.activity.empty")}
       </div>
     );
   }
@@ -1233,91 +1290,91 @@ function actionVisual(
     case "contact_passenger":
       return {
         icon: "phone",
-        label: copy(locale, "Contact rider", "聯絡乘客"),
+        label: detailT(locale, "dispatch.detail.action.contactRider"),
         variant: "secondary",
         danger: false,
       };
     case "assign_candidate":
       return {
         icon: "check",
-        label: copy(locale, "Assign #1", "指派候選 #1"),
+        label: detailT(locale, "dispatch.action.assignCandidate"),
         variant: "primary",
         danger: false,
       };
     case "release_driver":
       return {
         icon: "switchboard",
-        label: copy(locale, "Release driver", "釋放司機"),
+        label: detailT(locale, "dispatch.action.releaseReassignDriver"),
         variant,
         danger,
       };
     case "cancel_order":
       return {
         icon: "x",
-        label: copy(locale, "Cancel order", "取消訂單"),
+        label: detailT(locale, "dispatch.action.cancelOrder"),
         variant,
         danger,
       };
     case "fare_override":
       return {
         icon: "warn",
-        label: copy(locale, "Fare override", "車資覆寫"),
+        label: detailT(locale, "dispatch.action.requestFareOverride"),
         variant,
         danger: true,
       };
     case "redispatch":
       return {
         icon: "dispatch",
-        label: copy(locale, "Redispatch", "重新派遣"),
+        label: detailT(locale, "dispatch.action.redispatch"),
         variant,
         danger,
       };
     case "resolve_no_supply":
       return {
         icon: "health",
-        label: copy(locale, "Resolve no-supply", "處理無供給"),
+        label: detailT(locale, "dispatch.action.resolveNoSupply"),
         variant,
         danger,
       };
     case "escalate_incident":
       return {
         icon: "incidents",
-        label: copy(locale, "Escalate to incident", "升級事故"),
+        label: detailT(locale, "dispatch.action.escalateIncident"),
         variant,
         danger: true,
       };
     case "complete_reconciliation":
       return {
         icon: "check",
-        label: copy(locale, "Complete reconciliation", "完成對帳"),
+        label: detailT(locale, "dispatch.action.completeReconciliation"),
         variant: "primary",
         danger: false,
       };
     case "engage_manual_fallback":
       return {
         icon: "switchboard",
-        label: copy(locale, "Manual fallback", "人工 fallback"),
+        label: detailT(locale, "dispatch.action.engageManualFallback"),
         variant,
         danger,
       };
     case "force_refresh":
       return {
         icon: "clock",
-        label: copy(locale, "Force refresh", "強制刷新"),
+        label: detailT(locale, "dispatch.action.forceRefresh"),
         variant: "secondary",
         danger: false,
       };
     case "broadcast_eligible":
       return {
         icon: "dispatch",
-        label: copy(locale, "Broadcast", "廣播候選"),
+        label: detailT(locale, "dispatch.detail.action.broadcastCandidates"),
         variant,
         danger,
       };
     case "report_sync_failure":
       return {
         icon: "warn",
-        label: copy(locale, "Report sync failure", "回報同步失敗"),
+        label: detailT(locale, "dispatch.detail.action.reportSyncFailure"),
         variant,
         danger: true,
       };
@@ -1335,16 +1392,14 @@ function actionHint(action: ResourceActionDescriptor, locale: Locale) {
   if (!action.enabled) {
     return action.disabledReasonCode
       ? formatOpsCodeLabel(locale, action.disabledReasonCode)
-      : copy(locale, "unavailable", "目前不可用");
+      : detailT(locale, "dispatch.action.unavailable");
   }
 
-  const risk = copy(
-    locale,
-    `risk:${action.riskLevel}`,
-    `風險:${action.riskLevel}`,
-  );
+  const risk = detailT(locale, "dispatch.detail.action.risk", {
+    level: action.riskLevel,
+  });
   return action.requiresReason
-    ? `${risk} · ${copy(locale, "reason required", "需填原因")}`
+    ? `${risk} · ${detailT(locale, "dispatch.detail.action.reasonRequired")}`
     : risk;
 }
 
@@ -1355,7 +1410,7 @@ function renderHeaderActions(
   if (actions.length === 0) {
     return (
       <Pill theme={theme} tone="neutral">
-        {copy(locale, "read-only · terminal", "唯讀 · 終態")}
+        {detailT(locale, "dispatch.detail.readOnlyTerminal")}
       </Pill>
     );
   }
@@ -1569,13 +1624,12 @@ function buildCandidateEmptyState(
       return {
         tone: "info",
         icon: "dispatch",
-        title: copy(locale, "Dispatch job not started", "派遣工作尚未啟動"),
-        description: copy(
+        title: detailT(locale, "dispatch.empty.notProvisioned.title"),
+        description: detailT(
           locale,
-          "No dispatch job exists for this order yet. Candidate scoring begins once it enters matching.",
-          "此訂單尚未建立派遣工作，進入 matching 後才會開始評分候選。",
+          "dispatch.detail.empty.notProvisioned.description",
         ),
-        actionLabel: copy(locale, "Open dispatch board", "回派車看板"),
+        actionLabel: detailT(locale, "dispatch.detail.empty.openDispatchBoard"),
         actionHref: "/dispatch?board=ready",
         actionNewTab: false,
       };
@@ -1583,13 +1637,12 @@ function buildCandidateEmptyState(
       return {
         tone: "danger",
         icon: "warn",
-        title: copy(locale, "Candidate snapshot failed", "候選快照讀取失敗"),
-        description: copy(
+        title: detailT(locale, "dispatch.detail.empty.fetchFailed.title"),
+        description: detailT(
           locale,
-          "The candidate endpoint did not return a usable payload. Retry the snapshot.",
-          "候選端點未回傳可用內容，請重新整理快照。",
+          "dispatch.detail.empty.fetchFailed.description",
         ),
-        actionLabel: copy(locale, "Retry", "重新整理"),
+        actionLabel: detailT(locale, "common.refresh"),
         actionHref: `/dispatch/${encodeURIComponent(orderId)}`,
         actionNewTab: false,
       };
@@ -1597,13 +1650,12 @@ function buildCandidateEmptyState(
       return {
         tone: "warn",
         icon: "users",
-        title: copy(locale, "Candidate scope denied", "無候選讀取權限"),
-        description: copy(
+        title: detailT(locale, "dispatch.detail.empty.permissionDenied.title"),
+        description: detailT(
           locale,
-          "This actor can open the workspace but lacks supply read scope for candidate scoring.",
-          "目前帳號可進入工作區，但缺少候選評分的供給讀取權限。",
+          "dispatch.detail.empty.permissionDenied.description",
         ),
-        actionLabel: copy(locale, "Open ops dashboard", "返回儀表板"),
+        actionLabel: detailT(locale, "common.backToDashboard"),
         actionHref: "/dashboard",
         actionNewTab: false,
       };
@@ -1611,13 +1663,12 @@ function buildCandidateEmptyState(
       return {
         tone: "warn",
         icon: "health",
-        title: copy(locale, "No eligible supply", "目前無可用供給"),
-        description: copy(
+        title: detailT(locale, "dispatch.empty.externalUnavailable.title"),
+        description: detailT(
           locale,
-          "Supply is exhausted or the no-supply lane is active. Hand off via the no-supply / governance lane.",
-          "供給耗盡或 no-supply 流程啟動中，請改由 no-supply / 治理流程接手。",
+          "dispatch.detail.empty.externalUnavailable.description",
         ),
-        actionLabel: copy(locale, "No-supply board", "無供給看板"),
+        actionLabel: detailT(locale, "dispatch.detail.empty.noSupplyBoard"),
         actionHref: "/dispatch?board=no_supply",
         actionNewTab: false,
       };
@@ -1625,17 +1676,12 @@ function buildCandidateEmptyState(
       return {
         tone: "accent",
         icon: "filter",
-        title: copy(
+        title: detailT(locale, "dispatch.empty.filteredEmpty.title"),
+        description: detailT(
           locale,
-          "No candidates match the gate filter",
-          "目前篩選沒有候選",
+          "dispatch.detail.empty.filteredEmpty.description",
         ),
-        description: copy(
-          locale,
-          "Every scored candidate is filtered out by the current gate slice. Widen the gate view.",
-          "目前 gate 篩選把所有評分候選都排除了，請放寬 gate 檢視。",
-        ),
-        actionLabel: copy(locale, "Clear gate filter", "清除 gate 篩選"),
+        actionLabel: detailT(locale, "dispatch.detail.empty.clearGateFilter"),
         actionHref: `/dispatch/${encodeURIComponent(orderId)}`,
         actionNewTab: false,
       };
@@ -1643,17 +1689,15 @@ function buildCandidateEmptyState(
       return {
         tone: "warn",
         icon: "users",
-        title: copy(
+        title: detailT(locale, "dispatch.empty.driverNotEligible.title"),
+        description: detailT(
           locale,
-          "Candidates blocked by eligibility",
-          "候選因資格被擋",
+          "dispatch.detail.empty.driverNotEligible.description",
         ),
-        description: copy(
+        actionLabel: detailT(
           locale,
-          "All nearby drivers failed an eligibility or license gate. Resolve compliance before assignment.",
-          "附近司機皆未通過資格或證照 gate，指派前請先處理法遵。",
+          "dispatch.detail.empty.openFleetGovernance",
         ),
-        actionLabel: copy(locale, "Open fleet governance", "開啟車隊治理"),
         actionHref: platformAdminFleet,
         actionNewTab: true,
       };
@@ -1662,13 +1706,12 @@ function buildCandidateEmptyState(
       return {
         tone: "neutral",
         icon: "dispatch",
-        title: copy(locale, "No candidates yet", "目前沒有候選"),
-        description: copy(
+        title: detailT(locale, "dispatch.detail.empty.noData.title"),
+        description: detailT(
           locale,
-          "Matching is healthy but no candidate has surfaced for this work item yet.",
-          "matching 正常，但此工作項目目前還沒有評分出候選。",
+          "dispatch.detail.empty.noData.description",
         ),
-        actionLabel: copy(locale, "Back to dispatch board", "回派車看板"),
+        actionLabel: detailT(locale, "dispatch.detail.empty.openDispatchBoard"),
         actionHref: "/dispatch?board=ready",
         actionNewTab: false,
       };
@@ -1717,7 +1760,7 @@ function renderCandidateEmptyState(
         {view.actionNewTab ? <CanvasIcon name="ext" size={11} /> : null}
       </Link>
       <span style={tinyMetaStyle(view.tone)}>
-        {copy(locale, "emptyReason", "空狀態")} ·{" "}
+        {detailT(locale, "dispatch.detail.empty.reason")} ·{" "}
         {CANDIDATE_EMPTY_REASON_CODES[reason]}
       </span>
     </div>
@@ -1799,11 +1842,10 @@ function synthesizeRefreshMetadata(
 }
 
 function refreshBody(refresh: UiRefreshMetadata, locale: Locale) {
-  return copy(
-    locale,
-    `Snapshot ${formatLongDateTime(locale, refresh.generatedAt)} UTC from ${refresh.source}.`,
-    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} UTC 產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
-  );
+  return detailT(locale, "dispatch.detail.refresh.snapshot", {
+    generatedAt: formatLongDateTime(locale, refresh.generatedAt),
+    source: formatOpsCodeLabel(locale, refresh.source),
+  });
 }
 
 function renderRefreshRow(
@@ -1811,11 +1853,7 @@ function renderRefreshRow(
   locale: Locale,
   extra?: string,
 ) {
-  const freshnessLabel = copy(
-    locale,
-    refresh.dataFreshness.toUpperCase(),
-    formatOpsCodeLabel(locale, refresh.dataFreshness),
-  );
+  const freshnessLabel = formatOpsCodeLabel(locale, refresh.dataFreshness);
   return (
     <div style={helperRowStyle}>
       <Pill
@@ -1823,18 +1861,14 @@ function renderRefreshRow(
         tone={refresh.dataFreshness === "fresh" ? "success" : "warn"}
         dot
       >
-        {freshnessLabel} · {REFRESH_TIER_LABEL}
+        {freshnessLabel} · {detailT(locale, "dispatch.detail.refresh.tier")}
       </Pill>
       <span style={{ ...helperTextStyle, ...monoTextStyle }}>
-        {copy(locale, "generated", "生成時間")} ·{" "}
+        {detailT(locale, "dispatch.detail.refresh.generated")} ·{" "}
         {formatLongDateTime(locale, refresh.generatedAt)} UTC
       </span>
       <span style={helperTextStyle}>
-        {copy(
-          locale,
-          "CTAs come from availableActions",
-          "畫面 CTA 以 availableActions 為準",
-        )}
+        {detailT(locale, "dispatch.detail.refresh.availableActionsHint")}
       </span>
       {extra ? <span style={helperTextStyle}>{extra}</span> : null}
     </div>
@@ -1852,15 +1886,11 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
           >
             <span>{dispatchId}</span>
             <Pill theme={theme} tone="accent" dot>
-              {copy(locale, "broadcasting", "派送中")}
+              {detailT(locale, "dispatch.detail.broadcasting")}
             </Pill>
           </span>
         }
-        subtitle={copy(
-          locale,
-          "Smoke fallback workspace for route parity verification.",
-          "供 smoke parity 驗證使用的 fallback 工作區。",
-        )}
+        subtitle={detailT(locale, "dispatch.detail.smoke.subtitle")}
       />
       <div
         style={{
@@ -1869,21 +1899,32 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
           gap: 16,
         }}
       >
-        <Card theme={theme} title={copy(locale, "Candidate board", "候選面板")}>
+        <Card
+          theme={theme}
+          title={detailT(locale, "dispatch.detail.candidateBoard")}
+        >
           <DL
             theme={theme}
             cols={2}
             items={[
-              { k: "dispatch id", v: dispatchId, mono: true },
               {
-                k: "state",
-                v: copy(locale, "broadcasting", "派送中"),
+                k: detailT(locale, "dispatch.detail.smoke.dispatchId"),
+                v: dispatchId,
                 mono: true,
               },
-              { k: "eta", v: "6m", mono: true },
               {
-                k: "override",
-                v: copy(locale, "Request override", "提出 override"),
+                k: detailT(locale, "common.status"),
+                v: detailT(locale, "dispatch.detail.broadcasting"),
+                mono: true,
+              },
+              {
+                k: detailT(locale, "dispatch.workflow.col.eta"),
+                v: "6m",
+                mono: true,
+              },
+              {
+                k: detailT(locale, "dispatch.detail.overrideLabel"),
+                v: detailT(locale, "dispatch.action.requestOverride"),
               },
             ]}
           />
@@ -1891,35 +1932,22 @@ function renderSmokeDispatchWorkspace(locale: Locale, dispatchId: string) {
         <div style={{ display: "grid", gap: 16 }}>
           <Card
             theme={theme}
-            title={copy(locale, "Delivery sequence", "訂單狀態")}
+            title={detailT(locale, "dispatch.detail.deliverySequence")}
           >
-            <div>
-              {copy(
-                locale,
-                "queued → broadcasting → assigned",
-                "queued → broadcasting → assigned",
-              )}
-            </div>
+            <div>{detailT(locale, "dispatch.detail.smoke.sequence")}</div>
           </Card>
-          <Card theme={theme} title={copy(locale, "Recent activity", "活動")}>
-            <div>
-              {copy(
-                locale,
-                "Dispatch smoke activity log",
-                "派遣 smoke 活動紀錄",
-              )}
-            </div>
+          <Card
+            theme={theme}
+            title={detailT(locale, "dispatch.detail.recentActivity")}
+          >
+            <div>{detailT(locale, "dispatch.detail.smoke.activityLog")}</div>
           </Card>
           <Banner
             theme={theme}
             tone="warn"
             icon="warn"
-            title={copy(locale, "High-risk CTA present", "高風險 CTA 已呈現")}
-            body={copy(
-              locale,
-              "Override and cancellation require explicit confirmation in the production flow.",
-              "Override 與取消在正式流程中都需要明確確認。",
-            )}
+            title={detailT(locale, "dispatch.detail.highRiskCtaPresent")}
+            body={detailT(locale, "dispatch.detail.highRiskCtaBody")}
           />
         </div>
       </div>
@@ -2247,12 +2275,17 @@ async function renderOwnedWorkspace({
   const terminal = isOwnedTerminal(order, currentTask);
 
   const candidateColumns: CanvasTableColumn<CandidateRow>[] = [
-    { h: "RANK", k: "rankCell", w: 52 },
-    { h: "DRIVER", k: "driverCell", w: 180 },
-    { h: "VEHICLE", k: "vehicle", w: 132, mono: true },
-    { h: "ETA", k: "etaCell", w: 84 },
-    { h: "GATE", k: "gateCell", w: 164 },
-    { h: "SCORE", k: "score", w: 68, mono: true },
+    { h: detailT(locale, "dispatch.detail.col.rank"), k: "rankCell", w: 52 },
+    { h: detailT(locale, "common.driver"), k: "driverCell", w: 180 },
+    { h: detailT(locale, "common.vehicle"), k: "vehicle", w: 132, mono: true },
+    { h: detailT(locale, "dispatch.workflow.col.eta"), k: "etaCell", w: 84 },
+    { h: detailT(locale, "dispatch.detail.col.gate"), k: "gateCell", w: 164 },
+    {
+      h: detailT(locale, "dispatch.detail.col.score"),
+      k: "score",
+      w: 68,
+      mono: true,
+    },
   ];
 
   const stepperTimestamps: (string | null)[] = [
@@ -2274,7 +2307,7 @@ async function renderOwnedWorkspace({
           >
             <span>{`${order.orderNo} · ${getTenantLabel(order)}`}</span>
             <Pill theme={theme} tone="accent">
-              OWNED
+              {detailT(locale, "dispatch.detail.domain.owned")}
             </Pill>
           </span>
         }
@@ -2285,7 +2318,9 @@ async function renderOwnedWorkspace({
       {renderRefreshRow(
         refresh,
         locale,
-        `${candidateRows.length} ${copy(locale, "candidates", "候選")}`,
+        detailT(locale, "dispatch.detail.candidateCount", {
+          count: candidateRows.length,
+        }),
       )}
 
       <div style={{ padding: "12px 24px 0", display: "grid", gap: 12 }}>
@@ -2294,11 +2329,7 @@ async function renderOwnedWorkspace({
             theme={theme}
             tone="warn"
             icon="warn"
-            title={copy(
-              locale,
-              "Some dispatch data is degraded",
-              "部分派遣資料降級",
-            )}
+            title={detailT(locale, "dispatch.detail.banner.degraded.title")}
             body={refreshBody(refresh, locale)}
           />
         ) : null}
@@ -2307,16 +2338,8 @@ async function renderOwnedWorkspace({
             theme={theme}
             tone="info"
             icon="check"
-            title={copy(
-              locale,
-              "Work item is in a terminal state — read-only",
-              "工作項目已進入終態 · 唯讀",
-            )}
-            body={copy(
-              locale,
-              "No dispatch CTAs are offered; review the timeline and compliance record below.",
-              "不提供派遣 CTA；可檢視下方時間軸與法遵紀錄。",
-            )}
+            title={detailT(locale, "dispatch.detail.banner.terminal.title")}
+            body={detailT(locale, "dispatch.detail.banner.terminal.body")}
           />
         ) : null}
       </div>
@@ -2333,7 +2356,7 @@ async function renderOwnedWorkspace({
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card
             theme={theme}
-            title={`${copy(locale, "Candidates · ranked", "候選 driver · ranked")} (${candidateRows.length})`}
+            title={`${detailT(locale, "dispatch.detail.candidatesRanked")} (${candidateRows.length})`}
             {...(candidateRows.length > 0 ? { padding: 0 } : {})}
           >
             {candidateRows.length > 0 ? (
@@ -2353,21 +2376,29 @@ async function renderOwnedWorkspace({
 
           <Card
             theme={theme}
-            title={copy(locale, "Compliance gates", "Compliance gates")}
+            title={detailT(locale, "dispatch.detail.complianceGates")}
           >
             <DL
               theme={theme}
               cols={2}
               items={[
                 {
-                  k: "license valid",
-                  v: `${licenseClearCount}/${candidateRows.length || 0} ${
-                    locale === "zh" ? "候選通過" : "candidates clear"
-                  }`,
+                  k: detailT(locale, "dispatch.detail.compliance.licenseValid"),
+                  v: detailT(
+                    locale,
+                    "dispatch.detail.compliance.candidatesClear",
+                    {
+                      clear: licenseClearCount,
+                      total: candidateRows.length || 0,
+                    },
+                  ),
                   mono: true,
                 },
                 {
-                  k: "service bucket",
+                  k: detailT(
+                    locale,
+                    "dispatch.detail.compliance.serviceBucket",
+                  ),
                   v: `${formatOpsCodeLabel(locale, order.serviceBucket)} · ${
                     candidateRows.length > 0 &&
                     candidateRows.every((row) =>
@@ -2375,38 +2406,53 @@ async function renderOwnedWorkspace({
                         order.serviceBucket,
                       ),
                     )
-                      ? "ok"
-                      : "review"
+                      ? detailT(locale, "dispatch.detail.candidateGate.ok")
+                      : detailT(locale, "dispatch.detail.compliance.review")
                   }`,
                   mono: true,
                 },
                 {
-                  k: "dispatch state",
-                  v: `${formatOpsCodeLabel(locale, currentState)} · ${dispatchJob?.dispatchJobId ?? "—"}`,
+                  k: detailT(
+                    locale,
+                    "dispatch.detail.compliance.dispatchState",
+                  ),
+                  v: `${formatOpsCodeLabel(locale, currentState)} · ${dispatchJob?.dispatchJobId ?? detailT(locale, "common.dash")}`,
                   mono: true,
                 },
                 {
-                  k: "device binding",
-                  v: `${liveCandidateCount}/${candidateRows.length || 0} live · ${eligibleCandidateCount}/${candidateRows.length || 0} eligible`,
+                  k: detailT(
+                    locale,
+                    "dispatch.detail.compliance.deviceBinding",
+                  ),
+                  v: detailT(
+                    locale,
+                    "dispatch.detail.compliance.deviceBindingValue",
+                    {
+                      live: liveCandidateCount,
+                      total: candidateRows.length || 0,
+                      eligible: eligibleCandidateCount,
+                    },
+                  ),
                   mono: true,
                 },
                 {
-                  k: "fare quoted",
+                  k: detailT(locale, "dispatch.detail.compliance.fareQuoted"),
                   v: order.quotedFare
                     ? `${formatMinorCurrency(
                         order.quotedFare.amountMinor,
                         order.quotedFare.currency,
                       )} · ${order.quotedFareRuleVersion ?? "manual"}`
-                    : "—",
+                    : detailT(locale, "common.dash"),
                   mono: true,
                 },
                 {
-                  k: "override allowed",
+                  k: detailT(
+                    locale,
+                    "dispatch.detail.compliance.overrideAllowed",
+                  ),
                   v: order.exceptionHold
                     ? `${overrideSummary.status} · ${overrideSummary.nextAction}`
-                    : locale === "zh"
-                      ? "not needed"
-                      : "not needed",
+                    : detailT(locale, "dispatch.detail.override.notNeeded"),
                   mono: true,
                 },
               ]}
@@ -2417,7 +2463,7 @@ async function renderOwnedWorkspace({
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card
             theme={theme}
-            title={copy(locale, "Delivery sequence", "訂單狀態")}
+            title={detailT(locale, "dispatch.detail.deliverySequence")}
           >
             {renderSequenceRail(
               locale,
@@ -2426,7 +2472,10 @@ async function renderOwnedWorkspace({
             )}
           </Card>
 
-          <Card theme={theme} title={copy(locale, "Recent activity", "活動")}>
+          <Card
+            theme={theme}
+            title={detailT(locale, "dispatch.detail.recentActivity")}
+          >
             {renderActivityFeed(locale, activityEntries)}
           </Card>
         </div>
@@ -2495,7 +2544,7 @@ function renderForwardedWorkspace({
     resourceType: "adapter",
     resourceId: order.platformCode,
     openMode: "new_tab",
-    label: copy(locale, "Inspect adapter", "檢視 adapter"),
+    label: detailT(locale, "dispatch.action.inspectAdapter"),
   };
   const reconciliationLink: CrossAppResourceLink | null = reconciliationIssue
     ? {
@@ -2504,7 +2553,7 @@ function renderForwardedWorkspace({
         resourceType: "reconciliation",
         resourceId: reconciliationIssue.reconciliationJob.reconciliationJobId,
         openMode: "new_tab",
-        label: copy(locale, "Open reconciliation", "開啟對帳"),
+        label: detailT(locale, "dispatch.detail.action.openReconciliation"),
       }
     : null;
 
@@ -2538,11 +2587,11 @@ function renderForwardedWorkspace({
       stateCell:
         order.acceptedDriverId === driverId ? (
           <Pill theme={theme} tone="success" dot>
-            {copy(locale, "accepted", "已接受")}
+            {detailT(locale, "dispatch.detail.accepted")}
           </Pill>
         ) : (
           <Pill theme={theme} tone="info">
-            {copy(locale, "broadcast", "廣播中")}
+            {detailT(locale, "dispatch.detail.broadcast")}
           </Pill>
         ),
     }),
@@ -2552,8 +2601,16 @@ function renderForwardedWorkspace({
     (typeof candidateDriverRows)[number]
   >[] = [
     { h: "#", k: "rankCell", w: 44 },
-    { h: copy(locale, "DRIVER", "司機"), k: "driverCell", w: 200 },
-    { h: copy(locale, "PLATFORM STATE", "平台狀態"), k: "stateCell", w: 160 },
+    {
+      h: detailT(locale, "dispatch.detail.col.driver"),
+      k: "driverCell",
+      w: 200,
+    },
+    {
+      h: detailT(locale, "dispatch.detail.col.platformState"),
+      k: "stateCell",
+      w: 160,
+    },
   ];
 
   return (
@@ -2566,7 +2623,7 @@ function renderForwardedWorkspace({
           >
             <span>{order.mirrorOrderId}</span>
             <Pill theme={theme} tone="info">
-              FORWARDED
+              {detailT(locale, "dispatch.detail.domain.forwarded")}
             </Pill>
             <Pill theme={theme} tone={stateTone} dot>
               {formatOpsCodeLabel(locale, order.status)}
@@ -2581,7 +2638,7 @@ function renderForwardedWorkspace({
         refresh,
         locale,
         adapterHealth
-          ? `${copy(locale, "adapter", "轉接器")} ${formatOpsCodeLabel(locale, adapterHealth.status)}`
+          ? `${detailT(locale, "dispatch.detail.adapter")} ${formatOpsCodeLabel(locale, adapterHealth.status)}`
           : undefined,
       )}
 
@@ -2590,16 +2647,8 @@ function renderForwardedWorkspace({
           theme={theme}
           tone="info"
           icon="adapters"
-          title={copy(
-            locale,
-            "Forwarded mirror — do not treat as owned",
-            "此訂單為 forwarded mirror · 不可假裝為 owned",
-          )}
-          body={copy(
-            locale,
-            "No owned assignment exists. Every mutation must flow through a reconciliation issue to the platform finance owner; locally we only sync external state.",
-            "本地沒有 owned 指派。所有 mutation 必須透過 reconciliation issue 走平台 finance owner，本地僅同步外部狀態。",
-          )}
+          title={detailT(locale, "dispatch.detail.forwarded.banner.title")}
+          body={detailT(locale, "dispatch.detail.forwarded.banner.body")}
           actions={
             <>
               {renderCrossAppLink(adapterLink)}
@@ -2614,15 +2663,20 @@ function renderForwardedWorkspace({
             theme={theme}
             tone={adapterHealth?.status === "down" ? "danger" : "warn"}
             icon="health"
-            title={copy(
+            title={detailT(
               locale,
-              "Adapter dependency is degraded",
-              "轉接器相依降級",
+              "dispatch.detail.forwarded.adapterDegraded.title",
             )}
-            body={copy(
+            body={detailT(
               locale,
-              `${order.platformCode} adapter is ${adapterHealth?.status ?? "degraded"}${adapterHealth?.lastError ? ` · ${adapterHealth.lastError}` : ""}. Broadcast and live sync may be unavailable.`,
-              `${order.platformCode} 轉接器為 ${adapterHealth?.status ?? "degraded"}${adapterHealth?.lastError ? ` · ${adapterHealth.lastError}` : ""}；廣播與即時同步可能不可用。`,
+              "dispatch.detail.forwarded.adapterDegraded.body",
+              {
+                platform: order.platformCode,
+                status: adapterHealth?.status ?? "degraded",
+                lastError: adapterHealth?.lastError
+                  ? ` · ${adapterHealth.lastError}`
+                  : "",
+              },
             )}
           />
         ) : null}
@@ -2631,16 +2685,8 @@ function renderForwardedWorkspace({
             theme={theme}
             tone="info"
             icon="check"
-            title={copy(
-              locale,
-              "Mirror reached a terminal state — read-only",
-              "鏡像已進入終態 · 唯讀",
-            )}
-            body={copy(
-              locale,
-              "Only force refresh is offered; reconciliation and finance settle at the owner platform.",
-              "僅提供強制刷新；對帳與金流於來源平台結算。",
-            )}
+            title={detailT(locale, "dispatch.detail.forwarded.terminal.title")}
+            body={detailT(locale, "dispatch.detail.forwarded.terminal.body")}
           />
         ) : null}
       </div>
@@ -2657,7 +2703,7 @@ function renderForwardedWorkspace({
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card
             theme={theme}
-            title={`${copy(locale, "Broadcast candidates", "廣播候選")} (${candidateDriverRows.length})`}
+            title={`${detailT(locale, "dispatch.detail.broadcastCandidates")} (${candidateDriverRows.length})`}
             {...(candidateDriverRows.length > 0 ? { padding: 0 } : {})}
           >
             {candidateDriverRows.length > 0 ? (
@@ -2677,33 +2723,32 @@ function renderForwardedWorkspace({
 
           <Card
             theme={theme}
-            title={copy(
-              locale,
-              "Authority chain · finance",
-              "Compliance gates · authority chain",
-            )}
+            title={detailT(locale, "dispatch.detail.forwarded.authorityChain")}
           >
             <DL
               theme={theme}
               cols={2}
               items={[
                 {
-                  k: "domain",
+                  k: detailT(locale, "dispatch.detail.forwarded.domain"),
                   v: `forwarded · ${order.dispatchSemantics}`,
                   mono: true,
                 },
                 {
-                  k: "source platform",
+                  k: detailT(
+                    locale,
+                    "dispatch.detail.forwarded.sourcePlatform",
+                  ),
                   v: `${formatOpsCodeLabel(locale, order.platformCode)} · ${order.externalOrderId}`,
                   mono: true,
                 },
                 {
-                  k: "route locked",
-                  v: `${copy(locale, "yes", "是")} · ${waypointCount} ${copy(locale, "waypoints", "途經點")}`,
+                  k: detailT(locale, "dispatch.detail.forwarded.routeLocked"),
+                  v: `${detailT(locale, "common.yes")} · ${waypointCount} ${detailT(locale, "dispatch.detail.waypoints")}`,
                   mono: true,
                 },
                 {
-                  k: "fare authority",
+                  k: detailT(locale, "dispatch.detail.forwarded.fareAuthority"),
                   v: formatOpsCodeLabel(
                     locale,
                     order.financeContext.fareAuthority,
@@ -2711,19 +2756,19 @@ function renderForwardedWorkspace({
                   mono: true,
                 },
                 {
-                  k: "settlement",
+                  k: detailT(locale, "dispatch.detail.forwarded.settlement"),
                   v: `${formatOpsCodeLabel(locale, order.financeContext.settlementAuthority)} · ${formatOpsCodeLabel(locale, order.financeContext.localLedgerMode)}`,
                   mono: true,
                 },
                 {
-                  k: "sync state",
+                  k: detailT(locale, "dispatch.detail.forwarded.syncState"),
                   v: order.lastSyncError
                     ? `${formatOpsCodeLabel(locale, order.lastSyncError.code)}`
                     : `${order.lastNativeStatus ?? formatOpsCodeLabel(locale, order.status)}`,
                   mono: true,
                 },
                 {
-                  k: "last callback",
+                  k: detailT(locale, "dispatch.detail.forwarded.lastCallback"),
                   v: formatDateTime(
                     locale,
                     order.lastSyncError?.failedAt ?? order.updatedAt,
@@ -2731,12 +2776,25 @@ function renderForwardedWorkspace({
                   mono: true,
                 },
                 {
-                  k: "reconciliation",
+                  k: detailT(
+                    locale,
+                    "dispatch.detail.forwarded.reconciliation",
+                  ),
                   v: order.reconciliationJob
-                    ? `${formatOpsCodeLabel(locale, order.reconciliationJob.status)} · ${mismatchCount} mismatch`
+                    ? detailT(
+                        locale,
+                        "dispatch.detail.forwarded.reconciliationValue",
+                        {
+                          status: formatOpsCodeLabel(
+                            locale,
+                            order.reconciliationJob.status,
+                          ),
+                          mismatchCount,
+                        },
+                      )
                     : order.manualFallback.required
-                      ? copy(locale, "manual fallback", "人工 fallback")
-                      : "—",
+                      ? detailT(locale, "dispatch.action.engageManualFallback")
+                      : detailT(locale, "common.dash"),
                   mono: true,
                 },
               ]}
@@ -2747,7 +2805,7 @@ function renderForwardedWorkspace({
         <div style={{ display: "grid", gap: "16px", minWidth: 0 }}>
           <Card
             theme={theme}
-            title={copy(locale, "Delivery sequence", "訂單狀態")}
+            title={detailT(locale, "dispatch.detail.deliverySequence")}
           >
             {renderSequenceRail(locale, getForwardedStepIndex(order), [
               order.createdAt,
@@ -2763,7 +2821,10 @@ function renderForwardedWorkspace({
             ])}
           </Card>
 
-          <Card theme={theme} title={copy(locale, "Recent activity", "活動")}>
+          <Card
+            theme={theme}
+            title={detailT(locale, "dispatch.detail.recentActivity")}
+          >
             {renderActivityFeed(locale, activityEntries)}
           </Card>
         </div>
