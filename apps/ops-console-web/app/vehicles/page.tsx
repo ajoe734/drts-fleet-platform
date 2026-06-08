@@ -16,7 +16,7 @@ import { PublishAssistantScope } from "@/components/ops-assistant";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
-import type { Locale } from "@/lib/translations";
+import { t, type Locale } from "@/lib/translations";
 import { VehiclesTable } from "./vehicles-table";
 import {
   CanvasBanner as Banner,
@@ -237,8 +237,12 @@ const EMPTY_OVERRIDE_REASON_CODES: Record<EmptyReason, string> = {
   driver_not_eligible: "driver_not_eligible",
 };
 
-function copy(locale: Locale, en: string, zh: string) {
-  return locale === "zh" ? zh : en;
+function listT(
+  locale: Locale,
+  key: string,
+  params?: Record<string, string | number>,
+) {
+  return t(`vehicles.list.${key}`, locale, params);
 }
 
 function firstParam(value: string | string[] | undefined): string | undefined {
@@ -441,7 +445,7 @@ function toneColor(tone: CanvasTone) {
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return copy(locale, "No signal", "無訊號");
+    return listT(locale, "empty.noSignal");
   }
 
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
@@ -458,7 +462,7 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
 
 function formatLongDateTime(locale: Locale, value: string | null | undefined) {
   if (!value) {
-    return copy(locale, "unknown", "未知");
+    return listT(locale, "empty.unknown");
   }
 
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
@@ -479,7 +483,7 @@ function formatBuckets(
   buckets: VehicleRegistryRecord["supportedServiceBuckets"],
 ) {
   if (buckets.length === 0) {
-    return copy(locale, "Unclassified", "未分類");
+    return listT(locale, "empty.unclassified");
   }
 
   if (buckets.length === 1) {
@@ -523,7 +527,7 @@ function deriveVehicleStatus(
   ) {
     return {
       key: "blocked" as const,
-      label: copy(locale, "Not dispatchable", "不可派遣"),
+      label: listT(locale, "status.notDispatchable"),
       tone: "danger" as const,
     };
   }
@@ -531,7 +535,7 @@ function deriveVehicleStatus(
   if (overdueMaintenance) {
     return {
       key: "attention" as const,
-      label: copy(locale, "Maintenance attention", "保修注意"),
+      label: listT(locale, "status.maintenanceAttention"),
       tone: "warn" as const,
     };
   }
@@ -539,14 +543,14 @@ function deriveVehicleStatus(
   if (driverBound) {
     return {
       key: "active" as const,
-      label: copy(locale, "Bound to active shift", "綁定當前班次"),
+      label: listT(locale, "status.boundToActiveShift"),
       tone: "info" as const,
     };
   }
 
   return {
     key: "active" as const,
-    label: copy(locale, "Ready reserve", "待命可派"),
+    label: listT(locale, "status.readyReserve"),
     tone: "success" as const,
   };
 }
@@ -563,8 +567,8 @@ function deriveMaintenanceSignal(
         ? ("danger" as const)
         : ("success" as const),
       label: vehicle.overdueMaintenance
-        ? copy(locale, "Overdue", "已逾期")
-        : copy(locale, "Clear", "正常"),
+        ? listT(locale, "maintenance.overdue")
+        : listT(locale, "maintenance.clear"),
       nextMaintenanceAt:
         maintenanceRecords
           .filter(
@@ -584,7 +588,7 @@ function deriveMaintenanceSignal(
     return {
       overdue: true,
       tone: "danger" as const,
-      label: copy(locale, "Overdue", "已逾期"),
+      label: listT(locale, "maintenance.overdue"),
       nextMaintenanceAt: overdueRecord.scheduledAt,
     };
   }
@@ -603,8 +607,8 @@ function deriveMaintenanceSignal(
     overdue: false,
     tone: nextRecord ? ("warn" as const) : ("success" as const),
     label: nextRecord
-      ? copy(locale, "Upcoming", "待保修")
-      : copy(locale, "Clear", "正常"),
+      ? listT(locale, "maintenance.upcoming")
+      : listT(locale, "maintenance.clear"),
     nextMaintenanceAt: nextRecord?.scheduledAt ?? null,
   };
 }
@@ -673,7 +677,7 @@ function synthesizeCrossAppLinks(
         resourceType: "vehicle",
         resourceId: vehicle.vehicleId,
         openMode: "new_tab",
-        label: copy(locale, "Fleet governance", "車隊治理"),
+        label: listT(locale, "action.fleetGovernance"),
       },
     ];
   }
@@ -686,7 +690,7 @@ function synthesizeCrossAppLinks(
         resourceType: "vehicle",
         resourceId: vehicle.vehicleId,
         openMode: "new_tab",
-        label: copy(locale, "Compliance trace", "法遵檢視"),
+        label: listT(locale, "action.complianceTrace"),
       },
     ];
   }
@@ -742,21 +746,22 @@ function synthesizeAvailableActions(
 }
 
 function refreshBadgeLabel(refresh: UiRefreshMetadata, locale: Locale) {
-  const freshness = copy(
-    locale,
-    refresh.dataFreshness.toUpperCase(),
-    formatOpsCodeLabel(locale, refresh.dataFreshness),
-  );
+  const freshness =
+    locale === "en"
+      ? refresh.dataFreshness.toUpperCase()
+      : formatOpsCodeLabel(locale, refresh.dataFreshness);
 
   return `${freshness} · T3 · 15s`;
 }
 
 function refreshBody(refresh: UiRefreshMetadata, locale: Locale) {
-  return copy(
-    locale,
-    `Snapshot ${formatLongDateTime(locale, refresh.generatedAt)} UTC from ${refresh.source}.`,
-    `快照於 ${formatLongDateTime(locale, refresh.generatedAt)} UTC 產生，來源 ${formatOpsCodeLabel(locale, refresh.source)}。`,
-  );
+  return listT(locale, "refresh.body", {
+    generatedAt: formatLongDateTime(locale, refresh.generatedAt),
+    source:
+      locale === "en"
+        ? refresh.source
+        : formatOpsCodeLabel(locale, refresh.source),
+  });
 }
 
 function synthesizeRefreshMetadata(
@@ -978,17 +983,9 @@ function buildEmptyStateViewModel(
       return {
         tone: "info" as const,
         icon: "fleet" as const,
-        title: copy(
-          locale,
-          "Fleet registry not provisioned",
-          "車隊主檔尚未開通",
-        ),
-        description: copy(
-          locale,
-          "Platform Admin fleet governance still owns vehicle bootstrap for this environment.",
-          "目前環境的車輛主檔仍由 Platform Admin 車隊治理面建立。",
-        ),
-        actionLabel: copy(locale, "Open fleet governance", "開啟車隊治理"),
+        title: t("vehicles.list.empty.notProvisionedTitle", locale),
+        description: t("vehicles.list.empty.notProvisionedBody", locale),
+        actionLabel: listT(locale, "action.openFleetGovernance"),
         actionHref: `${resolveAppOrigin("platform-admin")}/fleet`,
         actionNewTab: true,
       };
@@ -996,15 +993,10 @@ function buildEmptyStateViewModel(
       return {
         tone: "danger" as const,
         icon: "warn" as const,
-        title: copy(locale, "Vehicle snapshot failed", "車輛快照讀取失敗"),
+        title: listT(locale, "empty.snapshotFailed"),
         description:
-          rawMessage ??
-          copy(
-            locale,
-            "The registry endpoint did not return a usable payload.",
-            "登記資料端點未回傳可用內容。",
-          ),
-        actionLabel: copy(locale, "Retry", "重新整理"),
+          rawMessage ?? t("vehicles.list.empty.fetchFailedBody", locale),
+        actionLabel: listT(locale, "empty.action.retry"),
         actionHref: buildHref(filters, {}),
         actionNewTab: false,
       };
@@ -1012,13 +1004,9 @@ function buildEmptyStateViewModel(
       return {
         tone: "warn" as const,
         icon: "users" as const,
-        title: copy(locale, "Vehicle scope denied", "無法存取車輛範圍"),
-        description: copy(
-          locale,
-          "This actor can enter the shell but lacks fleet registry read scope.",
-          "目前帳號可進入殼層，但沒有車隊登記讀取權限。",
-        ),
-        actionLabel: copy(locale, "Open ops dashboard", "返回儀表板"),
+        title: listT(locale, "empty.scopeDenied"),
+        description: t("vehicles.list.empty.permissionDeniedBody", locale),
+        actionLabel: listT(locale, "empty.action.openOpsDashboard"),
         actionHref: "/dashboard",
         actionNewTab: false,
       };
@@ -1026,17 +1014,9 @@ function buildEmptyStateViewModel(
       return {
         tone: "warn" as const,
         icon: "health" as const,
-        title: copy(
-          locale,
-          "External dependency unavailable",
-          "外部相依服務不可用",
-        ),
-        description: copy(
-          locale,
-          "Driver-binding or maintenance augmentation is degraded. Use the governance view for latest compliance state.",
-          "司機綁定或保修補充資料降級，請改用治理檢視確認最新法遵狀態。",
-        ),
-        actionLabel: copy(locale, "Open platform admin", "開啟 Platform Admin"),
+        title: t("vehicles.list.empty.externalUnavailableTitle", locale),
+        description: t("vehicles.list.empty.externalUnavailableBody", locale),
+        actionLabel: listT(locale, "empty.action.openPlatformAdmin"),
         actionHref: `${resolveAppOrigin("platform-admin")}/fleet`,
         actionNewTab: true,
       };
@@ -1044,17 +1024,9 @@ function buildEmptyStateViewModel(
       return {
         tone: "accent" as const,
         icon: "filter" as const,
-        title: copy(
-          locale,
-          "No vehicles match this slice",
-          "目前條件沒有符合的車輛",
-        ),
-        description: copy(
-          locale,
-          "Widen status, type, dispatchable, or overdue filters to restore results.",
-          "放寬狀態、類型、可派遣或逾期條件即可恢復結果。",
-        ),
-        actionLabel: copy(locale, "Clear filters", "清除條件"),
+        title: t("vehicles.list.empty.filteredTitle", locale),
+        description: listT(locale, "empty.filteredBody"),
+        actionLabel: listT(locale, "empty.action.clearFilters"),
         actionHref: clearFiltersHref,
         actionNewTab: false,
       };
@@ -1063,13 +1035,9 @@ function buildEmptyStateViewModel(
       return {
         tone: "neutral" as const,
         icon: "vehicles" as const,
-        title: copy(locale, "No vehicles registered", "尚未登記車輛"),
-        description: copy(
-          locale,
-          "The registry is healthy but there are no vehicle records in this environment yet.",
-          "登記資料健康，但此環境目前還沒有任何車輛紀錄。",
-        ),
-        actionLabel: copy(locale, "Open dispatch board", "前往派車看板"),
+        title: listT(locale, "empty.noVehicles"),
+        description: t("vehicles.list.empty.noVehiclesBody", locale),
+        actionLabel: listT(locale, "empty.action.openDispatchBoard"),
         actionHref: "/dispatch",
         actionNewTab: false,
       };
@@ -1217,9 +1185,7 @@ export default async function VehiclesPage({
       locale,
     );
     const lastSeenAt = deriveLastSeenAt(vehicle, activeShift);
-    const lastSeenLabel =
-      copy(locale, "Last seen", "最近訊號") +
-      ` · ${formatDateTime(locale, lastSeenAt)}`;
+    const lastSeenLabel = `${listT(locale, "label.lastSeen")} · ${formatDateTime(locale, lastSeenAt)}`;
 
     const provisionalRow = {
       vehicleId: vehicle.vehicleId,
@@ -1263,10 +1229,10 @@ export default async function VehiclesPage({
       ),
       debrandDueLabel:
         vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending"
-          ? copy(locale, "Debrand pending", "除標識待完成")
+          ? listT(locale, "label.debrandPending")
           : vehicle.supplyLifecycle.offboarding.status !== "none"
-            ? copy(locale, "Offboarding", "退場中")
-            : copy(locale, "No debrand", "無除標識"),
+            ? listT(locale, "label.offboarding")
+            : listT(locale, "label.noDebrand"),
       debrandTone:
         vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending"
           ? ("danger" as const)
@@ -1425,7 +1391,7 @@ export default async function VehiclesPage({
             gap: 6,
           }}
         >
-          {copy(locale, "All", "全部")}
+          {t("common.all", locale)}
           <span style={tinyMetaStyle()}>{tabCounts.all}</span>
         </Link>
       ),
@@ -1443,7 +1409,7 @@ export default async function VehiclesPage({
             gap: 6,
           }}
         >
-          {copy(locale, "Dispatchable", "可派")}
+          {listT(locale, "tab.dispatchable")}
           <span style={tinyMetaStyle("success")}>{tabCounts.dispatchable}</span>
         </Link>
       ),
@@ -1461,7 +1427,7 @@ export default async function VehiclesPage({
             gap: 6,
           }}
         >
-          {copy(locale, "Offboarding", "退場")}
+          {listT(locale, "tab.offboarding")}
           <span style={tinyMetaStyle("warn")}>{tabCounts.offboarding}</span>
         </Link>
       ),
@@ -1491,12 +1457,8 @@ export default async function VehiclesPage({
       />
       <PageHeader
         theme={theme}
-        title={copy(locale, "Vehicles", "車輛")}
-        subtitle={copy(
-          locale,
-          "dispatchable · contract · insurance · debrand",
-          "dispatchable · 合約 · 保險 · debrand",
-        )}
+        title={listT(locale, "pageTitle")}
+        subtitle={listT(locale, "pageSubtitle")}
         tabs={tabs.map((tab) => tab.node)}
         activeTab={activeTab}
         actions={
@@ -1509,7 +1471,7 @@ export default async function VehiclesPage({
             </Pill>
             <a href={refreshHref} style={buttonStyle("secondary")}>
               <CanvasIcon name="arrow" size={12} />
-              {copy(locale, "Refresh", "重新整理")}
+              {t("common.refresh", locale)}
             </a>
           </>
         }
@@ -1521,30 +1483,17 @@ export default async function VehiclesPage({
             theme={theme}
             tone={health.status === "down" ? "danger" : "warn"}
             icon={health.status === "down" ? "warn" : "health"}
-            title={copy(
-              locale,
-              "Vehicle page is running degraded",
-              "車輛頁面目前為降級模式",
-            )}
-            body={copy(
-              locale,
-              `${
+            title={listT(locale, "banner.degraded.title")}
+            body={listT(locale, "banner.degraded.body", {
+              services:
                 health.degradedServices
                   .map(
                     (service: UiHealthEnvelope["degradedServices"][number]) =>
                       `${service.service}: ${service.impact}`,
                   )
-                  .join(" · ") || "health unknown"
-              } · checked ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
-              `${
-                health.degradedServices
-                  .map(
-                    (service: UiHealthEnvelope["degradedServices"][number]) =>
-                      `${service.service}: ${service.impact}`,
-                  )
-                  .join(" · ") || "health unknown"
-              } · 檢查時間 ${formatLongDateTime(locale, health.lastCheckedAt)} UTC`,
-            )}
+                  .join(" · ") || listT(locale, "banner.degraded.unknown"),
+              checkedAt: formatLongDateTime(locale, health.lastCheckedAt),
+            })}
           />
         ) : null}
 
@@ -1553,11 +1502,7 @@ export default async function VehiclesPage({
             theme={theme}
             tone={refresh.dataFreshness === "degraded" ? "warn" : "info"}
             icon={refresh.dataFreshness === "degraded" ? "warn" : "clock"}
-            title={copy(
-              locale,
-              "Snapshot is not fresh",
-              "目前顯示的快照非最新",
-            )}
+            title={listT(locale, "banner.snapshotStale.title")}
             body={refreshBody(refresh, locale)}
           />
         ) : null}
@@ -1567,16 +1512,11 @@ export default async function VehiclesPage({
             theme={theme}
             tone="danger"
             icon="vehicles"
-            title={copy(
-              locale,
-              "Supply emergency: many vehicles are offline",
-              "供給警報：大量車輛離線或不可派遣",
-            )}
-            body={copy(
-              locale,
-              `${blockedCount}/${rows.length} vehicles are currently not dispatchable. Escalate offboarding and compliance blockers before dispatch queues stall.`,
-              `目前 ${blockedCount}/${rows.length} 輛車不可派遣；請優先處理退場與法遵阻塞，避免派車佇列失速。`,
-            )}
+            title={listT(locale, "banner.supplyEmergency.title")}
+            body={listT(locale, "banner.supplyEmergency.body", {
+              blocked: blockedCount,
+              total: rows.length,
+            })}
             actions={
               <Link
                 href={`${resolveAppOrigin("platform-admin")}/fleet?tab=offboarding`}
@@ -1584,7 +1524,7 @@ export default async function VehiclesPage({
                 rel="noreferrer"
                 style={linkButtonStyle("danger")}
               >
-                {copy(locale, "Open Fleet Gov", "開啟車隊治理")}
+                {listT(locale, "banner.supplyEmergency.action")}
                 <CanvasIcon name="ext" size={11} />
               </Link>
             }
@@ -1594,27 +1534,27 @@ export default async function VehiclesPage({
         <div style={summaryGridStyle}>
           <div style={summaryCardStyle}>
             <span style={summaryLabelStyle}>
-              {copy(locale, "Registered", "已登記")}
+              {listT(locale, "summary.registered")}
             </span>
             <span style={summaryValueStyle}>{rows.length}</span>
             <span style={summaryFootStyle}>
-              {copy(locale, "vehicle master rows", "車輛主檔筆數")}
+              {listT(locale, "summary.registeredSub")}
             </span>
           </div>
           <div style={summaryCardStyle}>
             <span style={summaryLabelStyle}>
-              {copy(locale, "Dispatchable", "可派遣")}
+              {listT(locale, "summary.dispatchable")}
             </span>
             <span style={{ ...summaryValueStyle, color: theme.success }}>
               {dispatchableCount}
             </span>
             <span style={summaryFootStyle}>
-              {copy(locale, "ready for queue", "可進入派車佇列")}
+              {listT(locale, "summary.dispatchableSub")}
             </span>
           </div>
           <div style={summaryCardStyle}>
             <span style={summaryLabelStyle}>
-              {copy(locale, "Maintenance", "保修")}
+              {listT(locale, "summary.maintenance")}
             </span>
             <span
               style={{
@@ -1625,30 +1565,26 @@ export default async function VehiclesPage({
               {overdueCount}
             </span>
             <span style={summaryFootStyle}>
-              {copy(locale, "vehicles with overdue work", "逾期工單車輛")}
+              {listT(locale, "summary.maintenanceSub")}
             </span>
           </div>
           <div style={summaryCardStyle}>
             <span style={summaryLabelStyle}>
-              {copy(locale, "Bound drivers", "綁定司機")}
+              {listT(locale, "summary.boundDrivers")}
             </span>
             <span style={{ ...summaryValueStyle, color: theme.info }}>
               {boundCount}
             </span>
             <span style={summaryFootStyle}>
-              {copy(locale, "active shift bindings", "當前班次綁定")}
+              {listT(locale, "summary.boundDriversSub")}
             </span>
           </div>
         </div>
 
         <Card
           theme={theme}
-          title={copy(locale, "Filters", "篩選")}
-          subtitle={copy(
-            locale,
-            "Status, type, dispatchable, and overdue views run on the same snapshot.",
-            "狀態、類型、可派遣與逾期條件都套用同一份快照。",
-          )}
+          title={listT(locale, "filter.title")}
+          subtitle={listT(locale, "filter.subtitle")}
         >
           <form method="get" style={{ display: "grid", gap: 0 }}>
             <input type="hidden" name="tab" value={filters.tab} />
@@ -1662,55 +1598,49 @@ export default async function VehiclesPage({
             <div style={filterGridStyle}>
               <label style={fieldStackStyle}>
                 <span style={fieldLabelStyle}>
-                  {copy(locale, "Search", "搜尋")}
+                  {t("common.search", locale)}
                 </span>
                 <input
                   name="q"
                   defaultValue={filters.q}
-                  placeholder={copy(
-                    locale,
-                    "vehicle id, plate, driver",
-                    "車輛編號、車牌、司機",
-                  )}
+                  placeholder={listT(locale, "filter.searchPlaceholder")}
                   style={fieldStyle}
                 />
               </label>
 
               <label style={fieldStackStyle}>
                 <span style={fieldLabelStyle}>
-                  {copy(locale, "Status", "狀態")}
+                  {t("common.status", locale)}
                 </span>
                 <select
                   name="status"
                   defaultValue={filters.status}
                   style={fieldStyle}
                 >
-                  <option value="all">{copy(locale, "All", "全部")}</option>
+                  <option value="all">{t("common.all", locale)}</option>
                   <option value="active">
-                    {copy(locale, "Active", "運作中")}
+                    {listT(locale, "filter.status.active")}
                   </option>
                   <option value="attention">
-                    {copy(locale, "Attention", "注意")}
+                    {listT(locale, "filter.status.attention")}
                   </option>
                   <option value="blocked">
-                    {copy(locale, "Blocked", "阻塞")}
+                    {listT(locale, "filter.status.blocked")}
                   </option>
                   <option value="offboarding">
-                    {copy(locale, "Offboarding", "退場")}
+                    {listT(locale, "filter.status.offboarding")}
                   </option>
                 </select>
               </label>
 
               <label style={fieldStackStyle}>
-                <span style={fieldLabelStyle}>
-                  {copy(locale, "Type", "類型")}
-                </span>
+                <span style={fieldLabelStyle}>{t("common.type", locale)}</span>
                 <select
                   name="type"
                   defaultValue={filters.type}
                   style={fieldStyle}
                 >
-                  <option value="all">{copy(locale, "All", "全部")}</option>
+                  <option value="all">{t("common.all", locale)}</option>
                   {typeOptions.map((value) => (
                     <option key={value} value={value}>
                       {formatOpsCodeLabel(locale, value)}
@@ -1721,41 +1651,45 @@ export default async function VehiclesPage({
 
               <label style={fieldStackStyle}>
                 <span style={fieldLabelStyle}>
-                  {copy(locale, "Dispatchable", "可派遣")}
+                  {listT(locale, "tab.dispatchable")}
                 </span>
                 <select
                   name="dispatchable"
                   defaultValue={filters.dispatchable}
                   style={fieldStyle}
                 >
-                  <option value="all">{copy(locale, "All", "全部")}</option>
-                  <option value="yes">{copy(locale, "Yes", "可派")}</option>
-                  <option value="no">{copy(locale, "No", "不可派")}</option>
+                  <option value="all">{t("common.all", locale)}</option>
+                  <option value="yes">
+                    {t("vehicles.list.table.dispatchable.yes", locale)}
+                  </option>
+                  <option value="no">
+                    {t("vehicles.list.table.dispatchable.no", locale)}
+                  </option>
                 </select>
               </label>
 
               <label style={fieldStackStyle}>
                 <span style={fieldLabelStyle}>
-                  {copy(locale, "Overdue", "逾期")}
+                  {listT(locale, "filter.overdue")}
                 </span>
                 <select
                   name="overdue"
                   defaultValue={filters.overdue}
                   style={fieldStyle}
                 >
-                  <option value="all">{copy(locale, "All", "全部")}</option>
-                  <option value="yes">{copy(locale, "Yes", "是")}</option>
-                  <option value="no">{copy(locale, "No", "否")}</option>
+                  <option value="all">{t("common.all", locale)}</option>
+                  <option value="yes">{t("common.yes", locale)}</option>
+                  <option value="no">{t("common.no", locale)}</option>
                 </select>
               </label>
 
               <div style={{ display: "flex", gap: 8 }}>
                 <button type="submit" style={buttonStyle("primary")}>
                   <CanvasIcon name="search" size={12} />
-                  {copy(locale, "Apply", "套用")}
+                  {listT(locale, "filter.apply")}
                 </button>
                 <Link href="/vehicles" style={buttonStyle("ghost")}>
-                  {copy(locale, "Reset", "重設")}
+                  {listT(locale, "filter.reset")}
                 </Link>
               </div>
             </div>
@@ -1763,34 +1697,25 @@ export default async function VehiclesPage({
 
           <div style={helperRowStyle}>
             <span style={helperTextStyle}>
-              {copy(
-                locale,
-                `${displayedRows.length} visible / ${rows.length} total`,
-                `目前顯示 ${displayedRows.length} / 總數 ${rows.length}`,
-              )}
+              {listT(locale, "helper.visible", {
+                visible: displayedRows.length,
+                total: rows.length,
+              })}
             </span>
             <span style={{ ...helperTextStyle, ...monoTextStyle }}>
-              {copy(locale, "generated", "生成時間")} ·{" "}
+              {listT(locale, "helper.generated")} ·{" "}
               {formatLongDateTime(locale, refresh.generatedAt)} UTC
             </span>
             <span style={helperTextStyle}>
-              {copy(
-                locale,
-                "supporting actions come from availableActions",
-                "畫面 CTA 以 availableActions 為準",
-              )}
+              {listT(locale, "helper.actionsHint")}
             </span>
           </div>
         </Card>
 
         <Card
           theme={theme}
-          title={copy(locale, "Vehicle registry", "車輛登記清單")}
-          subtitle={copy(
-            locale,
-            "Current driver binding, dispatchability, maintenance, and governance handoff in one grid.",
-            "在同一張表內整合司機綁定、可派遣狀態、保修與治理交接。",
-          )}
+          title={listT(locale, "table.title")}
+          subtitle={listT(locale, "table.subtitle")}
         >
           {emptyView ? (
             <div style={emptyStateStyle}>
@@ -1824,7 +1749,7 @@ export default async function VehiclesPage({
                 ) : null}
               </Link>
               <span style={tinyMetaStyle(emptyView.tone)}>
-                {copy(locale, "emptyReason", "空狀態")} ·{" "}
+                {listT(locale, "empty.reasonLabel")} ·{" "}
                 {EMPTY_OVERRIDE_REASON_CODES[emptyReason ?? "no_data"]}
               </span>
             </div>
