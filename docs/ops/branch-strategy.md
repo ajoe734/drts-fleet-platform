@@ -136,8 +136,30 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 ### Hotfix path
 
 - branch off main, PR to main, 3 gates (or admin bypass)
-- after merge, cherry-pick into dev
+- **after merge, cherry-pick the commit into `dev` in the same change** (see the reconciliation rule below — this is mandatory, not optional)
 - if the hotfix needs to ship immediately to prod: cut a manual publish (`gh workflow run nightly-publish.yml`), trigger hourly-promote manually, then `gh workflow run deploy-prod.yml -f tag=<new prod tag>`
+
+### Reconciliation rule — `main` must never out-diverge `dev`
+
+Every `publish/v*` snapshot is cut from `dev`, so promotion (`publish → main`)
+only stays conflict-free while **`main`'s content is an ancestor-state of
+`dev`**. Therefore:
+
+- **Any** commit that lands directly on `main` — a `hotfix/*`, an admin-bypass
+  fix, *or* a promote-rescue commit — **must be cherry-picked back into `dev`**
+  as part of the same change. A direct-to-main commit that is not back-ported
+  makes the next `publish → main` PR `CONFLICTING`, which silently deadlocks the
+  whole promote rail (the required `pull_request` gates can never register on an
+  unbuildable merge ref).
+- Audit for drift at any time with `git cherry -v origin/dev origin/main`. A
+  non-empty `+` list (commits on `main` not in `dev`) is early warning that the
+  next promote will conflict — reconcile before it does.
+- If the rail is already deadlocked, follow
+  [`docs/03-runbooks/promote-rail-rescue-runbook.md`](../03-runbooks/promote-rail-rescue-runbook.md).
+
+This was learned the hard way twice: #265 `PROMOTE-RESCUE-254` (2026-05-24) and
+#574 `PROMOTE-RESCUE-20260608` (2026-06-08), where direct-to-main commits left
+`main` frozen — and prod with it — for ~2 weeks.
 
 ---
 
@@ -417,3 +439,4 @@ git switch -c <lane>/<task-id-kebab> origin/dev
 - `scripts/branch-strategy/bootstrap-branches.sh` + `apply-branch-protection.sh` + `triage-branches.sh`
 - `.orchestrator/branch_routing.py` — single track now; both backend + frontend → `dev`
 - `.husky/pre-commit` + `commit-msg` — local gates mirroring CI
+- `docs/03-runbooks/promote-rail-rescue-runbook.md` — how to unblock a stuck `publish → main` promote
