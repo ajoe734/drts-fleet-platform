@@ -29,4 +29,21 @@ describe("Platform Admin product routes", () => {
       offenders.map((file) => file.replace(`${process.cwd()}/`, "")),
     ).toEqual([]);
   });
+
+  it("manual dev deploys require an explicit non-main source ref", () => {
+    const workflow = readFileSync(
+      join(process.cwd(), ".github/workflows/deploy-dev.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain("required: true");
+    expect(workflow).toContain('GITHUB_EVENT_NAME:-}" == "workflow_dispatch');
+    expect(workflow).toContain("source_ref is required for manual dev deploy");
+    expect(workflow).toContain("Do not dispatch deploy-dev from main");
+    expect(workflow).toContain("main is not a valid dev deploy source_ref");
+    expect(workflow).not.toContain(
+      'source_ref="${INPUT_SOURCE_REF:-${GITHUB_SHA}}"',
+    );
+    expect(workflow).not.toContain('source_ref="dev"');
+  });
 });
