@@ -35,25 +35,25 @@ export default async function FleetTrainingPage() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
             gap: 12,
           }}
         >
           <CanvasKPI
             theme={theme}
-            label="整體完成率"
+            label={t("training.kpi.completion", locale)}
             value={summary.completionPct}
           />
           <CanvasKPI
             theme={theme}
-            label="待完成人次"
+            label={t("training.kpi.pending", locale)}
             value={summary.pendingHeadcount}
           />
           <CanvasKPI
             theme={theme}
-            label="逾期未完成"
+            label={t("training.kpi.overdue", locale)}
             value={summary.overdueIncomplete}
-            delta="影響派工"
+            delta={t("training.kpi.overdueDelta", locale)}
             deltaTone="down"
           />
         </div>
@@ -69,7 +69,12 @@ export default async function FleetTrainingPage() {
                     marginBottom: 6,
                   }}
                 >
-                  <BiLabel theme={theme} zh={c.course} en={c.en} />
+                  <BiLabel
+                    theme={theme}
+                    locale={locale}
+                    zh={t(`training.course.${c.en}`, "zh")}
+                    en={t(`training.course.${c.en}`, "en")}
+                  />
                   <span
                     style={{
                       fontFamily: theme.monoFamily,
