@@ -2057,6 +2057,56 @@ def command_blocker(state: dict[str, Any], args: list[str]) -> None:
     append_log({"ts": timestamp, "agent": actor, "type": "blocker", "task_id": task_id, "message": f"Blocked on {waiting_for}: {message}"})
 
 
+def _load_orchestrator_config() -> dict[str, Any]:
+    """Best-effort load of the orchestrator config for guard flags.
+
+    Reads ``.orchestrator/config.json`` then shallow-overlays
+    ``config.local.json`` (operator override), matching the retention reader.
+    Returns ``{}`` on any failure so guards fail open and never break closeout.
+    """
+    config: dict[str, Any] = {}
+    orchestrator_dir = ROOT / ".orchestrator"
+    try:
+        if str(orchestrator_dir) not in sys.path:
+            sys.path.insert(0, str(orchestrator_dir))
+        from common import load_config  # type: ignore
+
+        config = dict(load_config(orchestrator_dir / "config.json") or {})
+    except Exception:
+        config = {}
+    local = orchestrator_dir / "config.local.json"
+    if local.exists():
+        try:
+            config.update(json.loads(local.read_text(encoding="utf-8")) or {})
+        except Exception:
+            pass
+    return config
+
+
+def _enforce_integration_gate(task: dict[str, Any], completion_metadata: dict[str, Any]) -> None:
+    """Refuse a branch-only ``done`` when the integration gate is enabled.
+
+    Opt-in via ``branch_strategy.integration_gate.enabled``; ``log_only`` logs
+    the would-block and allows the close. Fails open on any import/config error.
+    """
+    try:
+        orchestrator_dir = ROOT / ".orchestrator"
+        if str(orchestrator_dir) not in sys.path:
+            sys.path.insert(0, str(orchestrator_dir))
+        from integration_gate import check_integration_gate, integration_gate_settings  # type: ignore
+    except Exception:
+        return
+    config = _load_orchestrator_config()
+    integration_status = completion_metadata.get("integration_status", "")
+    block = check_integration_gate(task, integration_status, config)
+    if not block:
+        return
+    if integration_gate_settings(config).get("log_only"):
+        print(f"[integration-gate canary] would refuse done: {block}", file=sys.stderr)
+        return
+    raise SystemExit(block)
+
+
 def command_done(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: done <task-id> <message>")
@@ -2071,6 +2121,7 @@ def command_done(state: dict[str, Any], args: list[str]) -> None:
     if task.get("status") != "review_approved":
         raise SystemExit(f"{task_id} must be review_approved before it can move to done")
     completion_metadata = completion_metadata_from_env(task, actor)
+    _enforce_integration_gate(task, completion_metadata)
     timestamp = iso_now()
     task["status"] = "done"
     task["last_update"] = timestamp
