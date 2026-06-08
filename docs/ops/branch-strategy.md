@@ -400,6 +400,17 @@ Workers record the layer reached with `INTEGRATION_STATUS`:
 Only `dev_deployed` plus deploy run evidence may be described as "published to
 dev" or "ready on the dev test machine".
 
+**Enforcement (`INTEGRATION_GATE`).** The above is no longer convention-only.
+`.orchestrator/integration_gate.py` (opt-in via
+`branch_strategy.integration_gate.enabled`, with a `log_only` canary) refuses
+`scripts/ai_status.py done` when a task's `INTEGRATION_STATUS` is branch-only
+(`branch_pushed`/`pr_open`/`ci_pending`/`ci_failed`/`deploy_blocked`): the task
+stays at `review_approved` until its commit reaches `origin/dev`, at which point
+`apply_git_merge_reconciliation` flips it to `done`. Use
+`INTEGRATION_STATUS=not_applicable` for sidecar/support/externally-held tasks.
+This closes the recurring "done at branch, never merged to dev → work stranded"
+failure mode.
+
 ### 11.7 Trigger checklist (before each significant save)
 
 Worker prompts (wakeup + closeout skill) carry this checklist; it is reproduced here for human reference:
