@@ -172,7 +172,7 @@ const en: Dict = {
     "Consecutive quality drops below threshold trigger a partnership review workflow.",
 
   "data.fixtureNotice":
-    "Showing design fixtures. Real data will load once the /api/fleet-partner/* portal endpoints ship.",
+    "Showing sample data. Real data will load once the /api/fleet-partner/* portal endpoints are available.",
 
   "service.realtime": "Realtime",
   "service.business": "Business dispatch",
